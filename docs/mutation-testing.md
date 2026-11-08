@@ -35,8 +35,9 @@ read-only next steps. It never writes a test and never proposes a code change.
   cache"). `--resume` continues an interrupted or partial run (see "Outcome
   journal and resume").
 - Only `--format human` and `--format json` are valid. `tasks` also accepts
-  `--format markdown`. Version 1 has no SARIF,
-  CodeClimate, LSP, gate, GitHub Action or GitLab surface.
+  `--format markdown`. Version 1 has no SARIF, CodeClimate or LSP surface.
+  The GitHub Action and the GitLab template can run the command (see
+  [CI](#ci)).
 - Each run saves its full JSON report to
   `<cache dir>/mutation/last-report.json` (by default `.fallow/mutation/`).
   The cache directory has a `.gitignore` with `*`, so the saved report does
@@ -1952,6 +1953,200 @@ reads files only. It runs no test.
   or `timeoutMs` fails to load. Add a key only together with its run option.
 - The section is not part of the detection digest of dead-code findings.
 
+## CI
+
+The GitHub Action and the GitLab template run `fallow mutation` before the
+analysis, and add one section to the existing sticky comment. The step is off
+by default.
+
+| Setting | Action input | GitLab variable | Default |
+|---|---|---|---|
+| Turn the step on | `mutation` | `FALLOW_MUTATION` | `false` |
+| Scope | `mutation-scope` | `FALLOW_MUTATION_SCOPE` | `changed` |
+| `--time-budget` | `mutation-time-budget` | `FALLOW_MUTATION_TIME_BUDGET` | `10m` |
+| `--max-mutants` | `mutation-max-mutants` | `FALLOW_MUTATION_MAX_MUTANTS` | none |
+| `--min-score` | `mutation-min-score` | `FALLOW_MUTATION_MIN_SCORE` | none |
+
+The scope is `changed`, `all`, or a list of files and directories relative to
+the root, separated by spaces or commas. The `changed` scope uses the diff of
+the pull request or the merge request (`--diff-file`). Without a diff, it uses
+`changed-since` (`FALLOW_CHANGED_SINCE`). A job with neither, for example a
+push to the default branch, skips the run and says so in the section.
+
+```yaml
+# GitHub Actions
+permissions:
+  contents: read
+  pull-requests: write
+steps:
+  - uses: actions/checkout@v6
+  - uses: actions/setup-node@v6
+    with:
+      node-version: 24
+  - run: npm ci
+  - uses: fallow-rs/fallow@vX.Y.Z
+    with:
+      comment: true
+      mutation: true
+```
+
+```yaml
+# GitLab CI
+fallow:
+  extends: .fallow
+  variables:
+    FALLOW_COMMENT: "true"
+    FALLOW_MUTATION: "true"
+  script:
+    - npm ci
+    - bash /tmp/fallow-run.sh
+```
+
+### Step order
+
+The run refuses a dirty worktree, and the CI step never passes
+`--allow-dirty`. Put the steps in this order:
+
+1. Check out the code.
+2. Install the dependencies. `node_modules/` is ignored, so it does not make
+   the worktree dirty.
+3. Run the code generation and the build steps that the tests need. Each file
+   that they write must be committed or ignored by `.gitignore`. Otherwise the
+   run stops with exit code 2 and `FALLOW_MUTATION_DIRTY_WORKTREE`. A package
+   manager cache inside the project is such a file too, for example a pnpm
+   store at `.pnpm-store/` (the usual GitLab cache setup). Ignore it in
+   `.gitignore`, or put the store outside the project.
+4. Run the Fallow step. It runs the mutation run first, because the analysis
+   writes its result files into the workspace.
+
+The step writes the report with `-o` to the runner temp directory, and copies
+the result files into the artifacts directory after the run. A shell redirect
+into the workspace would make the worktree dirty before the run starts (see
+[Command surface](#command-surface)).
+
+### Result files and the comment
+
+| File | Content |
+|---|---|
+| `fallow-mutation.json` | The report of the run, when the run wrote one |
+| `fallow-mutation-tasks.json` | The `fallow mutation tasks` batch of the report |
+| `fallow-mutation-status.json` | The outcome of the step |
+| `fallow-mutation-section.md` | The section of the comment and the job summary |
+
+The section shows the killed, survived, no-coverage and not-measured counts,
+the score, the scope, the budget state, and the first 5 survivors with their
+lines and a `fallow mutation inspect <id>` command. `survived` mutants come
+before `no_coverage` mutants. A `partial` run says "Partial run" with its
+reasons. Not measured counts the `pending`, `runtime_error`, `flaky` and
+`compile_error` mutants.
+
+To inspect a survivor on your machine, run `fallow mutation` with the same
+scope on the same commit, then `fallow mutation inspect <id>`. Or download
+`fallow-mutation.json` and run
+`fallow mutation inspect <id> --report fallow-mutation.json`. The GitLab job
+keeps the file as an artifact. The Action writes it to `artifacts-dir`; add
+an upload step to keep it:
+
+```yaml
+- uses: actions/upload-artifact@v4
+  if: always() && steps.fallow.outputs.mutation-results != ''
+  with:
+    name: fallow-mutation
+    path: ${{ steps.fallow.outputs.mutation-results }}
+```
+
+A section with survivors or a partial run makes a clean comment not clean, so
+the post command creates the first comment.
+
+### Exit codes in CI
+
+The step itself always finishes, so the analysis and the comment still run.
+The last step of the Action, or the end of the GitLab job, applies the result:
+
+| Outcome | `fallow mutation` exit code | Job result |
+|---|---|---|
+| `ok` | `0` (complete or partial) | passes |
+| `skipped` | not run | passes |
+| `gate-failed` | `1` | fails with exit code 1 |
+| `tool-failed` | `2` | fails with exit code 2 and the error code and message |
+| `interrupted` | `128 + signal` | fails with exit code 2 |
+| `invalid-input` | not run | fails with exit code 2 and the problem of the input |
+| `refused` | not run | fails with exit code 2 |
+
+A report that the step cannot read is a `tool-failed` outcome, so a gate
+result is never lost. The stderr of the run can hold test output, so it goes
+to `fallow-mutation-stderr.log` and never into the comment.
+
+Exit code 2 is a tool failure, not an uncertain result. The comment section
+and the job log name the error code, the message and the help.
+
+The Action has the outputs `mutation-outcome`, `mutation-completion`,
+`mutation-score` and `mutation-results`. The GitLab dotenv report has
+`FALLOW_MUTATION_OUTCOME`.
+
+### Fork safety
+
+The run executes the tests of the pull request. A test can read each secret
+that the job has.
+
+- GitHub: the step runs only for the `pull_request`, `push`, `schedule`,
+  `workflow_dispatch` and `merge_group` events. A `pull_request` job from a
+  fork gets no secrets and a read-only token. The other four events run code
+  of the repository itself. Each other event, for example
+  `pull_request_target`, `issue_comment` or `workflow_run`, runs with the
+  secrets and a write token of the base repository, and the job can check out
+  the code of a fork. The payload of `issue_comment` and `workflow_run` does
+  not always name the pull request, so the step refuses these events. Do not
+  check out the head of a fork pull request in a `pull_request_target` job:
+  each later step runs the code of the fork with your secrets.
+- GitHub: a private repository can send secrets to the workflows of fork pull
+  requests (the setting "Send secrets and variables to workflows from fork
+  pull requests"). The step cannot see that setting. Do not turn on mutation
+  testing in such a repository for fork pull requests.
+- GitLab: a merge request pipeline from a fork that runs in the target project
+  has the CI/CD variables of the target project. The job refuses it. A
+  pipeline that runs in the fork project has only the variables of the fork,
+  and the job runs.
+
+- The run removes `GH_TOKEN`, `GITHUB_TOKEN`, `GITLAB_TOKEN`, the GitHub
+  OIDC request token and the Actions runtime token from the environment of
+  the tests. Only `gh pr diff` gets the token of the Action. `CI_JOB_TOKEN`
+  stays, because a test can need it for a package registry. Other secrets
+  that the workflow puts into the environment of the job stay visible to the
+  tests.
+
+### Result cache in CI
+
+The result cache (`<root>/.fallow/mutation/results.json`) makes the next run
+faster, and a budgeted run continues after the stored results.
+
+- GitHub: `actions/cache/restore` and `actions/cache/save` keep the file. The
+  key has the runner OS, the root, a digest of the lockfiles and the runner
+  config files, and the run id. A restore takes the newest entry of the same
+  digest. The analysis cache leaves out `.fallow/mutation`. A fork pull
+  request restores the cache but never saves it, so its tests cannot write
+  results that a later trusted run reads.
+- GitLab: the job cache keeps `.fallow/`. A GitLab cache key cannot hash
+  files that the template does not know, so the job writes the same digest to
+  `.fallow/mutation/ci-cache-key`. A restored cache with another digest is
+  removed before the run. A fork pipeline that runs in the fork project uses
+  the cache of the fork project.
+
+The digest covers `package-lock.json`, `npm-shrinkwrap.json`, `yarn.lock`,
+`pnpm-lock.yaml`, `bun.lock` and `bun.lockb` at the root and at the top of the
+git worktree, and `vitest.config.*`, `vite.config.*`, `vitest.workspace.*`,
+`bunfig.toml`, `package.json` and `tsconfig.json` at the root. The keys of
+the entries in the file stay the authority (see [Result cache](#result-cache)).
+A config that moves the cache directory moves the file out of the CI cache.
+
+### Base ref on GitLab
+
+The changed scope uses `git diff <CI_MERGE_REQUEST_DIFF_BASE_SHA>..HEAD`. A
+shallow clone can miss the base commit. Then the diff fails, and the run uses
+`--changed-since`, which stops with `FALLOW_CHANGED_FILES_FAILED` (a missing
+commit or merge base) or `FALLOW_MUTATION_BASE_NOT_FOUND` (a ref that does not
+resolve). Set `GIT_DEPTH: "0"` for that job.
+
 ## Ownership
 
 | Part | Path |
@@ -1969,6 +2164,9 @@ reads files only. It runs no test.
 | MCP plan and inspect tools | `crates/mcp/src/tools/mutation.rs` |
 | Node companion and runner adapters | `tools/mutation-runner` |
 | Runner selection | `crates/api/src/mutation/runner_select.rs` |
+| CI step, comment section and cache digest | `ci/scripts/mutation_common.sh` |
+| GitHub Action step | `action/scripts/mutation.sh`, `action.yml` |
+| GitLab template step | `ci/scripts/mutation.sh`, `ci/gitlab-ci.yml` |
 
 ## Tests
 
@@ -1985,5 +2183,8 @@ reads files only. It runs no test.
 - The `node:test` end-to-end test needs a supported `node` on `PATH`, and
   the `bun test` end-to-end test needs a supported `bun`. Without it, the
   test prints a skip message and passes.
+- `bash ci/tests/run.sh` and `bash action/tests/run.sh` test the CI step,
+  the comment section, the exit codes and the fork refusal with a fake
+  `fallow` binary (`ci/tests/mutation.sh`, `action/tests/mutation.sh`).
 - `npm test` in `tools/mutation-runner` runs the companion suites. The
   `bun test` suite is skipped when `bun` is not on `PATH`.

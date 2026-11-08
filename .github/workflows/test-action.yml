@@ -6,6 +6,8 @@ on:
     paths:
       - 'action/**'
       - 'action.yml'
+      - 'ci/scripts/mutation_common.sh'
+      - 'ci/tests/fixtures/mutation-*.json'
       - '.github/workflows/test-action.yml'
   workflow_dispatch:
 

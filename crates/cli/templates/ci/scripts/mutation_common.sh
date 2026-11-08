@@ -1,0 +1,1 @@
+../../../../../ci/scripts/mutation_common.sh

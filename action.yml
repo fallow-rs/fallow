@@ -329,6 +329,25 @@ inputs:
   skip:
     description: 'Skip these analyses when no command is specified or the command is audit (comma-separated: dead-code,architecture,dupes,health). With audit, a baseline input for a skipped analysis fails the run'
     required: false
+  # Mutation testing
+  mutation:
+    description: 'Run `fallow mutation` before the analysis, and add a mutation section to the PR comment and the job summary. The step runs the tests of the project, so install the project dependencies in an earlier step. The step runs only for the pull_request, push, schedule, workflow_dispatch and merge_group events; it refuses events that give the job the secrets of the base repository and can check out the code of a fork (for example pull_request_target). A tool failure (exit code 2) fails the job.'
+    required: false
+    default: 'false'
+  mutation-scope:
+    description: 'Mutation scope: changed (the lines that the PR diff adds), all (each source file), or a list of files and directories relative to root, separated by spaces or commas'
+    required: false
+    default: 'changed'
+  mutation-time-budget:
+    description: 'Time budget of the mutation run, for example 90s, 10m or 1h. A run that the budget stops is partial, and the next run continues from the result cache. Empty means no budget'
+    required: false
+    default: '10m'
+  mutation-max-mutants:
+    description: 'Maximum number of covered mutants that the mutation run executes. Empty means no limit'
+    required: false
+  mutation-min-score:
+    description: 'Minimum mutation score in percent (0 to 100). A lower score fails the job. Empty uses mutation.minScore of the config, or no gate'
+    required: false
 
 outputs:
   results:
@@ -400,6 +419,18 @@ outputs:
   post-skipped-reason:
     description: 'Reason the Post review comments step skipped posting (pagination_failure / none). Set to pagination_failure only when the inline-review POST was actually aborted to avoid duplicate threads (multi-comment dedup lookup failed). Empty when the Post review comments step did not run.'
     value: ${{ steps.review.outputs.post_skipped_reason }}
+  mutation-outcome:
+    description: 'Outcome of the mutation step: ok, skipped, gate-failed, tool-failed, invalid-input, refused or interrupted. Empty when the mutation input is false.'
+    value: ${{ steps.mutation.outputs.outcome }}
+  mutation-completion:
+    description: 'Completion of the mutation run: complete or partial. Empty when the run wrote no report.'
+    value: ${{ steps.mutation.outputs.completion }}
+  mutation-score:
+    description: 'Mutation score in percent, for example 87.5. Empty when no mutant ran to a test result.'
+    value: ${{ steps.mutation.outputs.score }}
+  mutation-results:
+    description: 'Path to the mutation report (fallow-mutation.json). Empty when the run wrote no report.'
+    value: ${{ steps.mutation.outputs.results }}
   dedup-lookup-failed:
     description: 'true when a dedup lookup failed on the Post PR comment or Post review comments step. Distinct from post-skipped-reason: the summary-only paths post a fresh comment anyway (potential duplicate) when their lookup fails, while the multi-comment review path aborts. Gate on this to detect either degraded state. Resolves to "true" if EITHER step reported a failure, "false" otherwise.'
     value: ${{ (steps.review.outputs.dedup_lookup_failed == 'true' || steps.comment.outputs.dedup_lookup_failed == 'true') && 'true' || 'false' }}
@@ -440,6 +471,7 @@ runs:
       shell: bash
       env:
         INPUT_ROOT: ${{ inputs.root }}
+        INPUT_MUTATION: ${{ inputs.mutation }}
       run: |
         if command -v sha256sum > /dev/null 2>&1; then
           digest=$(printf '%s' "${INPUT_ROOT:-.}" | sha256sum)
@@ -447,14 +479,68 @@ runs:
           digest=$(printf '%s' "${INPUT_ROOT:-.}" | shasum -a 256)
         fi
         printf 'root_digest=%s\n' "${digest:0:16}" >> "$GITHUB_OUTPUT"
+        if [ "$INPUT_MUTATION" = "true" ]; then
+          source "${GITHUB_ACTION_PATH}/ci/scripts/mutation_common.sh"
+          printf 'mutation_digest=%s\n' "$(fallow_mutation_cache_digest "${INPUT_ROOT:-.}")" >> "$GITHUB_OUTPUT"
+        fi
 
+    # The mutation result cache has its own key and save rule (see the
+    # mutation steps below), so the analysis cache leaves it out.
     - name: Cache analysis results
       uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
       with:
-        path: ${{ inputs.root }}/.fallow
+        path: |
+          ${{ inputs.root }}/.fallow
+          !${{ inputs.root }}/.fallow/mutation
         key: fallow-cache-${{ runner.os }}-${{ steps.fallow-cache-key.outputs.root_digest }}-${{ hashFiles(format('{0}/**/package.json', inputs.root)) }}
         restore-keys: |
           fallow-cache-${{ runner.os }}-${{ steps.fallow-cache-key.outputs.root_digest }}-
+
+    # The key covers the lockfiles and the runner config files. Each run and
+    # each attempt saves a new entry, and a restore takes the newest entry of
+    # the same digest, so a budgeted run continues from the results of the last
+    # run.
+    - name: Restore mutation result cache
+      if: inputs.mutation == 'true'
+      uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+      with:
+        path: ${{ inputs.root }}/.fallow/mutation/results.json
+        key: fallow-mutation-${{ runner.os }}-${{ steps.fallow-cache-key.outputs.root_digest }}-${{ steps.fallow-cache-key.outputs.mutation_digest }}-${{ github.run_id }}-${{ github.run_attempt }}
+        restore-keys: |
+          fallow-mutation-${{ runner.os }}-${{ steps.fallow-cache-key.outputs.root_digest }}-${{ steps.fallow-cache-key.outputs.mutation_digest }}-
+
+    # Mutation runs before the analysis: the run refuses a dirty worktree, and
+    # the analysis writes its result files into the workspace.
+    - name: Run mutation testing
+      id: mutation
+      if: inputs.mutation == 'true'
+      shell: bash
+      env:
+        FALLOW_MUTATION_ROOT: ${{ inputs.root }}
+        FALLOW_MUTATION_CONFIG: ${{ inputs.config }}
+        FALLOW_MUTATION_SCOPE: ${{ inputs.mutation-scope }}
+        FALLOW_MUTATION_TIME_BUDGET: ${{ inputs.mutation-time-budget }}
+        FALLOW_MUTATION_MAX_MUTANTS: ${{ inputs.mutation-max-mutants }}
+        FALLOW_MUTATION_MIN_SCORE: ${{ inputs.mutation-min-score }}
+        FALLOW_MUTATION_DIFF_FILE: ${{ inputs.diff-file }}
+        FALLOW_ARTIFACTS_DIR: ${{ inputs.artifacts-dir }}
+        INPUT_CHANGED_SINCE: ${{ inputs.changed-since }}
+        PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+        EVENT_NAME: ${{ github.event_name }}
+        # Only `gh pr diff` gets the token. The run removes the credential
+        # variables before it starts the tests of the project.
+        FALLOW_MUTATION_GH_TOKEN: ${{ inputs.github-token }}
+        GH_REPO: ${{ github.repository }}
+      run: bash ${{ github.action_path }}/action/scripts/mutation.sh run
+
+    - name: Save mutation result cache
+      if: always() && steps.mutation.outputs.cache_save == 'true'
+      uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v5
+      with:
+        path: ${{ inputs.root }}/.fallow/mutation/results.json
+        key: fallow-mutation-${{ runner.os }}-${{ steps.fallow-cache-key.outputs.root_digest }}-${{ steps.fallow-cache-key.outputs.mutation_digest }}-${{ github.run_id }}-${{ github.run_attempt }}
 
     - name: Run analysis
       id: analyze
@@ -595,6 +681,8 @@ runs:
         FALLOW_PR_COMMENT_LAYOUT: ${{ inputs.comment-layout }}
         FALLOW_DIFF_FILTER: ${{ inputs.diff-filter }}
         FALLOW_ARTIFACTS_DIR: ${{ inputs.artifacts-dir }}
+        FALLOW_MUTATION_SECTION_FILE: ${{ steps.mutation.outputs.section }}
+        FALLOW_MUTATION_CLEAN: ${{ steps.mutation.outputs.clean }}
         # FALLOW_DIFF_FILE is propagated from the analyze step via
         # $GITHUB_ENV. Declaring it here would override the propagation
         # whenever inputs.diff-file is empty (the default), forcing
@@ -684,3 +772,11 @@ runs:
         FALLOW_API_RETRIES: ${{ inputs.api-retries }}
         FALLOW_API_RETRY_DELAY: ${{ inputs.api-retry-delay }}
       run: bash ${{ github.action_path }}/action/scripts/review.sh
+
+    - name: Mutation testing result
+      if: always() && steps.mutation.outputs.outcome != ''
+      shell: bash
+      env:
+        FALLOW_MUTATION_STATUS_FILE: ${{ steps.mutation.outputs.status }}
+        FALLOW_MUTATION_SECTION_FILE: ${{ steps.mutation.outputs.section }}
+      run: bash ${{ github.action_path }}/action/scripts/mutation.sh gate

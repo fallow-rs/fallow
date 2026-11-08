@@ -32,6 +32,16 @@ const GITLAB_FILES: &[VendoredFile] = &[
         content: include_str!("../templates/ci/scripts/gitlab_common.sh"),
         executable: true,
     },
+    VendoredFile {
+        path: "ci/scripts/mutation.sh",
+        content: include_str!("../templates/ci/scripts/mutation.sh"),
+        executable: true,
+    },
+    VendoredFile {
+        path: "ci/scripts/mutation_common.sh",
+        content: include_str!("../templates/ci/scripts/mutation_common.sh"),
+        executable: true,
+    },
 ];
 
 pub struct GitlabTemplateOptions {
@@ -129,6 +139,10 @@ mod tests {
         // comment.sh and review.sh both `source` gitlab_common.sh, so a vendored
         // pipeline that omits it breaks at runtime.
         assert!(dir.path().join("ci/scripts/gitlab_common.sh").is_file());
+        // FALLOW_MUTATION runs mutation.sh, and mutation.sh and comment.sh
+        // source mutation_common.sh.
+        assert!(dir.path().join("ci/scripts/mutation.sh").is_file());
+        assert!(dir.path().join("ci/scripts/mutation_common.sh").is_file());
     }
 
     #[test]

@@ -2818,6 +2818,11 @@ assert_contains "$(grep -E '^  FALLOW_COMMAND:' "$DIR/../gitlab-ci.yml")" "archi
 unset FALLOW_TEST_LOG
 rm -rf "$ARCH_WORK"
 
+# --- Mutation testing ---
+
+# shellcheck source=mutation.sh
+source "$DIR/mutation.sh"
+
 # --- Summary ---
 
 echo ""

@@ -62,6 +62,17 @@
 #     extends: .fallow
 #     variables:
 #       FALLOW_CHANGED_SINCE: "origin/main"
+#
+#   # Mutation testing of the changed lines, in the same MR comment. The job
+#   # runs the project tests, so install the dependencies before the run.
+#   fallow:
+#     extends: .fallow
+#     variables:
+#       FALLOW_COMMENT: "true"
+#       FALLOW_MUTATION: "true"
+#     script:
+#       - npm ci
+#       - bash /tmp/fallow-run.sh
 
 # ---------------------------------------------------------------------------
 # Configuration variables
@@ -196,6 +207,16 @@ variables:
   # Bare invocation selectors
   FALLOW_ONLY: ""               # Bare run and audit. Comma-separated: dead-code,architecture,dupes,health
   FALLOW_SKIP: ""               # Bare run and audit. Same values as FALLOW_ONLY. With audit, a FALLOW_AUDIT_*_BASELINE for a skipped analysis fails the run
+
+  # Mutation testing. The run executes the project tests, so the job must
+  # install the dependencies first (see the example above). A merge request
+  # from a fork that runs in the target project is refused. Exit code 2 of
+  # fallow mutation fails the job.
+  FALLOW_MUTATION: "false"            # Run fallow mutation before the analysis and add a section to the MR comment
+  FALLOW_MUTATION_SCOPE: "changed"    # changed (the lines that the MR adds), all, or files and directories relative to FALLOW_ROOT, separated by spaces or commas
+  FALLOW_MUTATION_TIME_BUDGET: "10m"  # Time budget, for example 90s, 10m or 1h; a stopped run is partial and the next run continues from the result cache; empty means no budget
+  FALLOW_MUTATION_MAX_MUTANTS: ""     # Maximum number of covered mutants that the run executes
+  FALLOW_MUTATION_MIN_SCORE: ""       # Minimum mutation score in percent; a lower score fails the job
 
   # Advanced: pin remote MR-integration scripts to a specific tag or commit.
   # Leave empty to prefer vendored local ci/ + action/ scripts when present.
@@ -358,14 +379,14 @@ variables:
       FALLOW_SCRIPTS_DIR="/tmp/fallow-scripts"
       mkdir -p "$FALLOW_SCRIPTS_DIR"
 
-      if [ "$FALLOW_COMMENT" = "true" ] || [ "$FALLOW_REVIEW" = "true" ]; then
+      if [ "$FALLOW_COMMENT" = "true" ] || [ "$FALLOW_REVIEW" = "true" ] || [ "${FALLOW_MUTATION:-false}" = "true" ]; then
         DOWNLOAD_FAILURES=0
         if [ -d "ci/scripts" ]; then
           echo "Using vendored MR integration scripts from the repository checkout..."
 
           # The stderr of `cp` is discarded because the `else` branch names the
           # file that failed, and the counter below decides the job outcome.
-          for f in comment.sh review.sh gitlab_common.sh; do
+          for f in comment.sh review.sh gitlab_common.sh mutation.sh mutation_common.sh; do
             if cp "ci/scripts/${f}" "${FALLOW_SCRIPTS_DIR}/${f}" 2>/dev/null; then
               chmod +x "${FALLOW_SCRIPTS_DIR}/${f}"
             else
@@ -380,7 +401,7 @@ variables:
           fi
 
           if [ -z "$FALLOW_SCRIPTS_REF" ]; then
-            echo "ERROR: FALLOW_COMMENT/FALLOW_REVIEW require vendored ci/ + action/ scripts or a pinned FALLOW_SCRIPTS_REF when fallow is installed from latest or a semver range."
+            echo "ERROR: FALLOW_COMMENT/FALLOW_REVIEW/FALLOW_MUTATION require vendored ci/ + action/ scripts or a pinned FALLOW_SCRIPTS_REF when fallow is installed from latest or a semver range."
             exit 2
           fi
 
@@ -393,7 +414,7 @@ variables:
 
           # The stderr of `curl` is discarded because the `else` branch names the
           # file that failed, and the counter below decides the job outcome.
-          for f in comment.sh review.sh gitlab_common.sh; do
+          for f in comment.sh review.sh gitlab_common.sh mutation.sh mutation_common.sh; do
             if curl -sf --retry 3 --retry-connrefused --retry-delay 2 "${FALLOW_SCRIPTS_BASE}/ci/scripts/${f}" -o "${FALLOW_SCRIPTS_DIR}/${f}" 2>/dev/null; then
               chmod +x "${FALLOW_SCRIPTS_DIR}/${f}"
             else
@@ -522,6 +543,28 @@ variables:
         if [ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ]; then
           FALLOW_CHANGED_SINCE="$CI_MERGE_REQUEST_DIFF_BASE_SHA"
           echo "Auto-scoping to changed files (--changed-since ${FALLOW_CHANGED_SINCE:0:12})"
+        fi
+      fi
+
+      # ── Mutation testing ───────────────────────────────────────────
+      # Runs before the analysis: the run refuses a dirty worktree, and the
+      # analysis writes its result files into the project directory.
+      MUTATION_OUTCOME=""
+      if [ "${FALLOW_MUTATION:-false}" = "true" ]; then
+        if [ ! -f /tmp/fallow-scripts/mutation.sh ] || [ ! -f /tmp/fallow-scripts/mutation_common.sh ]; then
+          echo "ERROR: FALLOW_MUTATION needs ci/scripts/mutation.sh and ci/scripts/mutation_common.sh, and the script preparation did not get them."
+          exit 2
+        fi
+        echo "Running mutation testing..."
+        bash /tmp/fallow-scripts/mutation.sh
+        if [ -f fallow-mutation-status.json ]; then
+          MUTATION_OUTCOME=$(jq -r '.outcome // ""' fallow-mutation-status.json 2> /dev/null || true)
+          [ -n "$MUTATION_OUTCOME" ] || MUTATION_OUTCOME="tool-failed"
+          export FALLOW_MUTATION_SECTION_FILE="$PWD/fallow-mutation-section.md"
+          FALLOW_MUTATION_CLEAN=$(jq -r '.clean' fallow-mutation-status.json)
+          export FALLOW_MUTATION_CLEAN
+        else
+          MUTATION_OUTCOME="tool-failed"
         fi
       fi
 
@@ -1831,12 +1874,47 @@ variables:
         echo "FALLOW_GATES_PASSED=${GATE_PASSED_NAMES}"
         echo "FALLOW_ANALYSIS_DEGRADED=${ANALYSIS_DEGRADED}"
         echo "FALLOW_REQUESTS_UNAPPLIED=${REQUESTS_UNAPPLIED}"
+        echo "FALLOW_MUTATION_OUTCOME=${MUTATION_OUTCOME}"
       } > fallow-gates.env
 
-      if [ ${#GATE_FAILURES[@]} -gt 0 ]; then
-        for failure in "${GATE_FAILURES[@]}"; do
+      # ── Mutation result ──────────────────────────────────────────────
+      # A failed score gate joins the other gates. A tool failure, a refusal
+      # or a signal exits 2 after the other gates print.
+      MUTATION_FAILURE=""
+      if [ -n "$MUTATION_OUTCOME" ]; then
+        # shellcheck source=scripts/mutation_common.sh
+        source /tmp/fallow-scripts/mutation_common.sh
+      fi
+      case "$MUTATION_OUTCOME" in
+        gate-failed)
+          GATE_FAILURES+=("$(jq -r '"Fallow mutation score " + (if .score == null then "n/a" else "\((.score * 1000 | round) / 10)%" end) + " is lower than " + (if .min_score == null then "the minimum score of the config" else "the minimum of \(.min_score)%" end)' fallow-mutation-status.json)")
+          ;;
+        refused)
+          MUTATION_FAILURE="Mutation testing did not run. $(fallow_mutation_status_message fallow-mutation-status.json)"
+          ;;
+        invalid-input)
+          MUTATION_FAILURE="The mutation testing input is invalid. $(fallow_mutation_status_message fallow-mutation-status.json)"
+          ;;
+        interrupted)
+          MUTATION_FAILURE="A signal stopped fallow mutation (exit code $(jq -r '.exit_code // "unknown"' fallow-mutation-status.json))."
+          ;;
+        tool-failed)
+          if jq -e '.outcome == "tool-failed"' fallow-mutation-status.json > /dev/null 2>&1; then
+            MUTATION_FAILURE="$(jq -r '"fallow mutation failed with exit code \(.exit_code // "unknown")" + (if .code == null then "" else " (\(.code))" end)' fallow-mutation-status.json): $(fallow_mutation_status_message fallow-mutation-status.json)"
+          else
+            MUTATION_FAILURE="fallow mutation failed and wrote no status file."
+          fi
+          ;;
+      esac
+
+      if [ ${#GATE_FAILURES[@]} -gt 0 ] || [ -n "$MUTATION_FAILURE" ]; then
+        for failure in ${GATE_FAILURES[@]+"${GATE_FAILURES[@]}"}; do
           echo "ERROR: ${failure}"
         done
+        if [ -n "$MUTATION_FAILURE" ]; then
+          echo "ERROR: ${MUTATION_FAILURE}"
+          exit 2
+        fi
         # 8 is the documented security-gate exit and outranks the generic 1.
         if [ "$SECURITY_GATE_FAILED" = "true" ]; then
           exit 8
@@ -1868,6 +1946,11 @@ variables:
       - fallow-skip-reason.txt
       - fallow-dedup-lookup-failed.txt
       - fallow-gates.env
+      - fallow-mutation.json
+      - fallow-mutation-tasks.json
+      - fallow-mutation-status.json
+      - fallow-mutation-section.md
+      - fallow-mutation-stderr.log
     reports:
       codequality:
         - gl-code-quality-report.json
