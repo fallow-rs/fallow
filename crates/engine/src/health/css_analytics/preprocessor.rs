@@ -847,6 +847,22 @@ mod tests {
     }
 
     #[test]
+    fn line_comments_inside_parentheses_are_stripped() {
+        let source = "$map: (\n  a: 1, // don't\n  b: 2\n);\n.x { color: red; } // gone\n.y { color: blue; }\n";
+        let layer = main_layer(source);
+        assert!(!layer.contains("don't"), "{layer}");
+        assert!(!layer.contains("gone"), "{layer}");
+        assert!(layer.contains("color: blue"), "{layer}");
+    }
+
+    #[test]
+    fn an_unclosed_quote_ends_at_the_line_end() {
+        let layer = main_layer(".x { font-family: Bob's; }\n// gone\n.y { color: blue; }\n");
+        assert!(!layer.contains("gone"), "{layer}");
+        assert!(layer.contains("color: blue"), "{layer}");
+    }
+
+    #[test]
     fn real_line_comments_are_still_stripped() {
         let layer = main_layer("// noted\n.x {\n  // inline note\n  color: red;\n}\n");
         assert!(layer.contains("color: red"), "{layer}");

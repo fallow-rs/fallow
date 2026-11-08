@@ -93,12 +93,13 @@ pub(super) enum BlockComments {
 
 /// Replace each `//` line comment, and each block comment when `block` is
 /// [`BlockComments::Blank`], with spaces. Offsets and newlines stay, so line
-/// numbers do not change. A `//` inside a quoted string, inside parentheses
-/// such as `url(//host/x)`, or after a `:` is no comment. A kept block
-/// comment is still skipped, so a quote inside it does not open a string.
+/// numbers do not change. As in Sass, a `//` inside a quoted string or an
+/// unquoted `url(//host/x)` is no comment. A `//` after a `:`, as in
+/// `https://`, is no comment either. A `//` inside other parentheses, such as
+/// a multi-line map, is a comment. A kept block comment is still skipped, so a
+/// quote inside it does not open a string.
 pub(super) fn blank_comments(source: &str, block: BlockComments) -> String {
     let mut bytes = source.as_bytes().to_vec();
-    let mut depth = 0usize;
     let mut i = 0;
     while i < bytes.len() {
         let end = match bytes[i] {
@@ -114,28 +115,11 @@ pub(super) fn blank_comments(source: &str, block: BlockComments) -> String {
                 }
                 end
             }
-            b'/' if bytes.get(i + 1) == Some(&b'/')
-                && depth == 0
-                && (i == 0 || bytes[i - 1] != b':') =>
-            {
-                bytes[i..]
-                    .iter()
-                    .position(|&b| b == b'\n')
-                    .map_or(bytes.len(), |offset| i + offset)
+            b'/' if bytes.get(i + 1) == Some(&b'/') && (i == 0 || bytes[i - 1] != b':') => {
+                line_end(&bytes, i)
             }
-            b'(' => {
-                depth += 1;
-                i += 1;
-                continue;
-            }
-            b')' => {
-                depth = depth.saturating_sub(1);
-                i += 1;
-                continue;
-            }
-            b'{' | b'}' | b';' => {
-                depth = 0;
-                i += 1;
+            b'(' if opens_url(&bytes, i) => {
+                i = skip_unquoted_url(&bytes, i + 1);
                 continue;
             }
             _ => {
@@ -199,15 +183,52 @@ fn skip_past(bytes: &[u8], from: usize, end: u8) -> usize {
         .map_or(bytes.len(), |offset| from + offset + 1)
 }
 
+/// Skip a quoted string that starts at `i`, just after the opening quote. As
+/// in CSS, an unescaped newline ends an unclosed string, so a stray quote does
+/// not swallow the rest of the file.
 fn skip_string(bytes: &[u8], mut i: usize, quote: u8) -> usize {
     while i < bytes.len() {
         match bytes[i] {
             b'\\' => i += 2,
+            b'\n' => return i,
             b if b == quote => return i + 1,
             _ => i += 1,
         }
     }
     bytes.len()
+}
+
+fn line_end(bytes: &[u8], from: usize) -> usize {
+    bytes[from..]
+        .iter()
+        .position(|&b| b == b'\n')
+        .map_or(bytes.len(), |offset| from + offset)
+}
+
+/// Whether the `(` at `paren` ends a `url` function name.
+fn opens_url(bytes: &[u8], paren: usize) -> bool {
+    paren >= 3
+        && bytes[paren - 3..paren].eq_ignore_ascii_case(b"url")
+        && (paren == 3
+            || !matches!(bytes[paren - 4], b'-' | b'_' | b'$' | b'@')
+                && !bytes[paren - 4].is_ascii_alphanumeric())
+}
+
+/// Skip the body of an unquoted `url(...)` that starts at `from`. A quoted
+/// body is left to the string scan. The body ends at `)` or at the line end.
+fn skip_unquoted_url(bytes: &[u8], from: usize) -> usize {
+    let body = from
+        + bytes[from..]
+            .iter()
+            .take_while(|b| matches!(b, b' ' | b'\t'))
+            .count();
+    if matches!(bytes.get(body), Some(b'"' | b'\'')) {
+        return body;
+    }
+    bytes[body..]
+        .iter()
+        .position(|&b| b == b')' || b == b'\n')
+        .map_or(bytes.len(), |offset| body + offset)
 }
 
 fn skip_block_comment(bytes: &[u8], from: usize) -> usize {
