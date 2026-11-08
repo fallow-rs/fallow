@@ -9,6 +9,9 @@ const FAULTS = "test/faults.test.ts";
 const CONCURRENT = "test/concurrent.test.ts";
 const UNHANDLED = "test/unhandled.test.ts";
 const id = (name, file = FILE) => `${file}::${name}`;
+// Without a thread CPU clock (Node before 22.19 and 23.9), a loop timeout
+// uses wall time, and the run result has no `loop_timeout` flag.
+const HAS_THREAD_CLOCK = typeof process.threadCpuUsage === "function";
 const withoutMessage = ({ message: _message, ...entry }) => entry;
 
 for (const { packageName, version } of VITEST_MAJORS) {
@@ -222,7 +225,7 @@ for (const { packageName, version } of VITEST_MAJORS) {
           bail: true,
         });
         assert.equal(result.status, "timeout", JSON.stringify(result));
-        assert.equal(result.loop_timeout, true);
+        assert.equal(result.loop_timeout, HAS_THREAD_CLOCK || undefined);
         assert.equal(result.killed_by, null);
         assert.deepEqual(result.tests.map(withoutMessage), [
           { test_id: id("spins", FAULTS), status: "fail", failure_kind: "timeout" },
@@ -246,7 +249,7 @@ for (const { packageName, version } of VITEST_MAJORS) {
           bail: true,
         });
         assert.equal(result.status, "timeout", JSON.stringify(result));
-        assert.equal(result.loop_timeout, true);
+        assert.equal(result.loop_timeout, HAS_THREAD_CLOCK || undefined);
       },
     );
 

@@ -2,7 +2,16 @@ import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
 import test from "node:test";
 
-import { LOOP_TIMEOUT_NAME, installFallowMutation } from "../src/runtime/global.mjs";
+import {
+  LOOP_TIMEOUT_NAME,
+  WALL_LOOP_TIMEOUT_NAME,
+  installFallowMutation,
+} from "../src/runtime/global.mjs";
+
+// Node before 22.19 and 23.9 has no thread CPU clock, so the runtime falls
+// back to wall time and its own error name.
+const HAS_THREAD_CLOCK = typeof process.threadCpuUsage === "function";
+const EXPECTED_LOOP_TIMEOUT_NAME = HAS_THREAD_CLOCK ? LOOP_TIMEOUT_NAME : WALL_LOOP_TIMEOUT_NAME;
 
 test("a() is true only for the active mutant", () => {
   const control = installFallowMutation();
@@ -72,7 +81,7 @@ test("a() throws a loop timeout when the active mutant runs past the loop budget
   assert.throws(
     () => spin(runtime, "m1", performance.now() + 5_000),
     (error) => {
-      assert.equal(error.name, LOOP_TIMEOUT_NAME);
+      assert.equal(error.name, EXPECTED_LOOP_TIMEOUT_NAME);
       assert.match(error.message, /^Test timed out in 20ms/u);
       return true;
     },
@@ -90,7 +99,7 @@ test("a mutant run throws a loop timeout from any site that it evaluates past th
   control.setLoopBudget(5);
   control.startTest();
   assert.throws(() => spin(runtime, "m2", performance.now() + 5_000), {
-    name: LOOP_TIMEOUT_NAME,
+    name: EXPECTED_LOOP_TIMEOUT_NAME,
   });
   control.finishTest();
   control.setActive(null);
@@ -124,7 +133,9 @@ test("the loop budget counts the time of the earlier tests of the file", () => {
   spin(runtime, "m1", performance.now() + 30);
   control.finishTest();
   control.startTest();
-  assert.throws(() => spin(runtime, "m1", performance.now() + 5_000), { name: LOOP_TIMEOUT_NAME });
+  assert.throws(() => spin(runtime, "m1", performance.now() + 5_000), {
+    name: EXPECTED_LOOP_TIMEOUT_NAME,
+  });
   control.finishTest();
   control.startFile();
   control.startTest();
@@ -166,7 +177,8 @@ test("a replaced clock in a test neither throws from a() nor moves the loop budg
     });
     assert.doesNotThrow(evaluate, "a stubbed clock error reached the caller of a()");
   } finally {
-    Object.defineProperty(process, "threadCpuUsage", thread);
+    if (thread === undefined) delete process.threadCpuUsage;
+    else Object.defineProperty(process, "threadCpuUsage", thread);
     Object.defineProperty(globalThis, "performance", perf);
     control.finishTest();
     control.setActive(null);
@@ -225,24 +237,28 @@ test("each test starts its own count of site evaluations", () => {
   }
 });
 
-test("time that a test spends waiting does not use the loop budget", () => {
-  const control = installFallowMutation();
-  const runtime = globalThis.__fallowMutation;
-  control.startFile();
-  control.setActive("m1");
-  control.setLoopBudget(20);
-  control.startTest();
-  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 60);
-  try {
-    assert.doesNotThrow(() => {
-      for (let i = 0; i < 1_000; i += 1) runtime.a("m1");
-    }, "a wait of 60 ms used a loop budget of 20 ms");
-  } finally {
-    control.finishTest();
-    control.setActive(null);
-    control.setLoopBudget(null);
-  }
-});
+test(
+  "time that a test spends waiting does not use the loop budget",
+  { skip: !HAS_THREAD_CLOCK && "the runtime has no thread CPU clock" },
+  () => {
+    const control = installFallowMutation();
+    const runtime = globalThis.__fallowMutation;
+    control.startFile();
+    control.setActive("m1");
+    control.setLoopBudget(20);
+    control.startTest();
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 60);
+    try {
+      assert.doesNotThrow(() => {
+        for (let i = 0; i < 1_000; i += 1) runtime.a("m1");
+      }, "a wait of 60 ms used a loop budget of 20 ms");
+    } finally {
+      control.finishTest();
+      control.setActive(null);
+      control.setLoopBudget(null);
+    }
+  },
+);
 
 test("a() and c() never throw", () => {
   installFallowMutation();
