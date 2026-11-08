@@ -132,8 +132,8 @@ fn css_analytics_skip_a_too_deep_stylesheet() {
 }
 
 /// Depth of the nested color functions. lightningcss parses the content of an
-/// unclosed `light-dark(`, `rgb(` or `hsl(` twice at each level, so the parse
-/// does not end in the time limit at this depth.
+/// unclosed `light-dark(`, `rgb(` or `hsl(` twice at each level, so at this
+/// depth a parse takes far longer than the time limit of the test.
 const COLOR_DEPTH: usize = 40;
 
 /// Extract the CSS Modules classes of `source` on another thread and fail when
@@ -177,6 +177,15 @@ fn ordinary_color_function_nesting_still_parses() {
                   hsl(0 0% 0%)), red)}\n.b{--c:light-dark(rgb(0 0 0), hsl(0 0% 100%))}";
     assert!(crate::parse_style_bounded(source, || ()).is_some());
     assert!(crate::css_metrics::compute_css_analytics(source).is_some());
+}
+
+/// Open color functions stop only the lightningcss parse. The bracket depth
+/// of a stylesheet must still count every bracket after them.
+#[test]
+fn color_functions_do_not_hide_bracket_nesting() {
+    let source = format!(".a{{x:{}{}", "rgb(".repeat(COLOR_DEPTH), "(".repeat(5000));
+    assert!(crate::nesting::parse_file_bounded(Path::new("a.css"), &source, || ()).is_none());
+    assert_degraded(&parse("a.css", &source));
 }
 
 #[test]

@@ -214,7 +214,7 @@ struct Scanner<'a> {
 impl Scanner<'_> {
     fn scan(&mut self) {
         while let Some(&byte) = self.bytes.get(self.pos) {
-            if self.max_depth > self.limit || self.max_colors > MAX_COLOR_FUNCTION_DEPTH {
+            if self.max_depth > self.limit {
                 return;
             }
             self.pos += 1;
