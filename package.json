@@ -29,6 +29,7 @@
     "check:release-metadata": "node scripts/verify-release-metadata.mjs",
     "sync:emitted-versions": "node scripts/sync-emitted-versions.mjs",
     "check:emitted-versions": "node scripts/sync-emitted-versions.mjs --check",
+    "check:miri-fs-tests": "node scripts/check-miri-fs-tests.mjs",
     "test:semantic-clone-conformance": "node --test scripts/semantic-clone-conformance.test.mjs",
     "type-aware:corpus": "node scripts/type-aware-corpus.mjs",
     "test:type-aware-corpus": "node --test scripts/type-aware-corpus.test.mjs",

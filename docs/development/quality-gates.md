@@ -34,8 +34,9 @@ step, for example `HK_SKIP_STEPS=file-size`.
 
 hk runs the steps of a hook in parallel. A pre-commit step with a `glob` runs
 only when a staged file matches it, so a commit without Rust inputs skips
-`cargo fmt`, Clippy and the Miri cfg check. hk does not match deleted files, so
-a commit that only deletes a Rust file also skips them. The pre-push hook runs
+`cargo fmt`, Clippy, the Miri cfg check and the Miri file system test check.
+hk does not match deleted files, so a commit that only deletes a Rust file
+also skips them. The pre-push hook runs
 `cargo fmt` and Clippy with no glob and catches that case. The pre-commit hook only checks.
 Run `hk fix` to apply the fix commands, for example `cargo fmt --all`. The
 hooks use `stash = "none"`, because every worktree of this repository shares
@@ -472,6 +473,11 @@ The slowest `CI` jobs have parts that run in parallel:
   scale gets `#[cfg_attr(miri, ignore = "too slow under Miri: ...")]`. Miri
   looks for undefined behavior, and the normal test run still covers the
   logic. One such test once took 16 minutes under Miri.
+  Before a push, run
+  `cargo +<MIRI_TOOLCHAIN> miri test -p <crate> --lib --tests -- --skip proptests`
+  when a change adds a file system call or a `par_iter` to code that the
+  Miri crates test. `MIRI_TOOLCHAIN` is set in the `miri` job of
+  `.github/workflows/ci.yml`.
 
 `Check`, `Lint and contracts` and `NAPI package` have the same trigger. Only
 `Check (1/2)` and `Lint and contracts` may use the runner that the
@@ -699,6 +705,7 @@ python3 scripts/scan-hidden-unicode.py --mode committed --staged
 sh scripts/check-conflict-markers.sh --staged
 node scripts/check-comment-quality.mjs --staged
 cargo fallow boundaries --fail-on-issues --quiet
+node scripts/check-miri-fs-tests.mjs
 cargo fallow size --staged --fail-on-growth --quiet
 sh scripts/hook-file-length.sh HEAD
 sh scripts/hook-changelog-fragments.sh
@@ -728,6 +735,16 @@ is `#[cfg(all(test, not(miri)))]`. The Miri job is path-filtered and slow, so
 this check runs in `verify:fast`, in the pre-commit hook, and in the CI script
 tests on every pull request. Fix a failure with `#[cfg(all(test, not(miri)))]`
 on the calling module.
+
+The Miri file system test check (`npm run check:miri-fs-tests`) reads the
+same crates. It walks the modules that the Miri build compiles, from
+`src/lib.rs` and each file in `tests/`. It fails when a `#[test]` function
+calls `tempdir(`, `tempfile::`, `TempDir` or `std::fs::` and has no
+`cfg_attr(miri, ignore ...)` mark. The message gives the attribute to add.
+A test under `not(miri)` or with a plain `#[ignore]` passes. The check reads
+only the body of the test. A file system call or a rayon pool start in a
+function that a test calls needs a Miri run, as the `Miri` CI item describes.
+The check runs in `verify:fast` and in the pre-commit hook.
 
 Pre-push parity:
 

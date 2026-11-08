@@ -49,6 +49,7 @@ const FAST_COMMANDS = [
   ["npm", ["run", "check:conformance-fixtures"]],
   ["sh", ["scripts/hook-file-length.sh", "origin/main"]],
   ["node", ["--test", "scripts/workflow-policy.test.mjs"]],
+  ["npm", ["run", "check:miri-fs-tests"]],
 ];
 
 const FULL_ONLY_COMMANDS = [
