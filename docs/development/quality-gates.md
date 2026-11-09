@@ -431,14 +431,35 @@ form. Pull request CI runs fixed seeds and the seam property tests, which feed
 backslash and drive-root paths into the path key code. The scheduled job runs
 40 new seeds a day.
 
+A fifth job runs the seed sweep of the surface differential in
+`crates/mcp/tests/integration/surface_differential`. The oracle generates a
+monorepo and runs each surface on its real path: the `fallow` binary, the
+`fallow-mcp` binary over stdio (typed route and CLI route), the `fallow-lsp`
+binary over the Language Server Protocol, the `fallow_api` calls of the Node
+bindings, and the built Node bindings when `FALLOW_SURFACE_NODE_ADDON` names
+the `crates/napi` directory. It compares normalized facts, not wire formats:
+
+- the dead-code findings with paths, lines, columns and finding ids, and the
+  editor diagnostics at the same positions with the same ids;
+- the clone groups and families in report order, on each scope that covers
+  every file (`--changed-since`, an empty `--baseline`, and `audit`);
+- each dependency and export trace against the report;
+- the effect of `FALLOW_CACHE_DIR` and `FALLOW_CACHE_MAX_SIZE` on each
+  surface.
+
+Pull request CI runs three fixed project seeds without the Node bindings in
+the `fallow-mcp` integration tests. The scheduled job builds the Node
+bindings and runs 100 new project seeds a day.
+
 ### Oracle proof
 
 An oracle is a test that compares two results that must agree, for example a
 warm cache run and a `--no-cache` run. The cache model tests in
 `crates/engine/tests/integration/cache_model` are an oracle. The result
 cache model tests in `crates/api/src/mutation/cache_model`, the permutation
-oracle in `crates/cli/tests/integration/permutation` and the platform oracle
-in `crates/cli/tests/integration/platform` are others. Each
+oracle in `crates/cli/tests/integration/permutation`, the platform oracle in
+`crates/cli/tests/integration/platform` and the surface differential in
+`crates/mcp/tests/integration/surface_differential` are others. Each
 oracle must fail on the parent of a named fix commit and pass on the fix
 commit, or it does not catch that bug class. `node scripts/oracle-proof.mjs <oracle>` shows this.
 It checks out `fix^` and `fix` in temporary worktrees, puts the current oracle

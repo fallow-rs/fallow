@@ -239,6 +239,41 @@ test("the oracle seeds workflow runs the permutation oracle seeds", () => {
   );
 });
 
+test("the oracle seeds workflow runs the surface differential seeds with the Node bindings", () => {
+  const workflow = readWorkflow(".github/workflows/oracle-seeds.yml");
+  const oracle = readFileSync(
+    "crates/mcp/tests/integration/surface_differential/oracle.rs",
+    "utf8",
+  );
+  const surfaces = readFileSync(
+    "crates/mcp/tests/integration/surface_differential/surfaces.rs",
+    "utf8",
+  );
+  const job = indentedBlock(workflow, "surface-differential-seeds", 2);
+
+  assert.match(job, /permissions:\n      contents: read/);
+  assert.match(job, /persist-credentials: false/);
+  assert.match(oracle, /#\[ignore = [^\]]*\]\nfn seed_sweep_agrees_on_every_surface\(\)/);
+  assert.match(oracle, /"FALLOW_SURFACE_SEEDS"/);
+  assert.match(oracle, /"FALLOW_SURFACE_SEED_START"/);
+  assert.match(surfaces, /NODE_ADDON_ENV: &str = "FALLOW_SURFACE_NODE_ADDON"/);
+  assert.match(job, /npx napi build --platform --no-js/);
+  assert.match(job, /export FALLOW_SURFACE_NODE_ADDON=/);
+  assert.match(job, /export FALLOW_SURFACE_SEEDS=/);
+  assert.match(job, /export FALLOW_SURFACE_SEED_START=/);
+  assert.match(job, /surface_differential:: \\\n\s+-- --include-ignored/);
+  const failureText = "the surfaces disagree";
+  assert.ok(oracle.includes(failureText), "the oracle panics with the text that the job finds");
+  assert.ok(job.includes(`grep -q '${failureText}'`), "the job finds the panic text of the oracle");
+  assert.match(job, /panicked at[\s\S]*GITHUB_STEP_SUMMARY/, "a failure prints the failing seed");
+  assert.match(job, /exit "\$status"/);
+  assert.doesNotMatch(
+    readWorkflow(".github/workflows/ci.yml"),
+    /FALLOW_SURFACE_SEEDS|FALLOW_SURFACE_NODE_ADDON|seed_sweep_agrees_on_every_surface/,
+    "pull request CI keeps the fixed seeds and adds no Node bindings run",
+  );
+});
+
 test("the oracle seeds workflow runs the Unicode span tests with a wide case range", () => {
   const workflow = readWorkflow(".github/workflows/oracle-seeds.yml");
   const job = indentedBlock(workflow, "unicode-span-seeds", 2);

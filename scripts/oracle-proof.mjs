@@ -16,6 +16,7 @@ import { cargoTargetDir } from "./cargo-target.mjs";
 import { cacheModel } from "./oracle-proof/cache-model.mjs";
 import { mutationCache } from "./oracle-proof/mutation-cache.mjs";
 import { permutation } from "./oracle-proof/permutation.mjs";
+import { surfaceDifferential } from "./oracle-proof/surface-differential.mjs";
 import { unicodeSpans } from "./oracle-proof/unicode-spans.mjs";
 import { platform } from "./oracle-proof/platform.mjs";
 
@@ -24,6 +25,7 @@ export const ORACLES = Object.freeze({
   [cacheModel.name]: cacheModel,
   [mutationCache.name]: mutationCache,
   [permutation.name]: permutation,
+  [surfaceDifferential.name]: surfaceDifferential,
   [unicodeSpans.name]: unicodeSpans,
   [platform.name]: platform,
 });
