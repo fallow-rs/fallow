@@ -334,13 +334,15 @@ fn all_builtin_plugin_names_are_non_empty_and_unique() {
 fn all_builtin_plugins_have_activation_signals() {
     // Plugins activated from package metadata or filesystem sentinels rather
     // than dependency enablers (napi binary name; deno.json presence;
-    // kibana.jsonc presence; action.yml with a node runtime).
+    // kibana.jsonc presence; action.yml with a node runtime; the package.json
+    // n8n block).
     const NON_DEPENDENCY_ACTIVATED_PLUGINS: &[&str] = &[
         "napi-rs",
         "deno",
         "kibana",
         "typescript-content-mapper",
         "github-action",
+        "n8n",
     ];
     let plugins = registry::builtin::create_builtin_plugins();
     for p in &plugins {

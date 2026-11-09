@@ -56,6 +56,10 @@ impl Plugin for VitePluginPagesPlugin {
         CONFIG_PATTERNS
     }
 
+    fn always_used(&self) -> &'static [&'static str] {
+        CONFIG_PATTERNS
+    }
+
     fn resolve_config(&self, config_path: &Path, source: &str, root: &Path) -> PluginResult {
         let mut result = PluginResult::default();
         let Some(options) = extract_vite_plugin_call_string_lists(

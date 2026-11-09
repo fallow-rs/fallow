@@ -43,4 +43,9 @@ fn page_directories_of_the_pages_plugin_call_are_entry_points() {
             "{path} is not in a pages directory and must stay unused: {unused_paths:?}"
         );
     }
+    let excluded = "packages/docs/src/pages/drafts/wip.vue";
+    assert!(
+        unused_paths.contains(&excluded.to_string()),
+        "the Pages exclude option removes {excluded} from the routes: {unused_paths:?}"
+    );
 }

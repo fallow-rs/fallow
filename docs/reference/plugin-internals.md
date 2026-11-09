@@ -730,5 +730,6 @@ the config directory. A dir that climbs out of the workspace package becomes
 a parent-relative entry pattern. A call without `dirs` uses `src/pages`. The
 default extensions are the union of the Vue, React and Solid resolver
 defaults. A call whose options argument is not an object literal, or whose
-`dirs` is not static, gives no entries. The plugin does not read `exclude`,
-so an excluded file stays an entry point. The entries have the runtime role.
+`dirs` is not static, gives no entries. The `exclude` globs are relative to
+each page directory, and an excluded file is not an entry point. The plugin
+also marks `vite.config.*` as always used. The entries have the runtime role.
