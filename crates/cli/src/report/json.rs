@@ -1311,7 +1311,7 @@ mod tests {
         let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["kind"], "dead-code");
-        assert_eq!(output["schema_version"], 10);
+        assert_eq!(output["schema_version"], 11);
         assert!(output["version"].is_string());
         assert_eq!(output["elapsed_ms"], 123);
         assert_eq!(output["total_issues"], 0);
@@ -2245,7 +2245,7 @@ mod tests {
         let output = api_check_json_document(&results, &root, elapsed).expect("should serialize");
 
         assert_eq!(output["kind"], "dead-code");
-        assert_eq!(output["schema_version"], 10);
+        assert_eq!(output["schema_version"], 11);
         assert_eq!(output["elapsed_ms"], 99);
     }
 

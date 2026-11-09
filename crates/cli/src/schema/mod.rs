@@ -967,12 +967,10 @@ mod tests {
         }
     }
 
-    /// Subset cross-check (NOT a bijection): every suppressible/filterable
-    /// `IssueKind` must be represented by at least one row, either via its
-    /// own id or via a suppression-comment token. Complexity is one kind
-    /// covered by several rule rows; that is expected.
+    /// Every finding kind has a row, while the suppression-only inventory
+    /// kind stays outside finding rows. Complexity can have several rows.
     #[test]
-    fn every_issue_kind_is_covered_by_a_row() {
+    fn finding_kinds_have_rows_and_inventory_stays_suppression_only() {
         let schema = schema();
         let rows = schema["issue_types"].as_array().unwrap();
 
@@ -989,8 +987,19 @@ mod tests {
             }
         }
 
+        assert_eq!(
+            IssueKind::parse("shared-state"),
+            Some(IssueKind::SharedState)
+        );
+        assert!(
+            !covered.contains(&IssueKind::SharedState.to_discriminant()),
+            "shared-state inventory must not appear in finding rows"
+        );
         for name in KNOWN_ISSUE_KIND_NAMES.iter() {
             let kind = IssueKind::parse(name).unwrap();
+            if kind == IssueKind::SharedState {
+                continue;
+            }
             assert!(
                 covered.contains(&kind.to_discriminant()),
                 "IssueKind for token '{name}' has no issue_types row (neither id nor suppress token)"
