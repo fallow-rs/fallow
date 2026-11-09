@@ -116,3 +116,58 @@ pub fn assert_only_in_control(source: &str, kind: SourceKind, control: &str) {
         );
     }
 }
+
+/// Runs a CommonJS script with `node`. Returns the standard output and the
+/// exit code, or `None` when `node` is not available.
+pub fn run_node(code: &str) -> Option<(String, Option<i32>)> {
+    use std::io::Write;
+    use std::process::{Command, Stdio};
+    let mut child = Command::new("node")
+        .args(["--input-type=commonjs", "-"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .spawn()
+        .ok()?;
+    child.stdin.take()?.write_all(code.as_bytes()).ok()?;
+    let output = child.wait_with_output().ok()?;
+    Some((
+        String::from_utf8_lossy(&output.stdout).into_owned(),
+        output.status.code(),
+    ))
+}
+
+/// Prefixes `code` with a runtime that makes only mutant `id` active.
+pub fn activate(id: &str, code: &str) -> String {
+    format!(
+        "globalThis.__fallowMutation = {{ a: (id) => id === \"{id}\", c: () => {{}} }};\n{code}"
+    )
+}
+
+/// Checks with `node` that the instrumented code of `source` gives the
+/// output of `source` when no mutant is active, and the output of the
+/// applied mutant when one mutant is active. A machine without `node`
+/// skips the check.
+pub fn assert_runs_like_each_mutant(source: &str, options: &MutationOptions) -> usize {
+    let Some(original) = run_node(source) else {
+        return 0;
+    };
+    assert_eq!(original.1, Some(0), "the fixture fails: {original:?}");
+    let result = run_with(source, SourceKind::Js, options);
+    assert_eq!(
+        run_node(&result.code),
+        Some(original),
+        "the inactive instrumented code differs\n---\n{}",
+        result.code
+    );
+    for mutant in &result.mutants {
+        let mutated = run_node(&apply(source, mutant));
+        let switched = run_node(&activate(mutant.id.as_str(), &result.code));
+        assert_eq!(
+            switched, mutated,
+            "{} {:?} -> {:?}",
+            mutant.operator, mutant.original, mutant.replacement
+        );
+    }
+    result.mutants.len()
+}

@@ -5,11 +5,13 @@
 //! expression. See `emit`.
 
 use oxc_ast::ast::{
-    Argument, ArrayExpression, BlockStatement, CallExpression, Expression, FunctionBody,
-    ObjectExpression, Statement, SwitchCase, ThrowStatement, VariableDeclarationKind,
+    Argument, ArrayExpression, ArrowFunctionExpression, BlockStatement, CallExpression, Class,
+    Expression, Function, FunctionBody, ObjectExpression, Statement, SwitchCase, ThrowStatement,
+    VariableDeclaration, VariableDeclarationKind,
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_span::{GetSpan, Span};
+use oxc_syntax::scope::ScopeFlags;
 
 use super::{Candidate, Collector, has_optional_link, is_skipped_call, pair};
 use crate::{MutantChange, Operator};
@@ -60,17 +62,57 @@ fn method_replacement(name: &str) -> Option<(&'static str, Option<&'static str>)
     METHODS.iter().find(|(method, _)| *method == name).copied()
 }
 
-/// True for a statement that declares a name for the whole switch block. A
-/// clause with one keeps its statements, because a nested block would
-/// change the scope of the name.
-fn is_lexical_declaration(statement: &Statement<'_>) -> bool {
-    match statement {
-        Statement::VariableDeclaration(declaration) => {
-            !matches!(declaration.kind, VariableDeclarationKind::Var)
-        }
-        Statement::FunctionDeclaration(_) | Statement::ClassDeclaration(_) => true,
-        _ => false,
+/// True when the statements can move into a nested block and be removed
+/// as one mutant:
+///
+/// - no statement at their own top level is a declaration. A `let`,
+///   `const`, `class` or `function` declaration would get the scope of the
+///   nested block: `var g; function g() {}` becomes a redeclaration error,
+///   and in sloppy code a function declaration no longer replaces a
+///   parameter;
+/// - no `var` or function declaration exists at any depth outside a nested
+///   function. The switch keeps such a binding hoisted, while the applied
+///   mutant removes it: a later read of the name gives `undefined` in the
+///   run and a `ReferenceError` in the reported mutant.
+fn is_movable(statements: &[Statement<'_>]) -> bool {
+    if statements.iter().any(Statement::is_declaration) {
+        return false;
     }
+    let mut finder = HoistedDeclaration::default();
+    for statement in statements {
+        finder.visit_statement(statement);
+    }
+    !finder.found
+}
+
+/// Finds a `var` or function declaration that hoists out of a block. The
+/// search does not enter a function or a class: their declarations have
+/// their own scope.
+#[derive(Default)]
+struct HoistedDeclaration {
+    found: bool,
+}
+
+impl<'a> Visit<'a> for HoistedDeclaration {
+    fn visit_variable_declaration(&mut self, it: &VariableDeclaration<'a>) {
+        self.found |= it.kind == VariableDeclarationKind::Var;
+        walk::walk_variable_declaration(self, it);
+    }
+
+    fn visit_function(&mut self, it: &Function<'a>, _flags: ScopeFlags) {
+        self.found |= it.is_declaration();
+    }
+
+    fn visit_arrow_function_expression(&mut self, _it: &ArrowFunctionExpression<'a>) {}
+
+    fn visit_class(&mut self, _it: &Class<'a>) {}
+}
+
+/// True when the node that `visit` walks holds a `super(...)` call.
+fn calls_super(visit: impl FnOnce(&mut SuperCall)) -> bool {
+    let mut finder = SuperCall::default();
+    visit(&mut finder);
+    finder.found
 }
 
 /// Finds a `super(...)` call.
@@ -115,28 +157,40 @@ impl Collector<'_> {
     /// constructor with a `super(...)` call keeps its body: without the call,
     /// each instance creation throws.
     pub(super) fn empty_function_body(&mut self, body: &FunctionBody<'_>) {
-        if body.statements.is_empty() {
+        let Some(first) = body.statements.first() else {
+            return;
+        };
+        if !is_movable(&body.statements)
+            || (self.in_constructor() && calls_super(|finder| finder.visit_function_body(body)))
+        {
             return;
         }
-        if self.frames.last().is_some_and(|frame| frame.constructor) {
-            let mut finder = SuperCall::default();
-            finder.visit_function_body(body);
-            if finder.found {
-                return;
-            }
-        }
-        let start = body
-            .directives
-            .last()
-            .map_or(body.span.start + 1, |directive| directive.span.end);
+        // After a directive, the range starts at the first statement: a
+        // directive without a semicolon ends at a line break, and the
+        // wrapper must not follow it on the same line.
+        let start = if body.directives.is_empty() {
+            body.span.start + 1
+        } else {
+            first.span().start
+        };
         self.empty_statements((start, body.span.end - 1));
     }
 
-    /// Adds the `block-statement` candidate of a non-empty block.
+    /// Adds the `block-statement` candidate of a non-empty block. In a
+    /// constructor, a block with a `super(...)` call keeps its statements,
+    /// as the constructor body does.
     pub(super) fn empty_block(&mut self, it: &BlockStatement<'_>) {
-        if !it.body.is_empty() {
-            self.empty_statements((it.span.start + 1, it.span.end - 1));
+        if it.body.is_empty()
+            || !is_movable(&it.body)
+            || (self.in_constructor() && calls_super(|finder| finder.visit_block_statement(it)))
+        {
+            return;
         }
+        self.empty_statements((it.span.start + 1, it.span.end - 1));
+    }
+
+    fn in_constructor(&self) -> bool {
+        self.frames.last().is_some_and(|frame| frame.constructor)
     }
 
     fn empty_statements(&mut self, region: (u32, u32)) {
@@ -154,7 +208,7 @@ impl Collector<'_> {
         let (Some(first), Some(last)) = (it.consequent.first(), it.consequent.last()) else {
             return;
         };
-        if it.consequent.iter().any(is_lexical_declaration) {
+        if !is_movable(&it.consequent) {
             return;
         }
         self.add_statement(
@@ -256,39 +310,22 @@ impl Collector<'_> {
 
     /// A call statement, a returned call and a concise arrow body already get
     /// a `removed-call` or `return-value` mutant with the same result.
+    ///
+    /// The replacement is always `(void 0)`. Without the parentheses, the
+    /// applied mutant `f() + 1` would read `void (0 + 1)`, while the switch
+    /// evaluates `(void 0) + 1`, and `void 0 ** 2` is a syntax error.
     fn call_expression(&mut self, it: &CallExpression<'_>) {
         let span = pair(it.span);
         if is_skipped_call(it) || self.covered_calls.contains(&span) {
             return;
         }
-        let replacement = if self.continues_after(it.span.end) {
-            "(void 0)"
-        } else {
-            "void 0"
-        };
         self.add(
             it.span,
             Operator::CallExpression,
             span,
-            replacement.to_owned(),
+            "(void 0)".to_owned(),
             MutantChange::new(MutantChange::CALL, "void 0"),
         );
-    }
-
-    /// True when the token after `end` continues the expression as a member,
-    /// call, template or exponent: `void 0.x` would lex `0.` as a number,
-    /// and `void 0 ** 2` is a syntax error.
-    fn continues_after(&self, end: u32) -> bool {
-        let rest = self
-            .source
-            .as_bytes()
-            .get(end as usize..)
-            .unwrap_or_default();
-        let next = rest.iter().position(|byte| !byte.is_ascii_whitespace());
-        matches!(
-            next.map(|index| &rest[index..]),
-            Some([b'.' | b'[' | b'(' | b'`' | b'*', ..] | [b'?', b'.', ..])
-        )
     }
 
     /// Adds the `regex-constructor` candidates of `RegExp("...")` or

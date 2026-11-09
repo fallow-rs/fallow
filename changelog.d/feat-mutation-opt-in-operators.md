@@ -1,12 +1,12 @@
 ### Added
 
 - **`fallow mutation` has nine opt-in operators from the StrykerJS mutator set.** They run only when `--operators`, `mutation.operators` or the MCP `operators` parameter names them:
-  - `block-statement` removes the statements of a block or function body;
+  - `block-statement` removes the statements of a block or function body without declarations;
   - `array-literal` changes `[x]` to `[]` and `[]` to `["fallow"]`;
   - `object-literal` changes a non-empty object literal to `{}`;
   - `method-expression` swaps method pairs such as `startsWith` and `endsWith`, and removes calls such as `.trim()` and `.filter(...)`;
   - `switch-case` removes the statements of a clause;
-  - `call-expression` changes a call in an expression position to `void 0`;
+  - `call-expression` changes a call in an expression position to `(void 0)`;
   - `throw-statement` removes `throw new X(...)`;
   - `regex-constructor` applies the regex changes to a `new RegExp("...")` pattern;
   - `regex-assertion` negates a lookaround and swaps `\b` and `\B`.

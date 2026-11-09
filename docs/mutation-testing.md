@@ -145,9 +145,16 @@ mutants, and many of them are equivalent or killed by any test that runs the
 code. The rules of each opt-in operator:
 
 - `block-statement`: the directive prologue of a function body stays, so the
-  body keeps its strictness. A constructor that calls `super(...)` keeps its
-  body, because each instance creation would throw. A class `static` block
-  gives no mutant.
+  body keeps its strictness. In a constructor, a body or block with a
+  `super(...)` call keeps its statements, because each instance creation
+  would throw. A class `static` block gives no mutant.
+- `block-statement` and `switch-case`: the range gives no mutant when it
+  holds a declaration at its own top level (`let`, `const`, `class`,
+  `function`, `var` or a TypeScript declaration), or a `var` or function
+  declaration at any depth outside a nested function. The instrumentation
+  moves the statements into a nested block, so a top-level declaration
+  would change its scope, and a hoisted `var` would stay declared while the
+  reported mutant removes it.
 - `array-literal` and `object-literal`: a destructuring pattern and an
   assignment target give no mutant.
 - `method-expression`: `startsWith` and `endsWith`, `every` and `some`,
@@ -160,14 +167,13 @@ code. The rules of each opt-in operator:
   with their call: `s.trim()` becomes `s`. The callee must be a static
   member without parentheses. A call in an optional chain and a call on
   `super` give no mutant.
-- `switch-case`: the clause falls through to the next clause. A clause with
-  a `let`, `const`, `class` or `function` declaration gives no mutant,
-  because the declaration has the scope of the whole switch.
+- `switch-case`: the clause falls through to the next clause.
 - `call-expression`: a call statement, a returned call and a concise arrow
   call body give no mutant, because `removed-call` or `return-value` gives
   the same result. A call in an optional chain, a `super(...)` call, a
-  `require(...)` call and a logging call give no mutant. Before a member
-  access, a call or `**`, the replacement is `(void 0)`.
+  `require(...)` call and a logging call give no mutant. The replacement is
+  always `(void 0)`, so it keeps its grouping before an operator: `f() + 1`
+  becomes `(void 0) + 1`.
 - `throw-statement`: only a `throw` of a `new` expression is removed.
 - `regex-constructor`: the pattern must be a string literal, and the flags a
   string literal or absent. The callee is `RegExp`, with or without `new`.

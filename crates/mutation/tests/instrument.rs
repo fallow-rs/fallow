@@ -552,46 +552,20 @@ const run = async (v) => (await v) * 2;
 run(4).then((v) => { out.push(v); console.log(JSON.stringify(out)); });
 "#;
 
-/// Runs a CommonJS script with `node`. Returns `None` when `node` is not
-/// available.
-fn run_node(code: &str) -> Option<(String, Option<i32>)> {
-    use std::io::Write;
-    use std::process::{Command, Stdio};
-    let mut child = Command::new("node")
-        .args(["--input-type=commonjs", "-"])
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .spawn()
-        .ok()?;
-    child.stdin.take()?.write_all(code.as_bytes()).ok()?;
-    let output = child.wait_with_output().ok()?;
-    Some((
-        String::from_utf8_lossy(&output.stdout).into_owned(),
-        output.status.code(),
-    ))
-}
-
-fn activate(id: &str, code: &str) -> String {
-    format!(
-        "globalThis.__fallowMutation = {{ a: (id) => id === \"{id}\", c: () => {{}} }};\n{code}"
-    )
-}
-
 #[test]
 fn instrumented_code_runs_like_the_original_and_like_each_mutant() {
     // A machine without `node` skips the check.
-    let Some(original) = run_node(RUNTIME_FIXTURE) else {
+    let Some(original) = common::run_node(RUNTIME_FIXTURE) else {
         return;
     };
     assert_eq!(original.1, Some(0), "the fixture fails: {original:?}");
     let result = run(RUNTIME_FIXTURE, SourceKind::Js);
     assert!(result.mutants.len() > 20, "{}", result.mutants.len());
-    assert_eq!(run_node(&result.code), Some(original.clone()));
+    assert_eq!(common::run_node(&result.code), Some(original.clone()));
     let mut differs = 0;
     for mutant in &result.mutants {
-        let mutated = run_node(&common::apply(RUNTIME_FIXTURE, mutant));
-        let switched = run_node(&activate(mutant.id.as_str(), &result.code));
+        let mutated = common::run_node(&common::apply(RUNTIME_FIXTURE, mutant));
+        let switched = common::run_node(&common::activate(mutant.id.as_str(), &result.code));
         assert_eq!(
             switched, mutated,
             "{} {:?} -> {:?}",
