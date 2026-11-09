@@ -7,6 +7,7 @@ use serde_json::json;
 
 use super::{InitArgs, RulePackContext};
 use crate::error::emit_input_error;
+use crate::setup_hooks::symlink_guard::{refusal_message, symlinked_component};
 
 pub fn run(args: &InitArgs, ctx: &RulePackContext<'_>) -> ExitCode {
     let selected = match select_template(args, ctx.output) {
@@ -102,6 +103,13 @@ fn available_pack_path(
             ctx.output,
         ));
     }
+    if let Some(link) = symlinked_component(ctx.root, &abs_path) {
+        let link = link.strip_prefix(ctx.root).unwrap_or(&link);
+        return Err(emit_input_error(
+            &refusal_message(&rel_path.display().to_string(), &link.display().to_string()),
+            ctx.output,
+        ));
+    }
     Ok(rel_path)
 }
 
@@ -168,19 +176,34 @@ enum ConfigUpdateResult {
 }
 
 fn update_config(ctx: &RulePackContext<'_>, rel_path: &str) -> ConfigUpdateResult {
-    let config_path = if let Some(config_path) = ctx.config_path {
+    // `guard_root` is the directory that the config must not link out of.
+    // An absolute `--config` is the caller's choice and has none. Discovery
+    // can stop at a config above the root, up to the repository root, so a
+    // discovered config is checked against its own directory.
+    let (config_path, guard_root) = if let Some(config_path) = ctx.config_path {
         if config_path.is_absolute() {
-            config_path.clone()
+            (config_path.clone(), None)
         } else {
-            ctx.root.join(config_path)
+            (ctx.root.join(config_path), Some(ctx.root.to_path_buf()))
         }
     } else {
         let Some(config_path) = fallow_config::FallowConfig::find_config_path(ctx.root) else {
             return ConfigUpdateResult::Missing;
         };
-        config_path
+        let guard_root = config_path.parent().map(std::path::Path::to_path_buf);
+        (config_path, guard_root)
     };
     let config_display = root_relative(ctx.root, &config_path);
+    if let Some(guard_root) = guard_root
+        && let Some(link) = symlinked_component(&guard_root, &config_path)
+    {
+        let link = link.strip_prefix(&guard_root).unwrap_or(&link);
+        let reason = refusal_message(&config_display, &link.display().to_string());
+        return ConfigUpdateResult::ManualSnippet {
+            config_path: config_display,
+            reason,
+        };
+    }
     match fallow_config::add_rule_pack_path(&config_path, rel_path) {
         Ok(true) => ConfigUpdateResult::Updated(config_display),
         Ok(false) => ConfigUpdateResult::AlreadyPresent(config_display),

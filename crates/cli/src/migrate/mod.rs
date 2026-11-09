@@ -6,6 +6,8 @@ mod knip_regex;
 mod knip_scoped;
 mod knip_tables;
 mod stylelint;
+#[cfg(all(test, unix))]
+mod symlink_tests;
 #[cfg(test)]
 mod tests;
 mod toml_gen;
@@ -14,6 +16,7 @@ use std::path::Path;
 use std::process::ExitCode;
 
 use crate::exit_codes::exit_invalid_input;
+use crate::setup_hooks::symlink_guard::{refusal_message, symlinked_component};
 use jscpd::migrate_jscpd;
 use jsonc::generate_jsonc;
 use knip::migrate_knip;
@@ -136,6 +139,14 @@ pub fn run_migrate(
     } else {
         let filename = format.filename();
         let output_path = root.join(filename);
+        if let Some(link) = symlinked_component(root, &output_path) {
+            let link = link.strip_prefix(root).unwrap_or(&link);
+            eprintln!(
+                "Error: {}",
+                refusal_message(filename, &link.display().to_string())
+            );
+            return exit_invalid_input();
+        }
         if let Err(e) = std::fs::write(&output_path, &output_content) {
             eprintln!("Error: failed to write {filename}: {e}");
             return exit_invalid_input();

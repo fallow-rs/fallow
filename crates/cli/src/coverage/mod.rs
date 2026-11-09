@@ -294,7 +294,7 @@ impl Default for CoverageSetupState {
 impl CoverageSetupLock {
     fn try_acquire(root: &Path) -> Result<Self, String> {
         let lock_path = setup_lock_path(root);
-        ensure_fallow_dir(root)?;
+        ensure_fallow_dir(root, &lock_path)?;
         let file = OpenOptions::new()
             .create(true)
             .truncate(false)
@@ -391,7 +391,10 @@ fn setup_lock_path(root: &Path) -> PathBuf {
     root.join(".fallow").join("setup.lock")
 }
 
-fn ensure_fallow_dir(root: &Path) -> Result<(), String> {
+/// Create `<root>/.fallow` for `file`, unless `file` or a directory on the
+/// way to it is a symlink that resolves outside the project.
+fn ensure_fallow_dir(root: &Path, file: &Path) -> Result<(), String> {
+    refuse_outside_link(root, file)?;
     let dir = root.join(".fallow");
     std::fs::create_dir_all(&dir)
         .map_err(|err| format!("failed to create {}: {err}", dir.display()))
@@ -422,8 +425,8 @@ fn load_setup_state(root: &Path) -> CoverageSetupState {
 }
 
 fn save_setup_state(root: &Path, state: &CoverageSetupState) -> Result<(), String> {
-    ensure_fallow_dir(root)?;
     let path = setup_state_path(root);
+    ensure_fallow_dir(root, &path)?;
     let content = serde_json::to_vec_pretty(state)
         .map_err(|err| format!("failed to serialize {}: {err}", path.display()))?;
     atomic_write(&path, &content)
@@ -1756,7 +1759,21 @@ fn recipe_path(root: &Path) -> PathBuf {
     root.join("docs").join("collect-coverage.md")
 }
 
+/// Refuse a project path when it, or a directory on the way to it, is a
+/// symlink that resolves outside `root`. A cloned repository can commit such
+/// a link to make setup write a file outside the project.
+fn refuse_outside_link(root: &Path, path: &Path) -> Result<(), String> {
+    match crate::setup_hooks::symlinked_component(root, path) {
+        Some(link) => Err(crate::setup_hooks::symlink_guard::refusal_message(
+            &display_relative(root, path),
+            &display_relative(root, &link),
+        )),
+        None => Ok(()),
+    }
+}
+
 fn write_recipe(root: &Path, contents: &str) -> Result<PathBuf, String> {
+    refuse_outside_link(root, &recipe_path(root))?;
     let docs_dir = root.join("docs");
     std::fs::create_dir_all(&docs_dir)
         .map_err(|err| format!("failed to create {}: {err}", docs_dir.display()))?;

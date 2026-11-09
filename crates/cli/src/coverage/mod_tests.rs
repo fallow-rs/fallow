@@ -824,3 +824,102 @@ fn detect_coverage_artifact_finds_nyc_output_istanbul_file() {
 
     assert_eq!(detect_coverage_artifact(dir.path()), Some(coverage_file));
 }
+
+#[cfg(unix)]
+#[test]
+fn setup_lock_is_not_created_in_a_linked_fallow_dir_outside_the_project() {
+    let dir = tempdir().expect("tempdir");
+    let outside = tempdir().expect("outside tempdir");
+    std::os::unix::fs::symlink(outside.path(), dir.path().join(".fallow")).expect("symlink");
+
+    let result = super::CoverageSetupLock::try_acquire(dir.path());
+
+    assert!(result.is_err());
+    assert!(!outside.path().join("setup.lock").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn setup_state_is_not_written_into_a_linked_fallow_dir_outside_the_project() {
+    let dir = tempdir().expect("tempdir");
+    let outside = tempdir().expect("outside tempdir");
+    std::os::unix::fs::symlink(outside.path(), dir.path().join(".fallow")).expect("symlink");
+
+    let result = super::save_setup_state(dir.path(), &super::CoverageSetupState::default());
+
+    assert!(result.is_err());
+    assert!(!outside.path().join("setup.json").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn recipe_is_not_written_through_a_link_outside_the_project() {
+    let dir = tempdir().expect("tempdir");
+    let outside = tempdir().expect("outside tempdir");
+    let target = outside.path().join("rc");
+    std::fs::write(&target, "keep\n").expect("write outside file");
+    std::fs::create_dir(dir.path().join("docs")).expect("mkdir");
+    std::os::unix::fs::symlink(&target, dir.path().join("docs/collect-coverage.md"))
+        .expect("symlink");
+
+    let result = write_recipe(dir.path(), "recipe\n");
+
+    assert!(result.is_err());
+    assert_eq!(std::fs::read_to_string(&target).expect("read"), "keep\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn recipe_is_not_written_into_a_linked_docs_dir_outside_the_project() {
+    let dir = tempdir().expect("tempdir");
+    let outside = tempdir().expect("outside tempdir");
+    std::os::unix::fs::symlink(outside.path(), dir.path().join("docs")).expect("symlink");
+
+    let result = write_recipe(dir.path(), "recipe\n");
+
+    assert!(result.is_err());
+    assert!(!outside.path().join("collect-coverage.md").exists());
+}
+
+#[cfg(unix)]
+#[test]
+fn recipe_is_written_through_a_docs_link_inside_the_project() {
+    let dir = tempdir().expect("tempdir");
+    std::fs::create_dir(dir.path().join("handbook")).expect("mkdir");
+    std::os::unix::fs::symlink("handbook", dir.path().join("docs")).expect("symlink");
+
+    write_recipe(dir.path(), "recipe\n").expect("recipe should write");
+
+    assert!(dir.path().join("handbook/collect-coverage.md").is_file());
+}
+
+#[cfg(unix)]
+#[test]
+fn setup_state_does_not_overwrite_a_linked_file_outside_the_project() {
+    let dir = tempdir().expect("tempdir");
+    let outside = tempdir().expect("outside tempdir");
+    let target = outside.path().join("rc");
+    std::fs::write(&target, "keep\n").expect("write outside file");
+    std::fs::create_dir(dir.path().join(".fallow")).expect("mkdir");
+    std::os::unix::fs::symlink(&target, setup_state_path(dir.path())).expect("symlink");
+
+    let result = super::save_setup_state(dir.path(), &super::CoverageSetupState::default());
+
+    assert!(result.is_err());
+    assert_eq!(std::fs::read_to_string(&target).expect("read"), "keep\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn setup_lock_is_not_created_through_a_dangling_link() {
+    let dir = tempdir().expect("tempdir");
+    let outside = tempdir().expect("outside tempdir");
+    std::fs::create_dir(dir.path().join(".fallow")).expect("mkdir");
+    let planted = outside.path().join("lock");
+    std::os::unix::fs::symlink(&planted, dir.path().join(".fallow/setup.lock")).expect("symlink");
+
+    let result = super::CoverageSetupLock::try_acquire(dir.path());
+
+    assert!(result.is_err());
+    assert!(!planted.exists());
+}
