@@ -1,0 +1,5 @@
+{
+  "name": "vite-plugin-pages-fixture",
+  "private": true,
+  "workspaces": ["packages/*"]
+}

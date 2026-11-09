@@ -29,6 +29,16 @@ pub struct MutationPlanParams {
     /// the limit with covered mutants, so it can also run a `pending` one.
     pub max_mutants: Option<usize>,
 
+    /// Keep at most this many mutants on each line; the rest are `pending`
+    /// with the reason `sampled-out`. Omitted: the `mutation.mutantsPerLine`
+    /// config key, else no limit.
+    #[schemars(range(min = 1))]
+    pub mutants_per_line: Option<usize>,
+
+    /// Plan every mutant of each function that holds a changed line. Omitted:
+    /// the `mutation.functionScope` config key, else the changed lines only.
+    pub function_scope: Option<bool>,
+
     /// Kebab-case operator names, for example `relational-operator`.
     /// Omitted: the `mutation.operators` config key, else every operator.
     pub operators: Option<Vec<String>>,

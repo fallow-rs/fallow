@@ -21,18 +21,16 @@ pub(super) fn widened_ranges(
         .chain(source.match_indices('\n').map(|(index, _)| index + 1))
         .collect();
     for &line in lines {
-        let Some(&start) = usize::try_from(line)
+        let Some(index) = usize::try_from(line)
             .ok()
             .and_then(|line| line.checked_sub(1))
-            .and_then(|index| starts.get(index))
         else {
             continue;
         };
-        let end = starts
-            .iter()
-            .copied()
-            .find(|&next| next > start)
-            .unwrap_or(source.len());
+        let Some(&start) = starts.get(index) else {
+            continue;
+        };
+        let end = starts.get(index + 1).copied().unwrap_or(source.len());
         let text = &source[start..end];
         let first = start + text.len() - text.trim_start().len();
         let Ok(position) = u32::try_from(first) else {

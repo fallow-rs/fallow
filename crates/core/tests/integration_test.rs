@@ -133,6 +133,8 @@ mod graph_cache_transparency;
 mod graphql_config_plugin;
 #[path = "integration_test/graphql_imports.rs"]
 mod graphql_imports;
+#[path = "integration_test/gulp_plugin.rs"]
+mod gulp_plugin;
 #[path = "integration_test/hoisted_root_plugin_activation.rs"]
 mod hoisted_root_plugin_activation;
 #[path = "integration_test/hono_html_tagged_template.rs"]
@@ -191,6 +193,8 @@ mod lit_unused_state;
 mod member_detection;
 #[path = "integration_test/metro_extra_node_modules.rs"]
 mod metro_extra_node_modules;
+#[path = "integration_test/n8n_plugin.rs"]
+mod n8n_plugin;
 #[path = "integration_test/nested_local_path_dependency.rs"]
 mod nested_local_path_dependency;
 #[path = "integration_test/nesting_too_deep_diagnostic.rs"]
@@ -243,10 +247,14 @@ mod type_test_entries;
 mod typed_receiver_scoping;
 #[path = "integration_test/unmeasured_zero_diagnostics.rs"]
 mod unmeasured_zero_diagnostics;
+#[path = "integration_test/unplugin_icons_plugin.rs"]
+mod unplugin_icons_plugin;
 #[path = "integration_test/unreachable_exports.rs"]
 mod unreachable_exports;
 #[path = "integration_test/vercel_api_directory_functions.rs"]
 mod vercel_api_directory_functions;
+#[path = "integration_test/vite_plugin_pages_plugin.rs"]
+mod vite_plugin_pages_plugin;
 #[path = "integration_test/vitest_jsx_import_source.rs"]
 mod vitest_jsx_import_source;
 #[path = "integration_test/vitest_jsx_project_scopes.rs"]

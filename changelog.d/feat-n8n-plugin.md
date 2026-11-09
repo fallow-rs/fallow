@@ -1,0 +1,3 @@
+### Added
+
+- **Built-in n8n plugin.** n8n loads the nodes and credentials of a node package from the `n8n.nodes` and `n8n.credentials` arrays in `package.json`. Fallow now makes these files entry points, so node files, credential files and the files that they import are no longer unused files. Each path names build output, such as `dist/nodes/Foo/Foo.node.js`. Fallow maps it to the source file through the `tsconfig` `outDir` and `rootDir`, or to the source file beside the output directory when no `rootDir` is set. The members that n8n reads from a class that implements `INodeType` or `ICredentialType`, such as `description`, `webhookMethods` and `documentationUrl`, are no longer unused class members.

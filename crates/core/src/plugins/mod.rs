@@ -92,27 +92,6 @@ fn entry_rules_match(result: &PluginResult, path: &str) -> bool {
         .any(|rule| rule.matches(path))
 }
 
-#[cfg(test)]
-const SUPPORT_ENTRY_POINT_PLUGINS: &[&str] = &[
-    "alchemy",
-    "content-collections",
-    "contentlayer",
-    "danger",
-    "drizzle",
-    "fumadocs",
-    "i18next",
-    "knex",
-    "kysely",
-    "mintlify",
-    "msw",
-    "opencode",
-    "prisma",
-    "storybook",
-    "stryker",
-    "typeorm",
-    "velite",
-];
-
 /// Which workspace diagnostic kind a plugin-stage advisory becomes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PluginConfigEffect {
@@ -2073,6 +2052,7 @@ mod gatsby;
 mod github_action;
 mod graphql_codegen;
 mod graphql_config;
+mod gulp;
 mod hardhat;
 mod husky;
 mod i18next;
@@ -2092,6 +2072,7 @@ mod mintlify;
 mod mocha;
 mod module_federation;
 mod msw;
+mod n8n;
 mod napi_rs;
 mod nest_commander;
 mod nestjs;
@@ -2164,10 +2145,12 @@ mod typeorm;
 mod typescript;
 mod typescript_content_mapper;
 mod unocss;
+pub(crate) mod unplugin_icons;
 mod varlock;
 mod velite;
 mod vercel;
 mod vite;
+mod vite_plugin_pages;
 pub(crate) mod vite_plus;
 mod vitepress;
 mod vitest;

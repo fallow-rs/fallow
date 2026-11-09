@@ -723,6 +723,8 @@ const TOOL_SCHEMA_EXPECTATIONS: &[(&str, &[&str], &[&str])] = &[
             "all",
             "paths",
             "max_mutants",
+            "mutants_per_line",
+            "function_scope",
             "operators",
             "no_cache",
             "threads",

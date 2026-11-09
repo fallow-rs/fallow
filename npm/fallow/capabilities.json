@@ -7962,6 +7962,8 @@
           "all",
           "paths",
           "max_mutants",
+          "mutants_per_line",
+          "function_scope",
           "operators"
         ],
         "license": "free",
@@ -8592,7 +8594,7 @@
     ]
   },
   "plugins": {
-    "count": 150,
+    "count": 154,
     "note": "Built-in framework plugins, auto-activated when their enabler dependency is present; run fallow list --plugins for the set active in a specific project",
     "names": [
       "nextjs",
@@ -8646,6 +8648,7 @@
       "ember",
       "eve",
       "vite",
+      "vite-plugin-pages",
       "vscode",
       "webpack",
       "rollup",
@@ -8689,6 +8692,7 @@
       "tailwind",
       "postcss",
       "unocss",
+      "unplugin-icons",
       "pandacss",
       "prisma",
       "drizzle",
@@ -8726,10 +8730,12 @@
       "typedoc",
       "openapi-ts",
       "plop",
+      "gulp",
       "c8",
       "nyc",
       "msw",
       "napi-rs",
+      "n8n",
       "opencode",
       "nodemon",
       "pm2",

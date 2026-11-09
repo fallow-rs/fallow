@@ -29,7 +29,7 @@ mod alias_constant;
 #[path = "config_parser_alias_entry.rs"]
 mod alias_entry;
 #[path = "config_parser_vite_plugin_call.rs"]
-mod vite_plugin_call;
+pub(crate) mod vite_plugin_call;
 pub(crate) use vite_plugin_call::extract_vite_plugin_call_option_path;
 use vite_plugin_call::is_plugin_binding_call;
 
