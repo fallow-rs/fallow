@@ -1438,6 +1438,308 @@ jobs:
         );
     }
 
+    /// Regression test for issue #4380: a quoted jq filter passed to `jq -c`
+    /// after command substitution must not be harvested as an entry pattern.
+    /// `jq -c` is compact output, not a `--config` flag, so the filter must
+    /// never reach the config-file path. The filter's first bracket group
+    /// (`["runner-public"]`) passes `could_be_file_path`, which is what let
+    /// it through before this fix. Reported against the exact workflow shape
+    /// from the issue (line-continued `docker compose ... | jq -c '...'`).
+    #[test]
+    fn jq_compact_filter_after_command_substitution_not_entry_file() {
+        let content = r#"
+jobs:
+  check:
+    steps:
+      - run: |
+          allowed=$(docker compose -f docker-compose.public.yml config --no-interpolate --format json \
+            | jq -c '.services["runner-public"].environment | keys + ["OVERHUB_NETWORK", "RUNNER_PUBLIC_MEMORY_LIMIT"]')
+"#;
+        let analysis = analyze_content(content);
+        assert!(
+            !analysis
+                .entry_files
+                .iter()
+                .any(|f| f.contains("services") || f.contains("runner-public")),
+            "jq filter must not become an entry pattern, got: {:?}",
+            analysis.entry_files
+        );
+    }
+
+    /// Control for issue #4380: a genuine script path in a neighboring step
+    /// must still be harvested next to the `jq -c` filter that must be
+    /// dropped. The fix is scoped to jq: the `-c` config misread plus jq's
+    /// program and flag-value handling in file-argument extraction; other
+    /// tools are untouched.
+    #[test]
+    fn genuine_script_path_alongside_jq_compact_filter_still_harvested() {
+        let content = r#"
+jobs:
+  check:
+    steps:
+      - run: |
+          allowed=$(docker compose -f docker-compose.public.yml config --no-interpolate --format json \
+            | jq -c '.services["runner-public"].environment | keys + ["OVERHUB_NETWORK", "RUNNER_PUBLIC_MEMORY_LIMIT"]')
+      - name: Run real script
+        run: node scripts/deploy.js --env production
+"#;
+        let analysis = analyze_content(content);
+        assert!(
+            analysis
+                .entry_files
+                .contains(&"scripts/deploy.js".to_string()),
+            "genuine script path must still be harvested, got: {:?}",
+            analysis.entry_files
+        );
+        assert!(
+            !analysis
+                .entry_files
+                .iter()
+                .any(|f| f.contains("services") || f.contains("runner-public")),
+            "jq filter must not leak into entry_files, got: {:?}",
+            analysis.entry_files
+        );
+    }
+
+    /// Debate round 1 (issue #4380): a whitespace-free jq filter that
+    /// contains `/` — e.g. the division `.total/.count` — passes
+    /// `looks_like_file_path` (its final clause accepts any token with `/`
+    /// and no whitespace), so it leaks through the positional file-argument
+    /// path even after the `-c` config misread is fixed. It is a valid glob,
+    /// so it becomes a silent phantom entry point with no warning. The real
+    /// input file (`data.json`) must still be harvested.
+    #[test]
+    fn jq_compact_division_filter_not_entry_file() {
+        let content = r"
+jobs:
+  check:
+    steps:
+      - run: jq -c '.total/.count' data.json
+";
+        let analysis = analyze_content(content);
+        assert!(
+            analysis.entry_files.contains(&"data.json".to_string()),
+            "real jq input file must still be harvested, got: {:?}",
+            analysis.entry_files
+        );
+        assert!(
+            !analysis.entry_files.iter().any(|f| f.contains("total")),
+            "jq filter must not become an entry pattern, got: {:?}",
+            analysis.entry_files
+        );
+    }
+
+    /// Control for the jq program skip (issue #4380): with `-f` /
+    /// `--from-file` the program comes from a file, so the first positional
+    /// is a real input file and must still be harvested. A bare `prog.jq`
+    /// is not path-like (no `/`, `.jq` is not a known extension), so it is
+    /// not harvested; the path-like program file is covered by
+    /// `jq_from_file_program_path_still_harvested`.
+    #[test]
+    fn jq_from_file_input_still_harvested() {
+        let content = r"
+jobs:
+  check:
+    steps:
+      - run: jq -f prog.jq input.json
+";
+        let analysis = analyze_content(content);
+        assert!(
+            analysis.entry_files.contains(&"input.json".to_string()),
+            "jq -f input file must still be harvested, got: {:?}",
+            analysis.entry_files
+        );
+        assert!(
+            !analysis.entry_files.iter().any(|f| f.contains("prog.jq")),
+            "jq program file must not become an entry pattern, got: {:?}",
+            analysis.entry_files
+        );
+    }
+
+    /// Control for the jq program skip (issue #4380): jq's `--arg` family
+    /// takes two values (name + value), so the filter program is the first
+    /// positional *after* those values. The value itself (`/`) is not a file
+    /// either. The real input file must still be harvested.
+    #[test]
+    fn jq_arg_flag_values_not_entry_files() {
+        let content = r"
+jobs:
+  check:
+    steps:
+      - run: jq --arg sep / '.total/.count' data.json
+";
+        let analysis = analyze_content(content);
+        assert!(
+            analysis.entry_files.contains(&"data.json".to_string()),
+            "real jq input file must still be harvested, got: {:?}",
+            analysis.entry_files
+        );
+        assert!(
+            !analysis
+                .entry_files
+                .iter()
+                .any(|f| f.contains("total") || f == "/"),
+            "jq --arg values and filter must not become entry patterns, got: {:?}",
+            analysis.entry_files
+        );
+    }
+
+    /// Debate round 2 (issue #4380): `-L` / `--library-path` takes a
+    /// directory value, so without width handling the directory is eaten as
+    /// the jq program and the real filter (`.total/.count`) leaks as a
+    /// silent phantom entry point — the same failure class as round 1.
+    #[test]
+    fn jq_library_path_filter_not_entry_file() {
+        let content = r"
+jobs:
+  check:
+    steps:
+      - run: jq -L lib '.total/.count' data.json
+      - run: jq --library-path lib '.a/.b' other.json
+";
+        let analysis = analyze_content(content);
+        assert!(
+            analysis.entry_files.contains(&"data.json".to_string()),
+            "real jq input file must still be harvested, got: {:?}",
+            analysis.entry_files
+        );
+        assert!(
+            analysis.entry_files.contains(&"other.json".to_string()),
+            "real jq input file must still be harvested, got: {:?}",
+            analysis.entry_files
+        );
+        assert!(
+            !analysis
+                .entry_files
+                .iter()
+                .any(|f| f.contains("total") || f.contains(".a/.b")),
+            "jq filter must not become an entry pattern, got: {:?}",
+            analysis.entry_files
+        );
+    }
+
+    /// Debate round 3 (issue #4380): `is_jq_from_file_option` must check
+    /// that `f` is the FIRST value-taking flag in a short-flag cluster, not
+    /// merely that `f` appears in the token. `-Lfilters` is `-L` with the
+    /// attached directory value `filters` — there is no `-f` option, so the
+    /// filter after it is still the program and must be skipped, not
+    /// harvested as a silent phantom entry point.
+    #[test]
+    fn jq_library_path_attached_filter_value_not_entry_file() {
+        let content = r"
+jobs:
+  check:
+    steps:
+      - run: jq -Lfilters '.total/.count' data.json
+      - run: jq -Lfoo '.a/.b' other.json
+";
+        let analysis = analyze_content(content);
+        assert!(
+            analysis.entry_files.contains(&"data.json".to_string()),
+            "real jq input file must still be harvested, got: {:?}",
+            analysis.entry_files
+        );
+        assert!(
+            analysis.entry_files.contains(&"other.json".to_string()),
+            "real jq input file must still be harvested, got: {:?}",
+            analysis.entry_files
+        );
+        assert!(
+            !analysis
+                .entry_files
+                .iter()
+                .any(|f| f.contains("total") || f.contains(".a/.b")),
+            "jq filter must not become an entry pattern, got: {:?}",
+            analysis.entry_files
+        );
+    }
+
+    /// Debate round 2 (issue #4380): `--slurpfile` / `--rawfile` take a
+    /// name plus a FILE value jq reads, so the file must still be harvested
+    /// like any other real input — skipping all three tokens silently drops
+    /// it. The filter program is the positional after the file value.
+    #[test]
+    fn jq_slurpfile_rawfile_values_still_harvested() {
+        let content = r"
+jobs:
+  check:
+    steps:
+      - run: jq --slurpfile cfg config.json '.x' data.json
+      - run: jq --rawfile tmpl templates/frag.txt '.x' data.json
+";
+        let analysis = analyze_content(content);
+        assert!(
+            analysis.entry_files.contains(&"config.json".to_string()),
+            "jq --slurpfile file must still be harvested, got: {:?}",
+            analysis.entry_files
+        );
+        assert!(
+            analysis
+                .entry_files
+                .contains(&"templates/frag.txt".to_string()),
+            "jq --rawfile file must still be harvested, got: {:?}",
+            analysis.entry_files
+        );
+        assert!(
+            analysis.entry_files.contains(&"data.json".to_string()),
+            "real jq input file must still be harvested, got: {:?}",
+            analysis.entry_files
+        );
+        assert!(
+            !analysis.entry_files.iter().any(|f| f == ".x"),
+            "jq filter must not become an entry pattern, got: {:?}",
+            analysis.entry_files
+        );
+    }
+
+    /// Debate round 2 (issue #4380): after `--args` / `--jsonargs` every
+    /// remaining argument is a positional string value jq never opens as a
+    /// file, so path-like strings must not become entry points.
+    #[test]
+    fn jq_args_positional_strings_not_entry_files() {
+        let content = r"
+jobs:
+  check:
+    steps:
+      - run: jq --args '.x' a/b
+      - run: jq '.x' --jsonargs some/path
+";
+        let analysis = analyze_content(content);
+        assert!(
+            analysis.entry_files.is_empty(),
+            "jq --args strings must not become entry patterns, got: {:?}",
+            analysis.entry_files
+        );
+    }
+
+    /// Debate round 2 (issue #4380): a `-f` / `--from-file` program file
+    /// given by path is a real file jq reads, so it must be harvested like
+    /// any other real input — the same class as `--slurpfile` values. A
+    /// bare `prog.jq` is still not path-like
+    /// (`jq_from_file_input_still_harvested`).
+    #[test]
+    fn jq_from_file_program_path_still_harvested() {
+        let content = r"
+jobs:
+  check:
+    steps:
+      - run: jq -f scripts/filter.jq input.json
+";
+        let analysis = analyze_content(content);
+        assert!(
+            analysis
+                .entry_files
+                .contains(&"scripts/filter.jq".to_string()),
+            "jq -f program file must still be harvested, got: {:?}",
+            analysis.entry_files
+        );
+        assert!(
+            analysis.entry_files.contains(&"input.json".to_string()),
+            "jq -f input file must still be harvested, got: {:?}",
+            analysis.entry_files
+        );
+    }
+
     /// A `run:` block invoking a real script by path is genuine dependency
     /// evidence and must still be harvested, even next to a `run:` block
     /// whose quoted jq filter must be dropped (issue #2592).

@@ -1858,6 +1858,110 @@ fn resolve_script_call(
     state.local_paths = outer_local_paths;
 }
 
+/// Width (in tokens) of a jq option starting at `token`, or `None` when the
+/// token is not a jq option whose following tokens are all skipped.
+///
+/// jq's `--arg` / `--argjson` take two values (name + value); `-f` /
+/// `--from-file`, `--indent`, and `-L` / `--library-path` take one. A
+/// short-flag cluster containing `f` or `L` (e.g. `-cf`, `-cL`) is a
+/// value-taking option: its value is the next token when the flag is the
+/// last in the cluster, or attached to the token when it is not.
+///
+/// `--slurpfile` / `--rawfile` / `--argfile` are deliberately NOT here:
+/// their second value is a file jq reads, so it must be evaluated, not
+/// skipped (see `jq_file_value_skip`, debate round 2, issue #4380).
+fn jq_option_width(token: &str) -> Option<usize> {
+    match token {
+        "--arg" | "--argjson" => Some(3),
+        "--from-file" | "--indent" | "--library-path" | "-f" => Some(2),
+        _ => {
+            if let Some(name) = token.strip_prefix("--") {
+                // Long option with an attached `=value`: one value is
+                // attached, so only the remaining value (if any) follows.
+                if let Some((flag, _)) = name.split_once('=') {
+                    return match flag {
+                        "arg" | "argjson" => Some(2),
+                        "from-file" | "indent" | "library-path" => Some(1),
+                        _ => None,
+                    };
+                }
+                None
+            } else if token.len() > 1 && token.starts_with('-') {
+                // Short-flag cluster: only `f` and `L` take a value. The
+                // first value-taking flag decides: its value is the next
+                // token when it is last in the cluster, or attached when
+                // it is not (e.g. `-fL` means `-f` with value `L`).
+                let flags = &token[1..];
+                match flags.find(['f', 'L']) {
+                    Some(pos) if pos == flags.len() - 1 => Some(2),
+                    Some(_) => Some(1),
+                    None => None,
+                }
+            } else {
+                None
+            }
+        }
+    }
+}
+
+/// Tokens to skip before the file value of a jq option whose value IS a
+/// file jq reads (`--slurpfile name file`, `--rawfile name file`,
+/// `--argfile name file`), or `None` when the token is not such an option.
+/// The file token itself is evaluated (not skipped) by the caller: skipping
+/// it would silently drop a real input (debate round 2, issue #4380).
+///
+/// Separate form: skip flag + name (2). Attached form
+/// (`--slurpfile=name file`): skip only the flag token (1).
+fn jq_file_value_skip(token: &str) -> Option<usize> {
+    match token {
+        "--slurpfile" | "--rawfile" | "--argfile" => Some(2),
+        _ => {
+            let name = token.strip_prefix("--")?;
+            let (flag, _) = name.split_once('=')?;
+            match flag {
+                "slurpfile" | "rawfile" | "argfile" => Some(1),
+                _ => None,
+            }
+        }
+    }
+}
+
+/// Push the program-file value of a from-file jq option (`-f file`,
+/// `--from-file file`) when it is given by path, i.e. as a separate token
+/// (`width == 2`). Attached values (`-fprog.jq`, `--from-file=prog.jq`)
+/// are not tokens and are never evaluated.
+fn push_jq_from_file_value(tokens: &[&str], idx: usize, width: usize, file_args: &mut Vec<String>) {
+    if width != 2 {
+        return;
+    }
+    if let Some(file) = tokens.get(idx + 1)
+        && looks_like_file_path(file)
+    {
+        file_args.push(file.to_string());
+    }
+}
+
+/// Whether a jq option token selects the program from a file (`-f` /
+/// `--from-file`, including short-flag clusters whose FIRST value-taking
+/// flag is `f`).
+///
+/// Only the first value-taking flag (`f` or `L`) in a cluster decides: a
+/// mere `f` inside `-L`'s attached value (e.g. `-Lfilters`) is not an `-f`
+/// option at all, so it must not mark the program as from-file (debate
+/// round 3, issue #4380 — otherwise the real filter leaks as a silent
+/// phantom entry point).
+fn is_jq_from_file_option(token: &str) -> bool {
+    if token == "--from-file" || token.starts_with("--from-file=") {
+        return true;
+    }
+    token.len() > 1
+        && token.starts_with('-')
+        && !token.starts_with("--")
+        && token[1..]
+            .find(['f', 'L'])
+            .is_some_and(|pos| token.as_bytes()[1..][pos] == b'f')
+}
+
 /// Extract file path arguments and `--config`/`-c` arguments from the remaining tokens.
 /// When `is_node_runner` is true, flags like `-e`/`--eval`/`-r`/`--require` that consume
 /// the next argument are skipped.
@@ -1865,9 +1969,27 @@ fn extract_args_for_binary(
     tokens: &[&str],
     mut idx: usize,
     is_node_runner: bool,
+    binary: &str,
 ) -> (Vec<String>, Vec<String>) {
     let mut file_args = Vec::new();
     let mut config_args = Vec::new();
+    // `jq` has no `--config` flag at all: `-c` is `--compact-output`, and
+    // its program comes from `-f`/`--from-file`. Treating the token after
+    // `-c` as a config file harvests the quoted jq filter as an entry
+    // pattern (issue #4380).
+    let is_jq = tool_name(binary) == "jq";
+    // For `jq`, the first positional argument is the filter program, not a
+    // file (debate round 1, issue #4380): a whitespace-free filter with `/`
+    // (e.g. `.total/.count`) passes `looks_like_file_path` and would
+    // otherwise be harvested as a silent phantom entry point. Skip it —
+    // unless the program comes from a file (`-f` / `--from-file`), in which
+    // case the first positional is a real input file.
+    let mut jq_program_seen = false;
+    let mut jq_from_file = false;
+    // After `--args` / `--jsonargs`, every remaining argument is a
+    // positional string value jq never opens as a file (debate round 2,
+    // issue #4380).
+    let mut jq_args_seen = false;
 
     while idx < tokens.len() {
         let token = tokens[idx];
@@ -1887,7 +2009,44 @@ fn extract_args_for_binary(
             continue;
         }
 
-        if let Some(config) = extract_config_arg(token, tokens.get(idx + 1).copied()) {
+        if is_jq {
+            if matches!(token, "--args" | "--jsonargs") {
+                jq_args_seen = true;
+                idx += 1;
+                continue;
+            }
+            if !jq_args_seen {
+                // `--slurpfile` / `--rawfile` / `--argfile`: the file value
+                // is a real input — evaluate it, do not skip it.
+                if let Some(skip) = jq_file_value_skip(token) {
+                    let file_idx = idx + skip;
+                    if let Some(file) = tokens.get(file_idx)
+                        && looks_like_file_path(file)
+                    {
+                        file_args.push(file.to_string());
+                    }
+                    idx = file_idx + 1;
+                    continue;
+                }
+                if let Some(width) = jq_option_width(token) {
+                    if is_jq_from_file_option(token) {
+                        jq_from_file = true;
+                        // The program file itself is a real file jq reads:
+                        // harvest it when given by path.
+                        push_jq_from_file_value(tokens, idx, width, &mut file_args);
+                    }
+                    idx += width;
+                    continue;
+                }
+            }
+            if !token.starts_with('-') && !jq_from_file && !jq_program_seen {
+                jq_program_seen = true;
+                idx += 1;
+                continue;
+            }
+        }
+
+        if !is_jq && let Some(config) = extract_config_arg(token, tokens.get(idx + 1).copied()) {
             config_args.push(config);
             if token.contains('=') || token.starts_with("--config=") || token.starts_with("-c=") {
                 idx += 1;
@@ -1902,7 +2061,7 @@ fn extract_args_for_binary(
             continue;
         }
 
-        if looks_like_file_path(token) {
+        if !jq_args_seen && looks_like_file_path(token) {
             file_args.push(token.to_string());
         }
         idx += 1;
@@ -2781,7 +2940,7 @@ fn parse_command_segment(
 fn binary_path_args(binary: &str, tokens: &[&str], idx: usize) -> (Vec<String>, Vec<String>) {
     let args = &tokens[idx + 1..];
     let (mut file_args, mut config_args) =
-        extract_args_for_binary(tokens, idx + 1, NODE_RUNNERS.contains(&binary));
+        extract_args_for_binary(tokens, idx + 1, NODE_RUNNERS.contains(&binary), binary);
     file_args = argument_entries::entry_file_args(binary, args, file_args);
     if is_task_runner(binary) {
         file_args.clear();
@@ -2844,7 +3003,8 @@ fn wrapped_command_args<'a>(
     if !runs_here {
         return WrappedCommandArgs::without_args(child);
     }
-    let (mut file_args, mut config_args) = extract_args_for_binary(tokens, command_start, false);
+    let (mut file_args, mut config_args) =
+        extract_args_for_binary(tokens, command_start, false, child);
     file_args = argument_entries::entry_file_args(child, &tokens[child_idx + 1..], file_args);
     if is_task_runner(child) {
         file_args.clear();
