@@ -17,6 +17,7 @@ import { cacheModel } from "./oracle-proof/cache-model.mjs";
 import { mutationCache } from "./oracle-proof/mutation-cache.mjs";
 import { permutation } from "./oracle-proof/permutation.mjs";
 import { unicodeSpans } from "./oracle-proof/unicode-spans.mjs";
+import { platform } from "./oracle-proof/platform.mjs";
 
 /** The registered oracles, by name. */
 export const ORACLES = Object.freeze({
@@ -24,6 +25,7 @@ export const ORACLES = Object.freeze({
   [mutationCache.name]: mutationCache,
   [permutation.name]: permutation,
   [unicodeSpans.name]: unicodeSpans,
+  [platform.name]: platform,
 });
 
 const EXIT_HOLDS = 0;
@@ -102,7 +104,7 @@ const failureLines = (logPath) =>
  * bug, so `killed` is not `fail`. A test filter that matches no test exits
  * 0, so a run without a passed test is `no-tests`, not `pass`.
  */
-const runOracleAt = (oracle, { source, commit, label, logs, env, keep, test }) => {
+const runOracleAt = (oracle, { source, commit, label, logs, env, keep, build, test }) => {
   const tree = mkdtempSync(join(tmpdir(), `oracle-proof-${label}-`));
   rmSync(tree, { recursive: true, force: true });
   git(source, ["worktree", "add", "--quiet", "--detach", tree, commit]);
@@ -115,7 +117,7 @@ const runOracleAt = (oracle, { source, commit, label, logs, env, keep, test }) =
     }
     const buildLog = join(logs, `${label}-build.log`);
     const testLog = join(logs, `${label}-test.log`);
-    if (runLogged(oracle.build, { cwd: tree, env, logPath: buildLog }) !== 0) {
+    if (runLogged(build, { cwd: tree, env, logPath: buildLog }) !== 0) {
       return { label, commit, tree, notes, result: "build-error", log: buildLog };
     }
     const status = runLogged(test, { cwd: tree, env, logPath: testLog });
@@ -144,21 +146,29 @@ const removeWorktree = (source, tree) => {
 
 const TOOL_ERRORS = new Set(["build-error", "killed", "no-tests"]);
 
-/** A fix commit as `{ commit, scope?, reason?, test?, env? }`. A string is a commit with the full oracle. */
+/** A fix commit as `{ commit, scope?, reason?, build?, test?, env? }`. A string is a commit with the full oracle. */
 const toFix = (fix) => (typeof fix === "string" ? { commit: fix } : fix);
 
 /**
  * Run `oracle` on `fix^` and on `fix`. The proof holds when the parent fails
  * and the fix passes. A fix with a `test` or an `env` narrows the oracle to
  * the tests of that fix, for example when the fix commit does not have a
- * later fix that other tests of the oracle need.
+ * later fix that other tests of the oracle need. A fix with a `build` uses
+ * that build command, for example for a test target of an older layout.
  */
 export const proveFix = (oracle, fixSpec, { source, logs, env = process.env, keep = false }) => {
   const fix = toFix(fixSpec);
   const commit = git(source, ["rev-parse", "--verify", `${fix.commit}^{commit}`]);
   const parent = git(source, ["rev-parse", "--verify", `${commit}^`]);
   const short = commit.slice(0, 9);
-  const shared = { source, logs, env: { ...env, ...fix.env }, keep, test: fix.test ?? oracle.test };
+  const shared = {
+    source,
+    logs,
+    env: { ...env, ...fix.env },
+    keep,
+    build: fix.build ?? oracle.build,
+    test: fix.test ?? oracle.test,
+  };
   const runs = [
     runOracleAt(oracle, { ...shared, commit: parent, label: `${short}-parent` }),
     runOracleAt(oracle, { ...shared, commit, label: `${short}-fix` }),
