@@ -4,16 +4,19 @@
 //! and the result cache stores none of them, so a repeat run with the same
 //! budget does the same work again.
 
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 
 use fallow_output::MutantStatus;
 
+use super::clock::Clock;
 use super::{Attempt, ScheduleConfig, ScheduleTimings};
 
 /// The deadline of a phase. Only the first pass has a reserve.
 pub(super) struct PhaseDeadline {
     at: Instant,
+    clock: Arc<dyn Clock>,
     reserve: Option<ConfirmationReserve>,
 }
 
@@ -23,13 +26,18 @@ impl PhaseDeadline {
         let startup = timings.setup + timings.dry_run;
         config.deadline.map(|at| Self {
             at,
+            clock: Arc::clone(&config.clock),
             reserve: Some(ConfirmationReserve::new(startup, config.concurrency)),
         })
     }
 
     /// The deadline of the retry phase. The retries use the real deadline.
-    pub(super) fn retries(at: Instant) -> Self {
-        Self { at, reserve: None }
+    pub(super) fn retries(config: &ScheduleConfig) -> Option<Self> {
+        config.deadline.map(|at| Self {
+            at,
+            clock: Arc::clone(&config.clock),
+            reserve: None,
+        })
     }
 
     /// Whether a new job must stay pending.
@@ -38,7 +46,8 @@ impl PhaseDeadline {
             .reserve
             .as_ref()
             .map_or(Duration::ZERO, ConfirmationReserve::needed);
-        Instant::now()
+        self.clock
+            .now()
             .checked_add(needed)
             .is_none_or(|end| end >= self.at)
     }
@@ -51,18 +60,22 @@ impl PhaseDeadline {
         retry_extra_ms: u64,
         run: impl FnOnce() -> Result<Attempt, E>,
     ) -> Result<Attempt, E> {
-        let started = Instant::now();
+        let Some((deadline, reserve)) =
+            deadline.and_then(|deadline| Some((deadline, deadline.reserve.as_ref()?)))
+        else {
+            return run();
+        };
+        let started = deadline.clock.now();
         let attempt = run()?;
-        if let Some(reserve) = deadline.and_then(|deadline| deadline.reserve.as_ref()) {
-            reserve.note(attempt.status, started.elapsed(), retry_extra_ms);
-        }
+        let wall = deadline.clock.now().saturating_duration_since(started);
+        reserve.note(attempt.status, wall, retry_extra_ms);
         Ok(attempt)
     }
 }
 
-/// Whether a plain deadline has passed.
-pub(super) fn expired(deadline: Option<Instant>) -> bool {
-    deadline.is_some_and(|at| Instant::now() >= at)
+/// Whether the time budget of `config` has ended.
+pub(super) fn expired(config: &ScheduleConfig) -> bool {
+    config.deadline.is_some_and(|at| config.clock.now() >= at)
 }
 
 struct ConfirmationReserve {
