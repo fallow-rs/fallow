@@ -17,7 +17,7 @@ use fallow_output::{
     MutationKillMatrixTargetStatus, MutationPlanDisposition, MutationPlanOutput, MutationReport,
     MutationResumeOutput, MutationScopeKind, MutationScopeOutput, MutationSkippedFile,
     MutationStaleReason, MutationTargetOnlyKill, MutationTestKillRow, MutationTypecheckOutput,
-    TestReachClass,
+    SKIPPED_TESTS_CODE, TestReachClass,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -286,6 +286,9 @@ fn summary_line(report: &MutationReport) -> String {
     ] {
         if count > 0 {
             let _ = write!(line, "  {label} {count}");
+        }
+        if label == "pending" && report.summary.sampled_out > 0 {
+            let _ = write!(line, "  sampled out {}", report.summary.sampled_out);
         }
     }
     let _ = write!(line, "  {}", completion_text(report));
@@ -576,8 +579,8 @@ fn render_footer_lines(out: &mut String, report: &MutationReport) {
         }
     }
     for error in &report.errors {
-        // The run with duplicate test ids still has valid verdicts for the other tests.
-        let label = if error.code == DUPLICATE_TEST_IDS_CODE {
+        // A run with duplicate or skipped test ids still has valid verdicts for the other tests.
+        let label = if error.code == DUPLICATE_TEST_IDS_CODE || error.code == SKIPPED_TESTS_CODE {
             "Warning"
         } else {
             "Error"
@@ -1030,9 +1033,14 @@ pub fn render_plan(plan: &MutationPlanOutput) -> String {
         + counts.pruned_generated
         + counts.pruned_side_effect_sink
         + counts.pruned_framework_config;
+    let sampled = if counts.sampled_out > 0 {
+        format!(" ({} sampled out)", counts.sampled_out)
+    } else {
+        String::new()
+    };
     let _ = writeln!(
         out,
-        "Mutants: {} planned, {} pending, {} no coverage, {pruned} pruned",
+        "Mutants: {} planned, {} pending{sampled}, {} no coverage, {pruned} pruned",
         counts.planned, counts.pending, counts.no_coverage
     );
     let _ = writeln!(

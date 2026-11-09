@@ -191,6 +191,9 @@ pub(super) fn build(
             }
         }
     }
+    if let Some(per_line) = request.mutants_per_line {
+        super::sampling::sample_per_line(&mut mutants, per_line);
+    }
     rank(&mut mutants, request.max_mutants);
     let mutants: Vec<PlannedMutant> = mutants.into_iter().map(|entry| entry.planned).collect();
 
@@ -222,7 +225,46 @@ pub(super) fn build(
         framework_config_checked: inputs.framework_config_exports.is_some(),
         skipped_files,
         unmatched_paths,
+        skipped_tests: skipped_tests(&context),
     }
+}
+
+/// The skipped and todo tests in the runner test files that the diff of a
+/// changed-code scope changes. A file counts when the diff changes its path
+/// (an added, modified or deleted line), also when it reaches no changed
+/// source. A deleted file is not on disk, so it has no test. The other scopes
+/// have none.
+fn skipped_tests(context: &Context<'_>) -> Vec<super::SkippedTest> {
+    let MutationScope::ChangedSinceBase(diff) = &context.request.scope else {
+        return Vec::new();
+    };
+    let root = context.inputs.root;
+    let nodes: Vec<_> = context
+        .graph
+        .test_entry_points
+        .iter()
+        .filter(|&&entry| is_runner_test_entry(context.graph, root, entry))
+        .filter_map(|&entry| context.graph.modules.get(entry.0 as usize))
+        .filter(|node| {
+            diff.key_for(&node.path, root)
+                .is_some_and(|key| diff.changes_path(&key))
+        })
+        .collect();
+    let mut tests: Vec<super::SkippedTest> = nodes
+        .par_iter()
+        .flat_map_iter(|node| {
+            let rel = relative_key_path(&node.path, root);
+            let found = Layout::from_path(&rel)
+                .zip(std::fs::read_to_string(&node.path).ok())
+                .map(|(layout, text)| {
+                    let source = text.strip_prefix(BOM).unwrap_or(&text);
+                    super::skipped_tests::skipped_tests_in(&rel, source, layout)
+                });
+            found.into_iter().flatten()
+        })
+        .collect();
+    tests.sort();
+    tests
 }
 
 /// The source files in scope, sorted by root-relative path. Test code, test
@@ -337,6 +379,9 @@ fn plan_file(context: &Context<'_>, candidate: &Candidate<'_>) -> FileOutcome {
         .added_lines
         .as_deref()
         .map(|lines| added_line_ranges(source, lines));
+    if context.request.function_scope {
+        widen_to_functions(candidate, source, &mut options);
+    }
     let instrumented = match candidate
         .layout
         .instrument(source, &candidate.rel, &options)
@@ -366,6 +411,20 @@ fn plan_file(context: &Context<'_>, candidate: &Candidate<'_>) -> FileOutcome {
         mutants,
         skipped: None,
     }
+}
+
+/// Widens the changed-line ranges of `options` to the functions that hold the
+/// changed lines. The function spans come from the syntax tree, so the
+/// operator filter does not hide a function.
+fn widen_to_functions(candidate: &Candidate<'_>, source: &str, options: &mut MutationOptions) {
+    let (Some(lines), Some(ranges)) = (candidate.added_lines.as_deref(), options.ranges.take())
+    else {
+        return;
+    };
+    let functions = function_spans(source, candidate.layout);
+    options.ranges = Some(super::function_scope::widened_ranges(
+        source, lines, ranges, &functions,
+    ));
 }
 
 fn planned_file(
@@ -796,6 +855,16 @@ fn database_files(graph: &ModuleGraph) -> FxHashSet<FileId> {
 /// function of the source. The function kinds match the enclosing functions
 /// that `fallow-mutation` reports.
 fn has_top_level_site(starts: &[u32], source: &str, layout: Layout) -> bool {
+    let spans = function_spans(source, layout);
+    starts
+        .iter()
+        .any(|&start| !spans.iter().any(|&(from, to)| from <= start && start < to))
+}
+
+/// The byte spans of each function, method and arrow function in the script
+/// code of the file, read from the syntax tree. A function with no mutant is
+/// part of the result. A file that does not parse gives no span.
+pub(super) fn function_spans(source: &str, layout: Layout) -> Vec<(u32, u32)> {
     use oxc_ast::ast::{ArrowFunctionExpression, Function};
     use oxc_ast_visit::Visit;
     use oxc_syntax::scope::ScopeFlags;
@@ -817,12 +886,7 @@ fn has_top_level_site(starts: &[u32], source: &str, layout: Layout) -> bool {
     fallow_extract::parse_bounded_or_default(&text, kind.source_type(), |parsed| {
         let mut spans = Spans::default();
         spans.visit_program(&parsed.program);
-        starts.iter().any(|&start| {
-            !spans
-                .0
-                .iter()
-                .any(|&(from, to)| from <= start && start < to)
-        })
+        spans.0
     })
 }
 
@@ -1046,6 +1110,7 @@ fn count(mutants: &[PlannedMutant]) -> MutationPlanCounts {
         match entry.disposition {
             MutantDisposition::Planned => counts.planned += 1,
             MutantDisposition::Pending => counts.pending += 1,
+            MutantDisposition::SampledOut => counts.sampled_out += 1,
             MutantDisposition::NoCoverage => counts.no_coverage += 1,
             MutantDisposition::Pruned(PruneReason::DeadCode) => counts.pruned.dead_code += 1,
             MutantDisposition::Pruned(PruneReason::Generated) => counts.pruned.generated += 1,

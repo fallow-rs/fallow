@@ -32,7 +32,8 @@ use crate::mutation::node_args::node_test_args;
 use crate::mutation::protocol::{InitOptions, InitRequest};
 use crate::mutation::report::{
     CompletionFacts, baseline_failures, completion, function_results, issues, mutant_results,
-    plan_counts, plan_files, plan_mutants, skipped_files, summary, tool_version,
+    plan_counts, plan_files, plan_mutants, skipped_files, skipped_tests_issue, summary,
+    tool_version,
 };
 use crate::mutation::result_cache::{KeyFiles, NOT_KEYED, ResultCache};
 use crate::mutation::run_dir::{RunFile, write_run_dir};
@@ -79,6 +80,13 @@ fn validate(options: &MutationRunOptions) -> ProgrammaticResult<()> {
             "the mutant limit must be at least 1",
         )
         .with_context("mutation.maxMutants"));
+    }
+    if options.mutants_per_line == Some(0) {
+        return Err(mutation_error(
+            "FALLOW_INVALID_MUTATION_OPTIONS",
+            "the mutants per line limit must be at least 1",
+        )
+        .with_context("mutation.mutantsPerLine"));
     }
     if options.kill_matrix && !options.kill_matrix_targets.is_empty() {
         return Err(mutation_error(
@@ -404,11 +412,25 @@ fn plan_for(
         None => config_operators(&session)?,
     };
     let operator_names = operators.as_deref().map(operator_names);
+    let mutation_config = &session.config().mutation;
+    // A run of selected mutant ids (a recheck) must run each of them, so it
+    // never samples.
+    let mutants_per_line = options
+        .mutant_ids
+        .is_empty()
+        .then(|| {
+            options
+                .mutants_per_line
+                .or(mutation_config.mutants_per_line)
+        })
+        .flatten();
     let request = MutationPlanRequest {
         scope,
         operators,
         allow_side_effects: options.allow_side_effects,
         max_mutants: options.max_mutants,
+        mutants_per_line,
+        function_scope: options.function_scope || mutation_config.function_scope == Some(true),
         skip_component_files: false,
         mutant_ids: (!options.mutant_ids.is_empty())
             .then(|| options.mutant_ids.iter().cloned().collect()),
@@ -809,6 +831,7 @@ fn schedule_plan(plan: &MutationPlan) -> SchedulePlan {
         mutants: scheduled(plan, MutantDisposition::Planned),
         unreached: scheduled(plan, MutantDisposition::NoCoverage),
         pending: scheduled(plan, MutantDisposition::Pending),
+        sampled_out: scheduled(plan, MutantDisposition::SampledOut),
         known_ids: plan
             .mutants
             .iter()
@@ -1218,11 +1241,13 @@ fn execute(
 
 /// The errors of a finished run: the scheduler issues and the worktree facts.
 fn run_issues(
+    plan: &MutationPlan,
     outcome: Option<&ScheduleOutcome>,
     changed_paths: &[String],
     check_error: Option<String>,
 ) -> Vec<fallow_output::MutationRunIssue> {
     let mut errors = issues(outcome);
+    errors.extend(skipped_tests_issue(plan));
     if !changed_paths.is_empty() {
         errors.push(fallow_output::MutationRunIssue {
             code: "worktree-changed".to_owned(),
@@ -1385,7 +1410,7 @@ pub fn run_mutation_with_progress(
         typecheck_failed: typecheck.issue.is_some(),
         promoted: outcome.map_or(&[], |outcome| outcome.promoted.as_slice()),
     });
-    let mut errors = run_issues(outcome, &changed_paths, check_error);
+    let mut errors = run_issues(plan, outcome, &changed_paths, check_error);
     errors.extend(typecheck.issue);
     let timings = run_timings(outcome, execution.setup_ms, plan_ms, typecheck_ms);
     Ok(MutationReport {
@@ -1614,6 +1639,7 @@ mod tests {
             framework_config_checked: false,
             skipped_files: Vec::new(),
             unmatched_paths: Vec::new(),
+            skipped_tests: Vec::new(),
         };
         assert!(
             open_result_cache(
@@ -1650,6 +1676,7 @@ mod tests {
             framework_config_checked: false,
             skipped_files: Vec::new(),
             unmatched_paths: Vec::new(),
+            skipped_tests: Vec::new(),
         }
     }
 

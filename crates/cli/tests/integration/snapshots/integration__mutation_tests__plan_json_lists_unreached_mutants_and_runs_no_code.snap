@@ -14,6 +14,7 @@ expression: "serde_json::to_string_pretty(&value).unwrap()"
     "total": 6,
     "planned": 0,
     "pending": 0,
+    "sampled_out": 0,
     "no_coverage": 6,
     "pruned_dead_code": 0,
     "pruned_generated": 0,

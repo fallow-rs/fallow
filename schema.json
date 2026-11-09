@@ -1202,6 +1202,22 @@
           "format": "uint",
           "minimum": 1
         },
+        "mutantsPerLine": {
+          "description": "The maximum number of mutants on one source line. The plan keeps the\nmost productive mutants of the line (relational, condition,\narithmetic and logical operators first). The others are `pending`\nwith the reason `sampled-out`. Unset keeps each mutant.\n`--mutants-per-line` wins.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint",
+          "minimum": 1
+        },
+        "functionScope": {
+          "description": "Widen each changed line to the whole function that holds it, so that a\nchange to a parameter or a signature selects the mutants of the\nfunction. Only the changed-code scope uses it. Unset or `false` mutates\nthe changed lines only. `--function-scope` turns it on.",
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
         "typecheck": {
           "description": "Type-check each survived mutant through the TypeScript-Go companion\nof `--type-aware`. A survivor that does not type-check becomes\n`compile_error` and does not count in the score. A survivor that\nremoves an optional-chaining link from a receiver whose type excludes\n`null` and `undefined` gets an advisory `equivalence_hint`. Its status\nand the score do not change. Unset or `false` checks no survivor.\n`--typecheck` turns the check on.",
           "type": [

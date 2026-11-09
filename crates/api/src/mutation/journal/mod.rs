@@ -45,8 +45,9 @@ const UNREAD_FILE: &str = "journal.jsonl.unread";
 const STALE_TEMPORARY: std::time::Duration = std::time::Duration::from_hours(1);
 
 /// The fingerprint of a run. A journal resumes only a run with an equal
-/// fingerprint. The run limits (`--max-mutants`, `--time-budget`,
-/// `--concurrency`) are not in it, so a resumed run can use other limits.
+/// fingerprint. The run limits (`--max-mutants`, `--mutants-per-line`,
+/// `--time-budget`, `--concurrency`) are not in it, so a resumed run can use
+/// other limits.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct JournalHeader {
     pub journal_format: u32,

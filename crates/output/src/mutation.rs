@@ -22,6 +22,9 @@ pub const MUTATION_INSPECT_SCHEMA_VERSION: u32 = 2;
 pub const MUTATION_TASKS_SCHEMA_VERSION: u32 = 1;
 /// The code of the run issue for tests that share a test id in the dry run.
 pub const DUPLICATE_TEST_IDS_CODE: &str = "duplicate-test-ids";
+/// The code of the run issue for tests that the dry run skipped or marked as
+/// todo, in a test file of the plan. Such a test checks nothing.
+pub const SKIPPED_TESTS_CODE: &str = "skipped-tests";
 
 /// Version singleton for a mutation report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -74,6 +77,10 @@ pub enum MutantStatus {
     /// mutant does not count in the score.
     CompileError,
 }
+
+/// The `pending_reason` of a mutant that the `--mutants-per-line` limit left
+/// out of the plan.
+pub const SAMPLED_OUT_REASON: &str = "sampled-out";
 
 /// The number of mutants for each status, and the mutation score.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -196,6 +203,9 @@ pub enum MutationIncompleteReason {
     RuntimeError,
     /// The mutant limit left covered mutants `pending`.
     MutantLimit,
+    /// The `--mutants-per-line` limit left mutants out of the plan. They are
+    /// `pending` with the reason `sampled-out`.
+    SampledOut,
     /// The time budget ended before each mutant ran.
     TimeBudget,
     /// The plan did not instrument at least one selected file.
@@ -361,6 +371,12 @@ pub struct MutantResult {
     /// The static rule of a `pruned` mutant, kebab-case.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prune_reason: Option<String>,
+    /// Why a `pending` mutant did not run, kebab-case. Only `sampled-out` has
+    /// a reason: the `--mutants-per-line` limit left the mutant out of the
+    /// plan. A mutant that the mutant limit or the time budget left out has
+    /// no reason.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_reason: Option<String>,
     /// The test that killed the mutant in this run. Absent for a kill by an
     /// error outside a test.
     ///
@@ -603,6 +619,9 @@ pub struct MutationSummary {
     /// caps reports the coverage of the full run. `equivalent` and `pruned`
     /// mutants never count. `null` when no mutant is covered or unreached.
     pub coverage: Option<f64>,
+    /// The `pending` mutants that the `--mutants-per-line` limit left out of
+    /// the plan. They are part of `counts.pending`.
+    pub sampled_out: usize,
 }
 
 impl MutationSummary {
@@ -611,8 +630,14 @@ impl MutationSummary {
     pub fn from_results(results: &[MutantResult]) -> Self {
         let mut counts = MutationStatusCounts::default();
         let (mut covered, mut uncovered) = (0usize, 0usize);
+        let mut sampled_out = 0usize;
         for result in results {
             counts.add(result.status);
+            if result.status == MutantStatus::Pending
+                && result.pending_reason.as_deref() == Some(SAMPLED_OUT_REASON)
+            {
+                sampled_out += 1;
+            }
             match result.status {
                 MutantStatus::NoCoverage => uncovered += 1,
                 MutantStatus::Pending => covered += 1,
@@ -633,6 +658,7 @@ impl MutationSummary {
             counts,
             score: counts.score(),
             coverage: ratio(covered, covered + uncovered),
+            sampled_out,
         }
     }
 }
@@ -1202,6 +1228,12 @@ pub struct MutationPlanMutant {
     /// The static rule of a `pruned` mutant, kebab-case.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub prune_reason: Option<String>,
+    /// Why a `pending` mutant did not run, kebab-case. Only `sampled-out` has
+    /// a reason: the `--mutants-per-line` limit left the mutant out of the
+    /// plan. A mutant that the mutant limit or the time budget left out has
+    /// no reason.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pending_reason: Option<String>,
     /// How tests reach the code of the mutant in the module graph. Only a
     /// `no_coverage` mutant has this field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1228,8 +1260,10 @@ pub struct MutationPlanCountsOutput {
     pub total: usize,
     /// Planned mutants.
     pub planned: usize,
-    /// Mutants after the mutant limit.
+    /// Mutants after the mutant limit, and the sampled-out mutants.
     pub pending: usize,
+    /// The `pending` mutants that the `--mutants-per-line` limit left out.
+    pub sampled_out: usize,
     /// Mutants that no test file reaches.
     pub no_coverage: usize,
     /// Mutants in unused files.
@@ -1544,6 +1578,7 @@ mod tests {
             },
             status,
             prune_reason: None,
+            pending_reason: None,
             killing_tests: Vec::new(),
             kill_matrix_complete: false,
             killed_by: None,
@@ -1689,6 +1724,7 @@ mod tests {
             },
             status: MutantStatus::NoCoverage,
             prune_reason: None,
+            pending_reason: None,
             killing_tests: Vec::new(),
             kill_matrix_complete: false,
             killed_by: None,
@@ -1748,6 +1784,7 @@ mod tests {
             },
             status: MutantStatus::Flaky,
             prune_reason: None,
+            pending_reason: None,
             killing_tests: Vec::new(),
             kill_matrix_complete: false,
             killed_by: None,

@@ -271,6 +271,7 @@ mod tests {
             framework_config_checked: false,
             skipped_files: Vec::new(),
             unmatched_paths: Vec::new(),
+            skipped_tests: Vec::new(),
         }
     }
 
@@ -290,6 +291,7 @@ mod tests {
             },
             status,
             prune_reason: None,
+            pending_reason: None,
             killing_tests: Vec::new(),
             kill_matrix_complete: false,
             killed_by: None,

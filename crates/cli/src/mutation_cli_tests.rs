@@ -300,6 +300,8 @@ fn flags_win_over_config_and_config_fills_the_gaps() {
         operators: Some(vec![MutationOperatorName::RemovedCall]),
         concurrency: Some(3),
         min_score: Some(60.0),
+        mutants_per_line: Some(2),
+        function_scope: Some(true),
         ..MutationConfig::default()
     };
     let from_config = run_options(&input(root, MutationArgs::default(), config.clone())).unwrap();
@@ -308,6 +310,11 @@ fn flags_win_over_config_and_config_fills_the_gaps() {
         "the API plan applies the config operators, so CLI and MCP share one rule"
     );
     assert_eq!(from_config.concurrency, Some(3));
+    assert_eq!(
+        from_config.mutants_per_line, None,
+        "the API applies these config keys, so CLI and MCP share one rule"
+    );
+    assert!(!from_config.function_scope);
     assert_eq!(from_config.scope, MutationRunScope::Changed { base: None });
     assert!(!from_config.allow_side_effects);
 
@@ -315,6 +322,7 @@ fn flags_win_over_config_and_config_fills_the_gaps() {
         operators: vec!["arithmetic-operator".to_owned(), "return-value".to_owned()],
         concurrency: Some(1),
         min_score: Some(90.0),
+        mutants_per_line: Some(1),
         all: true,
         allow_side_effects: true,
         time_budget: Some("2m".to_owned()),
@@ -328,6 +336,7 @@ fn flags_win_over_config_and_config_fills_the_gaps() {
         Some(vec![Operator::ArithmeticOperator, Operator::ReturnValue])
     );
     assert_eq!(from_flags.concurrency, Some(1));
+    assert_eq!(from_flags.mutants_per_line, Some(1), "the flag wins");
     assert_eq!(from_flags.scope, MutationRunScope::All);
     assert!(from_flags.allow_side_effects);
     assert_eq!(from_flags.time_budget, Some(Duration::from_secs(120)));
@@ -336,9 +345,50 @@ fn flags_win_over_config_and_config_fills_the_gaps() {
 }
 
 #[test]
+fn a_recheck_never_samples_whatever_the_config_and_the_flags_say() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::write(
+        dir.path().join("src/add.js"),
+        "export const add = (a, b) => a + b;\n",
+    )
+    .unwrap();
+    let digest = crate::mutation_inspect::sha256_hex(b"export const add = (a, b) => a + b;\n");
+    let report = serde_json::json!({
+        "kind": "mutation",
+        "mutants": [{
+            "mutant_id": "a", "file": "src/add.js", "line": 1, "column": 1,
+            "span": [0, 1], "operator": "x", "status": "survived",
+        }],
+        "files": [{ "path": "src/add.js", "source_sha256": digest }],
+    });
+    let report_path = dir.path().join("report.json");
+    std::fs::write(&report_path, serde_json::to_vec(&report).unwrap()).unwrap();
+    let selection = recheck::select(&report_path, dir.path(), &[]).unwrap();
+
+    let config = MutationConfig {
+        mutants_per_line: Some(2),
+        function_scope: Some(true),
+        ..MutationConfig::default()
+    };
+    let args = MutationArgs {
+        mutants_per_line: Some(3),
+        function_scope: true,
+        ..MutationArgs::default()
+    };
+    let rechecking = input(dir.path(), args, config);
+    let mut options = run_options(&rechecking).unwrap();
+    apply_recheck(&rechecking, &mut options, Some(&selection)).unwrap();
+
+    assert_eq!(options.mutants_per_line, None);
+    assert!(!options.function_scope);
+    assert_eq!(options.mutant_ids, ["a"]);
+}
+
+#[test]
 fn invalid_flags_and_scope_conflicts_exit_2() {
     let root = Path::new("/project");
-    let cases: [(MutationArgs, Option<&str>, &str); 7] = [
+    let cases: [(MutationArgs, Option<&str>, &str); 8] = [
         (
             MutationArgs {
                 operators: vec!["bogus".to_owned()],
@@ -378,6 +428,14 @@ fn invalid_flags_and_scope_conflicts_exit_2() {
             },
             None,
             "--max-mutants must be at least 1",
+        ),
+        (
+            MutationArgs {
+                mutants_per_line: Some(0),
+                ..MutationArgs::default()
+            },
+            None,
+            "--mutants-per-line must be at least 1",
         ),
         (
             MutationArgs {
@@ -435,6 +493,7 @@ fn mutant(id: &str, file: &str, rank: u32, status: MutantStatus) -> MutantResult
         },
         status,
         prune_reason: (status == MutantStatus::Pruned).then(|| "side-effect-sink".to_owned()),
+        pending_reason: None,
         killed_by: (status == MutantStatus::Killed).then(|| "test/a.test.ts::adds".to_owned()),
         covering_tests: if matches!(status, MutantStatus::Survived | MutantStatus::Killed) {
             vec![
@@ -830,6 +889,58 @@ fn human_summary_names_pending_equivalent_errors_and_flaky_only_when_not_zero() 
     assert_eq!(
         text.lines().nth(2).unwrap_or_default(),
         "Score 50.0%  killed 1  survived 1  timeout 0  complete",
+        "{text}"
+    );
+}
+
+#[test]
+fn the_summary_line_names_the_sampled_out_mutants() {
+    let mut sampled = mutant("m2", "src/a.ts", 2, MutantStatus::Pending);
+    sampled.pending_reason = Some("sampled-out".to_owned());
+    let sampled_report = report(
+        vec![
+            mutant("m1", "src/a.ts", 1, MutantStatus::Killed),
+            sampled,
+            mutant("m3", "src/a.ts", 3, MutantStatus::Pending),
+        ],
+        vec![MutationIncompleteReason::SampledOut],
+    );
+    let text = run_text(&sampled_report, &OPTIONS);
+    assert_eq!(
+        text.lines().nth(2).unwrap_or_default(),
+        "Score 100.0%  killed 1  survived 0  timeout 0  pending 2  sampled out 1  partial (sampled-out)",
+        "{text}"
+    );
+}
+
+#[test]
+fn the_plan_line_names_the_sampled_out_mutants() {
+    let plan = MutationPlanOutput {
+        schema_version: MutationPlanSchemaVersion::V1,
+        version: ToolVersion("0.0.0".to_owned()),
+        elapsed_ms: ElapsedMs(0),
+        scope: MutationScopeOutput {
+            kind: MutationScopeKind::All,
+            base_ref: None,
+        },
+        counts: MutationPlanCountsOutput {
+            total: 4,
+            planned: 1,
+            pending: 3,
+            sampled_out: 2,
+            ..MutationPlanCountsOutput::default()
+        },
+        mutants: Vec::new(),
+        files: Vec::new(),
+        test_files: Vec::new(),
+        no_test_files: false,
+        framework_config_checked: true,
+        skipped_files: Vec::new(),
+        unmatched_paths: Vec::new(),
+    };
+    let text = plain(&render_plan(&plan));
+    assert!(
+        text.contains("Mutants: 1 planned, 3 pending (2 sampled out), 0 no coverage, 0 pruned\n"),
         "{text}"
     );
 }
@@ -1260,6 +1371,7 @@ fn human_plan_counts_the_no_coverage_mutants_by_test_reach() {
         location: mutant(id, "src/a.ts", 1, MutantStatus::Pending).location,
         disposition: MutationPlanDisposition::NoCoverage,
         prune_reason: None,
+        pending_reason: None,
         test_reach: reach.map(|reach| MutantTestReach {
             reach,
             export_name: None,
@@ -1305,6 +1417,7 @@ fn human_plan_lists_planned_mutants_and_prune_reasons() {
         location: mutant(id, "src/a.ts", rank, MutantStatus::Pending).location,
         disposition,
         prune_reason: reason.map(str::to_owned),
+        pending_reason: None,
         test_reach: None,
     };
     let plan = MutationPlanOutput {
@@ -1576,6 +1689,22 @@ fn an_error_line_names_its_mutant() {
 }
 
 #[test]
+fn skipped_tests_show_as_a_warning() {
+    let mut warned = report(Vec::new(), Vec::new());
+    warned.errors = vec![fallow_output::MutationRunIssue {
+        code: fallow_output::SKIPPED_TESTS_CODE.to_owned(),
+        message: "1 test in the test files of the plan is skipped or todo".to_owned(),
+        mutant_id: None,
+        stderr_tail: None,
+    }];
+    let text = run_text(&warned, &OPTIONS);
+    assert!(
+        text.contains("Warning (skipped-tests): 1 test in the test files"),
+        "{text}"
+    );
+}
+
+#[test]
 fn duplicate_test_ids_show_as_a_warning_and_other_issues_as_errors() {
     let mut warned = report(Vec::new(), Vec::new());
     warned.errors = vec![
@@ -1767,6 +1896,7 @@ fn the_plan_list_shows_twenty_mutants_and_one_more_line() {
                     .location,
                 disposition: MutationPlanDisposition::Planned,
                 prune_reason: None,
+                pending_reason: None,
                 test_reach: None,
             })
             .collect(),

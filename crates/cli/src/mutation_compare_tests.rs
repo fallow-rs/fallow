@@ -43,6 +43,7 @@ fn current(id: &str, line: u32, status: MutantStatus) -> MutantResult {
         },
         status,
         prune_reason: None,
+        pending_reason: None,
         killed_by: None,
         killing_tests: Vec::new(),
         kill_matrix_complete: false,

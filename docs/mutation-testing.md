@@ -26,7 +26,8 @@ read-only next steps. It never writes a test and never proposes a code change.
 - `--workspace` and `--changed-workspaces` exit with code 2 in version 1,
   because the plan cannot narrow to a workspace yet. Pass the workspace
   directory as a path.
-- The run flags are `--max-mutants`, `--time-budget` (`90s`, `10m`, `1h`),
+- The run flags are `--max-mutants`, `--mutants-per-line`, `--function-scope`,
+  `--time-budget` (`90s`, `10m`, `1h`),
   `--setup-timeout` (default `2m`), `--runner-config`, `--kill-matrix`,
   `--kill-matrix-for`, `--concurrency`, `--runtime`, `--allow-dirty`, `--allow-side-effects`,
   `--min-score`, `--operators`, `--verdicts`, `--typecheck`, `--resume` and
@@ -495,6 +496,56 @@ coverage. The scheduler corrects this after the dry run:
 view before the coverage is known. A run can execute a mutant that the plan
 shows as `pending`.
 
+## Function scope
+
+The changed-code scope mutates the added lines of the diff only. A change to
+a parameter or a signature line holds no mutant, so the default scope can
+select nothing for it. `--function-scope` (config key
+`mutation.functionScope`) widens the scope:
+
+- Each added line selects the whole function that holds it. A parameter line,
+  a signature line and a body line all select the same function.
+- The function is the innermost function that holds the first non-blank
+  byte of the line. When no function holds it, the largest function that
+  starts on the line counts, for example `export function f() {`. A line with
+  no such function, for example a top-level `const`, selects its own mutants
+  only.
+- A mutant of a nested function is part of the outer function.
+- The plan reads the function spans from the syntax tree. The `--operators`
+  filter does not hide a function that holds no emitted mutant.
+- The ranking still puts the mutants on added lines first, because the
+  `in_diff` fact of a mutant is not widened.
+- `--all` and positional paths do not use the option, and the flag is an
+  error with them. `--recheck` does not accept the flag.
+
+## Mutants per line
+
+`--mutants-per-line N` (config key `mutation.mutantsPerLine`) keeps at most
+`N` planned mutants on each source line. The flag wins over the config key.
+`N` must be at least 1.
+
+- The plan makes the choice, before the dry run and before `--max-mutants`.
+  The result cache does not change it.
+- A line keeps its mutants in this operator order: `relational-operator`,
+  `negate-condition`, `arithmetic-operator`, `logical-operator`,
+  `unary-operator`, `update-operator`, `return-value`, `removed-call`,
+  `optional-chaining`, `boolean-literal`, `string-literal`, `regex-literal`
+  and `removed-chain-link`.
+- Mutants of the same operator on one line keep the order of a SHA-256 hash
+  of the mutant id. A second run on the same code keeps the same mutants.
+- Each mutant that the limit leaves out is `pending` with
+  `pending_reason: "sampled-out"`. The run never executes it. `--plan` shows
+  the same mutant as `pending` with the same `pending_reason`.
+- A left-out mutant that no dry-run test covers is `no_coverage`, so the
+  coverage does not depend on the limit. The coverage counts the other
+  left-out mutants as covered.
+- `summary.sampled_out` and `plan.counts.sampled_out` give the number of
+  left-out mutants. They are part of the `pending` count.
+- The completion is `partial` with the reason `sampled-out` when a left-out
+  mutant stays `pending`.
+- `--recheck` does not accept the flag, and a run of selected mutant ids never
+  samples, also through the API.
+
 ## Score and coverage
 
 - `summary.score` covers the executed mutants only:
@@ -539,6 +590,30 @@ shows as `pending`.
   `duplicate-test-ids` names the IDs, and the human output shows it as a
   warning. The run does not stop, and the verdicts of the other tests stay
   valid. Give each test a unique title to remove the warning.
+- A test file can leave a test out of the run, for example with `it.skip`.
+  Such a test runs no assertion, so it cannot kill a mutant. The run warns
+  about these tests in each runner test file that the diff of the
+  changed-code scope changes. A file counts when the diff adds, changes or
+  removes a line in it, also when it reaches no changed source. A deleted
+  file has no test. A scan of the syntax tree finds the tests, so a change
+  to the tests alone starts no runner and no companion. A run without a
+  diff scope (`--all` or paths) gives no such warning, and `--plan` does not
+  print it.
+- The scan recognizes `it`, `test`, `describe` and `suite` with `.skip` or
+  `.todo`, also after `.concurrent`, `.sequential` or `.shuffle`. It
+  recognizes `xit`, `xtest` and `xdescribe`. It recognizes the `node:test`
+  options `{ skip: true }` and `{ todo: true }`, and a non-empty string
+  value of either key. The last write to a key wins, as in an object
+  literal. A condition that the run decides, such as `it.skipIf(flag)`,
+  `{ skip: process.env.CI }`, or a spread or a computed key after the last
+  literal write, is not a skipped test. A spread before the last literal
+  write does not matter.
+  A call such as `t.skip()` inside a test is not recognized.
+- The `errors` entry `skipped-tests` names up to ten of these tests with
+  file, line and name. The name is present when the first argument is a
+  string literal. The human output shows the entry as a warning. The run
+  does not stop, and the completion and the exit code do not change. Run
+  each test or remove it to remove the warning.
 - The `node-test` and `bun-test` adapters find test files with the default
   patterns of the runner. These glob patterns do not go into a dot
   directory, such as `.github/`. Fallow therefore sends the static test files
@@ -777,6 +852,11 @@ exception (see [Timeouts](#timeouts)).
 - A retry starts only before the `--time-budget` deadline. A mutant that
   gets no retry keeps its first status, and the completion is `partial`
   (`time-budget`).
+- With `--time-budget`, the first pass starts the mutants with the lowest
+  estimated test time first. The estimate is the sum of the dry-run times of
+  the tests that cover the mutant. Thus the budget settles more mutants.
+  Static mutants stay last. Without `--time-budget`, the jobs keep the plan
+  order.
 - With `--time-budget`, the first pass keeps time free for the retries of
   the survivors and timeouts that it found. Before each new mutant run, it
   adds these parts to the current time: the estimated retry time of each
@@ -1512,10 +1592,13 @@ outcome journal keeps them.
 - The fingerprint sorts the operators and removes duplicates. It writes the
   paths of a `paths` scope relative to the root, without `.` parts, sorted
   and without duplicates. `./src/a` and `src/a` give one fingerprint.
-- `--max-mutants`, `--time-budget` and `--concurrency` are not in the
-  fingerprint. A run that `--max-mutants` or the time budget stopped can
-  continue with other limits. A resumed result takes a place in the
-  `--max-mutants` limit, the same as a cached result.
+- `--max-mutants`, `--mutants-per-line`, `--time-budget` and `--concurrency`
+  are not in the fingerprint. A run that `--max-mutants` or the time budget
+  stopped can continue with other limits. A resumed result takes a place in
+  the `--max-mutants` limit, the same as a cached result.
+- `--function-scope` can add mutants. That changes the instrumented text and
+  the run directory hash, so a resume that changes the option exits `2` in
+  this case.
 - A journal result whose key does not match the key of this run is
   rejected, for example after a change to a covering test file. The result
   is not reused from the journal. The mutant runs again, or its status comes
@@ -2046,6 +2129,8 @@ reads files only. It runs no test.
     "operators": ["arithmetic-operator", "relational-operator"],
     "minScore": 80,
     "concurrency": 4,
+    "mutantsPerLine": 2,
+    "functionScope": true,
     "typecheck": true,
     "runnerConfig": "vitest.integration.config.mjs"
   }
@@ -2054,7 +2139,15 @@ reads files only. It runs no test.
 
 - `runner` is `auto`, `vitest`, `node-test` or `bun-test`. See
   [Runners](#runners).
-- `operators`, `minScore` and `concurrency` apply to each run. A CLI flag wins.
+- `operators`, `minScore`, `concurrency` and `mutantsPerLine` apply to each run.
+  A CLI flag wins.
+- `mutantsPerLine` and `functionScope` are config keys of the shared API, so
+  the CLI and the MCP tools select the same mutants for one project. A run of
+  selected mutant ids (`--recheck`) never samples and never widens, whatever
+  the config says.
+- `functionScope: true` widens the changed-code scope to whole functions for
+  each run. `--function-scope` does the same for one run. No flag turns it
+  off. See [Function scope](#function-scope).
 - `runnerConfig` selects the runner config file for each run.
   `--runner-config` wins. See [Runner config](#runner-config).
 - `typecheck: true` turns on the survivor type check for each run.

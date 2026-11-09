@@ -105,6 +105,19 @@ where
     Ok(value)
 }
 
+fn deserialize_mutants_per_line<'de, D>(deserializer: D) -> Result<Option<usize>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = Option::<usize>::deserialize(deserializer)?;
+    if value == Some(0) {
+        return Err(serde::de::Error::custom(
+            "mutation.mutantsPerLine must be at least 1",
+        ));
+    }
+    Ok(value)
+}
+
 /// Project settings for `fallow mutation`.
 ///
 /// Project config cannot widen what a run executes: the override that keeps
@@ -142,6 +155,26 @@ pub struct MutationConfig {
     )]
     #[schemars(range(min = 1))]
     pub concurrency: Option<usize>,
+
+    /// The maximum number of mutants on one source line. The plan keeps the
+    /// most productive mutants of the line (relational, condition,
+    /// arithmetic and logical operators first). The others are `pending`
+    /// with the reason `sampled-out`. Unset keeps each mutant.
+    /// `--mutants-per-line` wins.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_mutants_per_line"
+    )]
+    #[schemars(range(min = 1))]
+    pub mutants_per_line: Option<usize>,
+
+    /// Widen each changed line to the whole function that holds it, so that a
+    /// change to a parameter or a signature selects the mutants of the
+    /// function. Only the changed-code scope uses it. Unset or `false` mutates
+    /// the changed lines only. `--function-scope` turns it on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub function_scope: Option<bool>,
 
     /// Type-check each survived mutant through the TypeScript-Go companion
     /// of `--type-aware`. A survivor that does not type-check becomes
@@ -181,7 +214,7 @@ mod tests {
     fn every_key_parses_in_camel_case() {
         let config = parse(
             r#"{"runner":"vitest","operators":["arithmetic-operator","removed-call"],
-                "minScore":80,"concurrency":4,"typecheck":true,
+                "minScore":80,"concurrency":4,"mutantsPerLine":2,"functionScope":true,"typecheck":true,
                 "runnerConfig":"vitest.integration.config.mjs"}"#,
         )
         .expect("valid config");
@@ -195,6 +228,8 @@ mod tests {
         );
         assert_eq!(config.min_score, Some(80.0));
         assert_eq!(config.concurrency, Some(4));
+        assert_eq!(config.mutants_per_line, Some(2));
+        assert_eq!(config.function_scope, Some(true));
         assert_eq!(config.typecheck, Some(true));
         assert_eq!(
             config.runner_config.as_deref(),
@@ -244,6 +279,10 @@ mod tests {
             (r#"{"minScore":101}"#, "between 0 and 100"),
             (r#"{"minScore":-1}"#, "between 0 and 100"),
             (r#"{"concurrency":0}"#, "concurrency must be at least 1"),
+            (
+                r#"{"mutantsPerLine":0}"#,
+                "mutantsPerLine must be at least 1",
+            ),
             (r#"{"runner":"jest"}"#, "unknown variant"),
             (r#"{"operators":["bogus"]}"#, "unknown variant"),
         ] {

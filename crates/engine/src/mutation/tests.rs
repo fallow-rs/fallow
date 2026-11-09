@@ -556,6 +556,59 @@ fn max_mutants_applies_after_ranking_and_marks_the_rest_pending() {
 }
 
 #[test]
+fn mutants_per_line_keeps_one_planned_mutant_per_line_and_is_stable() {
+    let root = fixture("mutation-plan");
+    let mut sampled = MutationPlanRequest::new(MutationScope::All);
+    sampled.mutants_per_line = Some(1);
+    let [full, first, second] = plans(
+        &root,
+        None,
+        &[
+            MutationPlanRequest::new(MutationScope::All),
+            sampled.clone(),
+            sampled,
+        ],
+    )
+    .try_into()
+    .expect("three plans");
+    let mut per_line: BTreeMap<(&str, u32), usize> = BTreeMap::new();
+    for entry in first
+        .mutants
+        .iter()
+        .filter(|entry| entry.disposition == PLANNED)
+    {
+        *per_line
+            .entry((entry.file.as_str(), entry.mutant.line))
+            .or_default() += 1;
+    }
+    assert!(per_line.values().all(|&count| count == 1), "{per_line:?}");
+    assert!(
+        first.counts.sampled_out > 0,
+        "the fixture has a crowded line"
+    );
+    assert_eq!(
+        first.counts.planned + first.counts.sampled_out,
+        full.counts.planned
+    );
+    assert_eq!(first.counts.total, full.counts.total);
+    let sampled_ids = |plan: &MutationPlan| -> Vec<String> {
+        plan.mutants
+            .iter()
+            .filter(|entry| entry.disposition == MutantDisposition::SampledOut)
+            .map(|entry| entry.mutant.id.to_string())
+            .collect()
+    };
+    assert_eq!(sampled_ids(&first), sampled_ids(&second));
+    assert!(
+        first
+            .mutants
+            .iter()
+            .filter(|entry| entry.disposition == MutantDisposition::SampledOut)
+            .all(|entry| entry.rank.is_none())
+    );
+}
+
+#[test]
 fn changed_scope_mutates_only_the_added_lines() {
     let root = fixture("mutation-plan");
     let diff = "\
@@ -591,6 +644,272 @@ diff --git a/src/math.ts b/src/math.ts
         .collect();
     assert!(originals.contains(">"), "{originals:?}");
     assert!(!originals.contains("<"), "{originals:?}");
+}
+
+/// The diff of one added line: the signature line of `clamp`, which holds
+/// the parameters and no mutant.
+const CLAMP_SIGNATURE_DIFF: &str = "\
+diff --git a/src/math.ts b/src/math.ts
+--- a/src/math.ts
++++ b/src/math.ts
+@@ -4,0 +5,1 @@
++export function clamp(value: number, low: number, high: number): number {
+";
+
+#[test]
+fn function_scope_selects_the_whole_function_of_a_changed_parameter_line() {
+    let root = fixture("mutation-plan");
+    let request = |function_scope: bool| {
+        let mut request = MutationPlanRequest::new(MutationScope::ChangedSinceBase(
+            DiffIndex::from_unified_diff(CLAMP_SIGNATURE_DIFF),
+        ));
+        request.function_scope = function_scope;
+        request
+    };
+    let [lines, widened, all] = plans(
+        &root,
+        None,
+        &[
+            request(false),
+            request(true),
+            MutationPlanRequest::new(MutationScope::Paths(vec![PathBuf::from("src/math.ts")])),
+        ],
+    )
+    .try_into()
+    .expect("three plans");
+    assert!(
+        lines.mutants.is_empty(),
+        "the signature line holds no mutant: {:?}",
+        lines.mutants
+    );
+    assert!(!widened.mutants.is_empty());
+    for entry in &widened.mutants {
+        let function = entry.function.as_ref().expect("in clamp");
+        assert_eq!(
+            function.name.as_deref(),
+            Some("clamp"),
+            "{:?}",
+            entry.mutant
+        );
+        assert!(function.in_diff, "the changed line is in the function");
+    }
+    let clamp_ids = |plan: &MutationPlan| -> BTreeSet<String> {
+        plan.mutants
+            .iter()
+            .filter(|entry| {
+                entry
+                    .function
+                    .as_ref()
+                    .and_then(|function| function.name.as_deref())
+                    == Some("clamp")
+            })
+            .map(|entry| entry.mutant.id.to_string())
+            .collect()
+    };
+    assert_eq!(clamp_ids(&widened), clamp_ids(&all), "each mutant of clamp");
+    assert!(
+        widened
+            .mutants
+            .iter()
+            .all(|entry| !entry.mutant.original.is_empty()),
+        "the plan holds instrumented mutants"
+    );
+}
+
+#[test]
+fn function_scope_reads_the_functions_from_the_syntax_tree_not_from_the_mutants() {
+    let project = tempfile::tempdir().expect("temp dir");
+    let root = dunce::canonicalize(project.path()).expect("root");
+    std::fs::create_dir_all(root.join("src")).expect("src");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"adder","private":true,"type":"module","main":"src/adder.ts","devDependencies":{"vitest":"^3.2.4"}}"#,
+    )
+    .expect("package.json");
+    std::fs::write(
+        root.join("src/adder.ts"),
+        "export function makeAdder(\n  base: number,\n): (n: number) => number {\n  return (n) => base + n;\n}\n",
+    )
+    .expect("adder.ts");
+    std::fs::write(
+        root.join("src/adder.test.ts"),
+        "import { expect, test } from \"vitest\";\nimport { makeAdder } from \"./adder\";\n\ntest(\"adds\", () => {\n  expect(makeAdder(1)(2)).toBe(3);\n});\n",
+    )
+    .expect("adder.test.ts");
+    let diff = "\
+diff --git a/src/adder.ts b/src/adder.ts
+--- a/src/adder.ts
++++ b/src/adder.ts
+@@ -1,0 +2,1 @@
++  base: number,
+";
+    let request = |function_scope: bool| {
+        let mut request = MutationPlanRequest::new(MutationScope::ChangedSinceBase(
+            DiffIndex::from_unified_diff(diff),
+        ));
+        request.operators = Some(vec![Operator::ArithmeticOperator]);
+        request.function_scope = function_scope;
+        request
+    };
+    let [lines, widened] = plans(&root, None, &[request(false), request(true)])
+        .try_into()
+        .expect("two plans");
+    assert!(lines.mutants.is_empty(), "{:?}", lines.mutants);
+    let originals: Vec<&str> = widened
+        .mutants
+        .iter()
+        .map(|entry| entry.mutant.original.as_str())
+        .collect();
+    assert_eq!(
+        originals,
+        ["+"],
+        "the parameter line selects the whole outer function, which holds the arithmetic mutant of its inner arrow"
+    );
+}
+
+/// A project with a source file, a test file with a skipped test, a test file
+/// with a todo test, and a test file with a skipped test that no diff touches.
+fn skip_project() -> (tempfile::TempDir, PathBuf) {
+    let project = tempfile::tempdir().expect("temp dir");
+    let root = dunce::canonicalize(project.path()).expect("root");
+    let files = [
+        (
+            "package.json",
+            r#"{"name":"adder","private":true,"type":"module","main":"src/adder.ts","devDependencies":{"vitest":"^3.2.4"}}"#,
+        ),
+        (
+            "src/adder.ts",
+            "export function add(a: number, b: number): number {\n  return a + b;\n}\n",
+        ),
+        (
+            "src/adder.test.ts",
+            "import { expect, it } from \"vitest\";\nimport { add } from \"./adder\";\n\nit(\"adds\", () => expect(add(1, 2)).toBe(3));\nit.skip(\"adds negatives\", () => {});\n",
+        ),
+        (
+            "src/other.test.ts",
+            "import { it } from \"vitest\";\n\nit(\"other\", () => {});\nit.todo(\"later\");\n",
+        ),
+        (
+            "src/untouched.test.ts",
+            "import { it } from \"vitest\";\n\nit.skip(\"untouched\", () => {});\n",
+        ),
+    ];
+    for (path, text) in files {
+        let target = root.join(path);
+        std::fs::create_dir_all(target.parent().expect("parent")).expect("dir");
+        std::fs::write(target, text).expect("write");
+    }
+    (project, root)
+}
+
+fn added_line(file: &str) -> String {
+    format!(
+        "diff --git a/{file} b/{file}\n--- a/{file}\n+++ b/{file}\n@@ -1,0 +2,1 @@\n+// changed\n"
+    )
+}
+
+fn removed_line(file: &str) -> String {
+    format!(
+        "diff --git a/{file} b/{file}\n--- a/{file}\n+++ b/{file}\n@@ -2,1 +1,0 @@\n-// removed\n"
+    )
+}
+
+fn deleted_file(file: &str) -> String {
+    format!(
+        "diff --git a/{file} b/{file}\ndeleted file mode 100644\n--- a/{file}\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-it.skip(\"gone\", () => {{}});\n"
+    )
+}
+
+fn skips(root: &Path, diff: &str) -> (Vec<String>, usize) {
+    let plan = plans(
+        root,
+        None,
+        &[MutationPlanRequest::new(MutationScope::ChangedSinceBase(
+            DiffIndex::from_unified_diff(diff),
+        ))],
+    )
+    .remove(0);
+    let found = plan
+        .skipped_tests
+        .iter()
+        .map(|test| {
+            format!(
+                "{}:{} {:?} {}",
+                test.file,
+                test.line,
+                test.kind,
+                test.name.as_deref().unwrap_or("-")
+            )
+        })
+        .collect();
+    (found, plan.mutants.len())
+}
+
+#[test]
+fn a_changed_scope_reports_the_skipped_tests_of_the_test_files_that_the_diff_changes() {
+    let (_project, root) = skip_project();
+    let adder_skip = "src/adder.test.ts:5 Skip adds negatives";
+    let other_todo = "src/other.test.ts:4 Todo later";
+
+    let (mixed, mutants) = skips(
+        &root,
+        &[added_line("src/adder.ts"), added_line("src/adder.test.ts")].concat(),
+    );
+    assert_eq!(mixed, [adder_skip]);
+    assert!(mutants > 0, "the source change has mutants");
+
+    let (test_only, mutants) = skips(&root, &added_line("src/adder.test.ts"));
+    assert_eq!(test_only, [adder_skip]);
+    assert_eq!(mutants, 0, "no source changed");
+
+    let (deletion_only, _) = skips(&root, &removed_line("src/other.test.ts"));
+    assert_eq!(
+        deletion_only,
+        [other_todo],
+        "a removed line changes the file"
+    );
+
+    let (both, _) = skips(
+        &root,
+        &[
+            added_line("src/other.test.ts"),
+            added_line("src/adder.test.ts"),
+        ]
+        .concat(),
+    );
+    assert_eq!(both, [adder_skip, other_todo], "sorted by file and line");
+
+    let (source_only, _) = skips(&root, &added_line("src/adder.ts"));
+    assert!(source_only.is_empty(), "{source_only:?}");
+
+    let (outside, _) = skips(&root, &added_line("src/other.test.ts"));
+    assert!(
+        outside.iter().all(|found| !found.contains("untouched")),
+        "a skip in a test file outside the diff is not reported: {outside:?}"
+    );
+
+    let (deleted, _) = skips(&root, &deleted_file("src/gone.test.ts"));
+    assert!(
+        deleted.is_empty(),
+        "a deleted file has no test: {deleted:?}"
+    );
+}
+
+#[test]
+fn a_full_run_and_explicit_paths_report_no_skipped_test() {
+    let (_project, root) = skip_project();
+    let [full, paths] = plans(
+        &root,
+        None,
+        &[
+            MutationPlanRequest::new(MutationScope::All),
+            MutationPlanRequest::new(MutationScope::Paths(vec![PathBuf::from("src")])),
+        ],
+    )
+    .try_into()
+    .expect("two plans");
+    assert!(full.skipped_tests.is_empty(), "{:?}", full.skipped_tests);
+    assert!(paths.skipped_tests.is_empty(), "{:?}", paths.skipped_tests);
 }
 
 #[test]

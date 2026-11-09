@@ -1811,7 +1811,7 @@ export type MutationSchemaVersion = "2"
 /**
  * Why a run is partial.
  */
-export type MutationIncompleteReason = ("runtime-error" | "mutant-limit" | "time-budget" | "skipped-files" | "unloaded-files" | "test-files-not-discovered" | "baseline-failure" | "worktree-changed" | "typecheck-failed" | "worktree-unchecked")
+export type MutationIncompleteReason = ("runtime-error" | "mutant-limit" | "sampled-out" | "time-budget" | "skipped-files" | "unloaded-files" | "test-files-not-discovered" | "baseline-failure" | "worktree-changed" | "typecheck-failed" | "worktree-unchecked")
 /**
  * The quality of observed test-to-mutant evidence.
  */
@@ -20973,6 +20973,11 @@ score?: (number | null)
  * mutants never count. `null` when no mutant is covered or unreached.
  */
 coverage?: (number | null)
+/**
+ * The `pending` mutants that the `--mutants-per-line` limit left out of
+ * the plan. They are part of `counts.pending`.
+ */
+sampled_out: number
 }
 /**
  * One mutant of a run.
@@ -21027,6 +21032,13 @@ status: MutantStatus
  * The static rule of a `pruned` mutant, kebab-case.
  */
 prune_reason?: (string | null)
+/**
+ * Why a `pending` mutant did not run, kebab-case. Only `sampled-out` has
+ * a reason: the `--mutants-per-line` limit left the mutant out of the
+ * plan. A mutant that the mutant limit or the time budget left out has
+ * no reason.
+ */
+pending_reason?: (string | null)
 /**
  * The test that killed the mutant in this run. Absent for a kill by an
  * error outside a test.
@@ -21604,9 +21616,13 @@ total: number
  */
 planned: number
 /**
- * Mutants after the mutant limit.
+ * Mutants after the mutant limit, and the sampled-out mutants.
  */
 pending: number
+/**
+ * The `pending` mutants that the `--mutants-per-line` limit left out.
+ */
+sampled_out: number
 /**
  * Mutants that no test file reaches.
  */
@@ -21681,6 +21697,13 @@ disposition: MutationPlanDisposition
  * The static rule of a `pruned` mutant, kebab-case.
  */
 prune_reason?: (string | null)
+/**
+ * Why a `pending` mutant did not run, kebab-case. Only `sampled-out` has
+ * a reason: the `--mutants-per-line` limit left the mutant out of the
+ * plan. A mutant that the mutant limit or the time budget left out has
+ * no reason.
+ */
+pending_reason?: (string | null)
 /**
  * How tests reach the code of the mutant in the module graph. Only a
  * `no_coverage` mutant has this field.

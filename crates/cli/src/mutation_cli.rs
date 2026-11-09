@@ -80,6 +80,19 @@ pub struct MutationArgs {
     /// count. The others are `pending`.
     #[arg(long, value_name = "N")]
     pub max_mutants: Option<usize>,
+    /// Keep at most N mutants on each source line. The plan keeps the most
+    /// productive mutants of the line (relational, condition, arithmetic and
+    /// logical operators first). The others are `pending` with the reason
+    /// `sampled-out` and do not run (default: the `mutation.mutantsPerLine`
+    /// key, else each mutant).
+    #[arg(long, value_name = "N")]
+    pub mutants_per_line: Option<usize>,
+    /// Widen each changed line to the whole function that holds it, so that a
+    /// changed parameter or signature selects the mutants of the function.
+    /// Only the changed-code scope uses it (default: the
+    /// `mutation.functionScope` key, else the changed lines only).
+    #[arg(long, conflicts_with_all = ["all", "paths"])]
+    pub function_scope: bool,
     /// Stop starting mutants after this time, for example `90s`, `10m` or `1h`.
     /// The others are `pending`.
     #[arg(long, value_name = "DURATION")]
@@ -151,7 +164,7 @@ pub struct MutationArgs {
     /// `fallow mutation tasks` then lists the mutants that are still open.
     #[arg(
         long,
-        conflicts_with_all = ["all", "paths", "plan", "resume", "allow_dirty", "max_mutants", "min_score"]
+        conflicts_with_all = ["all", "paths", "plan", "resume", "allow_dirty", "max_mutants", "mutants_per_line", "function_scope", "min_score"]
     )]
     pub recheck: bool,
     /// The saved report of `--recheck` (default: the report of the last run).
@@ -345,6 +358,12 @@ pub fn run_options(input: &MutationCliInput<'_>) -> Result<MutationRunOptions, P
             "mutation.maxMutants",
         ));
     }
+    if input.args.mutants_per_line == Some(0) {
+        return Err(input_error(
+            "--mutants-per-line must be at least 1",
+            "mutation.mutantsPerLine",
+        ));
+    }
     Ok(MutationRunOptions {
         analysis: AnalysisOptions {
             root: Some(input.root.to_path_buf()),
@@ -359,6 +378,8 @@ pub fn run_options(input: &MutationCliInput<'_>) -> Result<MutationRunOptions, P
         operators: parse_operators(&input.args.operators)?,
         allow_side_effects: input.args.allow_side_effects,
         max_mutants: input.args.max_mutants,
+        mutants_per_line: input.args.mutants_per_line,
+        function_scope: input.args.function_scope,
         allow_dirty: input.args.allow_dirty,
         runtime: input.args.runtime.clone(),
         concurrency: input.args.concurrency.or(input.config.concurrency),
@@ -768,6 +789,8 @@ fn apply_recheck(
     options.scope = MutationRunScope::Paths(selection.files());
     options.mutant_ids = selection.mutant_ids();
     options.test_changes_only = true;
+    options.mutants_per_line = None;
+    options.function_scope = false;
     Ok(None)
 }
 

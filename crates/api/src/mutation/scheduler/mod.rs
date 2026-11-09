@@ -26,11 +26,13 @@ use retry_set::{confirmation_tests, fastest_first, retry_extra_ms, whole_files};
 mod classification;
 pub(super) mod control;
 mod dry_facts;
+mod issues;
 mod retry_set;
 pub mod targets;
 mod window;
 use classification::{attempt_record, classify, is_load_kill, kill_kind, matrix_evidence};
 use dry_facts::{DryRunFacts, covering_tests, read_dry_run, record_dry_run, reported_duplicates};
+use issues::{no_covering_test_message, static_map_miss_issue, undiscovered_issue};
 use targets::{config_targets, job_targets};
 use window::{loop_budget_ms, round_ms, scaled_ms, settles_loop_timeout, timeout_ms};
 mod stored;
@@ -73,6 +75,11 @@ pub struct SchedulePlan {
     /// covering test does not use the limit: the first covered pending
     /// mutants in rank order run in its place.
     pub pending: Vec<ScheduledMutant>,
+    /// The mutants that the `--mutants-per-line` limit left out. The
+    /// scheduler never runs them. A mutant that no passing dry-run test
+    /// covers gets `no_coverage`, so the coverage does not depend on the
+    /// limit.
+    pub sampled_out: Vec<ScheduledMutant>,
     /// Each mutant id of the plan. A hit outside this set stops the run.
     pub known_ids: FxHashSet<String>,
     /// The static test files of the plan.
@@ -1028,26 +1035,14 @@ struct JobContext<'a> {
     ready: &'a Ready,
     cache: Option<&'a dyn ResultLookup>,
     journal: Option<&'a dyn OutcomeJournal>,
+    /// True when a time budget is set.
+    budgeted: bool,
 }
 
 impl JobContext<'_> {
     /// True when the run keeps the killing tests of each mutant.
     const fn collects_evidence(&self) -> bool {
         self.kill_matrix || self.targets.is_some()
-    }
-}
-
-/// The issue of a mutant that the dry run hit, while the static map reaches
-/// no test of its file.
-fn static_map_miss_issue(mutant: &ScheduledMutant) -> ScheduleIssue {
-    ScheduleIssue {
-        code: "static-map-miss",
-        message: format!(
-            "the dry run hit this mutant in `{}`, but the static map reaches no test of that file; the module graph misses a test that loads it",
-            mutant.file
-        ),
-        mutant_id: Some(mutant.id.clone()),
-        stderr_tail: None,
     }
 }
 
@@ -1100,7 +1095,10 @@ enum JobSource {
 /// Builds the job of each covered mutant. A mutant with a cached result gets
 /// that result and no job. The `--max-mutants` limit counts the covered
 /// mutants only: an uncovered planned mutant leaves its place to the next
-/// covered pending mutant in rank order.
+/// covered pending mutant in rank order. Under a time budget the regular jobs
+/// run the cheapest first (the lowest dry-run time of their tests), so the
+/// budget settles the most mutants. The sort is stable, so equal costs keep
+/// the rank order. Static mutants stay last.
 fn build_jobs(
     plan: &SchedulePlan,
     facts: &DryRunFacts,
@@ -1199,11 +1197,15 @@ fn build_jobs(
         if static_mutant {
             statics.push(job);
         } else {
-            regular.push(job);
+            regular.push((total, job));
         }
     }
-    regular.extend(statics);
-    regular
+    if context.budgeted {
+        regular.sort_by(|left, right| left.0.total_cmp(&right.0));
+    }
+    let mut jobs: Vec<Job> = regular.into_iter().map(|(_, job)| job).collect();
+    jobs.extend(statics);
+    jobs
 }
 
 /// Shared state of the worker threads of one phase.
@@ -1513,55 +1515,6 @@ fn start_primary(
     })
 }
 
-/// The longest test name that [`no_covering_test_message`] shows.
-const MAX_TEST_NAME_CHARS: usize = 60;
-const ELLIPSIS: &str = "...";
-
-/// The `runtime_error` message for a mutant with no covering test left after
-/// the dry run of a respawned companion. It gives the count and the first
-/// test only: `baseline_failures` holds the full list. The message leaves out
-/// the mutant id because the issue carries it.
-fn no_covering_test_message(dropped: &[String]) -> String {
-    let first = dropped.first().map_or_else(String::new, |name| {
-        if name.chars().count() <= MAX_TEST_NAME_CHARS {
-            return name.clone();
-        }
-        let kept: String = name
-            .chars()
-            .take(MAX_TEST_NAME_CHARS - ELLIPSIS.len())
-            .collect();
-        format!("{kept}{ELLIPSIS}")
-    });
-    let tests = if dropped.len() == 1 {
-        format!("1 test: {first}")
-    } else {
-        format!("{} tests, first: {first}", dropped.len())
-    };
-    format!("no covering test passed in the dry run of the restarted companion ({tests})")
-}
-
-/// The issue for static test files that the runner does not list. Their
-/// tests never run, so a mutant that only they reach stays `no_coverage`.
-fn undiscovered_issue(files: &[String]) -> Option<ScheduleIssue> {
-    (!files.is_empty()).then(|| ScheduleIssue {
-        code: "test-files-not-discovered",
-        message: {
-            let (noun, pronoun) = if files.len() == 1 {
-                ("file", "it")
-            } else {
-                ("files", "they")
-            };
-            format!(
-                "the runner does not list {} static test {noun}, so {pronoun} did not run: {}",
-                files.len(),
-                files.join(", ")
-            )
-        },
-        mutant_id: None,
-        stderr_tail: None,
-    })
-}
-
 /// Gives `no_coverage` to each pending mutant that has no passing dry-run
 /// covering test. The test is the same as for a planned mutant, so a run
 /// that `--max-mutants` limits reports the coverage of the full run.
@@ -1571,7 +1524,7 @@ fn mark_unreached_pending(
     dry_files: &[String],
     outcome: &mut ScheduleOutcome,
 ) {
-    for mutant in &plan.pending {
+    for mutant in plan.pending.iter().chain(&plan.sampled_out) {
         let static_mutant = facts.static_ids.contains(&mutant.id);
         if covering_tests(plan, facts, dry_files, mutant, static_mutant, false).is_empty() {
             outcome.results.insert(
@@ -1967,6 +1920,7 @@ pub fn run_schedule_with_progress(
         ready: &ready,
         cache: config.cache.as_deref(),
         journal: config.journal.as_deref(),
+        budgeted: config.deadline.is_some(),
     };
     let mutants_started = Instant::now();
     let (jobs, (link, known)) =
