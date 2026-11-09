@@ -90,6 +90,17 @@ pub fn sfc_preprocessor_virtual_stylesheet(source: &str) -> Option<String> {
 
 /// Scan markup source for Tailwind arbitrary-value utilities.
 #[must_use]
-pub fn scan_tailwind_arbitrary_values(source: &str) -> Vec<TailwindArbitraryUse> {
+pub fn scan_tailwind_arbitrary_values(
+    source: &str,
+    config: &fallow_config::ResolvedConfig,
+) -> Vec<TailwindArbitraryUse> {
     fallow_extract::tailwind::scan_tailwind_arbitrary_values(source)
+        .into_iter()
+        .filter(|usage| {
+            !config
+                .tailwind_ignore_patterns
+                .iter()
+                .any(|pattern| pattern.is_match(&usage.value))
+        })
+        .collect()
 }

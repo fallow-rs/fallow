@@ -1413,6 +1413,13 @@ impl FallowConfig {
         }
         let mut health_errors = config.health.threshold_override_errors();
         health_errors.extend(config.health.change_coupling.errors());
+        for (index, pattern) in config.health.tailwind_ignore_patterns.iter().enumerate() {
+            if let Err(error) = regex::Regex::new(pattern) {
+                health_errors.push(format!(
+                    "health.tailwindIgnorePatterns[{index}] is not a valid regex: {error}"
+                ));
+            }
+        }
         if !health_errors.is_empty() {
             return Err(miette::miette!(
                 "invalid config:\n  - {}",

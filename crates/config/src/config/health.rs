@@ -339,6 +339,16 @@ pub struct HealthConfig {
     #[serde(default)]
     pub ignore: Vec<String>,
 
+    /// Regular expressions excluding Tailwind arbitrary-value utilities from
+    /// token-drift findings and analytics, including CVA variants. Matches the
+    /// normalized `prefix-[value]` token, without variants, negative signs, or
+    /// suffix modifiers. Both `-mt-[7px]` and `mt-[7px]` match as `mt-[7px]`;
+    /// `bg-[#abc]/50` matches as `bg-[#abc]`. These spellings cannot be excluded
+    /// independently. Use `^icon-\[` to exclude Iconify tokens, including variants.
+    /// Defaults to no exclusions. Invalid regexes fail config loading.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tailwind_ignore_patterns: Vec<String>,
+
     /// Per-file or per-function threshold overrides. These keep exceptional
     /// functions visible as configured numeric ceilings instead of hiding them
     /// behind binary suppressions.
@@ -382,6 +392,7 @@ impl Default for HealthConfig {
             coverage: None,
             coverage_root: None,
             ignore: vec![],
+            tailwind_ignore_patterns: vec![],
             threshold_overrides: vec![],
             ownership: OwnershipConfig::default(),
             change_coupling: ChangeCouplingConfig::default(),
@@ -656,6 +667,7 @@ maxCognitive = 25
             max_unit_size: 120,
             max_file_lines: 500,
             ignore: vec!["test/**".to_string()],
+            tailwind_ignore_patterns: Vec::new(),
             threshold_overrides: vec![HealthThresholdOverride {
                 files: vec!["src/auth.ts".to_string()],
                 functions: Vec::new(),

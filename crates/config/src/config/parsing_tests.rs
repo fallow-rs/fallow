@@ -549,6 +549,51 @@ fn serde_round_trip_drops_explicit_private_type_leaks_flag() {
 }
 
 #[test]
+fn tailwind_ignore_patterns_round_trip_as_strings() {
+    let dir = test_dir("tailwind-ignore-patterns");
+    let path = dir.path().join(".fallowrc.json");
+    let patterns = serde_json::json!(["^icon-\\[", "^bg-\\[#abc\\]$"]);
+    std::fs::write(
+        &path,
+        serde_json::json!({"health": {"tailwindIgnorePatterns": patterns}}).to_string(),
+    )
+    .unwrap();
+
+    let config = FallowConfig::load(&path).unwrap();
+    let serialized = serde_json::to_value(&config).unwrap();
+    assert_eq!(serialized["health"]["tailwindIgnorePatterns"], patterns);
+    let round_tripped: FallowConfig = serde_json::from_value(serialized).unwrap();
+    let resolved = round_tripped.resolve(
+        dir.path().to_path_buf(),
+        OutputFormat::Json,
+        1,
+        true,
+        true,
+        None,
+    );
+    assert!(resolved.tailwind_ignore_patterns[0].is_match("icon-[lucide--eye]"));
+    assert!(!resolved.tailwind_ignore_patterns[0].is_match("icon-size-[17px]"));
+}
+
+#[test]
+fn invalid_tailwind_ignore_pattern_names_the_config_entry() {
+    let dir = test_dir("invalid-tailwind-ignore-pattern");
+    let path = dir.path().join(".fallowrc.json");
+    std::fs::write(
+        &path,
+        r#"{"health":{"tailwindIgnorePatterns":["^icon-", "["]}}"#,
+    )
+    .unwrap();
+
+    let error = FallowConfig::load(&path).unwrap_err().to_string();
+    assert!(
+        error.contains("health.tailwindIgnorePatterns[1]"),
+        "{error}"
+    );
+    assert!(error.contains("regex"), "{error}");
+}
+
+#[test]
 fn load_json_config_file_with_health_threshold_override() {
     let dir = test_dir("json-health-threshold-override");
     let config_path = dir.path().join(".fallowrc.json");

@@ -1850,8 +1850,8 @@ fn audit_css_surfaces_cva_duplicate_variant_blocks() {
          export const button = cva('inline-flex', {\n\
            variants: {\n\
              tone: {\n\
-               primary: 'px-3 py-2 text-sm font-medium bg-[#f05a28]',\n\
-               secondary: 'px-3 py-2 text-sm font-medium bg-[#f05a28]',\n\
+               primary: 'px-3 py-2 text-sm font-medium bg-[#f05a28] hover:text-[#f05a28]',\n\
+               secondary: 'px-3 py-2 text-sm font-medium bg-[#f05a28] hover:text-[#f05a28]',\n\
              },\n\
            },\n\
          });\n",
@@ -1863,7 +1863,7 @@ fn audit_css_surfaces_cva_duplicate_variant_blocks() {
     )
     .unwrap();
 
-    let output = run_fallow_raw(&[
+    let args = [
         "audit",
         "--root",
         root.to_str().unwrap(),
@@ -1872,7 +1872,8 @@ fn audit_css_surfaces_cva_duplicate_variant_blocks() {
         "--format",
         "json",
         "--quiet",
-    ]);
+    ];
+    let output = run_fallow_raw(&args);
     let json = parse_json(&output);
     let findings = json["complexity"]["styling_findings"]
         .as_array()
@@ -1904,6 +1905,34 @@ fn audit_css_surfaces_cva_duplicate_variant_blocks() {
                     .is_some_and(|hint| hint.contains("reuse --color-brand"))
         }),
         "CVA variant arbitrary value should point at the existing theme token: {findings:#?}"
+    );
+
+    fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"health":{"tailwindIgnorePatterns":["^bg-\\["]}}"#,
+    )
+    .unwrap();
+    let filtered = parse_json(&run_fallow_raw(&args));
+    let findings = filtered["complexity"]["styling_findings"]
+        .as_array()
+        .unwrap();
+    let drifts: Vec<_> = findings
+        .iter()
+        .filter(|finding| finding["code"] == "css-token-drift")
+        .map(|finding| {
+            finding["value"]
+                .as_str()
+                .unwrap()
+                .split(" in CVA variant:")
+                .next()
+                .unwrap()
+        })
+        .collect();
+    assert_eq!(drifts, vec!["text-[#f05a28]", "text-[#f05a28]"]);
+    assert!(
+        findings
+            .iter()
+            .any(|finding| finding["sub_kind"] == "cva-duplicate-variant-block")
     );
 }
 

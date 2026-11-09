@@ -83,7 +83,7 @@ pub(super) fn scan_cva_variant_token_drifts(
         if candidates.is_empty() {
             return Vec::new();
         }
-        collect_cva_file_token_drifts(&mut out, &mut seen, &rel, &source, candidates);
+        collect_cva_file_token_drifts(&mut out, &mut seen, &rel, &source, candidates, ctx.config);
     }
     out.sort_by(|a, b| {
         a.path
@@ -101,9 +101,10 @@ fn collect_cva_file_token_drifts(
     rel: &str,
     source: &str,
     token_candidates: &[ComparableThemeTokenCandidate],
+    config: &fallow_config::ResolvedConfig,
 ) {
     for (variant_classes, line) in collect_cva_class_blocks(source) {
-        for arbitrary in crate::css::scan_tailwind_arbitrary_values(&variant_classes) {
+        for arbitrary in crate::css::scan_tailwind_arbitrary_values(&variant_classes, config) {
             let Some((namespace, value, metric)) = cva_arbitrary_value_metric(&arbitrary.value)
             else {
                 continue;
