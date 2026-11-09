@@ -1,0 +1,14 @@
+{
+  "name": "n8n-nodes-foo",
+  "version": "1.0.0",
+  "main": "index.js",
+  "files": ["dist"],
+  "n8n": {
+    "n8nNodesApiVersion": 1,
+    "credentials": ["dist/credentials/FooApi.credentials.js"],
+    "nodes": ["dist/nodes/Foo/Foo.node.js"]
+  },
+  "devDependencies": {
+    "n8n-workflow": "*"
+  }
+}

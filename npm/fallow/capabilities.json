@@ -8592,7 +8592,7 @@
     ]
   },
   "plugins": {
-    "count": 151,
+    "count": 152,
     "note": "Built-in framework plugins, auto-activated when their enabler dependency is present; run fallow list --plugins for the set active in a specific project",
     "names": [
       "nextjs",
@@ -8731,6 +8731,7 @@
       "nyc",
       "msw",
       "napi-rs",
+      "n8n",
       "opencode",
       "nodemon",
       "pm2",

@@ -682,3 +682,18 @@ the `gulpfile` of each package root an entry point, with the extensions that
 the gulp module loaders accept. A `gulpfile.js` or `gulpfile.ts` directory
 gives its `index` file. The plugin credits no package: a gulpfile imports
 `gulp`, and a package script that runs `gulp` credits it.
+
+## n8n node packages
+
+The `n8n` plugin activates on a `package.json` with an `n8n` block. It reads
+the string values of `n8n.nodes` and `n8n.credentials`. Each value is a path
+relative to the package root. A path to an existing file is the entry. A path
+to build output maps to its source through the `tsconfig` output map
+(`outDir` and `rootDir`). When no config maps the path, the plugin removes the
+first path segment and looks for the source at the package root, because node
+packages often set `outDir` without `rootDir`. A path that climbs out of the
+package gives no entry. The entries have the runtime role.
+
+The plugin also credits the members that n8n reads from a class that
+implements `INodeType` or `ICredentialType`. The rule is scoped to the
+implements clause, so other classes keep their findings.

@@ -193,6 +193,8 @@ mod lit_unused_state;
 mod member_detection;
 #[path = "integration_test/metro_extra_node_modules.rs"]
 mod metro_extra_node_modules;
+#[path = "integration_test/n8n_plugin.rs"]
+mod n8n_plugin;
 #[path = "integration_test/nested_local_path_dependency.rs"]
 mod nested_local_path_dependency;
 #[path = "integration_test/nesting_too_deep_diagnostic.rs"]

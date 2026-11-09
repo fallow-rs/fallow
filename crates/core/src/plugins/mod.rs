@@ -2072,6 +2072,7 @@ mod mintlify;
 mod mocha;
 mod module_federation;
 mod msw;
+mod n8n;
 mod napi_rs;
 mod nest_commander;
 mod nestjs;
