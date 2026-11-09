@@ -286,7 +286,6 @@ test("the oracle seeds workflow runs the platform oracle seeds outside pull requ
   );
 });
 
-
 test("public skill PR parity uses the exact base while push and candidate checks stay strict", () => {
   const workflow = readWorkflow(".github/workflows/ci.yml");
   const job = indentedBlock(workflow, "skills-vendor", 2);
