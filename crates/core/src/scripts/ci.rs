@@ -17,7 +17,6 @@ use super::ci_action_inputs::StepActionInputs;
 use super::shell_helpers::HelperBase;
 use super::{
     IgnoredCommandEntries, ScriptCatalog, analyze_commands_with_context, could_be_file_path,
-    has_shell_syntax_residue,
 };
 use references::{expand_matrix_runs, github_script_files};
 
@@ -116,6 +115,12 @@ fn extract_ci_signals(content: &str, context: &CiContext<'_>, analysis: &mut CiA
     extract_ci_signals_in(content, context, None, analysis);
 }
 
+/// A `-c` value with a quote or a pipe is inline code (a jq filter, a
+/// `python -c` program), not a config path.
+fn is_inline_code(config_arg: &str) -> bool {
+    config_arg.contains(['"', '\'', '|'])
+}
+
 /// [`extract_ci_signals`] for a file whose `${{ github.action_path }}` is
 /// `action_dir`, relative to the project root. `None` for a workflow file.
 ///
@@ -164,23 +169,15 @@ fn extract_ci_signals_in(
             parsed
                 .config_files
                 .into_iter()
-                .filter(|s| could_be_file_path(s) && !has_shell_syntax_residue(s))
+                .filter(|s| could_be_file_path(s) && !is_inline_code(s))
                 .filter_map(resolve),
         );
-        analysis.entry_files.extend(
-            parsed
-                .entry_files
-                .into_iter()
-                .filter(|entry| !has_shell_syntax_residue(entry))
-                .filter_map(resolve),
-        );
-        analysis.test_entry_files.extend(
-            parsed
-                .test_entry_files
-                .into_iter()
-                .filter(|entry| !has_shell_syntax_residue(entry))
-                .filter_map(resolve),
-        );
+        analysis
+            .entry_files
+            .extend(parsed.entry_files.into_iter().filter_map(resolve));
+        analysis
+            .test_entry_files
+            .extend(parsed.test_entry_files.into_iter().filter_map(resolve));
     }
     analysis
         .entry_files
@@ -1478,12 +1475,9 @@ jobs:
         );
     }
 
-    /// Regression test for issue #4380: a quoted jq filter inside a command
-    /// substitution in a `run:` block (the `$( ... | jq -c '...' )` shape,
-    /// with the filter carrying double-quoted keys and an unsplit pipe) must
-    /// not be harvested as an entry pattern either. The #2592 guard caught
-    /// the `//`-operator shape; this filter has neither a doubled slash nor
-    /// any slash at all, so the path walk passes it through.
+    /// Issue #4380: the `-c` value of `jq -c '<filter>'` reads as a config
+    /// argument. A filter with no slash passes the path check and then fails
+    /// to compile as an entry glob.
     #[test]
     fn command_substitution_jq_filter_not_entry_file() {
         let content = r#"
@@ -1501,6 +1495,44 @@ jobs:
                 .iter()
                 .any(|f| f.contains("runner-public") || f.contains("OVERHUB_NETWORK")),
             "jq filter must not become an entry pattern, got: {:?}",
+            analysis.entry_files
+        );
+    }
+
+    #[test]
+    fn inline_python_program_not_entry_file() {
+        let content = r#"
+jobs:
+  check:
+    steps:
+      - run: v=$(python3 -c 'import os; print(os.environ["runner-public"])')
+"#;
+        let analysis = analyze_content(content);
+        assert!(
+            !analysis
+                .entry_files
+                .iter()
+                .any(|f| f.contains("runner-public")),
+            "python program must not become an entry pattern, got: {:?}",
+            analysis.entry_files
+        );
+    }
+
+    #[test]
+    fn quoted_script_path_with_apostrophe_stays_entry_file() {
+        let content = r#"
+jobs:
+  check:
+    steps:
+      - run: node "scripts/it's.js"
+"#;
+        let analysis = analyze_content(content);
+        assert!(
+            analysis
+                .entry_files
+                .iter()
+                .any(|f| f.ends_with("scripts/it's.js")),
+            "quoted script path must stay an entry, got: {:?}",
             analysis.entry_files
         );
     }

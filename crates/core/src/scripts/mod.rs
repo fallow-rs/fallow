@@ -1185,30 +1185,6 @@ fn retain_first_seen<T: Clone + Eq + std::hash::Hash>(values: &mut Vec<T>) {
 /// additionally normalizes `..` segments via [`Path::components`] so paths like
 /// `apps/api/../shared/scripts/deploy.ts` collapse to `apps/shared/scripts/deploy.ts`
 /// instead of being passed verbatim to globset (which does not normalize).
-/// Whether a harvested token still carries shell syntax residue — an unsplit
-/// pipe, or quotes that survived unquoting — marking it as shell text such as
-/// a jq filter rather than a file path (issue #4380: a quoted jq filter in a
-/// `run:` command substitution kept its quotes and pipe as one token).
-#[must_use]
-pub fn has_shell_syntax_residue(raw: &str) -> bool {
-    raw.contains(['"', '\'', '|'])
-}
-
-/// Normalize a script-extracted file path into a project-relative entry pattern.
-///
-/// `ws_prefix` is the workspace package's path relative to the project root
-/// (empty string for root-level package.json scripts). `raw` is the path as it
-/// appeared in the script (e.g., `./scripts/deploy.ts`, `scripts/deploy.ts`).
-///
-/// Returns `None` when:
-/// - The path is absolute or escapes the project root. Parent segments may
-///   resolve above the workspace package as long as they stay inside the
-///   project root (e.g., `apps/api/../../top.ts` becomes `top.ts`).
-///
-/// Matches existing behaviour for `config_files` (workspace-prefix join) but
-/// additionally normalizes `..` segments via [`Path::components`] so paths like
-/// `apps/api/../shared/scripts/deploy.ts` collapse to `apps/shared/scripts/deploy.ts`
-/// instead of being passed verbatim to globset (which does not normalize).
 #[must_use]
 pub fn normalize_script_entry_pattern(ws_prefix: &str, raw: &str) -> Option<String> {
     let trimmed = raw.trim_start_matches("./");
