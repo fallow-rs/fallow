@@ -6,7 +6,7 @@ use crate::{
     SarifDocumentInput, SarifFindingFields as SarifFields,
     SarifSourceSnippetCache as SourceSnippetCache, append_sarif_findings as push_sarif_results,
     build_sarif_document, build_sarif_result_with_snippet as sarif_result_with_snippet,
-    issue_output_contracts, normalize_uri,
+    issue_output_contracts, normalize_uri, sarif::sarif_utf16_column,
 };
 use fallow_config::{RulesConfig, Severity};
 #[path = "dead_code_sarif_members.rs"]
@@ -1707,11 +1707,11 @@ fn candidate_sarif_region(
     byte_col: u32,
 ) -> serde_json::Value {
     let mut region = serde_json::json!({"startLine":line});
-    if let Some(source) = snippets.line(path, line)
-        && let Some(prefix) = source.get(..byte_col as usize)
+    if let Some(column) = snippets
+        .line(path, line)
+        .and_then(|source| sarif_utf16_column(line, &source, byte_col))
     {
-        // SARIF defaults to UTF-16 code units when the run omits columnKind.
-        region["startColumn"] = serde_json::json!(prefix.encode_utf16().count() + 1);
+        region["startColumn"] = serde_json::json!(column);
     }
     region
 }

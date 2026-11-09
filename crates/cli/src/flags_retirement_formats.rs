@@ -98,11 +98,18 @@ pub fn sarif_rule() -> serde_json::Value {
 }
 
 /// One SARIF result per candidate.
+///
+/// `sources` resolves the root-relative site paths, so each `startColumn`
+/// counts UTF-16 code units.
 #[must_use]
-pub fn sarif_results(report: &FlagRetirementReport) -> Vec<serde_json::Value> {
+pub fn sarif_results(
+    report: &FlagRetirementReport,
+    sources: &mut fallow_output::SarifSourceSnippetCache,
+) -> Vec<serde_json::Value> {
     candidates(report)
         .filter_map(|row| {
             let (path, line, col) = row_location(row)?;
+            let column = sources.start_column(std::path::Path::new(path), line, col);
             let reasons = reason_codes(row);
             let mut message = format!(
                 "Feature flag '{}' is a retirement candidate: {}",
@@ -119,7 +126,7 @@ pub fn sarif_results(report: &FlagRetirementReport) -> Vec<serde_json::Value> {
                 "locations": [{
                     "physicalLocation": {
                         "artifactLocation": { "uri": crate::report::normalize_uri(path) },
-                        "region": { "startLine": line.max(1), "startColumn": col + 1 },
+                        "region": { "startLine": line.max(1), "startColumn": column },
                     }
                 }],
                 "properties": {
@@ -297,9 +304,35 @@ mod tests {
         );
     }
 
+    /// The read site of `beta` is at byte column 4 of `src/app.ts` line 7.
+    /// After a two-byte character the SARIF column counts one UTF-16 unit
+    /// for it (issue #4405).
+    #[test]
+    fn sarif_column_counts_utf16_code_units() {
+        let root = tempfile::tempdir().expect("root");
+        std::fs::create_dir_all(root.path().join("src")).expect("create src");
+        std::fs::write(
+            root.path().join("src/app.ts"),
+            "\n\n\n\n\n\n\u{e9}\u{e9}beta\n",
+        )
+        .expect("write");
+
+        let results = sarif_results(
+            &report(),
+            &mut fallow_output::SarifSourceSnippetCache::with_root(root.path()),
+        );
+
+        let region = &results[0]["locations"][0]["physicalLocation"]["region"];
+        assert_eq!(region["startLine"], 7);
+        assert_eq!(region["startColumn"], 3);
+    }
+
     #[test]
     fn sarif_gives_one_note_per_candidate_at_the_first_read_site() {
-        let results = sarif_results(&report());
+        let results = sarif_results(
+            &report(),
+            &mut fallow_output::SarifSourceSnippetCache::default(),
+        );
         assert_eq!(results.len(), 2);
         assert_eq!(results[0]["ruleId"], SARIF_RULE_ID);
         assert_eq!(results[0]["level"], "note");
