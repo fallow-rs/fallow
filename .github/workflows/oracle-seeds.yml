@@ -12,7 +12,10 @@ name: Oracle Seeds
 # steps of the failing sequence. Add that sequence to REGRESSIONS in the
 # sequences.rs file of the cache model when you fix the cause: in
 # crates/engine/tests/integration/cache_model for the analysis caches, and in
-# crates/api/src/mutation/cache_model for the mutation result cache.
+# crates/api/src/mutation/cache_model for the mutation result cache. A
+# permutation oracle failure prints the template, the project seed and the
+# permutation seed: add that pair as a fixed test in
+# crates/cli/tests/integration/permutation/oracle.rs when you fix the cause.
 on:
   schedule:
     - cron: '40 2 * * *'
@@ -34,6 +37,14 @@ on:
         description: 'The first mutation result cache seed number (0: run number times MUTATION_SEED_STRIDE)'
         type: number
         default: 0
+      permutation_seeds:
+        description: 'The number of permutation oracle project seeds to run'
+        type: number
+        default: 60
+      permutation_start:
+        description: 'The first permutation oracle project seed (0: run number times PERMUTATION_SEED_STRIDE)'
+        type: number
+        default: 0
 
 concurrency:
   group: oracle-seeds
@@ -47,6 +58,9 @@ env:
   # Each mutation result cache seed runs the real test runner about ten
   # times, so its range is smaller.
   MUTATION_SEED_STRIDE: 100
+  # Each permutation oracle seed runs the binary about 180 times (each
+  # command and format, with and without the permutation).
+  PERMUTATION_SEED_STRIDE: 60
   # A background git repack after a fixture commit races the next git add.
   # See scripts/workflow-policy.test.mjs.
   GIT_CONFIG_COUNT: '2'
@@ -194,6 +208,70 @@ jobs:
               echo '```'
             else
               echo "The run failed before it compared a sequence. Read the log of this step."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+  permutation-seeds:
+    name: Permutation oracle wide seed range
+    runs-on: ubuntu-26.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          cache-key: oracle-seeds-permutation
+
+      - name: Build the permutation oracle tests
+        run: cargo test --locked -p fallow-cli --test integration permutation::oracle --no-run
+
+      - name: Run the wide seed range
+        shell: bash
+        env:
+          INPUT_SEEDS: ${{ inputs.permutation_seeds }}
+          INPUT_START: ${{ inputs.permutation_start }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          count="${INPUT_SEEDS:-$PERMUTATION_SEED_STRIDE}"
+          start="${INPUT_START:-0}"
+          case "$count:$start" in
+            *[!0-9:]* | :* | *:) echo "::error::seeds and start must be whole numbers"; exit 2 ;;
+          esac
+          if [ "$count" -lt 1 ]; then
+            echo "::error::seeds must be 1 or more"
+            exit 2
+          fi
+          if [ "$start" = 0 ]; then
+            start=$(( (RUN_NUMBER - 1) * PERMUTATION_SEED_STRIDE + 1 ))
+          fi
+          export FALLOW_PERMUTATION_SEEDS="$count"
+          export FALLOW_PERMUTATION_SEED_START="$start"
+          echo "Project seeds $start to $(( start + count - 1 ))"
+          status=0
+          cargo test --locked -p fallow-cli --test integration permutation::oracle::seed_sweep_keeps_output_identical \
+            -- --ignored --exact --nocapture 2>&1 | tee seeds.log || status=$?
+          {
+            echo "## Permutation oracle wide seed range"
+            echo
+            echo "Project seeds $start to $(( start + count - 1 )). Run again with \`FALLOW_PERMUTATION_SEED_START=$start FALLOW_PERMUTATION_SEEDS=$count\`."
+            echo
+            if [ "$status" = 0 ]; then
+              echo "No output changed with the discovery order."
+            elif grep -q 'the output changes with the discovery order' seeds.log; then
+              echo "An output changed with the discovery order:"
+              echo
+              echo '```text'
+              sed -n '/panicked at/,$p' seeds.log | head -40
+              echo '```'
+            else
+              echo "The run failed before it compared an output. Read the log of this step."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
