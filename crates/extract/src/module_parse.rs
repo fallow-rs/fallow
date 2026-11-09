@@ -37,6 +37,9 @@ pub fn parse_source_to_module(
 
 /// Parse source text into a [`ModuleInfo`], with the user flag patterns
 /// applied on top of the built-in ones.
+///
+/// A leading byte order mark is removed, and the spans count from the end of
+/// it.
 pub fn parse_source_to_module_with_flags(
     file_id: FileId,
     path: &Path,
@@ -45,7 +48,31 @@ pub fn parse_source_to_module_with_flags(
     need_complexity: bool,
     flag_patterns: &FlagPatterns,
 ) -> ModuleInfo {
-    let bounded = crate::nesting::parse_file_bounded(path, crate::strip_bom(source), || {
+    parse_source_without_bom(
+        file_id,
+        path,
+        crate::strip_bom(source),
+        content_hash,
+        need_complexity,
+        flag_patterns,
+    )
+}
+
+/// [`parse_source_to_module_with_flags`] for a source that a caller already
+/// read without its byte order mark.
+///
+/// Only the first U+FEFF of a file is the mark. Thus this function must not
+/// remove a U+FEFF again: a second U+FEFF is source text, and the spans
+/// count it.
+pub fn parse_source_without_bom(
+    file_id: FileId,
+    path: &Path,
+    source: &str,
+    content_hash: u64,
+    need_complexity: bool,
+    flag_patterns: &FlagPatterns,
+) -> ModuleInfo {
+    let bounded = crate::nesting::parse_file_bounded(path, source, || {
         let module = parse_source_to_module_unbounded(
             file_id,
             path,

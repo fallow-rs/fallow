@@ -262,7 +262,6 @@ fn parse_source_to_module_inner(
     need_complexity: bool,
     flag_patterns: &FlagPatterns,
 ) -> ModuleInfo {
-    let source = crate::strip_bom(source);
     if let Some(module) =
         parse_non_js_source_to_module(file_id, path, source, content_hash, need_complexity)
     {

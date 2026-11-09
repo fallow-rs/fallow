@@ -81,7 +81,6 @@ const COLOR_FUNCTIONS: &[&[u8]] = &[
 /// The module is a failed parse with no facts, so the file shows up as
 /// degraded instead of aborting the run.
 pub fn too_deep_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleInfo {
-    let source = crate::strip_bom(source);
     let mut info = ModuleInfoExtractor::new().into_module_info(
         file_id,
         content_hash,
