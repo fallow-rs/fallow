@@ -195,6 +195,10 @@ pub struct PackageJson {
     /// The tegg `eggModule` block of a module package, kept raw.
     #[serde(default, rename = "eggModule")]
     pub egg_module: Option<serde_json::Value>,
+    /// The `n8n` block of an n8n node package (`nodes` and `credentials`),
+    /// kept raw so that an unexpected shape does not fail manifest parsing.
+    #[serde(default)]
+    pub n8n: Option<serde_json::Value>,
 }
 
 impl PackageJson {

@@ -674,3 +674,62 @@ to `dotenv-cli` and `@dotenvx/dotenvx`. Plugin activation requires one of those 
 dependency or script evidence. `.env` files are not plugin config or entry
 points, and the `dotenv` runtime library is credited only when source or a
 supported Node preload actually uses it.
+
+## gulp
+
+The `gulp` plugin activates on a `gulp` or `gulp-cli` dependency. It makes
+the `gulpfile` of each package root an entry point, with the extensions that
+the gulp module loaders accept. A `gulpfile.js` or `gulpfile.ts` directory
+gives its `index` file. The plugin credits no package: a gulpfile imports
+`gulp`, and a package script that runs `gulp` credits it.
+
+## n8n node packages
+
+The `n8n` plugin activates on a `package.json` with an `n8n` block. It reads
+the string values of `n8n.nodes` and `n8n.credentials`. Each value is a path
+relative to the package root. A path to an existing file is the entry. A path
+to build output maps to its source through the `tsconfig` output map
+(`outDir` and `rootDir`). When no config maps the path, the plugin removes the
+first path segment and looks for the source at the package root, because node
+packages often set `outDir` without `rootDir`. A path that climbs out of the
+package gives no entry. The entries have the runtime role.
+
+The plugin also credits the members that n8n reads from a class that
+implements `INodeType` or `ICredentialType`. The rule is scoped to the
+implements clause, so other classes keep their findings.
+
+## unplugin-icons imports
+
+The `unplugin-icons` plugin activates on an `unplugin-icons` dependency. It
+marks the `~icons/`, `virtual:icons/` and `virtual/icons/` module prefixes as
+virtual modules, so an icon import is not an unlisted dependency or an
+unresolved import.
+
+The package credit is in `analyze/iconify.rs`, next to the credit for Iconify
+markup strings. The analysis reads the import, re-export and dynamic import
+specifiers of each resolved module, because `ModuleInfo` releases its dynamic
+imports after resolution. An import of `<prefix><set>/<name>` credits
+`@iconify-json/<set>`, `@iconify/json` and `unplugin-icons` when the project
+declares them. unplugin-icons loads an icon set from `@iconify-json/<set>`
+first and from `@iconify/json` next. The credit applies to the whole project,
+the same as the markup credit, because a package can bundle the icon imports
+of another workspace package.
+
+## vite-plugin-pages routes
+
+The `vite-plugin-pages` plugin activates on a `vite-plugin-pages` dependency
+and reads `vite.config.*`. It finds the `Pages(...)` call in the `plugins`
+array through the default import of `vite-plugin-pages`, also inside a
+wrapper call. The shared reader is
+`extract_vite_plugin_call_string_lists` in
+`config_parser_vite_plugin_call.rs`.
+
+Each `dirs` entry (a string, or the `dir` of an object) becomes the glob
+`<dir>/**/*.{<extensions>}` relative to the Vite root: the `root` option, or
+the config directory. A dir that climbs out of the workspace package becomes
+a parent-relative entry pattern. A call without `dirs` uses `src/pages`. The
+default extensions are the union of the Vue, React and Solid resolver
+defaults. A call whose options argument is not an object literal, or whose
+`dirs` is not static, gives no entries. The `exclude` globs are relative to
+each page directory, and an excluded file is not an entry point. The plugin
+also marks `vite.config.*` as always used. The entries have the runtime role.
