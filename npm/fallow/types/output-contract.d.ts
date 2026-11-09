@@ -21414,8 +21414,9 @@ checked: number
  */
 compile_errors: number
 /**
- * The checked survivors that got an `equivalence_hint`. They keep the
- * status `survived`.
+ * The mutants of the final report that have an `equivalence_hint`. They
+ * keep the status `survived`. A verdict that makes a mutant `equivalent`
+ * removes its hint and lowers this count.
  */
 hinted?: number
 /**

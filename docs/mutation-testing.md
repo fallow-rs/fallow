@@ -1620,12 +1620,15 @@ are not checked, so the cost grows with the number of survivors only.
   runtime value can be nullish, the mutant is equivalent, and a verdict file
   (`--verdicts`) records it.
 - The hint is advisory and can be wrong. A type does not prove a run-time
-  value. Two examples: under `exactOptionalPropertyTypes`, the property
-  `value?: T` can be absent at run time although code reads it as `T`; and a
-  method that a caller detaches (`const read = box.read; read()`) loses its
-  `this`, so `this.value?.b` throws without the link. The hint rules are
-  conservative on purpose, but they do not cover each such case. Read the
-  code before you write a verdict.
+  value. Two examples: a method that a caller detaches
+  (`const read = box.read; read()`) loses its `this`, so `this?.value` returns
+  `undefined` and `this.value` throws; and a function that declares the
+  return type `{ b: number }` but returns the result of `JSON.parse("null")`,
+  so `parse(s)?.b` returns `undefined` and `parse(s).b` throws. The hint
+  rules are conservative on purpose, but they do not cover each such case.
+  Read the code before you write a verdict.
+- A verdict for a hinted survivor sets the status `equivalent` and removes the
+  hint. `typecheck.hinted` counts the hints that stay in the final report.
 - The hint needs `strictNullChecks` (or `strict`) and
   `noUncheckedIndexedAccess` in the `tsconfig.json` of the file, because
   without the second option `xs[0]` has a non-nullable type and is `undefined`

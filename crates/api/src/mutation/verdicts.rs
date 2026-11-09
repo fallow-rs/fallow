@@ -135,7 +135,9 @@ pub fn validate_mutation_verdicts(verdict_json: &[u8]) -> Result<(), Programmati
 /// Applies a verdict document to `report`.
 ///
 /// Each verdict for a `survived`, `no_coverage` or `flaky` mutant sets the
-/// status `equivalent`, which does not count in the score. A verdict for a
+/// status `equivalent`, which does not count in the score. The mutant loses
+/// its `equivalence_hint`, and `typecheck.hinted` counts the hints that stay
+/// in the report. A verdict for a
 /// killed or timed-out mutant is contradicted by a test, so the status stays.
 /// A verdict for a mutant with no tested result (`pending`, `runtime_error`,
 /// `pruned`) is deferred. A verdict that matches no mutant is unmatched; it
@@ -172,6 +174,7 @@ pub fn apply_mutation_verdicts(
             Effect::Applied => {
                 if status != MutantStatus::Equivalent {
                     report.mutants[index].status = MutantStatus::Equivalent;
+                    report.mutants[index].equivalence_hint = None;
                     move_in_function(report, index, status);
                 }
                 applied.insert(id);
@@ -192,6 +195,13 @@ pub fn apply_mutation_verdicts(
         .collect();
 
     report.summary = MutationSummary::from_results(&report.mutants);
+    if let Some(typecheck) = report.typecheck.as_mut() {
+        typecheck.hinted = report
+            .mutants
+            .iter()
+            .filter(|mutant| mutant.equivalence_hint.is_some())
+            .count();
+    }
     report.verdicts = Some(MutationVerdictJoin {
         verdicts_sha256: sha256_hex(verdict_json),
         applied: applied.into_iter().collect(),
@@ -206,9 +216,9 @@ pub fn apply_mutation_verdicts(
 #[expect(clippy::unwrap_used, reason = "tests unwrap to keep assertions short")]
 mod tests {
     use fallow_output::{
-        MutantLocation, MutantResult, MutationCompletion, MutationFunctionResult,
-        MutationSchemaVersion, MutationScopeKind, MutationScopeOutput, MutationSummary,
-        MutationTimings, MutationWorktreeCheck,
+        MutantEquivalenceHint, MutantLocation, MutantResult, MutationCompletion,
+        MutationFunctionResult, MutationSchemaVersion, MutationScopeKind, MutationScopeOutput,
+        MutationSummary, MutationTimings, MutationTypecheckOutput, MutationWorktreeCheck,
     };
     use fallow_types::envelope::{ElapsedMs, ToolVersion};
 
@@ -324,6 +334,41 @@ mod tests {
             .collect();
         serde_json::to_vec(&serde_json::json!({ "schema_version": "1", "verdicts": verdicts }))
             .unwrap()
+    }
+
+    /// A verdict for a hinted survivor makes the hint redundant. The final
+    /// report keeps the hint only on a mutant that is still `survived`, and
+    /// `typecheck.hinted` counts the hints of the final report.
+    #[test]
+    fn a_verdict_clears_the_hint_and_the_hinted_count() {
+        let mut judged = mutant("m2", MutantStatus::Survived);
+        judged.equivalence_hint = Some(MutantEquivalenceHint::TypeNonNullish);
+        let mut open = mutant("m3", MutantStatus::Survived);
+        open.equivalence_hint = Some(MutantEquivalenceHint::TypeNonNullish);
+        let mut report = report(vec![mutant("m1", MutantStatus::Killed), judged, open]);
+        report.typecheck = Some(MutationTypecheckOutput {
+            completed: true,
+            survivors: 2,
+            checked: 2,
+            compile_errors: 0,
+            hinted: 2,
+            skipped: Vec::new(),
+        });
+
+        apply_mutation_verdicts(&mut report, &document(&["m2"])).unwrap();
+
+        assert_eq!(report.mutants[1].status, MutantStatus::Equivalent);
+        assert_eq!(report.mutants[1].equivalence_hint, None);
+        assert_eq!(report.mutants[2].status, MutantStatus::Survived);
+        assert_eq!(
+            report.mutants[2].equivalence_hint,
+            Some(MutantEquivalenceHint::TypeNonNullish)
+        );
+        let typecheck = report.typecheck.as_ref().unwrap();
+        assert_eq!(typecheck.hinted, 1);
+        assert_eq!(typecheck.checked, 2);
+        let value = serde_json::to_value(&report.mutants[1]).unwrap();
+        assert!(value.get("equivalence_hint").is_none(), "{value}");
     }
 
     #[test]

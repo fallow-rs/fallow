@@ -432,8 +432,8 @@ pub enum MutantEquivalenceHint {
     /// The mutant removes an optional-chaining link (`?.`), and the declared
     /// type of the receiver excludes `null` and `undefined`. If no run-time
     /// value can be nullish, the mutant is equivalent. A run-time value can
-    /// still be nullish, for example an optional property under
-    /// `exactOptionalPropertyTypes`, or a method that loses its `this`.
+    /// still be nullish, for example in a method that loses its `this`, or
+    /// in a call whose declared return type hides a nullish value.
     TypeNonNullish,
 }
 
@@ -780,8 +780,9 @@ pub struct MutationTypecheckOutput {
     /// The checked survivors that do not type-check. They have the status
     /// `compile_error`.
     pub compile_errors: usize,
-    /// The checked survivors that got an `equivalence_hint`. They keep the
-    /// status `survived`.
+    /// The mutants of the final report that have an `equivalence_hint`. They
+    /// keep the status `survived`. A verdict that makes a mutant `equivalent`
+    /// removes its hint and lowers this count.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub hinted: usize,
     /// The survivors that the checker did not check, by reason.
