@@ -510,3 +510,66 @@ fn opt_in_mutants_run_like_the_applied_mutant() {
         assert!(count == 0 || count > 10, "{count}");
     }
 }
+
+/// Statements that start with a replaced call and continue with an
+/// operator: the guard against the previous line must keep the grouping of
+/// the whole statement.
+const STATEMENT_START_FIXTURE: &str = r#"const out = [];
+let n = 0;
+function f() { n += 1; return 2; }
+f() ** 2;
+f() ** 2 ** 3;
+(f()) ** 2;
+f() + 1 > 2 ? out.push("big") : out.push("small");
+f() && out.push("and");
+!f() ? out.push("no") : out.push("yes");
+out.push(n);
+console.log(JSON.stringify(out));
+"#;
+
+#[test]
+fn statement_start_guard_keeps_the_statement_grouping() {
+    assert_cases(
+        Operator::CallExpression,
+        JS,
+        &[
+            ("f() ** 2;", &[("f()", "void 0, (void 0)")]),
+            ("f() ** 2 ** 3;", &[("f()", "void 0, (void 0)")]),
+            ("(f()) ** 2;", &[("f()", "(void 0)")]),
+        ],
+    );
+    for operators in [vec![Operator::CallExpression], Operator::ALL.to_vec()] {
+        let options = MutationOptions {
+            operators,
+            ranges: None,
+        };
+        assert_runs_like_each_mutant(STATEMENT_START_FIXTURE, &options);
+    }
+}
+
+#[test]
+fn block_statement_keeps_super_calls_in_arrows_of_a_constructor() {
+    assert_cases(
+        Operator::BlockStatement,
+        JS,
+        &[
+            (
+                "class A extends B { constructor() { (() => { if (x) { super(); } })(); } }",
+                &[],
+            ),
+            (
+                "class A extends B { constructor() { (() => { (() => { if (x) { super(); } })(); })(); } }",
+                &[],
+            ),
+        ],
+    );
+    let result = only(
+        "class A extends B { constructor() { super(); const g = function () { (() => { h(); })(); }; g(); } }",
+        JS,
+        Operator::BlockStatement,
+    );
+    assert_eq!(
+        pairs(&result, Operator::BlockStatement),
+        expected(&[(" (() => { h(); })(); ", ""), (" h(); ", "")])
+    );
+}

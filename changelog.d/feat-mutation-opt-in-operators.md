@@ -17,3 +17,4 @@
 
 - **`return-value` now mutates a concise arrow body that is a call, such as `() => save()`.** Before, such a body got no mutant.
 - **A branch or operand constant now gives no equivalent mutant through `!`.** `!(items.length >= 0) || flag` on an array no longer gives `false || flag`.
+- **A mutant at the start of an expression statement now keeps the grouping of the rest of the statement.** The guard against a join with the line before is now `void 0,`, not `void`. Before, `!x ? a() : b();` became `void (x) ? a() : b()` in the report and always ran `b()`, and `f() ** 2;` gave a syntax error.

@@ -665,11 +665,11 @@ fn unary_operator_removes_not_and_negation() {
         ("x = -+a;", &[("+", " -"), ("-", ""), ("-", "+ ")]),
         (
             "~a.indexOf(b) || f();",
-            &[("~a.indexOf(b)", "void (a.indexOf(b))")],
+            &[("~a.indexOf(b)", "void 0, (a.indexOf(b))")],
         ),
         (
             "!function () {}();",
-            &[("!function () {}()", "void (function () {}())")],
+            &[("!function () {}()", "void 0, (function () {}())")],
         ),
         ("-{}.x;", &[("-{}.x", "({}.x)"), ("-", "+")]),
     ];

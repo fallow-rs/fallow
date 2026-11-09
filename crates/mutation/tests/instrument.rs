@@ -565,7 +565,7 @@ fn instrumented_code_runs_like_the_original_and_like_each_mutant() {
     let mut differs = 0;
     for mutant in &result.mutants {
         let mutated = common::run_node(&common::apply(RUNTIME_FIXTURE, mutant));
-        let switched = common::run_node(&common::activate(mutant.id.as_str(), &result.code));
+        let switched = common::run_node_active(&result.code, mutant.id.as_str());
         assert_eq!(
             switched, mutated,
             "{} {:?} -> {:?}",

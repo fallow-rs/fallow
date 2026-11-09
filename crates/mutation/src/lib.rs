@@ -134,7 +134,7 @@ pub struct Mutant {
     pub original: String,
     /// The text that replaces the span. The original source with this
     /// replacement applied is the mutated program. At the start of an
-    /// expression statement, the text can start with `void`, so that the
+    /// expression statement, the text can start with `void 0,`, so that the
     /// statement does not join the line before it.
     pub replacement: String,
     /// The innermost function that contains the mutant.
@@ -587,10 +587,17 @@ fn starts_with_asi_hazard(text: &str) -> bool {
     hazard && !text.starts_with("++") && !text.starts_with("--")
 }
 
-/// Prefixes `void` to a replacement that starts an expression statement with
-/// an ASI hazard, so that the original source with the replacement applied
-/// keeps the statement boundary. When the original also starts with a hazard,
-/// the line before it already ends the statement, and no prefix is needed.
+/// Prefixes `void 0,` to a replacement that starts an expression statement
+/// with an ASI hazard, so that the original source with the replacement
+/// applied keeps the statement boundary. When the original also starts with a
+/// hazard, the line before it already ends the statement, and no prefix is
+/// needed.
+///
+/// The comma has the lowest precedence, so the rest of the statement keeps
+/// its grouping: `f() ** 2` becomes `void 0, (void 0) ** 2`, and
+/// `!x ? a() : b()` becomes `void 0, (x) ? a() : b()`. A `void` prefix alone
+/// would bind to the replacement only, which is a syntax error before `**`
+/// and makes the test of `? :` always `undefined`.
 fn guard_statement_start(
     source: &str,
     statement_starts: &std::collections::BTreeSet<u32>,
@@ -608,7 +615,7 @@ fn guard_statement_start(
         .as_bytes()
         .get((start as usize).wrapping_sub(1))
         .is_some_and(|&byte| is_identifier_byte(byte));
-    let prefix = if joins { " void " } else { "void " };
+    let prefix = if joins { " void 0, " } else { "void 0, " };
     format!("{prefix}{}", candidate.replacement)
 }
 

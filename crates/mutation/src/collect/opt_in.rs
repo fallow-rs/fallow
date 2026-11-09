@@ -189,8 +189,14 @@ impl Collector<'_> {
         self.empty_statements((it.span.start + 1, it.span.end - 1));
     }
 
+    /// True when the nearest frame that is not an arrow function is a
+    /// constructor: an arrow function has the `super` of that frame.
     fn in_constructor(&self) -> bool {
-        self.frames.last().is_some_and(|frame| frame.constructor)
+        self.frames
+            .iter()
+            .rev()
+            .find(|frame| !frame.arrow)
+            .is_some_and(|frame| frame.constructor)
     }
 
     fn empty_statements(&mut self, region: (u32, u32)) {

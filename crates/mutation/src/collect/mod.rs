@@ -94,6 +94,9 @@ struct Frame {
     reference: FunctionRef,
     constructor: bool,
     generator: bool,
+    /// True for an arrow function, which has the `this` and `super` of the
+    /// frame around it.
+    arrow: bool,
 }
 
 struct PendingFunction {
@@ -964,7 +967,7 @@ impl Collector<'_> {
         }
     }
 
-    fn push_frame(&mut self, span: Span, name: Option<String>, generator: bool) {
+    fn push_frame(&mut self, span: Span, name: Option<String>, generator: bool, arrow: bool) {
         let pending = self.pending.take();
         let constructor = pending.as_ref().is_some_and(|pending| pending.constructor);
         let name = name.or_else(|| pending.and_then(|pending| pending.name));
@@ -975,6 +978,7 @@ impl Collector<'_> {
             },
             constructor,
             generator,
+            arrow,
         });
     }
 
@@ -1164,7 +1168,7 @@ impl<'a> Visit<'a> for Collector<'_> {
             return;
         }
         let name = it.id.as_ref().map(|id| id.name.as_str().to_owned());
-        self.push_frame(it.span, name, it.generator);
+        self.push_frame(it.span, name, it.generator, false);
         if let Some(body) = &it.body {
             self.empty_function_body(body);
         }
@@ -1177,7 +1181,7 @@ impl<'a> Visit<'a> for Collector<'_> {
         if let Some(body) = body {
             self.expression_starts.insert(body.span().start);
         }
-        self.push_frame(it.span, None, false);
+        self.push_frame(it.span, None, false, true);
         if let ArrowFunctionBody::FunctionBody(body) = &it.body {
             self.empty_function_body(body);
         }

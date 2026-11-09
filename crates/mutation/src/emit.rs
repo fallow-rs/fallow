@@ -144,7 +144,9 @@ impl Emitter<'_, '_> {
             return;
         }
         let (start, end) = site.span;
-        // A statement that starts with `(` can join the line before it.
+        // A statement that starts with `(` can join the line before it. The
+        // comma keeps the grouping of the rest of the statement, as in
+        // `guard_statement_start`.
         if self.statement_starts.contains(&start) && parent_start != Some(start) {
             // `do++i` has no space after the keyword; `dovoid` would be a name.
             let joins = self
@@ -153,7 +155,8 @@ impl Emitter<'_, '_> {
                 .bytes()
                 .last()
                 .is_some_and(is_identifier_byte);
-            self.writer.push(if joins { " void " } else { "void " });
+            self.writer
+                .push(if joins { " void 0, " } else { "void 0, " });
         }
         self.writer.push("(");
         for mutant in &site.mutants {
