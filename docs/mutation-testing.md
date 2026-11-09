@@ -848,6 +848,19 @@ targets is a mismatch. The order of the targets does not matter.
 
 ## Timeouts
 
+The dry run executes the instrumented code, which is slower than the
+original code. The adapters therefore multiply the test timeout of a dry run
+by `DRY_RUN_TIMEOUT_FACTOR` (3, in `adapters/common.mjs`):
+
+- The Vitest adapter multiplies the `testTimeout` and `hookTimeout` of each
+  project. A value of 0 stays 0, because Vitest reads 0 as no limit.
+- The `bun test` adapter passes `--timeout` with 3 times the Bun default of
+  5 seconds. Bun reads no default timeout from `bunfig.toml`.
+- The `node:test` adapter sets no run timeout in a dry run, so only the
+  timeouts in the test files apply.
+
+A timeout that a test file sets on one test stays as it is in each adapter.
+
 Each mutant run has two time limits:
 
 - `timeout_ms` is `1.5` times the dry-run time of the covering tests, plus

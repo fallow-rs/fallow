@@ -96,6 +96,21 @@ export const validateInit = (init) => {
   );
 };
 
+/**
+ * The factor on the project test timeout in a dry run. The dry run executes
+ * the instrumented code, which is slower than the original code. A test close
+ * to its timeout must not become a baseline failure for that reason. A mutant
+ * run sets its own timeout from the dry-run durations.
+ */
+const DRY_RUN_TIMEOUT_FACTOR = 3;
+
+/** True for a timeout that sets a limit. Vitest reads 0 as no limit. */
+export const hasTimeoutLimit = (timeoutMs) => Number.isFinite(timeoutMs) && timeoutMs > 0;
+
+/** Gives the dry-run value of a timeout. A value that sets no limit stays as it is. */
+export const dryRunTimeout = (timeoutMs) =>
+  hasTimeoutLimit(timeoutMs) ? timeoutMs * DRY_RUN_TIMEOUT_FACTOR : timeoutMs;
+
 export const validateDryRun = (request) => {
   expectRequest(isOptional(request.test_files, isStringList), "test_files must be a list of paths");
 };
