@@ -21,6 +21,7 @@ fallow-api = { workspace = true }
 fallow-config = { workspace = true }
 fallow-types = { workspace = true }
 ls-types = { workspace = true }
+oxc_syntax = { workspace = true }
 tower-lsp-server = { workspace = true }
 serde = { workspace = true }
 tokio = { workspace = true }

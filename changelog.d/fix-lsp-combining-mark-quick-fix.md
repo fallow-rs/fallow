@@ -1,0 +1,3 @@
+### Fixed
+
+- **The LSP offers the remove-export quick fix for a name with a combining mark.** JavaScript allows a combining mark after the first character of a name, for example `café` written as an `e` followed by the character U+0301. The quick fix read the name only up to the mark, so it gave no action for such an export. It could also give the action for an export `cafe` on that line. The quick fix now reads a name with the identifier rule of the parser. The "Dismiss optional prop review" action uses the same rule, so it no longer adds a comment for a longer name that only starts with the prop name.

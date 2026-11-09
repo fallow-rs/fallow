@@ -48,7 +48,9 @@ pub fn build_suppress_absent_prop_actions(
             {
                 return None;
             }
-            let is_ident = |c: char| c.is_alphanumeric() || c == '_' || c == '$';
+            // The parser rule, so a combining mark or a joiner next to the
+            // name makes it a different name.
+            let is_ident = oxc_syntax::identifier::is_identifier_part;
             if content
                 .get(..start)?
                 .chars()
@@ -232,6 +234,30 @@ mod tests {
             action.diagnostics.as_ref().expect("linked diagnostic")[0].range,
             range
         );
+    }
+
+    /// U+0301 continues a name, so `highlight` + U+0301 is a different name
+    /// from the `highlight` of the finding.
+    #[test]
+    fn longer_name_with_combining_mark_does_not_offer_action() {
+        let project = tempfile::tempdir().expect("project");
+        let path = project.path().join("Card.tsx");
+        let source = "type Props = {\n  highlight\u{301}?: boolean\n};\n";
+        std::fs::write(&path, source).expect("saved declaration");
+        let uri = Uri::from_file_path(&path).expect("uri");
+        let results = results(&path, 2, 2);
+        let range = Range {
+            start: Position {
+                line: 1,
+                character: 2,
+            },
+            end: Position {
+                line: 1,
+                character: 11,
+            },
+        };
+        let actions = build_suppress_absent_prop_actions(&results, &path, &uri, &range, source);
+        assert!(actions.is_empty());
     }
 
     #[test]
