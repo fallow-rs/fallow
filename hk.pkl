@@ -132,6 +132,11 @@ hooks {
       ["file-length"] {
         check = "sh scripts/hook-file-length.sh origin/main upstream/main"
       }
+      // Same commands as the CI "JS Lint and Format" job. A rebase applies
+      // resolved conflicts without the pre-commit hook.
+      ["js-lint"] {
+        check = "sh scripts/hook-js-lint.sh --all"
+      }
     }
   }
 }

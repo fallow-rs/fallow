@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
@@ -71,4 +71,24 @@ test("the pre-commit hook reads the scope list from the helper", () => {
   const hook = readFileSync(join(repoRoot, "scripts/hook-js-lint.sh"), "utf8");
   assert.match(hook, /node scripts\/js-lint-scopes\.mjs --filter-staged/u);
   assert.doesNotMatch(hook, /grep -E '\^\(npm\//u, "the hook must not hold its own copy");
+});
+
+// A rebase applies resolved conflicts without the pre-commit hook, so the
+// pre-push hook checks every JavaScript file in the scopes.
+test("the pre-push hook checks JavaScript files without a staged file", (t) => {
+  const hooks = readFileSync(join(repoRoot, "hk.pkl"), "utf8");
+  const prePush = /\["pre-push"\][\s\S]*$/u.exec(hooks)?.[0] ?? "";
+  assert.match(prePush, /sh scripts\/hook-js-lint\.sh --all/u);
+
+  if (!existsSync(join(repoRoot, "node_modules"))) {
+    t.skip("node_modules is missing");
+    return;
+  }
+  const result = spawnSync("sh", ["scripts/hook-js-lint.sh", "--all"], {
+    cwd: repoRoot,
+    env: { ...process.env, GIT_INDEX_FILE: join(repoRoot, ".git-empty-index-for-test") },
+    encoding: "utf8",
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(`${result.stdout}${result.stderr}`, /correct format/u);
 });
