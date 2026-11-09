@@ -954,6 +954,7 @@ fn a_function_that_writes_through_an_orm_is_pruned_unless_allowed() {
         function_dispositions(&default, "src/routes.ts"),
         BTreeMap::from([
             ("<top-level>".to_owned(), PLANNED),
+            ("app.delete(\"/items/:id\")".to_owned(), PLANNED),
             ("delete".to_owned(), PLANNED),
             ("pageCount".to_owned(), PLANNED),
         ]),

@@ -336,8 +336,9 @@ pub struct MutantLocation {
 ///
 /// Each side is an operator token (for example `??` or `<=`), a fixed literal
 /// (`true`, `undefined`, `""`, `"fallow"`, `void 0`), a regular expression
-/// token (`^`, `$`, `[`, `[^`, `\d`), or a placeholder for a side that is
-/// project code: `<condition>`, `<call>`, `<expression>` or `<string>`. An
+/// token (`^`, `$`, `[`, `[^`, `+`, `{n,m}`, `\d`), or a placeholder for a
+/// side that is project code: `<condition>`, `<call>`, `<expression>`,
+/// `<string>` or `<template>`. An
 /// empty side means that the edit removes the token.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]

@@ -22,6 +22,20 @@ fn arithmetic_operator_swaps_and_skips_string_concatenation() {
         ("x = \"a\" + b;", &[]),
         ("x = a + `t${b}`;", &[]),
         ("x = a ** b;", &[]),
+        ("x = \"a\" * b;", &[]),
+        ("x = a / `t`;", &[]),
+        ("x = a % \"2\";", &[]),
+        ("x *= 2;", &[("*=", "/=")]),
+        ("x /= 2;", &[("/=", "*=")]),
+        ("x %= 2;", &[("%=", "*=")]),
+        ("x <<= 2;", &[("<<=", ">>=")]),
+        ("x >>= 2;", &[(">>=", "<<=")]),
+        ("x &= 2;", &[("&=", "|=")]),
+        ("x |= 2;", &[("|=", "&=")]),
+        ("x *= \"a\";", &[]),
+        ("x >>>= 2;", &[]),
+        ("x ^= 2;", &[]),
+        ("x **= 2;", &[]),
     ];
     for (source, want) in cases {
         let result = run(source, JS);
@@ -52,10 +66,22 @@ fn relational_operator_uses_the_non_redundant_subset() {
             "x = a >= b;",
             &[(">=", ">"), (">=", "=="), ("a >= b", "true")],
         ),
-        ("x = a === b;", &[("===", "!=="), ("a === b", "false")]),
-        ("x = a !== b;", &[("!==", "==="), ("a !== b", "true")]),
-        ("x = a == b;", &[("==", "!="), ("a == b", "false")]),
-        ("x = a != b;", &[("!=", "=="), ("a != b", "true")]),
+        (
+            "x = a === b;",
+            &[("===", "!=="), ("a === b", "false"), ("a === b", "true")],
+        ),
+        (
+            "x = a !== b;",
+            &[("!==", "==="), ("a !== b", "true"), ("a !== b", "false")],
+        ),
+        (
+            "x = a == b;",
+            &[("==", "!="), ("a == b", "false"), ("a == b", "true")],
+        ),
+        (
+            "x = a != b;",
+            &[("!=", "=="), ("a != b", "true"), ("a != b", "false")],
+        ),
         ("x = a instanceof B;", &[]),
         ("x = k in o;", &[]),
     ];
@@ -409,18 +435,34 @@ fn logical_operator_swaps_and_keeps_precedence() {
 }
 
 #[test]
-fn negate_condition_covers_plain_tests_only() {
+fn negate_condition_covers_branch_and_loop_tests() {
     let both: &[(&str, &str)] = &[("x", "false"), ("x", "true")];
+    let logical: &[(&str, &str)] = &[("a && b", "false"), ("a && b", "true")];
     let cases: &[(&str, &[(&str, &str)])] = &[
         ("if (x) {}", both),
         ("while (x) {}", both),
         ("do {} while (x);", both),
         ("for (; x; ) {}", both),
         ("y = x ? 1 : 2;", both),
-        ("if (a < b) {}", &[]),
+        // The `false` mutant of `a < b` is the relational constant.
+        ("if (a < b) {}", &[("a < b", "true")]),
+        ("if ((a < b)) {}", &[("a < b", "true")]),
+        // Both constants of `a === b` are relational mutants.
         ("if (a === b) {}", &[]),
-        ("if (a && b) {}", &[]),
-        ("for (;;) { break; }", &[]),
+        ("if (a && b) {}", logical),
+        ("y = a && b ? 1 : 2;", logical),
+        // A loop test that is a comparison or a logical expression gets
+        // `false` only: `true` gives an endless loop.
+        ("while (a && b) {}", &[("a && b", "false")]),
+        ("do {} while (a || b);", &[("a || b", "false")]),
+        ("for (; a && b; ) {}", &[("a && b", "false")]),
+        ("while (a < b) {}", &[]),
+        ("for (;;) { break; }", &[("", "false")]),
+        ("for (let i = 0;; i++) { break; }", &[("", "false")]),
+        (
+            "for (let i = 0 /* ; */ ; ; i++) { break; }",
+            &[("", "false")],
+        ),
     ];
     for (source, want) in cases {
         let result = run(source, JS);
@@ -613,15 +655,23 @@ fn negate_condition_yields_to_boolean_literal_on_a_literal_test() {
 fn unary_operator_removes_not_and_negation() {
     let cases: &[(&str, &[(&str, &str)])] = &[
         ("x = !a;", &[("!", "")]),
-        ("x = -a;", &[("-", "")]),
+        ("x = -a;", &[("-", ""), ("-", "+")]),
         ("x = typeof a;", &[]),
-        ("x = +a;", &[]),
-        ("x = ~a;", &[]),
+        ("x = +a;", &[("+", "-")]),
+        ("x = ~a;", &[("~", "")]),
+        ("x = -1;", &[("-", "")]),
+        ("x = a+-b;", &[("-", ""), ("-", " +")]),
+        ("x = a - +b;", &[("+", "-")]),
+        ("x = -+a;", &[("+", " -"), ("-", ""), ("-", "+ ")]),
+        (
+            "~a.indexOf(b) || f();",
+            &[("~a.indexOf(b)", "void (a.indexOf(b))")],
+        ),
         (
             "!function () {}();",
             &[("!function () {}()", "void (function () {}())")],
         ),
-        ("-{}.x;", &[("-{}.x", "({}.x)")]),
+        ("-{}.x;", &[("-{}.x", "({}.x)"), ("-", "+")]),
     ];
     for (source, want) in cases {
         let result = run(source, JS);
@@ -643,7 +693,10 @@ fn unary_operator_keeps_export_default_and_arrow_bodies_valid() {
                 "(function () { return 1; }())",
             )],
         ),
-        ("export default -class {};", &[("-class {}", "(class {})")]),
+        (
+            "export default -class {};",
+            &[("-class {}", "(class {})"), ("-", "+")],
+        ),
         ("const g = () => !{}.x;", &[("!{}.x", "({}.x)")]),
         ("const h = () => !a;", &[("!a", "(a)")]),
     ];
@@ -664,6 +717,7 @@ fn relational_operator_keeps_the_grouping_of_a_nested_comparison() {
             "x = c == a < b;",
             &[
                 ("c == a < b", "false"),
+                ("c == a < b", "true"),
                 ("==", "!="),
                 ("a < b", "false"),
                 ("<", "<="),
@@ -773,7 +827,17 @@ fn return_value_returns_undefined_outside_constructors_and_generators() {
         ("function f() { return true; }", &[]),
         ("class A { constructor() { return a; } }", &[]),
         ("function* g() { return a; }", &[]),
-        ("const f = () => a;", &[]),
+        ("const f = () => a;", &[("a", "undefined")]),
+        ("const f = (x) => x + 1;", &[("x + 1", "undefined")]),
+        (
+            "const f = () => ({ a: 1 });",
+            &[("({ a: 1 })", "undefined")],
+        ),
+        ("export default () => a;", &[("a", "undefined")]),
+        ("const f = () => undefined;", &[]),
+        ("const f = () => void g();", &[]),
+        ("const f = () => true;", &[]),
+        ("const f = () => g();", &[]),
     ];
     for (source, want) in cases {
         let result = run(source, JS);
@@ -1117,7 +1181,14 @@ fn optional_chaining_skips_a_parenthesized_callee() {
 #[test]
 fn regex_literal_changes_one_pattern_token() {
     let cases: &[(&str, &[(&str, &str)])] = &[
-        ("x = /^a+$/;", &[("/^a+$/", "/a+$/"), ("/^a+$/", "/^a+/")]),
+        (
+            "x = /^a+$/;",
+            &[
+                ("/^a+$/", "/a+$/"),
+                ("/^a+$/", "/^a+/"),
+                ("/^a+$/", "/^a$/"),
+            ],
+        ),
         (
             "x = /[a-z]\\d/gi;",
             &[
@@ -1189,5 +1260,181 @@ fn operator_names_are_kebab_case() {
     assert_eq!(
         Operator::from_name("return-value"),
         Some(Operator::ReturnValue)
+    );
+}
+
+#[test]
+fn logical_operator_swaps_logical_assignments() {
+    let cases: &[(&str, &[(&str, &str)])] = &[
+        ("x &&= y;", &[("&&=", "||=")]),
+        ("x ||= y;", &[("||=", "&&=")]),
+        ("x ??= y;", &[("??=", "&&=")]),
+        ("x ??= \"a\";", &[("??=", "&&=")]),
+        ("x = y;", &[]),
+    ];
+    for (source, want) in cases {
+        let result = run(source, JS);
+        assert_eq!(
+            pairs(&result, Operator::LogicalOperator),
+            expected(want),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn negate_condition_replaces_boolean_operands_of_logical_expressions() {
+    let cases: &[(&str, &[(&str, &str)])] = &[
+        ("x = a < b && c;", &[("a < b", "true")]),
+        ("x = c && !a;", &[("!a", "true")]),
+        ("x = !a || c;", &[("!a", "false")]),
+        ("x = a >= b || c;", &[("a >= b", "false")]),
+        ("x = (a > b) && c;", &[("a > b", "true")]),
+        // The relational constant `false` of `a < b` is the same mutant.
+        ("x = a < b || c;", &[]),
+        // The relational constant `true` of `a === b` is the same mutant.
+        ("x = a === b && c;", &[]),
+        ("x = a && b;", &[]),
+        ("x = f() && b;", &[]),
+        ("x = a ?? !b;", &[]),
+        ("x = !!a && b;", &[("!!a", "true")]),
+    ];
+    for (source, want) in cases {
+        let result = run(source, JS);
+        assert_eq!(
+            pairs(&result, Operator::NegateCondition),
+            expected(want),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn one_mutant_per_replacement_text_at_a_span() {
+    let result = run("x = a === b && c;", JS);
+    let at_operand: Vec<_> = result
+        .mutants
+        .iter()
+        .filter(|m| m.original == "a === b" && m.replacement == "true")
+        .map(|m| m.operator)
+        .collect();
+    assert_eq!(at_operand, vec![Operator::RelationalOperator]);
+    let only_negate = common::run_with(
+        "x = a === b && c;",
+        JS,
+        &fallow_mutation::MutationOptions {
+            operators: vec![Operator::NegateCondition],
+            ranges: None,
+        },
+    );
+    assert_eq!(
+        pairs(&only_negate, Operator::NegateCondition),
+        expected(&[("a === b", "true")])
+    );
+}
+
+#[test]
+fn for_loop_without_a_test_gets_a_false_test() {
+    let source = "for (;;) { if (g()) break; }";
+    let result = run(source, JS);
+    let mutated: Vec<String> = result
+        .mutants
+        .iter()
+        .filter(|m| m.operator == Operator::NegateCondition && m.original.is_empty())
+        .map(|m| common::apply(source, m))
+        .collect();
+    assert_eq!(mutated, vec!["for (;false;) { if (g()) break; }"]);
+}
+
+#[test]
+fn pathe_condition_gets_operand_and_quantifier_mutants() {
+    let source = "export function f(dir: string, p: string) {\n  if (dir === \".\" && !normalizeWindowsPath(p).replace(/\\/+$/, \"\").includes(\"/\")) {\n    return p;\n  }\n  return dir;\n}\n";
+    let result = run(source, TS);
+    let has = |original: &str, replacement: &str| {
+        result
+            .mutants
+            .iter()
+            .any(|m| m.original == original && m.replacement == replacement)
+    };
+    assert!(has("dir === \".\"", "true"), "dir === \".\" -> true");
+    assert!(has("/\\/+$/", "/\\/$/"), "/\\/+$/ -> /\\/$/");
+}
+
+#[test]
+fn regex_literal_removes_quantifiers_and_inner_anchors() {
+    let cases: &[(&str, &[(&str, &str)])] = &[
+        (
+            "x = /a+b*c?/;",
+            &[
+                ("/a+b*c?/", "/ab*c?/"),
+                ("/a+b*c?/", "/a+bc?/"),
+                ("/a+b*c?/", "/a+b*c/"),
+            ],
+        ),
+        ("x = /a+?/;", &[("/a+?/", "/a/")]),
+        ("x = /a*?b/;", &[("/a*?b/", "/ab/")]),
+        ("x = /a{2,5}/;", &[("/a{2,5}/", "/a{2}/")]),
+        ("x = /a{2,}/;", &[("/a{2,}/", "/a{2}/")]),
+        ("x = /a{2,5}?/;", &[("/a{2,5}?/", "/a{2}?/")]),
+        ("x = /a{2}/;", &[]),
+        ("x = /a{/;", &[]),
+        ("x = /a{x}/;", &[]),
+        ("x = /(?:a)+/;", &[("/(?:a)+/", "/(?:a)/")]),
+        ("x = /(?:a)/;", &[]),
+        ("x = /(?<n>a)/;", &[]),
+        ("x = /(?=a)b/;", &[]),
+        ("x = /(?<=a)b/;", &[]),
+        ("x = /(?!a)b/;", &[]),
+        ("x = /a\\+/;", &[]),
+        ("x = /[a+?*]/;", &[("/[a+?*]/", "/[^a+?*]/")]),
+        (
+            "x = /(^a|b$)/;",
+            &[("/(^a|b$)/", "/(a|b$)/"), ("/(^a|b$)/", "/(^a|b)/")],
+        ),
+        ("x = /a|^b/;", &[("/a|^b/", "/a|b/")]),
+        ("x = /a$|b/;", &[("/a$|b/", "/a|b/")]),
+        ("x = /(?:^a)/;", &[("/(?:^a)/", "/(?:a)/")]),
+        ("x = /(?<=^)a/;", &[]),
+        (
+            "x = /[\\d]+/v;",
+            &[("/[\\d]+/v", "/[\\D]+/v"), ("/[\\d]+/v", "/[\\d]/v")],
+        ),
+    ];
+    for (source, want) in cases {
+        let result = run(source, JS);
+        assert_eq!(
+            pairs(&result, Operator::RegexLiteral),
+            expected(want),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn string_literal_empties_and_fills_template_literals() {
+    let cases: &[(&str, &[(&str, &str)])] = &[
+        ("x = `a${b}`;", &[("`a${b}`", "``")]),
+        ("x = `abc`;", &[("`abc`", "``")]),
+        ("x = ``;", &[("``", "`fallow`")]),
+        ("x = `${a}`;", &[("`${a}`", "``")]),
+        ("x = tag`a${b}`;", &[]),
+        ("x = tag`a${\"b\"}`;", &[("\"b\"", "\"\"")]),
+        ("console.log(`a`);", &[]),
+        ("const m = require(`./m`);", &[]),
+        ("const m = import(`./m`);", &[]),
+        ("x = { [`k`]: 1 };", &[]),
+    ];
+    for (source, want) in cases {
+        let result = run(source, JS);
+        assert_eq!(
+            pairs(&result, Operator::StringLiteral),
+            expected(want),
+            "{source}"
+        );
+    }
+    let typed = run("type T = `a${string}`;\nlet x: `b` = `b`;", TS);
+    assert_eq!(
+        pairs(&typed, Operator::StringLiteral),
+        expected(&[("`b`", "``")])
     );
 }

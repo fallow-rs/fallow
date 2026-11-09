@@ -35,8 +35,8 @@ use oxc_ast::ast::{
     TSInterfaceDeclaration, TSNamespaceDeclaration, TSNamespaceExportDeclaration, TSType,
     TSTypeAliasDeclaration, TSTypeAnnotation, TSTypeName, TSTypeOperatorOperator,
     TSTypeParameterDeclaration, TSTypeParameterInstantiation, TaggedTemplateExpression,
-    UnaryExpression, UpdateExpression, VariableDeclaration, VariableDeclarationKind,
-    VariableDeclarator, WhileStatement, WithStatement,
+    TemplateLiteral, UnaryExpression, UpdateExpression, VariableDeclaration,
+    VariableDeclarationKind, VariableDeclarator, WhileStatement, WithStatement,
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_semantic::{Semantic, SemanticBuilder};
@@ -48,6 +48,11 @@ use oxc_syntax::reference::ReferenceId;
 use oxc_syntax::scope::ScopeFlags;
 use oxc_syntax::symbol::SymbolId;
 
+use crate::replacements::{
+    arithmetic_replacement, assignment_replacement, equivalent_zero_replacement, is_boolean_valued,
+    is_comparison_level, is_relational, is_text_operand, lowers_precedence, mirrored,
+    relational_replacements,
+};
 use crate::{FunctionRef, MutantChange, Operator, is_identifier_byte};
 
 /// One candidate mutant: replace `region` with `replacement`.
@@ -869,30 +874,6 @@ impl<'a> Visit<'a> for FilteredLookups<'_, '_> {
     }
 }
 
-/// The comparison operator with its operands swapped: `0 < n` is `n > 0`.
-const fn mirrored(operator: BinaryOperator) -> BinaryOperator {
-    match operator {
-        BinaryOperator::LessThan => BinaryOperator::GreaterThan,
-        BinaryOperator::LessEqualThan => BinaryOperator::GreaterEqualThan,
-        BinaryOperator::GreaterThan => BinaryOperator::LessThan,
-        BinaryOperator::GreaterEqualThan => BinaryOperator::LessEqualThan,
-        other => other,
-    }
-}
-
-/// The replacement that is equivalent for `n <operator> 0` when `n` is a
-/// non-negative integer: `n > 0` is `n != 0`, `n <= 0` is `n == 0`,
-/// `n < 0` is always false and `n >= 0` is always true.
-const fn equivalent_zero_replacement(operator: BinaryOperator) -> Option<&'static str> {
-    match operator {
-        BinaryOperator::GreaterThan => Some("!="),
-        BinaryOperator::LessEqualThan => Some("=="),
-        BinaryOperator::LessThan => Some("false"),
-        BinaryOperator::GreaterEqualThan => Some("true"),
-        _ => None,
-    }
-}
-
 fn is_zero(expression: &Expression<'_>) -> bool {
     matches!(
         callee_without_wrappers(expression),
@@ -959,73 +940,6 @@ fn is_skipped_call(call: &CallExpression<'_>) -> bool {
     matches!(call.callee, Expression::Super(_))
         || is_logging_callee(&call.callee)
         || is_require_callee(&call.callee)
-}
-
-const fn is_relational(operator: BinaryOperator) -> bool {
-    matches!(
-        operator,
-        BinaryOperator::LessThan
-            | BinaryOperator::LessEqualThan
-            | BinaryOperator::GreaterThan
-            | BinaryOperator::GreaterEqualThan
-            | BinaryOperator::Equality
-            | BinaryOperator::Inequality
-            | BinaryOperator::StrictEquality
-            | BinaryOperator::StrictInequality
-    )
-}
-
-/// The operators at the relational or equality precedence level.
-const fn is_comparison_level(operator: BinaryOperator) -> bool {
-    is_relational(operator) || matches!(operator, BinaryOperator::In | BinaryOperator::Instanceof)
-}
-
-/// True when the replacement operator binds weaker than `operator`, so that
-/// a token swap inside a comparison regroups the operands.
-const fn lowers_precedence(operator: BinaryOperator, replacement: &str) -> bool {
-    matches!(
-        operator,
-        BinaryOperator::LessThan
-            | BinaryOperator::LessEqualThan
-            | BinaryOperator::GreaterThan
-            | BinaryOperator::GreaterEqualThan
-    ) && matches!(replacement.as_bytes(), b"==" | b"!=")
-}
-
-/// The non-redundant relational replacements: operator texts, then the
-/// constant that replaces the whole expression.
-const fn relational_replacements(
-    operator: BinaryOperator,
-) -> Option<(&'static [&'static str], &'static str)> {
-    let replacements: (&'static [&'static str], &'static str) = match operator {
-        BinaryOperator::LessThan => (&["<=", "!="], "false"),
-        BinaryOperator::LessEqualThan => (&["<", "=="], "true"),
-        BinaryOperator::GreaterThan => (&[">=", "!="], "false"),
-        BinaryOperator::GreaterEqualThan => (&[">", "=="], "true"),
-        BinaryOperator::StrictEquality => (&["!=="], "false"),
-        BinaryOperator::StrictInequality => (&["==="], "true"),
-        BinaryOperator::Equality => (&["!="], "false"),
-        BinaryOperator::Inequality => (&["=="], "true"),
-        _ => return None,
-    };
-    Some(replacements)
-}
-
-const fn arithmetic_replacement(operator: BinaryOperator) -> Option<&'static str> {
-    match operator {
-        BinaryOperator::Addition => Some("-"),
-        BinaryOperator::Subtraction => Some("+"),
-        BinaryOperator::Multiplication => Some("/"),
-        BinaryOperator::Division | BinaryOperator::Remainder => Some("*"),
-        _ => None,
-    }
-}
-
-fn is_text_operand(expression: &Expression<'_>) -> bool {
-    matches!(
-        expression.without_parentheses(),
-        Expression::StringLiteral(_) | Expression::TemplateLiteral(_)
-    )
 }
 
 /// The byte length of the `//` comment at the start of `rest`. The comment
@@ -1161,31 +1075,83 @@ impl Collector<'_> {
         }
     }
 
-    fn negate(&mut self, test: &Expression<'_>) {
-        let skip = match test.without_parentheses() {
+    /// Adds the `true` and `false` mutants of a branch or loop test.
+    ///
+    /// A comparison or logical test uses the span without parentheses, so
+    /// that a constant that the relational operator already gives at that
+    /// span is one mutant. In a loop test, such a test gets `false` only:
+    /// `true` gives an endless loop, and only the Vitest adapter stops one
+    /// before the watchdog. A plain loop test keeps both mutants.
+    fn negate(&mut self, test: &Expression<'_>, loop_test: bool) {
+        let inner = test.without_parentheses();
+        let compound = match inner {
             Expression::BinaryExpression(binary) => is_relational(binary.operator),
-            Expression::LogicalExpression(_)
-            | Expression::ImportMeta(_)
-            | Expression::NewTarget(_) => true,
+            Expression::LogicalExpression(_) => true,
+            Expression::ImportMeta(_) | Expression::NewTarget(_) => return,
             _ => false,
         };
-        if skip {
-            return;
-        }
-        let region = pair(test.span());
-        let equivalent_true = self.filtered_lookups.contains(&region);
+        let span = if compound { inner.span() } else { test.span() };
+        let region = pair(span);
+        let skip_true = self.filtered_lookups.contains(&region) || (compound && loop_test);
         for value in ["true", "false"] {
-            if equivalent_true && value == "true" {
+            if skip_true && value == "true" {
                 continue;
             }
             self.add(
-                test.span(),
+                span,
                 Operator::NegateCondition,
                 region,
                 value.to_owned(),
                 MutantChange::new(MutantChange::CONDITION, value),
             );
         }
+    }
+
+    /// Adds the constant mutant of each boolean operand of `&&` or `||`:
+    /// `true` for an operand of `&&`, `false` for an operand of `||`. The
+    /// other constant gives the same result as a constant for the whole
+    /// expression.
+    fn negate_operands(&mut self, it: &LogicalExpression<'_>) {
+        let value = match it.operator {
+            LogicalOperator::And => "true",
+            LogicalOperator::Or => "false",
+            LogicalOperator::Coalesce => return,
+        };
+        for operand in [&it.left, &it.right] {
+            let inner = operand.without_parentheses();
+            if is_boolean_valued(inner) {
+                self.add(
+                    inner.span(),
+                    Operator::NegateCondition,
+                    pair(inner.span()),
+                    value.to_owned(),
+                    MutantChange::new(MutantChange::CONDITION, value),
+                );
+            }
+        }
+    }
+
+    /// Adds the `false` mutant of the missing test of `for (init;; update)`.
+    /// The mutant is an insertion at the test position, so its original
+    /// text is empty. The emitter gives the empty site the value `true`.
+    fn negate_missing_test(&mut self, it: &ForStatement<'_>) {
+        let test_start = match &it.init {
+            Some(init) => self.find_token(init.span().end, it.body.span().start, ";"),
+            None => self
+                .find_token(it.span.start + 3, it.body.span().start, "(")
+                .and_then(|open| self.find_token(open + 1, it.body.span().start, ";")),
+        };
+        let Some(semicolon) = test_start else {
+            return;
+        };
+        let offset = semicolon + 1;
+        self.add(
+            Span::new(offset, offset),
+            Operator::NegateCondition,
+            (offset, offset),
+            "false".to_owned(),
+            MutantChange::new(MutantChange::CONDITION, "false"),
+        );
     }
 
     fn removable_call(expression: &Expression<'_>) -> bool {
@@ -1372,6 +1338,30 @@ impl Collector<'_> {
         );
     }
 
+    /// Adds the mutant that swaps the sign operator of `it` for `swap`. A
+    /// space keeps the swap from joining a neighbor sign into `++` or `--`:
+    /// `a+-b` becomes `a+ +b`.
+    fn swap_sign(&mut self, it: &UnaryExpression<'_>, swap: &'static str) {
+        let region = (it.span.start, it.span.start + 1);
+        let sign = swap.as_bytes()[0];
+        let before = region.0.checked_sub(1).and_then(|offset| self.byte(offset));
+        let mut replacement = String::new();
+        if before == Some(sign) {
+            replacement.push(' ');
+        }
+        replacement.push_str(swap);
+        if self.byte(region.1) == Some(sign) {
+            replacement.push(' ');
+        }
+        self.add(
+            it.span,
+            Operator::UnaryOperator,
+            region,
+            replacement,
+            MutantChange::new(it.operator.as_str(), swap),
+        );
+    }
+
     fn logical_operand(&self, operand: &Expression<'_>) -> String {
         let text = self.text(operand.span().start, operand.span().end);
         if matches!(operand, Expression::LogicalExpression(_)) {
@@ -1402,10 +1392,26 @@ impl<'a> Visit<'a> for Collector<'_> {
     }
 
     fn visit_arrow_function_expression(&mut self, it: &ArrowFunctionExpression<'a>) {
-        if let Some(body) = it.get_expression() {
+        let body = it.get_expression();
+        if let Some(body) = body {
             self.expression_starts.insert(body.span().start);
         }
         self.push_frame(it.span, None, false);
+        // A call body already gets the `void 0` mutant of `removed-call`,
+        // which gives the same `undefined` result.
+        if let Some(body) = body
+            && self.returns_value(body)
+            && !Self::removable_call(body)
+        {
+            let span = body.span();
+            self.add(
+                span,
+                Operator::ReturnValue,
+                pair(span),
+                "undefined".to_owned(),
+                MutantChange::new(MutantChange::EXPRESSION, "undefined"),
+            );
+        }
         walk::walk_arrow_function_expression(self, it);
         self.frames.pop();
     }
@@ -1518,17 +1524,17 @@ impl<'a> Visit<'a> for Collector<'_> {
             return;
         }
         walk::walk_if_statement(self, it);
-        self.negate(&it.test);
+        self.negate(&it.test, false);
     }
 
     fn visit_while_statement(&mut self, it: &WhileStatement<'a>) {
         walk::walk_while_statement(self, it);
-        self.negate(&it.test);
+        self.negate(&it.test, true);
     }
 
     fn visit_do_while_statement(&mut self, it: &DoWhileStatement<'a>) {
         walk::walk_do_while_statement(self, it);
-        self.negate(&it.test);
+        self.negate(&it.test, true);
     }
 
     fn visit_for_statement(&mut self, it: &ForStatement<'a>) {
@@ -1536,14 +1542,15 @@ impl<'a> Visit<'a> for Collector<'_> {
             self.counted_loop_tests.insert(test);
         }
         walk::walk_for_statement(self, it);
-        if let Some(test) = &it.test {
-            self.negate(test);
+        match &it.test {
+            Some(test) => self.negate(test, true),
+            None => self.negate_missing_test(it),
         }
     }
 
     fn visit_conditional_expression(&mut self, it: &ConditionalExpression<'a>) {
         walk::walk_conditional_expression(self, it);
-        self.negate(&it.test);
+        self.negate(&it.test, false);
     }
 
     fn visit_binary_expression(&mut self, it: &BinaryExpression<'a>) {
@@ -1551,30 +1558,30 @@ impl<'a> Visit<'a> for Collector<'_> {
         let found = self.find_token(it.left.span().end, it.right.span().start, operator.as_str());
         if let Some(start) = found {
             let end = start + operator.as_str().len() as u32;
-            if let Some(replacement) = arithmetic_replacement(operator) {
-                let concatenation =
-                    operator == BinaryOperator::Addition || operator == BinaryOperator::Subtraction;
-                let text =
-                    concatenation && (is_text_operand(&it.left) || is_text_operand(&it.right));
-                if !text {
-                    let padded = self.pad_operator(replacement, end);
-                    self.add(
-                        it.span,
-                        Operator::ArithmeticOperator,
-                        (start, end),
-                        padded,
-                        MutantChange::new(operator.as_str(), replacement),
-                    );
-                }
+            if let Some(replacement) = arithmetic_replacement(operator)
+                && !is_text_operand(&it.left)
+                && !is_text_operand(&it.right)
+            {
+                let padded = self.pad_operator(replacement, end);
+                self.add(
+                    it.span,
+                    Operator::ArithmeticOperator,
+                    (start, end),
+                    padded,
+                    MutantChange::new(operator.as_str(), replacement),
+                );
             }
-            if let Some((operators, constant)) = relational_replacements(operator) {
+            if let Some((operators, constants)) = relational_replacements(operator) {
                 let equivalent = self.equivalent_replacement(it);
-                if equivalent != Some(constant) {
+                for constant in constants {
+                    if equivalent == Some(*constant) {
+                        continue;
+                    }
                     self.add(
                         it.span,
                         Operator::RelationalOperator,
                         pair(it.span),
-                        constant.to_owned(),
+                        (*constant).to_owned(),
                         MutantChange::new(MutantChange::EXPRESSION, constant),
                     );
                 }
@@ -1665,18 +1672,34 @@ impl<'a> Visit<'a> for Collector<'_> {
             }
         }
         walk::walk_logical_expression(self, it);
+        self.negate_operands(it);
     }
 
     fn visit_unary_expression(&mut self, it: &UnaryExpression<'a>) {
-        let mutable = match it.operator {
+        let numeric = matches!(
+            it.argument.without_parentheses(),
+            Expression::NumericLiteral(_) | Expression::BigIntLiteral(_)
+        );
+        let (mutable, swap) = match it.operator {
             UnaryOperator::Delete => return,
-            UnaryOperator::LogicalNot => !matches!(
-                it.argument.without_parentheses(),
-                Expression::UnaryExpression(inner) if inner.operator == UnaryOperator::LogicalNot
+            UnaryOperator::LogicalNot => (
+                !matches!(
+                    it.argument.without_parentheses(),
+                    Expression::UnaryExpression(inner) if inner.operator == UnaryOperator::LogicalNot
+                ),
+                None,
             ),
-            UnaryOperator::UnaryNegation => true,
-            _ => false,
+            // `+1` is `1`, the value of the removal mutant.
+            UnaryOperator::UnaryNegation => (true, (!numeric).then_some("+")),
+            UnaryOperator::UnaryPlus => (false, Some("-")),
+            UnaryOperator::BitwiseNot => (true, None),
+            _ => (false, None),
         };
+        if let Some(swap) = swap
+            && self.text(it.span.start, it.span.start + 1) == it.operator.as_str()
+        {
+            self.swap_sign(it, swap);
+        }
         if mutable && self.text(it.span.start, it.span.start + 1) == it.operator.as_str() {
             let change = MutantChange::new(it.operator.as_str(), "");
             if self.statement_starts.contains(&it.span.start)
@@ -1738,19 +1761,23 @@ impl<'a> Visit<'a> for Collector<'_> {
     }
 
     fn visit_assignment_expression(&mut self, it: &AssignmentExpression<'a>) {
-        let replacement = match it.operator {
-            AssignmentOperator::Addition => Some("-="),
-            AssignmentOperator::Subtraction => Some("+="),
-            _ => None,
-        };
         let token = it.operator.as_str();
-        if let Some(replacement) = replacement
+        let text_skip = !matches!(
+            it.operator,
+            AssignmentOperator::Addition
+                | AssignmentOperator::Subtraction
+                | AssignmentOperator::LogicalAnd
+                | AssignmentOperator::LogicalOr
+                | AssignmentOperator::LogicalNullish
+        ) && is_text_operand(&it.right);
+        if let Some((operator, replacement)) = assignment_replacement(it.operator)
+            && !text_skip
             && let Some(start) = self.find_token(it.left.span().end, it.right.span().start, token)
         {
             let region = (start, start + token.len() as u32);
             self.add(
                 it.span,
-                Operator::ArithmeticOperator,
+                operator,
                 region,
                 replacement.to_owned(),
                 MutantChange::new(token, replacement),
@@ -1856,8 +1883,29 @@ impl<'a> Visit<'a> for Collector<'_> {
         }
     }
 
+    fn visit_template_literal(&mut self, it: &TemplateLiteral<'a>) {
+        let empty = it.expressions.is_empty() && it.quasis.iter().all(|q| q.value.raw.is_empty());
+        let (replacement, change) = if empty {
+            ("`fallow`", MutantChange::new("``", "`fallow`"))
+        } else {
+            ("``", MutantChange::new(MutantChange::TEMPLATE, "``"))
+        };
+        self.add(
+            it.span,
+            Operator::StringLiteral,
+            pair(it.span),
+            replacement.to_owned(),
+            change,
+        );
+        walk::walk_template_literal(self, it);
+    }
+
+    /// The template of a tagged template gives no mutant: the tag reads the
+    /// raw parts. Its expressions still give mutants.
     fn visit_tagged_template_expression(&mut self, it: &TaggedTemplateExpression<'a>) {
-        self.visit_template_literal(&it.quasi);
+        for expression in &it.quasi.expressions {
+            self.visit_expression(expression);
+        }
     }
 
     fn visit_jsx_attribute_value(&mut self, it: &JSXAttributeValue<'a>) {

@@ -42,13 +42,13 @@ pub enum MutationOperatorName {
     ReturnValue,
     /// `true` to `false`, and the reverse.
     BooleanLiteral,
-    /// A string literal emptied or filled.
+    /// A string or template literal emptied or filled.
     StringLiteral,
     /// `a?.b` to `a.b`.
     OptionalChaining,
-    /// One token of a regular expression literal changed: an anchor
-    /// removed, a character class negated, or a class escape with the
-    /// opposite case.
+    /// One token of a regular expression literal changed: an anchor or a
+    /// quantifier removed, a `{n,m}` range shortened to `{n}`, a character
+    /// class negated, or a class escape with the opposite case.
     RegexLiteral,
     /// `z.number().int()` to `z.number()` in a module-level `const`
     /// initializer: one call link of a fluent chain removed.

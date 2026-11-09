@@ -9,31 +9,38 @@ use serde::Serialize;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum Operator {
-    /// `+` and `-` swap, `*` and `/` swap, `%` becomes `*`, `+=` and `-=` swap.
+    /// `+` and `-` swap, `*` and `/` swap, `%` becomes `*`. The compound
+    /// assignments `+=` and `-=`, `*=` and `/=`, `<<=` and `>>=`, `&=` and
+    /// `|=` swap, and `%=` becomes `*=`.
     ArithmeticOperator,
-    /// The non-redundant relational subset (Kaminski).
+    /// The non-redundant relational subset (Kaminski), and the constant
+    /// result of the comparison.
     RelationalOperator,
-    /// `&&` and `||` swap, `??` becomes `&&`.
+    /// `&&` and `||` swap, `??` becomes `&&`. `&&=` and `||=` swap, `??=`
+    /// becomes `&&=`.
     LogicalOperator,
-    /// A plain condition becomes `true` and `false`.
+    /// A branch or loop test becomes `true` and `false`, and a boolean
+    /// operand of `&&` or `||` becomes the constant that does not decide
+    /// the whole expression.
     NegateCondition,
-    /// `!x` and `-x` become `x`.
+    /// `!x`, `-x` and `~x` become `x`. `-x` and `+x` swap.
     UnaryOperator,
     /// `++` and `--` swap.
     UpdateOperator,
     /// A call statement becomes a no-op.
     RemovedCall,
-    /// `return expr` becomes `return undefined`.
+    /// `return expr` and the concise body of `x => expr` become `undefined`.
     ReturnValue,
     /// `true` and `false` swap.
     BooleanLiteral,
-    /// A non-empty string becomes empty, an empty string becomes `"fallow"`.
+    /// A non-empty string or template becomes empty. An empty one becomes
+    /// `"fallow"` or `` `fallow` ``.
     StringLiteral,
     /// `a?.b` becomes `a.b`, `a?.()` becomes `a()`.
     OptionalChaining,
-    /// One token of a regular expression literal changes: an anchor is
-    /// removed, a character class is negated, or a class escape gets the
-    /// opposite case.
+    /// One token of a regular expression literal changes: an anchor or a
+    /// quantifier is removed, a `{n,m}` range becomes `{n}`, a character
+    /// class is negated, or a class escape gets the opposite case.
     RegexLiteral,
     /// One call link of a fluent chain in a module-level `const`
     /// initializer is removed: `r.m(args)` becomes `r`, when `r` is a call.
