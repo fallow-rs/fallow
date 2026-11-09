@@ -59,6 +59,56 @@ fn plan_json_lists_unreached_mutants_and_runs_no_code() {
 }
 
 #[test]
+fn mutants_per_line_leaves_the_other_mutants_of_a_line_pending_in_the_plan() {
+    let project = untested_project();
+    let root = project.path();
+    fs::write(
+        root.join("src/math.ts"),
+        "export const inRange = (n: number): boolean => n > 0 && n + 1 < 10;\n",
+    )
+    .expect("math.ts");
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"mutation-fixture","private":true,"type":"module","main":"src/math.ts","devDependencies":{"vitest":"^5.0.0"}}"#,
+    )
+    .expect("package.json");
+    fs::write(
+        root.join("src/math.test.ts"),
+        "import { expect, test } from \"vitest\";\nimport { inRange } from \"./math\";\n\ntest(\"in range\", () => {\n  expect(inRange(3)).toBe(true);\n});\n",
+    )
+    .expect("math.test.ts");
+    commit_all(root, "add a test");
+
+    let (full_output, full) = json_mutation(root, &["--plan", "--all"]);
+    assert_eq!(full_output.code, 0, "{}", full_output.stderr);
+    let planned = full["counts"]["planned"].as_u64().unwrap();
+    assert!(planned > 1, "the line has several mutants: {full}");
+
+    let (output, sampled) = json_mutation(root, &["--plan", "--all", "--mutants-per-line", "1"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let counts = &sampled["counts"];
+    assert_eq!(counts["planned"], 1, "{sampled}");
+    assert_eq!(counts["sampled_out"].as_u64().unwrap(), planned - 1);
+    assert_eq!(counts["pending"], counts["sampled_out"]);
+    let pending: Vec<&serde_json::Value> = sampled["mutants"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|mutant| mutant["disposition"] == "pending")
+        .collect();
+    assert_eq!(pending.len() as u64, planned - 1);
+    assert!(
+        pending
+            .iter()
+            .all(|mutant| mutant["pending_reason"] == "sampled-out"),
+        "{sampled}"
+    );
+
+    let zero = mutation(root, &["--plan", "--all", "--mutants-per-line", "0"]);
+    assert_eq!(zero.code, 2, "{}", zero.stderr);
+}
+
+#[test]
 fn plan_mutates_the_script_blocks_of_vue_svelte_and_astro_components() {
     let project = untested_project();
     let root = project.path();
