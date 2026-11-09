@@ -357,6 +357,10 @@ fn extract_fly_toml_file_refs(content: &str, context: CommandRefContext<'_>) -> 
 }
 
 #[cfg(test)]
+#[path = "infrastructure_unicode_span_oracle.rs"]
+mod unicode_span_oracle;
+
+#[cfg(test)]
 mod tests {
     use super::*;
 

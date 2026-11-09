@@ -467,6 +467,10 @@ fn delete_export_lines(
 }
 
 #[cfg(test)]
+#[path = "exports_unicode_span_oracle.rs"]
+mod unicode_span_oracle;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use fallow_types::results::UnusedExport;

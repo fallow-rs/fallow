@@ -16,12 +16,14 @@ import { cargoTargetDir } from "./cargo-target.mjs";
 import { cacheModel } from "./oracle-proof/cache-model.mjs";
 import { mutationCache } from "./oracle-proof/mutation-cache.mjs";
 import { permutation } from "./oracle-proof/permutation.mjs";
+import { unicodeSpans } from "./oracle-proof/unicode-spans.mjs";
 
 /** The registered oracles, by name. */
 export const ORACLES = Object.freeze({
   [cacheModel.name]: cacheModel,
   [mutationCache.name]: mutationCache,
   [permutation.name]: permutation,
+  [unicodeSpans.name]: unicodeSpans,
 });
 
 const EXIT_HOLDS = 0;
@@ -32,6 +34,8 @@ const EXIT_TOOL_ERROR = 2;
 const FAILURE_LINE =
   /^(error(\[\w+\])?: |test .* FAILED$|thread '.*' panicked at |failures:$|test result: )/;
 const FAILURE_LINE_LIMIT = 40;
+/** A cargo test summary with at least one passed test. */
+const TESTS_RAN = /^test result: ok\. [1-9]\d* passed/m;
 
 const USAGE = `Usage: node scripts/oracle-proof.mjs <oracle> [<fix commit>...] [options]
        node scripts/oracle-proof.mjs --list
@@ -49,7 +53,8 @@ Options:
   --list           List the oracles and their fix commits.
 
 Exit codes: 0 every proof holds, 1 a proof does not hold, 2 tool error
-(bad input, a git error, a build failure, or a run that a signal stopped).
+(bad input, a git error, a build failure, a run that a signal stopped, or a
+run in which no test ran).
 
 An interrupt (Ctrl-C) during a build can leave a worktree in the temporary
 directory. Remove it with \`git worktree remove --force <path>\`, or with
@@ -92,9 +97,10 @@ const failureLines = (logPath) =>
 
 /**
  * Port the oracle onto `commit` in a new worktree, build it, and run it.
- * The result is `pass`, `fail`, `build-error`, or `killed`. A test that a
- * signal stopped (for example out of memory) did not show the bug, so
- * `killed` is not `fail`.
+ * The result is `pass`, `fail`, `build-error`, `killed`, or `no-tests`. A
+ * test that a signal stopped (for example out of memory) did not show the
+ * bug, so `killed` is not `fail`. A test filter that matches no test exits
+ * 0, so a run without a passed test is `no-tests`, not `pass`.
  */
 const runOracleAt = (oracle, { source, commit, label, logs, env, keep, test }) => {
   const tree = mkdtempSync(join(tmpdir(), `oracle-proof-${label}-`));
@@ -113,7 +119,14 @@ const runOracleAt = (oracle, { source, commit, label, logs, env, keep, test }) =
       return { label, commit, tree, notes, result: "build-error", log: buildLog };
     }
     const status = runLogged(test, { cwd: tree, env, logPath: testLog });
-    const result = status === null ? "killed" : status === 0 ? "pass" : "fail";
+    const result =
+      status === null
+        ? "killed"
+        : status !== 0
+          ? "fail"
+          : TESTS_RAN.test(readFileSync(testLog, "utf8"))
+            ? "pass"
+            : "no-tests";
     return { label, commit, tree, notes, result, log: testLog };
   } finally {
     if (!keep) removeWorktree(source, tree);
@@ -129,7 +142,7 @@ const removeWorktree = (source, tree) => {
   }
 };
 
-const TOOL_ERRORS = new Set(["build-error", "killed"]);
+const TOOL_ERRORS = new Set(["build-error", "killed", "no-tests"]);
 
 /** A fix commit as `{ commit, scope?, reason?, test?, env? }`. A string is a commit with the full oracle. */
 const toFix = (fix) => (typeof fix === "string" ? { commit: fix } : fix);
@@ -177,7 +190,7 @@ const formatRun = (run, keep) => {
 /** The human report of one proof. */
 export const formatProof = (oracle, proof, keep = false) => {
   const verdict = proof.toolError
-    ? "tool error: a build failed, or a signal stopped a run"
+    ? "tool error: a build failed, a signal stopped a run, or no test ran"
     : proof.holds
       ? "proof holds: fails on the parent, passes on the fix"
       : "proof does not hold: the oracle must fail on the parent and pass on the fix";

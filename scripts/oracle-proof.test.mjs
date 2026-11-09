@@ -35,7 +35,13 @@ const oracle = (overrides = {}) => ({
   fixes: [],
   port: () => [],
   build: ["sh", ["-c", "exit 0"]],
-  test: ["sh", ["-c", "test ! -f bug || { echo 'test bug_is_gone ... FAILED'; exit 1; }"]],
+  test: [
+    "sh",
+    [
+      "-c",
+      "test ! -f bug || { echo 'test bug_is_gone ... FAILED'; exit 1; }; echo 'test result: ok. 1 passed'",
+    ],
+  ],
   ...overrides,
 });
 
@@ -85,11 +91,28 @@ test("--keep leaves the worktrees for inspection", () => {
 
 test("the proof does not hold when the oracle passes on the parent", () => {
   withRepo(({ repo, fix, logs }) => {
-    const weak = oracle({ test: ["sh", ["-c", "exit 0"]] });
+    const weak = oracle({ test: ["sh", ["-c", "echo 'test result: ok. 1 passed'"]] });
     const proof = proveFix(weak, fix, { source: repo, logs });
 
     assert.equal(proof.holds, false);
     assert.match(formatProof(weak, proof), /proof does not hold/);
+  });
+});
+
+test("a pass without a test run is a tool error, not a proof", () => {
+  withRepo(({ repo, fix, logs }) => {
+    // A test filter that matches no test exits 0, as cargo does.
+    const empty = oracle({
+      test: ["sh", ["-c", "test ! -f bug || exit 1; echo 'test result: ok. 0 passed; 0 failed'"]],
+    });
+    const proof = proveFix(empty, fix, { source: repo, logs });
+
+    assert.equal(proof.toolError, true);
+    assert.equal(proof.holds, false);
+    assert.deepEqual(
+      proof.runs.map((run) => run.result),
+      ["fail", "no-tests"],
+    );
   });
 });
 
@@ -193,7 +216,10 @@ test("a scoped fix runs its own test command and env, and the report names the s
       commit: fix,
       scope: "the bug test",
       reason: "the other tests need a later fix",
-      test: ["sh", ["-c", 'test "$ORACLE_SCOPE" = bug && test ! -f bug']],
+      test: [
+        "sh",
+        ["-c", 'test "$ORACLE_SCOPE" = bug && test ! -f bug && echo "test result: ok. 1 passed"'],
+      ],
       env: { ORACLE_SCOPE: "bug" },
     };
     const proof = proveFix(oracle({ test: ["sh", ["-c", "exit 1"]] }), scoped, {
@@ -211,7 +237,9 @@ test("a scoped fix runs its own test command and env, and the report names the s
 
 test("a run that a signal stops is a tool error, not a failing oracle", () => {
   withRepo(({ repo, fix, logs }) => {
-    const killed = oracle({ test: ["sh", ["-c", "test ! -f bug || kill -9 $$"]] });
+    const killed = oracle({
+      test: ["sh", ["-c", "test ! -f bug || kill -9 $$; echo 'test result: ok. 1 passed'"]],
+    });
     const proof = proveFix(killed, fix, { source: repo, logs });
 
     assert.deepEqual(

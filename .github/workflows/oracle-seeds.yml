@@ -16,6 +16,8 @@ name: Oracle Seeds
 # permutation oracle failure prints the template, the project seed and the
 # permutation seed: add that pair as a fixed test in
 # crates/cli/tests/integration/permutation/oracle.rs when you fix the cause.
+# A Unicode span failure prints the shrunk input. Add it as a named test to
+# the unicode_span_oracle module that failed.
 on:
   schedule:
     - cron: '40 2 * * *'
@@ -45,6 +47,14 @@ on:
         description: 'The first permutation oracle project seed (0: run number times PERMUTATION_SEED_STRIDE)'
         type: number
         default: 0
+      unicode_cases:
+        description: 'The number of cases for each Unicode span test'
+        type: number
+        default: 20000
+      unicode_seed:
+        description: 'The Unicode span seed (0: the run number)'
+        type: number
+        default: 0
 
 concurrency:
   group: oracle-seeds
@@ -61,6 +71,8 @@ env:
   # Each permutation oracle seed runs the binary about 180 times (each
   # command and format, with and without the permutation).
   PERMUTATION_SEED_STRIDE: 60
+  # The Unicode span tests parse small inputs, so one run checks many cases.
+  UNICODE_SPAN_CASES: 20000
   # A background git repack after a fixture commit races the next git add.
   # See scripts/workflow-policy.test.mjs.
   GIT_CONFIG_COUNT: '2'
@@ -272,6 +284,70 @@ jobs:
               echo '```'
             else
               echo "The run failed before it compared an output. Read the log of this step."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+  unicode-span-seeds:
+    name: Unicode span wide case range
+    runs-on: ubuntu-26.04
+    timeout-minutes: 60
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          cache-key: oracle-seeds-unicode
+
+      - name: Build the Unicode span tests
+        run: cargo test --locked -p fallow-lsp -p fallow-core -p fallow-extract -p fallow-cli --lib --no-run
+
+      - name: Run the wide case range
+        shell: bash
+        env:
+          INPUT_CASES: ${{ inputs.unicode_cases }}
+          INPUT_SEED: ${{ inputs.unicode_seed }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          cases="${INPUT_CASES:-$UNICODE_SPAN_CASES}"
+          seed="${INPUT_SEED:-0}"
+          case "$cases:$seed" in
+            *[!0-9:]* | :* | *:) echo "::error::cases and seed must be whole numbers"; exit 2 ;;
+          esac
+          if [ "$cases" -lt 1 ]; then
+            echo "::error::cases must be 1 or more"
+            exit 2
+          fi
+          if [ "$seed" = 0 ]; then
+            seed="$RUN_NUMBER"
+          fi
+          export PROPTEST_CASES="$cases"
+          export PROPTEST_RNG_SEED="$seed"
+          echo "Seed $seed, $cases cases for each test"
+          status=0
+          cargo test --locked -p fallow-lsp -p fallow-core -p fallow-extract -p fallow-cli --lib unicode_span_oracle \
+            2>&1 | tee seeds.log || status=$?
+          {
+            echo "## Unicode span wide case range"
+            echo
+            echo "Seed $seed, $cases cases for each test. Run again with \`PROPTEST_RNG_SEED=$seed PROPTEST_CASES=$cases\`."
+            echo
+            if [ "$status" = 0 ]; then
+              echo "Each Unicode span test passed."
+            elif grep -q 'minimal failing input' seeds.log; then
+              echo "A case failed. Add the shrunk input as a named test when you fix the cause:"
+              echo
+              echo '```text'
+              sed -n '/Test failed/,/global rejects/p' seeds.log | head -80
+              echo '```'
+            else
+              echo "A test failed without a shrunk input, or the build failed. Read the log of this step."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"

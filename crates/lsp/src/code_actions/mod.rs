@@ -1,6 +1,9 @@
 mod absent_props;
 mod quick_fix;
 mod suppress;
+#[cfg(test)]
+#[path = "quick_fix_unicode_span_oracle.rs"]
+mod unicode_span_oracle;
 
 use std::path::Path;
 
