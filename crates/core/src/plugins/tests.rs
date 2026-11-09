@@ -1,5 +1,28 @@
 use super::*;
 
+/// Plugins whose entry points keep files alive but are not runtime or test
+/// roots.
+const SUPPORT_ENTRY_POINT_PLUGINS: &[&str] = &[
+    "alchemy",
+    "content-collections",
+    "contentlayer",
+    "danger",
+    "drizzle",
+    "fumadocs",
+    "gulp",
+    "i18next",
+    "knex",
+    "kysely",
+    "mintlify",
+    "msw",
+    "opencode",
+    "prisma",
+    "storybook",
+    "stryker",
+    "typeorm",
+    "velite",
+];
+
 #[test]
 fn segment_regexes_split_on_the_native_separator() {
     let regexes = vec![Regex::new("^_(components|hooks)$").expect("valid regex")];

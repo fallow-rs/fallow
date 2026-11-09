@@ -674,3 +674,11 @@ to `dotenv-cli` and `@dotenvx/dotenvx`. Plugin activation requires one of those 
 dependency or script evidence. `.env` files are not plugin config or entry
 points, and the `dotenv` runtime library is credited only when source or a
 supported Node preload actually uses it.
+
+## gulp
+
+The `gulp` plugin activates on a `gulp` or `gulp-cli` dependency. It makes
+the `gulpfile` of each package root an entry point, with the extensions that
+the gulp module loaders accept. A `gulpfile.js` or `gulpfile.ts` directory
+gives its `index` file. The plugin credits no package: a gulpfile imports
+`gulp`, and a package script that runs `gulp` credits it.
