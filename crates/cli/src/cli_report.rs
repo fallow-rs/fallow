@@ -8,9 +8,18 @@
 //! produced by `--format json`
 //! (dead-code, architecture, dupes, health, audit, security, or the bare
 //! combined run)
-//! renders byte-identically to the direct `--format` run. The `fallow fix`
+//! renders byte-identically to the direct `--format` run, with one exception:
+//! the live PR comment of a combined run has its own layout, and this command
+//! renders the per-finding layout for it. The `fallow fix`
 //! envelope carries no `kind`; it is detected by its top-level fields and
 //! rendered via [`EnvelopeKind::Fix`].
+//!
+//! `--mutation-report` and `--mutation-not-run` join the mutation evidence of
+//! the CI job to the render. Only this command has that join, so a render
+//! with one of these flags has no live equivalent. The join merges the
+//! `mutation-min-score` gate into the envelope first, so the status note and
+//! the gate rows name it. Then the survivor findings follow the analysis
+//! findings, after the shared diff filter.
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -18,11 +27,41 @@ use std::process::ExitCode;
 use fallow_config::{FallowConfig, OutputFormat};
 use fallow_output::{GroupByMode, PrDecisionConclusion};
 
+use crate::cli_args::MutationNotRunArg;
 use crate::exit_codes::INVALID_INPUT;
-use crate::report::ci::pr_comment::Provider;
+use crate::report::ci::pr_comment::{MutationSurface, Provider};
 use crate::report::github_annotations::{self, EnvelopeKind};
 use crate::report::github_summary;
+use crate::report::mutation_evidence::MutationEvidence;
 use crate::telemetry;
+
+/// The mutation evidence that one `fallow report` call joins to the render.
+#[derive(Clone, Copy, Debug)]
+pub enum MutationInput<'a> {
+    /// `--mutation-report <PATH>`: a saved mutation report, or the error
+    /// envelope of a failed `fallow mutation` run.
+    Report(&'a Path),
+    /// `--mutation-not-run <REASON>`: why the CI job did not run mutation
+    /// testing.
+    NotRun(MutationNotRunArg),
+}
+
+/// The mutation flags of one `fallow report` call.
+#[derive(Clone, Copy, Debug)]
+pub struct MutationRequest<'a> {
+    /// The evidence to join.
+    pub input: MutationInput<'a>,
+    /// The `--root` as the user wrote it, for the inspect command of the
+    /// mutation section. `None` when the call has no `--root`.
+    pub root_flag: Option<&'a Path>,
+}
+
+/// The refusal of the mutation flags with a format that cannot show them.
+const MUTATION_FORMATS_ONLY: &str = "--mutation-report and --mutation-not-run apply to the pr-comment, review, github-summary, github-annotations and codeclimate formats only";
+
+/// The refusal of the mutation flags with a saved `fallow fix` envelope.
+const MUTATION_NOT_FOR_FIX: &str =
+    "--mutation-report and --mutation-not-run do not apply to a saved fallow fix envelope";
 
 /// Run `fallow report --from <file>` with the global `--format` and `--root`.
 /// `quiet` removes the stderr notes, as on the live run of the same format.
@@ -32,6 +71,7 @@ pub fn run_report(
     root: &Path,
     config_path: Option<&Path>,
     quiet: bool,
+    mutation: Option<MutationRequest<'_>>,
 ) -> ExitCode {
     if let Some(path) = config_path
         && let Err(error) = FallowConfig::load(path)
@@ -49,11 +89,16 @@ pub fn run_report(
             telemetry::FailureReason::UnsupportedFormat,
         );
     };
+    if mutation.is_some()
+        && let Err(error) = validate_mutation_target(target)
+    {
+        return invalid_report_input(error, output, telemetry::FailureReason::UnsupportedFormat);
+    }
     let envelope = match load_envelope(from, output) {
         Ok(envelope) => envelope,
         Err(code) => return code,
     };
-    let saved = match prepare_saved_envelope(envelope, output) {
+    let mut saved = match prepare_saved_envelope(envelope, output) {
         Ok(saved) => saved,
         Err(code) => return code,
     };
@@ -61,12 +106,34 @@ pub fn run_report(
         Ok(kind) => kind,
         Err(code) => return code,
     };
+    if mutation.is_some()
+        && let Err(error) = validate_mutation_kind(kind)
+    {
+        return invalid_report_input(error, output, telemetry::FailureReason::UnsupportedFormat);
+    }
     if let Err(error) = validate_report_target(target, kind) {
         return invalid_report_input(&error, output, telemetry::FailureReason::UnsupportedFormat);
     }
     if let Err(error) = validate_saved_report_envelope(kind, &saved.envelope) {
         return invalid_report_input(&error, output, telemetry::FailureReason::Validation);
     }
+    let mut evidence = match mutation
+        .map(|request| join_mutation_evidence(request, root, &mut saved.envelope, output))
+        .transpose()
+    {
+        Ok(evidence) => evidence,
+        Err(code) => return code,
+    };
+    // The survivor findings set the inline overflow of the view, so they are
+    // built before any surface reads the view.
+    let survivors = evidence
+        .as_mut()
+        .map(MutationEvidence::codeclimate_issues)
+        .unwrap_or_default();
+    let mutation = evidence.as_ref().map(|evidence| MutationSurface {
+        view: evidence.view(),
+        survivors: &survivors,
+    });
     let resolver = match saved_group_resolver(saved.grouped_by, root, config_path, output) {
         Ok(resolver) => resolver,
         Err(code) => return code,
@@ -84,29 +151,74 @@ pub fn run_report(
         output,
         quiet,
     );
+    print_saved_target(
+        target,
+        kind,
+        &SavedRender {
+            envelope: &saved.envelope,
+            root,
+            config_path,
+            resolver: resolver.as_ref(),
+            output,
+            quiet,
+        },
+        mutation,
+    )
+}
+
+/// The parsed input of one saved render, shared by every target.
+struct SavedRender<'a> {
+    envelope: &'a serde_json::Value,
+    root: &'a Path,
+    config_path: Option<&'a Path>,
+    resolver: Option<&'a crate::report::OwnershipResolver>,
+    output: OutputFormat,
+    quiet: bool,
+}
+
+/// Print the saved envelope in the format of `target`, with the mutation
+/// evidence when the call has a mutation flag.
+fn print_saved_target(
+    target: ReportTarget,
+    kind: EnvelopeKind,
+    saved: &SavedRender<'_>,
+    mutation: Option<MutationSurface<'_>>,
+) -> ExitCode {
+    let SavedRender {
+        envelope,
+        root,
+        config_path,
+        resolver,
+        output,
+        quiet,
+    } = *saved;
     match target {
         ReportTarget::GithubAnnotations => {
-            github_annotations::print_annotations(kind, &saved.envelope, root)
+            github_annotations::print_annotations_with_mutation(kind, envelope, root, mutation)
         }
-        ReportTarget::GithubSummary => github_summary::print_summary(kind, &saved.envelope, root),
-        ReportTarget::Markdown => {
-            render_saved_markdown(kind, &saved.envelope, root, resolver.as_ref(), output)
-        }
+        ReportTarget::GithubSummary => github_summary::print_summary_with_mutation(
+            kind,
+            envelope,
+            root,
+            mutation.map(|mutation| mutation.view),
+        ),
+        ReportTarget::Markdown => render_saved_markdown(kind, envelope, root, resolver, output),
         ReportTarget::CodeClimate => {
             crate::report::codeclimate::print_envelope_codeclimate_with_config(
                 kind,
-                &saved.envelope,
+                envelope,
                 root,
                 config_path,
-                resolver.as_ref(),
+                resolver,
+                mutation.map_or(&[], |mutation| mutation.survivors),
             )
         }
         ReportTarget::Sarif => crate::report::sarif::print_envelope_sarif_with_config(
             kind,
-            &saved.envelope,
+            envelope,
             root,
             config_path,
-            resolver.as_ref(),
+            resolver,
             quiet,
         ),
         ReportTarget::PrComment(provider) | ReportTarget::Review(provider) => {
@@ -114,14 +226,71 @@ pub fn run_report(
                 target,
                 provider,
                 kind,
-                &saved.envelope,
+                envelope,
                 root,
                 config_path,
-                resolver.as_ref(),
+                resolver,
                 output,
+                mutation,
             )
         }
     }
+}
+
+/// Read the mutation evidence of `request` and merge its gate into
+/// `envelope`, so the status note and the gate rows name it. An input error
+/// exits 2 with `FALLOW_MUTATION_REPORT_INVALID`.
+fn join_mutation_evidence(
+    request: MutationRequest<'_>,
+    root: &Path,
+    envelope: &mut serde_json::Value,
+    output: OutputFormat,
+) -> Result<MutationEvidence, ExitCode> {
+    let evidence = load_mutation_evidence(request, root).map_err(|mut error| {
+        telemetry::note_failure_reason(telemetry::FailureReason::Validation);
+        // `report` has no JSON format, so the human error line is the only
+        // place that can name the code, as the unreadable-report warning does.
+        if let Some(code) = &error.code {
+            error.message = format!("{code}: {}", error.message);
+        }
+        crate::error::emit_programmatic_error(&error, output, crate::error::requested_json_style())
+    })?;
+    evidence.merge_gate_outcomes(envelope);
+    Ok(evidence)
+}
+
+/// Read the mutation evidence of `request`. `root` is the resolved `--root`,
+/// which must be the root of the mutation run.
+fn load_mutation_evidence(
+    request: MutationRequest<'_>,
+    root: &Path,
+) -> Result<MutationEvidence, fallow_api::ProgrammaticError> {
+    let evidence = match request.input {
+        MutationInput::Report(path) => MutationEvidence::load(path, root)?,
+        MutationInput::NotRun(reason) => MutationEvidence::not_run(reason),
+    };
+    Ok(evidence.with_root_flag(request.root_flag))
+}
+
+/// Refuse the mutation flags for a format that has no mutation surface.
+const fn validate_mutation_target(target: ReportTarget) -> Result<(), &'static str> {
+    match target {
+        ReportTarget::Sarif | ReportTarget::Markdown => Err(MUTATION_FORMATS_ONLY),
+        ReportTarget::GithubAnnotations
+        | ReportTarget::GithubSummary
+        | ReportTarget::CodeClimate
+        | ReportTarget::PrComment(_)
+        | ReportTarget::Review(_) => Ok(()),
+    }
+}
+
+/// Refuse the mutation flags for a saved `fallow fix` envelope, which has no
+/// findings to join them to.
+const fn validate_mutation_kind(kind: EnvelopeKind) -> Result<(), &'static str> {
+    if matches!(kind, EnvelopeKind::Fix) {
+        return Err(MUTATION_NOT_FOR_FIX);
+    }
+    Ok(())
 }
 
 /// Emit an invalid-input error of `fallow report` and note the failure reason.
@@ -228,6 +397,7 @@ fn render_saved_ci_target(
     config_path: Option<&Path>,
     resolver: Option<&crate::report::OwnershipResolver>,
     output: OutputFormat,
+    mutation: Option<MutationSurface<'_>>,
 ) -> ExitCode {
     let issues = match crate::report::codeclimate::envelope_codeclimate_issues_with_config(
         kind,
@@ -282,7 +452,7 @@ fn render_saved_ci_target(
     };
     match target {
         ReportTarget::PrComment(_) => {
-            crate::report::ci::pr_comment::print_pr_comment_from_codeclimate_issues(
+            crate::report::ci::pr_comment::print_pr_comment_with_mutation(
                 command,
                 provider,
                 &issues,
@@ -292,25 +462,17 @@ fn render_saved_ci_target(
                     gates: &crate::report::gate_outcome_text::gate_rows(envelope),
                     config_patterns: &config_patterns,
                 },
+                mutation,
             )
         }
-        ReportTarget::Review(_) => match conclusion {
-            Some(conclusion) => {
-                crate::report::ci::review::print_review_envelope_from_codeclimate_issues_with_conclusion(
-                    command,
-                    provider,
-                    &issues,
-                    conclusion,
-                    review_notes,
-                )
-            }
-            None => crate::report::ci::review::print_review_envelope_from_codeclimate_issues(
-                command,
-                provider,
-                &issues,
-                review_notes,
-            ),
-        },
+        ReportTarget::Review(_) => crate::report::ci::review::print_review_envelope_with_mutation(
+            command,
+            provider,
+            &issues,
+            conclusion,
+            review_notes,
+            mutation,
+        ),
         _ => unreachable!("saved CI target dispatch only accepts comment and review targets"),
     }
 }
@@ -1229,6 +1391,48 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn the_mutation_flags_apply_to_the_ci_formats_only() {
+        for output in [
+            OutputFormat::PrCommentGithub,
+            OutputFormat::PrCommentGitlab,
+            OutputFormat::ReviewGithub,
+            OutputFormat::ReviewGitlab,
+            OutputFormat::GithubSummary,
+            OutputFormat::GithubAnnotations,
+            OutputFormat::CodeClimate,
+        ] {
+            let target = report_target(output).expect("a report target");
+            assert_eq!(validate_mutation_target(target), Ok(()), "{output:?}");
+        }
+        for output in [OutputFormat::Sarif, OutputFormat::Markdown] {
+            let target = report_target(output).expect("a report target");
+            assert_eq!(
+                validate_mutation_target(target),
+                Err(
+                    "--mutation-report and --mutation-not-run apply to the pr-comment, review, github-summary, github-annotations and codeclimate formats only"
+                ),
+                "{output:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_mutation_flags_refuse_a_fix_envelope() {
+        assert!(validate_mutation_kind(EnvelopeKind::Fix).is_err());
+        for kind in [
+            EnvelopeKind::DeadCode,
+            EnvelopeKind::Architecture,
+            EnvelopeKind::Dupes,
+            EnvelopeKind::Health,
+            EnvelopeKind::Audit,
+            EnvelopeKind::Combined,
+            EnvelopeKind::Security,
+        ] {
+            assert_eq!(validate_mutation_kind(kind), Ok(()), "{kind:?}");
         }
     }
 

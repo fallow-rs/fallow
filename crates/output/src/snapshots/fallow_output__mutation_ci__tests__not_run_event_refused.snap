@@ -1,0 +1,13 @@
+---
+source: crates/output/src/mutation_ci_tests.rs
+expression: both_headings(&view)
+---
+#### Mutation testing
+
+**Mutation testing did not run.** This event can run the code of a fork with the secrets of the base repository. Mutation testing runs only for the pull_request, push, schedule, workflow_dispatch and merge_group events.
+
+===== summary heading =====
+
+## Mutation testing
+
+**Mutation testing did not run.** This event can run the code of a fork with the secrets of the base repository. Mutation testing runs only for the pull_request, push, schedule, workflow_dispatch and merge_group events.

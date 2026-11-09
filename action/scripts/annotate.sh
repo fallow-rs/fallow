@@ -23,7 +23,9 @@ set -euo pipefail
 # Optional env: CHANGED_SINCE, INPUT_ROOT, FALLOW_RESULTS_FILE,
 #   FALLOW_SCOPED_RESULTS_FILE, FALLOW_CHANGED_FILES_FILE,
 #   FALLOW_PR_DECISION_FILE, HAS_NATIVE_REPORT, FALLOW_BIN,
-#   FALLOW_RENDER_PATH_PREFIX_SET, FALLOW_RENDER_PATH_PREFIX, FALLOW_ROOT
+#   FALLOW_RENDER_PATH_PREFIX_SET, FALLOW_RENDER_PATH_PREFIX, FALLOW_ROOT,
+#   and the mutation variables of fallow_mutation_render_args
+#   (render-common.sh)
 
 # Each optional variable gets its default here, so `set -u` fails on a typo in
 # a name instead of on an input that the workflow did not set.
@@ -37,6 +39,8 @@ set -euo pipefail
 . "$(dirname "${BASH_SOURCE[0]}")/legacy-render.sh"
 # shellcheck source=action/scripts/results-file.sh
 . "$(dirname "${BASH_SOURCE[0]}")/results-file.sh"
+# shellcheck source=action/scripts/render-common.sh
+. "$(dirname "${BASH_SOURCE[0]}")/render-common.sh"
 
 MAX="${MAX_ANNOTATIONS:-50}"
 if ! [[ "$MAX" =~ ^[0-9]+$ ]]; then
@@ -65,6 +69,8 @@ emit_native_annotations_if_available() {
   local args=(report --from "$input_file" --root "${INPUT_ROOT:-.}" --format github-annotations)
   [ "${FALLOW_RENDER_PATH_PREFIX_SET:-0}" = "1" ] \
     && args+=(--report-path-prefix "${FALLOW_RENDER_PATH_PREFIX:-}")
+  load_mutation_render_args
+  args+=(${MUTATION_RENDER_ARGS[@]+"${MUTATION_RENDER_ARGS[@]}"})
   local err_file
   err_file=$(mktemp)
   _FALLOW_TMPS+=("$err_file")

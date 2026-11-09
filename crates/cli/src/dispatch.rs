@@ -43,6 +43,9 @@ use type_aware_check::validate_type_aware_check_options;
 #[path = "dispatch_baselines.rs"]
 mod baselines_dispatch;
 use baselines_dispatch::dispatch_baselines_command;
+#[path = "dispatch_ci.rs"]
+mod ci_dispatch;
+use ci_dispatch::map_ci_subcommand;
 
 #[path = "dispatch_audit_inputs.rs"]
 mod audit_inputs;
@@ -306,8 +309,26 @@ pub fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> 
             no_open,
             viz_format,
         } => dispatch_viz(dispatch, viz_output.as_deref(), no_open, viz_format),
-        Command::Report { from } => {
-            cli_report::run_report(&from, output, root, cli.config.as_deref(), cli.quiet)
+        Command::Report {
+            from,
+            mutation_report,
+            mutation_not_run,
+        } => {
+            let input = mutation_report
+                .as_deref()
+                .map(cli_report::MutationInput::Report)
+                .or_else(|| mutation_not_run.map(cli_report::MutationInput::NotRun));
+            cli_report::run_report(
+                &from,
+                output,
+                root,
+                cli.config.as_deref(),
+                cli.quiet,
+                input.map(|input| cli_report::MutationRequest {
+                    input,
+                    root_flag: cli.root.as_deref(),
+                }),
+            )
         }
         Command::Schema => unreachable!("handled above"),
         migrate @ Command::Migrate { .. } => dispatch_migrate_command(migrate, root),
@@ -1651,153 +1672,6 @@ pub fn map_telemetry_subcommand(sub: TelemetryCli) -> telemetry::TelemetryComman
         TelemetryCli::Enable => telemetry::TelemetryCommand::Enable,
         TelemetryCli::Disable => telemetry::TelemetryCommand::Disable,
         TelemetryCli::Inspect { example } => telemetry::TelemetryCommand::Inspect { example },
-    }
-}
-
-fn map_ci_subcommand(sub: CiCli) -> ci::CiCommand {
-    match sub {
-        command @ CiCli::PlanPrComment { .. } => map_ci_plan_pr_comment(command),
-        command @ CiCli::PostPrComment { .. } => map_ci_post_pr_comment(command),
-        command @ CiCli::PostReview { .. } => map_ci_post_review(command),
-        command @ CiCli::PostCheckRun { .. } => map_ci_post_check_run(command),
-        command @ CiCli::ReconcileReview { .. } => map_ci_reconcile_review(command),
-    }
-}
-
-fn map_ci_plan_pr_comment(command: CiCli) -> ci::CiCommand {
-    let CiCli::PlanPrComment {
-        body,
-        marker_id,
-        clean,
-        existing_comment_id,
-        existing_body,
-    } = command
-    else {
-        unreachable!("ci plan-pr-comment mapper called with different variant");
-    };
-
-    ci::CiCommand::PlanPrComment {
-        body,
-        marker_id,
-        clean,
-        existing_comment_id,
-        existing_body,
-    }
-}
-
-fn map_ci_post_pr_comment(command: CiCli) -> ci::CiCommand {
-    let CiCli::PostPrComment {
-        provider,
-        pr,
-        mr,
-        body,
-        envelope,
-        marker_id,
-        clean,
-        repo,
-        project_id,
-        api_url,
-        dry_run,
-    } = command
-    else {
-        unreachable!("ci post-pr-comment mapper called with different variant");
-    };
-
-    ci::CiCommand::PostPrComment {
-        provider: map_ci_provider(provider),
-        target: pr.or(mr),
-        body,
-        envelope,
-        marker_id,
-        clean,
-        repo,
-        project_id,
-        api_url,
-        dry_run,
-    }
-}
-
-fn map_ci_post_review(command: CiCli) -> ci::CiCommand {
-    let CiCli::PostReview {
-        provider,
-        pr,
-        mr,
-        envelope,
-        repo,
-        project_id,
-        api_url,
-        dry_run,
-    } = command
-    else {
-        unreachable!("ci post-review mapper called with different variant");
-    };
-
-    ci::CiCommand::PostReview {
-        provider: map_ci_provider(provider),
-        target: pr.or(mr),
-        envelope,
-        repo,
-        project_id,
-        api_url,
-        dry_run,
-    }
-}
-
-fn map_ci_post_check_run(command: CiCli) -> ci::CiCommand {
-    let CiCli::PostCheckRun {
-        provider,
-        decision,
-        repo,
-        head_sha,
-        api_url,
-        split_gates,
-        dry_run,
-    } = command
-    else {
-        unreachable!("ci post-check-run mapper called with different variant");
-    };
-
-    ci::CiCommand::PostCheckRun {
-        provider: map_ci_provider(provider),
-        decision,
-        repo,
-        head_sha,
-        api_url,
-        split_gates,
-        dry_run,
-    }
-}
-
-fn map_ci_reconcile_review(command: CiCli) -> ci::CiCommand {
-    let CiCli::ReconcileReview {
-        provider,
-        pr,
-        mr,
-        envelope,
-        repo,
-        project_id,
-        api_url,
-        dry_run,
-    } = command
-    else {
-        unreachable!("ci reconcile-review mapper called with different variant");
-    };
-
-    ci::CiCommand::ReconcileReview {
-        provider: map_ci_provider(provider),
-        target: pr.or(mr),
-        envelope,
-        repo,
-        project_id,
-        api_url,
-        dry_run,
-    }
-}
-
-fn map_ci_provider(provider: CiProviderArg) -> ci::CiProvider {
-    match provider {
-        CiProviderArg::Github => ci::CiProvider::Github,
-        CiProviderArg::Gitlab => ci::CiProvider::Gitlab,
     }
 }
 

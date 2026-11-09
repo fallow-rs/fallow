@@ -390,7 +390,7 @@
       "section": "commands",
       "row": "report",
       "column": "Key Flags",
-      "seed": "`--from`"
+      "seed": "`--from`, `--mutation-report`, `--mutation-not-run`"
     },
     {
       "section": "commands",
@@ -2341,6 +2341,12 @@
       "row": "mixed-client-server-barrel",
       "column": "Description",
       "seed": "Barrel re-exports both a \"use client\" module and a server-only module; Requires the project to declare next"
+    },
+    {
+      "section": "issue-types",
+      "row": "mutation-survived",
+      "column": "Description",
+      "seed": "A small code change made no test fail"
     },
     {
       "section": "issue-types",

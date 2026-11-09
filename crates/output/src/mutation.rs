@@ -10,6 +10,7 @@ use fallow_types::envelope::{ElapsedMs, ToolVersion};
 use serde::{Deserialize, Serialize};
 
 use crate::audit_test_reach::TestReachClass;
+use crate::gate_outcomes::GateOutcomes;
 use crate::root_envelopes::serialize_named_json_output;
 
 /// Current mutation report schema version.
@@ -119,11 +120,11 @@ impl MutationStatusCounts {
     #[must_use]
     pub const fn executed(&self) -> usize {
         self.killed
-            + self.timeout
-            + self.survived
-            + self.runtime_error
-            + self.flaky
-            + self.compile_error
+            .saturating_add(self.timeout)
+            .saturating_add(self.survived)
+            .saturating_add(self.runtime_error)
+            .saturating_add(self.flaky)
+            .saturating_add(self.compile_error)
     }
 
     /// Adds one mutant with `status`.
@@ -176,8 +177,8 @@ impl MutationStatusCounts {
         reason = "mutant counts are far below 2^52"
     )]
     pub fn score(&self) -> Option<f64> {
-        let detected = self.killed + self.timeout;
-        let executed = detected + self.survived;
+        let detected = self.killed.saturating_add(self.timeout);
+        let executed = detected.saturating_add(self.survived);
         (executed > 0).then(|| detected as f64 / executed as f64)
     }
 }
@@ -1009,6 +1010,11 @@ pub struct MutationReport {
     /// `--compare`, and absent when this run is not complete.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub compare: Option<MutationCompare>,
+    /// The verdict of the `mutation-min-score` gate. Present only when a
+    /// minimum applies: from `--min-score`, or from `mutation.minScore` when
+    /// the run is not a recheck. The exit code of the run reads this entry.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub gate_outcomes: Option<GateOutcomes>,
 }
 
 /// How one mutant of a compare differs from the saved report.

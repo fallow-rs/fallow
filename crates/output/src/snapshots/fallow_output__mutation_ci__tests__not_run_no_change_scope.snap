@@ -1,0 +1,13 @@
+---
+source: crates/output/src/mutation_ci_tests.rs
+expression: both_headings(&view)
+---
+#### Mutation testing
+
+**Mutation testing did not run.** The changed scope needs a pull request diff or a base ref, and this job has neither. Run the job in a pull request, set a base ref, or use the all scope.
+
+===== summary heading =====
+
+## Mutation testing
+
+**Mutation testing did not run.** The changed scope needs a pull request diff or a base ref, and this job has neither. Run the job in a pull request, set a base ref, or use the all scope.

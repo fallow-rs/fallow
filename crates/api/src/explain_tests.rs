@@ -37,6 +37,7 @@ fn all_rules_walks_every_registry_in_order() {
         .chain(FLAGS_RULES)
         .chain(SECURITY_RULES)
         .chain(AUDIT_RULES)
+        .chain(MUTATION_RULES)
         .map(|rule| rule.id)
         .collect();
     assert_eq!(ids, expected);
@@ -925,4 +926,29 @@ fn unknown_explain_error_keeps_the_example_list_for_a_novel_token() {
     let error = unknown_explain_error("banana-split-detector");
     assert!(!error.message.contains("Did you mean"), "{}", error.message);
     assert_eq!(error.help, None);
+}
+
+#[test]
+fn the_mutation_survived_rule_reports_under_mutation_in_the_tests_category() {
+    let rule = rule_by_id("fallow/mutation-survived").unwrap();
+    assert_eq!(rule.category, "Tests");
+    assert_eq!(rule_command(rule), "mutation");
+    assert_eq!(
+        rule_by_token("mutation-survived").map(|found| found.id),
+        Some(rule.id)
+    );
+    assert_eq!(
+        rule_severity_key(rule),
+        None,
+        "no rules.* key gates a mutation finding"
+    );
+    assert_eq!(
+        rule_guide(rule).how_to_fix,
+        "Add or change a test so that it fails on this change. To see the code, run `fallow mutation inspect` with the mutant ID that the finding names."
+    );
+    assert!(all_rules().any(|found| found.id == rule.id));
+    assert_eq!(
+        rule_docs_url(rule),
+        "https://fallow.tools/docs/cli/mutation/"
+    );
 }

@@ -482,11 +482,12 @@ pub fn rule_by_id(id: &str) -> Option<&'static RuleDef> {
         .chain(FLAGS_RULES.iter())
         .chain(SECURITY_RULES.iter())
         .chain(AUDIT_RULES.iter())
+        .chain(MUTATION_RULES.iter())
         .find(|r| r.id == id)
 }
 
 /// Every registered rule in registry order: dead-code, health, duplication,
-/// flags, security, then audit. The order is the `fallow schema`
+/// flags, security, audit, then mutation. The order is the `fallow schema`
 /// `issue_types` order and the `fallow://issue-types` resource order.
 pub fn all_rules() -> impl Iterator<Item = &'static RuleDef> {
     CHECK_RULES
@@ -496,10 +497,12 @@ pub fn all_rules() -> impl Iterator<Item = &'static RuleDef> {
         .chain(FLAGS_RULES.iter())
         .chain(SECURITY_RULES.iter())
         .chain(AUDIT_RULES.iter())
+        .chain(MUTATION_RULES.iter())
 }
 
 /// The command family a rule reports under (`dead-code`, `health`, `dupes`,
-/// `flags`, `security`, or `audit`), derived from the registry array that owns it.
+/// `flags`, `security`, `audit`, or `mutation`), derived from the registry
+/// array that owns it.
 /// Membership is by id (unique across registries); the registries are
 /// `const` slices, so pointer identity is not stable across uses.
 #[must_use]
@@ -515,6 +518,8 @@ pub fn rule_command(rule: &RuleDef) -> &'static str {
         "security"
     } else if owns(AUDIT_RULES) {
         "audit"
+    } else if owns(MUTATION_RULES) {
+        "mutation"
     } else {
         "dead-code"
     }
@@ -645,6 +650,7 @@ pub fn rule_by_token(token: &str) -> Option<&'static RuleDef> {
             .chain(FLAGS_RULES.iter())
             .chain(SECURITY_RULES.iter())
             .chain(AUDIT_RULES.iter())
+            .chain(MUTATION_RULES.iter())
             .find(|rule| {
                 rule.docs_path.ends_with(&normalized)
                     || rule.docs_path.ends_with(singular)
@@ -719,6 +725,7 @@ pub fn rule_guide(rule: &RuleDef) -> RuleGuide {
         .or_else(|| duplication_rule_guide(rule.id))
         .or_else(|| security_rule_guide(rule.id))
         .or_else(|| audit_rule_guide(rule.id))
+        .or_else(|| mutation_rule_guide(rule.id))
         .unwrap_or_else(fallback_rule_guide)
 }
 
@@ -1027,6 +1034,16 @@ fn security_rule_guide(id: &str) -> Option<RuleGuide> {
         id if id.starts_with("security/") => RuleGuide {
             example: "A `fallow security` candidate uses this catalogue category as its SARIF rule id, for example security/sql-injection for a matched SQL sink.",
             how_to_fix: "Review the candidate trace before acting. Confirm attacker control, missing sanitization, and reachable runtime context, then fix with the category-appropriate safer API or add a reviewed suppression.",
+        },
+        _ => return None,
+    })
+}
+
+fn mutation_rule_guide(id: &str) -> Option<RuleGuide> {
+    Some(match id {
+        "fallow/mutation-survived" => RuleGuide {
+            example: "The tests call `isAdult(30)` and `isAdult(10)` only. Changing `>=` to `>` in `isAdult` makes no test fail, because no test checks the age `18`.",
+            how_to_fix: "Add or change a test so that it fails on this change. To see the code, run `fallow mutation inspect` with the mutant ID that the finding names.",
         },
         _ => return None,
     })
@@ -1384,6 +1401,16 @@ pub const FLAGS_RULES: &[RuleDef] = &[
         docs_path: "cli/flags#retirement-report",
     },
 ];
+
+/// Rule definitions for the findings of `fallow mutation`.
+pub const MUTATION_RULES: &[RuleDef] = &[RuleDef {
+    id: "fallow/mutation-survived",
+    category: "Tests",
+    name: "Survived Mutants",
+    short: "A small code change made no test fail",
+    full: "`fallow mutation` makes one small change to the code, such as `>=` to `>`, and runs the tests that reach the changed line. A survived mutant is a change that made no test fail, so the tests do not check that behavior. The CI integrations report a survived mutant on a changed line as a warning finding (CodeClimate severity `minor`). The finding names the operator, the function and the mutant id, and never the source text. A mutant that no test reaches (`no_coverage`) is not a finding. No `rules.*` key gates the finding: the mutation score gate (`--min-score` or `mutation.minScore`) decides the exit code.",
+    docs_path: "cli/mutation",
+}];
 
 macro_rules! security_catalogue_rule {
     ($id:literal, $name:literal, $cwe:literal) => {

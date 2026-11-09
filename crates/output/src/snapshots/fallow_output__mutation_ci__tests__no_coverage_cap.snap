@@ -1,0 +1,63 @@
+---
+source: crates/output/src/mutation_ci_tests.rs
+expression: both_headings(&view)
+---
+#### Mutation testing
+
+The tests detected each mutant that ran.
+
+| Killed | Survived | No coverage | Not measured | Score |
+| --- | --- | --- | --- | --- |
+| 5 | 0 | 12 | 0 | 100.0% |
+
+Scope: the changed lines.
+
+<details>
+<summary>No test reaches these lines (10 of 12)</summary>
+
+- `src/wide.ts:1`
+- `src/wide.ts:2`
+- `src/wide.ts:3`
+- `src/wide.ts:4`
+- `src/wide.ts:5`
+- `src/wide.ts:6`
+- `src/wide.ts:7`
+- `src/wide.ts:8`
+- `src/wide.ts:9`
+- `src/wide.ts:10`
+
+</details>
+
+To inspect a mutant, run `fallow mutation inspect <mutant-id> --report fallow-mutation.json` with the `fallow-mutation.json` file of this job.
+
+===== summary heading =====
+
+## Mutation testing
+
+The tests detected each mutant that ran.
+
+| Killed | Survived | No coverage | Not measured | Score |
+| --- | --- | --- | --- | --- |
+| 5 | 0 | 12 | 0 | 100.0% |
+
+Scope: the changed lines.
+
+The run took 4m 12s. 3 results came from the cache.
+
+<details>
+<summary>No test reaches these lines (10 of 12)</summary>
+
+- `src/wide.ts:1`
+- `src/wide.ts:2`
+- `src/wide.ts:3`
+- `src/wide.ts:4`
+- `src/wide.ts:5`
+- `src/wide.ts:6`
+- `src/wide.ts:7`
+- `src/wide.ts:8`
+- `src/wide.ts:9`
+- `src/wide.ts:10`
+
+</details>
+
+To inspect a mutant, run `fallow mutation inspect <mutant-id> --report fallow-mutation.json` with the `fallow-mutation.json` file of this job.

@@ -39,6 +39,17 @@ pub struct GateLine {
 const MAX_NAMED_FILES: usize = 5;
 
 impl GateLine {
+    /// The observed number as text. The mutation score is a percent of a
+    /// division, so it shows one decimal, rounded down like the mutation
+    /// section: a score just below the minimum never shows as equal to it.
+    fn observed_num(&self, observed: f64) -> String {
+        if self.name == "mutation-min-score" {
+            trim_num(observed.mul_add(10.0, 1e-9).floor() / 10.0)
+        } else {
+            trim_num(observed)
+        }
+    }
+
     /// The trailing `(85 against 90)` clause, when the gate compared something.
     fn measured_clause(&self) -> String {
         match (
@@ -47,12 +58,16 @@ impl GateLine {
             self.threshold_label.as_deref(),
         ) {
             (Some(observed), Some(threshold), _) => {
-                format!(" ({} against {})", trim_num(observed), trim_num(threshold))
+                format!(
+                    " ({} against {})",
+                    self.observed_num(observed),
+                    trim_num(threshold)
+                )
             }
             (Some(observed), None, Some(label)) => {
-                format!(" ({} at or above {label})", trim_num(observed))
+                format!(" ({} at or above {label})", self.observed_num(observed))
             }
-            (Some(observed), None, None) => format!(" ({})", trim_num(observed)),
+            (Some(observed), None, None) => format!(" ({})", self.observed_num(observed)),
             _ => String::new(),
         }
     }
@@ -94,12 +109,16 @@ impl GateLine {
             self.threshold_label.as_deref(),
         ) {
             (Some(observed), Some(threshold), _) => {
-                format!("{} against {}", trim_num(observed), trim_num(threshold))
+                format!(
+                    "{} against {}",
+                    self.observed_num(observed),
+                    trim_num(threshold)
+                )
             }
             (Some(observed), None, Some(label)) => {
-                format!("{} at or above {label}", trim_num(observed))
+                format!("{} at or above {label}", self.observed_num(observed))
             }
-            (Some(observed), None, None) => trim_num(observed),
+            (Some(observed), None, None) => self.observed_num(observed),
             _ => self.status.clone(),
         }
     }
@@ -508,6 +527,7 @@ fn known_gate_label(name: &str) -> Option<&'static str> {
         "audit-verdict" => "Audit verdict",
         "type-aware-require" => "Type-aware completeness",
         "parse-error" => "Parse errors",
+        "mutation-min-score" => "Mutation score",
         _ => return None,
     })
 }
@@ -790,6 +810,58 @@ mod tests {
 
         assert_eq!(rows[0].observed, "3 at or above critical");
         assert_eq!(rows[0].threshold.as_deref(), Some("critical"));
+    }
+
+    #[test]
+    fn the_mutation_score_gate_row_reads_mutation_score() {
+        let value = envelope(&serde_json::json!({
+            "mutation-min-score": {
+                "status": "fail", "enforced": true, "observed": 62.5, "threshold": 80.0
+            }
+        }));
+
+        let rows = gate_rows(&value);
+
+        assert_eq!(rows[0].id, "mutation-min-score");
+        assert_eq!(rows[0].label, "Mutation score");
+        assert_eq!(rows[0].observed, "62.5 against 80");
+        assert_eq!(rows[0].threshold.as_deref(), Some("80"));
+    }
+
+    #[test]
+    fn the_mutation_score_shows_one_decimal_rounded_down() {
+        // 2 of 3 mutants killed, and a score just below the minimum.
+        let value = envelope(&serde_json::json!({
+            "mutation-min-score": {
+                "status": "fail", "enforced": true,
+                "observed": 200.0 / 3.0, "threshold": 80.0
+            },
+            "health-findings": {
+                "status": "fail", "enforced": true, "observed": 2.5, "threshold": 1.0
+            }
+        }));
+        let near = envelope(&serde_json::json!({
+            "mutation-min-score": {
+                "status": "fail", "enforced": true, "observed": 79.96, "threshold": 80.0
+            }
+        }));
+
+        let rows = gate_rows(&value);
+        let observed = |id: &str| {
+            rows.iter()
+                .find(|row| row.id == id)
+                .map(|row| row.observed.clone())
+        };
+
+        assert_eq!(
+            observed("mutation-min-score").as_deref(),
+            Some("66.6 against 80")
+        );
+        assert_eq!(
+            observed("health-findings").as_deref(),
+            Some("2.5 against 1")
+        );
+        assert_eq!(gate_rows(&near)[0].observed, "79.9 against 80");
     }
 
     /// The name set is OPEN, so a gate from a newer build must still reach the

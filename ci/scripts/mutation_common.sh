@@ -2,7 +2,9 @@
 # Shared `fallow mutation` helpers for the GitHub Action
 # (action/scripts/mutation.sh) and the GitLab template (ci/scripts/mutation.sh).
 # The caller sources this file, sets the FALLOW_MUTATION_* variables below,
-# and calls fallow_mutation_main.
+# and calls fallow_mutation_main. The render steps call
+# fallow_mutation_render_args to pass the result to `fallow report`, which
+# renders all mutation output.
 #
 # Input variables:
 #   FALLOW_MUTATION_ROOT           project root (default: .)
@@ -13,40 +15,41 @@
 #   FALLOW_MUTATION_MIN_SCORE      optional percent from 0 to 100
 #   FALLOW_MUTATION_DIFF_FILE      diff of the changed scope (optional)
 #   FALLOW_MUTATION_CHANGED_SINCE  base ref of the changed scope (optional)
-#   FALLOW_MUTATION_REFUSE_REASON  non-empty: do not run, and report why
+#   FALLOW_MUTATION_REFUSE_REASON  event-refused or fork-refused: do not run
 #   FALLOW_MUTATION_OUT_DIR        directory for the result files (default: .)
 #
 # Result files in FALLOW_MUTATION_OUT_DIR, written after the run:
-#   fallow-mutation.json          the mutation report, when the run wrote one
-#   fallow-mutation-tasks.json    the open tasks of the report, when available
-#   fallow-mutation-status.json   the outcome of the step
-#   fallow-mutation-section.md    the section for the sticky comment
+#   fallow-mutation.json          the mutation report. When the run wrote no
+#                                 report, the error envelope that the run
+#                                 printed on stdout, if it printed one.
+#   fallow-mutation-status.json   {"outcome", "exit_code", "not_run_reason"},
+#                                 closed values only
+#   fallow-mutation-stderr.log    the error output of the run, for the job log
 
-FALLOW_MUTATION_TOP_ITEMS=5
+# The first fallow release with `fallow report --mutation-report`. The upgrade
+# line of a CI job with an older CLI names it.
+# shellcheck disable=SC2034
+MUTATION_REPORT_VERSION=3.42.0
 
-# Credentials that the CI job has and the tests of the project do not need.
-# The run removes them from the environment of `fallow mutation`, so a test
-# cannot read them. CI_JOB_TOKEN stays: a test can need it for a package
-# registry, and GitLab limits its scope.
+# The values of `fallow report --mutation-not-run`.
+FALLOW_MUTATION_NOT_RUN_REASONS=(event-refused fork-refused no-change-scope interrupted)
+
+# The run removes these variables from the environment of `fallow mutation`.
+# The tests of the project run in that process and do not need them.
+# - Credentials: a test cannot read them. CI_JOB_TOKEN stays: a test can need
+#   it for a package registry, and GitLab limits its scope.
+# - GitHub workflow command files: a test does not get the paths of the env,
+#   the outputs, the PATH, the state or the job summary of the later steps.
+#   The files stay on the disk of the runner, and a test can still find them.
+# - BASH_ENV: a test shell does not source a file that the job chose.
+# This is defense in depth, not a guarantee. The event and fork refusals are
+# the boundary.
 FALLOW_MUTATION_UNSET_ENV=(
   GH_TOKEN GITHUB_TOKEN GITLAB_TOKEN FALLOW_MUTATION_GH_TOKEN
   ACTIONS_ID_TOKEN_REQUEST_TOKEN ACTIONS_ID_TOKEN_REQUEST_URL ACTIONS_RUNTIME_TOKEN
+  GITHUB_ENV GITHUB_OUTPUT GITHUB_PATH GITHUB_STEP_SUMMARY GITHUB_STATE
+  BASH_ENV
 )
-FALLOW_MUTATION_MAX_LINE_CHARS=160
-# An error message can list each changed path of a worktree. The comment and
-# the job log show at most this many characters of a message; the status file
-# keeps the full text. GitHub rejects a comment over 65536 characters.
-FALLOW_MUTATION_MAX_MESSAGE_CHARS=1000
-
-# The report fields that the status and the section read. A report of another
-# shape counts as a tool failure, so a gate result is never lost.
-FALLOW_MUTATION_REPORT_SHAPE='
-  (.completion | type == "object")
-  and (.completion.status | type == "string")
-  and (.summary | type == "object")
-  and (.summary.counts | type == "object")
-  and ((.mutants // []) | type == "array")
-'
 
 fallow_mutation_sha256() {
   if command -v sha256sum > /dev/null 2>&1; then
@@ -78,25 +81,19 @@ fallow_mutation_cache_digest() {
   } | fallow_mutation_sha256 | cut -c1-16
 }
 
-# Checks the input values before they reach the command line. Fallow
-# validates the meaning of each value; this guard only keeps a value from
-# being read as a flag. Prints the problem and returns 1 for a bad value.
+# Returns 0 when the argument is a value of `fallow report --mutation-not-run`.
+fallow_mutation_is_not_run_reason() {
+  local value=${1:-} reason
+  for reason in "${FALLOW_MUTATION_NOT_RUN_REASONS[@]}"; do
+    [ "$value" = "$reason" ] && return 0
+  done
+  return 1
+}
+
+# Checks the scope paths before they reach the command line. Fallow validates
+# all the other values. A path that starts with "-" would be read as a flag.
+# Prints the problem and returns 1 for a bad path.
 fallow_mutation_validate_inputs() {
-  local budget=${FALLOW_MUTATION_TIME_BUDGET:-}
-  local max=${FALLOW_MUTATION_MAX_MUTANTS:-}
-  local min=${FALLOW_MUTATION_MIN_SCORE:-}
-  if [ -n "$budget" ] && ! [[ "$budget" =~ ^[0-9][0-9a-z.]*$ ]]; then
-    printf 'The mutation time budget must be a duration such as 90s, 10m or 1h, got: %s\n' "$budget"
-    return 1
-  fi
-  if [ -n "$max" ] && ! [[ "$max" =~ ^[1-9][0-9]*$ ]]; then
-    printf 'The mutation mutant limit must be a positive integer, got: %s\n' "$max"
-    return 1
-  fi
-  if [ -n "$min" ] && ! [[ "$min" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
-    printf 'The mutation minimum score must be a number from 0 to 100, got: %s\n' "$min"
-    return 1
-  fi
   local token
   for token in $(fallow_mutation_scope_paths); do
     case "$token" in
@@ -175,234 +172,75 @@ fallow_mutation_outcome_for_exit() {
 }
 
 # Writes the status file. Arguments: file, outcome, exit code (or empty),
-# error code, message, help, report file (or empty).
+# not-run reason (or empty). The file holds closed values only: the render
+# gets free text only from the error envelope of the CLI.
 fallow_mutation_write_status() {
-  local file=$1 outcome=$2 exit_code=$3 code=$4 message=$5 help=$6 report=$7
+  local file=$1 outcome=$2 exit_code=${3:-} reason=${4:-}
   jq -n \
     --arg outcome "$outcome" \
     --arg exit_code "$exit_code" \
-    --arg code "$code" \
-    --arg message "$message" \
-    --arg help "$help" \
-    --arg scope "$(fallow_mutation_scope)" \
-    --arg root "${FALLOW_MUTATION_ROOT:-.}" \
-    --arg time_budget "${FALLOW_MUTATION_TIME_BUDGET:-}" \
-    --arg max_mutants "${FALLOW_MUTATION_MAX_MUTANTS:-}" \
-    --arg min_score "${FALLOW_MUTATION_MIN_SCORE:-}" \
-    --slurpfile report "${report:-/dev/null}" \
-    '
-    ($report[0] // null) as $r
-    | {
-        outcome: $outcome,
-        exit_code: (if $exit_code == "" then null else ($exit_code | tonumber) end),
-        code: (if $code == "" then null else $code end),
-        message: (if $message == "" then null else $message end),
-        help: (if $help == "" then null else $help end),
-        scope: $scope,
-        root: $root,
-        time_budget: (if $time_budget == "" then null else $time_budget end),
-        max_mutants: (if $max_mutants == "" then null else ($max_mutants | tonumber) end),
-        min_score: (if $min_score == "" then null else ($min_score | tonumber) end),
-        completion: ($r.completion.status // null),
-        score: ($r.summary.score // null),
-        clean: (
-          ($outcome == "ok" or $outcome == "skipped")
-          and (($r.completion.status // "complete") == "complete")
-          and (($r.summary.counts.survived // 0) == 0)
-          and (($r.summary.counts.no_coverage // 0) == 0)
-        )
-      }
-    ' > "$file"
+    --arg reason "$reason" \
+    '{
+      outcome: $outcome,
+      exit_code: (if $exit_code == "" then null else ($exit_code | tonumber) end),
+      not_run_reason: (if $reason == "" then null else $reason end)
+    }' > "$file"
 }
 
-# The jq program that renders the comment section from the status, the
-# report and the tasks. Paths, names and source lines come from the pull
-# request, so they appear only inside code spans and code blocks.
-# shellcheck disable=SC2016
-FALLOW_MUTATION_SECTION_JQ='
-def quote: [39] | implode;
-def span: tostring | gsub("[`\r\n]"; quote) | "`" + . + "`";
-def pct: if . == null then "n/a" else ((. * 1000 | round) / 10 | tostring) + "%" end;
-def duration:
-  (. / 1000 | floor) as $s
-  | if $s >= 3600 then "\($s / 3600 | floor)h \(($s % 3600) / 60 | floor)m"
-    elif $s >= 60 then "\($s / 60 | floor)m \($s % 60)s"
-    else "\($s)s" end;
-def clip: if length > $max_chars then .[0:$max_chars] + " ..." else . end;
-def block($sign): split("\n") | map("   " + $sign + (gsub("\r"; "") | clip)) | join("\n");
-def shorten:
-  if length > $max_message then .[0:$max_message] + " ... (shortened; fallow-mutation-status.json of this job has the full text)"
-  else . end;
-def text_block: "```text\n" + (tostring | shorten | gsub("```"; quote + quote + quote)) + "\n```";
-
-($status[0]) as $st
-| ($report[0] // null) as $r
-| ($tasks[0] // null) as $t
-| (if $st.root == "." then "" else " --root " + $st.root end) as $root_flag
-| ($r.summary.counts // {}) as $c
-| (($c.killed // 0) + ($c.timeout // 0)) as $killed
-| (($c.pending // 0) + ($c.runtime_error // 0) + ($c.flaky // 0) + ($c.compile_error // 0)) as $not_measured
-| (($r.completion.reasons // []) | map(span) | join(", ")) as $reasons
-
-| def counts_table:
-    "| Killed | Survived | No coverage | Not measured | Score |\n"
-    + "| --- | --- | --- | --- | --- |\n"
-    + "| \($killed) | \($c.survived // 0) | \($c.no_coverage // 0) | \($not_measured) | \($r.summary.score | pct) |";
-
-  def scope_text:
-    if $r.scope.kind == "changed" then "the changed lines"
-    elif $r.scope.kind == "all" then "all source files"
-    elif $r.scope.kind == "paths" then "the selected paths"
-    else ($st.scope | span) end;
-
-  def budget_text:
-    [ (if $st.time_budget != null then "time " + ($st.time_budget | span) else empty end),
-      (if $st.max_mutants != null then "\($st.max_mutants) mutants" else empty end) ]
-    | if length == 0 then "none" else join(", ") end;
-
-  def run_facts:
-    "Scope: \(scope_text). Budget: \(budget_text)."
-    + (if $r.elapsed_ms != null then " The run took \($r.elapsed_ms | duration)." else "" end)
-    + (if ($r.cache.hits // 0) > 0 then " \($r.cache.hits) results came from the cache." else "" end);
-
-  def task_for($id): ($t.tasks // []) | map(select(.mutant_id == $id)) | first;
-
-  def item($m):
-    task_for($m.mutant_id) as $task
-    | "1. " + ("\($m.file):\($m.line)" | span)
-      + (if $m.function != null then ", function " + ($m.function | span) else "" end)
-      + (if $m.status == "survived" then " (survived)" else " (no test reaches it)" end)
-      + "\n"
-      + (if $task.original_lines != null and $task.mutated_lines != null then
-           "   ````diff\n" + ($task.original_lines | block("-")) + "\n"
-           + ($task.mutated_lines | block("+")) + "\n   ````\n"
-         elif $m.change != null then
-           "   Change: " + ($m.change.from | span) + " to " + ($m.change.to | span) + "\n"
-         else "" end)
-      + "   " + ("fallow mutation inspect \($m.mutant_id)" + $root_flag | span);
-
-  def survivors:
-    [ ($r.mutants // [])[] | select(.status == "survived" or .status == "no_coverage") ]
-    | sort_by(if .status == "survived" then 0 else 1 end)
-    | if length == 0 then ""
-      else
-        "\n\n<details open>\n<summary>Top survivors (\([length, $top] | min) of \(length))</summary>\n\n"
-        + (.[0:$top] | map(item(.)) | join("\n"))
-        + "\n\n</details>\n\nEach item is a small code change that made no test fail. Add a test that fails on the change. To inspect an item on your machine, run `fallow mutation` with the same scope on this commit first, or add `--report` with the `fallow-mutation.json` file of this job. `fallow mutation tasks` lists each item."
-      end;
-
-  def partial_note:
-    if ($r.completion.status // "complete") == "partial" then
-      "**Partial run** (\($reasons)). The counts cover only the mutants that ran."
-      + (if ($r.completion.reasons // []) | any(. == "time-budget")
-         then " The next run with the same budget continues from the result cache."
-         else "" end)
-      + "\n\n"
-    else "" end;
-
-  def headline:
-    if $st.outcome == "gate-failed" then
-      "**Score below the minimum.** The score is \($r.summary.score | pct)"
-      + (if $st.min_score != null then ", and the minimum is \($st.min_score)%." else ", and the minimum score of the config is higher." end)
-      + "\n\n"
-    elif $st.outcome == "interrupted" then
-      "**Mutation testing stopped** because a signal stopped the run (exit code \($st.exit_code)).\n\n"
-    elif ($c.total // 0) == 0 then
-      "The scope has no mutant.\n\n"
-    elif (($c.survived // 0) + ($c.no_coverage // 0)) == 0 then
-      "The tests detected each mutant that ran.\n\n"
-    else "" end;
-
-  "## Mutation testing\n\n"
-  + (
-    if $st.outcome == "refused" then
-      "**Mutation testing did not run.** " + $st.message
-    elif $st.outcome == "skipped" then
-      "Mutation testing did not run: " + $st.message
-    elif $st.outcome == "invalid-input" then
-      "**Mutation testing did not start.** The input is invalid.\n\n" + ($st.message | text_block)
-    elif $st.outcome == "tool-failed" then
-      "**Mutation testing failed** (exit code \($st.exit_code // "n/a")"
-      + (if $st.code != null then ", " + ($st.code | span) else "" end) + ").\n\n"
-      + ($st.message // "fallow mutation gave no error message." | text_block)
-      + (if $st.help != null then "\n\n" + ($st.help | text_block) else "" end)
-    elif $r == null then
-      "**Mutation testing failed** (exit code \($st.exit_code // "n/a")). The run wrote no report."
-    else
-      partial_note + headline + counts_table + "\n\n" + run_facts + survivors
-    end
-  )
-  + "\n"
-'
-
-# Renders the comment section to stdout. Arguments: status file, report
-# file (or empty), tasks file (or empty).
-fallow_mutation_render_section() {
-  local status=$1 report=${2:-} tasks=${3:-}
-  [ -n "$report" ] && [ -s "$report" ] || report=/dev/null
-  [ -n "$tasks" ] && [ -s "$tasks" ] || tasks=/dev/null
-  jq -nrj \
-    --slurpfile status "$status" \
-    --slurpfile report "$report" \
-    --slurpfile tasks "$tasks" \
-    --argjson top "$FALLOW_MUTATION_TOP_ITEMS" \
-    --argjson max_chars "$FALLOW_MUTATION_MAX_LINE_CHARS" \
-    --argjson max_message "$FALLOW_MUTATION_MAX_MESSAGE_CHARS" \
-    "$FALLOW_MUTATION_SECTION_JQ"
-}
-
-# shellcheck disable=SC2016
-FALLOW_MUTATION_INSERT_JQ='
-def insert_section($s):
-  split("\nGenerated by fallow.") as $p
-  | if ($p | length) < 2 then . + "\n" + $s
-    else ($p[:-1] | join("\nGenerated by fallow.")) + "\n" + $s + "\nGenerated by fallow." + $p[-1]
-    end;
-'
-
-# Puts the mutation section above the footer of the rendered sticky comment,
-# in the markdown body and in the envelope that the post command reads. A
-# section with open items makes the envelope not clean, so the post command
-# creates the first comment. Arguments: body file, envelope file (or empty),
-# section file, clean (true or false).
-fallow_mutation_insert_section() {
-  local body=$1 envelope=${2:-} section=$3 clean=${4:-true}
-  [ -s "$section" ] || return 0
-  local tmp
-  if [ -f "$body" ]; then
-    tmp="${body}.mutation.tmp"
-    if ! jq -Rsj --rawfile s "$section" "${FALLOW_MUTATION_INSERT_JQ} insert_section(\$s)" "$body" > "$tmp"; then
-      rm -f "$tmp"
-      return 1
-    fi
-    mv "$tmp" "$body"
+# Writes the first error envelope of a stdout file to the target file.
+# Returns 1 when stdout has no envelope.
+fallow_mutation_write_envelope() {
+  local stdout_file=$1 target=$2
+  jq -cs 'map(select(type == "object" and .error == true)) | first // empty' \
+    "$stdout_file" > "$target" 2> /dev/null || true
+  if [ -s "$target" ]; then
+    return 0
   fi
-  if [ -n "$envelope" ] && [ -f "$envelope" ]; then
-    tmp="${envelope}.mutation.tmp"
-    if ! jq --rawfile s "$section" --argjson clean "$clean" \
-        "${FALLOW_MUTATION_INSERT_JQ} .body |= insert_section(\$s) | .is_clean = (.is_clean and \$clean)" \
-        "$envelope" > "$tmp"; then
-      rm -f "$tmp"
-      return 1
-    fi
-    mv "$tmp" "$envelope"
+  rm -f "$target"
+  return 1
+}
+
+# Writes an error envelope with a fixed code and message, for a failure that
+# left no report and no envelope of the CLI. The render then shows the
+# failure. Arguments: target file, code, message, exit code (or empty).
+fallow_mutation_write_fallback_envelope() {
+  local target=$1 code=$2 message=$3 exit_code=${4:-}
+  jq -cn --arg code "$code" --arg message "$message" --arg exit_code "$exit_code" \
+    '{error: true, code: $code, message: $message,
+      exit_code: (if $exit_code == "" then 2 else ($exit_code | tonumber) end)}' > "$target"
+}
+
+# Prints the `fallow report` arguments that pass the mutation result, one
+# argument for each line: `--mutation-not-run <reason>`, `--mutation-report
+# <file>`, or nothing. Prints nothing when the capability probe
+# (HAS_MUTATION_REPORT in the Action, FALLOW_HAS_MUTATION_REPORT in GitLab) is
+# not true, so an older CLI renders as before.
+# Argument: the directory of the result files (optional).
+# FALLOW_MUTATION_NOT_RUN, FALLOW_MUTATION_STATUS_FILE and
+# FALLOW_MUTATION_RESULTS_FILE take precedence over the files in that
+# directory. Without a directory and without these variables, the job ran no
+# mutation step, and the function prints nothing.
+fallow_mutation_render_args() {
+  [ "${HAS_MUTATION_REPORT:-}" = "true" ] || [ "${FALLOW_HAS_MUTATION_REPORT:-}" = "true" ] || return 0
+  local dir=${1:-}
+  local reason=${FALLOW_MUTATION_NOT_RUN:-}
+  local status_file=${FALLOW_MUTATION_STATUS_FILE:-}
+  local report=${FALLOW_MUTATION_RESULTS_FILE:-}
+  if [ -n "$dir" ]; then
+    status_file=${status_file:-${dir%/}/fallow-mutation-status.json}
+    report=${report:-${dir%/}/fallow-mutation.json}
+  fi
+  if [ -z "$reason" ] && [ -n "$status_file" ] && [ -f "$status_file" ]; then
+    reason=$(jq -r '.not_run_reason // empty' "$status_file" 2> /dev/null || true)
+  fi
+  if fallow_mutation_is_not_run_reason "$reason"; then
+    printf '%s\n%s\n' --mutation-not-run "$reason"
+    return 0
+  fi
+  if [ -n "$report" ] && [ -s "$report" ]; then
+    printf '%s\n%s\n' --mutation-report "$report"
   fi
   return 0
-}
-
-# Prints the message of a status file, shortened for a job log line.
-fallow_mutation_status_message() {
-  jq -r --argjson n "$FALLOW_MUTATION_MAX_MESSAGE_CHARS" \
-    '(.message // "") | if length > $n then .[0:$n] + " ... (shortened; fallow-mutation-status.json has the full text)" else . end' \
-    "$1"
-}
-
-# Prints one field of the error envelope that `fallow mutation` printed.
-fallow_mutation_error_field() {
-  local stdout_file=$1 field=$2
-  jq -rs --arg f "$field" \
-    'map(select(type == "object" and .error == true)) | first | .[$f] // empty' \
-    "$stdout_file" 2>/dev/null || true
 }
 
 # Runs `fallow mutation` and writes the result files. Returns 0 when the run
@@ -416,32 +254,37 @@ fallow_mutation_main() {
   tmp=$(mktemp -d "${tmp_parent%/}/fallow-mutation.XXXXXX")
   local report="$tmp/report.json"
   local status_tmp="$tmp/status.json"
-  local tasks="$tmp/tasks.json"
-  local outcome exit_code="" code="" message="" help="" problem build_status=0
+  local outcome exit_code="" reason="" problem build_status=0
   local name
 
   # A result file of an earlier run in the same directory must not look like
-  # the result of this run.
-  for name in fallow-mutation.json fallow-mutation-tasks.json fallow-mutation-status.json \
-      fallow-mutation-section.md fallow-mutation-stderr.log; do
+  # the result of this run. The section and tasks files of older scripts are
+  # removed too, because no step of this version writes them.
+  for name in fallow-mutation.json fallow-mutation-status.json fallow-mutation-stderr.log \
+      fallow-mutation-tasks.json fallow-mutation-section.md; do
     rm -f "${out_dir}/${name}"
   done
 
   if [ -n "${FALLOW_MUTATION_REFUSE_REASON:-}" ]; then
     outcome=refused
-    message=$FALLOW_MUTATION_REFUSE_REASON
+    case "$FALLOW_MUTATION_REFUSE_REASON" in
+      event-refused|fork-refused) reason=$FALLOW_MUTATION_REFUSE_REASON ;;
+      *) printf 'Unknown mutation refuse reason: %s\n' "$FALLOW_MUTATION_REFUSE_REASON" >&2 ;;
+    esac
   elif ! problem=$(fallow_mutation_validate_inputs); then
-    outcome=invalid-input
-    message=$problem
+    outcome=tool-failed
+    fallow_mutation_write_fallback_envelope "$report" FALLOW_MUTATION_INVALID_SCOPE "$problem"
   else
     fallow_mutation_build_args "$report" || build_status=$?
     if [ "$build_status" -eq 3 ]; then
       outcome=skipped
-      message="the changed scope needs a pull request diff or a base ref, and this job has neither. Run the job in a pull request, set a base ref, or use the all scope."
+      reason=no-change-scope
     else
       # The tests of the project run inside this command. Its stdout and
       # stderr go to the temp directory: a new file in the worktree would
-      # make the dirty-worktree check of the run refuse the run.
+      # make the dirty-worktree check of the run refuse the run. The stderr
+      # can hold test output, so it goes to a log file and never into a
+      # rendered surface.
       exit_code=0
       local unset_args=() var
       for var in "${FALLOW_MUTATION_UNSET_ENV[@]}"; do
@@ -449,45 +292,30 @@ fallow_mutation_main() {
       done
       env "${unset_args[@]}" fallow "${FALLOW_MUTATION_ARGS[@]}" > "$tmp/stdout.json" 2> "$tmp/stderr.log" || exit_code=$?
       outcome=$(fallow_mutation_outcome_for_exit "$exit_code")
-      code=$(fallow_mutation_error_field "$tmp/stdout.json" code)
-      message=$(fallow_mutation_error_field "$tmp/stdout.json" message)
-      help=$(fallow_mutation_error_field "$tmp/stdout.json" help)
-      # The stderr can hold test output, so it goes to the log file of the
-      # job and never into the comment.
-      if [ -z "$message" ] && [ "$outcome" = "tool-failed" ]; then
-        message="fallow mutation printed no error message. The file fallow-mutation-stderr.log of this job has its error output."
-      fi
-      if [ -s "$report" ] && ! jq -e "$FALLOW_MUTATION_REPORT_SHAPE" "$report" > /dev/null 2>&1; then
+      if [ ! -s "$report" ]; then
         rm -f "$report"
-        if [ "$outcome" = "ok" ] || [ "$outcome" = "gate-failed" ]; then
-          outcome=tool-failed
-          message="fallow mutation wrote a report with an unknown shape."
+        [ "$outcome" = "interrupted" ] || outcome=tool-failed
+        if fallow_mutation_write_envelope "$tmp/stdout.json" "$report"; then
+          :
+        elif [ "$outcome" = "interrupted" ]; then
+          reason=interrupted
+        else
+          fallow_mutation_write_fallback_envelope "$report" FALLOW_MUTATION_NO_REPORT \
+            "fallow mutation exited with code ${exit_code}, wrote no report and printed no error message. The fallow-mutation-stderr.log file of this job has its error output." \
+            "$exit_code"
         fi
       fi
     fi
   fi
 
-  [ -s "$report" ] || report=""
-  if [ -n "$report" ]; then
-    local tasks_args=(mutation tasks --report "$report" --root "${FALLOW_MUTATION_ROOT:-.}" --format json --quiet)
-    [ -n "${FALLOW_MUTATION_CONFIG:-}" ] && tasks_args+=(--config "$FALLOW_MUTATION_CONFIG")
-    fallow "${tasks_args[@]}" > "$tasks" 2> /dev/null || rm -f "$tasks"
-  fi
-
   mkdir -p "$out_dir"
-  if ! fallow_mutation_write_status "$status_tmp" "$outcome" "$exit_code" "$code" "$message" "$help" "$report"; then
+  if ! fallow_mutation_write_status "$status_tmp" "$outcome" "$exit_code" "$reason"; then
+    printf 'The CI step could not write the mutation status file.\n' >&2
     outcome=tool-failed
-    report=""
-    fallow_mutation_write_status "$status_tmp" "$outcome" "$exit_code" "" \
-      "The CI step could not read the result of fallow mutation." "" ""
-  fi
-  if ! fallow_mutation_render_section "$status_tmp" "$report" "$tasks" > "$out_dir/fallow-mutation-section.md"; then
-    printf '## Mutation testing\n\nThe CI step could not render the result. See fallow-mutation-status.json of this job.\n' \
-      > "$out_dir/fallow-mutation-section.md"
+    printf '{"outcome":"tool-failed","exit_code":null,"not_run_reason":null}\n' > "$status_tmp"
   fi
   cp "$status_tmp" "$out_dir/fallow-mutation-status.json"
-  [ -n "$report" ] && cp "$report" "$out_dir/fallow-mutation.json"
-  [ -s "$tasks" ] && cp "$tasks" "$out_dir/fallow-mutation-tasks.json"
+  [ -s "$report" ] && cp "$report" "$out_dir/fallow-mutation.json"
   [ -s "$tmp/stderr.log" ] && cp "$tmp/stderr.log" "$out_dir/fallow-mutation-stderr.log"
   rm -rf "$tmp"
 

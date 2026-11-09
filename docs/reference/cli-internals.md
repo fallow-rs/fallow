@@ -795,6 +795,79 @@ grouped combined run prints the dead-code section without groups and has no
 `report_parity_tests` integration tests compare the two renders for each
 supported kind.
 
+## Saved-only mutation join
+
+`fallow report --from` renders a saved envelope byte-identically to the
+direct `--format` run, with two exceptions:
+
+- The live PR comment of the bare combined run has its own layout.
+  `report --from` renders the per-finding layout for it.
+- `--mutation-report` and `--mutation-not-run` join the mutation evidence of
+  a CI job to the render. No live command has this join, so these renders
+  have no live equivalent. `SAVED_ONLY_JOINS` in `report_parity_tests.rs`
+  lists the flags with their covering tests.
+
+`cli_report::run_report` takes an `Option<MutationRequest>`: the input
+(`MutationInput::Report(path)` or `MutationInput::NotRun(reason)`) and the
+`--root` as the user wrote it. The inspect command in the section repeats
+that root, not the absolute path of the runner. The order is:
+
+1. `report_target`, then `validate_mutation_target`. A format other than the
+   pr-comment, review, `github-summary`, `github-annotations` and
+   `codeclimate` formats exits 2 before `--from` is read.
+2. The envelope load and the kind detection, then `validate_mutation_kind`.
+   A saved `fallow fix` envelope exits 2.
+3. `validate_report_target` and `validate_saved_report_envelope`. An invalid
+   `--from` file reports its own error first.
+4. `join_mutation_evidence`: `MutationEvidence::load` or
+   `MutationEvidence::not_run`, then `with_root_flag`, then
+   `merge_gate_outcomes`. The merge adds only
+   `gate_outcomes["mutation-min-score"]` to the envelope, so the status note,
+   the summary and annotation gate lines and the decision gate rows read it.
+   An input error exits 2 with `FALLOW_MUTATION_REPORT_INVALID: <message>`.
+5. `MutationEvidence::codeclimate_issues`, called once. It builds the
+   survivor issues, applies the shared diff filter
+   (`diff_filter::filter_issues_from_env`), caps them at
+   `MUTATION_MAX_INLINE`, and sets `inline_overflow` in the view. The filter
+   runs before the cap, so a survivor outside the diff never takes an inline
+   slot.
+6. `print_saved_target` renders the target.
+
+`crates/cli/src/report/mutation_evidence.rs` reads the report with the
+`SavedReport` type of `mutation_inspect.rs`, so the two readers cannot
+disagree. It checks the SHA-256 digest of each file under the resolved root.
+A survivor in a changed or missing file is dropped and counted in
+`stale_hidden`. A file that is not valid JSON, or a `mutation` report that
+does not parse, is the `Unreadable` state with a stderr warning and exit 0,
+so a truncated report never hides the analysis output.
+
+Each surface has a `*_with_mutation` entry point. The earlier entry point
+delegates to it with `None`, so the live callers and their output do not
+change:
+
+- PR comment (`print_pr_comment_with_mutation`): the survivors pass the
+  summary filter and the path rebase on their own, and follow the analysis
+  issues. `mutation_decision_row` goes after the command row and before the
+  gate rows. `compose_trailing_section` puts the mutation section before the
+  section of config patterns that matched nothing, joined by a blank line.
+  With no mutation section, the trailing section is unchanged.
+- Review (`print_review_envelope_with_mutation`): the analysis issues and
+  the survivors are merged and sorted by path, line and fingerprint, so a
+  survivor on the line of an analysis finding merges into one comment. The
+  summary gets `mutation_review_summary_line` and the comment section.
+- Annotations (`print_annotations_with_mutation`): the gate notice, the
+  request notice, the run-state line, the analysis annotations, the survivor
+  warnings, then the budget notice. The run-state line comes early, so the
+  `head -n` cap of the Action keeps it.
+- Job summary (`print_summary_with_mutation`): the `##` section goes after
+  `render_summary` and before the config-pattern section.
+- CodeClimate (`print_envelope_codeclimate_with_config`): the survivors follow
+  the analysis issues, before the shared path rebase.
+
+`crates/output/src/mutation_ci.rs` owns all the text and has no IO. A
+`suggestion` fence never appears, because no fix intent in
+`report/ci/suggestion.rs` matches `fallow/mutation-survived`.
+
 ## Compact health populations
 
 Compact health output keeps the existing `vital-signs:` payload unchanged and

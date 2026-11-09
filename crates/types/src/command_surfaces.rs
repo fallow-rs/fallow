@@ -146,13 +146,13 @@ pub const COMMAND_ENVELOPES: &[CommandEnvelope] = &[
         kind: "mutation",
         grouped_kind: None,
         report_from: ReportFrom::Refused(
-            "mutation results come from one opt-in test run and feed no CI surface in version 1",
+            "a mutation report is a side input: pass it with fallow report --from <results> --mutation-report <file>",
         ),
         mcp_tool: Some("mutation_plan"),
         mcp_omission: None,
         verdict: false,
         ci: CiIntegration::Omitted(
-            "mutation testing runs the project tests; only an explicit local command starts a run",
+            "the CI integrations run mutation testing through the mutation input and render it through report --mutation-report, not through the command input",
         ),
     },
 ];
@@ -267,5 +267,26 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn the_mutation_row_points_to_the_mutation_report_side_input() {
+        let Some(row) = command_envelope("mutation") else {
+            panic!("mutation has a row");
+        };
+        let ReportFrom::Refused(report_reason) = row.report_from else {
+            panic!("report --from refuses a mutation report as the primary input");
+        };
+        assert!(
+            report_reason.contains("--mutation-report"),
+            "{report_reason}"
+        );
+        let CiIntegration::Omitted(ci_reason) = row.ci else {
+            panic!("the command input of the CI integrations does not run mutation");
+        };
+        assert!(
+            ci_reason.contains("report --mutation-report"),
+            "{ci_reason}"
+        );
     }
 }

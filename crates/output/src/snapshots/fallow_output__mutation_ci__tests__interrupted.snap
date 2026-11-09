@@ -1,0 +1,13 @@
+---
+source: crates/output/src/mutation_ci_tests.rs
+expression: both_headings(&view)
+---
+#### Mutation testing
+
+**Mutation testing stopped.** A signal stopped the run, and the run wrote no report.
+
+===== summary heading =====
+
+## Mutation testing
+
+**Mutation testing stopped.** A signal stopped the run, and the run wrote no report.

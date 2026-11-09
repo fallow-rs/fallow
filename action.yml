@@ -331,7 +331,7 @@ inputs:
     required: false
   # Mutation testing
   mutation:
-    description: 'Run `fallow mutation` before the analysis, and add a mutation section to the PR comment and the job summary. The step runs the tests of the project, so install the project dependencies in an earlier step. The step runs only for the pull_request, push, schedule, workflow_dispatch and merge_group events; it refuses events that give the job the secrets of the base repository and can check out the code of a fork (for example pull_request_target). A tool failure (exit code 2) fails the job.'
+    description: 'Run `fallow mutation` before the analysis. `fallow report --mutation-report` then adds a mutation section to the PR comment and the job summary, and shows survived mutants on changed lines as findings, annotations and inline review comments. This needs a fallow version with `fallow report --mutation-report`; an older fallow runs the mutation step and its gate, and the job summary names the version to upgrade to. The step runs the tests of the project, so install the project dependencies in an earlier step. The step runs only for the pull_request, push, schedule, workflow_dispatch and merge_group events; it refuses events that give the job the secrets of the base repository and can check out the code of a fork (for example pull_request_target). A failed score gate, a refusal and a tool failure fail the job in the last step.'
     required: false
     default: 'false'
   mutation-scope:
@@ -346,7 +346,7 @@ inputs:
     description: 'Maximum number of covered mutants that the mutation run executes. Empty means no limit'
     required: false
   mutation-min-score:
-    description: 'Minimum mutation score in percent (0 to 100). A lower score fails the job. Empty uses mutation.minScore of the config, or no gate'
+    description: 'Minimum mutation score in percent (0 to 100). A lower score fails the job, and the gates-failed output names mutation-min-score. Empty uses mutation.minScore of the config, or no gate'
     required: false
 
 outputs:
@@ -420,7 +420,7 @@ outputs:
     description: 'Reason the Post review comments step skipped posting (pagination_failure / none). Set to pagination_failure only when the inline-review POST was actually aborted to avoid duplicate threads (multi-comment dedup lookup failed). Empty when the Post review comments step did not run.'
     value: ${{ steps.review.outputs.post_skipped_reason }}
   mutation-outcome:
-    description: 'Outcome of the mutation step: ok, skipped, gate-failed, tool-failed, invalid-input, refused or interrupted. Empty when the mutation input is false.'
+    description: 'Outcome of the mutation step: ok, skipped, gate-failed, tool-failed, refused or interrupted. An invalid mutation input is a tool-failed outcome, because fallow validates it and exits 2. Empty when the mutation input is false.'
     value: ${{ steps.mutation.outputs.outcome }}
   mutation-completion:
     description: 'Completion of the mutation run: complete or partial. Empty when the run wrote no report.'
@@ -431,6 +431,9 @@ outputs:
   mutation-results:
     description: 'Path to the mutation report (fallow-mutation.json). Empty when the run wrote no report.'
     value: ${{ steps.mutation.outputs.results }}
+  mutation-report-rendered:
+    description: 'true when the installed fallow can render the mutation result (`fallow report --mutation-report`), so the PR comment, the review, the annotations and the job summary show it. false for an older fallow. Empty when the mutation input is false.'
+    value: ${{ steps.mutation.outputs.report_rendered }}
   dedup-lookup-failed:
     description: 'true when a dedup lookup failed on the Post PR comment or Post review comments step. Distinct from post-skipped-reason: the summary-only paths post a fresh comment anyway (potential duplicate) when their lookup fails, while the multi-comment review path aborts. Gate on this to detect either degraded state. Resolves to "true" if EITHER step reported a failure, "false" otherwise.'
     value: ${{ (steps.review.outputs.dedup_lookup_failed == 'true' || steps.comment.outputs.dedup_lookup_failed == 'true') && 'true' || 'false' }}
@@ -496,6 +499,30 @@ runs:
         restore-keys: |
           fallow-cache-${{ runner.os }}-${{ steps.fallow-cache-key.outputs.root_digest }}-
 
+    # The scope step resolves the base ref, the changed files and the unified
+    # diff once, before the mutation run, so the mutation run, the analysis,
+    # the comment and the review use the same diff. It runs no project code,
+    # so it alone gets the token for the GitHub API fallbacks.
+    - name: Resolve change scope
+      id: scope
+      if: always()
+      shell: bash
+      env:
+        INPUT_ROOT: ${{ inputs.root }}
+        INPUT_CONFIG: ${{ inputs.config }}
+        INPUT_COMMAND: ${{ inputs.command }}
+        INPUT_BASELINE: ${{ inputs.baseline }}
+        INPUT_CHANGED_SINCE: ${{ inputs.changed-since }}
+        INPUT_AUTO_CHANGED_SINCE: ${{ inputs.auto-changed-since }}
+        INPUT_DIFF_FILE: ${{ inputs.diff-file }}
+        INPUT_ARTIFACTS_DIR: ${{ inputs.artifacts-dir }}
+        PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        PR_NUMBER: ${{ github.event.pull_request.number }}
+        EVENT_NAME: ${{ github.event_name }}
+        GH_TOKEN: ${{ inputs.github-token }}
+        GH_REPO: ${{ github.repository }}
+      run: bash ${{ github.action_path }}/action/scripts/scope.sh
+
     # The key covers the lockfiles and the runner config files. Each run and
     # each attempt saves a new entry, and a restore takes the newest entry of
     # the same digest, so a budgeted run continues from the results of the last
@@ -510,7 +537,9 @@ runs:
           fallow-mutation-${{ runner.os }}-${{ steps.fallow-cache-key.outputs.root_digest }}-${{ steps.fallow-cache-key.outputs.mutation_digest }}-
 
     # Mutation runs before the analysis: the run refuses a dirty worktree, and
-    # the analysis writes its result files into the workspace.
+    # the analysis writes its result files into the workspace. The diff, the
+    # base ref and artifacts-dir come from the scope step through $GITHUB_ENV.
+    # The step gets no token: it runs the tests of the project.
     - name: Run mutation testing
       id: mutation
       if: inputs.mutation == 'true'
@@ -522,16 +551,9 @@ runs:
         FALLOW_MUTATION_TIME_BUDGET: ${{ inputs.mutation-time-budget }}
         FALLOW_MUTATION_MAX_MUTANTS: ${{ inputs.mutation-max-mutants }}
         FALLOW_MUTATION_MIN_SCORE: ${{ inputs.mutation-min-score }}
-        FALLOW_MUTATION_DIFF_FILE: ${{ inputs.diff-file }}
-        FALLOW_ARTIFACTS_DIR: ${{ inputs.artifacts-dir }}
-        INPUT_CHANGED_SINCE: ${{ inputs.changed-since }}
-        PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
         PR_NUMBER: ${{ github.event.pull_request.number }}
         PR_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
         EVENT_NAME: ${{ github.event_name }}
-        # Only `gh pr diff` gets the token. The run removes the credential
-        # variables before it starts the tests of the project.
-        FALLOW_MUTATION_GH_TOKEN: ${{ inputs.github-token }}
         GH_REPO: ${{ github.repository }}
       run: bash ${{ github.action_path }}/action/scripts/mutation.sh run
 
@@ -621,12 +643,10 @@ runs:
         INPUT_ONLY: ${{ inputs.only }}
         INPUT_SKIP: ${{ inputs.skip }}
         INPUT_ARTIFACTS_DIR: ${{ inputs.artifacts-dir }}
-        # User-supplied diff overrides the analyze step's auto-generation
-        # below; analyze.sh leaves it untouched when the user already
-        # supplied a path. When the user did not, analyze.sh writes
-        # the diff under artifacts-dir and exports it via $GITHUB_ENV so subsequent
-        # steps (comment.sh, review.sh) skip their own `gh pr diff`
-        # fetch and reuse the same file.
+        INPUT_MUTATION_MIN_SCORE: ${{ inputs.mutation-min-score }}
+        # A user-supplied diff wins. Without it, analyze.sh uses the diff of
+        # the scope step, which the comment and review steps also read from
+        # $GITHUB_ENV.
         FALLOW_DIFF_FILE: ${{ inputs.diff-file }}
       run: bash ${{ github.action_path }}/action/scripts/analyze.sh
 
@@ -681,13 +701,9 @@ runs:
         FALLOW_PR_COMMENT_LAYOUT: ${{ inputs.comment-layout }}
         FALLOW_DIFF_FILTER: ${{ inputs.diff-filter }}
         FALLOW_ARTIFACTS_DIR: ${{ inputs.artifacts-dir }}
-        FALLOW_MUTATION_SECTION_FILE: ${{ steps.mutation.outputs.section }}
-        FALLOW_MUTATION_CLEAN: ${{ steps.mutation.outputs.clean }}
-        # FALLOW_DIFF_FILE is propagated from the analyze step via
-        # $GITHUB_ENV. Declaring it here would override the propagation
-        # whenever inputs.diff-file is empty (the default), forcing
-        # comment.sh to re-fetch the diff via `gh pr diff` and
-        # double-paying the API quota.
+        # FALLOW_DIFF_FILE and the FALLOW_MUTATION_* result paths come from
+        # the scope and mutation steps through $GITHUB_ENV. Declaring them
+        # here would override that value.
         FALLOW_API_RETRIES: ${{ inputs.api-retries }}
         FALLOW_API_RETRY_DELAY: ${{ inputs.api-retry-delay }}
       run: bash ${{ github.action_path }}/action/scripts/comment.sh
@@ -700,7 +716,7 @@ runs:
         inputs.command != 'fix' &&
         inputs.command != 'security' &&
         steps.analyze.outputs.issues != '' &&
-        steps.analyze.outputs.issues != '0'
+        (steps.analyze.outputs.issues != '0' || steps.mutation.outputs.report_rendered == 'true')
       shell: bash
       env:
         FALLOW_COMMAND: ${{ steps.analyze.outputs.command }}
@@ -738,6 +754,7 @@ runs:
         FALLOW_GATES_SKIPPED: ${{ steps.analyze.outputs.gates_skipped }}
         FALLOW_GATES_PASSED: ${{ steps.analyze.outputs.gates_passed }}
         FALLOW_ANALYSIS_DEGRADED: ${{ steps.analyze.outputs.analysis_degraded }}
+        INPUT_MUTATION: ${{ inputs.mutation }}
       run: bash ${{ github.action_path }}/action/scripts/summary.sh
 
     - name: Post review comments
@@ -767,8 +784,8 @@ runs:
         FALLOW_COMMENT_ID: ${{ inputs.comment-id }}
         FALLOW_DIFF_FILTER: ${{ inputs.diff-filter }}
         FALLOW_ARTIFACTS_DIR: ${{ inputs.artifacts-dir }}
-        # FALLOW_DIFF_FILE is propagated from the analyze step via
-        # $GITHUB_ENV (see comment on the comment step env block).
+        # FALLOW_DIFF_FILE and the FALLOW_MUTATION_* result paths come from
+        # $GITHUB_ENV (see the comment step env block).
         FALLOW_API_RETRIES: ${{ inputs.api-retries }}
         FALLOW_API_RETRY_DELAY: ${{ inputs.api-retry-delay }}
       run: bash ${{ github.action_path }}/action/scripts/review.sh
@@ -778,5 +795,5 @@ runs:
       shell: bash
       env:
         FALLOW_MUTATION_STATUS_FILE: ${{ steps.mutation.outputs.status }}
-        FALLOW_MUTATION_SECTION_FILE: ${{ steps.mutation.outputs.section }}
+        FALLOW_MUTATION_RESULTS_FILE: ${{ steps.mutation.outputs.results }}
       run: bash ${{ github.action_path }}/action/scripts/mutation.sh gate

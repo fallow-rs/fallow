@@ -1,0 +1,29 @@
+---
+source: crates/output/src/mutation_ci_tests.rs
+expression: both_headings(&view)
+---
+#### Mutation testing
+
+**Mutation testing failed** (exit code 2, `FALLOW_MUTATION_RUNNER`).
+
+````text
+The test runner exited before the dry run.
+````
+
+````text
+Run `fallow mutation --dry-run` to see the runner output.
+````
+
+===== summary heading =====
+
+## Mutation testing
+
+**Mutation testing failed** (exit code 2, `FALLOW_MUTATION_RUNNER`).
+
+````text
+The test runner exited before the dry run.
+````
+
+````text
+Run `fallow mutation --dry-run` to see the runner output.
+````

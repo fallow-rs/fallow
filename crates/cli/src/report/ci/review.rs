@@ -5,11 +5,15 @@ use fallow_output::CodeClimateIssue;
 use super::diff_filter::DiffIndex;
 use crate::exit_codes::exit_invalid_input;
 use crate::report::emit_json;
+use crate::report::mutation_evidence::MUTATION_SURVIVED_RULE;
 use fallow_output::PrDecisionConclusion;
 use fallow_output::{
     AuditReviewGate, CiIssue, CiProvider as Provider, ReviewCheckConclusion, ReviewEnvelopeOutput,
     ReviewEnvelopeRenderInput, ReviewEnvelopeTruncation, ReviewGitlabDiffRefs as GitlabDiffRefs,
     ReviewId, issues_from_codeclimate_issues,
+};
+use fallow_output::{
+    MutationCiView, MutationHeading, mutation_review_summary_line, render_mutation_section,
 };
 
 /// The text a review summary body carries beside its inline-comment line.
@@ -139,6 +143,29 @@ fn render_review_envelope_with_diff(
     conclusion: Option<ReviewCheckConclusion>,
     notes: ReviewSummaryNotes<'_>,
 ) -> ReviewEnvelopeOutput {
+    render_review_envelope_with_mutation(
+        command, provider, issues, diff_index, review_id, conclusion, notes, None,
+    )
+}
+
+/// [`render_review_envelope_with_diff`] with the mutation evidence of a saved
+/// render: the summary gets the mutation line and the mutation section before
+/// the config-pattern section.
+#[must_use]
+#[expect(
+    clippy::too_many_arguments,
+    reason = "the private render seam keeps test-injected diff and optional gate state explicit"
+)]
+fn render_review_envelope_with_mutation(
+    command: &str,
+    provider: Provider,
+    issues: &[CiIssue],
+    diff_index: Option<&DiffIndex>,
+    review_id: Option<&ReviewId>,
+    conclusion: Option<ReviewCheckConclusion>,
+    notes: ReviewSummaryNotes<'_>,
+    mutation: Option<&MutationCiView>,
+) -> ReviewEnvelopeOutput {
     let max = std::env::var("FALLOW_MAX_COMMENTS")
         .ok()
         .and_then(|v| v.parse::<usize>().ok())
@@ -147,8 +174,16 @@ fn render_review_envelope_with_diff(
         .then(gitlab_diff_refs_from_env)
         .flatten();
     let include_guidance = review_guidance_enabled();
-    let config_section =
-        crate::report::config_pattern_text::markdown_section(notes.config_patterns);
+    let trailing_section = super::pr_comment::compose_trailing_section(
+        mutation.map(|view| {
+            format!(
+                "{}\n\n{}",
+                mutation_review_summary_line(view, inline_survivor_count(issues, max)),
+                render_mutation_section(view, MutationHeading::Review)
+            )
+        }),
+        crate::report::config_pattern_text::markdown_section(notes.config_patterns),
+    );
     let status_message = notes.message;
 
     let input = ReviewEnvelopeRenderInput {
@@ -162,7 +197,7 @@ fn render_review_envelope_with_diff(
         include_guidance,
         suggestion_block: &super::suggestion::suggestion_block,
         guidance_block: &review_guidance_block,
-        trailing_section: config_section.as_deref(),
+        trailing_section: trailing_section.as_deref(),
     };
     let rendered = match (review_id, conclusion) {
         (Some(review_id), Some(conclusion)) => {
@@ -185,6 +220,32 @@ fn render_review_envelope_with_diff(
     };
     note_review_truncation(rendered.truncation);
     rendered.envelope
+}
+
+/// The number of survivor findings that get an inline comment: the
+/// survivors inside the first `max_groups` comment groups, as the renderer
+/// groups them.
+fn inline_survivor_count(issues: &[CiIssue], max_groups: usize) -> usize {
+    fallow_output::group_review_issues_by_path_line(issues, max_groups)
+        .groups
+        .iter()
+        .flatten()
+        .filter(|issue| issue.rule_id == MUTATION_SURVIVED_RULE)
+        .count()
+}
+
+/// The analysis findings and the survivor findings in one list for the
+/// review. The renderer groups adjacent findings on one line into one
+/// comment, so the merged list is sorted by location. Without survivors, the
+/// list stays as it is.
+fn merge_survivor_issues(mut issues: Vec<CiIssue>, survivors: Vec<CiIssue>) -> Vec<CiIssue> {
+    if survivors.is_empty() {
+        return issues;
+    }
+    issues.extend(survivors);
+    issues
+        .sort_by(|a, b| (&a.path, a.line, &a.fingerprint).cmp(&(&b.path, b.line, &b.fingerprint)));
+    issues
 }
 
 /// Record telemetry for body-size or comment-count truncation of the review.
@@ -214,10 +275,7 @@ pub(crate) fn print_review_envelope_from_codeclimate_issues(
     codeclimate: &[CodeClimateIssue],
     notes: ReviewSummaryNotes<'_>,
 ) -> ExitCode {
-    let mut issues =
-        super::diff_filter::filter_issues_from_env(issues_from_codeclimate_issues(codeclimate));
-    apply_audit_gate(&mut issues, notes.audit_gate);
-    print_review_envelope_from_ci_issues(command, provider, &issues, None, notes)
+    print_review_envelope_with_mutation(command, provider, codeclimate, None, notes, None)
 }
 
 #[must_use]
@@ -228,15 +286,40 @@ pub(crate) fn print_review_envelope_from_codeclimate_issues_with_conclusion(
     conclusion: PrDecisionConclusion,
     notes: ReviewSummaryNotes<'_>,
 ) -> ExitCode {
-    let mut issues =
-        super::diff_filter::filter_issues_from_env(issues_from_codeclimate_issues(codeclimate));
+    print_review_envelope_with_mutation(
+        command,
+        provider,
+        codeclimate,
+        Some(conclusion),
+        notes,
+        None,
+    )
+}
+
+/// Print the review envelope of the analysis findings and, for a saved
+/// render with mutation evidence, the survivor findings on the diff.
+#[must_use]
+pub(crate) fn print_review_envelope_with_mutation(
+    command: &str,
+    provider: Provider,
+    codeclimate: &[CodeClimateIssue],
+    conclusion: Option<PrDecisionConclusion>,
+    notes: ReviewSummaryNotes<'_>,
+    mutation: Option<super::pr_comment::MutationSurface<'_>>,
+) -> ExitCode {
+    let on_diff = |issues: &[CodeClimateIssue]| {
+        super::diff_filter::filter_issues_from_env(issues_from_codeclimate_issues(issues))
+    };
+    let survivors = mutation.map_or_else(Vec::new, |mutation| on_diff(mutation.survivors));
+    let mut issues = merge_survivor_issues(on_diff(codeclimate), survivors);
     apply_audit_gate(&mut issues, notes.audit_gate);
     print_review_envelope_from_ci_issues(
         command,
         provider,
         &issues,
-        Some(review_conclusion(conclusion)),
+        conclusion.map(review_conclusion),
         notes,
+        mutation.map(|mutation| mutation.view),
     )
 }
 
@@ -247,6 +330,7 @@ fn print_review_envelope_from_ci_issues(
     issues: &[CiIssue],
     conclusion: Option<ReviewCheckConclusion>,
     notes: ReviewSummaryNotes<'_>,
+    mutation: Option<&MutationCiView>,
 ) -> ExitCode {
     let review_id = match review_id_from_env() {
         Ok(review_id) => review_id,
@@ -255,7 +339,7 @@ fn print_review_envelope_from_ci_issues(
             return exit_invalid_input();
         }
     };
-    let envelope = render_review_envelope_with_diff(
+    let envelope = render_review_envelope_with_mutation(
         command,
         provider,
         issues,
@@ -263,6 +347,7 @@ fn print_review_envelope_from_ci_issues(
         review_id.as_ref(),
         conclusion,
         notes,
+        mutation,
     );
     let analysis_run_id = crate::output_runtime::telemetry_analysis_run_id();
     let value = match review_id.as_ref() {
@@ -555,6 +640,146 @@ mod tests {
             "{body}"
         );
         assert_eq!(envelope["summary"]["body"], envelope["body"]);
+    }
+
+    fn mutation_view() -> fallow_output::MutationCiView {
+        fallow_output::MutationCiView {
+            scope: Some(fallow_output::MutationScopeKind::Changed),
+            counts: fallow_output::MutationStatusCounts {
+                total: 16,
+                killed: 10,
+                survived: 6,
+                ..fallow_output::MutationStatusCounts::default()
+            },
+            score: Some(0.625),
+            ..fallow_output::MutationCiView::new(fallow_output::MutationCiState::Ran)
+        }
+    }
+
+    #[test]
+    fn review_summary_states_the_mutation_line_and_section_before_the_markers() {
+        let root = std::path::Path::new("/project");
+        let diagnostics = [fallow_config::WorkspaceDiagnostic::new(
+            root,
+            root.to_path_buf(),
+            fallow_config::WorkspaceDiagnosticKind::IgnoreDependenciesGlobUnmatched {
+                pattern: "@typo/*".to_owned(),
+            },
+        )];
+        let issues = vec![
+            issue("fallow/unused-file", "minor", "src/a.ts", 1, "aaa"),
+            issue(
+                crate::report::mutation_evidence::MUTATION_SURVIVED_RULE,
+                "minor",
+                "src/age.ts",
+                14,
+                "bbb",
+            ),
+        ];
+        let view = mutation_view();
+        let envelope = to_value(&render_review_envelope_with_mutation(
+            "dead-code",
+            Provider::Github,
+            &issues,
+            None,
+            None,
+            None,
+            ReviewSummaryNotes {
+                message: None,
+                config_patterns: &diagnostics,
+                audit_gate: None,
+            },
+            Some(&view),
+        ));
+        let body = envelope["body"].as_str().expect("body is string");
+        let line = body
+            .find("Mutation testing: score 62.5%, 6 survivors (1 inline).")
+            .expect("summary line");
+        let section = body.find("#### Mutation testing").expect("section");
+        let patterns = body
+            .find("## Unmatched config patterns")
+            .expect("config pattern section");
+        let marker = body.find("<!-- fallow-review -->").expect("marker");
+        assert!(
+            line < section && section < patterns && patterns < marker,
+            "{body}"
+        );
+        assert_eq!(envelope["comments"].as_array().map(Vec::len), Some(2));
+    }
+
+    #[test]
+    fn the_inline_count_names_only_the_survivors_inside_the_comment_cap() {
+        let survived = crate::report::mutation_evidence::MUTATION_SURVIVED_RULE;
+        let issues = vec![
+            issue("fallow/unused-file", "minor", "src/a.ts", 1, "aaa"),
+            issue(survived, "minor", "src/age.ts", 14, "bbb"),
+            issue(survived, "minor", "src/age.ts", 14, "ccc"),
+            issue(survived, "minor", "src/age.ts", 20, "ddd"),
+        ];
+        assert_eq!(inline_survivor_count(&issues, 50), 3);
+        assert_eq!(inline_survivor_count(&issues, 2), 2);
+        assert_eq!(inline_survivor_count(&issues, 1), 0);
+    }
+
+    #[test]
+    fn survivors_join_the_findings_in_location_order() {
+        let analysis = vec![
+            issue("fallow/unused-file", "minor", "src/b.ts", 5, "bbb"),
+            issue("fallow/unused-file", "minor", "src/a.ts", 1, "aaa"),
+        ];
+        let unchanged = merge_survivor_issues(analysis.clone(), Vec::new());
+        assert_eq!(
+            unchanged, analysis,
+            "no survivor keeps the analysis order as it is"
+        );
+
+        let survivor = issue(
+            crate::report::mutation_evidence::MUTATION_SURVIVED_RULE,
+            "minor",
+            "src/a.ts",
+            3,
+            "ccc",
+        );
+        let merged = merge_survivor_issues(analysis, vec![survivor]);
+        let locations: Vec<(&str, u64)> = merged
+            .iter()
+            .map(|issue| (issue.path.as_str(), issue.line))
+            .collect();
+        assert_eq!(
+            locations,
+            [("src/a.ts", 1), ("src/a.ts", 3), ("src/b.ts", 5)]
+        );
+    }
+
+    #[test]
+    fn a_review_without_mutation_evidence_is_the_plain_render() {
+        let issues = vec![issue(
+            "fallow/unused-file",
+            "minor",
+            "src/a.ts",
+            1,
+            "abc1234567890def",
+        )];
+        let plain = render_review_envelope_with_diff(
+            "check",
+            Provider::Github,
+            &issues,
+            None,
+            None,
+            None,
+            ReviewSummaryNotes::default(),
+        );
+        let with_none = render_review_envelope_with_mutation(
+            "check",
+            Provider::Github,
+            &issues,
+            None,
+            None,
+            None,
+            ReviewSummaryNotes::default(),
+            None,
+        );
+        assert_eq!(to_value(&plain), to_value(&with_none));
     }
 
     #[test]

@@ -2058,7 +2058,7 @@ diff_risk_introduced: number
  * The key set is OPEN. A name that a consumer does not recognize means "some
  * gate", not an error.
  *
- * The names that this build can emit are `error-severity-findings`, `regression`, `stale-baseline`, `baseline-growth`, `duplication-threshold`, `duplication-findings`, `health-min-score`, `health-min-severity`, `health-findings`, `health-coverage-gaps`, `health-runtime-coverage`, `security`, `security-advisory`, `audit-verdict`, `type-aware-require` and `parse-error`. `GateName` describes each name and the default entries of each command.
+ * The names that this build can emit are `error-severity-findings`, `regression`, `stale-baseline`, `baseline-growth`, `duplication-threshold`, `duplication-findings`, `health-min-score`, `health-min-severity`, `health-findings`, `health-coverage-gaps`, `health-runtime-coverage`, `security`, `security-advisory`, `audit-verdict`, `type-aware-require`, `parse-error` and `mutation-min-score`. `GateName` describes each name and the default entries of each command.
  */
 export interface GateOutcomes {
 [k: string]: GateOutcome
@@ -20735,6 +20735,12 @@ recheck?: (MutationRecheck | null)
  * `--compare`, and absent when this run is not complete.
  */
 compare?: (MutationCompare | null)
+/**
+ * The verdict of the `mutation-min-score` gate. Present only when a
+ * minimum applies: from `--min-score`, or from `mutation.minScore` when
+ * the run is not a recheck. The exit code of the run reads this entry.
+ */
+gate_outcomes?: (GateOutcomes | null)
 }
 /**
  * The completion status of a run.

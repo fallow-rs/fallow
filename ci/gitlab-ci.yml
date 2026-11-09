@@ -123,7 +123,7 @@ variables:
   FALLOW_PR_COMMENT_LAYOUT: "default" # Sticky MR comment layout: default, compact, gate-only, or details
   FALLOW_SUMMARY_SCOPE: "all"   # Sticky MR summary scope: 'all' keeps project-level dependency/catalog/override findings outside the diff; 'diff' applies the diff filter to them too. Inline review discussions are unaffected. If the diff cannot be read, fallow reports all findings.
   FALLOW_DIFF_FILTER: "added"   # Diff-aware filter: 'added' | 'diff_context' | 'file' | 'nofilter'
-  FALLOW_DIFF_FILE: ""          # Path to a unified-diff file. When unset and CI_MERGE_REQUEST_DIFF_BASE_SHA is set, the comment / review scripts derive it via `git diff` (see the script blocks below). When set OR derived, fallow narrows findings to lines inside an added hunk. Sticky summary comments keep project-level findings by default unless FALLOW_SUMMARY_SCOPE is 'diff'; inline review discussions stay diff-anchored. When both FALLOW_DIFF_FILE and FALLOW_CHANGED_SINCE are set, --diff-file wins for line-level filtering and --changed-since still scopes file discovery; fallow logs a one-line stderr note.
+  FALLOW_DIFF_FILE: ""          # Path to a unified-diff file. When unset and FALLOW_CHANGED_SINCE is set (auto-set in MR context), the template derives it with `git diff --relative` from FALLOW_ROOT before the mutation run, and the mutation run, the analysis, the comment and the review read that one diff. When set OR derived, fallow narrows findings to lines inside an added hunk. Sticky summary comments keep project-level findings by default unless FALLOW_SUMMARY_SCOPE is 'diff'; inline review discussions stay diff-anchored. When both FALLOW_DIFF_FILE and FALLOW_CHANGED_SINCE are set, --diff-file wins for line-level filtering and --changed-since still scopes file discovery; fallow logs a one-line stderr note.
   FALLOW_API_RETRIES: "3"       # Maximum HTTP retry attempts for the binary's reconcile-review and the curl/gh wrappers
   FALLOW_API_RETRY_DELAY: "2"   # Floor delay in seconds between rate-limited retries; server-supplied Retry-After overrides
   FALLOW_GITLAB_BASE_SHA: ""    # Override for the MR base SHA in the review-gitlab position object; falls back to CI_MERGE_REQUEST_DIFF_BASE_SHA
@@ -546,6 +546,57 @@ variables:
         fi
       fi
 
+      # ── Change scope ───────────────────────────────────────────────
+      # One diff for the mutation run, the analysis, the MR comment and the
+      # review. The block writes only to the temp directory and to .git (a
+      # fetch), because `fallow mutation` refuses a dirty worktree. The
+      # block is inline, so a FALLOW_SCRIPTS_REF of another version needs no
+      # new script. The paths of the diff are relative to FALLOW_ROOT.
+      # The fix command has no auto changed-since, so the mutation run reads
+      # the merge request base directly.
+      SCOPE_BASE="${FALLOW_CHANGED_SINCE:-${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}}"
+      export FALLOW_SCOPE_CHANGED_SINCE="$SCOPE_BASE"
+      SCOPE_DIFF=""
+      if [ -n "$SCOPE_BASE" ]; then
+        # A shallow clone can miss the base commit. The two-dot diff below
+        # and `--changed-since` need it. The stderr of `git cat-file -e` is
+        # discarded because it is an existence test, and a failed fetch is
+        # reported by the diff check below.
+        if ! git cat-file -e "${SCOPE_BASE}^{commit}" 2> /dev/null; then
+          git fetch --no-tags --depth=1 origin "$SCOPE_BASE" > /dev/null 2>&1 || true
+        fi
+      fi
+      if [ -n "$FALLOW_CHANGED_SINCE" ] && [ -z "$FALLOW_DIFF_FILE" ]; then
+        SCOPE_DIFF="${TMPDIR:-/tmp}/fallow-scope/mr.diff"
+        mkdir -p "${SCOPE_DIFF%/*}"
+        # Three dots diff from the merge base, as `--changed-since` does. A
+        # shallow clone can have no merge base, and then two dots diff the
+        # two commits. A failed diff is reported below. A diff that worked
+        # and is empty means that the merge request changes no file under
+        # FALLOW_ROOT: it stays, so the filters keep no line finding.
+        SCOPE_DIFF_OK=true
+        if ! (cd "$FALLOW_ROOT" && git diff --unified=0 --relative "${SCOPE_BASE}...HEAD" -- .) > "$SCOPE_DIFF" 2> /dev/null; then
+          (cd "$FALLOW_ROOT" && git diff --unified=0 --relative "$SCOPE_BASE" HEAD -- .) > "$SCOPE_DIFF" 2> /dev/null \
+            || SCOPE_DIFF_OK=false
+        fi
+        if [ "$SCOPE_DIFF_OK" = "true" ]; then
+          export FALLOW_DIFF_FILE="$SCOPE_DIFF"
+        else
+          rm -f "$SCOPE_DIFF"
+          SCOPE_DIFF=""
+          echo "fallow: warning [shallow-clone]: could not produce unified diff for line-level finding scoping. Set GIT_DEPTH: \"0\" in the pipeline to enable line-precision."
+        fi
+      fi
+      # The capability probe: an older CLI has `fallow mutation` but cannot
+      # render its result. A pipe into `grep -q` could fail under pipefail.
+      export FALLOW_HAS_MUTATION_REPORT=false
+      if [ "${FALLOW_MUTATION:-false}" = "true" ]; then
+        REPORT_HELP=$(fallow report --help 2> /dev/null || true)
+        case "$REPORT_HELP" in
+          *--mutation-report*) FALLOW_HAS_MUTATION_REPORT=true ;;
+        esac
+      fi
+
       # ── Mutation testing ───────────────────────────────────────────
       # Runs before the analysis: the run refuses a dirty worktree, and the
       # analysis writes its result files into the project directory.
@@ -555,36 +606,38 @@ variables:
           echo "ERROR: FALLOW_MUTATION needs ci/scripts/mutation.sh and ci/scripts/mutation_common.sh, and the script preparation did not get them."
           exit 2
         fi
+        # shellcheck source=scripts/mutation_common.sh
+        source /tmp/fallow-scripts/mutation_common.sh
         echo "Running mutation testing..."
         bash /tmp/fallow-scripts/mutation.sh
         if [ -f fallow-mutation-status.json ]; then
           MUTATION_OUTCOME=$(jq -r '.outcome // ""' fallow-mutation-status.json 2> /dev/null || true)
           [ -n "$MUTATION_OUTCOME" ] || MUTATION_OUTCOME="tool-failed"
-          export FALLOW_MUTATION_SECTION_FILE="$PWD/fallow-mutation-section.md"
-          FALLOW_MUTATION_CLEAN=$(jq -r '.clean' fallow-mutation-status.json)
-          export FALLOW_MUTATION_CLEAN
         else
           MUTATION_OUTCOME="tool-failed"
         fi
+        # fallow_mutation_render_args reads these in the Code Quality render,
+        # comment.sh and review.sh.
+        export FALLOW_MUTATION_STATUS_FILE="$PWD/fallow-mutation-status.json"
+        export FALLOW_MUTATION_RESULTS_FILE="$PWD/fallow-mutation.json"
+        if [ "${FALLOW_HAS_MUTATION_REPORT:-false}" != "true" ]; then
+          CLI_VERSION_TEXT=$(fallow --version 2> /dev/null | head -n 1 || true)
+          echo "WARNING: Mutation results are not in the MR comment, the review or the Code Quality report: ${CLI_VERSION_TEXT:-this fallow version} cannot render them. Use fallow ${MUTATION_REPORT_VERSION:-the latest version} or later."
+        fi
       fi
 
-      # ── Pre-compute unified diff for line-level finding scoping ────
-      # When the user did not supply $FALLOW_DIFF_FILE, write a
-      # fallow-mr.diff alongside the analysis output so fallow can
-      # narrow source-anchored findings (dead-code, complexity, duplication,
-      # boundary violations, runtime-coverage hot paths) to lines
-      # inside the diff. Project-level findings (unused deps, catalog,
-      # override) bypass the filter and pass through unchanged.
-      # GitLab CI runs each script line in the same shell, so an exported
+      # ── Diff for line-level finding scoping ────────────────────────
+      # fallow narrows source-anchored findings (dead-code, complexity,
+      # duplication, boundary violations, runtime-coverage hot paths) to the
+      # lines of FALLOW_DIFF_FILE. Project-level findings (unused deps,
+      # catalog, override) bypass the filter and pass through unchanged.
+      # GitLab CI runs each script line in the same shell, so the exported
       # variable is visible to the saved-envelope comment/review renderers.
-      # They derive the diff themselves only when FALLOW_DIFF_FILE is unset.
-      if [ -n "$FALLOW_CHANGED_SINCE" ] && [ -z "$FALLOW_DIFF_FILE" ]; then
-        if git diff --unified=0 "${FALLOW_CHANGED_SINCE}..HEAD" > fallow-mr.diff && [ -s fallow-mr.diff ]; then
-          export FALLOW_DIFF_FILE="$PWD/fallow-mr.diff"
-        else
-          rm -f fallow-mr.diff
-          echo "fallow: warning [shallow-clone]: could not produce unified diff for line-level finding scoping. Set GIT_DEPTH: \"0\" in the pipeline to enable line-precision."
-        fi
+      # The project directory keeps a copy under the file name of older
+      # templates. The copy comes after the mutation run, which refuses a
+      # dirty worktree.
+      if [ -n "$SCOPE_DIFF" ]; then
+        cp "$SCOPE_DIFF" fallow-mr.diff
       fi
 
       # ── Build CLI arguments ──────────────────────────────────────────
@@ -1421,6 +1474,13 @@ variables:
         [ -n "$FALLOW_WORKSPACE" ] && REPORT_ARGS+=(--workspace "$FALLOW_WORKSPACE")
         [ "$FALLOW_RENDER_PATH_PREFIX_SET" = "1" ] \
           && REPORT_ARGS+=(--report-path-prefix "${FALLOW_RENDER_PATH_PREFIX:-}")
+        # The mutation block sourced mutation_common.sh. The survived mutants
+        # on the changed lines become Code Quality entries.
+        if declare -F fallow_mutation_render_args > /dev/null; then
+          while IFS= read -r MUTATION_ARG; do
+            REPORT_ARGS+=("$MUTATION_ARG")
+          done < <(fallow_mutation_render_args)
+        fi
         set +e
         fallow "${REPORT_ARGS[@]}" > gl-code-quality-report.json 2> fallow-codequality-stderr.log
         CODEQUALITY_EXIT=$?
@@ -1493,6 +1553,10 @@ variables:
           # failOnParseError in config or --fail-on-parse-error in FALLOW_ARGS
           # armed it, so an entry in the envelope is the repository's request.
           parse-error)           printf '%s' "true" ;;
+          # FALLOW_MUTATION_MIN_SCORE or mutation.minScore in config sets the
+          # minimum. The CLI publishes the entry only when a minimum applies,
+          # and always enforces it.
+          mutation-min-score)    printf '%s' "true" ;;
           *)                     printf '%s' "" ;;
         esac
       }
@@ -1509,13 +1573,15 @@ variables:
       # has() rather than // empty, because jq treats a false value as absent
       # under the alternative operator. Never a bare jq -e in an assignment:
       # this script runs under set -euo pipefail.
+      # The third argument names another envelope, for example
+      # fallow-mutation.json.
       read_gate_member() {
         jq -r --arg gate "$1" --arg member "$2" '
           (.gate_outcomes // {}) as $gates
           | if ($gates | has($gate)) and ($gates[$gate] | has($member))
             then ($gates[$gate][$member] | tostring)
             else "" end
-        ' fallow-results.json || true
+        ' "${3:-fallow-results.json}" || true
       }
 
       # The envelope carries these as JSON numbers, so a whole value arrives
@@ -1567,6 +1633,15 @@ variables:
               | join(", ")
             ' fallow-results.json || true)
             [ -n "$files" ] && printf 'fallow could not parse %s' "$files"
+            ;;
+          mutation-min-score)
+            # The tests of the project ran before the job read this file, so
+            # only numbers reach the log.
+            local observed threshold
+            observed=$(jq -r '.gate_outcomes["mutation-min-score"].observed | numbers | tostring' fallow-mutation.json 2> /dev/null || true)
+            threshold=$(jq -r '.gate_outcomes["mutation-min-score"].threshold | numbers | tostring' fallow-mutation.json 2> /dev/null || true)
+            [ -n "$observed" ] && [ -n "$threshold" ] \
+              && printf 'mutation score %s%% is below the minimum %s%%' "$(trim_gate_number "$observed")" "$(trim_gate_number "$threshold")"
             ;;
         esac
         # An empty detail must not make this function return non-zero: the case
@@ -1865,6 +1940,62 @@ variables:
         fi
       fi
 
+      # ── Mutation result ──────────────────────────────────────────────
+      # The score gate of fallow-mutation.json joins the other gates and
+      # their dotenv lists. A tool failure, a refusal or a signal exits 2
+      # after the other gates print. The tests of the project ran before the
+      # job read the result files, so only closed values and the error
+      # envelope of the CLI reach the log.
+      MUTATION_FAILURE=""
+      MUTATION_GATE_RECORDED=false
+      if [ -n "$MUTATION_OUTCOME" ] && [ -s fallow-mutation.json ]; then
+        MUTATION_GATE_STATUS=$(read_gate_member mutation-min-score status fallow-mutation.json)
+        if [ -n "$MUTATION_GATE_STATUS" ]; then
+          case "$MUTATION_GATE_STATUS" in
+            fail|warn|skipped|pass) ;;
+            *) MUTATION_GATE_STATUS=unknown ;;
+          esac
+          GATE_FAILURE_COUNT=${#GATE_FAILURES[@]}
+          classify_gate mutation-min-score "$MUTATION_GATE_STATUS" \
+            "$(read_gate_member mutation-min-score enforced fallow-mutation.json)"
+          [ "${#GATE_FAILURES[@]}" -gt "$GATE_FAILURE_COUNT" ] && MUTATION_GATE_RECORDED=true
+        fi
+      fi
+      MUTATION_EXIT_CODE=$(jq -r '.exit_code | numbers | tostring' fallow-mutation-status.json 2> /dev/null || true)
+      case "$MUTATION_OUTCOME" in
+        ""|ok|skipped) ;;
+        gate-failed)
+          # A CLI older than the gate entry still exits 1 on a failed gate,
+          # so the job fails closed.
+          if [ "$MUTATION_GATE_RECORDED" != "true" ]; then
+            GATE_FAILURES+=("Fallow mutation-min-score gate failed: the mutation score is below the minimum, so fallow mutation exited with code 1.")
+          fi
+          ;;
+        refused)
+          case "$(jq -r '.not_run_reason // ""' fallow-mutation-status.json 2> /dev/null || true)" in
+            fork-refused)
+              MUTATION_FAILURE="Mutation testing did not run: this pipeline runs a merge request from a fork in the target project, so the job has the CI/CD variables of the target project. Run the pipeline in the fork project, or set FALLOW_MUTATION to false for fork merge requests."
+              ;;
+            *)
+              MUTATION_FAILURE="Mutation testing did not run: the mutation step refused the run."
+              ;;
+          esac
+          ;;
+        interrupted)
+          MUTATION_FAILURE="A signal stopped fallow mutation (exit code ${MUTATION_EXIT_CODE:-unknown})."
+          ;;
+        *)
+          MUTATION_ERROR_CODE=$(jq -r 'select(type == "object" and .error == true) | .code | strings | select(test("^[A-Z0-9_]+$"))' fallow-mutation.json 2> /dev/null || true)
+          MUTATION_ERROR_MESSAGE=$(jq -r 'select(type == "object" and .error == true) | .message | strings | gsub("[\r\n]+"; " ") | .[0:1000]' fallow-mutation.json 2> /dev/null || true)
+          MUTATION_FAILURE="fallow mutation failed (exit code ${MUTATION_EXIT_CODE:-unknown}${MUTATION_ERROR_CODE:+, ${MUTATION_ERROR_CODE}})"
+          if [ -n "$MUTATION_ERROR_MESSAGE" ]; then
+            MUTATION_FAILURE="${MUTATION_FAILURE}: ${MUTATION_ERROR_MESSAGE}"
+          else
+            MUTATION_FAILURE="${MUTATION_FAILURE}. fallow-mutation-stderr.log of this job has the error output."
+          fi
+          ;;
+      esac
+
       # dotenv so a downstream job can branch on the verdict without re-reading
       # the envelope.
       {
@@ -1876,36 +2007,6 @@ variables:
         echo "FALLOW_REQUESTS_UNAPPLIED=${REQUESTS_UNAPPLIED}"
         echo "FALLOW_MUTATION_OUTCOME=${MUTATION_OUTCOME}"
       } > fallow-gates.env
-
-      # ── Mutation result ──────────────────────────────────────────────
-      # A failed score gate joins the other gates. A tool failure, a refusal
-      # or a signal exits 2 after the other gates print.
-      MUTATION_FAILURE=""
-      if [ -n "$MUTATION_OUTCOME" ]; then
-        # shellcheck source=scripts/mutation_common.sh
-        source /tmp/fallow-scripts/mutation_common.sh
-      fi
-      case "$MUTATION_OUTCOME" in
-        gate-failed)
-          GATE_FAILURES+=("$(jq -r '"Fallow mutation score " + (if .score == null then "n/a" else "\((.score * 1000 | round) / 10)%" end) + " is lower than " + (if .min_score == null then "the minimum score of the config" else "the minimum of \(.min_score)%" end)' fallow-mutation-status.json)")
-          ;;
-        refused)
-          MUTATION_FAILURE="Mutation testing did not run. $(fallow_mutation_status_message fallow-mutation-status.json)"
-          ;;
-        invalid-input)
-          MUTATION_FAILURE="The mutation testing input is invalid. $(fallow_mutation_status_message fallow-mutation-status.json)"
-          ;;
-        interrupted)
-          MUTATION_FAILURE="A signal stopped fallow mutation (exit code $(jq -r '.exit_code // "unknown"' fallow-mutation-status.json))."
-          ;;
-        tool-failed)
-          if jq -e '.outcome == "tool-failed"' fallow-mutation-status.json > /dev/null 2>&1; then
-            MUTATION_FAILURE="$(jq -r '"fallow mutation failed with exit code \(.exit_code // "unknown")" + (if .code == null then "" else " (\(.code))" end)' fallow-mutation-status.json): $(fallow_mutation_status_message fallow-mutation-status.json)"
-          else
-            MUTATION_FAILURE="fallow mutation failed and wrote no status file."
-          fi
-          ;;
-      esac
 
       if [ ${#GATE_FAILURES[@]} -gt 0 ] || [ -n "$MUTATION_FAILURE" ]; then
         for failure in ${GATE_FAILURES[@]+"${GATE_FAILURES[@]}"}; do
@@ -1947,9 +2048,7 @@ variables:
       - fallow-dedup-lookup-failed.txt
       - fallow-gates.env
       - fallow-mutation.json
-      - fallow-mutation-tasks.json
       - fallow-mutation-status.json
-      - fallow-mutation-section.md
       - fallow-mutation-stderr.log
     reports:
       codequality:

@@ -24,8 +24,8 @@ use sha2::{Digest, Sha256};
 const MAX_REPORT_BYTES: u64 = 64 * 1024 * 1024;
 
 /// The fields of a saved `fallow mutation` or `fallow mutation --plan`
-/// document that inspect reads. Unknown fields are ignored, so a report of a
-/// later minor version still reads.
+/// document that inspect and the CI render read. Unknown fields are ignored,
+/// so a report of a later minor version still reads.
 #[derive(Debug, Deserialize)]
 pub struct SavedReport {
     #[serde(default)]
@@ -35,14 +35,48 @@ pub struct SavedReport {
     pub files: Vec<SavedFile>,
     #[serde(default)]
     pub completion: Option<SavedCompletion>,
+    /// The totals. A plan has no summary.
+    #[serde(default)]
+    pub summary: Option<SavedSummary>,
+    #[serde(default)]
+    pub scope: Option<SavedScope>,
+    /// The gate verdicts, keyed by gate name. Absent when no minimum applies.
+    #[serde(default)]
+    pub gate_outcomes: Option<serde_json::Map<String, serde_json::Value>>,
+    #[serde(default)]
+    pub elapsed_ms: Option<u64>,
+    /// The result cache facts. Absent with `--no-cache`.
+    #[serde(default)]
+    pub cache: Option<SavedCache>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct SavedCompletion {
     pub status: fallow_output::MutationCompletionStatus,
-    /// Why the run is partial, kebab-case. Empty for a complete run.
+    /// The wire names of the reasons of a partial run. A name that this
+    /// build does not know stays a string, so a later report still reads.
     #[serde(default)]
     pub reasons: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SavedSummary {
+    pub counts: fallow_output::MutationStatusCounts,
+    /// The score as a fraction from 0 to 1. `null` when no mutant counted.
+    #[serde(default)]
+    pub score: Option<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SavedScope {
+    /// The wire name of the scope kind, for example `changed`.
+    pub kind: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SavedCache {
+    /// The mutants whose status came from the cache.
+    pub hits: usize,
 }
 
 #[derive(Debug, Deserialize)]
@@ -60,7 +94,7 @@ pub struct SavedMutant {
     #[serde(default)]
     rank: Option<u32>,
     #[serde(default)]
-    change: Option<MutantChange>,
+    pub change: Option<MutantChange>,
     #[serde(default)]
     pub status: Option<MutantStatus>,
     #[serde(default)]
@@ -242,9 +276,16 @@ impl SavedReport {
 pub fn report_relative_path(file: &str) -> Result<&Path, fallow_api::ProgrammaticError> {
     let relative = Path::new(file);
     if relative.is_absolute()
-        || relative
-            .components()
-            .any(|component| matches!(component, std::path::Component::ParentDir))
+        || relative.components().any(|component| {
+            // `C:foo` and `\\foo` are not absolute on Windows, but they leave
+            // the root through a drive prefix or the drive root.
+            matches!(
+                component,
+                std::path::Component::ParentDir
+                    | std::path::Component::Prefix(_)
+                    | std::path::Component::RootDir
+            )
+        })
     {
         return Err(report_input_error(format!(
             "the report path `{file}` is not inside the project root"

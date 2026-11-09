@@ -128,6 +128,11 @@ pub enum GateName {
     /// The gate is never armed by default, because
     /// the parser also rejects valid syntax that is newer than the parser.
     ParseError,
+    /// `fallow mutation --min-score` or `mutation.minScore`. `observed` is the
+    /// score in percent, and `threshold` is the minimum. `skipped` when no
+    /// mutant was counted. Absent on a recheck, because the score of a
+    /// recheck covers only the rechecked mutants.
+    MutationMinScore,
 }
 
 impl GateName {
@@ -138,7 +143,7 @@ impl GateName {
     /// the emitter rather than against a hand-kept list. A new variant belongs
     /// here as well as in [`Self::as_str`], whose match will not compile until
     /// it is named.
-    pub const ALL: [Self; 16] = [
+    pub const ALL: [Self; 17] = [
         Self::ErrorSeverityFindings,
         Self::Regression,
         Self::StaleBaseline,
@@ -155,6 +160,7 @@ impl GateName {
         Self::AuditVerdict,
         Self::TypeAwareRequire,
         Self::ParseError,
+        Self::MutationMinScore,
     ];
 
     /// The kebab-case key this gate serializes as, for prose and lookups
@@ -178,6 +184,7 @@ impl GateName {
             Self::AuditVerdict => "audit-verdict",
             Self::TypeAwareRequire => "type-aware-require",
             Self::ParseError => "parse-error",
+            Self::MutationMinScore => "mutation-min-score",
         }
     }
 }
@@ -244,7 +251,7 @@ mod tests {
                 "{description}"
             );
         }
-        assert!(description.contains("`type-aware-require` and `parse-error`."));
+        assert!(description.contains("`parse-error` and `mutation-min-score`."));
     }
 
     #[test]
@@ -302,6 +309,27 @@ mod tests {
                     "enforced": true,
                     "observed": 85.0,
                     "threshold": 90.0
+                }
+            })
+        );
+    }
+
+    #[test]
+    fn the_mutation_score_gate_serializes_with_its_score_and_minimum() {
+        let mut gates = GateOutcomes::new();
+        gates.insert(
+            GateName::MutationMinScore,
+            GateOutcome::measured(GateStatus::Fail, true, 62.5, 80.0),
+        );
+        let value = serde_json::to_value(&gates).expect("gate outcomes serialize");
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "mutation-min-score": {
+                    "status": "fail",
+                    "enforced": true,
+                    "observed": 62.5,
+                    "threshold": 80.0
                 }
             })
         );

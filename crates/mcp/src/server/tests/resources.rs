@@ -5,7 +5,8 @@
 use std::collections::BTreeSet;
 
 use fallow_api::{
-    AUDIT_RULES, CHECK_RULES, DUPES_RULES, FLAGS_RULES, HEALTH_RULES, SECURITY_RULES, bare_rule_id,
+    AUDIT_RULES, CHECK_RULES, DUPES_RULES, FLAGS_RULES, HEALTH_RULES, MUTATION_RULES,
+    SECURITY_RULES, bare_rule_id,
 };
 use fallow_types::mcp_manifest::MCP_RESOURCES;
 use rmcp::model::{ErrorCode, ResourceContents, Role};
@@ -168,6 +169,7 @@ fn issue_types_resource_carries_severity_fixable_and_explain_uri() {
         FLAGS_RULES,
         SECURITY_RULES,
         AUDIT_RULES,
+        MUTATION_RULES,
     ]
     .iter()
     .map(|rules| rules.len())

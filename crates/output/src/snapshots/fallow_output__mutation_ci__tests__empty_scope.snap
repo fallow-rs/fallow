@@ -1,0 +1,19 @@
+---
+source: crates/output/src/mutation_ci_tests.rs
+expression: both_headings(&view)
+---
+#### Mutation testing
+
+The scope has no mutant.
+
+Scope: the changed lines.
+
+===== summary heading =====
+
+## Mutation testing
+
+The scope has no mutant.
+
+Scope: the changed lines.
+
+The run took 4m 12s. 3 results came from the cache.

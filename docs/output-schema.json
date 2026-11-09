@@ -28977,6 +28977,11 @@
           "type": "string",
           "const": "parse-error",
           "description": "`--fail-on-parse-error` or the `failOnParseError` config key: at least\none source file did not parse cleanly (a `source-parse-degraded` or\n`source-nesting-too-deep` entry in `workspace_diagnostics[]`). The\nentry lists each such file in `files`, with the same facts as the\ndiagnostic of that file, so a consumer can act without a join. A file\nwith a `source-nesting-too-deep` entry has `reason: nesting-too-deep`.\nThe gate is never armed by default, because\nthe parser also rejects valid syntax that is newer than the parser."
+        },
+        {
+          "type": "string",
+          "const": "mutation-min-score",
+          "description": "`fallow mutation --min-score` or `mutation.minScore`. `observed` is the\nscore in percent, and `threshold` is the minimum. `skipped` when no\nmutant was counted. Absent on a recheck, because the score of a\nrecheck covers only the rechecked mutants."
         }
       ],
       "description": "Which gate an outcome describes.\n\nTaken from the exit-code sites rather than from any integration's input\nlist, because a gate a consumer cannot name is exactly the one whose verdict\ngoes missing. Serialized as kebab-case and published as an open set: a name\nthat a consumer does not recognize means \"some gate\", not an error.\n\nThe default exit rule of a command is always in `gate_outcomes`, also when\nno flag armed a gate: `error-severity-findings` on `dead-code`, `check` and\nthe combined run (with `health-findings` when the combined run analyzed\nhealth), `health-findings` on `health`, `security-advisory` on `security`\nand `audit-verdict` on `audit`. `dupes` has no default exit rule, so a\n`dupes` run that armed no gate carries no object and always exits 0. The\ntyped programmatic API runs no CLI gate and leaves the object absent.\n\nA gate reports `skipped` when it stands down: a change-scoped baseline\ncomparison, `health --report-only`, or a security advisory that a\nconfigured `--gate` shadows. Only `audit-verdict` reports `warn`."
@@ -28986,7 +28991,7 @@
       "additionalProperties": {
         "$ref": "#/definitions/GateOutcome"
       },
-      "description": "The verdict of every gate that a run evaluated, keyed by gate name.\n\nEach tool defines its own gate names. The name of a gate is the JSON member\nname, and the members are in the order of the names. A tool never writes an\nempty object. When no gate ran, the member is absent.\n\nThe key set is OPEN. A name that a consumer does not recognize means \"some\ngate\", not an error.\n\nThe names that this build can emit are `error-severity-findings`, `regression`, `stale-baseline`, `baseline-growth`, `duplication-threshold`, `duplication-findings`, `health-min-score`, `health-min-severity`, `health-findings`, `health-coverage-gaps`, `health-runtime-coverage`, `security`, `security-advisory`, `audit-verdict`, `type-aware-require` and `parse-error`. `GateName` describes each name and the default entries of each command."
+      "description": "The verdict of every gate that a run evaluated, keyed by gate name.\n\nEach tool defines its own gate names. The name of a gate is the JSON member\nname, and the members are in the order of the names. A tool never writes an\nempty object. When no gate ran, the member is absent.\n\nThe key set is OPEN. A name that a consumer does not recognize means \"some\ngate\", not an error.\n\nThe names that this build can emit are `error-severity-findings`, `regression`, `stale-baseline`, `baseline-growth`, `duplication-threshold`, `duplication-findings`, `health-min-score`, `health-min-severity`, `health-findings`, `health-coverage-gaps`, `health-runtime-coverage`, `security`, `security-advisory`, `audit-verdict`, `type-aware-require`, `parse-error` and `mutation-min-score`. `GateName` describes each name and the default entries of each command."
     },
     "RequestOutcomes": {
       "type": "object",
@@ -33152,6 +33157,17 @@
             }
           ],
           "description": "The mutants whose result differs from a saved report. Absent outside\n`--compare`, and absent when this run is not complete."
+        },
+        "gate_outcomes": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/GateOutcomes"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The verdict of the `mutation-min-score` gate. Present only when a\nminimum applies: from `--min-score`, or from `mutation.minScore` when\nthe run is not a recheck. The exit code of the run reads this entry."
         }
       },
       "required": [

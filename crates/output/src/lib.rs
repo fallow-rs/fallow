@@ -72,6 +72,7 @@ mod lean_pass;
 mod lean_profile;
 mod list_envelopes;
 mod mutation;
+mod mutation_ci;
 mod next_steps;
 mod package_baselines;
 mod pr_comment_envelope;
@@ -358,6 +359,12 @@ pub use mutation::{
     MutationWorktreeCheck, SAMPLED_OUT_REASON, SKIPPED_TESTS_CODE,
     serialize_mutation_inspect_json_output, serialize_mutation_json_output,
     serialize_mutation_plan_json_output, serialize_mutation_tasks_json_output,
+};
+pub use mutation_ci::{
+    MUTATION_MESSAGE_MAX_CHARS, MUTATION_NO_COVERAGE_ITEMS, MUTATION_SECTION_MAX_CHARS,
+    MutationCiLocation, MutationCiState, MutationCiView, MutationHeading, MutationNotRunReason,
+    MutationRunNotice, mutation_decision_row, mutation_review_summary_line, mutation_run_notice,
+    render_mutation_section, survived_description,
 };
 pub use next_steps::{
     AuditNextStepsInput, BaselineRecheckInput, CombinedNextStepsInput, DeadCodeNextStepsInput,

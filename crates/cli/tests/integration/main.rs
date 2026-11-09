@@ -127,6 +127,7 @@ mod quiet_stderr_tests;
 mod reconcile_review_tests;
 mod release_publish_list;
 mod report_from_levels_tests;
+mod report_mutation_tests;
 mod report_parity_tests;
 mod request_outcome_tests;
 mod requested_rule_off_tests;

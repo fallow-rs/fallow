@@ -7,6 +7,10 @@ set -o pipefail
 DIR="$(cd "$(dirname "$0")" && pwd)"
 JQ_DIR="$DIR/../jq"
 FIXTURES="$DIR/fixtures"
+# The scope step writes to $RUNNER_TEMP/fallow-scope. A private directory
+# keeps two runs of this suite on one machine apart.
+RUN_SH_RUNNER_TEMP=$(mktemp -d)
+export RUNNER_TEMP="$RUN_SH_RUNNER_TEMP"
 PASSED=0
 FAILED=0
 ERRORS=()
@@ -815,102 +819,6 @@ else
   fail "analyze: complete policy fails partial semantic output with zero findings" "expected exit 1, got $cmd_status"
 fi
 assert_contains "$OUT" "Type-aware completeness gate failed" "analyze: completeness failure is explicit"
-
-run_analyze_scope_case() {
-  local case_name=$1
-  local changed_files=$2
-  local baseline=$3
-  local changed_since=$4
-  local diff_file=$5
-  local root=${6:-.}
-  local config=${7:-}
-  local work="$ANALYZE_TMP/scope-$case_name"
-  mkdir -p "$work/$root"
-  rm -f "$ANALYZE_TMP/output-$case_name" "$ANALYZE_TMP/env-$case_name"
-  if [ -n "$diff_file" ]; then
-    printf '%s\n' 'diff --git a/src/a.ts b/src/a.ts' > "$diff_file"
-  fi
-
-  (
-    cd "$work" || exit 1
-    PATH="$ANALYZE_TMP/bin:$PATH" \
-      FAKE_CHANGED_FILES="$changed_files" \
-      GITHUB_OUTPUT="$ANALYZE_TMP/output-$case_name" \
-      GITHUB_ENV="$ANALYZE_TMP/env-$case_name" \
-      INPUT_ROOT="$root" \
-      INPUT_CONFIG="$config" \
-      INPUT_COMMAND="dead-code" \
-      INPUT_FORMAT="json" \
-      INPUT_AUTO_CHANGED_SINCE="true" \
-      INPUT_CHANGED_SINCE="$changed_since" \
-      EVENT_NAME="pull_request" \
-      PR_BASE_SHA="base1234" \
-      INPUT_BASELINE="$baseline" \
-      FALLOW_DIFF_FILE="$diff_file" \
-      bash "$DIR/../scripts/analyze.sh"
-  ) 2>&1
-}
-
-OUT=$(run_analyze_scope_case "config-baseline-auto" ".fallowrc.json" "baseline.json" "" "")
-ARGS=$(cat "$ANALYZE_TMP/scope-config-baseline-auto/fallow-analysis-args.sh")
-OUTPUTS=$(cat "$ANALYZE_TMP/output-config-baseline-auto")
-ENV_OUT=$(cat "$ANALYZE_TMP/env-config-baseline-auto")
-assert_not_contains "$ARGS" "--changed-since" "analyze: config baseline auto-scope removes changed-since"
-if grep -qx 'changed_since=' "$ANALYZE_TMP/output-config-baseline-auto"; then
-  pass "analyze: config baseline auto-scope clears changed_since output"
-else
-  fail "analyze: config baseline auto-scope clears changed_since output" "outputs were: $OUTPUTS"
-fi
-assert_not_contains "$ENV_OUT" "FALLOW_DIFF_FILE=" "analyze: config baseline auto-scope skips auto diff file"
-assert_contains "$OUT" "dead-code baseline comparison is running unscoped because '.fallowrc.json' changed" "analyze: config baseline auto-scope warns"
-
-OUT=$(run_analyze_scope_case "source-baseline-auto" "src/a.ts" "baseline.json" "" "")
-ARGS=$(cat "$ANALYZE_TMP/scope-source-baseline-auto/fallow-analysis-args.sh")
-OUTPUTS=$(cat "$ANALYZE_TMP/output-source-baseline-auto")
-ENV_OUT=$(cat "$ANALYZE_TMP/env-source-baseline-auto")
-assert_contains "$ARGS" "--changed-since base1234" "analyze: source baseline auto-scope keeps changed-since"
-assert_contains "$OUTPUTS" "changed_since=base1234" "analyze: source baseline auto-scope keeps changed_since output"
-assert_contains "$ENV_OUT" "FALLOW_DIFF_FILE=" "analyze: source baseline auto-scope writes auto diff file"
-
-OUT=$(run_analyze_scope_case "config-no-baseline" ".fallowrc.json" "" "" "")
-ARGS=$(cat "$ANALYZE_TMP/scope-config-no-baseline/fallow-analysis-args.sh")
-OUTPUTS=$(cat "$ANALYZE_TMP/output-config-no-baseline")
-assert_contains "$ARGS" "--changed-since base1234" "analyze: config without baseline keeps changed-since"
-assert_contains "$OUTPUTS" "changed_since=base1234" "analyze: config without baseline keeps changed_since output"
-
-OUT=$(run_analyze_scope_case "explicit-config-root-prefix" "packages/app/config/fallow.jsonc" "baseline.json" "" "" "packages/app" "config/fallow.jsonc")
-ARGS=$(cat "$ANALYZE_TMP/scope-explicit-config-root-prefix/fallow-analysis-args.sh")
-assert_not_contains "$ARGS" "--changed-since" "analyze: explicit config path with root prefix removes auto changed-since"
-assert_contains "$OUT" "because 'config/fallow.jsonc' changed" "analyze: explicit config path warning uses root-relative path"
-
-OUT=$(run_analyze_scope_case "config-explicit-changed-since" ".fallowrc.json" "baseline.json" "manual-base" "")
-ARGS=$(cat "$ANALYZE_TMP/scope-config-explicit-changed-since/fallow-analysis-args.sh")
-OUTPUTS=$(cat "$ANALYZE_TMP/output-config-explicit-changed-since")
-assert_contains "$ARGS" "--changed-since manual-base" "analyze: explicit changed-since is preserved"
-assert_contains "$OUTPUTS" "changed_since=manual-base" "analyze: explicit changed-since output is preserved"
-assert_contains "$OUT" "explicitly scoped" "analyze: explicit changed-since warns about baseline drift"
-
-EXPLICIT_DIFF="$ANALYZE_TMP/user.diff"
-OUT=$(run_analyze_scope_case "config-explicit-diff" ".fallowrc.json" "baseline.json" "" "$EXPLICIT_DIFF")
-ARGS=$(cat "$ANALYZE_TMP/scope-config-explicit-diff/fallow-analysis-args.sh")
-OUTPUTS=$(cat "$ANALYZE_TMP/output-config-explicit-diff")
-ENV_OUT=$(cat "$ANALYZE_TMP/env-config-explicit-diff")
-assert_not_contains "$ARGS" "--changed-since base1234" "analyze: explicit diff still clears auto changed-since"
-if grep -qx 'changed_since=' "$ANALYZE_TMP/output-config-explicit-diff"; then
-  pass "analyze: explicit diff clears auto changed_since output"
-else
-  fail "analyze: explicit diff clears auto changed_since output" "outputs were: $OUTPUTS"
-fi
-assert_contains "$ENV_OUT" "FALLOW_DIFF_FILE=$EXPLICIT_DIFF" "analyze: explicit diff file is preserved"
-assert_contains "$OUT" "explicit diff file remains active" "analyze: explicit diff warns about remaining scope"
-
-OUT=$(run_analyze_scope_case "newline-filename" $'src/line\nbreak.ts' "" "" "")
-CHANGED_FILE="$ANALYZE_TMP/scope-newline-filename/fallow-changed-files.json"
-if jq -e 'length == 1 and .[0] == "src/line\nbreak.ts"' "$CHANGED_FILE" >/dev/null; then
-  pass "analyze: changed-file JSON preserves newline-bearing filename"
-else
-  fail "analyze: changed-file JSON preserves newline-bearing filename" "got: $(cat "$CHANGED_FILE")"
-fi
 
 # Audit verdict + gate are emitted to GITHUB_OUTPUT for the Check threshold step.
 # Without this, the threshold step gates on raw introduced count, re-introducing
@@ -2765,161 +2673,8 @@ API_FAIL_BIN="$API_FAIL_WORK/bin"
 mkdir -p "$API_FAIL_BIN"
 SCRIPTS_DIR="$DIR/../scripts"
 
-# --- Test 1: analyze.sh emits changed_files_unavailable=true when gh api fails ---
-# Simulate a 500 from the GitHub API. The mock fails the gh api --paginate call
-# unconditionally; analyze.sh's git diff fallback also fails (no real git
-# history against the bogus SHA), so the script lands in the gh api branch.
-
-cat > "$API_FAIL_BIN/gh" <<'SH'
-#!/usr/bin/env bash
-if [ "${1:-}" = "api" ]; then
-  case " $* " in
-    *" --paginate "*) ;;
-    *) echo "missing --paginate" >&2; exit 2 ;;
-  esac
-  echo "gh: HTTP 500: Internal Server Error (api.github.com/repos/owner/repo/pulls/123/files)" >&2
-  exit 1
-fi
-exit 0
-SH
-chmod +x "$API_FAIL_BIN/gh"
-
+# The changed_files_unavailable cases are in scope.sh.
 API_FAIL_OUTPUT="$API_FAIL_WORK/github_output"
-: > "$API_FAIL_OUTPUT"
-API_FAIL_STDERR=$(cd "$API_FAIL_WORK" \
-  && PATH="$API_FAIL_BIN:$PATH" \
-  GITHUB_OUTPUT="$API_FAIL_OUTPUT" \
-  INPUT_ROOT="." \
-  INPUT_COMMAND="check" \
-  INPUT_FORMAT="json" \
-  INPUT_CHANGED_SINCE="0000000000000000000000000000000000000000" \
-  PR_NUMBER="123" \
-  GH_REPO="owner/repo" \
-  GH_TOKEN="test" \
-  FALLOW_API_RETRIES=1 \
-  FALLOW_API_RETRY_DELAY=0 \
-  bash "$SCRIPTS_DIR/analyze.sh" 2>&1 1>/dev/null) || true
-
-assert_contains "$(cat "$API_FAIL_OUTPUT")" "changed_files_unavailable=true" \
-  "analyze: emits changed_files_unavailable=true on gh api failure"
-assert_contains "$API_FAIL_STDERR" "GitHub API call to list PR files failed" \
-  "analyze: stderr names API failure mode (not shallow-clone)"
-assert_contains "$API_FAIL_STDERR" "gh auth status" \
-  "analyze: warning includes actionable hint (gh auth status)"
-
-# --- Test 2: analyze.sh emits changed_files_unavailable=false when gh api succeeds ---
-
-cat > "$API_FAIL_BIN/gh" <<'SH'
-#!/usr/bin/env bash
-if [ "${1:-}" = "api" ]; then
-  case " $* " in
-    *" --paginate "*) ;;
-    *) echo "missing --paginate" >&2; exit 2 ;;
-  esac
-  printf '%s\n' \
-    '"src/a.ts"' \
-    '"src/line\nbreak.ts"' \
-    '"src/quote\"file.ts"' \
-    '"src/back\\slash.ts"'
-  exit 0
-fi
-exit 0
-SH
-chmod +x "$API_FAIL_BIN/gh"
-
-: > "$API_FAIL_OUTPUT"
-(cd "$API_FAIL_WORK" \
-  && PATH="$API_FAIL_BIN:$PATH" \
-  GITHUB_OUTPUT="$API_FAIL_OUTPUT" \
-  INPUT_ROOT="." \
-  INPUT_COMMAND="check" \
-  INPUT_FORMAT="json" \
-  INPUT_CHANGED_SINCE="0000000000000000000000000000000000000000" \
-  PR_NUMBER="123" \
-  GH_REPO="owner/repo" \
-  GH_TOKEN="test" \
-  FALLOW_API_RETRIES=1 \
-  FALLOW_API_RETRY_DELAY=0 \
-  bash "$SCRIPTS_DIR/analyze.sh" >/dev/null 2>&1) || true
-
-if grep -q '^changed_files_unavailable=false$' "$API_FAIL_OUTPUT" \
-    && ! grep -q '^changed_files_unavailable=true$' "$API_FAIL_OUTPUT"; then
-  pass "analyze: emits changed_files_unavailable=false on gh api success"
-else
-  fail "analyze: emits changed_files_unavailable=false on gh api success" \
-    "expected only =false, got: $(grep changed_files_unavailable "$API_FAIL_OUTPUT" || echo 'absent')"
-fi
-API_CHANGED_FILE="$API_FAIL_WORK/fallow-changed-files.json"
-if jq -e '
-  length == 4
-  and .[0] == "src/a.ts"
-  and .[1] == "src/line\nbreak.ts"
-  and .[2] == "src/quote\"file.ts"
-  and .[3] == "src/back\\slash.ts"
-' "$API_CHANGED_FILE" >/dev/null; then
-  pass "analyze: API fallback preserves JSON-escaped filenames"
-else
-  fail "analyze: API fallback preserves JSON-escaped filenames" \
-    "got: $(cat "$API_CHANGED_FILE" 2>/dev/null || echo absent)"
-fi
-
-# --- Test 2a: API fallback scopes repo-relative paths for an absolute root ---
-
-mkdir -p "$API_FAIL_WORK/packages/app"
-cat > "$API_FAIL_BIN/gh" <<'SH'
-#!/usr/bin/env bash
-if [ "${1:-}" = "api" ]; then
-  printf '%s\n' \
-    '"packages/app/src/a.ts"' \
-    '"packages/other/src/ignored.ts"'
-  exit 0
-fi
-exit 0
-SH
-chmod +x "$API_FAIL_BIN/gh"
-
-: > "$API_FAIL_OUTPUT"
-(cd "$API_FAIL_WORK" \
-  && PATH="$API_FAIL_BIN:$PATH" \
-  GITHUB_WORKSPACE="$API_FAIL_WORK" \
-  GITHUB_OUTPUT="$API_FAIL_OUTPUT" \
-  INPUT_ROOT="$API_FAIL_WORK/packages/app" \
-  INPUT_COMMAND="check" \
-  INPUT_FORMAT="json" \
-  INPUT_CHANGED_SINCE="0000000000000000000000000000000000000000" \
-  PR_NUMBER="123" \
-  GH_REPO="owner/repo" \
-  GH_TOKEN="test" \
-  FALLOW_API_RETRIES=1 \
-  FALLOW_API_RETRY_DELAY=0 \
-  bash "$SCRIPTS_DIR/analyze.sh" >/dev/null 2>&1) || true
-
-if jq -e 'length == 1 and .[0] == "src/a.ts"' "$API_CHANGED_FILE" >/dev/null; then
-  pass "analyze: API fallback scopes changed files for an absolute root"
-else
-  fail "analyze: API fallback scopes changed files for an absolute root" \
-    "got: $(cat "$API_CHANGED_FILE" 2>/dev/null || echo absent)"
-fi
-
-# --- Test 2b: analyze.sh emits changed_files_unavailable=false even without INPUT_CHANGED_SINCE ---
-# The marker must be unconditional so downstream `if:` gates can match on it
-# as a positive signal (== 'false') without seeing an absent-vs-false ambiguity.
-
-: > "$API_FAIL_OUTPUT"
-(cd "$API_FAIL_WORK" \
-  && PATH="$API_FAIL_BIN:$PATH" \
-  GITHUB_OUTPUT="$API_FAIL_OUTPUT" \
-  INPUT_ROOT="." \
-  INPUT_COMMAND="check" \
-  INPUT_FORMAT="json" \
-  bash "$SCRIPTS_DIR/analyze.sh" >/dev/null 2>&1) || true
-
-if grep -q '^changed_files_unavailable=false$' "$API_FAIL_OUTPUT"; then
-  pass "analyze: emits changed_files_unavailable=false even without INPUT_CHANGED_SINCE"
-else
-  fail "analyze: emits changed_files_unavailable=false even without INPUT_CHANGED_SINCE" \
-    "expected =false (unconditional init), got: $(grep changed_files_unavailable "$API_FAIL_OUTPUT" || echo 'absent')"
-fi
 
 # --- Test 3-5: review.sh dedup-lookup failure paths ---
 # Shared mock harness: fallow renders the typed envelope; gh fails on the
@@ -5717,129 +5472,17 @@ assert_contains "$(grep -A1 '^  command:' "$DIR/../../action.yml")" "architectur
 
 rm -rf "$ARCH_WORK"
 
-echo ""
-echo "=== Shallow clone merge base for changed-since ==="
+# --- Change scope step ---
 
-# A pull_request job checks out the merge commit at depth 1 by default. The CLI
-# diffs against merge-base(base, HEAD), so analyze.sh must fetch enough history
-# for that merge base. The fake fallow fails like the real CLI without one.
-MB_TMP=$(mktemp -d)
-mkdir -p "$MB_TMP/bin"
-cat > "$MB_TMP/bin/fallow" <<'SH'
-#!/usr/bin/env bash
-base=""
-prev=""
-for arg in "$@"; do
-  [ "$prev" = "--changed-since" ] && base=$arg
-  prev=$arg
-done
-case "$*" in
-  *audit*) ;;
-  *) printf '{"total_issues":0}\n'; exit 0 ;;
-esac
-if [ -n "$base" ] && ! git merge-base "$base" HEAD >/dev/null 2>&1; then
-  printf '{"error":true,"message":"could not determine changed files for base ref %s: no merge base","exit_code":2}\n' "$base"
-  exit 2
-fi
-printf '%s\n' '{"command":"audit","verdict":"pass","attribution":{"gate":"new-only","dead_code_introduced":0,"dead_code_inherited":0,"complexity_introduced":0,"complexity_inherited":0,"duplication_introduced":0,"duplication_inherited":0},"summary":{"dead_code_issues":0,"dead_code_has_errors":false,"complexity_findings":0,"max_cyclomatic":null,"duplication_clone_groups":0}}'
-SH
-chmod +x "$MB_TMP/bin/fallow"
-
-mb_git() {
-  env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE \
-    git -c user.email=test@example.com -c user.name=test -c commit.gpgsign=false \
-      -c merge.gpgsign=false -c core.hooksPath=/dev/null "$@"
-}
-
-# History: main has five commits, a PR branch adds two, main adds one more,
-# and the PR merge commit joins the two tips (first parent: the base tip).
-mb_git init -q -b main "$MB_TMP/src"
-for i in 1 2 3 4 5; do
-  echo "$i" > "$MB_TMP/src/f$i.ts"
-  mb_git -C "$MB_TMP/src" add . && mb_git -C "$MB_TMP/src" commit -qm "main $i"
-done
-mb_git -C "$MB_TMP/src" switch -qc feature
-for i in 1 2; do
-  echo "$i" > "$MB_TMP/src/pr$i.ts"
-  mb_git -C "$MB_TMP/src" add . && mb_git -C "$MB_TMP/src" commit -qm "pr $i"
-done
-mb_git -C "$MB_TMP/src" switch -q main
-echo "base" > "$MB_TMP/src/base.ts"
-mb_git -C "$MB_TMP/src" add . && mb_git -C "$MB_TMP/src" commit -qm "main base"
-MB_BASE=$(mb_git -C "$MB_TMP/src" rev-parse main)
-MB_HEAD=$(mb_git -C "$MB_TMP/src" rev-parse feature)
-mb_git -C "$MB_TMP/src" merge -q --no-ff feature -m "merge pr"
-MB_MERGE=$(mb_git -C "$MB_TMP/src" rev-parse HEAD)
-mb_git -C "$MB_TMP/src" reset -q --hard "$MB_BASE"
-mb_git -C "$MB_TMP/src" update-ref refs/pull/1/merge "$MB_MERGE"
-mb_git clone -q --bare "$MB_TMP/src" "$MB_TMP/remote.git"
-# A bare clone copies only branches and tags. Keep the merge commit on a ref,
-# as GitHub does, so a fetch by its SHA works with every git version.
-mb_git -C "$MB_TMP/remote.git" update-ref refs/pull/1/merge "$MB_MERGE"
-
-# Make a depth-1 checkout of one commit, like actions/checkout does.
-mb_checkout() {
-  local dir=$1 sha=$2
-  mb_git init -q "$dir"
-  mb_git -C "$dir" remote add origin "file://$MB_TMP/remote.git"
-  mb_git -C "$dir" fetch -q --no-tags --depth=1 origin "$sha"
-  mb_git -C "$dir" checkout -q "$sha"
-}
-
-run_merge_base_case() {
-  local dir=$1
-  (
-    cd "$dir" || exit 1
-    env -u GIT_DIR -u GIT_INDEX_FILE -u GIT_WORK_TREE \
-      PATH="$MB_TMP/bin:$PATH" \
-      GITHUB_OUTPUT="$dir.output" \
-      GITHUB_ENV="$dir.env" \
-      INPUT_ROOT="." \
-      INPUT_COMMAND="audit" \
-      INPUT_FORMAT="json" \
-      INPUT_AUTO_CHANGED_SINCE="true" \
-      EVENT_NAME="pull_request" \
-      PR_BASE_SHA="$MB_BASE" \
-      bash "$DIR/../scripts/analyze.sh"
-  ) 2>&1
-}
-
-mb_checkout "$MB_TMP/merge" "$MB_MERGE"
-# The file runs under errexit here, and the case can exit non-zero.
-set +e
-OUT=$(run_merge_base_case "$MB_TMP/merge")
-cmd_status=$?
-set -e
-if [ "$cmd_status" -eq 0 ]; then
-  pass "merge base: depth-1 merge commit checkout runs audit"
-else
-  fail "merge base: depth-1 merge commit checkout runs audit" "exit $cmd_status, output: $OUT"
-fi
-assert_not_contains "$OUT" "no merge base" "merge base: merge commit checkout gets a merge base"
-if [ "$(mb_git -C "$MB_TMP/merge" merge-base "$MB_BASE" HEAD 2>/dev/null)" = "$MB_BASE" ]; then
-  pass "merge base: merge commit parents give the PR base as merge base"
-else
-  fail "merge base: merge commit parents give the PR base as merge base" "merge base not found"
-fi
-
-mb_checkout "$MB_TMP/head" "$MB_HEAD"
-set +e
-OUT=$(run_merge_base_case "$MB_TMP/head")
-cmd_status=$?
-set -e
-if [ "$cmd_status" -eq 0 ]; then
-  pass "merge base: depth-1 PR head checkout deepens to a merge base"
-else
-  fail "merge base: depth-1 PR head checkout deepens to a merge base" "exit $cmd_status, output: $OUT"
-fi
-assert_not_contains "$OUT" "no merge base" "merge base: PR head checkout gets a merge base"
-
-rm -rf "$MB_TMP"
+# shellcheck source=scope.sh
+source "$DIR/scope.sh"
 
 # --- Mutation testing ---
 
 # shellcheck source=mutation.sh
 source "$DIR/mutation.sh"
+
+rm -rf "$RUN_SH_RUNNER_TEMP"
 
 # --- Summary ---
 

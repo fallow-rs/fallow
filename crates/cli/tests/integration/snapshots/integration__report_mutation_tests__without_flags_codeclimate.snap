@@ -1,0 +1,38 @@
+---
+source: crates/cli/tests/integration/report_mutation_tests.rs
+expression: body
+---
+[
+  {
+    "type": "issue",
+    "check_name": "fallow/unused-file",
+    "description": "File is not reachable from any entry point",
+    "categories": [
+      "Bug Risk"
+    ],
+    "severity": "major",
+    "fingerprint": "344469b851861760",
+    "location": {
+      "path": "src/unused.ts",
+      "lines": {
+        "begin": 1
+      }
+    }
+  },
+  {
+    "type": "issue",
+    "check_name": "fallow/unused-export",
+    "description": "Export 'isSenior' is never imported by other modules",
+    "categories": [
+      "Bug Risk"
+    ],
+    "severity": "major",
+    "fingerprint": "61a33f11cb50d50e",
+    "location": {
+      "path": "src/age.ts",
+      "lines": {
+        "begin": 5
+      }
+    }
+  }
+]

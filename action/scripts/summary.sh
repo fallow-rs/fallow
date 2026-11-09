@@ -31,7 +31,9 @@ set -euo pipefail
 #   FALLOW_BASELINE_UNRECOGNISED, FALLOW_BASELINE_SAVED_BY,
 #   FALLOW_BASELINE_PATH, FALLOW_GATES_FAILED,
 #   FALLOW_GATES_WARNED, FALLOW_GATES_SKIPPED, FALLOW_GATES_PASSED,
-#   FALLOW_ANALYSIS_DEGRADED, GITHUB_SERVER_URL, GITHUB_REPOSITORY
+#   FALLOW_ANALYSIS_DEGRADED, GITHUB_SERVER_URL, GITHUB_REPOSITORY,
+#   INPUT_MUTATION, HAS_MUTATION_REPORT, and the mutation variables of
+#   fallow_mutation_render_args (render-common.sh)
 
 # Each optional variable gets its default here, so `set -u` fails on a typo in
 # a name instead of on an input that the workflow did not set.
@@ -47,11 +49,14 @@ set -euo pipefail
 : "${FALLOW_GATES_SKIPPED:=}" "${FALLOW_GATES_PASSED:=}"
 : "${FALLOW_ANALYSIS_DEGRADED:=}" "${GITHUB_SERVER_URL:=https://github.com}"
 : "${GITHUB_REPOSITORY:=}" "${GITHUB_STEP_SUMMARY:=}"
+: "${INPUT_MUTATION:=false}" "${HAS_MUTATION_REPORT:=false}"
 
 # shellcheck source=action/scripts/legacy-render.sh
 . "$(dirname "${BASH_SOURCE[0]}")/legacy-render.sh"
 # shellcheck source=action/scripts/results-file.sh
 . "$(dirname "${BASH_SOURCE[0]}")/results-file.sh"
+# shellcheck source=action/scripts/render-common.sh
+. "$(dirname "${BASH_SOURCE[0]}")/render-common.sh"
 
 select_summary_script() {
   case "$FALLOW_COMMAND" in
@@ -84,6 +89,8 @@ emit_native_summary_if_available() {
   local args=(report --from "$input_file" --root "${INPUT_ROOT:-.}" --format github-summary)
   [ "${FALLOW_RENDER_PATH_PREFIX_SET:-0}" = "1" ] \
     && args+=(--report-path-prefix "${FALLOW_RENDER_PATH_PREFIX:-}")
+  load_mutation_render_args
+  args+=(${MUTATION_RENDER_ARGS[@]+"${MUTATION_RENDER_ARGS[@]}"})
   local rendered err_file
   err_file=$(mktemp)
   if ! rendered=$("${FALLOW_BIN:-fallow}" "${args[@]}" 2>"$err_file"); then
@@ -230,8 +237,22 @@ append_gate_summary() {
   fi
 }
 
+# A CLI without `fallow report --mutation-report` cannot render the mutation
+# result, and no shell renderer exists. The mutation result step still fails
+# the job for a failed gate.
+append_mutation_upgrade_line() {
+  [ -n "${GITHUB_STEP_SUMMARY:-}" ] || return 0
+  [ "${INPUT_MUTATION:-false}" = "true" ] || return 0
+  [ "${HAS_MUTATION_REPORT:-false}" = "true" ] && return 0
+  local version subject="this fallow version"
+  version=$(fallow_binary_version)
+  [ -n "$version" ] && subject="fallow ${version}"
+  printf '%s\n\n' "> Mutation results are not in this summary: ${subject} cannot render them. Use fallow ${MUTATION_REPORT_VERSION} or later." >> "$GITHUB_STEP_SUMMARY"
+}
+
 append_baseline_advisory
 append_gate_summary
+append_mutation_upgrade_line
 
 if emit_native_summary_if_available; then
   exit 0

@@ -8,6 +8,26 @@ trap 'rm -f "${_FALLOW_TMPS[@]:-}"' EXIT
 
 FALLOW_RENDER_ARGS=()
 
+# A pinned FALLOW_SCRIPTS_REF from before the mutation scripts has no
+# mutation_common.sh, and that job then renders no mutation result.
+_FALLOW_COMMON_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "${_FALLOW_COMMON_DIR}/mutation_common.sh" ]; then
+  # shellcheck source=mutation_common.sh
+  source "${_FALLOW_COMMON_DIR}/mutation_common.sh"
+fi
+
+# Appends the mutation arguments of `fallow report` to FALLOW_RENDER_ARGS.
+# `report` refuses them with a fix envelope, so a fix job renders without the
+# mutation result.
+append_mutation_render_args() {
+  declare -F fallow_mutation_render_args > /dev/null || return 0
+  [ "${FALLOW_COMMAND:-}" != "fix" ] || return 0
+  local arg
+  while IFS= read -r arg; do
+    FALLOW_RENDER_ARGS+=("$arg")
+  done < <(fallow_mutation_render_args)
+}
+
 prepare_fallow_render_args() {
   local format=$1
   local results_file="${FALLOW_RESULTS_FILE:-fallow-results.json}"
@@ -24,6 +44,9 @@ prepare_fallow_render_args() {
   [ -n "${FALLOW_WORKSPACE:-}" ] && FALLOW_RENDER_ARGS+=(--workspace "$FALLOW_WORKSPACE")
   [ "${FALLOW_RENDER_PATH_PREFIX_SET:-0}" = "1" ] \
     && FALLOW_RENDER_ARGS+=(--report-path-prefix "${FALLOW_RENDER_PATH_PREFIX:-}")
+  append_mutation_render_args
+  # The template exports FALLOW_DIFF_FILE from its change scope. This fallback
+  # serves an older template that has no scope block.
   if [ -z "${FALLOW_DIFF_FILE:-}" ] && [ -n "${CI_MERGE_REQUEST_DIFF_BASE_SHA:-}" ]; then
     if git diff "${CI_MERGE_REQUEST_DIFF_BASE_SHA}..HEAD" > fallow-mr.diff 2>fallow-mr-diff-stderr.log; then
       export FALLOW_DIFF_FILE="$PWD/fallow-mr.diff"

@@ -502,6 +502,39 @@ mod tests {
         );
     }
 
+    /// A survived mutant names a test gap, not an edit of the line, so its
+    /// review comment never offers a one-click change. The source line here
+    /// gives a block for an unused export, which shows that the rule id alone
+    /// withholds it.
+    #[test]
+    fn a_survived_mutant_gets_no_suggestion_block() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let source = dir.path().join("age.ts");
+        std::fs::write(&source, "export const isAdult = (age) => age >= 18;\n").expect("write");
+        let finding = |rule_id: &str| CiIssue {
+            rule_id: rule_id.to_owned(),
+            description: "Changing >= to > in isAdult made no test fail. Mutant 9f3c2a1b."
+                .to_owned(),
+            severity: "minor".to_owned(),
+            path: source.to_string_lossy().into_owned(),
+            line: 1,
+            end_line: None,
+            other_locations: Vec::new(),
+            fingerprint: "abc".to_owned(),
+            legacy_fingerprint: None,
+            audit: None,
+        };
+        let survived = finding(crate::report::mutation_evidence::MUTATION_SURVIVED_RULE);
+        for provider in [Provider::Github, Provider::Gitlab] {
+            assert!(
+                suggestion_block(provider, &finding("fallow/unused-export")).is_some(),
+                "the control finding reads the line"
+            );
+            assert_eq!(suggestion_block(provider, &survived), None);
+        }
+        assert_eq!(fix_intent(&survived), None);
+    }
+
     #[test]
     fn delete_line_suggestion_skips_blank_lines() {
         assert_eq!(

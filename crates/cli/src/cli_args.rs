@@ -2176,6 +2176,18 @@ pub enum Command {
         /// combined).
         #[arg(long, value_name = "PATH")]
         from: PathBuf,
+        /// A saved `fallow mutation --format json` report, or the JSON error
+        /// envelope of a failed run, to render with the results. Applies to
+        /// the pr-comment, review, github-summary, github-annotations and
+        /// codeclimate formats only. The paths in the report are relative to
+        /// the root of the mutation run, which must be the `--root` of this
+        /// call.
+        #[arg(long, value_name = "PATH")]
+        mutation_report: Option<PathBuf>,
+        /// Why mutation testing did not run in this job, so the render states
+        /// it. Applies to the same formats as `--mutation-report`.
+        #[arg(long, value_name = "REASON", conflicts_with = "mutation_report")]
+        mutation_not_run: Option<MutationNotRunArg>,
     },
     /// Dump fallow's capability manifest (CLI commands and flags, issue types, MCP tools, framework plugins, env vars) as machine-readable JSON for agent introspection. Always JSON, regardless of --format
     Schema,
@@ -2834,180 +2846,6 @@ pub enum CoverageCli {
     },
 }
 
-#[derive(Subcommand)]
-pub enum CiCli {
-    /// Compute the provider action for a rendered sticky PR summary comment.
-    PlanPrComment {
-        /// Path to the rendered PR comment Markdown body.
-        #[arg(long)]
-        body: PathBuf,
-
-        /// Sticky marker id used in the rendered body.
-        #[arg(long)]
-        marker_id: String,
-
-        /// Treat the rendered body as a clean no-findings result.
-        #[arg(long)]
-        clean: bool,
-
-        /// Existing provider comment id, when a matching sticky comment exists.
-        #[arg(long)]
-        existing_comment_id: Option<String>,
-
-        /// Path to the existing provider comment body. Enables unchanged-skip planning.
-        #[arg(long)]
-        existing_body: Option<PathBuf>,
-    },
-
-    /// Post, update, or skip a rendered sticky PR summary comment.
-    PostPrComment {
-        /// Provider whose PR comment is being posted.
-        #[arg(long, value_enum)]
-        provider: CiProviderArg,
-
-        /// Pull request number (GitHub).
-        #[arg(long)]
-        pr: Option<String>,
-
-        /// Merge request IID (GitLab).
-        #[arg(long)]
-        mr: Option<String>,
-
-        /// Path to the rendered PR comment Markdown body.
-        #[arg(long)]
-        body: PathBuf,
-
-        /// Path to the typed PR comment envelope JSON, when available.
-        #[arg(long)]
-        envelope: Option<PathBuf>,
-
-        /// Sticky marker id used in the rendered body.
-        #[arg(long)]
-        marker_id: String,
-
-        /// Treat the rendered body as a clean no-findings result.
-        #[arg(long)]
-        clean: bool,
-
-        /// GitHub repository in owner/name form. Defaults to GH_REPO or GITHUB_REPOSITORY.
-        #[arg(long)]
-        repo: Option<String>,
-
-        /// GitLab project id or path. Defaults to CI_PROJECT_ID.
-        #[arg(long = "project-id")]
-        project_id: Option<String>,
-
-        /// Provider API base URL. Defaults to github.com.
-        #[arg(long = "api-url")]
-        api_url: Option<String>,
-
-        /// Compute the post plan without creating or updating the provider comment.
-        #[arg(long)]
-        dry_run: bool,
-    },
-
-    /// Post a rendered review envelope as a provider review or summary comment.
-    PostReview {
-        /// Provider whose review envelope is being posted.
-        #[arg(long, value_enum)]
-        provider: CiProviderArg,
-
-        /// Pull request number (GitHub).
-        #[arg(long)]
-        pr: Option<String>,
-
-        /// Merge request IID (GitLab).
-        #[arg(long)]
-        mr: Option<String>,
-
-        /// Path to a review-github or review-gitlab JSON envelope.
-        #[arg(long)]
-        envelope: PathBuf,
-
-        /// GitHub repository in owner/name form. Defaults to GH_REPO or GITHUB_REPOSITORY.
-        #[arg(long)]
-        repo: Option<String>,
-
-        /// GitLab project id or path. Defaults to CI_PROJECT_ID.
-        #[arg(long = "project-id")]
-        project_id: Option<String>,
-
-        /// Provider API base URL. Defaults to github.com or CI_API_V4_URL/gitlab.com.
-        #[arg(long = "api-url")]
-        api_url: Option<String>,
-
-        /// Compute the post plan without creating provider comments.
-        #[arg(long)]
-        dry_run: bool,
-    },
-
-    /// Post a GitHub Check Run from a typed PR decision surface.
-    PostCheckRun {
-        /// Provider whose check run is being posted. Only GitHub is supported.
-        #[arg(long, value_enum)]
-        provider: CiProviderArg,
-
-        /// Path to a fallow-pr-decision JSON sidecar.
-        #[arg(long)]
-        decision: PathBuf,
-
-        /// GitHub repository in owner/name form.
-        #[arg(long)]
-        repo: String,
-
-        /// Head SHA the check run should attach to.
-        #[arg(long = "head-sha")]
-        head_sha: String,
-
-        /// Provider API base URL. Defaults to github.com.
-        #[arg(long = "api-url")]
-        api_url: Option<String>,
-
-        /// Post one check run per decision gate instead of one aggregate check.
-        #[arg(long = "split-gates")]
-        split_gates: bool,
-
-        /// Print the check run payload without posting it.
-        #[arg(long)]
-        dry_run: bool,
-    },
-
-    /// Validate a rendered review envelope and compute a stable reconcile plan.
-    ReconcileReview {
-        /// Provider whose review envelope is being reconciled.
-        #[arg(long, value_enum)]
-        provider: CiProviderArg,
-
-        /// Pull request number (GitHub).
-        #[arg(long)]
-        pr: Option<String>,
-
-        /// Merge request IID (GitLab).
-        #[arg(long)]
-        mr: Option<String>,
-
-        /// Path to a review-github or review-gitlab JSON envelope.
-        #[arg(long)]
-        envelope: PathBuf,
-
-        /// GitHub repository in owner/name form. Defaults to GH_REPO or GITHUB_REPOSITORY.
-        #[arg(long)]
-        repo: Option<String>,
-
-        /// GitLab project id or path. Defaults to CI_PROJECT_ID.
-        #[arg(long = "project-id")]
-        project_id: Option<String>,
-
-        /// Provider API base URL. Defaults to github.com or CI_API_V4_URL/gitlab.com.
-        #[arg(long = "api-url")]
-        api_url: Option<String>,
-
-        /// Compute the reconcile plan without posting resolution notes or resolving threads.
-        #[arg(long)]
-        dry_run: bool,
-    },
-}
-
 /// CLI mirror of [`fallow_engine::baseline::HealthBaselineMode`].
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq, clap::ValueEnum)]
 pub enum BaselineModeArg {
@@ -3066,3 +2904,13 @@ pub use rule_pack_args::RulePackCli;
 #[path = "cli_args_audit.rs"]
 mod audit_args;
 pub use audit_args::*;
+#[path = "cli_args_ci.rs"]
+mod ci_args;
+pub use ci_args::*;
+#[path = "cli_args_report.rs"]
+mod report_args;
+pub use report_args::*;
+
+#[cfg(test)]
+#[path = "cli_args_report_tests.rs"]
+mod report_flag_tests;

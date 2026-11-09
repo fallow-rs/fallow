@@ -1,0 +1,27 @@
+---
+source: crates/output/src/mutation_ci_tests.rs
+expression: both_headings(&view)
+---
+#### Mutation testing
+
+The tests detected each mutant that ran.
+
+| Killed | Survived | No coverage | Not measured | Score |
+| --- | --- | --- | --- | --- |
+| 12 | 0 | 0 | 0 | 100.0% |
+
+Scope: the changed lines.
+
+===== summary heading =====
+
+## Mutation testing
+
+The tests detected each mutant that ran.
+
+| Killed | Survived | No coverage | Not measured | Score |
+| --- | --- | --- | --- | --- |
+| 12 | 0 | 0 | 0 | 100.0% |
+
+Scope: the changed lines.
+
+The run took 4m 12s. 3 results came from the cache.

@@ -556,11 +556,124 @@ fn report(mutants: Vec<MutantResult>, reasons: Vec<MutationIncompleteReason>) ->
         typecheck: None,
         recheck: None,
         compare: None,
+        gate_outcomes: None,
     }
+}
+
+/// The report with the gate entry of `min_score`, as the run sets it before
+/// the serialization.
+fn gated(mut report: MutationReport, min_score: Option<f64>) -> MutationReport {
+    report.gate_outcomes = crate::gates::mutation_gate_outcomes(report.summary.score, min_score);
+    report
 }
 
 #[test]
 fn exit_code_is_1_only_when_a_minimum_is_set_and_missed() {
+    let half = || {
+        report(
+            vec![
+                mutant("m1", "src/a.ts", 1, MutantStatus::Killed),
+                mutant("m2", "src/a.ts", 2, MutantStatus::Survived),
+            ],
+            Vec::new(),
+        )
+    };
+    assert_eq!(run_exit_code(&gated(half(), None)), 0);
+    assert_eq!(run_exit_code(&gated(half(), Some(50.0))), 0);
+    assert_eq!(run_exit_code(&gated(half(), Some(50.1))), 1);
+    let unscored = report(
+        vec![mutant("m1", "src/a.ts", 1, MutantStatus::Pruned)],
+        Vec::new(),
+    );
+    assert_eq!(run_exit_code(&gated(unscored, Some(100.0))), 0);
+}
+
+#[test]
+fn the_exit_code_reads_the_gate_entry_and_not_the_score() {
+    let mut failed = report(
+        vec![mutant("m1", "src/a.ts", 1, MutantStatus::Killed)],
+        Vec::new(),
+    );
+    let mut gates = fallow_output::GateOutcomes::new();
+    gates.insert(
+        fallow_output::GateName::MutationMinScore,
+        fallow_output::GateOutcome::measured(fallow_output::GateStatus::Fail, true, 100.0, 80.0),
+    );
+    failed.gate_outcomes = Some(gates);
+    assert_eq!(run_exit_code(&failed), 1);
+    failed.gate_outcomes = None;
+    assert_eq!(run_exit_code(&failed), 0);
+}
+
+/// Every score and minimum on a half-percent grid: the exit code is 1
+/// exactly when the published entry is an enforced fail, and that is the
+/// rule `score * 100 < minimum`.
+#[test]
+fn the_exit_code_and_the_gate_entry_agree_on_a_grid_of_scores() {
+    let base = report(Vec::new(), Vec::new());
+    for score_step in 0..=200_u32 {
+        let score = f64::from(score_step) / 200.0;
+        for minimum in 0..=100_u32 {
+            let minimum = f64::from(minimum);
+            let mut report = base.clone();
+            report.summary.score = Some(score);
+            let report = gated(report, Some(minimum));
+            let entry = report
+                .gate_outcomes
+                .as_ref()
+                .and_then(|gates| gates.get(&fallow_output::GateName::MutationMinScore))
+                .expect("a minimum gives an entry");
+            let exit = run_exit_code(&report);
+            assert_eq!(
+                exit,
+                u8::from(entry.fails_run()),
+                "score {score}, minimum {minimum}"
+            );
+            assert_eq!(
+                exit,
+                u8::from(score * 100.0 < minimum),
+                "score {score}, minimum {minimum}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_recheck_drops_the_configured_minimum_so_its_report_has_no_gate_object() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = "export const add = (a, b) => a + b;\n";
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::write(dir.path().join("src/add.js"), source).unwrap();
+    let saved = serde_json::json!({
+        "kind": "mutation",
+        "mutants": [{
+            "mutant_id": "a", "file": "src/add.js", "line": 1, "column": 1,
+            "span": [0, 1], "operator": "x", "status": "survived",
+        }],
+        "files": [{
+            "path": "src/add.js",
+            "source_sha256": crate::mutation_inspect::sha256_hex(source.as_bytes()),
+        }],
+    });
+    let path = dir.path().join("report.json");
+    std::fs::write(&path, serde_json::to_vec(&saved).unwrap()).unwrap();
+    let config = MutationConfig {
+        min_score: Some(80.0),
+        ..MutationConfig::default()
+    };
+    let cli = input(dir.path(), MutationArgs::default(), config);
+    let mut options = run_options(&cli).unwrap();
+    assert_eq!(apply_recheck(&cli, &mut options, None).unwrap(), Some(80.0));
+    let selection = recheck::select(&path, dir.path(), &[]).unwrap();
+    let min_score = apply_recheck(&cli, &mut options, Some(&selection)).unwrap();
+    assert_eq!(min_score, None);
+    let rechecked = gated(report(Vec::new(), Vec::new()), min_score);
+    assert!(rechecked.gate_outcomes.is_none());
+    assert_eq!(run_exit_code(&rechecked), 0);
+}
+
+#[test]
+fn the_report_has_a_gate_object_only_when_a_minimum_applies() {
     let half = report(
         vec![
             mutant("m1", "src/a.ts", 1, MutantStatus::Killed),
@@ -568,14 +681,20 @@ fn exit_code_is_1_only_when_a_minimum_is_set_and_missed() {
         ],
         Vec::new(),
     );
-    assert_eq!(run_exit_code(&half, None), 0);
-    assert_eq!(run_exit_code(&half, Some(50.0)), 0);
-    assert_eq!(run_exit_code(&half, Some(50.1)), 1);
-    let unscored = report(
-        vec![mutant("m1", "src/a.ts", 1, MutantStatus::Pruned)],
-        Vec::new(),
+    let ungated = serialize_mutation_json_output(gated(half.clone(), None)).unwrap();
+    assert!(ungated.get("gate_outcomes").is_none(), "{ungated}");
+    let json = serialize_mutation_json_output(gated(half, Some(80.0))).unwrap();
+    assert_eq!(
+        json["gate_outcomes"],
+        serde_json::json!({
+            "mutation-min-score": {
+                "status": "fail",
+                "enforced": true,
+                "observed": 50.0,
+                "threshold": 80.0
+            }
+        })
     );
-    assert_eq!(run_exit_code(&unscored, Some(100.0)), 0);
 }
 
 fn baseline_failure(test_id: Option<&str>, message: Option<&str>) -> MutationBaselineFailure {
@@ -631,7 +750,7 @@ fn a_baseline_failure_does_not_fail_a_run_that_left_mutants_pending() {
         baseline_blocked_run_error(&stopped).is_none(),
         "the time budget or --max-mutants stopped the run, not the baseline failure"
     );
-    assert_eq!(run_exit_code(&stopped, None), 0);
+    assert_eq!(run_exit_code(&stopped), 0);
 }
 
 #[test]
@@ -664,7 +783,7 @@ fn a_run_with_only_no_coverage_mutants_and_no_baseline_failure_exits_0() {
         Vec::new(),
     );
     assert!(baseline_blocked_run_error(&unreached).is_none());
-    assert_eq!(run_exit_code(&unreached, None), 0);
+    assert_eq!(run_exit_code(&unreached), 0);
 }
 
 #[test]
@@ -678,7 +797,7 @@ fn a_baseline_failure_does_not_fail_a_run_with_an_executed_mutant() {
     );
     partial.baseline_failures = vec![baseline_failure(Some("test/env.test.ts::loads"), None)];
     assert!(baseline_blocked_run_error(&partial).is_none());
-    assert_eq!(run_exit_code(&partial, None), 0);
+    assert_eq!(run_exit_code(&partial), 0);
 }
 
 #[test]
