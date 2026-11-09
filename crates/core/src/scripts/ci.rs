@@ -17,6 +17,7 @@ use super::ci_action_inputs::StepActionInputs;
 use super::shell_helpers::HelperBase;
 use super::{
     IgnoredCommandEntries, ScriptCatalog, analyze_commands_with_context, could_be_file_path,
+    has_shell_syntax_residue,
 };
 use references::{expand_matrix_runs, github_script_files};
 
@@ -163,15 +164,23 @@ fn extract_ci_signals_in(
             parsed
                 .config_files
                 .into_iter()
-                .filter(|s| could_be_file_path(s))
+                .filter(|s| could_be_file_path(s) && !has_shell_syntax_residue(s))
                 .filter_map(resolve),
         );
-        analysis
-            .entry_files
-            .extend(parsed.entry_files.into_iter().filter_map(resolve));
-        analysis
-            .test_entry_files
-            .extend(parsed.test_entry_files.into_iter().filter_map(resolve));
+        analysis.entry_files.extend(
+            parsed
+                .entry_files
+                .into_iter()
+                .filter(|entry| !has_shell_syntax_residue(entry))
+                .filter_map(resolve),
+        );
+        analysis.test_entry_files.extend(
+            parsed
+                .test_entry_files
+                .into_iter()
+                .filter(|entry| !has_shell_syntax_residue(entry))
+                .filter_map(resolve),
+        );
     }
     analysis
         .entry_files
@@ -1465,6 +1474,33 @@ jobs:
         assert!(
             !analysis.entry_files.iter().any(|f| f.contains("proposals")),
             "jq filter must not leak into entry_files, got: {:?}",
+            analysis.entry_files
+        );
+    }
+
+    /// Regression test for issue #4380: a quoted jq filter inside a command
+    /// substitution in a `run:` block (the `$( ... | jq -c '...' )` shape,
+    /// with the filter carrying double-quoted keys and an unsplit pipe) must
+    /// not be harvested as an entry pattern either. The #2592 guard caught
+    /// the `//`-operator shape; this filter has neither a doubled slash nor
+    /// any slash at all, so the path walk passes it through.
+    #[test]
+    fn command_substitution_jq_filter_not_entry_file() {
+        let content = r#"
+jobs:
+  check:
+    steps:
+      - run: |
+          allowed=$(docker compose -f docker-compose.public.yml config --no-interpolate --format json \
+            | jq -c '.services["runner-public"].environment | keys + ["OVERHUB_NETWORK", "RUNNER_PUBLIC_MEMORY_LIMIT"]')
+"#;
+        let analysis = analyze_content(content);
+        assert!(
+            !analysis
+                .entry_files
+                .iter()
+                .any(|f| f.contains("runner-public") || f.contains("OVERHUB_NETWORK")),
+            "jq filter must not become an entry pattern, got: {:?}",
             analysis.entry_files
         );
     }
