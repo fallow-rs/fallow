@@ -1571,10 +1571,13 @@ outcome journal keeps them.
 - The fingerprint sorts the operators and removes duplicates. It writes the
   paths of a `paths` scope relative to the root, without `.` parts, sorted
   and without duplicates. `./src/a` and `src/a` give one fingerprint.
-- `--max-mutants`, `--time-budget` and `--concurrency` are not in the
-  fingerprint. A run that `--max-mutants` or the time budget stopped can
-  continue with other limits. A resumed result takes a place in the
-  `--max-mutants` limit, the same as a cached result.
+- `--max-mutants`, `--mutants-per-line`, `--time-budget` and `--concurrency`
+  are not in the fingerprint. A run that `--max-mutants` or the time budget
+  stopped can continue with other limits. A resumed result takes a place in
+  the `--max-mutants` limit, the same as a cached result.
+- `--function-scope` can add mutants. That changes the instrumented text and
+  the run directory hash, so a resume that changes the option exits `2` in
+  this case.
 - A journal result whose key does not match the key of this run is
   rejected, for example after a change to a covering test file. The result
   is not reused from the journal. The mutant runs again, or its status comes
