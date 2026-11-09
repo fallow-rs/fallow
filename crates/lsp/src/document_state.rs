@@ -39,9 +39,13 @@ pub struct DocumentSnapshot {
 
 pub type VersionSnapshot = FxHashMap<Uri, DocumentSnapshot>;
 
+/// Compare an open buffer with its file on disk. Each side is compared
+/// without its leading byte order mark, because most editors drop the mark
+/// from the buffer and some clients keep it.
 pub fn document_matches_disk(uri: &Uri, text: &str) -> bool {
+    let text = &text[crate::position::byte_order_mark_len(text)..];
     uri.to_file_path()
-        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|path| crate::position::read_document_text(&path))
         .is_some_and(|disk_text| disk_text == text)
 }
 
@@ -133,5 +137,24 @@ pub fn uri_is_stale(
             !live_state.known_clean && !document_matches_disk(uri, &live_state.text)
         }
         (None, None) => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn byte_order_mark_on_disk_matches_buffer_without_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("module.ts");
+        std::fs::write(&path, "\u{feff}export const helper = 1;\n").unwrap();
+        let uri = Uri::from_file_path(&path).unwrap();
+        assert!(document_matches_disk(&uri, "export const helper = 1;\n"));
+        assert!(document_matches_disk(
+            &uri,
+            "\u{feff}export const helper = 1;\n"
+        ));
+        assert!(!document_matches_disk(&uri, "export const other = 1;\n"));
     }
 }

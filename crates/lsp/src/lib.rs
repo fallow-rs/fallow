@@ -817,7 +817,7 @@ impl FallowLspServer {
     async fn code_action_file_content(&self, uri: &Uri, file_path: &Path) -> String {
         let documents = self.documents.read().await;
         documents.get(uri).map_or_else(
-            || std::fs::read_to_string(file_path).unwrap_or_default(),
+            || crate::position::read_document_text(file_path).unwrap_or_default(),
             |state| state.text.clone(),
         )
     }
@@ -1557,3 +1557,7 @@ fn find_project_roots(workspace_root: &std::path::Path) -> Vec<std::path::PathBu
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests_byte_order_mark.rs"]
+mod byte_order_mark_tests;

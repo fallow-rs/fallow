@@ -8,6 +8,31 @@ use std::path::{Path, PathBuf};
 use ls_types::{Position, Range};
 use rustc_hash::FxHashMap;
 
+/// The UTF-8 byte order mark. It is a file encoding marker, not text.
+const BYTE_ORDER_MARK: char = '\u{feff}';
+
+/// Read a file as an editor shows it: without the leading byte order mark.
+///
+/// The editor buffer does not hold the mark, and the analysis counts byte
+/// columns after it. Only the first U+FEFF is the mark. A second U+FEFF is
+/// text that the editor shows, so this function keeps it.
+pub fn read_document_text(path: &Path) -> Option<String> {
+    let mut text = std::fs::read_to_string(path).ok()?;
+    let mark_len = byte_order_mark_len(&text);
+    text.drain(..mark_len);
+    Some(text)
+}
+
+/// The byte length of the leading byte order mark of `text`: 3 bytes when
+/// `text` starts with U+FEFF, else 0.
+pub fn byte_order_mark_len(text: &str) -> usize {
+    if text.starts_with(BYTE_ORDER_MARK) {
+        BYTE_ORDER_MARK.len_utf8()
+    } else {
+        0
+    }
+}
+
 /// Range covering a byte column through to the end of its line, converted to
 /// UTF-16 at the protocol boundary. `u32::MAX` is the LSP idiom for end-of-line.
 pub fn line_range_from_byte_col(
@@ -70,7 +95,7 @@ impl PositionMapper {
 
     fn line_index(&mut self, path: &Path) -> Option<&LineIndex> {
         if !self.files.contains_key(path) {
-            let index = std::fs::read_to_string(path).ok().map(LineIndex::new);
+            let index = read_document_text(path).map(LineIndex::new);
             self.files.insert(path.to_path_buf(), index);
         }
         self.files.get(path).and_then(Option::as_ref)
@@ -193,6 +218,29 @@ mod tests {
     #[test]
     fn missing_line_falls_back_to_byte_col() {
         assert_eq!(byte_col_to_utf16("only one line", 4, 42), 42);
+    }
+
+    #[test]
+    fn byte_order_mark_on_disk_is_not_a_column() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("module.ts");
+        std::fs::write(
+            &path,
+            "\u{feff}export const helper = 1;\nexport const é = 2;\n",
+        )
+        .unwrap();
+        let mut mapper = PositionMapper::default();
+        assert_eq!(mapper.utf16_col(&path, 0, 13), 13);
+        assert_eq!(mapper.utf16_col(&path, 1, 15), 14);
+    }
+
+    #[test]
+    fn second_leading_feff_is_content() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("module.ts");
+        std::fs::write(&path, "\u{feff}\u{feff}export const a0 = 1;").unwrap();
+        let mut mapper = PositionMapper::default();
+        assert_eq!(mapper.utf16_col(&path, 0, 16), 14);
     }
 
     #[test]

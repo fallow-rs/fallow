@@ -300,12 +300,11 @@ fn nbsp_indentation() {
     check(&case).expect("the edit removes only `export `");
 }
 
-/// Known bug on main: the analysis strips a UTF-8 byte order mark before it
-/// computes byte columns, but the position mapper reads the file with the
-/// mark. For `\u{feff}export const helper = 1;` on disk, the diagnostic
-/// starts at UTF-16 column 11 instead of 13.
+/// The analysis computes byte columns after a UTF-8 byte order mark, and
+/// the position mapper reads the file without the mark. For
+/// `\u{feff}export const helper = 1;` on disk, the diagnostic starts at
+/// UTF-16 column 13.
 #[test]
-#[ignore = "known bug: LSP columns on line 1 count the byte order mark"]
 fn byte_order_mark_on_disk() {
     let case = Case {
         lines: vec!["export const helper = 1;".to_string()],
