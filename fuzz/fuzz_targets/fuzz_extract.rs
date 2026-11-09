@@ -87,12 +87,6 @@ fuzz_target!(|data: &[u8]| {
     let path = Path::new(PATHS[usize::from(selector) % PATHS.len()]);
     worker_stack::on_worker_stack(|| {
         let info = fallow_core::extract::parse_from_content(FileId(0), path, source);
-        // Known bug: extraction strips two leading U+FEFF, so the spans
-        // of such a file are 3 bytes off. The ignored test
-        // `two_leading_byte_order_marks` in
-        // crates/extract/src/unicode_span_oracle.rs holds the case.
-        if !source.starts_with("\u{feff}\u{feff}") {
-            assert_char_boundaries(source, &info);
-        }
+        assert_char_boundaries(source, &info);
     });
 });

@@ -162,6 +162,9 @@ const PARALLEL_PARSE_FILE_THRESHOLD: usize = 32;
 /// analyses) sees a consistent post-BOM view. Mirrors the
 /// `fallow_config` layer (`config_writer.rs::BOM`) so config-shaped sources
 /// and source-code-shaped sources are processed symmetrically. See issue #475.
+///
+/// Call it once for each source. Only the first U+FEFF of a file is the
+/// mark, so a second call removes a U+FEFF that is source text.
 #[must_use]
 fn strip_bom(source: &str) -> &str {
     source.strip_prefix(BOM_CHAR).unwrap_or(source)
@@ -424,7 +427,7 @@ fn parse_single_file_cached(
     let parse_start = std::time::Instant::now();
     // Drop a count that a scan outside a parse left on this thread.
     css_masked_bytes::take();
-    let module = parse_source_to_module_with_flags(
+    let module = module_parse::parse_source_without_bom(
         file.id,
         &file.path,
         source,
@@ -445,12 +448,13 @@ pub fn parse_single_file(file: &DiscoveredFile) -> Option<ModuleInfo> {
     let raw = std::fs::read_to_string(&file.path).ok()?;
     let source = strip_bom(&raw);
     let content_hash = xxhash_rust::xxh3::xxh3_64(source.as_bytes());
-    Some(parse_source_to_module(
+    Some(module_parse::parse_source_without_bom(
         file.id,
         &file.path,
         source,
         content_hash,
         false,
+        &FlagPatterns::default(),
     ))
 }
 
@@ -459,7 +463,14 @@ pub fn parse_single_file(file: &DiscoveredFile) -> Option<ModuleInfo> {
 pub fn parse_from_content(file_id: FileId, path: &Path, content: &str) -> ModuleInfo {
     let content = strip_bom(content);
     let content_hash = xxhash_rust::xxh3::xxh3_64(content.as_bytes());
-    parse_source_to_module(file_id, path, content, content_hash, true)
+    module_parse::parse_source_without_bom(
+        file_id,
+        path,
+        content,
+        content_hash,
+        true,
+        &FlagPatterns::default(),
+    )
 }
 
 #[cfg(all(test, not(miri)))]
