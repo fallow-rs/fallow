@@ -135,11 +135,13 @@ pub struct MutationRunOptions {
     pub max_mutants: Option<usize>,
     /// The maximum number of mutants on one source line, chosen at plan time
     /// in a fixed operator order. The others become `pending` with the reason
-    /// `sampled-out`, and the run never executes them. `None` keeps each
-    /// mutant.
+    /// `sampled-out`, and the run never executes them. `None` uses the
+    /// `mutation.mutantsPerLine` config key, else keeps each mutant. A run of
+    /// `mutant_ids` never samples.
     pub mutants_per_line: Option<usize>,
     /// Widen each changed line of the changed-code scope to the whole
-    /// function that holds it. The other scopes ignore it.
+    /// function that holds it. The other scopes ignore it. `false` still
+    /// uses the `mutation.functionScope` config key.
     pub function_scope: bool,
     /// Run in a dirty git worktree, or outside a git worktree. The run still
     /// compares the worktree after the run.

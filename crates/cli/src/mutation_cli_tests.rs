@@ -310,8 +310,11 @@ fn flags_win_over_config_and_config_fills_the_gaps() {
         "the API plan applies the config operators, so CLI and MCP share one rule"
     );
     assert_eq!(from_config.concurrency, Some(3));
-    assert_eq!(from_config.mutants_per_line, Some(2));
-    assert!(from_config.function_scope);
+    assert_eq!(
+        from_config.mutants_per_line, None,
+        "the API applies these config keys, so CLI and MCP share one rule"
+    );
+    assert!(!from_config.function_scope);
     assert_eq!(from_config.scope, MutationRunScope::Changed { base: None });
     assert!(!from_config.allow_side_effects);
 
@@ -339,6 +342,47 @@ fn flags_win_over_config_and_config_fills_the_gaps() {
     assert_eq!(from_flags.time_budget, Some(Duration::from_secs(120)));
     assert_eq!(from_flags.runner_timeout, Some(Duration::from_secs(300)));
     assert_eq!(min_score(&flagged).unwrap(), Some(90.0));
+}
+
+#[test]
+fn a_recheck_never_samples_whatever_the_config_and_the_flags_say() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("src")).unwrap();
+    std::fs::write(
+        dir.path().join("src/add.js"),
+        "export const add = (a, b) => a + b;\n",
+    )
+    .unwrap();
+    let digest = crate::mutation_inspect::sha256_hex(b"export const add = (a, b) => a + b;\n");
+    let report = serde_json::json!({
+        "kind": "mutation",
+        "mutants": [{
+            "mutant_id": "a", "file": "src/add.js", "line": 1, "column": 1,
+            "span": [0, 1], "operator": "x", "status": "survived",
+        }],
+        "files": [{ "path": "src/add.js", "source_sha256": digest }],
+    });
+    let report_path = dir.path().join("report.json");
+    std::fs::write(&report_path, serde_json::to_vec(&report).unwrap()).unwrap();
+    let selection = recheck::select(&report_path, dir.path(), &[]).unwrap();
+
+    let config = MutationConfig {
+        mutants_per_line: Some(2),
+        function_scope: Some(true),
+        ..MutationConfig::default()
+    };
+    let args = MutationArgs {
+        mutants_per_line: Some(3),
+        function_scope: true,
+        ..MutationArgs::default()
+    };
+    let rechecking = input(dir.path(), args, config);
+    let mut options = run_options(&rechecking).unwrap();
+    apply_recheck(&rechecking, &mut options, Some(&selection)).unwrap();
+
+    assert_eq!(options.mutants_per_line, None);
+    assert!(!options.function_scope);
+    assert_eq!(options.mutant_ids, ["a"]);
 }
 
 #[test]

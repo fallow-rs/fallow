@@ -292,6 +292,102 @@ fn the_plan_uses_the_config_operators_unless_the_caller_names_operators() {
     assert_eq!(operators(&explicit), vec!["arithmetic-operator"]);
 }
 
+/// A project whose test reaches `src/range.ts`, so the plan marks the
+/// mutants of its one crowded line as planned.
+fn sampling_project() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("dir");
+    let write = |path: &str, text: &str| {
+        let target = dir.path().join(path);
+        fs::create_dir_all(target.parent().expect("parent")).expect("dir");
+        fs::write(target, text).expect("write");
+    };
+    write(
+        "package.json",
+        r#"{"name":"p","type":"module","main":"src/range.ts","devDependencies":{"vitest":"^5.0.0"}}"#,
+    );
+    write(
+        "src/range.ts",
+        "export function inRange(\n  n: number,\n): boolean {\n  return n > 0 && n + 1 < 10;\n}\n",
+    );
+    write(
+        "src/range.test.ts",
+        "import { expect, test } from \"vitest\";\nimport { inRange } from \"./range\";\n\ntest(\"in range\", () => {\n  expect(inRange(3)).toBe(true);\n});\n",
+    );
+    dir
+}
+
+fn write_config(project: &tempfile::TempDir, json: &str) {
+    fs::write(project.path().join(".fallowrc.json"), json).expect("config");
+}
+
+#[test]
+fn the_plan_reads_mutants_per_line_from_the_config_and_an_explicit_option_wins() {
+    let project = sampling_project();
+    let from_none = plan_mutation(&options(project.path(), MutationRunScope::All)).expect("plan");
+    assert_eq!(from_none.counts.sampled_out, 0);
+    write_config(&project, r#"{"mutation":{"mutantsPerLine":1}}"#);
+
+    let from_config = plan_mutation(&options(project.path(), MutationRunScope::All)).expect("plan");
+    assert!(
+        from_config.counts.sampled_out > 0,
+        "{:#?}",
+        from_config.counts
+    );
+    assert_eq!(from_config.counts.pending, from_config.counts.sampled_out);
+
+    let mut explicit = options(project.path(), MutationRunScope::All);
+    explicit.mutants_per_line = Some(1000);
+    let plan = plan_mutation(&explicit).expect("plan");
+    assert_eq!(
+        plan.counts.sampled_out, 0,
+        "the option wins over the config"
+    );
+    assert_eq!(plan.counts.planned, from_none.counts.planned);
+}
+
+#[test]
+fn a_run_of_selected_mutant_ids_never_samples() {
+    let project = sampling_project();
+    let all = plan_mutation(&options(project.path(), MutationRunScope::All)).expect("plan");
+    let ids: Vec<String> = all
+        .mutants
+        .iter()
+        .filter(|mutant| mutant.disposition == fallow_output::MutationPlanDisposition::Planned)
+        .map(|mutant| mutant.location.mutant_id.clone())
+        .collect();
+    assert!(ids.len() > 1, "{ids:?}");
+    write_config(&project, r#"{"mutation":{"mutantsPerLine":1}}"#);
+
+    let mut selected = options(project.path(), MutationRunScope::All);
+    selected.mutant_ids.clone_from(&ids);
+    selected.mutants_per_line = Some(1);
+    let plan = plan_mutation(&selected).expect("plan");
+    assert_eq!(plan.counts.sampled_out, 0, "a recheck never samples");
+    assert_eq!(plan.counts.planned, ids.len());
+}
+
+#[test]
+fn the_plan_reads_function_scope_from_the_config() {
+    let project = sampling_project();
+    let diff_path = project.path().join("param.diff");
+    fs::write(
+        &diff_path,
+        "diff --git a/src/range.ts b/src/range.ts\n--- a/src/range.ts\n+++ b/src/range.ts\n@@ -1,0 +2,1 @@\n+  n: number,\n",
+    )
+    .expect("diff");
+    let changed = || {
+        let mut changed = options(project.path(), MutationRunScope::Changed { base: None });
+        changed.analysis.diff_file = Some(diff_path.clone());
+        changed
+    };
+    let lines = plan_mutation(&changed()).expect("plan");
+    assert_eq!(lines.counts.total, 0, "a parameter line holds no mutant");
+
+    write_config(&project, r#"{"mutation":{"functionScope":true}}"#);
+    let widened = plan_mutation(&changed()).expect("plan");
+    assert!(widened.counts.total > 0, "{:#?}", widened.counts);
+}
+
 #[test]
 fn an_output_path_of_the_caller_does_not_make_the_worktree_dirty() {
     let project = small_project();

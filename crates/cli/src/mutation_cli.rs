@@ -378,11 +378,8 @@ pub fn run_options(input: &MutationCliInput<'_>) -> Result<MutationRunOptions, P
         operators: parse_operators(&input.args.operators)?,
         allow_side_effects: input.args.allow_side_effects,
         max_mutants: input.args.max_mutants,
-        mutants_per_line: input
-            .args
-            .mutants_per_line
-            .or(input.config.mutants_per_line),
-        function_scope: input.args.function_scope || input.config.function_scope == Some(true),
+        mutants_per_line: input.args.mutants_per_line,
+        function_scope: input.args.function_scope,
         allow_dirty: input.args.allow_dirty,
         runtime: input.args.runtime.clone(),
         concurrency: input.args.concurrency.or(input.config.concurrency),
@@ -792,6 +789,8 @@ fn apply_recheck(
     options.scope = MutationRunScope::Paths(selection.files());
     options.mutant_ids = selection.mutant_ids();
     options.test_changes_only = true;
+    options.mutants_per_line = None;
+    options.function_scope = false;
     Ok(None)
 }
 

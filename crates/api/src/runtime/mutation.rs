@@ -411,13 +411,25 @@ fn plan_for(
         None => config_operators(&session)?,
     };
     let operator_names = operators.as_deref().map(operator_names);
+    let mutation_config = &session.config().mutation;
+    // A run of selected mutant ids (a recheck) must run each of them, so it
+    // never samples.
+    let mutants_per_line = options
+        .mutant_ids
+        .is_empty()
+        .then(|| {
+            options
+                .mutants_per_line
+                .or(mutation_config.mutants_per_line)
+        })
+        .flatten();
     let request = MutationPlanRequest {
         scope,
         operators,
         allow_side_effects: options.allow_side_effects,
         max_mutants: options.max_mutants,
-        mutants_per_line: options.mutants_per_line,
-        function_scope: options.function_scope,
+        mutants_per_line,
+        function_scope: options.function_scope || mutation_config.function_scope == Some(true),
         skip_component_files: false,
         mutant_ids: (!options.mutant_ids.is_empty())
             .then(|| options.mutant_ids.iter().cloned().collect()),
