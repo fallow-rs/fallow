@@ -21,7 +21,10 @@ use crate::plugins::config_parser::lexical_normalize;
 /// A target at the package root with a JavaScript output suffix, such as
 /// `./*.js`, matches every file of that type in the package: configs,
 /// scripts and tests too. When its source pattern in `src` matches files,
-/// only those files are entries.
+/// those files are entries, and of the direct matches only the files directly
+/// in the package root stay entries. A package that publishes its build output
+/// as the package root has no committed JavaScript files there, but a
+/// hand-written package exports its root files and keeps helpers in `src`.
 pub(super) fn expand_wildcard_entries(
     base: &Path,
     pattern: &str,
@@ -31,18 +34,21 @@ pub(super) fn expand_wildcard_entries(
     if is_root_output_target(pattern) {
         let before = entries.len();
         for source_pattern in wildcard_source_patterns(pattern, false) {
-            push_wildcard_matches(base, &source_pattern, files, entries);
+            push_wildcard_matches(base, &source_pattern, files, entries, Capture::Any);
         }
-        if entries.len() == before {
-            push_wildcard_matches(base, pattern, files, entries);
-        }
+        let capture = if entries.len() == before {
+            Capture::Any
+        } else {
+            Capture::SingleSegment
+        };
+        push_wildcard_matches(base, pattern, files, entries, capture);
         return;
     }
     let before = entries.len();
-    push_wildcard_matches(base, pattern, files, entries);
+    push_wildcard_matches(base, pattern, files, entries, Capture::Any);
     let has_direct_match = entries.len() > before;
     for source_pattern in wildcard_source_patterns(pattern, has_direct_match) {
-        push_wildcard_matches(base, &source_pattern, files, entries);
+        push_wildcard_matches(base, &source_pattern, files, entries, Capture::Any);
     }
 }
 
@@ -77,9 +83,9 @@ const WILDCARD_SOURCE_EXTENSIONS: &[&str] = &["ts", "tsx", "mts", "cts", "js", "
 /// - A `lib` directory becomes `src` only when the target matches no file.
 /// - A target at the package root, such as `./*.js`, maps into `src`. A
 ///   package that publishes its build directory as the package root has
-///   this shape. [`expand_wildcard_entries`] uses the direct matches of a
-///   root target with a JavaScript output suffix only when `src` has no
-///   match. For other root targets, the mapping applies only when the
+///   this shape. When `src` has a match for a root target with a
+///   JavaScript output suffix, [`expand_wildcard_entries`] keeps only the
+///   direct matches in the package root. For other root targets, the mapping applies only when the
 ///   target matches no file.
 ///
 /// A JavaScript output suffix (`.js`, `.d.ts`, ...) becomes each source
@@ -135,12 +141,22 @@ fn replace_segment_with_src<'a>(segments: &[&'a str], position: usize) -> Vec<&'
     source
 }
 
+/// The substrings that a `*` of a wildcard target can stand for.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Capture {
+    /// Any non-empty substring, also with `/`, as Node resolves it.
+    Any,
+    /// A non-empty substring without `/`.
+    SingleSegment,
+}
+
 /// Push the discovered files that match one wildcard target.
 fn push_wildcard_matches(
     base: &Path,
     pattern: &str,
     files: &[DiscoveredFile],
     entries: &mut Vec<EntryPoint>,
+    capture: Capture,
 ) {
     let target = lexical_normalize(&base.join(pattern));
     let literal_dir: PathBuf = target
@@ -156,7 +172,10 @@ fn push_wildcard_matches(
             continue;
         }
         let path = file.path.to_string_lossy().replace('\\', "/");
-        if matches_subpath_pattern(&path, &parts)
+        let Some(captured) = subpath_capture(&path, &parts) else {
+            continue;
+        };
+        if (capture == Capture::Any || !captured.contains('/'))
             && !is_in_nested_package(&file.path, &package_root, &mut nested_packages)
         {
             entries.push(EntryPoint {
@@ -201,27 +220,24 @@ fn is_named_package(dir: &Path) -> bool {
     manifest.is_file() && PackageJson::load(&manifest).is_ok_and(|pkg| pkg.name.is_some())
 }
 
-/// Whether `path` matches a target split at its `*` characters, with one
-/// non-empty substring in place of every `*`.
-fn matches_subpath_pattern(path: &str, parts: &[&str]) -> bool {
+/// The substring that stands for every `*` when `path` matches a target split
+/// at its `*` characters. Every `*` must stand for the same non-empty
+/// substring.
+fn subpath_capture<'a>(path: &'a str, parts: &[&str]) -> Option<&'a str> {
     let [prefix, .., suffix] = parts else {
-        return false;
+        return None;
     };
     if !path.starts_with(prefix) || !path.ends_with(suffix) {
-        return false;
+        return None;
     }
     let literal_len: usize = parts.iter().map(|part| part.len()).sum();
     let stars = parts.len() - 1;
-    let Some(captured_len) = path.len().checked_sub(literal_len) else {
-        return false;
-    };
+    let captured_len = path.len().checked_sub(literal_len)?;
     if captured_len == 0 || captured_len % stars != 0 {
-        return false;
+        return None;
     }
-    let Some(capture) = path.get(prefix.len()..prefix.len() + captured_len / stars) else {
-        return false;
-    };
-    stars == 1 || parts.join(capture) == path
+    let capture = path.get(prefix.len()..prefix.len() + captured_len / stars)?;
+    (stars == 1 || parts.join(capture) == path).then_some(capture)
 }
 
 #[cfg(test)]
@@ -439,6 +455,26 @@ mod tests {
         expand_wildcard_entries(dir.path(), "./*.js", &files, &mut entries);
 
         assert_eq!(entry_names(&entries, dir.path()), vec!["src/middleware.ts"],);
+    }
+
+    #[test]
+    fn root_output_target_keeps_root_files_of_hand_written_package() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::create_dir_all(dir.path().join("scripts")).unwrap();
+        std::fs::write(dir.path().join("foo.js"), "import './src/impl.js';").unwrap();
+        std::fs::write(dir.path().join("bar.js"), "export {};").unwrap();
+        std::fs::write(dir.path().join("src/impl.js"), "export {};").unwrap();
+        std::fs::write(dir.path().join("scripts/orphan.js"), "export {};").unwrap();
+
+        let files = discovered_files_under(dir.path());
+        let mut entries = Vec::new();
+        expand_wildcard_entries(dir.path(), "./*.js", &files, &mut entries);
+
+        assert_eq!(
+            entry_names(&entries, dir.path()),
+            vec!["bar.js", "foo.js", "src/impl.js"],
+        );
     }
 
     #[test]
