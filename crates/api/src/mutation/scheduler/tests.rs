@@ -2,6 +2,7 @@ use std::sync::atomic::AtomicUsize;
 use std::sync::{Arc, Mutex};
 
 use super::super::protocol::{DryTest, Reloaded, RemoteError, RunTest, UnhandledError};
+use super::clock::{Clock, SystemClock};
 use super::control::split_control_run_failure;
 use super::*;
 
@@ -292,8 +293,44 @@ fn config(concurrency: usize) -> ScheduleConfig {
         targets: Vec::new(),
         runner_timeout: Duration::from_secs(5),
         deadline: None,
+        clock: Arc::new(SystemClock),
         cache: None,
         journal: None,
+    }
+}
+
+/// A clock that moves only when a fake run moves it. A time-budget test on
+/// this clock gives the same result on a fast and on a loaded host.
+#[derive(Debug)]
+struct FakeClock {
+    now: Mutex<Instant>,
+}
+
+impl FakeClock {
+    fn new() -> Arc<Self> {
+        Arc::new(Self {
+            now: Mutex::new(Instant::now()),
+        })
+    }
+
+    /// Moves the clock forward, as a run of length `by` does.
+    fn advance(&self, by: Duration) {
+        *self.now.lock().unwrap() += by;
+    }
+}
+
+impl Clock for FakeClock {
+    fn now(&self) -> Instant {
+        *self.now.lock().unwrap()
+    }
+}
+
+/// A one-worker config with a time budget of `budget` on `clock`.
+fn budgeted_config(clock: &Arc<FakeClock>, budget: Duration) -> ScheduleConfig {
+    ScheduleConfig {
+        deadline: Some(clock.now() + budget),
+        clock: Arc::clone(clock) as Arc<dyn Clock>,
+        ..config(1)
     }
 }
 
@@ -1469,15 +1506,16 @@ fn covering_tests_sort_by_id_while_the_run_order_follows_the_duration() {
 
 #[test]
 fn an_ended_time_budget_skips_the_survivor_retry_and_keeps_survived() {
+    let clock = FakeClock::new();
+    let run_clock = Arc::clone(&clock);
     let spawner = FakeSpawner::new(script(
         |_| standard_dry(),
-        |_, run| {
-            std::thread::sleep(Duration::from_millis(300));
+        move |_, run| {
+            run_clock.advance(Duration::from_millis(300));
             Ok(run_result(run, RunStatus::Survived, None))
         },
     ));
-    let mut config = config(1);
-    config.deadline = Some(Instant::now() + Duration::from_millis(150));
+    let config = budgeted_config(&clock, Duration::from_millis(150));
     let outcome = run_schedule(&spawner, &plan(&["m1"]), &config).expect("run");
     assert_eq!(status(&outcome, "m1"), MutantStatus::Survived);
     assert_eq!(outcome.unretried, vec!["m1".to_owned()]);
@@ -1490,15 +1528,16 @@ fn an_ended_time_budget_skips_the_survivor_retry_and_keeps_survived() {
 
 #[test]
 fn an_ended_time_budget_skips_the_timeout_retry_and_keeps_timeout() {
+    let clock = FakeClock::new();
+    let run_clock = Arc::clone(&clock);
     let spawner = FakeSpawner::new(script(
         |_| standard_dry(),
-        |_, run| {
-            std::thread::sleep(Duration::from_millis(300));
+        move |_, run| {
+            run_clock.advance(Duration::from_millis(300));
             Ok(run_result(run, RunStatus::Timeout, None))
         },
     ));
-    let mut config = config(1);
-    config.deadline = Some(Instant::now() + Duration::from_millis(150));
+    let config = budgeted_config(&clock, Duration::from_millis(150));
     let outcome = run_schedule(&spawner, &plan(&["m1"]), &config).expect("run");
     assert_eq!(status(&outcome, "m1"), MutantStatus::Timeout);
     assert!(!outcome.results["m1"].retried, "an unconfirmed timeout");
@@ -1509,20 +1548,31 @@ fn an_ended_time_budget_skips_the_timeout_retry_and_keeps_timeout() {
 #[test]
 fn a_time_budget_keeps_time_to_confirm_the_survivors_of_the_first_pass() {
     const IDS: [&str; 8] = ["m1", "m2", "m3", "m4", "m5", "m6", "m7", "m8"];
+    let clock = FakeClock::new();
+    let run_clock = Arc::clone(&clock);
+    let budget = Duration::from_millis(550);
     let spawner = FakeSpawner::new(script(
-        |_| DryRunResult {
-            hits: BTreeMap::from([(tid("t1"), IDS.iter().map(|id| (*id).to_owned()).collect())]),
-            ..standard_dry()
+        move |_| {
+            // A stalled host: the dry run takes more wall time than the full
+            // budget. The scheduler reads only its clock, so the stall
+            // changes nothing.
+            std::thread::sleep(budget + Duration::from_millis(50));
+            DryRunResult {
+                hits: BTreeMap::from([(
+                    tid("t1"),
+                    IDS.iter().map(|id| (*id).to_owned()).collect(),
+                )]),
+                ..standard_dry()
+            }
         },
-        |_, run| {
-            std::thread::sleep(Duration::from_millis(100));
+        move |_, run| {
+            run_clock.advance(Duration::from_millis(100));
             Ok(run_result(run, RunStatus::Survived, None))
         },
     ));
-    let mut config = config(1);
-    // Without a reserve, the first pass fills this budget with about six
-    // runs, and no survivor gets its confirmation.
-    config.deadline = Some(Instant::now() + Duration::from_millis(550));
+    // Without a reserve, the first pass fills this budget with six runs,
+    // and no survivor gets its confirmation.
+    let config = budgeted_config(&clock, budget);
     let outcome = run_schedule(&spawner, &plan(&IDS), &config).expect("run");
     assert!(
         outcome.unretried.is_empty(),
@@ -2567,17 +2617,18 @@ fn a_zero_test_kill_whose_tests_fail_without_the_mutant_is_a_runtime_error() {
 
 #[test]
 fn a_zero_test_kill_after_the_time_budget_stays_pending_without_a_control_run() {
+    let clock = FakeClock::new();
+    let run_clock = Arc::clone(&clock);
     let spawner = FakeSpawner::new(script(
         |_| shared_set_dry(),
-        |_, run| {
+        move |_, run| {
             if run.mutant_id.as_deref() == Some("m2") {
-                std::thread::sleep(Duration::from_millis(400));
+                run_clock.advance(Duration::from_millis(400));
             }
             Ok(m1_killed_others_fail_at_load(run))
         },
     ));
-    let mut config = config(1);
-    config.deadline = Some(Instant::now() + Duration::from_millis(250));
+    let config = budgeted_config(&clock, Duration::from_millis(250));
     let outcome = run_schedule(&spawner, &plan(&["m1", "m2"]), &config).expect("run");
     assert_eq!(status(&outcome, "m1"), MutantStatus::Killed);
     assert_eq!(status(&outcome, "m2"), MutantStatus::Pending);

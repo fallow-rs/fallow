@@ -24,6 +24,7 @@ use reserve::PhaseDeadline;
 use retry_set::{confirmation_tests, fastest_first, retry_extra_ms, whole_files};
 
 mod classification;
+pub mod clock;
 pub(super) mod control;
 mod dry_facts;
 mod issues;
@@ -108,6 +109,8 @@ pub struct ScheduleConfig {
     pub runner_timeout: Duration,
     /// The end of the time budget.
     pub deadline: Option<Instant>,
+    /// The clock that the time budget reads.
+    pub clock: Arc<dyn clock::Clock>,
     /// The result cache. `None` runs each covered mutant.
     pub cache: Option<Arc<dyn ResultLookup>>,
     /// The outcome journal. It receives each final result when it is final,
@@ -858,7 +861,7 @@ impl<'a> Worker<'a> {
             Some(ControlVerdict::TimedOut(reason)) => return Ok(settled(reason.clone())),
             None => {}
         }
-        if reserve::expired(self.config.deadline) {
+        if reserve::expired(self.config) {
             return Ok(ControlCheck::NoTime);
         }
         let (outcome, ran) = self.control_run(tests, job, caps)?;
@@ -1628,7 +1631,7 @@ fn retry_suspects(
         runner,
         &retry_files,
         suspects,
-        runner.config.deadline.map(PhaseDeadline::retries),
+        PhaseDeadline::retries(runner.config),
         (None, &finished),
         |done, total| MutationProgress::Retries { done, total },
     )?;
@@ -1736,7 +1739,7 @@ fn self_check(
     link: Box<dyn CompanionLink>,
     known: &FxHashSet<String>,
 ) -> Result<(Box<dyn CompanionLink>, Vec<FailedTest>), ScheduleError> {
-    let expired = reserve::expired(runner.config.deadline);
+    let expired = reserve::expired(runner.config);
     let Some(job) = jobs.first().filter(|_| !expired) else {
         return Ok((link, Vec::new()));
     };
@@ -1884,7 +1887,7 @@ pub fn run_schedule_with_progress(
         return Ok(outcome);
     }
 
-    let started = Instant::now();
+    let started = config.clock.now();
     let Primary {
         mut link,
         ready,
@@ -1903,7 +1906,7 @@ pub fn run_schedule_with_progress(
         progress,
     };
     outcome.ready = Some(ready.clone());
-    outcome.timings.setup = started.elapsed();
+    outcome.timings.setup = config.clock.now().saturating_duration_since(started);
     if dry_files.is_empty() {
         link.shutdown();
         no_coverage_for_all(&mut outcome);
@@ -1913,9 +1916,9 @@ pub fn run_schedule_with_progress(
     progress(MutationProgress::Baseline {
         test_files: dry_files.len(),
     });
-    let dry_started = Instant::now();
+    let dry_started = config.clock.now();
     let dry = first_dry_run(&mut link, &dry_files, config.runner_timeout)?;
-    outcome.timings.dry_run = dry_started.elapsed();
+    outcome.timings.dry_run = config.clock.now().saturating_duration_since(dry_started);
     runner.first_dry_run = outcome.timings.dry_run;
     let mut facts = match read_dry_run(plan, runner.caps, &dry) {
         Ok(facts) => facts,
@@ -1937,7 +1940,7 @@ pub fn run_schedule_with_progress(
         journal: config.journal.as_deref(),
         budgeted: config.deadline.is_some(),
     };
-    let mutants_started = Instant::now();
+    let mutants_started = config.clock.now();
     let (jobs, (link, known)) =
         checked_jobs(runner, plan, &mut facts, &context, link, &mut outcome)?;
     let finished = |job: &Job, attempt: &Attempt| journal_first_run(config, job, attempt);
@@ -1950,13 +1953,16 @@ pub fn run_schedule_with_progress(
         |done, total| MutationProgress::Mutants { done, total },
     )?;
     outcome.workers = workers;
-    outcome.timings.mutants = mutants_started.elapsed();
+    outcome.timings.mutants = config
+        .clock
+        .now()
+        .saturating_duration_since(mutants_started);
     note_control_failures(&mut outcome, &facts, &memo);
     let (suspects, first_runs) = record_first_runs(&mut outcome, &facts, &memo, attempts);
     if !suspects.is_empty() {
-        let retry_started = Instant::now();
+        let retry_started = config.clock.now();
         retry_suspects(runner, &facts, suspects, first_runs, &mut outcome)?;
-        outcome.timings.retry = retry_started.elapsed();
+        outcome.timings.retry = config.clock.now().saturating_duration_since(retry_started);
     }
     outcome
         .issues

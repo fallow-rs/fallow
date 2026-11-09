@@ -38,6 +38,7 @@ use crate::mutation::report::{
 use crate::mutation::result_cache::{KeyFiles, NOT_KEYED, ResultCache};
 use crate::mutation::run_dir::{RunFile, write_run_dir};
 use crate::mutation::runner_select::{Runner, select_runner};
+use crate::mutation::scheduler::clock::SystemClock;
 use crate::mutation::scheduler::{
     OutcomeJournal, ResultLookup, ScheduleConfig, ScheduleError, ScheduleIssue, ScheduleOutcome,
     SchedulePlan, ScheduledMutant, run_schedule_with_progress,
@@ -1223,6 +1224,7 @@ fn execute(
         concurrency: options.concurrency.unwrap_or_else(default_concurrency),
         runner_timeout: options.runner_timeout.unwrap_or(DEFAULT_RUNNER_TIMEOUT),
         deadline,
+        clock: Arc::new(SystemClock),
         cache: result_cache
             .clone()
             .map(|cache| cache as Arc<dyn ResultLookup>),
