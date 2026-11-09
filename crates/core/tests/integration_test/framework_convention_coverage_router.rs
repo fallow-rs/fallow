@@ -221,6 +221,34 @@ fn react_router_route_config_discovers_modules_outside_routes_dir() {
 }
 
 #[test]
+fn react_router_route_config_follows_imported_route_arrays() {
+    let root = fixture_path("react-router-split-route-config");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_files = collect_unused_files(&root, &results);
+    for expected_used_file in [
+        "app/direct.tsx",
+        "app/marketing/home.tsx",
+        "app/marketing/about.tsx",
+        "app/account/layout.tsx",
+        "app/account/login.tsx",
+        "app/admin/page.tsx",
+        "app/sections/page.tsx",
+        "app/(app)/items/[id]/page.tsx",
+    ] {
+        assert!(
+            !unused_files.iter().any(|path| path == expected_used_file),
+            "{expected_used_file} should be treated as framework-used, unused files: {unused_files:?}"
+        );
+    }
+    assert!(
+        unused_files.iter().any(|path| path == "app/not-routed.tsx"),
+        "plain file outside the route config should stay unused, unused files: {unused_files:?}"
+    );
+}
+
+#[test]
 fn react_router_custom_app_directory_keeps_src_routes_alive() {
     let root = fixture_path("react-router-src-app");
     let config = create_config(root.clone());
