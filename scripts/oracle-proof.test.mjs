@@ -235,6 +235,23 @@ test("a scoped fix runs its own test command and env, and the report names the s
   });
 });
 
+test("a fix with its own build command uses it instead of the oracle build", () => {
+  withRepo(({ repo, fix, logs }) => {
+    const ownBuild = {
+      commit: fix,
+      scope: "the old test target",
+      build: ["sh", ["-c", "exit 0"]],
+    };
+    const proof = proveFix(oracle({ build: ["sh", ["-c", "exit 101"]] }), ownBuild, {
+      source: repo,
+      logs,
+    });
+
+    assert.equal(proof.toolError, false);
+    assert.equal(proof.holds, true);
+  });
+});
+
 test("a run that a signal stops is a tool error, not a failing oracle", () => {
   withRepo(({ repo, fix, logs }) => {
     const killed = oracle({

@@ -257,6 +257,36 @@ test("the oracle seeds workflow runs the Unicode span tests with a wide case ran
   );
 });
 
+test("the oracle seeds workflow runs the platform oracle seeds outside pull request CI", () => {
+  const workflow = readWorkflow(".github/workflows/oracle-seeds.yml");
+  const oracle = readFileSync("crates/cli/tests/integration/platform/oracle.rs", "utf8");
+  const job = indentedBlock(workflow, "platform-seeds", 2);
+
+  assert.match(job, /permissions:\n      contents: read/);
+  assert.match(job, /persist-credentials: false/);
+  assert.match(oracle, /#\[ignore = [^\]]*\]\nfn seed_sweep_keeps_findings_identical\(\)/);
+  assert.match(oracle, /"FALLOW_PLATFORM_SEEDS"/);
+  assert.match(oracle, /"FALLOW_PLATFORM_SEED_START"/);
+  assert.match(
+    job,
+    /platform::oracle::seed_sweep_keeps_findings_identical[\s\S]*-- --ignored --exact/,
+  );
+  assert.match(job, /export FALLOW_PLATFORM_SEEDS=/);
+  assert.match(job, /export FALLOW_PLATFORM_SEED_START=/);
+  assert.match(
+    job,
+    /panicked at[\s\S]*GITHUB_STEP_SUMMARY/,
+    "a failure prints the failing project seed and form",
+  );
+  assert.match(job, /exit "\$status"/);
+  assert.doesNotMatch(
+    readWorkflow(".github/workflows/ci.yml"),
+    /seed_sweep_keeps_findings_identical|FALLOW_PLATFORM_SEEDS/,
+    "pull request CI keeps the fixed seeds",
+  );
+});
+
+
 test("public skill PR parity uses the exact base while push and candidate checks stay strict", () => {
   const workflow = readWorkflow(".github/workflows/ci.yml");
   const job = indentedBlock(workflow, "skills-vendor", 2);

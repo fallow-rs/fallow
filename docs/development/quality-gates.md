@@ -422,20 +422,31 @@ binary has the hook. Pull request CI runs one fixed project seed with two
 permutation seeds per template. The scheduled job runs 60 new project seeds a
 day.
 
+A fourth job runs the seed sweep of the platform oracle in
+`crates/cli/tests/integration/platform`. Each seed generates a project, writes
+it once with LF line endings and once with CRLF or mixed line endings, and
+compares the output of `dead-code`, `dupes`, `health` and `audit` in each
+format. It also saves a baseline in each form and applies it in the other
+form. Pull request CI runs fixed seeds and the seam property tests, which feed
+backslash and drive-root paths into the path key code. The scheduled job runs
+40 new seeds a day.
+
 ### Oracle proof
 
 An oracle is a test that compares two results that must agree, for example a
 warm cache run and a `--no-cache` run. The cache model tests in
-`crates/engine/tests/integration/cache_model` are an oracle, and the result
-cache model tests in `crates/api/src/mutation/cache_model` and the
-permutation oracle in `crates/cli/tests/integration/permutation` are others. Each
+`crates/engine/tests/integration/cache_model` are an oracle. The result
+cache model tests in `crates/api/src/mutation/cache_model`, the permutation
+oracle in `crates/cli/tests/integration/permutation` and the platform oracle
+in `crates/cli/tests/integration/platform` are others. Each
 oracle must fail on the parent of a named fix commit and pass on the fix
 commit, or it does not catch that bug class. `node scripts/oracle-proof.mjs <oracle>` shows this.
 It checks out `fix^` and `fix` in temporary worktrees, puts the current oracle
 on each commit, builds it, and runs it. A build failure is a tool error (exit
 2), not a failing oracle. `--list` names the oracles and their fix commits. A
 fix commit can narrow the oracle to its own tests, when the commit does not
-have a later fix that the other tests need. To add an oracle, add a module
+have a later fix that the other tests need, and it can name its own build
+command for a commit with an older test layout. To add an oracle, add a module
 under `scripts/oracle-proof/` with its fix commits, its port step and its
 commands, and register it in `ORACLES`.
 

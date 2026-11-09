@@ -18,6 +18,8 @@ name: Oracle Seeds
 # crates/cli/tests/integration/permutation/oracle.rs when you fix the cause.
 # A Unicode span failure prints the shrunk input. Add it as a named test to
 # the unicode_span_oracle module that failed.
+# The platform oracle in crates/cli/tests/integration/platform prints the
+# project seed and the line-ending form of a failing project.
 on:
   schedule:
     - cron: '40 2 * * *'
@@ -55,6 +57,14 @@ on:
         description: 'The Unicode span seed (0: the run number)'
         type: number
         default: 0
+      platform_seeds:
+        description: 'The number of platform oracle project seeds to run'
+        type: number
+        default: 40
+      platform_start:
+        description: 'The first platform oracle project seed (0: (run number - 1) times PLATFORM_SEED_STRIDE, plus 1)'
+        type: number
+        default: 0
 
 concurrency:
   group: oracle-seeds
@@ -73,6 +83,8 @@ env:
   PERMUTATION_SEED_STRIDE: 60
   # The Unicode span tests parse small inputs, so one run checks many cases.
   UNICODE_SPAN_CASES: 20000
+  # Each platform seed runs each command and format on two checkouts.
+  PLATFORM_SEED_STRIDE: 40
   # A background git repack after a fixture commit races the next git add.
   # See scripts/workflow-policy.test.mjs.
   GIT_CONFIG_COUNT: '2'
@@ -348,6 +360,70 @@ jobs:
               echo '```'
             else
               echo "A test failed without a shrunk input, or the build failed. Read the log of this step."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+  platform-seeds:
+    name: Platform oracle wide seed range
+    runs-on: ubuntu-26.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          cache-key: oracle-seeds-platform
+
+      - name: Build the platform oracle tests
+        run: cargo test --locked -p fallow-cli --test integration --no-run
+
+      - name: Run the wide seed range
+        shell: bash
+        env:
+          INPUT_SEEDS: ${{ inputs.platform_seeds }}
+          INPUT_START: ${{ inputs.platform_start }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          count="${INPUT_SEEDS:-$PLATFORM_SEED_STRIDE}"
+          start="${INPUT_START:-0}"
+          case "$count:$start" in
+            *[!0-9:]* | :* | *:) echo "::error::seeds and start must be whole numbers"; exit 2 ;;
+          esac
+          if [ "$count" -lt 1 ]; then
+            echo "::error::seeds must be 1 or more"
+            exit 2
+          fi
+          if [ "$start" = 0 ]; then
+            start=$(( (RUN_NUMBER - 1) * PLATFORM_SEED_STRIDE + 1 ))
+          fi
+          export FALLOW_PLATFORM_SEEDS="$count"
+          export FALLOW_PLATFORM_SEED_START="$start"
+          echo "Seed numbers $start to $(( start + count - 1 ))"
+          status=0
+          cargo test --locked -p fallow-cli --test integration platform::oracle::seed_sweep_keeps_findings_identical \
+            -- --ignored --exact 2>&1 | tee seeds.log || status=$?
+          {
+            echo "## Platform oracle wide seed range"
+            echo
+            echo "Seed numbers $start to $(( start + count - 1 )). Run again with \`FALLOW_PLATFORM_SEED_START=$start FALLOW_PLATFORM_SEEDS=$count\`."
+            echo
+            if [ "$status" = 0 ]; then
+              echo "Each CRLF and mixed form gave the same findings, fingerprints and baselines as the LF form."
+            elif grep -q 'changes with the line endings' seeds.log; then
+              echo "A form gives other output than the LF form. Add a fixed-seed test with this project seed and form when you fix the cause:"
+              echo
+              echo '```text'
+              sed -n '/panicked at/,$p' seeds.log | head -80
+              echo '```'
+            else
+              echo "The run failed before it compared a project. Read the log of this step."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"
