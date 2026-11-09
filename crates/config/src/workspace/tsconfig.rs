@@ -3,13 +3,13 @@ use std::path::{Component, Path, PathBuf};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 const MAX_EXTENDS_DEPTH: usize = 16;
-/// The most distinct config files that the `extends` walk of one project
+/// The most distinct config files that the `extends` walk of one root config
 /// reads. A walk over this limit fails closed, so an untrusted repository can
 /// not make the walk read an unbounded number of files.
 const MAX_EXTENDS_READS: usize = 256;
-/// The most `extends` entries that the walk of one project follows, after it
-/// drops repeated specifiers of one array. A walk over this limit fails
-/// closed.
+/// The most `extends` entries that the walk of one root config follows,
+/// after it drops repeated specifiers of one array. A walk over this limit
+/// fails closed.
 const MAX_EXTENDS_ENTRIES: usize = 4096;
 const DECLARATION_OUTPUT_SUFFIXES: &[&str] = &[".d.ts", ".d.mts", ".d.cts"];
 
@@ -261,8 +261,11 @@ fn tsconfig_paths(root: &Path) -> Option<Vec<PathBuf>> {
 /// All root configs share one memo, because they share one
 /// `substitution_base`. The walk reads and parses each config once, resolves
 /// each `extends` specifier of a config folder once, and stops at
-/// [`MAX_EXTENDS_READS`] configs and [`MAX_EXTENDS_ENTRIES`] `extends`
-/// entries. Over a limit, the current and all later root configs fail closed.
+/// [`MAX_EXTENDS_READS`] new configs and [`MAX_EXTENDS_ENTRIES`] `extends`
+/// entries for each root config. Over a limit, only the current root config
+/// fails closed. The walk does not keep a failure that comes from a limit, so
+/// a later root config can still resolve the configs that it shares. The
+/// total cost stays linear: each root config does at most one budget of work.
 struct ExtendsWalk<'a> {
     substitution_base: &'a Path,
     /// The configs on the current `extends` path, to detect a cycle.
@@ -275,8 +278,11 @@ struct ExtendsWalk<'a> {
     failed: FxHashMap<PathBuf, usize>,
     /// The canonical target of each `extends` specifier, by config folder.
     targets: FxHashMap<PathBuf, FxHashMap<String, Option<PathBuf>>>,
+    /// The reads and `extends` entries of the current root config.
     reads: usize,
     entries: usize,
+    /// The current root config went over a limit.
+    over_limit: bool,
 }
 
 impl<'a> ExtendsWalk<'a> {
@@ -289,6 +295,7 @@ impl<'a> ExtendsWalk<'a> {
             targets: FxHashMap::default(),
             reads: 0,
             entries: 0,
+            over_limit: false,
         }
     }
 
@@ -298,6 +305,9 @@ impl<'a> ExtendsWalk<'a> {
     /// when the walk is over one of its limits.
     fn read(&mut self, config_path: &Path) -> Option<CompilerOptions> {
         self.in_progress.clear();
+        self.reads = 0;
+        self.entries = 0;
+        self.over_limit = false;
         let config_path = dunce::canonicalize(config_path).ok()?;
         self.read_with_height(&config_path, 0)
             .map(|(options, _)| options)
@@ -333,6 +343,7 @@ impl<'a> ExtendsWalk<'a> {
                 limit = MAX_EXTENDS_READS,
                 "tsconfig extends walk reads too many configs; ignoring the output mapping"
             );
+            self.over_limit = true;
             None
         } else {
             self.reads += 1;
@@ -344,6 +355,9 @@ impl<'a> ExtendsWalk<'a> {
                 self.resolved
                     .insert(config_path.to_path_buf(), (options.clone(), *height));
             }
+            // A failure after a limit can come from the limit and not from
+            // the config, so a later root config must walk it again.
+            None if self.over_limit => {}
             None => {
                 let failed_depth = self
                     .failed
@@ -373,6 +387,7 @@ impl<'a> ExtendsWalk<'a> {
                     limit = MAX_EXTENDS_ENTRIES,
                     "tsconfig extends walk follows too many entries; ignoring the output mapping"
                 );
+                self.over_limit = true;
                 return None;
             }
             self.entries += 1;
@@ -1680,6 +1695,49 @@ mod tests {
         assert_eq!(
             map(root, "./distribution/index.js", &["ts"]),
             TsconfigOutputResolution::Unconfigured
+        );
+    }
+
+    #[test]
+    fn root_config_over_a_limit_does_not_disable_other_root_configs() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let root = directory.path();
+        write(
+            &root.join("configs/base.json"),
+            r#"{"compilerOptions":{"rootDir":"../code","outDir":"../output"}}"#,
+        );
+        write(
+            &root.join("configs/shared.json"),
+            r#"{"extends":"./base.json"}"#,
+        );
+        write(&root.join("configs/leaf.json"), "{}");
+        // `tsconfig.a.json` sorts before `tsconfig.json`. Its own entries use
+        // the whole entry budget, so the walk goes over the limit inside the
+        // shared config.
+        let parents = (0..MAX_EXTENDS_ENTRIES - 1)
+            .map(|index| format!(r#""./configs/folder-{index}/../leaf.json""#))
+            .chain(std::iter::once(r#""./configs/shared.json""#.to_owned()))
+            .collect::<Vec<_>>()
+            .join(",");
+        write(
+            &root.join("tsconfig.a.json"),
+            &format!(r#"{{"extends":[{parents}]}}"#),
+        );
+        write(
+            &root.join("tsconfig.json"),
+            r#"{"extends":"./configs/shared.json"}"#,
+        );
+        write(&root.join("code/index.ts"), "export const value = 1;\n");
+
+        let output_map = TsconfigOutputMap::from_project(root);
+        assert_eq!(
+            output_map.configs.len(),
+            1,
+            "only the root config over the limit fails closed"
+        );
+        assert_eq!(
+            output_map.resolve_source_for_entry("./output/index.js", &["ts"]),
+            TsconfigOutputResolution::Resolved(root.join("code/index.ts"))
         );
     }
 
