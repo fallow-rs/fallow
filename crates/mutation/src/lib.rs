@@ -14,6 +14,8 @@
 //! relational constant `true` of `a === b` and the `negate-condition` mutant
 //! of `a === b` as an operand of `&&`. The site keeps the first candidate
 //! that the selected operators allow, so each mutated text is one mutant.
+//!
+//! User documentation is on [`fallow mutation`](https://fallow.tools/docs/cli/mutation/).
 
 mod blocks;
 mod collect;

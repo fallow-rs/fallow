@@ -7,6 +7,8 @@
 //!
 //! The optional `tokio` feature adds async command setup and bounded cleanup
 //! while preserving the same operating-system tree owner.
+//!
+//! User documentation for the `fallow` command line is in the [CLI reference](https://fallow.tools/docs/cli/).
 
 mod cleanup_paths;
 #[cfg(target_os = "linux")]

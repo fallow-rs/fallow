@@ -6,6 +6,11 @@
 //! non-CLI consumers can use. Shared selectors such as `OutputFormat` stay in
 //! `fallow-types`; this crate re-exports only the selectors needed to keep
 //! output builders on one contract surface.
+//!
+//! User documentation for the output formats is on [fallow.tools](https://fallow.tools/docs/cli/global-flags/):
+//!
+//! - [Output formats and global flags](https://fallow.tools/docs/cli/global-flags/)
+//! - [CI integration](https://fallow.tools/docs/integrations/ci/)
 #![warn(missing_docs)]
 #![cfg_attr(
     test,

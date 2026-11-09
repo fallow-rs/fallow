@@ -5,6 +5,12 @@
 //! without calling deprecated core entry points directly. Public modules should
 //! expose owned engine runners, typed result structs, or narrowly scoped aliases
 //! instead of broad core re-exports.
+//!
+//! User documentation for the analysis engine is on [fallow.tools](https://fallow.tools/docs/analysis/):
+//!
+//! - [Analysis overview](https://fallow.tools/docs/analysis/)
+//! - [Duplication analysis](https://fallow.tools/docs/analysis/duplication/)
+//! - [Similar code](https://fallow.tools/docs/analysis/similar-code/)
 
 #![warn(missing_docs)]
 #![cfg_attr(not(test), deny(clippy::disallowed_methods))]

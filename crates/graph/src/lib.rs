@@ -2,6 +2,12 @@
 //!
 //! This crate builds the dependency graph from parsed modules, resolves import
 //! specifiers to their targets, and tracks export usage through re-export chains.
+//!
+//! User documentation for module graph analysis is on [fallow.tools](https://fallow.tools/docs/explanations/dead-code/):
+//!
+//! - [Dead code findings explained](https://fallow.tools/docs/explanations/dead-code/)
+//! - [Architecture boundaries](https://fallow.tools/docs/analysis/boundaries/)
+//! - [Workspaces](https://fallow.tools/docs/configuration/workspaces/)
 
 #![warn(missing_docs)]
 #![cfg_attr(not(test), deny(clippy::disallowed_methods))]

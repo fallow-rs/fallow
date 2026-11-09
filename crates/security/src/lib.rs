@@ -11,6 +11,8 @@
 //! vulnerabilities: fallow is deterministic and syntactic, never taint-proof.
 //! Matchers default to non-literal arguments. A row can opt into narrowly
 //! captured literal or context predicates when the literal itself is the signal.
+//!
+//! User documentation is on [`fallow security`](https://fallow.tools/docs/cli/security/).
 
 use fallow_config::EffectKind;
 use fallow_types::extract::{SinkArgKind, SinkLiteralValue, SinkObjectProperty, SinkShape};

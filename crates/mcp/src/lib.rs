@@ -1,3 +1,10 @@
+//! The MCP server of `fallow`, the codebase intelligence tool for TypeScript and JavaScript.
+//!
+//! User documentation for the MCP server is on [fallow.tools](https://fallow.tools/docs/integrations/mcp/):
+//!
+//! - [MCP server](https://fallow.tools/docs/integrations/mcp/)
+//! - [Agent skills](https://fallow.tools/docs/integrations/agent-skills/)
+
 #![cfg_attr(
     test,
     allow(

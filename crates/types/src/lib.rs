@@ -2,6 +2,8 @@
 //!
 //! This crate contains type definitions used across multiple fallow crates
 //! (core, CLI, LSP). It has no analysis logic, only data structures.
+//!
+//! User documentation for fallow is on [fallow.tools](https://fallow.tools/docs/).
 
 #![warn(missing_docs)]
 #![cfg_attr(

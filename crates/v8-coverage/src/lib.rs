@@ -30,6 +30,11 @@
 //! The closed-source cross-reference, combined scoring, hot-path heuristics and
 //! verdict generation live in `fallow-cov` (private) and consume the CLI's
 //! remapped function output via the `fallow-cov-protocol` envelope.
+//!
+//! User documentation for runtime coverage is on [fallow.tools](https://fallow.tools/docs/analysis/runtime-coverage/):
+//!
+//! - [Runtime coverage](https://fallow.tools/docs/analysis/runtime-coverage/)
+//! - [`fallow coverage`](https://fallow.tools/docs/cli/coverage/)
 
 #![forbid(unsafe_code)]
 #![cfg_attr(
