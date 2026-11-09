@@ -19,9 +19,17 @@ fn write(root: &Path, relative: &str, content: &str) {
 /// Make the workspace in a temporary git repository. `clone/` is gitignored and
 /// holds a package named `vite` without a `./pack` export. `packages/app`
 /// declares `vite` as an alias of the workspace package `@scope/core`.
+///
+/// `node_modules/vite` at the root links to `clone/`. Module resolution stops
+/// at this nearest `vite`, so a `vite` package that is installed in an
+/// ancestor directory of the fixture cannot resolve `vite/pack` or
+/// `vite/client`. A real pnpm install links `vite` to `packages/core`. The
+/// fixture links it to `clone/`, which has no `./pack` export, so only the
+/// alias to `@scope/core` can resolve `vite/pack`. Nothing resolves
+/// `vite/client`.
 fn write_workspace(root: &Path) {
     std::fs::create_dir_all(root.join(".git")).expect("git directory");
-    write(root, ".gitignore", "clone\n");
+    write(root, ".gitignore", "clone\nnode_modules\n");
     write(root, "package.json", r#"{"name":"root","private":true}"#);
     write(
         root,
@@ -59,6 +67,8 @@ fn write_workspace(root: &Path) {
         r#"{"name":"vite","exports":{".":"./index.js"},"devDependencies":{"clone-tool":"^1.0.0"}}"#,
     );
     write(root, "clone/index.js", "export const vite = 1;\n");
+    std::fs::create_dir_all(root.join("node_modules")).expect("node_modules directory");
+    link_dir(&root.join("clone"), &root.join("node_modules/vite"));
     write(
         root,
         "clone/packages/lib/package.json",
@@ -69,6 +79,16 @@ fn write_workspace(root: &Path) {
         "clone/packages/lib/src/index.js",
         "import lodash from 'lodash';\nexport default lodash;\n",
     );
+}
+
+#[cfg(unix)]
+fn link_dir(target: &Path, link: &Path) {
+    std::os::unix::fs::symlink(target, link).expect("node_modules symlink");
+}
+
+#[cfg(windows)]
+fn link_dir(target: &Path, link: &Path) {
+    std::os::windows::fs::symlink_dir(target, link).expect("node_modules symlink");
 }
 
 #[test]
@@ -154,7 +174,7 @@ fn workspace_alias_subpath_without_export_is_unresolved() {
     assert_eq!(
         unresolved,
         vec!["vite/client"],
-        "pnpm links `vite` to `@scope/core`, which has no `./client` export"
+        "`vite` is an alias of `@scope/core`, which has no `./client` export"
     );
     let unused: Vec<&str> = results
         .unused_dependencies
