@@ -158,7 +158,12 @@ fn tokenize_corpus_for_duplicates(
     let cache_root = input
         .cache_root
         .filter(|_| files.len() >= config.min_corpus_size_for_token_cache);
-    let token_cache = cache_root.map(TokenCache::load);
+    let token_cache = cache_root.map(|cache_root| {
+        TokenCache::load(
+            cache_root,
+            fallow_types::path_guard::cache_write_base(input.root, cache_root),
+        )
+    });
 
     let read_started_ns = fallow_types::source_fingerprint::now_ns();
     let file_data = tokenize_duplication_files(

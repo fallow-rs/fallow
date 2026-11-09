@@ -49,6 +49,7 @@ pub fn run_audit_cache_prune(opts: &AuditCachePruneOptions<'_>) -> ExitCode {
     } else {
         SweepMode::Apply
     };
+    let cache_dir = project_cache_dir(opts);
     let mut report = sweep_reusable_caches_with_report(
         opts.root,
         resolved.max_age,
@@ -60,7 +61,7 @@ pub fn run_audit_cache_prune(opts: &AuditCachePruneOptions<'_>) -> ExitCode {
     report
         .entries
         .extend(crate::audit::sweep_base_snapshot_cache(
-            &project_cache_dir(opts),
+            fallow_types::path_guard::CacheTarget::new(opts.root, &cache_dir),
             resolved.max_age,
             mode,
             std::time::SystemTime::now(),

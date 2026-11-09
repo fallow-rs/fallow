@@ -368,7 +368,11 @@ fn component_cache_store_save(c: &mut Criterion) {
     let fixture = create_cache_fixture();
     let mut store = populated_store(&fixture);
     store
-        .save(fixture.dir.path(), CONFIG_HASH, DEFAULT_CACHE_MAX_SIZE)
+        .save(
+            fallow_types::path_guard::CacheTarget::inside(fixture.dir.path()),
+            CONFIG_HASH,
+            DEFAULT_CACHE_MAX_SIZE,
+        )
         .expect("fixture save");
     assert_representative_size(fixture.dir.path());
 
@@ -377,7 +381,13 @@ fn component_cache_store_save(c: &mut Criterion) {
     // and a ~2 MB store against the 256 MB default never gets close. Do not
     // "fix" this into `iter_batched`; the batched setup would hide the encode.
     c.bench_function("component_cache_store_save", |bencher| {
-        bencher.iter(|| store.save(fixture.dir.path(), CONFIG_HASH, DEFAULT_CACHE_MAX_SIZE));
+        bencher.iter(|| {
+            store.save(
+                fallow_types::path_guard::CacheTarget::inside(fixture.dir.path()),
+                CONFIG_HASH,
+                DEFAULT_CACHE_MAX_SIZE,
+            )
+        });
     });
 }
 
@@ -385,7 +395,11 @@ fn component_cache_store_load(c: &mut Criterion) {
     let fixture = create_cache_fixture();
     let mut store = populated_store(&fixture);
     store
-        .save(fixture.dir.path(), CONFIG_HASH, DEFAULT_CACHE_MAX_SIZE)
+        .save(
+            fallow_types::path_guard::CacheTarget::inside(fixture.dir.path()),
+            CONFIG_HASH,
+            DEFAULT_CACHE_MAX_SIZE,
+        )
         .expect("fixture save");
     assert_representative_size(fixture.dir.path());
 
@@ -406,7 +420,11 @@ fn component_cache_cached_to_module(c: &mut Criterion) {
     let fixture = create_cache_fixture();
     let mut store = populated_store(&fixture);
     store
-        .save(fixture.dir.path(), CONFIG_HASH, DEFAULT_CACHE_MAX_SIZE)
+        .save(
+            fallow_types::path_guard::CacheTarget::inside(fixture.dir.path()),
+            CONFIG_HASH,
+            DEFAULT_CACHE_MAX_SIZE,
+        )
         .expect("fixture save");
     assert_representative_size(fixture.dir.path());
     let paths = &fixture.paths;

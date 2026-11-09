@@ -13,6 +13,7 @@
 use std::path::Path;
 
 use fallow_types::cache_rejection::CacheRejection;
+use fallow_types::path_guard::CacheTarget;
 use serde::{Deserialize, Serialize};
 
 use super::{CachedResolvedProject, GRAPH_CACHE_VERSION, GraphCacheManifest};
@@ -95,18 +96,20 @@ impl GraphCacheStore {
         Ok(store)
     }
 
-    /// Persist this graph cache to `cache_dir`, best-effort.
+    /// Persist this graph cache to the cache directory of `target`, best-effort.
     ///
     /// Creates the cache directory, writes a `.gitignore`, encodes the store
     /// with postcard, and writes `graph-cache.bin` atomically. Every IO error
     /// is logged at debug and swallowed; the graph cache must never fail the
     /// surrounding analysis run.
-    pub fn save(&self, cache_dir: &Path) {
-        if let Err(error) = std::fs::create_dir_all(cache_dir) {
-            tracing::debug!("Failed to create graph cache dir: {error}");
+    ///
+    /// A symlink that leaves the base of `target` skips the save.
+    pub fn save(&self, target: CacheTarget<'_>) {
+        if let Err(error) = target.check(&target.dir().join(GRAPH_CACHE_FILE)) {
+            tracing::debug!("Skipped the graph cache save: {error}");
             return;
         }
-        if let Err(error) = write_cache_gitignore(cache_dir) {
+        if let Err(error) = target.write_gitignore() {
             tracing::debug!("Failed to write graph cache .gitignore: {error}");
             // Continue: a missing .gitignore does not invalidate the cache file.
         }
@@ -119,8 +122,7 @@ impl GraphCacheStore {
             }
         };
 
-        let cache_file = cache_dir.join(GRAPH_CACHE_FILE);
-        if let Err(error) = atomic_write(&cache_file, &framed(self.version, &encoded)) {
+        if let Err(error) = target.write_file(GRAPH_CACHE_FILE, &framed(self.version, &encoded)) {
             tracing::debug!("Failed to write graph cache: {error}");
         }
     }
@@ -180,18 +182,6 @@ fn read_header(data: &[u8]) -> Result<&[u8], CacheRejection> {
         return Err(CacheRejection::VersionMismatch);
     }
     Ok(payload)
-}
-
-/// Write `.fallow/.gitignore` (`*\n`) so the cache directory is never committed.
-fn write_cache_gitignore(cache_dir: &Path) -> std::io::Result<()> {
-    std::fs::write(cache_dir.join(".gitignore"), "*\n")
-}
-
-/// Replace `cache_file` with `data` through a unique temp file. The extraction
-/// cache store uses the same helper, so concurrent fallow processes that share
-/// `.fallow/` never interleave a write to either cache.
-fn atomic_write(cache_file: &Path, data: &[u8]) -> std::io::Result<()> {
-    fallow_types::atomic_file::write_atomic(cache_file, data)
 }
 
 #[cfg(test)]

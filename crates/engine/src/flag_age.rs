@@ -17,6 +17,7 @@ use std::process::Stdio;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use fallow_types::flag_retirement::{FlagAgeMode, FlagCommit, RetirementFlag};
+use fallow_types::path_guard::CacheTarget;
 use fallow_types::workspace::WorkspaceDiagnosticKind;
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -133,7 +134,7 @@ pub(crate) fn apply_flag_ages(
     if let Some(dir) = request.cache_dir
         && (outcome.blame_calls > 0 || outcome.pickaxe_calls > 0)
     {
-        save_cache(dir, &cache);
+        save_cache(CacheTarget::new(request.root, dir), &cache);
     }
 
     for row in rows.iter_mut() {
@@ -399,17 +400,11 @@ fn load_cache(dir: &Path, head: &str) -> Option<AgeCache> {
 }
 
 /// Write the cache through a temporary file, so a reader never sees a
-/// partial file. A failed write only costs the next run its warm cache.
-fn save_cache(dir: &Path, cache: &AgeCache) {
-    let Ok(bytes) = serde_json::to_vec(cache) else {
-        return;
-    };
-    if std::fs::create_dir_all(dir).is_err() {
-        return;
-    }
-    let tmp = dir.join(format!("{CACHE_FILE}.tmp"));
-    if std::fs::write(&tmp, bytes).is_ok() {
-        let _ = std::fs::rename(&tmp, dir.join(CACHE_FILE));
+/// partial file. A failed write only costs the next run its warm cache. A
+/// symlink that leaves the base of `target` skips the save.
+fn save_cache(target: CacheTarget<'_>, cache: &AgeCache) {
+    if let Ok(bytes) = serde_json::to_vec(cache) {
+        let _ = target.write_file(CACHE_FILE, &bytes);
     }
 }
 
@@ -423,6 +418,25 @@ mod tests {
 
     /// 2023-11-14T22:13:20Z.
     const BASE_EPOCH: u64 = 1_700_000_000;
+
+    #[test]
+    #[cfg(unix)]
+    fn a_linked_cache_dir_gets_no_age_cache() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        let outside = dir.path().join("outside");
+        std::fs::create_dir_all(&root).expect("root");
+        std::fs::create_dir_all(&outside).expect("outside");
+        std::os::unix::fs::symlink(&outside, root.join(".fallow")).expect("link");
+        let cache_dir = root.join(".fallow");
+        save_cache(CacheTarget::new(&root, &cache_dir), &AgeCache::default());
+        assert_eq!(std::fs::read_dir(&outside).expect("outside").count(), 0);
+        save_cache(CacheTarget::inside(&outside), &AgeCache::default());
+        assert!(
+            outside.join(CACHE_FILE).exists(),
+            "a plain directory gets the cache"
+        );
+    }
 
     fn git(root: &Path, args: &[&str], epoch: Option<u64>) {
         let mut command = crate::git_env::git_command(root);

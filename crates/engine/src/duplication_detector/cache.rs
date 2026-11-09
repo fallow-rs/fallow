@@ -91,6 +91,9 @@ pub(super) struct TokenCacheEntry {
 #[derive(Debug)]
 pub(super) struct TokenCache {
     dir: PathBuf,
+    /// The directory that the writes must stay in, from
+    /// `fallow_types::path_guard::cache_write_base`.
+    write_base: PathBuf,
     store: CacheStore,
     dirty: bool,
 }
@@ -122,7 +125,7 @@ impl TokenCacheMode {
 
 impl TokenCache {
     #[must_use]
-    pub(super) fn load(cache_root: &Path) -> Self {
+    pub(super) fn load(cache_root: &Path, write_base: &Path) -> Self {
         let dir = cache_root
             .join("cache")
             .join(format!("dupes-tokens-v{DUPES_CACHE_VERSION}"));
@@ -136,6 +139,7 @@ impl TokenCache {
 
         Self {
             dir,
+            write_base: write_base.to_path_buf(),
             store,
             dirty: false,
         }
@@ -261,6 +265,13 @@ impl TokenCache {
     }
 
     pub(super) fn save_if_dirty(&self) -> Result<bool, String> {
+        for name in [".gitignore", "cache.bin"] {
+            fallow_types::path_guard::ensure_no_outside_link(
+                &self.write_base,
+                &self.dir.join(name),
+            )
+            .map_err(|e| format!("Skipped the duplication cache save: {e}"))?;
+        }
         ensure_cache_gitignore(&self.dir)?;
         if !self.dirty {
             return Ok(false);
@@ -522,12 +533,12 @@ mod tests {
         std::fs::write(&file, "const value = 1;\n").expect("write source");
         let metadata = std::fs::metadata(&file).expect("metadata");
 
-        let mut cache = TokenCache::load(dir.path());
+        let mut cache = TokenCache::load(dir.path(), dir.path());
         let entry = entry("const value = 1;\n");
         insert_entry(&mut cache, &file, &metadata, mode(), &entry);
         cache.save().expect("save cache");
 
-        let loaded = TokenCache::load(dir.path());
+        let loaded = TokenCache::load(dir.path(), dir.path());
         let hit = loaded
             .get(&file, &metadata, mode())
             .expect("cache should hit");
@@ -551,7 +562,7 @@ mod tests {
     #[test]
     fn token_cache_save_writes_gitignore() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let cache = TokenCache::load(dir.path());
+        let cache = TokenCache::load(dir.path(), dir.path());
         cache.save().expect("save cache");
 
         let gitignore = dir
@@ -566,20 +577,34 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn token_cache_skips_a_save_through_a_linked_cache_dir() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let root = dir.path().join("project");
+        let outside = dir.path().join("outside");
+        std::fs::create_dir_all(&root).expect("root");
+        std::fs::create_dir_all(&outside).expect("outside");
+        std::os::unix::fs::symlink(&outside, root.join(".fallow")).expect("link");
+        let cache = TokenCache::load(&root.join(".fallow"), &root);
+        assert!(cache.save().is_err());
+        assert_eq!(std::fs::read_dir(&outside).expect("outside").count(), 0);
+    }
+
+    #[test]
     fn token_cache_misses_when_metadata_changes() {
         let dir = tempfile::tempdir().expect("temp dir");
         let file = dir.path().join("src.ts");
         std::fs::write(&file, "const value = 1;\n").expect("write source");
         let metadata = std::fs::metadata(&file).expect("metadata");
 
-        let mut cache = TokenCache::load(dir.path());
+        let mut cache = TokenCache::load(dir.path(), dir.path());
         let entry = entry("const value = 1;\n");
         insert_entry(&mut cache, &file, &metadata, mode(), &entry);
         cache.save().expect("save cache");
 
         std::fs::write(&file, "const value = 12345;\n").expect("rewrite source");
         let changed_metadata = std::fs::metadata(&file).expect("metadata");
-        let loaded = TokenCache::load(dir.path());
+        let loaded = TokenCache::load(dir.path(), dir.path());
         assert!(loaded.get(&file, &changed_metadata, mode()).is_none());
     }
 
@@ -590,7 +615,7 @@ mod tests {
         std::fs::write(&file, "const value = 1;\n").expect("write source");
         let metadata = std::fs::metadata(&file).expect("metadata");
 
-        let mut cache = TokenCache::load(dir.path());
+        let mut cache = TokenCache::load(dir.path(), dir.path());
         let entry = entry("const value = 1;\n");
         insert_entry(&mut cache, &file, &metadata, mode(), &entry);
         cache.save().expect("save cache");
@@ -603,7 +628,7 @@ mod tests {
             false,
             false,
         );
-        let loaded = TokenCache::load(dir.path());
+        let loaded = TokenCache::load(dir.path(), dir.path());
         assert!(loaded.get(&file, &metadata, changed_mode).is_none());
     }
 
@@ -634,7 +659,7 @@ mod tests {
         );
         std::fs::write(cache_dir.join("cache.bin"), bitcode::encode(&store)).expect("write cache");
 
-        let loaded = TokenCache::load(dir.path());
+        let loaded = TokenCache::load(dir.path(), dir.path());
         assert!(loaded.get(&file, &metadata, mode()).is_none());
     }
 
@@ -645,7 +670,7 @@ mod tests {
         std::fs::write(&file, "const value = 1;\n").expect("write source");
         let metadata = std::fs::metadata(&file).expect("metadata");
 
-        let mut cache = TokenCache::load(dir.path());
+        let mut cache = TokenCache::load(dir.path(), dir.path());
         let entry = entry("const value = 1;\n");
         insert_entry(&mut cache, &file, &metadata, mode(), &entry);
         let cached = cache
@@ -668,7 +693,7 @@ mod tests {
         std::fs::write(&file, "const value = 1;\n").expect("write source");
         let metadata = std::fs::metadata(&file).expect("metadata");
 
-        let mut cache = TokenCache::load(dir.path());
+        let mut cache = TokenCache::load(dir.path(), dir.path());
         let entry = entry("const value = 1;\n");
         insert_entry(&mut cache, &file, &metadata, mode(), &entry);
         let cached = cache
@@ -731,7 +756,7 @@ mod tests {
         let accessed = metadata.accessed().unwrap_or(modified);
         let ctime_before = SourceFingerprint::from_metadata(&metadata).ctime_ns;
 
-        let mut cache = TokenCache::load(dir.path());
+        let mut cache = TokenCache::load(dir.path(), dir.path());
         let entry = entry("const value = 1;\n");
         insert_entry(&mut cache, &file, &metadata, mode(), &entry);
 
@@ -754,7 +779,7 @@ mod tests {
         std::fs::write(&file, "const value = 1;\n").expect("write source");
         let metadata = std::fs::metadata(&file).expect("metadata");
 
-        let mut cache = TokenCache::load(dir.path());
+        let mut cache = TokenCache::load(dir.path(), dir.path());
         let entry = entry("const value = 1;\n");
         insert_entry(&mut cache, &file, &metadata, mode(), &entry);
 
@@ -780,7 +805,7 @@ mod tests {
         std::fs::write(&file, "const value = 1;\n").expect("write source");
         let metadata = std::fs::metadata(&file).expect("metadata");
 
-        let mut cache = TokenCache::load(dir.path());
+        let mut cache = TokenCache::load(dir.path(), dir.path());
         let entry = entry("const value = 1;\n");
         let stale_fingerprint = SourceFingerprint::new(1, metadata.len());
         cache.store.entries.insert(
@@ -816,7 +841,7 @@ mod tests {
         std::fs::write(&file, "\u{feff}const value = 1;\n").expect("write source");
         let metadata = std::fs::metadata(&file).expect("metadata");
 
-        let mut cache = TokenCache::load(dir.path());
+        let mut cache = TokenCache::load(dir.path(), dir.path());
         let entry = entry("const value = 1;\n");
         cache.store.entries.insert(
             cache_key(&file),
@@ -851,7 +876,7 @@ mod tests {
         let accessed = metadata.accessed().unwrap_or(modified);
         let real_mtime_ns = SourceFingerprint::from_metadata(&metadata).mtime_ns;
 
-        let mut cache = TokenCache::load(dir.path());
+        let mut cache = TokenCache::load(dir.path(), dir.path());
         let entry = entry("const value = 1;\n");
         let no_ctime_fingerprint = SourceFingerprint::new(real_mtime_ns, metadata.len());
         cache.store.entries.insert(
@@ -905,7 +930,7 @@ mod tests {
         // the same tick as the read: all three values match the live file.
         let same_tick = std::fs::metadata(&file).expect("metadata after rewrite");
 
-        let mut cache = TokenCache::load(dir.path());
+        let mut cache = TokenCache::load(dir.path(), dir.path());
         cache.insert(
             &file,
             &same_tick,
@@ -930,7 +955,7 @@ mod tests {
         let file = dir.path().join("src.ts");
         std::fs::write(&file, "const value = 1;\n").expect("write source");
         let metadata = std::fs::metadata(&file).expect("metadata");
-        let mut cache = TokenCache::load(dir.path());
+        let mut cache = TokenCache::load(dir.path(), dir.path());
         let entry = entry("const value = 1;\n");
         cache.insert(
             &file,

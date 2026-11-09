@@ -14,6 +14,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
+use fallow_types::path_guard::CacheTarget;
 use serde::{Deserialize, Serialize};
 
 /// Current ledger format version. Bumped only on a breaking shape change; a
@@ -104,8 +105,14 @@ pub fn load_viewed_state(cache_dir: &Path) -> ViewedState {
 /// current guide hash, then writes via a temp file + rename so a crash mid-write
 /// can never truncate the JSON. Returns the file count actually persisted.
 /// Swallows IO errors (logged at most by the caller); the viewed-state is a
-/// convenience, never load-bearing for the tour or the exit code.
-pub fn mark_viewed(cache_dir: &Path, files: &[String], current_hash: &str) -> std::io::Result<()> {
+/// convenience, never load-bearing for the tour or the exit code. A symlink
+/// that leaves the project `root` on the way to the ledger stops the write.
+pub fn mark_viewed(
+    root: &Path,
+    cache_dir: &Path,
+    files: &[String],
+    current_hash: &str,
+) -> std::io::Result<()> {
     let mut state = load_viewed_state(cache_dir);
     // A hash change means the prior marks no longer apply; reset the ledger to
     // the current snapshot rather than mixing marks across two graph states.
@@ -122,20 +129,21 @@ pub fn mark_viewed(cache_dir: &Path, files: &[String], current_hash: &str) -> st
             },
         );
     }
-    write_atomic(cache_dir, &state)
+    write_atomic(CacheTarget::new(root, cache_dir), &state)
 }
 
-/// Serialize `state` and write it to the ledger path via temp + rename.
-fn write_atomic(cache_dir: &Path, state: &ViewedState) -> std::io::Result<()> {
-    let path = fallow_config::walkthrough_state_path(cache_dir);
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
+/// Serialize `state` and replace the ledger with it atomically.
+fn write_atomic(target: CacheTarget<'_>, state: &ViewedState) -> std::io::Result<()> {
+    let path = fallow_config::walkthrough_state_path(target.dir());
+    let (Some(parent), Some(name)) = (path.parent(), path.file_name().and_then(|n| n.to_str()))
+    else {
+        return Err(std::io::Error::other(
+            "the walkthrough state path has no file name",
+        ));
+    };
     let json = serde_json::to_string_pretty(state)
         .map_err(|e| std::io::Error::new(std::io::ErrorKind::InvalidData, e))?;
-    let tmp = path.with_extension("json.tmp");
-    std::fs::write(&tmp, json.as_bytes())?;
-    std::fs::rename(&tmp, &path)
+    target.with_dir(parent).write_file(name, json.as_bytes())
 }
 
 #[cfg(test)]
@@ -164,6 +172,20 @@ mod tests {
     }
 
     #[test]
+    #[cfg(unix)]
+    fn a_linked_cache_dir_gets_no_ledger() {
+        let dir = temp_cache();
+        let root = dir.path().join("project");
+        let outside = dir.path().join("outside");
+        std::fs::create_dir_all(&root).expect("root");
+        std::fs::create_dir_all(&outside).expect("outside");
+        std::os::unix::fs::symlink(&outside, root.join(".fallow")).expect("link");
+        let marks = ["src/a.ts".to_string()];
+        assert!(mark_viewed(&root, &root.join(".fallow"), &marks, "h").is_err());
+        assert_eq!(std::fs::read_dir(&outside).expect("outside").count(), 0);
+    }
+
+    #[test]
     fn unknown_version_loads_empty_default() {
         let dir = temp_cache();
         let path = fallow_config::walkthrough_state_path(dir.path());
@@ -179,7 +201,7 @@ mod tests {
     #[test]
     fn mark_then_load_round_trips() {
         let dir = temp_cache();
-        mark_viewed(dir.path(), &["src/a.ts".to_string()], "hash1").expect("mark");
+        mark_viewed(dir.path(), dir.path(), &["src/a.ts".to_string()], "hash1").expect("mark");
         let state = load_viewed_state(dir.path());
         assert!(state.is_viewed("src/a.ts", "hash1"));
         assert!(!state.is_viewed("src/b.ts", "hash1"));
@@ -188,7 +210,7 @@ mod tests {
     #[test]
     fn stale_hash_reads_as_not_viewed_but_keeps_entry() {
         let dir = temp_cache();
-        mark_viewed(dir.path(), &["src/a.ts".to_string()], "hash1").expect("mark");
+        mark_viewed(dir.path(), dir.path(), &["src/a.ts".to_string()], "hash1").expect("mark");
         let state = load_viewed_state(dir.path());
         // A different current hash: the mark is ignored for this render.
         assert!(!state.is_viewed("src/a.ts", "hash2"));
@@ -199,8 +221,8 @@ mod tests {
     #[test]
     fn mark_against_new_hash_resets_prior_marks() {
         let dir = temp_cache();
-        mark_viewed(dir.path(), &["src/a.ts".to_string()], "hash1").expect("mark a");
-        mark_viewed(dir.path(), &["src/b.ts".to_string()], "hash2").expect("mark b");
+        mark_viewed(dir.path(), dir.path(), &["src/a.ts".to_string()], "hash1").expect("mark a");
+        mark_viewed(dir.path(), dir.path(), &["src/b.ts".to_string()], "hash2").expect("mark b");
         let state = load_viewed_state(dir.path());
         assert!(state.is_viewed("src/b.ts", "hash2"));
         // The hash1 mark was reset when the snapshot moved.
@@ -211,6 +233,7 @@ mod tests {
     fn is_viewed_only_matches_current_hash() {
         let dir = temp_cache();
         mark_viewed(
+            dir.path(),
             dir.path(),
             &["src/a.ts".to_string(), "src/b.ts".to_string()],
             "hash1",

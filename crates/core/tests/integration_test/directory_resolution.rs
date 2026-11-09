@@ -348,7 +348,7 @@ fn cache_from_before_script_extension_policy_is_rejected_on_unchanged_files() {
     store.manifest.version = PRE_SCRIPT_EXTENSION_CACHE_VERSION;
     // Model an old resolver graph without touching any project input fingerprint.
     store.graph.modules.clear();
-    store.save(cache.path());
+    store.save(fallow_types::path_guard::CacheTarget::inside(cache.path()));
     assert_eq!(
         fallow_core::graph_cache::GraphCacheStore::load(cache.path()).err(),
         Some(CacheRejection::VersionMismatch),

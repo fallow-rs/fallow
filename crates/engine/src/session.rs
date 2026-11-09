@@ -1505,7 +1505,7 @@ fn write_parse_cache(
     let store = cache.get_or_insert_with(|| fallow_extract::cache::CacheStore::new(&config.root));
     if update_parse_cache(store, write)
         && let Err(error) = store.save(
-            &config.cache_dir,
+            config.cache_target(),
             config.cache_config_hash,
             cache_max_size_bytes,
         )

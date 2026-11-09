@@ -7,7 +7,7 @@
 //! files live in the home directory, where dotfile managers link them on
 //! purpose, so the check does not apply there.
 
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use super::{Mode, Plan, Report, SetupHooksOptions, display_rel};
 
@@ -30,31 +30,7 @@ pub fn refusal_message(path: &str, link: &str) -> String {
 /// does not resolve returns `path` itself. A missing entry ends the walk,
 /// because nothing below it exists yet.
 pub fn symlinked_component(root: &Path, path: &Path) -> Option<PathBuf> {
-    let Ok(relative) = path.strip_prefix(root) else {
-        return Some(path.to_path_buf());
-    };
-    let Ok(canonical_root) = dunce::canonicalize(root) else {
-        return Some(path.to_path_buf());
-    };
-    let mut current = root.to_path_buf();
-    for component in relative.components() {
-        let Component::Normal(name) = component else {
-            return Some(path.to_path_buf());
-        };
-        current.push(name);
-        match current.symlink_metadata() {
-            Ok(meta) if meta.file_type().is_symlink() => {
-                let inside = dunce::canonicalize(&current)
-                    .is_ok_and(|resolved| resolved.starts_with(&canonical_root));
-                if !inside {
-                    return Some(current);
-                }
-            }
-            Ok(_) => {}
-            Err(_) => return None,
-        }
-    }
-    None
+    fallow_types::path_guard::outside_link(root, path)
 }
 
 /// A planned file and the first symlink on the way to it that resolves

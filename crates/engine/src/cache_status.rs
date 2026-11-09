@@ -135,7 +135,7 @@ mod tests {
         let mut store = fallow_extract::cache::CacheStore::new(&analysis.root);
         store
             .save(
-                &analysis.cache_dir,
+                fallow_types::path_guard::CacheTarget::inside(&analysis.cache_dir),
                 analysis.cache_config_hash,
                 fallow_extract::cache::DEFAULT_CACHE_MAX_SIZE,
             )

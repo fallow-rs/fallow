@@ -193,7 +193,7 @@ fn assert_resolver_cache_hit_matches_cold(fixture: &str) {
             .is_none(),
         "stable file keys and content hashes should still allow resolver reuse"
     );
-    store.save(&cache_dir);
+    store.save(fallow_types::path_guard::CacheTarget::inside(&cache_dir));
 
     let warm = fallow_core::analyze_with_trace(&config).expect("resolver-cache analysis");
     let cold_json = serde_json::to_value(&cold.results).expect("serialize cold results");

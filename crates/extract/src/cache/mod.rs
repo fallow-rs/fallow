@@ -11,6 +11,12 @@ mod types;
 #[cfg(all(test, not(miri)))]
 mod tests;
 
+/// A test cache directory that is its own write base.
+#[cfg(all(test, not(miri)))]
+fn at(dir: &std::path::Path) -> fallow_types::path_guard::CacheTarget<'_> {
+    fallow_types::path_guard::CacheTarget::inside(dir)
+}
+
 #[cfg(test)]
 pub(crate) use conversion::module_to_cached_from_parts;
 pub use conversion::{

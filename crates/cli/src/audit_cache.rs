@@ -7,6 +7,7 @@ use fallow_output::{ExceededThreshold, FindingSeverity};
 use fallow_types::audit_cache::{
     AuditCacheKeyBuilder, AuditConfigFingerprint, AuditCoverageFingerprint,
 };
+use fallow_types::path_guard::CacheTarget;
 use fallow_types::source_fingerprint::SourceFingerprint;
 use rustc_hash::{FxHashMap, FxHashSet};
 use xxhash_rust::xxh3::xxh3_64;
@@ -477,13 +478,19 @@ fn snapshot_disposition(rank: usize, age: Duration, max_age: Option<Duration>) -
 /// files. `fallow audit` runs this in [`SweepMode::Apply`] after each save,
 /// and `fallow audit-cache prune` runs it in both modes and reports the
 /// entries.
+///
+/// A symlink that leaves the base of `target` on the way to the snapshot
+/// directory stops the sweep, so it never removes a file outside the project.
 pub fn sweep_base_snapshot_cache(
-    cache_dir: &Path,
+    target: CacheTarget<'_>,
     max_age: Option<Duration>,
     mode: SweepMode,
     now: SystemTime,
 ) -> Vec<SweepEntry> {
-    let dir = audit_base_snapshot_cache_dir(cache_dir);
+    let dir = audit_base_snapshot_cache_dir(target.dir());
+    if target.check(&dir).is_err() {
+        return Vec::new();
+    }
     list_snapshot_files(&dir)
         .into_iter()
         .enumerate()
@@ -518,6 +525,14 @@ pub(super) fn save_cached_base_snapshot(
         return;
     };
     let dir = audit_base_snapshot_cache_dir(opts.cache_dir);
+    let target = audit_base_snapshot_cache_file(opts.cache_dir, key);
+    let cache = CacheTarget::new(opts.root, opts.cache_dir);
+    for path in [&dir.join(".gitignore"), &target] {
+        if let Err(error) = cache.check(path) {
+            tracing::warn!("Skipped the audit base snapshot cache save: {error}");
+            return;
+        }
+    }
     if ensure_audit_base_snapshot_cache_dir(&dir).is_err() {
         return;
     }
@@ -534,10 +549,7 @@ pub(super) fn save_cached_base_snapshot(
     if tmp.write_all(&data).is_err() {
         return;
     }
-    if tmp
-        .persist(audit_base_snapshot_cache_file(opts.cache_dir, key))
-        .is_err()
-    {
+    if tmp.persist(target).is_err() {
         return;
     }
     let max_age = crate::base_worktree::resolve_cache_max_age_with_options(
@@ -545,7 +557,8 @@ pub(super) fn save_cached_base_snapshot(
         opts.config_path.as_ref(),
         opts.allow_remote_extends,
     );
-    sweep_base_snapshot_cache(opts.cache_dir, max_age, SweepMode::Apply, SystemTime::now());
+    let target = CacheTarget::new(opts.root, opts.cache_dir);
+    sweep_base_snapshot_cache(target, max_age, SweepMode::Apply, SystemTime::now());
 }
 
 fn normalized_changed_files(root: &Path, changed_files: &FxHashSet<PathBuf>) -> Vec<String> {
