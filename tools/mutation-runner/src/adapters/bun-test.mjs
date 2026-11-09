@@ -13,6 +13,7 @@ import {
 } from "./child-process.mjs";
 import {
   buildOverlay,
+  dryRunTimeout,
   hasRun,
   isSupportedVersion,
   unsupportedVersion,
@@ -33,6 +34,14 @@ const TEST_FILE_PATTERNS = [
   "**/*.spec.{js,jsx,ts,tsx,mjs,cjs,mts,cts}",
   "**/*_spec.{js,jsx,ts,tsx,mjs,cjs,mts,cts}",
 ];
+
+/** The default test timeout of `bun test`. */
+const BUN_DEFAULT_TIMEOUT_MS = 5000;
+/**
+ * The timeout of a dry run. The dry run runs the instrumented code, so it
+ * gets the Bun default times `DRY_RUN_TIMEOUT_FACTOR`.
+ */
+const DRY_RUN_TIMEOUT_MS = dryRunTimeout(BUN_DEFAULT_TIMEOUT_MS);
 
 /** A `bunfig.toml` line that runs the tests in a random order. */
 const RANDOMIZE = /^\s*randomize\s*=\s*true\b/mu;
@@ -225,13 +234,14 @@ const joinHits = (tests, rows, randomized) => {
 const optionalArgs = (condition, args) => (condition ? args : []);
 
 /** The arguments of one `bun test` process. */
-const bunArgs = (file, junit, { timeoutMs, pattern, bail }) => [
+const bunArgs = (file, junit, { timeoutMs = DRY_RUN_TIMEOUT_MS, pattern, bail }) => [
   "test",
   "--preload",
   PRELOAD,
   "--reporter=junit",
   `--reporter-outfile=${junit}`,
-  ...optionalArgs(timeoutMs !== undefined, ["--timeout", String(timeoutMs)]),
+  "--timeout",
+  String(timeoutMs),
   ...optionalArgs(bail === true, ["--bail"]),
   ...optionalArgs(pattern !== undefined, ["-t", pattern]),
   // A path that starts with `./` names one file. A bare name is a filter.

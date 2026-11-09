@@ -15,9 +15,11 @@ import {
   buildOverlay,
   byCodeUnit,
   dryRunResult,
+  dryRunTimeout,
   errorDirectories,
   errorMessage,
   hasRun,
+  hasTimeoutLimit,
   isSupportedVersion,
   parseVersion,
   realPath,
@@ -393,12 +395,9 @@ const forceRunnerOptions = (vitest) => {
   }
 };
 
-/** True for a hook timeout that sets a limit. Vitest reads 0 as no limit. */
-const hasHookLimit = (value) => Number.isFinite(value) && value > 0;
-
 /** Gives the hook timeout of a run: never shorter than `timeout_ms`, and no limit stays no limit. */
 const runHookTimeout = (projectHook, timeoutMs) =>
-  hasHookLimit(projectHook) ? Math.max(projectHook, timeoutMs ?? 0) : projectHook;
+  hasTimeoutLimit(projectHook) ? Math.max(projectHook, timeoutMs ?? 0) : projectHook;
 
 /**
  * Sets the test and hook timeouts of each project for one run. Vitest
@@ -409,9 +408,10 @@ const runHookTimeout = (projectHook, timeoutMs) =>
  * timeout when it is longer: `timeout_ms` comes from the test durations of
  * the dry run, which do not include a suite hook such as `beforeAll`. A
  * shorter hook timeout would report a slow hook as a kill. The API watchdog
- * stays the hard bound of a run. A dry run (`timeoutMs` null) uses the
- * project values. Vitest reads a hook timeout of 0 as no limit, so a project
- * hook timeout that is not a positive finite number stays as it is.
+ * stays the hard bound of a run. A dry run (`timeoutMs` null) runs the
+ * instrumented code, so it uses the project values times
+ * `DRY_RUN_TIMEOUT_FACTOR`. Vitest reads a timeout of 0 as no limit, so a
+ * project timeout that is not a positive finite number stays as it is.
  */
 const createTimeoutControl = (projects) => {
   const original = new Map(
@@ -422,7 +422,12 @@ const createTimeoutControl = (projects) => {
   );
   return (timeoutMs) => {
     for (const [project, values] of original) {
-      project.config.testTimeout = timeoutMs ?? values.test;
+      if (timeoutMs === null) {
+        project.config.testTimeout = dryRunTimeout(values.test);
+        project.config.hookTimeout = dryRunTimeout(values.hook);
+        continue;
+      }
+      project.config.testTimeout = timeoutMs;
       project.config.hookTimeout = runHookTimeout(values.hook, timeoutMs);
     }
   };
