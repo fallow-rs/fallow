@@ -23,6 +23,7 @@ mod layout;
 mod plan;
 mod reach;
 mod sampling;
+mod skipped_tests;
 #[cfg(test)]
 mod tests;
 
@@ -37,6 +38,7 @@ pub use fallow_mutation::{
 };
 pub use fallow_output::DiffIndex;
 pub use layout::{instrument_source, is_component_file};
+pub use skipped_tests::{SkipKind, SkippedTest};
 
 use crate::EngineError;
 use crate::module_graph::{ExportTestReach, RetainedModuleGraph};
@@ -391,12 +393,13 @@ pub struct MutationPlan {
     pub mutants: Vec<PlannedMutant>,
     /// The union of the static test files of `files`, sorted.
     pub test_files: Vec<String>,
-    /// The runner test files that a changed-code scope changes, sorted. A
-    /// test file counts when the diff adds a line to it, also when it reaches
-    /// no changed source. Empty for the other scopes. The run dry-runs these
-    /// files to find the tests that the runner skips.
+    /// The skipped and todo tests in the runner test files that the diff of a
+    /// changed-code scope changes, sorted by file and line. A test file
+    /// counts when the diff adds, removes or changes a line in it, also when
+    /// it reaches no changed source. A scan of the syntax tree finds the
+    /// tests, so no runner starts. Empty for the other scopes.
     #[serde(skip)]
-    pub changed_test_files: Vec<String>,
+    pub skipped_tests: Vec<SkippedTest>,
     /// The files that the test files reach through static imports, sorted.
     /// [`MutationPlan::test_file_reach`] indexes into this list.
     #[serde(skip)]

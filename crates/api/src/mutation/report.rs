@@ -10,7 +10,7 @@ use fallow_output::{
     MutationCompletion, MutationFunctionResult, MutationIncompleteReason, MutationPlanCountsOutput,
     MutationPlanDisposition, MutationPlanFile, MutationPlanMutant, MutationReport,
     MutationRunIssue, MutationSkippedFile, MutationStatusCounts, MutationSummary,
-    SAMPLED_OUT_REASON, TestReachClass,
+    SAMPLED_OUT_REASON, SKIPPED_TESTS_CODE, TestReachClass,
 };
 use fallow_types::envelope::ToolVersion;
 use rustc_hash::FxHashSet;
@@ -471,6 +471,46 @@ pub fn baseline_failures(outcome: Option<&ScheduleOutcome>) -> Vec<MutationBasel
 }
 
 /// The public issues of a schedule.
+/// The most skipped tests that the `skipped-tests` entry names.
+const MAX_SKIPPED_TESTS_SHOWN: usize = 10;
+
+/// The warning for the skipped and todo tests that the plan found in the test
+/// files of the diff. `None` when it found none. Such a test checks nothing,
+/// so it cannot kill a mutant. The entry does not change the completion.
+pub fn skipped_tests_issue(plan: &MutationPlan) -> Option<MutationRunIssue> {
+    let tests = &plan.skipped_tests;
+    if tests.is_empty() {
+        return None;
+    }
+    let shown: Vec<String> = tests
+        .iter()
+        .take(MAX_SKIPPED_TESTS_SHOWN)
+        .map(|test| match &test.name {
+            Some(name) => format!("{}:{} ({name})", test.file, test.line),
+            None => format!("{}:{}", test.file, test.line),
+        })
+        .collect();
+    let tail = match tests.len().saturating_sub(MAX_SKIPPED_TESTS_SHOWN) {
+        0 => String::new(),
+        more => format!(" and {more} more"),
+    };
+    let (noun, verb) = if tests.len() == 1 {
+        ("test", "is")
+    } else {
+        ("tests", "are")
+    };
+    Some(MutationRunIssue {
+        code: SKIPPED_TESTS_CODE.to_owned(),
+        message: format!(
+            "{} {noun} {verb} skipped or todo: {}{tail}. A skipped test checks nothing, so it cannot kill a mutant. Run each test or remove it.",
+            tests.len(),
+            shown.join(", ")
+        ),
+        mutant_id: None,
+        stderr_tail: None,
+    })
+}
+
 pub fn issues(outcome: Option<&ScheduleOutcome>) -> Vec<MutationRunIssue> {
     outcome
         .map(|outcome| {
@@ -565,7 +605,7 @@ mod tests {
             framework_config_checked: false,
             skipped_files: Vec::new(),
             unmatched_paths: Vec::new(),
-            changed_test_files: Vec::new(),
+            skipped_tests: Vec::new(),
         }
     }
 
@@ -857,6 +897,38 @@ mod tests {
             ],
             "m3 is planned with no outcome, m4 is after the limit"
         );
+    }
+
+    #[test]
+    fn skipped_tests_make_one_warning_with_file_line_and_name_and_no_completion_change() {
+        use fallow_engine::mutation::{SkipKind, SkippedTest};
+        let skipped = |line, kind, name: Option<&str>| SkippedTest {
+            file: "src/a.test.ts".to_owned(),
+            line,
+            kind,
+            name: name.map(str::to_owned),
+        };
+        let mut plan = plan(Vec::new(), 0);
+        assert!(skipped_tests_issue(&plan).is_none());
+        plan.skipped_tests = vec![skipped(5, SkipKind::Skip, Some("adds negatives"))];
+        let issue = skipped_tests_issue(&plan).expect("one warning");
+        assert_eq!(issue.code, "skipped-tests");
+        assert_eq!(
+            issue.message,
+            "1 test is skipped or todo: src/a.test.ts:5 (adds negatives). A skipped test checks nothing, so it cannot kill a mutant. Run each test or remove it."
+        );
+        plan.skipped_tests = (1..=12)
+            .map(|line| skipped(line, SkipKind::Todo, None))
+            .collect();
+        let issue = skipped_tests_issue(&plan).expect("one warning");
+        assert!(
+            issue
+                .message
+                .starts_with("12 tests are skipped or todo: src/a.test.ts:1, "),
+            "{}",
+            issue.message
+        );
+        assert!(issue.message.contains(" and 2 more. "), "{}", issue.message);
     }
 
     #[test]

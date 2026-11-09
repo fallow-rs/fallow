@@ -699,20 +699,26 @@ mod end_to_end {
     }
 
     /// A unified diff that adds line 2 of each file, written outside the
-    /// project so that the worktree stays clean.
-    fn diff_file(files: &[&str]) -> (tempfile::TempDir, PathBuf) {
+    /// project so that the worktree stays clean. With `remove`, the diff only
+    /// removes a line.
+    fn diff_file(files: &[&str], remove: bool) -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().expect("dir");
         let mut text = String::new();
         for file in files {
-            text.push_str("diff --git a/");
-            text.push_str(file);
-            text.push_str(" b/");
-            text.push_str(file);
-            text.push_str("\n--- a/");
-            text.push_str(file);
-            text.push_str("\n+++ b/");
-            text.push_str(file);
-            text.push_str("\n@@ -1,0 +2,1 @@\n+// changed\n");
+            for prefix in ["diff --git a/", "--- a/", "+++ b/"] {
+                text.push_str(prefix);
+                text.push_str(file);
+                if prefix.starts_with("diff") {
+                    text.push_str(" b/");
+                    text.push_str(file);
+                }
+                text.push('\n');
+            }
+            text.push_str(if remove {
+                "@@ -2,1 +1,0 @@\n-// removed\n"
+            } else {
+                "@@ -1,0 +2,1 @@\n+// changed\n"
+            });
         }
         let path = dir.path().join("change.diff");
         fs::write(&path, text).expect("diff");
@@ -726,7 +732,8 @@ mod end_to_end {
     }
 
     #[test]
-    fn a_skipped_test_of_a_changed_test_file_gets_a_warning_with_or_without_a_changed_source() {
+    fn a_skipped_test_of_a_changed_test_file_gets_a_warning_and_a_test_only_change_starts_no_runner()
+     {
         let Some(package) = companion_fixture() else {
             return;
         };
@@ -738,13 +745,15 @@ mod end_to_end {
                 .find(|error| error.code == fallow_output::SKIPPED_TESTS_CODE)
                 .map(|error| error.message.clone())
         };
+        let expected = "1 test is skipped or todo: test/math.test.ts:29 (skipped). A skipped test checks nothing, so it cannot kill a mutant. Run each test or remove it.";
 
-        let (_diff_dir, mixed_diff) = diff_file(&["src/math.ts", "test/math.test.ts"]);
+        let (_dir, mixed_diff) = diff_file(&["src/math.ts", "test/math.test.ts"], false);
         let mixed = run_mutation(&changed_options(&root, &mixed_diff)).expect("the run completes");
-        let message = warning(&mixed).unwrap_or_else(|| panic!("a warning: {:#?}", mixed.errors));
-        assert!(
-            message.starts_with("1 test is skipped or todo: test/math.test.ts::skipped."),
-            "{message}"
+        assert_eq!(
+            warning(&mixed).as_deref(),
+            Some(expected),
+            "{:#?}",
+            mixed.errors
         );
         assert_eq!(
             mixed.completion.status,
@@ -752,15 +761,29 @@ mod end_to_end {
             "the warning does not make the run partial"
         );
         assert!(mixed.summary.counts.total > 0);
+        assert!(mixed.runner.is_some());
 
-        let (_test_dir, test_only_diff) = diff_file(&["test/math.test.ts"]);
+        let (_dir, test_only_diff) = diff_file(&["test/math.test.ts"], false);
         let test_only =
             run_mutation(&changed_options(&root, &test_only_diff)).expect("the run completes");
+        assert_eq!(warning(&test_only).as_deref(), Some(expected));
         assert_eq!(test_only.summary.counts.total, 0, "no source changed");
-        assert!(warning(&test_only).is_some(), "{:#?}", test_only.errors);
-        assert!(test_only.runner.is_some(), "the changed tests were dry-run");
+        assert!(test_only.runner.is_none(), "the scan starts no companion");
+        assert_eq!(
+            test_only.completion.status,
+            MutationCompletionStatus::Complete
+        );
 
-        let (_source_dir, source_only_diff) = diff_file(&["src/math.ts"]);
+        let (_dir, deletion_diff) = diff_file(&["test/math.test.ts"], true);
+        let deletion =
+            run_mutation(&changed_options(&root, &deletion_diff)).expect("the run completes");
+        assert_eq!(
+            warning(&deletion).as_deref(),
+            Some(expected),
+            "a removed line counts"
+        );
+
+        let (_dir, source_only_diff) = diff_file(&["src/math.ts"], false);
         let source_only =
             run_mutation(&changed_options(&root, &source_only_diff)).expect("the run completes");
         assert!(warning(&source_only).is_none(), "{:#?}", source_only.errors);

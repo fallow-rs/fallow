@@ -31,10 +31,7 @@ mod retry_set;
 pub mod targets;
 mod window;
 use classification::{attempt_record, classify, is_load_kill, kill_kind, matrix_evidence};
-use dry_facts::{
-    DryRunFacts, covering_tests, read_dry_run, record_dry_run, reported_duplicates,
-    warn_about_changed_tests,
-};
+use dry_facts::{DryRunFacts, covering_tests, read_dry_run, record_dry_run, reported_duplicates};
 use issues::{no_covering_test_message, static_map_miss_issue, undiscovered_issue};
 use targets::{config_targets, job_targets};
 use window::{loop_budget_ms, round_ms, scaled_ms, settles_loop_timeout, timeout_ms};
@@ -87,10 +84,6 @@ pub struct SchedulePlan {
     pub known_ids: FxHashSet<String>,
     /// The static test files of the plan.
     pub test_files: Vec<String>,
-    /// The runner test files that a changed-code scope changes. The dry run
-    /// includes them, also when they reach no mutant, and the run warns about
-    /// the tests in them that the runner skips. Empty without a diff scope.
-    pub changed_test_files: Vec<String>,
     /// The static test files of each source file.
     pub file_test_files: BTreeMap<String, Vec<String>>,
 }
@@ -1509,19 +1502,11 @@ fn start_primary(
         return Err(version_error(&config.runner, &ready.runner_version));
     }
     let runner_files: FxHashSet<&String> = ready.test_files.iter().collect();
-    let (mut dry_files, undiscovered): (Vec<String>, Vec<String>) = plan
+    let (dry_files, undiscovered) = plan
         .test_files
         .iter()
         .cloned()
         .partition(|file| runner_files.contains(file));
-    dry_files.extend(
-        plan.changed_test_files
-            .iter()
-            .filter(|file| runner_files.contains(file))
-            .cloned(),
-    );
-    dry_files.sort_unstable();
-    dry_files.dedup();
     Ok(Primary {
         link,
         ready,
@@ -1881,10 +1866,7 @@ pub fn run_schedule_with_progress(
     };
     if (plan.mutants.is_empty() && plan.unreached.is_empty()) || plan.test_files.is_empty() {
         no_coverage_for_all(&mut outcome);
-        if plan.changed_test_files.is_empty() {
-            return Ok(outcome);
-        }
-        return warn_about_changed_tests(spawner, plan, config, outcome);
+        return Ok(outcome);
     }
 
     let started = Instant::now();
@@ -1927,7 +1909,7 @@ pub fn run_schedule_with_progress(
             return Err(error);
         }
     };
-    record_dry_run(&mut outcome, plan, &dry);
+    record_dry_run(&mut outcome, &dry);
     let target_ids =
         config_targets(config, &dry, runner.caps, &mut outcome).inspect_err(|_| link.shutdown())?;
     outcome.unloaded_paths = dry.unloaded_paths;

@@ -767,53 +767,149 @@ diff --git a/src/adder.ts b/src/adder.ts
     );
 }
 
-fn diff_of(files: &[&str]) -> DiffIndex {
-    let mut text = String::new();
-    for file in files {
-        std::fmt::Write::write_fmt(
-            &mut text,
-            format_args!(
-                "diff --git a/{file} b/{file}\n--- a/{file}\n+++ b/{file}\n@@ -1,0 +2,1 @@\n+// changed\n"
-            ),
-        )
-        .expect("write to a string");
+/// A project with a source file, a test file with a skipped test, a test file
+/// with a todo test, and a test file with a skipped test that no diff touches.
+fn skip_project() -> (tempfile::TempDir, PathBuf) {
+    let project = tempfile::tempdir().expect("temp dir");
+    let root = dunce::canonicalize(project.path()).expect("root");
+    let files = [
+        (
+            "package.json",
+            r#"{"name":"adder","private":true,"type":"module","main":"src/adder.ts","devDependencies":{"vitest":"^3.2.4"}}"#,
+        ),
+        (
+            "src/adder.ts",
+            "export function add(a: number, b: number): number {\n  return a + b;\n}\n",
+        ),
+        (
+            "src/adder.test.ts",
+            "import { expect, it } from \"vitest\";\nimport { add } from \"./adder\";\n\nit(\"adds\", () => expect(add(1, 2)).toBe(3));\nit.skip(\"adds negatives\", () => {});\n",
+        ),
+        (
+            "src/other.test.ts",
+            "import { it } from \"vitest\";\n\nit(\"other\", () => {});\nit.todo(\"later\");\n",
+        ),
+        (
+            "src/untouched.test.ts",
+            "import { it } from \"vitest\";\n\nit.skip(\"untouched\", () => {});\n",
+        ),
+    ];
+    for (path, text) in files {
+        let target = root.join(path);
+        std::fs::create_dir_all(target.parent().expect("parent")).expect("dir");
+        std::fs::write(target, text).expect("write");
     }
-    DiffIndex::from_unified_diff(&text)
+    (project, root)
+}
+
+fn added_line(file: &str) -> String {
+    format!(
+        "diff --git a/{file} b/{file}\n--- a/{file}\n+++ b/{file}\n@@ -1,0 +2,1 @@\n+// changed\n"
+    )
+}
+
+fn removed_line(file: &str) -> String {
+    format!(
+        "diff --git a/{file} b/{file}\n--- a/{file}\n+++ b/{file}\n@@ -2,1 +1,0 @@\n-// removed\n"
+    )
+}
+
+fn deleted_file(file: &str) -> String {
+    format!(
+        "diff --git a/{file} b/{file}\ndeleted file mode 100644\n--- a/{file}\n+++ /dev/null\n@@ -1,1 +0,0 @@\n-it.skip(\"gone\", () => {{}});\n"
+    )
+}
+
+fn skips(root: &Path, diff: &str) -> (Vec<String>, usize) {
+    let plan = plans(
+        root,
+        None,
+        &[MutationPlanRequest::new(MutationScope::ChangedSinceBase(
+            DiffIndex::from_unified_diff(diff),
+        ))],
+    )
+    .remove(0);
+    let found = plan
+        .skipped_tests
+        .iter()
+        .map(|test| {
+            format!(
+                "{}:{} {:?} {}",
+                test.file,
+                test.line,
+                test.kind,
+                test.name.as_deref().unwrap_or("-")
+            )
+        })
+        .collect();
+    (found, plan.mutants.len())
 }
 
 #[test]
-fn a_changed_scope_lists_the_runner_test_files_that_the_diff_changes() {
-    let root = fixture("mutation-plan");
-    let changed = |files: &[&str]| {
-        plans(
-            &root,
-            None,
-            &[MutationPlanRequest::new(MutationScope::ChangedSinceBase(
-                diff_of(files),
-            ))],
-        )
-        .remove(0)
-    };
-    let mixed = changed(&["src/math.ts", "src/math.test.ts"]);
-    assert_eq!(mixed.changed_test_files, ["src/math.test.ts"]);
-    assert!(!mixed.mutants.is_empty());
+fn a_changed_scope_reports_the_skipped_tests_of_the_test_files_that_the_diff_changes() {
+    let (_project, root) = skip_project();
+    let adder_skip = "src/adder.test.ts:5 Skip adds negatives";
+    let other_todo = "src/other.test.ts:4 Todo later";
 
-    let test_only = changed(&["src/math.test.ts"]);
-    assert_eq!(test_only.changed_test_files, ["src/math.test.ts"]);
-    assert!(test_only.mutants.is_empty(), "{:?}", test_only.mutants);
+    let (mixed, mutants) = skips(
+        &root,
+        &[added_line("src/adder.ts"), added_line("src/adder.test.ts")].concat(),
+    );
+    assert_eq!(mixed, [adder_skip]);
+    assert!(mutants > 0, "the source change has mutants");
 
-    let source_only = changed(&["src/math.ts"]);
-    assert!(source_only.changed_test_files.is_empty());
+    let (test_only, mutants) = skips(&root, &added_line("src/adder.test.ts"));
+    assert_eq!(test_only, [adder_skip]);
+    assert_eq!(mutants, 0, "no source changed");
 
-    let unrelated = changed(&["src/wrapper.test.ts", "src/math.test.ts"]);
+    let (deletion_only, _) = skips(&root, &removed_line("src/other.test.ts"));
     assert_eq!(
-        unrelated.changed_test_files,
-        ["src/math.test.ts", "src/wrapper.test.ts"],
-        "sorted, and a test file counts when it does not reach a changed source"
+        deletion_only,
+        [other_todo],
+        "a removed line changes the file"
     );
 
-    let full = plans(&root, None, &[MutationPlanRequest::new(MutationScope::All)]).remove(0);
-    assert!(full.changed_test_files.is_empty(), "no diff scope");
+    let (both, _) = skips(
+        &root,
+        &[
+            added_line("src/other.test.ts"),
+            added_line("src/adder.test.ts"),
+        ]
+        .concat(),
+    );
+    assert_eq!(both, [adder_skip, other_todo], "sorted by file and line");
+
+    let (source_only, _) = skips(&root, &added_line("src/adder.ts"));
+    assert!(source_only.is_empty(), "{source_only:?}");
+
+    let (outside, _) = skips(&root, &added_line("src/other.test.ts"));
+    assert!(
+        outside.iter().all(|found| !found.contains("untouched")),
+        "a skip in a test file outside the diff is not reported: {outside:?}"
+    );
+
+    let (deleted, _) = skips(&root, &deleted_file("src/gone.test.ts"));
+    assert!(
+        deleted.is_empty(),
+        "a deleted file has no test: {deleted:?}"
+    );
+}
+
+#[test]
+fn a_full_run_and_explicit_paths_report_no_skipped_test() {
+    let (_project, root) = skip_project();
+    let [full, paths] = plans(
+        &root,
+        None,
+        &[
+            MutationPlanRequest::new(MutationScope::All),
+            MutationPlanRequest::new(MutationScope::Paths(vec![PathBuf::from("src")])),
+        ],
+    )
+    .try_into()
+    .expect("two plans");
+    assert!(full.skipped_tests.is_empty(), "{:?}", full.skipped_tests);
+    assert!(paths.skipped_tests.is_empty(), "{:?}", paths.skipped_tests);
 }
 
 #[test]

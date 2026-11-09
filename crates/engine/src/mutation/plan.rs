@@ -225,18 +225,21 @@ pub(super) fn build(
         framework_config_checked: inputs.framework_config_exports.is_some(),
         skipped_files,
         unmatched_paths,
-        changed_test_files: changed_test_files(&context),
+        skipped_tests: skipped_tests(&context),
     }
 }
 
-/// The runner test files to which the diff of a changed-code scope adds a
-/// line, sorted by root-relative path. The other scopes have none.
-fn changed_test_files(context: &Context<'_>) -> Vec<String> {
+/// The skipped and todo tests in the runner test files that the diff of a
+/// changed-code scope changes. A file counts when the diff changes its path
+/// (an added, modified or deleted line), also when it reaches no changed
+/// source. A deleted file is not on disk, so it has no test. The other scopes
+/// have none.
+fn skipped_tests(context: &Context<'_>) -> Vec<super::SkippedTest> {
     let MutationScope::ChangedSinceBase(diff) = &context.request.scope else {
         return Vec::new();
     };
     let root = context.inputs.root;
-    let mut files: Vec<String> = context
+    let nodes: Vec<_> = context
         .graph
         .test_entry_points
         .iter()
@@ -244,14 +247,24 @@ fn changed_test_files(context: &Context<'_>) -> Vec<String> {
         .filter_map(|&entry| context.graph.modules.get(entry.0 as usize))
         .filter(|node| {
             diff.key_for(&node.path, root)
-                .and_then(|key| diff.added_lines_in(&key))
-                .is_some_and(|lines| !lines.is_empty())
+                .is_some_and(|key| diff.changes_path(&key))
         })
-        .map(|node| relative_key_path(&node.path, root))
         .collect();
-    files.sort();
-    files.dedup();
-    files
+    let mut tests: Vec<super::SkippedTest> = nodes
+        .par_iter()
+        .flat_map_iter(|node| {
+            let rel = relative_key_path(&node.path, root);
+            let found = Layout::from_path(&rel)
+                .zip(std::fs::read_to_string(&node.path).ok())
+                .map(|(layout, text)| {
+                    let source = text.strip_prefix(BOM).unwrap_or(&text);
+                    super::skipped_tests::skipped_tests_in(&rel, source, layout)
+                });
+            found.into_iter().flatten()
+        })
+        .collect();
+    tests.sort();
+    tests
 }
 
 /// The source files in scope, sorted by root-relative path. Test code, test

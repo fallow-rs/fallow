@@ -590,20 +590,27 @@ select nothing for it. `--function-scope` (config key
   `duplicate-test-ids` names the IDs, and the human output shows it as a
   warning. The run does not stop, and the verdicts of the other tests stay
   valid. Give each test a unique title to remove the warning.
-- A test can be `skip` or `todo` in the dry run, for example `it.skip`. Such
-  a test runs no assertion, so it cannot kill a mutant. The run warns about
-  these tests only in the runner test files that the diff of the
-  changed-code scope changes. The test file does not need to reach a changed
-  source file, so a change to the tests alone also gets the warning. The
-  dry run includes each changed runner test file that the runner lists. A
-  run without a diff scope (`--all` or paths) gives no per-test warning.
-  The `errors` entry `skipped-tests` names up to five of these tests, and
-  the human output shows it as a warning. The run does not stop, and the
-  completion does not change. Run each test or remove it to remove the
-  warning.
-- A failing test in a changed test file is a baseline failure, the same as a
-  failing test of a static test file. Because the dry run includes the
-  changed test files, it can report such a failure.
+- A test file can leave a test out of the run, for example with `it.skip`.
+  Such a test runs no assertion, so it cannot kill a mutant. The run warns
+  about these tests in each runner test file that the diff of the
+  changed-code scope changes. A file counts when the diff adds, changes or
+  removes a line in it, also when it reaches no changed source. A deleted
+  file has no test. A scan of the syntax tree finds the tests, so a change
+  to the tests alone starts no runner and no companion. A run without a
+  diff scope (`--all` or paths) gives no such warning, and `--plan` does not
+  print it.
+- The scan recognizes `it`, `test`, `describe` and `suite` with `.skip` or
+  `.todo`, also after `.concurrent`, `.sequential` or `.shuffle`. It
+  recognizes `xit`, `xtest` and `xdescribe`. It recognizes the `node:test`
+  options `{ skip: true }` and `{ todo: true }`, and a non-empty string
+  value of either key. A condition that the run decides, such as
+  `it.skipIf(flag)` or `{ skip: process.env.CI }`, is not a skipped test.
+  A call such as `t.skip()` inside a test is not recognized.
+- The `errors` entry `skipped-tests` names up to ten of these tests with
+  file, line and name. The name is present when the first argument is a
+  string literal. The human output shows the entry as a warning. The run
+  does not stop, and the completion and the exit code do not change. Run
+  each test or remove it to remove the warning.
 - The `node-test` and `bun-test` adapters find test files with the default
   patterns of the runner. These glob patterns do not go into a dot
   directory, such as `.github/`. Fallow therefore sends the static test files

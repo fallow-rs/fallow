@@ -32,7 +32,8 @@ use crate::mutation::node_args::node_test_args;
 use crate::mutation::protocol::{InitOptions, InitRequest};
 use crate::mutation::report::{
     CompletionFacts, baseline_failures, completion, function_results, issues, mutant_results,
-    plan_counts, plan_files, plan_mutants, skipped_files, summary, tool_version,
+    plan_counts, plan_files, plan_mutants, skipped_files, skipped_tests_issue, summary,
+    tool_version,
 };
 use crate::mutation::result_cache::{KeyFiles, NOT_KEYED, ResultCache};
 use crate::mutation::run_dir::{RunFile, write_run_dir};
@@ -837,7 +838,6 @@ fn schedule_plan(plan: &MutationPlan) -> SchedulePlan {
             .map(|mutant| mutant.mutant.id.as_str().to_owned())
             .collect::<FxHashSet<_>>(),
         test_files: plan.test_files.clone(),
-        changed_test_files: plan.changed_test_files.clone(),
         file_test_files: plan
             .files
             .iter()
@@ -1132,20 +1132,6 @@ fn runner_output(
     })
 }
 
-/// The static test files and the changed test files of a plan, sorted. The
-/// glob runners search for exactly these files.
-fn known_test_files(plan: &MutationPlan) -> Vec<String> {
-    let mut files: Vec<String> = plan
-        .test_files
-        .iter()
-        .chain(&plan.changed_test_files)
-        .cloned()
-        .collect();
-    files.sort_unstable();
-    files.dedup();
-    files
-}
-
 /// The public error of a schedule that stopped the run.
 fn execute(
     options: &MutationRunOptions,
@@ -1157,10 +1143,8 @@ fn execute(
     let schedule = schedule_plan(plan);
     // With no planned mutant the dry run still runs the static test files,
     // because a hit on a statically unreached mutant is a static map miss.
-    // It also runs the changed test files, to warn about their skipped tests.
     if schedule.mutants.is_empty()
         && (schedule.unreached.is_empty() || schedule.test_files.is_empty())
-        && schedule.changed_test_files.is_empty()
     {
         return Ok(Execution {
             outcome: None,
@@ -1217,7 +1201,7 @@ fn execute(
             config_path: planned.runner_config.clone(),
             run_dir: run_dir.dir.to_string_lossy().into_owned(),
             path_map: run_dir.path_map.clone(),
-            options: init_options(runner, &root, &known_test_files(plan)),
+            options: init_options(runner, &root, &plan.test_files),
         },
         runner: range.clone(),
         kill_matrix: options.kill_matrix,
@@ -1257,11 +1241,13 @@ fn execute(
 
 /// The errors of a finished run: the scheduler issues and the worktree facts.
 fn run_issues(
+    plan: &MutationPlan,
     outcome: Option<&ScheduleOutcome>,
     changed_paths: &[String],
     check_error: Option<String>,
 ) -> Vec<fallow_output::MutationRunIssue> {
     let mut errors = issues(outcome);
+    errors.extend(skipped_tests_issue(plan));
     if !changed_paths.is_empty() {
         errors.push(fallow_output::MutationRunIssue {
             code: "worktree-changed".to_owned(),
@@ -1424,7 +1410,7 @@ pub fn run_mutation_with_progress(
         typecheck_failed: typecheck.issue.is_some(),
         promoted: outcome.map_or(&[], |outcome| outcome.promoted.as_slice()),
     });
-    let mut errors = run_issues(outcome, &changed_paths, check_error);
+    let mut errors = run_issues(plan, outcome, &changed_paths, check_error);
     errors.extend(typecheck.issue);
     let timings = run_timings(outcome, execution.setup_ms, plan_ms, typecheck_ms);
     Ok(MutationReport {
@@ -1653,7 +1639,7 @@ mod tests {
             framework_config_checked: false,
             skipped_files: Vec::new(),
             unmatched_paths: Vec::new(),
-            changed_test_files: Vec::new(),
+            skipped_tests: Vec::new(),
         };
         assert!(
             open_result_cache(
@@ -1690,7 +1676,7 @@ mod tests {
             framework_config_checked: false,
             skipped_files: Vec::new(),
             unmatched_paths: Vec::new(),
-            changed_test_files: Vec::new(),
+            skipped_tests: Vec::new(),
         }
     }
 

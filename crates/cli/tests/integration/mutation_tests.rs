@@ -109,6 +109,57 @@ fn mutants_per_line_leaves_the_other_mutants_of_a_line_pending_in_the_plan() {
 }
 
 #[test]
+fn a_test_only_change_warns_about_its_skipped_tests_and_starts_no_runner() {
+    let project = untested_project();
+    let root = project.path();
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"mutation-fixture","private":true,"type":"module","main":"src/math.ts","devDependencies":{"vitest":"^5.0.0"}}"#,
+    )
+    .expect("package.json");
+    fs::write(
+        root.join("src/math.test.ts"),
+        "import { expect, it } from \"vitest\";\nimport { add } from \"./math\";\n\nit(\"adds\", () => expect(add(1, 2)).toBe(3));\nit.skip(\"adds negatives\", () => {});\n",
+    )
+    .expect("math.test.ts");
+    commit_all(root, "add a test");
+    let diff_dir = tempfile::tempdir().expect("temp dir");
+    let diff = diff_dir.path().join("change.diff");
+    fs::write(
+        &diff,
+        "diff --git a/src/math.test.ts b/src/math.test.ts\n--- a/src/math.test.ts\n+++ b/src/math.test.ts\n@@ -4,0 +5,1 @@\n+it.skip(\"adds negatives\", () => {});\n",
+    )
+    .expect("diff");
+
+    let (output, report) = json_mutation(root, &["--diff-file", diff.to_str().expect("utf-8")]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let errors = report["errors"].as_array().expect("errors");
+    let warning = errors
+        .iter()
+        .find(|error| error["code"] == "skipped-tests")
+        .unwrap_or_else(|| panic!("a skipped-tests warning: {report}"));
+    assert_eq!(
+        warning["message"],
+        "1 test is skipped or todo: src/math.test.ts:5 (adds negatives). A skipped test checks nothing, so it cannot kill a mutant. Run each test or remove it."
+    );
+    assert!(
+        report["runner"].is_null(),
+        "the scan starts no runner: {report}"
+    );
+    assert_eq!(report["completion"]["status"], "complete");
+
+    let (_, full) = json_mutation(root, &["--all"]);
+    assert!(
+        full["errors"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .all(|error| error["code"] != "skipped-tests"),
+        "a full run gives no per-test warning"
+    );
+}
+
+#[test]
 fn plan_mutates_the_script_blocks_of_vue_svelte_and_astro_components() {
     let project = untested_project();
     let root = project.path();

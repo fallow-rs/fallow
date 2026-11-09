@@ -157,13 +157,8 @@ pub(super) fn covering_tests(
     tests
 }
 
-/// Copies the test files, the duplicate test id issue and the skipped test
-/// issue of the dry run.
-pub(super) fn record_dry_run(
-    outcome: &mut ScheduleOutcome,
-    plan: &SchedulePlan,
-    dry: &DryRunResult,
-) {
+/// Copies the test files and the duplicate test id issue of the dry run.
+pub(super) fn record_dry_run(outcome: &mut ScheduleOutcome, dry: &DryRunResult) {
     outcome.test_files = dry
         .tests
         .iter()
@@ -172,49 +167,6 @@ pub(super) fn record_dry_run(
     outcome
         .issues
         .extend(duplicate_test_ids_issue(&reported_duplicates(dry)));
-    outcome.issues.extend(skipped_tests_issue(plan, dry));
-}
-
-/// The issue for tests that the dry run skipped or marked as todo, in a test
-/// file that the diff changes. Such a test runs no assertion, so it cannot
-/// kill a mutant. A run without a diff scope has no changed test file and
-/// gives no issue.
-pub(super) fn skipped_tests_issue(
-    plan: &SchedulePlan,
-    dry: &DryRunResult,
-) -> Option<ScheduleIssue> {
-    let skipped: Vec<&str> = dry
-        .tests
-        .iter()
-        .filter(|test| matches!(test.status, TestStatus::Skip | TestStatus::Todo))
-        .filter(|test| plan.changed_test_files.contains(&test.file))
-        .map(|test| test.test_id.as_str())
-        .collect();
-    if skipped.is_empty() {
-        return None;
-    }
-    let shown = skipped.iter().take(MAX_DUPLICATE_IDS_SHOWN);
-    let more = skipped.len().saturating_sub(MAX_DUPLICATE_IDS_SHOWN);
-    let tail = if more == 0 {
-        String::new()
-    } else {
-        format!(" and {more} more")
-    };
-    let (noun, verb) = if skipped.len() == 1 {
-        ("test", "is")
-    } else {
-        ("tests", "are")
-    };
-    Some(ScheduleIssue {
-        code: fallow_output::SKIPPED_TESTS_CODE,
-        message: format!(
-            "{} {noun} {verb} skipped or todo: {}{tail}. A skipped test checks nothing, so it cannot kill a mutant. Run each test or remove it.",
-            skipped.len(),
-            shown.copied().collect::<Vec<_>>().join(", ")
-        ),
-        mutant_id: None,
-        stderr_tail: None,
-    })
 }
 
 /// The duplicate test ids of the dry run, without the ids of a file that an
@@ -268,27 +220,4 @@ fn duplicate_test_ids_issue(ids: &[String]) -> Option<ScheduleIssue> {
         mutant_id: None,
         stderr_tail: None,
     })
-}
-
-/// Dry-runs the changed test files of a plan that has no mutant to run, so
-/// that the report can warn about the tests that the runner skips.
-pub(super) fn warn_about_changed_tests(
-    spawner: &dyn CompanionSpawner,
-    plan: &SchedulePlan,
-    config: &ScheduleConfig,
-    mut outcome: ScheduleOutcome,
-) -> Result<ScheduleOutcome, ScheduleError> {
-    let Primary {
-        mut link,
-        ready,
-        dry_files,
-        ..
-    } = start_primary(spawner, plan, config)?;
-    outcome.ready = Some(ready);
-    if !dry_files.is_empty() {
-        let dry = first_dry_run(&mut link, &dry_files, config.runner_timeout)?;
-        outcome.issues.extend(skipped_tests_issue(plan, &dry));
-    }
-    link.shutdown();
-    Ok(outcome)
 }
