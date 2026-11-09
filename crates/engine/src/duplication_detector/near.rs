@@ -750,6 +750,7 @@ mod tests {
         let second = source.find("let").expect("second line");
         assert_eq!(byte_offset_to_line_col(second, &lines), (2, 0));
     }
+
     #[test]
     fn detects_semantic_gapped_functions_under_mild_exact_mode() {
         let files = vec![

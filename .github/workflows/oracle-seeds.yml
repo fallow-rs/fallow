@@ -411,7 +411,7 @@ jobs:
           cache-key: oracle-seeds-unicode
 
       - name: Build the Unicode span tests
-        run: cargo test --locked -p fallow-lsp -p fallow-core -p fallow-extract -p fallow-cli --lib --no-run
+        run: cargo test --locked -p fallow-lsp -p fallow-core -p fallow-extract -p fallow-cli -p fallow-engine --lib --no-run
 
       - name: Run the wide case range
         shell: bash
