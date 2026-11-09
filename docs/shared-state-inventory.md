@@ -9,8 +9,8 @@ The optional `shared_state` body has its own version. It is outside finding
 arrays, totals, severity promotion, health scoring, baseline counts, finding
 gates and automatic fixes. Parse, completeness and baseline validity gates
 still apply. Human, JSON and Markdown output support it. Saved envelopes can
-render it as Markdown. Other formats, `--finding-id` and `--group-by` refuse
-the requested inventory, including an empty body.
+render it as Markdown. Other formats, `--sarif-file`, `--finding-id` and
+`--group-by` refuse the requested inventory, including an empty body.
 
 Imported writes require a direct runtime ESM import and a unique value-export
 declaration through the existing graph resolver. Assignment, compound/logical
@@ -18,8 +18,10 @@ assignment, update and delete preserve static property segments. A literal
 `["a.b"]` is one segment; `.a.b` is two. Namespace `ns.config.x` resolves the
 exported `config` value; assigning `ns.config` is excluded. Type-only imports,
 ambiguous or unresolved origins, local aliases, dynamic keys, mutator calls
-and `Object.assign` are outside the contract. The declaration is the binding
-origin, not proof of ownership of the runtime object.
+and `Object.assign` are outside the contract. Destructuring and iteration
+assignment targets are excluded; their computed keys, default initializers and
+right-hand expressions can still contribute reads. The declaration is the
+binding origin, not proof of ownership of the runtime object.
 
 Globals group the exact unshadowed root spelling (`window`, `globalThis`,
 `self`, `global`) and direct custom slot. Each group retains separate read and
@@ -45,9 +47,9 @@ the host union without inferring which runtime will execute a file. The
 catalogue is explicit and incomplete; declarations never extend it.
 
 Extraction retains at most 4096 facts per file and walks at most 64 static
-property segments. The engine retains at most 20000 source facts. Fact limits
-set `truncated`. Parser diagnostics, nesting limits, recorded discovery/read
-loss and truncation clear `complete`. Vue/Svelte scripts and Astro frontmatter
+property segments. The engine retains at most 20000 source facts. Fact and
+property-depth limits set `truncated`. Parser diagnostics, nesting limits,
+recorded discovery/read loss and truncation clear `complete`. Vue/Svelte scripts and Astro frontmatter
 and processed scripts preserve their parser diagnostics through disk and
 process reuse. Ordinary runs also report these embedded parse errors.
 Unsupported syntax, unprocessed Astro scripts and MDX prose remain outside

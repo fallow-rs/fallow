@@ -199,9 +199,7 @@ pub(crate) fn merge_inventory(
     target
         .imported_writes
         .sort_by(|left, right| left.id.cmp(&right.id));
-    target
-        .imported_writes
-        .dedup_by(|left, right| left.id == right.id);
+    target.imported_writes.dedup();
     // Different project roots do not establish a shared global runtime.
     target.globals.extend(other.globals);
     target.globals.sort_by(|left, right| left.id.cmp(&right.id));

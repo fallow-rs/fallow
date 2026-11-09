@@ -146,3 +146,30 @@ window.location = '/';
         .unwrap();
     assert!(ordinary.results.stale_suppressions.is_empty());
 }
+
+#[test]
+fn shared_state_merge_preserves_same_identity_from_distinct_roots() {
+    let first = tempfile::tempdir().unwrap();
+    let second = tempfile::tempdir().unwrap();
+    let analyze = |root: &std::path::Path| {
+        std::fs::write(root.join("owner.ts"), "export const state = {};").unwrap();
+        std::fs::write(
+            root.join("writer.ts"),
+            "import {state} from './owner'; state.custom = 1;",
+        )
+        .unwrap();
+        AnalysisSession::load_default_with_config(root, |config| config.request_shared_state())
+            .analyze_dead_code()
+            .unwrap()
+            .results
+    };
+    let mut left = analyze(first.path());
+    let right = analyze(second.path());
+    let left_write = left.shared_state.as_ref().unwrap().imported_writes[0].clone();
+    let right_write = right.shared_state.as_ref().unwrap().imported_writes[0].clone();
+    assert_eq!(left_write.id, right_write.id);
+    assert_ne!(left_write.writer.path, right_write.writer.path);
+    left.merge_into(right);
+    let writes = &left.shared_state.as_ref().unwrap().imported_writes;
+    assert_eq!(writes, &vec![left_write, right_write]);
+}

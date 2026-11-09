@@ -4,4 +4,4 @@
 
 ### Fixed
 
-- Preserve embedded script parse diagnostics and invalidate stale parse caches so incomplete inventories and existing parse-error gates report lost source evidence.
+- Preserve embedded script parse diagnostics and property-depth truncation, and invalidate stale parse caches so incomplete inventories and existing parse-error gates report lost source evidence.

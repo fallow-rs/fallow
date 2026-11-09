@@ -25,8 +25,9 @@ impl ModuleInfoExtractor {
         info.import_binding_references = references.into();
     }
 
-    pub(crate) fn push_shared_state(&mut self, mut facts: Vec<StateAccessFact>) {
-        if facts.len() > crate::shared_state::MAX_STATE_FACTS {
+    pub(crate) fn push_shared_state(&mut self, collected: crate::shared_state::AccessFacts) {
+        let mut facts = collected.facts;
+        if collected.truncated || facts.len() > crate::shared_state::MAX_STATE_FACTS {
             facts.truncate(crate::shared_state::MAX_STATE_FACTS);
             self.semantic_facts.push(SemanticFact::SharedStateTruncated);
         }

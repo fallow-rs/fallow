@@ -149,3 +149,71 @@ fn shared_state_completeness_includes_discovery_and_read_loss() {
         .unwrap();
     assert!(!inventory.complete, "a discovered source could not be read");
 }
+
+#[test]
+fn shared_state_property_bound_preserves_truncation_through_caches() {
+    for (filename, prefix, suffix) in [
+        ("writer.ts", "", ""),
+        ("writer.vue", "<script>", "</script>"),
+        ("writer.astro", "<script>", "</script>"),
+    ] {
+        let project = tempfile::tempdir().unwrap();
+        let root = project.path();
+        std::fs::write(
+            root.join("entry.ts"),
+            format!(
+                "import './{filename}'; export const read = () => [window.custom, window.keep];"
+            ),
+        )
+        .unwrap();
+        let store = Arc::new(WarmParseStore::new(
+            crate::warm_parse::WarmParseLimits::default(),
+        ));
+        for segments in [64, 65, 64] {
+            let property = format!("window.custom{}", ".child".repeat(segments - 1));
+            std::fs::write(
+                root.join(filename),
+                format!("{prefix}{property} = 1; window.keep = 2; window[key] = 3;{suffix}"),
+            )
+            .unwrap();
+            for (warm, no_cache) in [
+                (false, false),
+                (false, false),
+                (true, false),
+                (true, false),
+                (true, true),
+            ] {
+                let session = AnalysisSession::load_default_with_config(root, |config| {
+                    config.request_shared_state();
+                    config.no_cache = no_cache;
+                })
+                .with_warm_parse(warm.then(|| Arc::clone(&store)));
+                let inventory = session
+                    .analyze_dead_code()
+                    .unwrap()
+                    .results
+                    .shared_state
+                    .unwrap();
+                assert_eq!(
+                    inventory.truncated,
+                    segments > 64,
+                    "{filename} segments={segments}, warm={warm}, no_cache={no_cache}"
+                );
+                assert_eq!(inventory.complete, segments <= 64);
+                let slots: Vec<_> = inventory
+                    .globals
+                    .iter()
+                    .map(|group| group.slot.as_str())
+                    .collect();
+                assert_eq!(
+                    slots,
+                    if segments > 64 {
+                        vec!["keep"]
+                    } else {
+                        vec!["custom", "keep"]
+                    }
+                );
+            }
+        }
+    }
+}

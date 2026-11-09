@@ -656,7 +656,7 @@ pub(crate) fn is_mdx_file(path: &Path) -> bool {
 /// Parse an MDX file by extracting import/export statements, then append the
 /// member accesses and whole-object uses scanned from the prose body.
 #[cfg(test)]
-pub(crate) fn parse_mdx_to_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleInfo {
+fn parse_mdx_to_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleInfo {
     parse_mdx_to_module_with_mode(
         file_id,
         source,

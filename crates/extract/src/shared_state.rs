@@ -5,6 +5,7 @@ use fallow_types::shared_state::{StateAccessFact, StateOperation, StateRoot};
 use oxc_ast::{AstKind, ast::Expression};
 use oxc_semantic::{AstNodes, NodeId, Semantic};
 use oxc_span::{GetSpan, Span};
+use oxc_syntax::number::ToJsString;
 use rustc_hash::FxHashMap;
 
 /// Maximum retained facts per file. One extra fact signals truncation.
@@ -41,13 +42,25 @@ pub fn bound_merged_facts(facts: &mut Vec<fallow_types::extract::SemanticFact>) 
     }
 }
 
+#[derive(Debug, Default, PartialEq, Eq)]
+pub struct AccessFacts {
+    pub facts: Vec<StateAccessFact>,
+    pub truncated: bool,
+}
+
+enum Access {
+    Unsupported,
+    Truncated,
+    Site(Vec<String>, StateOperation),
+}
+
 pub fn collect(
     semantic: &Semantic<'_>,
     imports: &[ImportInfo],
     mode: fallow_types::shared_state::ExtractionMode,
-) -> Vec<StateAccessFact> {
+) -> AccessFacts {
     if mode == fallow_types::shared_state::ExtractionMode::Standard {
-        return Vec::new();
+        return AccessFacts::default();
     }
     let bindings: FxHashMap<_, _> = imports
         .iter()
@@ -58,6 +71,7 @@ pub fn collect(
         })
         .collect();
     let mut facts = Vec::new();
+    let mut truncated = false;
     for node in semantic.nodes().iter() {
         let AstKind::IdentifierReference(identifier) = node.kind() else {
             continue;
@@ -87,8 +101,13 @@ pub fn collect(
             }
             None => continue,
         };
-        let Some((path, operation)) = access(semantic.nodes(), node.id(), identifier.span) else {
-            continue;
+        let (path, operation) = match access(semantic.nodes(), node.id(), identifier.span) {
+            Access::Unsupported => continue,
+            Access::Truncated => {
+                truncated = true;
+                continue;
+            }
+            Access::Site(path, operation) => (path, operation),
         };
         if matches!(root, StateRoot::Import { .. }) && operation == StateOperation::Read {
             continue;
@@ -104,14 +123,10 @@ pub fn collect(
         }
     }
     facts.sort_by_key(|fact| fact.span_start);
-    facts
+    AccessFacts { facts, truncated }
 }
 
-fn access(
-    nodes: &AstNodes<'_>,
-    mut node: NodeId,
-    mut span: Span,
-) -> Option<(Vec<String>, StateOperation)> {
+fn access(nodes: &AstNodes<'_>, mut node: NodeId, mut span: Span) -> Access {
     let mut path = Vec::new();
     loop {
         let parent = nodes.parent_id(node);
@@ -123,15 +138,18 @@ fn access(
                 (member.property.name.to_string(), member.span)
             }
             AstKind::ComputedMemberExpression(member) if member.object.span() == span => {
-                let key = match &member.expression {
-                    Expression::StringLiteral(value) => value.value.as_str()?.to_owned(),
-                    Expression::NumericLiteral(value) => value.value.to_string(),
-                    _ => return None,
+                let Some(key) = static_key(&member.expression) else {
+                    return Access::Unsupported;
                 };
                 (key, member.span)
             }
-            AstKind::PrivateFieldExpression(_) => return None,
+            AstKind::PrivateFieldExpression(_) => return Access::Unsupported,
             AstKind::ParenthesizedExpression(wrapper) => {
+                node = parent;
+                span = wrapper.span;
+                continue;
+            }
+            AstKind::TSTypeAssertion(wrapper) => {
                 node = parent;
                 span = wrapper.span;
                 continue;
@@ -155,15 +173,42 @@ fn access(
         };
         path.push(key);
         if path.len() > MAX_PROPERTY_SEGMENTS {
-            return None;
+            return Access::Truncated;
         }
         node = parent;
         span = next_span;
     }
     if path.is_empty() {
-        return None;
+        return Access::Unsupported;
     }
-    let operation = match nodes.parent_kind(node) {
+    let parent = nodes.parent_kind(node);
+    if unsupported_target(parent, span) {
+        return Access::Unsupported;
+    }
+    Access::Site(path, operation(parent, span))
+}
+
+fn static_key(expression: &Expression<'_>) -> Option<String> {
+    match expression {
+        Expression::StringLiteral(value) => value.value.as_str().map(str::to_owned),
+        Expression::NumericLiteral(value) => Some(value.value.to_js_string()),
+        _ => None,
+    }
+}
+
+fn unsupported_target(kind: AstKind<'_>, span: Span) -> bool {
+    match kind {
+        AstKind::ArrayAssignmentTarget(_) | AstKind::AssignmentTargetRest(_) => true,
+        AstKind::AssignmentTargetPropertyProperty(property) => property.binding.span() == span,
+        AstKind::AssignmentTargetWithDefault(target) => target.binding.span() == span,
+        AstKind::ForInStatement(statement) => statement.left.span() == span,
+        AstKind::ForOfStatement(statement) => statement.left.span() == span,
+        _ => false,
+    }
+}
+
+fn operation(kind: AstKind<'_>, span: Span) -> StateOperation {
+    match kind {
         AstKind::AssignmentExpression(assignment) if assignment.left.span() == span => {
             if assignment.operator.is_assign() {
                 StateOperation::Assign
@@ -180,8 +225,7 @@ fn access(
             StateOperation::Delete
         }
         _ => StateOperation::Read,
-    };
-    Some((path, operation))
+    }
 }
 
 #[cfg(all(test, not(miri)))]
@@ -191,6 +235,112 @@ mod tests {
     use oxc_parser::Parser;
     use oxc_semantic::SemanticBuilder;
     use oxc_span::SourceType;
+
+    fn extracted(source: &str) -> Vec<fallow_types::shared_state::StateAccessFact> {
+        let module = crate::parse_source_to_module_with_mode(
+            crate::FileId(0),
+            std::path::Path::new("entry.ts"),
+            source,
+            0,
+            false,
+            fallow_types::shared_state::ExtractionMode::SharedState,
+        );
+        assert_eq!(module.parse_error_count, 0);
+        module
+            .semantic_facts
+            .iter()
+            .filter_map(|fact| match fact {
+                fallow_types::extract::SemanticFact::SharedState(fact) => Some(fact.clone()),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn shared_state_unsupported_targets_preserve_real_reads() {
+        use fallow_types::shared_state::StateOperation;
+        for source in [
+            "({value: window.custom} = {value: window.rhs});",
+            "[window.custom] = [window.rhs];",
+            "[...window.custom] = window.rhs;",
+            "({value: window.custom = window.rhs} = {});",
+            "for (window.custom of window.rhs) {}",
+            "for (window.custom in window.rhs) {}",
+            "({[window.rhs]: window.custom} = {});",
+        ] {
+            let facts = extracted(source);
+            assert_eq!(
+                facts
+                    .iter()
+                    .map(|fact| (&fact.path, fact.operation))
+                    .collect::<Vec<_>>(),
+                vec![(&vec!["rhs".to_owned()], StateOperation::Read)],
+                "{source}"
+            );
+        }
+        let facts = extracted("target[window.key] = window.rhs;");
+        assert_eq!(
+            facts
+                .iter()
+                .map(|fact| fact.path[0].as_str())
+                .collect::<Vec<_>>(),
+            vec!["key", "rhs"]
+        );
+    }
+
+    #[test]
+    fn shared_state_numeric_keys_use_ecmascript_spelling() {
+        let facts = extracted(
+            r#"window[1e21] = 1; window["1e+21"]; window["1000000000000000000000"];
+window[1e-7] = 1; window["1e-7"]; window["0.0000001"]; window[42] = 1; window["42"];"#,
+        );
+        assert_eq!(
+            facts
+                .iter()
+                .map(|fact| fact.path[0].as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "1e+21",
+                "1e+21",
+                "1000000000000000000000",
+                "1e-7",
+                "1e-7",
+                "0.0000001",
+                "42",
+                "42"
+            ]
+        );
+    }
+
+    #[test]
+    fn shared_state_type_assertions_preserve_import_and_global_writes() {
+        use fallow_types::shared_state::{StateOperation, StateRoot};
+        let facts = extracted(
+            "import {state} from './owner'; (<any>state).custom = 1; (state as any).other = 1; (<any>window).custom = 1; (window as any).other = 1;",
+        );
+        assert_eq!(
+            facts
+                .iter()
+                .map(|fact| fact.path[0].as_str())
+                .collect::<Vec<_>>(),
+            vec!["custom", "other", "custom", "other"]
+        );
+        assert!(
+            facts
+                .iter()
+                .all(|fact| fact.operation == StateOperation::Assign)
+        );
+        assert!(matches!(
+            facts[0].root,
+            StateRoot::Import { import_index: 0 }
+        ));
+        assert_eq!(
+            facts[2].root,
+            StateRoot::Global {
+                name: "window".to_owned()
+            }
+        );
+    }
 
     #[test]
     fn imported_writes_and_unshadowed_globals_preserve_paths() {
@@ -213,7 +363,7 @@ type T = typeof window.custom; config[key] = 5; config.push(1);
             &extractor.imports,
             fallow_types::shared_state::ExtractionMode::SharedState,
         );
-        let paths: Vec<_> = facts.iter().map(|fact| fact.path.clone()).collect();
+        let paths: Vec<_> = facts.facts.iter().map(|fact| fact.path.clone()).collect();
         assert_eq!(
             paths,
             vec![

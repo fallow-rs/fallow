@@ -1594,7 +1594,7 @@ pub struct SemanticUsage {
     unreferenced_import_equals_bindings: Vec<String>,
     pub(crate) component_contracts: fallow_types::extract::ComponentContractFacts,
     pub(crate) effect_facts: Option<Box<fallow_types::extract::EffectFacts>>,
-    shared_state: Vec<fallow_types::shared_state::StateAccessFact>,
+    shared_state: crate::shared_state::AccessFacts,
 }
 
 /// Move every unreferenced non-destructured `require()` binding into the

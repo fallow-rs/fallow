@@ -149,9 +149,9 @@ fn static_regex(pattern: &str) -> regex::Regex {
     regex::Regex::new(pattern).expect("static regex pattern should compile")
 }
 
-pub use module_parse::{
-    parse_source_to_module, parse_source_to_module_with_flags, parse_source_to_module_with_mode,
-};
+#[cfg(test)]
+use module_parse::parse_source_to_module_with_mode;
+pub use module_parse::{parse_source_to_module, parse_source_to_module_with_flags};
 
 /// Leading UTF-8 byte order mark codepoint.
 ///

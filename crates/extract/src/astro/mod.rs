@@ -546,7 +546,7 @@ struct AstroFrontmatterAnalysis {
 /// `<script src="...">` references and inline `<script>` import statements
 /// in the template body.
 #[cfg(test)]
-pub(crate) fn parse_astro_to_module(
+fn parse_astro_to_module(
     file_id: FileId,
     source: &str,
     content_hash: u64,

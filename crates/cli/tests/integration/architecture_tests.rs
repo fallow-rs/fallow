@@ -1209,3 +1209,50 @@ fn shared_state_saved_grouped_inventory_is_rejected_even_when_empty() {
     nested["groups"][0]["shared_state"] = empty;
     assert_eq!(render(&nested).code, 2);
 }
+
+#[test]
+fn shared_state_rejects_sarif_sidecar_without_overwriting_artifact() {
+    for populated in [false, true] {
+        let dir = architecture_project("");
+        if populated {
+            write(dir.path(), "src/writer.ts", "window.custom = 1;");
+            write(
+                dir.path(),
+                "src/reader.ts",
+                "export const read = () => window.custom;",
+            );
+        }
+        let supported = run(
+            "architecture",
+            dir.path(),
+            &["--shared-state", "--format", "json", "--quiet"],
+        );
+        assert_eq!(supported.code, 0, "{}", supported.stderr);
+        assert_eq!(
+            parse_json(&supported)["shared_state"]["globals"]
+                .as_array()
+                .unwrap()
+                .len(),
+            usize::from(populated)
+        );
+        let artifact = dir.path().join("inventory.sarif");
+        std::fs::write(&artifact, "existing sentinel").unwrap();
+        let rejected = run(
+            "architecture",
+            dir.path(),
+            &[
+                "--shared-state",
+                "--format",
+                "json",
+                "--sarif-file",
+                artifact.to_str().unwrap(),
+                "--quiet",
+            ],
+        );
+        assert_eq!(rejected.code, 2, "{}", rejected.stdout);
+        assert_eq!(
+            std::fs::read_to_string(&artifact).unwrap(),
+            "existing sentinel"
+        );
+    }
+}

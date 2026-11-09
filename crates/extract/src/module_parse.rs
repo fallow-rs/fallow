@@ -104,6 +104,7 @@ pub fn parse_source_without_bom(
 }
 
 /// Parse source with explicit optional semantic facts.
+#[cfg(test)]
 pub fn parse_source_to_module_with_mode(
     file_id: FileId,
     path: &Path,

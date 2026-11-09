@@ -53,47 +53,14 @@ pub fn inventory(
     let mut globals = BTreeMap::<(String, String), GlobalStateGroup>::new();
     let mut retained = 0;
     for module in sorted {
-        let Some(info) = parsed.get(&module.file_id) else {
-            output.complete = false;
-            continue;
-        };
-        let relative = module
-            .path
-            .strip_prefix(&config.root)
-            .unwrap_or(&module.path);
-        if crate::test_paths::is_test_path(&config.root, relative) {
-            continue;
-        }
-        for fact in info.semantic_facts.iter() {
-            if matches!(fact, SemanticFact::SharedStateTruncated) {
-                output.truncated = true;
-            }
-            let SemanticFact::SharedState(fact) = fact else {
-                continue;
-            };
-            let site = site(&module.path, info, fact.span_start);
-            if is_suppressed(&info.suppressions, site.line as u32, IssueKind::SharedState)
-                || config
-                    .ignore_findings
-                    .is_ignored_path(&config.root, &module.path)
-            {
-                continue;
-            }
-            if retained >= MAX_INVENTORY_SITES {
-                output.truncated = true;
-                continue;
-            }
-            retained += 1;
-            match &fact.root {
-                StateRoot::Import { import_index } => {
-                    if let Some(write) = imported_write(module, *import_index, fact, site, &origins)
-                    {
-                        output.imported_writes.push(write);
-                    }
-                }
-                StateRoot::Global { name } => add_global(&mut globals, name, fact, site, config),
-            }
-        }
+        collect_sites(
+            module,
+            config,
+            &origins,
+            &mut output,
+            &mut globals,
+            &mut retained,
+        );
     }
     output.globals = globals.into_values().filter_map(finish_global).collect();
     output.imported_writes.sort_by(|left, right| {
@@ -103,6 +70,56 @@ pub fn inventory(
     });
     output.complete &= !output.truncated;
     Some(output)
+}
+
+fn collect_sites(
+    module: &ResolvedModule,
+    config: &ResolvedConfig,
+    origins: &OriginIndex<'_>,
+    output: &mut SharedStateInventory,
+    globals: &mut BTreeMap<(String, String), GlobalStateGroup>,
+    retained: &mut usize,
+) {
+    let Some(info) = origins.parsed.get(&module.file_id) else {
+        output.complete = false;
+        return;
+    };
+    let relative = module
+        .path
+        .strip_prefix(&config.root)
+        .unwrap_or(&module.path);
+    if crate::test_paths::is_test_path(&config.root, relative) {
+        return;
+    }
+    for fact in info.semantic_facts.iter() {
+        if matches!(fact, SemanticFact::SharedStateTruncated) {
+            output.truncated = true;
+        }
+        let SemanticFact::SharedState(fact) = fact else {
+            continue;
+        };
+        let site = site(&module.path, info, fact.span_start);
+        if is_suppressed(&info.suppressions, site.line as u32, IssueKind::SharedState)
+            || config
+                .ignore_findings
+                .is_ignored_path(&config.root, &module.path)
+        {
+            continue;
+        }
+        if *retained >= MAX_INVENTORY_SITES {
+            output.truncated = true;
+            continue;
+        }
+        *retained += 1;
+        match &fact.root {
+            StateRoot::Import { import_index } => {
+                if let Some(write) = imported_write(module, *import_index, fact, site, origins) {
+                    output.imported_writes.push(write);
+                }
+            }
+            StateRoot::Global { name } => add_global(globals, name, fact, site, config),
+        }
+    }
 }
 
 /// Include recorded source loss even when the parser returned no module.

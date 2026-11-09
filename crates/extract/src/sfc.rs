@@ -392,7 +392,7 @@ pub fn is_sfc_file(path: &Path) -> bool {
 
 /// Parse an SFC file by extracting and combining all `<script>` and `<style>` blocks.
 #[cfg(test)]
-pub(crate) fn parse_sfc_to_module(
+fn parse_sfc_to_module(
     file_id: FileId,
     path: &Path,
     source: &str,

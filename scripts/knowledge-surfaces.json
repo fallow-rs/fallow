@@ -194,6 +194,10 @@
         "section": "verification"
       },
       {
+        "path": "docs/shared-state-inventory.md",
+        "section": "architecture"
+      },
+      {
         "path": "docs/similar-code-analysis.md",
         "section": "architecture"
       },

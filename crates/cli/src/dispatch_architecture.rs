@@ -27,6 +27,12 @@ pub(super) fn dispatch_architecture_command(
             dispatch.output,
         );
     }
+    if shared_state && dispatch.cli.sarif_file.is_some() {
+        return emit_input_error(
+            "--shared-state does not support --sarif-file",
+            dispatch.output,
+        );
+    }
     if shared_state
         && !matches!(
             dispatch.output,
