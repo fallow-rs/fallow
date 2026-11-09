@@ -20,6 +20,10 @@ name: Oracle Seeds
 # the unicode_span_oracle module that failed.
 # The platform oracle in crates/cli/tests/integration/platform prints the
 # project seed and the line-ending form of a failing project.
+# A surface differential failure prints the project seed and each fact on
+# which the surfaces disagree. Add that seed to PR_SEEDS in
+# crates/mcp/tests/integration/surface_differential/oracle.rs when you fix
+# the cause.
 on:
   schedule:
     - cron: '40 2 * * *'
@@ -47,6 +51,14 @@ on:
         default: 60
       permutation_start:
         description: 'The first permutation oracle project seed (0: run number times PERMUTATION_SEED_STRIDE)'
+        type: number
+        default: 0
+      surface_seeds:
+        description: 'The number of surface differential project seeds to run'
+        type: number
+        default: 100
+      surface_start:
+        description: 'The first surface differential project seed (0: run number times SURFACE_SEED_STRIDE)'
         type: number
         default: 0
       unicode_cases:
@@ -81,6 +93,9 @@ env:
   # Each permutation oracle seed runs the binary about 180 times (each
   # command and format, with and without the permutation).
   PERMUTATION_SEED_STRIDE: 60
+  # Each surface differential seed runs the CLI, the MCP server, the
+  # language server and the Node bindings about 60 times, in about 4 s.
+  SURFACE_SEED_STRIDE: 100
   # The Unicode span tests parse small inputs, so one run checks many cases.
   UNICODE_SPAN_CASES: 20000
   # Each platform seed runs each command and format on two checkouts.
@@ -296,6 +311,85 @@ jobs:
               echo '```'
             else
               echo "The run failed before it compared an output. Read the log of this step."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit "$status"
+
+  surface-differential-seeds:
+    name: Surface differential wide seed range
+    runs-on: ubuntu-26.04
+    timeout-minutes: 120
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Rust
+        uses: ./.github/actions/setup-rust
+        with:
+          cache-key: oracle-seeds-surface
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26'
+
+      # The test binary first, then the binaries that it runs.
+      - name: Build the surface differential tests
+        run: |
+          cargo test --locked -p fallow-mcp --test integration surface_differential --no-run
+          cargo build --locked -p fallow-cli -p fallow-lsp
+
+      - name: Build the Node bindings
+        run: |
+          cd crates/napi
+          npm ci --omit=optional --ignore-scripts
+          npx napi build --platform --no-js
+          npm run publish:prepare
+
+      - name: Run the wide seed range
+        shell: bash
+        env:
+          INPUT_SEEDS: ${{ inputs.surface_seeds }}
+          INPUT_START: ${{ inputs.surface_start }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          count="${INPUT_SEEDS:-$SURFACE_SEED_STRIDE}"
+          start="${INPUT_START:-0}"
+          case "$count:$start" in
+            *[!0-9:]* | :* | *:) echo "::error::seeds and start must be whole numbers"; exit 2 ;;
+          esac
+          if [ "$count" -lt 1 ]; then
+            echo "::error::seeds must be 1 or more"
+            exit 2
+          fi
+          if [ "$start" = 0 ]; then
+            start=$(( (RUN_NUMBER - 1) * SURFACE_SEED_STRIDE + 1 ))
+          fi
+          export FALLOW_SURFACE_SEEDS="$count"
+          export FALLOW_SURFACE_SEED_START="$start"
+          export FALLOW_SURFACE_NODE_ADDON="$PWD/crates/napi"
+          echo "Project seeds $start to $(( start + count - 1 ))"
+          status=0
+          cargo test --locked -p fallow-mcp --test integration surface_differential:: \
+            -- --include-ignored --skip surface_differential::cache_env::api_child --nocapture 2>&1 | tee seeds.log || status=$?
+          {
+            echo "## Surface differential wide seed range"
+            echo
+            echo "Project seeds $start to $(( start + count - 1 )), with the Node bindings. Run again with \`FALLOW_SURFACE_SEED_START=$start FALLOW_SURFACE_SEEDS=$count\`."
+            echo
+            if [ "$status" = 0 ]; then
+              echo "Each surface gave the same facts."
+            elif grep -q 'the surfaces disagree' seeds.log; then
+              echo "The surfaces disagree:"
+              echo
+              echo '```text'
+              sed -n '/panicked at/,$p' seeds.log | head -60
+              echo '```'
+            else
+              echo "A test failed before it compared the surfaces. Read the log of this step."
             fi
           } >> "$GITHUB_STEP_SUMMARY"
           exit "$status"

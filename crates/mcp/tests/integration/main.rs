@@ -7,6 +7,9 @@
 mod cloud_runtime_context;
 mod inspect_target_cloud;
 mod resources;
+// The surface differential builds `file://` URIs from Unix paths.
+#[cfg(unix)]
+mod surface_differential;
 mod typed_route_env_coverage;
 mod version;
 mod warm_session;
