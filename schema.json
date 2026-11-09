@@ -189,7 +189,7 @@
       }
     },
     "mutation": {
-      "description": "Configures the explicit `fallow mutation` workflow: `runner` (`auto`\nor `vitest`), `operators` (kebab-case names, default each operator),\n`minScore` (0 to 100; a lower score exits with code 1), and\n`concurrency` (half the logical cores). No key starts a run, and the\nside-effect override is a CLI flag only.",
+      "description": "Configures the explicit `fallow mutation` workflow: `runner` (`auto`\nor `vitest`), `operators` (kebab-case names, default the default set),\n`minScore` (0 to 100; a lower score exits with code 1), and\n`concurrency` (half the logical cores). No key starts a run, and the\nside-effect override is a CLI flag only.",
       "$ref": "#/$defs/MutationConfig"
     },
     "health": {

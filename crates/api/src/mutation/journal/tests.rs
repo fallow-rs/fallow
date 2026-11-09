@@ -151,7 +151,7 @@ fn a_resume_with_another_fingerprint_names_each_input_that_differs() {
             "runtime (journal: node 24.1.0, this run: node 22.18.0)".to_owned(),
             "planned source and instrumentation (journal: 0123456789ab, this run: fedcba987654)"
                 .to_owned(),
-            "operators (journal: each operator, this run: arithmetic-operator)".to_owned(),
+            "operators (journal: default set, this run: arithmetic-operator)".to_owned(),
         ]
     );
     assert_eq!(

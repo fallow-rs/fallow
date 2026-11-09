@@ -1151,7 +1151,7 @@ mod end_to_end {
         assert!(
             error
                 .message
-                .contains("operators (journal: each operator, this run: arithmetic-operator)"),
+                .contains("operators (journal: default set, this run: arithmetic-operator)"),
             "{}",
             error.message
         );
