@@ -606,7 +606,10 @@ select nothing for it. `--function-scope` (config key
   `negate-condition`, `arithmetic-operator`, `logical-operator`,
   `unary-operator`, `update-operator`, `return-value`, `removed-call`,
   `optional-chaining`, `boolean-literal`, `string-literal`, `regex-literal`
-  and `removed-chain-link`.
+  and `removed-chain-link`, then the opt-in operators `method-expression`,
+  `call-expression`, `throw-statement`, `switch-case`, `regex-assertion`,
+  `regex-constructor`, `array-literal`, `object-literal` and
+  `block-statement`.
 - Mutants of the same operator on one line keep the order of a SHA-256 hash
   of the mutant id. A second run on the same code keeps the same mutants.
 - Each mutant that the limit leaves out is `pending` with
