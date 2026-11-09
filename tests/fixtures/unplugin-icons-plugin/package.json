@@ -1,0 +1,13 @@
+{
+  "name": "unplugin-icons-plugin-fixture",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/main.ts",
+  "devDependencies": {
+    "@iconify-json/lucide": "1.0.0",
+    "@iconify-json/mdi": "1.0.0",
+    "@iconify-json/tabler": "1.0.0",
+    "@iconify/json": "1.0.0",
+    "unplugin-icons": "1.0.0"
+  }
+}

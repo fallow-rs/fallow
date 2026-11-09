@@ -697,3 +697,20 @@ package gives no entry. The entries have the runtime role.
 The plugin also credits the members that n8n reads from a class that
 implements `INodeType` or `ICredentialType`. The rule is scoped to the
 implements clause, so other classes keep their findings.
+
+## unplugin-icons imports
+
+The `unplugin-icons` plugin activates on an `unplugin-icons` dependency. It
+marks the `~icons/`, `virtual:icons/` and `virtual/icons/` module prefixes as
+virtual modules, so an icon import is not an unlisted dependency or an
+unresolved import.
+
+The package credit is in `analyze/iconify.rs`, next to the credit for Iconify
+markup strings. The analysis reads the import, re-export and dynamic import
+specifiers of each resolved module, because `ModuleInfo` releases its dynamic
+imports after resolution. An import of `<prefix><set>/<name>` credits
+`@iconify-json/<set>`, `@iconify/json` and `unplugin-icons` when the project
+declares them. unplugin-icons loads an icon set from `@iconify-json/<set>`
+first and from `@iconify/json` next. The credit applies to the whole project,
+the same as the markup credit, because a package can bundle the icon imports
+of another workspace package.

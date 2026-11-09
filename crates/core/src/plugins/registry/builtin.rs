@@ -45,10 +45,11 @@ use super::super::{
     textlint::TextlintPlugin, tsd::TsdPlugin, tsdown::TsdownPlugin, tsup::TsupPlugin,
     turborepo::TurborepoPlugin, typedoc::TypedocPlugin, typeorm::TypeormPlugin,
     typescript::TypeScriptPlugin, typescript_content_mapper::TypescriptContentMapperPlugin,
-    unocss::UnoCssPlugin, varlock::VarlockPlugin, velite::VelitePlugin, vercel::VercelPlugin,
-    vite::VitePlugin, vite_plus::VitePlusPlugin, vitepress::VitePressPlugin, vitest::VitestPlugin,
-    vscode::VscodePlugin, waku::WakuPlugin, webdriverio::WebdriverioPlugin, webpack::WebpackPlugin,
-    wrangler::WranglerPlugin, wuchale::WuchalePlugin, wxt::WxtPlugin,
+    unocss::UnoCssPlugin, unplugin_icons::UnpluginIconsPlugin, varlock::VarlockPlugin,
+    velite::VelitePlugin, vercel::VercelPlugin, vite::VitePlugin, vite_plus::VitePlusPlugin,
+    vitepress::VitePressPlugin, vitest::VitestPlugin, vscode::VscodePlugin, waku::WakuPlugin,
+    webdriverio::WebdriverioPlugin, webpack::WebpackPlugin, wrangler::WranglerPlugin,
+    wuchale::WuchalePlugin, wxt::WxtPlugin,
 };
 
 macro_rules! push_plugins {
@@ -185,6 +186,7 @@ fn add_quality_and_language_plugins(plugins: &mut Vec<Box<dyn Plugin>>) {
         TailwindPlugin,
         PostCssPlugin,
         UnoCssPlugin,
+        UnpluginIconsPlugin,
         PandaCssPlugin,
         PrismaPlugin,
         DrizzlePlugin,

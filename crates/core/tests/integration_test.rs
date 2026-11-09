@@ -247,6 +247,8 @@ mod type_test_entries;
 mod typed_receiver_scoping;
 #[path = "integration_test/unmeasured_zero_diagnostics.rs"]
 mod unmeasured_zero_diagnostics;
+#[path = "integration_test/unplugin_icons_plugin.rs"]
+mod unplugin_icons_plugin;
 #[path = "integration_test/unreachable_exports.rs"]
 mod unreachable_exports;
 #[path = "integration_test/vercel_api_directory_functions.rs"]

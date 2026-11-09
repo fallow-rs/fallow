@@ -2145,6 +2145,7 @@ mod typeorm;
 mod typescript;
 mod typescript_content_mapper;
 mod unocss;
+pub(crate) mod unplugin_icons;
 mod varlock;
 mod velite;
 mod vercel;

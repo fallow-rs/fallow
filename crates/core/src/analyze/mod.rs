@@ -852,8 +852,7 @@ fn run_setup_and_detect(input: &SetupAndDetectInput<'_, '_>) -> AnalysisResults 
             .iter()
             .filter(|m| !input.excluded.contains(&m.file_id))
     };
-    let iconify_referenced =
-        iconify::collect_iconify_referenced_deps(credit_modules(), input.pkg, input.workspaces);
+    let iconify_referenced = iconify::collect_iconify_referenced_deps(input);
     let loader_referenced =
         inline_loaders::collect_inline_loader_referenced_deps(input.resolved_modules, input.graph);
     let jsx_runtime_referenced = jsx_runtime_credits::collect_jsx_runtime_package_credits(
