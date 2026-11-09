@@ -2200,3 +2200,6 @@ mod compare {
         assert_eq!(conflict.code, 2, "{}", conflict.stderr);
     }
 }
+
+#[path = "mutation_copy_scope_tests.rs"]
+mod copy_scope;

@@ -23,6 +23,15 @@ read-only next steps. It never writes a test and never proposes a code change.
 - The default scope is the changed code against the detected base ref, the same
   way as `fallow audit`. `--changed-since <ref>` (alias `--base`) sets the
   base, and `--diff-file` gives the diff.
+  Generated mutation diffs use Git's rename and copy detection (`-M -C`):
+  unchanged copied lines are excluded, while edits in a detected copy remain
+  in scope. Detection considers modified sources and keeps Git's configured
+  rename limit. Copies from unchanged sources, sources outside a selected
+  package root, and untracked files can still appear as new additions.
+  Supplied `--diff-file` hunks stay literal. A plain addition patch selects
+  all its added lines; generate a patch with `git diff -M -C` to retain copy
+  ancestry, or add `--find-copies-harder` when unchanged sources must also be
+  considered. Exhaustive source searches can cost more on large repositories.
 - `--all` mutates each source file. Positional paths mutate only those files or
   directories. The three scopes are exclusive.
 - `--workspace` and `--changed-workspaces` exit with code 2 in version 1,

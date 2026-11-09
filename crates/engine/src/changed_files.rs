@@ -471,6 +471,22 @@ fn collect_git_rename_pairs(
 /// The result includes committed, staged, unstaged, and untracked changes so it
 /// covers the same scope as `try_get_changed_files`.
 pub fn try_get_changed_diff(root: &Path, git_ref: &str) -> Result<String, ChangedFilesError> {
+    changed_diff(root, git_ref, false)
+}
+
+/// Return a mutation scope diff with explicit rename and copy detection.
+///
+/// Ordinary copy detection considers modified sources without searching every
+/// unchanged file. Git's configured similarity limit still applies.
+pub fn try_get_mutation_diff(root: &Path, git_ref: &str) -> Result<String, ChangedFilesError> {
+    changed_diff(root, git_ref, true)
+}
+
+fn changed_diff(
+    root: &Path,
+    git_ref: &str,
+    detect_copies: bool,
+) -> Result<String, ChangedFilesError> {
     validate_git_ref(git_ref).map_err(ChangedFilesError::InvalidRef)?;
     let toplevel = resolve_git_toplevel(root)?;
     let merge_base_output = spawn_output(&mut git_command(root, &["merge-base", git_ref, "HEAD"]))
@@ -487,17 +503,13 @@ pub fn try_get_changed_diff(root: &Path, git_ref: &str) -> Result<String, Change
         ));
     }
 
-    let output = spawn_output(&mut git_command(
-        root,
-        &[
-            "diff",
-            "--relative",
-            "--unified=0",
-            "--end-of-options",
-            &merge_base,
-        ],
-    ))
-    .map_err(|e| ChangedFilesError::GitMissing(e.to_string()))?;
+    let mut args = vec!["diff", "--relative", "--unified=0"];
+    if detect_copies {
+        args.extend(["-M", "-C"]);
+    }
+    args.extend(["--end-of-options", &merge_base]);
+    let output = spawn_output(&mut git_command(root, &args))
+        .map_err(|e| ChangedFilesError::GitMissing(e.to_string()))?;
 
     if !output.status.success() {
         return Err(changed_files_error_from_output(&output));
@@ -1315,15 +1327,20 @@ mod tests {
         std::fs::write(repo.path().join("unstaged.ts"), "unstaged\n").expect("unstaged edit");
         std::fs::write(repo.path().join("untracked.ts"), "untracked\n").expect("untracked edit");
 
-        let diff = try_get_changed_diff(repo.path(), "base").expect("complete changeset diff");
-        let index = fallow_output::DiffIndex::from_unified_diff(&diff);
+        for diff in [
+            try_get_changed_diff(repo.path(), "base"),
+            try_get_mutation_diff(repo.path(), "base"),
+        ] {
+            let diff = diff.expect("complete changeset diff");
+            let index = fallow_output::DiffIndex::from_unified_diff(&diff);
 
-        assert!(diff.contains("b/committed.ts"), "{diff}");
-        assert!(diff.contains("b/staged.ts"), "{diff}");
-        assert!(diff.contains("b/unstaged.ts"), "{diff}");
-        assert!(diff.contains("b/untracked.ts"), "{diff}");
-        assert_eq!(index.hunk_count(), 4);
-        assert_eq!(index.net_lines(), 2);
+            assert!(diff.contains("b/committed.ts"), "{diff}");
+            assert!(diff.contains("b/staged.ts"), "{diff}");
+            assert!(diff.contains("b/unstaged.ts"), "{diff}");
+            assert!(diff.contains("b/untracked.ts"), "{diff}");
+            assert_eq!(index.hunk_count(), 4);
+            assert_eq!(index.net_lines(), 2);
+        }
     }
 
     fn run_git(root: &Path, args: &[&str]) {

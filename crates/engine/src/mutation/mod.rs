@@ -74,7 +74,7 @@ pub const RUNNER_CONFIG_MODULES: [&str; 18] = [
 #[derive(Debug, Clone)]
 pub enum MutationScope {
     /// The added lines of a diff against the base ref. Build the index with
-    /// the existing diff machinery (`changed_files::try_get_changed_diff`,
+    /// the mutation diff machinery (`changed_files::try_get_mutation_diff`,
     /// `DiffIndex::from_unified_diff` and `diff_source::place_diff`). Only
     /// mutants that overlap an added line are kept.
     ChangedSinceBase(DiffIndex),
