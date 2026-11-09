@@ -3,6 +3,12 @@
 //! This crate handles all file parsing: JS/TS via Oxc, Vue/Svelte SFC extraction,
 //! Astro frontmatter, MDX import/export extraction, CSS Module class name extraction,
 //! HTML asset reference extraction, and incremental caching of parse results.
+//!
+//! User documentation for the supported file types is on [fallow.tools](https://fallow.tools/docs/analysis/file-types/):
+//!
+//! - [Supported file types](https://fallow.tools/docs/analysis/file-types/)
+//! - [CSS analysis](https://fallow.tools/docs/analysis/css-analysis/)
+//! - [Framework plugins](https://fallow.tools/docs/frameworks/built-in/)
 
 #![warn(missing_docs)]
 #![cfg_attr(not(test), deny(clippy::disallowed_methods))]

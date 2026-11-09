@@ -6,6 +6,12 @@
 //! CLI-independent option, error, and output contracts so NAPI, future Rust
 //! embedders, and the engine facade can share them without depending on the
 //! CLI crate.
+//!
+//! User documentation for the analyses that this API runs is on [fallow.tools](https://fallow.tools/docs/analysis/):
+//!
+//! - [Dead code analysis](https://fallow.tools/docs/analysis/dead-code/)
+//! - [Duplication analysis](https://fallow.tools/docs/analysis/duplication/)
+//! - [Health and complexity](https://fallow.tools/docs/explanations/health/)
 #![warn(missing_docs)]
 #![cfg_attr(
     test,

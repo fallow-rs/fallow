@@ -10,6 +10,10 @@
 //!
 //! The crate version follows the fallow release. The wire version is
 //! [`REPORT_PROTOCOL_VERSION`].
+//!
+//! User documentation for the report formats is on [fallow.tools](https://fallow.tools/docs/cli/schema/):
+//!
+//! - [Report schema](https://fallow.tools/docs/cli/schema/)
 #![warn(missing_docs)]
 #![cfg_attr(
     test,

@@ -13,6 +13,13 @@
 //! upgrade. Construct them with struct update syntax, for example
 //! `RulesConfig { unused_files: Severity::Off, ..RulesConfig::default() }`,
 //! to stay source-compatible.
+//!
+//! User documentation for the configuration file is on [fallow.tools](https://fallow.tools/docs/configuration/overview/):
+//!
+//! - [Configuration overview](https://fallow.tools/docs/configuration/overview/)
+//! - [Rules](https://fallow.tools/docs/configuration/rules/)
+//! - [Workspaces](https://fallow.tools/docs/configuration/workspaces/)
+//! - [Boundaries](https://fallow.tools/docs/configuration/boundaries/)
 
 #![warn(missing_docs)]
 #![cfg_attr(not(test), deny(clippy::disallowed_methods))]

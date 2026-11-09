@@ -22,6 +22,10 @@
 //! # Grace ladder
 //!
 //! Matches Docker Desktop / JetBrains conventions. See [`grace_state`].
+//!
+//! User documentation for license management is on [fallow.tools](https://fallow.tools/docs/cli/license/):
+//!
+//! - [`fallow license`](https://fallow.tools/docs/cli/license/)
 
 #![forbid(unsafe_code)]
 #![cfg_attr(
