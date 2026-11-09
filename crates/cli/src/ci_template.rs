@@ -1,4 +1,5 @@
 use crate::exit_codes::exit_invalid_input;
+use crate::setup_hooks::symlink_guard::{refusal_message, symlinked_component};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -59,6 +60,13 @@ pub fn run_gitlab_template(opts: &GitlabTemplateOptions) -> ExitCode {
 }
 
 fn vendor_gitlab_files(root: &Path, force: bool) -> ExitCode {
+    if let Some((path, link)) = outside_link(root) {
+        eprintln!(
+            "Error: {}",
+            refusal_message(&display_path(root, &path), &display_path(root, &link))
+        );
+        return exit_invalid_input();
+    }
     for file in GITLAB_FILES {
         let path = root.join(file.path);
         if let Err(err) = write_vendored_file(&path, file.content, file.executable, force) {
@@ -73,6 +81,22 @@ fn vendor_gitlab_files(root: &Path, force: bool) -> ExitCode {
         GITLAB_FILES.len()
     );
     ExitCode::SUCCESS
+}
+
+/// The first vendored file whose path goes through a symlink that resolves
+/// outside `root`, with that symlink. A vendor directory that does not exist
+/// yet has no entries below it, so it has no such link.
+fn outside_link(root: &Path) -> Option<(PathBuf, PathBuf)> {
+    root.symlink_metadata().ok()?;
+    GITLAB_FILES.iter().find_map(|file| {
+        let path = root.join(file.path);
+        symlinked_component(root, &path).map(|link| (path, link))
+    })
+}
+
+fn display_path(root: &Path, path: &Path) -> String {
+    path.strip_prefix(root)
+        .map_or_else(|_| path.display().to_string(), |p| p.display().to_string())
 }
 
 fn write_vendored_file(
@@ -156,6 +180,75 @@ mod tests {
 
         assert_eq!(code, exit_invalid_input());
         assert_eq!(std::fs::read_to_string(path).expect("read"), "custom");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn vendoring_does_not_create_a_file_through_a_dangling_link() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let outside = tempfile::tempdir().expect("tempdir");
+        let planted = outside.path().join("pipeline.yml");
+        std::fs::create_dir(dir.path().join("ci")).expect("mkdir");
+        std::os::unix::fs::symlink(&planted, dir.path().join("ci/gitlab-ci.yml")).expect("symlink");
+
+        let code = vendor_gitlab_files(dir.path(), false);
+
+        assert_eq!(code, exit_invalid_input());
+        assert!(!planted.exists());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn forced_vendoring_does_not_overwrite_a_linked_file_outside_the_dir() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let outside = tempfile::tempdir().expect("tempdir");
+        let target = outside.path().join("script");
+        std::fs::write(&target, "keep\n").expect("write");
+        std::fs::create_dir_all(dir.path().join("ci/scripts")).expect("mkdir");
+        std::os::unix::fs::symlink(&target, dir.path().join("ci/scripts/comment.sh"))
+            .expect("symlink");
+
+        let code = vendor_gitlab_files(dir.path(), true);
+
+        assert_eq!(code, exit_invalid_input());
+        assert_eq!(std::fs::read_to_string(&target).expect("read"), "keep\n");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn vendoring_does_not_write_into_a_linked_directory_outside_the_dir() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let outside = tempfile::tempdir().expect("tempdir");
+        std::os::unix::fs::symlink(outside.path(), dir.path().join("ci")).expect("symlink");
+
+        let code = vendor_gitlab_files(dir.path(), false);
+
+        assert_eq!(code, exit_invalid_input());
+        assert!(!outside.path().join("gitlab-ci.yml").exists());
+    }
+
+    #[test]
+    fn vendoring_creates_a_missing_vendor_dir() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let target = dir.path().join("new/vendor");
+
+        let code = vendor_gitlab_files(&target, false);
+
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert!(target.join("ci/gitlab-ci.yml").is_file());
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn vendoring_writes_through_a_link_inside_the_dir() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir(dir.path().join("shared")).expect("mkdir");
+        std::os::unix::fs::symlink("shared", dir.path().join("ci")).expect("symlink");
+
+        let code = vendor_gitlab_files(dir.path(), false);
+
+        assert_eq!(code, ExitCode::SUCCESS);
+        assert!(dir.path().join("shared/gitlab-ci.yml").is_file());
     }
 
     #[test]

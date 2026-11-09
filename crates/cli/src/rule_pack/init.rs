@@ -7,6 +7,7 @@ use serde_json::json;
 
 use super::{InitArgs, RulePackContext};
 use crate::error::emit_input_error;
+use crate::setup_hooks::symlink_guard::{refusal_message, symlinked_component};
 
 pub fn run(args: &InitArgs, ctx: &RulePackContext<'_>) -> ExitCode {
     let selected = match select_template(args, ctx.output) {
@@ -102,6 +103,13 @@ fn available_pack_path(
             ctx.output,
         ));
     }
+    if let Some(link) = symlinked_component(ctx.root, &abs_path) {
+        let link = link.strip_prefix(ctx.root).unwrap_or(&link);
+        return Err(emit_input_error(
+            &refusal_message(&rel_path.display().to_string(), &link.display().to_string()),
+            ctx.output,
+        ));
+    }
     Ok(rel_path)
 }
 
@@ -181,6 +189,19 @@ fn update_config(ctx: &RulePackContext<'_>, rel_path: &str) -> ConfigUpdateResul
         config_path
     };
     let config_display = root_relative(ctx.root, &config_path);
+    // A config named with an absolute `--config` outside the root is the
+    // caller's choice. A discovered or root-relative config that links out
+    // of the project is not edited; the user gets the snippet instead.
+    if config_path.starts_with(ctx.root)
+        && let Some(link) = symlinked_component(ctx.root, &config_path)
+    {
+        let link = link.strip_prefix(ctx.root).unwrap_or(&link);
+        let reason = refusal_message(&config_display, &link.display().to_string());
+        return ConfigUpdateResult::ManualSnippet {
+            config_path: config_display,
+            reason,
+        };
+    }
     match fallow_config::add_rule_pack_path(&config_path, rel_path) {
         Ok(true) => ConfigUpdateResult::Updated(config_display),
         Ok(false) => ConfigUpdateResult::AlreadyPresent(config_display),

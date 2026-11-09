@@ -393,6 +393,7 @@ fn setup_lock_path(root: &Path) -> PathBuf {
 
 fn ensure_fallow_dir(root: &Path) -> Result<(), String> {
     let dir = root.join(".fallow");
+    refuse_outside_link(root, &dir)?;
     std::fs::create_dir_all(&dir)
         .map_err(|err| format!("failed to create {}: {err}", dir.display()))
 }
@@ -1756,7 +1757,21 @@ fn recipe_path(root: &Path) -> PathBuf {
     root.join("docs").join("collect-coverage.md")
 }
 
+/// Refuse a project path when it, or a directory on the way to it, is a
+/// symlink that resolves outside `root`. A cloned repository can commit such
+/// a link to make setup write a file outside the project.
+fn refuse_outside_link(root: &Path, path: &Path) -> Result<(), String> {
+    match crate::setup_hooks::symlinked_component(root, path) {
+        Some(link) => Err(crate::setup_hooks::symlink_guard::refusal_message(
+            &display_relative(root, path),
+            &display_relative(root, &link),
+        )),
+        None => Ok(()),
+    }
+}
+
 fn write_recipe(root: &Path, contents: &str) -> Result<PathBuf, String> {
+    refuse_outside_link(root, &recipe_path(root))?;
     let docs_dir = root.join("docs");
     std::fs::create_dir_all(&docs_dir)
         .map_err(|err| format!("failed to create {}: {err}", docs_dir.display()))?;
