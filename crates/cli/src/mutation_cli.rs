@@ -125,7 +125,8 @@ pub struct MutationArgs {
     /// Type-check each survived mutant through the `--type-aware`
     /// companion. A survivor that does not type-check becomes
     /// `compile_error` and leaves the score. An optional-chaining survivor on a
-    /// receiver that the types prove never nullish becomes `equivalent`.
+    /// receiver whose type excludes `null` and `undefined` gets an advisory
+    /// `equivalence_hint`. Its status and the score do not change.
     #[arg(long)]
     pub typecheck: bool,
     /// Continue an interrupted or partial run: reuse the killed and confirmed

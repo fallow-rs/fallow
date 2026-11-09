@@ -36769,16 +36769,6 @@
       ],
       "description": "The quality of the evidence of one `--kill-matrix-for` target."
     },
-    "MutantEquivalentReason": {
-      "oneOf": [
-        {
-          "type": "string",
-          "const": "type-proven-never-nullish",
-          "description": "The mutant removes an optional-chaining link (`?.`), and the type\ncheck shows that the receiver is never `null` or `undefined`. The\nproof needs `strictNullChecks` and `noUncheckedIndexedAccess`, and it\ndoes not hold for a cast, `any`, `unknown` or a generic type."
-        }
-      ],
-      "description": "The proof that makes a mutant `equivalent` without a verdict."
-    },
     "MutantEquivalenceHint": {
       "oneOf": [
         {

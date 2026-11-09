@@ -146,9 +146,10 @@ pub struct MutationConfig {
     /// Type-check each survived mutant through the TypeScript-Go companion
     /// of `--type-aware`. A survivor that does not type-check becomes
     /// `compile_error` and does not count in the score. A survivor that
-    /// removes an optional-chaining link from a receiver that is never
-    /// nullish becomes `equivalent` and does not count either. Unset or `false`
-    /// checks no survivor. `--typecheck` turns the check on.
+    /// removes an optional-chaining link from a receiver whose type excludes
+    /// `null` and `undefined` gets an advisory `equivalence_hint`. Its status
+    /// and the score do not change. Unset or `false` checks no survivor.
+    /// `--typecheck` turns the check on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub typecheck: Option<bool>,
 
