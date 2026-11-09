@@ -315,6 +315,7 @@ mod tests {
             typecheck: None,
             recheck: None,
             compare: None,
+            gate_outcomes: None,
         }
     }
 

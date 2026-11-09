@@ -19,9 +19,9 @@ use fallow_api::{
 };
 use fallow_config::{MutationConfig, OutputFormat};
 use fallow_output::{
-    MutantStatus, MutationPlanOutput, MutationReport, serialize_mutation_inspect_json_output,
-    serialize_mutation_json_output, serialize_mutation_plan_json_output,
-    serialize_mutation_tasks_json_output,
+    GateName, GateOutcome, MutantStatus, MutationPlanOutput, MutationReport,
+    serialize_mutation_inspect_json_output, serialize_mutation_json_output,
+    serialize_mutation_plan_json_output, serialize_mutation_tasks_json_output,
 };
 
 use crate::json_style::JsonStyle;
@@ -423,17 +423,21 @@ fn absolute_output_path(path: &Path) -> PathBuf {
     std::env::current_dir().map_or_else(|_| path.to_path_buf(), |cwd| cwd.join(path))
 }
 
-/// The exit code of the score of a finished run: 1 only when a minimum
-/// score is set and the measured score is lower. Survivors alone never fail
-/// a run. A run with no counted mutant has no score and passes here; a run
-/// in which baseline failures leave each mutant without a test result exits 2
-/// through [`baseline_blocked_run_error`] instead.
+/// The exit code of the score of a finished run, read off the
+/// `mutation-min-score` entry of `gate_outcomes`: 1 only when the entry is an
+/// enforced `fail`, so the exit code and the published verdict are one rule.
+/// Survivors alone never fail a run. A run with no counted mutant has a
+/// `skipped` entry and passes here; a run in which baseline failures leave
+/// each mutant without a test result exits 2 through
+/// [`baseline_blocked_run_error`] instead.
 #[must_use]
-pub fn run_exit_code(report: &MutationReport, min_score: Option<f64>) -> u8 {
-    match (min_score, report.summary.score) {
-        (Some(minimum), Some(score)) if score * 100.0 < minimum => MIN_SCORE_EXIT_CODE,
-        _ => 0,
-    }
+pub fn run_exit_code(report: &MutationReport) -> u8 {
+    let failed = report
+        .gate_outcomes
+        .as_ref()
+        .and_then(|gates| gates.get(&GateName::MutationMinScore))
+        .is_some_and(GateOutcome::fails_run);
+    if failed { MIN_SCORE_EXIT_CODE } else { 0 }
 }
 
 fn path_argument(path: &Path) -> String {
@@ -675,7 +679,8 @@ fn run_inner(input: &MutationCliInput<'_>) -> Result<ExitCode, ProgrammaticError
     let (compare_section, compare_blocked) = compare_with(baseline.as_ref(), &report);
     report.compare = compare_section;
     let blocked = blocked.or(compare_blocked);
-    let exit = run_exit_code(&report, min_score);
+    report.gate_outcomes = crate::gates::mutation_gate_outcomes(report.summary.score, min_score);
+    let exit = run_exit_code(&report);
     crate::telemetry::note_result_count(report.summary.counts.survived);
     let value = serialize_mutation_json_output(report.clone()).map_err(|error| {
         ProgrammaticError::new(

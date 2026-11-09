@@ -1,0 +1,39 @@
+---
+source: crates/output/src/mutation_ci_tests.rs
+expression: both_headings(&view)
+---
+#### Mutation testing
+
+**Partial run** (`time-budget`). The counts cover only the mutants that ran. The next run with the same budget continues from the result cache.
+
+**10 mutants survived.** Score 75.0%.
+
+| Killed | Survived | No coverage | Not measured | Score |
+| --- | --- | --- | --- | --- |
+| 30 | 10 | 0 | 80 | 75.0% |
+
+Scope: the changed lines.
+
+Each survived mutant is a small code change that made no test fail. The **Tests** findings above show the survived mutants on the changed lines. Add a test that fails on the change.
+
+To inspect a mutant, run `fallow mutation inspect <mutant-id> --report fallow-mutation.json` with the `fallow-mutation.json` file of this job.
+
+===== summary heading =====
+
+## Mutation testing
+
+**Partial run** (`time-budget`). The counts cover only the mutants that ran. The next run with the same budget continues from the result cache.
+
+**10 mutants survived.** Score 75.0%.
+
+| Killed | Survived | No coverage | Not measured | Score |
+| --- | --- | --- | --- | --- |
+| 30 | 10 | 0 | 80 | 75.0% |
+
+Scope: the changed lines.
+
+The run took 4m 12s. 3 results came from the cache.
+
+Each survived mutant is a small code change that made no test fail. Add a test that fails on the change.
+
+To inspect a mutant, run `fallow mutation inspect <mutant-id> --report fallow-mutation.json` with the `fallow-mutation.json` file of this job.

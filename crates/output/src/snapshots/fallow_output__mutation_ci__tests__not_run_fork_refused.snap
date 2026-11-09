@@ -1,0 +1,13 @@
+---
+source: crates/output/src/mutation_ci_tests.rs
+expression: both_headings(&view)
+---
+#### Mutation testing
+
+**Mutation testing did not run.** The merge request comes from a fork, and the pipeline runs in the target project.
+
+===== summary heading =====
+
+## Mutation testing
+
+**Mutation testing did not run.** The merge request comes from a fork, and the pipeline runs in the target project.

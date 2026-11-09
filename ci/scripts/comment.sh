@@ -71,13 +71,6 @@ if FALLOW_PR_COMMENT_ENVELOPE_FILE="fallow-mr-comment-envelope.json" \
    FALLOW_PR_DECISION_FILE="fallow-mr-decision.json" \
    FALLOW_PR_DETAILS_FILE="fallow-mr-details.json" \
    render_with_fallow pr-comment-gitlab fallow-mr-comment.md; then
-  if [ -n "${FALLOW_MUTATION_SECTION_FILE:-}" ] && [ -s "$FALLOW_MUTATION_SECTION_FILE" ]; then
-    # shellcheck source=mutation_common.sh
-    source "${SCRIPT_DIR}/mutation_common.sh"
-    fallow_mutation_insert_section fallow-mr-comment.md fallow-mr-comment-envelope.json \
-      "$FALLOW_MUTATION_SECTION_FILE" "${FALLOW_MUTATION_CLEAN:-true}" \
-      || echo "WARNING: Failed to add the mutation section to the MR comment"
-  fi
   POST_COMMENT_ARGS=(
     ci post-pr-comment
     --provider gitlab

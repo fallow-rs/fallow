@@ -2708,6 +2708,24 @@
           "type": "string",
           "required": true,
           "description": "Path to a fallow JSON results file produced by `--format json` (dead-code, architecture, dupes, health, audit, security, or bare combined)"
+        },
+        {
+          "name": "--mutation-report",
+          "type": "string",
+          "required": false,
+          "description": "A saved `fallow mutation --format json` report, or the JSON error envelope of a failed run, to render with the results. Applies to the pr-comment, review, github-summary, github-annotations and codeclimate formats only. The paths in the report are relative to the root of the mutation run, which must be the `--root` of this call"
+        },
+        {
+          "name": "--mutation-not-run",
+          "type": "string",
+          "required": false,
+          "description": "Why mutation testing did not run in this job, so the render states it. Applies to the same formats as `--mutation-report`",
+          "possible_values": [
+            "event-refused",
+            "fork-refused",
+            "no-change-scope",
+            "interrupted"
+          ]
         }
       ]
     },
@@ -7265,6 +7283,36 @@
       "license": "free",
       "license_note": null,
       "docs_url": "https://fallow.tools/docs/cli/audit/#diff-risk-rules"
+    },
+    {
+      "id": "mutation-survived",
+      "rule_id": "fallow/mutation-survived",
+      "command": "mutation",
+      "category": "Tests",
+      "description": "A small code change made no test fail",
+      "label": null,
+      "config_key": null,
+      "registry_index": null,
+      "aliases": [],
+      "lsp": false,
+      "filter_flag": null,
+      "result_key": null,
+      "summary_label": null,
+      "summary_docs_anchor": null,
+      "sarif_rule_ids": null,
+      "codeclimate_check_names": null,
+      "ts_alias": null,
+      "counts_in_total": false,
+      "fixable": false,
+      "suppressible": false,
+      "suppress_comment": null,
+      "default_severity": null,
+      "opt_in": null,
+      "frameworks": [],
+      "note": null,
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://fallow.tools/docs/cli/mutation/"
     }
   ],
   "suppression_comments": {

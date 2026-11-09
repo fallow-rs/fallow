@@ -15,8 +15,8 @@ use crate::Cli;
 use crate::cli_format::Format;
 use crate::exit_codes::exit_invalid_input;
 use crate::explain::{
-    AUDIT_RULES, CHECK_RULES, DUPES_RULES, FLAGS_RULES, HEALTH_RULES, RuleDef, SECURITY_RULES,
-    rule_docs_url, rule_severity_key,
+    AUDIT_RULES, CHECK_RULES, DUPES_RULES, FLAGS_RULES, HEALTH_RULES, MUTATION_RULES, RuleDef,
+    SECURITY_RULES, rule_docs_url, rule_severity_key,
 };
 
 pub fn run_schema(json_style: crate::json_style::JsonStyle) -> ExitCode {
@@ -311,6 +311,9 @@ fn issue_types_schema() -> serde_json::Value {
     }
     for rule in AUDIT_RULES {
         rows.push(issue_type_row(rule, "audit", &default_severities));
+    }
+    for rule in MUTATION_RULES {
+        rows.push(issue_type_row(rule, "mutation", &default_severities));
     }
     serde_json::Value::Array(rows)
 }
@@ -934,7 +937,8 @@ mod tests {
             + DUPES_RULES.len()
             + FLAGS_RULES.len()
             + SECURITY_RULES.len()
-            + AUDIT_RULES.len();
+            + AUDIT_RULES.len()
+            + MUTATION_RULES.len();
         assert_eq!(rows.len(), expected, "one issue_types row per explain rule");
 
         let row_rule_ids: FxHashSet<&str> = rows
@@ -953,6 +957,7 @@ mod tests {
             .chain(FLAGS_RULES)
             .chain(SECURITY_RULES)
             .chain(AUDIT_RULES)
+            .chain(MUTATION_RULES)
         {
             assert!(
                 row_rule_ids.contains(rule.id),

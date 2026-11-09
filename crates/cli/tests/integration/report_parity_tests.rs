@@ -527,6 +527,67 @@ fn every_report_from_command_has_a_parity_case() {
     }
 }
 
+/// The joins that only exist on the saved path, as `(flag, test)`. A join adds
+/// evidence that no live analysis run reads, so no direct render exists to
+/// compare with. `test` in `report_mutation_tests.rs` covers the join instead.
+const SAVED_ONLY_JOINS: &[(&str, &str)] = &[
+    (
+        "--mutation-report",
+        "pr_comments_join_the_survivors_the_section_and_the_decision_rows",
+    ),
+    (
+        "--mutation-not-run",
+        "github_annotations_append_the_run_state_and_the_survivors_for_each_flag",
+    ),
+];
+
+#[test]
+fn saved_only_joins_have_no_live_render_and_a_covering_test() {
+    use fallow_types::command_surfaces::{COMMAND_ENVELOPES, ReportFrom};
+
+    let mutation = COMMAND_ENVELOPES
+        .iter()
+        .find(|row| row.command == "mutation")
+        .expect("mutation command row");
+    assert!(
+        matches!(mutation.report_from, ReportFrom::Refused(_)),
+        "a mutation report is a side input of report, not a --from document"
+    );
+    let root = workspace_fixture("tests/fixtures/basic-project");
+    let report_help = run(&root, &["report".to_owned(), "--help".to_owned()]);
+    let report_help = String::from_utf8_lossy(&report_help.stdout);
+    let source = include_str!("report_mutation_tests.rs");
+    for (flag, test) in SAVED_ONLY_JOINS {
+        assert!(report_help.contains(flag), "report --help lists {flag}");
+        assert!(
+            test_body(source, test).is_some_and(|body| body.contains(flag)),
+            "{flag}: the test `{test}` does not exist or does not pass the flag"
+        );
+        for command in ["dead-code", "dupes", "audit"] {
+            let live = run(
+                &root,
+                &[
+                    command.to_owned(),
+                    "--root".to_owned(),
+                    root.display().to_string(),
+                    (*flag).to_owned(),
+                    "x".to_owned(),
+                ],
+            );
+            assert_eq!(
+                live.status.code(),
+                Some(2),
+                "the live `{command}` run has no {flag} join"
+            );
+            assert!(
+                String::from_utf8_lossy(&live.stderr).contains("unexpected argument"),
+                "{command} {flag}: {}",
+                String::from_utf8_lossy(&live.stderr)
+            );
+        }
+    }
+}
+
 /// The source of `fn {name}()` up to the closing brace at column zero.
 fn test_body<'a>(source: &'a str, name: &str) -> Option<&'a str> {
     let start = source.find(&format!("fn {name}()"))?;

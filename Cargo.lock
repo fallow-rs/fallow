@@ -1464,6 +1464,7 @@ dependencies = [
  "fallow-config",
  "fallow-report-protocol",
  "fallow-types",
+ "insta",
  "rustc-hash",
  "schemars",
  "serde",

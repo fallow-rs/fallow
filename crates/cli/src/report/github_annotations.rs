@@ -16,8 +16,11 @@
 use std::path::Path;
 use std::process::ExitCode;
 
+use fallow_output::{CodeClimateIssue, MutationCiView, PrDecisionAnnotationLevel};
 use fallow_types::output_dead_code::caveat_labels_for_tokens;
 use serde_json::Value;
+
+use crate::report::ci::pr_comment::MutationSurface;
 
 use super::github::{
     Annotation, AnnotationLevel, PackageManager, RenderOptions, arr, b, budget_notice, fmt_num,
@@ -64,8 +67,21 @@ impl From<fallow_output::CheckEnvelope> for EnvelopeKind {
 /// Render and print the annotation stream for one envelope, resolving the
 /// ambient path-rebase and package-manager options at this boundary.
 pub(crate) fn print_annotations(kind: EnvelopeKind, envelope: &Value, root: &Path) -> ExitCode {
+    print_annotations_with_mutation(kind, envelope, root, None)
+}
+
+/// [`print_annotations`] with the mutation evidence of a saved render: the
+/// run-state line after the verdict lines, and the survivor warnings after
+/// the analysis annotations.
+pub(crate) fn print_annotations_with_mutation(
+    kind: EnvelopeKind,
+    envelope: &Value,
+    root: &Path,
+    mutation: Option<MutationSurface<'_>>,
+) -> ExitCode {
     let options = resolve_render_options(root);
-    let rendered = render_annotations(kind, envelope, &options);
+    let survivors = mutation.map_or(&[][..], |mutation| mutation.survivors);
+    let rendered = render_annotations_with_survivors(kind, envelope, &options, survivors);
     // Before the findings, because the consumer caps this stream: the action
     // pipes it through `head -n "$MAX"` (`action/scripts/annotate.sh`), so a
     // verdict appended after the findings is the first thing a noisy run drops.
@@ -75,10 +91,46 @@ pub(crate) fn print_annotations(kind: EnvelopeKind, envelope: &Value, root: &Pat
     if let Some(line) = crate::report::request_outcome_text::annotation_line(envelope) {
         outln!("{line}");
     }
+    if let Some(line) = mutation.and_then(|mutation| mutation_run_notice_line(mutation.view)) {
+        outln!("{line}");
+    }
     if !rendered.is_empty() {
         outln!("{rendered}");
     }
     ExitCode::SUCCESS
+}
+
+/// The workflow command that states the mutation run state: `::error` for a
+/// failed, stopped or unreadable run, and `::notice` for a partial run.
+/// `None` for a complete run and for a run that the job did not start.
+fn mutation_run_notice_line(view: &MutationCiView) -> Option<String> {
+    let notice = fallow_output::mutation_run_notice(view)?;
+    let command = match notice.level {
+        PrDecisionAnnotationLevel::Failure => "error",
+        PrDecisionAnnotationLevel::Warning => "warning",
+        PrDecisionAnnotationLevel::Notice => "notice",
+    };
+    Some(format!(
+        "::{command} title={}::{}",
+        escape_workflow_property(notice.title),
+        escape_workflow_message(&notice.message)
+    ))
+}
+
+/// The message escaping of [`super::github`]: `%`, CR and LF. A line break
+/// in an untrusted message must not start a second workflow command.
+fn escape_workflow_message(text: &str) -> String {
+    text.replace('%', "%25")
+        .replace('\r', "%0D")
+        .replace('\n', "%0A")
+}
+
+/// The property escaping of [`super::github`]: the message escaping, plus `,`
+/// and `:`.
+fn escape_workflow_property(text: &str) -> String {
+    escape_workflow_message(text)
+        .replace(',', "%2C")
+        .replace(':', "%3A")
 }
 
 /// Pure renderer: collect per-kind annotations, sort most-severe-first
@@ -86,12 +138,24 @@ pub(crate) fn print_annotations(kind: EnvelopeKind, envelope: &Value, root: &Pat
 /// append the trailing budget notice.
 #[must_use]
 pub fn render_annotations(kind: EnvelopeKind, envelope: &Value, options: &RenderOptions) -> String {
+    render_annotations_with_survivors(kind, envelope, options, &[])
+}
+
+/// [`render_annotations`] with the survivor findings of a mutation report
+/// after the sorted analysis annotations. The budget notice counts both.
+fn render_annotations_with_survivors(
+    kind: EnvelopeKind,
+    envelope: &Value,
+    options: &RenderOptions,
+    survivors: &[CodeClimateIssue],
+) -> String {
     let mut annotations = collect_annotations(kind, envelope, options.pm);
     sort_annotations(&mut annotations);
     if kind == EnvelopeKind::Audit && envelope["attribution"]["gate"] == "new-only" {
         annotations
             .sort_by_key(|annotation| (annotation.level, annotation.introduced != Some(true)));
     }
+    annotations.extend(survivors.iter().map(survivor_annotation));
     let mut lines: Vec<String> = Vec::with_capacity(annotations.len() + 1);
     for annotation in &mut annotations {
         annotation.path = options.rebase.apply(&annotation.path);
@@ -101,6 +165,21 @@ pub fn render_annotations(kind: EnvelopeKind, envelope: &Value, options: &Render
         lines.push(notice);
     }
     lines.join("\n")
+}
+
+/// The warning of one survived mutant. The issue has no column, so the
+/// annotation names the line only.
+fn survivor_annotation(issue: &CodeClimateIssue) -> Annotation {
+    Annotation {
+        level: AnnotationLevel::Warning,
+        path: issue.location.path.clone(),
+        line: Some(u64::from(issue.location.lines.begin)),
+        end_line: None,
+        col: None,
+        title: issue.check_name.clone(),
+        message: issue.description.clone(),
+        introduced: None,
+    }
 }
 
 pub(crate) fn collect_annotations(
@@ -1674,6 +1753,117 @@ fn collect_diff_risk(env: &Value, out: &mut Vec<Annotation>) {
             Anchor::gated_line(finding),
             format!("fallow/{}", s(finding, "rule")),
             format!("{} ({})", s(finding, "message"), s(finding, "evidence")),
+        );
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::report::github::PathRebase;
+    use fallow_output::{
+        CodeClimateIssueInput, CodeClimateSeverity, MutationCiState, MutationCiView,
+        MutationCompletion, MutationCompletionStatus, MutationIncompleteReason,
+        MutationNotRunReason, build_codeclimate_issue,
+    };
+
+    fn survivor(path: &str, line: u32) -> CodeClimateIssue {
+        build_codeclimate_issue(CodeClimateIssueInput {
+            check_name: crate::report::mutation_evidence::MUTATION_SURVIVED_RULE,
+            description: "Changing >= to > in isAdult made no test fail. Mutant 9f3c2a1b.",
+            severity: CodeClimateSeverity::Minor,
+            category: "Bug Risk",
+            path,
+            begin_line: Some(line),
+            fingerprint: "fp",
+        })
+    }
+
+    fn options() -> RenderOptions {
+        RenderOptions {
+            rebase: PathRebase::Prefix("pkg".to_owned()),
+            ..RenderOptions::default()
+        }
+    }
+
+    fn envelope() -> Value {
+        serde_json::json!({
+            "kind": "dead-code",
+            "unused_files": [{ "path": "src/zz-dead.ts" }]
+        })
+    }
+
+    #[test]
+    fn survivors_follow_the_analysis_annotations_inside_the_budget_notice() {
+        let rendered = render_annotations_with_survivors(
+            EnvelopeKind::DeadCode,
+            &envelope(),
+            &options(),
+            &[survivor("src/age.ts", 14)],
+        );
+        let lines: Vec<&str> = rendered.lines().collect();
+        assert_eq!(lines.len(), 3, "{rendered}");
+        assert!(
+            lines[0].starts_with("::warning file=pkg/src/zz-dead.ts,title=Unused file::"),
+            "{rendered}"
+        );
+        assert_eq!(
+            lines[1],
+            "::warning file=pkg/src/age.ts,line=14,title=fallow/mutation-survived::Changing >= to > in isAdult made no test fail. Mutant 9f3c2a1b."
+        );
+        assert_eq!(
+            lines[2],
+            "::notice::fallow emitted 2 annotations; GitHub shows at most 10 per type per step"
+        );
+    }
+
+    #[test]
+    fn no_survivor_keeps_the_plain_render() {
+        assert_eq!(
+            render_annotations_with_survivors(EnvelopeKind::DeadCode, &envelope(), &options(), &[]),
+            render_annotations(EnvelopeKind::DeadCode, &envelope(), &options()),
+        );
+    }
+
+    #[test]
+    fn a_failed_run_gives_one_escaped_error_line() {
+        let view = MutationCiView::new(MutationCiState::Failed {
+            exit_code: 2,
+            code: "FALLOW_X".to_owned(),
+            message: "100% broken\n::add-mask::secret".to_owned(),
+            help: None,
+        });
+        let line = mutation_run_notice_line(&view).expect("a failed run has a line");
+        assert!(
+            line.starts_with(
+                "::error title=Mutation testing::Mutation testing failed (exit code 2, FALLOW_X): 100%25 broken%0A::add-mask::secret"
+            ),
+            "{line}"
+        );
+        assert_eq!(line.lines().count(), 1, "{line}");
+    }
+
+    #[test]
+    fn a_partial_run_gives_a_notice_and_a_skipped_run_gives_nothing() {
+        let partial = MutationCiView {
+            completion: Some(MutationCompletion {
+                status: MutationCompletionStatus::Partial,
+                reasons: vec![MutationIncompleteReason::TimeBudget],
+            }),
+            ..MutationCiView::new(MutationCiState::Ran)
+        };
+        assert_eq!(
+            mutation_run_notice_line(&partial).as_deref(),
+            Some(
+                "::notice title=Mutation testing::Partial run (time-budget). The annotations cover only the mutants that ran."
+            )
+        );
+        let skipped =
+            MutationCiView::new(MutationCiState::NotRun(MutationNotRunReason::EventRefused));
+        assert_eq!(mutation_run_notice_line(&skipped), None);
+        assert_eq!(
+            mutation_run_notice_line(&MutationCiView::new(MutationCiState::Ran)),
+            None
         );
     }
 }

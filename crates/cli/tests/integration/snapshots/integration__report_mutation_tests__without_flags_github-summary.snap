@@ -1,0 +1,43 @@
+---
+source: crates/cli/tests/integration/report_mutation_tests.rs
+expression: body
+---
+# Fallow Analysis
+
+> [!WARNING]
+> **2 issues** found · <n>ms
+
+| Category | Count |
+|----------|------:|
+| [Unused files](https://fallow.tools/docs/explanations/dead-code/#unused-files) | 1 |
+| [Unused exports](https://fallow.tools/docs/explanations/dead-code/#unused-exports) | 1 |
+
+---
+
+<details><summary><strong>Unused files (1)</strong></summary>
+
+Files not reachable from any entry point.
+
+| File |
+|------|
+| `src/unused.ts` |
+
+</details>
+
+<details><summary><strong>Unused exports (1)</strong></summary>
+
+Exported symbols with no known consumers.
+
+| File | Line | Export |
+|------|-----:|--------|
+| `src/age.ts` | 5 | `isSenior` |
+
+</details>
+
+
+> [!TIP]
+> Run `fallow fix --dry-run` to preview safe auto-fixes.
+> Intentionally public? Add [`/** @public */`](https://fallow.tools/docs/configuration/suppression/) above exports to preserve them.
+> Add [`// fallow-ignore-next-line`](https://fallow.tools/docs/configuration/suppression/) above a line to suppress a specific finding.
+
+Gate outcomes: failed error-severity-findings (2 at or above error).

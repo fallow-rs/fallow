@@ -553,6 +553,18 @@ The table does not cover the human output, the docs, the annotation and
 comment routing of the CI scripts, or the companion repositories. Check those
 by hand.
 
+A command whose result reaches CI only as a side input of `fallow report` has
+a row with `ReportFrom::Refused` and `CiIntegration::Omitted`, and each reason
+names the side-input flag. The `mutation` row is the example: CI runs
+`fallow mutation` through the `mutation` input and renders the report with
+`fallow report --from <results> --mutation-report <file>`. Such a flag has no
+live render, so it has no `PARITY_CASES` entry. Add it to `SAVED_ONLY_JOINS`
+in `report_parity_tests.rs` with the name of its covering test.
+`saved_only_joins_have_no_live_render_and_a_covering_test` checks that the
+row refuses `report --from`, that `report --help` lists the flag, that the
+covering test passes the flag, and that the live `dead-code`, `dupes` and
+`audit` commands reject it.
+
 ## Add an invariant
 
 1. Write the predicate in `crates/cli/tests/drift/invariants.rs`. It returns

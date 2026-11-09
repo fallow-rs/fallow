@@ -34,7 +34,10 @@ use std::fmt::Write as _;
 use std::path::Path;
 use std::process::ExitCode;
 
-use fallow_output::{markdown_code_span, markdown_table_code_span, markdown_table_text};
+use fallow_output::{
+    MutationCiView, MutationHeading, markdown_code_span, markdown_table_code_span,
+    markdown_table_text, render_mutation_section,
+};
 use fallow_types::output_dead_code::caveat_labels_for_tokens;
 use serde_json::Value;
 
@@ -48,6 +51,9 @@ use audit::render_audit_summary;
 #[path = "github_summary_architecture.rs"]
 mod architecture_sections;
 use architecture_sections::check_sections_architecture;
+#[path = "github_summary_catalog.rs"]
+mod catalog_sections;
+use catalog_sections::check_sections_catalog;
 
 const DEAD_CODE_DOCS: &str = "https://fallow.tools/docs/explanations/dead-code/";
 const HEALTH_DOCS: &str = "https://fallow.tools/docs/explanations/health/";
@@ -89,9 +95,27 @@ impl LinkContext {
 
 /// Render and print the job-summary markdown for one envelope.
 pub(crate) fn print_summary(kind: EnvelopeKind, envelope: &Value, root: &Path) -> ExitCode {
+    print_summary_with_mutation(kind, envelope, root, None)
+}
+
+/// [`print_summary`] with the mutation section of a saved render, after the
+/// per-kind body and before the config patterns.
+pub(crate) fn print_summary_with_mutation(
+    kind: EnvelopeKind,
+    envelope: &Value,
+    root: &Path,
+    mutation: Option<&MutationCiView>,
+) -> ExitCode {
     let options = resolve_render_options(root);
     let links = LinkContext::from_env(&options.rebase);
     outln!("{}", render_summary(kind, envelope, &links));
+    if let Some(view) = mutation {
+        outln!("");
+        outln!(
+            "{}",
+            render_mutation_section(view, MutationHeading::Summary)
+        );
+    }
     // The unmatched config patterns follow the findings, as in `--format
     // markdown`. The section reads the envelope, so a live summary and one
     // from `fallow report --from` list the same patterns.
@@ -1088,82 +1112,6 @@ fn stale_suppression_description(it: &Value) -> String {
         Some(kind) => markdown_table_code_span(kind),
         None => "blanket".to_owned(),
     }
-}
-
-fn check_sections_catalog() -> Vec<SectionSpec> {
-    vec![
-        SectionSpec {
-            name: "Unused catalog entries",
-            key: "unused_catalog_entries",
-            header: "pnpm catalog entries not referenced by any workspace package.\n\n| Entry | Catalog | Location | Hardcoded consumers |\n|-------|---------|----------|---------------------|\n",
-            row: |it| {
-                format!(
-                    "| {} | {} | {} | {} |",
-                    code_cell(it, "entry_name"),
-                    code_cell(it, "catalog_name"),
-                    path_line_cell(it),
-                    backtick_join(it, "hardcoded_consumers"),
-                )
-            },
-        },
-        SectionSpec {
-            name: "Empty catalog groups",
-            key: "empty_catalog_groups",
-            header: "Named pnpm catalog groups with no entries.\n\n| Catalog | Location |\n|---------|----------|\n",
-            row: |it| {
-                format!(
-                    "| {} | {} |",
-                    code_cell(it, "catalog_name"),
-                    path_line_cell(it)
-                )
-            },
-        },
-        SectionSpec {
-            name: "Unresolved catalog references",
-            key: "unresolved_catalog_references",
-            header: "Workspace `package.json` references to catalogs that do not declare the package. `pnpm install` will fail until each entry is added to its named catalog or the reference is switched.\n\n| Entry | Catalog | Location | Available in |\n|-------|---------|----------|--------------|\n",
-            row: |it| {
-                format!(
-                    "| {} | {} | {} | {} |",
-                    code_cell(it, "entry_name"),
-                    code_cell(it, "catalog_name"),
-                    path_line_cell(it),
-                    backtick_join(it, "available_in_catalogs"),
-                )
-            },
-        },
-        SectionSpec {
-            name: "Unused dependency overrides",
-            key: "unused_dependency_overrides",
-            header: "Package-manager override entries forcing a version no workspace package depends on. Some entries may be intentional pins for transitive CVEs; the hint column flags those.\n\n| Override | Forces | Source | Location | Hint |\n|----------|--------|--------|----------|------|\n",
-            row: |it| {
-                format!(
-                    "| {} | {} -> {} | {} | {} | {} |",
-                    code_cell(it, "raw_key"),
-                    code_cell(it, "target_package"),
-                    code_cell(it, "version_range"),
-                    code_cell(it, "source"),
-                    path_line_cell(it),
-                    markdown_table_text(str_or(it, "hint", "")),
-                )
-            },
-        },
-        SectionSpec {
-            name: "Misconfigured dependency overrides",
-            key: "misconfigured_dependency_overrides",
-            header: "Package-manager override entries with an unparsable key or empty value. The active package manager will reject or ignore these.\n\n| Override | Value | Source | Location | Reason |\n|----------|-------|--------|----------|--------|\n",
-            row: |it| {
-                format!(
-                    "| {} | {} | {} | {} | {} |",
-                    markdown_table_code_span(str_or(it, "raw_key", "")),
-                    markdown_table_code_span(str_or(it, "raw_value", "")),
-                    code_cell(it, "source"),
-                    path_line_cell(it),
-                    markdown_table_text(str_or(it, "reason", "unparsable")),
-                )
-            },
-        },
-    ]
 }
 
 fn check_tips(env: &Value) -> String {

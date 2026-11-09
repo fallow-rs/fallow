@@ -441,7 +441,7 @@ pub fn is_project_level_rule(rule_id: &str) -> bool {
 /// carries is listed, so a new bucket does not sort alphabetically into the
 /// middle of the report. "Other" collects rules a downstream consumer added
 /// without registering, and sorts last by construction.
-const CATEGORY_ORDER: [&str; 10] = [
+const CATEGORY_ORDER: [&str; 11] = [
     "Dead code",
     "Dependencies",
     "Duplication",
@@ -451,6 +451,7 @@ const CATEGORY_ORDER: [&str; 10] = [
     "Security",
     "Flags",
     "Suppressions",
+    "Tests",
     "Other",
 ];
 
@@ -1468,6 +1469,27 @@ mod tests {
             body.contains("Found **2** findings: Dead code 1, Dependencies 1."),
             "{body}"
         );
+    }
+
+    #[test]
+    fn the_tests_section_comes_after_the_registered_sections_and_before_other() {
+        let categories = |rule_id: &str| -> &'static str {
+            match rule_id {
+                "fallow/mutation-survived" => "Tests",
+                "fallow/unregistered" => "Other",
+                _ => "Suppressions",
+            }
+        };
+        let issues = vec![
+            pr_comment_issue("fallow/unregistered", "x", "minor", "src/c.ts"),
+            pr_comment_issue("fallow/mutation-survived", "y", "minor", "src/b.ts"),
+            pr_comment_issue("fallow/stale-suppression", "z", "minor", "src/a.ts"),
+        ];
+        let order: Vec<&str> = group_by_category(&issues, &categories)
+            .into_iter()
+            .map(|(category, _)| category)
+            .collect();
+        assert_eq!(order, ["Suppressions", "Tests", "Other"]);
     }
 
     #[test]

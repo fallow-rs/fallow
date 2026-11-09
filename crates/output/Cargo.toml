@@ -25,6 +25,7 @@ fallow-report-protocol = { workspace = true }
 schemars = { workspace = true, optional = true }
 
 [dev-dependencies]
+insta = { workspace = true }
 tempfile = { workspace = true }
 
 [features]

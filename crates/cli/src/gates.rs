@@ -616,6 +616,31 @@ pub fn health_gate_outcomes(input: &HealthGateInputs<'_>) -> Option<GateOutcomes
     gates.into_option()
 }
 
+/// The gate of a `fallow mutation` run, `None` when no minimum score applies.
+///
+/// `score` is the fraction of `summary.score`, and `min_score` is the minimum
+/// in percent. The entry compares `score * 100` with the minimum, which is the
+/// rule that `run_exit_code` of the mutation command reads off this entry. A
+/// run with no counted mutant has no score, so the gate reports `skipped` and
+/// keeps the minimum as its `threshold`. The gate is always enforced: a
+/// recheck drops the minimum and gets no entry.
+pub fn mutation_gate_outcomes(score: Option<f64>, min_score: Option<f64>) -> Option<GateOutcomes> {
+    let minimum = min_score?;
+    let outcome = score.map_or_else(
+        || GateOutcome {
+            threshold: Some(minimum),
+            ..GateOutcome::new(GateStatus::Skipped, true)
+        },
+        |score| {
+            let percent = score * 100.0;
+            GateOutcome::measured(status_of(percent < minimum), true, percent, minimum)
+        },
+    );
+    let mut gates = GateOutcomes::new();
+    gates.insert(GateName::MutationMinScore, outcome);
+    Some(gates)
+}
+
 /// The wire spelling of a severity floor, for `threshold_label`.
 const fn severity_floor_label(severity: fallow_output::FindingSeverity) -> &'static str {
     match severity {
@@ -1183,5 +1208,41 @@ mod tests {
         .expect("the combined run states its default rules");
         assert_eq!(fail_on_issues_exit_code(Some(&gates)), 0);
         assert_eq!(fail_on_issues_exit_code(None), 0);
+    }
+
+    fn mutation_entry(score: Option<f64>, min_score: Option<f64>) -> Option<GateOutcome> {
+        mutation_gate_outcomes(score, min_score)
+            .and_then(|gates| gates.get(&GateName::MutationMinScore).cloned())
+    }
+
+    #[test]
+    fn a_mutation_score_below_the_minimum_fails_the_enforced_gate() {
+        assert_eq!(
+            mutation_entry(Some(0.625), Some(80.0)),
+            Some(GateOutcome::measured(GateStatus::Fail, true, 62.5, 80.0))
+        );
+    }
+
+    #[test]
+    fn a_mutation_score_equal_to_the_minimum_passes() {
+        assert_eq!(
+            mutation_entry(Some(0.5), Some(50.0)),
+            Some(GateOutcome::measured(GateStatus::Pass, true, 50.0, 50.0))
+        );
+    }
+
+    #[test]
+    fn a_mutation_run_with_no_counted_mutant_skips_the_gate() {
+        let entry = mutation_entry(None, Some(80.0)).expect("a minimum arms the gate");
+        assert_eq!(entry.status, GateStatus::Skipped);
+        assert!(entry.enforced);
+        assert_eq!(entry.observed, None);
+        assert_eq!(entry.threshold, Some(80.0));
+    }
+
+    #[test]
+    fn a_mutation_run_without_a_minimum_has_no_gate_object() {
+        assert!(mutation_gate_outcomes(Some(0.1), None).is_none());
+        assert!(mutation_gate_outcomes(None, None).is_none());
     }
 }

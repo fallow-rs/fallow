@@ -140,9 +140,25 @@ concluded, which on a pull request is that it stood down.
 
 ### Mutation testing
 
-Set `mutation: true` to run `fallow mutation` before the analysis. The step runs the tests of the project, so install the dependencies in an earlier step. The default scope is the lines that the PR adds, with a time budget of `10m`. The PR comment and the job summary get one "Mutation testing" section with the counts, the budget state and the top survivors. A partial run says "Partial run".
+Set `mutation: true` to run `fallow mutation` before the analysis. The step runs the tests of the project, so install the dependencies in an earlier step. The default scope is the lines that the PR adds, with a time budget of `10m`.
 
-Exit code 2 of `fallow mutation` (a tool failure) and a failed `mutation-min-score` fail the job in the last step, after the comment. The step runs only for the `pull_request`, `push`, `schedule`, `workflow_dispatch` and `merge_group` events. It refuses events such as `pull_request_target`, because they give the job the secrets of the base repository and can check out the code of a fork. The step never passes `--allow-dirty`: run code generation and build steps before the action, and commit or ignore the files that they write. See `docs/mutation-testing.md` (section CI) for the inputs, the cache, and the fork rules.
+The step `Resolve change scope` runs first. It writes one diff to `$RUNNER_TEMP/fallow-scope/`, and the mutation run, the analysis, the comment and the review all read it. Only this step gets `GH_TOKEN`; the mutation step gets no token. A PR with `auto-changed-since: false` and no `changed-since` still gets the PR diff, so the comment, the review and the `changed` mutation scope use the lines of the PR.
+
+The comment, the review, the annotations and the job summary render the result with `fallow report --mutation-report`. The comment and the job summary get one "Mutation testing" section. Survived mutants on the changed lines are findings with the rule `fallow/mutation-survived`: rows in the **Tests** table, inline review comments and `::warning` annotations, 20 at most. The check run gets a `mutation` row, and a `mutation-min-score` row when a minimum is set. The aggregate conclusion does not read the gate rows. To block a merge on the score, use `--split-gates` and make `Fallow / mutation-min-score` a required check.
+
+A failed `mutation-min-score` fails the job with exit code 1 in the last step, after the comment. A tool failure, an interrupted run and a refused event fail it with exit code 2. A set minimum is always enforced; leave `mutation-min-score` empty for an advisory run. The `gates-*` outputs name `mutation-min-score` when the report has the gate.
+
+| Output | Value |
+|---|---|
+| `mutation-outcome` | `ok`, `skipped`, `gate-failed`, `tool-failed`, `refused` or `interrupted`. An invalid mutation input is `tool-failed`. |
+| `mutation-completion` | `complete` or `partial` |
+| `mutation-score` | The score in percent |
+| `mutation-results` | The path of `fallow-mutation.json` |
+| `mutation-report-rendered` | `true` when the installed fallow has `fallow report --mutation-report`, `false` otherwise |
+
+The step has no `section` output. With a fallow that has `fallow mutation` but not `--mutation-report`, the run and the gate still work, and the job summary says that the installed fallow cannot render the results. With a fallow that has no `mutation` command, the outcome is `tool-failed`.
+
+The step runs only for the `pull_request`, `push`, `schedule`, `workflow_dispatch` and `merge_group` events. It refuses events such as `pull_request_target`, because they give the job the secrets of the base repository and can check out the code of a fork. The step never passes `--allow-dirty`: run code generation and build steps before the action, and commit or ignore the files that they write. See `docs/mutation-testing.md` (section CI) for the section states, the result files, the cache and the fork rules.
 
 ### Bot identity
 

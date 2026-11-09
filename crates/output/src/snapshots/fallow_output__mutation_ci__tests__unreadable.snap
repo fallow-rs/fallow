@@ -1,0 +1,21 @@
+---
+source: crates/output/src/mutation_ci_tests.rs
+expression: both_headings(&view)
+---
+#### Mutation testing
+
+**Fallow could not read the mutation report** (`FALLOW_MUTATION_REPORT_INVALID`).
+
+````text
+invalid type: string "x", expected a sequence at line 1 column 40
+````
+
+===== summary heading =====
+
+## Mutation testing
+
+**Fallow could not read the mutation report** (`FALLOW_MUTATION_REPORT_INVALID`).
+
+````text
+invalid type: string "x", expected a sequence at line 1 column 40
+````

@@ -1448,6 +1448,7 @@ pub fn run_mutation_with_progress(
         typecheck: typecheck.output,
         recheck: None,
         compare: None,
+        gate_outcomes: None,
     })
 }
 

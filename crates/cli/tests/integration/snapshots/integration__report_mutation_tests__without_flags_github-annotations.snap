@@ -1,0 +1,8 @@
+---
+source: crates/cli/tests/integration/report_mutation_tests.rs
+expression: body
+---
+::notice::Fallow: Gate outcomes: failed error-severity-findings (2 at or above error).
+::error file=src/age.ts,line=5,col=17,title=Unused export::Exported value 'isSenior' is never imported by other modules.%0A%0AIf this export is part of a public API, consider adding it to the entry configuration.%0AOtherwise, remove the export keyword or delete the declaration.
+::error file=src/unused.ts,title=Unused file::This file is not imported by any other module and unreachable from entry points.%0AConsider removing it or importing it where needed.
+::notice::fallow emitted 2 annotations; GitHub shows at most 10 per type per step

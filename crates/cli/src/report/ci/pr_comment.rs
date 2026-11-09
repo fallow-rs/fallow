@@ -4,13 +4,16 @@ use std::sync::OnceLock;
 
 #[cfg(test)]
 use fallow_output::is_project_level_rule;
-use fallow_output::issues_from_codeclimate_issues;
 pub use fallow_output::{
     CiIssue, CiProvider as Provider, CodeClimateIssue, PR_DECISION_SCHEMA, PR_DETAILS_SCHEMA,
     PrCommentEnvelope, PrCommentLayout, PrCommentTruncation, PrDecisionAnnotation,
     PrDecisionAnnotationLevel, PrDecisionConclusion, PrDecisionDetails, PrDecisionGate,
     PrDecisionSurface, PrDetailsArtifact, PrDetailsRow, PrDetailsSection, command_title,
     issues_from_codeclimate,
+};
+use fallow_output::{
+    MutationCiView, MutationHeading, issues_from_codeclimate_issues, mutation_decision_row,
+    render_mutation_section,
 };
 
 /// Workspace name, set once by `main()` when the binary is invoked with
@@ -81,6 +84,37 @@ pub struct PrCommentStatus<'a> {
     pub config_patterns: &'a [fallow_config::WorkspaceDiagnostic],
 }
 
+/// The mutation evidence that `fallow report --mutation-report` or
+/// `--mutation-not-run` joins to a saved render. A live render has none.
+#[derive(Clone, Copy)]
+pub(crate) struct MutationSurface<'a> {
+    /// The view that the section, the decision row and the run notice render.
+    pub view: &'a MutationCiView,
+    /// The survivor findings on the diff, already capped, with root-relative
+    /// paths.
+    pub survivors: &'a [CodeClimateIssue],
+}
+
+/// The trailing section of a comment or review body: the mutation section,
+/// then the config-pattern section, with one blank line between them. The
+/// config section alone stays as it is, so a body without mutation evidence
+/// does not change.
+pub(crate) fn compose_trailing_section(
+    mutation: Option<String>,
+    config: Option<String>,
+) -> Option<String> {
+    let Some(mutation) = mutation else {
+        return config;
+    };
+    let parts: Vec<&str> = [Some(mutation.as_str()), config.as_deref()]
+        .into_iter()
+        .flatten()
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .collect();
+    (!parts.is_empty()).then(|| parts.join("\n\n"))
+}
+
 /// Render the sticky comment body. `conclusion` is the gate outcome the caller
 /// already computed, folded into the severity-derived verdict by the renderer;
 /// `None` renders the severity-derived verdict alone.
@@ -130,10 +164,37 @@ pub fn render_pr_comment_with_status_note(
     config_patterns: &[fallow_config::WorkspaceDiagnostic],
     status_message: Option<&str>,
 ) -> String {
-    let section = crate::report::config_pattern_text::markdown_section(config_patterns);
+    render_pr_comment_with_mutation(
+        command,
+        provider,
+        issues,
+        conclusion,
+        PrCommentStatus {
+            message: status_message,
+            gates: &[],
+            config_patterns,
+        },
+        None,
+    )
+}
+
+/// [`render_pr_comment_with_status_note`] with the mutation section before
+/// the config-pattern section, when a saved render joins mutation evidence.
+fn render_pr_comment_with_mutation(
+    command: &str,
+    provider: Provider,
+    issues: &[CiIssue],
+    conclusion: Option<PrDecisionConclusion>,
+    status: PrCommentStatus<'_>,
+    mutation: Option<&MutationCiView>,
+) -> String {
+    let section = compose_trailing_section(
+        mutation.map(|view| render_mutation_section(view, MutationHeading::Comment)),
+        crate::report::config_pattern_text::markdown_section(status.config_patterns),
+    );
     let mut body =
         render_pr_comment_body(command, provider, issues, conclusion, section.as_deref());
-    if let Some(message) = status_message {
+    if let Some(message) = status.message {
         body.push_str("\n\n> ");
         body.push_str(message);
     }
@@ -227,11 +288,40 @@ pub(crate) fn print_pr_comment_from_codeclimate_issues(
     conclusion: Option<PrDecisionConclusion>,
     status: PrCommentStatus<'_>,
 ) -> ExitCode {
-    let issues = rebase_issue_paths(super::diff_filter::filter_issues_for_summary(
-        issues_from_codeclimate_issues(codeclimate),
-    ));
+    print_pr_comment_with_mutation(command, provider, codeclimate, conclusion, status, None)
+}
+
+/// [`print_pr_comment_from_codeclimate_issues`] with the mutation evidence of
+/// a saved render. The survivors come after the analysis findings, so the
+/// decision annotations list them after the analysis findings, inside the
+/// same cap.
+#[must_use]
+pub(crate) fn print_pr_comment_with_mutation(
+    command: &str,
+    provider: Provider,
+    codeclimate: &[CodeClimateIssue],
+    conclusion: Option<PrDecisionConclusion>,
+    status: PrCommentStatus<'_>,
+    mutation: Option<MutationSurface<'_>>,
+) -> ExitCode {
+    let summary_issues = |issues: &[CodeClimateIssue]| {
+        rebase_issue_paths(super::diff_filter::filter_issues_for_summary(
+            issues_from_codeclimate_issues(issues),
+        ))
+    };
+    let mut issues = summary_issues(codeclimate);
+    if let Some(mutation) = mutation {
+        issues.extend(summary_issues(mutation.survivors));
+    }
     let conclusion = conclusion.unwrap_or_else(|| issue_decision_conclusion(issues.is_empty()));
-    print_pr_comment_from_ci_issues(command, provider, &issues, conclusion, status)
+    print_pr_comment_from_ci_issues(
+        command,
+        provider,
+        &issues,
+        conclusion,
+        status,
+        mutation.map(|mutation| mutation.view),
+    )
 }
 
 fn rebase_issue_paths(mut issues: Vec<CiIssue>) -> Vec<CiIssue> {
@@ -251,14 +341,15 @@ fn print_pr_comment_from_ci_issues(
     issues: &[CiIssue],
     conclusion: PrDecisionConclusion,
     status: PrCommentStatus<'_>,
+    mutation: Option<&MutationCiView>,
 ) -> ExitCode {
-    let body = render_pr_comment_with_status_note(
+    let body = render_pr_comment_with_mutation(
         command,
         provider,
         issues,
         Some(conclusion),
-        status.config_patterns,
-        status.message,
+        status,
+        mutation,
     );
     let max_comments = max_comments();
     let envelope = PrCommentEnvelope {
@@ -273,7 +364,8 @@ fn print_pr_comment_from_ci_issues(
             total_findings: issues.len(),
         },
     };
-    let decision = build_issue_decision_surface(command, issues, &envelope, conclusion, status);
+    let decision =
+        build_issue_decision_surface(command, issues, &envelope, conclusion, status, mutation);
     let details = build_pr_details_artifact(command, issues);
     write_pr_comment_envelope_sidecar(&envelope);
     write_pr_decision_sidecar(&decision);
@@ -289,6 +381,7 @@ fn build_issue_decision_surface(
     envelope: &PrCommentEnvelope,
     conclusion: PrDecisionConclusion,
     status: PrCommentStatus<'_>,
+    mutation: Option<&MutationCiView>,
 ) -> PrDecisionSurface {
     // The command row stays first and the caller's `conclusion` stays the
     // surface's: the gate rows are additive display, and deriving the check-run
@@ -302,6 +395,7 @@ fn build_issue_decision_surface(
         threshold: None,
         scope: "new code".to_owned(),
     }];
+    gates.extend(mutation.map(mutation_decision_row));
     gates.extend(status.gates.iter().cloned());
     PrDecisionSurface {
         schema: PR_DECISION_SCHEMA.to_owned(),
@@ -634,6 +728,7 @@ mod tests {
                 gates: &[],
                 config_patterns: &[],
             },
+            None,
         );
 
         assert_eq!(decision.conclusion, PrDecisionConclusion::Failure);
@@ -683,6 +778,7 @@ mod tests {
                 gates: &gates,
                 config_patterns: &[],
             },
+            None,
         );
 
         assert_eq!(decision.conclusion, PrDecisionConclusion::Success);
@@ -726,6 +822,173 @@ mod tests {
         assert!(
             body.contains("- `ignoreDependencies`: `@typo/*` matched nothing in this run"),
             "{body}"
+        );
+    }
+
+    fn mutation_view() -> fallow_output::MutationCiView {
+        fallow_output::MutationCiView {
+            scope: Some(fallow_output::MutationScopeKind::Changed),
+            counts: fallow_output::MutationStatusCounts {
+                total: 16,
+                killed: 10,
+                survived: 6,
+                ..fallow_output::MutationStatusCounts::default()
+            },
+            score: Some(0.625),
+            ..fallow_output::MutationCiView::new(fallow_output::MutationCiState::Ran)
+        }
+    }
+
+    fn clean_envelope() -> PrCommentEnvelope {
+        PrCommentEnvelope {
+            marker_id: "fallow-results".to_owned(),
+            body: "body".to_owned(),
+            is_clean: true,
+            details_url: None,
+            check_summary: Some("pass".to_owned()),
+            truncation: PrCommentTruncation {
+                truncated: false,
+                shown_findings: 0,
+                total_findings: 0,
+            },
+        }
+    }
+
+    #[test]
+    fn a_body_without_mutation_evidence_is_the_status_note_render() {
+        let issues: Vec<CiIssue> = Vec::new();
+        assert_eq!(
+            render_pr_comment_with_mutation(
+                "check",
+                Provider::Github,
+                &issues,
+                None,
+                PrCommentStatus {
+                    message: Some("Gate outcomes: passed."),
+                    gates: &[],
+                    config_patterns: &[],
+                },
+                None,
+            ),
+            render_pr_comment_with_status_note(
+                "check",
+                Provider::Github,
+                &issues,
+                None,
+                &[],
+                Some("Gate outcomes: passed.")
+            )
+        );
+    }
+
+    #[test]
+    fn the_mutation_section_precedes_the_config_patterns_and_the_footer() {
+        let issues: Vec<CiIssue> = Vec::new();
+        let root = std::path::Path::new("/project");
+        let patterns = [fallow_config::WorkspaceDiagnostic::new(
+            root,
+            root.to_path_buf(),
+            fallow_config::WorkspaceDiagnosticKind::IgnoreDependenciesGlobUnmatched {
+                pattern: "@typo/*".to_owned(),
+            },
+        )];
+        let view = mutation_view();
+        let body = render_pr_comment_with_mutation(
+            "check",
+            Provider::Github,
+            &issues,
+            None,
+            PrCommentStatus {
+                message: None,
+                gates: &[],
+                config_patterns: &patterns,
+            },
+            Some(&view),
+        );
+        let mutation = body.find("#### Mutation testing").expect("section");
+        let patterns = body.find("## Unmatched config patterns").expect("patterns");
+        let footer = body.find("Generated by fallow.").expect("footer");
+        assert!(mutation < patterns && patterns < footer, "{body}");
+        assert!(body.contains("**6 mutants survived.**"), "{body}");
+        assert!(
+            body.contains("#### Mutation testing\n\n"),
+            "the section keeps its own paragraphs: {body}"
+        );
+    }
+
+    #[test]
+    fn the_mutation_row_follows_the_command_row_and_precedes_the_gate_rows() {
+        let gates = [PrDecisionGate {
+            id: "mutation-min-score".to_owned(),
+            label: "Mutation score".to_owned(),
+            status: PrDecisionConclusion::Failure,
+            observed: "62.5".to_owned(),
+            threshold: Some("80".to_owned()),
+            scope: "this run".to_owned(),
+        }];
+        let view = mutation_view();
+        let decision = build_issue_decision_surface(
+            "dead-code",
+            &[],
+            &clean_envelope(),
+            PrDecisionConclusion::Success,
+            PrCommentStatus {
+                message: None,
+                gates: &gates,
+                config_patterns: &[],
+            },
+            Some(&view),
+        );
+
+        let ids: Vec<&str> = decision.gates.iter().map(|gate| gate.id.as_str()).collect();
+        assert_eq!(ids, ["dead-code", "mutation", "mutation-min-score"]);
+        assert_eq!(
+            decision.gates[1],
+            fallow_output::mutation_decision_row(&view)
+        );
+        assert_eq!(
+            decision.conclusion,
+            PrDecisionConclusion::Success,
+            "the mutation rows do not move the conclusion"
+        );
+    }
+
+    #[test]
+    fn a_decision_without_mutation_evidence_has_no_mutation_row() {
+        let decision = build_issue_decision_surface(
+            "dead-code",
+            &[],
+            &clean_envelope(),
+            PrDecisionConclusion::Success,
+            PrCommentStatus {
+                message: None,
+                gates: &[],
+                config_patterns: &[],
+            },
+            None,
+        );
+        assert_eq!(decision.gates.len(), 1);
+    }
+
+    #[test]
+    fn the_trailing_section_joins_the_parts_with_one_blank_line() {
+        assert_eq!(compose_trailing_section(None, None), None);
+        assert_eq!(
+            compose_trailing_section(None, Some("\n## Patterns".to_owned())).as_deref(),
+            Some("\n## Patterns"),
+            "the config section alone passes through unchanged"
+        );
+        assert_eq!(
+            compose_trailing_section(Some("#### Mutation testing".to_owned()), None).as_deref(),
+            Some("#### Mutation testing")
+        );
+        assert_eq!(
+            compose_trailing_section(
+                Some("#### Mutation testing\n".to_owned()),
+                Some("\n## Patterns".to_owned())
+            )
+            .as_deref(),
+            Some("#### Mutation testing\n\n## Patterns")
         );
     }
 
