@@ -850,6 +850,95 @@ fn root_config_over_a_limit_does_not_disable_other_root_configs() {
     );
 }
 
+/// Write `configs/hub.json` with more `extends` entries than one root
+/// config may follow, and `configs/base.json` with an output mapping.
+fn write_hostile_hub(root: &Path) {
+    write(
+        &root.join("configs/base.json"),
+        r#"{"compilerOptions":{"rootDir":"../code","outDir":"../output"}}"#,
+    );
+    write(&root.join("configs/leaf.json"), "{}");
+    let parents = (0..=MAX_EXTENDS_ENTRIES)
+        .map(|index| format!(r#""./folder-{index}/../leaf.json""#))
+        .collect::<Vec<_>>()
+        .join(",");
+    write(
+        &root.join("configs/hub.json"),
+        &format!(r#"{{"extends":[{parents}]}}"#),
+    );
+    write(&root.join("code/index.ts"), "export const value = 1;\n");
+}
+
+#[test]
+fn many_hostile_root_configs_share_one_project_budget() {
+    const HOSTILE_ROOTS: usize = 64;
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let root = directory.path().to_path_buf();
+    write_hostile_hub(&root);
+    for index in 0..HOSTILE_ROOTS {
+        write(
+            &root.join(format!("tsconfig.a{index:02}.json")),
+            r#"{"extends":"./configs/hub.json"}"#,
+        );
+    }
+    // `tsconfig.json` sorts after the hostile root configs.
+    write(
+        &root.join("tsconfig.json"),
+        r#"{"extends":"./configs/base.json"}"#,
+    );
+
+    let (sender, receiver) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = sender.send(TsconfigOutputMap::from_project(&root));
+    });
+    let output_map = receiver
+        .recv_timeout(std::time::Duration::from_secs(10))
+        .expect("the extends walk must finish within the time limit");
+    assert!(
+        output_map.configs.is_empty(),
+        "the root configs after the spent project budget fail closed"
+    );
+    assert_eq!(
+        output_map.resolve_source_for_entry("./output/index.js", &["ts"]),
+        TsconfigOutputResolution::Unconfigured
+    );
+}
+
+#[test]
+fn config_stopped_by_a_limit_is_not_parsed_again() {
+    let directory = tempfile::tempdir().expect("temporary directory");
+    let root = dunce::canonicalize(directory.path()).expect("canonical root");
+    write_hostile_hub(&root);
+    write(
+        &root.join("configs/hub.json"),
+        r#"{"extends":"./base.json"}"#,
+    );
+    // The first root config spends its entry budget before the hub
+    // config follows its own entry.
+    let parents = (0..MAX_EXTENDS_ENTRIES - 1)
+        .map(|index| format!(r#""./configs/folder-{index}/../leaf.json""#))
+        .chain(std::iter::once(r#""./configs/hub.json""#.to_owned()))
+        .collect::<Vec<_>>()
+        .join(",");
+    write(
+        &root.join("tsconfig.a.json"),
+        &format!(r#"{{"extends":[{parents}]}}"#),
+    );
+    write(
+        &root.join("tsconfig.json"),
+        r#"{"extends":"./configs/hub.json"}"#,
+    );
+
+    let mut walk = ExtendsWalk::new(&root);
+    assert!(walk.read(&root.join("tsconfig.a.json")).is_none());
+    // A second parse of the hub config would now fail.
+    write(&root.join("configs/hub.json"), "{ not valid JSONC");
+    let options = walk
+        .read(&root.join("tsconfig.json"))
+        .expect("the walk uses the parsed hub config of the first root");
+    assert_eq!(options.root_dir, Some(root.join("code")));
+}
+
 #[test]
 fn repeated_extends_entry_keeps_its_last_place() {
     let directory = tempfile::tempdir().expect("temporary directory");

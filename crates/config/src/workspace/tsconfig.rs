@@ -1,4 +1,5 @@
 use std::path::{Component, Path, PathBuf};
+use std::rc::Rc;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -11,6 +12,10 @@ const MAX_EXTENDS_READS: usize = 256;
 /// after it drops repeated specifiers of one array. A walk over this limit
 /// fails closed.
 const MAX_EXTENDS_ENTRIES: usize = 4096;
+/// The read and entry limits of one project, as a multiple of the limits of
+/// one root config. Without it, many hostile root configs would each spend a
+/// full budget.
+const PROJECT_BUDGET_ROOTS: usize = 16;
 const DECLARATION_OUTPUT_SUFFIXES: &[&str] = &[".d.ts", ".d.mts", ".d.cts"];
 
 #[derive(Debug, Clone, Default)]
@@ -314,8 +319,10 @@ fn tsconfig_paths(root: &Path) -> Option<Vec<PathBuf>> {
 /// [`MAX_EXTENDS_READS`] new configs and [`MAX_EXTENDS_ENTRIES`] `extends`
 /// entries for each root config. Over a limit, only the current root config
 /// fails closed. The walk does not keep a failure that comes from a limit, so
-/// a later root config can still resolve the configs that it shares. The
-/// total cost stays linear: each root config does at most one budget of work.
+/// a later root config can still resolve the configs that it shares. All root
+/// configs together stop at [`PROJECT_BUDGET_ROOTS`] budgets, and the root
+/// configs after that fail closed. Each config file is read and parsed at
+/// most once, also when a limit stopped an earlier root config.
 struct ExtendsWalk<'a> {
     substitution_base: &'a Path,
     /// The configs on the current `extends` path, to detect a cycle.
@@ -328,11 +335,50 @@ struct ExtendsWalk<'a> {
     failed: FxHashMap<PathBuf, usize>,
     /// The canonical target of each `extends` specifier, by config folder.
     targets: FxHashMap<PathBuf, FxHashMap<String, Option<PathBuf>>>,
-    /// The reads and `extends` entries of the current root config.
-    reads: usize,
-    entries: usize,
+    /// The parsed content of each config file, or `None` when the file does
+    /// not read or parse.
+    sources: FxHashMap<PathBuf, Option<Rc<serde_json::Value>>>,
+    /// The config expansions of the current root config and of the project.
+    reads: WorkBudget,
+    /// The `extends` entries of the current root config and of the project.
+    entries: WorkBudget,
     /// The current root config went over a limit.
     over_limit: bool,
+}
+
+/// A work count with a limit for one root config and a limit for the project.
+struct WorkBudget {
+    root_limit: usize,
+    root: usize,
+    project: usize,
+}
+
+impl WorkBudget {
+    const fn new(root_limit: usize) -> Self {
+        Self {
+            root_limit,
+            root: 0,
+            project: 0,
+        }
+    }
+
+    fn start_root(&mut self) {
+        self.root = 0;
+    }
+
+    fn project_spent(&self) -> bool {
+        self.project >= self.root_limit * PROJECT_BUDGET_ROOTS
+    }
+
+    /// Count one unit of work. `false` when a limit is spent.
+    fn take(&mut self) -> bool {
+        if self.root >= self.root_limit || self.project_spent() {
+            return false;
+        }
+        self.root += 1;
+        self.project += 1;
+        true
+    }
 }
 
 impl<'a> ExtendsWalk<'a> {
@@ -343,8 +389,9 @@ impl<'a> ExtendsWalk<'a> {
             resolved: FxHashMap::default(),
             failed: FxHashMap::default(),
             targets: FxHashMap::default(),
-            reads: 0,
-            entries: 0,
+            sources: FxHashMap::default(),
+            reads: WorkBudget::new(MAX_EXTENDS_READS),
+            entries: WorkBudget::new(MAX_EXTENDS_ENTRIES),
             over_limit: false,
         }
     }
@@ -355,9 +402,16 @@ impl<'a> ExtendsWalk<'a> {
     /// when the walk is over one of its limits.
     fn read(&mut self, config_path: &Path) -> Option<CompilerOptions> {
         self.in_progress.clear();
-        self.reads = 0;
-        self.entries = 0;
+        self.reads.start_root();
+        self.entries.start_root();
         self.over_limit = false;
+        if self.reads.project_spent() || self.entries.project_spent() {
+            tracing::debug!(
+                config = %config_path.display(),
+                "tsconfig extends walk spent the budget of the project; ignoring the output mapping"
+            );
+            return None;
+        }
         let config_path = dunce::canonicalize(config_path).ok()?;
         self.read_with_height(&config_path, 0)
             .map(|(options, _)| options)
@@ -387,7 +441,9 @@ impl<'a> ExtendsWalk<'a> {
         if !self.in_progress.insert(config_path.to_path_buf()) {
             return None;
         }
-        let result = if self.reads >= MAX_EXTENDS_READS {
+        let result = if self.reads.take() {
+            self.parse(config_path, depth)
+        } else {
             tracing::debug!(
                 config = %config_path.display(),
                 limit = MAX_EXTENDS_READS,
@@ -395,9 +451,6 @@ impl<'a> ExtendsWalk<'a> {
             );
             self.over_limit = true;
             None
-        } else {
-            self.reads += 1;
-            self.parse(config_path, depth)
         };
         self.in_progress.remove(config_path);
         match &result {
@@ -431,7 +484,7 @@ impl<'a> ExtendsWalk<'a> {
             if !seen_specifiers.insert(specifier) {
                 continue;
             }
-            if self.entries >= MAX_EXTENDS_ENTRIES {
+            if !self.entries.take() {
                 tracing::debug!(
                     config = %config_path.display(),
                     limit = MAX_EXTENDS_ENTRIES,
@@ -440,7 +493,6 @@ impl<'a> ExtendsWalk<'a> {
                 self.over_limit = true;
                 return None;
             }
-            self.entries += 1;
             let parent = self.resolve_target(config_path, config_dir, specifier)?;
             if seen_parents.insert(parent.clone()) {
                 parents.push(parent);
@@ -472,11 +524,25 @@ impl<'a> ExtendsWalk<'a> {
         target
     }
 
+    /// The parsed content of the canonical `config_path`, read once per walk.
+    fn source(&mut self, config_path: &Path) -> Option<Rc<serde_json::Value>> {
+        if let Some(source) = self.sources.get(config_path) {
+            return source.clone();
+        }
+        let source = std::fs::read_to_string(config_path)
+            .ok()
+            .and_then(|content| {
+                crate::jsonc::parse_to_value(content.trim_start_matches('\u{FEFF}')).ok()
+            })
+            .map(Rc::new);
+        self.sources
+            .insert(config_path.to_path_buf(), source.clone());
+        source
+    }
+
     fn parse(&mut self, config_path: &Path, depth: usize) -> Option<(CompilerOptions, usize)> {
         let substitution_base = self.substitution_base;
-        let content = std::fs::read_to_string(config_path).ok()?;
-        let value: serde_json::Value =
-            crate::jsonc::parse_to_value(content.trim_start_matches('\u{FEFF}')).ok()?;
+        let value = self.source(config_path)?;
         let extends: Vec<&str> = match value.get("extends") {
             Some(serde_json::Value::String(extends)) => vec![extends.as_str()],
             Some(serde_json::Value::Array(items)) => items
