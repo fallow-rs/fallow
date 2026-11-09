@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
 # Shared results-file helper for the GitHub Action render steps.
 #
-# summary.sh and annotate.sh source this file. It defines functions only and
-# changes no shell state. The caller owns the EXIT handler and the temp files.
+# summary.sh and annotate.sh source this file.
+# The caller owns the EXIT handler and the temp files.
 #
 # Optional env: FALLOW_RESULTS_FILE, FALLOW_SCOPED_RESULTS_FILE,
 #   FALLOW_CHANGED_FILES_FILE, CHANGED_SINCE, INPUT_ROOT
 # Required env when CHANGED_SINCE is set: ACTION_JQ_DIR
+
+# shellcheck source=artifacts.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/artifacts.sh"
 
 # Resolve the results file the render paths consume, scoping it to the changed
 # files when --changed-since is active. Native and jq select the same input.
@@ -31,6 +34,7 @@ resolve_results_file() {
     fi
 
     if [ -n "$changed_json" ] && [ "$changed_json" != "[]" ]; then
+      fallow_artifact_check "$scoped_file" || return 2
       if jq --argjson changed "$changed_json" -f "${ACTION_JQ_DIR}/filter-changed.jq" "$results_file" > "$scoped_file" 2>/dev/null; then
         results_file="$scoped_file"
       fi

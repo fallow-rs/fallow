@@ -31,6 +31,55 @@
 # shellcheck disable=SC2034
 MUTATION_REPORT_VERSION=3.42.0
 
+# Validate paths against the physical working directory. This preflight assumes
+# a static checkout; it does not prevent concurrent path replacement.
+fallow_artifact_check() {
+  local path=$1 kind=${2:-file} workspace part current index
+  local parts=()
+  workspace=$(pwd -P) || return 2
+  case "$path" in
+    "$workspace"|"$PWD") path=. ;;
+    "$workspace"/*) path=${path#"$workspace"/} ;;
+    "$PWD"/*) path=${path#"$PWD"/} ;;
+  esac
+  if [[ "$path" = /* || "$path" = -* || "$path" == *$'\n'* || "$path" == *$'\r'* \
+      || "$path" =~ (^|/)\.\.(/|$) ]]; then
+    printf '%s\n' '::error::Artifact paths must stay inside the workspace without traversal or control characters.' >&2
+    return 2
+  fi
+  IFS=/ read -r -a parts <<< "$path"
+  current=$workspace
+  for ((index = 0; index < ${#parts[@]}; index++)); do
+    part=${parts[$index]}
+    [ -n "$part" ] && [ "$part" != . ] || continue
+    current="$current/$part"
+    if [ -L "$current" ]; then
+      printf '%s\n' '::error::Artifact paths must not contain symlinks.' >&2
+      return 2
+    fi
+    if [ "$kind" = directory ] || [ "$index" -lt $((${#parts[@]} - 1)) ]; then
+      if [ -e "$current" ] && { [ ! -d "$current" ] || [ ! -w "$current" ]; }; then
+        printf '%s\n' '::error::Artifact parents must be writable directories.' >&2
+        return 2
+      fi
+    elif [ -e "$current" ] && { [ ! -f "$current" ] || [ ! -w "$current" ]; }; then
+      printf '%s\n' '::error::Artifact destinations must be writable regular files.' >&2
+      return 2
+    fi
+  done
+}
+
+FALLOW_MUTATION_ARTIFACTS=(fallow-mutation.json fallow-mutation-tasks.json fallow-mutation-status.json
+  fallow-mutation-section.md fallow-mutation-stderr.log)
+
+fallow_mutation_check_artifacts() {
+  local dir=$1 name
+  fallow_artifact_check "$dir" directory || return 2
+  for name in "${FALLOW_MUTATION_ARTIFACTS[@]}"; do
+    fallow_artifact_check "$dir/$name" || return 2
+  done
+}
+
 # The values of `fallow report --mutation-not-run`.
 FALLOW_MUTATION_NOT_RUN_REASONS=(event-refused fork-refused no-change-scope interrupted)
 
@@ -249,6 +298,7 @@ fallow_mutation_render_args() {
 # return code, so the analysis and the comment still run after a failure.
 fallow_mutation_main() {
   local out_dir=${FALLOW_MUTATION_OUT_DIR:-.}
+  fallow_mutation_check_artifacts "$out_dir" || return 2
   local tmp_parent=${RUNNER_TEMP:-${TMPDIR:-/tmp}}
   local tmp
   tmp=$(mktemp -d "${tmp_parent%/}/fallow-mutation.XXXXXX")
@@ -260,8 +310,7 @@ fallow_mutation_main() {
   # A result file of an earlier run in the same directory must not look like
   # the result of this run. The section and tasks files of older scripts are
   # removed too, because no step of this version writes them.
-  for name in fallow-mutation.json fallow-mutation-status.json fallow-mutation-stderr.log \
-      fallow-mutation-tasks.json fallow-mutation-section.md; do
+  for name in "${FALLOW_MUTATION_ARTIFACTS[@]}"; do
     rm -f "${out_dir}/${name}"
   done
 
@@ -308,7 +357,10 @@ fallow_mutation_main() {
     fi
   fi
 
-  mkdir -p "$out_dir"
+  if ! fallow_mutation_check_artifacts "$out_dir" || ! mkdir -p -- "$out_dir"; then
+    rm -rf "$tmp"
+    return 2
+  fi
   if ! fallow_mutation_write_status "$status_tmp" "$outcome" "$exit_code" "$reason"; then
     printf 'The CI step could not write the mutation status file.\n' >&2
     outcome=tool-failed

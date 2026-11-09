@@ -614,4 +614,46 @@ assert_not_contains "$(cat "$MUT_TMP/gl-off.log")" "--mutation-" \
 assert_not_contains "$(cat "$MUT_TMP/gl-off.log")" "report --help" \
   "gitlab template: a job without mutation testing does not probe the CLI"
 
+# Artifact cleanup must not follow a checkout link before input validation.
+for shape in parent leaf dangling directory; do
+  W="$MUT_TMP/artifact-$shape"
+  mkdir -p "$W/work" "$W/outside"
+  printf 'preserve outside report\n' > "$W/outside/fallow-mutation.json"
+  case "$shape" in
+    parent) ln -s "$W/outside" "$W/work/out" ;;
+    *)
+      mkdir -p "$W/work/out"
+      case "$shape" in
+        leaf) ln -s "$W/outside/fallow-mutation.json" "$W/work/out/fallow-mutation.json" ;;
+        dangling) ln -s "$W/missing" "$W/work/out/fallow-mutation.json" ;;
+        directory) mkdir "$W/work/out/fallow-mutation.json" ;;
+      esac
+      ;;
+  esac
+  RC=0
+  (
+    cd "$W/work" || exit 99
+    source "$MUT_SCRIPTS/mutation_common.sh"
+    FALLOW_MUTATION_OUT_DIR=out FALLOW_MUTATION_REFUSE_REASON=test fallow_mutation_main
+  ) > "$W/log" 2>&1 || RC=$?
+  mut_assert_eq "$RC" 2 "mutation artifacts: rejects $shape before cleanup"
+  mut_assert_eq "$(cat "$W/outside/fallow-mutation.json")" 'preserve outside report' \
+    "mutation artifacts: $shape preserves the outside report"
+  assert_contains "$(cat "$W/log")" '::error::Artifact' "mutation artifacts: $shape explains the refusal"
+done
+
+W="$MUT_TMP/artifact-regular"
+mkdir -p "$W"
+for attempt in first repeated; do
+  RC=0
+  (
+    cd "$W" || exit 99
+    source "$MUT_SCRIPTS/mutation_common.sh"
+    FALLOW_MUTATION_OUT_DIR=reports/nested FALLOW_MUTATION_REFUSE_REASON=test fallow_mutation_main
+  ) > "$W/log" 2>&1 || RC=$?
+  mut_assert_eq "$RC" 2 "mutation artifacts: $attempt run reports the requested refusal"
+  mut_assert_eq "$(jq -r .outcome "$W/reports/nested/fallow-mutation-status.json")" refused \
+    "mutation artifacts: $attempt run writes its status through regular paths"
+done
+
 rm -rf "$MUT_TMP"

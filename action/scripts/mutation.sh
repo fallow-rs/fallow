@@ -31,15 +31,8 @@ set_env() {
   printf '%s=%s\n' "$1" "$2" >> "$GITHUB_ENV"
 }
 
-# Escapes a workflow command message, so a newline or a percent sign in an
-# error message cannot end the command or start a new one.
-escape_command_data() {
-  local value=$1
-  value=${value//'%'/'%25'}
-  value=${value//$'\r'/'%0D'}
-  value=${value//$'\n'/'%0A'}
-  printf '%s' "$value"
-}
+# shellcheck source=workflow-command.sh
+source "${SCRIPT_DIR}/workflow-command.sh"
 
 gate_error() {
   echo "::error title=Fallow mutation::$(escape_command_data "$1")"
@@ -122,6 +115,7 @@ report_score() {
 
 run_step() {
   export FALLOW_MUTATION_OUT_DIR="${FALLOW_ARTIFACTS_DIR:-.}"
+  fallow_mutation_check_artifacts "$FALLOW_MUTATION_OUT_DIR" || return 2
   local out=$FALLOW_MUTATION_OUT_DIR
   local status="$out/fallow-mutation-status.json"
   local report="$out/fallow-mutation.json"

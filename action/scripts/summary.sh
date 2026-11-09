@@ -84,7 +84,7 @@ emit_native_summary_if_available() {
   [ "$FALLOW_COMMAND" = "fix" ] && return 1
 
   local input_file
-  input_file=$(resolve_results_file)
+  input_file=$(resolve_results_file) || exit 2
 
   local args=(report --from "$input_file" --root "${INPUT_ROOT:-.}" --format github-summary)
   [ "${FALLOW_RENDER_PATH_PREFIX_SET:-0}" = "1" ] \
@@ -278,7 +278,7 @@ if [ ! -f "$JQ_FILE" ]; then
   exit 0
 fi
 
-RESULTS_FILE=$(resolve_results_file)
+RESULTS_FILE=$(resolve_results_file) || exit 2
 SCOPED_RESULTS_FILE="${FALLOW_SCOPED_RESULTS_FILE:-fallow-results-scoped.json}"
 
 if ! BODY=$(jq -r -f "$JQ_FILE" "$RESULTS_FILE"); then

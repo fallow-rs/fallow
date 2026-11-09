@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck source=artifacts.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/artifacts.sh"
+prepare_artifacts "${FALLOW_ARTIFACTS_DIR:-.}" \
+  fallow-review.json \
+  fallow-review-stderr.log fallow-review-post.json fallow-review-post-stderr.log || exit 2
+
 # Post review comments with rich markdown formatting
 # Env contract: see this script's step env block in action.yml, the
 #   authoritative list of consumed variables. Hard requirements are asserted

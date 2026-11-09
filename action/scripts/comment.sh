@@ -1,6 +1,14 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck source=artifacts.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/artifacts.sh"
+prepare_artifacts "${FALLOW_ARTIFACTS_DIR:-.}" \
+  fallow-pr-comment.md \
+  fallow-pr-comment-envelope.json fallow-pr-decision.json fallow-pr-details.json \
+  fallow-comment-stderr.log fallow-pr-comment-plan.json fallow-check-run.json \
+  fallow-check-run-stderr.log || exit 2
+
 # Post or update a PR comment with analysis results
 # Env contract: see this script's step env block in action.yml, the
 #   authoritative list of consumed variables. Hard requirements are asserted

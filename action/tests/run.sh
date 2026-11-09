@@ -224,6 +224,12 @@ fi
 echo ""
 echo "=== Install script ==="
 
+if node --test "$DIR/trust-boundaries.test.mjs"; then
+  pass "artifacts: static checkout paths and workflow messages are contained"
+else
+  fail "artifacts: static checkout paths and workflow messages are contained" "regression test failed"
+fi
+
 if node --test "$DIR/install-verification-timeout.test.mjs"; then
   pass "install: binary verification is supervised"
 else
