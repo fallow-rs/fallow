@@ -1,0 +1,8 @@
+{
+  "compilerOptions": {
+    "rootDir": "source",
+    "outDir": "build",
+    "module": "commonjs"
+  },
+  "include": ["source"]
+}

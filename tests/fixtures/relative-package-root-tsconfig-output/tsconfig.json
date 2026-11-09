@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "rootDir": "lib/",
+    "outDir": "build/",
+    "module": "commonjs",
+    "declaration": true
+  },
+  "include": ["./lib/**/*"]
+}

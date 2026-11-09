@@ -824,3 +824,57 @@ fn relative_package_root_dot_dot_resolves_to_the_source_entry() {
         "require('..') must resolve to the package source, got: {unresolved:?}"
     );
 }
+
+/// A deep import into the `outDir` of a workspace package (`lib/build/util`)
+/// names build output that is not on disk. The tsconfig `rootDir` and
+/// `outDir` of the package map the import to its source file, the same as
+/// for the `main` field. The `nodes` package has no `rootDir` and sets
+/// `outDir` in a config with an array `extends`. TypeScript 6 then uses the
+/// folder of the config as `rootDir`.
+#[cfg_attr(miri, ignore)]
+#[test]
+fn workspace_output_subpath_resolves_through_tsconfig_output_map() {
+    let root = fixture_path("workspace-dist-subpath-tsconfig-output");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unresolved: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|i| i.import.specifier.as_str())
+        .collect();
+    assert!(
+        unresolved.is_empty(),
+        "output subpaths must resolve to source, got: {unresolved:?}"
+    );
+    let unused_files: Vec<String> = results
+        .unused_files
+        .iter()
+        .map(|f| f.file.path.to_string_lossy().replace('\\', "/"))
+        .collect();
+    assert!(
+        unused_files.is_empty(),
+        "imported source files must be used, got: {unused_files:?}"
+    );
+}
+
+/// `require('..')` names a package root whose `main` points at unbuilt output
+/// in a custom `outDir`. The tsconfig output map of the package maps `main`
+/// to the source entry.
+#[cfg_attr(miri, ignore)]
+#[test]
+fn relative_package_root_resolves_main_through_tsconfig_output_map() {
+    let root = fixture_path("relative-package-root-tsconfig-output");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unresolved: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|i| i.import.specifier.as_str())
+        .collect();
+    assert!(
+        unresolved.is_empty(),
+        "require('..') must resolve to the source entry, got: {unresolved:?}"
+    );
+}

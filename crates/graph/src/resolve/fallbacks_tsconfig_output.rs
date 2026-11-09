@@ -8,8 +8,10 @@ use fallow_config::TsconfigOutputResolution;
 use fallow_types::discover::FileId;
 
 use super::{
-    ResolveContext, ResolveResult, SOURCE_EXTS, lookup_internal_file_id, nearest_package_manifest,
-    normalize_path_lexically, try_pnpm_workspace_fallback, try_source_fallback,
+    PackageManifestInfo, ResolveContext, ResolveResult, SOURCE_EXTS, lookup_internal_file_id,
+    nearest_package_manifest, normalize_path_lexically, resolve_package_map_target,
+    safe_relative_package_source_path, try_pnpm_workspace_fallback, try_source_fallback,
+    try_source_subpath,
 };
 
 /// Resolve a relative import of a build output file to its source file:
@@ -85,6 +87,48 @@ pub(in crate::resolve) fn try_tsconfig_output_source(
         return None;
     };
     lookup_internal_file_id(ctx, &source)
+}
+
+/// The output extensions that a package subpath without an extension can name.
+const OUTPUT_SUBPATH_EXTS: &[&str] = &["js", "mjs", "cjs", "jsx"];
+
+/// Resolve a package subpath (empty for the package root) through the source
+/// layout of the package, then through the output-to-source mapping.
+pub(in crate::resolve) fn try_package_source_or_output(
+    ctx: &ResolveContext<'_>,
+    manifest: &PackageManifestInfo,
+    subpath: &str,
+) -> Option<FileId> {
+    try_source_subpath(ctx, manifest, Path::new(subpath))
+        .or_else(|| try_output_subpath_source(ctx, manifest, subpath))
+}
+
+/// Map a package subpath that names build output to its source file.
+///
+/// The package root (an empty `subpath`) maps through `main`. A deep import
+/// such as `pkg/dist/util` names the output file `dist/util.js` or
+/// `dist/util/index.js`. Node resolves these paths at run time, so they get
+/// the same output-to-source mapping as a package map target.
+fn try_output_subpath_source(
+    ctx: &ResolveContext<'_>,
+    manifest: &PackageManifestInfo,
+    subpath: &str,
+) -> Option<FileId> {
+    let resolve = |target: &str| resolve_package_map_target(ctx, manifest, target, None);
+    if subpath.is_empty() {
+        let main = manifest.package_json.main.as_deref()?;
+        safe_relative_package_source_path(main)?;
+        return resolve(&format!("./{}", main.trim_start_matches("./")));
+    }
+    safe_relative_package_source_path(subpath)?;
+    let has_output_extension = Path::new(subpath)
+        .extension()
+        .and_then(|ext| ext.to_str())
+        .is_some_and(|ext| OUTPUT_SUBPATH_EXTS.contains(&ext));
+    if has_output_extension {
+        return resolve(&format!("./{subpath}"));
+    }
+    resolve(&format!("./{subpath}.js")).or_else(|| resolve(&format!("./{subpath}/index.js")))
 }
 
 /// The source extensions of the files that a bundler compiles. TypeScript
