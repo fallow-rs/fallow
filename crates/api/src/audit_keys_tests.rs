@@ -1321,6 +1321,15 @@ fn make_duplication_report(groups: Vec<CloneGroup>) -> DuplicationReport {
 }
 
 #[test]
+fn dupe_group_key_ignores_crlf_line_endings() {
+    let root = root();
+    let files = [root.join("src/a.ts"), root.join("src/b.ts")];
+    let lf = make_clone_group(&files, "const x = 1;\nconst y = 2;\n");
+    let crlf = make_clone_group(&files, "const x = 1;\r\nconst y = 2;\r\n");
+    assert_eq!(dupe_group_key(&lf, &root), dupe_group_key(&crlf, &root));
+}
+
+#[test]
 fn dupe_group_key_is_stable_for_sorted_deduplicated_files() {
     let root = root();
     let a = root.join("src/a.ts");

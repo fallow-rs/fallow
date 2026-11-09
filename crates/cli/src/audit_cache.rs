@@ -49,7 +49,10 @@ use crate::error::emit_input_error;
 /// of the paths of the whole group (#4344). A version-19 snapshot holds the
 /// path of one occurrence, so a shift in a later occurrence would mark an
 /// inherited finding as introduced.
-pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 20;
+/// Version 21 leaves `\r` out of the fragment hash of a clone-group key. A
+/// version-20 snapshot of a CRLF checkout holds keys with `\r`, so its clone
+/// groups would not match the head keys.
+pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 21;
 const MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE: usize = 16 * 1024 * 1024;
 /// Most snapshot files that one cache version directory keeps. Each key folds
 /// in the base SHA and the changed files, so every new commit or edit adds a

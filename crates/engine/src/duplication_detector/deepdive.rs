@@ -227,10 +227,13 @@ pub fn clone_fingerprint(instances: &[CloneInstance]) -> String {
     fingerprint_for_hash(hash_instances(instances))
 }
 
+/// The digest leaves out `\r`. It orders the groups of one full-hash
+/// collision, so a `\r` would swap their `-rN` suffixes between a CRLF and
+/// an LF checkout.
 fn hash_distinct_fragments(instances: &[CloneInstance]) -> u128 {
     let mut fragments = instances
         .iter()
-        .map(|instance| instance.fragment.as_str())
+        .map(|instance| without_carriage_returns(&instance.fragment))
         .collect::<Vec<_>>();
     fragments.sort_unstable();
     fragments.dedup();
@@ -240,6 +243,14 @@ fn hash_distinct_fragments(instances: &[CloneInstance]) -> u128 {
         update_hash_bytes(&mut hasher, fragment.as_bytes());
     }
     hasher.digest128()
+}
+
+fn without_carriage_returns(fragment: &str) -> std::borrow::Cow<'_, str> {
+    if fragment.contains('\r') {
+        std::borrow::Cow::Owned(fragment.replace('\r', ""))
+    } else {
+        std::borrow::Cow::Borrowed(fragment)
+    }
 }
 
 fn sorted_locations(instances: &[CloneInstance]) -> Vec<(&Path, usize, usize)> {
@@ -911,6 +922,39 @@ mod tests {
             clone_fingerprint(&a.instances),
             clone_fingerprint(&b.instances)
         );
+    }
+
+    /// Two groups whose fragments differ only in a comment share one full
+    /// hash, so the `-rN` suffix follows the order of their fragment digests.
+    fn colliding_groups(variant: usize, line_ending: &str) -> Vec<CloneGroup> {
+        ["left", "right"]
+            .into_iter()
+            .map(|side| {
+                let fragment = format!("alpha();{line_ending}// {side} {variant}{line_ending}");
+                let mut clone = group(&[&fragment, &fragment], 2);
+                for (index, instance) in clone.instances.iter_mut().enumerate() {
+                    instance.file = PathBuf::from(format!("{side}-{index}.ts"));
+                }
+                clone
+            })
+            .collect()
+    }
+
+    #[test]
+    fn collision_suffixes_ignore_line_endings() {
+        for variant in 0..16 {
+            let lf = colliding_groups(variant, "\n");
+            let crlf = colliding_groups(variant, "\r\n");
+            let lf_set = CloneFingerprintSet::from_groups(&lf);
+            let crlf_set = CloneFingerprintSet::from_groups(&crlf);
+            let lf_handles: Vec<_> = lf.iter().map(|g| lf_set.fingerprint_for_group(g)).collect();
+            let crlf_handles: Vec<_> = crlf
+                .iter()
+                .map(|g| crlf_set.fingerprint_for_group(g))
+                .collect();
+            assert!(lf_handles[0].ends_with("-r1") || lf_handles[0].ends_with("-r2"));
+            assert_eq!(lf_handles, crlf_handles, "variant {variant}");
+        }
     }
 
     #[test]

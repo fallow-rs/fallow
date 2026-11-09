@@ -27,16 +27,11 @@ const REPORT_FORMATS: [&str; 12] = [
     "github-summary",
 ];
 
-/// The formats whose clone fingerprints change with CRLF line endings on
-/// `main`. The CodeClimate fingerprint of each instance of a clone group
-/// hashes the first 64 characters of the raw fragment of the first instance,
-/// `\r` included. The review formats merge by that fingerprint, so their
-/// `merged:` fingerprints change. The PR comment formats sort by path, line
-/// and then fingerprint, so their order changes when two issues share a path
-/// and a line. `audit` adds the clone groups of the change to the same
-/// formats. The passing tests skip these pairs.
-/// `ci_clone_fingerprints_keep_crlf_invariance` keeps the bug.
-const KNOWN_CRLF_BUG: [(&str, &str); 8] = [
+/// The pairs whose output carries the CodeClimate fingerprint of a clone
+/// instance. The review formats merge by that fingerprint, and the PR comment
+/// formats sort by it when two issues share a path and a line. `audit` adds
+/// the clone groups of the change to the same formats.
+const CLONE_FINGERPRINT_PAIRS: [(&str, &str); 8] = [
     ("dupes", "codeclimate"),
     ("dupes", "pr-comment-github"),
     ("dupes", "pr-comment-gitlab"),
@@ -250,10 +245,6 @@ fn formats() -> Vec<String> {
     )
 }
 
-fn is_known_bug(command: &str, format: &str) -> bool {
-    KNOWN_CRLF_BUG.contains(&(command, format))
-}
-
 /// The arguments of `command` for a form. `audit` reviews the change commit
 /// against the base commit of that form.
 fn command_args<'a>(command: &'a str, form: &'a Form) -> Vec<&'a str> {
@@ -360,16 +351,11 @@ fn check_pairs(seed: u64, endings: LineEndings, pairs: &[(&str, String)]) {
     );
 }
 
-/// The pairs of `commands` and each format, without the known bug.
+/// The pairs of `commands` and each format.
 fn pairs<'a>(commands: &[&'a str]) -> Vec<(&'a str, String)> {
     commands
         .iter()
-        .flat_map(|command| {
-            formats()
-                .into_iter()
-                .filter(|format| !is_known_bug(command, format))
-                .map(move |format| (*command, format))
-        })
+        .flat_map(|command| formats().into_iter().map(move |format| (*command, format)))
         .collect()
 }
 
@@ -465,21 +451,17 @@ fn baselines_round_trip_across_line_endings() {
     check_baselines(9, LineEndings::Mixed(91));
 }
 
-/// Found on `main`: `build_duplication_codeclimate` hashes the first 64
-/// characters of the raw clone fragment into the CodeClimate fingerprint.
-/// With CRLF line endings the fragment holds `\r`, so the fingerprint of each
-/// clone instance changes. GitLab Code Quality then reports each clone as
-/// new and fixed when a Windows runner and a Linux runner share a pipeline.
-/// The PR comment and review formats sort and merge by that fingerprint, so
-/// their order and their `merged:` fingerprints change too, in `dupes` and
-/// in `audit`. The minimal input
-/// is two files with the same function body, one in LF and one in CRLF form;
-/// `seams::codeclimate_clone_fingerprints_ignore_line_endings` shows it
-/// without the CLI.
+/// The CodeClimate fingerprint of a clone instance hashes the first 64
+/// characters of the fragment without `\r`. When a `\r` stays in the hash,
+/// GitLab Code Quality reports each clone as new and fixed when a Windows
+/// runner and a Linux runner share a pipeline. The PR comment and review
+/// formats sort and merge by that fingerprint, so their order and their
+/// `merged:` fingerprints change too, in `dupes` and in `audit`.
+/// `seams::codeclimate_clone_fingerprints_ignore_line_endings` shows the
+/// same contract without the CLI.
 #[test]
-#[ignore = "bug on main: CodeClimate clone fingerprints change with CRLF line endings"]
 fn ci_clone_fingerprints_keep_crlf_invariance() {
-    let pairs: Vec<(&str, String)> = KNOWN_CRLF_BUG
+    let pairs: Vec<(&str, String)> = CLONE_FINGERPRINT_PAIRS
         .iter()
         .map(|(command, format)| (*command, (*format).to_owned()))
         .collect();

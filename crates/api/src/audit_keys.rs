@@ -1899,6 +1899,7 @@ pub fn dupes_keys(
 /// `dupe:<sorted files joined by |>:<tokens>:<lines>:<fragment hash>`.
 /// The fragment hash keeps distinct groups spanning the same files apart;
 /// line positions are excluded so a group survives shifts within its files.
+/// The fragment hash leaves out `\r`, so the line endings do not change the key.
 pub fn dupe_group_key(group: &fallow_types::duplicates::CloneGroup, root: &Path) -> String {
     let mut files: Vec<String> = group
         .instances
@@ -1909,7 +1910,11 @@ pub fn dupe_group_key(group: &fallow_types::duplicates::CloneGroup, root: &Path)
     files.dedup();
     let mut hasher = DefaultHasher::new();
     for instance in &group.instances {
-        instance.fragment.hash(&mut hasher);
+        if instance.fragment.contains('\r') {
+            instance.fragment.replace('\r', "").hash(&mut hasher);
+        } else {
+            instance.fragment.hash(&mut hasher);
+        }
     }
     format!(
         "dupe:{}:{}:{}:{:x}",
