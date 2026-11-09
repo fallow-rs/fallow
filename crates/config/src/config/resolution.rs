@@ -269,6 +269,9 @@ pub struct ResolvedConfig {
     /// `unused-component-props`. `None` when `unusedComponentProps.ignorePattern`
     /// is unset. Compiled from the validated raw pattern in [`Self::resolve`].
     pub unused_component_props_ignore: Option<regex::Regex>,
+    /// Compiled `health.tailwindIgnorePatterns` matched against normalized
+    /// Tailwind arbitrary-value tokens before findings and analytics are built.
+    pub tailwind_ignore_patterns: Vec<regex::Regex>,
     /// Options for the `circular-dependencies` rule, passed through unchanged.
     pub circular_dependencies: super::CircularDependenciesConfig,
     /// Effect library options, passed through unchanged.
@@ -916,6 +919,24 @@ fn compile_unused_component_props_ignore(pattern: Option<&str>) -> Option<regex:
     })
 }
 
+fn compile_tailwind_ignores(health: &HealthConfig) -> Vec<regex::Regex> {
+    health
+        .tailwind_ignore_patterns
+        .iter()
+        .filter_map(|pattern| match regex::Regex::new(pattern) {
+            Ok(re) => Some(re),
+            Err(error) => {
+                tracing::warn!(
+                    %error,
+                    "ignoring invalid health.tailwindIgnorePatterns entry; this config was \
+                     not validated through FallowConfig::load"
+                );
+                None
+            }
+        })
+        .collect()
+}
+
 /// Split `workspaces` into its patterns, its per-package baselines and its
 /// compiled per-workspace settings.
 fn resolve_workspace_settings(
@@ -1023,6 +1044,7 @@ impl FallowConfig {
             used_class_members: self.used_class_members,
             ignore_decorators: self.ignore_decorators,
             unused_component_props_ignore,
+            tailwind_ignore_patterns: compile_tailwind_ignores(&self.health),
             circular_dependencies: self.circular_dependencies,
             effect: self.effect,
             duplicates: self.duplicates,

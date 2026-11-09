@@ -346,14 +346,8 @@ pub struct HealthConfig {
     /// `bg-[#abc]/50` matches as `bg-[#abc]`. These spellings cannot be excluded
     /// independently. Use `^icon-\[` to exclude Iconify tokens, including variants.
     /// Defaults to no exclusions. Invalid regexes fail config loading.
-    #[serde(
-        default,
-        skip_serializing_if = "Vec::is_empty",
-        deserialize_with = "deserialize_tailwind_ignore_patterns",
-        serialize_with = "serialize_tailwind_ignore_patterns"
-    )]
-    #[schemars(with = "Vec<String>")]
-    pub tailwind_ignore_patterns: Vec<regex::Regex>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub tailwind_ignore_patterns: Vec<String>,
 
     /// Per-file or per-function threshold overrides. These keep exceptional
     /// functions visible as configured numeric ceilings instead of hiding them
@@ -405,35 +399,6 @@ impl Default for HealthConfig {
             suggest_inline_suppression: default_suggest_inline_suppression(),
         }
     }
-}
-
-fn deserialize_tailwind_ignore_patterns<'de, D>(
-    deserializer: D,
-) -> Result<Vec<regex::Regex>, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    Vec::<String>::deserialize(deserializer)?
-        .into_iter()
-        .enumerate()
-        .map(|(index, pattern)| {
-            regex::Regex::new(&pattern).map_err(|error| {
-                serde::de::Error::custom(format!(
-                    "health.tailwindIgnorePatterns[{index}] is not a valid regex: {error}"
-                ))
-            })
-        })
-        .collect()
-}
-
-fn serialize_tailwind_ignore_patterns<S>(
-    patterns: &[regex::Regex],
-    serializer: S,
-) -> Result<S::Ok, S::Error>
-where
-    S: serde::Serializer,
-{
-    serializer.collect_seq(patterns.iter().map(regex::Regex::as_str))
 }
 
 /// Per-file or per-function health threshold override.

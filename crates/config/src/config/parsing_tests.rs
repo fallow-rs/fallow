@@ -563,8 +563,16 @@ fn tailwind_ignore_patterns_round_trip_as_strings() {
     let serialized = serde_json::to_value(&config).unwrap();
     assert_eq!(serialized["health"]["tailwindIgnorePatterns"], patterns);
     let round_tripped: FallowConfig = serde_json::from_value(serialized).unwrap();
-    assert!(round_tripped.health.tailwind_ignore_patterns[0].is_match("icon-[lucide--eye]"));
-    assert!(!round_tripped.health.tailwind_ignore_patterns[0].is_match("icon-size-[17px]"));
+    let resolved = round_tripped.resolve(
+        dir.path().to_path_buf(),
+        OutputFormat::Json,
+        1,
+        true,
+        true,
+        None,
+    );
+    assert!(resolved.tailwind_ignore_patterns[0].is_match("icon-[lucide--eye]"));
+    assert!(!resolved.tailwind_ignore_patterns[0].is_match("icon-size-[17px]"));
 }
 
 #[test]

@@ -799,7 +799,7 @@ fn scan_markup_tailwind_arbitrary_values(
         let Some((rel, source)) = read_markup_scan_source(file, ctx) else {
             continue;
         };
-        for arb in crate::css::scan_tailwind_arbitrary_values(&source, &config.health) {
+        for arb in crate::css::scan_tailwind_arbitrary_values(&source, config) {
             total_uses = total_uses.saturating_add(1);
             let entry = agg
                 .entry(arb.value)

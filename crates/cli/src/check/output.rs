@@ -612,6 +612,7 @@ mod tests {
             used_class_members: vec![],
             ignore_decorators: vec![],
             unused_component_props_ignore: None,
+            tailwind_ignore_patterns: vec![],
             circular_dependencies: fallow_config::CircularDependenciesConfig::default(),
             effect: fallow_config::EffectConfig::default(),
             duplicates: fallow_config::DuplicatesConfig::default(),
