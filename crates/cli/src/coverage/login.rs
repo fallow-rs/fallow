@@ -121,10 +121,109 @@ fn lowercase_first(text: &str) -> String {
     })
 }
 
+const API_KEYS_PATH: &str = "/settings#api-keys";
+const DASHBOARD_API_KEYS_PAGE: &str = "in the Fallow Cloud dashboard under Settings, API keys";
+
+/// The `http(s)` origin of a URL: its scheme, its host without the port, and
+/// its full authority.
+struct Origin<'a> {
+    scheme: &'static str,
+    host: &'a str,
+    authority: &'a str,
+}
+
+/// Parses the origin of `url`. Returns `None` for a scheme other than `https`,
+/// for `http` outside loopback, and for an authority with userinfo, a
+/// backslash or whitespace: such a printed link can open another host than
+/// the one it shows.
+fn parse_origin(url: &str) -> Option<Origin<'_>> {
+    let (scheme, rest) = url.split_once("://")?;
+    let scheme = if scheme.eq_ignore_ascii_case("https") {
+        "https"
+    } else if scheme.eq_ignore_ascii_case("http") {
+        "http"
+    } else {
+        return None;
+    };
+    let authority = &rest[..rest.find(['/', '?', '#']).unwrap_or(rest.len())];
+    if authority.is_empty()
+        || authority.contains(['@', '\\'])
+        || authority
+            .chars()
+            .any(|c| c.is_whitespace() || c.is_control())
+    {
+        return None;
+    }
+    let host_end = if authority.starts_with('[') {
+        authority.find(']')? + 1
+    } else {
+        authority.find(':').unwrap_or(authority.len())
+    };
+    let (host, port) = authority.split_at(host_end);
+    let valid_port = port.is_empty()
+        || port.strip_prefix(':').is_some_and(|digits| {
+            (1..=5).contains(&digits.len()) && digits.bytes().all(|b| b.is_ascii_digit())
+        });
+    if host.is_empty() || !valid_port {
+        return None;
+    }
+    if scheme == "http" && !is_loopback(host) {
+        return None;
+    }
+    Some(Origin {
+        scheme,
+        host,
+        authority,
+    })
+}
+
+/// `text` without control characters, so a cloud answer cannot send
+/// terminal escape sequences.
+fn printable(text: &str) -> String {
+    text.chars().filter(|c| !c.is_control()).collect()
+}
+
+fn is_loopback(host: &str) -> bool {
+    host.eq_ignore_ascii_case("localhost")
+        || host.to_ascii_lowercase().ends_with(".localhost")
+        || host == "127.0.0.1"
+        || host == "[::1]"
+}
+
+fn without_api_prefix(host: &str) -> &str {
+    match host.get(..4) {
+        Some(prefix) if prefix.eq_ignore_ascii_case("api.") => &host[4..],
+        _ => host,
+    }
+}
+
+/// Where the user creates or revokes API keys on the cloud at `base_url`,
+/// as a phrase after a verb ("at <link>" or a page name). The dashboard
+/// origin from the login page counts only on the host of the API (without
+/// `api.`), so a cloud cannot point the link at another site.
+fn api_keys_location(base_url: &str, dashboard_url: Option<&str>) -> String {
+    let Some(api) = parse_origin(base_url) else {
+        return DASHBOARD_API_KEYS_PAGE.to_owned();
+    };
+    let api_host = without_api_prefix(api.host);
+    if let Some(dashboard) = dashboard_url.and_then(parse_origin)
+        && dashboard.host.eq_ignore_ascii_case(api_host)
+    {
+        return format!(
+            "at {}://{}{API_KEYS_PATH}",
+            dashboard.scheme, dashboard.authority
+        );
+    }
+    if api.authority == api.host && api_host != api.host {
+        return format!("at {}://{api_host}{API_KEYS_PATH}", api.scheme);
+    }
+    DASHBOARD_API_KEYS_PAGE.to_owned()
+}
+
 /// Revoke steps for a key that the cloud created but this machine did not store.
-fn orphan_key_hint(machine_name: &str) -> String {
+fn orphan_key_hint(machine_name: &str, api_keys_location: &str) -> String {
     format!(
-        "Revoke the key \"fallow cloud login ({machine_name})\" at https://fallow.cloud/settings#api-keys, then run `fallow cloud login` again."
+        "Revoke the key \"fallow cloud login ({machine_name})\" {api_keys_location}, then run `fallow cloud login` again."
     )
 }
 
@@ -144,16 +243,21 @@ fn run_login(args: &LoginArgs, output: OutputFormat, json_style: JsonStyle) -> E
     };
     eprintln!(
         "Open {} and enter the code {}",
-        start.verification_uri, start.user_code
+        printable(&start.verification_uri),
+        printable(&start.user_code)
     );
     eprintln!("This creates a read-only API key for \"{machine_name}\". Waiting for approval...");
 
-    let token = match poll_for_key(&agent, &base_url, &start, &machine_name) {
+    let api_keys_location = api_keys_location(&base_url, Some(&start.verification_uri));
+    let token = match poll_for_key(&agent, &base_url, &start, &machine_name, &api_keys_location) {
         Ok(token) => token,
         Err(message) => return emit_input_error(&message, output),
     };
     let Some(issued) = token.api_key else {
-        return emit_input_error(&no_key_message(token.api_key_error.as_ref()), output);
+        return emit_input_error(
+            &no_key_message(token.api_key_error.as_ref(), &api_keys_location),
+            output,
+        );
     };
     let source = match credentials::store_api_key(&base_url, &issued.key) {
         Ok(source) => source,
@@ -161,7 +265,7 @@ fn run_login(args: &LoginArgs, output: OutputFormat, json_style: JsonStyle) -> E
             return emit_input_error(
                 &format!(
                     "failed to store the API key: {message}. {}",
-                    orphan_key_hint(&machine_name)
+                    orphan_key_hint(&machine_name, &api_keys_location)
                 ),
                 output,
             );
@@ -223,7 +327,8 @@ fn run_logout(api_url: Option<&str>, output: OutputFormat, json_style: JsonStyle
     if removed.keychain || removed.file {
         eprintln!("Logged out. Removed the stored API key for {base_url}.");
         eprintln!(
-            "The key stays valid until you revoke it at https://fallow.cloud/settings#api-keys."
+            "The key stays valid until you revoke it {}.",
+            api_keys_location(&base_url, None)
         );
     } else {
         eprintln!("No stored API key for {base_url}.");
@@ -255,24 +360,26 @@ fn start_device_flow(
 }
 
 /// The message of a sign-in that the cloud approved without a key.
-fn no_key_message(error: Option<&ApiKeyError>) -> String {
+fn no_key_message(error: Option<&ApiKeyError>, api_keys_location: &str) -> String {
     let Some(error) = error else {
-        return "Fallow Cloud approved the login but returned no API key. The cloud may not support `fallow cloud login` yet. Create a read-only key at https://fallow.cloud/settings#api-keys and set FALLOW_API_KEY.".to_owned();
+        return format!(
+            "Fallow Cloud approved the login but returned no API key. The cloud may not support `fallow cloud login` yet. Create a read-only key {api_keys_location} and set FALLOW_API_KEY."
+        );
     };
+    // The CLI states the owner rule itself, so it does not repeat the cloud text.
+    if error.code.as_deref() == Some("owner_required") {
+        return format!(
+            "You signed in, but Fallow Cloud did not create an API key: only an organization owner can approve a key. Ask an owner to approve the code, or to create a read-only key {api_keys_location}. Set that key as FALLOW_API_KEY. No key was stored."
+        );
+    }
     let reason = error
         .message
         .as_deref()
         .map(|message| message.trim().trim_end_matches('.'))
         .filter(|message| !message.is_empty())
         .unwrap_or("the cloud gave no reason");
-    let hint = match error.code.as_deref() {
-        Some("owner_required") => {
-            " Only an organization owner can approve a key. Ask an owner to approve the code, or to create a read-only key at https://fallow.cloud/settings#api-keys for FALLOW_API_KEY."
-        }
-        _ => "",
-    };
     format!(
-        "You signed in, but Fallow Cloud did not create an API key: {reason}.{hint} No key was stored."
+        "You signed in, but Fallow Cloud did not create an API key: {reason}. No key was stored."
     )
 }
 
@@ -281,6 +388,7 @@ fn poll_for_key(
     base_url: &str,
     start: &DeviceStart,
     machine_name: &str,
+    api_keys_location: &str,
 ) -> Result<DeviceToken, String> {
     let deadline = Instant::now() + Duration::from_secs(start.expires_in);
     let mut interval = Duration::from_secs(start.interval);
@@ -295,14 +403,14 @@ fn poll_for_key(
                 if lost >= MAX_TRANSIENT_POLLS {
                     return Err(format!(
                         "{message}. If you approved the code, {}",
-                        lowercase_first(&orphan_key_hint(machine_name))
+                        lowercase_first(&orphan_key_hint(machine_name, api_keys_location))
                     ));
                 }
             }
             PollOutcome::AlreadyClaimed => {
                 return Err(format!(
                     "the login was approved, but the API key did not reach this machine. {}",
-                    orphan_key_hint(machine_name)
+                    orphan_key_hint(machine_name, api_keys_location)
                 ));
             }
             PollOutcome::Failed(message) => return Err(message),
@@ -452,29 +560,146 @@ mod tests {
     }
 
     #[test]
-    fn a_key_refusal_names_the_cloud_reason_and_the_owner_rule() {
+    fn an_owner_refusal_states_the_owner_rule_once() {
         let token: DeviceToken = serde_json::from_str(
-            r#"{"licenseJwt":"jwt","apiKeyError":{"code":"owner_required","message":"Only an owner can create an API key"}}"#,
+            r#"{"licenseJwt":"jwt","apiKeyError":{"code":"owner_required","message":"Only an organization owner can create an API key. The CLI is signed in without one. Ask an owner to create a read-only key in Settings."}}"#,
         )
         .unwrap();
         assert!(token.api_key.is_none());
-        let message = no_key_message(token.api_key_error.as_ref());
-        assert!(
-            message.contains("Only an owner can create an API key"),
+        let message = no_key_message(
+            token.api_key_error.as_ref(),
+            "at https://fallow.cloud/settings#api-keys",
+        );
+        assert_eq!(
+            message.matches("organization owner").count(),
+            1,
             "{message}"
         );
-        assert!(message.contains("organization owner"), "{message}");
+        assert!(!message.contains("signed in without one"), "{message}");
+        assert!(message.contains("No key was stored"), "{message}");
+        assert!(
+            message.contains("https://fallow.cloud/settings#api-keys"),
+            "{message}"
+        );
         assert!(!message.contains("may not support"), "{message}");
+    }
 
-        let other = no_key_message(Some(&ApiKeyError {
-            code: Some("acknowledgement_required".to_owned()),
-            message: Some("Confirm the key in the dashboard.".to_owned()),
-        }));
+    #[test]
+    fn a_key_refusal_names_the_cloud_reason() {
+        let other = no_key_message(
+            Some(&ApiKeyError {
+                code: Some("acknowledgement_required".to_owned()),
+                message: Some("Confirm the key in the dashboard.".to_owned()),
+            }),
+            "at https://fallow.cloud/settings#api-keys",
+        );
         assert!(
             other.contains("Confirm the key in the dashboard"),
             "{other}"
         );
         assert!(!other.contains(".."), "{other}");
+    }
+
+    #[test]
+    fn the_api_keys_link_follows_the_dashboard_on_the_api_host() {
+        let production = "https://api.fallow.cloud";
+        assert_eq!(
+            api_keys_location(production, Some("https://fallow.cloud/device")),
+            "at https://fallow.cloud/settings#api-keys"
+        );
+        assert_eq!(
+            api_keys_location(
+                "http://localhost:3000",
+                Some("http://localhost:5173/device?x=1")
+            ),
+            "at http://localhost:5173/settings#api-keys"
+        );
+        assert_eq!(
+            api_keys_location("http://[::1]:3000", Some("http://[::1]:5173/device")),
+            "at http://[::1]:5173/settings#api-keys"
+        );
+        assert_eq!(
+            api_keys_location(production, Some("https://fallow.cloud:8443/device")),
+            "at https://fallow.cloud:8443/settings#api-keys"
+        );
+        assert_eq!(
+            api_keys_location(production, Some("HTTPS://Fallow.Cloud/device")),
+            "at https://Fallow.Cloud/settings#api-keys"
+        );
+    }
+
+    #[test]
+    fn printable_drops_terminal_escapes() {
+        assert_eq!(
+            printable("https://fallow.cloud/device\u{1b}[2J"),
+            "https://fallow.cloud/device[2J"
+        );
+        assert_eq!(printable("ABCD-EFGH"), "ABCD-EFGH");
+    }
+
+    #[test]
+    fn a_cloud_cannot_point_the_api_keys_link_at_another_host() {
+        let production = "https://api.fallow.cloud";
+        let expected = "at https://fallow.cloud/settings#api-keys";
+        for dashboard in [
+            "https://fallow.cloud@evil.example/device",
+            "https://evil.example\\@fallow.cloud/device",
+            "https://evil.example/device",
+            "http://fallow.cloud/device",
+            "javascript://fallow.cloud/device",
+            "device?next=https://fallow.cloud",
+            "https://fallow .cloud/device",
+            "https://fallow.cloud:\u{1b}[2J/device",
+            "https://fallow.cloud:99999x/device",
+            "https://fallow.cloud:/device",
+            "https://[::1]junk/device",
+            "",
+        ] {
+            assert_eq!(
+                api_keys_location(production, Some(dashboard)),
+                expected,
+                "{dashboard}"
+            );
+        }
+    }
+
+    #[test]
+    fn the_logout_location_follows_the_api_url() {
+        assert_eq!(
+            api_keys_location("https://api.staging.fallow.cloud", None),
+            "at https://staging.fallow.cloud/settings#api-keys"
+        );
+        for base_url in [
+            "http://localhost:3000",
+            "https://api.fallow.cloud:8443",
+            "https://api.fallow.cloud@evil.example",
+            "http://api.fallow.cloud",
+            "not a url",
+        ] {
+            assert_eq!(
+                api_keys_location(base_url, None),
+                DASHBOARD_API_KEYS_PAGE,
+                "{base_url}"
+            );
+        }
+    }
+
+    #[test]
+    fn orphan_and_owner_messages_use_the_given_location() {
+        let hint = orphan_key_hint("ci-box", DASHBOARD_API_KEYS_PAGE);
+        assert!(
+            hint.contains("\"fallow cloud login (ci-box)\" in the Fallow Cloud dashboard"),
+            "{hint}"
+        );
+        let message = no_key_message(
+            Some(&ApiKeyError {
+                code: Some("owner_required".to_owned()),
+                message: None,
+            }),
+            DASHBOARD_API_KEYS_PAGE,
+        );
+        assert!(message.contains("only an organization owner"), "{message}");
+        assert!(message.contains(DASHBOARD_API_KEYS_PAGE), "{message}");
     }
 
     #[test]
