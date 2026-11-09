@@ -253,6 +253,13 @@ pub fn report_relative_path(file: &str) -> Result<&Path, fallow_api::Programmati
     Ok(relative)
 }
 
+/// The source without its leading UTF-8 byte order mark. The run strips the
+/// mark before it instruments a file, so the report spans count from the end
+/// of the mark.
+pub fn without_byte_order_mark(source: &str) -> &str {
+    source.strip_prefix('\u{feff}').unwrap_or(source)
+}
+
 /// The code of `mutant` from the current file bytes. The file must have the
 /// digest of the report, and its instrumentation must give the mutant.
 pub fn mutant_code(
@@ -268,6 +275,7 @@ pub fn mutant_code(
     }
     let source =
         std::str::from_utf8(bytes).map_err(|_| MutationStaleReason::MutantNotReproduced)?;
+    let source = without_byte_order_mark(source);
     let reproduced = reproduce(source, &mutant.file, &mutant.mutant_id, mutant.span)
         .ok_or(MutationStaleReason::MutantNotReproduced)?;
     let (original_lines, mutated_lines) =

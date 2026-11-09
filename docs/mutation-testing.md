@@ -1828,22 +1828,31 @@ fallow mutation export -o mutation-report.json   # the report in the schema form
 
 - The report comes from `--report <file>`, or else from the last run, with the
   same search as `inspect`. A `mutation-plan` document has no test results,
-  so `export` exits with code 2 and `FALLOW_MUTATION_REPORT_INVALID`.
+  so `export` exits with code 2 and `FALLOW_MUTATION_REPORT_INVALID`. The
+  report paths are relative to the project root, so pass `--root` when you
+  run `export` from another directory.
 - The schema needs the full source of each mutated file. The source comes
   from the current file. Each mutated file must have the SHA-256 digest of
   the report. Otherwise `export` exits with code 2 and
   `FALLOW_MUTATION_REPORT_INVALID`, and the message names each changed or
-  missing file. Thus a location never points into changed code.
+  missing file, with the cause. Thus a location never points into changed
+  code. The `source` does not hold a leading byte order mark, because the run
+  instruments the file without it.
 - The output is JSON with `--format human` and with `--format json`. `-o`
   writes it to a file.
 - `mutatorName` is the operator, and `replacement` is the text of the change.
   `location` has 1-based lines and columns. A column counts UTF-16 code units,
-  the unit of a source string in a browser.
+  the unit of a source string in a browser. Lines break at `\r\n`, `\r`,
+  `\n`, U+2028 and U+2029, the same as in a browser report viewer. The
+  mutants of a file are in source order.
 - `coveredBy` holds the covering tests. `killedBy` holds the killing tests of
   a kill matrix run, or else the first killing test. `testFiles` lists each
   test by its file. A test id with no test file is under the key `unknown`.
-- `static`, `duration` and `statusReason` come from the report.
-  `thresholds` is `high: 80`, `low: 60`. `framework.name` is `fallow`.
+- `static` is the `static_mutant` field of the report. `duration` is the
+  `duration_ms` field: the time of one run of the mutant, with the time of
+  the runner. `export` writes `statusReason` from the status (see the
+  table). `thresholds` is `high: 80`, `low: 60`. `framework.name` is
+  `fallow`.
 - `config.completion` holds the `completion` of the report: the status and
   the reasons of a partial run.
 
@@ -1870,7 +1879,12 @@ dashboard can show a lower score than Fallow.
 
 A partial run (`completion.status: "partial"`) can miss kills. Each
 `Survived` and `NoCoverage` mutant of a partial run gets a `statusReason`
-that names the reasons and says that the result is not conclusive.
+that names the reasons and says that the result is not conclusive. The
+status stays `Survived` or `NoCoverage`, because the run found no test that
+detects the mutant, and `Ignored` would hide a real test gap. A dashboard
+reads only the status, so the score of a partial run can be lower than the
+score of a complete run. Read `config.completion` before you compare the
+score of a partial run.
 
 ## Recheck
 

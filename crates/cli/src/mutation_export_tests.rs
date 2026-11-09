@@ -216,3 +216,89 @@ fn a_plan_or_a_changed_file_is_refused() {
     .unwrap_err();
     assert!(error.message.contains("src/math.ts"), "{}", error.message);
 }
+
+fn report_for(file_bytes: &str, mutants: &[Value]) -> SavedReport {
+    serde_json::from_value(json!({
+        "kind": "mutation",
+        "completion": complete(),
+        "mutants": mutants,
+        "files": [{ "path": "src/math.ts", "source_sha256": sha256_hex(file_bytes.as_bytes()) }],
+    }))
+    .unwrap()
+}
+
+#[test]
+fn a_byte_order_mark_is_not_part_of_the_source_or_the_columns() {
+    let plus = find("+", "-");
+    let on_disk = format!("\u{feff}{SOURCE}");
+    let dir = project(&on_disk);
+    let report = report_for(&on_disk, &[entry(&plus, "survived", &json!({}))]);
+
+    let document = export(&report, dir.path()).unwrap();
+
+    assert_eq!(document["files"]["src/math.ts"]["source"], SOURCE);
+    let mutant = only_mutant(&document);
+    assert_eq!(mutant["replacement"], "-");
+    let line = SOURCE.lines().nth(1).unwrap();
+    let column = line[..line.find('+').unwrap()].encode_utf16().count() + 1;
+    assert_eq!(
+        mutant["location"]["start"],
+        json!({ "line": 2, "column": column })
+    );
+
+    let code = crate::mutation_inspect::mutant_code(
+        Some(on_disk.as_bytes()),
+        Some(&sha256_hex(on_disk.as_bytes())),
+        Some(&sha256_hex(on_disk.as_bytes())),
+        &report.mutants[0],
+    )
+    .unwrap();
+    assert_eq!(code.replacement, "-");
+}
+
+#[test]
+fn lines_break_where_a_browser_viewer_breaks_them() {
+    let source = "const a = 1;\u{2028}const b = 2;\rconst c = 3;\r\nexport const d = (n: number) => n + 1;\n";
+    let mutant = instrument(
+        source,
+        "src/math.ts",
+        SourceKind::Ts,
+        &MutationOptions::default(),
+    )
+    .unwrap()
+    .mutants
+    .into_iter()
+    .find(|mutant| mutant.original == "+")
+    .unwrap();
+    let dir = project(source);
+    let report = report_for(source, &[entry(&mutant, "survived", &json!({}))]);
+
+    let document = export(&report, dir.path()).unwrap();
+
+    let column = "export const d = (n: number) => n ".len() + 1;
+    assert_eq!(
+        only_mutant(&document)["location"],
+        json!({
+            "start": { "line": 4, "column": column },
+            "end": { "line": 4, "column": column + 1 },
+        })
+    );
+}
+
+#[test]
+fn the_error_names_the_cause_for_each_file() {
+    let plus = find("+", "-");
+    let dir = tempfile::tempdir().unwrap();
+    let error = export(
+        &report(&[entry(&plus, "survived", &json!({}))], &complete()),
+        dir.path(),
+    )
+    .unwrap_err();
+    assert!(
+        error
+            .message
+            .contains("src/math.ts (the file cannot be read)"),
+        "{}",
+        error.message
+    );
+}

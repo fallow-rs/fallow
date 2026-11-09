@@ -18,6 +18,7 @@ use serde_json::{Map, Value, json};
 use super::tasks::test_file_of;
 use crate::mutation_inspect::{
     SavedMutant, SavedReport, report_input_error, report_relative_path, reproduce, sha256_hex,
+    without_byte_order_mark,
 };
 
 /// The major version of the schema that the export writes.
@@ -62,17 +63,21 @@ pub fn export(report: &SavedReport, root: &Path) -> Result<Value, fallow_api::Pr
     let mut files = Map::new();
     let mut stale = Vec::new();
     let mut test_ids: Vec<&str> = Vec::new();
-    for (path, mutants) in by_file {
-        let Some(source) = current_source(report, root, path) else {
-            stale.push(path);
-            continue;
+    for (path, mut mutants) in by_file {
+        let source = match current_source(report, root, path) {
+            Ok(source) => source,
+            Err(cause) => {
+                stale.push(format!("{path} ({cause})"));
+                continue;
+            }
         };
         let replacements = replacements(&source, path);
-        let mut results: Vec<Value> = mutants
+        let lines = LineStarts::new(&source);
+        mutants.sort_by_key(|mutant| (mutant.span, mutant.mutant_id.as_str()));
+        let results: Vec<Value> = mutants
             .iter()
-            .map(|mutant| mutant_result(&source, mutant, &replacements, partial.as_deref()))
+            .map(|mutant| mutant_result(&source, &lines, mutant, &replacements, partial.as_deref()))
             .collect();
-        results.sort_by(|left, right| left["id"].as_str().cmp(&right["id"].as_str()));
         for mutant in &mutants {
             test_ids.extend(mutant.covering_tests.iter().map(String::as_str));
             test_ids.extend(mutant.killing_tests.iter().map(String::as_str));
@@ -89,7 +94,7 @@ pub fn export(report: &SavedReport, root: &Path) -> Result<Value, fallow_api::Pr
     }
     if !stale.is_empty() {
         return Err(report_input_error(format!(
-            "the export needs the source of each mutated file as the run saw it, but these files are missing or changed after the run: {}; run `fallow mutation` again, or restore the files",
+            "the export needs the source of each mutated file as the run saw it: {}; run `fallow mutation` again, or restore the files",
             stale.join(", ")
         )));
     }
@@ -129,14 +134,21 @@ fn partial_note(report: &SavedReport) -> Option<String> {
     ))
 }
 
-/// The current text of `path`, when it has the digest of the report.
-fn current_source(report: &SavedReport, root: &Path, path: &str) -> Option<String> {
-    let expected = report.saved_file(path)?.source_sha256.as_str();
-    let bytes = std::fs::read(root.join(report_relative_path(path).ok()?)).ok()?;
+/// The current text of `path` without its byte order mark, when the file
+/// has the digest of the report. The error is the cause, for the message.
+fn current_source(report: &SavedReport, root: &Path, path: &str) -> Result<String, &'static str> {
+    let expected = report
+        .saved_file(path)
+        .ok_or("the report has no digest of the file")?
+        .source_sha256
+        .as_str();
+    let relative = report_relative_path(path).map_err(|_| "the path leaves the project root")?;
+    let bytes = std::fs::read(root.join(relative)).map_err(|_| "the file cannot be read")?;
     if sha256_hex(&bytes) != expected {
-        return None;
+        return Err("the file changed after the run");
     }
-    String::from_utf8(bytes).ok()
+    let source = std::str::from_utf8(&bytes).map_err(|_| "the file is not UTF-8 text")?;
+    Ok(without_byte_order_mark(source).to_owned())
 }
 
 /// The replacement text of each mutant of one instrumentation of `source`,
@@ -161,6 +173,7 @@ fn replacements(source: &str, path: &str) -> FxHashMap<(String, (u32, u32)), Str
 
 fn mutant_result(
     source: &str,
+    lines: &LineStarts,
     mutant: &SavedMutant,
     replacements: &FxHashMap<(String, (u32, u32)), String>,
     partial: Option<&str>,
@@ -177,7 +190,7 @@ fn mutant_result(
     let mut result = Map::new();
     result.insert("id".into(), json!(mutant.mutant_id));
     result.insert("mutatorName".into(), json!(mutant.operator));
-    result.insert("location".into(), location(source, mutant.span));
+    result.insert("location".into(), lines.location(source, mutant.span));
     result.insert("status".into(), json!(schema_status));
     if let Some(reason) = reason {
         result.insert("statusReason".into(), json!(reason));
@@ -271,25 +284,47 @@ fn schema_status(mutant: &SavedMutant, status: MutantStatus) -> (&'static str, O
     }
 }
 
-/// The 1-based line and column of each end of `span`. A column counts UTF-16
-/// code units, the unit of the source string in a browser.
-fn location(source: &str, span: (u32, u32)) -> Value {
-    json!({
-        "start": position(source, span.0 as usize),
-        "end": position(source, span.1 as usize),
-    })
-}
+/// The start offset of each line, with the line breaks of a browser viewer:
+/// `\r\n`, `\r`, `\n`, U+2028 and U+2029.
+struct LineStarts(Vec<usize>);
 
-fn position(source: &str, offset: usize) -> Value {
-    let mut offset = offset.min(source.len());
-    while !source.is_char_boundary(offset) {
-        offset -= 1;
+impl LineStarts {
+    fn new(source: &str) -> Self {
+        let mut starts = vec![0];
+        let mut chars = source.char_indices().peekable();
+        while let Some((index, character)) = chars.next() {
+            let end = match character {
+                '\r' if chars.peek().is_some_and(|(_, next)| *next == '\n') => {
+                    chars.next();
+                    index + 2
+                }
+                '\r' | '\n' | '\u{2028}' | '\u{2029}' => index + character.len_utf8(),
+                _ => continue,
+            };
+            starts.push(end);
+        }
+        Self(starts)
     }
-    let before = &source[..offset];
-    let line = before.matches('\n').count() + 1;
-    let line_start = before.rfind('\n').map_or(0, |index| index + 1);
-    let column = before[line_start..].encode_utf16().count() + 1;
-    json!({ "line": line, "column": column })
+
+    /// The 1-based line and column of each end of `span`. A column counts
+    /// UTF-16 code units, the unit of the source string in a browser.
+    fn location(&self, source: &str, span: (u32, u32)) -> Value {
+        json!({
+            "start": self.position(source, span.0 as usize),
+            "end": self.position(source, span.1 as usize),
+        })
+    }
+
+    fn position(&self, source: &str, offset: usize) -> Value {
+        let mut offset = offset.min(source.len());
+        while !source.is_char_boundary(offset) {
+            offset -= 1;
+        }
+        let line = self.0.partition_point(|&start| start <= offset);
+        let line_start = self.0[line - 1];
+        let column = source[line_start..offset].encode_utf16().count() + 1;
+        json!({ "line": line, "column": column })
+    }
 }
 
 fn language(path: &str) -> &'static str {
