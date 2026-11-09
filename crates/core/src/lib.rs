@@ -2467,9 +2467,9 @@ fn run_plugins(
     let ws_results = run_workspace_plugins(
         &registry,
         config,
+        &plugins::registry::RootPluginContext::new(root_pkg, &result.active_plugins),
         workspace_pkgs,
         &file_paths,
-        &result.active_plugins,
         candidate_index.as_ref(),
     );
     merge_workspace_plugin_results(&mut result, ws_results)?;
@@ -2548,14 +2548,11 @@ fn run_root_plugins(
 fn run_workspace_plugins(
     registry: &plugins::PluginRegistry,
     config: &ResolvedConfig,
+    root: &plugins::registry::RootPluginContext<'_>,
     workspace_pkgs: &[LoadedWorkspacePackage],
     file_paths: &[std::path::PathBuf],
-    root_active_plugins: &[String],
     candidate_index: Option<&plugins::registry::ConfigCandidateIndex>,
 ) -> Vec<WorkspacePluginResult> {
-    let root_active_plugins: rustc_hash::FxHashSet<&str> =
-        root_active_plugins.iter().map(String::as_str).collect();
-
     let precompiled_matchers = registry.precompile_config_matchers();
     let workspace_relative_files = bucket_files_by_workspace(workspace_pkgs, file_paths);
 
@@ -2568,9 +2565,10 @@ fn run_workspace_plugins(
                     pkg: ws_pkg,
                     root: &ws.root,
                     project_root: &config.root,
+                    root_dependencies: &root.dependencies,
                     precompiled_config_matchers: &precompiled_matchers,
                     relative_files,
-                    skip_config_plugins: &root_active_plugins,
+                    skip_config_plugins: &root.active_plugins,
                     production_mode: config.production,
                     candidate_index,
                 }) {

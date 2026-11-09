@@ -215,11 +215,32 @@ pub struct PluginRegistry {
     external_plugins: Vec<ExternalPluginDef>,
 }
 
+/// Facts of the root project run that every workspace plugin run reads.
+pub(crate) struct RootPluginContext<'a> {
+    /// Plugins that are active for the root project.
+    pub(crate) active_plugins: FxHashSet<&'a str>,
+    /// Dependency names of the root `package.json`.
+    pub(crate) dependencies: Vec<String>,
+}
+
+impl<'a> RootPluginContext<'a> {
+    pub(crate) fn new(root_pkg: Option<&PackageJson>, active_plugins: &'a [String]) -> Self {
+        Self {
+            active_plugins: active_plugins.iter().map(String::as_str).collect(),
+            dependencies: root_pkg.map_or_else(Vec::new, PackageJson::all_dependency_names),
+        }
+    }
+}
+
 /// Inputs for the workspace-fast plugin path.
 pub(crate) struct WorkspacePluginRunInput<'a> {
     pub(crate) pkg: &'a PackageJson,
     pub(crate) root: &'a Path,
     pub(crate) project_root: &'a Path,
+    /// Dependency names of the root `package.json`. A package manager hoists
+    /// them, so a workspace script can call their binaries without its own
+    /// declaration.
+    pub(crate) root_dependencies: &'a [String],
     pub(crate) precompiled_config_matchers: &'a [(&'a dyn Plugin, Vec<globset::GlobMatcher>)],
     pub(crate) relative_files: &'a [(PathBuf, String)],
     pub(crate) skip_config_plugins: &'a FxHashSet<&'a str>,
@@ -879,9 +900,7 @@ impl PluginRegistry {
         let mut result = AggregatedPluginResult::default();
         let mut regex_errors = Vec::new();
 
-        let all_deps = input.pkg.all_dependency_names();
-        let script_packages =
-            script_activation_packages(input.pkg, input.root, &all_deps, input.production_mode);
+        let (all_deps, script_packages) = workspace_activation_deps(input);
         let workspace_files: Vec<PathBuf> = input
             .relative_files
             .iter()
@@ -1100,7 +1119,8 @@ impl PluginRegistry {
         candidate_index: Option<&ConfigCandidateIndex>,
     ) -> PluginRunContext<'a> {
         let all_deps = pkg.all_dependency_names();
-        let script_packages = script_activation_packages(pkg, root, &all_deps, production_mode);
+        let script_packages =
+            script_activation_packages(pkg, root, &[root], &all_deps, production_mode);
         let active = self.collect_active_plugins(&PluginActivationInput {
             pkg,
             root,
@@ -1730,9 +1750,48 @@ fn check_meta_framework_prerequisites(active_plugins: &[&dyn Plugin], root: &Pat
     }
 }
 
+/// The dependency names and script packages that activate plugins for a
+/// workspace package.
+///
+/// A package manager hoists the dependencies of the root `package.json`, so a
+/// workspace script can call `mocha` or `vite` with no declaration of its own.
+/// A root dependency counts for the workspace only when a workspace script
+/// calls it. A root dependency that no workspace script calls stays out, so
+/// a root tool does not activate its plugin in every workspace.
+fn workspace_activation_deps(
+    input: &WorkspacePluginRunInput<'_>,
+) -> (Vec<String>, FxHashSet<String>) {
+    let mut deps = input.pkg.all_dependency_names();
+    let own: FxHashSet<&str> = deps.iter().map(String::as_str).collect();
+    let hoisted: Vec<String> = input
+        .root_dependencies
+        .iter()
+        .filter(|dep| !own.contains(dep.as_str()))
+        .cloned()
+        .collect();
+    let mut script_deps = deps.clone();
+    script_deps.extend(hoisted.iter().cloned());
+    let script_packages = script_activation_packages(
+        input.pkg,
+        input.root,
+        &[input.root, input.project_root],
+        &script_deps,
+        input.production_mode,
+    );
+    deps.extend(
+        hoisted
+            .into_iter()
+            .filter(|dep| script_packages.contains(dep)),
+    );
+    (deps, script_packages)
+}
+
+/// The packages that the scripts of `pkg` call. `node_modules_roots` are
+/// the directories whose `node_modules` map a binary name to its package.
 fn script_activation_packages(
     pkg: &PackageJson,
     root: &Path,
+    node_modules_roots: &[&Path],
     all_deps: &[String],
     production_mode: bool,
 ) -> FxHashSet<String> {
@@ -1746,9 +1805,11 @@ fn script_activation_packages(
         pkg_scripts.clone()
     };
 
-    let mut nm_roots = Vec::new();
-    if root.join("node_modules").is_dir() {
-        nm_roots.push(root);
+    let mut nm_roots: Vec<&Path> = Vec::new();
+    for nm_root in node_modules_roots {
+        if !nm_roots.contains(nm_root) && nm_root.join("node_modules").is_dir() {
+            nm_roots.push(nm_root);
+        }
     }
     let bin_map = scripts::build_bin_to_package_map(&nm_roots, all_deps);
     let dep_set: FxHashSet<String> = all_deps.iter().cloned().collect();
