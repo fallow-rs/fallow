@@ -1862,6 +1862,7 @@ fn run_workspace_fast_returns_empty_for_no_active_plugins() {
         pkg: &pkg,
         root: Path::new("/workspace/pkg"),
         project_root: Path::new("/workspace"),
+        root_dependencies: &[],
         precompiled_config_matchers: &matchers,
         relative_files: &relative_files,
         skip_config_plugins: &FxHashSet::default(),
@@ -1941,6 +1942,7 @@ fn run_workspace_fast_eslint_config_parsed_when_eslint_active_at_root() {
         pkg: &pkg,
         root: &app_dir,
         project_root: monorepo_root,
+        root_dependencies: &[],
         precompiled_config_matchers: &matchers,
         relative_files: &workspace_relative,
         skip_config_plugins: &skip_config_plugins,
@@ -1968,6 +1970,7 @@ fn run_workspace_fast_detects_active_plugins() {
         pkg: &pkg,
         root: Path::new("/workspace/pkg"),
         project_root: Path::new("/workspace"),
+        root_dependencies: &[],
         precompiled_config_matchers: &matchers,
         relative_files: &relative_files,
         skip_config_plugins: &FxHashSet::default(),
@@ -1988,6 +1991,7 @@ fn run_workspace_fast_detects_script_activated_plugins() {
         pkg: &pkg,
         root: Path::new("/workspace/pkg"),
         project_root: Path::new("/workspace"),
+        root_dependencies: &[],
         precompiled_config_matchers: &matchers,
         relative_files: &relative_files,
         skip_config_plugins: &FxHashSet::default(),
@@ -2003,6 +2007,79 @@ fn run_workspace_fast_detects_script_activated_plugins() {
     );
 }
 
+/// Run the workspace fast path for a workspace without dependencies of its
+/// own, with `script` as its `test` script and `root_dependencies` hoisted
+/// from the root `package.json`.
+fn run_workspace_with_root_deps(
+    script: Option<&str>,
+    root_dependencies: &[String],
+) -> AggregatedPluginResult {
+    let registry = PluginRegistry::default();
+    let matchers = registry.precompile_config_matchers();
+    let json = script.map_or_else(
+        || serde_json::json!({}),
+        |script| serde_json::json!({ "scripts": { "test": script } }),
+    );
+    let pkg: PackageJson = serde_json::from_value(json).unwrap();
+    registry.run_workspace_fast(&WorkspacePluginRunInput {
+        pkg: &pkg,
+        root: Path::new("/workspace/packages/a"),
+        project_root: Path::new("/workspace"),
+        root_dependencies,
+        precompiled_config_matchers: &matchers,
+        relative_files: &[],
+        skip_config_plugins: &FxHashSet::default(),
+        production_mode: false,
+        candidate_index: None,
+    })
+}
+
+#[test]
+fn run_workspace_fast_activates_root_dependency_that_a_workspace_script_calls() {
+    let root_deps = vec!["mocha".to_string(), "vite".to_string()];
+
+    let mocha = run_workspace_with_root_deps(Some("mocha --exit"), &root_deps);
+    assert!(
+        mocha.active_plugins.contains(&"mocha".to_string()),
+        "a hoisted root dependency that a workspace script calls activates its plugin: {:?}",
+        mocha.active_plugins
+    );
+    assert!(
+        !mocha.active_plugins.contains(&"vite".to_string()),
+        "a hoisted root dependency that no workspace script calls stays inactive"
+    );
+
+    let vite = run_workspace_with_root_deps(Some("vite build"), &root_deps);
+    assert!(vite.active_plugins.contains(&"vite".to_string()));
+    assert!(
+        vite.entry_patterns
+            .iter()
+            .any(|(rule, _)| rule.pattern == "index.html"),
+        "the vite plugin adds its index.html entry for the workspace: {:?}",
+        vite.entry_patterns
+    );
+}
+
+#[test]
+fn run_workspace_fast_ignores_root_dependencies_without_a_workspace_script() {
+    let root_deps = vec!["mocha".to_string(), "vite".to_string()];
+    let result = run_workspace_with_root_deps(None, &root_deps);
+    assert!(
+        result.active_plugins.is_empty(),
+        "root dependencies alone do not activate plugins in a workspace: {:?}",
+        result.active_plugins
+    );
+}
+
+#[test]
+fn run_workspace_fast_does_not_activate_a_script_binary_without_a_dependency() {
+    let result = run_workspace_with_root_deps(Some("mocha --exit"), &[]);
+    assert!(
+        !result.active_plugins.contains(&"mocha".to_string()),
+        "a script binary that no manifest declares does not activate a plugin"
+    );
+}
+
 #[test]
 fn run_workspace_fast_filters_matchers_to_active_plugins() {
     let registry = PluginRegistry::default();
@@ -2014,6 +2091,7 @@ fn run_workspace_fast_filters_matchers_to_active_plugins() {
         pkg: &pkg,
         root: Path::new("/workspace/pkg"),
         project_root: Path::new("/workspace"),
+        root_dependencies: &[],
         precompiled_config_matchers: &matchers,
         relative_files: &relative_files,
         skip_config_plugins: &FxHashSet::default(),
@@ -2051,6 +2129,7 @@ fn run_workspace_fast_resolves_config_from_workspace_relative_paths() {
         pkg: &pkg,
         root: &workspace_root,
         project_root,
+        root_dependencies: &[],
         precompiled_config_matchers: &matchers,
         relative_files: &workspace_relative,
         skip_config_plugins: &FxHashSet::default(),

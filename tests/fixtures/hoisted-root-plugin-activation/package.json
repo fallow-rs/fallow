@@ -1,0 +1,9 @@
+{
+  "name": "hoisted-root-plugin-activation",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "devDependencies": {
+    "mocha": "^11.0.0",
+    "vite": "^6.0.0"
+  }
+}

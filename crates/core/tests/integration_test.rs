@@ -131,6 +131,8 @@ mod graph_cache_transparency;
 mod graphql_config_plugin;
 #[path = "integration_test/graphql_imports.rs"]
 mod graphql_imports;
+#[path = "integration_test/hoisted_root_plugin_activation.rs"]
+mod hoisted_root_plugin_activation;
 #[path = "integration_test/hono_html_tagged_template.rs"]
 mod hono_html_tagged_template;
 #[path = "integration_test/html_entry.rs"]
