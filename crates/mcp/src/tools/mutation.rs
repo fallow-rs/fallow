@@ -108,6 +108,8 @@ pub fn mutation_plan_options(
         scope: plan_scope(params)?,
         operators: plan_operators(params.operators.as_deref())?,
         max_mutants: params.max_mutants,
+        mutants_per_line: params.mutants_per_line,
+        function_scope: params.function_scope == Some(true),
         ..MutationRunOptions::default()
     })
 }
@@ -308,12 +310,16 @@ mod tests {
                 "no_cache": true,
                 "threads": 2,
                 "max_mutants": 25,
+                "mutants_per_line": 2,
+                "function_scope": true,
                 "operators": ["relational-operator", "return-value"],
             })),
             None,
         )
         .unwrap();
         assert_eq!(options.max_mutants, Some(25));
+        assert_eq!(options.mutants_per_line, Some(2));
+        assert!(options.function_scope);
         assert_eq!(
             options.operators,
             Some(vec![Operator::RelationalOperator, Operator::ReturnValue])

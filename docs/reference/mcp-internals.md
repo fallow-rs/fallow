@@ -171,7 +171,10 @@ Contract rules:
   `fallow mutation`. `mutation_plan` calls `fallow_api::plan_mutation` in
   process and serializes with
   `fallow_output::serialize_mutation_plan_json_output`, so its envelope is the
-  `fallow mutation --plan` JSON, with `kind: "mutation-plan"`.
+  `fallow mutation --plan` JSON, with `kind: "mutation-plan"`. Its
+  `max_mutants`, `mutants_per_line` and `function_scope` params map to the
+  CLI flags of the same name, and an omitted param falls back to the
+  `mutation.mutantsPerLine` and `mutation.functionScope` config keys.
   `mutation_inspect` runs `fallow mutation inspect <id> [--report <file>]` as
   a subprocess. A relative `report` resolves against `root`, and outer
   whitespace is trimmed. Without `report`, the CLI reads
