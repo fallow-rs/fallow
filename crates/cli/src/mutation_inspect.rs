@@ -68,6 +68,8 @@ pub struct SavedMutant {
     pub killing_tests: Vec<String>,
     #[serde(default)]
     kill_matrix_complete: bool,
+    #[serde(default)]
+    pub equivalence_hint: Option<fallow_output::MutantEquivalenceHint>,
 }
 
 #[derive(Debug, Deserialize)]

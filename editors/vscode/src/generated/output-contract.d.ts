@@ -1833,6 +1833,10 @@ export type MutantStatus = ("killed" | "timeout" | "survived" | "no_coverage" | 
  */
 export type MutantFailureKind = ("assertion" | "error" | "timeout")
 /**
+ * Why a survivor may be equivalent, as far as the type check can tell.
+ */
+export type MutantEquivalenceHint = "type-non-nullish"
+/**
  * Why the type check did not check a survivor.
  */
 export type MutationTypecheckSkipReason = ("no-project" | "not-type-checked" | "source-changed" | "file-missing" | "unsupported-file")
@@ -21092,6 +21096,13 @@ resumed?: boolean
  * `compile_error` mutant, sorted, at most 8.
  */
 type_error_codes?: number[]
+/**
+ * An advisory hint that the mutant may be equivalent to the original
+ * code. The hint never changes the status: the mutant stays `survived`
+ * and counts in the score. A person decides, and records the decision in
+ * a verdict file. The hint can be wrong.
+ */
+equivalence_hint?: (MutantEquivalenceHint | null)
 }
 /**
  * The edit of a mutant, without project text.
@@ -21402,6 +21413,12 @@ checked: number
  * `compile_error`.
  */
 compile_errors: number
+/**
+ * The mutants of the final report that have an `equivalence_hint`. They
+ * keep the status `survived`. A verdict that makes a mutant `equivalent`
+ * removes its hint and lowers this count.
+ */
+hinted?: number
 /**
  * The survivors that the checker did not check, by reason.
  */
@@ -21865,6 +21882,12 @@ original_lines?: (string | null)
  * stale.
  */
 mutated_lines?: (string | null)
+/**
+ * An advisory hint that the mutant may be equivalent. The task stays
+ * open: a person decides, and records an equivalent mutant in a verdict
+ * file.
+ */
+equivalence_hint?: (MutantEquivalenceHint | null)
 /**
  * Why the current file no longer gives the mutant. Absent for a fresh
  * task.

@@ -416,6 +416,25 @@ pub struct MutantResult {
     /// `compile_error` mutant, sorted, at most 8.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub type_error_codes: Vec<u32>,
+    /// An advisory hint that the mutant may be equivalent to the original
+    /// code. The hint never changes the status: the mutant stays `survived`
+    /// and counts in the score. A person decides, and records the decision in
+    /// a verdict file. The hint can be wrong.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub equivalence_hint: Option<MutantEquivalenceHint>,
+}
+
+/// Why a survivor may be equivalent, as far as the type check can tell.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum MutantEquivalenceHint {
+    /// The mutant removes an optional-chaining link (`?.`), and the declared
+    /// type of the receiver excludes `null` and `undefined`. If no run-time
+    /// value can be nullish, the mutant is equivalent. A run-time value can
+    /// still be nullish, for example in a method that loses its `this`, or
+    /// in a call whose declared return type hides a nullish value.
+    TypeNonNullish,
 }
 
 /// One run of a retried mutant.
@@ -761,9 +780,22 @@ pub struct MutationTypecheckOutput {
     /// The checked survivors that do not type-check. They have the status
     /// `compile_error`.
     pub compile_errors: usize,
+    /// The mutants of the final report that have an `equivalence_hint`. They
+    /// keep the status `survived`. A verdict that makes a mutant `equivalent`
+    /// removes its hint and lowers this count.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub hinted: usize,
     /// The survivors that the checker did not check, by reason.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub skipped: Vec<MutationTypecheckSkip>,
+}
+
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde skip predicate signature"
+)]
+const fn is_zero(value: &usize) -> bool {
+    *value == 0
 }
 
 /// The quality of observed test-to-mutant evidence.
@@ -1366,6 +1398,11 @@ pub struct MutationTask {
     /// The same lines with the mutation applied. `null` when the task is
     /// stale.
     pub mutated_lines: Option<String>,
+    /// An advisory hint that the mutant may be equivalent. The task stays
+    /// open: a person decides, and records an equivalent mutant in a verdict
+    /// file.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub equivalence_hint: Option<MutantEquivalenceHint>,
     /// Why the current file no longer gives the mutant. Absent for a fresh
     /// task.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1522,6 +1559,7 @@ mod tests {
             cached: false,
             resumed: false,
             type_error_codes: Vec::new(),
+            equivalence_hint: None,
         }
     }
 
@@ -1663,6 +1701,7 @@ mod tests {
             cached: false,
             resumed: false,
             type_error_codes: Vec::new(),
+            equivalence_hint: None,
         };
         let value = serde_json::to_value(&result).expect("serializes");
         assert_eq!(
@@ -1728,6 +1767,7 @@ mod tests {
             cached: false,
             resumed: false,
             type_error_codes: Vec::new(),
+            equivalence_hint: None,
         };
         let value = serde_json::to_value(&result).expect("serializes");
         assert_eq!(

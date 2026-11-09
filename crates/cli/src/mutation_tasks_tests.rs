@@ -261,3 +261,38 @@ fn an_empty_batch_says_so() {
         "No open mutation tasks: no mutant survived and each mutant has coverage.\n"
     );
 }
+
+#[test]
+fn a_task_carries_the_equivalence_hint_of_its_survivor() {
+    let plus = find(SOURCE, "+", "-");
+    let greater = find(SOURCE, ">", ">=");
+    let mut hinted = entry(&plus, "add", "survived", &["test/math.test.ts::add"]);
+    hinted["equivalence_hint"] = serde_json::json!("type-non-nullish");
+    let plain = entry(&greater, "isPositive", "survived", &[]);
+    let dir = project(SOURCE);
+    let output = tasks(&report(&[hinted, plain], "complete"), dir.path()).unwrap();
+    let hints: Vec<_> = output
+        .tasks
+        .iter()
+        .map(|task| (task.mutant_id.as_str(), task.equivalence_hint))
+        .collect();
+    assert!(hints.contains(&(
+        plus.id.as_str(),
+        Some(fallow_output::MutantEquivalenceHint::TypeNonNullish)
+    )));
+    assert!(hints.contains(&(greater.id.as_str(), None)));
+    let text = render_text(&output);
+    assert_eq!(
+        text.matches("hint: the type of the receiver").count(),
+        1,
+        "{text}"
+    );
+    let json = serde_json::to_value(&output).unwrap();
+    let json_hints = json["tasks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|task| task["equivalence_hint"] == "type-non-nullish")
+        .count();
+    assert_eq!(json_hints, 1, "{json}");
+}

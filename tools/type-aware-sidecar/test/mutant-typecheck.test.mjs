@@ -186,3 +186,309 @@ test("the executable answers a one-shot mutant-typecheck request", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+const CHAIN_SOURCE = [
+  "export const member = (m1: { b: number }): number => m1?.b ?? 0;",
+  "export const call = (c1: () => number): number => c1?.() ?? 0;",
+  'export const element = (e1: { b: number }): number => e1?.["b"] ?? 0;',
+  "export const maybe = (u1: { b: number } | undefined): number => u1?.b ?? 0;",
+  "export const indexed = (xs: { b: number }[]): number => xs[0]?.b ?? 0;",
+  "export const loose = (l1: any): number => (l1 as any)?.b ?? 0;",
+  "export const cast = (k1: unknown): number => (k1 as { b: number })?.b ?? 0;",
+  "export const asserted = (n1: { b: number } | null): number => n1!?.b ?? 0;",
+  "export const narrowed = (w1: { b: number } | undefined): number => (w1 ? w1?.b : 0);",
+  "export const generic = <T extends { b: number }>(g1: T): number => g1?.b ?? 0;",
+  'export const wide = "é€😀"; export const later = (z1: { b: number }): number => z1?.b ?? 0;',
+  "export const spaced = (s1: { b: number }): number => s1",
+  "  ?.b ?? 0;",
+  "",
+].join("\n");
+
+const linkAfter = (source, id, anchor, replacement) => {
+  const index = source.indexOf(anchor) + anchor.length;
+  assert.equal(source.slice(index, index + 2), "?.", `${id} anchor`);
+  const start = Buffer.byteLength(source.slice(0, index), "utf8");
+  return { id, start, end: start + 2, replacement };
+};
+
+const chainMutants = (source) => [
+  linkAfter(source, "member", "=> m1", "."),
+  linkAfter(source, "call", "=> c1", ""),
+  linkAfter(source, "element", "=> e1", ""),
+  linkAfter(source, "maybe", "=> u1", "."),
+  linkAfter(source, "indexed", "=> xs[0]", "."),
+  linkAfter(source, "loose", "(l1 as any)", "."),
+  linkAfter(source, "cast", "(k1 as { b: number })", "."),
+  linkAfter(source, "asserted", "=> n1!", "."),
+  linkAfter(source, "narrowed", "? w1", "."),
+  linkAfter(source, "generic", "=> g1", "."),
+  linkAfter(source, "later", "=> z1", "."),
+  linkAfter(source, "spaced", "=> s1\n  ", "."),
+];
+
+const NON_NULLISH_HINT = "type-non-nullish";
+
+const checkChains = (compilerOptions) => {
+  const root = makeProject({ "src/chain.ts": CHAIN_SOURCE }, compilerOptions);
+  try {
+    const parsed = parseRequest(
+      request(root, [
+        {
+          path: "src/chain.ts",
+          source_sha256: sha256(CHAIN_SOURCE),
+          mutants: chainMutants(CHAIN_SOURCE),
+        },
+      ]),
+    );
+    return Object.fromEntries(checkMutants(parsed).map((result) => [result.id, result]));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+};
+
+const hinted = (id) => ({ id, outcome: "compiles", hint: NON_NULLISH_HINT });
+
+test("an optional link on a type that is never nullish gets the hint", () => {
+  const results = checkChains({ noUncheckedIndexedAccess: true });
+  assert.deepEqual(results.member, hinted("member"));
+  assert.deepEqual(results.call, hinted("call"));
+  assert.deepEqual(results.element, hinted("element"));
+  assert.deepEqual(results.later, hinted("later"));
+  assert.deepEqual(results.spaced, hinted("spaced"));
+});
+
+test("an optional link whose receiver may be nullish or is unsound keeps the normal check", () => {
+  const results = checkChains({ noUncheckedIndexedAccess: true });
+  assert.equal(results.maybe.outcome, "compile-error");
+  assert.equal(results.indexed.outcome, "compile-error");
+  for (const id of ["loose", "cast", "asserted", "generic", "narrowed"]) {
+    assert.deepEqual(results[id], { id, outcome: "compiles" }, id);
+  }
+});
+
+test("the proof needs strictNullChecks and noUncheckedIndexedAccess", () => {
+  const settings = [
+    { noUncheckedIndexedAccess: false },
+    { noUncheckedIndexedAccess: undefined },
+    { strict: false, noUncheckedIndexedAccess: true },
+    { strictNullChecks: false, noUncheckedIndexedAccess: true },
+  ];
+  for (const compilerOptions of settings) {
+    const results = checkChains(compilerOptions);
+    assert.equal(results.member.outcome, "compiles", JSON.stringify(compilerOptions));
+    assert.equal(results.later.outcome, "compiles", JSON.stringify(compilerOptions));
+  }
+  const explicit = checkChains({
+    strict: false,
+    strictNullChecks: true,
+    noUncheckedIndexedAccess: true,
+  });
+  assert.deepEqual(explicit.member, hinted("member"));
+});
+
+test("a JavaScript file never gets the hint", () => {
+  const javascript = "export const get = (a) => a?.b;\n";
+  const root = makeProject(
+    { "src/get.js": javascript },
+    { allowJs: true, checkJs: true, noUncheckedIndexedAccess: true },
+  );
+  try {
+    const parsed = parseRequest(
+      request(root, [{ path: "src/get.js", mutants: [linkAfter(javascript, "js", "=> a", ".")] }]),
+    );
+    assert.deepEqual(checkMutants(parsed), [{ id: "js", outcome: "compiles" }]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+const RISK_SOURCE = [
+  'import { cfg } from "./cfg";',
+  'import { amb } from "./ambient";',
+  "declare const supplied: { b: number };",
+  "declare let suppliedLet: { b: number };",
+  "function getB(): { b: number } { return { b: 1 }; }",
+  "function inferredB() { return { b: 1 }; }",
+  "export class Box {",
+  "  value!: { b: number };",
+  "  unset: { b: number };",
+  "  declare ambient: { b: number };",
+  "  set: { b: number } = { b: 1 };",
+  "  assigned: { b: number };",
+  "  constructor(readonly param: { b: number }) { this.assigned = param; }",
+  "  readValue() { return this.value?.b ?? 0; }",
+  "  readUnset() { return this.unset?.b ?? 0; }",
+  "  readAmbient() { return this.ambient?.b ?? 0; }",
+  "  readSet() { return this.set?.b ?? 0; }",
+  "  readAssigned() { return this.assigned?.b ?? 0; }",
+  "  readParam() { return this.param?.b ?? 0; }",
+  "}",
+  "export const nested = (n0: unknown): number => (n0 as { child: { b: number } }).child?.b ?? 0;",
+  "export const aliased = (n1: unknown): number => { const aliasedX = n1 as { b: number }; return aliasedX?.b ?? 0; };",
+  "export const chained = (n2: unknown): number => { const c1 = n2 as { b: number }; const chainedY = c1; return chainedY?.b ?? 0; };",
+  "export const angle = (n3: unknown): number => { const angleX = <{ b: number }>n3; return angleX?.b ?? 0; };",
+  "export const bang = (n4: { b: number } | null): number => { const bangX = n4!; return bangX?.b ?? 0; };",
+  "export const viaSatisfies = (n5: { b: number }): number => (n5 satisfies { b: number })?.b ?? 0;",
+  "export const ambientVar = (): number => supplied?.b ?? 0;",
+  "export const ambientLet = (): number => suppliedLet?.b ?? 0;",
+  "export const ambientFile = (): number => amb?.b ?? 0;",
+  "export const imported = (): number => cfg?.b ?? 0;",
+  "export const literalLocal = (): number => { const o = { b: 1 }; return o?.b ?? 0; };",
+  "export const annotatedCall = (): number => getB()?.b ?? 0;",
+  "export const inferredCall = (): number => inferredB()?.b ?? 0;",
+  "export const viaParam = (box: Box): number => box.set?.b ?? 0;",
+  "export const reassigned = (r0: unknown): number => { let ra: { b: number } = { b: 1 }; ra = r0 as any; return ra?.b ?? 0; };",
+  "export const closure = (): number => {",
+  "  let cl: { b: number } = { b: 1 };",
+  "  const swap = (v: { b: number }): void => { cl = v; };",
+  "  swap({ b: 2 });",
+  "  return cl?.b ?? 0;",
+  "};",
+  "export const destructured = (): number => { let ds: { b: number } = { b: 1 }; [ds] = [{ b: 2 }]; return ds?.b ?? 0; };",
+  "export const objectTarget = (): number => { let os: { b: number } = { b: 1 }; ({ os } = { os: { b: 2 } }); return os?.b ?? 0; };",
+  "export const loopTarget = (): number => { let ls: { b: number } = { b: 1 }; for (ls of [{ b: 2 }]) { break; } return ls?.b ?? 0; };",
+  "export const incremented = (): string => { let cnt: number = 0; cnt++; return cnt?.toFixed() ?? ''; };",
+  "export const compound = (): string => { let tot: number = 0; tot += 1; return tot?.toFixed() ?? ''; };",
+  "export const varBinding = (r1: unknown): number => { var vb: { b: number } = { b: 1 }; vb = r1 as any; return vb?.b ?? 0; };",
+  "export const parameter = (p0: { b: number }, r2: unknown): number => { p0 = r2 as any; return p0?.b ?? 0; };",
+  "export const keptLet = (): number => { let keep: { b: number } = { b: 1 }; return keep?.b ?? 0; };",
+  "export const shadowA = (r3: unknown): number => { let dup: { b: number } = { b: 1 }; dup = r3 as any; return dup?.b ?? 0; };",
+  "export const shadowB = (): number => { let dup: { b: number } = { b: 1 }; const keptB = dup?.b ?? 0; return keptB; };",
+  "export const stale = (): number | undefined => {",
+  "  let a: { b: number } | undefined = { b: 1 };",
+  "  const reset = (): void => { a = undefined; };",
+  "  if (a) { reset(); return a?.b; }",
+  "  return 0;",
+  "};",
+  "export const staleAlias = (): number | undefined => {",
+  "  let s: { b: number } | undefined = { b: 1 };",
+  "  const clear = (): void => { s = undefined; };",
+  "  if (s) { clear(); const staleY = s; return staleY?.b; }",
+  "  return 0;",
+  "};",
+  "",
+].join("\n");
+
+const riskMutants = (source) => [
+  linkAfter(source, "value", "return this.value", "."),
+  linkAfter(source, "unset", "return this.unset", "."),
+  linkAfter(source, "ambient", "return this.ambient", "."),
+  linkAfter(source, "set", "return this.set", "."),
+  linkAfter(source, "assigned", "return this.assigned", "."),
+  linkAfter(source, "param", "return this.param", "."),
+  linkAfter(source, "nested", ").child", "."),
+  linkAfter(source, "aliased", "return aliasedX", "."),
+  linkAfter(source, "chained", "return chainedY", "."),
+  linkAfter(source, "angle", "return angleX", "."),
+  linkAfter(source, "bang", "return bangX", "."),
+  linkAfter(source, "viaSatisfies", "(n5 satisfies { b: number })", "."),
+  linkAfter(source, "ambientVar", "=> supplied", "."),
+  linkAfter(source, "ambientLet", "=> suppliedLet", "."),
+  linkAfter(source, "ambientFile", "=> amb", "."),
+  linkAfter(source, "imported", "=> cfg", "."),
+  linkAfter(source, "literalLocal", "return o", "."),
+  linkAfter(source, "annotatedCall", "=> getB()", "."),
+  linkAfter(source, "inferredCall", "=> inferredB()", "."),
+  linkAfter(source, "viaParam", "=> box.set", "."),
+  linkAfter(source, "reassigned", "return ra", "."),
+  linkAfter(source, "closure", "return cl", "."),
+  linkAfter(source, "destructured", "return ds", "."),
+  linkAfter(source, "objectTarget", "return os", "."),
+  linkAfter(source, "loopTarget", "return ls", "."),
+  linkAfter(source, "incremented", "return cnt", "."),
+  linkAfter(source, "compound", "return tot", "."),
+  linkAfter(source, "varBinding", "return vb", "."),
+  linkAfter(source, "parameter", "return p0", "."),
+  linkAfter(source, "keptLet", "return keep", "."),
+  linkAfter(source, "shadowA", "return dup", "."),
+  linkAfter(source, "shadowB", "const keptB = dup", "."),
+  linkAfter(source, "stale", "reset(); return a", "."),
+  linkAfter(source, "staleAlias", "return staleY", "."),
+];
+
+const checkRisks = () => {
+  const root = makeProject(
+    {
+      "src/risk.ts": RISK_SOURCE,
+      "src/cfg.ts": "export const cfg = { b: 1 };\n",
+      "src/ambient.d.ts": "export declare const amb: { b: number };\n",
+    },
+    { noUncheckedIndexedAccess: true, strictPropertyInitialization: false },
+  );
+  try {
+    const parsed = parseRequest(
+      request(root, [
+        {
+          path: "src/risk.ts",
+          source_sha256: sha256(RISK_SOURCE),
+          mutants: riskMutants(RISK_SOURCE),
+        },
+      ]),
+    );
+    return Object.fromEntries(checkMutants(parsed).map((result) => [result.id, result]));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+};
+
+test("a cast, an alias of a cast or a non-null assertion is never proven", () => {
+  const results = checkRisks();
+  for (const id of ["nested", "aliased", "chained", "angle", "bang"]) {
+    assert.deepEqual(results[id], { id, outcome: "compiles" }, id);
+  }
+});
+
+test("a declaration that nothing forces to hold a value is never proven", () => {
+  const results = checkRisks();
+  for (const id of ["value", "unset", "ambient", "ambientVar", "ambientLet", "ambientFile"]) {
+    assert.deepEqual(results[id], { id, outcome: "compiles" }, id);
+  }
+});
+
+test("a narrowing that a call can invalidate is never proven", () => {
+  const results = checkRisks();
+  for (const id of ["stale", "staleAlias"]) {
+    assert.deepEqual(results[id], { id, outcome: "compiles" }, id);
+  }
+});
+
+test("declared types that the language enforces still prove a receiver", () => {
+  const results = checkRisks();
+  for (const id of [
+    "set",
+    "assigned",
+    "param",
+    "viaSatisfies",
+    "imported",
+    "literalLocal",
+    "annotatedCall",
+    "viaParam",
+  ]) {
+    assert.deepEqual(results[id], hinted(id), id);
+  }
+  assert.deepEqual(results.inferredCall, { id: "inferredCall", outcome: "compiles" });
+});
+
+test("a binding that code assigns after its declaration is never proven", () => {
+  const results = checkRisks();
+  for (const id of [
+    "reassigned",
+    "closure",
+    "destructured",
+    "objectTarget",
+    "loopTarget",
+    "incremented",
+    "compound",
+    "varBinding",
+    "parameter",
+    "shadowA",
+  ]) {
+    assert.deepEqual(results[id], { id, outcome: "compiles" }, id);
+  }
+});
+
+test("a binding that no code assigns after its declaration is still proven", () => {
+  const results = checkRisks();
+  assert.deepEqual(results.keptLet, hinted("keptLet"));
+  assert.deepEqual(results.shadowB, hinted("shadowB"));
+});

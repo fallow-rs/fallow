@@ -1203,7 +1203,7 @@
           "minimum": 1
         },
         "typecheck": {
-          "description": "Type-check each survived mutant through the TypeScript-Go companion\nof `--type-aware`. A survivor that does not type-check becomes\n`compile_error` and does not count in the score. Unset or `false`\nchecks no survivor. `--typecheck` turns the check on.",
+          "description": "Type-check each survived mutant through the TypeScript-Go companion\nof `--type-aware`. A survivor that does not type-check becomes\n`compile_error` and does not count in the score. A survivor that\nremoves an optional-chaining link from a receiver whose type excludes\n`null` and `undefined` gets an advisory `equivalence_hint`. Its status\nand the score do not change. Unset or `false` checks no survivor.\n`--typecheck` turns the check on.",
           "type": [
             "boolean",
             "null"

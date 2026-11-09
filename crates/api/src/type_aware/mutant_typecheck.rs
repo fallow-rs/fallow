@@ -6,7 +6,7 @@
 
 use std::path::Path;
 
-use fallow_output::MutationTypecheckSkipReason;
+use fallow_output::{MutantEquivalenceHint, MutationTypecheckSkipReason};
 use rustc_hash::FxHashSet;
 use serde::{Deserialize, Serialize};
 
@@ -46,6 +46,9 @@ pub enum TypecheckOutcome {
     Compiles,
     /// The mutated file has new errors, with these diagnostic codes.
     CompileError(Vec<u32>),
+    /// The mutated file has no new error, and the checker gives an advisory
+    /// hint that the mutant may be equivalent.
+    Hinted(MutantEquivalenceHint),
     /// The checker did not check the file.
     Unchecked(MutationTypecheckSkipReason),
 }
@@ -74,6 +77,8 @@ struct WireResult {
     codes: Vec<u32>,
     #[serde(default)]
     reason: Option<MutationTypecheckSkipReason>,
+    #[serde(default)]
+    hint: Option<MutantEquivalenceHint>,
 }
 
 #[derive(Deserialize)]
@@ -143,15 +148,22 @@ fn validate(
             return Err(mismatch(&format!("a duplicate mutant `{}`", result.id)));
         }
         let outcome = match (result.outcome, result.reason) {
-            (WireOutcome::Compiles, None) if result.codes.is_empty() => TypecheckOutcome::Compiles,
-            (WireOutcome::CompileError, None) if !result.codes.is_empty() => {
+            (WireOutcome::Compiles, None) if result.codes.is_empty() => match result.hint {
+                Some(hint) => TypecheckOutcome::Hinted(hint),
+                None => TypecheckOutcome::Compiles,
+            },
+            (WireOutcome::CompileError, None)
+                if !result.codes.is_empty() && result.hint.is_none() =>
+            {
                 let mut codes = result.codes;
                 codes.sort_unstable();
                 codes.dedup();
                 codes.truncate(MAX_CODES);
                 TypecheckOutcome::CompileError(codes)
             }
-            (WireOutcome::Unchecked, Some(reason)) if result.codes.is_empty() => {
+            (WireOutcome::Unchecked, Some(reason))
+                if result.codes.is_empty() && result.hint.is_none() =>
+            {
                 TypecheckOutcome::Unchecked(reason)
             }
             _ => return Err(mismatch(&format!("an invalid result for `{}`", result.id))),
@@ -225,6 +237,51 @@ mod tests {
                 ),
             ]
         );
+    }
+
+    #[test]
+    fn a_compiles_outcome_can_carry_a_hint() {
+        let results = validate(
+            &files(),
+            response(&serde_json::json!([
+                { "id": "m1", "outcome": "compiles", "hint": "type-non-nullish" },
+                { "id": "m2", "outcome": "compiles" },
+                { "id": "m3", "outcome": "unchecked", "reason": "no-project" },
+            ])),
+        )
+        .expect("a valid response");
+        assert_eq!(
+            results[0],
+            (
+                "m1".to_owned(),
+                TypecheckOutcome::Hinted(MutantEquivalenceHint::TypeNonNullish)
+            )
+        );
+        assert_eq!(results[1], ("m2".to_owned(), TypecheckOutcome::Compiles));
+        for invalid in [
+            serde_json::json!({ "id": "m1", "outcome": "compile-error", "codes": [2322], "hint": "type-non-nullish" }),
+            serde_json::json!({ "id": "m1", "outcome": "unchecked", "reason": "no-project", "hint": "type-non-nullish" }),
+            serde_json::json!({ "id": "m1", "outcome": "equivalent", "reason": "type-proven-never-nullish" }),
+        ] {
+            let response = serde_json::from_value::<Response>(serde_json::json!({
+                "protocol_version": WIRE_PROTOCOL_VERSION,
+                "operation": MUTANT_TYPECHECK_OPERATION,
+                "results": [
+                    invalid,
+                    { "id": "m2", "outcome": "compiles" },
+                    { "id": "m3", "outcome": "compiles" },
+                ],
+            }));
+            if let Ok(response) = response {
+                assert!(validate(&files(), response).is_err());
+            }
+        }
+        let unknown_hint = serde_json::from_value::<Response>(serde_json::json!({
+            "protocol_version": WIRE_PROTOCOL_VERSION,
+            "operation": MUTANT_TYPECHECK_OPERATION,
+            "results": [{ "id": "m1", "outcome": "compiles", "hint": "other" }],
+        }));
+        assert!(unknown_hint.is_err());
     }
 
     #[test]

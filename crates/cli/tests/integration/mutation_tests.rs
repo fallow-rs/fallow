@@ -1122,6 +1122,132 @@ mod end_to_end {
         assert_eq!(checked["completion"]["status"], "complete", "{checked}");
     }
 
+    /// A hinted survivor stays `survived`: no `equivalent` mutant, the same
+    /// survivors as the plain run (less the compile errors), and the score
+    /// is detected over executed.
+    fn assert_hint_leaves_the_score(checked: &serde_json::Value, plain: &serde_json::Value) {
+        let counts = &checked["summary"]["counts"];
+        assert_eq!(counts["equivalent"], 0, "{checked}");
+        assert_eq!(
+            counts["survived"].as_u64().expect("survived")
+                + counts["compile_error"].as_u64().expect("compile errors"),
+            plain["summary"]["counts"]["survived"]
+                .as_u64()
+                .expect("survived"),
+            "{checked}"
+        );
+        let detected = counts["killed"].as_f64().expect("killed")
+            + counts["timeout"].as_f64().expect("timeout");
+        let executed = detected + counts["survived"].as_f64().expect("survived");
+        assert_eq!(
+            checked["summary"]["score"].as_f64(),
+            Some(detected / executed),
+            "{checked}"
+        );
+        assert_eq!(checked["completion"]["status"], "complete", "{checked}");
+    }
+
+    /// `readB` reads `a?.b` where `a` is a plain object type. No test can
+    /// tell `a?.b` from `a.b`, so the mutant survives the tests. With
+    /// `strictNullChecks` and `noUncheckedIndexedAccess`, the type check adds
+    /// the advisory `equivalence_hint` to the survivor. The hint never changes
+    /// the status or the score. Without `--typecheck` the survivor has no
+    /// hint.
+    #[test]
+    fn a_typecheck_run_hints_an_optional_link_on_a_non_nullable_receiver_without_changing_the_score()
+     {
+        let Some(package) = companion_package() else {
+            return;
+        };
+        if !type_aware_companion_installed() {
+            return;
+        }
+        let (_project, root) = vitest_project(
+            &package,
+            "\nexport function readB(a: { b: number }): number | undefined {\n  return a?.b;\n}\n",
+        );
+        fs::write(
+            root.join("tsconfig.json"),
+            r#"{"compilerOptions":{"strict":true,"noUncheckedIndexedAccess":true,"noEmit":true},"include":["src"]}"#,
+        )
+        .expect("tsconfig");
+        fs::write(
+            root.join("test/chain.test.ts"),
+            "import { expect, test } from \"vitest\";\nimport { readB } from \"../src/math\";\n\ntest(\"reads b\", () => {\n  expect(readB({ b: 4 })).toBe(4);\n});\n",
+        )
+        .expect("chain test");
+        commit_all(&root, "chain");
+
+        let args = ["src/math.ts", "--concurrency", "1"];
+        let (plain_output, plain) = json_mutation(&root, &args);
+        assert_eq!(plain_output.code, 0, "{}", plain_output.stderr);
+        let link = |report: &serde_json::Value| -> serde_json::Value {
+            report["mutants"]
+                .as_array()
+                .expect("mutants")
+                .iter()
+                .find(|mutant| {
+                    mutant["function"] == "readB" && mutant["operator"] == "optional-chaining"
+                })
+                .cloned()
+                .expect("an optional-chaining mutant of readB")
+        };
+        assert_eq!(link(&plain)["status"], "survived", "{plain}");
+        assert!(link(&plain).get("equivalence_hint").is_none(), "{plain}");
+
+        let typecheck_run = |extra: &[&str]| -> serde_json::Value {
+            let mut command = std::process::Command::new(crate::common::fallow_bin());
+            command
+                .env("RUST_LOG", "")
+                .env("NO_COLOR", "1")
+                .args(["mutation", "--root"])
+                .arg(&root)
+                .args(args)
+                .args(extra)
+                .args(["--typecheck", "--format", "json", "--quiet"]);
+            crate::common::configure_type_aware_sidecar(&mut command);
+            let output = command.output().expect("fallow runs");
+            assert_eq!(
+                output.status.code(),
+                Some(0),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+            serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("json")
+        };
+        let checked = typecheck_run(&[]);
+        let mutant = link(&checked);
+        assert_eq!(mutant["status"], "survived", "{checked}");
+        assert_eq!(mutant["equivalence_hint"], "type-non-nullish", "{checked}");
+        assert_eq!(checked["typecheck"]["completed"], true, "{checked}");
+        assert_eq!(checked["typecheck"]["hinted"], 1, "{checked}");
+        assert_hint_leaves_the_score(&checked, &plain);
+
+        // A verdict for the hinted survivor makes it `equivalent` and
+        // removes the hint, so the report does not show both.
+        let verdict_path = root.join("verdicts.json");
+        fs::write(
+            &verdict_path,
+            serde_json::to_string(&serde_json::json!({
+                "schema_version": "1",
+                "verdicts": [{ "review_key": mutant["mutant_id"], "verdict": "equivalent" }],
+            }))
+            .expect("verdict json"),
+        )
+        .expect("verdicts");
+        commit_all(&root, "verdicts");
+        let judged = typecheck_run(&["--verdicts", verdict_path.to_str().expect("path")]);
+        let mutant = link(&judged);
+        assert_eq!(mutant["status"], "equivalent", "{judged}");
+        assert!(mutant.get("equivalence_hint").is_none(), "{judged}");
+        assert!(judged["typecheck"].get("hinted").is_none(), "{judged}");
+        assert_eq!(
+            judged["typecheck"]["checked"],
+            checked["typecheck"]["checked"]
+        );
+        assert_eq!(judged["summary"]["counts"]["equivalent"], 1, "{judged}");
+    }
+
     /// A component compiler in the shape of the Vue plugin: its `transform`
     /// hook keeps the script block of a `.vue` file.
     const COMPONENT_CONFIG: &str = r#"const componentPlugin = () => ({

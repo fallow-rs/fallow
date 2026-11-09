@@ -1333,7 +1333,7 @@
           "name": "--typecheck",
           "type": "bool",
           "required": false,
-          "description": "Type-check each survived mutant through the `--type-aware` companion. A survivor that does not type-check becomes `compile_error` and leaves the score",
+          "description": "Type-check each survived mutant through the `--type-aware` companion. A survivor that does not type-check becomes `compile_error` and leaves the score. An optional-chaining survivor on a receiver whose type excludes `null` and `undefined` gets an advisory `equivalence_hint`. Its status and the score do not change",
           "possible_values": [
             "true",
             "false"

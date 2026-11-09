@@ -33957,6 +33957,17 @@
             "type": "integer"
           },
           "description": "The TypeScript diagnostic codes of the new errors of a\n`compile_error` mutant, sorted, at most 8."
+        },
+        "equivalence_hint": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutantEquivalenceHint"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "An advisory hint that the mutant may be equivalent to the original\ncode. The hint never changes the status: the mutant stays `survived`\nand counts in the score. A person decides, and records the decision in\na verdict file. The hint can be wrong."
         }
       },
       "required": [
@@ -34648,6 +34659,10 @@
         "compile_errors": {
           "type": "integer",
           "description": "The checked survivors that do not type-check. They have the status\n`compile_error`."
+        },
+        "hinted": {
+          "type": "integer",
+          "description": "The mutants of the final report that have an `equivalence_hint`. They\nkeep the status `survived`. A verdict that makes a mutant `equivalent`\nremoves its hint and lowers this count."
         },
         "skipped": {
           "type": "array",
@@ -36427,6 +36442,17 @@
           ],
           "description": "The same lines with the mutation applied. `null` when the task is\nstale."
         },
+        "equivalence_hint": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutantEquivalenceHint"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "An advisory hint that the mutant may be equivalent. The task stays\nopen: a person decides, and records an equivalent mutant in a verdict\nfile."
+        },
         "stale_reason": {
           "anyOf": [
             {
@@ -36742,6 +36768,16 @@
         }
       ],
       "description": "The quality of the evidence of one `--kill-matrix-for` target."
+    },
+    "MutantEquivalenceHint": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "type-non-nullish",
+          "description": "The mutant removes an optional-chaining link (`?.`), and the declared\ntype of the receiver excludes `null` and `undefined`. If no run-time\nvalue can be nullish, the mutant is equivalent. A run-time value can\nstill be nullish, for example in a method that loses its `this`, or\nin a call whose declared return type hides a nullish value."
+        }
+      ],
+      "description": "Why a survivor may be equivalent, as far as the type check can tell."
     }
   }
 }
