@@ -470,7 +470,6 @@ pub fn baseline_failures(outcome: Option<&ScheduleOutcome>) -> Vec<MutationBasel
         .unwrap_or_default()
 }
 
-/// The public issues of a schedule.
 /// The most skipped tests that the `skipped-tests` entry names.
 const MAX_SKIPPED_TESTS_SHOWN: usize = 10;
 
@@ -511,6 +510,7 @@ pub fn skipped_tests_issue(plan: &MutationPlan) -> Option<MutationRunIssue> {
     })
 }
 
+/// The public issues of a schedule.
 pub fn issues(outcome: Option<&ScheduleOutcome>) -> Vec<MutationRunIssue> {
     outcome
         .map(|outcome| {

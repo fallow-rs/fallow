@@ -286,9 +286,9 @@ fn summary_line(report: &MutationReport) -> String {
     ] {
         if count > 0 {
             let _ = write!(line, "  {label} {count}");
-        }
-        if label == "pending" && report.summary.sampled_out > 0 {
-            let _ = write!(line, "  sampled out {}", report.summary.sampled_out);
+            if label == "pending" && report.summary.sampled_out > 0 {
+                let _ = write!(line, " ({} sampled out)", report.summary.sampled_out);
+            }
         }
     }
     let _ = write!(line, "  {}", completion_text(report));
