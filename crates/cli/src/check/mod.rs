@@ -37,8 +37,11 @@ use baseline_save::save_baseline_file;
 mod baseline_compare;
 use baseline_compare::load_and_compare_baseline;
 
+mod configuration;
+use configuration::prepare_check_config;
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct IssueFilters {
+    pub shared_state: bool,
     pub unused_files: bool,
     pub unused_exports: bool,
     pub unused_deps: bool,
@@ -182,7 +185,8 @@ impl IssueFilters {
     }
 
     pub const fn any_active(&self) -> bool {
-        self.unused_files
+        self.shared_state
+            || self.unused_files
             || self.unused_exports
             || self.unused_deps
             || self.unused_types
@@ -812,40 +816,6 @@ fn drop_in_background<T: Send + 'static>(value: T) {
         .name("fallow-drop".to_owned())
         .spawn(move || drop(value));
     drop(spawned);
-}
-
-fn prepare_check_config(opts: &CheckOptions<'_>) -> Result<ResolvedConfig, ExitCode> {
-    let mut config = load_config_for_analysis(
-        opts.root,
-        opts.config_path,
-        crate::ConfigLoadOptions {
-            output: opts.output,
-            no_cache: opts.no_cache,
-            threads: opts.threads,
-            production_override:
-                fallow_engine::project_config::ProductionFlags::single_analysis_override(
-                    opts.production,
-                    opts.production_override,
-                ),
-            quiet: opts.quiet,
-            allow_remote_extends: opts.allow_remote_extends,
-        },
-        fallow_config::ProductionAnalysis::DeadCode,
-    )?;
-    config.analysis_snapshot = opts.analysis_snapshot;
-    if opts.include_entry_exports {
-        config.force_include_entry_exports();
-    }
-    if opts.show_cascade {
-        config.show_cascade = true;
-    }
-    if opts.fail_on_parse_error {
-        config.fail_on_parse_error = true;
-    }
-    apply_type_aware_overrides(opts, &mut config)?;
-    opts.filters.activate_explicit_opt_ins(&mut config.rules);
-    apply_type_aware_private_leak_default(&mut config, opts.filters.any_active());
-    Ok(config)
 }
 
 /// Default the opt-in `private-type-leaks` rule to `warn` for type-aware runs,

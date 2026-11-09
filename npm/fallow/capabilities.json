@@ -1120,6 +1120,16 @@
       "description": "Check import cycles, boundaries and policy rules after editing",
       "flags": [
         {
+          "name": "--shared-state",
+          "type": "bool",
+          "required": false,
+          "description": "Inventory direct imported writes and custom global access sites",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
           "name": "--cycles",
           "type": "bool",
           "required": false,

@@ -244,6 +244,8 @@ pub enum IssueKind {
     /// An exported member of an exported TypeScript namespace that no code
     /// reads (`export namespace N { export const a = 1 }`).
     UnusedNamespaceMember,
+    /// Optional shared-state inventory sites, consumed outside core detectors.
+    SharedState,
 }
 
 impl IssueKind {
@@ -316,6 +318,7 @@ impl IssueKind {
         Self::AddedDependency,
         Self::DuplicateExportAlias,
         Self::UnusedNamespaceMember,
+        Self::SharedState,
     ];
 
     /// Parse an issue kind from the string tokens used in CLI output and suppression comments.
@@ -395,6 +398,7 @@ impl IssueKind {
             Self::DuplicateExportAlias => 65,
             Self::UnlistedBinary => 66,
             Self::UnusedNamespaceMember => 67,
+            Self::SharedState => 68,
         }
     }
 
@@ -469,6 +473,7 @@ impl IssueKind {
             65 => Some(Self::DuplicateExportAlias),
             66 => Some(Self::UnlistedBinary),
             67 => Some(Self::UnusedNamespaceMember),
+            68 => Some(Self::SharedState),
             _ => None,
         }
     }

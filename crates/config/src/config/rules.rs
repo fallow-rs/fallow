@@ -613,6 +613,7 @@ impl RulesConfig {
     #[must_use]
     pub const fn severity_for_kind(&self, kind: IssueKind) -> Severity {
         match kind {
+            IssueKind::SharedState => Severity::Off,
             IssueKind::UnusedFile => self.unused_files,
             IssueKind::UnusedExport => self.unused_exports,
             IssueKind::UnusedType => self.unused_types,

@@ -158,6 +158,9 @@ pub(super) fn run_dead_code_in_context(
 fn parse_finding_ids(
     options: &DeadCodeOptions,
 ) -> ProgrammaticResult<Option<fallow_engine::dead_code::FindingIdFilter>> {
+    if options.filters.shared_state {
+        reject_finding_ids(options)?;
+    }
     fallow_engine::dead_code::FindingIdFilter::parse(&options.finding_ids).map_err(|message| {
         ProgrammaticError::new(message, 2)
             .with_code("FALLOW_INVALID_FINDING_ID")
@@ -899,6 +902,9 @@ fn configure_project_for_dead_code(
     mut project_config: ProjectConfig,
     options: &DeadCodeOptions,
 ) -> ProjectConfig {
+    if options.filters.shared_state {
+        project_config.config.request_shared_state();
+    }
     if options.include_entry_exports {
         project_config.config.force_include_entry_exports();
     }
@@ -1006,7 +1012,8 @@ fn apply_dead_code_filters(filters: &DeadCodeFilters, results: &mut AnalysisResu
 }
 
 fn dead_code_filters_active(filters: &DeadCodeFilters) -> bool {
-    filters.unused_files
+    filters.shared_state
+        || filters.unused_files
         || filters.unused_exports
         || filters.unused_deps
         || filters.unused_types

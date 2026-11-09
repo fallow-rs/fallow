@@ -22,3 +22,24 @@ pub(super) fn dead_code_filter_flags_from_meta() -> Vec<&'static str> {
     }
     flags
 }
+
+pub(super) fn mcp_issue_type_flags_from_meta() -> Vec<(&'static str, &'static str)> {
+    ISSUE_KIND_META
+        .iter()
+        .filter_map(|meta| meta.mcp_pair())
+        .collect()
+}
+
+pub(super) fn codeclimate_result_codes_from_meta() -> Vec<&'static str> {
+    ISSUE_RESULT_META
+        .iter()
+        .filter(|meta| meta.counts_in_total)
+        .map(|meta| meta.code)
+        .collect()
+}
+
+fn push_unique<T: Copy + PartialEq>(items: &mut Vec<T>, item: T) {
+    if !items.contains(&item) {
+        items.push(item);
+    }
+}

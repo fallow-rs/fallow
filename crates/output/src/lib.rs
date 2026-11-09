@@ -471,3 +471,6 @@ pub use walkthrough_render::{
     MAX_CONTRACT_MEMBERS, WalkthroughAccounting, cap_member_list, cap_names, clean_decision_fact,
     decisions_outside_units, visible_stage_units,
 };
+
+/// Shared-state inventory rendering and saved contract validation.
+pub mod shared_state;

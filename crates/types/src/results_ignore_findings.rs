@@ -11,6 +11,7 @@ use super::*;
 /// `ignoreFindings`, which is the failure mode issue #2017 describes.
 pub(super) fn classify_ignore_findings_fields(results: &AnalysisResults) {
     let AnalysisResults {
+        shared_state: _,
         // Hideable: counted source-owned dead-code families.
         unused_files: _unused_files,
         unused_exports: _unused_exports,

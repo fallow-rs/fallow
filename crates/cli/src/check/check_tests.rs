@@ -71,6 +71,7 @@ fn dependency_findings_are_reported_without_filters_or_with_a_dependency_filter(
 
 fn no_filters() -> IssueFilters {
     IssueFilters {
+        shared_state: false,
         unused_files: false,
         unused_exports: false,
         unused_deps: false,
@@ -680,6 +681,7 @@ fn apply_all_filter_types_simultaneously() {
     );
 
     let f = IssueFilters {
+        shared_state: false,
         unused_files: true,
         unused_exports: true,
         unused_deps: true,

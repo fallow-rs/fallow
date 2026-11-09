@@ -498,6 +498,9 @@ fn finding_id_rule_is_off(id: &str, config: &ResolvedConfig) -> bool {
 /// cross-package imports are resolved. Only reported findings are narrowed.
 pub fn filter_to_workspaces(results: &mut AnalysisResults, ws_roots: &[PathBuf]) {
     let any_under = |path: &Path| ws_roots.iter().any(|root| path.starts_with(root));
+    if let Some(inventory) = &mut results.shared_state {
+        inventory.retain_sites(|site| any_under(&site.path));
+    }
     let pkg_jsons = ws_roots
         .iter()
         .map(|root| root.join("package.json"))

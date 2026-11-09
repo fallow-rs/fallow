@@ -66,6 +66,7 @@ fn create_config(root: PathBuf) -> fallow_config::ResolvedConfig {
         audit: fallow_config::AuditConfig::default(),
         codeowners: None,
         public_packages: vec![],
+        shared_state_allowlist: Vec::new(),
         flags: fallow_config::FlagsConfig::default(),
         security: fallow_config::SecurityConfig::default(),
         fix: fallow_config::FixConfig::default(),

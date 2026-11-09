@@ -141,3 +141,6 @@ pub mod workspace;
 /// `RUST_LOG` shows it again. Config-load warnings, such as an unknown rule
 /// key, do not use this target, so they stay visible in a quiet run.
 pub const ANALYSIS_DIAGNOSTIC_LOG_TARGET: &str = "fallow::analysis_diagnostic";
+
+/// Optional architecture shared-state facts and inventory.
+pub mod shared_state;

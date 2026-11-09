@@ -19,6 +19,7 @@ fn create_boundary_config_with_entry(
     entry: &str,
 ) -> fallow_config::ResolvedConfig {
     FallowConfig {
+        shared_state_allowlist: Vec::new(),
         type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
         minimum_version: None,
@@ -361,6 +362,7 @@ fn no_violations_when_rule_is_off() {
         }],
     };
     let config = FallowConfig {
+        shared_state_allowlist: Vec::new(),
         type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
         minimum_version: None,
@@ -434,6 +436,7 @@ fn preset_detects_boundary_violation() {
         rules: vec![],
     };
     let config = FallowConfig {
+        shared_state_allowlist: Vec::new(),
         type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
         minimum_version: None,
@@ -547,6 +550,7 @@ fn root_field_classifies_per_subtree() {
         ],
     };
     let config = FallowConfig {
+        shared_state_allowlist: Vec::new(),
         type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
         minimum_version: None,
@@ -664,6 +668,7 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
         }],
     };
     let flat_config = FallowConfig {
+        shared_state_allowlist: Vec::new(),
         type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
         minimum_version: None,
@@ -749,6 +754,7 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
         }],
     };
     let scoped_config = FallowConfig {
+        shared_state_allowlist: Vec::new(),
         type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
         minimum_version: None,

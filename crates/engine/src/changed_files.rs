@@ -710,6 +710,9 @@ pub(crate) fn filter_results_by_path_scope(
     results: &mut AnalysisResults,
     scope: &impl ChangedPathScope,
 ) {
+    if let Some(inventory) = &mut results.shared_state {
+        inventory.retain_sites(|site| scope.contains(&site.path));
+    }
     classify_changed_file_filter_fields(results);
     retain_basic_issue_findings_by_changed_path(results, scope);
     retain_graph_findings_by_changed_files(results, scope);
@@ -719,6 +722,7 @@ pub(crate) fn filter_results_by_path_scope(
 }
 fn classify_changed_file_filter_fields(results: &AnalysisResults) {
     let AnalysisResults {
+        shared_state: _,
         unused_files: _unused_files,
         unused_exports: _unused_exports,
         unused_types: _unused_types,
@@ -892,6 +896,7 @@ fn retain_client_boundary_findings_by_changed_files(
     scope: &impl ChangedPathScope,
 ) {
     let AnalysisResults {
+        shared_state: _,
         invalid_client_exports,
         mixed_client_server_barrels,
         misplaced_directives,
@@ -908,6 +913,7 @@ fn retain_component_contract_findings_by_changed_files(
     scope: &impl ChangedPathScope,
 ) {
     let AnalysisResults {
+        shared_state: _,
         unprovided_injects,
         unrendered_components,
         unused_component_props,
@@ -944,6 +950,7 @@ fn retain_react_health_findings_by_changed_files(
     scope: &impl ChangedPathScope,
 ) {
     let AnalysisResults {
+        shared_state: _,
         prop_drilling_chains,
         thin_wrappers,
         duplicate_prop_shapes,
@@ -960,6 +967,7 @@ fn retain_nextjs_findings_by_changed_files(
     scope: &impl ChangedPathScope,
 ) {
     let AnalysisResults {
+        shared_state: _,
         route_collisions,
         dynamic_segment_name_conflicts,
         ..

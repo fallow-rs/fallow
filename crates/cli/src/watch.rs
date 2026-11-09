@@ -1196,6 +1196,7 @@ mod tests {
         ignore_patterns: Vec<String>,
     ) -> fallow_config::ResolvedConfig {
         FallowConfig {
+            shared_state_allowlist: Vec::new(),
             schema: None,
             minimum_version: None,
             extends: vec![],

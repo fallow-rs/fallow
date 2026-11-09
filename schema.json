@@ -332,6 +332,18 @@
         "configObjectHeuristics": false
       }
     },
+    "sharedStateAllowlist": {
+      "description": "Exact [global root, direct slot] pairs excluded from shared-state inventory.",
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": {
+          "type": "string"
+        },
+        "minItems": 2,
+        "maxItems": 2
+      }
+    },
     "security": {
       "description": "Scopes the opt-in `fallow security` catalogue: which candidate categories run and which extra local identifiers count as HTTP request objects. Set when tuning security-candidate detection; the object holds `categories` (an object with `include` and/or `exclude` string arrays of catalogue category ids, where `include` restricts to a whitelist and `exclude` removes from the admitted set, both unset admits all ordinary categories) and `requestReceivers` (a string array of project-local names that extend, not replace, the built-in `*.query`/`*.params`/`*.body` source-receiver allowlist). The `hardcoded-secret` and `secret-to-network` categories are include-required: they fire only when explicitly listed in `categories.include`, even when no include list is otherwise set. The valid category ids are enumerated (with title, CWE, and include-required flag) in the `security_categories` block of `fallow schema`, and also listed by `fallow security --help`; they are not in this config-schema.",
       "$ref": "#/$defs/SecurityConfig",

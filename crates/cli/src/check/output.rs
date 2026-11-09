@@ -584,6 +584,8 @@ mod tests {
 
     fn make_resolved_config() -> fallow_config::ResolvedConfig {
         fallow_config::ResolvedConfig {
+            extraction_mode: fallow_types::shared_state::ExtractionMode::Standard,
+            shared_state_allowlist: Vec::new(),
             detection_config_digest: String::new(),
             legacy_glob_groups: Vec::new(),
             root: std::path::PathBuf::from("/project"),

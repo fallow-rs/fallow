@@ -98,6 +98,9 @@ pub fn run_report(
         Ok(envelope) => envelope,
         Err(code) => return code,
     };
+    if let Err(code) = validate_shared_state_report(&envelope, target, output) {
+        return code;
+    }
     let mut saved = match prepare_saved_envelope(envelope, output) {
         Ok(saved) => saved,
         Err(code) => return code,
@@ -523,6 +526,31 @@ fn saved_status_message(
     ])
 }
 
+fn validate_shared_state_report(
+    envelope: &serde_json::Value,
+    target: ReportTarget,
+    output: OutputFormat,
+) -> Result<(), ExitCode> {
+    match fallow_output::shared_state::validate_saved(envelope) {
+        Ok(true) if !matches!(target, ReportTarget::Markdown) => {
+            return Err(invalid_report_input(
+                "saved shared-state inventory supports markdown output only",
+                output,
+                telemetry::FailureReason::UnsupportedFormat,
+            ));
+        }
+        Err(error) => {
+            return Err(invalid_report_input(
+                &error,
+                output,
+                telemetry::FailureReason::Validation,
+            ));
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod status_note_tests {
     use fallow_output::{
@@ -828,20 +856,16 @@ struct SavedEnvelope {
 pub const NORMALIZED_GROUPED_DEAD_CODE_MARKER: &str = "_fallow_report_normalized_grouped_dead_code";
 
 /// The grouped kinds that `fallow report --from` flattens before it renders:
-/// `(grouped kind, flat kind, current schema version)`.
+/// `(grouped kind, flat kind, analysis kind)`.
 ///
 /// Both members of the dead-code family write the same grouped body, so one
 /// flatten step serves both and keeps the flat kind of the row.
-const GROUPED_SAVED_KINDS: &[(&str, &str, u32)] = &[
-    (
-        "dead-code-grouped",
-        "dead-code",
-        fallow_output::CHECK_SCHEMA_VERSION,
-    ),
+const GROUPED_SAVED_KINDS: &[(&str, &str, EnvelopeKind)] = &[
+    ("dead-code-grouped", "dead-code", EnvelopeKind::DeadCode),
     (
         "architecture-grouped",
         "architecture",
-        fallow_output::ARCHITECTURE_SCHEMA_VERSION,
+        EnvelopeKind::Architecture,
     ),
 ];
 
@@ -879,7 +903,7 @@ fn normalize_saved_envelope(mut envelope: serde_json::Value) -> Result<SavedEnve
         .and_then(serde_json::Value::as_str)
         .and_then(parse_group_by_mode);
     let saved_kind = envelope.get("kind").and_then(serde_json::Value::as_str);
-    let Some(&(_, flat_kind, current_version)) = GROUPED_SAVED_KINDS
+    let Some(&(_, flat_kind, analysis_kind)) = GROUPED_SAVED_KINDS
         .iter()
         .find(|(grouped, _, _)| saved_kind == Some(*grouped))
     else {
@@ -888,6 +912,8 @@ fn normalize_saved_envelope(mut envelope: serde_json::Value) -> Result<SavedEnve
             grouped_by,
         });
     };
+    let strict_schema =
+        !crate::report::codeclimate::saved_schema_is_legacy(analysis_kind, &envelope);
     let Some(root) = envelope.as_object_mut() else {
         return Err("saved grouped dead-code envelope must be an object".to_owned());
     };
@@ -900,11 +926,7 @@ fn normalize_saved_envelope(mut envelope: serde_json::Value) -> Result<SavedEnve
     let groups = groups_value.as_array_mut().ok_or_else(|| {
         "saved grouped dead-code envelope field `groups` must be an array".to_owned()
     })?;
-    let current_schema = root
-        .get("schema_version")
-        .and_then(serde_json::Value::as_u64)
-        == Some(u64::from(current_version));
-    if current_schema {
+    if strict_schema {
         validate_current_grouped_dead_code(root, groups)?;
     }
     root.remove("grouped_by");
@@ -936,7 +958,7 @@ fn normalize_saved_envelope(mut envelope: serde_json::Value) -> Result<SavedEnve
             }
         }
     }
-    if !current_schema {
+    if !strict_schema {
         normalize_historical_component_counts(&mut envelope)?;
     }
     Ok(SavedEnvelope {

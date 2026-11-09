@@ -13,7 +13,7 @@ use crate::common::{
 };
 
 /// `ARCHITECTURE_SCHEMA_VERSION` of the `architecture` envelope.
-const ARCHITECTURE_SCHEMA_VERSION: u64 = 1;
+const ARCHITECTURE_SCHEMA_VERSION: u64 = 2;
 
 const ARCHITECTURE_ARRAYS: [&str; 7] = [
     "circular_dependencies",
@@ -205,14 +205,14 @@ fn dead_code_json_keeps_dead_code_kind_and_version() {
         &["--format", "json", "--quiet"],
     ));
     assert_eq!(flat["kind"], "dead-code");
-    assert_eq!(flat["schema_version"], 10);
+    assert_eq!(flat["schema_version"], 11);
     let grouped = parse_json(&run(
         "dead-code",
         dir.path(),
         &["--group-by", "directory", "--format", "json", "--quiet"],
     ));
     assert_eq!(grouped["kind"], "dead-code-grouped");
-    assert_eq!(grouped["schema_version"], 10);
+    assert_eq!(grouped["schema_version"], 11);
 }
 
 #[test]
@@ -229,7 +229,7 @@ fn bare_only_architecture_json_keeps_combined_shape() {
         json["check"].get("kind").is_none(),
         "the embedded check section carries no kind"
     );
-    assert_eq!(json["check"]["schema_version"], 10);
+    assert_eq!(json["check"]["schema_version"], 11);
 }
 
 #[test]
@@ -970,4 +970,352 @@ fn dead_code_summary_keeps_one_row_list() {
         "dead-code keeps its row list: {}",
         output.stdout
     );
+}
+
+#[test]
+fn shared_state_inventory_selection_and_format_refusal() {
+    let dir = architecture_project("");
+    write(
+        dir.path(),
+        "src/shared/state.ts",
+        "export const state = {};\n",
+    );
+    write(
+        dir.path(),
+        "src/writer.ts",
+        "import {state} from './shared/state'; state.value = 1; window.custom = 2;\n",
+    );
+    write(
+        dir.path(),
+        "src/reader.ts",
+        "export const read = () => window.custom;\n",
+    );
+    let output = run(
+        "architecture",
+        dir.path(),
+        &[
+            "--shared-state",
+            "--format",
+            "json",
+            "--quiet",
+            "--fail-on-issues",
+        ],
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["shared_state"]["version"], 1);
+    assert!(
+        !json["shared_state"]["imported_writes"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(json["circular_dependencies"].as_array().unwrap().is_empty());
+    let cycles = run(
+        "architecture",
+        dir.path(),
+        &["--shared-state", "--cycles", "--format", "json", "--quiet"],
+    );
+    assert!(
+        !parse_json(&cycles)["circular_dependencies"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    for format in ["sarif", "compact", "codeclimate"] {
+        let unsupported = run(
+            "architecture",
+            dir.path(),
+            &["--shared-state", "--format", format, "--quiet"],
+        );
+        assert_eq!(unsupported.code, 2, "{format}: {}", unsupported.stderr);
+    }
+}
+
+#[test]
+fn shared_state_saved_output_and_scope_preserve_supported_evidence() {
+    let dir = architecture_project("");
+    write(
+        dir.path(),
+        "src/shared/state.ts",
+        "export const state = {};\n",
+    );
+    write(
+        dir.path(),
+        "src/writer.ts",
+        "import {state} from './shared/state'; state['a.b'] = 1; window.custom = 2;\n",
+    );
+    write(
+        dir.path(),
+        "src/reader.ts",
+        "export const read = () => window.custom;\n",
+    );
+    let output = run(
+        "architecture",
+        dir.path(),
+        &["--shared-state", "--format", "json", "--quiet"],
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(
+        json["shared_state"]["imported_writes"][0]["property"],
+        serde_json::json!(["a.b"])
+    );
+    assert_eq!(
+        json["shared_state"]["imported_writes"][0]["writer"]["path"],
+        "src/writer.ts"
+    );
+    let scoped = run(
+        "architecture",
+        dir.path(),
+        &[
+            "--shared-state",
+            "--file",
+            "src/reader.ts",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let scoped_json = parse_json(&scoped);
+    assert!(
+        scoped_json["shared_state"]["imported_writes"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        scoped_json["shared_state"]["globals"],
+        json["shared_state"]["globals"]
+    );
+    write(dir.path(), "saved.json", &output.stdout);
+    let markdown = run(
+        "report",
+        dir.path(),
+        &[
+            "--from",
+            dir.path().join("saved.json").to_str().unwrap(),
+            "--format",
+            "markdown",
+        ],
+    );
+    assert_eq!(markdown.code, 0, "{}", markdown.stderr);
+    assert!(markdown.stdout.contains("Shared-state inventory"));
+    assert!(markdown.stdout.contains("src/writer.ts"));
+    let unsupported = run(
+        "report",
+        dir.path(),
+        &[
+            "--from",
+            dir.path().join("saved.json").to_str().unwrap(),
+            "--format",
+            "sarif",
+        ],
+    );
+    assert_eq!(unsupported.code, 2);
+    let mut invalid = json;
+    invalid["shared_state"]["version"] = serde_json::json!(2);
+    write(
+        dir.path(),
+        "saved.json",
+        &serde_json::to_string(&invalid).unwrap(),
+    );
+    let refused = run(
+        "report",
+        dir.path(),
+        &[
+            "--from",
+            dir.path().join("saved.json").to_str().unwrap(),
+            "--format",
+            "markdown",
+        ],
+    );
+    assert_eq!(refused.code, 2);
+}
+
+#[test]
+fn shared_state_keeps_parse_gates_and_rejects_observation_filters() {
+    let dir = architecture_project("");
+    write(dir.path(), "src/broken.ts", "export const broken = ;\n");
+    let ungated = run(
+        "architecture",
+        dir.path(),
+        &["--shared-state", "--format", "json", "--quiet"],
+    );
+    assert_eq!(ungated.code, 0, "{}", ungated.stderr);
+    assert_eq!(parse_json(&ungated)["shared_state"]["complete"], false);
+    let gated = run(
+        "architecture",
+        dir.path(),
+        &[
+            "--shared-state",
+            "--fail-on-parse-error",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(gated.code, 1, "{}", gated.stderr);
+    for selector in [
+        ["--group-by", "directory"],
+        ["--finding-id", "dc1:unused-file:0000000000000000"],
+    ] {
+        let refused = run(
+            "architecture",
+            dir.path(),
+            &[
+                "--shared-state",
+                selector[0],
+                selector[1],
+                "--format",
+                "json",
+                "--quiet",
+            ],
+        );
+        assert_eq!(refused.code, 2);
+    }
+}
+
+#[test]
+fn shared_state_saved_grouped_inventory_is_rejected_even_when_empty() {
+    let dir = architecture_project("");
+    let grouped = parse_json(&run(
+        "architecture",
+        dir.path(),
+        &["--group-by", "directory", "--format", "json", "--quiet"],
+    ));
+    let saved = dir.path().join("grouped.json");
+    let render = |value: &serde_json::Value| {
+        std::fs::write(&saved, serde_json::to_vec(value).unwrap()).unwrap();
+        run(
+            "report",
+            dir.path(),
+            &["--from", saved.to_str().unwrap(), "--format", "markdown"],
+        )
+    };
+    let ordinary = render(&grouped);
+    assert_eq!(ordinary.code, 0, "{}", ordinary.stderr);
+    assert!(ordinary.stdout.contains("Circular"), "{}", ordinary.stdout);
+    let empty = serde_json::json!({"version":1,"complete":true,"truncated":false,"imported_writes":[],"globals":[]});
+    let mut root = grouped.clone();
+    root["shared_state"] = empty.clone();
+    let rejected = render(&root);
+    assert_eq!(
+        rejected.code, 2,
+        "present empty inventory must not be dropped: {}",
+        rejected.stdout
+    );
+    let mut nested = grouped;
+    nested["groups"][0]["shared_state"] = empty;
+    assert_eq!(render(&nested).code, 2);
+}
+
+#[test]
+fn shared_state_rejects_sarif_sidecar_without_overwriting_artifact() {
+    for populated in [false, true] {
+        let dir = architecture_project("");
+        if populated {
+            write(dir.path(), "src/writer.ts", "window.custom = 1;");
+            write(
+                dir.path(),
+                "src/reader.ts",
+                "export const read = () => window.custom;",
+            );
+        }
+        let supported = run(
+            "architecture",
+            dir.path(),
+            &["--shared-state", "--format", "json", "--quiet"],
+        );
+        assert_eq!(supported.code, 0, "{}", supported.stderr);
+        assert_eq!(
+            parse_json(&supported)["shared_state"]["globals"]
+                .as_array()
+                .unwrap()
+                .len(),
+            usize::from(populated)
+        );
+        let artifact = dir.path().join("inventory.sarif");
+        std::fs::write(&artifact, "existing sentinel").unwrap();
+        let rejected = run(
+            "architecture",
+            dir.path(),
+            &[
+                "--shared-state",
+                "--format",
+                "json",
+                "--sarif-file",
+                artifact.to_str().unwrap(),
+                "--quiet",
+            ],
+        );
+        assert_eq!(rejected.code, 2, "{}", rejected.stdout);
+        assert_eq!(
+            std::fs::read_to_string(&artifact).unwrap(),
+            "existing sentinel"
+        );
+    }
+}
+
+#[test]
+fn prior_schema_saved_reports_preserve_strict_validation() {
+    let dir = architecture_project("");
+    for (command, version) in [("dead-code", 10), ("architecture", 1)] {
+        for grouped in [false, true] {
+            let mut args = vec!["--format", "json", "--quiet"];
+            let mut rendered_args = vec!["--format", "codeclimate", "--quiet"];
+            if grouped {
+                args.extend(["--group-by", "directory"]);
+                rendered_args.extend(["--group-by", "directory"]);
+            }
+            let expected = parse_json(&run(command, dir.path(), &rendered_args));
+            assert!(
+                expected
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|row| row["check_name"] == "fallow/circular-dependency")
+            );
+            let mut archive = parse_json(&run(command, dir.path(), &args));
+            archive["schema_version"] = version.into();
+            let saved = dir.path().join("prior-schema.json");
+            let render = |value: &serde_json::Value| {
+                std::fs::write(&saved, value.to_string()).unwrap();
+                run_fallow_raw(&[
+                    "report",
+                    "--from",
+                    saved.to_str().unwrap(),
+                    "--root",
+                    dir.path().to_str().unwrap(),
+                    "--format",
+                    "codeclimate",
+                    "--quiet",
+                ])
+            };
+            let valid = render(&archive);
+            assert_eq!(
+                valid.code, 0,
+                "{command}, grouped={grouped}: {}",
+                valid.stderr
+            );
+            assert_eq!(parse_json(&valid), expected);
+            archive["total_issues"] = 999.into();
+            assert_eq!(
+                render(&archive).code,
+                2,
+                "{command}, grouped={grouped}: corrupt total"
+            );
+            if grouped {
+                archive["total_issues"] = archive["groups"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|group| group["total_issues"].as_u64().unwrap())
+                    .sum::<u64>()
+                    .into();
+                archive["groups"][0].as_object_mut().unwrap().remove("key");
+                assert_eq!(render(&archive).code, 2, "{command}: missing grouped key");
+            }
+        }
+    }
 }

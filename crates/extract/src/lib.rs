@@ -65,6 +65,7 @@ pub mod sfc;
 pub mod sfc_css;
 mod sfc_props;
 mod sfc_template;
+mod shared_state;
 pub mod similar_code;
 mod source_map;
 mod stack;
@@ -148,6 +149,8 @@ fn static_regex(pattern: &str) -> regex::Regex {
     regex::Regex::new(pattern).expect("static regex pattern should compile")
 }
 
+#[cfg(test)]
+use module_parse::parse_source_to_module_with_mode;
 pub use module_parse::{parse_source_to_module, parse_source_to_module_with_flags};
 
 /// Leading UTF-8 byte order mark codepoint.
@@ -221,11 +224,30 @@ pub fn parse_all_files_cancellable(
     cancellation: Option<&AtomicBool>,
     flag_patterns: &FlagPatterns,
 ) -> ParseResult {
+    parse_all_files_with_mode(
+        files,
+        cache,
+        need_complexity,
+        cancellation,
+        flag_patterns,
+        fallow_types::shared_state::ExtractionMode::Standard,
+    )
+}
+
+/// Parse files with an explicit optional-fact mode matching the cache identity.
+pub fn parse_all_files_with_mode(
+    files: &[DiscoveredFile],
+    cache: Option<&CacheStore>,
+    need_complexity: bool,
+    cancellation: Option<&AtomicBool>,
+    flag_patterns: &FlagPatterns,
+    mode: fallow_types::shared_state::ExtractionMode,
+) -> ParseResult {
     let parse_one = |file: &DiscoveredFile| {
         if cancellation.is_some_and(|cancelled| cancelled.load(Ordering::SeqCst)) {
             return ParseFileResult::default();
         }
-        parse_single_file_cached(file, cache, need_complexity, flag_patterns)
+        parse_single_file_cached(file, cache, need_complexity, flag_patterns, mode)
     };
     let results: Vec<ParseFileResult> = if files.len() <= PARALLEL_PARSE_FILE_THRESHOLD {
         files.iter().map(parse_one).collect()
@@ -383,6 +405,7 @@ fn parse_single_file_cached(
     cache: Option<&CacheStore>,
     need_complexity: bool,
     flag_patterns: &FlagPatterns,
+    mode: fallow_types::shared_state::ExtractionMode,
 ) -> ParseFileResult {
     let cached_by_path = cache.and_then(|store| store.get_by_path_only(&file.path));
 
@@ -439,7 +462,10 @@ fn parse_single_file_cached(
         source,
         content_hash,
         need_complexity,
-        flag_patterns,
+        &module_parse::ExtractionOptions {
+            flag_patterns,
+            mode,
+        },
     );
     let parse_cpu_nanos = u64::try_from(parse_start.elapsed().as_nanos()).unwrap_or(u64::MAX);
     let mut result =
@@ -460,7 +486,10 @@ pub fn parse_single_file(file: &DiscoveredFile) -> Option<ModuleInfo> {
         source,
         content_hash,
         false,
-        &FlagPatterns::default(),
+        &module_parse::ExtractionOptions {
+            flag_patterns: &FlagPatterns::default(),
+            mode: fallow_types::shared_state::ExtractionMode::Standard,
+        },
     ))
 }
 
@@ -475,7 +504,10 @@ pub fn parse_from_content(file_id: FileId, path: &Path, content: &str) -> Module
         content,
         content_hash,
         true,
-        &FlagPatterns::default(),
+        &module_parse::ExtractionOptions {
+            flag_patterns: &FlagPatterns::default(),
+            mode: fallow_types::shared_state::ExtractionMode::Standard,
+        },
     )
 }
 

@@ -552,7 +552,7 @@ writeFileSync(
 {
   const report = await detectDeadCode({ root, explain: true });
   assert.equal(report.kind, "dead-code");
-  assert.equal(report.schema_version, 10);
+  assert.equal(report.schema_version, 11);
   assert.ok(report._meta);
   assert.ok(report.unused_exports.some((item) => item.export_name === "unusedThing"));
   console.log("  [PASS] detectDeadCode");
@@ -636,7 +636,7 @@ writeFileSync(
 {
   const report = await detectArchitecture({ root });
   assert.equal(report.kind, "architecture");
-  assert.equal(report.schema_version, 1);
+  assert.equal(report.schema_version, 2);
   assert.equal(report.circular_dependencies.length, 1);
   assert.equal(report.boundary_violations.length, 1);
   assert.equal(report.unused_exports.length, 0);

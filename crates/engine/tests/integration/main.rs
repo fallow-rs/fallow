@@ -11,3 +11,5 @@ mod dupes_integration;
 mod dupes_profile;
 mod dupes_span;
 mod dupes_stress_test;
+
+mod shared_state;

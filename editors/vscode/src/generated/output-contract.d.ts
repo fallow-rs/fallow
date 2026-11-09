@@ -228,7 +228,15 @@ export type TypeAwareAbstentionReason = ("no-project" | "ambiguous-project" | "b
 /**
  * Schema projection for the dead-code envelope's exact version.
  */
-export type CheckSchemaVersion = 10
+export type CheckSchemaVersion = 11
+/**
+ * A direct property operation. Calls are not classified as writes.
+ */
+export type StateOperation = ("read" | "assign" | "read_modify_write" | "update" | "delete")
+/**
+ * Runtime relationships that static observations cannot establish.
+ */
+export type UnknownStateRelation = "unknown"
 /**
  * A suggested action attached to a finding in the JSON output. Each finding
  * carries an `actions` array; consumers (agents, IDE clients, CI bots) can
@@ -1452,7 +1460,7 @@ export type DupesSchemaVersion = (4 | 10)
  * The schema emitter registers this type by name and points the
  * `ArchitectureOutput` and `ArchitectureGroupedOutput` definitions at it.
  */
-export type ArchitectureSchemaVersion = 1
+export type ArchitectureSchemaVersion = 2
 /**
  * Wire-version discriminator for [`ImpactReport`]. Independent from the global
  * `SchemaVersion` (the impact report versions on its own cadence) and from the
@@ -3080,6 +3088,10 @@ total_issues: number
 entry_points?: (EntryPoints | null)
 summary: CheckSummary
 /**
+ * Optional architecture inventory, excluded from issue totals and gates.
+ */
+shared_state?: (SharedStateInventory | null)
+/**
  * Files not reachable from any entry point. Wrapped in
  * [`UnusedFileFinding`] so each entry carries a typed `actions` array
  * natively, replacing the pre-2.76 post-pass injection.
@@ -3844,6 +3856,131 @@ route_collisions?: number
  * param spellings.
  */
 dynamic_segment_name_conflicts?: number
+}
+/**
+ * Versioned advisory inventory. Its observations are never counted as findings.
+ */
+export interface SharedStateInventory {
+/**
+ * Inventory contract version.
+ */
+version: number
+/**
+ * False if source parsing or retention limits omitted supported evidence.
+ */
+complete: boolean
+/**
+ * Whether bounded fact retention omitted sites.
+ */
+truncated: boolean
+/**
+ * Imported value property writes.
+ */
+imported_writes: ImportedStateWrite[]
+/**
+ * Exact global root/slot groups.
+ */
+globals: GlobalStateGroup[]
+}
+/**
+ * A write through an imported value binding with one declaration origin.
+ */
+export interface ImportedStateWrite {
+/**
+ * Stable observation identity.
+ */
+id: string
+writer: StateSite
+declaration: StateSite
+/**
+ * Canonical exported name.
+ */
+binding: string
+/**
+ * Exact property segments relative to the imported value.
+ */
+property: string[]
+operation: StateOperation
+/**
+ * Manual guidance.
+ */
+actions: StateAction[]
+}
+/**
+ * A retained source location.
+ */
+export interface StateSite {
+/**
+ * Project-relative source path.
+ */
+path: string
+/**
+ * One-based source line.
+ */
+line: number
+/**
+ * One-based byte column.
+ */
+column: number
+/**
+ * Original byte offset.
+ */
+offset: number
+}
+/**
+ * Manual review guidance. Inventory observations cannot be automatically fixed.
+ */
+export interface StateAction {
+/**
+ * Human-readable next step.
+ */
+description: string
+/**
+ * Always false.
+ */
+auto_fixable: boolean
+}
+/**
+ * One exact root and custom slot, with retained reads and writes across files.
+ */
+export interface GlobalStateGroup {
+/**
+ * Stable observation identity.
+ */
+id: string
+/**
+ * Exact root spelling. Roots are never normalized across runtimes.
+ */
+root: string
+/**
+ * Direct custom slot.
+ */
+slot: string
+/**
+ * Sorted read sites.
+ */
+reads: GlobalStateAccess[]
+/**
+ * Sorted write sites.
+ */
+writes: GlobalStateAccess[]
+same_runtime: UnknownStateRelation
+execution_order: UnknownStateRelation
+/**
+ * Manual guidance.
+ */
+actions: StateAction[]
+}
+/**
+ * A source access within a global group.
+ */
+export interface GlobalStateAccess {
+site: StateSite
+/**
+ * Full path, including the direct slot.
+ */
+property: string[]
+operation: StateOperation
 }
 /**
  * Wire-shape envelope for an [`UnusedFile`] finding. The bare finding
@@ -15383,6 +15520,10 @@ owners?: (string[] | null)
  */
 total_issues: number
 /**
+ * Optional architecture inventory, excluded from issue totals and gates.
+ */
+shared_state?: (SharedStateInventory | null)
+/**
  * Files not reachable from any entry point. Wrapped in
  * [`UnusedFileFinding`] so each entry carries a typed `actions` array
  * natively, replacing the pre-2.76 post-pass injection.
@@ -17128,6 +17269,10 @@ total_issues: number
  */
 entry_points?: (EntryPoints | null)
 summary: CheckSummary
+/**
+ * Optional architecture inventory, excluded from issue totals and gates.
+ */
+shared_state?: (SharedStateInventory | null)
 /**
  * Files not reachable from any entry point. Wrapped in
  * [`UnusedFileFinding`] so each entry carries a typed `actions` array

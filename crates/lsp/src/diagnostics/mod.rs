@@ -513,6 +513,7 @@ mod severity_gate {
     #[test]
     fn severity_gate_classifies_every_result_field() {
         let AnalysisResults {
+            shared_state: _,
             // ---- dead-code diagnostic fields (each has a row in the table) ----
             unused_files: _,
             unused_exports: _,
