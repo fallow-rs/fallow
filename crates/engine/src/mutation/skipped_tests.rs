@@ -17,7 +17,8 @@ use super::layout::Layout;
 pub enum SkipKind {
     /// The runner skips the test.
     Skip,
-    /// The test is a placeholder that the runner does not run.
+    /// The test is a placeholder. Its result does not count, and some runners
+    /// do not run its body.
     Todo,
 }
 
@@ -143,7 +144,8 @@ enum Flag {
 /// value, a spread or a computed key after the last literal write makes the
 /// result uncertain, so the call is not reported. A spread before the last
 /// literal write does not matter. An uncertain `skip` does not hide a `todo`
-/// that is on: the run leaves the test out in both cases.
+/// that is on. The scanner reports that test as `todo`, because its result
+/// does not count, although Node.js runs its body.
 fn option_kind(options: &ObjectExpression<'_>) -> Option<SkipKind> {
     let (mut skip, mut todo) = (Flag::Unset, Flag::Unset);
     for property in &options.properties {
