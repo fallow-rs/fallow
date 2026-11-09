@@ -447,7 +447,6 @@ mod tests {
             .output()
             .expect("run Windows Job Object helper");
 
-        // libtest prints the panic of the helper on stdout, not on stderr.
         assert!(
             output.status.success(),
             "helper failed with {}\nstdout:\n{}\nstderr:\n{}",
