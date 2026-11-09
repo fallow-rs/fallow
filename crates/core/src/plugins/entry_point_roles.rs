@@ -55,6 +55,7 @@ pub(super) const RUNTIME_ENTRY_POINT_PLUGINS: &[&str] = &[
     "rsbuild",
     "rspack",
     "sanity",
+    "solid-start",
     "supabase",
     "sveltekit",
     "tanstack-router",

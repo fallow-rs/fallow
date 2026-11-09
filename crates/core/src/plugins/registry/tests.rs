@@ -2954,6 +2954,10 @@ fn framework_plugins_have_correct_enablers() {
     let result = registry.run(&waku_pkg, Path::new("/project"), &[]);
     assert!(result.active_plugins.contains(&"waku".to_string()));
 
+    let solid_start_pkg = make_pkg(&["@solidjs/start"]);
+    let result = registry.run(&solid_start_pkg, Path::new("/project"), &[]);
+    assert!(result.active_plugins.contains(&"solid-start".to_string()));
+
     let wxt_pkg = make_pkg(&["wxt"]);
     let result = registry.run(&wxt_pkg, Path::new("/project"), &[]);
     assert!(result.active_plugins.contains(&"wxt".to_string()));
@@ -2967,6 +2971,7 @@ fn framework_plugins_have_correct_enablers() {
     assert!(!result.active_plugins.contains(&"redwoodsdk".to_string()));
     assert!(!result.active_plugins.contains(&"wxt".to_string()));
     assert!(!result.active_plugins.contains(&"waku".to_string()));
+    assert!(!result.active_plugins.contains(&"solid-start".to_string()));
 }
 
 #[test]

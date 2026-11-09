@@ -1,0 +1,3 @@
+### Added
+
+- **Built-in SolidStart plugin.** The `solid-start` plugin activates from the `@solidjs/start` dependency. It makes `<appRoot>/app.{tsx,jsx}`, `<appRoot>/entry-client.{tsx,jsx}`, `<appRoot>/entry-server.{tsx,jsx}` and each module under `<appRoot>/<routeDir>` entry points. Before, fallow reported these files and all the modules that they import as unused files. Route files get the `default`, `route` and HTTP method exports. The plugin reads `appRoot`, `routeDir`, `extensions` and `middleware` from the `solidStart()` call in `vite.config.*` and from `defineConfig()` in the version 1 `app.config.*`. The defaults are `src` and `routes`.

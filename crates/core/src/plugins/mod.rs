@@ -2050,6 +2050,7 @@ mod semantic_release;
 mod sentry;
 mod simple_git_hooks;
 mod size_limit;
+mod solid_start;
 mod storybook;
 mod stryker;
 mod stylelint;
