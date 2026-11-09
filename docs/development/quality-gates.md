@@ -1004,6 +1004,11 @@ with the current base. When `origin/main` does not exist, for example in a
 fork clone with another remote name, `verify:fast` skips the steps and prints
 the reason.
 
+`Large file growth` compares only commits. The `Staged file growth` step of
+`verify:fast` runs the rule of the pre-commit hook on the staged files, so
+stage the change before you run `verify:fast` to find growth before the
+commit. No step checks unstaged changes.
+
 During a merge commit, the pre-commit step compares each file with the larger
 of its `HEAD` and `MERGE_HEAD` versions. Thus growth that the merged branch
 brought in does not fail the merge. On `git commit --amend`, the step compares

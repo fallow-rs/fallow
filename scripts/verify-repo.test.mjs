@@ -21,6 +21,7 @@ const FAST_COMMANDS = [
   ["npm", ["run", "check:knowledge-architecture"]],
   ["npm", ["run", "check:agent-adapters"]],
   ["cargo", ["fallow", "size", "--base", "origin/main", "--fail-on-growth", "--quiet"]],
+  ["cargo", ["fallow", "size", "--staged", "--fail-on-growth", "--quiet"]],
   ["node", ["scripts/changelog-fragments.mjs", "check", "--base", "origin/main"]],
   ["cargo", ["fmt", "--all", "--", "--check"]],
   ["cargo", ["clippy", "--workspace", "--all-targets", "--", "-D", "warnings"]],
@@ -153,6 +154,25 @@ test("the base ref steps run when the base ref exists", () => {
   assert.ok(executed.includes("Large file growth"));
   assert.ok(executed.includes("Changelog fragments"));
   assert.ok(executed.includes("File length"));
+});
+
+test("the staged growth step runs without the base ref", () => {
+  const executed = [];
+  const exitCode = runVerification("fast", {
+    assertInstall: () => {},
+    hasRef: () => false,
+    runCommand: (command) => {
+      executed.push(command);
+      return 0;
+    },
+    write: () => {},
+  });
+
+  assert.equal(exitCode, 0);
+  // `--base` compares only commits, so staged growth needs its own step.
+  const staged = executed.find(({ label }) => label === "Staged file growth");
+  assert.ok(staged, "verify:fast has no staged file growth step");
+  assert.deepEqual(staged.args, ["fallow", "size", "--staged", "--fail-on-growth", "--quiet"]);
 });
 
 test("the base ref steps are skipped when the base ref is missing", () => {

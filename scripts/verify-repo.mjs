@@ -31,6 +31,13 @@ const FAST_COMMANDS = [
     requiresRef: BASE_REF,
   },
   {
+    // `--base` compares only commits. The pre-commit hook runs this rule on
+    // the staged files, so this step fails before the commit, not after it.
+    label: "Staged file growth",
+    command: "cargo",
+    args: ["fallow", "size", "--staged", "--fail-on-growth", "--quiet"],
+  },
+  {
     // CI runs the same rule in the "Changelog fragments" step. Entries go to
     // changelog.d/, never to the [Unreleased] section of CHANGELOG.md.
     label: "Changelog fragments",
