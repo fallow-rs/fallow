@@ -132,86 +132,125 @@ impl TsconfigOutputMap {
         let Some(root) = self.root.as_deref() else {
             return TsconfigOutputResolution::Unconfigured;
         };
+        let Some(output) = OutputEntry::new(root, entry) else {
+            return TsconfigOutputResolution::Unconfigured;
+        };
+        let mut sources = SourceCandidates::default();
+        for options in &self.configs {
+            sources.add_config(options, &output, root, source_extensions, root_dir_default);
+        }
+        sources.resolution(root, self.display_root.as_deref())
+    }
+}
+
+/// An output path inside the project root, such as `dist/index.js`.
+struct OutputEntry {
+    path: PathBuf,
+    is_declaration: bool,
+}
+
+impl OutputEntry {
+    /// `None` for an absolute entry, an entry that leaves the root, or an
+    /// entry without a UTF-8 file name.
+    fn new(root: &Path, entry: &str) -> Option<Self> {
         let entry_path = Path::new(entry);
         if entry_path.is_absolute()
             || entry_path
                 .components()
                 .any(|component| matches!(component, Component::ParentDir))
         {
-            return TsconfigOutputResolution::Unconfigured;
+            return None;
         }
-        let Some(entry_path) = normalize_path(&root.join(entry_path)) else {
-            return TsconfigOutputResolution::Unconfigured;
+        let path = normalize_path(&root.join(entry_path))?;
+        let file_name = path.file_name()?.to_str()?;
+        let is_declaration = DECLARATION_OUTPUT_SUFFIXES
+            .iter()
+            .any(|suffix| file_name.ends_with(suffix));
+        Some(Self {
+            path,
+            is_declaration,
+        })
+    }
+}
+
+impl CompilerOptions {
+    /// The folder where this config emits `output`.
+    fn output_dir(&self, output: &OutputEntry) -> Option<&Path> {
+        if output.is_declaration {
+            self.declaration_dir.as_deref().or(self.out_dir.as_deref())
+        } else {
+            self.out_dir.as_deref()
+        }
+    }
+
+    /// Whether this config emits `output` itself. With `emitDeclarationOnly`,
+    /// another tool (swc, Babel, a bundler) can emit the JavaScript into
+    /// `outDir` with the same layout. A source file with the same stem then
+    /// maps, but the config does not claim the output, so the callers keep
+    /// their other fallbacks.
+    fn claims_output(&self, output: &OutputEntry) -> bool {
+        output.is_declaration || !self.emit_declaration_only.unwrap_or(false)
+    }
+}
+
+/// The source files that the configs map one output path to.
+///
+/// Candidates of a config with an explicit `rootDir` win over the candidates
+/// of a config folder default, so an inferred `rootDir` can not make an
+/// explicit mapping ambiguous.
+#[derive(Default)]
+struct SourceCandidates {
+    explicit: FxHashSet<PathBuf>,
+    inferred: FxHashSet<PathBuf>,
+    /// A config with an explicit `rootDir` claims the output path.
+    configured: bool,
+}
+
+impl SourceCandidates {
+    fn add_config(
+        &mut self,
+        options: &CompilerOptions,
+        output: &OutputEntry,
+        root: &Path,
+        source_extensions: &[&str],
+        root_dir_default: RootDirDefault,
+    ) {
+        let Some(output_dir) = options.output_dir(output) else {
+            return;
         };
-        // Candidates of a config with an explicit `rootDir` win over the
-        // candidates of a config folder default, so an inferred `rootDir` can
-        // not make an explicit mapping ambiguous.
-        let mut candidates = FxHashSet::default();
-        let mut inferred_candidates = FxHashSet::default();
-        let mut configured = false;
-
-        for options in &self.configs {
-            let Some(file_name) = entry_path.file_name().and_then(|name| name.to_str()) else {
-                continue;
-            };
-            let is_declaration = DECLARATION_OUTPUT_SUFFIXES
-                .iter()
-                .any(|suffix| file_name.ends_with(suffix));
-            // With `emitDeclarationOnly`, another tool (swc, Babel, a bundler)
-            // can emit the JavaScript into `outDir` with the same layout. A
-            // source file with the same stem then maps, but the config does not
-            // claim the output, so the callers keep their other fallbacks.
-            let claims_output = is_declaration || !options.emit_declaration_only.unwrap_or(false);
-            let output_dir = if is_declaration {
-                options
-                    .declaration_dir
-                    .as_deref()
-                    .or(options.out_dir.as_deref())
-            } else {
-                options.out_dir.as_deref()
-            };
-            let Some(output_dir) = output_dir else {
-                continue;
-            };
-            let Some((source_stem, family_extensions)) =
-                source_suffix_for_output(&entry_path, output_dir)
-            else {
-                continue;
-            };
-            let (root_dir, target) = match (options.root_dir.as_deref(), root_dir_default) {
-                (Some(root_dir), _) => {
-                    configured |= claims_output;
-                    (root_dir, &mut candidates)
-                }
-                (None, RootDirDefault::ConfigDir) => match options.config_dir.as_deref() {
-                    Some(config_dir) => (config_dir, &mut inferred_candidates),
-                    None => continue,
-                },
-                (None, RootDirDefault::Skip) => continue,
-            };
-            if options.no_emit.unwrap_or(false) {
-                continue;
+        let Some((source_stem, family_extensions)) =
+            source_suffix_for_output(&output.path, output_dir)
+        else {
+            return;
+        };
+        let (root_dir, target) = match (options.root_dir.as_deref(), root_dir_default) {
+            (Some(root_dir), _) => {
+                self.configured |= options.claims_output(output);
+                (root_dir, &mut self.explicit)
             }
-            for extension in family_extensions {
-                if !source_extensions.contains(extension) {
-                    continue;
-                }
-                let Some(candidate) = append_extension(&source_stem, extension) else {
-                    continue;
-                };
-                let candidate = root_dir.join(candidate);
-                let Ok(candidate) = dunce::canonicalize(candidate) else {
-                    continue;
-                };
-                if candidate.starts_with(root) && candidate.is_file() {
-                    target.insert(candidate);
-                }
-            }
+            (None, RootDirDefault::ConfigDir) => match options.config_dir.as_deref() {
+                Some(config_dir) => (config_dir, &mut self.inferred),
+                None => return,
+            },
+            (None, RootDirDefault::Skip) => return,
+        };
+        if options.no_emit.unwrap_or(false) {
+            return;
         }
-        if candidates.is_empty() {
-            candidates = inferred_candidates;
-        }
+        let sources = family_extensions
+            .iter()
+            .filter(|extension| source_extensions.contains(extension))
+            .filter_map(|extension| existing_source(root, root_dir, &source_stem, extension));
+        target.extend(sources);
+    }
 
+    fn resolution(self, root: &Path, display_root: Option<&Path>) -> TsconfigOutputResolution {
+        let configured = self.configured;
+        let candidates = if self.explicit.is_empty() {
+            self.inferred
+        } else {
+            self.explicit
+        };
         if candidates.is_empty() && configured {
             return TsconfigOutputResolution::ConfiguredWithoutSource;
         }
@@ -222,17 +261,28 @@ impl TsconfigOutputMap {
                 TsconfigOutputResolution::Unconfigured
             };
         }
-        let Some(source) = candidates.into_iter().next() else {
-            return TsconfigOutputResolution::ConfiguredButUnresolved;
-        };
-        let Some(relative) = source.strip_prefix(root).ok() else {
-            return TsconfigOutputResolution::ConfiguredButUnresolved;
-        };
-        let Some(display_root) = self.display_root.as_deref() else {
-            return TsconfigOutputResolution::ConfiguredButUnresolved;
-        };
-        TsconfigOutputResolution::Resolved(display_root.join(relative))
+        candidates
+            .into_iter()
+            .next()
+            .and_then(|source| Some(display_root?.join(source.strip_prefix(root).ok()?)))
+            .map_or(
+                TsconfigOutputResolution::ConfiguredButUnresolved,
+                TsconfigOutputResolution::Resolved,
+            )
     }
+}
+
+/// The canonical source file `root_dir/source_stem.extension` when it exists
+/// inside `root`.
+fn existing_source(
+    root: &Path,
+    root_dir: &Path,
+    source_stem: &Path,
+    extension: &str,
+) -> Option<PathBuf> {
+    let candidate = root_dir.join(append_extension(source_stem, extension)?);
+    let candidate = dunce::canonicalize(candidate).ok()?;
+    (candidate.starts_with(root) && candidate.is_file()).then_some(candidate)
 }
 
 fn tsconfig_paths(root: &Path) -> Option<Vec<PathBuf>> {
