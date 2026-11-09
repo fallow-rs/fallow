@@ -90,7 +90,8 @@ pub enum MutationScope {
 pub struct MutationPlanRequest {
     /// The files and lines to mutate.
     pub scope: MutationScope,
-    /// The operators to use. `None` uses each operator.
+    /// The operators to use. `None` uses the default set
+    /// (`Operator::DEFAULT`).
     pub operators: Option<Vec<Operator>>,
     /// Keep the mutants in functions that call a file system, child process,
     /// network or database sink. The default prunes them, because a mutant

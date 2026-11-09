@@ -330,7 +330,7 @@ struct Planned {
     base_ref: Option<String>,
     /// The selected runner config file, relative to the project root.
     runner_config: Option<String>,
-    /// The names of the selected operators. `None` uses each operator.
+    /// The names of the selected operators. `None` uses the default set.
     operators: Option<Vec<String>>,
 }
 

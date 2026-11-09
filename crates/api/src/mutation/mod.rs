@@ -116,7 +116,8 @@ pub struct MutationRunOptions {
     pub analysis: AnalysisOptions,
     /// The code to mutate.
     pub scope: MutationRunScope,
-    /// The operators to use. `None` uses each operator.
+    /// The operators to use. `None` uses the default set
+    /// (`Operator::DEFAULT`).
     pub operators: Option<Vec<Operator>>,
     /// Keep mutants near a file system, process, network or database sink.
     /// Only an explicit caller option can set this, never project config,

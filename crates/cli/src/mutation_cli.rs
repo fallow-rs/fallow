@@ -130,7 +130,10 @@ pub struct MutationArgs {
     /// Exit with code 1 when the mutation score is below this percentage.
     #[arg(long, value_name = "0-100")]
     pub min_score: Option<f64>,
-    /// The operators to use, comma-separated (default: each operator).
+    /// The operators to use, comma-separated. Default: the default set. The
+    /// opt-in operators (block-statement, array-literal, object-literal,
+    /// method-expression, switch-case, call-expression, throw-statement,
+    /// regex-constructor, regex-assertion) run only when named here.
     #[arg(long, value_name = "NAMES", value_delimiter = ',')]
     pub operators: Vec<String>,
     /// A verdict document that marks mutants as equivalent. Equivalent
@@ -545,6 +548,7 @@ fn code_lookup(report: &MutationReport, root: &Path) -> CodeLookup {
             file,
             &mutant.location.mutant_id,
             mutant.location.span,
+            &mutant.location.operator,
         ) {
             let (before, after) =
                 crate::mutation_inspect::line_context(source, mutant.location.span);

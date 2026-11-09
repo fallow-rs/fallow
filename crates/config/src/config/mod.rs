@@ -447,7 +447,7 @@ pub struct FallowConfig {
     pub similar_code: SimilarCodeConfig,
 
     /// Configures the explicit `fallow mutation` workflow: `runner` (`auto`
-    /// or `vitest`), `operators` (kebab-case names, default each operator),
+    /// or `vitest`), `operators` (kebab-case names, default the default set),
     /// `minScore` (0 to 100; a lower score exits with code 1), and
     /// `concurrency` (half the logical cores). No key starts a run, and the
     /// side-effect override is a CLI flag only.

@@ -11,7 +11,8 @@ use super::plan::RankEntry;
 /// The rank of an operator when a line keeps only some of its mutants. Lower
 /// ranks stay. Relational, condition, arithmetic and logical mutants change
 /// behavior that tests usually check. Literal and structural mutants come
-/// after them.
+/// after them. The opt-in operators come last: they make more mutants that
+/// are equivalent or that any test kills.
 const fn productivity(operator: Operator) -> u8 {
     match operator {
         Operator::RelationalOperator => 0,
@@ -27,6 +28,15 @@ const fn productivity(operator: Operator) -> u8 {
         Operator::StringLiteral => 10,
         Operator::RegexLiteral => 11,
         Operator::RemovedChainLink => 12,
+        Operator::MethodExpression => 13,
+        Operator::CallExpression => 14,
+        Operator::ThrowStatement => 15,
+        Operator::SwitchCase => 16,
+        Operator::RegexAssertion => 17,
+        Operator::RegexConstructor => 18,
+        Operator::ArrayLiteral => 19,
+        Operator::ObjectLiteral => 20,
+        Operator::BlockStatement => 21,
     }
 }
 

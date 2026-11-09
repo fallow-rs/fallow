@@ -100,6 +100,16 @@ read-only next steps. It never writes a test and never proposes a code change.
 
 ## Operators
 
+The operators are in two sets. A run that names no operator uses the default
+set: the operators of the first table. The opt-in operators of the second
+table run only when `--operators`, the `mutation.operators` config key or the
+MCP `operators` parameter names them. A list that names an operator replaces
+the default set, so `--operators regex-literal,regex-assertion` runs only
+those two. To add an opt-in operator to the defaults, name each default
+operator and the opt-in operator.
+
+Default set:
+
 | Operator | Change |
 |---|---|
 | `arithmetic-operator` | `+` and `-` swap, `*` and `/` swap, `%` becomes `*`; in a compound assignment, `+=` and `-=`, `*=` and `/=`, `<<=` and `>>=`, `&=` and `\|=` swap, and `%=` becomes `*=` |
@@ -115,6 +125,66 @@ read-only next steps. It never writes a test and never proposes a code change.
 | `optional-chaining` | `a?.b` becomes `a.b` |
 | `regex-literal` | one pattern token changes |
 | `removed-chain-link` | `r.m(args)` becomes `r` in a fluent chain of a module-level `const` |
+
+Opt-in set:
+
+| Operator | Change |
+|---|---|
+| `block-statement` | the statements of a non-empty block or function body are removed |
+| `array-literal` | `[x]` becomes `[]`, and `[]` becomes `["fallow"]` |
+| `object-literal` | a non-empty object literal becomes `{}` |
+| `method-expression` | a method call becomes its pair, or the call is removed |
+| `switch-case` | the statements of a `case` or `default` clause are removed |
+| `call-expression` | a call in an expression position becomes `void 0` |
+| `throw-statement` | `throw new X(...)` becomes `{}` |
+| `regex-constructor` | the `regex-literal` and `regex-assertion` changes of a `new RegExp("...")` pattern |
+| `regex-assertion` | a lookaround is negated, or `\b` and `\B` swap |
+
+The opt-in operators follow the StrykerJS mutator set. They make many more
+mutants, and many of them are equivalent or killed by any test that runs the
+code. The rules of each opt-in operator:
+
+- `block-statement`: the directive prologue of a function body stays, so the
+  body keeps its strictness. In a constructor, a body or block with a
+  `super(...)` call keeps its statements, because each instance creation
+  would throw. A class `static` block gives no mutant.
+- `block-statement` and `switch-case`: the range gives no mutant when it
+  holds a declaration at its own top level (`let`, `const`, `class`,
+  `function`, `var` or a TypeScript declaration), or a `var` or function
+  declaration at any depth outside a nested function. The instrumentation
+  moves the statements into a nested block, so a top-level declaration
+  would change its scope, and a hoisted `var` would stay declared while the
+  reported mutant removes it.
+- `array-literal` and `object-literal`: a destructuring pattern and an
+  assignment target give no mutant.
+- `method-expression`: `startsWith` and `endsWith`, `every` and `some`,
+  `toLowerCase` and `toUpperCase`, `toLocaleLowerCase` and
+  `toLocaleUpperCase`, `trimEnd` and `trimStart`, `min` and `max` swap. The
+  date setters `setDate` and `setTime`, `setFullYear` and `setMonth`,
+  `setHours` and `setMinutes`, `setSeconds` and `setMilliseconds`, and their
+  UTC forms swap; `setUTCDate` becomes `setTime`. `charAt`, `filter`,
+  `reverse`, `slice`, `sort`, `substr`, `substring` and `trim` are removed
+  with their call: `s.trim()` becomes `s`. The callee must be a static
+  member without parentheses. A call in an optional chain and a call on
+  `super` give no mutant.
+- `switch-case`: the clause falls through to the next clause.
+- `call-expression`: a call statement, a returned call and a concise arrow
+  call body give no mutant, because `removed-call` or `return-value` gives
+  the same result. This is also true in a run that does not select those
+  two operators: select them to cover such calls. A call in an optional chain, a `super(...)` call, a
+  `require(...)` call and a logging call give no mutant. The replacement is
+  always `(void 0)`, so it keeps its grouping before an operator: `f() + 1`
+  becomes `(void 0) + 1`.
+- `throw-statement`: only a `throw` of a `new` expression is removed.
+- `regex-constructor`: the pattern must be a string literal, and the flags a
+  string literal or absent. The callee is `RegExp`, with or without `new`.
+- `regex-assertion`: `\b` in a character class is a backspace, so it gives
+  no mutant.
+
+The block, switch case and throw mutants change statements, not
+expressions. The instrumentation wraps them in an `if` statement:
+`{if (active) {mutated} else {original}}`. The wrapper adds no line, so line
+numbers in the instrumented file do not change.
 
 The rules of the operators in detail:
 
@@ -146,8 +216,8 @@ The rules of the operators in detail:
   because `+1` gives the same value as the removal mutant `1`.
 - `return-value`: an arrow function with an expression body, such as
   `x => x + 1`, gets the body `undefined`. A body that is already `undefined`,
-  a `void` expression or a boolean literal gives no mutant, and a call body
-  gets the `removed-call` mutant instead.
+  a `void` expression or a boolean literal gives no mutant. A call body,
+  such as `() => save()`, gets this mutant too.
 - `string-literal`: a template literal follows the rules of a string. A
   tagged template gives no mutant, because the tag reads the raw parts, but
   its expressions still do. A template in a type position gives no mutant.
@@ -537,7 +607,10 @@ select nothing for it. `--function-scope` (config key
   `negate-condition`, `arithmetic-operator`, `logical-operator`,
   `unary-operator`, `update-operator`, `return-value`, `removed-call`,
   `optional-chaining`, `boolean-literal`, `string-literal`, `regex-literal`
-  and `removed-chain-link`.
+  and `removed-chain-link`, then the opt-in operators `method-expression`,
+  `call-expression`, `throw-statement`, `switch-case`, `regex-assertion`,
+  `regex-constructor`, `array-literal`, `object-literal` and
+  `block-statement`.
 - Mutants of the same operator on one line keep the order of a SHA-256 hash
   of the mutant id. A second run on the same code keeps the same mutants.
 - Each mutant that the limit leaves out is `pending` with
@@ -1831,6 +1904,12 @@ source text.
   expression that becomes `true` or `false` are `<expression>`. A non-empty
   `string-literal` is `<string>`, and a non-empty template literal is
   `<template>`.
+- The opt-in operators use `<statements>` for the statements of a block,
+  function body or `case` clause, `<statement>` for a `throw` statement,
+  `<array>` and `<object>` for a non-empty literal, and `<call>` for a
+  replaced or removed call. A `method-expression` pair is the two method
+  names, for example `{"from": "startsWith", "to": "endsWith"}`.
+- A `regex-assertion` side is `(?=`, `(?!`, `(?<=`, `(?<!`, `\b` or `\B`.
 - A `regex-literal` quantifier side is `+`, `*` or `?`, and a shortened
   range is `{"from": "{n,m}", "to": "{n}"}`.
 - An empty side means that the edit removes the token, for example

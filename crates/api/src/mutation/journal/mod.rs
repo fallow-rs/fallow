@@ -61,7 +61,7 @@ pub struct JournalHeader {
     pub runner_config: Option<String>,
     /// The scope, for example `all` or `changed against main`.
     pub scope: String,
-    /// The operator names. `None` uses each operator.
+    /// The operator names. `None` uses the default set.
     pub operators: Option<Vec<String>>,
     pub allow_side_effects: bool,
     #[serde(default)]
@@ -78,7 +78,7 @@ impl JournalHeader {
         let operators = |names: &Option<Vec<String>>| {
             names
                 .as_ref()
-                .map_or_else(|| "each operator".to_owned(), |names| names.join(","))
+                .map_or_else(|| "default set".to_owned(), |names| names.join(","))
         };
         let config = |config: &Option<String>| config.clone().unwrap_or_else(|| "none".to_owned());
         let targets = |targets: &[String]| {

@@ -35096,7 +35096,7 @@
         "from",
         "to"
       ],
-      "description": "The edit of a mutant, without project text.\n\nEach side is an operator token (for example `??` or `<=`), a fixed literal\n(`true`, `undefined`, `\"\"`, `\"fallow\"`, `void 0`), a regular expression\ntoken (`^`, `$`, `[`, `[^`, `+`, `{n,m}`, `\\d`), or a placeholder for a\nside that is project code: `<condition>`, `<call>`, `<expression>`,\n`<string>` or `<template>`. An\nempty side means that the edit removes the token."
+      "description": "The edit of a mutant, without project text.\n\nEach side is an operator token (for example `??` or `<=`), a fixed literal\n(`true`, `undefined`, `\"\"`, `\"fallow\"`, `void 0`), a regular expression\ntoken (`^`, `$`, `[`, `[^`, `+`, `{n,m}`, `\\d`), or a placeholder for a\nside that is project code: `<condition>`, `<call>`, `<expression>`,\n`<string>`, `<template>`, `<statement>`, `<statements>`, `<array>` or\n`<object>`. An\nempty side means that the edit removes the token."
     },
     "NodeModulesState": {
       "oneOf": [

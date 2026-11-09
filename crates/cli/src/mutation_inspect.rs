@@ -204,22 +204,35 @@ pub struct Reproduced {
     pub replacement: String,
 }
 
-/// Instruments `source` and finds the mutant `mutant_id` at `span`.
+/// Instruments `source` and finds the mutant `mutant_id` of `operator` at
+/// `span`.
 ///
-/// The mutant id can depend on the other mutants of the file when two
-/// mutants have the same inputs, so a second pass keeps only the mutants that
-/// overlap `span`.
+/// The instrumentation selects only `operator`, so an opt-in operator that
+/// the default set leaves out is reproduced too. A mutant id hashes its
+/// operator, so the other operators of the run cannot change it, and with one
+/// operator no other candidate can take its place as a text duplicate. An
+/// unknown name selects every operator. The mutant id can depend on the
+/// other mutants of the file when two mutants have the same inputs, so a
+/// second pass keeps only the mutants that overlap `span`.
 pub fn reproduce(
     source: &str,
     file: &str,
     mutant_id: &str,
     span: (u32, u32),
+    operator: &str,
 ) -> Option<Reproduced> {
+    let operators = fallow_mutation::Operator::from_name(operator).map_or_else(
+        || fallow_mutation::Operator::ALL.to_vec(),
+        |operator| vec![operator],
+    );
     let passes = [
-        MutationOptions::default(),
         MutationOptions {
+            operators: operators.clone(),
+            ranges: None,
+        },
+        MutationOptions {
+            operators,
             ranges: Some(vec![span]),
-            ..MutationOptions::default()
         },
     ];
     passes.iter().find_map(|options| {
@@ -317,8 +330,14 @@ pub fn mutant_code(
     let source =
         std::str::from_utf8(bytes).map_err(|_| MutationStaleReason::MutantNotReproduced)?;
     let source = without_byte_order_mark(source);
-    let reproduced = reproduce(source, &mutant.file, &mutant.mutant_id, mutant.span)
-        .ok_or(MutationStaleReason::MutantNotReproduced)?;
+    let reproduced = reproduce(
+        source,
+        &mutant.file,
+        &mutant.mutant_id,
+        mutant.span,
+        &mutant.operator,
+    )
+    .ok_or(MutationStaleReason::MutantNotReproduced)?;
     let (original_lines, mutated_lines) =
         mutated_lines(source, mutant.span, &reproduced.replacement);
     Ok(MutationInspectCode {
@@ -598,10 +617,42 @@ mod tests {
         .into_iter()
         .find(|mutant| mutant.original == "+")
         .unwrap();
-        let reproduced =
-            reproduce(source, "src/Total.vue", mutant.id.as_str(), mutant.span).unwrap();
+        let reproduced = reproduce(
+            source,
+            "src/Total.vue",
+            mutant.id.as_str(),
+            mutant.span,
+            "arithmetic-operator",
+        )
+        .unwrap();
         assert_eq!(reproduced.replacement, "-");
         assert_eq!(mutant.line, 3);
+    }
+
+    #[test]
+    fn an_opt_in_mutant_is_reproduced() {
+        let source = "export function save(x: number) {\n  write(x);\n}\n";
+        let options = MutationOptions {
+            operators: vec![fallow_mutation::Operator::BlockStatement],
+            ..MutationOptions::default()
+        };
+        let mutant = fallow_engine::mutation::instrument_source(source, "src/save.ts", &options)
+            .unwrap()
+            .unwrap()
+            .mutants
+            .into_iter()
+            .next()
+            .unwrap();
+        let reproduced = reproduce(
+            source,
+            "src/save.ts",
+            mutant.id.as_str(),
+            mutant.span,
+            "block-statement",
+        )
+        .unwrap();
+        assert_eq!(reproduced.replacement, "");
+        assert_eq!(reproduced.original, "\n  write(x);\n");
     }
 
     #[test]
