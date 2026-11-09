@@ -122,19 +122,25 @@ pub fn assert_only_in_control(source: &str, kind: SourceKind, control: &str) {
 /// statement, and it prints each uncaught error, so that two runs that
 /// throw different errors do not compare equal.
 ///
-/// The line holds the error name, and the message only for a plain
-/// `Error`. V8 writes the source of the failing expression into the message
-/// of a `TypeError`, so the same failure reads `f(...) is not iterable` in
-/// the applied mutant and `(intermediate value) is not iterable` in the
-/// instrumented code.
+/// The line holds the error name and the message. V8 writes the source of
+/// the failing expression into some messages, so the same failure reads
+/// `f(...) is not iterable` in the applied mutant and
+/// `(intermediate value) is not iterable` in the instrumented code. The
+/// script replaces only that source text with `<expr>`: in the
+/// "is not a function", "is not a constructor", "is not iterable" and
+/// related messages, and in "of '...' as it is". Each other message stays
+/// as it is, so `TypeError("left")` and `TypeError("right")` differ.
 const NODE_SETUP: &str = r#"const active = process.env.FALLOW_TEST_ACTIVE;
 if (active) {
   globalThis.__fallowMutation = { a: (id) => id === active, c: () => {} };
 }
+const normalize = (message) => String(message)
+  .replace(/^.+? (is not (?:a function|a constructor|iterable|async iterable|an object|a function or its return value is not (?:async )?iterable))/, "<expr> $1")
+  .replace(/ of '.*' as it is/, " of <expr> as it is");
 const report = (error) => {
   const name = error && error.name;
-  const message = name === "Error" ? `: ${error.message}` : "";
-  process.stdout.write(`uncaught ${name}${message}\n`);
+  const message = normalize(error && error.message);
+  process.stdout.write(`uncaught ${name}: ${message}\n`);
   process.exit(1);
 };
 process.on("uncaughtException", report);

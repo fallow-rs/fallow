@@ -35,3 +35,24 @@ fn the_active_runtime_keeps_strict_mode() {
     let active = run_node_active(&result.code, &id).map(|(stdout, _)| stdout);
     assert_eq!(active.as_deref(), Some("true -1\n"));
 }
+
+#[test]
+fn errors_of_one_type_with_different_messages_do_not_compare_equal() {
+    let Some(left) = run_node("throw new TypeError(\"left\");") else {
+        return;
+    };
+    let right = run_node("throw new TypeError(\"right\");");
+    assert_ne!(Some(left), right);
+}
+
+#[test]
+fn source_text_in_an_engine_message_compares_equal() {
+    let Some(direct) = run_node("function f() { return 1; }\nfor (const x of f()) {}") else {
+        return;
+    };
+    let wrapped = run_node("function f() { return 1; }\nfor (const x of (0, f)()) {}");
+    assert_eq!(Some(direct), wrapped);
+    let null_read = run_node("const q = null; q.x;");
+    let missing = run_node("q;");
+    assert_ne!(null_read, missing);
+}
