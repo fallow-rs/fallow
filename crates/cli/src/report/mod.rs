@@ -433,6 +433,33 @@ fn duplication_run_fails(ctx: &ReportContext<'_>) -> bool {
         .is_some_and(fallow_output::GateOutcomes::fails_run)
 }
 
+fn print_shared_state(
+    results: &AnalysisResults,
+    ctx: &ReportContext<'_>,
+    output: OutputFormat,
+) -> Result<(), ExitCode> {
+    if let Some(inventory) = &results.shared_state {
+        if ctx.group_by.is_some()
+            || !matches!(
+                output,
+                OutputFormat::Human | OutputFormat::Json | OutputFormat::Markdown
+            )
+        {
+            return Err(crate::emit_input_error(
+                "shared-state inventory supports ungrouped human, json and markdown output",
+                output,
+            ));
+        }
+        if matches!(output, OutputFormat::Human) {
+            outln!(
+                "{}",
+                fallow_output::shared_state::markdown(inventory, ctx.root)
+            );
+        }
+    }
+    Ok(())
+}
+
 /// Print analysis results in the configured format.
 /// Returns exit code 2 if serialization fails, SUCCESS otherwise.
 ///
@@ -445,6 +472,9 @@ pub(crate) fn print_results(
     output: OutputFormat,
     regression: Option<&crate::regression::RegressionOutcome>,
 ) -> ExitCode {
+    if let Err(code) = print_shared_state(results, ctx, output) {
+        return code;
+    }
     if let Some(ref resolver) = ctx.group_by {
         let groups = grouping::group_analysis_results(results, ctx.root, resolver);
         return print_grouped_results(&groups, results, ctx, output, resolver);

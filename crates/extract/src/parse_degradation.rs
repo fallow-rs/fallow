@@ -15,6 +15,16 @@ pub struct ParseDegradation {
 }
 
 impl ParseDegradation {
+    pub fn merge(&mut self, other: Self) {
+        self.error_count = self.error_count.saturating_add(other.error_count);
+        self.panicked |= other.panicked;
+    }
+
+    pub fn apply_to(self, module: &mut fallow_types::extract::ModuleInfo) {
+        module.parse_error_count = module.parse_error_count.saturating_add(self.error_count);
+        module.parse_panicked |= self.panicked;
+    }
+
     pub fn from_parser(parser_return: &oxc_parser::ParserReturn<'_>) -> Self {
         Self {
             error_count: u32::try_from(parser_return.diagnostics.len()).unwrap_or(u32::MAX),

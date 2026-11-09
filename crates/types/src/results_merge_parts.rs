@@ -22,6 +22,7 @@ pub(super) fn split_merge_parts(
     AnalysisResultsMetadataMergeParts,
 ) {
     let AnalysisResults {
+        shared_state,
         unused_files,
         unused_exports,
         unused_types,
@@ -160,6 +161,7 @@ pub(super) fn split_merge_parts(
             duplicate_prop_shapes,
         },
         AnalysisResultsMetadataMergeParts {
+            shared_state,
             cascade_hidden,
             cascade,
             suppression_count,

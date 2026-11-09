@@ -441,6 +441,7 @@ fn visit_families<V: FamilyVisitor>(results: &mut AnalysisResults, visitor: &mut
     // No `..` rest pattern: a new field fails to compile here until it is
     // classified as a finding family or as metadata.
     let AnalysisResults {
+        shared_state: _,
         unused_files,
         unused_exports,
         unused_types,

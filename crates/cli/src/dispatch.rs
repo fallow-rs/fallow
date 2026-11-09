@@ -513,77 +513,11 @@ fn dispatch_check_command(command: Command, dispatch: &DispatchContext<'_>) -> E
     )
 }
 
-/// Destructure the `Command::Architecture` arm and forward to `dispatch_check`
-/// with the architecture issue types selected. The analysis, the JSON envelope
-/// and the finding ids are the ones `dead-code` produces for the same filters.
-fn dispatch_architecture_command(command: Command, dispatch: &DispatchContext<'_>) -> ExitCode {
-    let Command::Architecture {
-        cycles,
-        boundaries,
-        policy,
-        file,
-        finding_id,
-        path,
-    } = command
-    else {
-        unreachable!("architecture dispatcher only handles architecture commands");
-    };
-
-    let finding_ids = match fallow_engine::dead_code::FindingIdFilter::parse(&finding_id) {
-        Ok(filter) => filter,
-        Err(message) => {
-            return emit_input_error(&format!("--finding-id: {message}"), dispatch.output);
-        }
-    };
-
-    let scope = match crate::scope_path::resolve_command_scope(dispatch.root, dispatch.output, path)
-    {
-        Ok(scope) => scope.map(|resolved| resolved.absolute),
-        Err(code) => return code,
-    };
-
-    dispatch_check(
-        dispatch,
-        &CheckDispatchArgs {
-            filters: architecture_issue_filters(cycles, boundaries, policy),
-            trace_opts: TraceOptions {
-                trace_export: None,
-                trace_file: None,
-                trace_dependency: None,
-                impact_closure: None,
-                symbol_impact: None,
-                performance: dispatch.cli.performance,
-            },
-            include_dupes: false,
-            type_aware: dispatch.cli.type_aware_override(),
-            type_aware_project: dispatch.cli.type_aware_project.clone(),
-            type_aware_require: dispatch.cli.type_aware_require,
-            top: None,
-            file,
-            scope,
-            finding_ids,
-            surface: check::CheckSurface::architecture(cycles, boundaries, policy),
-        },
-    )
-}
-
-/// Map the `fallow architecture` filter flags onto the `dead-code` filter flags
-/// they stand for. No flag selects every architecture issue type.
-pub fn architecture_issue_filters(cycles: bool, boundaries: bool, policy: bool) -> IssueFilters {
-    let all = !(cycles || boundaries || policy);
-    let mut filters = IssueFilters::default();
-    for (flag, active) in [
-        ("--circular-deps", cycles || all),
-        ("--re-export-cycles", cycles || all),
-        ("--package-cycles", cycles || all),
-        ("--boundary-violations", boundaries || all),
-        ("--policy-violations", policy || all),
-    ] {
-        enable_check_filter(&mut filters, flag, active);
-    }
-    filters
-}
-
+#[path = "dispatch_architecture.rs"]
+mod architecture;
+#[cfg(test)]
+pub use architecture::architecture_issue_filters;
+use architecture::dispatch_architecture_command;
 /// Map the `Command::Check` filter flags onto `IssueFilters`. Reads the flags by
 /// reference (all `Copy` bools) so the caller can still move the non-filter
 /// fields out of the same `Command` value afterwards. Split into two halves to

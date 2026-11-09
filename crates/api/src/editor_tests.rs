@@ -651,6 +651,7 @@ fn merge_test_unused_member(
 )]
 pub fn merge_test_source_with_all_fields() -> EditorAnalysisResults {
     EditorAnalysisResults {
+        shared_state: None,
         unused_files: vec![UnusedFileFinding::with_actions(UnusedFile {
             path: "/f.ts".into(),
         })],

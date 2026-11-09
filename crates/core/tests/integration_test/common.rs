@@ -17,6 +17,7 @@ pub fn fixture_path(name: &str) -> PathBuf {
 
 pub fn create_config(root: PathBuf) -> fallow_config::ResolvedConfig {
     FallowConfig {
+        shared_state_allowlist: Vec::new(),
         type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
         minimum_version: None,
@@ -74,6 +75,7 @@ pub fn create_config(root: PathBuf) -> fallow_config::ResolvedConfig {
 /// that only exist in production mode (type-only dependencies) are emitted.
 pub fn create_production_config(root: PathBuf) -> fallow_config::ResolvedConfig {
     FallowConfig {
+        shared_state_allowlist: Vec::new(),
         type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
         minimum_version: None,
@@ -177,6 +179,7 @@ pub fn create_config_with_cache(
     cache_dir: std::path::PathBuf,
 ) -> fallow_config::ResolvedConfig {
     let mut config = FallowConfig {
+        shared_state_allowlist: Vec::new(),
         type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
         minimum_version: None,
@@ -239,6 +242,7 @@ where
     let mut rules = RulesConfig::default();
     modify(&mut rules);
     FallowConfig {
+        shared_state_allowlist: Vec::new(),
         type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
         minimum_version: None,
@@ -304,6 +308,7 @@ pub fn create_config_with_overrides(
         })
         .collect();
     FallowConfig {
+        shared_state_allowlist: Vec::new(),
         type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
         minimum_version: None,
@@ -362,6 +367,7 @@ pub fn create_config_with_ignore_decorators(
     ignore_decorators: Vec<String>,
 ) -> fallow_config::ResolvedConfig {
     FallowConfig {
+        shared_state_allowlist: Vec::new(),
         type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
         minimum_version: None,

@@ -420,6 +420,7 @@ impl TryFrom<DeadCodeOptions> for api::DeadCodeOptions {
                 type_aware: value.type_aware,
             })?,
             filters: api::DeadCodeFilters {
+                shared_state: false,
                 unused_files: value.unused_files.unwrap_or(false),
                 unused_exports: value.unused_exports.unwrap_or(false),
                 unused_deps: value.unused_deps.unwrap_or(false),
@@ -479,6 +480,7 @@ impl TryFrom<ArchitectureOptions> for api::ArchitectureOptions {
 
     fn try_from(value: ArchitectureOptions) -> Result<Self, Self::Error> {
         Ok(Self {
+            shared_state: false,
             analysis: map_common_options(CommonOptionsInput {
                 root: value.root,
                 config_path: value.config_path,
@@ -1388,6 +1390,7 @@ mod tests {
                 ..api::AnalysisOptions::default()
             },
             filters: api::DeadCodeFilters {
+                shared_state: false,
                 unused_exports: true,
                 ..api::DeadCodeFilters::default()
             },

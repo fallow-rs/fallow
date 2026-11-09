@@ -15,6 +15,10 @@ pub fn strip_root_prefix(value: &mut serde_json::Value, prefix: &str) {
         }
         serde_json::Value::Object(map) => {
             for (key, value) in map.iter_mut() {
+                if key == "shared_state" {
+                    crate::shared_state::normalize_paths(value, prefix);
+                    continue;
+                }
                 if key == VERBATIM_KEY {
                     continue;
                 }

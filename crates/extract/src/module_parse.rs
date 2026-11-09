@@ -9,6 +9,12 @@ use fallow_types::extract::ModuleInfo;
 use crate::parse::parse_source_to_module_unbounded;
 use fallow_types::extract::FlagPatterns;
 
+/// Extraction settings that must agree with the caller's cache identity.
+pub struct ExtractionOptions<'a> {
+    pub flag_patterns: &'a FlagPatterns,
+    pub mode: fallow_types::shared_state::ExtractionMode,
+}
+
 /// Parse source text into a [`ModuleInfo`].
 ///
 /// When `need_complexity` is false the per-function complexity visitor is
@@ -54,7 +60,10 @@ pub fn parse_source_to_module_with_flags(
         crate::strip_bom(source),
         content_hash,
         need_complexity,
-        flag_patterns,
+        &ExtractionOptions {
+            flag_patterns,
+            mode: fallow_types::shared_state::ExtractionMode::Standard,
+        },
     )
 }
 
@@ -70,7 +79,7 @@ pub fn parse_source_without_bom(
     source: &str,
     content_hash: u64,
     need_complexity: bool,
-    flag_patterns: &FlagPatterns,
+    options: &ExtractionOptions<'_>,
 ) -> ModuleInfo {
     let bounded = crate::nesting::parse_file_bounded(path, source, || {
         let module = parse_source_to_module_unbounded(
@@ -79,7 +88,7 @@ pub fn parse_source_without_bom(
             source,
             content_hash,
             need_complexity,
-            flag_patterns,
+            options,
         );
         // The CSS comment mask counts on the thread that parsed. Carry the
         // count back in case that was a sized thread.
@@ -92,4 +101,26 @@ pub fn parse_source_without_bom(
         }
         None => crate::nesting::too_deep_module(file_id, source, content_hash),
     }
+}
+
+/// Parse source with explicit optional semantic facts.
+pub fn parse_source_to_module_with_mode(
+    file_id: FileId,
+    path: &Path,
+    source: &str,
+    content_hash: u64,
+    need_complexity: bool,
+    mode: fallow_types::shared_state::ExtractionMode,
+) -> ModuleInfo {
+    parse_source_without_bom(
+        file_id,
+        path,
+        crate::strip_bom(source),
+        content_hash,
+        need_complexity,
+        &ExtractionOptions {
+            flag_patterns: &FlagPatterns::default(),
+            mode,
+        },
+    )
 }

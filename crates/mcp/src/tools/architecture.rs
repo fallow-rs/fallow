@@ -101,6 +101,7 @@ fn architecture_options_from_params(
         .filter(|value| filled(Some(value)))
         .map(str::to_string);
     ArchitectureOptions {
+        shared_state: false,
         analysis: AnalysisOptions {
             production: params.production.unwrap_or(false),
             production_override: params.production,

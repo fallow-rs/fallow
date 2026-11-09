@@ -11,6 +11,7 @@ fn make_config(
     ignore_exports: Vec<IgnoreExportRule>,
 ) -> fallow_config::ResolvedConfig {
     FallowConfig {
+        shared_state_allowlist: Vec::new(),
         type_aware: fallow_config::TypeAwareConfig::default(),
         schema: None,
         minimum_version: None,

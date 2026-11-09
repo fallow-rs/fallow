@@ -16,7 +16,7 @@ use crate::HealthReport;
 use crate::root_envelopes::{attach_telemetry_meta, serialize_named_json_output};
 
 /// Current schema version for the dead-code/check JSON envelope.
-pub const CHECK_SCHEMA_VERSION: u32 = 10;
+pub const CHECK_SCHEMA_VERSION: u32 = 11;
 
 /// Schema projection for the dead-code envelope's exact version.
 #[cfg(feature = "schema")]
@@ -29,7 +29,7 @@ struct CheckSchemaVersion(u32);
 ///
 /// The architecture body is the dead-code body, so a change to that shared
 /// body bumps this version and [`CHECK_SCHEMA_VERSION`] together.
-pub const ARCHITECTURE_SCHEMA_VERSION: u32 = 1;
+pub const ARCHITECTURE_SCHEMA_VERSION: u32 = 2;
 
 /// Schema projection for the architecture envelope's exact version.
 ///

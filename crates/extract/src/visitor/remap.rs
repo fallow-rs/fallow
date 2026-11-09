@@ -16,6 +16,7 @@ impl ModuleInfoExtractor {
         self.remap_handled_spans(&mut remap);
         self.remap_security_spans(&mut remap);
         self.remap_site_offsets(&mut remap);
+        self.remap_shared_state(&mut remap);
     }
 
     /// Remap the facts that store only the start offset of a site.

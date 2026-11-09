@@ -579,6 +579,17 @@
           "description": "Per-category finding counts.",
           "$ref": "#/definitions/CheckSummary"
         },
+        "shared_state": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SharedStateInventory"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional architecture inventory, excluded from issue totals and gates."
+        },
         "unused_files": {
           "type": "array",
           "items": {
@@ -1245,6 +1256,17 @@
         "total_issues": {
           "type": "integer",
           "description": "Findings in this group."
+        },
+        "shared_state": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SharedStateInventory"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional architecture inventory, excluded from issue totals and gates."
         },
         "unused_files": {
           "type": "array",
@@ -7080,6 +7102,17 @@
     "AnalysisResults": {
       "type": "object",
       "properties": {
+        "shared_state": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SharedStateInventory"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional architecture inventory, excluded from issue totals and gates."
+        },
         "unused_files": {
           "type": "array",
           "items": {
@@ -25978,7 +26011,7 @@
     },
     "CheckSchemaVersion": {
       "type": "integer",
-      "const": 10,
+      "const": 11,
       "description": "Schema projection for the dead-code envelope's exact version."
     },
     "CombinedSchemaVersion": {
@@ -30858,7 +30891,7 @@
     },
     "ArchitectureSchemaVersion": {
       "type": "integer",
-      "const": 1,
+      "const": 2,
       "description": "Schema projection for the architecture envelope's exact version.\n\nThe schema emitter registers this type by name and points the\n`ArchitectureOutput` and `ArchitectureGroupedOutput` definitions at it."
     },
     "ArchitectureGroupedOutput": {
@@ -31020,6 +31053,17 @@
         "summary": {
           "description": "Per-category finding counts.",
           "$ref": "#/definitions/CheckSummary"
+        },
+        "shared_state": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/SharedStateInventory"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional architecture inventory, excluded from issue totals and gates."
         },
         "unused_files": {
           "type": "array",
@@ -36823,6 +36867,269 @@
         }
       ],
       "description": "Why a survivor may be equivalent, as far as the type check can tell."
+    },
+    "SharedStateInventory": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "version": {
+          "type": "integer",
+          "description": "Inventory contract version."
+        },
+        "complete": {
+          "type": "boolean",
+          "description": "False if source parsing or retention limits omitted supported evidence."
+        },
+        "truncated": {
+          "type": "boolean",
+          "description": "Whether bounded fact retention omitted sites."
+        },
+        "imported_writes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ImportedStateWrite"
+          },
+          "description": "Imported value property writes."
+        },
+        "globals": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/GlobalStateGroup"
+          },
+          "description": "Exact global root/slot groups."
+        }
+      },
+      "required": [
+        "version",
+        "complete",
+        "truncated",
+        "imported_writes",
+        "globals"
+      ],
+      "description": "Versioned advisory inventory. Its observations are never counted as findings."
+    },
+    "ImportedStateWrite": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Stable observation identity."
+        },
+        "writer": {
+          "description": "Writer location.",
+          "$ref": "#/definitions/StateSite"
+        },
+        "declaration": {
+          "description": "Canonical value declaration, not inferred runtime object ownership.",
+          "$ref": "#/definitions/StateSite"
+        },
+        "binding": {
+          "type": "string",
+          "description": "Canonical exported name."
+        },
+        "property": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Exact property segments relative to the imported value."
+        },
+        "operation": {
+          "description": "Direct write operation.",
+          "$ref": "#/definitions/StateOperation"
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/StateAction"
+          },
+          "description": "Manual guidance."
+        }
+      },
+      "required": [
+        "id",
+        "writer",
+        "declaration",
+        "binding",
+        "property",
+        "operation",
+        "actions"
+      ],
+      "description": "A write through an imported value binding with one declaration origin."
+    },
+    "StateSite": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Project-relative source path."
+        },
+        "line": {
+          "type": "integer",
+          "description": "One-based source line."
+        },
+        "column": {
+          "type": "integer",
+          "description": "One-based byte column."
+        },
+        "offset": {
+          "type": "integer",
+          "description": "Original byte offset."
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "column",
+        "offset"
+      ],
+      "description": "A retained source location."
+    },
+    "StateOperation": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "read",
+          "description": "Value read, including a call receiver."
+        },
+        {
+          "type": "string",
+          "const": "assign",
+          "description": "Simple assignment."
+        },
+        {
+          "type": "string",
+          "const": "read_modify_write",
+          "description": "Compound or logical assignment, which may read the previous value."
+        },
+        {
+          "type": "string",
+          "const": "update",
+          "description": "Increment or decrement."
+        },
+        {
+          "type": "string",
+          "const": "delete",
+          "description": "Property deletion."
+        }
+      ],
+      "description": "A direct property operation. Calls are not classified as writes."
+    },
+    "StateAction": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "description": {
+          "type": "string",
+          "description": "Human-readable next step."
+        },
+        "auto_fixable": {
+          "type": "boolean",
+          "description": "Always false."
+        }
+      },
+      "required": [
+        "description",
+        "auto_fixable"
+      ],
+      "description": "Manual review guidance. Inventory observations cannot be automatically fixed."
+    },
+    "GlobalStateGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Stable observation identity."
+        },
+        "root": {
+          "type": "string",
+          "description": "Exact root spelling. Roots are never normalized across runtimes."
+        },
+        "slot": {
+          "type": "string",
+          "description": "Direct custom slot."
+        },
+        "reads": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/GlobalStateAccess"
+          },
+          "description": "Sorted read sites."
+        },
+        "writes": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/GlobalStateAccess"
+          },
+          "description": "Sorted write sites."
+        },
+        "same_runtime": {
+          "description": "Whether the files execute in the same runtime is unknown.",
+          "$ref": "#/definitions/UnknownStateRelation"
+        },
+        "execution_order": {
+          "description": "Execution order is unknown.",
+          "$ref": "#/definitions/UnknownStateRelation"
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/StateAction"
+          },
+          "description": "Manual guidance."
+        }
+      },
+      "required": [
+        "id",
+        "root",
+        "slot",
+        "reads",
+        "writes",
+        "same_runtime",
+        "execution_order",
+        "actions"
+      ],
+      "description": "One exact root and custom slot, with retained reads and writes across files."
+    },
+    "GlobalStateAccess": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "site": {
+          "description": "Source location.",
+          "$ref": "#/definitions/StateSite"
+        },
+        "property": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Full path, including the direct slot."
+        },
+        "operation": {
+          "description": "Direct operation.",
+          "$ref": "#/definitions/StateOperation"
+        }
+      },
+      "required": [
+        "site",
+        "property",
+        "operation"
+      ],
+      "description": "A source access within a global group."
+    },
+    "UnknownStateRelation": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "unknown",
+          "description": "No runtime or ordering claim."
+        }
+      ],
+      "description": "Runtime relationships that static observations cannot establish."
     }
   }
 }

@@ -98,6 +98,9 @@ pub fn run_report(
         Ok(envelope) => envelope,
         Err(code) => return code,
     };
+    if let Err(code) = validate_shared_state_report(&envelope, target, output) {
+        return code;
+    }
     let mut saved = match prepare_saved_envelope(envelope, output) {
         Ok(saved) => saved,
         Err(code) => return code,
@@ -521,6 +524,31 @@ fn saved_status_message(
             .map(crate::report::grouping_note::dropped_grouping_clause)
             .as_deref(),
     ])
+}
+
+fn validate_shared_state_report(
+    envelope: &serde_json::Value,
+    target: ReportTarget,
+    output: OutputFormat,
+) -> Result<(), ExitCode> {
+    match fallow_output::shared_state::validate_saved(envelope) {
+        Ok(true) if !matches!(target, ReportTarget::Markdown) => {
+            return Err(invalid_report_input(
+                "saved shared-state inventory supports markdown output only",
+                output,
+                telemetry::FailureReason::UnsupportedFormat,
+            ));
+        }
+        Err(error) => {
+            return Err(invalid_report_input(
+                &error,
+                output,
+                telemetry::FailureReason::Validation,
+            ));
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 #[cfg(test)]

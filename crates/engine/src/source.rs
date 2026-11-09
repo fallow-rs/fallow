@@ -145,12 +145,14 @@ pub(crate) fn parse_all_files(
     need_complexity: bool,
     cancellation: Option<&AtomicBool>,
     flag_patterns: &fallow_types::extract::FlagPatterns,
+    mode: fallow_types::shared_state::ExtractionMode,
 ) -> ParseResult {
-    fallow_extract::parse_all_files_cancellable(
+    fallow_extract::parse_all_files_with_mode(
         files,
         cache,
         need_complexity,
         cancellation,
         flag_patterns,
+        mode,
     )
 }

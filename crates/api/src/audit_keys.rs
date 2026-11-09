@@ -145,6 +145,7 @@ impl DeadCodeAuditLedger {
     )]
     pub fn annotate_results(&self, results: &mut fallow_types::results::AnalysisResults) {
         let fallow_types::results::AnalysisResults {
+            shared_state: _,
             unused_files,
             unused_exports,
             unused_types,
@@ -628,6 +629,7 @@ impl DeadCodeKeyCollector<'_> {
     )]
     fn add_all_findings(&mut self, results: &fallow_types::results::AnalysisResults) {
         let fallow_types::results::AnalysisResults {
+            shared_state: _,
             unused_files,
             unused_exports,
             unused_types,
@@ -1505,6 +1507,7 @@ fn retain_introduced<T: IdentifiedFinding>(
 
 fn classify_introduced_dead_code_fields(results: &fallow_types::results::AnalysisResults) {
     let fallow_types::results::AnalysisResults {
+        shared_state: _,
         unused_files: _unused_files,
         unused_exports: _unused_exports,
         unused_types: _unused_types,

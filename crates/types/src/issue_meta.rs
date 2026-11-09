@@ -5,7 +5,10 @@ use std::sync::LazyLock;
 use crate::suppress::IssueKind;
 #[path = "issue_meta_derived.rs"]
 mod derived;
-use derived::{dead_code_filter_flags_from_meta, known_issue_kind_names_from_meta};
+use derived::{
+    codeclimate_result_codes_from_meta, dead_code_filter_flags_from_meta,
+    known_issue_kind_names_from_meta, mcp_issue_type_flags_from_meta,
+};
 
 #[path = "issue_meta_kind_methods.rs"]
 mod kind_methods;
@@ -977,6 +980,19 @@ pub const ISSUE_KIND_META: &[IssueKindMeta] = &[
         lsp: false,
         docs_category: "audit",
     },
+    IssueKindMeta {
+        kind: Some(IssueKind::SharedState),
+        code: "shared-state",
+        aliases: &[],
+        label: "Shared-state inventory",
+        config_key: None,
+        filter_flag: None,
+        mcp_issue_type: None,
+        suppress_token: Some("shared-state"),
+        suppress_file_level: false,
+        lsp: false,
+        docs_category: "architecture",
+    },
 ];
 
 /// Shared contract facts for serialized `AnalysisResults` arrays.
@@ -1835,27 +1851,6 @@ pub static MCP_ISSUE_TYPE_FLAGS: LazyLock<Vec<(&'static str, &'static str)>> =
 /// Result issue codes emitted by the dead-code CodeClimate formatter.
 pub static CODECLIMATE_RESULT_CODES: LazyLock<Vec<&'static str>> =
     LazyLock::new(codeclimate_result_codes_from_meta);
-
-fn mcp_issue_type_flags_from_meta() -> Vec<(&'static str, &'static str)> {
-    ISSUE_KIND_META
-        .iter()
-        .filter_map(|meta| meta.mcp_pair())
-        .collect()
-}
-
-fn codeclimate_result_codes_from_meta() -> Vec<&'static str> {
-    ISSUE_RESULT_META
-        .iter()
-        .filter(|meta| meta.counts_in_total)
-        .map(|meta| meta.code)
-        .collect()
-}
-
-fn push_unique<T: Copy + PartialEq>(items: &mut Vec<T>, item: T) {
-    if !items.contains(&item) {
-        items.push(item);
-    }
-}
 
 /// Lookup metadata by canonical code.
 #[must_use]

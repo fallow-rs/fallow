@@ -491,6 +491,7 @@ fn for_each_gated_finding(
     f: &mut dyn FnMut(&mut dyn GatedRuleFinding),
 ) {
     let AnalysisResults {
+        shared_state: _,
         unused_files,
         unused_exports,
         unused_types,
@@ -630,6 +631,7 @@ fn for_each_gated_finding(
 )]
 fn tally_gated_findings(results: &AnalysisResults, tally: &mut SeverityTally<'_, '_>) {
     let AnalysisResults {
+        shared_state: _,
         unused_files,
         unused_exports,
         unused_types,

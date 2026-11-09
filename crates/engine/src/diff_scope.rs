@@ -38,6 +38,9 @@ pub fn filter_dead_code_by_diff(results: &mut AnalysisResults, diff: &DiffIndex,
             .is_none_or(|rel| diff.line_is_added(&rel, u64::from(line)))
     };
 
+    if let Some(inventory) = &mut results.shared_state {
+        inventory.retain_sites(|site| line_in_diff(&site.path, site.line as u32));
+    }
     filter_source_findings(results, &touches_file, &line_in_diff);
     filter_security_findings(results, &touches_file, &line_in_diff);
     filter_dependency_findings(results, &line_in_diff);

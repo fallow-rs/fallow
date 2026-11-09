@@ -13,7 +13,7 @@ use crate::common::{
 };
 
 /// `ARCHITECTURE_SCHEMA_VERSION` of the `architecture` envelope.
-const ARCHITECTURE_SCHEMA_VERSION: u64 = 1;
+const ARCHITECTURE_SCHEMA_VERSION: u64 = 2;
 
 const ARCHITECTURE_ARRAYS: [&str; 7] = [
     "circular_dependencies",
@@ -970,4 +970,242 @@ fn dead_code_summary_keeps_one_row_list() {
         "dead-code keeps its row list: {}",
         output.stdout
     );
+}
+
+#[test]
+fn shared_state_inventory_selection_and_format_refusal() {
+    let dir = architecture_project("");
+    write(
+        dir.path(),
+        "src/shared/state.ts",
+        "export const state = {};\n",
+    );
+    write(
+        dir.path(),
+        "src/writer.ts",
+        "import {state} from './shared/state'; state.value = 1; window.custom = 2;\n",
+    );
+    write(
+        dir.path(),
+        "src/reader.ts",
+        "export const read = () => window.custom;\n",
+    );
+    let output = run(
+        "architecture",
+        dir.path(),
+        &[
+            "--shared-state",
+            "--format",
+            "json",
+            "--quiet",
+            "--fail-on-issues",
+        ],
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(json["shared_state"]["version"], 1);
+    assert!(
+        !json["shared_state"]["imported_writes"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert!(json["circular_dependencies"].as_array().unwrap().is_empty());
+    let cycles = run(
+        "architecture",
+        dir.path(),
+        &["--shared-state", "--cycles", "--format", "json", "--quiet"],
+    );
+    assert!(
+        !parse_json(&cycles)["circular_dependencies"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    for format in ["sarif", "compact", "codeclimate"] {
+        let unsupported = run(
+            "architecture",
+            dir.path(),
+            &["--shared-state", "--format", format, "--quiet"],
+        );
+        assert_eq!(unsupported.code, 2, "{format}: {}", unsupported.stderr);
+    }
+}
+
+#[test]
+fn shared_state_saved_output_and_scope_preserve_supported_evidence() {
+    let dir = architecture_project("");
+    write(
+        dir.path(),
+        "src/shared/state.ts",
+        "export const state = {};\n",
+    );
+    write(
+        dir.path(),
+        "src/writer.ts",
+        "import {state} from './shared/state'; state['a.b'] = 1; window.custom = 2;\n",
+    );
+    write(
+        dir.path(),
+        "src/reader.ts",
+        "export const read = () => window.custom;\n",
+    );
+    let output = run(
+        "architecture",
+        dir.path(),
+        &["--shared-state", "--format", "json", "--quiet"],
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let json = parse_json(&output);
+    assert_eq!(
+        json["shared_state"]["imported_writes"][0]["property"],
+        serde_json::json!(["a.b"])
+    );
+    assert_eq!(
+        json["shared_state"]["imported_writes"][0]["writer"]["path"],
+        "src/writer.ts"
+    );
+    let scoped = run(
+        "architecture",
+        dir.path(),
+        &[
+            "--shared-state",
+            "--file",
+            "src/reader.ts",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    let scoped_json = parse_json(&scoped);
+    assert!(
+        scoped_json["shared_state"]["imported_writes"]
+            .as_array()
+            .unwrap()
+            .is_empty()
+    );
+    assert_eq!(
+        scoped_json["shared_state"]["globals"],
+        json["shared_state"]["globals"]
+    );
+    write(dir.path(), "saved.json", &output.stdout);
+    let markdown = run(
+        "report",
+        dir.path(),
+        &[
+            "--from",
+            dir.path().join("saved.json").to_str().unwrap(),
+            "--format",
+            "markdown",
+        ],
+    );
+    assert_eq!(markdown.code, 0, "{}", markdown.stderr);
+    assert!(markdown.stdout.contains("Shared-state inventory"));
+    assert!(markdown.stdout.contains("src/writer.ts"));
+    let unsupported = run(
+        "report",
+        dir.path(),
+        &[
+            "--from",
+            dir.path().join("saved.json").to_str().unwrap(),
+            "--format",
+            "sarif",
+        ],
+    );
+    assert_eq!(unsupported.code, 2);
+    let mut invalid = json;
+    invalid["shared_state"]["version"] = serde_json::json!(2);
+    write(
+        dir.path(),
+        "saved.json",
+        &serde_json::to_string(&invalid).unwrap(),
+    );
+    let refused = run(
+        "report",
+        dir.path(),
+        &[
+            "--from",
+            dir.path().join("saved.json").to_str().unwrap(),
+            "--format",
+            "markdown",
+        ],
+    );
+    assert_eq!(refused.code, 2);
+}
+
+#[test]
+fn shared_state_keeps_parse_gates_and_rejects_observation_filters() {
+    let dir = architecture_project("");
+    write(dir.path(), "src/broken.ts", "export const broken = ;\n");
+    let ungated = run(
+        "architecture",
+        dir.path(),
+        &["--shared-state", "--format", "json", "--quiet"],
+    );
+    assert_eq!(ungated.code, 0, "{}", ungated.stderr);
+    assert_eq!(parse_json(&ungated)["shared_state"]["complete"], false);
+    let gated = run(
+        "architecture",
+        dir.path(),
+        &[
+            "--shared-state",
+            "--fail-on-parse-error",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(gated.code, 1, "{}", gated.stderr);
+    for selector in [
+        ["--group-by", "directory"],
+        ["--finding-id", "dc1:unused-file:0000000000000000"],
+    ] {
+        let refused = run(
+            "architecture",
+            dir.path(),
+            &[
+                "--shared-state",
+                selector[0],
+                selector[1],
+                "--format",
+                "json",
+                "--quiet",
+            ],
+        );
+        assert_eq!(refused.code, 2);
+    }
+}
+
+#[test]
+fn shared_state_saved_grouped_inventory_is_rejected_even_when_empty() {
+    let dir = architecture_project("");
+    let grouped = parse_json(&run(
+        "architecture",
+        dir.path(),
+        &["--group-by", "directory", "--format", "json", "--quiet"],
+    ));
+    let saved = dir.path().join("grouped.json");
+    let render = |value: &serde_json::Value| {
+        std::fs::write(&saved, serde_json::to_vec(value).unwrap()).unwrap();
+        run(
+            "report",
+            dir.path(),
+            &["--from", saved.to_str().unwrap(), "--format", "markdown"],
+        )
+    };
+    let ordinary = render(&grouped);
+    assert_eq!(ordinary.code, 0, "{}", ordinary.stderr);
+    assert!(ordinary.stdout.contains("Circular"), "{}", ordinary.stdout);
+    let empty = serde_json::json!({"version":1,"complete":true,"truncated":false,"imported_writes":[],"globals":[]});
+    let mut root = grouped.clone();
+    root["shared_state"] = empty.clone();
+    let rejected = render(&root);
+    assert_eq!(
+        rejected.code, 2,
+        "present empty inventory must not be dropped: {}",
+        rejected.stdout
+    );
+    let mut nested = grouped;
+    nested["groups"][0]["shared_state"] = empty;
+    assert_eq!(render(&nested).code, 2);
 }

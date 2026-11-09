@@ -454,6 +454,8 @@ impl TypeAwareOptions {
 /// analysis reports every issue type.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct DeadCodeFilters {
+    /// Request advisory shared-state observations and an explicit finding selection.
+    pub shared_state: bool,
     /// Files never reached from any entry point.
     pub unused_files: bool,
     /// Exported symbols never imported elsewhere.
@@ -543,7 +545,8 @@ impl DeadCodeFilters {
     }
 
     fn any_active(&self) -> bool {
-        self.unused_files
+        self.shared_state
+            || self.unused_files
             || self.unused_exports
             || self.unused_deps
             || self.unused_types
@@ -684,6 +687,8 @@ pub struct DeadCodeOptions {
 /// kind, as `--cycles`, `--boundaries` and `--policy` do on the CLI.
 #[derive(Debug, Clone, Default)]
 pub struct ArchitectureOptions {
+    /// Include the optional advisory shared-state inventory.
+    pub shared_state: bool,
     /// Shared analysis options.
     pub analysis: AnalysisOptions,
     /// Restrict findings to these files when non-empty.
@@ -701,8 +706,9 @@ impl ArchitectureOptions {
     /// The dead-code issue-type filters that the selectors stand for.
     #[must_use]
     pub fn dead_code_filters(&self) -> DeadCodeFilters {
-        let all = !(self.cycles || self.boundaries || self.policy);
+        let all = !(self.cycles || self.boundaries || self.policy || self.shared_state);
         DeadCodeFilters {
+            shared_state: self.shared_state,
             circular_deps: self.cycles || all,
             re_export_cycles: self.cycles || all,
             package_cycles: self.cycles || all,
@@ -1828,3 +1834,5 @@ mod tests {
         assert!(derived.force_full);
     }
 }
+
+mod shared_state_explain;

@@ -227,6 +227,10 @@ pub struct ResolvedConfig {
     /// names), mixed into cache keys so plugin changes invalidate cached
     /// extractions instead of serving stale results.
     pub cache_config_hash: u64,
+    /// Optional facts collected for this run. Immutable after session creation.
+    pub extraction_mode: fallow_types::shared_state::ExtractionMode,
+    /// Exact global root/slot pairs omitted from the inventory.
+    pub shared_state_allowlist: Vec<[String; 2]>,
     /// Package names and package-name globs excluded from both
     /// unused-dependency and unlisted-dependency detection.
     pub ignore_dependencies: IgnoreDependencyMatcher,
@@ -1004,6 +1008,8 @@ impl FallowConfig {
             no_cache,
             cache_max_size_mb: cache.max_size_mb,
             cache_config_hash: cache.config_hash,
+            extraction_mode: fallow_types::shared_state::ExtractionMode::Standard,
+            shared_state_allowlist: self.shared_state_allowlist,
             ignore_dependencies: IgnoreDependencyMatcher::compile(&self.ignore_dependencies),
             ignore_binaries: IgnoreDependencyMatcher::compile(&self.ignore_binaries),
             workspace_settings,
@@ -1151,3 +1157,15 @@ impl ResolvedConfig {
 #[cfg(test)]
 #[path = "resolution_tests.rs"]
 mod tests;
+
+impl ResolvedConfig {
+    /// Request optional shared-state facts with a distinct cache identity.
+    pub fn request_shared_state(&mut self) {
+        if self.extraction_mode == fallow_types::shared_state::ExtractionMode::Standard {
+            self.extraction_mode = fallow_types::shared_state::ExtractionMode::SharedState;
+            // Domain separation preserves the exact normal-mode cache identity.
+            const SHARED_STATE_CACHE_DOMAIN: u64 = 0x7368_6172_6564_0001;
+            self.cache_config_hash ^= SHARED_STATE_CACHE_DOMAIN;
+        }
+    }
+}

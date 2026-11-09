@@ -1065,6 +1065,9 @@ fn fallback_rule_guide() -> RuleGuide {
 pub fn explain_issue_type(
     issue_type: &str,
 ) -> Result<fallow_output::ExplainOutput, crate::ProgrammaticError> {
+    if matches!(issue_type, "shared-state" | "fallow/shared-state") {
+        return Ok(crate::shared_state_explain::explain());
+    }
     let Some(rule) = rule_by_token(issue_type) else {
         return Err(unknown_explain_error(issue_type));
     };

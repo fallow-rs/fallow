@@ -43,6 +43,8 @@ use crate::suppress::closest_known_kind_name;
 mod ignore_findings;
 use ignore_findings::classify_ignore_findings_fields;
 
+#[path = "results_inventory_merge.rs"]
+mod inventory_merge;
 #[path = "results_merge_parts.rs"]
 mod merge_parts;
 use merge_parts::split_merge_parts;
@@ -249,6 +251,9 @@ pub struct ReactComponentIntel {
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AnalysisResults {
+    /// Optional architecture inventory, excluded from issue totals and gates.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub shared_state: Option<crate::shared_state::SharedStateInventory>,
     /// Files not reachable from any entry point. Wrapped in
     /// [`UnusedFileFinding`] so each entry carries a typed `actions` array
     /// natively, replacing the pre-2.76 post-pass injection.
@@ -813,6 +818,7 @@ struct AnalysisResultsFrameworkMergeParts {
 }
 
 struct AnalysisResultsMetadataMergeParts {
+    shared_state: Option<crate::shared_state::SharedStateInventory>,
     cascade_hidden: usize,
     cascade: CascadeState,
     suppression_count: usize,
@@ -1311,39 +1317,6 @@ impl AnalysisResults {
         self.thin_wrappers.extend(parts.thin_wrappers);
         self.duplicate_prop_shapes
             .extend(parts.duplicate_prop_shapes);
-    }
-
-    fn merge_metadata_and_security(&mut self, parts: AnalysisResultsMetadataMergeParts) {
-        self.semantic_reachable_files
-            .extend(parts.semantic_reachable_files);
-        self.feature_flags.extend(parts.feature_flags);
-        self.security_findings.extend(parts.security_findings);
-        self.security_unresolved_edge_files += parts.security_unresolved_edge_files;
-        self.security_unresolved_callee_sites += parts.security_unresolved_callee_sites;
-        self.security_unresolved_callee_diagnostics
-            .extend(parts.security_unresolved_callee_diagnostics);
-        self.export_usages.extend(parts.export_usages);
-        self.active_suppressions.extend(parts.active_suppressions);
-        self.suppression_count += parts.suppression_count;
-        self.cascade_hidden += parts.cascade_hidden;
-        self.cascade
-            .suppressed_unused_files
-            .extend(parts.cascade.suppressed_unused_files);
-        self.cascade.hidden.extend(parts.cascade.hidden);
-        self.unused_component_props_exempted += parts.unused_component_props_exempted;
-        if self.entry_point_summary.is_none() {
-            self.entry_point_summary = parts.entry_point_summary;
-        }
-        if self.render_fan_in.is_none() {
-            self.render_fan_in = parts.render_fan_in;
-        }
-        self.react_component_intel
-            .extend(parts.react_component_intel);
-        for contract in parts.semantic_framework_contracts {
-            if !self.semantic_framework_contracts.contains(&contract) {
-                self.semantic_framework_contracts.push(contract);
-            }
-        }
     }
 
     /// Sort all result arrays for deterministic output ordering.

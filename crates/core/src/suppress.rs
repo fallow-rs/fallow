@@ -21,6 +21,7 @@ use crate::results::{ActiveSuppression, StaleSuppression, SuppressionOrigin};
 /// consumed by core detectors). Without this exclusion, these suppressions
 /// would always appear stale since no core detector checks them.
 const NON_CORE_KINDS: &[IssueKind] = &[
+    IssueKind::SharedState,
     IssueKind::Complexity,
     IssueKind::CoverageGaps,
     IssueKind::FeatureFlag,

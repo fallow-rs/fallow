@@ -5,6 +5,7 @@ mod independent_this;
 mod local_class_heritage;
 mod remap;
 mod requirements;
+mod shared_state;
 mod ssr_load_module;
 mod this_scope;
 
@@ -3655,6 +3656,7 @@ impl ModuleInfoExtractor {
         let mut exported_factory_return_object_shapes =
             self.collect_exported_factory_return_object_shapes();
         let mut type_member_types = self.collect_type_member_types();
+        self.rebase_shared_state(info.imports.len() as u32);
         self.merge_import_binding_references(info);
         info.imports.append(&mut self.imports);
         let mut exports = std::mem::take(&mut info.exports).to_vec();
@@ -3694,6 +3696,7 @@ impl ModuleInfoExtractor {
         // #1785 (review finding).
         let mut semantic_facts = std::mem::take(&mut info.semantic_facts).to_vec();
         semantic_facts.append(&mut self.semantic_facts);
+        crate::shared_state::bound_merged_facts(&mut semantic_facts);
         info.semantic_facts = semantic_facts.into();
         info.has_cjs_exports |= self.has_cjs_exports;
         info.has_angular_component_template_url |= self.has_angular_component_template_url;
@@ -3733,27 +3736,6 @@ impl ModuleInfoExtractor {
             calls.append(&mut self.imported_call_sites);
             info.imported_call_sites = calls.into();
         }
-    }
-
-    /// Append this script's import binding references. Call it before the
-    /// imports are appended: each `import_index` moves by the number of
-    /// imports that `info` already holds.
-    fn merge_import_binding_references(&mut self, info: &mut ModuleInfo) {
-        if self.import_binding_references.is_empty() {
-            return;
-        }
-        let base = u32::try_from(info.imports.len()).unwrap_or(u32::MAX);
-        let mut references = std::mem::take(&mut info.import_binding_references).to_vec();
-        references.extend(
-            self.import_binding_references
-                .drain(..)
-                .map(|mut reference| {
-                    reference.import_index = reference.import_index.saturating_add(base);
-                    reference
-                }),
-        );
-        references.sort_by_key(|reference| reference.span_start);
-        info.import_binding_references = references.into();
     }
 
     fn merge_security_info(&mut self, info: &mut ModuleInfo) {

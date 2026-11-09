@@ -1,3 +1,6 @@
+#[path = "parse_shared_state.rs"]
+mod semantic_attachment;
+pub use semantic_attachment::compute_semantic_usage_for_extractor_with_mode;
 use std::path::Path;
 
 use oxc_allocator::Allocator;
@@ -11,13 +14,13 @@ use oxc_span::{SourceType, Span};
 
 use crate::ExportInfo;
 use crate::ModuleInfo;
-use crate::astro::{is_astro_file, parse_astro_to_module};
+use crate::astro::is_astro_file;
 use crate::css::{is_css_file, parse_css_to_module};
 use crate::glimmer::{is_glimmer_file, strip_glimmer_templates};
 use crate::graphql::{is_graphql_file, parse_graphql_to_module};
 use crate::html::{is_html_file, parse_html_to_module_with_complexity};
-use crate::mdx::{is_mdx_file, parse_mdx_to_module};
-use crate::sfc::{is_sfc_file, parse_sfc_to_module};
+use crate::mdx::is_mdx_file;
+use crate::sfc::is_sfc_file;
 use crate::visitor::{ModuleInfoExtractor, RouteLoadHarvestMode};
 use fallow_types::discover::FileId;
 use fallow_types::extract::{
@@ -52,7 +55,7 @@ pub fn parse_source_to_module_unbounded(
     source: &str,
     content_hash: u64,
     need_complexity: bool,
-    flag_patterns: &FlagPatterns,
+    options: &crate::module_parse::ExtractionOptions<'_>,
 ) -> ModuleInfo {
     let mut module = parse_source_to_module_inner(
         file_id,
@@ -60,7 +63,7 @@ pub fn parse_source_to_module_unbounded(
         source,
         content_hash,
         need_complexity,
-        flag_patterns,
+        options,
     );
     if is_glimmer_file(path) {
         for range in crate::glimmer::find_template_ranges(source) {
@@ -260,10 +263,12 @@ fn parse_source_to_module_inner(
     source: &str,
     content_hash: u64,
     need_complexity: bool,
-    flag_patterns: &FlagPatterns,
+    options: &crate::module_parse::ExtractionOptions<'_>,
 ) -> ModuleInfo {
+    let flag_patterns = options.flag_patterns;
+    let mode = options.mode;
     if let Some(module) =
-        parse_non_js_source_to_module(file_id, path, source, content_hash, need_complexity)
+        parse_non_js_source_to_module(file_id, path, source, content_hash, need_complexity, mode)
     {
         return module;
     }
@@ -281,7 +286,7 @@ fn parse_source_to_module_inner(
         crate::suppress::parse_suppressions(&parser_return.program.comments, source);
 
     let (mut extractor, mut semantic_usage) =
-        build_primary_extractor(&parser_return.program, path, source, source_type);
+        build_primary_extractor(&parser_return.program, path, source, source_type, mode);
 
     let line_offsets = fallow_types::extract::compute_line_offsets(source);
 
@@ -305,6 +310,7 @@ fn parse_source_to_module_inner(
             source,
             export_statements: &crate::jsdoc_attach::export_statement_spans(&parser_return.program),
             flag_patterns,
+            mode,
         },
         &mut ParseOutputs {
             extractor: &mut extractor,
@@ -340,6 +346,7 @@ struct JsxRetryOrJsdocInput<'a> {
     source: &'a str,
     export_statements: &'a [oxc_span::Span],
     flag_patterns: &'a FlagPatterns,
+    mode: fallow_types::shared_state::ExtractionMode,
 }
 
 struct ModuleAssemblyInput {
@@ -361,6 +368,7 @@ fn build_primary_extractor(
     path: &Path,
     source: &str,
     source_type: SourceType,
+    mode: fallow_types::shared_state::ExtractionMode,
 ) -> (ModuleInfoExtractor, SemanticUsage) {
     let mut extractor = ModuleInfoExtractor::new();
     extractor.set_route_load_harvest_mode(route_load_harvest_mode_for_path(path));
@@ -373,8 +381,12 @@ fn build_primary_extractor(
 
     let template_used_imports =
         collect_glimmer_template_into_extractor(&mut extractor, path, source);
-    let semantic_usage =
-        compute_semantic_usage_for_extractor(program, &mut extractor, &template_used_imports);
+    let semantic_usage = compute_semantic_usage_for_extractor_with_mode(
+        program,
+        &mut extractor,
+        &template_used_imports,
+        mode,
+    );
     extractor.resolve_vitest_mock_operations(&semantic_usage.mock_api_reference_spans);
     (extractor, semantic_usage)
 }
@@ -427,6 +439,7 @@ fn apply_jsx_retry_or_jsdoc(input: &JsxRetryOrJsdocInput<'_>, outputs: &mut Pars
         need_complexity: input.need_complexity,
         line_offsets: input.line_offsets,
         flag_patterns: input.flag_patterns,
+        mode: input.mode,
     };
     let Some(retry) = parse_with_jsx_retry(&retry_input) else {
         apply_jsdoc_tags_to_extractor(
@@ -555,6 +568,7 @@ struct JsxRetryInput<'a> {
     need_complexity: bool,
     line_offsets: &'a [u32],
     flag_patterns: &'a FlagPatterns,
+    mode: fallow_types::shared_state::ExtractionMode,
 }
 
 fn parse_with_jsx_retry(input: &JsxRetryInput<'_>) -> Option<JsxRetryParse> {
@@ -585,10 +599,11 @@ fn parse_with_jsx_retry(input: &JsxRetryInput<'_>) -> Option<JsxRetryParse> {
 
     let template_used_imports =
         collect_glimmer_template_into_extractor(&mut extractor, input.path, input.source);
-    let semantic_usage = compute_semantic_usage_for_extractor(
+    let semantic_usage = compute_semantic_usage_for_extractor_with_mode(
         &retry_return.program,
         &mut extractor,
         &template_used_imports,
+        input.mode,
     );
     extractor.resolve_vitest_mock_operations(&semantic_usage.mock_api_reference_spans);
     let complexity = retry_complexity(
@@ -659,26 +674,34 @@ fn parse_non_js_source_to_module(
     source: &str,
     content_hash: u64,
     need_complexity: bool,
+    mode: fallow_types::shared_state::ExtractionMode,
 ) -> Option<ModuleInfo> {
     if is_sfc_file(path) {
-        return Some(parse_sfc_to_module(
+        return Some(crate::sfc::parse_sfc_to_module_with_mode(
             file_id,
             path,
             source,
             content_hash,
             need_complexity,
+            mode,
         ));
     }
     if is_astro_file(path) {
-        return Some(parse_astro_to_module(
+        return Some(crate::astro::parse_astro_to_module_with_mode(
             file_id,
             source,
             content_hash,
             need_complexity,
+            mode,
         ));
     }
     if is_mdx_file(path) {
-        return Some(parse_mdx_to_module(file_id, source, content_hash));
+        return Some(crate::mdx::parse_mdx_to_module_with_mode(
+            file_id,
+            source,
+            content_hash,
+            mode,
+        ));
     }
     if is_css_file(path) {
         return Some(parse_css_to_module(file_id, path, source, content_hash));
@@ -1566,54 +1589,12 @@ pub struct SemanticUsage {
     namespace_member_uses: Vec<fallow_types::extract::NamespaceMemberUseFact>,
     /// Non-destructured `require()` bindings nothing in the file references.
     /// Moved into `import_binding_usage.unused` by
-    /// [`compute_semantic_usage_for_extractor`], which is the layer that knows
+    /// [`compute_semantic_usage_for_extractor_with_mode`], which is the layer that knows
     /// which of them the exported form declares.
     unreferenced_import_equals_bindings: Vec<String>,
     pub(crate) component_contracts: fallow_types::extract::ComponentContractFacts,
     pub(crate) effect_facts: Option<Box<fallow_types::extract::EffectFacts>>,
-}
-
-pub fn compute_semantic_usage_for_extractor(
-    program: &Program<'_>,
-    extractor: &mut ModuleInfoExtractor,
-    template_used: &rustc_hash::FxHashSet<String>,
-) -> SemanticUsage {
-    let computed_enum_key_spans = extractor.computed_enum_key_reference_spans();
-    let subclass_candidates = extractor.subclass_reference_candidates();
-    let callback_candidates = extractor.callback_capture_reference_candidates();
-    let imported_call_candidates = extractor.imported_call_reference_candidates();
-    let require_namespace_bindings = extractor.require_namespace_bindings();
-    let mut semantic_usage = compute_semantic_usage_with_candidates(
-        program,
-        &extractor.imports,
-        &extractor.exports,
-        &require_namespace_bindings,
-        template_used,
-        SemanticReferenceCandidates {
-            module_bindings: &computed_enum_key_spans,
-            subclass_bindings: &subclass_candidates,
-            callback_captures: &callback_candidates,
-            imported_calls: &imported_call_candidates,
-        },
-    );
-    extractor.resolve_computed_enum_key_uses(&semantic_usage.module_binding_reference_spans);
-    extractor.set_subclass_binding_provenance(
-        std::mem::take(&mut semantic_usage.subclass_binding_reference_spans),
-        std::mem::take(&mut semantic_usage.subclass_namespace_reference_spans),
-        std::mem::take(&mut semantic_usage.subclass_immutable_reference_spans),
-        std::mem::take(&mut semantic_usage.builtin_container_reference_spans),
-        std::mem::take(&mut semantic_usage.subclass_binding_writes),
-    );
-    extractor.resolve_imported_call_sites(&semantic_usage.imported_call_reference_spans);
-    extractor.set_import_binding_references(std::mem::take(
-        &mut semantic_usage.import_binding_references,
-    ));
-    extractor.push_namespace_member_uses(std::mem::take(&mut semantic_usage.namespace_member_uses));
-    report_unreferenced_import_equals_bindings(
-        &mut semantic_usage,
-        &extractor.exported_import_equals_names,
-    );
-    semantic_usage
+    shared_state: Vec<fallow_types::shared_state::StateAccessFact>,
 }
 
 /// Move every unreferenced non-destructured `require()` binding into the
@@ -1653,6 +1634,7 @@ fn report_unreferenced_import_equals_bindings(
 
 #[derive(Clone, Copy)]
 struct SemanticReferenceCandidates<'a> {
+    mode: fallow_types::shared_state::ExtractionMode,
     module_bindings: &'a rustc_hash::FxHashSet<Span>,
     subclass_bindings: &'a rustc_hash::FxHashSet<Span>,
     callback_captures: &'a rustc_hash::FxHashSet<Span>,
@@ -1813,7 +1795,6 @@ fn compute_semantic_usage_with_candidates(
         value_referenced_bindings.into_iter().collect();
     value_referenced_bindings.sort_unstable();
     let mock_api_reference_spans = compute_mock_api_reference_spans(&semantic, imports, root_scope);
-    let declaration_merges = declaration_merge_facts(&semantic);
     let mut module_binding_reference_spans = FxHashSet::default();
     if !candidates.module_bindings.is_empty() {
         for symbol_id in scoping.symbol_ids() {
@@ -1856,7 +1837,7 @@ fn compute_semantic_usage_with_candidates(
             value_referenced: value_referenced_bindings,
         },
         auto_import_candidates: compute_auto_import_candidates_from_semantic(scoping),
-        declaration_merges,
+        declaration_merges: declaration_merge_facts(&semantic),
         mock_api_reference_spans,
         module_binding_reference_spans,
         subclass_binding_reference_spans: subclass.bindings,
@@ -1870,6 +1851,7 @@ fn compute_semantic_usage_with_candidates(
         unreferenced_import_equals_bindings: import_equals.unreferenced,
         component_contracts: crate::component_contracts::collect(&semantic, imports, exports),
         effect_facts: crate::effect_facts::collect(&semantic, program, imports, exports),
+        shared_state: crate::shared_state::collect(&semantic, imports, candidates.mode),
     }
 }
 
@@ -2221,6 +2203,7 @@ pub fn compute_import_binding_usage(
         import_equals_bindings,
         template_used,
         SemanticReferenceCandidates {
+            mode: fallow_types::shared_state::ExtractionMode::Standard,
             module_bindings: &rustc_hash::FxHashSet::default(),
             subclass_bindings: &rustc_hash::FxHashSet::default(),
             callback_captures: &rustc_hash::FxHashSet::default(),

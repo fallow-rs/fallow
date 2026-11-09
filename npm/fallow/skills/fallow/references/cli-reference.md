@@ -48,7 +48,7 @@ Every fallow command with its purpose and key flags. The table is regenerated fr
 |---|---|---|
 | `fallow` | Run full codebase analysis: cleanup + duplication + health (default) | `--only`, `--skip`, `--production`, `--production-dead-code`, `--production-health`, `--production-dupes`, `--ci`, `--fail-on-issues`, `--group-by`, `--summary`, `--fail-on-regression`, `--tolerance`, `--regression-baseline`, `--save-regression-baseline`, `--score`, `--trend`, `--save-snapshot`, `--include-entry-exports` |
 | `dead-code` | Dead code analysis (`check` is an alias) | `--unused-exports`, `--changed-since`, `--changed-workspaces`, `--production`, `--file`, `--include-entry-exports`, `--stale-suppressions`, `--ci`, `--group-by`, `--summary`, `--fail-on-regression`, `--tolerance`, `--regression-baseline`, `--save-regression-baseline` |
-| `architecture` | Check import cycles, boundaries and policy rules after editing | `--cycles`, `--boundaries`, `--policy`, `--file`, `--finding-id`, `path` |
+| `architecture` | Check import cycles, boundaries and policy rules; optionally inventory shared-state access | `--cycles`, `--boundaries`, `--policy`, `--shared-state`, `--file`, `--finding-id`, `path` |
 | `watch` | Watch for changes and re-run analysis | `--no-clear` |
 | `type-aware` | Inspect the optional TypeScript semantic companion |  |
 | `doctor` | Diagnose project readiness without analysis or mutation |  |

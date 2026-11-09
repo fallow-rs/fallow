@@ -50,6 +50,9 @@ for contributors and maintainers of the open-source codebase.
 - [Mutation testing](mutation-testing.md): the opt-in `fallow mutation`
   command, its safety boundary, exit codes, verdicts, inspect, and config.
 
+- [Shared-state inventory](shared-state-inventory.md): opt-in evidence, limits,
+  selection, suppression and cache identity.
+
 ## Internal implementation references
 
 - [Implementation references](reference/README.md): subsystem-specific durable

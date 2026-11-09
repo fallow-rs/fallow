@@ -560,6 +560,7 @@ fn parse_statement_body(
     file_id: FileId,
     content_hash: u64,
     parsed_suppressions: crate::suppress::ParsedSuppressions,
+    mode: fallow_types::shared_state::ExtractionMode,
 ) -> (ModuleInfo, bool) {
     if extraction.body.is_empty() {
         let info =
@@ -572,16 +573,16 @@ fn parse_statement_body(
     let accepted = !parser_return.fatal_error && parser_return.diagnostics.is_empty();
     let mut extractor = ModuleInfoExtractor::new();
     extractor.visit_program(&parser_return.program);
-    crate::parse::compute_semantic_usage_for_extractor(
+    crate::parse::compute_semantic_usage_for_extractor_with_mode(
         &parser_return.program,
         &mut extractor,
         &rustc_hash::FxHashSet::default(),
+        mode,
     );
     extractor.remap_spans_with(|span| extraction.remap_span(span));
-    (
-        extractor.into_module_info(file_id, content_hash, parsed_suppressions),
-        accepted,
-    )
+    let mut info = extractor.into_module_info(file_id, content_hash, parsed_suppressions);
+    crate::parse_degradation::ParseDegradation::from_parser(&parser_return).apply_to(&mut info);
+    (info, accepted)
 }
 
 /// Does the parser accept this statement block on its own? A block that only
@@ -654,12 +655,32 @@ pub(crate) fn is_mdx_file(path: &Path) -> bool {
 
 /// Parse an MDX file by extracting import/export statements, then append the
 /// member accesses and whole-object uses scanned from the prose body.
+#[cfg(test)]
 pub(crate) fn parse_mdx_to_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleInfo {
+    parse_mdx_to_module_with_mode(
+        file_id,
+        source,
+        content_hash,
+        fallow_types::shared_state::ExtractionMode::Standard,
+    )
+}
+
+pub(crate) fn parse_mdx_to_module_with_mode(
+    file_id: FileId,
+    source: &str,
+    content_hash: u64,
+    mode: fallow_types::shared_state::ExtractionMode,
+) -> ModuleInfo {
     let parsed_suppressions = crate::suppress::parse_suppressions_from_source(source);
     let line_offsets = fallow_types::extract::compute_line_offsets(source);
     let (scan, extraction) = accepted_mdx_source(source);
-    let (mut info, _) =
-        parse_statement_body(&extraction, file_id, content_hash, parsed_suppressions);
+    let (mut info, _) = parse_statement_body(
+        &extraction,
+        file_id,
+        content_hash,
+        parsed_suppressions,
+        mode,
+    );
     let (body_accesses, body_whole_object_uses) = collect_body_usage(&scan, &info.imports);
     extend_member_accesses(&mut info, body_accesses);
     extend_whole_object_uses(&mut info, body_whole_object_uses);
