@@ -50,9 +50,9 @@ pub use path_info::{
 };
 pub use react_native::{PlatformFamilyKey, has_react_native_plugin, platform_family_key};
 pub use types::{
-    MissingExportTarget, OUTPUT_DIRS, ResolveResult, ResolvedImport, ResolvedModule,
-    ResolvedProject, ResolvedReExport, ResolvedReplacedModuleTarget, ResolvedSourceEdge,
-    ScopedPathAlias,
+    MISSING_ONLY_OUTPUT_DIRS, MissingExportTarget, OUTPUT_DIRS, ResolveResult, ResolvedImport,
+    ResolvedModule, ResolvedProject, ResolvedReExport, ResolvedReplacedModuleTarget,
+    ResolvedSourceEdge, ScopedPathAlias,
 };
 pub use work::ResolveWork;
 
