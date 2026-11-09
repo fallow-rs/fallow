@@ -197,6 +197,9 @@ test("analysis creates and replaces regular artifacts in default and nested dire
   const { work, run } = fixture(t);
   for (const dir of [".", "reports/nested"]) {
     for (const iteration of [1, 2]) {
+      if (iteration === 2) {
+        writeFileSync(join(work, dir, "fallow-results.json"), '{"total_issues":99}');
+      }
       const result = run("analyze.sh", { INPUT_ARTIFACTS_DIR: dir });
       assert.equal(result.status, 0, `${iteration}: ${result.stdout}${result.stderr}`);
       assert.equal(

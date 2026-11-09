@@ -10,7 +10,8 @@ set -euo pipefail
 #   FALLOW_SCOPE_CHANGED_SINCE), and the GitLab predefined CI_* variables.
 # Result: the files of fallow_mutation_main in the project directory. The
 #   script exits 0, so the analysis and the MR comment still run; the template
-#   reads fallow-mutation-status.json at the end of the job.
+#   reads fallow-mutation-status.json at the end of the job. Unsafe artifact
+#   paths exit 2 before a stale status can be consumed.
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=mutation_common.sh
@@ -19,6 +20,7 @@ source "${SCRIPT_DIR}/mutation_common.sh"
 export FALLOW_MUTATION_ROOT="${FALLOW_ROOT:-.}"
 export FALLOW_MUTATION_CONFIG="${FALLOW_CONFIG:-}"
 export FALLOW_MUTATION_OUT_DIR="${FALLOW_MUTATION_OUT_DIR:-.}"
+fallow_mutation_check_artifacts "$FALLOW_MUTATION_OUT_DIR" || exit 2
 
 STAMP_FILE="${FALLOW_MUTATION_ROOT}/.fallow/mutation/ci-cache-key"
 RESULTS_FILE="${FALLOW_MUTATION_ROOT}/.fallow/mutation/results.json"

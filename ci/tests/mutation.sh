@@ -333,6 +333,25 @@ mut_assert_eq "$(grep -c 'fallow mutation' "$W/mock.log")" "0" "gitlab mutation:
 assert_not_contains "$(cat "$W/stdout.log")" "Unknown mutation refuse reason" \
   "gitlab mutation: the refusal uses a closed reason"
 
+W="$MUT_TMP/gl-unsafe-stale-success"
+mkdir -p "$W"
+printf 'preserve outside report\n' > "$MUT_TMP/outside-report.json"
+ln -s "$MUT_TMP/outside-report.json" "$W/fallow-mutation.json"
+printf '{"outcome":"ok","completion":"complete","clean":true}\n' > "$W/fallow-mutation-status.json"
+RC=0
+(
+  cd "$W" || exit 99
+  CI_MERGE_REQUEST_IID=7 CI_MERGE_REQUEST_SOURCE_PROJECT_ID=200 CI_PROJECT_ID=100 \
+    bash "$MUT_SCRIPTS/mutation.sh"
+) > "$W/stdout.log" 2>&1 || RC=$?
+mut_assert_eq "$RC" 2 "gitlab mutation: unsafe artifacts fail before an old success status is consumed"
+mut_assert_eq "$(cat "$MUT_TMP/outside-report.json")" 'preserve outside report' \
+  "gitlab mutation: the rejected report symlink preserves its target"
+assert_not_contains "$(cat "$W/stdout.log")" 'Mutation testing: ok' \
+  "gitlab mutation: an unsafe destination cannot reuse a stale success"
+assert_contains "$(cat "$W/stdout.log")" '::error::Artifact paths must not contain symlinks' \
+  "gitlab mutation: the wrapper reports the unsafe destination"
+
 W="$MUT_TMP/gl-token"
 mut_run_gitlab "$W" GITLAB_TOKEN=secret-token GITHUB_ENV=/tmp/env BASH_ENV=/tmp/rc FALLOW_MUTATION_SCOPE=all \
   MOCK_MUTATION_REPORT="$FIXTURES/mutation-clean.json" > /dev/null
@@ -634,7 +653,7 @@ for shape in parent leaf dangling directory; do
   (
     cd "$W/work" || exit 99
     source "$MUT_SCRIPTS/mutation_common.sh"
-    FALLOW_MUTATION_OUT_DIR=out FALLOW_MUTATION_REFUSE_REASON=test fallow_mutation_main
+    FALLOW_MUTATION_OUT_DIR=out FALLOW_MUTATION_REFUSE_REASON=event-refused fallow_mutation_main
   ) > "$W/log" 2>&1 || RC=$?
   mut_assert_eq "$RC" 2 "mutation artifacts: rejects $shape before cleanup"
   mut_assert_eq "$(cat "$W/outside/fallow-mutation.json")" 'preserve outside report' \
@@ -644,16 +663,18 @@ done
 
 W="$MUT_TMP/artifact-regular"
 mkdir -p "$W"
-for attempt in first repeated; do
+for attempt in event-refused fork-refused; do
   RC=0
   (
     cd "$W" || exit 99
     source "$MUT_SCRIPTS/mutation_common.sh"
-    FALLOW_MUTATION_OUT_DIR=reports/nested FALLOW_MUTATION_REFUSE_REASON=test fallow_mutation_main
+    FALLOW_MUTATION_OUT_DIR=reports/nested FALLOW_MUTATION_REFUSE_REASON="$attempt" fallow_mutation_main
   ) > "$W/log" 2>&1 || RC=$?
   mut_assert_eq "$RC" 2 "mutation artifacts: $attempt run reports the requested refusal"
   mut_assert_eq "$(jq -r .outcome "$W/reports/nested/fallow-mutation-status.json")" refused \
     "mutation artifacts: $attempt run writes its status through regular paths"
+  mut_assert_eq "$(jq -r .not_run_reason "$W/reports/nested/fallow-mutation-status.json")" "$attempt" \
+    "mutation artifacts: $attempt run replaces the previous status contents"
 done
 
 rm -rf "$MUT_TMP"
