@@ -6,7 +6,10 @@
 //!   or right after `(`, `(?:` or `|`;
 //! - a `$` at the end of an alternative is removed: at the pattern end, or
 //!   right before `)` or `|`;
-//! - a `+`, `*` or `?` quantifier is removed, with its lazy `?`;
+//! - a `+`, `*` or `?` quantifier is removed, with its lazy `?`. When the
+//!   removal would join the atom before it with the next text into another
+//!   token, an empty group `(?:)` takes its place: `\1?2` becomes `\1(?:)2`,
+//!   not the escape `\12`;
 //! - a `{n,m}` or `{n,}` quantifier becomes `{n}`;
 //! - a character class is negated (`[a-z]` to `[^a-z]`, `[^a-z]` to `[a-z]`);
 //! - a class escape gets the opposite case (`\d` to `\D`, `\W` to `\w`, and
@@ -15,6 +18,14 @@
 //! The flags stay the same. A pattern with the `v` flag gives no class
 //! negation, because a negated class with strings is a syntax error in that
 //! mode. An empty pattern becomes `(?:)`, because `//` starts a comment.
+//!
+//! A mutated literal that does not parse is dropped, when the original
+//! literal parses. An invalid literal is an early error, so it would break
+//! the whole instrumented file, also while the mutant is inactive.
+
+use oxc_allocator::Allocator;
+use oxc_parser::{ParseOptions, Parser};
+use oxc_span::SourceType;
 
 use crate::MutantChange;
 
@@ -27,6 +38,7 @@ pub fn mutations(raw: &str) -> Vec<(String, MutantChange)> {
     let (Some(pattern), Some(flags)) = (raw.get(1..close), raw.get(close + 1..)) else {
         return Vec::new();
     };
+    let checked = is_valid_literal(raw);
     edits(pattern, flags.contains('v'))
         .into_iter()
         .map(|(start, end, text, change)| {
@@ -34,7 +46,64 @@ pub fn mutations(raw: &str) -> Vec<(String, MutantChange)> {
             let body = if mutated.is_empty() { "(?:)" } else { &mutated };
             (format!("/{body}/{flags}"), change)
         })
+        .filter(|(literal, _)| !checked || is_valid_literal(literal))
         .collect()
+}
+
+/// True when `literal` parses as a regular expression literal, pattern and
+/// flags included.
+fn is_valid_literal(literal: &str) -> bool {
+    let allocator = Allocator::default();
+    let source = format!("({literal});");
+    let options = ParseOptions {
+        parse_regular_expression: true,
+        ..ParseOptions::default()
+    };
+    let parsed = Parser::new(&allocator, &source, SourceType::mjs())
+        .with_options(options)
+        .parse();
+    !parsed.fatal_error && !parsed.diagnostics.has_errors()
+}
+
+/// True when the text `before` a removed quantifier and the text `after` it
+/// would form one token without the quantifier:
+///
+/// - a decimal escape and a digit (`\1?2` to `\12`);
+/// - a `\x` or `\u` escape with too few hex digits and a hex digit
+///   (`\x?41` to `\x41`), or `\u` and `{`;
+/// - `\c` and a letter, or `\k` and `<`;
+/// - a literal `{` and the rest of a brace quantifier (`{?3}` to `{3}`).
+///
+/// An escaped backslash before the atom can also match. The empty group
+/// that replaces the quantifier is then not needed, but it does no harm.
+fn joins(before: &[u8], after: &[u8]) -> bool {
+    let Some(&next) = after.first() else {
+        return false;
+    };
+    let trailing = |pred: fn(&u8) -> bool| before.iter().rev().take_while(|b| pred(b)).count();
+    let digits = trailing(u8::is_ascii_digit);
+    if digits > 0 && before[..before.len() - digits].ends_with(b"\\") && next.is_ascii_digit() {
+        return true;
+    }
+    let hex = trailing(u8::is_ascii_hexdigit);
+    let head = &before[..before.len() - hex];
+    let short_hex = (head.ends_with(b"\\x") && hex < 2) || (head.ends_with(b"\\u") && hex < 4);
+    if short_hex && (next.is_ascii_hexdigit() || (hex == 0 && next == b'{')) {
+        return true;
+    }
+    if (before.ends_with(b"\\c") && next.is_ascii_alphabetic())
+        || (before.ends_with(b"\\k") && next == b'<')
+    {
+        return true;
+    }
+    let tail = trailing(|b| b.is_ascii_digit() || *b == b',');
+    let brace = before.len() - tail;
+    if brace > 0 && before[brace - 1] == b'{' {
+        let mut text = before[brace - 1..].to_vec();
+        text.extend_from_slice(after);
+        return brace_quantifier(&text).is_some();
+    }
+    false
 }
 
 /// The opposite-case class escape of `byte`, and the change of the escape.
@@ -200,8 +269,13 @@ impl Scanner<'_> {
             b'*' => "*",
             _ => "?",
         };
+        let text = if joins(&self.bytes[..index], &self.bytes[end..]) {
+            "(?:)"
+        } else {
+            ""
+        };
         self.edits
-            .push((index, end, "", MutantChange::new(from, "")));
+            .push((index, end, text, MutantChange::new(from, "")));
         self.quantifiable = false;
         end
     }

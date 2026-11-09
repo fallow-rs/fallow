@@ -1438,3 +1438,106 @@ fn string_literal_empties_and_fills_template_literals() {
         expected(&[("`b`", "``")])
     );
 }
+
+#[test]
+fn regex_quantifier_removal_keeps_the_next_token_apart() {
+    let cases: &[(&str, &[(&str, &str)])] = &[
+        ("x = /(a)\\1?2/u;", &[("/(a)\\1?2/u", "/(a)\\1(?:)2/u")]),
+        ("x = /(a)\\1?2/;", &[("/(a)\\1?2/", "/(a)\\1(?:)2/")]),
+        ("x = /\\0?1/;", &[("/\\0?1/", "/\\0(?:)1/")]),
+        ("x = /\\c?X/;", &[("/\\c?X/", "/\\c(?:)X/")]),
+        ("x = /\\x?41/;", &[("/\\x?41/", "/\\x(?:)41/")]),
+        ("x = /\\u?0041/;", &[("/\\u?0041/", "/\\u(?:)0041/")]),
+        ("x = /x{?3}/;", &[("/x{?3}/", "/x{(?:)3}/")]),
+        ("x = /a{2?}/;", &[("/a{2?}/", "/a{2(?:)}/")]),
+        ("x = /(a)\\1?b/u;", &[("/(a)\\1?b/u", "/(a)\\1b/u")]),
+        ("x = /\\x41?1/;", &[("/\\x41?1/", "/\\x411/")]),
+        (
+            "x = /\\d?1/;",
+            &[("/\\d?1/", "/\\D?1/"), ("/\\d?1/", "/\\d1/")],
+        ),
+        ("x = /a+?b/;", &[("/a+?b/", "/ab/")]),
+    ];
+    for (source, want) in cases {
+        let result = run(source, JS);
+        assert_eq!(
+            pairs(&result, Operator::RegexLiteral),
+            expected(want),
+            "{source}"
+        );
+    }
+}
+
+#[test]
+fn branch_and_operand_constants_skip_equivalent_mutants() {
+    let cases: &[(&str, &[(&str, &str)])] = &[
+        // `n >= 0` is always true for an array length, so `true` is
+        // equivalent.
+        (
+            "const items = []; if (items.length >= 0) work();",
+            &[("items.length >= 0", "false")],
+        ),
+        ("const items = []; x = items.length >= 0 && flag;", &[]),
+        // `n < 0` is always false, so `false` is equivalent.
+        (
+            "const items = []; if (items.length < 0) work();",
+            &[("items.length < 0", "true")],
+        ),
+        ("const items = []; x = items.length < 0 || flag;", &[]),
+    ];
+    for (source, want) in cases {
+        let result = run(source, JS);
+        assert_eq!(
+            pairs(&result, Operator::NegateCondition),
+            expected(want),
+            "{source}"
+        );
+        assert!(
+            !result.mutants.iter().any(|m| {
+                (m.original == "items.length >= 0" && m.replacement == "true")
+                    || (m.original == "items.length < 0" && m.replacement == "false")
+            }),
+            "{source}: an equivalent constant survived"
+        );
+    }
+}
+
+#[test]
+fn equality_loop_test_gets_no_new_true_constant() {
+    let cases: &[(&str, &[(&str, &str)])] = &[
+        (
+            "while (n === 0) step();",
+            &[("===", "!=="), ("n === 0", "false")],
+        ),
+        (
+            "do step(); while (n == 0);",
+            &[("==", "!="), ("n == 0", "false")],
+        ),
+        (
+            "for (; n === 0; ) step();",
+            &[("===", "!=="), ("n === 0", "false")],
+        ),
+        // The `true` constant of `!==` exists on main and keeps its id.
+        (
+            "while (n !== 0) step();",
+            &[("!==", "==="), ("n !== 0", "true"), ("n !== 0", "false")],
+        ),
+        (
+            "if (n === 0) step();",
+            &[("===", "!=="), ("n === 0", "false"), ("n === 0", "true")],
+        ),
+    ];
+    for (source, want) in cases {
+        let result = run(source, JS);
+        assert_eq!(
+            pairs(&result, Operator::RelationalOperator),
+            expected(want),
+            "{source}"
+        );
+        let negate_true = result
+            .mutants
+            .iter()
+            .any(|m| m.operator == Operator::NegateCondition && m.replacement == "true");
+        assert!(!negate_true || source.starts_with("if"), "{source}");
+    }
+}

@@ -115,7 +115,9 @@ The rules of the operators in detail:
 - `relational-operator`: `<`, `<=`, `>` and `>=` get two operator swaps and
   one constant (`a < b` to `<=`, `!=` and `false`). An equality gets its
   negation and both constants: `a === b` becomes `a !== b`, `false` and
-  `true`.
+  `true`. When `==` or `===` is the whole test of a `while`, `do` or `for`
+  loop, it gets no `true` constant, because `true` gives an endless loop.
+  `!=` and `!==` keep their `true` constant in a loop test.
 - `negate-condition`: the test of an `if` statement, a `? :` expression and a
   loop becomes `true` and `false`. A loop test that is a comparison or a
   logical expression becomes `false` only, because `true` gives an endless
@@ -128,6 +130,9 @@ The rules of the operators in detail:
   constant gives the same result as a constant for the whole expression, so
   it is not made. For `dir === "." && !path.includes("/")`, the mutants are
   `true && !path.includes("/")` and `dir === "." && true`.
+- `negate-condition`: a constant that a test or an operand always has gives
+  no mutant. The rules of the zero comparisons on an array length decide
+  this: for `items.length >= 0`, the `true` mutant is equivalent.
 - `arithmetic-operator`: an expression with a string or template operand
   gives no mutant, for each operator. A compound assignment other than `+=`
   and `-=` with a string or template value gives no mutant either.
@@ -156,7 +161,11 @@ regular expression literal:
   or right before `)` or `|`;
 - a `+`, `*` or `?` quantifier is removed, together with its lazy `?`
   (`/\/+$/` to `/\/$/`). The `?` of a group opening such as `(?:` is not a
-  quantifier;
+  quantifier. When the removal would join two tokens into another token,
+  an empty group `(?:)` takes the place of the quantifier: `/(a)\1?2/`
+  becomes `/(a)\1(?:)2/`, not `/(a)\12/`. The same rule covers an
+  incomplete `\x`, `\u`, `\c` or `\k` escape and a literal `{` before
+  digits;
 - a `{n,m}` or `{n,}` quantifier becomes `{n}`. A `{n}` quantifier and a
   brace that is not a quantifier give no mutant;
 - a character class is negated (`[a-z]` to `[^a-z]`, and the reverse). A
@@ -164,7 +173,9 @@ regular expression literal:
 - a class escape gets the opposite case (`\d` to `\D`, and the same for `\w`
   and `\s`).
 
-The flags stay the same, and an empty pattern becomes `(?:)`. The corpus for
+The flags stay the same, and an empty pattern becomes `(?:)`. A mutated
+literal that does not parse is dropped, because an invalid literal is a
+syntax error for the whole file, also while the mutant is not active. The corpus for
 this operator is the JavaScript and TypeScript source files of six public
 projects (date-fns, zod, vue core, SvelteKit, reka-ui, runed), without tests.
 Each of its 7971 regex mutants compiled with `new RegExp`. Most literals give

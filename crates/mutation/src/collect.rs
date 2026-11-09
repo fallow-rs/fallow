@@ -122,6 +122,7 @@ pub fn collect(program: &Program<'_>, source: &str) -> Collected {
         expression_starts: BTreeSet::new(),
         equivalent_labels: BTreeSet::new(),
         counted_loop_tests: BTreeSet::new(),
+        loop_tests: BTreeSet::new(),
         known_arrays,
         filtered_lookups,
         logging_globals: crate::logging_only::LoggingGlobals::scan(program, source),
@@ -166,6 +167,10 @@ struct Collector<'s> {
     /// Counted `for` loop tests whose `!=` mutant is equivalent. See
     /// `counted_loop_test`.
     counted_loop_tests: BTreeSet<(u32, u32)>,
+    /// The spans of `while`, `do` and `for` tests, without parentheses. An
+    /// equality there gets no `true` constant, which gives an endless loop.
+    /// The `true` constant of `!=` and `!==` predates this rule and stays.
+    loop_tests: BTreeSet<(u32, u32)>,
     /// The identifier references that resolve to a binding that holds an
     /// array. See `ArrayBindings`.
     known_arrays: BTreeSet<ReferenceId>,
@@ -1093,8 +1098,9 @@ impl Collector<'_> {
         let span = if compound { inner.span() } else { test.span() };
         let region = pair(span);
         let skip_true = self.filtered_lookups.contains(&region) || (compound && loop_test);
+        let equivalent = self.equivalent_constant(inner);
         for value in ["true", "false"] {
-            if skip_true && value == "true" {
+            if (skip_true && value == "true") || equivalent == Some(value) {
                 continue;
             }
             self.add(
@@ -1119,7 +1125,7 @@ impl Collector<'_> {
         };
         for operand in [&it.left, &it.right] {
             let inner = operand.without_parentheses();
-            if is_boolean_valued(inner) {
+            if is_boolean_valued(inner) && self.equivalent_constant(inner) != Some(value) {
                 self.add(
                     inner.span(),
                     Operator::NegateCondition,
@@ -1129,6 +1135,22 @@ impl Collector<'_> {
                 );
             }
         }
+    }
+
+    /// The constant that gives the same result as `expression`, when
+    /// `expression` is a comparison with a provable result. See
+    /// `equivalent_replacement`.
+    fn equivalent_constant(&self, expression: &Expression<'_>) -> Option<&'static str> {
+        let Expression::BinaryExpression(binary) = expression else {
+            return None;
+        };
+        self.equivalent_replacement(binary)
+            .filter(|replacement| matches!(*replacement, "true" | "false"))
+    }
+
+    fn mark_loop_test(&mut self, test: &Expression<'_>) {
+        self.loop_tests
+            .insert(pair(test.without_parentheses().span()));
     }
 
     /// Adds the `false` mutant of the missing test of `for (init;; update)`.
@@ -1528,11 +1550,13 @@ impl<'a> Visit<'a> for Collector<'_> {
     }
 
     fn visit_while_statement(&mut self, it: &WhileStatement<'a>) {
+        self.mark_loop_test(&it.test);
         walk::walk_while_statement(self, it);
         self.negate(&it.test, true);
     }
 
     fn visit_do_while_statement(&mut self, it: &DoWhileStatement<'a>) {
+        self.mark_loop_test(&it.test);
         walk::walk_do_while_statement(self, it);
         self.negate(&it.test, true);
     }
@@ -1540,6 +1564,9 @@ impl<'a> Visit<'a> for Collector<'_> {
     fn visit_for_statement(&mut self, it: &ForStatement<'a>) {
         if let Some(test) = counted_loop_test(it) {
             self.counted_loop_tests.insert(test);
+        }
+        if let Some(test) = &it.test {
+            self.mark_loop_test(test);
         }
         walk::walk_for_statement(self, it);
         match &it.test {
@@ -1573,8 +1600,13 @@ impl<'a> Visit<'a> for Collector<'_> {
             }
             if let Some((operators, constants)) = relational_replacements(operator) {
                 let equivalent = self.equivalent_replacement(it);
+                let equality_loop_test = matches!(
+                    operator,
+                    BinaryOperator::Equality | BinaryOperator::StrictEquality
+                ) && self.loop_tests.contains(&pair(it.span));
                 for constant in constants {
-                    if equivalent == Some(*constant) {
+                    if equivalent == Some(*constant) || (equality_loop_test && *constant == "true")
+                    {
                         continue;
                     }
                     self.add(

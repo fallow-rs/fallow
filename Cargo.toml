@@ -356,8 +356,10 @@ allow = [
     { path = "crates/extract/src/similar_code.rs", max = 1, require = ["parse_bounded("] },
     { path = "crates/extract/src/template_usage.rs", max = 3 },
     # fallow-mutation has no fallow dependencies. The engine calls it only
-    # inside parse_bounded (crates/engine/src/mutation/layout.rs).
+    # inside parse_bounded (crates/engine/src/mutation/layout.rs). regex.rs
+    # parses one mutated regular expression literal to check its syntax.
     { path = "crates/mutation/src/lib.rs", max = 1 },
+    { path = "crates/mutation/src/regex.rs", max = 1 },
 ]
 
 # The Miri CI job is slow and has a path filter. This rule finds a test path
