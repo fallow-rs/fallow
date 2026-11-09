@@ -1557,3 +1557,7 @@ fn find_project_roots(workspace_root: &std::path::Path) -> Vec<std::path::PathBu
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "tests_byte_order_mark.rs"]
+mod byte_order_mark_tests;

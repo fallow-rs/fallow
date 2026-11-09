@@ -192,6 +192,7 @@ impl TokenCache {
             return Some(entry.to_entry());
         }
         let content = std::fs::read_to_string(path).ok()?;
+        let content = super::without_byte_order_mark(&content);
         if xxh3_64(content.as_bytes()) != xxh3_64(entry.source.as_bytes()) {
             return None;
         }
@@ -804,6 +805,36 @@ mod tests {
             );
         assert_eq!(hit.hashed_tokens[0].hash, 42);
         assert_eq!(hit.file_tokens.source, "const value = 1;\n");
+    }
+
+    /// The cache stores the source without the byte order mark, so the
+    /// content check must compare the file on disk without the mark too.
+    #[test]
+    fn token_cache_hits_via_content_for_a_file_with_a_byte_order_mark() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        let file = dir.path().join("src.ts");
+        std::fs::write(&file, "\u{feff}const value = 1;\n").expect("write source");
+        let metadata = std::fs::metadata(&file).expect("metadata");
+
+        let mut cache = TokenCache::load(dir.path());
+        let entry = entry("const value = 1;\n");
+        cache.store.entries.insert(
+            cache_key(&file),
+            CachedTokenFile::from_tokens(
+                SourceFingerprint::new(1, metadata.len()),
+                mode().hash,
+                &entry.hashed_tokens,
+                &entry.file_tokens,
+                &entry.suppressions,
+            ),
+        );
+
+        let live_fingerprint = SourceFingerprint::new(2, metadata.len());
+        assert!(
+            cache
+                .get_by_fingerprint(&file, live_fingerprint, mode())
+                .is_some()
+        );
     }
 
     /// The invariant the ctime work exists to protect: a same-size rewrite

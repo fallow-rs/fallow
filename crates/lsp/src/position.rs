@@ -15,7 +15,7 @@ const BYTE_ORDER_MARK: char = '\u{feff}';
 ///
 /// The editor buffer does not hold the mark, and the analysis counts byte
 /// columns after it. Only the first U+FEFF is the mark. A second U+FEFF is
-/// text, and the analysis and the editor count it as text.
+/// text that the editor shows, so this function keeps it.
 pub fn read_document_text(path: &Path) -> Option<String> {
     let mut text = std::fs::read_to_string(path).ok()?;
     let mark_len = byte_order_mark_len(&text);

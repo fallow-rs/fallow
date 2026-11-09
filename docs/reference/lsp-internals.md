@@ -198,6 +198,10 @@ the run is publishable only if its current text matches disk. Files absent from
 both snapshots, including project manifests, remain valid cross-file targets.
 Keep these checks shared by publishing and cached diagnostic cleanup.
 
+The disk match and the `PositionMapper` read a file without its leading UTF-8
+byte order mark, because the editor buffer and the analysis byte columns do
+not count the mark. A second leading U+FEFF is text, so they keep it.
+
 A run reads the file of an open document only when the buffer is not known to
 match the disk. `DocumentState::known_clean` is set by `didSave` and by a disk
 read that confirms the match for that version. An edit makes a new state

@@ -446,12 +446,13 @@ fn duplication_token_cache_entry(
         return Some((entry, suppressions));
     }
 
-    let source = std::fs::read_to_string(&file.path).ok()?;
-    let suppressions = suppress::parse_suppressions_from_source(&source).suppressions;
+    let raw = std::fs::read_to_string(&file.path).ok()?;
+    let source = without_byte_order_mark(&raw);
+    let suppressions = suppress::parse_suppressions_from_source(source).suppressions;
     if suppress::is_file_suppressed(&suppressions, IssueKind::CodeDuplication) {
         return None;
     }
-    let file_tokens = tokenize_duplication_source(file, ctx, &source);
+    let file_tokens = tokenize_duplication_source(file, ctx, source);
     if file_tokens.tokens.is_empty() {
         return None;
     }
@@ -464,6 +465,15 @@ fn duplication_token_cache_entry(
         },
         suppressions,
     ))
+}
+
+/// The source without its leading UTF-8 byte order mark.
+///
+/// Clone lines and columns count from the end of the mark, as the extraction
+/// spans and the editor buffer do. Only the first U+FEFF is the mark: a
+/// second U+FEFF is source text.
+fn without_byte_order_mark(source: &str) -> &str {
+    source.strip_prefix('\u{feff}').unwrap_or(source)
 }
 
 fn tokenize_duplication_source(
@@ -702,6 +712,38 @@ mod tests {
         let resurfaced = find_duplicates(dir.path(), &files, &ignored_config);
         assert!(!resurfaced.clone_groups.is_empty());
         assert_eq!(resurfaced.stats.clone_groups_ignored, 0);
+    }
+
+    #[test]
+    fn byte_order_mark_is_not_a_column_of_a_clone() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let source = "export function shared(value: number): number {\n  const doubled = value * 2;\n  const shifted = doubled + 3;\n  return shifted * 4;\n}\n";
+        let mut files = Vec::new();
+        for (index, (name, prefix)) in [("a.ts", "\u{feff}"), ("b.ts", "")].into_iter().enumerate()
+        {
+            let path = dir.path().join(name);
+            let content = format!("{prefix}{source}");
+            std::fs::write(&path, &content).expect("write clone");
+            files.push(DiscoveredFile {
+                id: FileId(index as u32),
+                path,
+                size_bytes: content.len() as u64,
+            });
+        }
+        let config = DuplicatesConfig {
+            min_tokens: 5,
+            min_lines: 2,
+            ..DuplicatesConfig::default()
+        };
+
+        let report = find_duplicates(dir.path(), &files, &config);
+
+        let group = report.clone_groups.first().expect("clone group");
+        assert_eq!(group.instances.len(), 2);
+        for instance in &group.instances {
+            assert_eq!((instance.start_line, instance.start_col), (1, 0));
+            assert!(instance.fragment.starts_with("export function shared"));
+        }
     }
 
     #[test]
