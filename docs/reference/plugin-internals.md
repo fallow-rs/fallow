@@ -714,3 +714,21 @@ declares them. unplugin-icons loads an icon set from `@iconify-json/<set>`
 first and from `@iconify/json` next. The credit applies to the whole project,
 the same as the markup credit, because a package can bundle the icon imports
 of another workspace package.
+
+## vite-plugin-pages routes
+
+The `vite-plugin-pages` plugin activates on a `vite-plugin-pages` dependency
+and reads `vite.config.*`. It finds the `Pages(...)` call in the `plugins`
+array through the default import of `vite-plugin-pages`, also inside a
+wrapper call. The shared reader is
+`extract_vite_plugin_call_string_lists` in
+`config_parser_vite_plugin_call.rs`.
+
+Each `dirs` entry (a string, or the `dir` of an object) becomes the glob
+`<dir>/**/*.{<extensions>}` relative to the Vite root: the `root` option, or
+the config directory. A dir that climbs out of the workspace package becomes
+a parent-relative entry pattern. A call without `dirs` uses `src/pages`. The
+default extensions are the union of the Vue, React and Solid resolver
+defaults. A call whose options argument is not an object literal, or whose
+`dirs` is not static, gives no entries. The plugin does not read `exclude`,
+so an excluded file stays an entry point. The entries have the runtime role.

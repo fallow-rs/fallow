@@ -2150,6 +2150,7 @@ mod varlock;
 mod velite;
 mod vercel;
 mod vite;
+mod vite_plugin_pages;
 pub(crate) mod vite_plus;
 mod vitepress;
 mod vitest;

@@ -253,6 +253,8 @@ mod unplugin_icons_plugin;
 mod unreachable_exports;
 #[path = "integration_test/vercel_api_directory_functions.rs"]
 mod vercel_api_directory_functions;
+#[path = "integration_test/vite_plugin_pages_plugin.rs"]
+mod vite_plugin_pages_plugin;
 #[path = "integration_test/vitest_jsx_import_source.rs"]
 mod vitest_jsx_import_source;
 #[path = "integration_test/vitest_jsx_project_scopes.rs"]
