@@ -5,7 +5,7 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
 ---
 {
   "kind": "dead-code",
-  "schema_version": 10,
+  "schema_version": 11,
   "version": "[VERSION]",
   "elapsed_ms": 10,
   "total_issues": 2,

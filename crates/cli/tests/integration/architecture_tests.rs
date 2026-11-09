@@ -1256,3 +1256,66 @@ fn shared_state_rejects_sarif_sidecar_without_overwriting_artifact() {
         );
     }
 }
+
+#[test]
+fn prior_schema_saved_reports_preserve_strict_validation() {
+    let dir = architecture_project("");
+    for (command, version) in [("dead-code", 10), ("architecture", 1)] {
+        for grouped in [false, true] {
+            let mut args = vec!["--format", "json", "--quiet"];
+            let mut rendered_args = vec!["--format", "codeclimate", "--quiet"];
+            if grouped {
+                args.extend(["--group-by", "directory"]);
+                rendered_args.extend(["--group-by", "directory"]);
+            }
+            let expected = parse_json(&run(command, dir.path(), &rendered_args));
+            assert!(
+                expected
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .any(|row| row["check_name"] == "fallow/circular-dependency")
+            );
+            let mut archive = parse_json(&run(command, dir.path(), &args));
+            archive["schema_version"] = version.into();
+            let saved = dir.path().join("prior-schema.json");
+            let render = |value: &serde_json::Value| {
+                std::fs::write(&saved, value.to_string()).unwrap();
+                run_fallow_raw(&[
+                    "report",
+                    "--from",
+                    saved.to_str().unwrap(),
+                    "--root",
+                    dir.path().to_str().unwrap(),
+                    "--format",
+                    "codeclimate",
+                    "--quiet",
+                ])
+            };
+            let valid = render(&archive);
+            assert_eq!(
+                valid.code, 0,
+                "{command}, grouped={grouped}: {}",
+                valid.stderr
+            );
+            assert_eq!(parse_json(&valid), expected);
+            archive["total_issues"] = 999.into();
+            assert_eq!(
+                render(&archive).code,
+                2,
+                "{command}, grouped={grouped}: corrupt total"
+            );
+            if grouped {
+                archive["total_issues"] = archive["groups"]
+                    .as_array()
+                    .unwrap()
+                    .iter()
+                    .map(|group| group["total_issues"].as_u64().unwrap())
+                    .sum::<u64>()
+                    .into();
+                archive["groups"][0].as_object_mut().unwrap().remove("key");
+                assert_eq!(render(&archive).code, 2, "{command}: missing grouped key");
+            }
+        }
+    }
+}

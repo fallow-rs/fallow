@@ -79,6 +79,7 @@ pub struct StateAccessFact {
 #[serde(deny_unknown_fields)]
 pub struct StateSite {
     /// Project-relative source path.
+    #[serde(serialize_with = "crate::serde_path::serialize")]
     pub path: PathBuf,
     /// One-based source line.
     pub line: usize,
@@ -231,5 +232,38 @@ impl StateOperation {
             Self::Update => "update",
             Self::Delete => "delete",
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn typed_state_sites_normalize_paths_without_changing_property_keys() {
+        let write = ImportedStateWrite {
+            id: "observation".to_owned(),
+            writer: StateSite {
+                path: r"src\writer.ts".into(),
+                line: 2,
+                column: 3,
+                offset: 8,
+            },
+            declaration: StateSite {
+                path: r"src\owner.ts".into(),
+                line: 1,
+                column: 1,
+                offset: 0,
+            },
+            binding: "state".to_owned(),
+            property: vec![r"literal\key".to_owned(), "a.b".to_owned()],
+            operation: StateOperation::Assign,
+            actions: Vec::new(),
+        };
+        let json = serde_json::to_value(&write).unwrap();
+        assert_eq!(json["writer"]["path"], "src/writer.ts");
+        assert_eq!(json["declaration"]["path"], "src/owner.ts");
+        assert_eq!(json["property"], serde_json::json!([r"literal\key", "a.b"]));
+        assert_eq!(json["writer"]["offset"], 8);
     }
 }

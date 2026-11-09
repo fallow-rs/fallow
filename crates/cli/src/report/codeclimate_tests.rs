@@ -63,12 +63,17 @@ fn stored_dead_code_envelope_renders_codeclimate_without_analysis() {
         .parent()
         .and_then(Path::parent)
         .expect("workspace root");
-    let issues = envelope_codeclimate_issues(EnvelopeKind::DeadCode, &envelope, root);
-
-    assert_eq!(issues.len(), 1);
-    assert_eq!(issues[0].check_name, "fallow/unused-file");
-    assert_eq!(issues[0].location.path, "src/dead.ts");
-    assert_eq!(issues[0].location.lines.begin, 1);
+    for version in [None, Some(9)] {
+        let mut input = envelope.clone();
+        if let Some(version) = version {
+            input["schema_version"] = version.into();
+        }
+        let issues = envelope_codeclimate_issues(EnvelopeKind::DeadCode, &input, root);
+        assert_eq!(issues.len(), 1);
+        assert_eq!(issues[0].check_name, "fallow/unused-file");
+        assert_eq!(issues[0].location.path, "src/dead.ts");
+        assert_eq!(issues[0].location.lines.begin, 1);
+    }
 }
 
 #[test]
@@ -124,6 +129,80 @@ fn current_dead_code_envelope_rejects_an_inconsistent_finding_total() {
         error,
         "saved dead-code envelope declares 1 findings but contains 0"
     );
+}
+
+#[test]
+fn prior_strict_schemas_preserve_validation_and_block_partial_fallback() {
+    for (kind, versions) in [
+        (EnvelopeKind::DeadCode, [10, 11]),
+        (EnvelopeKind::Architecture, [1, 2]),
+    ] {
+        for version in versions {
+            let mut envelope = current_dead_code_section();
+            envelope["schema_version"] = version.into();
+            envelope["unused_files"] =
+                serde_json::json!([{"path": "src/unused.ts", "actions": []}]);
+            envelope["total_issues"] = 1.into();
+            let render = |value: &serde_json::Value| {
+                envelope_codeclimate_issues_with_config(
+                    kind,
+                    value,
+                    Path::new("/project"),
+                    None,
+                    None,
+                )
+            };
+            let issues = render(&envelope).expect("valid supported schema");
+            assert_eq!(issues[0].check_name, "fallow/unused-file");
+            assert_eq!(issues[0].location.path, "src/unused.ts");
+            let mut corrupt = envelope.clone();
+            corrupt["total_issues"] = 3.into();
+            assert!(
+                render(&corrupt).is_err(),
+                "{kind:?} version {version} corrupt total"
+            );
+            let mut corrupt = envelope;
+            corrupt["unused_exports"] = "invalid".into();
+            assert!(
+                render(&corrupt).is_err(),
+                "{kind:?} version {version} partial fallback"
+            );
+        }
+    }
+}
+
+#[test]
+fn current_parents_accept_prior_check_schema_but_reject_older_child_shapes() {
+    for version in [10, 11, 9, 12] {
+        let mut section = current_dead_code_section();
+        section["schema_version"] = version.into();
+        section["unused_files"] = serde_json::json!([{"path": "src/unused.ts", "actions": []}]);
+        section["total_issues"] = 1.into();
+        let combined = serde_json::json!({
+            "schema_version": fallow_output::COMBINED_SCHEMA_VERSION,
+            "version": env!("CARGO_PKG_VERSION"), "elapsed_ms": 0, "check": section.clone()
+        });
+        for (kind, envelope) in [
+            (EnvelopeKind::Combined, combined),
+            (EnvelopeKind::Audit, current_audit_envelope(&section)),
+        ] {
+            let result = envelope_codeclimate_issues_with_config(
+                kind,
+                &envelope,
+                Path::new("/project"),
+                None,
+                None,
+            );
+            if matches!(version, 10 | 11) {
+                assert_eq!(
+                    result.expect("supported prior child schema")[0].check_name,
+                    "fallow/unused-file"
+                );
+            } else {
+                assert!(result.is_err(), "older/future child version {version}");
+            }
+        }
+    }
 }
 
 #[test]

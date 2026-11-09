@@ -300,7 +300,7 @@ pub fn validate_saved_schema(
             envelope_kind_label(kind)
         ));
     }
-    if version == u64::from(current) {
+    if !saved_schema_is_legacy(kind, envelope) {
         validate_current_saved_envelope(kind, envelope)?;
     }
     Ok(())
@@ -497,8 +497,10 @@ fn validate_current_dead_code_section(section: &serde_json::Value) -> Result<(),
         .and_then(serde_json::Value::as_u64)
         .ok_or_else(|| "missing a numeric `schema_version`".to_owned())?;
     let expected = u64::from(fallow_output::CHECK_SCHEMA_VERSION);
-    if version != expected {
-        return Err(format!("schema version is {version}; expected {expected}"));
+    if !(u64::from(FIRST_STRICT_CHECK_SCHEMA_VERSION)..=expected).contains(&version) {
+        return Err(format!(
+            "schema version is {version}; expected {FIRST_STRICT_CHECK_SCHEMA_VERSION} through {expected}"
+        ));
     }
     validate_current_saved_envelope(EnvelopeKind::DeadCode, section)
 }
@@ -619,14 +621,24 @@ fn validate_current_audit_envelope(
     Ok(())
 }
 
-fn saved_schema_is_legacy(kind: EnvelopeKind, envelope: &serde_json::Value) -> bool {
+// These shapes already enforce complete typed payloads and consistent totals.
+// Additive schema bumps must not restore permissive legacy reconstruction.
+const FIRST_STRICT_CHECK_SCHEMA_VERSION: u32 = 10;
+const FIRST_STRICT_ARCHITECTURE_SCHEMA_VERSION: u32 = 1;
+
+pub fn saved_schema_is_legacy(kind: EnvelopeKind, envelope: &serde_json::Value) -> bool {
     let Some(version) = envelope
         .get("schema_version")
         .and_then(serde_json::Value::as_u64)
     else {
         return true;
     };
-    current_schema_version(kind).is_some_and(|current| version < u64::from(current))
+    let strict_floor = match kind {
+        EnvelopeKind::DeadCode => Some(FIRST_STRICT_CHECK_SCHEMA_VERSION),
+        EnvelopeKind::Architecture => Some(FIRST_STRICT_ARCHITECTURE_SCHEMA_VERSION),
+        _ => current_schema_version(kind),
+    };
+    strict_floor.is_some_and(|floor| version < u64::from(floor))
 }
 
 fn current_schema_version(kind: EnvelopeKind) -> Option<u32> {
