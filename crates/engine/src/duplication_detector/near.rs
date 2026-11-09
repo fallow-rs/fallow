@@ -274,8 +274,8 @@ fn function_location(source: &str, span: Span, lines: &[usize]) -> Option<Functi
     {
         return None;
     }
-    let (start_line, start_col) = byte_offset_to_line_col(source, start, lines);
-    let (end_line, end_col) = byte_offset_to_line_col(source, end, lines);
+    let (start_line, start_col) = byte_offset_to_line_col(start, lines);
+    let (end_line, end_col) = byte_offset_to_line_col(end, lines);
     Some(FunctionLocation {
         start_line,
         end_line,
@@ -293,12 +293,12 @@ fn line_table(source: &str) -> Vec<usize> {
         .collect()
 }
 
-fn byte_offset_to_line_col(source: &str, offset: usize, lines: &[usize]) -> (usize, usize) {
+fn byte_offset_to_line_col(offset: usize, lines: &[usize]) -> (usize, usize) {
     let line_index = lines.partition_point(|&newline| newline < offset);
     let line_start = line_index
         .checked_sub(1)
         .map_or(0, |previous| lines[previous] + 1);
-    (line_index + 1, source[line_start..offset].chars().count())
+    (line_index + 1, offset - line_start)
 }
 
 fn rolling_shingles(tokens: &[u64]) -> Vec<u64> {
@@ -741,6 +741,15 @@ mod tests {
         )
     }
 
+    #[test]
+    fn near_clone_columns_are_byte_columns() {
+        let source = "/* \u{e9} \u{1F600} */ function f() {}\nlet x = 1;";
+        let lines = line_table(source);
+        let start = source.find("function").expect("function keyword");
+        assert_eq!(byte_offset_to_line_col(start, &lines), (1, start));
+        let second = source.find("let").expect("second line");
+        assert_eq!(byte_offset_to_line_col(second, &lines), (2, 0));
+    }
     #[test]
     fn detects_semantic_gapped_functions_under_mild_exact_mode() {
         let files = vec![

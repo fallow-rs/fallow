@@ -59,7 +59,7 @@ pub(super) fn build_clone_instance_fast(
     })
 }
 
-/// Convert a byte offset into a 1-based line number and 0-based character column
+/// Convert a byte offset into a 1-based line number and 0-based byte column
 /// using a pre-computed table of newline positions for O(log L) lookup.
 pub(super) fn byte_offset_to_line_col_fast(
     source: &str,
@@ -77,11 +77,11 @@ pub(super) fn byte_offset_to_line_col_fast(
     } else {
         line_table[line_idx - 1] + 1
     };
-    let col = source[line_start..offset].chars().count();
+    let col = offset - line_start;
     (line, col)
 }
 
-/// Convert a byte offset into a 1-based line number and 0-based character column.
+/// Convert a byte offset into a 1-based line number and 0-based byte column.
 #[cfg(test)]
 pub(super) fn byte_offset_to_line_col(source: &str, byte_offset: usize) -> (usize, usize) {
     let mut offset = byte_offset.min(source.len());
@@ -91,6 +91,6 @@ pub(super) fn byte_offset_to_line_col(source: &str, byte_offset: usize) -> (usiz
     let before = &source[..offset];
     let line = before.matches('\n').count() + 1;
     let line_start = before.rfind('\n').map_or(0, |pos| pos + 1);
-    let col = before[line_start..].chars().count();
+    let col = offset - line_start;
     (line, col)
 }

@@ -1561,3 +1561,7 @@ mod tests;
 #[cfg(test)]
 #[path = "tests_byte_order_mark.rs"]
 mod byte_order_mark_tests;
+
+#[cfg(test)]
+#[path = "tests_clone_columns.rs"]
+mod clone_columns_tests;

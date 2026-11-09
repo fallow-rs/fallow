@@ -437,7 +437,7 @@ jobs:
           export PROPTEST_RNG_SEED="$seed"
           echo "Seed $seed, $cases cases for each test"
           status=0
-          cargo test --locked -p fallow-lsp -p fallow-core -p fallow-extract -p fallow-cli --lib unicode_span_oracle \
+          cargo test --locked -p fallow-lsp -p fallow-core -p fallow-extract -p fallow-cli -p fallow-engine --lib unicode_span_oracle \
             2>&1 | tee seeds.log || status=$?
           {
             echo "## Unicode span wide case range"
