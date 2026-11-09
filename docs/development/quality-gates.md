@@ -37,7 +37,11 @@ only when a staged file matches it, so a commit without Rust inputs skips
 `cargo fmt`, Clippy, the Miri cfg check and the Miri file system test check.
 hk does not match deleted files, so a commit that only deletes a Rust file
 also skips them. The pre-push hook runs
-`cargo fmt` and Clippy with no glob and catches that case. The pre-commit hook only checks.
+`cargo fmt` and Clippy with no glob and catches that case. A rebase applies
+resolved conflicts without the pre-commit hook, so the pre-push hook also runs
+`npm run lint:js` and `npm run fmt:js:check` on every file in the JavaScript
+scopes. Like `cargo fmt`, this step checks the working tree, not only the
+pushed commits. The pre-commit hook only checks.
 Run `hk fix` to apply the fix commands, for example `cargo fmt --all`. The
 hooks use `stash = "none"`, because every worktree of this repository shares
 one git stash stack.

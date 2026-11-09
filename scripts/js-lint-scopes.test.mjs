@@ -1,6 +1,15 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import {
+  chmodSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import test from "node:test";
@@ -71,4 +80,41 @@ test("the pre-commit hook reads the scope list from the helper", () => {
   const hook = readFileSync(join(repoRoot, "scripts/hook-js-lint.sh"), "utf8");
   assert.match(hook, /node scripts\/js-lint-scopes\.mjs --filter-staged/u);
   assert.doesNotMatch(hook, /grep -E '\^\(npm\//u, "the hook must not hold its own copy");
+});
+
+// A rebase applies resolved conflicts without the pre-commit hook, so the
+// pre-push hook checks every JavaScript file in the scopes.
+test("the pre-push hook checks JavaScript files without a staged file", () => {
+  const hooks = readFileSync(join(repoRoot, "hk.pkl"), "utf8");
+  const prePush = /\n {2}\["pre-push"\] \{[\s\S]*?\n {2}\}/u.exec(hooks)?.[0] ?? "";
+  assert.match(prePush, /sh scripts\/hook-js-lint\.sh --all/u);
+
+  // A stub npm records its arguments, so the test does not depend on the
+  // format state of the checkout. The directory has no git repository and no
+  // staged file, so only the --all mode reaches npm.
+  const dir = mkdtempSync(join(tmpdir(), "hook-js-lint-"));
+  try {
+    mkdirSync(join(dir, "node_modules"));
+    mkdirSync(join(dir, "bin"));
+    const calls = join(dir, "calls");
+    const stub = join(dir, "bin", "npm");
+    writeFileSync(stub, `#!/bin/sh\necho "$*" >> "${calls}"\n`);
+    chmodSync(stub, 0o755);
+    const run = (args) =>
+      spawnSync("sh", [join(repoRoot, "scripts/hook-js-lint.sh"), ...args], {
+        cwd: dir,
+        env: { ...process.env, PATH: `${join(dir, "bin")}:${process.env.PATH}` },
+        encoding: "utf8",
+      });
+
+    const all = run(["--all"]);
+    assert.equal(all.status, 0, all.stderr);
+    assert.equal(readFileSync(calls, "utf8"), "run --silent lint:js\nrun --silent fmt:js:check\n");
+
+    rmSync(calls);
+    run([]);
+    assert.equal(existsSync(calls), false, "without --all, no staged file means no check");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
