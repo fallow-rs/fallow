@@ -182,7 +182,7 @@ beforeEach(() => {
 });
 
 const emptyCheck = {
-  schema_version: 10,
+  schema_version: 11,
   version: "0.0.0-test",
   elapsed_ms: 0,
   total_issues: 0,

@@ -205,14 +205,14 @@ fn dead_code_json_keeps_dead_code_kind_and_version() {
         &["--format", "json", "--quiet"],
     ));
     assert_eq!(flat["kind"], "dead-code");
-    assert_eq!(flat["schema_version"], 10);
+    assert_eq!(flat["schema_version"], 11);
     let grouped = parse_json(&run(
         "dead-code",
         dir.path(),
         &["--group-by", "directory", "--format", "json", "--quiet"],
     ));
     assert_eq!(grouped["kind"], "dead-code-grouped");
-    assert_eq!(grouped["schema_version"], 10);
+    assert_eq!(grouped["schema_version"], 11);
 }
 
 #[test]
@@ -229,7 +229,7 @@ fn bare_only_architecture_json_keeps_combined_shape() {
         json["check"].get("kind").is_none(),
         "the embedded check section carries no kind"
     );
-    assert_eq!(json["check"]["schema_version"], 10);
+    assert_eq!(json["check"]["schema_version"], 11);
 }
 
 #[test]

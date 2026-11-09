@@ -4251,7 +4251,7 @@ fn adding_baseline_staleness_moved_no_schema_version() {
     let project = rotted_baseline_project(4, 2);
     let root = project.path().to_str().expect("temp path is UTF-8");
     let dead_code = run_with_baseline(project.path(), &["--format", "json", "--quiet"]);
-    assert_eq!(parse_json(&dead_code)["schema_version"], 10);
+    assert_eq!(parse_json(&dead_code)["schema_version"], 11);
     let dupes = run_fallow_raw(&[
         "dupes",
         "--root",
