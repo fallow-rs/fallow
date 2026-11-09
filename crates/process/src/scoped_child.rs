@@ -422,12 +422,12 @@ mod tests {
         compile_fake_taskkill(root.path(), TASKKILL_MARKER_ENV);
         std::fs::write(
             root.path().join("descendant.cmd"),
-            "@echo off\r\necho ready>descendant-ready\r\nping.exe -n 30 127.0.0.1 >NUL\r\n",
+            "@echo off\r\necho ready>descendant-ready\r\nping.exe -n 60 127.0.0.1 >NUL\r\n",
         )
         .expect("write descendant script");
         std::fs::write(
             root.path().join("leader.cmd"),
-            "@echo off\r\nstart \"\" /B cmd.exe /D /S /C call descendant.cmd\r\nping.exe -n 30 127.0.0.1 >NUL\r\n",
+            "@echo off\r\nstart \"\" /B cmd.exe /D /S /C call descendant.cmd\r\nping.exe -n 60 127.0.0.1 >NUL\r\n",
         )
         .expect("write leader script");
         let mut search_paths = vec![root.path().to_path_buf()];
@@ -449,7 +449,9 @@ mod tests {
 
         assert!(
             output.status.success(),
-            "helper failed: {}",
+            "helper failed with {}\nstdout:\n{}\nstderr:\n{}",
+            output.status,
+            String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
         assert!(
@@ -488,11 +490,15 @@ mod tests {
         use std::time::{Duration, Instant};
 
         // TerminateJobObject only starts termination. On a loaded CI runner the
-        // kernel can need several seconds before the leader handle signals. The
-        // scripts ping for about 29 seconds, so a bound well below that still
-        // proves that termination, not a natural exit, ended the wait.
+        // kernel can need several seconds before the leader handle signals.
         const TERMINATION_BOUND: Duration = Duration::from_secs(10);
-        const STARTUP_BOUND: Duration = Duration::from_secs(10);
+        // The nested cmd.exe chain writes `descendant-ready` only when both
+        // shells run. A loaded runner can need more than ten seconds for that
+        // (#4326). The scripts ping for about 59 seconds, which is longer than
+        // this bound plus TERMINATION_BOUND. So the leader cannot exit
+        // naturally before the termination, and a fast wait proves that the
+        // termination ended it.
+        const STARTUP_BOUND: Duration = Duration::from_secs(30);
 
         let mut command = Command::new("cmd.exe");
         command
@@ -510,7 +516,10 @@ mod tests {
         while !ready.exists() && Instant::now() < ready_deadline {
             std::thread::sleep(Duration::from_millis(20));
         }
-        assert!(ready.exists(), "descendant did not start inside the job");
+        assert!(
+            ready.exists(),
+            "descendant did not start inside the job within {STARTUP_BOUND:?}"
+        );
 
         let started = Instant::now();
         terminator
