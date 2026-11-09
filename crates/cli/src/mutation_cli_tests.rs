@@ -908,7 +908,7 @@ fn the_summary_line_names_the_sampled_out_mutants() {
     let text = run_text(&sampled_report, &OPTIONS);
     assert_eq!(
         text.lines().nth(2).unwrap_or_default(),
-        "Score 100.0%  killed 1  survived 0  timeout 0  pending 2  sampled out 1  partial (sampled-out)",
+        "Score 100.0%  killed 1  survived 0  timeout 0  pending 2 (1 sampled out)  partial (sampled-out)",
         "{text}"
     );
 }

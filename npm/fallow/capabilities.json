@@ -7962,6 +7962,8 @@
           "all",
           "paths",
           "max_mutants",
+          "mutants_per_line",
+          "function_scope",
           "operators"
         ],
         "license": "free",

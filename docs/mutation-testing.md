@@ -456,9 +456,9 @@ so the run measured nothing.
 - A mutant has a test result when it is `killed`, `timeout`, `survived` or
   `flaky`. A run with only `runtime_error`, `compile_error` and
   `no_coverage` mutants and a baseline failure exits `2`.
-- A `pending` mutant keeps the exit code at `0`. The time budget or
-  `--max-mutants` stopped that run, so the baseline failure is not the
-  cause. The completion is `partial`.
+- A `pending` mutant keeps the exit code at `0`. The time budget,
+  `--max-mutants` or `--mutants-per-line` stopped that run, so the baseline
+  failure is not the cause. The completion is `partial`.
 - The error names the first baseline failure and the first line of its
   message.
 - The run always saves the full report to
@@ -542,7 +542,10 @@ select nothing for it. `--function-scope` (config key
   coverage does not depend on the limit. The coverage counts the other
   left-out mutants as covered.
 - `summary.sampled_out` and `plan.counts.sampled_out` give the number of
-  left-out mutants. They are part of the `pending` count.
+  left-out mutants. They are part of the `pending` count. A left-out mutant
+  that becomes `no_coverage` is in `plan.counts.sampled_out`, but not in
+  `summary.sampled_out`. To count the `pending` mutants that the mutant limit
+  stopped, subtract `sampled_out` from `pending`.
 - The completion is `partial` with the reason `sampled-out` when a left-out
   mutant stays `pending`.
 - `--recheck` does not accept the flag, and a run of selected mutant ids never
@@ -2138,7 +2141,9 @@ reads files only. It runs no test.
   mutant has a tested result. Otherwise it says `(no test ran)`.
 - The score line: the score, killed, survived, timeout, and the completion
   status. The line adds `pending`, `equivalent`, `runtime error`, `flaky` and
-  `compile error` only when the count is not zero.
+  `compile error` only when the count is not zero. A run with
+  `--mutants-per-line` shows the left-out part of the `pending` count as
+  `pending 12 (10 sampled out)`.
 - The scope line shows a full 40-character base SHA as its first 12
   characters, as `audit` does. No other line repeats the base ref.
 - The coverage line: the coverage and the no-coverage count.
@@ -2216,7 +2221,10 @@ reads files only. It runs no test.
 - `operators`, `minScore`, `concurrency` and `mutantsPerLine` apply to each run.
   A CLI flag wins.
 - `mutantsPerLine` and `functionScope` are config keys of the shared API, so
-  the CLI and the MCP tools select the same mutants for one project. A run of
+  the CLI and the MCP tools select the same mutants for one project. The
+  `mutation_plan` tool also takes `mutants_per_line` and `function_scope`.
+  The score ignores a `pending` mutant, so `--min-score` judges only the
+  mutants that the run executed. A run of
   selected mutant ids (`--recheck`) never samples and never widens, whatever
   the config says.
 - `functionScope: true` widens the changed-code scope to whole functions for

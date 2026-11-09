@@ -34182,7 +34182,7 @@
       "properties": {
         "code": {
           "type": "string",
-          "description": "A stable kebab-case code: `cache-write-failed`,\n`duplicate-test-ids`, `journal-write-failed`, `runtime-error`,\n`static-map-miss`, `test-files-not-discovered`, `typecheck-failed`,\n`worktree-changed` or `worktree-check-failed`."
+          "description": "A stable kebab-case code: `cache-write-failed`,\n`duplicate-test-ids`, `journal-write-failed`, `runtime-error`,\n`skipped-tests`, `static-map-miss`, `test-files-not-discovered`,\n`typecheck-failed`, `worktree-changed` or `worktree-check-failed`."
         },
         "message": {
           "type": "string",
