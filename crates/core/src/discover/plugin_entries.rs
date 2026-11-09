@@ -200,7 +200,17 @@ impl PluginGlobIndex {
     }
 
     /// Positions of the globs that match `rel`, in rule order.
+    ///
+    /// On Windows, `rel` can contain `\` separators. `globset` matches them as
+    /// `/`, so the ancestor prefixes must also be found at `\`.
     fn matches(&self, rel: &str) -> Vec<usize> {
+        let normalized;
+        let rel = if rel.contains(|c: char| c != '/' && std::path::is_separator(c)) {
+            normalized = rel.replace(std::path::is_separator, "/");
+            normalized.as_str()
+        } else {
+            rel
+        };
         let mut hits = Vec::new();
         let mut collect = |prefix: &str| {
             if let Some(chunks) = self.groups.get(prefix) {
@@ -621,6 +631,30 @@ mod tests {
             let mut expected = single.matches(path);
             expected.sort_unstable();
             assert_eq!(index.matches(path), expected, "matches for {path}");
+            // On Windows, the walker gives relative paths with `\` separators.
+            let native = path.replace('/', std::path::MAIN_SEPARATOR_STR);
+            let mut expected = single.matches(&native);
+            expected.sort_unstable();
+            assert_eq!(index.matches(&native), expected, "matches for {native}");
         }
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn glob_index_matches_backslash_paths() {
+        let globs: Vec<(String, globset::Glob)> =
+            ["packages/app/**/*.test.ts", "src/main.{ts,tsx}"]
+                .iter()
+                .map(|p| {
+                    (
+                        (*p).to_string(),
+                        crate::plugins::entry_rule_glob(p).expect("valid glob"),
+                    )
+                })
+                .collect();
+        let index = PluginGlobIndex::build(globs);
+
+        assert_eq!(index.matches(r"packages\app\src\a.test.ts"), vec![0]);
+        assert_eq!(index.matches(r"src\main.tsx"), vec![1]);
     }
 }
