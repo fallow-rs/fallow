@@ -597,36 +597,21 @@ pub(super) fn propagate_playwright_fixture_accesses(
     let mut typed_instance_targets: Option<TypedInstanceTargets> = None;
     for resolved in resolved_modules {
         let local_to_export_keys = indexes.local_keys(resolved.file_id);
-        let use_facts = playwright_fixture_uses(resolved);
-        for access in use_facts {
+        for access in playwright_fixture_uses(resolved) {
             let Some(test_keys) = local_to_export_keys.get(access.test_name.as_str()) else {
                 continue;
             };
-
             for test_key in test_keys {
                 let Some(fixture_targets) = targets_by_test.get(test_key) else {
                     continue;
                 };
-                let target_keys = match fixture_targets.get(access.fixture_name.as_str()) {
-                    Some(target_keys) => target_keys.clone(),
-                    None => {
-                        let chain = fixture_property_chain_targets(
-                            fixture_targets,
-                            access.fixture_name.as_str(),
-                            typed_instance_targets.get_or_insert_with(|| {
-                                build_typed_instance_binding_targets(graph, modules, indexes)
-                            }),
-                            graph,
-                        );
-                        for (owner, segment) in chain.segment_reads {
-                            accessed_members
-                                .entry(owner)
-                                .or_default()
-                                .insert(segment.to_string());
-                        }
-                        chain.targets
-                    }
-                };
+                let target_keys = resolve_fixture_access_targets(
+                    fixture_targets,
+                    access.fixture_name.as_str(),
+                    &mut typed_instance_targets,
+                    (graph, modules, indexes),
+                    accessed_members,
+                );
                 for target_key in target_keys {
                     accessed_members
                         .entry(target_key)
@@ -636,6 +621,36 @@ pub(super) fn propagate_playwright_fixture_accesses(
             }
         }
     }
+}
+
+/// The classes that a fixture access reaches. A fixture with a known name
+/// gives its classes directly. A property chain such as `app.details.input`
+/// resolves through the typed instance bindings, which build on first use,
+/// and records the property reads along the chain.
+fn resolve_fixture_access_targets(
+    fixture_targets: &FxHashMap<String, Vec<ExportKey>>,
+    fixture_name: &str,
+    typed_instance_targets: &mut Option<TypedInstanceTargets>,
+    (graph, modules, indexes): (&ModuleGraph, &[ModuleInfo], &MemberPassIndexes<'_>),
+    accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
+) -> Vec<ExportKey> {
+    if let Some(target_keys) = fixture_targets.get(fixture_name) {
+        return target_keys.clone();
+    }
+    let chain = fixture_property_chain_targets(
+        fixture_targets,
+        fixture_name,
+        typed_instance_targets
+            .get_or_insert_with(|| build_typed_instance_binding_targets(graph, modules, indexes)),
+        graph,
+    );
+    for (owner, segment) in chain.segment_reads {
+        accessed_members
+            .entry(owner)
+            .or_default()
+            .insert(segment.to_string());
+    }
+    chain.targets
 }
 
 /// What a property chain of a fixture reads.
