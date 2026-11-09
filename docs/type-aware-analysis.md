@@ -489,6 +489,7 @@ its decision counts in `baseline_type_aware` and validates global `type_aware`
 counters against all semantic decisions plus capacity omissions. A missing
 baseline decision fails discovery, including when request capacity prevented
 that decision. The denominator must not shrink to the queried subset.
+Zero-control projects must emit no findings in either pass.
 Findings added only by the semantic pass require a complete negative decision
 and are recorded separately in `semantic_only_promotions`. They are excluded
 from confirmation and retention claims in the baseline ledger. These records

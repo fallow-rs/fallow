@@ -87,6 +87,15 @@ export const typeEvidenceCoverage = (correctConfirmedCount, candidateCount, coun
   };
 };
 
+/** Whether every zero-control project has an empty finding population. */
+export const zeroControlProjectsClean = (projects) =>
+  projects
+    .filter(({ role }) => role === "zero-control")
+    .every(
+      ({ baseline_candidate_count: baseline, refined_candidate_count: refined }) =>
+        baseline === 0 && refined === 0,
+    );
+
 /** Projects with candidates behind blocking diagnostics, with each blocked program config. */
 export const blockedProjects = (projects) =>
   projects

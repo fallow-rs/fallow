@@ -40,6 +40,7 @@ import {
   summarizeAdjudicatedFeatureBuckets,
   typeAwareResolutionCounts,
   typeEvidenceCoverage,
+  zeroControlProjectsClean,
 } from "./type-aware-corpus/summary.mjs";
 import {
   validateCapabilitiesArtifactData as validateCapabilitiesData,
@@ -638,9 +639,11 @@ const executeFallow = async ({ project, fallowBin, sidecarBin, refined, rawPath,
   return { ...result, ...parsed };
 };
 
-const validateCandidateExpectation = (project, count) => {
-  if ([project.candidate_expectation === "zero", count !== 0].every(Boolean)) {
-    fail(`${project.id} zero-candidate control emitted ${count} candidates`);
+const validateCandidateExpectation = (project, count, refinedCount) => {
+  if (project.candidate_expectation === "zero" && (count !== 0 || refinedCount !== 0)) {
+    fail(
+      `${project.id} zero-candidate control emitted ${count} baseline and ${refinedCount} refined candidates`,
+    );
   }
   if ([project.candidate_expectation === "nonzero", count === 0].every(Boolean)) {
     fail(`${project.id} accuracy-core project emitted no candidates`);
@@ -916,7 +919,7 @@ const compactTypeAwareMetadata = (metadata) => {
 
 const discoverProject = async (project, options) => {
   const { baseline, refined } = await runDiscoveryIterations(project, options);
-  validateCandidateExpectation(project, baseline.candidates.length);
+  validateCandidateExpectation(project, baseline.candidates.length, refined.candidates.length);
   const decisions = indexCandidateDecisions(project.id, refined.typeAware);
   const { candidates, promotions } = comparePopulation(
     project.id,
@@ -2593,9 +2596,7 @@ const summarize = (manifest, options, publicationMode = "write") => {
   );
   addSupplementalConfirmation(confirmedProjects, supplementalArtifact);
   const featureBucketValue = summarizeAdjudicatedFeatureBuckets(entries);
-  const zeroControlsClean = discovery.projects
-    .filter(({ role }) => role === "zero-control")
-    .every(({ baseline_candidate_count }) => baseline_candidate_count === 0);
+  const zeroControlsClean = zeroControlProjectsClean(discovery.projects);
   const confirmationPrecision = safeRatio(correctConfirmed.length, confirmed.length);
   const coverage = typeEvidenceCoverage(correctConfirmed.length, entries.length, {
     abstainedCount,
