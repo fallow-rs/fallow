@@ -220,13 +220,12 @@ proptest! {
     }
 }
 
-/// Found on `main`: the CodeClimate fingerprint of a clone instance hashes
-/// the first 64 characters of the raw fragment. With CRLF line endings the
-/// fragment holds `\r`, so the same clone gets a new fingerprint. The minimal
-/// input is one clone group of two instances whose fragment has a line break
-/// in the first 64 characters, once with `\n` and once with `\r\n`.
+/// The CodeClimate fingerprint of a clone instance hashes the first 64
+/// characters of the fragment without `\r`, so the same clone keeps its
+/// fingerprint with CRLF line endings. The input is one clone group of two
+/// instances whose fragment has a line break in the first 64 characters,
+/// once with `\n` and once with `\r\n`.
 #[test]
-#[ignore = "bug on main: CodeClimate clone fingerprints change with CRLF line endings"]
 fn codeclimate_clone_fingerprints_ignore_line_endings() {
     let files = vec![vec!["a.ts".to_owned()], vec!["b.ts".to_owned()]];
     let fingerprints = |crlf: bool| -> Vec<String> {
