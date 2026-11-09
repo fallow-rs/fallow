@@ -892,3 +892,34 @@ fn recipe_is_written_through_a_docs_link_inside_the_project() {
 
     assert!(dir.path().join("handbook/collect-coverage.md").is_file());
 }
+
+#[cfg(unix)]
+#[test]
+fn setup_state_does_not_overwrite_a_linked_file_outside_the_project() {
+    let dir = tempdir().expect("tempdir");
+    let outside = tempdir().expect("outside tempdir");
+    let target = outside.path().join("rc");
+    std::fs::write(&target, "keep\n").expect("write outside file");
+    std::fs::create_dir(dir.path().join(".fallow")).expect("mkdir");
+    std::os::unix::fs::symlink(&target, setup_state_path(dir.path())).expect("symlink");
+
+    let result = super::save_setup_state(dir.path(), &super::CoverageSetupState::default());
+
+    assert!(result.is_err());
+    assert_eq!(std::fs::read_to_string(&target).expect("read"), "keep\n");
+}
+
+#[cfg(unix)]
+#[test]
+fn setup_lock_is_not_created_through_a_dangling_link() {
+    let dir = tempdir().expect("tempdir");
+    let outside = tempdir().expect("outside tempdir");
+    std::fs::create_dir(dir.path().join(".fallow")).expect("mkdir");
+    let planted = outside.path().join("lock");
+    std::os::unix::fs::symlink(&planted, dir.path().join(".fallow/setup.lock")).expect("symlink");
+
+    let result = super::CoverageSetupLock::try_acquire(dir.path());
+
+    assert!(result.is_err());
+    assert!(!planted.exists());
+}

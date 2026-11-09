@@ -446,3 +446,23 @@ fn rule_pack_init_does_not_edit_a_linked_config_outside_the_project() {
 
     assert_eq!(std::fs::read_to_string(&target).unwrap(), original);
 }
+
+#[cfg(unix)]
+#[test]
+fn rule_pack_init_does_not_edit_a_linked_repo_config_above_the_root() {
+    let repo = tempfile::tempdir().expect("create repo dir");
+    let outside = tempfile::tempdir().expect("create outside dir");
+    std::fs::create_dir(repo.path().join(".git")).expect("create .git");
+    let project = repo.path().join("packages/app");
+    std::fs::create_dir_all(&project).expect("create project dir");
+    std::fs::write(project.join("package.json"), "{\"name\":\"app\"}\n")
+        .expect("write package.json");
+    let target = outside.path().join("shared.json");
+    let original = "{\n  \"rules\": {}\n}\n";
+    std::fs::write(&target, original).expect("write outside config");
+    std::os::unix::fs::symlink(&target, repo.path().join(".fallowrc.json")).expect("symlink");
+
+    run_rule_pack(&project, &["init"]);
+
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), original);
+}
