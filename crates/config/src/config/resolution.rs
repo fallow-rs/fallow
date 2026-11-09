@@ -1011,10 +1011,6 @@ impl FallowConfig {
         let (workspace_patterns, workspace_changed_since, workspace_settings) =
             resolve_workspace_settings(self.workspaces);
 
-        let unused_component_props_ignore = compile_unused_component_props_ignore(
-            self.unused_component_props.ignore_pattern.as_deref(),
-        );
-
         ResolvedConfig {
             root,
             entry_patterns: self.entry,
@@ -1043,7 +1039,9 @@ impl FallowConfig {
             ignore_exports_used_in_file: self.ignore_exports_used_in_file,
             used_class_members: self.used_class_members,
             ignore_decorators: self.ignore_decorators,
-            unused_component_props_ignore,
+            unused_component_props_ignore: compile_unused_component_props_ignore(
+                self.unused_component_props.ignore_pattern.as_deref(),
+            ),
             tailwind_ignore_patterns: compile_tailwind_ignores(&self.health),
             circular_dependencies: self.circular_dependencies,
             effect: self.effect,
