@@ -7,9 +7,9 @@
 //! `fallow-types`; this crate re-exports only the selectors needed to keep
 //! output builders on one contract surface.
 //!
-//! User documentation for the report formats is on [fallow.tools](https://fallow.tools/docs/cli/schema/):
+//! User documentation for the output formats is on [fallow.tools](https://fallow.tools/docs/cli/global-flags/):
 //!
-//! - [Report schema](https://fallow.tools/docs/cli/schema/)
+//! - [Output formats and global flags](https://fallow.tools/docs/cli/global-flags/)
 //! - [CI integration](https://fallow.tools/docs/integrations/ci/)
 #![warn(missing_docs)]
 #![cfg_attr(

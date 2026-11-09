@@ -5,7 +5,7 @@
 //!
 //! User documentation for module graph analysis is on [fallow.tools](https://fallow.tools/docs/explanations/dead-code/):
 //!
-//! - [How dead code detection works](https://fallow.tools/docs/explanations/dead-code/)
+//! - [Dead code findings explained](https://fallow.tools/docs/explanations/dead-code/)
 //! - [Architecture boundaries](https://fallow.tools/docs/analysis/boundaries/)
 //! - [Workspaces](https://fallow.tools/docs/configuration/workspaces/)
 
