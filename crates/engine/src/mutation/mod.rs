@@ -391,6 +391,12 @@ pub struct MutationPlan {
     pub mutants: Vec<PlannedMutant>,
     /// The union of the static test files of `files`, sorted.
     pub test_files: Vec<String>,
+    /// The runner test files that a changed-code scope changes, sorted. A
+    /// test file counts when the diff adds a line to it, also when it reaches
+    /// no changed source. Empty for the other scopes. The run dry-runs these
+    /// files to find the tests that the runner skips.
+    #[serde(skip)]
+    pub changed_test_files: Vec<String>,
     /// The files that the test files reach through static imports, sorted.
     /// [`MutationPlan::test_file_reach`] indexes into this list.
     #[serde(skip)]

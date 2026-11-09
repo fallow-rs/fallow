@@ -254,6 +254,7 @@ fn plan(ids: &[&str]) -> SchedulePlan {
         unreached: Vec::new(),
         pending: Vec::new(),
         sampled_out: Vec::new(),
+        changed_test_files: Vec::new(),
         known_ids: ids
             .iter()
             .copied()
@@ -415,54 +416,120 @@ fn without_a_time_budget_the_jobs_keep_the_plan_order() {
     assert_eq!(mutant_run_order(&spawner), ["m2", "m1"]);
 }
 
-#[test]
-fn a_skipped_or_todo_test_of_a_plan_test_file_gets_a_warning() {
-    let dry = |_| DryRunResult {
+fn skipping_dry() -> impl Fn(usize) -> DryRunResult + Send + Sync + 'static {
+    |_| DryRunResult {
         tests: vec![
             test("t1", 2.0, TestStatus::Pass),
             test("t2", 100.0, TestStatus::Pass),
             test("skipped", 0.0, TestStatus::Skip),
             test("later", 0.0, TestStatus::Todo),
             DryTest {
-                file: "test/other.test.ts".to_owned(),
+                file: "test/b.test.ts".to_owned(),
                 ..test("elsewhere", 0.0, TestStatus::Skip)
             },
         ],
         ..standard_dry()
-    };
-    let spawner = FakeSpawner::new(script(dry, |_, run| {
-        Ok(run_result(run, RunStatus::Killed, Some(&run.test_ids[0])))
-    }));
-    let outcome = run_schedule(&spawner, &plan(&["m1"]), &config(1)).expect("run");
-    let issue = outcome
+    }
+}
+
+fn dry_run_files(spawner: &FakeSpawner) -> Vec<String> {
+    spawner
+        .log
+        .lock()
+        .expect("log")
+        .iter()
+        .find_map(|(_, request)| match request {
+            Request::DryRun { test_files } => Some(test_files.clone()),
+            _ => None,
+        })
+        .unwrap_or_default()
+}
+
+fn skipped_tests_issue(outcome: &ScheduleOutcome) -> Option<&ScheduleIssue> {
+    outcome
         .issues
         .iter()
         .find(|issue| issue.code == fallow_output::SKIPPED_TESTS_CODE)
-        .expect("a skipped-tests issue");
-    assert!(issue.message.starts_with("2 tests"), "{}", issue.message);
+}
+
+#[test]
+fn a_skipped_or_todo_test_of_a_changed_test_file_gets_a_warning() {
+    let spawner = FakeSpawner::new(script(skipping_dry(), |_, run| {
+        Ok(run_result(run, RunStatus::Killed, Some(&run.test_ids[0])))
+    }));
+    let mut plan = plan(&["m1"]);
+    plan.changed_test_files = vec!["test/a.test.ts".to_owned()];
+    let outcome = run_schedule(&spawner, &plan, &config(1)).expect("run");
+    let issue = skipped_tests_issue(&outcome).expect("a skipped-tests issue");
+    assert!(
+        issue.message.starts_with("2 tests are skipped or todo: "),
+        "{}",
+        issue.message
+    );
     assert!(issue.message.contains(&tid("skipped")), "{}", issue.message);
     assert!(issue.message.contains(&tid("later")), "{}", issue.message);
     assert!(
         !issue.message.contains("elsewhere"),
-        "a test outside the plan test files is not named: {}",
+        "a test of an unchanged test file is not named: {}",
         issue.message
     );
+    for sentence in issue.message.split(". ") {
+        assert!(
+            sentence.split_whitespace().count() <= 25 || sentence.contains("::"),
+            "{sentence}"
+        );
+    }
     assert_eq!(status(&outcome, "m1"), MutantStatus::Killed);
 }
 
 #[test]
-fn a_run_without_skipped_tests_has_no_skipped_tests_warning() {
-    let spawner = FakeSpawner::new(script(
-        |_| standard_dry(),
-        |_, run| Ok(run_result(run, RunStatus::Killed, Some(&run.test_ids[0]))),
-    ));
+fn a_run_without_a_diff_scope_gives_no_skipped_tests_warning() {
+    let spawner = FakeSpawner::new(script(skipping_dry(), |_, run| {
+        Ok(run_result(run, RunStatus::Killed, Some(&run.test_ids[0])))
+    }));
     let outcome = run_schedule(&spawner, &plan(&["m1"]), &config(1)).expect("run");
-    assert!(
-        outcome
-            .issues
-            .iter()
-            .all(|issue| issue.code != fallow_output::SKIPPED_TESTS_CODE)
+    assert!(skipped_tests_issue(&outcome).is_none());
+}
+
+#[test]
+fn a_changed_test_file_that_reaches_no_mutant_joins_the_dry_run() {
+    let spawner = FakeSpawner::new(script(skipping_dry(), |_, run| {
+        Ok(run_result(run, RunStatus::Killed, Some(&run.test_ids[0])))
+    }));
+    let mut plan = plan(&["m1"]);
+    plan.changed_test_files = vec![
+        "test/b.test.ts".to_owned(),
+        "test/missing.test.ts".to_owned(),
+    ];
+    let outcome = run_schedule(&spawner, &plan, &config(1)).expect("run");
+    assert_eq!(
+        dry_run_files(&spawner),
+        ["test/a.test.ts", "test/b.test.ts"],
+        "the runner lists b, and it does not list `missing`"
     );
+    let issue = skipped_tests_issue(&outcome).expect("a skipped-tests issue");
+    assert!(issue.message.contains("elsewhere"), "{}", issue.message);
+    assert_eq!(
+        outcome.undiscovered_test_files,
+        ["test/types.test-d.ts"],
+        "a changed test file that the runner does not list is not an undiscovered static file"
+    );
+}
+
+#[test]
+fn a_test_only_change_dry_runs_the_changed_test_files_and_runs_no_mutant() {
+    let spawner = FakeSpawner::new(script(skipping_dry(), |_, run| {
+        Ok(run_result(run, RunStatus::Killed, Some(&run.test_ids[0])))
+    }));
+    let mut plan = plan(&[]);
+    plan.test_files.clear();
+    plan.changed_test_files = vec!["test/a.test.ts".to_owned()];
+    let outcome = run_schedule(&spawner, &plan, &config(1)).expect("run");
+    assert_eq!(dry_run_files(&spawner), ["test/a.test.ts"]);
+    assert!(spawner.runs().is_empty(), "no mutant runs");
+    assert!(outcome.results.is_empty());
+    assert!(skipped_tests_issue(&outcome).is_some());
+    assert!(outcome.ready.is_some());
 }
 
 #[test]

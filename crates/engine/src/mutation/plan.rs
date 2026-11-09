@@ -225,7 +225,33 @@ pub(super) fn build(
         framework_config_checked: inputs.framework_config_exports.is_some(),
         skipped_files,
         unmatched_paths,
+        changed_test_files: changed_test_files(&context),
     }
+}
+
+/// The runner test files to which the diff of a changed-code scope adds a
+/// line, sorted by root-relative path. The other scopes have none.
+fn changed_test_files(context: &Context<'_>) -> Vec<String> {
+    let MutationScope::ChangedSinceBase(diff) = &context.request.scope else {
+        return Vec::new();
+    };
+    let root = context.inputs.root;
+    let mut files: Vec<String> = context
+        .graph
+        .test_entry_points
+        .iter()
+        .filter(|&&entry| is_runner_test_entry(context.graph, root, entry))
+        .filter_map(|&entry| context.graph.modules.get(entry.0 as usize))
+        .filter(|node| {
+            diff.key_for(&node.path, root)
+                .and_then(|key| diff.added_lines_in(&key))
+                .is_some_and(|lines| !lines.is_empty())
+        })
+        .map(|node| relative_key_path(&node.path, root))
+        .collect();
+    files.sort();
+    files.dedup();
+    files
 }
 
 /// The source files in scope, sorted by root-relative path. Test code, test

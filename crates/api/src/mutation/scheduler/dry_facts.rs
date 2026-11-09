@@ -176,14 +176,18 @@ pub(super) fn record_dry_run(
 }
 
 /// The issue for tests that the dry run skipped or marked as todo, in a test
-/// file of the plan. Such a test runs no assertion, so it cannot kill a
-/// mutant.
-fn skipped_tests_issue(plan: &SchedulePlan, dry: &DryRunResult) -> Option<ScheduleIssue> {
+/// file that the diff changes. Such a test runs no assertion, so it cannot
+/// kill a mutant. A run without a diff scope has no changed test file and
+/// gives no issue.
+pub(super) fn skipped_tests_issue(
+    plan: &SchedulePlan,
+    dry: &DryRunResult,
+) -> Option<ScheduleIssue> {
     let skipped: Vec<&str> = dry
         .tests
         .iter()
         .filter(|test| matches!(test.status, TestStatus::Skip | TestStatus::Todo))
-        .filter(|test| plan.test_files.contains(&test.file))
+        .filter(|test| plan.changed_test_files.contains(&test.file))
         .map(|test| test.test_id.as_str())
         .collect();
     if skipped.is_empty() {
@@ -204,7 +208,7 @@ fn skipped_tests_issue(plan: &SchedulePlan, dry: &DryRunResult) -> Option<Schedu
     Some(ScheduleIssue {
         code: fallow_output::SKIPPED_TESTS_CODE,
         message: format!(
-            "{} {noun} in the test files of the plan {verb} skipped or todo in the dry run: {}{tail}; such a test checks nothing, so it cannot kill a mutant; run it or remove it",
+            "{} {noun} {verb} skipped or todo: {}{tail}. A skipped test checks nothing, so it cannot kill a mutant. Run each test or remove it.",
             skipped.len(),
             shown.copied().collect::<Vec<_>>().join(", ")
         ),
@@ -264,4 +268,27 @@ fn duplicate_test_ids_issue(ids: &[String]) -> Option<ScheduleIssue> {
         mutant_id: None,
         stderr_tail: None,
     })
+}
+
+/// Dry-runs the changed test files of a plan that has no mutant to run, so
+/// that the report can warn about the tests that the runner skips.
+pub(super) fn warn_about_changed_tests(
+    spawner: &dyn CompanionSpawner,
+    plan: &SchedulePlan,
+    config: &ScheduleConfig,
+    mut outcome: ScheduleOutcome,
+) -> Result<ScheduleOutcome, ScheduleError> {
+    let Primary {
+        mut link,
+        ready,
+        dry_files,
+        ..
+    } = start_primary(spawner, plan, config)?;
+    outcome.ready = Some(ready);
+    if !dry_files.is_empty() {
+        let dry = first_dry_run(&mut link, &dry_files, config.runner_timeout)?;
+        outcome.issues.extend(skipped_tests_issue(plan, &dry));
+    }
+    link.shutdown();
+    Ok(outcome)
 }

@@ -602,19 +602,6 @@ mod end_to_end {
         Some(dunce::canonicalize(package).expect("package path"))
     }
 
-    /// The fixtures hold a skipped test and a todo test on purpose, so a run
-    /// reports the `skipped-tests` warning and no other error.
-    fn assert_only_skipped_tests_warning(report: &fallow_output::MutationReport) {
-        assert!(
-            report
-                .errors
-                .iter()
-                .all(|error| error.code == fallow_output::SKIPPED_TESTS_CODE),
-            "{:#?}",
-            report.errors
-        );
-    }
-
     /// A committed copy of the Vitest fixture of the companion package.
     fn vitest_project(package: &Path) -> (tempfile::TempDir, PathBuf) {
         let fixture = package.join("test/fixtures/vitest-basic");
@@ -711,39 +698,79 @@ mod end_to_end {
         );
     }
 
+    /// A unified diff that adds line 2 of each file, written outside the
+    /// project so that the worktree stays clean.
+    fn diff_file(files: &[&str]) -> (tempfile::TempDir, PathBuf) {
+        let dir = tempfile::tempdir().expect("dir");
+        let mut text = String::new();
+        for file in files {
+            text.push_str("diff --git a/");
+            text.push_str(file);
+            text.push_str(" b/");
+            text.push_str(file);
+            text.push_str("\n--- a/");
+            text.push_str(file);
+            text.push_str("\n+++ b/");
+            text.push_str(file);
+            text.push_str("\n@@ -1,0 +2,1 @@\n+// changed\n");
+        }
+        let path = dir.path().join("change.diff");
+        fs::write(&path, text).expect("diff");
+        (dir, path)
+    }
+
+    fn changed_options(root: &Path, diff: &Path) -> crate::mutation::MutationRunOptions {
+        let mut changed = options(root, MutationRunScope::Changed { base: None });
+        changed.analysis.diff_file = Some(diff.to_path_buf());
+        changed
+    }
+
     #[test]
-    fn a_skipped_test_of_a_plan_test_file_gets_a_warning() {
+    fn a_skipped_test_of_a_changed_test_file_gets_a_warning_with_or_without_a_changed_source() {
         let Some(package) = companion_fixture() else {
             return;
         };
         let (_project, root) = vitest_project(&package);
+        let warning = |report: &fallow_output::MutationReport| {
+            report
+                .errors
+                .iter()
+                .find(|error| error.code == fallow_output::SKIPPED_TESTS_CODE)
+                .map(|error| error.message.clone())
+        };
 
-        let report = run_mutation(&options(
+        let (_diff_dir, mixed_diff) = diff_file(&["src/math.ts", "test/math.test.ts"]);
+        let mixed = run_mutation(&changed_options(&root, &mixed_diff)).expect("the run completes");
+        let message = warning(&mixed).unwrap_or_else(|| panic!("a warning: {:#?}", mixed.errors));
+        assert!(
+            message.starts_with("1 test is skipped or todo: test/math.test.ts::skipped."),
+            "{message}"
+        );
+        assert_eq!(
+            mixed.completion.status,
+            MutationCompletionStatus::Complete,
+            "the warning does not make the run partial"
+        );
+        assert!(mixed.summary.counts.total > 0);
+
+        let (_test_dir, test_only_diff) = diff_file(&["test/math.test.ts"]);
+        let test_only =
+            run_mutation(&changed_options(&root, &test_only_diff)).expect("the run completes");
+        assert_eq!(test_only.summary.counts.total, 0, "no source changed");
+        assert!(warning(&test_only).is_some(), "{:#?}", test_only.errors);
+        assert!(test_only.runner.is_some(), "the changed tests were dry-run");
+
+        let (_source_dir, source_only_diff) = diff_file(&["src/math.ts"]);
+        let source_only =
+            run_mutation(&changed_options(&root, &source_only_diff)).expect("the run completes");
+        assert!(warning(&source_only).is_none(), "{:#?}", source_only.errors);
+
+        let full = run_mutation(&options(
             &root,
             MutationRunScope::Paths(vec![PathBuf::from("src/math.ts")]),
         ))
         .expect("the run completes");
-
-        let issue = report
-            .errors
-            .iter()
-            .find(|error| error.code == fallow_output::SKIPPED_TESTS_CODE)
-            .unwrap_or_else(|| panic!("a skipped-tests warning: {:#?}", report.errors));
-        assert!(
-            issue.message.starts_with("1 test in the test files"),
-            "{}",
-            issue.message
-        );
-        assert!(
-            issue.message.contains("test/math.test.ts::skipped"),
-            "{}",
-            issue.message
-        );
-        assert_eq!(
-            report.completion.status,
-            MutationCompletionStatus::Complete,
-            "the warning does not make the run partial"
-        );
+        assert!(warning(&full).is_none(), "{:#?}", full.errors);
     }
 
     #[test]
@@ -838,7 +865,7 @@ mod end_to_end {
             MutationCompletionStatus::Complete,
             "{report:#?}"
         );
-        assert_only_skipped_tests_warning(&report);
+        assert!(report.errors.is_empty(), "{:#?}", report.errors);
         assert!(report.worktree.checked);
         assert!(report.worktree.changed_paths.is_empty());
         assert_eq!(
@@ -963,7 +990,7 @@ mod end_to_end {
             MutationCompletionStatus::Complete,
             "{report:#?}"
         );
-        assert_only_skipped_tests_warning(report);
+        assert!(report.errors.is_empty(), "{:#?}", report.errors);
         assert!(report.worktree.changed_paths.is_empty());
         let in_function = |name: &str| {
             report

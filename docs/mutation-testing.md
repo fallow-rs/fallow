@@ -511,6 +511,8 @@ select nothing for it. `--function-scope` (config key
   no such function, for example a top-level `const`, selects its own mutants
   only.
 - A mutant of a nested function is part of the outer function.
+- The plan reads the function spans from the syntax tree. The `--operators`
+  filter does not hide a function that holds no emitted mutant.
 - The ranking still puts the mutants on added lines first, because the
   `in_diff` fact of a mutant is not widened.
 - `--all` and positional paths do not use the option, and the flag is an
@@ -541,7 +543,8 @@ select nothing for it. `--function-scope` (config key
   left-out mutants. They are part of the `pending` count.
 - The completion is `partial` with the reason `sampled-out` when a left-out
   mutant stays `pending`.
-- `--recheck` does not accept the flag.
+- `--recheck` does not accept the flag, and a run of selected mutant ids never
+  samples, also through the API.
 
 ## Score and coverage
 
@@ -587,12 +590,20 @@ select nothing for it. `--function-scope` (config key
   `duplicate-test-ids` names the IDs, and the human output shows it as a
   warning. The run does not stop, and the verdicts of the other tests stay
   valid. Give each test a unique title to remove the warning.
-- A test of a test file in the plan can be `skip` or `todo` in the dry run,
-  for example `it.skip`. Such a test runs no assertion, so it cannot kill a
-  mutant. The `errors` entry `skipped-tests` names up to five of these
-  tests, and the human output shows it as a warning. The run does not stop,
-  and the completion does not change. Run the test or remove it to remove
-  the warning.
+- A test can be `skip` or `todo` in the dry run, for example `it.skip`. Such
+  a test runs no assertion, so it cannot kill a mutant. The run warns about
+  these tests only in the runner test files that the diff of the
+  changed-code scope changes. The test file does not need to reach a changed
+  source file, so a change to the tests alone also gets the warning. The
+  dry run includes each changed runner test file that the runner lists. A
+  run without a diff scope (`--all` or paths) gives no per-test warning.
+  The `errors` entry `skipped-tests` names up to five of these tests, and
+  the human output shows it as a warning. The run does not stop, and the
+  completion does not change. Run each test or remove it to remove the
+  warning.
+- A failing test in a changed test file is a baseline failure, the same as a
+  failing test of a static test file. Because the dry run includes the
+  changed test files, it can report such a failure.
 - The `node-test` and `bun-test` adapters find test files with the default
   patterns of the runner. These glob patterns do not go into a dot
   directory, such as `.github/`. Fallow therefore sends the static test files
@@ -2120,6 +2131,10 @@ reads files only. It runs no test.
   [Runners](#runners).
 - `operators`, `minScore`, `concurrency` and `mutantsPerLine` apply to each run.
   A CLI flag wins.
+- `mutantsPerLine` and `functionScope` are config keys of the shared API, so
+  the CLI and the MCP tools select the same mutants for one project. A run of
+  selected mutant ids (`--recheck`) never samples and never widens, whatever
+  the config says.
 - `functionScope: true` widens the changed-code scope to whole functions for
   each run. `--function-scope` does the same for one run. No flag turns it
   off. See [Function scope](#function-scope).

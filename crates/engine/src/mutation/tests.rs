@@ -767,6 +767,55 @@ diff --git a/src/adder.ts b/src/adder.ts
     );
 }
 
+fn diff_of(files: &[&str]) -> DiffIndex {
+    let mut text = String::new();
+    for file in files {
+        std::fmt::Write::write_fmt(
+            &mut text,
+            format_args!(
+                "diff --git a/{file} b/{file}\n--- a/{file}\n+++ b/{file}\n@@ -1,0 +2,1 @@\n+// changed\n"
+            ),
+        )
+        .expect("write to a string");
+    }
+    DiffIndex::from_unified_diff(&text)
+}
+
+#[test]
+fn a_changed_scope_lists_the_runner_test_files_that_the_diff_changes() {
+    let root = fixture("mutation-plan");
+    let changed = |files: &[&str]| {
+        plans(
+            &root,
+            None,
+            &[MutationPlanRequest::new(MutationScope::ChangedSinceBase(
+                diff_of(files),
+            ))],
+        )
+        .remove(0)
+    };
+    let mixed = changed(&["src/math.ts", "src/math.test.ts"]);
+    assert_eq!(mixed.changed_test_files, ["src/math.test.ts"]);
+    assert!(!mixed.mutants.is_empty());
+
+    let test_only = changed(&["src/math.test.ts"]);
+    assert_eq!(test_only.changed_test_files, ["src/math.test.ts"]);
+    assert!(test_only.mutants.is_empty(), "{:?}", test_only.mutants);
+
+    let source_only = changed(&["src/math.ts"]);
+    assert!(source_only.changed_test_files.is_empty());
+
+    let unrelated = changed(&["src/wrapper.test.ts", "src/math.test.ts"]);
+    assert_eq!(
+        unrelated.changed_test_files,
+        ["src/math.test.ts", "src/wrapper.test.ts"],
+        "sorted, and a test file counts when it does not reach a changed source"
+    );
+
+    let full = plans(&root, None, &[MutationPlanRequest::new(MutationScope::All)]).remove(0);
+    assert!(full.changed_test_files.is_empty(), "no diff scope");
+}
+
 #[test]
 fn paths_scope_selects_only_the_named_files() {
     let root = fixture("mutation-plan");

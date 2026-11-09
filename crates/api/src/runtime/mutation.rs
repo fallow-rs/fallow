@@ -837,6 +837,7 @@ fn schedule_plan(plan: &MutationPlan) -> SchedulePlan {
             .map(|mutant| mutant.mutant.id.as_str().to_owned())
             .collect::<FxHashSet<_>>(),
         test_files: plan.test_files.clone(),
+        changed_test_files: plan.changed_test_files.clone(),
         file_test_files: plan
             .files
             .iter()
@@ -1131,6 +1132,20 @@ fn runner_output(
     })
 }
 
+/// The static test files and the changed test files of a plan, sorted. The
+/// glob runners search for exactly these files.
+fn known_test_files(plan: &MutationPlan) -> Vec<String> {
+    let mut files: Vec<String> = plan
+        .test_files
+        .iter()
+        .chain(&plan.changed_test_files)
+        .cloned()
+        .collect();
+    files.sort_unstable();
+    files.dedup();
+    files
+}
+
 /// The public error of a schedule that stopped the run.
 fn execute(
     options: &MutationRunOptions,
@@ -1142,8 +1157,10 @@ fn execute(
     let schedule = schedule_plan(plan);
     // With no planned mutant the dry run still runs the static test files,
     // because a hit on a statically unreached mutant is a static map miss.
+    // It also runs the changed test files, to warn about their skipped tests.
     if schedule.mutants.is_empty()
         && (schedule.unreached.is_empty() || schedule.test_files.is_empty())
+        && schedule.changed_test_files.is_empty()
     {
         return Ok(Execution {
             outcome: None,
@@ -1200,7 +1217,7 @@ fn execute(
             config_path: planned.runner_config.clone(),
             run_dir: run_dir.dir.to_string_lossy().into_owned(),
             path_map: run_dir.path_map.clone(),
-            options: init_options(runner, &root, &plan.test_files),
+            options: init_options(runner, &root, &known_test_files(plan)),
         },
         runner: range.clone(),
         kill_matrix: options.kill_matrix,
@@ -1636,6 +1653,7 @@ mod tests {
             framework_config_checked: false,
             skipped_files: Vec::new(),
             unmatched_paths: Vec::new(),
+            changed_test_files: Vec::new(),
         };
         assert!(
             open_result_cache(
@@ -1672,6 +1690,7 @@ mod tests {
             framework_config_checked: false,
             skipped_files: Vec::new(),
             unmatched_paths: Vec::new(),
+            changed_test_files: Vec::new(),
         }
     }
 
