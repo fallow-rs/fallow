@@ -60,6 +60,7 @@ mod visit_factory_properties;
 mod visit_factory_returns;
 #[path = "visit_impl_for_of_bindings.rs"]
 mod visit_for_of_bindings;
+pub(super) use visit_for_of_bindings::ITERABLE_ELEMENT_CALLBACK_METHODS;
 #[path = "visit_impl_function_returns.rs"]
 mod visit_function_returns;
 #[path = "visit_impl_helpers.rs"]
@@ -146,24 +147,6 @@ use visit_source_paths::{
     binding_source_path_candidates, flatten_member_path, push_unique_string, source_path_candidates,
 };
 pub(super) use visit_spy_calls::SpyApi;
-
-/// Array iteration methods whose callback's FIRST parameter is an element of the
-/// receiver array (so it can be typed to the receiver's element class). `reduce`
-/// and `reduceRight` are intentionally excluded: their first callback parameter
-/// is the accumulator, not an element. `sort` is excluded to keep the set to
-/// single-element-per-call iterators. See issue #1707 follow-up.
-const ITERABLE_ELEMENT_CALLBACK_METHODS: &[&str] = &[
-    "map",
-    "forEach",
-    "filter",
-    "find",
-    "findLast",
-    "findIndex",
-    "findLastIndex",
-    "flatMap",
-    "some",
-    "every",
-];
 
 const ROUTE_LOADER_DATA_SOURCES: &[&str] =
     &["react-router", "react-router-dom", "@remix-run/react"];
@@ -2459,7 +2442,13 @@ impl<'a> ModuleInfoExtractor {
                 subclass_receiver_reference(unwrap_static_expr(init))
                     .map(|(reference, _)| reference.span),
             );
-            if let Some(BindingTarget::Class(type_name)) = self.resolve_bound_object_name(&source) {
+            // An element source (`const day = m.days[i]`) binds no local: the
+            // module-flat binding map would mix the local with a binding of
+            // the same name in another function.
+            if !source.contains("[]")
+                && let Some(BindingTarget::Class(type_name)) =
+                    self.resolve_bound_object_name(&source)
+            {
                 self.insert_class_binding_target(id.name.to_string(), type_name);
             }
         }
@@ -2577,15 +2566,23 @@ impl<'a> ModuleInfoExtractor {
             self.insert_class_binding_target_if_absent(id.name.to_string(), class_name);
         }
 
-        if let Expression::CallExpression(call) = init
+        // `await Cls.create()` gives the instance of an async static factory
+        // (`static async create(): Promise<Cls>`), as `Cls.build()` gives the
+        // instance of a sync one.
+        let static_call_init = match init {
+            Expression::AwaitExpression(awaited) => unwrap_static_expr(&awaited.argument),
+            _ => init,
+        };
+        if let Expression::CallExpression(call) = static_call_init
             && let BindingPattern::BindingIdentifier(id) = &declarator.id
             && let Expression::StaticMemberExpression(member) = &call.callee
             && let Expression::Identifier(callee_object) = &member.object
         {
             if self.capture_subclass_provenance {
                 let path = format!("{}.{}", callee_object.name, member.property.name);
+                let awaited = !std::ptr::eq(static_call_init, init);
                 if let Some(value) =
-                    self.capture_binding_producer_call(&path, callee_object.span, false)
+                    self.capture_binding_producer_call(&path, callee_object.span, awaited)
                 {
                     self.set_static_binding_call_origin(
                         value,

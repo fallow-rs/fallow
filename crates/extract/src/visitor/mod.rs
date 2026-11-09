@@ -2040,6 +2040,7 @@ impl ModuleInfoExtractor {
                     callee_name,
                     member,
                     awaited,
+                    element: false,
                 },
             ));
     }
@@ -2830,49 +2831,6 @@ impl ModuleInfoExtractor {
         }
     }
 
-    /// Build the cross-module `exported_factory_returns` metadata: join the
-    /// strict (all-paths-unanimous) factory map against this module's exports, so
-    /// a `const x = useApi()` consumer can credit the returned class across the
-    /// boundary. The stored class name is the factory module's own LOCAL name,
-    /// resolved at analyze time through this module's imports to the real class
-    /// export. Only strict entries qualify, bounding over-credit. Must run after
-    /// `resolve_factory_return_aliases` has populated the strict map. See issue
-    /// #1441 (Part A).
-    fn collect_exported_factory_returns(&self) -> Vec<fallow_types::extract::FactoryReturnExport> {
-        if self.strict_factory_return_functions.is_empty()
-            && self.strict_async_factory_return_functions.is_empty()
-        {
-            return Vec::new();
-        }
-        let mut out = Vec::new();
-        for export in &self.exports {
-            if export.is_type_only {
-                continue;
-            }
-            let local_name = match (export.local_name.as_deref(), &export.name) {
-                (Some(local), _) => local,
-                (None, ExportName::Named(name)) => name.as_str(),
-                (None, ExportName::Default) => continue,
-            };
-            if let Some(class_local_name) = self.strict_factory_return_functions.get(local_name) {
-                out.push(fallow_types::extract::FactoryReturnExport {
-                    export_name: export.name.to_string(),
-                    class_local_name: class_local_name.clone(),
-                    is_async: false,
-                });
-            } else if let Some(class_local_name) =
-                self.strict_async_factory_return_functions.get(local_name)
-            {
-                out.push(fallow_types::extract::FactoryReturnExport {
-                    export_name: export.name.to_string(),
-                    class_local_name: class_local_name.clone(),
-                    is_async: true,
-                });
-            }
-        }
-        out
-    }
-
     /// Resolve each captured object-literal factory-return candidate's property
     /// values to terminal LOCAL class names, populating the same-file (loose) and
     /// cross-module (strict) shape maps. Reuses `resolve_bound_object_name` +
@@ -3506,6 +3464,7 @@ impl ModuleInfoExtractor {
         // the same typed-property expansion as unambiguous ones.
         self.resolve_ambiguous_walk_order_member_accesses();
         self.resolve_bound_member_accesses();
+        self.resolve_imported_call_element_accesses();
         self.complete_binding_producer_calls();
         self.propagate_local_subclass_member_accesses();
         self.resolve_projected_member_accesses();

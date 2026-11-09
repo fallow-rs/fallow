@@ -454,6 +454,7 @@ fn release_resolution_payload_drops_copied_vectors_only() {
             export_name: "useApi".to_string(),
             class_local_name: "RESTApi".to_string(),
             is_async: false,
+            returns_array: false,
         }]),
         exported_factory_return_object_shapes: std::sync::Arc::from([
             FactoryReturnObjectShapeExport {

@@ -61,7 +61,9 @@ pub(super) fn propagate_accesses_through_instance_exports(
     }
 }
 
-fn build_typed_instance_binding_targets(
+pub(super) type TypedInstanceTargets = FxHashMap<ExportKey, FxHashMap<String, Vec<ExportKey>>>;
+
+pub(super) fn build_typed_instance_binding_targets(
     graph: &ModuleGraph,
     modules: &[ModuleInfo],
     indexes: &MemberPassIndexes<'_>,
@@ -354,7 +356,7 @@ fn resolve_type_targets(
     targets
 }
 
-fn chained_typed_instance_targets(
+pub(super) fn chained_typed_instance_targets(
     graph: &ModuleGraph,
     typed_instance_targets: &FxHashMap<ExportKey, FxHashMap<String, Vec<ExportKey>>>,
     seed_key: &ExportKey,
