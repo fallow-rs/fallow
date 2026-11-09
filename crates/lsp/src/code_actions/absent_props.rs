@@ -26,7 +26,7 @@ pub fn build_suppress_absent_prop_actions(
     if results.absent_component_props.is_empty() {
         return Vec::new();
     }
-    if !std::fs::read_to_string(file_path).is_ok_and(|saved| saved == live_source) {
+    if crate::position::read_document_text(file_path).is_none_or(|saved| saved != live_source) {
         return Vec::new();
     }
     let file_lines: Vec<_> = live_source.lines().collect();

@@ -16,6 +16,8 @@ use ls_types::{
 };
 use rustc_hash::FxHashMap;
 
+use crate::position::byte_order_mark_len;
+
 /// One config entry that had no effect in the latest run.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UnmatchedConfigPattern {
@@ -64,12 +66,17 @@ pub fn collect(
         .collect()
 }
 
+/// A config span counts its byte offsets in the file on disk, with the byte
+/// order mark. The editor buffer does not hold the mark, so the position
+/// counts from the end of the mark.
 fn pattern_location(span: ConfigEntrySpan) -> Option<PatternLocation> {
     let content = std::fs::read_to_string(&span.path).ok()?;
+    let mark_len = byte_order_mark_len(&content);
+    let text = &content[mark_len..];
     Some(PatternLocation {
         range: Range {
-            start: position_at(&content, span.start),
-            end: position_at(&content, span.end),
+            start: position_at(text, span.start.saturating_sub(mark_len)),
+            end: position_at(text, span.end.saturating_sub(mark_len)),
         },
         path: span.path,
     })
@@ -144,6 +151,25 @@ mod tests {
         assert_eq!(position.line, 1);
         let line = "  \"a\": \"\u{1F389}\", \"b\": [";
         assert_eq!(position.character as usize, line.encode_utf16().count());
+    }
+
+    #[test]
+    fn byte_order_mark_is_not_a_column_of_the_first_line() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join(".fallowrc.json");
+        let content = "\u{feff}{\"ignoreFindings\": [\"a/**\"]}";
+        std::fs::write(&path, content).expect("write config");
+        let start = content.find("\"a/**\"").expect("entry");
+        let span = ConfigEntrySpan {
+            path,
+            start,
+            end: start + "\"a/**\"".len(),
+        };
+
+        let location = pattern_location(span).expect("location");
+
+        assert_eq!(location.range.start, Position::new(0, 20));
+        assert_eq!(location.range.end, Position::new(0, 26));
     }
 
     #[test]

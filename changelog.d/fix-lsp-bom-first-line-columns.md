@@ -1,0 +1,3 @@
+### Fixed
+
+- **LSP diagnostics on the first line of a file with a UTF-8 byte order mark start at the correct column.** The editor buffer does not hold the byte order mark, but the LSP counted it when it read the file from disk. Thus each diagnostic on line 1 started 2 columns too far to the left, and a config diagnostic on line 1 started 1 column too far to the right. The LSP now drops the leading byte order mark when it reads a file. A file with a byte order mark also no longer counts as changed against its open editor buffer, so its diagnostics and the remove-export quick fix are not dropped.

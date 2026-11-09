@@ -817,7 +817,7 @@ impl FallowLspServer {
     async fn code_action_file_content(&self, uri: &Uri, file_path: &Path) -> String {
         let documents = self.documents.read().await;
         documents.get(uri).map_or_else(
-            || std::fs::read_to_string(file_path).unwrap_or_default(),
+            || crate::position::read_document_text(file_path).unwrap_or_default(),
             |state| state.text.clone(),
         )
     }
