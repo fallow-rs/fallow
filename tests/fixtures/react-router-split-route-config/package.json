@@ -1,0 +1,6 @@
+{
+  "name": "react-router-split-route-config",
+  "dependencies": {
+    "@react-router/dev": "^7.0.0"
+  }
+}

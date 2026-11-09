@@ -10,9 +10,11 @@ use std::{
 
 use fallow_extract::JsText;
 use oxc_ast::ast::{
-    CallExpression, ExportDefaultDeclarationKind, Expression, ObjectExpression, Program, Statement,
+    Argument, ArrayExpressionElement, BindingPattern, CallExpression, Declaration, Expression,
+    ImportDeclarationSpecifier, ObjectExpression, Program, Statement, VariableDeclaration,
 };
 use oxc_span::SourceType;
+use rustc_hash::FxHashSet;
 
 use super::{Plugin, PluginResult, config_parser};
 
@@ -213,68 +215,315 @@ fn route_config_candidates(root: &Path, app_dir: &str) -> [PathBuf; 4] {
     ]
 }
 
+/// Source extensions that a route config module can have. The lookup order
+/// follows the TypeScript resolution order.
+const ROUTE_CONFIG_MODULE_EXTENSIONS: &[&str] =
+    &["ts", "tsx", "mts", "cts", "js", "jsx", "mjs", "cjs"];
+
+/// The state of one walk over the route config and the local modules that it
+/// imports. Route file paths stay relative to the directory of the route
+/// config, also when an imported module declares them.
+struct RouteWalk<'w> {
+    root: &'w Path,
+    result: &'w mut PluginResult,
+    /// The bindings that the walk followed. The set stops import cycles and
+    /// cycles between local variables.
+    followed: FxHashSet<FollowedBinding>,
+}
+
+impl RouteWalk<'_> {
+    /// Records the binding and tells whether the walk sees it for the first time.
+    fn first_visit(
+        &mut self,
+        module: &Path,
+        name: &str,
+        kind: BindingKind,
+        base_dir: &Path,
+    ) -> bool {
+        self.followed.insert(FollowedBinding {
+            module: module.to_path_buf(),
+            name: name.to_string(),
+            kind,
+            base_dir: base_dir.to_path_buf(),
+        })
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+enum BindingKind {
+    Export,
+    Local,
+}
+
+/// A binding of one module, walked with one route base directory. The
+/// `relative()` helper can walk the same binding with another directory.
+#[derive(PartialEq, Eq, Hash)]
+struct FollowedBinding {
+    module: PathBuf,
+    name: String,
+    kind: BindingKind,
+    base_dir: PathBuf,
+}
+
+/// One parsed module of the route config.
+#[derive(Clone, Copy)]
+struct RouteModule<'s, 'a> {
+    program: &'s Program<'a>,
+    path: &'s Path,
+}
+
+/// The value of a module export, before the walk resolves it.
+enum ExportTarget<'s, 'a> {
+    Expression(&'s Expression<'a>),
+    Local(&'s str),
+    ReExport { source: &'s str, name: &'s str },
+}
+
 fn collect_route_config_from_source(
     result: &mut PluginResult,
     source: &str,
     route_config_path: &Path,
     root: &Path,
 ) {
-    let source_type = SourceType::from_path(route_config_path).unwrap_or_default();
-    fallow_extract::parse_bounded_or_default(source, source_type, |parsed| {
-        let Some(expr) = find_default_export_expression(&parsed.program) else {
-            return;
-        };
-
-        let base_dir = route_config_path.parent().unwrap_or(root);
-        collect_route_entries(expr, &parsed.program, base_dir, root, result);
+    let base_dir = route_config_path.parent().unwrap_or(root);
+    let mut walk = RouteWalk {
+        root,
+        result,
+        followed: FxHashSet::default(),
+    };
+    walk.first_visit(route_config_path, "default", BindingKind::Export, base_dir);
+    parse_route_module(source, route_config_path, |module| {
+        collect_module_export(module, "default", base_dir, &mut walk);
     });
 }
 
-fn find_default_export_expression<'a>(program: &'a Program<'a>) -> Option<&'a Expression<'a>> {
-    for stmt in &program.body {
-        let Statement::ExportDefaultDeclaration(decl) = stmt else {
-            continue;
-        };
-
-        let expr = match &decl.declaration {
-            ExportDefaultDeclarationKind::FunctionDeclaration(_)
-            | ExportDefaultDeclarationKind::ClassDeclaration(_) => return None,
-            _ => decl.declaration.as_expression()?,
-        };
-        let expr = strip_wrappers(expr);
-
-        if let Some(name) = unwrap_identifier_name(expr) {
-            return find_variable_init_expression(program, name);
-        }
-        return Some(expr);
-    }
-
-    None
+fn parse_route_module(source: &str, path: &Path, walk: impl FnOnce(RouteModule<'_, '_>) + Send) {
+    let source_type = SourceType::from_path(path).unwrap_or_default();
+    fallow_extract::parse_bounded_or_default(source, source_type, |parsed| {
+        walk(RouteModule {
+            program: &parsed.program,
+            path,
+        });
+    });
 }
 
-fn find_variable_init_expression<'a>(
-    program: &'a Program<'a>,
-    name: &str,
-) -> Option<&'a Expression<'a>> {
-    for stmt in &program.body {
-        let Statement::VariableDeclaration(decl) = stmt else {
-            continue;
-        };
-
-        for declarator in &decl.declarations {
-            let oxc_ast::ast::BindingPattern::BindingIdentifier(id) = &declarator.id else {
-                continue;
-            };
-            if id.name == name {
-                return declarator.init.as_ref().map(strip_wrappers);
+fn collect_module_export(
+    module: RouteModule<'_, '_>,
+    export_name: &str,
+    base_dir: &Path,
+    walk: &mut RouteWalk<'_>,
+) {
+    for target in find_export_targets(module.program, export_name) {
+        match target {
+            ExportTarget::Expression(expr) => collect_route_entries(expr, module, base_dir, walk),
+            ExportTarget::Local(name) => collect_binding(name, module, base_dir, walk),
+            ExportTarget::ReExport { source, name } => {
+                follow_module_export(module.path, source, name, base_dir, walk);
             }
         }
     }
-
-    None
 }
 
-fn strip_wrappers<'a>(expr: &'a Expression<'a>) -> &'a Expression<'a> {
+/// Finds the values that `program` exports as `name`. A function or class
+/// default export holds no route entries, so the result is empty for it.
+fn find_export_targets<'s, 'a>(
+    program: &'s Program<'a>,
+    name: &'s str,
+) -> Vec<ExportTarget<'s, 'a>> {
+    let mut targets = Vec::new();
+    let mut star_sources = Vec::new();
+    for stmt in &program.body {
+        match stmt {
+            Statement::ExportDefaultDeclaration(decl) if name == "default" => {
+                let Some(expr) = decl.declaration.as_expression() else {
+                    continue;
+                };
+                let expr = strip_wrappers(expr);
+                targets.push(match unwrap_identifier_name(expr) {
+                    Some(local) => ExportTarget::Local(local),
+                    None => ExportTarget::Expression(expr),
+                });
+            }
+            Statement::ExportDeclaration(decl) => {
+                if let Declaration::VariableDeclaration(var) = &decl.declaration
+                    && let Some(init) = find_declarator_init(var, name)
+                {
+                    targets.push(ExportTarget::Expression(init));
+                }
+            }
+            Statement::ExportNamedDeclaration(decl) => {
+                targets.extend(
+                    decl.specifiers
+                        .iter()
+                        .filter(|specifier| specifier.exported.name() == name)
+                        .map(|specifier| ExportTarget::Local(specifier.local.name().as_str())),
+                );
+            }
+            Statement::ExportFromDeclaration(decl) => {
+                let Some(source) = decl.source.value.as_str() else {
+                    continue;
+                };
+                targets.extend(
+                    decl.specifiers
+                        .iter()
+                        .filter(|specifier| specifier.exported.name() == name)
+                        .map(|specifier| ExportTarget::ReExport {
+                            source,
+                            name: specifier.local.name().as_str(),
+                        }),
+                );
+            }
+            Statement::ExportAllDeclaration(decl)
+                if decl.exported.is_none() && name != "default" =>
+            {
+                star_sources.extend(decl.source.value.as_str());
+            }
+            _ => {}
+        }
+    }
+    if targets.is_empty() {
+        targets.extend(
+            star_sources
+                .into_iter()
+                .map(|source| ExportTarget::ReExport { source, name }),
+        );
+    }
+    targets
+}
+
+/// Follows a local binding to its declaration in the module, or to the
+/// export of the local module that the binding imports.
+fn collect_binding(
+    name: &str,
+    module: RouteModule<'_, '_>,
+    base_dir: &Path,
+    walk: &mut RouteWalk<'_>,
+) {
+    if !walk.first_visit(module.path, name, BindingKind::Local, base_dir) {
+        return;
+    }
+    if let Some(init) = find_variable_init_expression(module.program, name) {
+        collect_route_entries(init, module, base_dir, walk);
+        return;
+    }
+    if let Some((source, imported)) = find_import_binding(module.program, name) {
+        follow_module_export(module.path, source, imported, base_dir, walk);
+    }
+}
+
+fn find_import_binding<'s>(program: &'s Program<'_>, local: &str) -> Option<(&'s str, &'s str)> {
+    program.body.iter().find_map(|stmt| {
+        let Statement::ImportDeclaration(decl) = stmt else {
+            return None;
+        };
+        let imported = decl
+            .specifiers
+            .as_ref()?
+            .iter()
+            .find_map(|specifier| match specifier {
+                ImportDeclarationSpecifier::ImportSpecifier(spec) if spec.local.name == local => {
+                    Some(spec.imported.name().as_str())
+                }
+                ImportDeclarationSpecifier::ImportDefaultSpecifier(spec)
+                    if spec.local.name == local =>
+                {
+                    Some("default")
+                }
+                _ => None,
+            })?;
+        Some((decl.source.value.as_str()?, imported))
+    })
+}
+
+/// Parses the local module that `specifier` names and walks its export. The
+/// walk follows only relative specifiers to files inside the project root.
+fn follow_module_export(
+    importer: &Path,
+    specifier: &str,
+    export_name: &str,
+    base_dir: &Path,
+    walk: &mut RouteWalk<'_>,
+) {
+    if !specifier.starts_with('.') {
+        return;
+    }
+    let Some(path) = importer
+        .parent()
+        .and_then(|dir| resolve_local_module(dir, specifier))
+    else {
+        return;
+    };
+    if !path.starts_with(walk.root)
+        || !walk.first_visit(&path, export_name, BindingKind::Export, base_dir)
+    {
+        return;
+    }
+    let Ok(source) = fs::read_to_string(&path) else {
+        return;
+    };
+    parse_route_module(&source, &path, |module| {
+        collect_module_export(module, export_name, base_dir, walk);
+    });
+}
+
+/// Resolves a relative specifier the way a bundler does: the file itself, the
+/// file with a source extension, then the index file of a directory. A `.js`
+/// specifier also matches a TypeScript source with the same stem.
+fn resolve_local_module(dir: &Path, specifier: &str) -> Option<PathBuf> {
+    let base = config_parser::lexical_normalize(&dir.join(specifier));
+    if base.is_file() {
+        return Some(base);
+    }
+    let with_extension = ROUTE_CONFIG_MODULE_EXTENSIONS.iter().map(|ext| {
+        let mut path = base.clone().into_os_string();
+        path.push(".");
+        path.push(ext);
+        PathBuf::from(path)
+    });
+    let typescript_source = ["js", "mjs", "cjs"]
+        .iter()
+        .zip(["ts", "mts", "cts"])
+        .filter(|(js, _)| base.extension().is_some_and(|ext| ext == **js))
+        .map(|(_, ts)| base.with_extension(ts));
+    let index = ROUTE_CONFIG_MODULE_EXTENSIONS
+        .iter()
+        .map(|ext| base.join(format!("index.{ext}")));
+    with_extension
+        .chain(typescript_source)
+        .chain(index)
+        .find(|path| path.is_file())
+}
+
+fn find_declarator_init<'s, 'a>(
+    decl: &'s VariableDeclaration<'a>,
+    name: &str,
+) -> Option<&'s Expression<'a>> {
+    decl.declarations.iter().find_map(|declarator| {
+        let BindingPattern::BindingIdentifier(id) = &declarator.id else {
+            return None;
+        };
+        if id.name != name {
+            return None;
+        }
+        declarator.init.as_ref().map(strip_wrappers)
+    })
+}
+
+fn find_variable_init_expression<'s, 'a>(
+    program: &'s Program<'a>,
+    name: &str,
+) -> Option<&'s Expression<'a>> {
+    program.body.iter().find_map(|stmt| match stmt {
+        Statement::VariableDeclaration(decl) => find_declarator_init(decl, name),
+        Statement::ExportDeclaration(export) => match &export.declaration {
+            Declaration::VariableDeclaration(decl) => find_declarator_init(decl, name),
+            _ => None,
+        },
+        _ => None,
+    })
+}
+
+fn strip_wrappers<'s, 'a>(expr: &'s Expression<'a>) -> &'s Expression<'a> {
     match expr {
         Expression::ParenthesizedExpression(paren) => strip_wrappers(&paren.expression),
         Expression::TSSatisfiesExpression(ts_sat) => strip_wrappers(&ts_sat.expression),
@@ -283,7 +532,7 @@ fn strip_wrappers<'a>(expr: &'a Expression<'a>) -> &'a Expression<'a> {
     }
 }
 
-fn unwrap_identifier_name<'a>(expr: &'a Expression<'a>) -> Option<&'a str> {
+fn unwrap_identifier_name<'s>(expr: &'s Expression<'_>) -> Option<&'s str> {
     match strip_wrappers(expr) {
         Expression::Identifier(id) => Some(id.name.as_str()),
         _ => None,
@@ -292,30 +541,31 @@ fn unwrap_identifier_name<'a>(expr: &'a Expression<'a>) -> Option<&'a str> {
 
 fn collect_route_entries(
     expr: &Expression<'_>,
-    program: &Program<'_>,
+    module: RouteModule<'_, '_>,
     base_dir: &Path,
-    root: &Path,
-    result: &mut PluginResult,
+    walk: &mut RouteWalk<'_>,
 ) {
     match strip_wrappers(expr) {
         Expression::ArrayExpression(array) => {
             for element in &array.elements {
-                let Some(element_expr) = element.as_expression() else {
-                    continue;
+                let element_expr = match element {
+                    ArrayExpressionElement::SpreadElement(spread) => &spread.argument,
+                    _ => match element.as_expression() {
+                        Some(element_expr) => element_expr,
+                        None => continue,
+                    },
                 };
-                collect_route_entries(element_expr, program, base_dir, root, result);
+                collect_route_entries(element_expr, module, base_dir, walk);
             }
         }
         Expression::ObjectExpression(obj) => {
-            collect_route_object(obj, program, base_dir, root, result);
+            collect_route_object(obj, module, base_dir, walk);
         }
         Expression::CallExpression(call) => {
-            collect_route_call(call, program, base_dir, root, result);
+            collect_route_call(call, module, base_dir, walk);
         }
         Expression::Identifier(id) => {
-            if let Some(init) = find_variable_init_expression(program, id.name.as_str()) {
-                collect_route_entries(init, program, base_dir, root, result);
-            }
+            collect_binding(id.name.as_str(), module, base_dir, walk);
         }
         _ => {}
     }
@@ -323,56 +573,55 @@ fn collect_route_entries(
 
 fn collect_route_object(
     obj: &ObjectExpression<'_>,
-    program: &Program<'_>,
+    module: RouteModule<'_, '_>,
     base_dir: &Path,
-    root: &Path,
-    result: &mut PluginResult,
+    walk: &mut RouteWalk<'_>,
 ) {
     if let Some(file) = config_parser::property_string(obj, "file") {
-        add_route_module_file(result, &file, base_dir, root);
+        add_route_module_file(walk.result, &file, base_dir, walk.root);
     }
 
     if let Some(children) = config_parser::property_expr(obj, "children") {
-        collect_route_entries(children, program, base_dir, root, result);
+        collect_route_entries(children, module, base_dir, walk);
     }
 }
 
 fn collect_route_call(
     call: &CallExpression<'_>,
-    program: &Program<'_>,
+    module: RouteModule<'_, '_>,
     base_dir: &Path,
-    root: &Path,
-    result: &mut PluginResult,
+    walk: &mut RouteWalk<'_>,
 ) {
     let Some(name) = unwrap_identifier_name(&call.callee) else {
         return;
     };
+    let root = walk.root;
 
     match name {
         "route" => {
             if let Some(file) = nth_argument_string(call, 1) {
-                add_route_module_file(result, &file, base_dir, root);
+                add_route_module_file(walk.result, &file, base_dir, root);
             }
             if let Some(children) = nth_argument_expression(call, 2) {
-                collect_route_entries(children, program, base_dir, root, result);
+                collect_route_entries(children, module, base_dir, walk);
             }
         }
         "index" => {
             if let Some(file) = nth_argument_string(call, 0) {
-                add_route_module_file(result, &file, base_dir, root);
+                add_route_module_file(walk.result, &file, base_dir, root);
             }
         }
         "layout" => {
             if let Some(file) = nth_argument_string(call, 0) {
-                add_route_module_file(result, &file, base_dir, root);
+                add_route_module_file(walk.result, &file, base_dir, root);
             }
             if let Some(children) = nth_argument_expression(call, 1) {
-                collect_route_entries(children, program, base_dir, root, result);
+                collect_route_entries(children, module, base_dir, walk);
             }
         }
         "prefix" => {
             if let Some(children) = nth_argument_expression(call, 1) {
-                collect_route_entries(children, program, base_dir, root, result);
+                collect_route_entries(children, module, base_dir, walk);
             }
         }
         "relative" => {
@@ -380,20 +629,24 @@ fn collect_route_call(
                 .and_then(|raw| normalize_route_base_dir(&raw, base_dir, root))
                 .unwrap_or_else(|| base_dir.to_path_buf());
             if let Some(children) = nth_argument_expression(call, 1) {
-                collect_route_entries(children, program, &next_base, root, result);
+                collect_route_entries(children, module, &next_base, walk);
             }
         }
         "flatRoutes" => {
             if let Some(route_dir) = extract_flat_routes_root_dir(call, base_dir, root) {
-                add_route_dir_override(result, &route_dir);
+                add_route_dir_override(walk.result, &route_dir);
             }
         }
         _ => {
             for argument in &call.arguments {
-                let Some(argument_expr) = argument.as_expression() else {
-                    continue;
+                let argument_expr = match argument {
+                    Argument::SpreadElement(spread) => &spread.argument,
+                    _ => match argument.as_expression() {
+                        Some(argument_expr) => argument_expr,
+                        None => continue,
+                    },
                 };
-                collect_route_entries(argument_expr, program, base_dir, root, result);
+                collect_route_entries(argument_expr, module, base_dir, walk);
             }
         }
     }
@@ -443,16 +696,19 @@ fn normalize_route_base_dir(raw: &str, base_dir: &Path, root: &Path) -> Option<P
     normalize_route_path(raw, base_dir, root).map(|relative| root.join(relative))
 }
 
+/// Route file paths are literal. A segment such as `[id]` must not act as a
+/// glob character class, so the pattern escapes it.
 fn add_route_module_file(result: &mut PluginResult, raw_path: &str, base_dir: &Path, root: &Path) {
     let Some(path) = normalize_route_path(raw_path, base_dir, root) else {
         return;
     };
-    result.push_entry_pattern(path.clone());
-    result.push_used_export_rule(path, ROUTE_EXPORTS.iter().copied());
+    let pattern = globset::escape(&path);
+    result.push_entry_pattern(pattern.clone());
+    result.push_used_export_rule(pattern, ROUTE_EXPORTS.iter().copied());
 }
 
 fn add_route_dir_override(result: &mut PluginResult, route_dir: &str) {
-    let pattern = format!("{route_dir}/**/*.{{ts,tsx,js,jsx}}");
+    let pattern = format!("{}/**/*.{{ts,tsx,js,jsx}}", globset::escape(route_dir));
     result.push_entry_pattern(pattern.clone());
     result.push_used_export_rule(pattern, ROUTE_EXPORTS.iter().copied());
 }
@@ -574,6 +830,81 @@ mod tests {
         );
 
         assert!(has_entry_pattern(&result, "web/marketing/home.tsx"));
+    }
+
+    #[test]
+    fn resolve_config_follows_star_reexports_and_import_cycles() {
+        let temp = tempdir().unwrap();
+        fs::create_dir_all(temp.path().join("app/config")).unwrap();
+        fs::write(
+            temp.path().join("app/config/index.ts"),
+            r#"export * from "./first";"#,
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("app/config/first.ts"),
+            r#"
+                import { route } from "@react-router/dev/routes";
+                import { second } from "./second.js";
+                export const first = [route("first", "./first.tsx"), ...second];
+            "#,
+        )
+        .unwrap();
+        fs::write(
+            temp.path().join("app/config/second.ts"),
+            r#"
+                import { index } from "@react-router/dev/routes";
+                import { first } from "./first";
+                export const second = [index("./second.tsx"), ...first];
+            "#,
+        )
+        .unwrap();
+
+        let plugin = ReactRouterPlugin;
+        let result = plugin.resolve_config(
+            temp.path().join("app/routes.ts").as_path(),
+            r#"
+                import { first } from "./config";
+                import external from "external-routes";
+                export default [...first, ...external];
+            "#,
+            temp.path(),
+        );
+
+        assert!(has_entry_pattern(&result, "app/first.tsx"));
+        assert!(has_entry_pattern(&result, "app/second.tsx"));
+    }
+
+    #[test]
+    fn resolve_config_stops_at_local_variable_cycles() {
+        let plugin = ReactRouterPlugin;
+        let result = plugin.resolve_config(
+            Path::new("/project/app/routes.ts"),
+            r#"
+                import { route } from "@react-router/dev/routes";
+                const first = [...second, route("first", "./first.tsx")];
+                const second = [...first];
+                export default first;
+            "#,
+            Path::new("/project"),
+        );
+
+        assert!(has_entry_pattern(&result, "app/first.tsx"));
+    }
+
+    #[test]
+    fn resolve_config_escapes_literal_route_paths() {
+        let plugin = ReactRouterPlugin;
+        let result = plugin.resolve_config(
+            Path::new("/project/app/routes.ts"),
+            r#"
+                import { route } from "@react-router/dev/routes";
+                export default [route(":id", "./items/[id]/page.tsx")];
+            "#,
+            Path::new("/project"),
+        );
+
+        assert!(has_entry_pattern(&result, "app/items/[[]id[]]/page.tsx"));
     }
 
     #[test]
