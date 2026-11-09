@@ -145,6 +145,12 @@ pub(super) const CONFIRMATION_RUN_FAILURE: &str = "the test fails with no active
 pub(super) const RESTARTED_DRY_RUN_FAILURE: &str =
     "the test did not pass in the dry run of a restarted companion";
 
+const PARALLEL_STATE_HINT: &str = "; try --concurrency 1 or set mutation.concurrency to 1; parallel companions may share files or a database";
+
+pub(super) const fn parallel_state_hint(workers: usize) -> &'static str {
+    if workers > 1 { PARALLEL_STATE_HINT } else { "" }
+}
+
 /// The longest test error that a baseline failure keeps, in bytes. The
 /// companion bounds the error too. This bound guards the pipe from the
 /// companion.
@@ -163,8 +169,10 @@ pub fn split_control_run_failure(message: &str) -> Option<(&str, &str)> {
     ]
     .into_iter()
     .find_map(|reason| {
-        let error = message.strip_prefix(reason)?.strip_prefix(": ")?;
-        Some((reason, error))
+        let rest = message.strip_prefix(reason)?;
+        let rest = rest.strip_prefix(PARALLEL_STATE_HINT).unwrap_or(rest);
+        let error = rest.strip_prefix(": ")?;
+        Some((&message[..message.len() - rest.len()], error))
     })
 }
 
@@ -303,6 +311,7 @@ impl ControlMemo {
 /// message keeps the first error of the test from the dry run of a
 /// restarted companion, when the companion sent one.
 pub(super) fn note_restarted_baseline_failure(
+    workers: usize,
     outcome: &mut ScheduleOutcome,
     facts: &DryRunFacts,
     memo: &ControlMemo,
@@ -324,7 +333,10 @@ pub(super) fn note_restarted_baseline_failure(
                 error: memo.restarted_dry_run_error(&test),
                 test_id: test.clone(),
             }
-            .message(RESTARTED_DRY_RUN_FAILURE),
+            .message(&format!(
+                "{RESTARTED_DRY_RUN_FAILURE}{}",
+                parallel_state_hint(workers)
+            )),
         ),
         test_id: Some(test),
         mutant_ids: vec![mutant_id.to_owned()],
