@@ -350,9 +350,9 @@ pub use mutation::{
     MutationTasksSchemaVersion, MutationTasksSummary, MutationTestKillRow, MutationTimings,
     MutationTypecheckOutput, MutationTypecheckSkip, MutationTypecheckSkipReason, MutationVerdict,
     MutationVerdictInput, MutationVerdictJoin, MutationVerdictKind, MutationVerdictSchemaVersion,
-    MutationWorktreeCheck, SAMPLED_OUT_REASON, serialize_mutation_inspect_json_output,
-    serialize_mutation_json_output, serialize_mutation_plan_json_output,
-    serialize_mutation_tasks_json_output,
+    MutationWorktreeCheck, SAMPLED_OUT_REASON, SKIPPED_TESTS_CODE,
+    serialize_mutation_inspect_json_output, serialize_mutation_json_output,
+    serialize_mutation_plan_json_output, serialize_mutation_tasks_json_output,
 };
 pub use next_steps::{
     AuditNextStepsInput, BaselineRecheckInput, CombinedNextStepsInput, DeadCodeNextStepsInput,

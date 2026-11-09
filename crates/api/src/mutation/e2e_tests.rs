@@ -506,6 +506,19 @@ mod end_to_end {
         Some(dunce::canonicalize(package).expect("package path"))
     }
 
+    /// The fixtures hold a skipped test and a todo test on purpose, so a run
+    /// reports the `skipped-tests` warning and no other error.
+    fn assert_only_skipped_tests_warning(report: &fallow_output::MutationReport) {
+        assert!(
+            report
+                .errors
+                .iter()
+                .all(|error| error.code == fallow_output::SKIPPED_TESTS_CODE),
+            "{:#?}",
+            report.errors
+        );
+    }
+
     /// A committed copy of the Vitest fixture of the companion package.
     fn vitest_project(package: &Path) -> (tempfile::TempDir, PathBuf) {
         let fixture = package.join("test/fixtures/vitest-basic");
@@ -603,6 +616,41 @@ mod end_to_end {
     }
 
     #[test]
+    fn a_skipped_test_of_a_plan_test_file_gets_a_warning() {
+        let Some(package) = companion_fixture() else {
+            return;
+        };
+        let (_project, root) = vitest_project(&package);
+
+        let report = run_mutation(&options(
+            &root,
+            MutationRunScope::Paths(vec![PathBuf::from("src/math.ts")]),
+        ))
+        .expect("the run completes");
+
+        let issue = report
+            .errors
+            .iter()
+            .find(|error| error.code == fallow_output::SKIPPED_TESTS_CODE)
+            .unwrap_or_else(|| panic!("a skipped-tests warning: {:#?}", report.errors));
+        assert!(
+            issue.message.starts_with("1 test in the test files"),
+            "{}",
+            issue.message
+        );
+        assert!(
+            issue.message.contains("test/math.test.ts::skipped"),
+            "{}",
+            issue.message
+        );
+        assert_eq!(
+            report.completion.status,
+            MutationCompletionStatus::Complete,
+            "the warning does not make the run partial"
+        );
+    }
+
+    #[test]
     fn a_second_run_reuses_the_results_until_a_key_file_changes() {
         let Some(package) = companion_fixture() else {
             return;
@@ -694,7 +742,7 @@ mod end_to_end {
             MutationCompletionStatus::Complete,
             "{report:#?}"
         );
-        assert!(report.errors.is_empty(), "{:#?}", report.errors);
+        assert_only_skipped_tests_warning(&report);
         assert!(report.worktree.checked);
         assert!(report.worktree.changed_paths.is_empty());
         assert_eq!(
@@ -819,7 +867,7 @@ mod end_to_end {
             MutationCompletionStatus::Complete,
             "{report:#?}"
         );
-        assert!(report.errors.is_empty(), "{:#?}", report.errors);
+        assert_only_skipped_tests_warning(report);
         assert!(report.worktree.changed_paths.is_empty());
         let in_function = |name: &str| {
             report

@@ -566,6 +566,12 @@ shows as `pending`.
   `duplicate-test-ids` names the IDs, and the human output shows it as a
   warning. The run does not stop, and the verdicts of the other tests stay
   valid. Give each test a unique title to remove the warning.
+- A test of a test file in the plan can be `skip` or `todo` in the dry run,
+  for example `it.skip`. Such a test runs no assertion, so it cannot kill a
+  mutant. The `errors` entry `skipped-tests` names up to five of these
+  tests, and the human output shows it as a warning. The run does not stop,
+  and the completion does not change. Run the test or remove it to remove
+  the warning.
 - The `node-test` and `bun-test` adapters find test files with the default
   patterns of the runner. These glob patterns do not go into a dot
   directory, such as `.github/`. Fallow therefore sends the static test files

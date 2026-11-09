@@ -22,6 +22,9 @@ pub const MUTATION_INSPECT_SCHEMA_VERSION: u32 = 2;
 pub const MUTATION_TASKS_SCHEMA_VERSION: u32 = 1;
 /// The code of the run issue for tests that share a test id in the dry run.
 pub const DUPLICATE_TEST_IDS_CODE: &str = "duplicate-test-ids";
+/// The code of the run issue for tests that the dry run skipped or marked as
+/// todo, in a test file of the plan. Such a test checks nothing.
+pub const SKIPPED_TESTS_CODE: &str = "skipped-tests";
 
 /// Version singleton for a mutation report.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

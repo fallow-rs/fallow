@@ -1909,7 +1909,7 @@ pub fn run_schedule_with_progress(
             return Err(error);
         }
     };
-    record_dry_run(&mut outcome, &dry);
+    record_dry_run(&mut outcome, plan, &dry);
     let target_ids =
         config_targets(config, &dry, runner.caps, &mut outcome).inspect_err(|_| link.shutdown())?;
     outcome.unloaded_paths = dry.unloaded_paths;

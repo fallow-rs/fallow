@@ -17,7 +17,7 @@ use fallow_output::{
     MutationKillMatrixTargetStatus, MutationPlanDisposition, MutationPlanOutput, MutationReport,
     MutationResumeOutput, MutationScopeKind, MutationScopeOutput, MutationSkippedFile,
     MutationStaleReason, MutationTargetOnlyKill, MutationTestKillRow, MutationTypecheckOutput,
-    TestReachClass,
+    SKIPPED_TESTS_CODE, TestReachClass,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -579,8 +579,8 @@ fn render_footer_lines(out: &mut String, report: &MutationReport) {
         }
     }
     for error in &report.errors {
-        // The run with duplicate test ids still has valid verdicts for the other tests.
-        let label = if error.code == DUPLICATE_TEST_IDS_CODE {
+        // A run with duplicate or skipped test ids still has valid verdicts for the other tests.
+        let label = if error.code == DUPLICATE_TEST_IDS_CODE || error.code == SKIPPED_TESTS_CODE {
             "Warning"
         } else {
             "Error"

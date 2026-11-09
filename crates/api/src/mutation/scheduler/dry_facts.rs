@@ -157,8 +157,13 @@ pub(super) fn covering_tests(
     tests
 }
 
-/// Copies the test files and the duplicate test id issue of the dry run.
-pub(super) fn record_dry_run(outcome: &mut ScheduleOutcome, dry: &DryRunResult) {
+/// Copies the test files, the duplicate test id issue and the skipped test
+/// issue of the dry run.
+pub(super) fn record_dry_run(
+    outcome: &mut ScheduleOutcome,
+    plan: &SchedulePlan,
+    dry: &DryRunResult,
+) {
     outcome.test_files = dry
         .tests
         .iter()
@@ -167,6 +172,45 @@ pub(super) fn record_dry_run(outcome: &mut ScheduleOutcome, dry: &DryRunResult) 
     outcome
         .issues
         .extend(duplicate_test_ids_issue(&reported_duplicates(dry)));
+    outcome.issues.extend(skipped_tests_issue(plan, dry));
+}
+
+/// The issue for tests that the dry run skipped or marked as todo, in a test
+/// file of the plan. Such a test runs no assertion, so it cannot kill a
+/// mutant.
+fn skipped_tests_issue(plan: &SchedulePlan, dry: &DryRunResult) -> Option<ScheduleIssue> {
+    let skipped: Vec<&str> = dry
+        .tests
+        .iter()
+        .filter(|test| matches!(test.status, TestStatus::Skip | TestStatus::Todo))
+        .filter(|test| plan.test_files.contains(&test.file))
+        .map(|test| test.test_id.as_str())
+        .collect();
+    if skipped.is_empty() {
+        return None;
+    }
+    let shown = skipped.iter().take(MAX_DUPLICATE_IDS_SHOWN);
+    let more = skipped.len().saturating_sub(MAX_DUPLICATE_IDS_SHOWN);
+    let tail = if more == 0 {
+        String::new()
+    } else {
+        format!(" and {more} more")
+    };
+    let (noun, verb) = if skipped.len() == 1 {
+        ("test", "is")
+    } else {
+        ("tests", "are")
+    };
+    Some(ScheduleIssue {
+        code: fallow_output::SKIPPED_TESTS_CODE,
+        message: format!(
+            "{} {noun} in the test files of the plan {verb} skipped or todo in the dry run: {}{tail}; such a test checks nothing, so it cannot kill a mutant; run it or remove it",
+            skipped.len(),
+            shown.copied().collect::<Vec<_>>().join(", ")
+        ),
+        mutant_id: None,
+        stderr_tail: None,
+    })
 }
 
 /// The duplicate test ids of the dry run, without the ids of a file that an

@@ -416,6 +416,56 @@ fn without_a_time_budget_the_jobs_keep_the_plan_order() {
 }
 
 #[test]
+fn a_skipped_or_todo_test_of_a_plan_test_file_gets_a_warning() {
+    let dry = |_| DryRunResult {
+        tests: vec![
+            test("t1", 2.0, TestStatus::Pass),
+            test("t2", 100.0, TestStatus::Pass),
+            test("skipped", 0.0, TestStatus::Skip),
+            test("later", 0.0, TestStatus::Todo),
+            DryTest {
+                file: "test/other.test.ts".to_owned(),
+                ..test("elsewhere", 0.0, TestStatus::Skip)
+            },
+        ],
+        ..standard_dry()
+    };
+    let spawner = FakeSpawner::new(script(dry, |_, run| {
+        Ok(run_result(run, RunStatus::Killed, Some(&run.test_ids[0])))
+    }));
+    let outcome = run_schedule(&spawner, &plan(&["m1"]), &config(1)).expect("run");
+    let issue = outcome
+        .issues
+        .iter()
+        .find(|issue| issue.code == fallow_output::SKIPPED_TESTS_CODE)
+        .expect("a skipped-tests issue");
+    assert!(issue.message.starts_with("2 tests"), "{}", issue.message);
+    assert!(issue.message.contains(&tid("skipped")), "{}", issue.message);
+    assert!(issue.message.contains(&tid("later")), "{}", issue.message);
+    assert!(
+        !issue.message.contains("elsewhere"),
+        "a test outside the plan test files is not named: {}",
+        issue.message
+    );
+    assert_eq!(status(&outcome, "m1"), MutantStatus::Killed);
+}
+
+#[test]
+fn a_run_without_skipped_tests_has_no_skipped_tests_warning() {
+    let spawner = FakeSpawner::new(script(
+        |_| standard_dry(),
+        |_, run| Ok(run_result(run, RunStatus::Killed, Some(&run.test_ids[0]))),
+    ));
+    let outcome = run_schedule(&spawner, &plan(&["m1"]), &config(1)).expect("run");
+    assert!(
+        outcome
+            .issues
+            .iter()
+            .all(|issue| issue.code != fallow_output::SKIPPED_TESTS_CODE)
+    );
+}
+
+#[test]
 fn the_watchdog_adds_the_setup_time_of_each_covering_file() {
     let spawner = FakeSpawner::new(script(
         |_| DryRunResult {

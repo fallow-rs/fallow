@@ -1631,6 +1631,22 @@ fn an_error_line_names_its_mutant() {
 }
 
 #[test]
+fn skipped_tests_show_as_a_warning() {
+    let mut warned = report(Vec::new(), Vec::new());
+    warned.errors = vec![fallow_output::MutationRunIssue {
+        code: fallow_output::SKIPPED_TESTS_CODE.to_owned(),
+        message: "1 test in the test files of the plan is skipped or todo".to_owned(),
+        mutant_id: None,
+        stderr_tail: None,
+    }];
+    let text = run_text(&warned, &OPTIONS);
+    assert!(
+        text.contains("Warning (skipped-tests): 1 test in the test files"),
+        "{text}"
+    );
+}
+
+#[test]
 fn duplicate_test_ids_show_as_a_warning_and_other_issues_as_errors() {
     let mut warned = report(Vec::new(), Vec::new());
     warned.errors = vec![
