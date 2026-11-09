@@ -194,7 +194,9 @@ impl CacheStore {
             let target = (max_size_bytes / 10_000)
                 .saturating_mul(EVICTION_TARGET_BPS)
                 .saturating_sub(CACHE_HEADER_LEN);
-            encoded = self.evict_lru_to_target(target, encoded);
+            // The working set of the latest run may fill the whole cap.
+            let working_set = max_size_bytes.saturating_sub(CACHE_HEADER_LEN);
+            encoded = self.evict_lru_to_target(target, working_set, encoded);
             let evicted = initial_entries.saturating_sub(self.entries.len());
             let final_size = encoded.len();
             let significant_evicted =
@@ -225,7 +227,22 @@ impl CacheStore {
 
     /// Evict the entries that runs saw least recently until the re-encoded
     /// size is under `target_bytes` or only one entry remains.
-    fn evict_lru_to_target(&mut self, target_bytes: usize, mut encoded: Vec<u8>) -> Vec<u8> {
+    ///
+    /// The entries with the newest seen stamp are the working set of the
+    /// latest run, and they all share that one stamp. Eviction removes older
+    /// entries down to `target_bytes` first. It removes working-set entries
+    /// only down to `working_set_bytes`, which is the cap itself. The low
+    /// target gives headroom for entries that other scopes add. The working
+    /// set must not go down to the low target: a working set a little over
+    /// the trigger then loses about 40 percent of its entries on every save,
+    /// and the next run parses those files again. The tie order of the keys
+    /// is stable, so the same entries go on each save and the rest stay hits.
+    fn evict_lru_to_target(
+        &mut self,
+        target_bytes: usize,
+        working_set_bytes: usize,
+        encoded: Vec<u8>,
+    ) -> Vec<u8> {
         let mut order: Vec<(u64, String, usize)> = self
             .entries
             .iter()
@@ -241,48 +258,85 @@ impl CacheStore {
             })
             .collect();
         order.sort();
+        let newest = order.last().map_or(0, |(seen, _, _)| *seen);
+        let working_set_from = order.partition_point(|(seen, _, _)| *seen < newest);
 
+        let mut cursor = EvictionCursor {
+            idx: 0,
+            estimated_remaining: order
+                .iter()
+                .map(|(_, _, estimated_bytes)| estimated_bytes)
+                .sum(),
+        };
+        let mut encoded = encoded;
+        if working_set_from > 0 {
+            encoded = self.evict_order_range(
+                &order,
+                &mut cursor,
+                working_set_from,
+                target_bytes,
+                encoded,
+            );
+        }
+        let working_set_target = target_bytes.max(working_set_bytes);
+        if encoded.len() > working_set_target {
+            let keep_newest_from = order.len().saturating_sub(1);
+            encoded = self.evict_order_range(
+                &order,
+                &mut cursor,
+                keep_newest_from,
+                working_set_target,
+                encoded,
+            );
+        }
+
+        if encoded.len() > working_set_target && self.entries.len() == 1 {
+            tracing::warn!(
+                encoded_kb = encoded.len() / 1024,
+                target_kb = working_set_target / 1024,
+                "Single cache entry exceeds configured max; cache will overshoot the cap"
+            );
+        }
+        encoded
+    }
+
+    /// Remove entries in `order` from `cursor.idx` up to (not including)
+    /// `end` until the re-encoded size is under `target_bytes`.
+    fn evict_order_range(
+        &mut self,
+        order: &[(u64, String, usize)],
+        cursor: &mut EvictionCursor,
+        end: usize,
+        target_bytes: usize,
+        mut encoded: Vec<u8>,
+    ) -> Vec<u8> {
         const MAX_REFINEMENT_PASSES: usize = 2;
         const ESTIMATE_SAFETY_BPS: usize = 9_800;
-        let mut idx = 0;
-        let mut estimated_remaining: usize = order
-            .iter()
-            .map(|(_, _, estimated_bytes)| estimated_bytes)
-            .sum();
         for _ in 0..MAX_REFINEMENT_PASSES {
-            if encoded.len() <= target_bytes || self.entries.len() <= 1 {
-                break;
+            if encoded.len() <= target_bytes || cursor.idx >= end {
+                return encoded;
             }
 
             let estimated_budget = estimated_eviction_budget(
-                estimated_remaining,
+                cursor.estimated_remaining,
                 target_bytes,
                 encoded.len(),
                 ESTIMATE_SAFETY_BPS,
             );
-            let start_idx = idx;
-            while idx + 1 < order.len() && estimated_remaining > estimated_budget {
-                let (_, key, estimated_bytes) = &order[idx];
-                self.entries.remove(key);
-                estimated_remaining = estimated_remaining.saturating_sub(*estimated_bytes);
-                idx += 1;
+            let start_idx = cursor.idx;
+            while cursor.idx < end && cursor.estimated_remaining > estimated_budget {
+                self.evict_at(order, cursor);
             }
-            if idx == start_idx && idx + 1 < order.len() {
-                let (_, key, estimated_bytes) = &order[idx];
-                self.entries.remove(key);
-                estimated_remaining = estimated_remaining.saturating_sub(*estimated_bytes);
-                idx += 1;
+            if cursor.idx == start_idx {
+                self.evict_at(order, cursor);
             }
             encoded = self.encode();
         }
 
-        if encoded.len() > target_bytes && self.entries.len() > 1 {
+        if encoded.len() > target_bytes && cursor.idx < end {
             let conservative_budget = target_bytes / 2;
-            while idx + 1 < order.len() && estimated_remaining > conservative_budget {
-                let (_, key, estimated_bytes) = &order[idx];
-                self.entries.remove(key);
-                estimated_remaining = estimated_remaining.saturating_sub(*estimated_bytes);
-                idx += 1;
+            while cursor.idx < end && cursor.estimated_remaining > conservative_budget {
+                self.evict_at(order, cursor);
             }
             encoded = self.encode();
         }
@@ -291,22 +345,20 @@ impl CacheStore {
         // configured cap exact if a future bitcode layout violates that
         // estimate. This safety path runs only after byte-aware retention had
         // three opportunities to preserve a recent suffix.
-        if encoded.len() > target_bytes && self.entries.len() > 1 {
-            let keep_newest_from = order.len().saturating_sub(1);
-            for (_, key, _) in &order[idx..keep_newest_from] {
-                self.entries.remove(key);
+        if encoded.len() > target_bytes && cursor.idx < end {
+            while cursor.idx < end {
+                self.evict_at(order, cursor);
             }
             encoded = self.encode();
         }
-
-        if encoded.len() > target_bytes && self.entries.len() == 1 {
-            tracing::warn!(
-                encoded_kb = encoded.len() / 1024,
-                target_kb = target_bytes / 1024,
-                "Single cache entry exceeds configured max; cache will overshoot the cap"
-            );
-        }
         encoded
+    }
+
+    fn evict_at(&mut self, order: &[(u64, String, usize)], cursor: &mut EvictionCursor) {
+        let (_, key, estimated_bytes) = &order[cursor.idx];
+        self.entries.remove(key);
+        cursor.estimated_remaining = cursor.estimated_remaining.saturating_sub(*estimated_bytes);
+        cursor.idx += 1;
     }
 
     fn encode(&self) -> Vec<u8> {
@@ -461,6 +513,13 @@ impl CacheStore {
     pub fn is_empty(&self) -> bool {
         self.entries.is_empty()
     }
+}
+
+/// Position in the sorted eviction order, and the estimated size of the
+/// entries that remain.
+struct EvictionCursor {
+    idx: usize,
+    estimated_remaining: usize,
 }
 
 /// Marker written ahead of every cache payload so the format version can be

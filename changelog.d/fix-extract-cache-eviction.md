@@ -1,0 +1,3 @@
+### Fixed
+
+- **A warm run keeps its cache hits when the extraction cache is near its size limit.** All entries that one run sees get the same seen stamp. When a save went past 80% of the limit, eviction removed entries down to 60% of the limit, also entries of the latest run. The next run parsed those files again, and the save removed the same entries again. On a project with a working set a little over 80% of the limit, each warm run parsed about 40% of the files again. Eviction now removes the entries that the latest run did not see down to 60% of the limit. It removes entries of the latest run only down to the limit itself. A working set that fits in the limit now stays in the cache, so `.fallow/cache.bin` can stay near the full limit.
