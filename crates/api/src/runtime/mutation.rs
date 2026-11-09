@@ -249,6 +249,20 @@ fn engine_scope(
         MutationRunScope::All => Ok((MutationScope::All, None)),
         MutationRunScope::Paths(paths) => Ok((MutationScope::Paths(paths.clone()), None)),
         MutationRunScope::Changed { base } => {
+            if options.analysis.diff_file.is_some()
+                && let Some(request) = &resolved.diff_request
+                && request.status == fallow_output::RequestStatus::NotApplied
+            {
+                return Err(mutation_error(
+                    "FALLOW_MUTATION_DIFF_NOT_APPLIED",
+                    format!(
+                        "cannot use {} for mutation scope ({}); regenerate the patch from the project or repository root",
+                        request.requested,
+                        request.reason.as_deref().unwrap_or("not-applied"),
+                    ),
+                )
+                .with_context("analysis.diffFile"));
+            }
             if let Some(diff) = &resolved.diff {
                 return Ok((MutationScope::ChangedSinceBase(diff.clone()), None));
             }

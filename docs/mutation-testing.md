@@ -32,6 +32,12 @@ read-only next steps. It never writes a test and never proposes a code change.
   all its added lines; generate a patch with `git diff -M -C` to retain copy
   ancestry, or add `--find-copies-harder` when unchanged sources must also be
   considered. Exhaustive source searches can cost more on large repositories.
+  For changed scope, an explicit patch whose paths cannot be placed exits 2
+  with `FALLOW_MUTATION_DIFF_NOT_APPLIED`, before a test runner starts. This
+  applies to `--diff-file`, `--diff-stdin`, `--diff-file -`, and the API's
+  `analysis.diff_file`. Empty supplied patches select no mutants. Inherited
+  `FALLOW_DIFF_FILE` behavior is unchanged; this refusal applies to explicit
+  inputs only.
 - `--all` mutates each source file. Positional paths mutate only those files or
   directories. The three scopes are exclusive.
 - `--workspace` and `--changed-workspaces` exit with code 2 in version 1,

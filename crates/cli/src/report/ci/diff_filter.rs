@@ -252,6 +252,14 @@ static SHARED_DIFF: OnceLock<Option<LoadedDiff>> = OnceLock::new();
 /// was given no diff at all.
 static DIFF_REQUEST_OUTCOME: OnceLock<Option<fallow_output::RequestOutcome>> = OnceLock::new();
 
+/// The resolved source, including explicit stdin when placement failed.
+static DIFF_SOURCE: OnceLock<Option<DiffSource>> = OnceLock::new();
+
+/// The source selected at startup, independent of whether its patch applied.
+pub(crate) fn shared_diff_source() -> Option<&'static DiffSource> {
+    DIFF_SOURCE.get().and_then(Option::as_ref)
+}
+
 /// Resolve, read, and parse the diff source once for the lifetime of the
 /// process. Idempotent: only the first call populates the cache; later
 /// calls observe the original value. Returns the resolved index for the
@@ -271,6 +279,7 @@ pub(crate) fn init_shared_diff(
     candidate_bases: &[PathBuf],
     quiet: bool,
 ) -> Option<&'static DiffIndex> {
+    let _ = DIFF_SOURCE.set(source.cloned());
     let mut request = None;
     let loaded = source.and_then(|src| {
         let label = src.label();
