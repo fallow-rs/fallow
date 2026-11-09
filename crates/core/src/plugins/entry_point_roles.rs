@@ -78,6 +78,7 @@ pub(super) const SUPPORT_ENTRY_POINT_PLUGINS: &[&str] = &[
     "contentlayer",
     "danger",
     "drizzle",
+    "dumi",
     "fumadocs",
     "i18next",
     "knex",

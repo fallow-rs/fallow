@@ -2954,6 +2954,10 @@ fn framework_plugins_have_correct_enablers() {
     let result = registry.run(&waku_pkg, Path::new("/project"), &[]);
     assert!(result.active_plugins.contains(&"waku".to_string()));
 
+    let dumi_pkg = make_pkg(&["dumi"]);
+    let result = registry.run(&dumi_pkg, Path::new("/project"), &[]);
+    assert!(result.active_plugins.contains(&"dumi".to_string()));
+
     let solid_start_pkg = make_pkg(&["@solidjs/start"]);
     let result = registry.run(&solid_start_pkg, Path::new("/project"), &[]);
     assert!(result.active_plugins.contains(&"solid-start".to_string()));
@@ -2972,6 +2976,7 @@ fn framework_plugins_have_correct_enablers() {
     assert!(!result.active_plugins.contains(&"wxt".to_string()));
     assert!(!result.active_plugins.contains(&"waku".to_string()));
     assert!(!result.active_plugins.contains(&"solid-start".to_string()));
+    assert!(!result.active_plugins.contains(&"dumi".to_string()));
 }
 
 #[test]

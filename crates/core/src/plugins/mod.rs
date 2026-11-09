@@ -1967,6 +1967,7 @@ mod dependency_cruiser;
 mod docusaurus;
 mod dotenv;
 mod drizzle;
+mod dumi;
 mod egg;
 mod electron;
 mod ember;

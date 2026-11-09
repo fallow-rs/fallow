@@ -69,6 +69,8 @@ mod deprecated_exports;
 mod directory_resolution;
 #[path = "integration_test/dotenv_plugin.rs"]
 mod dotenv_plugin;
+#[path = "integration_test/dumi.rs"]
+mod dumi;
 #[path = "integration_test/duplicate_export_aliases.rs"]
 mod duplicate_export_aliases;
 #[path = "integration_test/duplicate_prop_shape.rs"]
