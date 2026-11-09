@@ -436,7 +436,7 @@ pub fn baseline_blocked_run_error(report: &MutationReport) -> Option<Programmati
         ProgrammaticError::new(message, 2)
             .with_code("FALLOW_MUTATION_BASELINE_FAILED")
             .with_help(
-                "run the tests with the runner directly and make them pass, for example with the environment variables that the package test script sets, then run fallow mutation again",
+                "read the error of each failed test in `baseline_failures[].message` of the JSON report, make the tests pass with the runner directly, then run fallow mutation again",
             ),
     )
 }
