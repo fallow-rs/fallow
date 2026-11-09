@@ -1329,7 +1329,7 @@ fn byte_offset_to_line_col_multibyte_chars() {
 
     let (line, col) = utils::byte_offset_to_line_col(source, 4);
     assert_eq!(line, 1);
-    assert_eq!(col, 1); // one character before the newline
+    assert_eq!(col, 4, "the column counts bytes, not characters");
 
     let (line, col) = utils::byte_offset_to_line_col(source, 5);
     assert_eq!(line, 2);

@@ -6024,11 +6024,11 @@
         },
         "start_col": {
           "type": "integer",
-          "description": "0-based start column."
+          "description": "0-based byte column offset of the start."
         },
         "end_col": {
           "type": "integer",
-          "description": "0-based end column."
+          "description": "0-based byte column offset of the end."
         },
         "fragment": {
           "type": "string",
@@ -10638,11 +10638,11 @@
         },
         "start_col": {
           "type": "integer",
-          "description": "0-based start column."
+          "description": "0-based byte column offset of the start."
         },
         "end_col": {
           "type": "integer",
-          "description": "0-based end column."
+          "description": "0-based byte column offset of the end."
         },
         "fragment": {
           "type": "string",

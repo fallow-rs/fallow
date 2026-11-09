@@ -1732,10 +1732,10 @@ fn clone_texts(symbol: &str, contents: &BTreeMap<String, String>) -> String {
             let start_col = usize::try_from(instance.start_col).ok()?;
             let end_col = usize::try_from(instance.end_col).ok()?;
             if let Some(last) = span.last_mut() {
-                *last = last.chars().take(end_col).collect();
+                *last = last.get(..end_col)?.to_string();
             }
             if let Some(first) = span.first_mut() {
-                *first = first.chars().skip(start_col).collect();
+                *first = first.get(start_col..)?.to_string();
             }
             Some(span.join("\n"))
         })

@@ -19,6 +19,8 @@ mod token_visitor;
 /// AST-based tokenization of source files into normalized token streams.
 pub mod tokenize;
 pub mod types;
+#[cfg(test)]
+mod unicode_span_oracle;
 
 use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
@@ -743,6 +745,63 @@ mod tests {
         for instance in &group.instances {
             assert_eq!((instance.start_line, instance.start_col), (1, 0));
             assert!(instance.fragment.starts_with("export function shared"));
+        }
+    }
+
+    /// Issue #4378: the LSP and SARIF read clone columns as byte columns.
+    #[test]
+    fn clone_columns_are_byte_columns() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let body = "export function shared(value: number): number {\n  const doubled = value * 2;\n  const shifted = doubled + 3;\n  const tripled = shifted * 3;\n";
+        let mut files = Vec::new();
+        let mut contents = Vec::new();
+        for (index, (name, marker)) in [("a.ts", "é \u{1F600}"), ("b.ts", "e")]
+            .into_iter()
+            .enumerate()
+        {
+            let path = dir.path().join(name);
+            let content =
+                format!("/* {marker} */ {body}  /* {marker} */ return tripled * 4;\n}}\n");
+            std::fs::write(&path, &content).expect("write clone");
+            files.push(DiscoveredFile {
+                id: FileId(index as u32),
+                path: path.clone(),
+                size_bytes: content.len() as u64,
+            });
+            contents.push((path, content));
+        }
+        let config = DuplicatesConfig {
+            min_tokens: 5,
+            min_lines: 2,
+            ..DuplicatesConfig::default()
+        };
+
+        let report = find_duplicates(dir.path(), &files, &config);
+
+        let group = report.clone_groups.first().expect("clone group");
+        assert_eq!(group.instances.len(), 2);
+        for instance in &group.instances {
+            let (_, content) = contents
+                .iter()
+                .find(|(path, _)| *path == instance.file)
+                .expect("instance file");
+            let lines: Vec<&str> = content.lines().collect();
+            let start_line = lines[instance.start_line - 1];
+            let end_line = lines[instance.end_line - 1];
+            assert!(
+                start_line
+                    .get(instance.start_col..)
+                    .is_some_and(|rest| rest.starts_with("export function shared")),
+                "start_col {} is not the byte column of the clone start in {start_line:?}",
+                instance.start_col,
+            );
+            assert!(
+                end_line
+                    .get(..instance.end_col)
+                    .is_some_and(|head| head.ends_with("tripled * 4")),
+                "end_col {} is not the byte column of the clone end in {end_line:?}",
+                instance.end_col,
+            );
         }
     }
 

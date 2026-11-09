@@ -20,9 +20,9 @@ pub struct CloneInstance {
     pub start_line: usize,
     /// 1-based end line of the clone.
     pub end_line: usize,
-    /// 0-based start column.
+    /// 0-based byte column offset of the start.
     pub start_col: usize,
-    /// 0-based end column.
+    /// 0-based byte column offset of the end.
     pub end_col: usize,
     /// The actual source code fragment.
     ///

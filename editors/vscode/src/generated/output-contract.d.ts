@@ -7932,11 +7932,11 @@ start_line: number
  */
 end_line: number
 /**
- * 0-based start column.
+ * 0-based byte column offset of the start.
  */
 start_col: number
 /**
- * 0-based end column.
+ * 0-based byte column offset of the end.
  */
 end_col: number
 /**
@@ -15240,11 +15240,11 @@ start_line: number
  */
 end_line: number
 /**
- * 0-based start column.
+ * 0-based byte column offset of the start.
  */
 start_col: number
 /**
- * 0-based end column.
+ * 0-based byte column offset of the end.
  */
 end_col: number
 /**
