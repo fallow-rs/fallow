@@ -93,6 +93,8 @@ mod static_str;
 mod suppressions;
 mod trace_envelopes;
 mod type_aware_envelopes;
+#[cfg(test)]
+mod unicode_span_oracle;
 mod walkthrough_render;
 
 pub use analysis_sarif::{

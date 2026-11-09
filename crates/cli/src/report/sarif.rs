@@ -360,7 +360,7 @@ fn envelope_sarif_document_with_context(
         return sarif;
     }
     if kind == EnvelopeKind::Security
-        && let Some(sarif) = saved_security_sarif(envelope)
+        && let Some(sarif) = saved_security_sarif(envelope, root)
     {
         return sarif;
     }
@@ -370,11 +370,12 @@ fn envelope_sarif_document_with_context(
     sarif
 }
 
-fn saved_security_sarif(envelope: &serde_json::Value) -> Option<serde_json::Value> {
+fn saved_security_sarif(envelope: &serde_json::Value, root: &Path) -> Option<serde_json::Value> {
     let findings = Vec::<SecurityFinding>::deserialize(envelope.get("security_findings")?).ok()?;
     Some(crate::security::build_security_sarif(
         &findings,
         envelope.get("gate"),
+        root,
     ))
 }
 
@@ -390,6 +391,7 @@ fn annotation_sarif_document(
     let rule_order = sarif_rule_ids(&sarif);
     let mut rules = sarif_rules_by_id(&sarif);
     let mut results = Vec::with_capacity(annotations.len());
+    let mut sources = fallow_output::SarifSourceSnippetCache::with_root(root);
 
     for annotation in annotations {
         let rule_id = native_rule_id(&annotation.title);
@@ -425,6 +427,15 @@ fn annotation_sarif_document(
             region,
             snippet: None,
         });
+        // The fingerprint above hashes the byte column. Only the shown column
+        // counts UTF-16 code units.
+        if let Some((line, col)) = region
+            && let Some(start) =
+                result.pointer_mut("/locations/0/physicalLocation/region/startColumn")
+        {
+            *start =
+                serde_json::json!(sources.start_column(Path::new(&annotation.path), line, col - 1));
+        }
         if let Some(end_line) = annotation.end_line
             && let Some(region) = result
                 .pointer_mut("/locations/0/physicalLocation/region")
@@ -1208,6 +1219,56 @@ mod tests {
         );
 
         assert_eq!(saved["runs"][0]["results"][0]["level"], "error");
+    }
+
+    /// A rendered saved report gives `startColumn` in UTF-16 code units, but
+    /// the fingerprint keeps the byte column, so the alert of an existing
+    /// finding stays open under the same identity (issue #4405).
+    #[test]
+    fn annotation_sarif_counts_utf16_columns_and_keeps_byte_fingerprints() {
+        let line = "/* \u{e9} \u{1f600} */ export const shared = () => 1;";
+        let byte_col = line.find("export").expect("token");
+        let envelope = serde_json::json!({
+            "kind": "dupes",
+            "clone_groups": [{
+                "instances": [
+                    {"file": "src/a.ts", "start_line": 1, "end_line": 1, "start_col": byte_col, "end_col": line.len()},
+                    {"file": "src/b.ts", "start_line": 1, "end_line": 1, "start_col": 0, "end_col": 10}
+                ],
+                "token_count": 10,
+                "line_count": 1
+            }]
+        });
+        let with_source = tempfile::tempdir().expect("root");
+        std::fs::create_dir_all(with_source.path().join("src")).expect("create src");
+        std::fs::write(with_source.path().join("src/a.ts"), format!("{line}\n")).expect("write");
+        let without_source = tempfile::tempdir().expect("root");
+
+        let first = |root: &Path| {
+            let sarif = annotation_sarif_document(EnvelopeKind::Dupes, &envelope, root, None);
+            let result = sarif["runs"][0]["results"]
+                .as_array()
+                .and_then(|results| {
+                    results.iter().find(|result| {
+                        result.pointer("/locations/0/physicalLocation/artifactLocation/uri")
+                            == Some(&serde_json::json!("src/a.ts"))
+                    })
+                })
+                .cloned()
+                .expect("result for src/a.ts");
+            (
+                result
+                    .pointer("/locations/0/physicalLocation/region/startColumn")
+                    .cloned(),
+                result["partialFingerprints"].clone(),
+            )
+        };
+        let (utf16_column, utf16_fingerprints) = first(with_source.path());
+        let (byte_column, byte_fingerprints) = first(without_source.path());
+
+        assert_eq!(utf16_column, Some(serde_json::json!(12)));
+        assert_eq!(byte_column, Some(serde_json::json!(byte_col + 1)));
+        assert_eq!(utf16_fingerprints, byte_fingerprints);
     }
 
     #[test]

@@ -1144,9 +1144,11 @@ fn print_flags_sarif(
         "defaultConfiguration": { "level": "note" },
     })];
 
+    let mut sources = fallow_output::SarifSourceSnippetCache::with_root(&config.root);
     let mut results: Vec<serde_json::Value> = flags
         .iter()
         .map(|f| {
+            let column = sources.start_column(&f.path, f.line, f.col);
             let path = crate::report::normalize_uri(&relative_path(f, &config.root));
             let mut msg = format!("Feature flag '{}' ({})", f.flag_name, kind_label(f));
             if !f.guarded_dead_exports.is_empty() {
@@ -1165,7 +1167,7 @@ fn print_flags_sarif(
                 "locations": [{
                     "physicalLocation": {
                         "artifactLocation": { "uri": path },
-                        "region": { "startLine": f.line, "startColumn": f.col + 1 },
+                        "region": { "startLine": f.line, "startColumn": column },
                     }
                 }],
             })
@@ -1174,7 +1176,10 @@ fn print_flags_sarif(
 
     if let Some(report) = retirement {
         rules.push(crate::flags_retirement_formats::sarif_rule());
-        results.extend(crate::flags_retirement_formats::sarif_results(report));
+        results.extend(crate::flags_retirement_formats::sarif_results(
+            report,
+            &mut sources,
+        ));
     }
 
     let sarif = serde_json::json!({

@@ -537,3 +537,77 @@ fn a_finding_without_an_id_has_no_finding_id_key() {
         );
     }
 }
+
+/// SARIF reads `startColumn` in UTF-16 code units when the run sets no
+/// `columnKind` (SARIF 2.1.0, section 3.14.17). The prefix `/* é 😀 */ ` is
+/// 14 bytes but 11 UTF-16 code units, so `unused` starts at column 25 and not
+/// at the byte column 28. See issue #4405.
+#[test]
+fn sarif_start_column_counts_utf16_code_units() {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path();
+    let source_line = "/* é 😀 */ export const unused = 1;";
+    std::fs::create_dir_all(root.join("src")).expect("create src");
+    std::fs::write(root.join("src/a.ts"), format!("{source_line}\n")).expect("write source");
+    let byte_col = u32::try_from(source_line.find("unused").expect("name")).expect("small");
+
+    let mut results = AnalysisResults::default();
+    results
+        .unused_exports
+        .push(UnusedExportFinding::with_actions(UnusedExport {
+            path: root.join("src/a.ts"),
+            export_name: "unused".to_owned(),
+            is_type_only: false,
+            line: 1,
+            col: byte_col,
+            span_start: byte_col,
+            is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
+        }));
+
+    let sarif = build_dead_code_sarif(&results, root, &RulesConfig::default(), &test_rule_builder);
+
+    let region = sarif
+        .pointer("/runs/0/results/0/locations/0/physicalLocation/region")
+        .expect("region");
+    assert_eq!(region["startLine"], 1);
+    assert_eq!(region["startColumn"], 25, "{region:#?}");
+    assert!(
+        sarif.pointer("/runs/0/columnKind").is_none(),
+        "the run keeps the SARIF default column kind"
+    );
+}
+
+/// Fallow columns on line 1 start after a byte order mark, so the mark is
+/// not counted in the SARIF column either.
+#[test]
+fn sarif_start_column_skips_the_byte_order_mark() {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).expect("create src");
+    std::fs::write(root.join("src/a.ts"), "\u{feff}export const unused = 1;\n")
+        .expect("write source");
+
+    let mut results = AnalysisResults::default();
+    results
+        .unused_exports
+        .push(UnusedExportFinding::with_actions(UnusedExport {
+            path: root.join("src/a.ts"),
+            export_name: "unused".to_owned(),
+            is_type_only: false,
+            line: 1,
+            col: 13,
+            span_start: 16,
+            is_re_export: false,
+            deprecated: false,
+            deprecated_reason: None,
+        }));
+
+    let sarif = build_dead_code_sarif(&results, root, &RulesConfig::default(), &test_rule_builder);
+
+    assert_eq!(
+        sarif.pointer("/runs/0/results/0/locations/0/physicalLocation/region/startColumn"),
+        Some(&serde_json::json!(14)),
+    );
+}

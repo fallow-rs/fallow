@@ -29,9 +29,13 @@ pub struct SarifResultInput<'a> {
     pub message: &'a str,
     /// Artifact URI relative to the analysed root.
     pub uri: &'a str,
-    /// 1-based `(start_line, start_column)` region, when known.
+    /// 1-based `(start_line, start_byte_column)` region, when known.
+    ///
+    /// The SARIF `startColumn` counts UTF-16 code units. The builder converts
+    /// the byte column with `snippet` when the snippet is present.
     pub region: Option<(u32, u32)>,
-    /// Source snippet that feeds the stable fingerprint and region context.
+    /// Full source text of the region line. It feeds the stable fingerprint
+    /// and converts the byte column to UTF-16 code units.
     pub snippet: Option<&'a str>,
 }
 
@@ -48,9 +52,13 @@ pub struct SarifFindingInput<'a> {
     pub message: &'a str,
     /// Artifact URI relative to the analysed root.
     pub uri: &'a str,
-    /// 1-based `(start_line, start_column)` region, when known.
+    /// 1-based `(start_line, start_byte_column)` region, when known.
+    ///
+    /// The SARIF `startColumn` counts UTF-16 code units. The builder converts
+    /// the byte column with `snippet` when the snippet is present.
     pub region: Option<(u32, u32)>,
-    /// Source snippet that feeds the stable fingerprint and region context.
+    /// Full source text of the region line. It feeds the stable fingerprint
+    /// and converts the byte column to UTF-16 code units.
     pub snippet: Option<&'a str>,
     /// Extra `properties` bag copied onto the SARIF result verbatim.
     pub properties: Option<Value>,
@@ -70,7 +78,7 @@ pub struct SarifFindingFields {
     pub message: String,
     /// Artifact URI relative to the analysed root.
     pub uri: String,
-    /// 1-based `(start_line, start_column)` region, when known.
+    /// 1-based `(start_line, start_byte_column)` region, when known.
     pub region: Option<(u32, u32)>,
     /// Absolute source path used to load the fingerprint snippet.
     pub source_path: Option<PathBuf>,
@@ -125,6 +133,36 @@ pub fn sarif_finding_fingerprint(rule_id: &str, path: &str, snippet: &str, col: 
     codeclimate_fingerprint_hash(&[rule_id, path, &normalized, &col.to_string()])
 }
 
+const BYTE_ORDER_MARK: char = '\u{feff}';
+
+/// Convert a 0-based byte column on the 1-based source `line` to a 1-based
+/// SARIF column.
+///
+/// A SARIF run without `columnKind` counts columns in UTF-16 code units
+/// (SARIF 2.1.0, section 3.14.17), but Fallow findings carry byte columns.
+/// Fallow columns on line 1 start after a byte order mark, so the mark is not
+/// counted. Returns `None` when `byte_col` is past the end of the line or is
+/// not on a character boundary, because then the line text does not match
+/// the finding.
+pub fn sarif_utf16_column(line: u32, line_text: &str, byte_col: u32) -> Option<u32> {
+    let text = if line == 1 {
+        line_text.strip_prefix(BYTE_ORDER_MARK).unwrap_or(line_text)
+    } else {
+        line_text
+    };
+    let prefix = text.get(..usize::try_from(byte_col).ok()?)?;
+    u32::try_from(prefix.encode_utf16().count() + 1).ok()
+}
+
+/// Like [`sarif_utf16_column`], but when the line text is unknown or does not
+/// match the column, return the 1-based byte column. That is the closest
+/// known position.
+fn sarif_column(line: u32, line_text: Option<&str>, byte_col: u32) -> u32 {
+    line_text
+        .and_then(|text| sarif_utf16_column(line, text, byte_col))
+        .unwrap_or_else(|| byte_col.saturating_add(1))
+}
+
 /// Lazily reads source files so SARIF result builders can attach stable line snippets.
 #[derive(Debug, Default)]
 pub struct SarifSourceSnippetCache {
@@ -145,6 +183,10 @@ impl SarifSourceSnippetCache {
 
     /// Return the 1-based source line from a file, caching the file contents.
     pub fn line(&mut self, path: &Path, line: u32) -> Option<String> {
+        self.line_text(path, line).map(str::to_owned)
+    }
+
+    fn line_text(&mut self, path: &Path, line: u32) -> Option<&str> {
         if line == 0 {
             return None;
         }
@@ -165,23 +207,34 @@ impl SarifSourceSnippetCache {
         self.files
             .get(&resolved)
             .and_then(|lines| lines.get(line.saturating_sub(1) as usize))
-            .cloned()
+            .map(String::as_str)
+    }
+
+    /// Return the 1-based SARIF `startColumn`, in UTF-16 code units, of a
+    /// 0-based byte column on a 1-based source line.
+    ///
+    /// When the file or the line cannot be read, or the column does not fit
+    /// the line, the result is the 1-based byte column.
+    pub fn start_column(&mut self, path: &Path, line: u32, byte_col: u32) -> u32 {
+        let text = self.line_text(path, line);
+        sarif_column(line, text, byte_col)
     }
 }
 
 /// Build a single SARIF result object.
 ///
-/// When `region` is `Some((line, col))`, a `region` block with 1-based
-/// `startLine` and `startColumn` is included in the physical location.
+/// When `region` is `Some((line, byte_col))`, a `region` block with 1-based
+/// `startLine` and `startColumn` is included in the physical location. The
+/// `startColumn` counts UTF-16 code units of the `snippet` line.
 #[must_use]
 pub fn build_sarif_result(input: SarifResultInput<'_>) -> Value {
     let mut physical_location = serde_json::json!({
         "artifactLocation": { "uri": input.uri }
     });
-    if let Some((line, col)) = input.region {
+    if let Some((line, byte_col)) = input.region {
         physical_location["region"] = serde_json::json!({
             "startLine": line,
-            "startColumn": col
+            "startColumn": sarif_column(line, input.snippet, byte_col.saturating_sub(1))
         });
     }
     let line = input
@@ -194,6 +247,10 @@ pub fn build_sarif_result(input: SarifResultInput<'_>) -> Value {
         .snippet
         .map(normalize_sarif_snippet)
         .filter(|snippet| !snippet.is_empty());
+    // The fingerprint hashes the byte column, not the UTF-16 `startColumn`.
+    // Both separate two findings on one line, and the byte column keeps the
+    // identity of each alert that code scanning opened before #4405.
+    //
     // The snippet replaces the LINE, which moves under any edit above it, and
     // not the COLUMN, which is as stable as the snippet itself: two findings on
     // one line are two alerts, and GitHub code scanning treats one
