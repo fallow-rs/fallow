@@ -65,6 +65,19 @@ pub enum MutationSubcommand {
         #[arg(long, value_name = "PATH")]
         report: Option<PathBuf>,
     },
+    /// Write a saved report in the open `mutation-testing-report-schema`
+    /// format. Runs no code.
+    ///
+    /// Mutation dashboards and HTML report viewers read this JSON format. The
+    /// document holds the source of each mutated file, so each file must be
+    /// as the run saw it. Without `--report`, it reads the report that the
+    /// last run saved in the Fallow cache.
+    Export {
+        /// A saved `fallow mutation --format json` report (default: the report
+        /// of the last run).
+        #[arg(long, value_name = "PATH")]
+        report: Option<PathBuf>,
+    },
 }
 
 /// The flags of `fallow mutation`.
@@ -549,6 +562,9 @@ pub fn run(input: &MutationCliInput<'_>) -> ExitCode {
     let (output, style) = (input.output, input.json_style);
     if let Some(MutationSubcommand::Tasks { report }) = &input.subcommand {
         return run_tasks(input, report.as_deref());
+    }
+    if let Some(MutationSubcommand::Export { report }) = &input.subcommand {
+        return run_export(input, report.as_deref());
     }
     if !matches!(output, OutputFormat::Human | OutputFormat::Json) {
         return crate::error::emit_input_error_with_style(
@@ -1059,6 +1075,51 @@ fn run_tasks(input: &MutationCliInput<'_>, report: Option<&Path>) -> ExitCode {
     };
     for line in text.iter().flat_map(|text| text.lines()) {
         crate::report::sink::outln!("{line}");
+    }
+    if let Some(path) = input.output_file
+        && let Err(code) = crate::finalize_report_file(path, input.quiet, output)
+    {
+        return code;
+    }
+    ExitCode::SUCCESS
+}
+
+#[path = "mutation_export.rs"]
+mod export;
+
+/// Writes the saved report as a `mutation-testing-report-schema` document.
+/// The document is JSON with both `--format human` and `--format json`.
+fn run_export(input: &MutationCliInput<'_>, report: Option<&Path>) -> ExitCode {
+    let (output, style) = (input.output, input.json_style);
+    if !matches!(output, OutputFormat::Human | OutputFormat::Json) {
+        return crate::error::emit_input_error_with_style(
+            "`fallow mutation export` writes JSON; it supports only human and json output",
+            output,
+            style,
+        );
+    }
+    let document = inspect_report_path(input, report).and_then(|(path, root)| {
+        let saved = crate::mutation_inspect::read_saved_report(&path)?;
+        export::export(&saved, &root)
+    });
+    let document = match document {
+        Ok(document) => document,
+        Err(error) => return crate::error::emit_programmatic_error(&error, output, style),
+    };
+    crate::telemetry::note_result_count(document["files"].as_object().map_or(0, |files| {
+        files
+            .values()
+            .filter_map(|file| file["mutants"].as_array())
+            .map(Vec::len)
+            .sum()
+    }));
+    if let Some(path) = input.output_file
+        && let Err(code) = crate::redirect_report_to_file(path, output)
+    {
+        return code;
+    }
+    if let Err(error) = emit_json(&document, style) {
+        return crate::error::emit_programmatic_error(&error, output, style);
     }
     if let Some(path) = input.output_file
         && let Err(code) = crate::finalize_report_file(path, input.quiet, output)

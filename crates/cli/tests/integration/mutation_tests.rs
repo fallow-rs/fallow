@@ -770,6 +770,48 @@ fn tasks_list_the_open_mutants_of_the_last_run_in_json_text_and_markdown() {
 }
 
 #[test]
+fn export_writes_the_last_run_in_the_report_schema_format() {
+    let project = untested_project();
+    let (_, report) = json_mutation(project.path(), &["--all"]);
+    let mutants = report["mutants"].as_array().unwrap().len();
+
+    let (output, document) = json_mutation(project.path(), &["export"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert_eq!(document["schemaVersion"], "2");
+    let exported: usize = document["files"]
+        .as_object()
+        .unwrap()
+        .values()
+        .map(|file| file["mutants"].as_array().unwrap().len())
+        .sum();
+    assert_eq!(exported, mutants);
+    let add = document["files"]
+        .as_object()
+        .unwrap()
+        .values()
+        .flat_map(|file| file["mutants"].as_array().unwrap())
+        .find(|mutant| mutant["mutatorName"] == "arithmetic-operator")
+        .expect("an arithmetic mutant");
+    assert_eq!(add["status"], "NoCoverage");
+    assert_eq!(add["replacement"], "-");
+
+    let human = mutation(project.path(), &["export"]);
+    assert_eq!(human.code, 0, "{}", human.stderr);
+    let human_document: serde_json::Value = serde_json::from_str(&human.stdout).unwrap();
+    assert_eq!(human_document, document);
+
+    let plan = project.path().join("plan.json");
+    let (_, plan_value) = json_mutation(project.path(), &["--all", "--plan"]);
+    fs::write(&plan, serde_json::to_string(&plan_value).unwrap()).expect("plan");
+    let (refused, error) = json_mutation(
+        project.path(),
+        &["export", "--report", plan.to_str().unwrap()],
+    );
+    assert_eq!(refused.code, 2);
+    assert_eq!(error["code"], "FALLOW_MUTATION_REPORT_INVALID");
+}
+
+#[test]
 fn recheck_reruns_the_open_tasks_and_refuses_a_changed_source() {
     let project = untested_project();
     let (_, report) = json_mutation(project.path(), &["--all"]);
