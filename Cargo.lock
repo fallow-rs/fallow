@@ -1333,6 +1333,7 @@ dependencies = [
  "regex",
  "rustc-hash",
  "sha2",
+ "tempfile",
  "tracing",
  "xxhash-rust",
 ]

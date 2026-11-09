@@ -237,6 +237,24 @@ fn component_contract_glimmer_typed_args_and_template() {
     );
 }
 
+/// Only the parser view drops the byte order mark. The Glimmer template
+/// ranges must use the same view, or a template at the end of its class
+/// falls outside the class span and its argument reads do not count.
+#[test]
+fn component_contract_glimmer_template_read_with_byte_order_mark() {
+    let source = "\u{feff}import Component from '@glimmer/component';\n\
+        interface Signature { Args: { condensed?: boolean } }\n\
+        export default class View extends Component<Signature> {<template>{{@condensed}}</template>}";
+    let info = parse_at_path("view.gts", source);
+    let facts = info.component_contracts.as_deref().expect("contracts");
+    let prop = facts
+        .declarations
+        .iter()
+        .find(|prop| prop.name == "condensed")
+        .expect("Glimmer optional argument");
+    assert!(prop.is_used);
+}
+
 #[test]
 fn component_contract_vue_options_runtime_default() {
     let source = r"<script>export default { props: { condensed: {type: Boolean, default: false}, title: {type: String, required: true} }, computed: { expanded() { return !this.condensed; } } };</script><template><p>{{ condensed }}</p></template>";
