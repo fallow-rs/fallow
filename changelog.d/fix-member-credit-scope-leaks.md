@@ -1,6 +1,0 @@
-### Fixed
-
-- **`fallow dead-code` uses the element class of a `for...of` loop variable only in the loop body.** After `for (const t of tables)` with `tables: Table[]`, a parameter `t` of another type in another function no longer credits `Table` members. This applies also to a loop over a call, such as `for (const t of all())`.
-  (Closes [#4352](https://github.com/fallow-rs/fallow/issues/4352))
-- **`fallow dead-code` no longer credits a member through `this` in a function with its own `this`.** In a nested `function` or an object-literal method inside a class method, `this.find().setVip()` no longer credits `find` or `setVip`. An arrow function keeps the `this` of the method and still gives the credit. A function that the code gives the instance also keeps the credit: `.bind(this)`, `.call(this)` or `.apply(this)` on the function or its name, a call that also passes `this` (such as `items.forEach(function () {}, this)`), a method call on `this` (such as the listener in `this.on("ready", function () {})`), an assignment to a `this.<field>` or a class field, and a `this` parameter with a named type. The extraction cache version is 423.
-  (Closes [#4351](https://github.com/fallow-rs/fallow/issues/4351))

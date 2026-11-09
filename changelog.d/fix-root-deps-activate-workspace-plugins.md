@@ -1,3 +1,0 @@
-### Fixed
-
-- **A test runner or a bundler in the root `package.json` now activates its plugin in a workspace.** A monorepo often declares a tool such as Mocha or Vite only in the root `package.json`. The package manager hoists it, and a workspace script such as `mocha --exit` or `vite build` calls its binary. Before, the plugin of a workspace became active only for a dependency of that workspace. The test files of the workspace and the files that its `index.html` links were then reported as unused files. A root dependency now activates its plugin in a workspace when a script of that workspace calls the binary of the dependency. A root dependency that no workspace script calls does not activate a plugin in the workspace.

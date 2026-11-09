@@ -1,3 +1,0 @@
-### Fixed
-
-- **`fallow audit` keeps a `css-duplicate-block` finding inherited when only the lines of a later occurrence move.** Before, a script or template edit that shifted the copy of a block in the second file of a group made the finding introduced, although the group and its count did not change. The audit key of a duplicate block finding now uses the sorted paths of all occurrences of the group, not the path of the occurrence that the changed-file scope names first. A new file that joins the group still gives an introduced finding. Thanks [@Smrtnyk](https://github.com/Smrtnyk) for the report. (Closes [#4344](https://github.com/fallow-rs/fallow/issues/4344))
