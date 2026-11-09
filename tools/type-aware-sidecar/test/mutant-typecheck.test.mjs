@@ -226,7 +226,7 @@ const chainMutants = (source) => [
   linkAfter(source, "spaced", "=> s1\n  ", "."),
 ];
 
-const TYPE_PROVEN = "type-proven-never-nullish";
+const NON_NULLISH_HINT = "type-non-nullish";
 
 const checkChains = (compilerOptions) => {
   const root = makeProject({ "src/chain.ts": CHAIN_SOURCE }, compilerOptions);
@@ -246,15 +246,15 @@ const checkChains = (compilerOptions) => {
   }
 };
 
-const equivalent = (id) => ({ id, outcome: "equivalent", reason: TYPE_PROVEN });
+const hinted = (id) => ({ id, outcome: "compiles", hint: NON_NULLISH_HINT });
 
-test("an optional link on a type that is never nullish is equivalent", () => {
+test("an optional link on a type that is never nullish gets the hint", () => {
   const results = checkChains({ noUncheckedIndexedAccess: true });
-  assert.deepEqual(results.member, equivalent("member"));
-  assert.deepEqual(results.call, equivalent("call"));
-  assert.deepEqual(results.element, equivalent("element"));
-  assert.deepEqual(results.later, equivalent("later"));
-  assert.deepEqual(results.spaced, equivalent("spaced"));
+  assert.deepEqual(results.member, hinted("member"));
+  assert.deepEqual(results.call, hinted("call"));
+  assert.deepEqual(results.element, hinted("element"));
+  assert.deepEqual(results.later, hinted("later"));
+  assert.deepEqual(results.spaced, hinted("spaced"));
 });
 
 test("an optional link whose receiver may be nullish or is unsound keeps the normal check", () => {
@@ -283,10 +283,10 @@ test("the proof needs strictNullChecks and noUncheckedIndexedAccess", () => {
     strictNullChecks: true,
     noUncheckedIndexedAccess: true,
   });
-  assert.deepEqual(explicit.member, equivalent("member"));
+  assert.deepEqual(explicit.member, hinted("member"));
 });
 
-test("a JavaScript file is never proven equivalent", () => {
+test("a JavaScript file never gets the hint", () => {
   const javascript = "export const get = (a) => a?.b;\n";
   const root = makeProject(
     { "src/get.js": javascript },
@@ -464,7 +464,7 @@ test("declared types that the language enforces still prove a receiver", () => {
     "annotatedCall",
     "viaParam",
   ]) {
-    assert.deepEqual(results[id], equivalent(id), id);
+    assert.deepEqual(results[id], hinted(id), id);
   }
   assert.deepEqual(results.inferredCall, { id: "inferredCall", outcome: "compiles" });
 });
@@ -489,6 +489,6 @@ test("a binding that code assigns after its declaration is never proven", () => 
 
 test("a binding that no code assigns after its declaration is still proven", () => {
   const results = checkRisks();
-  assert.deepEqual(results.keptLet, equivalent("keptLet"));
-  assert.deepEqual(results.shadowB, equivalent("shadowB"));
+  assert.deepEqual(results.keptLet, hinted("keptLet"));
+  assert.deepEqual(results.shadowB, hinted("shadowB"));
 });

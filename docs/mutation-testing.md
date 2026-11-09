@@ -1608,46 +1608,56 @@ are not checked, so the cost grows with the number of survivors only.
   file, for example a caller of a function with an inferred return type,
   stays `survived`. The check also does not run Vitest type tests, so the
   `typecheck-not-run` note stays.
-- A survivor that removes an optional-chaining link can become `equivalent`.
-  The mutants `a?.b` to `a.b`, `a?.()` to `a()` and `a?.[k]` to `a[k]` change
-  nothing when the type of `a` excludes `null` and `undefined`. The companion
-  checks the type of `a` in the original file. When the type is never nullish,
-  the mutant gets the status `equivalent` and `equivalent_reason:
-  "type-proven-never-nullish"`. The mutant does not count in the score.
-  `typecheck.equivalent` counts these mutants. They do not count in
-  `typecheck.checked`. A mutant that a verdict marks as equivalent has no
-  `equivalent_reason`.
-- The proof is strict. It needs `strictNullChecks` (or `strict`) and
+- A survivor that removes an optional-chaining link can get an advisory
+  hint. The mutants `a?.b` to `a.b`, `a?.()` to `a()` and `a?.[k]` to `a[k]`
+  change nothing when `a` is never `null` or `undefined` at run time. The
+  companion reads the declared type of `a` in the original file. When the
+  type excludes `null` and `undefined`, and the mutated file type-checks, the
+  survivor gets `equivalence_hint: "type-non-nullish"`. The status stays
+  `survived`, and the mutant stays in the score. `typecheck.hinted` counts the
+  hinted survivors, and `typecheck.checked` counts them too. The human report
+  and `fallow mutation tasks` show one line under a hinted survivor: if no
+  runtime value can be nullish, the mutant is equivalent, and a verdict file
+  (`--verdicts`) records it.
+- The hint is advisory and can be wrong. A type does not prove a run-time
+  value. Two examples: under `exactOptionalPropertyTypes`, the property
+  `value?: T` can be absent at run time although code reads it as `T`; and a
+  method that a caller detaches (`const read = box.read; read()`) loses its
+  `this`, so `this.value?.b` throws without the link. The hint rules are
+  conservative on purpose, but they do not cover each such case. Read the
+  code before you write a verdict.
+- The hint needs `strictNullChecks` (or `strict`) and
   `noUncheckedIndexedAccess` in the `tsconfig.json` of the file, because
   without the second option `xs[0]` has a non-nullable type and is `undefined`
   for an empty array. The file must be a TypeScript file.
-- The proof reads the declared type of the receiver, not the type that control
+- The hint reads the declared type of the receiver, not the type that control
   flow narrowing gives at the use. A call can invalidate a narrowing that the
-  checker keeps, so `if (a) { reset(); a?.b }` is not proven when `a` is
+  checker keeps, so `if (a) { reset(); a?.b }` gets no hint when `a` is
   declared as `T | undefined`. The receiver can be a parameter, a local
   binding with an initializer, a property, a call to a function with a
   declared return type, `this`, or a fresh value (`new`, a literal).
-- The proof does not hold for `any`, `unknown`, a type parameter, or a union
-  with `null` or `undefined`. It does not hold for an assertion (`as`,
+- The hint does not apply to `any`, `unknown`, a type parameter, or a union
+  with `null` or `undefined`. It does not apply to an assertion (`as`,
   `<T>x`, `x!`) anywhere in the receiver, or in the initializer of a local
   binding that the receiver reads. It looks through parentheses and
   `satisfies`.
-- The proof does not hold for a declaration that no code in the project
+- The hint does not apply to a declaration that no code in the project
   checks: a `declare` variable, a variable in a `.d.ts` file, a binding
   without an initializer, a `for` or `catch` variable, a destructured
   binding, a class property with `!` or `declare`, and a class property
   without an initializer that the constructor does not assign in its body. An
-  element access (`xs[0]`) and a call without a declared return type are not
-  proven either. A `let`, `var` or parameter binding that any code assigns
-  after its declaration is not proven: the proof counts `=`, compound
+  element access (`xs[0]`) and a call without a declared return type get no
+  hint either. A `let`, `var` or parameter binding that any code assigns
+  after its declaration gets no hint: the check counts `=`, compound
   assignment, `++`, `--`, destructuring targets, `for` loop targets and
-  assignments in closures. A top-level `let` or `var` of a script file is not
-  proven. In each of these cases the mutant gets the normal check.
-- The report names a code, not the expression, because the report holds no
+  assignments in closures. A top-level `let` or `var` of a script file gets
+  no hint.
+- A hinted survivor still gets the compile check. A hinted mutant whose
+  mutated file does not type-check is a `compile_error` without a hint. The
+  report names a code, not the expression, because the report holds no
   project text. The `file`, `line` and `column` of the mutant locate the
-  receiver. The proof runs after the tests and only for survivors, in the
-  same companion request as the compile check. A proof before the tests
-  would need a type-aware pass in the plan.
+  receiver. The hint runs after the tests and only for survivors, in the same
+  companion request as the compile check.
 - A survivor that the checker cannot check stays `survived`. The reasons are
   `no-project` (no `tsconfig.json` includes the file), `not-type-checked`
   (`// @ts-nocheck`, or a JavaScript file without `checkJs`),

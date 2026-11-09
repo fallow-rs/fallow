@@ -341,7 +341,7 @@ mod tests {
             cached: false,
             resumed: false,
             type_error_codes: Vec::new(),
-            equivalent_reason: None,
+            equivalence_hint: None,
         }
     }
 

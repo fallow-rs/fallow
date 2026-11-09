@@ -1,4 +1,6 @@
-// Proves that an optional-chaining mutant is equivalent to the original code.
+// Finds optional-chaining mutants that the types suggest are equivalent to the
+// original code. The result is an advisory hint, never a verdict: the mutant
+// keeps the status `survived`, because a type does not prove a run-time value.
 //
 // The mutants `a?.b` -> `a.b`, `a?.()` -> `a()` and `a?.[k]` -> `a[k]` change
 // nothing when the receiver `a` is never `null` or `undefined` at run time.
@@ -55,8 +57,8 @@ const {
   isVariableDeclaration,
 } = ast;
 
-/** The reason that the response gives for a proven mutant. */
-export const TYPE_PROVEN_REASON = "type-proven-never-nullish";
+/** The hint that the response gives for a mutant whose receiver type excludes nullish values. */
+export const NON_NULLISH_HINT = "type-non-nullish";
 
 const OPTIONAL_TOKEN = "?.";
 const TYPESCRIPT_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts"]);
@@ -412,7 +414,7 @@ const receiverIsNeverNullish = (project, receiver, writes) => {
  * a receiver whose declarations prove it never nullish. `project` is the
  * project of the original file, before any mutant is applied.
  */
-export const typeProvenEquivalents = (project, file, original) => {
+export const nonNullishLinks = (project, file, original) => {
   const links = file.mutants.filter((mutant) => isOptionalLink(original, mutant));
   if (links.length === 0 || !allowsTypeProof(project, file.absolutePath)) return new Set();
   const sourceFile = project.program.getSourceFile(file.absolutePath);

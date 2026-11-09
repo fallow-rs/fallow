@@ -1833,9 +1833,9 @@ export type MutantStatus = ("killed" | "timeout" | "survived" | "no_coverage" | 
  */
 export type MutantFailureKind = ("assertion" | "error" | "timeout")
 /**
- * The proof that makes a mutant `equivalent` without a verdict.
+ * Why a survivor may be equivalent, as far as the type check can tell.
  */
-export type MutantEquivalentReason = "type-proven-never-nullish"
+export type MutantEquivalenceHint = "type-non-nullish"
 /**
  * Why the type check did not check a survivor.
  */
@@ -21097,11 +21097,12 @@ resumed?: boolean
  */
 type_error_codes?: number[]
 /**
- * Why an `equivalent` mutant is equivalent, when a check in the run
- * proved it. Absent for a mutant that only a verdict marks as
- * equivalent.
+ * An advisory hint that the mutant may be equivalent to the original
+ * code. The hint never changes the status: the mutant stays `survived`
+ * and counts in the score. A person decides, and records the decision in
+ * a verdict file. The hint can be wrong.
  */
-equivalent_reason?: (MutantEquivalentReason | null)
+equivalence_hint?: (MutantEquivalenceHint | null)
 }
 /**
  * The edit of a mutant, without project text.
@@ -21413,11 +21414,10 @@ checked: number
  */
 compile_errors: number
 /**
- * The survivors that the checker proved equivalent. They have the
- * status `equivalent` and the `equivalent_reason` field. They do not
- * count in `checked`.
+ * The checked survivors that got an `equivalence_hint`. They keep the
+ * status `survived`.
  */
-equivalent?: number
+hinted?: number
 /**
  * The survivors that the checker did not check, by reason.
  */
@@ -21881,6 +21881,12 @@ original_lines?: (string | null)
  * stale.
  */
 mutated_lines?: (string | null)
+/**
+ * An advisory hint that the mutant may be equivalent. The task stays
+ * open: a person decides, and records an equivalent mutant in a verdict
+ * file.
+ */
+equivalence_hint?: (MutantEquivalenceHint | null)
 /**
  * Why the current file no longer gives the mutant. Absent for a fresh
  * task.

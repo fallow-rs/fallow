@@ -1124,12 +1124,13 @@ mod end_to_end {
 
     /// `readB` reads `a?.b` where `a` is a plain object type. No test can
     /// tell `a?.b` from `a.b`, so the mutant survives the tests. With
-    /// `strictNullChecks` and `noUncheckedIndexedAccess`, the type check
-    /// proves the receiver never nullish and moves the mutant to
-    /// `equivalent`, out of the score. Without `--typecheck` it stays a
-    /// survivor.
+    /// `strictNullChecks` and `noUncheckedIndexedAccess`, the type check adds
+    /// the advisory `equivalence_hint` to the survivor. The hint never changes
+    /// the status or the score. Without `--typecheck` the survivor has no
+    /// hint.
     #[test]
-    fn a_typecheck_run_proves_an_optional_link_on_a_non_nullable_receiver_equivalent() {
+    fn a_typecheck_run_hints_an_optional_link_on_a_non_nullable_receiver_without_changing_the_score()
+     {
         let Some(package) = companion_package() else {
             return;
         };
@@ -1167,7 +1168,7 @@ mod end_to_end {
                 .expect("an optional-chaining mutant of readB")
         };
         assert_eq!(link(&plain)["status"], "survived", "{plain}");
-        assert!(link(&plain).get("equivalent_reason").is_none(), "{plain}");
+        assert!(link(&plain).get("equivalence_hint").is_none(), "{plain}");
 
         let mut command = std::process::Command::new(crate::common::fallow_bin());
         command
@@ -1188,22 +1189,26 @@ mod end_to_end {
         let checked: serde_json::Value =
             serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("json");
         let mutant = link(&checked);
-        assert_eq!(mutant["status"], "equivalent", "{checked}");
-        assert_eq!(
-            mutant["equivalent_reason"], "type-proven-never-nullish",
-            "{checked}"
-        );
+        assert_eq!(mutant["status"], "survived", "{checked}");
+        assert_eq!(mutant["equivalence_hint"], "type-non-nullish", "{checked}");
         assert_eq!(checked["typecheck"]["completed"], true, "{checked}");
-        assert_eq!(checked["typecheck"]["equivalent"], 1, "{checked}");
-        assert_eq!(checked["summary"]["counts"]["equivalent"], 1, "{checked}");
+        assert_eq!(checked["typecheck"]["hinted"], 1, "{checked}");
         let counts = &checked["summary"]["counts"];
+        assert_eq!(counts["equivalent"], 0, "{checked}");
         assert_eq!(
             counts["survived"].as_u64().expect("survived")
-                + counts["equivalent"].as_u64().expect("equivalent")
                 + counts["compile_error"].as_u64().expect("compile errors"),
             plain["summary"]["counts"]["survived"]
                 .as_u64()
                 .expect("survived"),
+            "{checked}"
+        );
+        let detected = counts["killed"].as_f64().expect("killed")
+            + counts["timeout"].as_f64().expect("timeout");
+        let executed = detected + counts["survived"].as_f64().expect("survived");
+        assert_eq!(
+            checked["summary"]["score"].as_f64(),
+            Some(detected / executed),
             "{checked}"
         );
         assert_eq!(checked["completion"]["status"], "complete", "{checked}");

@@ -335,7 +335,7 @@ pub use list_envelopes::{
 pub use mutation::{
     DUPLICATE_TEST_IDS_CODE, MUTATION_INSPECT_SCHEMA_VERSION, MUTATION_PLAN_SCHEMA_VERSION,
     MUTATION_SCHEMA_VERSION, MUTATION_TASKS_SCHEMA_VERSION, MutantAttempt, MutantChange,
-    MutantEquivalentReason, MutantFailureKind, MutantLocation, MutantResult, MutantStatus,
+    MutantEquivalenceHint, MutantFailureKind, MutantLocation, MutantResult, MutantStatus,
     MutantTestReach, MutationBaselineFailure, MutationCacheOutput, MutationCompare,
     MutationCompareChange, MutationCompareMutant, MutationCompletion, MutationCompletionStatus,
     MutationFunctionResult, MutationIncompleteReason, MutationInspectCode, MutationInspectOutput,

@@ -19,7 +19,7 @@ import {
 } from "./backend.mjs";
 
 import { canonicalFileIdentity } from "./file-identity.mjs";
-import { TYPE_PROVEN_REASON, typeProvenEquivalents } from "./optional-chain-proof.mjs";
+import { NON_NULLISH_HINT, nonNullishLinks } from "./optional-chain-proof.mjs";
 
 const { DiagnosticCategory } = sync;
 
@@ -126,17 +126,15 @@ const projectSkipReason = (project, file, original) => {
 };
 
 const checkMutant = (context, check, mutant) => {
-  if (check.proven.has(mutant.id)) {
-    return { id: mutant.id, outcome: "equivalent", reason: TYPE_PROVEN_REASON };
-  }
   context.overlay.set(check.identity, mutatedText(check.original, mutant));
   const next = context.api.updateSnapshot(check.changes);
   check.snapshot.dispose();
   check.snapshot = next;
   const errors = fileErrors(next.getProject(check.config), check.file.absolutePath);
   const codes = newErrorCodes(check.baseline, errors);
-  return codes.length > 0
-    ? { id: mutant.id, outcome: "compile-error", codes }
+  if (codes.length > 0) return { id: mutant.id, outcome: "compile-error", codes };
+  return check.hinted.has(mutant.id)
+    ? { id: mutant.id, outcome: "compiles", hint: NON_NULLISH_HINT }
     : { id: mutant.id, outcome: "compiles" };
 };
 
@@ -149,14 +147,14 @@ const checkInProject = (context, file, original, config) => {
     changes: { fileChanges: { changed: [file.absolutePath] } },
     snapshot: context.api.updateSnapshot({ openProjects: [config] }),
     baseline: null,
-    proven: new Set(),
+    hinted: new Set(),
   };
   try {
     const project = check.snapshot.getProject(config);
     const reason = projectSkipReason(project, file, original);
     if (reason !== null) return unchecked(file, reason);
     check.baseline = countKeys(fileErrors(project, file.absolutePath));
-    check.proven = typeProvenEquivalents(project, file, original);
+    check.hinted = nonNullishLinks(project, file, original);
     return file.mutants.map((mutant) => checkMutant(context, check, mutant));
   } finally {
     context.overlay.delete(check.identity);

@@ -33958,16 +33958,16 @@
           },
           "description": "The TypeScript diagnostic codes of the new errors of a\n`compile_error` mutant, sorted, at most 8."
         },
-        "equivalent_reason": {
+        "equivalence_hint": {
           "anyOf": [
             {
-              "$ref": "#/definitions/MutantEquivalentReason"
+              "$ref": "#/definitions/MutantEquivalenceHint"
             },
             {
               "type": "null"
             }
           ],
-          "description": "Why an `equivalent` mutant is equivalent, when a check in the run\nproved it. Absent for a mutant that only a verdict marks as\nequivalent."
+          "description": "An advisory hint that the mutant may be equivalent to the original\ncode. The hint never changes the status: the mutant stays `survived`\nand counts in the score. A person decides, and records the decision in\na verdict file. The hint can be wrong."
         }
       },
       "required": [
@@ -34660,9 +34660,9 @@
           "type": "integer",
           "description": "The checked survivors that do not type-check. They have the status\n`compile_error`."
         },
-        "equivalent": {
+        "hinted": {
           "type": "integer",
-          "description": "The survivors that the checker proved equivalent. They have the\nstatus `equivalent` and the `equivalent_reason` field. They do not\ncount in `checked`."
+          "description": "The checked survivors that got an `equivalence_hint`. They keep the\nstatus `survived`."
         },
         "skipped": {
           "type": "array",
@@ -36442,6 +36442,17 @@
           ],
           "description": "The same lines with the mutation applied. `null` when the task is\nstale."
         },
+        "equivalence_hint": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutantEquivalenceHint"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "An advisory hint that the mutant may be equivalent. The task stays\nopen: a person decides, and records an equivalent mutant in a verdict\nfile."
+        },
         "stale_reason": {
           "anyOf": [
             {
@@ -36767,6 +36778,16 @@
         }
       ],
       "description": "The proof that makes a mutant `equivalent` without a verdict."
+    },
+    "MutantEquivalenceHint": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "type-non-nullish",
+          "description": "The mutant removes an optional-chaining link (`?.`), and the declared\ntype of the receiver excludes `null` and `undefined`. If no run-time\nvalue can be nullish, the mutant is equivalent. A run-time value can\nstill be nullish, for example an optional property under\n`exactOptionalPropertyTypes`, or a method that loses its `this`."
+        }
+      ],
+      "description": "Why a survivor may be equivalent, as far as the type check can tell."
     }
   }
 }

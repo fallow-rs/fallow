@@ -354,6 +354,9 @@ fn covered_by_line(tests: &[String]) -> Option<String> {
     })
 }
 
+/// The note under a survivor with an `equivalence_hint`.
+pub const EQUIVALENCE_HINT_TEXT: &str = "hint: the type of the receiver excludes null and undefined. If no runtime value can be nullish, the mutant is equivalent; record it in a verdict file.";
+
 fn render_survivors(out: &mut String, report: &MutationReport, code: Option<&CodeLookup>) {
     let groups = grouped(report, MutantStatus::Survived, MAX_SURVIVORS_SHOWN);
     if groups.is_empty() {
@@ -385,6 +388,9 @@ fn render_survivors(out: &mut String, report: &MutationReport, code: Option<&Cod
             );
             if let Some(line) = covered_by_line(&mutant.covering_tests) {
                 let _ = writeln!(out, "      {}", line.dimmed());
+            }
+            if mutant.equivalence_hint.is_some() {
+                let _ = writeln!(out, "      {}", EQUIVALENCE_HINT_TEXT.dimmed());
             }
         }
     }
@@ -721,8 +727,13 @@ fn typecheck_line(typecheck: &MutationTypecheckOutput) -> String {
         typecheck.compile_errors,
         plural(typecheck.compile_errors, "does", "do")
     );
-    if typecheck.equivalent > 0 {
-        let _ = write!(line, ", {} proven equivalent", typecheck.equivalent);
+    if typecheck.hinted > 0 {
+        let _ = write!(
+            line,
+            ", {} {} an equivalence hint",
+            typecheck.hinted,
+            plural(typecheck.hinted, "has", "have")
+        );
     }
     if !typecheck.skipped.is_empty() {
         let reasons: Vec<String> = typecheck

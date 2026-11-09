@@ -454,7 +454,7 @@ fn mutant(id: &str, file: &str, rank: u32, status: MutantStatus) -> MutantResult
         cached: false,
         resumed: false,
         type_error_codes: Vec::new(),
-        equivalent_reason: None,
+        equivalence_hint: None,
     }
 }
 
@@ -1133,7 +1133,7 @@ fn a_survivor_type_check_shows_its_counts_and_a_failed_check_says_so() {
         survivors: 3,
         checked: 2,
         compile_errors: 1,
-        equivalent: 0,
+        hinted: 0,
         skipped: vec![fallow_output::MutationTypecheckSkip {
             reason: fallow_output::MutationTypecheckSkipReason::NoProject,
             count: 1,
@@ -1149,14 +1149,16 @@ fn a_survivor_type_check_shows_its_counts_and_a_failed_check_says_so() {
     checked.typecheck = Some(fallow_output::MutationTypecheckOutput {
         completed: true,
         survivors: 3,
-        checked: 1,
+        checked: 3,
         compile_errors: 0,
-        equivalent: 2,
+        hinted: 2,
         skipped: Vec::new(),
     });
     let text = run_text(&checked, &OPTIONS);
     assert!(
-        text.contains("Survivor type check: 1 checked, 0 do not type-check, 2 proven equivalent\n"),
+        text.contains(
+            "Survivor type check: 3 checked, 0 do not type-check, 2 have an equivalence hint\n"
+        ),
         "{text}"
     );
     checked.typecheck = Some(fallow_output::MutationTypecheckOutput {
@@ -1164,7 +1166,7 @@ fn a_survivor_type_check_shows_its_counts_and_a_failed_check_says_so() {
         survivors: 2,
         checked: 0,
         compile_errors: 0,
-        equivalent: 0,
+        hinted: 0,
         skipped: Vec::new(),
     });
     let text = run_text(&checked, &OPTIONS);
@@ -2122,4 +2124,20 @@ fn mutation_human_inspect_bounds_killers_without_truncating_json() {
         json["killing_tests"][10],
         format!("test/killers/10::{long_name}")
     );
+}
+
+#[test]
+fn a_hinted_survivor_shows_the_advisory_note() {
+    let plain = mutant("m1", "src/a.ts", 1, MutantStatus::Survived);
+    let mut hinted = mutant("m2", "src/a.ts", 2, MutantStatus::Survived);
+    hinted.equivalence_hint = Some(fallow_output::MutantEquivalenceHint::TypeNonNullish);
+    let text = run_text(&report(vec![plain.clone(), hinted], Vec::new()), &OPTIONS);
+    assert_eq!(
+        text.matches("hint: the type of the receiver").count(),
+        1,
+        "{text}"
+    );
+    assert!(text.contains("record it in a verdict file"), "{text}");
+    let without = run_text(&report(vec![plain], Vec::new()), &OPTIONS);
+    assert!(!without.contains("hint: the type"), "{without}");
 }
