@@ -2454,3 +2454,60 @@ fn warm_runs_converge_when_the_working_set_is_a_little_over_the_cap() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// The documented eviction rule: a save over 80 percent of the cap removes
+/// the entries that the latest run did not see down to 60 percent of the cap.
+/// It keeps the entries that the latest run saw while they fit in the cap.
+#[test]
+fn eviction_keeps_the_latest_working_set_above_the_low_target() {
+    let dir = test_cache_dir("working_set_above_low_target");
+    let mut store = CacheStore::new(Path::new(""));
+    let stale: Vec<String> = (0..30u64).map(|i| format!("stale{i:02}.ts")).collect();
+    for (i, path) in (0u64..).zip(&stale) {
+        store.insert(Path::new(path), synthetic_module(i, 1 + i, 1));
+    }
+    let latest_run_seen = 1_000_000;
+    let working_set: Vec<String> = (0..45u64).map(|i| format!("live{i:02}.ts")).collect();
+    for (i, path) in (0u64..).zip(&working_set) {
+        store.insert(
+            Path::new(path),
+            synthetic_module(100 + i, latest_run_seen, 1),
+        );
+    }
+
+    let cap = 64 * 1024;
+    store.save(&dir, 5, cap).expect("save with eviction");
+
+    let loaded = CacheStore::load(&dir, Path::new(""), 5, DEFAULT_CACHE_MAX_SIZE)
+        .expect("load after eviction");
+    let kept_stale = stale
+        .iter()
+        .filter(|path| loaded.get_by_path_only(Path::new(path)).is_some())
+        .count();
+    let kept_working_set = working_set
+        .iter()
+        .filter(|path| loaded.get_by_path_only(Path::new(path)).is_some())
+        .count();
+    assert_eq!(
+        kept_stale, 0,
+        "entries that the latest run did not see go first"
+    );
+    assert_eq!(
+        kept_working_set,
+        working_set.len(),
+        "the working set fits in the cap, so all of it stays"
+    );
+    let on_disk = std::fs::metadata(dir.join("cache.bin"))
+        .expect("cache metadata")
+        .len() as usize;
+    assert!(
+        on_disk <= cap,
+        "cache ({on_disk} bytes) exceeds the cap ({cap} bytes)"
+    );
+    assert!(
+        on_disk > cap * 6 / 10,
+        "cache ({on_disk} bytes) went down to the low target, so the working set lost entries"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}
