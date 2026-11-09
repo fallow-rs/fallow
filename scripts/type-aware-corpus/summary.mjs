@@ -51,7 +51,10 @@ export const safeRatio = (numerator, denominator) =>
 
 export const typeAwareResolutionCounts = (projects) =>
   projects.reduce(
-    (totals, { type_aware: typeAware }) => ({
+    (
+      totals,
+      { type_aware: globalTypeAware, baseline_type_aware: typeAware = globalTypeAware },
+    ) => ({
       abstainedCount: totals.abstainedCount + (typeAware?.abstained_count ?? 0),
       unresolvedCount: totals.unresolvedCount + (typeAware?.unresolved_count ?? 0),
       blockingDiagnosticsCount:
@@ -87,9 +90,9 @@ export const typeEvidenceCoverage = (correctConfirmedCount, candidateCount, coun
 /** Projects with candidates behind blocking diagnostics, with each blocked program config. */
 export const blockedProjects = (projects) =>
   projects
-    .map(({ id, type_aware: typeAware }) => ({
+    .map(({ id, type_aware: typeAware, baseline_type_aware: baselineTypeAware = typeAware }) => ({
       project_id: id,
-      blocked_candidate_count: typeAware?.abstention_reasons?.blocking_diagnostics ?? 0,
+      blocked_candidate_count: baselineTypeAware?.abstention_reasons?.blocking_diagnostics ?? 0,
       programs: (typeAware?.projects ?? [])
         .filter(({ reason_code: reasonCode }) => reasonCode === "blocking-diagnostics")
         .map(({ config, blocking_diagnostic_count: diagnosticCount }) => ({

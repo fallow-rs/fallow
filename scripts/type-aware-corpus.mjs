@@ -65,6 +65,7 @@ import {
 } from "./type-aware-corpus/dependencies.mjs";
 import { WIRE_PROTOCOL_VERSION } from "../tools/type-aware-sidecar/src/generated-protocol.mjs";
 import { cargoFallowBin } from "./cargo-target.mjs";
+import { comparePopulation, validatePopulationMetadata } from "./type-aware-corpus/population.mjs";
 
 export { summarizeAdjudicatedFeatureBuckets };
 
@@ -668,33 +669,9 @@ const indexCandidateDecisions = (projectId, metadata) => {
   return decisions;
 };
 
-export const compareCandidateSets = (projectId, baseline, refined, metadata) => {
-  const refinedKeys = new Set(refined.map((candidate) => candidate.key));
-  const baselineKeys = new Set(baseline.map((candidate) => candidate.key));
-  const decisions = indexCandidateDecisions(projectId, metadata);
-  const additions = [...refinedKeys].filter((key) => !baselineKeys.has(key));
-  if (additions.length > 0) {
-    fail(`${projectId} refined output added candidates: ${additions.join(", ")}`);
-  }
-  return baseline.map((candidate) => {
-    const decision = decisions.get(candidate.key);
-    if (!decision) fail(`${projectId} emitted no semantic decision for ${candidate.key}`);
-    const removesFinding = ["confirmed-used", "contract-preserved"].includes(decision.decision);
-    if (removesFinding === refinedKeys.has(candidate.key)) {
-      fail(
-        `${projectId} semantic decision ${decision.decision} disagrees with the refined finding set for ${candidate.key}`,
-      );
-    }
-    return {
-      ...candidate,
-      semantic_status: removesFinding ? decision.decision : "retained",
-      semantic_decision: decision.decision,
-      semantic_completeness: decision.status,
-      owning_projects: arrayOrEmpty(decision.owning_projects),
-      contract: decision.contract ?? null,
-    };
-  });
-};
+export const compareCandidateSets = (projectId, baseline, refined, metadata) =>
+  comparePopulation(projectId, baseline, refined, indexCandidateDecisions(projectId, metadata))
+    .candidates;
 
 const ensureRuntimeInputs = (options) => {
   ensureFile(options.fallowBin, "release fallow binary");
@@ -940,20 +917,19 @@ const compactTypeAwareMetadata = (metadata) => {
 const discoverProject = async (project, options) => {
   const { baseline, refined } = await runDiscoveryIterations(project, options);
   validateCandidateExpectation(project, baseline.candidates.length);
-  const candidates = compareCandidateSets(
+  const decisions = indexCandidateDecisions(project.id, refined.typeAware);
+  const { candidates, promotions } = comparePopulation(
     project.id,
     baseline.candidates,
     refined.candidates,
-    refined.typeAware,
+    decisions,
   );
-  const metaCount = Object(refined.typeAware).candidate_count;
-  const mismatchedCount = [
-    Number.isSafeInteger(metaCount),
-    metaCount !== baseline.candidates.length,
-  ].every(Boolean);
-  if (mismatchedCount) {
-    fail(`${project.id} type-aware candidate_count does not match baseline output`);
-  }
+  const baselineCounts = validatePopulationMetadata(
+    project.id,
+    refined.typeAware,
+    decisions,
+    baseline.candidates,
+  );
   return {
     id: project.id,
     role: project.role,
@@ -967,6 +943,8 @@ const discoverProject = async (project, options) => {
       ({ semantic_status: status }) => status === "contract-preserved",
     ).length,
     type_aware: compactTypeAwareMetadata(refined.typeAware),
+    baseline_type_aware: baselineCounts,
+    semantic_only_promotions: promotions,
     candidates,
   };
 };
@@ -2687,7 +2665,7 @@ const summarize = (manifest, options, publicationMode = "write") => {
       adjudicated_truth_count: adjudicatedTruthCount,
       adjudicated_truth_coverage: adjudicatedTruthCoverage,
       adjudication_scope:
-        "Confirmed uses, required contracts, and reviewed declaration-only negatives; indeterminate candidates are excluded and corpus-wide recall is not claimed.",
+        "Baseline class members only: confirmed uses, required contracts, and reviewed declaration-only negatives. Semantic-only promotions and indeterminate candidates are excluded; corpus-wide recall is not claimed.",
       correct_unused_retention: correctUnusedRetention,
       abstained_count: abstainedCount,
       abstention,

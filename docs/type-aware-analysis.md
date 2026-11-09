@@ -479,6 +479,21 @@ platform, fixture commits, and dependency provenance. Partial runs must use a
 separate output directory, so they cannot overwrite canonical publication
 artifacts.
 
+Before `prepare`, clone any missing repository at the `fixture` path from
+`benchmarks/type-aware-corpus.json` and fetch its exact `ref`. The command creates
+clean worktrees from these clones; it does not download missing repositories.
+Use the corpus manifest pins, which can differ from the general benchmark pins.
+
+Accuracy metrics use the exact baseline class-member cohort. Discovery stores
+its decision counts in `baseline_type_aware` and validates global `type_aware`
+counters against all semantic decisions plus capacity omissions. A missing
+baseline decision fails discovery, including when request capacity prevented
+that decision. The denominator must not shrink to the queried subset.
+Findings added only by the semantic pass require a complete negative decision
+and are recorded separately in `semantic_only_promotions`. They are excluded
+from confirmation and retention claims in the baseline ledger. These records
+do not establish independently reviewed accuracy for promoted findings.
+
 The evidence phase executes the exact `--sidecar-bin` artifact recorded during
 discovery. It does not import semantic implementation modules from the current
 workspace. The ledger records the sidecar hash, protocol version, and digests of
@@ -499,6 +514,14 @@ npm run type-aware:corpus -- measure \
   --sidecar-bin tools/type-aware-sidecar/fallow-type-aware.mjs
 npm run type-aware:corpus -- evidence \
   --sidecar-bin tools/type-aware-sidecar/fallow-type-aware.mjs
+```
+
+Review the pinned source and evidence for every proposed removal and every
+known-unused negative. Record independent approvals bound to the current
+candidate-set and evidence digests in `benchmarks/type-aware-adjudication.json`.
+`adjudicate` applies those decisions; it does not perform the source review.
+
+```bash
 npm run type-aware:corpus -- adjudicate
 npm run type-aware:corpus -- verify-ledger
 npm run type-aware:corpus -- supplemental \
