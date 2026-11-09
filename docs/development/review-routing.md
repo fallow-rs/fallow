@@ -41,6 +41,16 @@ code, run the `Coverage` workflow on the pull request branch before the merge:
 `gh workflow run coverage.yml --ref <branch>`. `Coverage` runs only on `main`,
 and its slow instrumented build finds races that the pull request jobs miss.
 
+For a change to a pre-parse guard (`crates/extract/src/nesting.rs`,
+`crates/config/src/toml_input.rs`), review the guard against the lexer of the
+parser that it protects. A guard that reads strings, comments, escapes, or
+regex literals in a different way lets an input pass the guard and then
+overflow the parser. Check these items:
+
+- Each token form that can hide a bracket or a `<` from the guard.
+- A test for each bypass, plus the original fuzz crash file.
+- A run of the matching `fuzz/` target on the crash files.
+
 ## Synthesis
 
 - `Fix first` when any high-confidence blocker remains.
