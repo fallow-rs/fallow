@@ -873,10 +873,10 @@ of the pull request base branch:
 cargo fallow size --base origin/main --fail-on-growth
 ```
 
-The CI step has no skip route. A pull request that must grow a large file
-needs a maintainer decision. The step runs after a failed step. When the step
-cannot read the base ref, for example because the ref is not fetched, it exits
-with 2, not 1.
+Every pull request that changes Rust inputs runs this gate. A pull request
+that must grow a large file needs a maintainer decision. The step runs after
+a failed input detector. When the step cannot read the base ref, for example
+because the ref is not fetched, it exits with 2, not 1.
 
 ## Rust structure
 
@@ -888,6 +888,22 @@ pre-push step and `npm run verify:fast` run the same command:
 ```bash
 cargo fallow check --baseline cargo-fallow-baseline.json --fail-on-issues
 ```
+
+The required CI job stays present on every pull request. Its
+`scripts/rust-structure-inputs.mjs` detector reads the complete merge-base
+diff, including deleted paths and both sides of renames. Analysis can skip
+only when every change is known prose (`docs/**/*.md`, `changelog.d/*.md`
+and the root contributor documents listed in the script), or JavaScript,
+TypeScript, CSS or HTML source under `npm/`, `editors/`, `viz-frontend/`,
+`tools/`, `examples/` or `benchmarks/`.
+
+All other paths run analysis, including Rust source anywhere, crate and fuzz
+workspaces, manifests and locks, Cargo configuration, the baseline, toolchain,
+workflow and detector changes. Empty diffs, missing commits, mismatched
+checkouts, unknown change statuses and failed detection also run analysis.
+Every push to `main`, including release commits, runs analysis. Local gates
+always run the full command. CI requests JSON output to avoid the action's
+additional human-output analysis pass.
 
 Each gate fails the run:
 
