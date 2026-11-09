@@ -80,6 +80,7 @@ pub(super) const SUPPORT_ENTRY_POINT_PLUGINS: &[&str] = &[
     "drizzle",
     "dumi",
     "fumadocs",
+    "gulp",
     "i18next",
     "knex",
     "kysely",
