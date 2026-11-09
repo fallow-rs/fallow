@@ -12,6 +12,19 @@ struct CompilerOptions {
     declaration_dir: Option<PathBuf>,
     no_emit: Option<bool>,
     emit_declaration_only: Option<bool>,
+    /// The folder of the leaf config. TypeScript 6 uses it as the default
+    /// `rootDir`.
+    config_dir: Option<PathBuf>,
+}
+
+/// How a mapping treats a config without an explicit `rootDir`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum RootDirDefault {
+    /// Skip the config. A package entry keeps its other fallbacks.
+    Skip,
+    /// Use the folder of the config, as TypeScript 6 does. The config then
+    /// maps an existing source file, but does not claim the output.
+    ConfigDir,
 }
 
 /// Outcome for a package entry that may point into a configured TypeScript output directory.
@@ -53,7 +66,10 @@ impl TsconfigOutputMap {
             .iter()
             .filter_map(|path| {
                 let config_dir = path.parent()?;
-                read_compiler_options(path, config_dir, &mut FxHashSet::default(), 0)
+                let mut options =
+                    read_compiler_options(path, config_dir, &mut FxHashSet::default(), 0)?;
+                options.config_dir = Some(config_dir.to_path_buf());
+                Some(options)
             })
             .collect();
         Self {
@@ -84,7 +100,7 @@ impl TsconfigOutputMap {
         let Some(entry) = relative.and_then(Path::to_str) else {
             return TsconfigOutputResolution::Unconfigured;
         };
-        self.resolve_source_for_entry(entry, source_extensions)
+        self.resolve_source(entry, source_extensions, RootDirDefault::ConfigDir)
     }
 
     /// Resolve a generated entry while preserving whether the output was configured.
@@ -93,6 +109,15 @@ impl TsconfigOutputMap {
         &self,
         entry: &str,
         source_extensions: &[&str],
+    ) -> TsconfigOutputResolution {
+        self.resolve_source(entry, source_extensions, RootDirDefault::Skip)
+    }
+
+    fn resolve_source(
+        &self,
+        entry: &str,
+        source_extensions: &[&str],
+        root_dir_default: RootDirDefault,
     ) -> TsconfigOutputResolution {
         let Some(root) = self.root.as_deref() else {
             return TsconfigOutputResolution::Unconfigured;
@@ -139,10 +164,17 @@ impl TsconfigOutputMap {
             else {
                 continue;
             };
-            let Some(root_dir) = options.root_dir.as_deref() else {
-                continue;
+            let root_dir = match (options.root_dir.as_deref(), root_dir_default) {
+                (Some(root_dir), _) => {
+                    configured |= claims_output;
+                    root_dir
+                }
+                (None, RootDirDefault::ConfigDir) => match options.config_dir.as_deref() {
+                    Some(config_dir) => config_dir,
+                    None => continue,
+                },
+                (None, RootDirDefault::Skip) => continue,
             };
-            configured |= claims_output;
             if options.no_emit.unwrap_or(false) {
                 continue;
             }
@@ -223,15 +255,22 @@ fn read_compiler_options(
     let content = std::fs::read_to_string(&config_path).ok()?;
     let value: serde_json::Value =
         crate::jsonc::parse_to_value(content.trim_start_matches('\u{FEFF}')).ok()?;
-    let parent_options = match value.get("extends") {
-        Some(serde_json::Value::String(extends)) => {
-            let parent = resolve_extends_path(&config_path, extends)?;
-            read_compiler_options(&parent, substitution_base, visited, depth + 1)?
-        }
+    let extends: Vec<&str> = match value.get("extends") {
+        Some(serde_json::Value::String(extends)) => vec![extends.as_str()],
+        Some(serde_json::Value::Array(items)) => items
+            .iter()
+            .map(serde_json::Value::as_str)
+            .collect::<Option<_>>()?,
         Some(_) => return None,
-        None => CompilerOptions::default(),
+        None => Vec::new(),
     };
-    let mut options = parent_options;
+    // A later entry of an array `extends` overrides an earlier one.
+    let mut options = CompilerOptions::default();
+    for extends in extends {
+        let parent = resolve_extends_path(&config_path, extends)?;
+        let parent_options = read_compiler_options(&parent, substitution_base, visited, depth + 1)?;
+        options.inherit(parent_options);
+    }
     let Some(compiler_options) = value.get("compilerOptions") else {
         visited.remove(&config_path);
         return Some(options);
@@ -268,6 +307,19 @@ fn read_compiler_options(
     )?;
     visited.remove(&config_path);
     Some(options)
+}
+
+impl CompilerOptions {
+    /// Apply the options that `parent` sets over the current options.
+    fn inherit(&mut self, parent: Self) {
+        self.root_dir = parent.root_dir.or_else(|| self.root_dir.take());
+        self.out_dir = parent.out_dir.or_else(|| self.out_dir.take());
+        self.declaration_dir = parent
+            .declaration_dir
+            .or_else(|| self.declaration_dir.take());
+        self.no_emit = parent.no_emit.or(self.no_emit);
+        self.emit_declaration_only = parent.emit_declaration_only.or(self.emit_declaration_only);
+    }
 }
 
 fn replace_path_option(
@@ -481,12 +533,34 @@ fn package_subpath_tsconfig(package_root: &Path, subpath: &str) -> Option<PathBu
             let serde_json::Value::Object(exports) = exports else {
                 return None;
             };
-            let key = format!("./{subpath}");
-            let target = exports.get(&key)?.as_str()?;
-            return resolve_exported_config_file(package_root, target);
+            let target = exported_subpath_target(exports, &format!("./{subpath}"))?;
+            return resolve_exported_config_file(package_root, &target);
         }
     }
     resolve_config_file(package_root, &format!("./{subpath}"))
+}
+
+/// Find the string target of an `exports` key: the exact key first, then the
+/// `*` pattern with the longest prefix, as Node.js matches them.
+fn exported_subpath_target(
+    exports: &serde_json::Map<String, serde_json::Value>,
+    key: &str,
+) -> Option<String> {
+    if let Some(target) = exports.get(key) {
+        return target.as_str().map(str::to_string);
+    }
+    let (_, target, matched) = exports
+        .iter()
+        .filter_map(|(pattern, target)| {
+            let (prefix, suffix) = pattern.split_once('*')?;
+            if suffix.contains('*') || key.len() < prefix.len() + suffix.len() {
+                return None;
+            }
+            let matched = key.strip_prefix(prefix)?.strip_suffix(suffix)?;
+            Some((prefix.len(), target, matched))
+        })
+        .max_by_key(|(prefix_len, _, _)| *prefix_len)?;
+    Some(target.as_str()?.replace('*', matched))
 }
 
 fn package_extends_parts(extends: &str) -> Option<(PathBuf, Option<String>)> {
@@ -1167,6 +1241,45 @@ mod tests {
     }
 
     #[test]
+    fn package_subpaths_resolve_through_exports_patterns() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let root = directory.path();
+        write(
+            &root.join("node_modules/@scope/config/package.json"),
+            r#"{"exports":{"./base.json":"./base.json","./*":"./*","./presets/*.json":"./generated/*.json"}}"#,
+        );
+        write(
+            &root.join("node_modules/@scope/config/modern/build.json"),
+            r#"{"compilerOptions":{"outDir":"../../../../distribution"}}"#,
+        );
+        write(
+            &root.join("node_modules/@scope/config/generated/strict.json"),
+            r#"{"compilerOptions":{"outDir":"../../../../preset-output"}}"#,
+        );
+        write(
+            &root.join("tsconfig.build.json"),
+            r#"{"extends":"@scope/config/modern/build.json","compilerOptions":{"rootDir":"./source"}}"#,
+        );
+        write(
+            &root.join("tsconfig.preset.json"),
+            r#"{"extends":"@scope/config/presets/strict.json","compilerOptions":{"rootDir":"./source"}}"#,
+        );
+        write(&root.join("source/index.ts"), "export const value = 1;\n");
+
+        let map = TsconfigOutputMap::from_project(root);
+        assert_eq!(
+            map.resolve_source_for_entry("./distribution/index.js", &["ts"]),
+            TsconfigOutputResolution::Resolved(root.join("source/index.ts")),
+            "a `./*` pattern exports the subpath"
+        );
+        assert_eq!(
+            map.resolve_source_for_entry("./preset-output/index.js", &["ts"]),
+            TsconfigOutputResolution::Resolved(root.join("source/index.ts")),
+            "the pattern with the longest prefix wins"
+        );
+    }
+
+    #[test]
     fn missing_local_extends_does_not_use_child_options() {
         let directory = tempfile::tempdir().expect("temporary directory");
         let root = directory.path();
@@ -1218,6 +1331,64 @@ mod tests {
         assert_eq!(
             map(root, "./dist/index.d.ts", &["ts"]),
             TsconfigOutputResolution::ConfiguredWithoutSource
+        );
+    }
+
+    #[test]
+    fn array_extends_applies_parents_in_order_before_own_options() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let root = directory.path();
+        write(
+            &root.join("configs/first.json"),
+            r#"{"compilerOptions":{"rootDir":"../wrong","outDir":"../distribution"}}"#,
+        );
+        write(
+            &root.join("configs/second.json"),
+            r#"{"compilerOptions":{"rootDir":"../source"}}"#,
+        );
+        write(
+            &root.join("tsconfig.build.json"),
+            r#"{"extends":["./configs/first.json","./configs/second.json"]}"#,
+        );
+        write(&root.join("source/index.ts"), "export const value = 1;\n");
+
+        assert_eq!(
+            map(root, "./distribution/index.js", &["ts"]),
+            TsconfigOutputResolution::Resolved(root.join("source/index.ts"))
+        );
+    }
+
+    #[test]
+    fn output_path_without_root_dir_maps_from_the_config_folder() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let root = directory.path();
+        write(&root.join("tsconfig.json"), r#"{"compilerOptions":{}}"#);
+        write(
+            &root.join("tsconfig.build.json"),
+            r#"{"extends":["./tsconfig.json"],"compilerOptions":{"outDir":"dist"}}"#,
+        );
+        write(
+            &root.join("nodes/Http/transport.ts"),
+            "export const t = 1;\n",
+        );
+
+        let output_map = TsconfigOutputMap::from_project(root);
+        assert_eq!(
+            output_map.resolve_source_for_output_path(
+                &root.join("dist/nodes/Http/transport.js"),
+                &["ts"]
+            ),
+            TsconfigOutputResolution::Resolved(root.join("nodes/Http/transport.ts"))
+        );
+        assert_eq!(
+            output_map.resolve_source_for_output_path(&root.join("dist/missing.js"), &["ts"]),
+            TsconfigOutputResolution::Unconfigured,
+            "an inferred rootDir does not claim the output"
+        );
+        assert_eq!(
+            map(root, "./dist/nodes/Http/transport.js", &["ts"]),
+            TsconfigOutputResolution::Unconfigured,
+            "package entries keep the explicit rootDir rule"
         );
     }
 

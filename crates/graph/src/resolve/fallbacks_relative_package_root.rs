@@ -4,7 +4,8 @@ use std::path::Path;
 #[cfg(miri)]
 use std::path::PathBuf;
 
-use super::{ResolveContext, ResolveResult, normalize_path_lexically, try_source_subpath};
+use super::tsconfig_output::try_package_source_or_output;
+use super::{ResolveContext, ResolveResult, normalize_path_lexically};
 
 /// Whether `specifier` is relative: `.`, `..`, `./*` or `../*`.
 fn is_relative_specifier(specifier: &str) -> bool {
@@ -13,7 +14,8 @@ fn is_relative_specifier(specifier: &str) -> bool {
 
 /// Resolve a relative import that lands on a known package root whose built
 /// entry points are absent but whose package metadata points at source files.
-/// `require('..')` names the package root the same as `require('../')`.
+/// `require('..')` names the package root the same as `require('../')`. When
+/// the source layout gives no entry, `main` maps through the output mapping.
 pub(in crate::resolve) fn try_relative_package_root_source_fallback(
     ctx: &ResolveContext<'_>,
     from_file: &Path,
@@ -38,7 +40,7 @@ pub(in crate::resolve) fn try_relative_package_root_source_fallback(
                 .as_deref()
                 .is_some_and(|canonical| canonical == manifest.canonical_root);
         matches_manifest
-            .then(|| try_source_subpath(ctx, manifest, Path::new("")))
+            .then(|| try_package_source_or_output(ctx, manifest, ""))
             .flatten()
             .map(ResolveResult::InternalModule)
     })

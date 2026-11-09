@@ -35,10 +35,10 @@ pub(super) use path_aliases::{
 };
 pub(super) use relative_package_root::try_relative_package_root_source_fallback;
 use scss_paths::{find_scss_through_path_alias, lookup_scss_path};
-use tsconfig_output::try_tsconfig_output_source;
 pub(super) use tsconfig_output::{
     try_canonical_source_fallbacks, try_relative_output_source_fallbacks,
 };
+use tsconfig_output::{try_package_source_or_output, try_tsconfig_output_source};
 use workspace_package_asset::{exports_target_asset, workspace_package_asset};
 
 /// Try SCSS partial resolution: `_filename` and `_index` conventions.
@@ -1007,7 +1007,7 @@ fn try_manifest_workspace_resolution(
         };
     }
 
-    if let Some(file_id) = try_source_subpath(ctx, manifest, source_subpath) {
+    if let Some(file_id) = try_package_source_or_output(ctx, manifest, subpath) {
         return ManifestWorkspaceResolution::Resolved(ResolveResult::InternalPackageModule {
             file_id,
             package_name: pkg_name.to_string(),

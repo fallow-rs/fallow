@@ -1,0 +1,5 @@
+{
+  "name": "workspace-dist-subpath-tsconfig-output",
+  "private": true,
+  "workspaces": ["packages/*"]
+}
