@@ -600,6 +600,8 @@ const DERIVED_DEFINITION_NAMES: &[&str] = &[
 
 #[path = "schema_emit_parts/mutation.rs"]
 mod mutation_names;
+#[path = "schema_emit_parts/prune.rs"]
+mod prune;
 
 fn derived_definition_names() -> &'static [&'static str] {
     static NAMES: std::sync::LazyLock<Vec<&'static str>> = std::sync::LazyLock::new(|| {
@@ -1195,6 +1197,7 @@ fn merge_with_committed(derived: &Map<String, Value>) -> Result<Value, String> {
         normalize_schema(&mut value);
         definitions.insert(name.clone(), value);
     }
+    prune::prune_and_report(definitions, derived);
 
     augment_audit_wire_definitions(definitions)?;
     rewrite_fallow_output_definition(definitions)?;
@@ -2443,15 +2446,10 @@ mod drift_tests {
                 ));
             }
         }
-        const HAND_MAINTAINED_ALLOW_LIST: &[(&str, &str)] = &[];
-        let allow_list: rustc_hash::FxHashSet<&'static str> = HAND_MAINTAINED_ALLOW_LIST
-            .iter()
-            .map(|(name, _)| *name)
-            .collect();
         for name in committed.keys() {
-            if !derived.contains_key(name) && !allow_list.contains(name.as_str()) {
+            if !derived.contains_key(name) && !prune::is_hand_maintained(name) {
                 failures.push(format!(
-                    "orphan in `docs/output-schema.json`: definition `{name}` is not produced by `derived_definitions()`. Either register the type via `subschema_for::<{name}>()` in `derived_definitions`, or delete the stale entry. (If the entry is hand-maintained pending another #384 item, add it to `HAND_MAINTAINED_ALLOW_LIST` with a reason linking the issue.)"
+                    "orphan in `docs/output-schema.json`: definition `{name}` is not produced by `derived_definitions()`. Run `npm run generate:contracts` to prune the stale entry, or register the type via `subschema_for::<{name}>()` in `derived_definitions`. (If the entry is hand-maintained pending another #384 item, add it to `HAND_MAINTAINED_ALLOW_LIST` in `schema_emit_parts/prune.rs` with a reason linking the issue.)"
                 ));
             }
         }
