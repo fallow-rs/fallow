@@ -199,8 +199,14 @@ fn mutant_result(
         .get(&(mutant.mutant_id.clone(), mutant.span))
         .cloned()
         .or_else(|| {
-            reproduce(source, &mutant.file, &mutant.mutant_id, mutant.span)
-                .map(|reproduced| reproduced.replacement)
+            reproduce(
+                source,
+                &mutant.file,
+                &mutant.mutant_id,
+                mutant.span,
+                &mutant.operator,
+            )
+            .map(|reproduced| reproduced.replacement)
         });
     if let Some(replacement) = replacement {
         result.insert("replacement".into(), json!(replacement));

@@ -548,6 +548,7 @@ fn code_lookup(report: &MutationReport, root: &Path) -> CodeLookup {
             file,
             &mutant.location.mutant_id,
             mutant.location.span,
+            &mutant.location.operator,
         ) {
             let (before, after) =
                 crate::mutation_inspect::line_context(source, mutant.location.span);

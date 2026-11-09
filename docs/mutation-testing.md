@@ -170,7 +170,8 @@ code. The rules of each opt-in operator:
 - `switch-case`: the clause falls through to the next clause.
 - `call-expression`: a call statement, a returned call and a concise arrow
   call body give no mutant, because `removed-call` or `return-value` gives
-  the same result. A call in an optional chain, a `super(...)` call, a
+  the same result. This is also true in a run that does not select those
+  two operators: select them to cover such calls. A call in an optional chain, a `super(...)` call, a
   `require(...)` call and a logging call give no mutant. The replacement is
   always `(void 0)`, so it keeps its grouping before an operator: `f() + 1`
   becomes `(void 0) + 1`.
