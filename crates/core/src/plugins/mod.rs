@@ -13,73 +13,11 @@ use fallow_config::{
 use fallow_types::semantic::SemanticFrameworkContract;
 use regex::Regex;
 
-const TEST_ENTRY_POINT_PLUGINS: &[&str] = &[
-    "ava",
-    "bun",
-    "deno",
-    "cucumber",
-    "cypress",
-    "jasmine",
-    "jest",
-    "k6",
-    "mocha",
-    "playwright",
-    "rstest",
-    "tap",
-    "tsd",
-    "vitest",
-    "webdriverio",
-];
-
-const RUNTIME_ENTRY_POINT_PLUGINS: &[&str] = &[
-    "adonis",
-    "angular",
-    "astro",
-    "browser-extension",
-    "convex",
-    "docusaurus",
-    "egg",
-    "electron",
-    "ember",
-    "eve",
-    "expo",
-    "expo-router",
-    "flue",
-    "gatsby",
-    "hardhat",
-    "kibana",
-    "module-federation",
-    "nestjs",
-    "next-intl",
-    "nextjs",
-    "nitro",
-    "nuxt",
-    "obsidian",
-    "parcel",
-    "qwik",
-    "react-native",
-    "react-router",
-    "redwoodsdk",
-    "remix",
-    "rolldown",
-    "rollup",
-    "rsbuild",
-    "rspack",
-    "sanity",
-    "supabase",
-    "sveltekit",
-    "tanstack-router",
-    "tsdown",
-    "tsup",
-    "vercel",
-    "vite",
-    "vite-plus",
-    "vitepress",
-    "waku",
-    "webpack",
-    "wrangler",
-    "wxt",
-];
+use entry_point_roles::builtin_entry_point_role;
+#[cfg(test)]
+use entry_point_roles::{
+    RUNTIME_ENTRY_POINT_PLUGINS, SUPPORT_ENTRY_POINT_PLUGINS, TEST_ENTRY_POINT_PLUGINS,
+};
 
 /// Whether an entry rule of `result` matches the project-relative `path`, as
 /// entry point discovery compiles and matches the rules.
@@ -1649,16 +1587,6 @@ pub trait Plugin: Send + Sync {
     }
 }
 
-fn builtin_entry_point_role(name: &str) -> EntryPointRole {
-    if TEST_ENTRY_POINT_PLUGINS.contains(&name) {
-        EntryPointRole::Test
-    } else if RUNTIME_ENTRY_POINT_PLUGINS.contains(&name) {
-        EntryPointRole::Runtime
-    } else {
-        EntryPointRole::Support
-    }
-}
-
 /// Macro to eliminate boilerplate in plugin implementations.
 ///
 /// Generates a struct and a `Plugin` trait impl with the standard static methods
@@ -2039,9 +1967,11 @@ mod dependency_cruiser;
 mod docusaurus;
 mod dotenv;
 mod drizzle;
+mod dumi;
 mod egg;
 mod electron;
 mod ember;
+mod entry_point_roles;
 mod eslint;
 mod eve;
 mod expo;
@@ -2121,6 +2051,7 @@ mod semantic_release;
 mod sentry;
 mod simple_git_hooks;
 mod size_limit;
+mod solid_start;
 mod storybook;
 mod stryker;
 mod stylelint;

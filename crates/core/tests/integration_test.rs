@@ -69,6 +69,8 @@ mod deprecated_exports;
 mod directory_resolution;
 #[path = "integration_test/dotenv_plugin.rs"]
 mod dotenv_plugin;
+#[path = "integration_test/dumi.rs"]
+mod dumi;
 #[path = "integration_test/duplicate_export_aliases.rs"]
 mod duplicate_export_aliases;
 #[path = "integration_test/duplicate_prop_shape.rs"]
@@ -231,6 +233,8 @@ mod signature_backing_unused_backer;
 mod size_limit_plugin;
 #[path = "integration_test/skipped_file_reachability_caveat.rs"]
 mod skipped_file_reachability_caveat;
+#[path = "integration_test/solid_start.rs"]
+mod solid_start;
 #[path = "integration_test/ssr_load_module.rs"]
 mod ssr_load_module;
 #[path = "integration_test/svelte_dead_event.rs"]
