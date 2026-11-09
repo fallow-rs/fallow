@@ -1693,13 +1693,14 @@ jobs:
       # step of the "Fallow Self Analysis" job checks .mjs and .ts files.
       - name: Static checks
         if: always() && !cancelled() && (github.event_name != 'pull_request' || steps.structure-inputs.outcome != 'success' || steps.structure-inputs.outputs.scan != 'false')
-        uses: fallow-rs/cargo-fallow@fdcf25ad021dd919c52c5c7ee5d285431e2865b3 # v0.3.0
+        uses: fallow-rs/cargo-fallow@88f4aa8bd66d9671af5478a2275562f2793eb13c # optional SARIF output
         with:
           install: release
           baseline: cargo-fallow-baseline.json
           base: auto
           annotations: 'false'
           format: json
+          sarif-output: when-needed
 
   zizmor:
     name: Actions Security

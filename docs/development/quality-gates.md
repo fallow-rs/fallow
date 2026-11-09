@@ -903,7 +903,9 @@ workflow and detector changes. Empty diffs, missing commits, mismatched
 checkouts, unknown change statuses and failed detection also run analysis.
 Every push to `main`, including release commits, runs analysis. Local gates
 always run the full command. CI requests JSON output to avoid the action's
-additional human-output analysis pass.
+additional human-output analysis pass. With `sarif-output: when-needed`,
+a clean check also skips unused SARIF generation. Findings, warnings and
+failures retain SARIF diagnostics.
 
 Each gate fails the run:
 
