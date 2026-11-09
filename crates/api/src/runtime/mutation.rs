@@ -267,17 +267,17 @@ fn engine_scope(
                         .with_context("mutation.base")
                 })?;
             let text =
-                fallow_engine::changed_files::try_get_changed_diff(root, &resolved_base.git_ref)
+                fallow_engine::changed_files::try_get_mutation_diff(root, &resolved_base.git_ref)
                     .map_err(|error| {
-                        mutation_error(
-                            "FALLOW_CHANGED_FILES_FAILED",
-                            format!(
-                                "cannot diff against `{}`: {}",
-                                resolved_base.git_ref,
-                                error.describe()
-                            ),
-                        )
-                    })?;
+                    mutation_error(
+                        "FALLOW_CHANGED_FILES_FAILED",
+                        format!(
+                            "cannot diff against `{}`: {}",
+                            resolved_base.git_ref,
+                            error.describe()
+                        ),
+                    )
+                })?;
             let label = format!("git diff {}", resolved_base.git_ref);
             let index = fallow_engine::diff_source::place_diff(
                 DiffIndex::from_unified_diff(&text),
