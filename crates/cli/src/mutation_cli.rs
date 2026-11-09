@@ -641,10 +641,14 @@ fn refuse_run_flags_in_plan(args: &MutationArgs) -> Result<(), ProgrammaticError
     })
 }
 
+#[path = "mutation_cli_diff.rs"]
+mod diff;
+
 fn run_inner(input: &MutationCliInput<'_>) -> Result<ExitCode, ProgrammaticError> {
     let mut options = run_options(input)?;
     let recheck = recheck_selection(input)?;
     let min_score = apply_recheck(input, &mut options, recheck.as_ref())?;
+    let stdin_diff = diff::prepare(&mut options)?;
     let baseline = input
         .args
         .compare
@@ -653,7 +657,8 @@ fn run_inner(input: &MutationCliInput<'_>) -> Result<ExitCode, ProgrammaticError
         .transpose()?;
     if input.args.plan {
         refuse_run_flags_in_plan(&input.args)?;
-        let plan = plan_mutation(&options)?;
+        let plan = plan_mutation(&options)
+            .map_err(|error| diff::contextualize(error, stdin_diff.as_ref()))?;
         return Ok(emit_plan(plan, input));
     }
     let verdicts = input
@@ -670,7 +675,8 @@ fn run_inner(input: &MutationCliInput<'_>) -> Result<ExitCode, ProgrammaticError
             "fallow: mutation testing runs the project tests against each mutant. Fallow does not write to project files. The report lists any path that the tests changed."
         );
     }
-    let mut report = run_with_progress(&options, input)?;
+    let mut report = run_with_progress(&options, input)
+        .map_err(|error| diff::contextualize(error, stdin_diff.as_ref()))?;
     complete_file_digests(&mut report, input.root);
     report.recheck = recheck.as_ref().map(|selection| selection.section(&report));
     // Before the verdicts: an equivalent verdict for a survivor does not make

@@ -109,6 +109,7 @@ mod list_tests;
 mod logging_tests;
 mod migrate_tests;
 mod monorepo_report_paths_tests;
+mod mutation_explicit_diff_tests;
 mod mutation_tests;
 mod non_gating_ci_level_tests;
 mod nx_run_commands_tests;
