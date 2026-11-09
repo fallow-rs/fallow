@@ -767,11 +767,12 @@ fn inspect_cloud_without_a_repository_names_the_repo_flag() {
 #[test]
 fn cloud_login_names_the_owner_rule_when_the_cloud_mints_no_key() {
     let (dir, home) = project();
-    let token = r#"{"data":{"licenseJwt":"jwt","apiKeyError":{"code":"owner_required","message":"Only an organization owner can create an API key."}}}"#;
-    let (endpoint, _captured, handle) = serve(vec![
-        (200, DEVICE_START.to_owned()),
-        (200, token.to_owned()),
-    ]);
+    let token = r#"{"data":{"licenseJwt":"jwt","apiKeyError":{"code":"owner_required","message":"Only an organization owner can create an API key. The CLI is signed in without one."}}}"#;
+    let start = DEVICE_START.replace(
+        "https://fallow.cloud/device",
+        "http://127.0.0.1:5173/device",
+    );
+    let (endpoint, _captured, handle) = serve(vec![(200, start), (200, token.to_owned())]);
     let env = Env {
         api_url: Some(&endpoint),
         api_key: None,
@@ -789,10 +790,12 @@ fn cloud_login_names_the_owner_rule_when_the_cloud_mints_no_key() {
         login.stdout, login.stderr
     );
     let text = format!("{}{}", login.stdout, login.stderr);
+    assert_eq!(text.matches("organization owner").count(), 1, "{text}");
     assert!(
-        text.contains("Only an organization owner can create an API key"),
+        text.contains("http://127.0.0.1:5173/settings#api-keys"),
         "{text}"
     );
+    assert!(!text.contains("signed in without one"), "{text}");
     assert!(!text.contains("may not support"), "{text}");
     assert!(
         !home.path().join(".config/fallow/credentials").exists(),
@@ -828,7 +831,7 @@ fn cloud_login_names_the_revoke_step_when_an_earlier_poll_took_the_key() {
     let text = format!("{}{}", login.stdout, login.stderr);
     assert!(text.contains("did not reach this machine"), "{text}");
     assert!(text.contains("fallow cloud login (ci-box)"), "{text}");
-    assert!(text.contains("settings#api-keys"), "{text}");
+    assert!(text.contains("Settings, API keys"), "{text}");
     assert!(
         !home.path().join(".config/fallow/credentials").exists(),
         "no key is stored"
