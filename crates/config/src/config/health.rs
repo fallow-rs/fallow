@@ -341,8 +341,10 @@ pub struct HealthConfig {
 
     /// Regular expressions excluding Tailwind arbitrary-value utilities from
     /// token-drift findings and analytics, including CVA variants. Matches the
-    /// utility without variant prefixes, for example `icon-[lucide--eye]` in
-    /// `hover:icon-[lucide--eye]`. Use `^icon-\[` to exclude that prefix.
+    /// normalized `prefix-[value]` token, without variants, negative signs, or
+    /// suffix modifiers. Both `-mt-[7px]` and `mt-[7px]` match as `mt-[7px]`;
+    /// `bg-[#abc]/50` matches as `bg-[#abc]`. These spellings cannot be excluded
+    /// independently. Use `^icon-\[` to exclude Iconify tokens, including variants.
     /// Defaults to no exclusions. Invalid regexes fail config loading.
     #[serde(
         default,

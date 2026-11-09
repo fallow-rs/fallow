@@ -1850,8 +1850,8 @@ fn audit_css_surfaces_cva_duplicate_variant_blocks() {
          export const button = cva('inline-flex', {\n\
            variants: {\n\
              tone: {\n\
-               primary: 'px-3 py-2 text-sm font-medium bg-[#f05a28]',\n\
-               secondary: 'px-3 py-2 text-sm font-medium bg-[#f05a28]',\n\
+               primary: 'px-3 py-2 text-sm font-medium bg-[#f05a28] hover:text-[#f05a28]',\n\
+               secondary: 'px-3 py-2 text-sm font-medium bg-[#f05a28] hover:text-[#f05a28]',\n\
              },\n\
            },\n\
          });\n",
@@ -1916,11 +1916,19 @@ fn audit_css_surfaces_cva_duplicate_variant_blocks() {
     let findings = filtered["complexity"]["styling_findings"]
         .as_array()
         .unwrap();
-    assert!(
-        findings
-            .iter()
-            .all(|finding| finding["code"] != "css-token-drift")
-    );
+    let drifts: Vec<_> = findings
+        .iter()
+        .filter(|finding| finding["code"] == "css-token-drift")
+        .map(|finding| {
+            finding["value"]
+                .as_str()
+                .unwrap()
+                .split(" in CVA variant:")
+                .next()
+                .unwrap()
+        })
+        .collect();
+    assert_eq!(drifts, vec!["text-[#f05a28]", "text-[#f05a28]"]);
     assert!(
         findings
             .iter()

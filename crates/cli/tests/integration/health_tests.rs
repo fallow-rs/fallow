@@ -9044,6 +9044,11 @@ w-[13px] hover:bg-[#abc] w-[13px]">x</div>;"#,
             vec!["icon-[lucide--eye]", "icon-[mdi--account]", "w-[13px]"],
             4,
         ),
+        (
+            r#"["^icon-\\[lucide--eye\\]$"]"#,
+            vec!["bg-[#abc]", "icon-[mdi--account]", "w-[13px]"],
+            4,
+        ),
         (r#"["^icon-\\[", "^bg-\\["]"#, vec!["w-[13px]"], 2),
     ] {
         write_file(

@@ -1463,7 +1463,7 @@
           "default": []
         },
         "tailwindIgnorePatterns": {
-          "description": "Regular expressions excluding Tailwind arbitrary-value utilities from\ntoken-drift findings and analytics, including CVA variants. Matches the\nutility without variant prefixes, for example `icon-[lucide--eye]` in\n`hover:icon-[lucide--eye]`. Use `^icon-\\[` to exclude that prefix.\nDefaults to no exclusions. Invalid regexes fail config loading.",
+          "description": "Regular expressions excluding Tailwind arbitrary-value utilities from\ntoken-drift findings and analytics, including CVA variants. Matches the\nnormalized `prefix-[value]` token, without variants, negative signs, or\nsuffix modifiers. Both `-mt-[7px]` and `mt-[7px]` match as `mt-[7px]`;\n`bg-[#abc]/50` matches as `bg-[#abc]`. These spellings cannot be excluded\nindependently. Use `^icon-\\[` to exclude Iconify tokens, including variants.\nDefaults to no exclusions. Invalid regexes fail config loading.",
           "type": "array",
           "items": {
             "type": "string"
