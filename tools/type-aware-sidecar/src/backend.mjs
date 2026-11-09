@@ -28,7 +28,7 @@ const importApi = async (subpath) => {
 };
 export const sync = await importApi("sync");
 export const ast = await importApi("ast/is");
-export const { SyntaxKind } = await importApi("ast");
+export const { SyntaxKind, NodeFlags } = await importApi("ast");
 const { serverFS } = await importApi("fs");
 
 /**

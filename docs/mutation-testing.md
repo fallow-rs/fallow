@@ -1638,8 +1638,11 @@ are not checked, so the cost grows with the number of survivors only.
   binding, a class property with `!` or `declare`, and a class property
   without an initializer that the constructor does not assign in its body. An
   element access (`xs[0]`) and a call without a declared return type are not
-  proven either. Assignments to a binding after its initializer are not
-  tracked. In each of these cases the mutant gets the normal check.
+  proven either. A `let`, `var` or parameter binding that any code assigns
+  after its declaration is not proven: the proof counts `=`, compound
+  assignment, `++`, `--`, destructuring targets, `for` loop targets and
+  assignments in closures. A top-level `let` or `var` of a script file is not
+  proven. In each of these cases the mutant gets the normal check.
 - The report names a code, not the expression, because the report holds no
   project text. The `file`, `line` and `column` of the mutant locate the
   receiver. The proof runs after the tests and only for survivors, in the

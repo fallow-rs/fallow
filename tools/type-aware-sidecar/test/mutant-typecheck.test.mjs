@@ -337,6 +337,23 @@ const RISK_SOURCE = [
   "export const annotatedCall = (): number => getB()?.b ?? 0;",
   "export const inferredCall = (): number => inferredB()?.b ?? 0;",
   "export const viaParam = (box: Box): number => box.set?.b ?? 0;",
+  "export const reassigned = (r0: unknown): number => { let ra: { b: number } = { b: 1 }; ra = r0 as any; return ra?.b ?? 0; };",
+  "export const closure = (): number => {",
+  "  let cl: { b: number } = { b: 1 };",
+  "  const swap = (v: { b: number }): void => { cl = v; };",
+  "  swap({ b: 2 });",
+  "  return cl?.b ?? 0;",
+  "};",
+  "export const destructured = (): number => { let ds: { b: number } = { b: 1 }; [ds] = [{ b: 2 }]; return ds?.b ?? 0; };",
+  "export const objectTarget = (): number => { let os: { b: number } = { b: 1 }; ({ os } = { os: { b: 2 } }); return os?.b ?? 0; };",
+  "export const loopTarget = (): number => { let ls: { b: number } = { b: 1 }; for (ls of [{ b: 2 }]) { break; } return ls?.b ?? 0; };",
+  "export const incremented = (): string => { let cnt: number = 0; cnt++; return cnt?.toFixed() ?? ''; };",
+  "export const compound = (): string => { let tot: number = 0; tot += 1; return tot?.toFixed() ?? ''; };",
+  "export const varBinding = (r1: unknown): number => { var vb: { b: number } = { b: 1 }; vb = r1 as any; return vb?.b ?? 0; };",
+  "export const parameter = (p0: { b: number }, r2: unknown): number => { p0 = r2 as any; return p0?.b ?? 0; };",
+  "export const keptLet = (): number => { let keep: { b: number } = { b: 1 }; return keep?.b ?? 0; };",
+  "export const shadowA = (r3: unknown): number => { let dup: { b: number } = { b: 1 }; dup = r3 as any; return dup?.b ?? 0; };",
+  "export const shadowB = (): number => { let dup: { b: number } = { b: 1 }; const keptB = dup?.b ?? 0; return keptB; };",
   "export const stale = (): number | undefined => {",
   "  let a: { b: number } | undefined = { b: 1 };",
   "  const reset = (): void => { a = undefined; };",
@@ -373,6 +390,18 @@ const riskMutants = (source) => [
   linkAfter(source, "annotatedCall", "=> getB()", "."),
   linkAfter(source, "inferredCall", "=> inferredB()", "."),
   linkAfter(source, "viaParam", "=> box.set", "."),
+  linkAfter(source, "reassigned", "return ra", "."),
+  linkAfter(source, "closure", "return cl", "."),
+  linkAfter(source, "destructured", "return ds", "."),
+  linkAfter(source, "objectTarget", "return os", "."),
+  linkAfter(source, "loopTarget", "return ls", "."),
+  linkAfter(source, "incremented", "return cnt", "."),
+  linkAfter(source, "compound", "return tot", "."),
+  linkAfter(source, "varBinding", "return vb", "."),
+  linkAfter(source, "parameter", "return p0", "."),
+  linkAfter(source, "keptLet", "return keep", "."),
+  linkAfter(source, "shadowA", "return dup", "."),
+  linkAfter(source, "shadowB", "const keptB = dup", "."),
   linkAfter(source, "stale", "reset(); return a", "."),
   linkAfter(source, "staleAlias", "return staleY", "."),
 ];
@@ -438,4 +467,28 @@ test("declared types that the language enforces still prove a receiver", () => {
     assert.deepEqual(results[id], equivalent(id), id);
   }
   assert.deepEqual(results.inferredCall, { id: "inferredCall", outcome: "compiles" });
+});
+
+test("a binding that code assigns after its declaration is never proven", () => {
+  const results = checkRisks();
+  for (const id of [
+    "reassigned",
+    "closure",
+    "destructured",
+    "objectTarget",
+    "loopTarget",
+    "incremented",
+    "compound",
+    "varBinding",
+    "parameter",
+    "shadowA",
+  ]) {
+    assert.deepEqual(results[id], { id, outcome: "compiles" }, id);
+  }
+});
+
+test("a binding that no code assigns after its declaration is still proven", () => {
+  const results = checkRisks();
+  assert.deepEqual(results.keptLet, equivalent("keptLet"));
+  assert.deepEqual(results.shadowB, equivalent("shadowB"));
 });

@@ -13,17 +13,18 @@
 //   hold a value: `declare` and `.d.ts` variables, bindings without an
 //   initializer, `!` and `declare` properties, and class properties that no
 //   initializer or constructor assignment sets.
+// - It rejects a `let`, `var` or parameter binding that any code assigns after
+//   its declaration, in a closure or through a destructuring target too.
 // - It needs `strictNullChecks` (a type excludes nullish values only then) and
 //   `noUncheckedIndexedAccess` (otherwise `xs[0]` has a non-nullable type and
 //   is `undefined` for an empty array).
 //
 // When the provenance of the type is unclear, the proof says nothing and the
-// mutant keeps its normal check. Assignments to a binding after its
-// initializer are not tracked.
+// mutant keeps its normal check.
 
 import path from "node:path";
 
-import { ast, projectCompilerOptions, sync, SyntaxKind } from "./backend.mjs";
+import { ast, NodeFlags, projectCompilerOptions, sync, SyntaxKind } from "./backend.mjs";
 import { declarationsForSymbol } from "./semantic-identity.mjs";
 
 const { TypeFlags, SymbolFlags } = sync;
@@ -188,6 +189,109 @@ const uniqueDeclaration = (project, symbol) => {
   return declarations.length === 1 ? declarations[0] : null;
 };
 
+// Node kinds that a write target passes through on the way to its assignment:
+// `[a] = xs`, `({ a } = o)`, `({ k: a } = o)`, `(a as T) = v`.
+const TARGET_WRAPPERS = new Set([
+  SyntaxKind.ParenthesizedExpression,
+  SyntaxKind.ArrayLiteralExpression,
+  SyntaxKind.ObjectLiteralExpression,
+  SyntaxKind.ShorthandPropertyAssignment,
+  SyntaxKind.SpreadElement,
+  SyntaxKind.SpreadAssignment,
+  SyntaxKind.AsExpression,
+  SyntaxKind.TypeAssertionExpression,
+  SyntaxKind.NonNullExpression,
+  SyntaxKind.SatisfiesExpression,
+]);
+
+const isAssignmentOperator = (kind) =>
+  kind >= SyntaxKind.FirstAssignment && kind <= SyntaxKind.LastAssignment;
+
+const isIncrementOperator = (kind) =>
+  kind === SyntaxKind.PlusPlusToken || kind === SyntaxKind.MinusMinusToken;
+
+const isWriteTarget = (identifier) => {
+  let node = identifier;
+  for (let parent = node.parent; parent; parent = node.parent) {
+    if (TARGET_WRAPPERS.has(parent.kind)) {
+      node = parent;
+      continue;
+    }
+    switch (parent.kind) {
+      case SyntaxKind.PropertyAssignment:
+        if (parent.initializer !== node) return false;
+        node = parent;
+        continue;
+      case SyntaxKind.BinaryExpression:
+        return parent.left === node && isAssignmentOperator(parent.operatorToken.kind);
+      case SyntaxKind.PrefixUnaryExpression:
+      case SyntaxKind.PostfixUnaryExpression:
+        return isIncrementOperator(parent.operator);
+      case SyntaxKind.ForInStatement:
+      case SyntaxKind.ForOfStatement:
+        return parent.initializer === node;
+      default:
+        return false;
+    }
+  }
+  return false;
+};
+
+const writtenSymbolId = (project, identifier) => {
+  const symbol = isShorthandName(identifier)
+    ? project.checker.getShorthandAssignmentValueSymbol(identifier.parent)
+    : project.checker.getSymbolAtLocation(identifier);
+  return symbol?.id;
+};
+
+const isShorthandName = (identifier) =>
+  identifier.parent?.kind === SyntaxKind.ShorthandPropertyAssignment &&
+  identifier.parent.name === identifier;
+
+// The ids of the symbols that code in `sourceFile` assigns, found once for
+// each file. An unresolved write target is not recorded, so the scan also
+// keeps a flag for a file where a write could not be resolved.
+const writesOf = (project, sourceFile, cache) => {
+  const cached = cache.get(sourceFile);
+  if (cached) return cached;
+  const writes = { ids: new Set(), unresolved: false };
+  const visit = (node) => {
+    if (isIdentifier(node) && isWriteTarget(node)) {
+      const id = writtenSymbolId(project, node);
+      if (id === undefined) writes.unresolved = true;
+      else writes.ids.add(id);
+    }
+    node.forEachChild((child) => {
+      visit(child);
+      return undefined;
+    });
+  };
+  visit(sourceFile);
+  cache.set(sourceFile, writes);
+  return writes;
+};
+
+const isConstBinding = (declaration) =>
+  isVariableDeclaration(declaration) && (declaration.parent.flags & NodeFlags.Const) !== 0;
+
+// A top-level `let` or `var` of a script file is global: code in another file
+// can assign it, and the scan reads one file only.
+const isGlobalScriptBinding = (declaration, sourceFile) =>
+  isVariableDeclaration(declaration) &&
+  sourceFile.externalModuleIndicator === undefined &&
+  declaration.parent.parent.parent === sourceFile;
+
+// True when the binding can change after its declaration: a `let`, `var` or
+// parameter that some code assigns. Only the module that declares a binding
+// can assign it, so the scan reads the declaring file.
+const isReassigned = (project, declaration, symbol, context) => {
+  if (isConstBinding(declaration)) return false;
+  const sourceFile = declaration.getSourceFile();
+  if (isGlobalScriptBinding(declaration, sourceFile)) return true;
+  const writes = writesOf(project, sourceFile, context.writes);
+  return writes.unresolved || writes.ids.has(symbol.id);
+};
+
 const bindingType = (project, identifier, context) => {
   if (context.depth > MAX_BINDING_DEPTH) return null;
   let symbol = project.checker.getSymbolAtLocation(identifier);
@@ -201,6 +305,7 @@ const bindingType = (project, identifier, context) => {
     return null;
   }
   context.visited.add(declaration);
+  if (isReassigned(project, declaration, symbol, context)) return null;
   const inner = { ...context, depth: context.depth + 1 };
   if (isParameter(declaration) && isIdentifier(declaration.name)) {
     return typeAt(project, declaration, symbol);
@@ -292,10 +397,10 @@ const isOptionalLink = (original, mutant) =>
 const utf16Offset = (original, byteOffset) =>
   original.subarray(0, byteOffset).toString("utf8").length;
 
-const receiverIsNeverNullish = (project, receiver) => {
+const receiverIsNeverNullish = (project, receiver, writes) => {
   if (containsAssertion(receiver)) return false;
   try {
-    const type = declaredType(project, receiver, { visited: new Set(), depth: 0 });
+    const type = declaredType(project, receiver, { visited: new Set(), depth: 0, writes });
     return type !== null && neverNullish(type, 0);
   } catch {
     return false;
@@ -314,9 +419,10 @@ export const typeProvenEquivalents = (project, file, original) => {
   if (!sourceFile) return new Set();
   try {
     const receivers = receiversByLinkEnd(sourceFile);
+    const writes = new Map();
     const proven = links.filter((mutant) => {
       const receiver = receivers.get(utf16Offset(original, mutant.end));
-      return receiver !== undefined && receiverIsNeverNullish(project, receiver);
+      return receiver !== undefined && receiverIsNeverNullish(project, receiver, writes);
     });
     return new Set(proven.map((mutant) => mutant.id));
   } catch {
