@@ -876,6 +876,7 @@ impl ModuleInfoExtractor {
                                 callee_name: callee_name.clone(),
                                 member: member.clone(),
                                 awaited: false,
+                                element: false,
                             },
                         )
                     }

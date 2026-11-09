@@ -17976,6 +17976,45 @@ fn local_function_array_return_binds_element_class() {
     }
 }
 
+#[test]
+fn imported_function_array_return_records_element_fact() {
+    // `make` is imported, so its array return type is in another module. A
+    // read on an element of `make()` gives a fact that the analysis resolves.
+    // A read on the result itself and a call of a type-only import do not.
+    let info = parse(
+        r"
+        import { make } from './sheet';
+        import type { typeOnly } from './sheet';
+
+        const sheets = make();
+        sheets.some((sheet) => sheet.callback);
+        for (const sheet of make()) {
+            sheet.loop();
+        }
+        make()[0].index();
+        make().length;
+        for (const item of typeOnly()) {
+            item.typeOnlyRead();
+        }
+        ",
+    );
+
+    let element_facts: Vec<(&str, &str)> = info
+        .semantic_facts
+        .iter()
+        .filter_map(|fact| match fact {
+            SemanticFact::FactoryFnMemberAccess(access) if access.element => {
+                Some((access.callee_name.as_str(), access.member.as_str()))
+            }
+            _ => None,
+        })
+        .collect();
+    assert_eq!(
+        element_facts,
+        [("make", "callback"), ("make", "index"), ("make", "loop")]
+    );
+}
+
 /// Whether `info` credits `member` on `Table`.
 fn credits_table_member(info: &ModuleInfo, member: &str) -> bool {
     info.member_accesses

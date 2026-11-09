@@ -65,13 +65,16 @@ fn array_field_element_credits_member() {
 fn playwright_fixture_property_chain_credits_member() {
     // The `app` fixture is an `AppPage`, whose property `details` is a
     // `DetailsPage`, whose property `input` is an `InputPanel`. The spec reads
-    // members through both property chains.
+    // members through both property chains. The chain `app.details.input`
+    // also reads `details` on `AppPage` and `input` on `DetailsPage`.
     let unused = unused_class_members("playwright-fixture-property-chain");
     assert_credited(
         &unused,
         &[
             "AppPage.goto",
+            "AppPage.details",
             "DetailsPage.getParameter",
+            "DetailsPage.input",
             "InputPanel.select",
         ],
         "DetailsPage.unusedHelper",
@@ -79,5 +82,29 @@ fn playwright_fixture_property_chain_credits_member() {
     assert!(
         unused.contains(&"InputPanel.unusedSelect".to_string()),
         "InputPanel.unusedSelect has no access and must stay flagged, found: {unused:?}"
+    );
+}
+
+#[test]
+fn imported_array_factory_element_credits_member() {
+    // `make` in another module declares the return type `Sheet[]`. An element
+    // of `make()` (an iteration callback parameter, a `for...of` variable, an
+    // index), also through the local `sheets`, holds a `Sheet`. `makeSingle`
+    // returns one `Single`, so an element of its result is not a `Single`.
+    let unused = unused_class_members("class-member-imported-array-factory");
+    assert_credited(
+        &unused,
+        &[
+            "Sheet.viaCallback",
+            "Sheet.viaLoop",
+            "Sheet.viaMap",
+            "Sheet.viaDirectLoop",
+            "Sheet.viaIndex",
+        ],
+        "Sheet.unused",
+    );
+    assert!(
+        unused.contains(&"Single.viaLoop".to_string()),
+        "Single.viaLoop is read on an element of a single instance, found: {unused:?}"
     );
 }

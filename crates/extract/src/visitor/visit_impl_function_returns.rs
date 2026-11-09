@@ -1,10 +1,17 @@
-//! Declared return types of top-level local functions.
+//! Declared return types of top-level local functions, and the factory
+//! returns that a module exports.
 
+use fallow_types::extract::{
+    ExportName, FactoryFnMemberAccessFact, FactoryReturnExport, SemanticFact,
+};
 use oxc_ast::ast::*;
 
 use super::super::ModuleInfoExtractor;
 use super::super::helpers::{array_element_type_from_type, return_type_element_name};
 use super::unwrap_parens;
+
+/// The receiver suffix of an element of an array: `make()[]`.
+const IMPORTED_CALL_ELEMENT_SUFFIX: &str = "[]";
 
 impl<'a> ModuleInfoExtractor {
     /// Pre-pass over top-level declarations recording each local function's
@@ -90,6 +97,62 @@ impl<'a> ModuleInfoExtractor {
         }
     }
 
+    /// Build the cross-module `exported_factory_returns` metadata: join the
+    /// strict (all-paths-unanimous) factory map against this module's exports, so
+    /// a `const x = useApi()` consumer can credit the returned class across the
+    /// boundary. The stored class name is the factory module's own LOCAL name,
+    /// resolved at analyze time through this module's imports to the real class
+    /// export. Only strict entries qualify, bounding over-credit. Must run after
+    /// `resolve_factory_return_aliases` has populated the strict map. See issue
+    /// #1441 (Part A).
+    pub(in crate::visitor) fn collect_exported_factory_returns(&self) -> Vec<FactoryReturnExport> {
+        if self.strict_factory_return_functions.is_empty()
+            && self.strict_async_factory_return_functions.is_empty()
+            && self.local_function_array_return_types.is_empty()
+        {
+            return Vec::new();
+        }
+        let mut out = Vec::new();
+        for export in &self.exports {
+            if export.is_type_only {
+                continue;
+            }
+            let local_name = match (export.local_name.as_deref(), &export.name) {
+                (Some(local), _) => local,
+                (None, ExportName::Named(name)) => name.as_str(),
+                (None, ExportName::Default) => continue,
+            };
+            if let Some(class_local_name) = self.strict_factory_return_functions.get(local_name) {
+                out.push(FactoryReturnExport {
+                    export_name: export.name.to_string(),
+                    class_local_name: class_local_name.clone(),
+                    is_async: false,
+                    returns_array: false,
+                });
+            } else if let Some(class_local_name) =
+                self.strict_async_factory_return_functions.get(local_name)
+            {
+                out.push(FactoryReturnExport {
+                    export_name: export.name.to_string(),
+                    class_local_name: class_local_name.clone(),
+                    is_async: true,
+                    returns_array: false,
+                });
+            }
+            // `export const make = (): Sheet[] => ...`: a consumer in another
+            // module reads `Sheet` on an element of `make()`.
+            if let Some(class_local_name) = self.local_function_array_return_types.get(local_name) {
+                out.push(FactoryReturnExport {
+                    export_name: export.name.to_string(),
+                    class_local_name: class_local_name.clone(),
+                    is_async: false,
+                    returns_array: true,
+                });
+            }
+        }
+        out
+    }
+
     /// The element class of a call of a top-level function that declares an
     /// array return type: `Table` for `all()` with `function all(): Table[]`.
     /// A loop over, an iteration callback on, an index into, and a local that
@@ -125,7 +188,57 @@ impl<'a> ModuleInfoExtractor {
         {
             return None;
         }
-        self.local_function_array_return_types.get(name).cloned()
+        self.local_function_array_return_types
+            .get(name)
+            .cloned()
+            .or_else(|| self.imported_call_element_receiver(name))
+    }
+
+    /// The receiver name of an element of a call of an imported function:
+    /// `make()[]` for `make()`. The declared return type of `make` is in
+    /// another module, so the extraction cannot name the class. A member
+    /// read on the element keeps this receiver name, and
+    /// `resolve_imported_call_element_accesses` turns it into a fact that
+    /// the analysis resolves through the array return type of the export.
+    fn imported_call_element_receiver(&self, name: &str) -> Option<String> {
+        self.imports
+            .iter()
+            .any(|import| import.local_name == name && !import.is_type_only)
+            .then(|| format!("{name}(){IMPORTED_CALL_ELEMENT_SUFFIX}"))
+    }
+
+    /// Emit a factory fact for each member read on an element of a call of
+    /// an imported function (`make().forEach((sheet) => sheet.member)`,
+    /// `for (const sheet of sheets)` with `const sheets = make()`). The
+    /// analysis credits the member only when the export declares an array
+    /// return type of a class, so a call of any other import credits nothing.
+    pub(in crate::visitor) fn resolve_imported_call_element_accesses(&mut self) {
+        let mut facts = Vec::new();
+        for access in &self.member_accesses {
+            let Some(callee) = access
+                .object
+                .strip_suffix(IMPORTED_CALL_ELEMENT_SUFFIX)
+                .and_then(|call| call.strip_suffix("()"))
+            else {
+                continue;
+            };
+            if self
+                .imports
+                .iter()
+                .any(|import| import.local_name == callee && !import.is_type_only)
+            {
+                facts.push(FactoryFnMemberAccessFact {
+                    callee_name: callee.to_string(),
+                    member: access.member.clone(),
+                    awaited: false,
+                    element: true,
+                });
+            }
+        }
+        facts.sort_by(|a, b| (&a.callee_name, &a.member).cmp(&(&b.callee_name, &b.member)));
+        facts.dedup();
+        self.semantic_facts
+            .extend(facts.into_iter().map(SemanticFact::FactoryFnMemberAccess));
     }
 
     /// The element class of an index into a call of a top-level function that

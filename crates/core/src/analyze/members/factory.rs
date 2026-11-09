@@ -104,7 +104,15 @@ pub(super) fn propagate_factory_fn_accesses(
                 continue;
             };
             let classes = seed_keys.iter().flat_map(|seed_key| {
-                factory_return_classes_for_callee(graph, indexes, seed_key, access.awaited)
+                factory_return_classes_for_callee(
+                    graph,
+                    indexes,
+                    seed_key,
+                    FactoryResultUse {
+                        awaited: access.awaited,
+                        element: access.element,
+                    },
+                )
             });
             for class_origin in classes {
                 accessed_members
@@ -381,7 +389,7 @@ fn factory_return_object_property_classes(
                     {
                         for seed in seeds {
                             for class in
-                                factory_return_classes_for_callee(graph, indexes, seed, false)
+                                factory_return_classes_for_callee(graph, indexes, seed, PLAIN_CALL)
                             {
                                 out.push(class);
                             }
@@ -493,17 +501,46 @@ fn factory_return_class_origins(
         .collect()
 }
 
+/// How a consumer uses the result of a factory call.
+#[derive(Clone, Copy)]
+struct FactoryResultUse {
+    /// The consumer awaited the call.
+    awaited: bool,
+    /// The consumer reads an element of the result, not the result itself.
+    element: bool,
+}
+
+/// The result of a plain call, not awaited and not indexed.
+const PLAIN_CALL: FactoryResultUse = FactoryResultUse {
+    awaited: false,
+    element: false,
+};
+
+impl FactoryResultUse {
+    /// Whether this use reads the value that `factory_return` gives: an
+    /// element for an array return type, else the result itself.
+    const fn reads_value_of(
+        self,
+        factory_return: &fallow_types::extract::FactoryReturnExport,
+    ) -> bool {
+        factory_return.returns_array == self.element
+    }
+}
+
 /// The classes a callee's proven exported factory returns, resolved across modules.
 /// Empty for any callee that is not an internal exported factory with a strict,
 /// value-proven return: each link of the chain is an over-credit gate.
 ///
 /// An `async` factory returns a promise of the class, so it credits the class only
 /// when the consumer awaited the call. A sync factory credits for both call kinds.
+/// A factory with an array return type credits the class only for a read on an
+/// element of the result, and a factory of one instance only for a read on the
+/// result itself.
 fn factory_return_classes_for_callee(
     graph: &ModuleGraph,
     indexes: &MemberPassIndexes<'_>,
     seed_key: &ExportKey,
-    awaited: bool,
+    result_use: FactoryResultUse,
 ) -> Vec<ExportKey> {
     let mut origins = Vec::new();
     for factory_origin in
@@ -518,11 +555,12 @@ fn factory_return_classes_for_callee(
                 .iter()
                 .find(|factory_return| {
                     factory_origin.export_name.as_str() == factory_return.export_name.as_str()
+                        && result_use.reads_value_of(factory_return)
                 })
         else {
             continue;
         };
-        if factory_return.is_async && !awaited {
+        if factory_return.is_async && !result_use.awaited {
             continue;
         }
         origins.extend(factory_return_class_origins(
@@ -555,7 +593,7 @@ pub(super) fn propagate_factory_fn_whole_object_uses(
                 continue;
             };
             let classes = seed_keys.iter().flat_map(|seed_key| {
-                factory_return_classes_for_callee(graph, indexes, seed_key, false)
+                factory_return_classes_for_callee(graph, indexes, seed_key, PLAIN_CALL)
             });
             whole_object_used_exports.extend(classes);
         }
