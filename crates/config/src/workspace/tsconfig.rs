@@ -133,7 +133,11 @@ impl TsconfigOutputMap {
         let Some(entry_path) = normalize_path(&root.join(entry_path)) else {
             return TsconfigOutputResolution::Unconfigured;
         };
+        // Candidates of a config with an explicit `rootDir` win over the
+        // candidates of a config folder default, so an inferred `rootDir` can
+        // not make an explicit mapping ambiguous.
         let mut candidates = FxHashSet::default();
+        let mut inferred_candidates = FxHashSet::default();
         let mut configured = false;
 
         for options in &self.configs {
@@ -164,13 +168,13 @@ impl TsconfigOutputMap {
             else {
                 continue;
             };
-            let root_dir = match (options.root_dir.as_deref(), root_dir_default) {
+            let (root_dir, target) = match (options.root_dir.as_deref(), root_dir_default) {
                 (Some(root_dir), _) => {
                     configured |= claims_output;
-                    root_dir
+                    (root_dir, &mut candidates)
                 }
                 (None, RootDirDefault::ConfigDir) => match options.config_dir.as_deref() {
-                    Some(config_dir) => config_dir,
+                    Some(config_dir) => (config_dir, &mut inferred_candidates),
                     None => continue,
                 },
                 (None, RootDirDefault::Skip) => continue,
@@ -190,9 +194,12 @@ impl TsconfigOutputMap {
                     continue;
                 };
                 if candidate.starts_with(root) && candidate.is_file() {
-                    candidates.insert(candidate);
+                    target.insert(candidate);
                 }
             }
+        }
+        if candidates.is_empty() {
+            candidates = inferred_candidates;
         }
 
         if candidates.is_empty() && configured {
@@ -1389,6 +1396,34 @@ mod tests {
             map(root, "./dist/nodes/Http/transport.js", &["ts"]),
             TsconfigOutputResolution::Unconfigured,
             "package entries keep the explicit rootDir rule"
+        );
+    }
+
+    #[test]
+    fn explicit_root_dir_wins_over_the_config_folder_default() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let root = directory.path();
+        write(
+            &root.join("tsconfig.json"),
+            r#"{"compilerOptions":{"rootDir":"src","outDir":"dist"}}"#,
+        );
+        write(
+            &root.join("tsconfig.other.json"),
+            r#"{"compilerOptions":{"outDir":"dist"}}"#,
+        );
+        write(&root.join("src/util.ts"), "export const a = 1;\n");
+        write(&root.join("util.ts"), "export const b = 1;\n");
+        write(&root.join("only-root.ts"), "export const c = 1;\n");
+
+        let output_map = TsconfigOutputMap::from_project(root);
+        assert_eq!(
+            output_map.resolve_source_for_output_path(&root.join("dist/util.js"), &["ts"]),
+            TsconfigOutputResolution::Resolved(root.join("src/util.ts"))
+        );
+        assert_eq!(
+            output_map.resolve_source_for_output_path(&root.join("dist/only-root.js"), &["ts"]),
+            TsconfigOutputResolution::Resolved(root.join("only-root.ts")),
+            "the config folder default still applies when the explicit rootDir has no source"
         );
     }
 
