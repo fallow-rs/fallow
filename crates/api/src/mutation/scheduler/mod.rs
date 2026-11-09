@@ -43,7 +43,7 @@ use stored::{FirstRuns, job_key, journal_first_run, journal_retry, record_stored
 use control::{
     CONFIRMATION_RUN_FAILURE, CONTROL_RUN_FAILURE, ControlCheck, ControlMemo, ControlOutcome,
     ControlVerdict, FailedTest, bounded_test_error, control_fault, first_line,
-    note_control_failures, note_restarted_baseline_failure, sorted_tests,
+    note_control_failures, note_restarted_baseline_failure, parallel_state_hint, sorted_tests,
 };
 
 /// The extra wait of the watchdog after `timeout_ms` (section 8).
@@ -463,6 +463,7 @@ impl Attempt {
 
 /// A companion that has sent `ready` and a dry run.
 struct Worker<'a> {
+    workers: usize,
     spawner: &'a dyn CompanionSpawner,
     config: &'a ScheduleConfig,
     dry_files: &'a [String],
@@ -490,6 +491,7 @@ impl<'a> Worker<'a> {
         memo: &'a ControlMemo,
     ) -> Self {
         Self {
+            workers: 1,
             spawner,
             config,
             dry_files,
@@ -539,8 +541,9 @@ impl<'a> Worker<'a> {
             let fault = |stage: &str, fault: &LinkFault| {
                 EnsureError::Fault(
                     format!(
-                        "the companion {stage} failed: {fault}{}",
-                        setup_timeout_hint(fault)
+                        "the companion {stage} failed: {fault}{}{}",
+                        setup_timeout_hint(fault),
+                        parallel_state_hint(self.workers)
                     ),
                     fault.stderr_tail().map(str::to_owned),
                 )
@@ -632,8 +635,15 @@ impl<'a> Worker<'a> {
             if dropped_tests.iter().all(|test| self.memo.is_failed(test)) {
                 return Ok(Attempt::uncovered(dropped_tests));
             }
-            let mut attempt =
-                Attempt::runtime_error(job, no_covering_test_message(&dropped_tests), None);
+            let mut attempt = Attempt::runtime_error(
+                job,
+                format!(
+                    "{}{}",
+                    no_covering_test_message(&dropped_tests),
+                    parallel_state_hint(self.workers)
+                ),
+                None,
+            );
             attempt.dropped_tests = dropped_tests;
             return Ok(attempt);
         }
@@ -1210,6 +1220,7 @@ fn build_jobs(
 
 /// Shared state of the worker threads of one phase.
 struct Phase<'a> {
+    workers: usize,
     jobs: Mutex<VecDeque<Job>>,
     attempts: Mutex<Vec<(Job, Attempt)>>,
     fatal: Mutex<Option<ScheduleError>>,
@@ -1251,6 +1262,7 @@ impl Phase<'_> {
             self.dry_run_timeout,
             self.memo,
         );
+        worker.workers = self.workers;
         if let Some(link) = primary {
             worker.link = Some(link);
             worker.known_tests = known;
@@ -1317,6 +1329,7 @@ fn run_phase(
     let report = |done: usize| (runner.progress)(event(done, total));
     report(0);
     let phase = Phase {
+        workers,
         jobs: Mutex::new(jobs.into()),
         attempts: Mutex::new(Vec::new()),
         fatal: Mutex::new(None),
@@ -1357,6 +1370,7 @@ fn run_phase(
 }
 
 fn record(
+    workers: usize,
     outcome: &mut ScheduleOutcome,
     facts: &DryRunFacts,
     memo: &ControlMemo,
@@ -1371,7 +1385,7 @@ fn record(
     let partial_survivor =
         attempt.status == MutantStatus::Survived && !attempt.dropped_tests.is_empty();
     for test in attempt.dropped_tests {
-        note_restarted_baseline_failure(outcome, facts, memo, test, &job.id);
+        note_restarted_baseline_failure(workers, outcome, facts, memo, test, &job.id);
     }
     // `job.tests` is in measured fastest-first order. The report must not
     // depend on durations, so it lists the covering tests by id. A survivor
@@ -1576,7 +1590,7 @@ fn record_first_runs(
             first_runs.insert(job.id.clone(), attempt_record(&attempt));
             suspects.push(suspect);
         }
-        record(outcome, facts, memo, job, attempt);
+        record(outcome.workers, outcome, facts, memo, job, attempt);
     }
     (suspects, first_runs)
 }
@@ -1610,7 +1624,7 @@ fn retry_suspects(
     let finished = |job: &Job, attempt: &Attempt| {
         journal_retry(runner.config, &firsts, job, attempt);
     };
-    let (retries, _) = run_phase(
+    let (retries, workers) = run_phase(
         runner,
         &retry_files,
         suspects,
@@ -1641,6 +1655,7 @@ fn retry_suspects(
             .chain([attempt_record(&attempt)])
             .collect();
         record(
+            workers,
             outcome,
             facts,
             runner.memo,

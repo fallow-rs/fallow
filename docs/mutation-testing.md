@@ -1084,6 +1084,13 @@ mutant. Their results decide no mutant status.
   the human footer splits it in the same way. A test that passes in the
   first dry run and fails after a restart can depend on state outside the
   test, for example a file or the process id of the runner.
+- Parallel companions use the same project root and can share files or a
+  database. Vitest's `fileParallelism: false` serializes tests inside each
+  companion, but several companions can still run at once. When a phase has
+  more than one worker, restarted init and dry-run faults and baseline
+  mismatches suggest `--concurrency 1` or `mutation.concurrency: 1`. Shared
+  state is a possible cause; the report keeps the original error. Serial
+  phases and the first companion's setup do not receive this hint.
 - A static mutant needs a new companion before and after its run when the
   runner keeps modules loaded between runs (Vitest with `isolate: false`).
   After a reload of the worker gave `restart_required`, the companion that

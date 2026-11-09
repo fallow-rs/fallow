@@ -3348,3 +3348,6 @@ mod matrix_tests;
 
 #[path = "target_tests.rs"]
 mod target_tests;
+
+#[path = "concurrency_tests.rs"]
+mod concurrency_tests;

@@ -862,6 +862,17 @@ fn human_baseline_footer_shows_the_test_error_of_a_control_run_failure() {
     )];
     let text = run_text(&confirmation, &OPTIONS);
     assert!(text.contains("\n  Error: Error: boom\n"), "{text}");
+
+    partial.baseline_failures[0].message = Some(
+        "the test did not pass in the dry run of a restarted companion; try --concurrency 1 or set mutation.concurrency to 1; parallel companions may share files or a database: EEXIST: shared budget\n    at test/a.test.ts:3:5".to_owned(),
+    );
+    let text = run_text(&partial, &OPTIONS);
+    assert!(text.contains("try --concurrency 1"), "{text}");
+    assert!(text.contains("mutation.concurrency to 1"), "{text}");
+    assert!(
+        text.contains("\n  Error: EEXIST: shared budget\n"),
+        "{text}"
+    );
 }
 
 #[test]
