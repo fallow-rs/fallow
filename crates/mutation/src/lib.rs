@@ -165,7 +165,7 @@ impl MutantChange {
     /// Placeholder for a non-empty string literal.
     pub const STRING: &'static str = "<string>";
     /// Placeholder for a non-empty template literal.
-    pub const TEMPLATE: &'static str = "<template>";
+    const TEMPLATE: &'static str = "<template>";
 
     /// A change from `from` to `to`.
     pub const fn new(from: &'static str, to: &'static str) -> Self {

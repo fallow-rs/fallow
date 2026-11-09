@@ -80,109 +80,149 @@ fn brace_quantifier(rest: &[u8]) -> Option<(usize, usize)> {
 
 /// The edits of `pattern`, in pattern order.
 fn edits(pattern: &str, sets: bool) -> Vec<Edit> {
-    let bytes = pattern.as_bytes();
-    let mut edits = Vec::new();
-    let mut depth = 0_usize;
+    let mut scanner = Scanner {
+        pattern,
+        bytes: pattern.as_bytes(),
+        sets,
+        edits: Vec::new(),
+        depth: 0,
+        quantifiable: false,
+    };
     let mut index = 0;
-    // True when the previous token can take a quantifier. After `(`, `|`, an
-    // anchor, a lookaround open or the pattern start, a `?` or `*` is either
-    // group syntax or a syntax error, so it gets no edit.
-    let mut quantifiable = false;
-    while index < bytes.len() {
-        let byte = bytes[index];
-        if depth > 0 {
-            match byte {
-                b'\\' => {
-                    if let Some((swap, change)) =
-                        bytes.get(index + 1).and_then(|&b| swapped_class_escape(b))
-                    {
-                        edits.push((index + 1, index + 2, swap, change));
-                    }
-                    index += 1 + escaped_len(pattern, index);
-                    continue;
-                }
-                b'[' if sets => depth += 1,
-                b']' => {
-                    depth -= 1;
-                    quantifiable = depth == 0;
-                }
-                _ => {}
-            }
-            index += 1;
-            continue;
+    while index < scanner.bytes.len() {
+        index = if scanner.depth > 0 {
+            scanner.class_token(index)
+        } else {
+            scanner.token(index)
+        };
+    }
+    scanner.edits
+}
+
+/// A left-to-right scan of a pattern. Each token method takes the index of
+/// the token and returns the index after it.
+struct Scanner<'p> {
+    pattern: &'p str,
+    bytes: &'p [u8],
+    /// True for the `v` flag, where classes nest.
+    sets: bool,
+    edits: Vec<Edit>,
+    /// The depth of character classes at the scan position.
+    depth: usize,
+    /// True when the previous token can take a quantifier. After `(`, `|`,
+    /// an anchor, a lookaround open or the pattern start, a `?` or `*` is
+    /// group syntax or a syntax error, so it gets no edit.
+    quantifiable: bool,
+}
+
+impl Scanner<'_> {
+    /// An escape: the class escape swap, and the index after the escape.
+    fn escape(&mut self, index: usize) -> usize {
+        if let Some((swap, change)) = self
+            .bytes
+            .get(index + 1)
+            .and_then(|&b| swapped_class_escape(b))
+        {
+            self.edits.push((index + 1, index + 2, swap, change));
         }
+        index + 1 + escaped_len(self.pattern, index)
+    }
+
+    /// A token inside a character class.
+    fn class_token(&mut self, index: usize) -> usize {
+        match self.bytes[index] {
+            b'\\' => return self.escape(index),
+            b'[' if self.sets => self.depth += 1,
+            b']' => {
+                self.depth -= 1;
+                self.quantifiable = self.depth == 0;
+            }
+            _ => {}
+        }
+        index + 1
+    }
+
+    /// A token outside a character class.
+    fn token(&mut self, index: usize) -> usize {
+        let byte = self.bytes[index];
         match byte {
             b'\\' => {
-                let next = bytes.get(index + 1).copied();
-                if let Some((swap, change)) = next.and_then(swapped_class_escape) {
-                    edits.push((index + 1, index + 2, swap, change));
-                }
-                quantifiable = !matches!(next, Some(b'b' | b'B'));
-                index += 1 + escaped_len(pattern, index);
-                continue;
+                self.quantifiable = !matches!(self.bytes.get(index + 1), Some(b'b' | b'B'));
+                return self.escape(index);
             }
-            b'[' => {
-                if !sets {
-                    if bytes.get(index + 1) == Some(&b'^') {
-                        edits.push((index + 1, index + 2, "", MutantChange::new("[^", "[")));
-                    } else {
-                        edits.push((index + 1, index + 1, "^", MutantChange::new("[", "[^")));
-                    }
-                }
-                depth = 1;
-            }
-            b'^' if anchor_start(bytes, index) => {
-                edits.push((index, index + 1, "", MutantChange::new("^", "")));
-                quantifiable = false;
-            }
-            b'$' if matches!(bytes.get(index + 1), None | Some(b')' | b'|')) => {
-                edits.push((index, index + 1, "", MutantChange::new("$", "")));
-                quantifiable = false;
+            b'[' => self.class_open(index),
+            b'^' if anchor_start(self.bytes, index) => self.removal(index, "^"),
+            b'$' if matches!(self.bytes.get(index + 1), None | Some(b')' | b'|')) => {
+                self.removal(index, "$");
             }
             b'(' => {
-                index += group_open_len(bytes, index);
-                quantifiable = false;
-                continue;
+                self.quantifiable = false;
+                return index + group_open_len(self.bytes, index);
             }
-            b'|' | b'^' | b'$' => quantifiable = false,
-            b'+' | b'*' | b'?' if quantifiable => {
-                let lazy = usize::from(bytes.get(index + 1) == Some(&b'?'));
-                let end = index + 1 + lazy;
-                let from = match byte {
-                    b'+' => "+",
-                    b'*' => "*",
-                    _ => "?",
-                };
-                edits.push((index, end, "", MutantChange::new(from, "")));
-                quantifiable = false;
-                index = end;
-                continue;
-            }
-            b'{' if quantifiable => {
-                if let Some((len, low_end)) = brace_quantifier(&bytes[index..]) {
-                    let close = index + len - 1;
-                    if index + low_end < close {
-                        edits.push((
-                            index + low_end,
-                            close,
-                            "",
-                            MutantChange::new("{n,m}", "{n}"),
-                        ));
-                    }
-                    quantifiable = false;
-                    index += len;
-                    if bytes.get(index) == Some(&b'?') {
-                        index += 1;
-                    }
-                    continue;
+            b'|' | b'^' | b'$' => self.quantifiable = false,
+            b'+' | b'*' | b'?' if self.quantifiable => return self.quantifier(index, byte),
+            b'{' if self.quantifiable => {
+                if let Some(next) = self.brace(index) {
+                    return next;
                 }
-                quantifiable = true;
             }
-            _ => quantifiable = true,
+            _ => self.quantifiable = true,
         }
-        index += 1;
+        index + 1
     }
-    edits
+
+    fn class_open(&mut self, index: usize) {
+        if !self.sets {
+            if self.bytes.get(index + 1) == Some(&b'^') {
+                self.edits
+                    .push((index + 1, index + 2, "", MutantChange::new("[^", "[")));
+            } else {
+                self.edits
+                    .push((index + 1, index + 1, "^", MutantChange::new("[", "[^")));
+            }
+        }
+        self.depth = 1;
+    }
+
+    /// Removes the anchor `token` at `index`.
+    fn removal(&mut self, index: usize, token: &'static str) {
+        self.edits
+            .push((index, index + 1, "", MutantChange::new(token, "")));
+        self.quantifiable = false;
+    }
+
+    /// Removes a `+`, `*` or `?` quantifier with its lazy `?`.
+    fn quantifier(&mut self, index: usize, byte: u8) -> usize {
+        let lazy = usize::from(self.bytes.get(index + 1) == Some(&b'?'));
+        let end = index + 1 + lazy;
+        let from = match byte {
+            b'+' => "+",
+            b'*' => "*",
+            _ => "?",
+        };
+        self.edits
+            .push((index, end, "", MutantChange::new(from, "")));
+        self.quantifiable = false;
+        end
+    }
+
+    /// Shortens a `{n,m}` or `{n,}` quantifier to `{n}`. Returns `None` for
+    /// a brace that is not a quantifier.
+    fn brace(&mut self, index: usize) -> Option<usize> {
+        let (len, low_end) = brace_quantifier(&self.bytes[index..])?;
+        let close = index + len - 1;
+        if index + low_end < close {
+            self.edits.push((
+                index + low_end,
+                close,
+                "",
+                MutantChange::new("{n,m}", "{n}"),
+            ));
+        }
+        self.quantifiable = false;
+        let end = index + len;
+        Some(end + usize::from(self.bytes.get(end) == Some(&b'?')))
+    }
 }
 
 /// The byte length of the character after the backslash at `index`.
