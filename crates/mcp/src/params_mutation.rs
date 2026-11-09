@@ -40,7 +40,8 @@ pub struct MutationPlanParams {
     pub function_scope: Option<bool>,
 
     /// Kebab-case operator names, for example `relational-operator`.
-    /// Omitted: the `mutation.operators` config key, else every operator.
+    /// Omitted: the `mutation.operators` config key, else the default set.
+    /// The opt-in operators, such as `block-statement`, run only when named.
     pub operators: Option<Vec<String>>,
 
     /// Disable the incremental parse cache.

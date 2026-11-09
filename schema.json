@@ -1174,7 +1174,7 @@
           "default": "auto"
         },
         "operators": {
-          "description": "The operators to use. Unset uses each operator. `--operators` wins.",
+          "description": "The operators to use. Unset uses the default set. An opt-in operator\nruns only when this list or `--operators` names it. `--operators`\nwins.",
           "type": [
             "array",
             "null"
@@ -1327,6 +1327,51 @@
           "description": "`z.number().int()` to `z.number()` in a module-level `const`\ninitializer: one call link of a fluent chain removed.",
           "type": "string",
           "const": "removed-chain-link"
+        },
+        {
+          "description": "Opt-in. The statements of a block or function body removed.",
+          "type": "string",
+          "const": "block-statement"
+        },
+        {
+          "description": "Opt-in. `[x]` to `[]`, and `[]` to `[\"fallow\"]`.",
+          "type": "string",
+          "const": "array-literal"
+        },
+        {
+          "description": "Opt-in. A non-empty object literal to `{}`.",
+          "type": "string",
+          "const": "object-literal"
+        },
+        {
+          "description": "Opt-in. `startsWith` to `endsWith` and the other method pairs, or\n`s.trim()` to `s`.",
+          "type": "string",
+          "const": "method-expression"
+        },
+        {
+          "description": "Opt-in. The statements of a `case` clause removed.",
+          "type": "string",
+          "const": "switch-case"
+        },
+        {
+          "description": "Opt-in. A call in an expression position to `void 0`.",
+          "type": "string",
+          "const": "call-expression"
+        },
+        {
+          "description": "Opt-in. A `throw new X(...)` statement removed.",
+          "type": "string",
+          "const": "throw-statement"
+        },
+        {
+          "description": "Opt-in. The regex changes applied to a `new RegExp(\"...\")` pattern.",
+          "type": "string",
+          "const": "regex-constructor"
+        },
+        {
+          "description": "Opt-in. A lookaround negated, or `\\b` and `\\B` swapped.",
+          "type": "string",
+          "const": "regex-assertion"
         }
       ]
     },

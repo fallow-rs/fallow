@@ -52,6 +52,11 @@
     {
       "check": "complexity",
       "rule": "complexity",
+      "id": "11744b43845bba41"
+    },
+    {
+      "check": "complexity",
+      "rule": "complexity",
       "id": "1822a909af48c3f0"
     },
     {
@@ -543,11 +548,6 @@
       "check": "complexity",
       "rule": "complexity",
       "id": "c6c488f7eb93a3b3"
-    },
-    {
-      "check": "complexity",
-      "rule": "complexity",
-      "id": "c6c6ac29edb98f68"
     },
     {
       "check": "complexity",

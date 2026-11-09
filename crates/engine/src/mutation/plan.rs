@@ -148,7 +148,7 @@ pub(super) fn build(
             operators: request
                 .operators
                 .clone()
-                .unwrap_or_else(|| Operator::ALL.to_vec()),
+                .unwrap_or_else(|| Operator::DEFAULT.to_vec()),
             ranges: None,
         },
         test_entries: FxHashMap::default(),

@@ -21129,7 +21129,8 @@ equivalence_hint?: (MutantEquivalenceHint | null)
  * (`true`, `undefined`, `""`, `"fallow"`, `void 0`), a regular expression
  * token (`^`, `$`, `[`, `[^`, `+`, `{n,m}`, `\d`), or a placeholder for a
  * side that is project code: `<condition>`, `<call>`, `<expression>`,
- * `<string>` or `<template>`. An
+ * `<string>`, `<template>`, `<statement>`, `<statements>`, `<array>` or
+ * `<object>`. An
  * empty side means that the edit removes the token.
  */
 export interface MutantChange {

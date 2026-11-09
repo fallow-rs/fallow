@@ -53,6 +53,25 @@ pub enum MutationOperatorName {
     /// `z.number().int()` to `z.number()` in a module-level `const`
     /// initializer: one call link of a fluent chain removed.
     RemovedChainLink,
+    /// Opt-in. The statements of a block or function body removed.
+    BlockStatement,
+    /// Opt-in. `[x]` to `[]`, and `[]` to `["fallow"]`.
+    ArrayLiteral,
+    /// Opt-in. A non-empty object literal to `{}`.
+    ObjectLiteral,
+    /// Opt-in. `startsWith` to `endsWith` and the other method pairs, or
+    /// `s.trim()` to `s`.
+    MethodExpression,
+    /// Opt-in. The statements of a `case` clause removed.
+    SwitchCase,
+    /// Opt-in. A call in an expression position to `void 0`.
+    CallExpression,
+    /// Opt-in. A `throw new X(...)` statement removed.
+    ThrowStatement,
+    /// Opt-in. The regex changes applied to a `new RegExp("...")` pattern.
+    RegexConstructor,
+    /// Opt-in. A lookaround negated, or `\b` and `\B` swapped.
+    RegexAssertion,
 }
 
 impl MutationOperatorName {
@@ -73,6 +92,15 @@ impl MutationOperatorName {
             Self::OptionalChaining => "optional-chaining",
             Self::RegexLiteral => "regex-literal",
             Self::RemovedChainLink => "removed-chain-link",
+            Self::BlockStatement => "block-statement",
+            Self::ArrayLiteral => "array-literal",
+            Self::ObjectLiteral => "object-literal",
+            Self::MethodExpression => "method-expression",
+            Self::SwitchCase => "switch-case",
+            Self::CallExpression => "call-expression",
+            Self::ThrowStatement => "throw-statement",
+            Self::RegexConstructor => "regex-constructor",
+            Self::RegexAssertion => "regex-assertion",
         }
     }
 }
@@ -131,7 +159,9 @@ pub struct MutationConfig {
     #[serde(default)]
     pub runner: MutationRunner,
 
-    /// The operators to use. Unset uses each operator. `--operators` wins.
+    /// The operators to use. Unset uses the default set. An opt-in operator
+    /// runs only when this list or `--operators` names it. `--operators`
+    /// wins.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub operators: Option<Vec<MutationOperatorName>>,
 

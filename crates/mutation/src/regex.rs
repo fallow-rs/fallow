@@ -19,6 +19,13 @@
 //! negation, because a negated class with strings is a syntax error in that
 //! mode. An empty pattern becomes `(?:)`, because `//` starts a comment.
 //!
+//! The assertion edits are a separate kind, for the opt-in
+//! `regex-assertion` operator: a lookaround is negated (`(?=` and `(?!`
+//! swap, `(?<=` and `(?<!` swap), and `\b` and `\B` swap outside a class.
+//!
+//! [`pattern_mutations`] applies both kinds to the pattern of a
+//! `new RegExp("...")` string.
+//!
 //! A mutated literal that does not parse is dropped, when the original
 //! literal parses. An invalid literal is an early error, so it would break
 //! the whole instrumented file, also while the mutant is inactive.
@@ -29,9 +36,18 @@ use oxc_span::SourceType;
 
 use crate::MutantChange;
 
+/// The kind of a pattern edit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EditKind {
+    /// An anchor, quantifier, class or class escape edit (`regex-literal`).
+    Token,
+    /// A lookaround or word boundary edit (`regex-assertion`).
+    Assertion,
+}
+
 /// The mutated literals of `raw`, the source text of a regular expression
-/// literal, with the changed token, in pattern order.
-pub fn mutations(raw: &str) -> Vec<(String, MutantChange)> {
+/// literal, with the changed token and the edit kind, in pattern order.
+pub fn mutations(raw: &str) -> Vec<(String, MutantChange, EditKind)> {
     let Some(close) = raw.rfind('/').filter(|&close| close > 0) else {
         return Vec::new();
     };
@@ -41,13 +57,73 @@ pub fn mutations(raw: &str) -> Vec<(String, MutantChange)> {
     let checked = is_valid_literal(raw);
     edits(pattern, flags.contains('v'))
         .into_iter()
-        .map(|(start, end, text, change)| {
+        .map(|(start, end, text, change, kind)| {
             let mutated = format!("{}{text}{}", &pattern[..start], &pattern[end..]);
             let body = if mutated.is_empty() { "(?:)" } else { &mutated };
-            (format!("/{body}/{flags}"), change)
+            (format!("/{body}/{flags}"), change, kind)
         })
-        .filter(|(literal, _)| !checked || is_valid_literal(literal))
+        .filter(|(literal, _, _)| !checked || is_valid_literal(literal))
         .collect()
+}
+
+/// The mutated patterns of a `RegExp` constructor pattern, with the changed
+/// token, in pattern order. Both edit kinds apply. A mutated pattern that
+/// does not parse is dropped, when the original pattern parses.
+pub fn pattern_mutations(pattern: &str, flags: &str) -> Vec<(String, MutantChange)> {
+    let checked = is_valid_literal(&literal_of(pattern, flags));
+    edits(pattern, flags.contains('v'))
+        .into_iter()
+        .map(|(start, end, text, change, _)| {
+            let mutated = format!("{}{text}{}", &pattern[..start], &pattern[end..]);
+            (mutated, change)
+        })
+        .filter(|(mutated, _)| !checked || is_valid_literal(&literal_of(mutated, flags)))
+        .collect()
+}
+
+/// The regular expression literal of a constructor pattern: a `/` and a
+/// line terminator get an escape, so that the literal has the same pattern.
+/// `\/` is valid in each mode, also in a class. An empty pattern becomes
+/// `(?:)`.
+fn literal_of(pattern: &str, flags: &str) -> String {
+    let mut body = String::with_capacity(pattern.len() + 2);
+    let mut chars = pattern.chars();
+    while let Some(ch) = chars.next() {
+        match ch {
+            '\\' => {
+                body.push('\\');
+                if let Some(next) = chars.next() {
+                    match terminator_letter(next) {
+                        Some(letter) => body.push_str(letter),
+                        None => body.push(next),
+                    }
+                }
+            }
+            '/' => body.push_str("\\/"),
+            _ => match terminator_letter(ch) {
+                Some(letter) => {
+                    body.push('\\');
+                    body.push_str(letter);
+                }
+                None => body.push(ch),
+            },
+        }
+    }
+    if body.is_empty() {
+        body.push_str("(?:)");
+    }
+    format!("/{body}/{flags}")
+}
+
+/// The escape letter of a line terminator, which a literal cannot hold.
+const fn terminator_letter(ch: char) -> Option<&'static str> {
+    match ch {
+        '\n' => Some("n"),
+        '\r' => Some("r"),
+        '\u{2028}' => Some("u2028"),
+        '\u{2029}' => Some("u2029"),
+        _ => None,
+    }
 }
 
 /// True when `literal` parses as a regular expression literal, pattern and
@@ -120,8 +196,18 @@ const fn swapped_class_escape(byte: u8) -> Option<(&'static str, MutantChange)> 
     Some((swap, MutantChange::new(from, to)))
 }
 
-/// One edit of a pattern: `(start, end, replacement, change)`.
-type Edit = (usize, usize, &'static str, MutantChange);
+/// The swapped word boundary assertion of `byte`. Inside a class, `\b` is a
+/// backspace, so only the scan outside a class calls this.
+const fn swapped_boundary(byte: u8) -> Option<(&'static str, MutantChange)> {
+    match byte {
+        b'b' => Some(("B", MutantChange::new("\\b", "\\B"))),
+        b'B' => Some(("b", MutantChange::new("\\B", "\\b"))),
+        _ => None,
+    }
+}
+
+/// One edit of a pattern: `(start, end, replacement, change, kind)`.
+type Edit = (usize, usize, &'static str, MutantChange, EditKind);
 
 /// The byte length of a `{n}`, `{n,}` or `{n,m}` quantifier at the start of
 /// `rest`, and the end of its `n` part. A brace that does not start such a
@@ -192,7 +278,8 @@ impl Scanner<'_> {
             .get(index + 1)
             .and_then(|&b| swapped_class_escape(b))
         {
-            self.edits.push((index + 1, index + 2, swap, change));
+            self.edits
+                .push((index + 1, index + 2, swap, change, EditKind::Token));
         }
         index + 1 + escaped_len(self.pattern, index)
     }
@@ -216,7 +303,12 @@ impl Scanner<'_> {
         let byte = self.bytes[index];
         match byte {
             b'\\' => {
-                self.quantifiable = !matches!(self.bytes.get(index + 1), Some(b'b' | b'B'));
+                let next = self.bytes.get(index + 1).copied();
+                self.quantifiable = !matches!(next, Some(b'b' | b'B'));
+                if let Some((swap, change)) = next.and_then(swapped_boundary) {
+                    self.edits
+                        .push((index + 1, index + 2, swap, change, EditKind::Assertion));
+                }
                 return self.escape(index);
             }
             b'[' => self.class_open(index),
@@ -226,6 +318,7 @@ impl Scanner<'_> {
             }
             b'(' => {
                 self.quantifiable = false;
+                self.lookaround(index);
                 return index + group_open_len(self.bytes, index);
             }
             b'|' | b'^' | b'$' => self.quantifiable = false,
@@ -240,14 +333,44 @@ impl Scanner<'_> {
         index + 1
     }
 
+    /// Negates the lookaround that opens at `index`: `(?=` and `(?!` swap,
+    /// `(?<=` and `(?<!` swap.
+    fn lookaround(&mut self, index: usize) {
+        let rest = &self.bytes[index..];
+        let (at, from, to, swap) = match rest {
+            [b'(', b'?', b'=', ..] => (2, "(?=", "(?!", "!"),
+            [b'(', b'?', b'!', ..] => (2, "(?!", "(?=", "="),
+            [b'(', b'?', b'<', b'=', ..] => (3, "(?<=", "(?<!", "!"),
+            [b'(', b'?', b'<', b'!', ..] => (3, "(?<!", "(?<=", "="),
+            _ => return,
+        };
+        self.edits.push((
+            index + at,
+            index + at + 1,
+            swap,
+            MutantChange::new(from, to),
+            EditKind::Assertion,
+        ));
+    }
+
     fn class_open(&mut self, index: usize) {
         if !self.sets {
             if self.bytes.get(index + 1) == Some(&b'^') {
-                self.edits
-                    .push((index + 1, index + 2, "", MutantChange::new("[^", "[")));
+                self.edits.push((
+                    index + 1,
+                    index + 2,
+                    "",
+                    MutantChange::new("[^", "["),
+                    EditKind::Token,
+                ));
             } else {
-                self.edits
-                    .push((index + 1, index + 1, "^", MutantChange::new("[", "[^")));
+                self.edits.push((
+                    index + 1,
+                    index + 1,
+                    "^",
+                    MutantChange::new("[", "[^"),
+                    EditKind::Token,
+                ));
             }
         }
         self.depth = 1;
@@ -255,8 +378,13 @@ impl Scanner<'_> {
 
     /// Removes the anchor `token` at `index`.
     fn removal(&mut self, index: usize, token: &'static str) {
-        self.edits
-            .push((index, index + 1, "", MutantChange::new(token, "")));
+        self.edits.push((
+            index,
+            index + 1,
+            "",
+            MutantChange::new(token, ""),
+            EditKind::Token,
+        ));
         self.quantifiable = false;
     }
 
@@ -274,8 +402,13 @@ impl Scanner<'_> {
         } else {
             ""
         };
-        self.edits
-            .push((index, end, text, MutantChange::new(from, "")));
+        self.edits.push((
+            index,
+            end,
+            text,
+            MutantChange::new(from, ""),
+            EditKind::Token,
+        ));
         self.quantifiable = false;
         end
     }
@@ -291,6 +424,7 @@ impl Scanner<'_> {
                 close,
                 "",
                 MutantChange::new("{n,m}", "{n}"),
+                EditKind::Token,
             ));
         }
         self.quantifiable = false;

@@ -1325,7 +1325,7 @@
           "name": "--operators",
           "type": "string",
           "required": false,
-          "description": "The operators to use, comma-separated (default: each operator)"
+          "description": "The operators to use, comma-separated. Default: the default set. The opt-in operators (block-statement, array-literal, object-literal, method-expression, switch-case, call-expression, throw-statement, regex-constructor, regex-assertion) run only when named here"
         },
         {
           "name": "--verdicts",

@@ -13,6 +13,19 @@
 //! inner mutants live only inside the original branch of an outer mutant.
 //! A conditional expression introduces no function boundary, so `this`,
 //! `arguments`, `super`, `await` and `yield` keep their meaning.
+//!
+//! A statement site holds a range of statements. The emitter wraps it in an
+//! `if` statement in a block:
+//!
+//! ```text
+//! {if (__fallow_m_a("ID1")) {MUT1} else if (__fallow_m_a("ID2")) {MUT2}
+//!   else {__fallow_m_c("ID1"); __fallow_m_c("ID2"); ORIGINAL}}
+//! ```
+//!
+//! The statements move into a nested block. The collector makes statement
+//! sites only where that keeps the scope of each declaration: a block or
+//! function body that holds the whole range, or a `case` clause without a
+//! lexical declaration.
 
 use std::collections::BTreeSet;
 
@@ -28,6 +41,8 @@ pub struct EmitMutant {
 /// One site, ready to emit.
 pub struct EmitSite {
     pub span: (u32, u32),
+    /// True for a range of statements. See the module docs.
+    pub statement: bool,
     pub mutants: Vec<EmitMutant>,
 }
 
@@ -124,6 +139,10 @@ impl Emitter<'_, '_> {
     fn site(&mut self, node: usize, parent_start: Option<u32>) {
         let sites = self.sites;
         let site = &sites[node];
+        if site.statement {
+            self.statement_site(node);
+            return;
+        }
         let (start, end) = site.span;
         // A statement that starts with `(` can join the line before it.
         if self.statement_starts.contains(&start) && parent_start != Some(start) {
@@ -158,6 +177,34 @@ impl Emitter<'_, '_> {
         let children = std::mem::take(&mut self.tree.children[node]);
         self.range(start, end, &children, Some(start));
         self.writer.push(")))");
+    }
+}
+
+impl Emitter<'_, '_> {
+    fn statement_site(&mut self, node: usize) {
+        let sites = self.sites;
+        let site = &sites[node];
+        let (start, end) = site.span;
+        self.writer.push("{");
+        for mutant in &site.mutants {
+            self.writer
+                .push(&format!("if ({ACTIVE_FUNCTION}(\"{}\")) {{", mutant.id));
+            self.writer.copy(start, mutant.region.0);
+            self.writer.push(&mutant.replacement);
+            self.writer.copy(mutant.region.1, end);
+            self.writer.push("} else ");
+        }
+        self.writer.push("{");
+        for mutant in &site.mutants {
+            self.writer
+                .push(&format!("{HIT_FUNCTION}(\"{}\"); ", mutant.id));
+        }
+        let children = std::mem::take(&mut self.tree.children[node]);
+        self.range(start, end, &children, Some(start));
+        // A statement range ends at a statement end or before the `}` of its
+        // block, so it never ends inside a line comment, and the wrapper adds
+        // no line.
+        self.writer.push("}}");
     }
 }
 

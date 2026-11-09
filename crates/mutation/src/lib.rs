@@ -73,7 +73,8 @@ impl SourceKind {
 /// Options for [`instrument`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MutationOptions {
-    /// The operators that may produce mutants.
+    /// The operators that may produce mutants. The default is
+    /// [`Operator::DEFAULT`].
     pub operators: Vec<Operator>,
     /// Byte ranges in the original text. When set, a mutant is kept only when
     /// its span overlaps one of the ranges. `None` mutates the whole file.
@@ -83,7 +84,7 @@ pub struct MutationOptions {
 impl Default for MutationOptions {
     fn default() -> Self {
         Self {
-            operators: Operator::ALL.to_vec(),
+            operators: Operator::DEFAULT.to_vec(),
             ranges: None,
         }
     }
@@ -168,6 +169,15 @@ impl MutantChange {
     pub const STRING: &'static str = "<string>";
     /// Placeholder for a non-empty template literal.
     const TEMPLATE: &'static str = "<template>";
+    /// Placeholder for one statement, for example a `throw` statement.
+    const STATEMENT: &'static str = "<statement>";
+    /// Placeholder for the statements of a block, a function body or a
+    /// `case` clause.
+    const STATEMENTS: &'static str = "<statements>";
+    /// Placeholder for a non-empty array literal.
+    const ARRAY: &'static str = "<array>";
+    /// Placeholder for a non-empty object literal.
+    const OBJECT: &'static str = "<object>";
 
     /// A change from `from` to `to`.
     pub const fn new(from: &'static str, to: &'static str) -> Self {
@@ -383,6 +393,7 @@ fn instrument_text(
         }
         emit_sites.push(emit::EmitSite {
             span: site.span,
+            statement: site.statement,
             mutants: emit_mutants,
         });
     }

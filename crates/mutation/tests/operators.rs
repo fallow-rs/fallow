@@ -837,7 +837,11 @@ fn return_value_returns_undefined_outside_constructors_and_generators() {
         ("const f = () => undefined;", &[]),
         ("const f = () => void g();", &[]),
         ("const f = () => true;", &[]),
-        ("const f = () => g();", &[]),
+        ("const f = () => g();", &[("g()", "undefined")]),
+        (
+            "const f = async () => await g();",
+            &[("await g()", "undefined")],
+        ),
     ];
     for (source, want) in cases {
         let result = run(source, JS);
@@ -1255,6 +1259,15 @@ fn operator_names_are_kebab_case() {
             "optional-chaining",
             "regex-literal",
             "removed-chain-link",
+            "block-statement",
+            "array-literal",
+            "object-literal",
+            "method-expression",
+            "switch-case",
+            "call-expression",
+            "throw-statement",
+            "regex-constructor",
+            "regex-assertion",
         ],
     );
     assert_eq!(
@@ -1539,5 +1552,28 @@ fn equality_loop_test_gets_no_new_true_constant() {
             .iter()
             .any(|m| m.operator == Operator::NegateCondition && m.replacement == "true");
         assert!(!negate_true || source.starts_with("if"), "{source}");
+    }
+}
+
+#[test]
+fn equivalent_constants_look_through_logical_not() {
+    let cases: &[(&str, &[(&str, &str)])] = &[
+        // `!(n >= 0)` is always false for an array length.
+        ("const items = []; x = !(items.length >= 0) || flag;", &[]),
+        (
+            "const items = []; if (!(items.length >= 0)) work();",
+            &[("!(items.length >= 0)", "true")],
+        ),
+        // `!!(n >= 0)` is always true.
+        ("const items = []; x = !!(items.length >= 0) && flag;", &[]),
+        ("x = !(a >= 0) || flag;", &[("!(a >= 0)", "false")]),
+    ];
+    for (source, want) in cases {
+        let result = run(source, JS);
+        assert_eq!(
+            pairs(&result, Operator::NegateCondition),
+            expected(want),
+            "{source}"
+        );
     }
 }
