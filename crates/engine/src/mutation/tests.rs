@@ -717,6 +717,57 @@ fn function_scope_selects_the_whole_function_of_a_changed_parameter_line() {
 }
 
 #[test]
+fn function_scope_reads_the_functions_from_the_syntax_tree_not_from_the_mutants() {
+    let project = tempfile::tempdir().expect("temp dir");
+    let root = dunce::canonicalize(project.path()).expect("root");
+    std::fs::create_dir_all(root.join("src")).expect("src");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"adder","private":true,"type":"module","main":"src/adder.ts","devDependencies":{"vitest":"^3.2.4"}}"#,
+    )
+    .expect("package.json");
+    std::fs::write(
+        root.join("src/adder.ts"),
+        "export function makeAdder(\n  base: number,\n): (n: number) => number {\n  return (n) => base + n;\n}\n",
+    )
+    .expect("adder.ts");
+    std::fs::write(
+        root.join("src/adder.test.ts"),
+        "import { expect, test } from \"vitest\";\nimport { makeAdder } from \"./adder\";\n\ntest(\"adds\", () => {\n  expect(makeAdder(1)(2)).toBe(3);\n});\n",
+    )
+    .expect("adder.test.ts");
+    let diff = "\
+diff --git a/src/adder.ts b/src/adder.ts
+--- a/src/adder.ts
++++ b/src/adder.ts
+@@ -1,0 +2,1 @@
++  base: number,
+";
+    let request = |function_scope: bool| {
+        let mut request = MutationPlanRequest::new(MutationScope::ChangedSinceBase(
+            DiffIndex::from_unified_diff(diff),
+        ));
+        request.operators = Some(vec![Operator::ArithmeticOperator]);
+        request.function_scope = function_scope;
+        request
+    };
+    let [lines, widened] = plans(&root, None, &[request(false), request(true)])
+        .try_into()
+        .expect("two plans");
+    assert!(lines.mutants.is_empty(), "{:?}", lines.mutants);
+    let originals: Vec<&str> = widened
+        .mutants
+        .iter()
+        .map(|entry| entry.mutant.original.as_str())
+        .collect();
+    assert_eq!(
+        originals,
+        ["+"],
+        "the parameter line selects the whole outer function, which holds the arithmetic mutant of its inner arrow"
+    );
+}
+
+#[test]
 fn paths_scope_selects_only_the_named_files() {
     let root = fixture("mutation-plan");
     let plan = plans(

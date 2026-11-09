@@ -341,7 +341,7 @@ fn plan_file(context: &Context<'_>, candidate: &Candidate<'_>) -> FileOutcome {
         .as_deref()
         .map(|lines| added_line_ranges(source, lines));
     if context.request.function_scope {
-        widen_to_functions(context, candidate, source, &mut options);
+        widen_to_functions(candidate, source, &mut options);
     }
     let instrumented = match candidate
         .layout
@@ -375,37 +375,14 @@ fn plan_file(context: &Context<'_>, candidate: &Candidate<'_>) -> FileOutcome {
 }
 
 /// Widens the changed-line ranges of `options` to the functions that hold the
-/// changed lines. A first instrumentation of the whole file finds the
-/// function spans. A file that does not instrument keeps its ranges, and the
-/// main pass reports the error.
-fn widen_to_functions(
-    context: &Context<'_>,
-    candidate: &Candidate<'_>,
-    source: &str,
-    options: &mut MutationOptions,
-) {
+/// changed lines. The function spans come from the syntax tree, so the
+/// operator filter does not hide a function.
+fn widen_to_functions(candidate: &Candidate<'_>, source: &str, options: &mut MutationOptions) {
     let (Some(lines), Some(ranges)) = (candidate.added_lines.as_deref(), options.ranges.take())
     else {
         return;
     };
-    let whole_file = MutationOptions {
-        ranges: None,
-        ..context.options.clone()
-    };
-    let functions: Vec<(u32, u32)> = candidate
-        .layout
-        .instrument(source, &candidate.rel, &whole_file)
-        .map(|instrumented| {
-            instrumented
-                .mutants
-                .iter()
-                .filter_map(|mutant| mutant.enclosing_function.as_ref())
-                .map(|function| function.span)
-                .collect::<BTreeSet<_>>()
-                .into_iter()
-                .collect()
-        })
-        .unwrap_or_default();
+    let functions = function_spans(source, candidate.layout);
     options.ranges = Some(super::function_scope::widened_ranges(
         source, lines, ranges, &functions,
     ));
@@ -839,6 +816,16 @@ fn database_files(graph: &ModuleGraph) -> FxHashSet<FileId> {
 /// function of the source. The function kinds match the enclosing functions
 /// that `fallow-mutation` reports.
 fn has_top_level_site(starts: &[u32], source: &str, layout: Layout) -> bool {
+    let spans = function_spans(source, layout);
+    starts
+        .iter()
+        .any(|&start| !spans.iter().any(|&(from, to)| from <= start && start < to))
+}
+
+/// The byte spans of each function, method and arrow function in the script
+/// code of the file, read from the syntax tree. A function with no mutant is
+/// part of the result. A file that does not parse gives no span.
+pub(super) fn function_spans(source: &str, layout: Layout) -> Vec<(u32, u32)> {
     use oxc_ast::ast::{ArrowFunctionExpression, Function};
     use oxc_ast_visit::Visit;
     use oxc_syntax::scope::ScopeFlags;
@@ -860,12 +847,7 @@ fn has_top_level_site(starts: &[u32], source: &str, layout: Layout) -> bool {
     fallow_extract::parse_bounded_or_default(&text, kind.source_type(), |parsed| {
         let mut spans = Spans::default();
         spans.visit_program(&parsed.program);
-        starts.iter().any(|&start| {
-            !spans
-                .0
-                .iter()
-                .any(|&(from, to)| from <= start && start < to)
-        })
+        spans.0
     })
 }
 
