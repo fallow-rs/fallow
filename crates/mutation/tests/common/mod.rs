@@ -7,14 +7,21 @@
 
 use fallow_mutation::{Instrumented, Mutant, MutationOptions, Operator, SourceKind, instrument};
 use oxc_allocator::Allocator;
-use oxc_parser::Parser;
+use oxc_parser::{ParseOptions, Parser};
 use oxc_semantic::SemanticBuilder;
 
-/// Parses `code` and runs the semantic syntax checks. Panics with the
-/// diagnostics and the code when either step reports an error.
+/// Parses `code`, with the patterns of regular expression literals, and runs
+/// the semantic syntax checks. Panics with the diagnostics and the code when
+/// either step reports an error.
 pub fn assert_valid(code: &str, kind: SourceKind) {
     let allocator = Allocator::default();
-    let parsed = Parser::new(&allocator, code, kind.source_type()).parse();
+    let options = ParseOptions {
+        parse_regular_expression: true,
+        ..ParseOptions::default()
+    };
+    let parsed = Parser::new(&allocator, code, kind.source_type())
+        .with_options(options)
+        .parse();
     assert!(
         !parsed.fatal_error && !parsed.diagnostics.has_errors(),
         "code does not parse: {:?}\n---\n{code}",

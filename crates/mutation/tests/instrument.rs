@@ -355,7 +355,7 @@ fn typescript_output_keeps_generics_and_satisfies() {
     );
     assert!(result.code.contains("id<number>("));
     assert!(result.code.contains("satisfies Rec"));
-    assert!(result.code.contains("<T,>(x: T): T => x"));
+    assert!(result.code.contains("<T,>(x: T): T =>"));
 }
 
 #[test]

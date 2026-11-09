@@ -1293,7 +1293,7 @@
           "const": "boolean-literal"
         },
         {
-          "description": "A string literal emptied or filled.",
+          "description": "A string or template literal emptied or filled.",
           "type": "string",
           "const": "string-literal"
         },
@@ -1303,7 +1303,7 @@
           "const": "optional-chaining"
         },
         {
-          "description": "One token of a regular expression literal changed: an anchor\nremoved, a character class negated, or a class escape with the\nopposite case.",
+          "description": "One token of a regular expression literal changed: an anchor or a\nquantifier removed, a `{n,m}` range shortened to `{n}`, a character\nclass negated, or a class escape with the opposite case.",
           "type": "string",
           "const": "regex-literal"
         },

@@ -102,6 +102,7 @@ fn each_operator_reports_its_tokens() {
                 ("<", "<="),
                 ("<", "!="),
                 ("<expression>", "false"),
+                ("<expression>", "true"),
                 ("==", "!="),
             ],
         ),
@@ -150,6 +151,12 @@ fn each_operator_reports_its_tokens() {
         ),
         ("x = /[^a]/;", Operator::RegexLiteral, &[("[^", "[")]),
     ];
+    assert_changes(cases);
+}
+
+/// Asserts the sorted changes of one operator for each `(source, operator,
+/// want)` case.
+fn assert_changes(cases: &[Case]) {
     for (source, operator, want) in cases {
         let mut got = changes(source, *operator);
         let mut want = want.to_vec();
@@ -157,6 +164,43 @@ fn each_operator_reports_its_tokens() {
         want.sort_unstable();
         assert_eq!(got, want, "{source}");
     }
+}
+
+#[test]
+fn operand_quantifier_template_and_assignment_rules_report_their_tokens() {
+    let cases: &[Case] = &[
+        (
+            "x = /a+b{1,3}/;",
+            Operator::RegexLiteral,
+            &[("+", ""), ("{n,m}", "{n}")],
+        ),
+        (
+            "x = `a${b}`;",
+            Operator::StringLiteral,
+            &[("<template>", "``")],
+        ),
+        ("x = ``;", Operator::StringLiteral, &[("``", "`fallow`")]),
+        ("x *= 2;", Operator::ArithmeticOperator, &[("*=", "/=")]),
+        ("x ??= y;", Operator::LogicalOperator, &[("??=", "&&=")]),
+        ("x = -a;", Operator::UnaryOperator, &[("-", ""), ("-", "+")]),
+        ("x = ~a;", Operator::UnaryOperator, &[("~", "")]),
+        (
+            "for (;;) { break; }",
+            Operator::NegateCondition,
+            &[("<condition>", "false")],
+        ),
+        (
+            "x = a < b && c;",
+            Operator::NegateCondition,
+            &[("<condition>", "true")],
+        ),
+        (
+            "const f = () => a;",
+            Operator::ReturnValue,
+            &[("<expression>", "undefined")],
+        ),
+    ];
+    assert_changes(cases);
 }
 
 #[test]

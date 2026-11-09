@@ -96,31 +96,86 @@ read-only next steps. It never writes a test and never proposes a code change.
 
 | Operator | Change |
 |---|---|
-| `arithmetic-operator` | `+` and `-` swap, `*` and `/` swap, `%` becomes `*`, `+=` and `-=` swap |
-| `relational-operator` | the non-redundant relational subset |
-| `logical-operator` | `&&` and `\|\|` swap, `??` becomes `&&` |
-| `negate-condition` | a plain condition becomes `true` and `false` |
-| `unary-operator` | `!x` and `-x` become `x` |
+| `arithmetic-operator` | `+` and `-` swap, `*` and `/` swap, `%` becomes `*`; in a compound assignment, `+=` and `-=`, `*=` and `/=`, `<<=` and `>>=`, `&=` and `\|=` swap, and `%=` becomes `*=` |
+| `relational-operator` | the non-redundant relational subset, and the constant result |
+| `logical-operator` | `&&` and `\|\|` swap, `??` becomes `&&`; `&&=` and `\|\|=` swap, `??=` becomes `&&=` |
+| `negate-condition` | a branch or loop test becomes `true` and `false`; a boolean operand of `&&` becomes `true`, of `\|\|` becomes `false` |
+| `unary-operator` | `!x`, `-x` and `~x` become `x`; `-x` and `+x` swap |
 | `update-operator` | `++` and `--` swap |
 | `removed-call` | a call statement becomes a no-op |
-| `return-value` | `return expr` becomes `return undefined` |
+| `return-value` | `return expr` and the concise body of `x => expr` become `undefined` |
 | `boolean-literal` | `true` and `false` swap |
-| `string-literal` | a string becomes empty, an empty string becomes `"fallow"` |
+| `string-literal` | a string or template literal becomes empty; an empty one becomes `"fallow"` or `` `fallow` `` |
 | `optional-chaining` | `a?.b` becomes `a.b` |
 | `regex-literal` | one pattern token changes |
 | `removed-chain-link` | `r.m(args)` becomes `r` in a fluent chain of a module-level `const` |
 
+The rules of the operators in detail:
+
+- `relational-operator`: `<`, `<=`, `>` and `>=` get two operator swaps and
+  one constant (`a < b` to `<=`, `!=` and `false`). An equality gets its
+  negation and both constants: `a === b` becomes `a !== b`, `false` and
+  `true`. When `==` or `===` is the whole test of a `while`, `do` or `for`
+  loop, it gets no `true` constant, because `true` gives an endless loop.
+  `!=` and `!==` keep their `true` constant in a loop test.
+- `negate-condition`: the test of an `if` statement, a `? :` expression and a
+  loop becomes `true` and `false`. A loop test that is a comparison or a
+  logical expression becomes `false` only, because `true` gives an endless
+  loop. Only the Vitest adapter stops such a loop before the watchdog (see
+  Timeouts). A plain loop test such as `while (x)` keeps both mutants.
+- `negate-condition`: `for (init;; update)` gets the test `false`, so the body
+  never runs. The mutant inserts `false`, so its `original` text is empty.
+- `negate-condition`: an operand of `&&` that is a comparison or a `!x`
+  becomes `true`, and such an operand of `||` becomes `false`. The other
+  constant gives the same result as a constant for the whole expression, so
+  it is not made. For `dir === "." && !path.includes("/")`, the mutants are
+  `true && !path.includes("/")` and `dir === "." && true`.
+- `negate-condition`: a constant that a test or an operand always has gives
+  no mutant. The rules of the zero comparisons on an array length decide
+  this: for `items.length >= 0`, the `true` mutant is equivalent.
+- `arithmetic-operator`: an expression with a string or template operand
+  gives no mutant, for each operator. A compound assignment other than `+=`
+  and `-=` with a string or template value gives no mutant either.
+- `unary-operator`: `-x` becomes `+x` only when `x` is not a number literal,
+  because `+1` gives the same value as the removal mutant `1`.
+- `return-value`: an arrow function with an expression body, such as
+  `x => x + 1`, gets the body `undefined`. A body that is already `undefined`,
+  a `void` expression or a boolean literal gives no mutant, and a call body
+  gets the `removed-call` mutant instead.
+- `string-literal`: a template literal follows the rules of a string. A
+  tagged template gives no mutant, because the tag reads the raw parts, but
+  its expressions still do. A template in a type position gives no mutant.
+
+Two rules can give the same text at the same span. An example is the
+relational constant `true` of `a === b` and the `true` operand mutant of
+`a === b && c`. The site keeps one mutant: the first one that the selected
+operators allow. With the default operators, the existing rule keeps the
+mutant, so the id of an existing mutant does not change.
+
 The `regex-literal` operator gives one mutant for each of these tokens of a
 regular expression literal:
 
-- a `^` at the start of the pattern is removed;
-- a `$` at the end of the pattern is removed;
+- a `^` at the start of an alternative is removed: at the start of the
+  pattern, or right after `(`, `(?:` or `|`. A `^` in a lookbehind stays;
+- a `$` at the end of an alternative is removed: at the end of the pattern,
+  or right before `)` or `|`;
+- a `+`, `*` or `?` quantifier is removed, together with its lazy `?`
+  (`/\/+$/` to `/\/$/`). The `?` of a group opening such as `(?:` is not a
+  quantifier. When the removal would join two tokens into another token,
+  an empty group `(?:)` takes the place of the quantifier: `/(a)\1?2/`
+  becomes `/(a)\1(?:)2/`, not `/(a)\12/`. The same rule covers an
+  incomplete `\x`, `\u`, `\c` or `\k` escape and a literal `{` before
+  digits;
+- a `{n,m}` or `{n,}` quantifier becomes `{n}`. A `{n}` quantifier and a
+  brace that is not a quantifier give no mutant;
 - a character class is negated (`[a-z]` to `[^a-z]`, and the reverse). A
   pattern with the `v` flag gives no negation;
 - a class escape gets the opposite case (`\d` to `\D`, and the same for `\w`
   and `\s`).
 
-The flags stay the same, and an empty pattern becomes `(?:)`. The corpus for
+The flags stay the same, and an empty pattern becomes `(?:)`. A mutated
+literal that does not parse is dropped, because an invalid literal is a
+syntax error for the whole file, also while the mutant is not active. The corpus for
 this operator is the JavaScript and TypeScript source files of six public
 projects (date-fns, zod, vue core, SvelteKit, reka-ui, runed), without tests.
 Each of its 7971 regex mutants compiled with `new RegExp`. Most literals give
@@ -1622,12 +1677,16 @@ source text.
   hold text of the source file.
 - A side is an operator token, a fixed literal (`true`, `false`, `undefined`,
   `void 0`, `""`, `''`, `"fallow"`, `'fallow'`), or a regular expression token
-  (`^`, `$`, `[`, `[^`, or a class escape such as `\d`).
+  (`^`, `$`, `[`, `[^`, a quantifier, or a class escape such as `\d`).
 - A side that is project code is a placeholder. A `negate-condition` test is
-  `<condition>`. A `removed-call` statement is `<call>`, and a
-  `removed-chain-link` link is `<call>` with an empty `to`. A `return-value`
-  argument and a relational expression that becomes `true` or `false` are
-  `<expression>`. A non-empty `string-literal` is `<string>`.
+  `<condition>`, also the missing test of `for (;;)`. A `removed-call`
+  statement is `<call>`, and a `removed-chain-link` link is `<call>` with an
+  empty `to`. A `return-value` argument or arrow body and a relational
+  expression that becomes `true` or `false` are `<expression>`. A non-empty
+  `string-literal` is `<string>`, and a non-empty template literal is
+  `<template>`.
+- A `regex-literal` quantifier side is `+`, `*` or `?`, and a shortened
+  range is `{"from": "{n,m}", "to": "{n}"}`.
 - An empty side means that the edit removes the token, for example
   `{"from": "!", "to": ""}` for `unary-operator`.
 - A report that an older version wrote has no `change`. `inspect` copies the

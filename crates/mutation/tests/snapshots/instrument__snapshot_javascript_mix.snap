@@ -8,7 +8,7 @@ expression: result.code
 export function check(items, limit) {
   let count = 0;
   for (let i = 0; (__fallow_m_a("606bcda3f5b3810c") ? (false) : __fallow_m_a("15386f925e1fa7c2") ? (i <= items.length) : __fallow_m_a("70f0300922844bed") ? (i != items.length) : (__fallow_m_c("606bcda3f5b3810c"), __fallow_m_c("15386f925e1fa7c2"), __fallow_m_c("70f0300922844bed"), (i < items.length))); (__fallow_m_a("01bca12fe52231aa") ? (i--) : (__fallow_m_c("01bca12fe52231aa"), (i++)))) {
-    if ((__fallow_m_a("384cdfead23a6dba") ? (items[i]?.active || !items[i].hidden) : (__fallow_m_c("384cdfead23a6dba"), ((__fallow_m_a("c034986c5c2a6089") ? (items[i].active) : (__fallow_m_c("c034986c5c2a6089"), (items[i]?.active))) && (__fallow_m_a("7e045cc78ebb7dcb") ? (items[i].hidden) : (__fallow_m_c("7e045cc78ebb7dcb"), (!items[i].hidden))))))) {
+    if ((__fallow_m_a("384cdfead23a6dba") ? (items[i]?.active || !items[i].hidden) : __fallow_m_a("ee1c0df92df0ce85") ? (true) : __fallow_m_a("a20bfd6c92602012") ? (false) : (__fallow_m_c("384cdfead23a6dba"), __fallow_m_c("ee1c0df92df0ce85"), __fallow_m_c("a20bfd6c92602012"), ((__fallow_m_a("c034986c5c2a6089") ? (items[i].active) : (__fallow_m_c("c034986c5c2a6089"), (items[i]?.active))) && (__fallow_m_a("7e045cc78ebb7dcb") ? (items[i].hidden) : __fallow_m_a("f196f8fda6bbaae1") ? (true) : (__fallow_m_c("7e045cc78ebb7dcb"), __fallow_m_c("f196f8fda6bbaae1"), (!items[i].hidden))))))) {
       void (__fallow_m_a("3c289f1dbc0b7581") ? (count -= 1) : (__fallow_m_c("3c289f1dbc0b7581"), (count += 1)));
     }
   }

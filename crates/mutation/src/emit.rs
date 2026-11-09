@@ -151,6 +151,10 @@ impl Emitter<'_, '_> {
                 .push(&format!("{HIT_FUNCTION}(\"{}\"), ", mutant.id));
         }
         self.writer.push("(");
+        if start == end {
+            // An empty site is the missing test of `for (;;)`, which is true.
+            self.writer.push("true");
+        }
         let children = std::mem::take(&mut self.tree.children[node]);
         self.range(start, end, &children, Some(start));
         self.writer.push(")))");
