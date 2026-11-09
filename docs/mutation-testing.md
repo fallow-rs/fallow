@@ -603,8 +603,11 @@ select nothing for it. `--function-scope` (config key
   `.todo`, also after `.concurrent`, `.sequential` or `.shuffle`. It
   recognizes `xit`, `xtest` and `xdescribe`. It recognizes the `node:test`
   options `{ skip: true }` and `{ todo: true }`, and a non-empty string
-  value of either key. A condition that the run decides, such as
-  `it.skipIf(flag)` or `{ skip: process.env.CI }`, is not a skipped test.
+  value of either key. The last write to a key wins, as in an object
+  literal. A condition that the run decides, such as `it.skipIf(flag)`,
+  `{ skip: process.env.CI }`, or a spread or a computed key after the last
+  literal write, is not a skipped test. A spread before the last literal
+  write does not matter.
   A call such as `t.skip()` inside a test is not recognized.
 - The `errors` entry `skipped-tests` names up to ten of these tests with
   file, line and name. The name is present when the first argument is a

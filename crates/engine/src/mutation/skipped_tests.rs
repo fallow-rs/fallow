@@ -124,26 +124,54 @@ fn member_kind(callee: &Expression<'_>) -> Option<SkipKind> {
     }
 }
 
+/// What the options of a call say about one key, after the last write.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Flag {
+    /// No property writes the key.
+    Unset,
+    /// The last write is a literal that turns the key on.
+    On,
+    /// The last write is a literal that turns the key off.
+    Off,
+    /// A runtime value, a spread or a computed key follows the last literal
+    /// write, so the run decides.
+    Unknown,
+}
+
 /// `{ skip: true }` and `{ todo: "reason" }` in the options of a `node:test`
-/// call. A value that is not a literal depends on the run, so it does not
-/// count.
+/// call. The last write to a key wins, as in an object literal. A runtime
+/// value, a spread or a computed key after the last literal write makes the
+/// result uncertain, so the call is not reported. A spread before the last
+/// literal write does not matter. An uncertain `skip` does not hide a `todo`
+/// that is on: the run leaves the test out in both cases.
 fn option_kind(options: &ObjectExpression<'_>) -> Option<SkipKind> {
-    options.properties.iter().find_map(|property| {
+    let (mut skip, mut todo) = (Flag::Unset, Flag::Unset);
+    for property in &options.properties {
         let ObjectPropertyKind::ObjectProperty(property) = property else {
-            return None;
+            (skip, todo) = (Flag::Unknown, Flag::Unknown);
+            continue;
         };
-        let kind = match key_name(&property.key)? {
-            "skip" => SkipKind::Skip,
-            "todo" => SkipKind::Todo,
-            _ => return None,
+        if property.computed {
+            (skip, todo) = (Flag::Unknown, Flag::Unknown);
+            continue;
+        }
+        let flag = match key_name(&property.key) {
+            Some("skip") => &mut skip,
+            Some("todo") => &mut todo,
+            _ => continue,
         };
-        let set = match &property.value {
-            Expression::BooleanLiteral(value) => value.value,
-            Expression::StringLiteral(value) => !value.value.is_empty(),
-            _ => false,
+        *flag = match &property.value {
+            Expression::BooleanLiteral(value) if value.value => Flag::On,
+            Expression::StringLiteral(value) if !value.value.is_empty() => Flag::On,
+            Expression::BooleanLiteral(_) | Expression::StringLiteral(_) => Flag::Off,
+            _ => Flag::Unknown,
         };
-        set.then_some(kind)
-    })
+    }
+    match (skip, todo) {
+        (Flag::On, _) => Some(SkipKind::Skip),
+        (_, Flag::On) => Some(SkipKind::Todo),
+        _ => None,
+    }
 }
 
 fn key_name<'a>(key: &'a PropertyKey<'_>) -> Option<&'a str> {
@@ -255,6 +283,67 @@ skip(\"not a test\");
 const skip = true;
 ";
         assert_eq!(scan(source), Vec::new());
+    }
+
+    #[test]
+    fn a_later_literal_overrides_an_earlier_option() {
+        let source = "\
+test(\"off again\", { skip: true, skip: false }, () => {});
+test(\"emptied\", { skip: \"reason\", skip: \"\" }, () => {});
+test(\"todo off\", { todo: true, todo: false }, () => {});
+test(\"on again\", { skip: false, skip: true }, () => {});
+test(\"other key\", { skip: true, todo: false }, () => {});
+";
+        assert_eq!(
+            scan(source),
+            vec![
+                named(4, SkipKind::Skip, "on again"),
+                named(5, SkipKind::Skip, "other key"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_runtime_value_or_spread_after_the_last_literal_makes_the_result_uncertain() {
+        let source = "\
+test(\"spread after\", { skip: true, ...runtimeOptions }, () => {});
+test(\"todo spread\", { todo: true, ...runtimeOptions }, () => {});
+test(\"runtime value\", { skip: true, skip: flag }, () => {});
+test(\"spread between\", { skip: true, ...runtimeOptions, skip: true }, () => {});
+";
+        assert_eq!(
+            scan(source),
+            vec![named(4, SkipKind::Skip, "spread between")],
+            "only the literal after the spread is certain"
+        );
+    }
+
+    #[test]
+    fn a_spread_before_the_literal_leaves_the_test_skipped() {
+        let source = "\
+test(\"spread before\", { ...base, skip: true }, () => {});
+test(\"spread before todo\", { ...base, todo: \"later\" }, () => {});
+";
+        assert_eq!(
+            scan(source),
+            vec![
+                named(1, SkipKind::Skip, "spread before"),
+                named(2, SkipKind::Todo, "spread before todo"),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_computed_key_after_the_last_literal_makes_the_result_uncertain() {
+        let source = "\
+test(\"computed after\", { skip: true, [key]: false }, () => {});
+test(\"computed before\", { [key]: false, skip: true }, () => {});
+test(\"computed string\", { skip: true, [\"skip\"]: false }, () => {});
+";
+        assert_eq!(
+            scan(source),
+            vec![named(2, SkipKind::Skip, "computed before")]
+        );
     }
 
     #[test]
