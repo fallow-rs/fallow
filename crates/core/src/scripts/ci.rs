@@ -115,6 +115,12 @@ fn extract_ci_signals(content: &str, context: &CiContext<'_>, analysis: &mut CiA
     extract_ci_signals_in(content, context, None, analysis);
 }
 
+/// A `-c` value with a quote or a pipe is inline code (a jq filter, a
+/// `python -c` program), not a config path.
+fn is_inline_code(config_arg: &str) -> bool {
+    config_arg.contains(['"', '\'', '|'])
+}
+
 /// [`extract_ci_signals`] for a file whose `${{ github.action_path }}` is
 /// `action_dir`, relative to the project root. `None` for a workflow file.
 ///
@@ -163,7 +169,7 @@ fn extract_ci_signals_in(
             parsed
                 .config_files
                 .into_iter()
-                .filter(|s| could_be_file_path(s))
+                .filter(|s| could_be_file_path(s) && !is_inline_code(s))
                 .filter_map(resolve),
         );
         analysis
@@ -1465,6 +1471,68 @@ jobs:
         assert!(
             !analysis.entry_files.iter().any(|f| f.contains("proposals")),
             "jq filter must not leak into entry_files, got: {:?}",
+            analysis.entry_files
+        );
+    }
+
+    /// Issue #4380: the `-c` value of `jq -c '<filter>'` reads as a config
+    /// argument. A filter with no slash passes the path check and then fails
+    /// to compile as an entry glob.
+    #[test]
+    fn command_substitution_jq_filter_not_entry_file() {
+        let content = r#"
+jobs:
+  check:
+    steps:
+      - run: |
+          allowed=$(docker compose -f docker-compose.public.yml config --no-interpolate --format json \
+            | jq -c '.services["runner-public"].environment | keys + ["OVERHUB_NETWORK", "RUNNER_PUBLIC_MEMORY_LIMIT"]')
+"#;
+        let analysis = analyze_content(content);
+        assert!(
+            !analysis
+                .entry_files
+                .iter()
+                .any(|f| f.contains("runner-public") || f.contains("OVERHUB_NETWORK")),
+            "jq filter must not become an entry pattern, got: {:?}",
+            analysis.entry_files
+        );
+    }
+
+    #[test]
+    fn inline_python_program_not_entry_file() {
+        let content = r#"
+jobs:
+  check:
+    steps:
+      - run: v=$(python3 -c 'import os; print(os.environ["runner-public"])')
+"#;
+        let analysis = analyze_content(content);
+        assert!(
+            !analysis
+                .entry_files
+                .iter()
+                .any(|f| f.contains("runner-public")),
+            "python program must not become an entry pattern, got: {:?}",
+            analysis.entry_files
+        );
+    }
+
+    #[test]
+    fn quoted_script_path_with_apostrophe_stays_entry_file() {
+        let content = r#"
+jobs:
+  check:
+    steps:
+      - run: node "scripts/it's.js"
+"#;
+        let analysis = analyze_content(content);
+        assert!(
+            analysis
+                .entry_files
+                .iter()
+                .any(|f| f.ends_with("scripts/it's.js")),
+            "quoted script path must stay an entry, got: {:?}",
             analysis.entry_files
         );
     }
