@@ -599,55 +599,70 @@ fn collect_route_call(
 
     match name {
         "route" => {
-            if let Some(file) = nth_argument_string(call, 1) {
-                add_route_module_file(walk.result, &file, base_dir, root);
-            }
-            if let Some(children) = nth_argument_expression(call, 2) {
-                collect_route_entries(children, module, base_dir, walk);
-            }
+            add_argument_module_file(call, 1, base_dir, walk);
+            collect_argument_children(call, 2, module, base_dir, walk);
         }
-        "index" => {
-            if let Some(file) = nth_argument_string(call, 0) {
-                add_route_module_file(walk.result, &file, base_dir, root);
-            }
-        }
+        "index" => add_argument_module_file(call, 0, base_dir, walk),
         "layout" => {
-            if let Some(file) = nth_argument_string(call, 0) {
-                add_route_module_file(walk.result, &file, base_dir, root);
-            }
-            if let Some(children) = nth_argument_expression(call, 1) {
-                collect_route_entries(children, module, base_dir, walk);
-            }
+            add_argument_module_file(call, 0, base_dir, walk);
+            collect_argument_children(call, 1, module, base_dir, walk);
         }
-        "prefix" => {
-            if let Some(children) = nth_argument_expression(call, 1) {
-                collect_route_entries(children, module, base_dir, walk);
-            }
-        }
+        "prefix" => collect_argument_children(call, 1, module, base_dir, walk),
         "relative" => {
             let next_base = nth_argument_string(call, 0)
                 .and_then(|raw| normalize_route_base_dir(&raw, base_dir, root))
                 .unwrap_or_else(|| base_dir.to_path_buf());
-            if let Some(children) = nth_argument_expression(call, 1) {
-                collect_route_entries(children, module, &next_base, walk);
-            }
+            collect_argument_children(call, 1, module, &next_base, walk);
         }
         "flatRoutes" => {
             if let Some(route_dir) = extract_flat_routes_root_dir(call, base_dir, root) {
                 add_route_dir_override(walk.result, &route_dir);
             }
         }
-        _ => {
-            for argument in &call.arguments {
-                let argument_expr = match argument {
-                    Argument::SpreadElement(spread) => &spread.argument,
-                    _ => match argument.as_expression() {
-                        Some(argument_expr) => argument_expr,
-                        None => continue,
-                    },
-                };
-                collect_route_entries(argument_expr, module, base_dir, walk);
-            }
+        _ => collect_unknown_call_arguments(call, module, base_dir, walk),
+    }
+}
+
+/// Register the route module file named by the string argument at `index`.
+fn add_argument_module_file(
+    call: &CallExpression<'_>,
+    index: usize,
+    base_dir: &Path,
+    walk: &mut RouteWalk<'_>,
+) {
+    if let Some(file) = nth_argument_string(call, index) {
+        add_route_module_file(walk.result, &file, base_dir, walk.root);
+    }
+}
+
+/// Walk the child route entries in the argument at `index`.
+fn collect_argument_children(
+    call: &CallExpression<'_>,
+    index: usize,
+    module: RouteModule<'_, '_>,
+    base_dir: &Path,
+    walk: &mut RouteWalk<'_>,
+) {
+    if let Some(children) = nth_argument_expression(call, index) {
+        collect_route_entries(children, module, base_dir, walk);
+    }
+}
+
+/// A call with an unknown name can wrap route entries, so walk every
+/// argument, including spread arguments.
+fn collect_unknown_call_arguments(
+    call: &CallExpression<'_>,
+    module: RouteModule<'_, '_>,
+    base_dir: &Path,
+    walk: &mut RouteWalk<'_>,
+) {
+    for argument in &call.arguments {
+        let argument_expr = match argument {
+            Argument::SpreadElement(spread) => Some(&spread.argument),
+            _ => argument.as_expression(),
+        };
+        if let Some(argument_expr) = argument_expr {
+            collect_route_entries(argument_expr, module, base_dir, walk);
         }
     }
 }
