@@ -163,6 +163,9 @@ am_render() {
     export FALLOW_ROOT=. INPUT_ROOT=. MAX_ANNOTATIONS=50 ACTION_JQ_DIR="$DIR/../jq"
     export FALLOW_RESULTS_FILE="$work/fallow-results.json" HAS_NATIVE_REPORT=true
     export FALLOW_DIFF_FILE="$work/none.diff"
+    # summary.sh and annotate.sh run $FALLOW_BIN before PATH, and the CI job
+    # of the current binary sets it, so the stub must win here.
+    export FALLOW_BIN="$AM_BIN/fallow"
     for pair in "$@"; do export "${pair?}"; done
     export PATH="$AM_BIN:$PATH" MOCK_LOG="$work/mock.log" GITHUB_STEP_SUMMARY="$work/summary.md"
     bash "$AM_SCRIPTS/$script" > "$work/$script.out" 2>&1
