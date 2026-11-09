@@ -1,8 +1,12 @@
 use std::path::{Component, Path, PathBuf};
 
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 const MAX_EXTENDS_DEPTH: usize = 16;
+/// The most distinct config files that one `extends` walk reads. A walk over
+/// this limit fails closed, so an untrusted repository can not make the walk
+/// read an unbounded number of files.
+const MAX_EXTENDS_READS: usize = 256;
 const DECLARATION_OUTPUT_SUFFIXES: &[&str] = &[".d.ts", ".d.mts", ".d.cts"];
 
 #[derive(Debug, Clone, Default)]
@@ -66,8 +70,7 @@ impl TsconfigOutputMap {
             .iter()
             .filter_map(|path| {
                 let config_dir = path.parent()?;
-                let mut options =
-                    read_compiler_options(path, config_dir, &mut FxHashSet::default(), 0)?;
+                let mut options = read_compiler_options(path, config_dir)?;
                 options.config_dir = Some(config_dir.to_path_buf());
                 Some(options)
             })
@@ -246,74 +249,130 @@ fn tsconfig_paths(root: &Path) -> Option<Vec<PathBuf>> {
     Some(configs)
 }
 
-fn read_compiler_options(
-    config_path: &Path,
-    substitution_base: &Path,
-    visited: &mut FxHashSet<PathBuf>,
-    depth: usize,
-) -> Option<CompilerOptions> {
-    if depth >= MAX_EXTENDS_DEPTH {
-        return None;
+/// Read the merged compiler options of `config_path` and its `extends` chain.
+/// `None` when a config in the chain is missing, invalid, or part of a cycle,
+/// or when the chain is deeper than [`MAX_EXTENDS_DEPTH`] or reads more than
+/// [`MAX_EXTENDS_READS`] configs.
+fn read_compiler_options(config_path: &Path, substitution_base: &Path) -> Option<CompilerOptions> {
+    ExtendsWalk {
+        substitution_base,
+        in_progress: FxHashSet::default(),
+        resolved: FxHashMap::default(),
+        reads: 0,
     }
-    let config_path = dunce::canonicalize(config_path).ok()?;
-    if !visited.insert(config_path.clone()) {
-        return None;
-    }
-    let content = std::fs::read_to_string(&config_path).ok()?;
-    let value: serde_json::Value =
-        crate::jsonc::parse_to_value(content.trim_start_matches('\u{FEFF}')).ok()?;
-    let extends: Vec<&str> = match value.get("extends") {
-        Some(serde_json::Value::String(extends)) => vec![extends.as_str()],
-        Some(serde_json::Value::Array(items)) => items
-            .iter()
-            .map(serde_json::Value::as_str)
-            .collect::<Option<_>>()?,
-        Some(_) => return None,
-        None => Vec::new(),
-    };
-    // A later entry of an array `extends` overrides an earlier one.
-    let mut options = CompilerOptions::default();
-    for extends in extends {
-        let parent = resolve_extends_path(&config_path, extends)?;
-        let parent_options = read_compiler_options(&parent, substitution_base, visited, depth + 1)?;
-        options.inherit(parent_options);
-    }
-    let Some(compiler_options) = value.get("compilerOptions") else {
-        visited.remove(&config_path);
-        return Some(options);
-    };
-    let compiler_options = compiler_options.as_object()?;
-    let config_dir = config_path.parent()?;
+    .read(config_path, 0)
+}
 
-    replace_path_option(
-        compiler_options,
-        "rootDir",
-        config_dir,
-        substitution_base,
-        &mut options.root_dir,
-    )?;
-    replace_path_option(
-        compiler_options,
-        "outDir",
-        config_dir,
-        substitution_base,
-        &mut options.out_dir,
-    )?;
-    replace_path_option(
-        compiler_options,
-        "declarationDir",
-        config_dir,
-        substitution_base,
-        &mut options.declaration_dir,
-    )?;
-    replace_bool_option(compiler_options, "noEmit", &mut options.no_emit)?;
-    replace_bool_option(
-        compiler_options,
-        "emitDeclarationOnly",
-        &mut options.emit_declaration_only,
-    )?;
-    visited.remove(&config_path);
-    Some(options)
+/// The state of one `extends` walk from one top-level config.
+struct ExtendsWalk<'a> {
+    substitution_base: &'a Path,
+    /// The configs on the current `extends` path, to detect a cycle.
+    in_progress: FxHashSet<PathBuf>,
+    /// The merged options of each finished config, with the height of its
+    /// `extends` tree. An array `extends` can name one config through many
+    /// branches, so the walk reads and parses each config once.
+    resolved: FxHashMap<PathBuf, (CompilerOptions, usize)>,
+    reads: usize,
+}
+
+impl ExtendsWalk<'_> {
+    fn read(&mut self, config_path: &Path, depth: usize) -> Option<CompilerOptions> {
+        self.read_with_height(config_path, depth)
+            .map(|(options, _)| options)
+    }
+
+    /// The merged options of `config_path` and the height of its `extends`
+    /// tree. A config without `extends` has height 1.
+    fn read_with_height(
+        &mut self,
+        config_path: &Path,
+        depth: usize,
+    ) -> Option<(CompilerOptions, usize)> {
+        if depth >= MAX_EXTENDS_DEPTH {
+            return None;
+        }
+        let config_path = dunce::canonicalize(config_path).ok()?;
+        if let Some((options, height)) = self.resolved.get(&config_path) {
+            // A deeper path to a finished config can still exceed the depth limit.
+            return (depth + height <= MAX_EXTENDS_DEPTH).then(|| (options.clone(), *height));
+        }
+        if !self.in_progress.insert(config_path.clone()) {
+            return None;
+        }
+        if self.reads >= MAX_EXTENDS_READS {
+            tracing::debug!(
+                config = %config_path.display(),
+                limit = MAX_EXTENDS_READS,
+                "tsconfig extends walk reads too many configs; ignoring the output mapping"
+            );
+            return None;
+        }
+        self.reads += 1;
+        let (options, height) = self.parse(&config_path, depth)?;
+        self.in_progress.remove(&config_path);
+        self.resolved.insert(config_path, (options.clone(), height));
+        Some((options, height))
+    }
+
+    fn parse(&mut self, config_path: &Path, depth: usize) -> Option<(CompilerOptions, usize)> {
+        let substitution_base = self.substitution_base;
+        let content = std::fs::read_to_string(config_path).ok()?;
+        let value: serde_json::Value =
+            crate::jsonc::parse_to_value(content.trim_start_matches('\u{FEFF}')).ok()?;
+        let extends: Vec<&str> = match value.get("extends") {
+            Some(serde_json::Value::String(extends)) => vec![extends.as_str()],
+            Some(serde_json::Value::Array(items)) => items
+                .iter()
+                .map(serde_json::Value::as_str)
+                .collect::<Option<_>>()?,
+            Some(_) => return None,
+            None => Vec::new(),
+        };
+        // A later entry of an array `extends` overrides an earlier one.
+        let mut options = CompilerOptions::default();
+        let mut parent_height = 0;
+        for extends in extends {
+            let parent = resolve_extends_path(config_path, extends)?;
+            let (parent_options, height) = self.read_with_height(&parent, depth + 1)?;
+            parent_height = parent_height.max(height);
+            options.inherit(parent_options);
+        }
+        let height = parent_height + 1;
+        let Some(compiler_options) = value.get("compilerOptions") else {
+            return Some((options, height));
+        };
+        let compiler_options = compiler_options.as_object()?;
+        let config_dir = config_path.parent()?;
+
+        replace_path_option(
+            compiler_options,
+            "rootDir",
+            config_dir,
+            substitution_base,
+            &mut options.root_dir,
+        )?;
+        replace_path_option(
+            compiler_options,
+            "outDir",
+            config_dir,
+            substitution_base,
+            &mut options.out_dir,
+        )?;
+        replace_path_option(
+            compiler_options,
+            "declarationDir",
+            config_dir,
+            substitution_base,
+            &mut options.declaration_dir,
+        )?;
+        replace_bool_option(compiler_options, "noEmit", &mut options.no_emit)?;
+        replace_bool_option(
+            compiler_options,
+            "emitDeclarationOnly",
+            &mut options.emit_declaration_only,
+        )?;
+        Some((options, height))
+    }
 }
 
 impl CompilerOptions {
@@ -1454,6 +1513,140 @@ mod tests {
         assert_eq!(
             map(missing.path(), "./distribution/index.js", &["ts"]),
             TsconfigOutputResolution::Unconfigured
+        );
+    }
+
+    /// Run `map` on a separate thread and fail when it does not finish in time.
+    fn map_within(
+        root: &Path,
+        entry: &'static str,
+        limit: std::time::Duration,
+    ) -> TsconfigOutputResolution {
+        let root = root.to_path_buf();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let _ = sender.send(map(&root, entry, &["ts"]));
+        });
+        receiver
+            .recv_timeout(limit)
+            .expect("the extends walk must finish within the time limit")
+    }
+
+    #[test]
+    fn wide_array_extends_diamond_reads_each_config_once() {
+        const WIDTH: usize = 8;
+        const LEVELS: usize = 13;
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let root = directory.path();
+        // Every config of a level extends every config of the next level, so
+        // a walk without memoization reads WIDTH^LEVELS configs.
+        for level in 0..LEVELS {
+            for index in 0..WIDTH {
+                let content = if level + 1 == LEVELS {
+                    let root_dir = if index + 1 == WIDTH {
+                        "../source"
+                    } else {
+                        "../wrong"
+                    };
+                    format!(
+                        r#"{{"compilerOptions":{{"rootDir":"{root_dir}","outDir":"../distribution"}}}}"#
+                    )
+                } else {
+                    let parents = (0..WIDTH)
+                        .map(|parent| format!(r#""./level-{}-{parent}.json""#, level + 1))
+                        .collect::<Vec<_>>()
+                        .join(",");
+                    format!(r#"{{"extends":[{parents}]}}"#)
+                };
+                write(
+                    &root.join(format!("configs/level-{level}-{index}.json")),
+                    &content,
+                );
+            }
+        }
+        let top = (0..WIDTH)
+            .map(|index| format!(r#""./configs/level-0-{index}.json""#))
+            .collect::<Vec<_>>()
+            .join(",");
+        write(
+            &root.join("tsconfig.build.json"),
+            &format!(r#"{{"extends":[{top}]}}"#),
+        );
+        write(&root.join("source/index.ts"), "export const value = 1;\n");
+
+        assert_eq!(
+            map_within(
+                root,
+                "./distribution/index.js",
+                std::time::Duration::from_secs(10)
+            ),
+            TsconfigOutputResolution::Resolved(root.join("source/index.ts")),
+            "the last extends entry of each level must win"
+        );
+    }
+
+    #[test]
+    fn extends_walk_over_the_read_limit_fails_closed() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let root = directory.path();
+        let parents = (0..=MAX_EXTENDS_READS)
+            .map(|index| {
+                write(
+                    &root.join(format!("configs/base-{index}.json")),
+                    r#"{"compilerOptions":{"rootDir":"../source","outDir":"../distribution"}}"#,
+                );
+                format!(r#""./configs/base-{index}.json""#)
+            })
+            .collect::<Vec<_>>()
+            .join(",");
+        write(
+            &root.join("tsconfig.build.json"),
+            &format!(r#"{{"extends":[{parents}]}}"#),
+        );
+        write(&root.join("source/index.ts"), "export const value = 1;\n");
+
+        assert_eq!(
+            map(root, "./distribution/index.js", &["ts"]),
+            TsconfigOutputResolution::Unconfigured
+        );
+    }
+
+    #[test]
+    fn shared_parent_in_two_extends_branches_is_not_a_cycle() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let root = directory.path();
+        write(
+            &root.join("configs/shared.json"),
+            r#"{"compilerOptions":{"rootDir":"../source","outDir":"../distribution"}}"#,
+        );
+        write(
+            &root.join("configs/first.json"),
+            r#"{"extends":"./shared.json","compilerOptions":{"rootDir":"../wrong"}}"#,
+        );
+        write(
+            &root.join("configs/second.json"),
+            r#"{"extends":"./shared.json"}"#,
+        );
+        write(
+            &root.join("tsconfig.build.json"),
+            r#"{"extends":["./configs/first.json","./configs/second.json"]}"#,
+        );
+        write(&root.join("source/index.ts"), "export const value = 1;\n");
+
+        assert_eq!(
+            map(root, "./distribution/index.js", &["ts"]),
+            TsconfigOutputResolution::Resolved(root.join("source/index.ts")),
+            "the second branch re-applies the shared parent over the first branch"
+        );
+
+        write(
+            &root.join("configs/shared.json"),
+            r#"{"extends":"../tsconfig.build.json"}"#,
+        );
+        assert_eq!(
+            map(root, "./distribution/index.js", &["ts"]),
+            TsconfigOutputResolution::Unconfigured,
+            "a real cycle still fails closed"
         );
     }
 }
