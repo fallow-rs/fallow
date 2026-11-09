@@ -138,6 +138,9 @@ pub struct MutationRunOptions {
     /// `sampled-out`, and the run never executes them. `None` keeps each
     /// mutant.
     pub mutants_per_line: Option<usize>,
+    /// Widen each changed line of the changed-code scope to the whole
+    /// function that holds it. The other scopes ignore it.
+    pub function_scope: bool,
     /// Run in a dirty git worktree, or outside a git worktree. The run still
     /// compares the worktree after the run.
     pub allow_dirty: bool,

@@ -342,7 +342,7 @@
       "section": "commands",
       "row": "mutation",
       "column": "Key Flags",
-      "seed": "`--all`, `--plan`, `--max-mutants`, `--mutants-per-line`, `--time-budget`, `--concurrency`, `--runtime`, `--allow-dirty`"
+      "seed": "`--all`, `--plan`, `--max-mutants`, `--mutants-per-line`, `--function-scope`, `--time-budget`, `--concurrency`, `--runtime`"
     },
     {
       "section": "commands",

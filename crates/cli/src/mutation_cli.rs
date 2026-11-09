@@ -87,6 +87,12 @@ pub struct MutationArgs {
     /// key, else each mutant).
     #[arg(long, value_name = "N")]
     pub mutants_per_line: Option<usize>,
+    /// Widen each changed line to the whole function that holds it, so that a
+    /// changed parameter or signature selects the mutants of the function.
+    /// Only the changed-code scope uses it (default: the
+    /// `mutation.functionScope` key, else the changed lines only).
+    #[arg(long, conflicts_with_all = ["all", "paths"])]
+    pub function_scope: bool,
     /// Stop starting mutants after this time, for example `90s`, `10m` or `1h`.
     /// The others are `pending`.
     #[arg(long, value_name = "DURATION")]
@@ -158,7 +164,7 @@ pub struct MutationArgs {
     /// `fallow mutation tasks` then lists the mutants that are still open.
     #[arg(
         long,
-        conflicts_with_all = ["all", "paths", "plan", "resume", "allow_dirty", "max_mutants", "mutants_per_line", "min_score"]
+        conflicts_with_all = ["all", "paths", "plan", "resume", "allow_dirty", "max_mutants", "mutants_per_line", "function_scope", "min_score"]
     )]
     pub recheck: bool,
     /// The saved report of `--recheck` (default: the report of the last run).
@@ -376,6 +382,7 @@ pub fn run_options(input: &MutationCliInput<'_>) -> Result<MutationRunOptions, P
             .args
             .mutants_per_line
             .or(input.config.mutants_per_line),
+        function_scope: input.args.function_scope || input.config.function_scope == Some(true),
         allow_dirty: input.args.allow_dirty,
         runtime: input.args.runtime.clone(),
         concurrency: input.args.concurrency.or(input.config.concurrency),

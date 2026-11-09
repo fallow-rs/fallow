@@ -300,6 +300,8 @@ fn flags_win_over_config_and_config_fills_the_gaps() {
         operators: Some(vec![MutationOperatorName::RemovedCall]),
         concurrency: Some(3),
         min_score: Some(60.0),
+        mutants_per_line: Some(2),
+        function_scope: Some(true),
         ..MutationConfig::default()
     };
     let from_config = run_options(&input(root, MutationArgs::default(), config.clone())).unwrap();
@@ -308,6 +310,8 @@ fn flags_win_over_config_and_config_fills_the_gaps() {
         "the API plan applies the config operators, so CLI and MCP share one rule"
     );
     assert_eq!(from_config.concurrency, Some(3));
+    assert_eq!(from_config.mutants_per_line, Some(2));
+    assert!(from_config.function_scope);
     assert_eq!(from_config.scope, MutationRunScope::Changed { base: None });
     assert!(!from_config.allow_side_effects);
 
@@ -315,6 +319,7 @@ fn flags_win_over_config_and_config_fills_the_gaps() {
         operators: vec!["arithmetic-operator".to_owned(), "return-value".to_owned()],
         concurrency: Some(1),
         min_score: Some(90.0),
+        mutants_per_line: Some(1),
         all: true,
         allow_side_effects: true,
         time_budget: Some("2m".to_owned()),
@@ -328,6 +333,7 @@ fn flags_win_over_config_and_config_fills_the_gaps() {
         Some(vec![Operator::ArithmeticOperator, Operator::ReturnValue])
     );
     assert_eq!(from_flags.concurrency, Some(1));
+    assert_eq!(from_flags.mutants_per_line, Some(1), "the flag wins");
     assert_eq!(from_flags.scope, MutationRunScope::All);
     assert!(from_flags.allow_side_effects);
     assert_eq!(from_flags.time_budget, Some(Duration::from_secs(120)));
@@ -338,7 +344,7 @@ fn flags_win_over_config_and_config_fills_the_gaps() {
 #[test]
 fn invalid_flags_and_scope_conflicts_exit_2() {
     let root = Path::new("/project");
-    let cases: [(MutationArgs, Option<&str>, &str); 7] = [
+    let cases: [(MutationArgs, Option<&str>, &str); 8] = [
         (
             MutationArgs {
                 operators: vec!["bogus".to_owned()],
@@ -378,6 +384,14 @@ fn invalid_flags_and_scope_conflicts_exit_2() {
             },
             None,
             "--max-mutants must be at least 1",
+        ),
+        (
+            MutationArgs {
+                mutants_per_line: Some(0),
+                ..MutationArgs::default()
+            },
+            None,
+            "--mutants-per-line must be at least 1",
         ),
         (
             MutationArgs {

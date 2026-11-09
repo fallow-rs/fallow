@@ -646,6 +646,76 @@ diff --git a/src/math.ts b/src/math.ts
     assert!(!originals.contains("<"), "{originals:?}");
 }
 
+/// The diff of one added line: the signature line of `clamp`, which holds
+/// the parameters and no mutant.
+const CLAMP_SIGNATURE_DIFF: &str = "\
+diff --git a/src/math.ts b/src/math.ts
+--- a/src/math.ts
++++ b/src/math.ts
+@@ -4,0 +5,1 @@
++export function clamp(value: number, low: number, high: number): number {
+";
+
+#[test]
+fn function_scope_selects_the_whole_function_of_a_changed_parameter_line() {
+    let root = fixture("mutation-plan");
+    let request = |function_scope: bool| {
+        let mut request = MutationPlanRequest::new(MutationScope::ChangedSinceBase(
+            DiffIndex::from_unified_diff(CLAMP_SIGNATURE_DIFF),
+        ));
+        request.function_scope = function_scope;
+        request
+    };
+    let [lines, widened, all] = plans(
+        &root,
+        None,
+        &[
+            request(false),
+            request(true),
+            MutationPlanRequest::new(MutationScope::Paths(vec![PathBuf::from("src/math.ts")])),
+        ],
+    )
+    .try_into()
+    .expect("three plans");
+    assert!(
+        lines.mutants.is_empty(),
+        "the signature line holds no mutant: {:?}",
+        lines.mutants
+    );
+    assert!(!widened.mutants.is_empty());
+    for entry in &widened.mutants {
+        let function = entry.function.as_ref().expect("in clamp");
+        assert_eq!(
+            function.name.as_deref(),
+            Some("clamp"),
+            "{:?}",
+            entry.mutant
+        );
+        assert!(function.in_diff, "the changed line is in the function");
+    }
+    let clamp_ids = |plan: &MutationPlan| -> BTreeSet<String> {
+        plan.mutants
+            .iter()
+            .filter(|entry| {
+                entry
+                    .function
+                    .as_ref()
+                    .and_then(|function| function.name.as_deref())
+                    == Some("clamp")
+            })
+            .map(|entry| entry.mutant.id.to_string())
+            .collect()
+    };
+    assert_eq!(clamp_ids(&widened), clamp_ids(&all), "each mutant of clamp");
+    assert!(
+        widened
+            .mutants
+            .iter()
+            .all(|entry| !entry.mutant.original.is_empty()),
+        "the plan holds instrumented mutants"
+    );
+}
+
 #[test]
 fn paths_scope_selects_only_the_named_files() {
     let root = fixture("mutation-plan");

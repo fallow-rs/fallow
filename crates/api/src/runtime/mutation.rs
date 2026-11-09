@@ -417,6 +417,7 @@ fn plan_for(
         allow_side_effects: options.allow_side_effects,
         max_mutants: options.max_mutants,
         mutants_per_line: options.mutants_per_line,
+        function_scope: options.function_scope,
         skip_component_files: false,
         mutant_ids: (!options.mutant_ids.is_empty())
             .then(|| options.mutant_ids.iter().cloned().collect()),

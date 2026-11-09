@@ -26,7 +26,8 @@ read-only next steps. It never writes a test and never proposes a code change.
 - `--workspace` and `--changed-workspaces` exit with code 2 in version 1,
   because the plan cannot narrow to a workspace yet. Pass the workspace
   directory as a path.
-- The run flags are `--max-mutants`, `--mutants-per-line`, `--time-budget` (`90s`, `10m`, `1h`),
+- The run flags are `--max-mutants`, `--mutants-per-line`, `--function-scope`,
+  `--time-budget` (`90s`, `10m`, `1h`),
   `--setup-timeout` (default `2m`), `--runner-config`, `--kill-matrix`,
   `--kill-matrix-for`, `--concurrency`, `--runtime`, `--allow-dirty`, `--allow-side-effects`,
   `--min-score`, `--operators`, `--verdicts`, `--typecheck`, `--resume` and
@@ -494,6 +495,26 @@ coverage. The scheduler corrects this after the dry run:
 `--plan` runs no dry run, so its `planned` and `pending` dispositions are a
 view before the coverage is known. A run can execute a mutant that the plan
 shows as `pending`.
+
+## Function scope
+
+The changed-code scope mutates the added lines of the diff only. A change to
+a parameter or a signature line holds no mutant, so the default scope can
+select nothing for it. `--function-scope` (config key
+`mutation.functionScope`) widens the scope:
+
+- Each added line selects the whole function that holds it. A parameter line,
+  a signature line and a body line all select the same function.
+- The function is the innermost function that holds the first non-blank
+  byte of the line. When no function holds it, the largest function that
+  starts on the line counts, for example `export function f() {`. A line with
+  no such function, for example a top-level `const`, selects its own mutants
+  only.
+- A mutant of a nested function is part of the outer function.
+- The ranking still puts the mutants on added lines first, because the
+  `in_diff` fact of a mutant is not widened.
+- `--all` and positional paths do not use the option, and the flag is an
+  error with them. `--recheck` does not accept the flag.
 
 ## Mutants per line
 
@@ -2085,6 +2106,7 @@ reads files only. It runs no test.
     "minScore": 80,
     "concurrency": 4,
     "mutantsPerLine": 2,
+    "functionScope": true,
     "typecheck": true,
     "runnerConfig": "vitest.integration.config.mjs"
   }
@@ -2095,6 +2117,9 @@ reads files only. It runs no test.
   [Runners](#runners).
 - `operators`, `minScore`, `concurrency` and `mutantsPerLine` apply to each run.
   A CLI flag wins.
+- `functionScope: true` widens the changed-code scope to whole functions for
+  each run. `--function-scope` does the same for one run. No flag turns it
+  off. See [Function scope](#function-scope).
 - `runnerConfig` selects the runner config file for each run.
   `--runner-config` wins. See [Runner config](#runner-config).
 - `typecheck: true` turns on the survivor type check for each run.

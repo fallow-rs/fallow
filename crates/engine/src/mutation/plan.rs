@@ -340,6 +340,9 @@ fn plan_file(context: &Context<'_>, candidate: &Candidate<'_>) -> FileOutcome {
         .added_lines
         .as_deref()
         .map(|lines| added_line_ranges(source, lines));
+    if context.request.function_scope {
+        widen_to_functions(context, candidate, source, &mut options);
+    }
     let instrumented = match candidate
         .layout
         .instrument(source, &candidate.rel, &options)
@@ -369,6 +372,43 @@ fn plan_file(context: &Context<'_>, candidate: &Candidate<'_>) -> FileOutcome {
         mutants,
         skipped: None,
     }
+}
+
+/// Widens the changed-line ranges of `options` to the functions that hold the
+/// changed lines. A first instrumentation of the whole file finds the
+/// function spans. A file that does not instrument keeps its ranges, and the
+/// main pass reports the error.
+fn widen_to_functions(
+    context: &Context<'_>,
+    candidate: &Candidate<'_>,
+    source: &str,
+    options: &mut MutationOptions,
+) {
+    let (Some(lines), Some(ranges)) = (candidate.added_lines.as_deref(), options.ranges.take())
+    else {
+        return;
+    };
+    let whole_file = MutationOptions {
+        ranges: None,
+        ..context.options.clone()
+    };
+    let functions: Vec<(u32, u32)> = candidate
+        .layout
+        .instrument(source, &candidate.rel, &whole_file)
+        .map(|instrumented| {
+            instrumented
+                .mutants
+                .iter()
+                .filter_map(|mutant| mutant.enclosing_function.as_ref())
+                .map(|function| function.span)
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect()
+        })
+        .unwrap_or_default();
+    options.ranges = Some(super::function_scope::widened_ranges(
+        source, lines, ranges, &functions,
+    ));
 }
 
 fn planned_file(

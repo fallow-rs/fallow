@@ -169,6 +169,13 @@ pub struct MutationConfig {
     #[schemars(range(min = 1))]
     pub mutants_per_line: Option<usize>,
 
+    /// Widen each changed line to the whole function that holds it, so that a
+    /// change to a parameter or a signature selects the mutants of the
+    /// function. Only the changed-code scope uses it. Unset or `false` mutates
+    /// the changed lines only. `--function-scope` turns it on.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub function_scope: Option<bool>,
+
     /// Type-check each survived mutant through the TypeScript-Go companion
     /// of `--type-aware`. A survivor that does not type-check becomes
     /// `compile_error` and does not count in the score. A survivor that
@@ -207,7 +214,7 @@ mod tests {
     fn every_key_parses_in_camel_case() {
         let config = parse(
             r#"{"runner":"vitest","operators":["arithmetic-operator","removed-call"],
-                "minScore":80,"concurrency":4,"mutantsPerLine":2,"typecheck":true,
+                "minScore":80,"concurrency":4,"mutantsPerLine":2,"functionScope":true,"typecheck":true,
                 "runnerConfig":"vitest.integration.config.mjs"}"#,
         )
         .expect("valid config");
@@ -222,6 +229,7 @@ mod tests {
         assert_eq!(config.min_score, Some(80.0));
         assert_eq!(config.concurrency, Some(4));
         assert_eq!(config.mutants_per_line, Some(2));
+        assert_eq!(config.function_scope, Some(true));
         assert_eq!(config.typecheck, Some(true));
         assert_eq!(
             config.runner_config.as_deref(),

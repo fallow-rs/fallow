@@ -18,6 +18,7 @@
 //! - `pruned`: a static rule removes the mutant (see [`PruneReason`](crate::mutation::PruneReason)).
 
 mod database_write;
+mod function_scope;
 mod layout;
 mod plan;
 mod reach;
@@ -100,6 +101,11 @@ pub struct MutationPlanRequest {
     /// keeps the most productive mutants of the line and marks the others
     /// [`MutantDisposition::SampledOut`]. `None` keeps each mutant.
     pub mutants_per_line: Option<usize>,
+    /// Widen each changed line of [`MutationScope::ChangedSinceBase`] to the
+    /// whole innermost function that holds it, so that a change to a
+    /// parameter or a signature selects the mutants of the function. The
+    /// other scopes ignore it.
+    pub function_scope: bool,
     /// Leave each Vue, Svelte and Astro component file out of the plan,
     /// with the skip reason [`SkipReason::RunnerCannotLoad`]. Set it when
     /// the test runner has no loader for a component file.
@@ -120,6 +126,7 @@ impl MutationPlanRequest {
             allow_side_effects: false,
             max_mutants: None,
             mutants_per_line: None,
+            function_scope: false,
             skip_component_files: false,
             mutant_ids: None,
         }
