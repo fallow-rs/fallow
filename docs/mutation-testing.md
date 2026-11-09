@@ -1620,11 +1620,26 @@ are not checked, so the cost grows with the number of survivors only.
 - The proof is strict. It needs `strictNullChecks` (or `strict`) and
   `noUncheckedIndexedAccess` in the `tsconfig.json` of the file, because
   without the second option `xs[0]` has a non-nullable type and is `undefined`
-  for an empty array. The file must be a TypeScript file. The proof does not
-  hold for `any`, `unknown`, a type parameter, a union with `null` or
-  `undefined`, or a receiver that is a cast (`as`, `<T>x`) or a non-null
-  assertion (`x!`). In each of these cases the mutant gets the normal check.
-  Control-flow narrowing counts: `if (a) { a?.b }` is proven.
+  for an empty array. The file must be a TypeScript file.
+- The proof reads the declared type of the receiver, not the type that control
+  flow narrowing gives at the use. A call can invalidate a narrowing that the
+  checker keeps, so `if (a) { reset(); a?.b }` is not proven when `a` is
+  declared as `T | undefined`. The receiver can be a parameter, a local
+  binding with an initializer, a property, a call to a function with a
+  declared return type, `this`, or a fresh value (`new`, a literal).
+- The proof does not hold for `any`, `unknown`, a type parameter, or a union
+  with `null` or `undefined`. It does not hold for an assertion (`as`,
+  `<T>x`, `x!`) anywhere in the receiver, or in the initializer of a local
+  binding that the receiver reads. It looks through parentheses and
+  `satisfies`.
+- The proof does not hold for a declaration that no code in the project
+  checks: a `declare` variable, a variable in a `.d.ts` file, a binding
+  without an initializer, a `for` or `catch` variable, a destructured
+  binding, a class property with `!` or `declare`, and a class property
+  without an initializer that the constructor does not assign in its body. An
+  element access (`xs[0]`) and a call without a declared return type are not
+  proven either. Assignments to a binding after its initializer are not
+  tracked. In each of these cases the mutant gets the normal check.
 - The report names a code, not the expression, because the report holds no
   project text. The `file`, `line` and `column` of the mutant locate the
   receiver. The proof runs after the tests and only for survivors, in the

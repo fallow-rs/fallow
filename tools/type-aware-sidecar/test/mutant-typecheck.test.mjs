@@ -253,7 +253,6 @@ test("an optional link on a type that is never nullish is equivalent", () => {
   assert.deepEqual(results.member, equivalent("member"));
   assert.deepEqual(results.call, equivalent("call"));
   assert.deepEqual(results.element, equivalent("element"));
-  assert.deepEqual(results.narrowed, equivalent("narrowed"));
   assert.deepEqual(results.later, equivalent("later"));
   assert.deepEqual(results.spaced, equivalent("spaced"));
 });
@@ -262,7 +261,7 @@ test("an optional link whose receiver may be nullish or is unsound keeps the nor
   const results = checkChains({ noUncheckedIndexedAccess: true });
   assert.equal(results.maybe.outcome, "compile-error");
   assert.equal(results.indexed.outcome, "compile-error");
-  for (const id of ["loose", "cast", "asserted", "generic"]) {
+  for (const id of ["loose", "cast", "asserted", "generic", "narrowed"]) {
     assert.deepEqual(results[id], { id, outcome: "compiles" }, id);
   }
 });
@@ -301,4 +300,142 @@ test("a JavaScript file is never proven equivalent", () => {
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+const RISK_SOURCE = [
+  'import { cfg } from "./cfg";',
+  'import { amb } from "./ambient";',
+  "declare const supplied: { b: number };",
+  "declare let suppliedLet: { b: number };",
+  "function getB(): { b: number } { return { b: 1 }; }",
+  "function inferredB() { return { b: 1 }; }",
+  "export class Box {",
+  "  value!: { b: number };",
+  "  unset: { b: number };",
+  "  declare ambient: { b: number };",
+  "  set: { b: number } = { b: 1 };",
+  "  assigned: { b: number };",
+  "  constructor(readonly param: { b: number }) { this.assigned = param; }",
+  "  readValue() { return this.value?.b ?? 0; }",
+  "  readUnset() { return this.unset?.b ?? 0; }",
+  "  readAmbient() { return this.ambient?.b ?? 0; }",
+  "  readSet() { return this.set?.b ?? 0; }",
+  "  readAssigned() { return this.assigned?.b ?? 0; }",
+  "  readParam() { return this.param?.b ?? 0; }",
+  "}",
+  "export const nested = (n0: unknown): number => (n0 as { child: { b: number } }).child?.b ?? 0;",
+  "export const aliased = (n1: unknown): number => { const aliasedX = n1 as { b: number }; return aliasedX?.b ?? 0; };",
+  "export const chained = (n2: unknown): number => { const c1 = n2 as { b: number }; const chainedY = c1; return chainedY?.b ?? 0; };",
+  "export const angle = (n3: unknown): number => { const angleX = <{ b: number }>n3; return angleX?.b ?? 0; };",
+  "export const bang = (n4: { b: number } | null): number => { const bangX = n4!; return bangX?.b ?? 0; };",
+  "export const viaSatisfies = (n5: { b: number }): number => (n5 satisfies { b: number })?.b ?? 0;",
+  "export const ambientVar = (): number => supplied?.b ?? 0;",
+  "export const ambientLet = (): number => suppliedLet?.b ?? 0;",
+  "export const ambientFile = (): number => amb?.b ?? 0;",
+  "export const imported = (): number => cfg?.b ?? 0;",
+  "export const literalLocal = (): number => { const o = { b: 1 }; return o?.b ?? 0; };",
+  "export const annotatedCall = (): number => getB()?.b ?? 0;",
+  "export const inferredCall = (): number => inferredB()?.b ?? 0;",
+  "export const viaParam = (box: Box): number => box.set?.b ?? 0;",
+  "export const stale = (): number | undefined => {",
+  "  let a: { b: number } | undefined = { b: 1 };",
+  "  const reset = (): void => { a = undefined; };",
+  "  if (a) { reset(); return a?.b; }",
+  "  return 0;",
+  "};",
+  "export const staleAlias = (): number | undefined => {",
+  "  let s: { b: number } | undefined = { b: 1 };",
+  "  const clear = (): void => { s = undefined; };",
+  "  if (s) { clear(); const staleY = s; return staleY?.b; }",
+  "  return 0;",
+  "};",
+  "",
+].join("\n");
+
+const riskMutants = (source) => [
+  linkAfter(source, "value", "return this.value", "."),
+  linkAfter(source, "unset", "return this.unset", "."),
+  linkAfter(source, "ambient", "return this.ambient", "."),
+  linkAfter(source, "set", "return this.set", "."),
+  linkAfter(source, "assigned", "return this.assigned", "."),
+  linkAfter(source, "param", "return this.param", "."),
+  linkAfter(source, "nested", ").child", "."),
+  linkAfter(source, "aliased", "return aliasedX", "."),
+  linkAfter(source, "chained", "return chainedY", "."),
+  linkAfter(source, "angle", "return angleX", "."),
+  linkAfter(source, "bang", "return bangX", "."),
+  linkAfter(source, "viaSatisfies", "(n5 satisfies { b: number })", "."),
+  linkAfter(source, "ambientVar", "=> supplied", "."),
+  linkAfter(source, "ambientLet", "=> suppliedLet", "."),
+  linkAfter(source, "ambientFile", "=> amb", "."),
+  linkAfter(source, "imported", "=> cfg", "."),
+  linkAfter(source, "literalLocal", "return o", "."),
+  linkAfter(source, "annotatedCall", "=> getB()", "."),
+  linkAfter(source, "inferredCall", "=> inferredB()", "."),
+  linkAfter(source, "viaParam", "=> box.set", "."),
+  linkAfter(source, "stale", "reset(); return a", "."),
+  linkAfter(source, "staleAlias", "return staleY", "."),
+];
+
+const checkRisks = () => {
+  const root = makeProject(
+    {
+      "src/risk.ts": RISK_SOURCE,
+      "src/cfg.ts": "export const cfg = { b: 1 };\n",
+      "src/ambient.d.ts": "export declare const amb: { b: number };\n",
+    },
+    { noUncheckedIndexedAccess: true, strictPropertyInitialization: false },
+  );
+  try {
+    const parsed = parseRequest(
+      request(root, [
+        {
+          path: "src/risk.ts",
+          source_sha256: sha256(RISK_SOURCE),
+          mutants: riskMutants(RISK_SOURCE),
+        },
+      ]),
+    );
+    return Object.fromEntries(checkMutants(parsed).map((result) => [result.id, result]));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+};
+
+test("a cast, an alias of a cast or a non-null assertion is never proven", () => {
+  const results = checkRisks();
+  for (const id of ["nested", "aliased", "chained", "angle", "bang"]) {
+    assert.deepEqual(results[id], { id, outcome: "compiles" }, id);
+  }
+});
+
+test("a declaration that nothing forces to hold a value is never proven", () => {
+  const results = checkRisks();
+  for (const id of ["value", "unset", "ambient", "ambientVar", "ambientLet", "ambientFile"]) {
+    assert.deepEqual(results[id], { id, outcome: "compiles" }, id);
+  }
+});
+
+test("a narrowing that a call can invalidate is never proven", () => {
+  const results = checkRisks();
+  for (const id of ["stale", "staleAlias"]) {
+    assert.deepEqual(results[id], { id, outcome: "compiles" }, id);
+  }
+});
+
+test("declared types that the language enforces still prove a receiver", () => {
+  const results = checkRisks();
+  for (const id of [
+    "set",
+    "assigned",
+    "param",
+    "viaSatisfies",
+    "imported",
+    "literalLocal",
+    "annotatedCall",
+    "viaParam",
+  ]) {
+    assert.deepEqual(results[id], equivalent(id), id);
+  }
+  assert.deepEqual(results.inferredCall, { id: "inferredCall", outcome: "compiles" });
 });
