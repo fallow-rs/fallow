@@ -1,4 +1,0 @@
-### Changed
-
-- **`fallow mutation` stops an endless loop through the active mutant in under a second.** Before, a synchronous endless loop blocked the Vitest worker until the watchdog fired after `timeout_ms` (5 seconds or more). Then Fallow started a new companion and a new dry run, and the retry waited twice as long. Now the mutant switch checks a loop budget of `1.5` times the covering-test time plus 500 ms, and the Vitest adapter reports the test as a `timeout` in the same companion. On three public Vitest libraries, a full run with 2 workers took 1.7 to 6 times less wall time, and the score did not change. A mutant that only makes a test slow, for example under host load, can now get `timeout` in place of `killed` or `survived`. The retry with a doubled budget lowers this risk. Only the Vitest adapter checks the loop budget.
-  (Part of [#4341](https://github.com/fallow-rs/fallow/issues/4341))

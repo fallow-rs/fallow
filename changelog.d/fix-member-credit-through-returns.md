@@ -1,8 +1,0 @@
-### Fixed
-
-- **`fallow dead-code` credits a member on a method chain with arguments on a typed parameter.** In `function toWorld(local: Point) { return local.rotate(1).translate(1, 1); }`, where `rotate(angle: number): Point`, fallow now credits `Point.translate`. A `new Point(...)` local and a chain without arguments already gave this credit. Thanks @Smrtnyk for the report.
-  (Closes [#4311](https://github.com/fallow-rs/fallow/issues/4311))
-- **`fallow dead-code` credits a member on the return value of an inherited method in a class that is not exported.** In `class Viewer extends Floor`, where `Floor` declares `find(): Table | undefined` in another file, `this.find()?.setVip()` now credits `Table.setVip` also when `Viewer` is not exported. A deeper chain of unexported classes also gives the credit. A class on the chain that declares `find()` itself gives no credit to the base. Thanks @Smrtnyk for the report.
-  (Closes [#4312](https://github.com/fallow-rs/fallow/issues/4312))
-- **`fallow dead-code` credits a member on an element of an array that a local function returns.** With `function all(): Table[]` in the same file, fallow now credits `Table.setVip` for `for (const table of all())`, `all().forEach((table) => table.setVip())`, `all()[0].setVip()`, and `const tables = all(); for (const table of tables)`. The function can come before or after the reads. A call of a nested declaration or a catch parameter named `all`, and a call in a namespace body, gives no credit. The extraction cache version is 422. Thanks @Smrtnyk for the report.
-  (Closes [#4313](https://github.com/fallow-rs/fallow/issues/4313))

@@ -1,4 +1,0 @@
-### Fixed
-
-- **LSP diagnostics on the first line of a file with a UTF-8 byte order mark start at the correct column.** The editor buffer does not hold the byte order mark, but the LSP counted the mark when it read the file from disk. Thus diagnostics on line 1 started 2 columns too far to the left, and a config diagnostic on line 1 started 1 column too far to the right. Also, an open file with a byte order mark never matched its file on disk, so the LSP did not publish its diagnostics. The LSP now drops the leading byte order mark when it reads a file.
-- **Duplication results count lines and columns from the end of the byte order mark.** The duplication detector read a file with its UTF-8 byte order mark, so a clone on line 1 started 1 column too far to the right in the CLI, JSON and LSP output. The detector now drops the mark, the same as extraction. The duplication token cache version changes, so a warm cache does not give the old columns.

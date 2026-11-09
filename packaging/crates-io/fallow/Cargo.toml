@@ -1,6 +1,6 @@
 [package]
 name = "fallow"
-version = "3.41.0"
+version = "3.42.0"
 edition = "2024"
 rust-version = "1.97"
 license = "MIT"
@@ -21,7 +21,7 @@ path = "src/main.rs"
 # wrapper version would never get a new fallow-cli.
 # `scripts/sync-npm-versions.sh` bumps both values.
 [dependencies]
-fallow-cli = "=3.41.0"
+fallow-cli = "=3.42.0"
 
 [target.'cfg(target_env = "musl")'.dependencies]
 mimalloc = { version = "0.1.52", default-features = false }

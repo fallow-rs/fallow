@@ -1,4 +1,0 @@
-### Fixed
-
-- **`fallow cloud login` states the owner rule once when a member approves the code.** Before, the message printed the reason from Fallow Cloud and then the same rule again from the CLI. The message now says once that only an organization owner can approve a key, and it names where to create one.
-- **The API keys links of `fallow cloud login` and `fallow cloud logout` follow the cloud that the login uses.** Before, they always pointed to `fallow.cloud`, also with a custom `--api-url`. The link now uses the dashboard address that the cloud returns for the login, when that address is on the host of the API. Otherwise it uses `<host>` for an API at `api.<host>`, or names the Settings page without a link. The CLI never prints a link with userinfo, a backslash, or plain `http` outside loopback, so a cloud cannot make the link open another site. The login line also drops control characters from the address and the code that the cloud returns.

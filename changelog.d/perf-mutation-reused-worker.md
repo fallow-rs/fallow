@@ -1,4 +1,0 @@
-### Changed
-
-- **`fallow mutation` keeps one Vitest worker process for many mutant runs.** Vitest starts a new worker process for each run, and that start cost more CPU than most mutant runs. When the dry run gives the same results in one reused process, also when each module loads a second time, the Vitest adapter now keeps the worker process between mutant runs. Each test file of a reused run loads the source modules again with the current mutant. A run whose tests change state outside the modules (a global, a prototype, `process.env`, a listener, a timer) ends the process, and a kill in such a run counts only when the test file also detects the mutant in a new worker. Dry runs, control runs and `--kill-matrix` runs still start a new worker. On three public Vitest libraries, the CPU time of a full run went down by a factor of 1.6 to 3.0, and no verdict changed.
-  (Part of [#4341](https://github.com/fallow-rs/fallow/issues/4341))
