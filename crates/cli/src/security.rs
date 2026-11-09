@@ -13,7 +13,6 @@ use crate::report::sink::outln;
 use colored::Colorize;
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet};
-use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
@@ -52,6 +51,8 @@ use fallow_output::{
 
 pub use fallow_api::SecurityGateMode;
 
+#[path = "security_base_cache.rs"]
+mod base_cache;
 #[path = "security_sarif.rs"]
 mod sarif;
 
@@ -1152,8 +1153,9 @@ fn apply_security_gate(
     Ok(Some(mode))
 }
 
+use base_cache::{load_cached_security_base_snapshot, save_cached_security_base_snapshot};
+
 const SECURITY_BASE_SNAPSHOT_CACHE_VERSION: u8 = 2;
-const MAX_SECURITY_BASE_SNAPSHOT_CACHE_SIZE: usize = 8 * 1024 * 1024;
 
 #[derive(Debug, Clone)]
 struct SecurityKeySnapshot {
@@ -1163,15 +1165,6 @@ struct SecurityKeySnapshot {
 struct SecurityBaseSnapshotCacheKey {
     hash: u64,
     base_sha: String,
-}
-
-#[derive(bitcode::Encode, bitcode::Decode)]
-struct CachedSecurityKeySnapshot {
-    version: u8,
-    cli_version: String,
-    key_hash: u64,
-    base_sha: String,
-    reachable: Vec<String>,
 }
 
 fn retain_gate_newly_reachable(
@@ -1382,83 +1375,6 @@ fn security_base_snapshot_cache_key(
         hash: xxh3_64(&bytes),
         base_sha: base_sha.to_owned(),
     })
-}
-
-fn security_base_snapshot_cache_dir(config: &fallow_config::ResolvedConfig) -> PathBuf {
-    config.cache_dir.join("cache").join(format!(
-        "security-base-v{SECURITY_BASE_SNAPSHOT_CACHE_VERSION}"
-    ))
-}
-
-fn security_base_snapshot_cache_file(
-    config: &fallow_config::ResolvedConfig,
-    key: &SecurityBaseSnapshotCacheKey,
-) -> PathBuf {
-    security_base_snapshot_cache_dir(config).join(format!("{:016x}.bin", key.hash))
-}
-
-fn ensure_security_base_snapshot_cache_dir(dir: &Path) -> Result<(), std::io::Error> {
-    std::fs::create_dir_all(dir)?;
-    let gitignore = dir.join(".gitignore");
-    if std::fs::read_to_string(&gitignore).ok().as_deref() != Some("*\n") {
-        std::fs::write(gitignore, "*\n")?;
-    }
-    Ok(())
-}
-
-fn load_cached_security_base_snapshot(
-    config: &fallow_config::ResolvedConfig,
-    key: &SecurityBaseSnapshotCacheKey,
-) -> Option<SecurityKeySnapshot> {
-    if config.no_cache {
-        return None;
-    }
-    let path = security_base_snapshot_cache_file(config, key);
-    let data = std::fs::read(path).ok()?;
-    if data.len() > MAX_SECURITY_BASE_SNAPSHOT_CACHE_SIZE {
-        return None;
-    }
-    let cached: CachedSecurityKeySnapshot = bitcode::decode(&data).ok()?;
-    if cached.version != SECURITY_BASE_SNAPSHOT_CACHE_VERSION
-        || cached.cli_version != env!("CARGO_PKG_VERSION")
-        || cached.key_hash != key.hash
-        || cached.base_sha != key.base_sha
-    {
-        return None;
-    }
-    Some(SecurityKeySnapshot {
-        reachable: cached.reachable.into_iter().collect(),
-    })
-}
-
-fn save_cached_security_base_snapshot(
-    config: &fallow_config::ResolvedConfig,
-    key: &SecurityBaseSnapshotCacheKey,
-    snapshot: &SecurityKeySnapshot,
-) {
-    if config.no_cache {
-        return;
-    }
-    let dir = security_base_snapshot_cache_dir(config);
-    if ensure_security_base_snapshot_cache_dir(&dir).is_err() {
-        return;
-    }
-    let mut reachable = snapshot.reachable.iter().cloned().collect::<Vec<_>>();
-    reachable.sort_unstable();
-    let data = bitcode::encode(&CachedSecurityKeySnapshot {
-        version: SECURITY_BASE_SNAPSHOT_CACHE_VERSION,
-        cli_version: env!("CARGO_PKG_VERSION").to_owned(),
-        key_hash: key.hash,
-        base_sha: key.base_sha.clone(),
-        reachable,
-    });
-    let Ok(mut tmp) = tempfile::NamedTempFile::new_in(&dir) else {
-        return;
-    };
-    if tmp.write_all(&data).is_err() {
-        return;
-    }
-    let _ = tmp.persist(security_base_snapshot_cache_file(config, key));
 }
 
 struct SecurityAnalysisState {

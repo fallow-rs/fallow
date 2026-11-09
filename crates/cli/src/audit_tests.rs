@@ -2698,7 +2698,7 @@ fn base_snapshot_sweep_keeps_only_the_newest_files() {
     let files = write_snapshot_files(&cache_root, MAX_AUDIT_BASE_SNAPSHOT_FILES + 2, now);
 
     let entries = sweep_base_snapshot_cache(
-        &cache_root,
+        fallow_types::path_guard::CacheTarget::inside(&cache_root),
         Some(Duration::from_hours(30 * 24)),
         SweepMode::Apply,
         now,
@@ -2746,7 +2746,7 @@ fn base_snapshot_sweep_removes_only_files_it_wrote() {
     fs::write(&foreign, b"user data").expect("foreign file should write");
 
     let entries = sweep_base_snapshot_cache(
-        &cache_root,
+        fallow_types::path_guard::CacheTarget::inside(&cache_root),
         Some(Duration::from_hours(30 * 24)),
         SweepMode::Apply,
         now,
@@ -2778,7 +2778,7 @@ fn base_snapshot_sweep_does_not_follow_a_symlinked_version_dir() {
     std::os::unix::fs::symlink(&outside, &dir).expect("symlink should be created");
 
     let entries = sweep_base_snapshot_cache(
-        &cache_root,
+        fallow_types::path_guard::CacheTarget::inside(&cache_root),
         Some(Duration::from_hours(30 * 24)),
         SweepMode::Apply,
         now,
@@ -2798,19 +2798,19 @@ fn base_snapshot_sweep_reclaims_aged_files_and_dry_run_keeps_them() {
     let now = std::time::SystemTime::now();
     let files = write_snapshot_files(&cache_root, 1, now - Duration::from_hours(40 * 24));
     let max_age = Some(Duration::from_hours(30 * 24));
-
-    let preview = sweep_base_snapshot_cache(&cache_root, max_age, SweepMode::DryRun, now);
+    let target = fallow_types::path_guard::CacheTarget::inside(&cache_root);
+    let preview = sweep_base_snapshot_cache(target, max_age, SweepMode::DryRun, now);
     assert_eq!(preview.len(), 1);
     assert_eq!(preview[0].disposition.reason(), "aged-out");
     assert_eq!(preview[0].age_days, Some(40));
     assert!(files[0].exists(), "a dry run must not remove the file");
 
-    let applied = sweep_base_snapshot_cache(&cache_root, max_age, SweepMode::Apply, now);
+    let applied = sweep_base_snapshot_cache(target, max_age, SweepMode::Apply, now);
     assert_eq!(applied[0].disposition.reason(), "aged-out");
     assert!(!files[0].exists(), "an aged snapshot must be removed");
 
     let disabled = write_snapshot_files(&cache_root, 1, now - Duration::from_hours(40 * 24));
-    let kept = sweep_base_snapshot_cache(&cache_root, None, SweepMode::Apply, now);
+    let kept = sweep_base_snapshot_cache(target, None, SweepMode::Apply, now);
     assert_eq!(kept[0].disposition.reason(), "age-gc-disabled");
     assert!(
         disabled[0].exists(),

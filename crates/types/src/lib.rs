@@ -94,6 +94,8 @@ pub mod output_format;
 /// [`output_health::UntestedFileAction`]); the `schemars::JsonSchema`
 /// derive is gated per-struct on the `schema` feature.
 pub mod output_health;
+/// Refuse cache writes through a symlink that leaves the project.
+pub mod path_guard;
 /// Cross-platform path classification helpers.
 pub mod path_util;
 /// The `--performance` span tree and the process-level clock.

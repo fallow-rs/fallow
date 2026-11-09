@@ -1100,6 +1100,12 @@ impl ResolvedConfig {
         self.cache_dir = resolve_cache_dir(&self.root, Some(dir));
     }
 
+    /// The cache directory with the base that its writes must stay in.
+    #[must_use]
+    pub fn cache_target(&self) -> fallow_types::path_guard::CacheTarget<'_> {
+        fallow_types::path_guard::CacheTarget::new(&self.root, &self.cache_dir)
+    }
+
     /// Give this project root its own subdirectory when the cache directory
     /// is outside the root.
     ///

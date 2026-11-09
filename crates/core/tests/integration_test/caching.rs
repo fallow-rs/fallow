@@ -298,7 +298,11 @@ fn cache_roundtrip() {
     assert_eq!(store.len(), 1);
 
     store
-        .save(&temp_dir, 0, fallow_extract::cache::DEFAULT_CACHE_MAX_SIZE)
+        .save(
+            fallow_types::path_guard::CacheTarget::inside(&temp_dir),
+            0,
+            fallow_extract::cache::DEFAULT_CACHE_MAX_SIZE,
+        )
         .unwrap();
     let loaded = CacheStore::load(
         &temp_dir,

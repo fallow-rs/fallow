@@ -9,6 +9,7 @@ use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::OnceLock;
 
+use fallow_types::path_guard::CacheTarget;
 use serde::Deserialize;
 
 use crate::changed_files::git_path_from_bytes;
@@ -709,9 +710,9 @@ fn load_covering_churn_cache(
     window_covers(&cached.window, window, clock).then_some((cache, cached))
 }
 
-/// Save churn data to disk cache.
+/// Save churn data to disk cache, unless a symlink leaves the `target` base.
 fn save_churn_cache(
-    cache_dir: &Path,
+    target: CacheTarget<'_>,
     last_indexed_sha: &str,
     window_token: &str,
     state: &ChurnEventState,
@@ -734,12 +735,7 @@ fn save_churn_cache(
         author_pool: state.author_pool.clone(),
         commit_pool: state.commit_pool.clone(),
     };
-    let _ = std::fs::create_dir_all(cache_dir);
-    let data = bitcode::encode(&cache);
-    let tmp = cache_dir.join("churn.bin.tmp");
-    if std::fs::write(&tmp, data).is_ok() {
-        let _ = std::fs::rename(&tmp, cache_dir.join("churn.bin"));
-    }
+    let _ = target.write_file("churn.bin", &bitcode::encode(&cache));
 }
 
 /// Analyze churn with disk caching. Uses cached result when HEAD SHA and
@@ -840,7 +836,7 @@ fn extend_churn_cache(
     let mut state = cache.into_event_state(since.window.cutoff_secs(clock));
     merge_churn_states(&mut state, delta);
     save_churn_cache(
-        cache_dir,
+        CacheTarget::new(root, cache_dir),
         head_sha,
         &since.window.cache_token(),
         &state,
@@ -861,7 +857,7 @@ fn analyze_fresh_churn(
     let state = analyze_churn_events(root, since, None, clock)?;
     if !no_cache {
         save_churn_cache(
-            cache_dir,
+            CacheTarget::new(root, cache_dir),
             head_sha,
             &since.window.cache_token(),
             &state,
@@ -1903,7 +1899,8 @@ mod tests {
             git_log_bytes: 0,
         };
         let cache_dir = tempfile::tempdir().expect("cache directory");
-        save_churn_cache(cache_dir.path(), "abc123", "1y", &state, false);
+        let target = CacheTarget::inside(cache_dir.path());
+        save_churn_cache(target, "abc123", "1y", &state, false);
         let warm = load_churn_cache(cache_dir.path(), "1y")
             .expect("warm churn cache")
             .into_event_state(None);

@@ -726,15 +726,15 @@ pub(crate) fn save_snapshot(
     root: &Path,
     explicit_path: Option<&Path>,
 ) -> Result<PathBuf, String> {
-    let path = explicit_path.map_or_else(
-        || {
-            let dir = root.join(".fallow").join("snapshots");
-            let filename = snapshot.timestamp.replace(':', "-");
-            dir.join(format!("{filename}.json"))
-        },
-        Path::to_path_buf,
-    );
-
+    let path = if let Some(path) = explicit_path {
+        path.to_path_buf()
+    } else {
+        let name = format!("{}.json", snapshot.timestamp.replace(':', "-"));
+        let path = root.join(".fallow").join("snapshots").join(name);
+        fallow_types::path_guard::ensure_no_outside_link(root, &path)
+            .map_err(|e| format!("failed to write snapshot: {e}"))?;
+        path
+    };
     let json =
         serde_json::to_string_pretty(snapshot).map_err(|e| format!("failed to serialize: {e}"))?;
     crate::write_guard::write_file(

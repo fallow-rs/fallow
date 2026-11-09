@@ -6,6 +6,7 @@ use std::path::Path;
 use std::cell::Cell;
 
 use fallow_types::cache_rejection::CacheRejection;
+use fallow_types::path_guard::CacheTarget;
 use rustc_hash::FxHashMap;
 
 use bitcode::{Decode, Encode};
@@ -173,15 +174,17 @@ impl CacheStore {
     }
 
     /// Save cache to disk with write-time size enforcement and atomic rename.
+    /// A symlink that leaves the base of `target` stops the save before any
+    /// write.
     pub fn save(
         &mut self,
-        cache_dir: &Path,
+        target: CacheTarget<'_>,
         config_hash: u64,
         max_size_bytes: usize,
     ) -> Result<(), String> {
-        std::fs::create_dir_all(cache_dir)
-            .map_err(|e| format!("Failed to create cache dir: {e}"))?;
-        write_cache_gitignore(cache_dir)?;
+        target
+            .write_gitignore()
+            .map_err(|e| format!("Failed to write cache .gitignore: {e}"))?;
 
         self.config_hash = config_hash;
         let initial_entries = self.entries.len();
@@ -220,9 +223,9 @@ impl CacheStore {
             }
         }
 
-        let cache_file = cache_dir.join("cache.bin");
-        atomic_write(&cache_file, &framed(self.version, &encoded))?;
-        Ok(())
+        target
+            .write_file("cache.bin", &framed(self.version, &encoded))
+            .map_err(|e| format!("Failed to write cache file: {e}"))
     }
 
     /// Evict the entries that runs saw least recently until the re-encoded
@@ -609,18 +612,6 @@ fn normalise_root(root: &Path) -> String {
         Some(trimmed) => trimmed.to_owned(),
         None => text,
     }
-}
-
-fn write_cache_gitignore(cache_dir: &Path) -> Result<(), String> {
-    std::fs::write(cache_dir.join(".gitignore"), "*\n")
-        .map_err(|e| format!("Failed to write cache .gitignore: {e}"))
-}
-
-/// Replace `cache_file` with `data` through a unique temp file, so concurrent
-/// fallow processes that share `.fallow/` never interleave their writes.
-fn atomic_write(cache_file: &Path, data: &[u8]) -> Result<(), String> {
-    fallow_types::atomic_file::write_atomic(cache_file, data)
-        .map_err(|e| format!("Failed to write cache file: {e}"))
 }
 
 impl Default for CacheStore {

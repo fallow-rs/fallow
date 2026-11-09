@@ -1622,7 +1622,7 @@ fn update_parse_cache_if_enabled(
         let store = cache_store.get_or_insert_with(|| cache::CacheStore::new(&config.root));
         if update_cache(store, modules, files, need_complexity, read_started_ns)
             && let Err(error) = store.save(
-                &config.cache_dir,
+                config.cache_target(),
                 config.cache_config_hash,
                 cache_max_size_bytes,
             )
@@ -1766,7 +1766,7 @@ fn build_analysis_graph(input: &mut BuildAnalysisGraphInput<'_>) -> graph::Modul
             graph,
             resolved_project,
         };
-        store.save(&input.config.cache_dir);
+        store.save(input.config.cache_target());
         // `save` borrows the store, so the freshly built graph is moved back out
         // and returned in-memory. The warm path loads-and-reconstructs an
         // identical graph from this same persisted blob (proven by the

@@ -929,7 +929,7 @@ fn cache_save_and_load_roundtrip() {
         ..empty_cached_module()
     };
     store.insert(Path::new("test.ts"), module);
-    store.save(&dir, 0, DEFAULT_CACHE_MAX_SIZE).unwrap();
+    store.save(at(&dir), 0, DEFAULT_CACHE_MAX_SIZE).unwrap();
 
     let loaded = CacheStore::load(&dir, Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE);
     assert!(loaded.is_ok());
@@ -955,7 +955,7 @@ fn cache_load_refuses_a_blob_whose_format_marker_was_mangled() {
         ..empty_cached_module()
     };
     store.insert(Path::new("test.ts"), module);
-    store.save(&dir, 0, DEFAULT_CACHE_MAX_SIZE).unwrap();
+    store.save(at(&dir), 0, DEFAULT_CACHE_MAX_SIZE).unwrap();
 
     assert!(CacheStore::load(&dir, Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE).is_ok());
 
@@ -1526,7 +1526,7 @@ fn cache_save_no_eviction_when_under_threshold() {
         store.insert(Path::new(&format!("file{i}.ts")), synthetic_module(i, i, 1));
     }
     store
-        .save(&dir, 42, DEFAULT_CACHE_MAX_SIZE)
+        .save(at(&dir), 42, DEFAULT_CACHE_MAX_SIZE)
         .expect("save under threshold");
 
     let loaded =
@@ -1544,7 +1544,7 @@ fn cache_save_evicts_when_over_threshold() {
         store.insert(Path::new(&format!("file{i}.ts")), synthetic_module(i, i, 1));
     }
     let cap = 40 * 1024;
-    store.save(&dir, 99, cap).expect("save with eviction");
+    store.save(at(&dir), 99, cap).expect("save with eviction");
 
     let loaded = CacheStore::load(&dir, Path::new(""), 99, DEFAULT_CACHE_MAX_SIZE)
         .expect("load after eviction");
@@ -1590,7 +1590,7 @@ fn cache_eviction_bounds_full_store_encoding_work() {
         store.insert(Path::new(&format!("file{i}.ts")), synthetic_module(i, i, 1));
     }
     store
-        .save(&dir, 99, DEFAULT_CACHE_MAX_SIZE)
+        .save(at(&dir), 99, DEFAULT_CACHE_MAX_SIZE)
         .expect("measure unbounded cache size");
     let unbounded_size = std::fs::metadata(dir.join("cache.bin"))
         .expect("cache metadata")
@@ -1598,7 +1598,7 @@ fn cache_eviction_bounds_full_store_encoding_work() {
 
     CacheStore::reset_full_store_encode_count();
     store
-        .save(&dir, 99, unbounded_size)
+        .save(at(&dir), 99, unbounded_size)
         .expect("save with eviction");
     let encode_count = CacheStore::full_store_encode_count();
 
@@ -1633,7 +1633,7 @@ fn cache_eviction_preserves_recent_entries_with_skewed_sizes() {
     }
     store.insert(Path::new("large.ts"), synthetic_module(10_000, 1_000, 512));
     store
-        .save(&dir, 99, DEFAULT_CACHE_MAX_SIZE)
+        .save(at(&dir), 99, DEFAULT_CACHE_MAX_SIZE)
         .expect("measure unbounded cache size");
     let unbounded_size = std::fs::metadata(dir.join("cache.bin"))
         .expect("cache metadata")
@@ -1641,7 +1641,7 @@ fn cache_eviction_preserves_recent_entries_with_skewed_sizes() {
     let cap = unbounded_size * 9 / 10;
 
     CacheStore::reset_full_store_encode_count();
-    store.save(&dir, 99, cap).expect("save skewed cache");
+    store.save(at(&dir), 99, cap).expect("save skewed cache");
     let encode_count = CacheStore::full_store_encode_count();
     let loaded = CacheStore::load(&dir, Path::new(""), 99, DEFAULT_CACHE_MAX_SIZE)
         .expect("load skewed cache");
@@ -1677,7 +1677,7 @@ fn cache_save_always_honors_cap_with_huge_entries() {
     let mut store = CacheStore::new(Path::new(""));
     store.insert(Path::new("huge.ts"), synthetic_module(7, 0, 10));
     store
-        .save(&dir, 5, 1024)
+        .save(at(&dir), 5, 1024)
         .expect("save honors cap with overshoot");
 
     let loaded = CacheStore::load(&dir, Path::new(""), 5, DEFAULT_CACHE_MAX_SIZE)
@@ -1693,7 +1693,7 @@ fn cache_load_returns_none_on_config_hash_mismatch() {
     let mut store = CacheStore::new(Path::new(""));
     store.insert(Path::new("test.ts"), synthetic_module(1, 0, 1));
     store
-        .save(&dir, 0xDEAD_BEEF, DEFAULT_CACHE_MAX_SIZE)
+        .save(at(&dir), 0xDEAD_BEEF, DEFAULT_CACHE_MAX_SIZE)
         .expect("save with config_hash A");
 
     assert!(
@@ -1717,7 +1717,7 @@ fn cache_load_round_trip_with_matching_config_hash() {
     store.insert(Path::new("b.ts"), synthetic_module(2, 1, 1));
     let hash = 0xABCD_1234_5678_9ABC_u64;
     store
-        .save(&dir, hash, DEFAULT_CACHE_MAX_SIZE)
+        .save(at(&dir), hash, DEFAULT_CACHE_MAX_SIZE)
         .expect("save with hash");
 
     let loaded = CacheStore::load(&dir, Path::new(""), hash, DEFAULT_CACHE_MAX_SIZE)
@@ -1735,7 +1735,7 @@ fn cache_load_honors_user_max_size_above_default() {
     let mut store = CacheStore::new(Path::new(""));
     store.insert(Path::new("a.ts"), synthetic_module(1, 0, 1));
     store
-        .save(&dir, 0, DEFAULT_CACHE_MAX_SIZE)
+        .save(at(&dir), 0, DEFAULT_CACHE_MAX_SIZE)
         .expect("save under default");
 
     assert!(
@@ -1791,7 +1791,7 @@ fn cache_load_refuses_a_declared_version_it_does_not_write() {
     let mut store = CacheStore::new(Path::new(""));
     store.insert(Path::new("test.ts"), synthetic_module(1, 0, 1));
     store
-        .save(&dir, 0, DEFAULT_CACHE_MAX_SIZE)
+        .save(at(&dir), 0, DEFAULT_CACHE_MAX_SIZE)
         .expect("save current cache");
     let on_disk = std::fs::read(dir.join("cache.bin")).unwrap();
     let payload = on_disk[super::store::CACHE_HEADER_LEN..].to_vec();
@@ -1835,7 +1835,7 @@ fn cache_save_atomic_write_leaves_no_tmp_on_success() {
     let mut store = CacheStore::new(Path::new(""));
     store.insert(Path::new("test.ts"), synthetic_module(1, 0, 1));
     store
-        .save(&dir, 0, DEFAULT_CACHE_MAX_SIZE)
+        .save(at(&dir), 0, DEFAULT_CACHE_MAX_SIZE)
         .expect("save atomic");
 
     assert!(dir.join("cache.bin").exists(), "cache.bin present");
@@ -1892,7 +1892,7 @@ fn warm_cache_load_matches_cold_parse() {
     // Warm path: store, persist, and reload through the on-disk cache.
     let mut store = CacheStore::new(Path::new(""));
     store.insert(path, cold_cached);
-    store.save(&dir, 0, DEFAULT_CACHE_MAX_SIZE).unwrap();
+    store.save(at(&dir), 0, DEFAULT_CACHE_MAX_SIZE).unwrap();
 
     let loaded =
         CacheStore::load(&dir, Path::new(""), 0, DEFAULT_CACHE_MAX_SIZE).expect("warm cache loads");
@@ -1990,7 +1990,7 @@ fn warm_cache_written_under_one_root_is_reused_under_another() {
     let mut store = CacheStore::new(original_root);
     store.insert(&original_root.join("src/app.ts"), synthetic_module(7, 0, 1));
     store
-        .save(&dir, 0, DEFAULT_CACHE_MAX_SIZE)
+        .save(at(&dir), 0, DEFAULT_CACHE_MAX_SIZE)
         .expect("save under the original root");
 
     let loaded = CacheStore::load(&dir, moved_root, 0, DEFAULT_CACHE_MAX_SIZE)
@@ -2285,7 +2285,7 @@ fn concurrent_saves_never_leave_an_undecodable_cache_or_a_stray_temp_file() {
                     );
                 }
                 for _ in 0..ROUNDS {
-                    if let Err(error) = store.save(dir, 7, DEFAULT_CACHE_MAX_SIZE) {
+                    if let Err(error) = store.save(at(dir), 7, DEFAULT_CACHE_MAX_SIZE) {
                         failures.lock().expect("failure list").push(error);
                     }
                 }
@@ -2353,7 +2353,7 @@ fn eviction_removes_out_of_scope_entries_before_stable_in_scope_entries() {
 
     store.retain_paths(&in_scope);
     let cap = 40 * 1024;
-    store.save(&dir, 5, cap).expect("save with eviction");
+    store.save(at(&dir), 5, cap).expect("save with eviction");
 
     let loaded = CacheStore::load(&dir, Path::new(""), 5, DEFAULT_CACHE_MAX_SIZE)
         .expect("load after eviction");
@@ -2398,7 +2398,7 @@ fn simulate_cached_run(
         }
     }
     store.retain_paths(files);
-    store.save(dir, 5, cap).expect("save simulated run");
+    store.save(at(dir), 5, cap).expect("save simulated run");
     misses
 }
 
@@ -2476,7 +2476,7 @@ fn eviction_keeps_the_latest_working_set_above_the_low_target() {
     }
 
     let cap = 64 * 1024;
-    store.save(&dir, 5, cap).expect("save with eviction");
+    store.save(at(&dir), 5, cap).expect("save with eviction");
 
     let loaded = CacheStore::load(&dir, Path::new(""), 5, DEFAULT_CACHE_MAX_SIZE)
         .expect("load after eviction");
