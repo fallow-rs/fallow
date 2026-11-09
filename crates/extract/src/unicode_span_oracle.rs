@@ -293,18 +293,14 @@ proptest! {
 
     #[test]
     fn spans_fall_on_character_boundaries(statements in module()) {
-        // Known bug: see the ignored test `two_leading_byte_order_marks`.
-        prop_assume!(!statements[0].text.starts_with("\u{feff}\u{feff}"));
         check(&statements)?;
     }
 }
 
-/// Known bug on main: `parse_from_content` strips a leading U+FEFF, and the
-/// parser strips one more. A second U+FEFF is JavaScript whitespace, so the
-/// spans of `\u{feff}\u{feff}export const a0 = 1;` are 3 bytes off: the
-/// span of `a0` holds `st`.
+/// Only the first U+FEFF is the byte order mark. A second U+FEFF is
+/// JavaScript whitespace, and the spans count it: in
+/// `\u{feff}\u{feff}export const a0 = 1;` the span of `a0` holds `a0`.
 #[test]
-#[ignore = "known bug: extraction strips two leading U+FEFF"]
 fn two_leading_byte_order_marks() {
     let statements = [Statement {
         text: "\u{feff}\u{feff}export const a0 = 1;".to_string(),
