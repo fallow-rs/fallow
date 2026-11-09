@@ -122,23 +122,25 @@ fn task(
 fn covering_test_files(test_ids: &[String], static_test_files: &[String]) -> Vec<String> {
     let mut files: Vec<String> = test_ids
         .iter()
-        .filter_map(|id| {
-            static_test_files
-                .iter()
-                .find(|file| {
-                    id.starts_with(&format!("{file}::")) || id.contains(&format!("::{file}::"))
-                })
-                .cloned()
-                .or_else(|| {
-                    id.split("::")
-                        .find(|part| is_script_path(part))
-                        .map(str::to_owned)
-                })
-        })
+        .filter_map(|id| test_file_of(id, static_test_files))
         .collect();
     files.sort();
     files.dedup();
     files
+}
+
+/// The test file of one test id: a static test file that the id names, or
+/// else the first `::` part with a JavaScript or TypeScript extension.
+pub fn test_file_of(id: &str, static_test_files: &[String]) -> Option<String> {
+    static_test_files
+        .iter()
+        .find(|file| id.starts_with(&format!("{file}::")) || id.contains(&format!("::{file}::")))
+        .cloned()
+        .or_else(|| {
+            id.split("::")
+                .find(|part| is_script_path(part))
+                .map(str::to_owned)
+        })
 }
 
 /// The extensions of a test file that a supported runner loads.

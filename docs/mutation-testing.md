@@ -14,6 +14,7 @@ read-only next steps. It never writes a test and never proposes a code change.
 | `fallow mutation` | yes | `mutation` |
 | `fallow mutation inspect <mutant_id> [--report <file>]` | no | `mutation-inspect` |
 | `fallow mutation tasks [--report <file>]` | no | `mutation-tasks` |
+| `fallow mutation export [--report <file>]` | no | `mutation-testing-report-schema` document |
 | `fallow mutation --recheck [--report <file>] [--mutant <id>]` | yes | `mutation` |
 | `fallow mutation --compare <file>` | yes | `mutation` |
 | `fallow health --mutation-report <file>` | no | `health` |
@@ -35,7 +36,8 @@ read-only next steps. It never writes a test and never proposes a code change.
   cache"). `--resume` continues an interrupted or partial run (see "Outcome
   journal and resume").
 - Only `--format human` and `--format json` are valid. `tasks` also accepts
-  `--format markdown`. Version 1 has no SARIF, CodeClimate or LSP surface.
+  `--format markdown`. `export` writes JSON with both values (see
+  [Export](#export)). Version 1 has no SARIF, CodeClimate or LSP surface.
   The GitHub Action and the GitLab template can run the command (see
   [CI](#ci)).
 - Each run saves its full JSON report to
@@ -1811,6 +1813,64 @@ The header says that one test can cover several items, and that an item that
 no input can detect can be skipped. The markdown output puts the two lines in
 a fenced block. The MCP tool `mutation_tasks` returns the JSON batch. It runs
 no mutants.
+
+## Export
+
+`export` writes a saved `mutation` report in the open
+`mutation-testing-report-schema` format, schema version 2. Mutation
+dashboards and HTML report viewers read this format, so a team can keep the
+dashboard that it uses. `export` runs no code.
+
+```bash
+fallow mutation src/utils.ts                     # run, and save the report
+fallow mutation export -o mutation-report.json   # the report in the schema format
+```
+
+- The report comes from `--report <file>`, or else from the last run, with the
+  same search as `inspect`. A `mutation-plan` document has no test results,
+  so `export` exits with code 2 and `FALLOW_MUTATION_REPORT_INVALID`.
+- The schema needs the full source of each mutated file. The source comes
+  from the current file. Each mutated file must have the SHA-256 digest of
+  the report. Otherwise `export` exits with code 2 and
+  `FALLOW_MUTATION_REPORT_INVALID`, and the message names each changed or
+  missing file. Thus a location never points into changed code.
+- The output is JSON with `--format human` and with `--format json`. `-o`
+  writes it to a file.
+- `mutatorName` is the operator, and `replacement` is the text of the change.
+  `location` has 1-based lines and columns. A column counts UTF-16 code units,
+  the unit of a source string in a browser.
+- `coveredBy` holds the covering tests. `killedBy` holds the killing tests of
+  a kill matrix run, or else the first killing test. `testFiles` lists each
+  test by its file. A test id with no test file is under the key `unknown`.
+- `static`, `duration` and `statusReason` come from the report.
+  `thresholds` is `high: 80`, `low: 60`. `framework.name` is `fallow`.
+- `config.completion` holds the `completion` of the report: the status and
+  the reasons of a partial run.
+
+The schema has fewer statuses than Fallow. The export maps each status so
+that a mutant counts as killed or survived only when the run showed it:
+
+| Fallow status | Schema status | `statusReason` |
+|---|---|---|
+| `killed` | `Killed` | none |
+| `timeout` | `Timeout` | none |
+| `survived` | `Survived` | none, or the partial-run note |
+| `no_coverage` | `NoCoverage` | none, or the partial-run note |
+| `runtime_error` | `RuntimeError` | the runner failed outside the tests |
+| `compile_error` | `CompileError` | the mutated file does not type-check, with the TypeScript codes |
+| `flaky` | `Ignored` | `Flaky:` a second run changed the result |
+| `pruned` | `Ignored` | `Pruned:` the static rule |
+| `equivalent` | `Ignored` | `Equivalent:` a verdict marks the mutant |
+| `pending` | `Pending` | the mutant did not run |
+
+The schema score leaves out `Ignored`, `Pending`, `CompileError` and
+`RuntimeError`, the same as the Fallow score. `NoCoverage` counts in the
+schema score, but not in `summary.score` (see "Score and coverage"), so a
+dashboard can show a lower score than Fallow.
+
+A partial run (`completion.status: "partial"`) can miss kills. Each
+`Survived` and `NoCoverage` mutant of a partial run gets a `statusReason`
+that names the reasons and says that the result is not conclusive.
 
 ## Recheck
 

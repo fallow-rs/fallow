@@ -40,6 +40,9 @@ pub struct SavedReport {
 #[derive(Debug, Deserialize)]
 pub struct SavedCompletion {
     pub status: fallow_output::MutationCompletionStatus,
+    /// Why the run is partial, kebab-case. Empty for a complete run.
+    #[serde(default)]
+    pub reasons: Vec<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -70,6 +73,14 @@ pub struct SavedMutant {
     kill_matrix_complete: bool,
     #[serde(default)]
     pub equivalence_hint: Option<fallow_output::MutantEquivalenceHint>,
+    #[serde(default)]
+    pub prune_reason: Option<String>,
+    #[serde(default)]
+    pub static_mutant: bool,
+    #[serde(default)]
+    pub duration_ms: Option<u64>,
+    #[serde(default)]
+    pub type_error_codes: Vec<u32>,
 }
 
 #[derive(Debug, Deserialize)]
