@@ -2,6 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
+use fallow_config::PackageJson;
 use fallow_graph::resolve::{MISSING_ONLY_OUTPUT_DIRS, OUTPUT_DIRS};
 use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
 use rustc_hash::FxHashMap;
@@ -16,18 +17,48 @@ use crate::plugins::config_parser::lexical_normalize;
 ///
 /// A target in build output also matches its source files, with the rule of
 /// [`wildcard_source_patterns`].
+///
+/// A target at the package root with a JavaScript output suffix, such as
+/// `./*.js`, matches every file of that type in the package: configs,
+/// scripts and tests too. When its source pattern in `src` matches files,
+/// only those files are entries.
 pub(super) fn expand_wildcard_entries(
     base: &Path,
     pattern: &str,
     files: &[DiscoveredFile],
     entries: &mut Vec<EntryPoint>,
 ) {
+    if is_root_output_target(pattern) {
+        let before = entries.len();
+        for source_pattern in wildcard_source_patterns(pattern, false) {
+            push_wildcard_matches(base, &source_pattern, files, entries);
+        }
+        if entries.len() == before {
+            push_wildcard_matches(base, pattern, files, entries);
+        }
+        return;
+    }
     let before = entries.len();
     push_wildcard_matches(base, pattern, files, entries);
     let has_direct_match = entries.len() > before;
     for source_pattern in wildcard_source_patterns(pattern, has_direct_match) {
         push_wildcard_matches(base, &source_pattern, files, entries);
     }
+}
+
+/// Whether `pattern` has its first `*` at the package root and ends in a
+/// JavaScript output suffix, such as `./*.js` or `./*.d.ts`.
+fn is_root_output_target(pattern: &str) -> bool {
+    let relative = pattern.trim_start_matches("./");
+    relative
+        .split('/')
+        .next()
+        .is_some_and(|first| first.contains('*'))
+        && relative.rsplit_once('*').is_some_and(|(_, suffix)| {
+            WILDCARD_OUTPUT_SUFFIXES
+                .iter()
+                .any(|output| suffix.ends_with(output))
+        })
 }
 
 /// JavaScript output file suffixes that a build makes from a source file.
@@ -44,9 +75,12 @@ const WILDCARD_SOURCE_EXTENSIONS: &[&str] = &["ts", "tsx", "mts", "cts", "js", "
 /// - The last output directory (`dist`, `esm`, ...) before the first `*`
 ///   becomes `src`, so `./esm/*.mjs` maps to `./src/*.ts`.
 /// - A `lib` directory becomes `src` only when the target matches no file.
-/// - A target at the package root, such as `./*.js`, maps into `src` only
-///   when it matches no file. A package that publishes its build directory
-///   as the package root has this shape.
+/// - A target at the package root, such as `./*.js`, maps into `src`. A
+///   package that publishes its build directory as the package root has
+///   this shape. [`expand_wildcard_entries`] uses the direct matches of a
+///   root target with a JavaScript output suffix only when `src` has no
+///   match. For other root targets, the mapping applies only when the
+///   target matches no file.
 ///
 /// A JavaScript output suffix (`.js`, `.d.ts`, ...) becomes each source
 /// extension. Other suffixes stay. The result is empty when no rule applies.
@@ -134,9 +168,13 @@ fn push_wildcard_matches(
 }
 
 /// Whether `file` belongs to a package below `package_root`: a directory
-/// between the two has its own `package.json`. A `*` can match `/`, so
-/// `./*.js` of the root package also matches the files of nested workspace
+/// between the two has a `package.json` with a `name`. A `*` can match `/`,
+/// so `./*.js` of the root package also matches the files of nested workspace
 /// packages, which the root package does not export.
+///
+/// A `package.json` without a `name` is not a package. Component libraries
+/// put one in each component directory to set `sideEffects` or `main`, and
+/// the files of that directory stay part of the package.
 fn is_in_nested_package(
     file: &Path,
     package_root: &Path,
@@ -149,13 +187,18 @@ fn is_in_nested_package(
         }
         let is_package = *cache
             .entry(current.to_path_buf())
-            .or_insert_with(|| current.join("package.json").is_file());
+            .or_insert_with(|| is_named_package(current));
         if is_package {
             return true;
         }
         dir = current.parent();
     }
     false
+}
+
+fn is_named_package(dir: &Path) -> bool {
+    let manifest = dir.join("package.json");
+    manifest.is_file() && PackageJson::load(&manifest).is_ok_and(|pkg| pkg.name.is_some())
 }
 
 /// Whether `path` matches a target split at its `*` characters, with one
@@ -381,5 +424,71 @@ mod tests {
             entry_names(&entries, dir.path()),
             vec!["src/button/button.ts"],
         );
+    }
+
+    #[test]
+    fn root_output_target_prefers_source_over_unrelated_js_files() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::create_dir_all(dir.path().join("scripts")).unwrap();
+        std::fs::write(dir.path().join("src/middleware.ts"), "export {};").unwrap();
+        std::fs::write(dir.path().join("scripts/orphan.js"), "export {};").unwrap();
+
+        let files = discovered_files_under(dir.path());
+        let mut entries = Vec::new();
+        expand_wildcard_entries(dir.path(), "./*.js", &files, &mut entries);
+
+        assert_eq!(entry_names(&entries, dir.path()), vec!["src/middleware.ts"],);
+    }
+
+    #[test]
+    fn root_output_target_without_source_matches_files_on_disk() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        std::fs::write(dir.path().join("plugin.js"), "export {};").unwrap();
+
+        let files = discovered_files_under(dir.path());
+        let mut entries = Vec::new();
+        expand_wildcard_entries(dir.path(), "./*.js", &files, &mut entries);
+
+        assert_eq!(entry_names(&entries, dir.path()), vec!["plugin.js"]);
+    }
+
+    #[test]
+    fn wildcard_keeps_files_under_package_json_without_name() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let button = dir.path().join("src/Button");
+        std::fs::create_dir_all(&button).unwrap();
+        std::fs::write(
+            button.join("package.json"),
+            r#"{"sideEffects":false,"main":"./index.ts"}"#,
+        )
+        .unwrap();
+        std::fs::write(button.join("index.ts"), "export {};").unwrap();
+
+        let files = discovered_files_under(dir.path());
+        let mut entries = Vec::new();
+        expand_wildcard_entries(dir.path(), "./src/*/index.ts", &files, &mut entries);
+
+        assert_eq!(
+            entry_names(&entries, dir.path()),
+            vec!["src/Button/index.ts"],
+        );
+    }
+
+    #[test]
+    fn root_wildcard_skips_files_of_named_nested_packages() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let nested = dir.path().join("packages/a");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::create_dir_all(dir.path().join("src")).unwrap();
+        std::fs::write(nested.join("package.json"), r#"{"name":"a"}"#).unwrap();
+        std::fs::write(nested.join("index.js"), "export {};").unwrap();
+        std::fs::write(dir.path().join("src/top.ts"), "export {};").unwrap();
+
+        let files = discovered_files_under(dir.path());
+        let mut entries = Vec::new();
+        expand_wildcard_entries(dir.path(), "./*", &files, &mut entries);
+
+        assert_eq!(entry_names(&entries, dir.path()), vec!["src/top.ts"]);
     }
 }
