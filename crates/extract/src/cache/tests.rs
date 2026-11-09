@@ -2375,3 +2375,82 @@ fn eviction_removes_out_of_scope_entries_before_stable_in_scope_entries() {
 
     let _ = std::fs::remove_dir_all(&dir);
 }
+
+/// Simulate one analysis run over `files`: count the cache misses, insert a
+/// fresh entry for each miss, stamp the run, and save under `cap`.
+fn simulate_cached_run(
+    dir: &Path,
+    root: &Path,
+    files: &[fallow_types::discover::DiscoveredFile],
+    cap: usize,
+) -> usize {
+    let mut store = CacheStore::load(dir, root, 5, DEFAULT_CACHE_MAX_SIZE)
+        .unwrap_or_else(|_| CacheStore::new(root));
+    let mut misses = 0;
+    for (i, file) in files.iter().enumerate() {
+        let hash = i as u64;
+        if store.get(&file.path, hash).is_none() {
+            misses += 1;
+            store.insert(
+                &file.path,
+                synthetic_module(hash, current_unix_seconds(), 1),
+            );
+        }
+    }
+    store.retain_paths(files);
+    store.save(dir, 5, cap).expect("save simulated run");
+    misses
+}
+
+/// A project whose working set is a little larger than the cap must keep
+/// most of that working set. All entries of one run share one seen stamp.
+/// Eviction to the low target then removed the same large set of entries
+/// on every run, so each warm run parsed about 40 percent of the files again.
+#[test]
+fn warm_runs_converge_when_the_working_set_is_a_little_over_the_cap() {
+    use fallow_types::discover::DiscoveredFile;
+
+    let dir = test_cache_dir("working_set_over_cap");
+    let root = dir.join("project");
+    std::fs::create_dir_all(&root).unwrap();
+    let files: Vec<DiscoveredFile> = (0..400u32)
+        .map(|i| {
+            let path = root.join(format!("file{i:03}.ts"));
+            std::fs::write(&path, "").unwrap();
+            DiscoveredFile {
+                id: FileId(i),
+                path,
+                size_bytes: 1,
+            }
+        })
+        .collect();
+
+    let cache_dir = dir.join("cache");
+    let cold = simulate_cached_run(&cache_dir, &root, &files, DEFAULT_CACHE_MAX_SIZE);
+    assert_eq!(cold, files.len(), "the first run starts cold");
+    let full_size = std::fs::metadata(cache_dir.join("cache.bin"))
+        .expect("cache metadata")
+        .len() as usize;
+    let cap = full_size * 95 / 100;
+
+    let first = simulate_cached_run(&cache_dir, &root, &files, cap);
+    assert_eq!(first, 0, "the uncapped save kept every entry");
+    let max_misses = files.len() / 10;
+    for run in 2..=3 {
+        let misses = simulate_cached_run(&cache_dir, &root, &files, cap);
+        assert!(
+            misses <= max_misses,
+            "warm run {run} missed {misses} of {} files; at most {max_misses} expected",
+            files.len()
+        );
+    }
+    let on_disk = std::fs::metadata(cache_dir.join("cache.bin"))
+        .expect("cache metadata")
+        .len() as usize;
+    assert!(
+        on_disk <= cap,
+        "cache ({on_disk} bytes) exceeds the cap ({cap} bytes)"
+    );
+
+    let _ = std::fs::remove_dir_all(&dir);
+}

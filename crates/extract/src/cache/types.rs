@@ -27,7 +27,9 @@ pub const DEFAULT_CACHE_MAX_SIZE: usize = 256 * 1024 * 1024;
 /// Basis points (1/100 of a percent) for integer arithmetic without floats.
 pub(super) const EVICTION_TRIGGER_BPS: usize = 8000;
 
-/// Evict down to 60% of the cap so subsequent saves leave headroom.
+/// Evict entries that the latest run did not see down to 60% of the cap, so
+/// subsequent saves leave headroom. Entries that the latest run saw are
+/// evicted only down to the cap itself; see `CacheStore::evict_lru_to_target`.
 pub(super) const EVICTION_TARGET_BPS: usize = 6000;
 
 /// Promote the eviction log from `debug!` to `info!` when at least 25% of
