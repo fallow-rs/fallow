@@ -199,7 +199,7 @@ fn run() -> Result<(), String> {
     let derived = derived_definitions();
     validate_graph_facts_descriptions(&derived)?;
     validate_review_brief_wire_contract(&derived)?;
-    let mut merged = merge_with_committed(&derived)?;
+    let mut merged = merge_with_committed(&committed_schema_source()?, &derived)?;
     normalize_output_punctuation(&mut merged);
     let pretty = serde_json::to_string_pretty(&merged)
         .map_err(|err| format!("failed to serialize merged schema: {err}"))?;
@@ -1157,10 +1157,9 @@ fn register_list_boundaries_definitions(generator: &mut schemars::SchemaGenerato
     let _ = generator.subschema_for::<AuthoredRule>();
 }
 
-/// Merge derived definitions back into the hand-written schema document.
-fn merge_with_committed(derived: &Map<String, Value>) -> Result<Value, String> {
-    let source = committed_schema_source()?;
-    let mut document: Value = serde_json::from_str(&source)
+/// Merge derived definitions into the hand-written schema document in `source`.
+fn merge_with_committed(source: &str, derived: &Map<String, Value>) -> Result<Value, String> {
+    let mut document: Value = serde_json::from_str(source)
         .map_err(|err| format!("failed to parse committed docs/output-schema.json: {err}"))?;
 
     let definitions = document
@@ -2372,8 +2371,8 @@ mod drift_tests {
     #[test]
     fn emitted_schema_has_no_dangling_refs() {
         let derived = derived_definitions();
-        let document =
-            merge_with_committed(&derived).expect("merge must succeed on committed schema");
+        let source = committed_schema_source().expect("committed schema source");
+        let document = merge_with_committed(&source, &derived).expect("merge must succeed");
 
         let mut defined: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
         if let Some(map) = document.get("definitions").and_then(Value::as_object) {

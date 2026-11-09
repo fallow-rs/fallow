@@ -70,13 +70,21 @@ mod tests {
         assert_eq!(names, vec!["Kept", "HandWritten", "Last"]);
     }
 
-    /// The committed document carries no orphan after the merge, so
+    /// The merge removes a stale definition from the committed document, so
     /// `generate:contracts:check` fails on a stale entry before CI does.
     #[test]
-    fn the_merged_document_has_no_orphan_definition() {
+    fn the_merge_removes_a_stale_committed_definition() {
+        let mut committed: Value =
+            serde_json::from_str(&super::super::committed_schema_source().expect("source"))
+                .expect("committed schema parses");
+        committed["definitions"]["ZzStaleDefinition"] = serde_json::json!({ "type": "string" });
+        let source = serde_json::to_string(&committed).expect("serialize");
+
         let derived = super::super::derived_definitions();
-        let merged = super::super::merge_with_committed(&derived).expect("merge must succeed");
+        let merged =
+            super::super::merge_with_committed(&source, &derived).expect("merge must succeed");
         let definitions = merged["definitions"].as_object().expect("definitions");
+        assert!(!definitions.contains_key("ZzStaleDefinition"));
         for name in definitions.keys() {
             assert!(
                 derived.contains_key(name) || is_hand_maintained(name),
