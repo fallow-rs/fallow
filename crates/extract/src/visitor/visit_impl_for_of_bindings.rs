@@ -5,6 +5,24 @@ use oxc_ast::ast::*;
 use super::super::ModuleInfoExtractor;
 use super::{iteration_source_reference, static_member_object_name};
 
+/// Array iteration methods whose callback's FIRST parameter is an element of the
+/// receiver array (so it can be typed to the receiver's element class). `reduce`
+/// and `reduceRight` are intentionally excluded: their first callback parameter
+/// is the accumulator, not an element. `sort` is excluded to keep the set to
+/// single-element-per-call iterators. See issue #1707 follow-up.
+pub(in crate::visitor) const ITERABLE_ELEMENT_CALLBACK_METHODS: &[&str] = &[
+    "map",
+    "forEach",
+    "filter",
+    "find",
+    "findLast",
+    "findIndex",
+    "findLastIndex",
+    "flatMap",
+    "some",
+    "every",
+];
+
 impl ModuleInfoExtractor {
     /// Bind a `for (const util of utils)` loop variable to the element class of
     /// `utils` so member accesses on the loop variable (`util.getter`) in the

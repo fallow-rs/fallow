@@ -19,7 +19,10 @@ use fallow_types::extract::{AngularInputMember, AngularOutputMember};
 use heritage_names::{extract_static_expression_name, extract_type_name};
 use heritage_root::heritage_root_name;
 pub(super) use heritage_root::is_object_literal_initializer;
-use return_bindings::{collect_getter_binding, collect_method_return_binding};
+use return_bindings::{
+    collect_getter_binding, collect_method_return_binding, is_self_returning_instance_method,
+    push_array_element_binding, returns_named_class_type,
+};
 
 pub struct AngularComponentMetadata {
     pub template_url: Option<String>,
@@ -1170,68 +1173,21 @@ fn is_instance_returning_static_method(
     if returns_named_class_type(method.value.return_type.as_ref(), class_name) {
         return true;
     }
+    // `static async create(): Promise<Cls>` resolves to an instance. The
+    // body can build the instance in a local first, so the annotation is the
+    // only proof.
+    if method.value.r#async
+        && let (Some(name), Some(annotation)) = (class_name, method.value.return_type.as_deref())
+        && return_type_element_name(&annotation.type_annotation).is_some_and(|ty| ty == name)
+    {
+        return true;
+    }
     let Some(body) = method.value.body.as_ref() else {
         return false;
     };
     body.statements
         .last()
         .is_some_and(|stmt| statement_returns_class_instance(stmt, class_name))
-}
-
-fn is_self_returning_instance_method(
-    method: &oxc_ast::ast::MethodDefinition<'_>,
-    class_name: Option<&str>,
-) -> bool {
-    if returns_named_class_type(method.value.return_type.as_ref(), class_name) {
-        return true;
-    }
-    if returns_this_type(method.value.return_type.as_ref()) {
-        return true;
-    }
-    let Some(body) = method.value.body.as_ref() else {
-        return false;
-    };
-    body.statements.last().is_some_and(|stmt| {
-        let Statement::ReturnStatement(ret) = stmt else {
-            return false;
-        };
-        matches!(ret.argument.as_ref(), Some(Expression::ThisExpression(_)))
-    })
-}
-
-fn returns_named_class_type(
-    return_type: Option<&oxc_allocator::Box<'_, oxc_ast::ast::TSTypeAnnotation<'_>>>,
-    class_name: Option<&str>,
-) -> bool {
-    let Some(name) = class_name else {
-        return false;
-    };
-    let Some(annotation) = return_type.map(|boxed| boxed.as_ref()) else {
-        return false;
-    };
-    extract_type_annotation_name(annotation).is_some_and(|ty| ty == name)
-}
-
-fn returns_this_type(
-    return_type: Option<&oxc_allocator::Box<'_, oxc_ast::ast::TSTypeAnnotation<'_>>>,
-) -> bool {
-    let Some(annotation) = return_type.map(|boxed| boxed.as_ref()) else {
-        return false;
-    };
-    is_this_type(&annotation.type_annotation)
-}
-
-fn is_this_type(ty: &TSType<'_>) -> bool {
-    match ty {
-        TSType::TSThisType(_) => true,
-        TSType::TSTypeReference(type_ref) => match &type_ref.type_name {
-            TSTypeName::ThisExpression(_) => true,
-            TSTypeName::IdentifierReference(ident) => ident.name == "this",
-            TSTypeName::QualifiedName(_) => false,
-        },
-        TSType::TSParenthesizedType(paren) => is_this_type(&paren.type_annotation),
-        _ => false,
-    }
 }
 
 fn statement_returns_class_instance(stmt: &Statement<'_>, class_name: Option<&str>) -> bool {
@@ -1582,6 +1538,7 @@ fn collect_constructor_param_bindings(
         let Some(type_annotation) = param.type_annotation.as_deref() else {
             continue;
         };
+        push_array_element_binding(id.name.as_str(), type_annotation, resolve, bindings);
         let Some(type_name) = extract_type_annotation_name(type_annotation) else {
             continue;
         };
@@ -1611,6 +1568,9 @@ fn collect_property_binding<F>(
     let Some(name) = prop.key.static_name() else {
         return;
     };
+    if let Some(type_annotation) = prop.type_annotation.as_deref() {
+        push_array_element_binding(&name.text(), type_annotation, resolve, bindings);
+    }
     if let Some(type_annotation) = prop.type_annotation.as_deref()
         && let Some(type_name) = extract_type_annotation_name(type_annotation)
     {

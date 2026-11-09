@@ -39,6 +39,8 @@ mod caching;
 mod callback_wrapper_provenance;
 #[path = "integration_test/class_factory_property_provenance.rs"]
 mod class_factory_property_provenance;
+#[path = "integration_test/class_member_inferred_receivers.rs"]
+mod class_member_inferred_receivers;
 #[path = "integration_test/class_value_projections.rs"]
 mod class_value_projections;
 #[path = "integration_test/class_value_source_shapes.rs"]

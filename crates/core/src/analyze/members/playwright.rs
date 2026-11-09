@@ -594,6 +594,7 @@ pub(super) fn propagate_playwright_fixture_accesses(
         return;
     }
 
+    let mut typed_instance_targets: Option<TypedInstanceTargets> = None;
     for resolved in resolved_modules {
         let local_to_export_keys = indexes.local_keys(resolved.file_id);
         let use_facts = playwright_fixture_uses(resolved);
@@ -606,16 +607,56 @@ pub(super) fn propagate_playwright_fixture_accesses(
                 let Some(fixture_targets) = targets_by_test.get(test_key) else {
                     continue;
                 };
-                let Some(target_keys) = fixture_targets.get(access.fixture_name.as_str()) else {
-                    continue;
+                let target_keys = match fixture_targets.get(access.fixture_name.as_str()) {
+                    Some(target_keys) => target_keys.clone(),
+                    None => fixture_property_chain_targets(
+                        fixture_targets,
+                        access.fixture_name.as_str(),
+                        typed_instance_targets.get_or_insert_with(|| {
+                            build_typed_instance_binding_targets(graph, modules, indexes)
+                        }),
+                        graph,
+                    ),
                 };
                 for target_key in target_keys {
                     accessed_members
-                        .entry(target_key.clone())
+                        .entry(target_key)
                         .or_default()
                         .insert(access.member.clone());
                 }
             }
         }
     }
+}
+
+/// The classes that a property chain of a fixture reaches: `n8n.ndv` gives
+/// the declared class of the `ndv` property of the `n8n` fixture class. The
+/// longest known fixture prefix gives the start classes. The typed instance
+/// bindings of each class (typed properties, constructor parameters, getter
+/// and method return types) then resolve the rest of the chain. A link
+/// without a typed binding gives no class.
+fn fixture_property_chain_targets(
+    fixture_targets: &FxHashMap<String, Vec<ExportKey>>,
+    fixture_name: &str,
+    typed_instance_targets: &TypedInstanceTargets,
+    graph: &ModuleGraph,
+) -> Vec<ExportKey> {
+    let mut split = fixture_name.len();
+    while let Some(dot) = fixture_name[..split].rfind('.') {
+        split = dot;
+        let Some(roots) = fixture_targets.get(&fixture_name[..split]) else {
+            continue;
+        };
+        let segments: Vec<&str> = fixture_name[split + 1..].split('.').collect();
+        let mut targets = Vec::new();
+        for root in roots {
+            for target in
+                chained_typed_instance_targets(graph, typed_instance_targets, root, &segments)
+            {
+                push_export_key(&mut targets, target);
+            }
+        }
+        return targets;
+    }
+    Vec::new()
 }

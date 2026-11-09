@@ -18308,3 +18308,86 @@ fn this_read_in_function_with_own_this_gives_no_this_member_access() {
         info.semantic_facts
     );
 }
+
+#[test]
+fn array_field_records_element_instance_binding() {
+    // `days: Day[]` binds the element link `days[]` to `Day`, so a receiver
+    // chain through an element of the field resolves to `Day`. A method and a
+    // getter that return an array bind `list()[]` and `sorted[]`.
+    let info = parse(
+        r"
+        import { Day } from './day';
+
+        export class Month {
+          days: Day[] = [];
+          list(): Array<Day> { return this.days; }
+          get sorted(): readonly Day[] { return this.days; }
+          names: string[] = [];
+        }
+        ",
+    );
+    let heritage = info
+        .class_heritage
+        .iter()
+        .find(|class| class.export_name == "Month")
+        .expect("Month has heritage");
+    for key in ["days[]", "list()[]", "sorted[]"] {
+        assert!(
+            heritage
+                .instance_bindings
+                .contains(&(key.to_string(), "Day".to_string())),
+            "{key} must bind Day, found: {:?}",
+            heritage.instance_bindings
+        );
+    }
+    assert!(
+        !heritage
+            .instance_bindings
+            .iter()
+            .any(|(key, _)| key == "names[]"),
+        "a builtin element type gives no binding, found: {:?}",
+        heritage.instance_bindings
+    );
+}
+
+#[test]
+fn element_of_typed_parameter_field_records_typed_property_path() {
+    // `m: Month` comes from another module. A read on an element of `m.days`
+    // (an index, an iteration callback parameter, a loop variable) records the
+    // `days[]` path of `Month`. A string key reads a property, not an element.
+    let info = parse(
+        r#"
+        import type { Month } from './month';
+
+        export const read = (m: Month): void => {
+          m.days[0].viaIndex();
+          m.days[m.days.length - 1].viaIndex();
+          m.days.some((day) => day.viaCallback());
+          for (const day of m.days) {
+            day.viaLoop();
+          }
+          m.days["key"].viaKey();
+        };
+        "#,
+    );
+    let paths: Vec<(String, String)> = info
+        .semantic_facts
+        .iter()
+        .filter_map(|fact| match fact {
+            SemanticFact::TypedPropertyMemberAccess(access) if access.type_name == "Month" => {
+                Some((access.property_path.clone(), access.member.clone()))
+            }
+            _ => None,
+        })
+        .collect();
+    for member in ["viaIndex", "viaCallback", "viaLoop"] {
+        assert!(
+            paths.contains(&("days[]".to_string(), member.to_string())),
+            "{member} must be read on `days[]`, found: {paths:?}"
+        );
+    }
+    assert!(
+        paths.contains(&("days.key".to_string(), "viaKey".to_string())),
+        "a string key reads the property `key`, found: {paths:?}"
+    );
+}

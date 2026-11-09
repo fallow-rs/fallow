@@ -25,6 +25,8 @@ enum ChainLink<'b> {
     Property(Cow<'b, str>),
     PrivateField(&'b str),
     Call,
+    /// An element of an array: `[0]` or `[i - 1]`, spelled `[]`.
+    Element,
 }
 
 /// The dotted name of a static member chain (`a.b.c`, `this.#dep`, `f().x`).
@@ -76,7 +78,7 @@ fn member_chain_name(expr: &Expression<'_>, allow_call_arguments: bool) -> Optio
                 current = &member.object;
             }
             Expression::ComputedMemberExpression(member) => {
-                links.push(ChainLink::Property(member.static_property_name()?.text()));
+                links.push(computed_link(member)?);
                 current = &member.object;
             }
             // `#`-private field receiver (`this.#dep`): oxc's `PrivateIdentifier.name`
@@ -104,6 +106,10 @@ fn member_chain_name(expr: &Expression<'_>, allow_call_arguments: bool) -> Optio
                     links.push(ChainLink::Property(member.property.name.as_str().into()));
                     current = &member.object;
                 }
+                ChainElement::ComputedMemberExpression(member) => {
+                    links.push(computed_link(member)?);
+                    current = &member.object;
+                }
                 _ => return None,
             },
             _ => return None,
@@ -121,9 +127,28 @@ fn member_chain_name(expr: &Expression<'_>, allow_call_arguments: bool) -> Optio
                 name.push_str(field);
             }
             ChainLink::Call => name.push_str("()"),
+            ChainLink::Element => name.push_str("[]"),
         }
     }
     Some(name)
+}
+
+/// The link of a computed member: a property for a static key (`a["b"]`),
+/// and an element for a numeric index (`a[0]`, `a[i - 1]`, `a[i++]`). The
+/// element link `[]` resolves through the `<field>[]` instance binding of an
+/// array field, so `month.days[0].getFirst()` reads `Day.getFirst`. A bare
+/// identifier key gives no name, because it can hold a string key that a
+/// later pass resolves (`holder[key].member`).
+fn computed_link<'b>(member: &'b ComputedMemberExpression<'_>) -> Option<ChainLink<'b>> {
+    match &member.expression {
+        Expression::NumericLiteral(_) | Expression::UpdateExpression(_) => Some(ChainLink::Element),
+        Expression::BinaryExpression(binary) if binary.operator.is_arithmetic() => {
+            Some(ChainLink::Element)
+        }
+        _ => member
+            .static_property_name()
+            .map(|name| ChainLink::Property(name.text())),
+    }
 }
 
 /// Flatten a JSX member-expression object to its dotted receiver spelling

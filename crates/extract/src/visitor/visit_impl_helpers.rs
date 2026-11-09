@@ -1,7 +1,7 @@
 use oxc_ast::ast::*;
 use oxc_ast_visit::{Visit, walk};
 use oxc_semantic::ScopeFlags;
-use oxc_span::Span;
+use oxc_span::{GetSpan, Span};
 use rustc_hash::{FxHashMap, FxHashSet};
 use std::path::{Component, PathBuf};
 
@@ -12,8 +12,8 @@ use crate::js_text::JsText;
 use super::super::helpers::{extract_type_annotation_name, is_meta_url_arg};
 use super::visit_chain_names::MAX_RECORDED_CHAIN_LINKS;
 use super::{
-    assignment_target_identifier_name, call_receiver_name, static_member_object_name,
-    unwrap_parens, unwrap_static_expr,
+    ITERABLE_ELEMENT_CALLBACK_METHODS, assignment_target_identifier_name, call_receiver_name,
+    static_member_object_name, unwrap_parens, unwrap_static_expr,
 };
 
 pub(super) const PINO_PACKAGE: &str = "pino";
@@ -86,6 +86,9 @@ pub(super) struct StructuralParamMemberCollector {
     target_params: FxHashSet<String>,
     shadowed_stack: Vec<FxHashSet<String>>,
     alias_stack: Vec<FxHashMap<String, (String, String)>>,
+    /// The element alias of an iteration callback, keyed by the callback
+    /// start. The callback scope takes it when the walk enters the callback.
+    pending_element_aliases: FxHashMap<u32, (String, (String, String))>,
     pub(super) members: FxHashMap<String, FxHashSet<String>>,
     pub(super) property_members: FxHashMap<String, FxHashSet<(String, String)>>,
 }
@@ -96,6 +99,7 @@ impl StructuralParamMemberCollector {
             target_params,
             shadowed_stack: Vec::new(),
             alias_stack: Vec::new(),
+            pending_element_aliases: FxHashMap::default(),
             members: FxHashMap::default(),
             property_members: FxHashMap::default(),
         }
@@ -174,6 +178,22 @@ impl StructuralParamMemberCollector {
             .then(|| (root.to_string(), suffix.to_string()))
     }
 
+    /// The parameter and the element path of an array that a property path of
+    /// a tracked parameter holds: `(m, days[])` for `m.days`. The parameter
+    /// itself (an empty path) is not an array, so it gives no element.
+    fn element_receiver_path(&self, receiver: &Expression<'_>) -> Option<(String, String)> {
+        let (param, path) = self.resolve_receiver_path(receiver, false)?;
+        (!path.is_empty()).then(|| (param, format!("{path}[]")))
+    }
+
+    fn take_pending_element_alias(&mut self, start: u32) {
+        if let Some((local, target)) = self.pending_element_aliases.remove(&start)
+            && let Some(scope) = self.alias_stack.last_mut()
+        {
+            scope.insert(local, target);
+        }
+    }
+
     fn destructured_receiver_aliases(
         &self,
         declarator: &VariableDeclarator<'_>,
@@ -241,10 +261,62 @@ impl<'a> Visit<'a> for StructuralParamMemberCollector {
         walk::walk_computed_member_expression(self, expr);
     }
 
+    /// `m.days.some((day) => day.flag)` reads `flag` on an element of
+    /// `m.days`, so the callback parameter is an alias of the element path.
+    fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        if let Expression::StaticMemberExpression(callee) = &call.callee
+            && ITERABLE_ELEMENT_CALLBACK_METHODS.contains(&callee.property.name.as_str())
+            && let Some(target) = self.element_receiver_path(&callee.object)
+            && let Some(callback) = call.arguments.first()
+        {
+            let params = match callback {
+                Argument::ArrowFunctionExpression(arrow) => Some(&arrow.params),
+                Argument::FunctionExpression(function) => Some(&function.params),
+                _ => None,
+            };
+            if let Some(params) = params
+                && let Some(param) = params.items.first()
+                && let BindingPattern::BindingIdentifier(id) = &param.pattern
+            {
+                self.pending_element_aliases
+                    .insert(callback.span().start, (id.name.to_string(), target));
+            }
+        }
+        walk::walk_call_expression(self, call);
+    }
+
+    /// `for (const day of m.days)` makes `day` an alias of the element path.
+    fn visit_for_of_statement(&mut self, stmt: &ForOfStatement<'a>) {
+        let alias = match &stmt.left {
+            ForStatementLeft::VariableDeclaration(decl) => decl
+                .declarations
+                .first()
+                .and_then(|declarator| match &declarator.id {
+                    BindingPattern::BindingIdentifier(id) => Some(id.name.to_string()),
+                    _ => None,
+                })
+                .and_then(|local| Some((local, self.element_receiver_path(&stmt.right)?))),
+            _ => None,
+        };
+        self.shadowed_stack.push(FxHashSet::default());
+        self.alias_stack.push(FxHashMap::default());
+        self.visit_expression(&stmt.right);
+        self.visit_for_statement_left(&stmt.left);
+        if let Some((local, target)) = alias
+            && let Some(scope) = self.alias_stack.last_mut()
+        {
+            scope.insert(local, target);
+        }
+        self.visit_statement(&stmt.body);
+        self.alias_stack.pop();
+        self.shadowed_stack.pop();
+    }
+
     fn visit_function(&mut self, func: &Function<'a>, flags: ScopeFlags) {
         let shadowed = self.collect_shadowed_params(&func.params);
         self.shadowed_stack.push(shadowed);
         self.alias_stack.push(FxHashMap::default());
+        self.take_pending_element_alias(func.span.start);
         walk::walk_function(self, func, flags);
         self.alias_stack.pop();
         self.shadowed_stack.pop();
@@ -254,6 +326,7 @@ impl<'a> Visit<'a> for StructuralParamMemberCollector {
         let shadowed = self.collect_shadowed_params(&expr.params);
         self.shadowed_stack.push(shadowed);
         self.alias_stack.push(FxHashMap::default());
+        self.take_pending_element_alias(expr.span.start);
         walk::walk_arrow_function_expression(self, expr);
         self.alias_stack.pop();
         self.shadowed_stack.pop();
