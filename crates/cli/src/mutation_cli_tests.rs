@@ -730,7 +730,8 @@ fn a_run_with_baseline_failures_and_no_executed_mutant_exits_2() {
         error.message,
         "no mutant has a test result, because the test suite fails with no active mutant: test/env.test.ts::loads: Invalid environment variables (1 more failure, see `baseline_failures` in the JSON report)"
     );
-    assert!(error.help.is_some());
+    let help = error.help.expect("a help text");
+    assert!(help.contains("`baseline_failures[].message`"), "{help}");
 }
 
 #[test]

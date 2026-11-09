@@ -184,11 +184,14 @@ beforeEach(() => {
   mutation.startTest();
 });
 
-afterEach((context) => {
+// Vitest reads the first argument of a hook for the fixtures of a
+// `test.extend` test, and fails such a test when the argument is not an
+// object pattern.
+afterEach(({ task }) => {
   const { hits, staticHits } = mutation.finishTest();
   const children = childCoverage?.finishTest() ?? { hits: [], loaded: [] };
-  context.task.meta.fallowHits = [...new Set([...hits, ...children.hits])];
-  context.task.meta.fallowStaticHits = staticHits;
-  context.task.meta.fallowLoaded = [...new Set([...requireHook.loaded, ...children.loaded])];
-  if (freshModules) context.task.meta.fallowPolluted = pollutedAtStart || workerPolluted();
+  task.meta.fallowHits = [...new Set([...hits, ...children.hits])];
+  task.meta.fallowStaticHits = staticHits;
+  task.meta.fallowLoaded = [...new Set([...requireHook.loaded, ...children.loaded])];
+  if (freshModules) task.meta.fallowPolluted = pollutedAtStart || workerPolluted();
 });
