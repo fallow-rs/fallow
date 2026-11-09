@@ -1380,6 +1380,7 @@ dependencies = [
  "futures",
  "ls-types",
  "mimalloc",
+ "oxc_syntax",
  "proptest",
  "rayon",
  "rustc-hash",

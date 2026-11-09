@@ -43,13 +43,13 @@ const NAME_START: &[&str] = &[
     "\u{10400}",
 ];
 
-/// Identifier characters after the first one. Combining marks are absent
-/// because of the known bug in the ignored test `combining_mark_in_name`.
+/// Identifier characters after the first one, with a combining mark.
 const NAME_REST: &[&str] = &[
     "a",
     "0",
     "_",
     "\u{e9}",
+    "\u{301}",
     "\u{65e5}",
     "\u{1d49c}",
     "\u{10400}",
@@ -317,11 +317,9 @@ fn byte_order_mark_on_disk() {
     check_file(&case, "\u{feff}").expect("the diagnostic covers the name");
 }
 
-/// Known bug on main: `\u{301}` is a combining mark, which `ID_Continue`
-/// allows in a name, but the quick fix reads the name only up to it. For
-/// `export const cafe\u{301} = 1;` the quick fix offers no action.
+/// U+0301 is a combining mark, which `ID_Continue` allows in a name. The
+/// quick fix must read the full name, and not stop at the mark.
 #[test]
-#[ignore = "known bug: no quick fix for a name with a combining mark"]
 fn combining_mark_in_name() {
     let case = Case {
         lines: vec!["export const cafe\u{301} = 1;".to_string()],
