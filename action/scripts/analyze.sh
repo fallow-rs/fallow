@@ -3,6 +3,9 @@
 # invocation, but this script handles errors explicitly with if-guards.
 set +e -o pipefail
 
+# shellcheck source=artifacts.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/artifacts.sh"
+
 # Run fallow analysis with CLI argument construction (deduped)
 # Env contract: provided by the composite action. action.yml is the
 #   authoritative input surface; each INPUT_* variable maps 1:1 to an action
@@ -488,10 +491,11 @@ fi
 # is validated again here.
 ARTIFACTS_DIR="${FALLOW_ARTIFACTS_DIR:-.}"
 fallow_scope_validate_artifacts_dir "$ARTIFACTS_DIR" || exit 2
-if ! mkdir -p "$ARTIFACTS_DIR"; then
-  echo "::error::Failed to create artifacts-dir: ${ARTIFACTS_DIR}"
-  exit 2
-fi
+prepare_artifacts "$ARTIFACTS_DIR" \
+  fallow-results.json fallow-results-raw.json fallow-results-scoped.json \
+  fallow-results.sarif fallow-stderr.log fallow-analysis-args.sh \
+  fallow-changed-files.json fallow-pr.diff fallow-stale-baseline-gate-raw.json \
+  fallow-stale-baseline-gate.json fallow-stale-baseline-gate-stderr.log || exit 2
 
 RESULTS_FILE=$(artifact_path fallow-results.json)
 RESULTS_RAW_FILE=$(artifact_path fallow-results-raw.json)

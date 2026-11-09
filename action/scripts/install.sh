@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+# shellcheck source=workflow-command.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/workflow-command.sh"
+
 # Install fallow binary via npm, plus the exact-version fallow-type-aware
 # sidecar when the project or the action opts into type-aware analysis.
 # Optional env: FALLOW_VERSION, INPUT_ROOT, INPUT_CONFIG, INPUT_TYPE_AWARE,
@@ -155,14 +158,14 @@ version_source=""
 if [ -n "$requested_version" ]; then
   install_spec="$requested_version"
   version_source="the action 'version' input"
-  echo "::notice::Using fallow version from action input: ${install_spec}"
+  echo "::notice::Using fallow version from action input: $(escape_command_data "$install_spec")"
 elif [ -n "$project_spec" ]; then
   if is_safe_version_spec "$project_spec"; then
     install_spec="$project_spec"
     version_source="the fallow dependency in ${root}/package.json"
-    echo "::notice::Using fallow version from ${root}/package.json: ${install_spec}"
+    echo "::notice::Using fallow version from $(escape_command_data "${root}/package.json: ${install_spec}")"
   else
-    echo "::warning::Ignoring unsupported fallow package.json spec '${project_spec}'. Use a semver version or range, or set the action 'version' input explicitly."
+    echo "::warning::Ignoring unsupported fallow package.json spec '$(escape_command_data "$project_spec")'. Use a semver version or range, or set the action 'version' input explicitly."
     install_spec="latest"
     version_source="the latest published release"
   fi
@@ -172,7 +175,7 @@ else
 fi
 
 if ! is_safe_version_spec "$install_spec"; then
-  echo "::error::Invalid version specifier: ${install_spec}. Use 'latest' or a semver version/range like '2.52.2' or '^2.52.0'."
+  echo "::error::Invalid version specifier: $(escape_command_data "$install_spec"). Use 'latest' or a semver version/range like '2.52.2' or '^2.52.0'."
   exit 2
 fi
 

@@ -60,7 +60,7 @@ emit_native_annotations_if_available() {
   [ "$FALLOW_COMMAND" = "fix" ] && return 1
 
   local input_file
-  input_file=$(resolve_results_file)
+  input_file=$(resolve_results_file) || exit 2
 
   local native_file
   native_file=$(mktemp)
@@ -166,7 +166,7 @@ elif [ -f "${ROOT}/yarn.lock" ] || [ -f "yarn.lock" ]; then
 fi
 export PKG_MANAGER
 
-RESULTS_FILE=$(resolve_results_file)
+RESULTS_FILE=$(resolve_results_file) || exit 2
 
 ANNOTATIONS_FILE=$(mktemp)
 _FALLOW_TMPS+=("$ANNOTATIONS_FILE")
