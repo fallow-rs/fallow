@@ -31,7 +31,7 @@ fn project() -> tempfile::TempDir {
 }
 
 fn invoke(root: &std::path::Path, args: &[&str], stdin: &str) -> (i32, serde_json::Value, String) {
-    invoke_env(root, args, stdin, None)
+    invoke_env(root, args, stdin, None, None)
 }
 
 fn invoke_env(
@@ -39,12 +39,19 @@ fn invoke_env(
     args: &[&str],
     stdin: &str,
     ambient: Option<&std::path::Path>,
+    temp: Option<&std::path::Path>,
 ) -> (i32, serde_json::Value, String) {
     let mut command = Command::new(fallow_bin());
     scrub_analysis_env(&mut command);
     command.env_remove("FALLOW_DIFF_FILE");
     if let Some(path) = ambient {
         command.env("FALLOW_DIFF_FILE", path);
+    }
+    if let Some(path) = temp {
+        command
+            .env("TMPDIR", path)
+            .env("TMP", path)
+            .env("TEMP", path);
     }
     let mut child = command
         .args(["mutation", "--root"])
@@ -121,7 +128,7 @@ fn stdin_preserves_empty_and_placed_hunks_over_ambient_diff() {
         vec!["--plan", "--diff-stdin"],
         vec!["--plan", "--diff-file", "-"],
     ] {
-        let (code, report, stderr) = invoke_env(root, &flags, placed, Some(ambient.path()));
+        let (code, report, stderr) = invoke_env(root, &flags, placed, Some(ambient.path()), None);
         assert_eq!(code, 0, "{report} {stderr}");
         assert!(
             report["mutants"]
@@ -137,10 +144,10 @@ fn stdin_preserves_empty_and_placed_hunks_over_ambient_diff() {
                 .iter()
                 .all(|m| m["file"] == "src/other.ts")
         );
-        let (code, report, stderr) = invoke_env(root, &flags, "", Some(ambient.path()));
+        let (code, report, stderr) = invoke_env(root, &flags, "", Some(ambient.path()), None);
         assert_eq!(code, 0, "{report} {stderr}");
         assert!(report["mutants"].as_array().unwrap().is_empty());
-        let (code, report, stderr) = invoke_env(root, &flags, FOREIGN, Some(ambient.path()));
+        let (code, report, stderr) = invoke_env(root, &flags, FOREIGN, Some(ambient.path()), None);
         assert_eq!(code, 2, "{report} {stderr}");
         assert_eq!(report["code"], "FALLOW_MUTATION_DIFF_NOT_APPLIED");
         assert!(
@@ -148,7 +155,7 @@ fn stdin_preserves_empty_and_placed_hunks_over_ambient_diff() {
             "{report}"
         );
     }
-    let (code, report, stderr) = invoke_env(root, &["--plan"], "", Some(ambient.path()));
+    let (code, report, stderr) = invoke_env(root, &["--plan"], "", Some(ambient.path()), None);
     assert_eq!(code, 0, "{report} {stderr}");
     assert!(
         report["mutants"]
@@ -253,3 +260,6 @@ fn unreadable_explicit_file_keeps_its_input_error() {
     assert_eq!(code, 2, "{report} {stderr}");
     assert_eq!(report["code"], "FALLOW_INVALID_DIFF_FILE");
 }
+
+#[path = "mutation_stdin_temp_tests.rs"]
+mod stdin_temp;

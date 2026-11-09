@@ -648,7 +648,7 @@ fn run_inner(input: &MutationCliInput<'_>) -> Result<ExitCode, ProgrammaticError
     let mut options = run_options(input)?;
     let recheck = recheck_selection(input)?;
     let min_score = apply_recheck(input, &mut options, recheck.as_ref())?;
-    let stdin_diff = diff::prepare(&mut options)?;
+    let stdin_diff = diff::prepare(&mut options, input.root)?;
     let baseline = input
         .args
         .compare
