@@ -568,6 +568,16 @@ release bump past that lag fails CI. Regenerate the gate, or add a waiver with
 a tracking issue, a last version (`until_version`) and a reason. A waiver on
 fresh evidence also fails, so that it does not stay after the regeneration.
 
+The runtime gate (`maximum_p95_marginal_overhead_ms`) compares the CPU time
+of the process tree, user plus system time of Fallow, the sidecar and the
+TypeScript process, for each measured baseline and refined pair. Wall time
+on a shared machine depends more on other load than on the change, so the
+summary reports the wall-time overhead only for information. The runner
+samples the process tree every 100 ms and keeps the highest CPU time of each
+process, so a process that exits keeps its last sample. On macOS the sample
+comes from `ps`, on Linux from `/proc/<pid>/stat`. Windows has no sample, and
+there the gate compares wall time.
+
 Use `--project` only with a non-canonical `--out-dir` for iteration. The
 publication gate requires the complete manifest, repeated normalized output,
 complete paired measurements, source-current evidence, checked-in review

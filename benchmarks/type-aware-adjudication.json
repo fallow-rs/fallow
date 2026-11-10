@@ -16,6 +16,9 @@
     "tac_a58570150901b3248410": [
       "callback-inference"
     ],
+    "tac_c4399132fb54506ebf8d": [
+      "callback-inference"
+    ],
     "tac_b0978104a1568709a4db": [
       "callback-inference"
     ],
@@ -25,30 +28,21 @@
   },
   "independent_reviews": [
     {
+      "project_id": "svelte",
+      "candidate_count": 62,
+      "candidate_set_sha256": "2572ffc6ac452666bbdaf797f71a1a12974d50f23a6d8c975748b48b71da3bbc",
+      "evidence_sha256": "563a5a52cc9eea60bc5c3f55612507d1333f1b1a5cd4bb867a4eac5a776ce00b",
+      "reviewer": "independent-source-review-svelte",
+      "method": "Two or more reviewers checked each record against the pinned source. Confirmed uses were checked for a concrete source use of the exact member, with accessor reads and writes credited to the matching half. Contract-preserved records were checked for the declaration, the heritage edge, the signature, and a required interface member, an abstract member, or an override that changes the behavior of the class.",
+      "verdict": "approved"
+    },
+    {
       "project_id": "astro",
       "candidate_count": 20,
       "candidate_set_sha256": "b9e97b08f624956c7bb77fdbb8d91ce6bb085e40329758cb4df3e16b3f8f5e0e",
       "evidence_sha256": "85533c9ad449200cb3766acbf8ff89e29a737b7d311b50d3f20fde524ef59c26",
       "reviewer": "independent-source-review-astro",
-      "method": "Two reviewers checked each record against the pinned source. Confirmed uses were checked for a concrete source use of the exact member, with accessor reads and writes credited to the matching half. Contract-preserved records were checked for the declaration, the heritage edge, the signature, and a required interface member, an abstract member, or an override that changes the behavior of the class.",
-      "verdict": "approved"
-    },
-    {
-      "project_id": "next.js",
-      "candidate_count": 64,
-      "candidate_set_sha256": "7f650cfcd2d4fb0dd784603f63ed390894452b53de5ca461be20b2c3a84c24f2",
-      "evidence_sha256": "0b3198e26039cced724b066c68a5844bc7a0d5cdf2136572c57b18e3a36e6b29",
-      "reviewer": "independent-source-review-next.js",
-      "method": "Two reviewers checked each record against the pinned source. Confirmed uses were checked for a concrete source use of the exact member, with accessor reads and writes credited to the matching half. Contract-preserved records were checked for the declaration, the heritage edge, the signature, and a required interface member, an abstract member, or an override that changes the behavior of the class.",
-      "verdict": "approved"
-    },
-    {
-      "project_id": "query",
-      "candidate_count": 3,
-      "candidate_set_sha256": "8e2a04bfe7918a1145f796aa9c44f0b0fd48cf71e898e49fd1279668ef3ab2e9",
-      "evidence_sha256": "fc8e89177c3589366b08e300e0a86548a957e5db4292628f0095d68c7bba8bca",
-      "reviewer": "independent-source-review-query",
-      "method": "Two reviewers checked each record against the pinned source. Confirmed uses were checked for a concrete source use of the exact member, with accessor reads and writes credited to the matching half. Contract-preserved records were checked for the declaration, the heritage edge, the signature, and a required interface member, an abstract member, or an override that changes the behavior of the class.",
+      "method": "Two or more reviewers checked each record against the pinned source. Confirmed uses were checked for a concrete source use of the exact member, with accessor reads and writes credited to the matching half. Contract-preserved records were checked for the declaration, the heritage edge, the signature, and a required interface member, an abstract member, or an override that changes the behavior of the class.",
       "verdict": "approved"
     },
     {
@@ -57,7 +51,25 @@
       "candidate_set_sha256": "bb9a3d9822393f596327cc8d5dcfe2f627d3295c92011e3911cb6ca51358d543",
       "evidence_sha256": "1b22718975075a3145d6bbc8b332417edd7bf60b5732f4acdc093a9dc3209c3a",
       "reviewer": "independent-source-review-typescript",
-      "method": "Two reviewers checked each record against the pinned source. Confirmed uses were checked for a concrete source use of the exact member, with accessor reads and writes credited to the matching half. Contract-preserved records were checked for the declaration, the heritage edge, the signature, and a required interface member, an abstract member, or an override that changes the behavior of the class.",
+      "method": "Two or more reviewers checked each record against the pinned source. Confirmed uses were checked for a concrete source use of the exact member, with accessor reads and writes credited to the matching half. Contract-preserved records were checked for the declaration, the heritage edge, the signature, and a required interface member, an abstract member, or an override that changes the behavior of the class.",
+      "verdict": "approved"
+    },
+    {
+      "project_id": "next.js",
+      "candidate_count": 64,
+      "candidate_set_sha256": "7f650cfcd2d4fb0dd784603f63ed390894452b53de5ca461be20b2c3a84c24f2",
+      "evidence_sha256": "0b3198e26039cced724b066c68a5844bc7a0d5cdf2136572c57b18e3a36e6b29",
+      "reviewer": "independent-source-review-next.js",
+      "method": "Two or more reviewers checked each record against the pinned source. Confirmed uses were checked for a concrete source use of the exact member, with accessor reads and writes credited to the matching half. Contract-preserved records were checked for the declaration, the heritage edge, the signature, and a required interface member, an abstract member, or an override that changes the behavior of the class.",
+      "verdict": "approved"
+    },
+    {
+      "project_id": "query",
+      "candidate_count": 3,
+      "candidate_set_sha256": "8e2a04bfe7918a1145f796aa9c44f0b0fd48cf71e898e49fd1279668ef3ab2e9",
+      "evidence_sha256": "fc8e89177c3589366b08e300e0a86548a957e5db4292628f0095d68c7bba8bca",
+      "reviewer": "independent-source-review-query",
+      "method": "Two or more reviewers checked each record against the pinned source. Confirmed uses were checked for a concrete source use of the exact member, with accessor reads and writes credited to the matching half. Contract-preserved records were checked for the declaration, the heritage edge, the signature, and a required interface member, an abstract member, or an override that changes the behavior of the class.",
       "verdict": "approved"
     },
     {
@@ -66,7 +78,7 @@
       "candidate_set_sha256": "54609a071ff13c4f533f5288108376381acd289b0cbad11948a71508ee1270ba",
       "evidence_sha256": "a6484c021405984f93eae6476654e979bf7923807b963a7cd602e70124c5ce8b",
       "reviewer": "independent-source-review-vite",
-      "method": "Two reviewers checked each record against the pinned source. Confirmed uses were checked for a concrete source use of the exact member, with accessor reads and writes credited to the matching half. Contract-preserved records were checked for the declaration, the heritage edge, the signature, and a required interface member, an abstract member, or an override that changes the behavior of the class.",
+      "method": "Two or more reviewers checked each record against the pinned source. Confirmed uses were checked for a concrete source use of the exact member, with accessor reads and writes credited to the matching half. Contract-preserved records were checked for the declaration, the heritage edge, the signature, and a required interface member, an abstract member, or an override that changes the behavior of the class.",
       "verdict": "approved"
     }
   ],
@@ -153,5 +165,14 @@
       "method": "Every removed declaration and at least one exact type-resolved use were checked against the pinned public Vitest source.",
       "verdict": "approved"
     }
-  ]
+  ],
+  "overruled_rejections": {
+    "tac_8c5953d7ac6adaa3348b": {
+      "reason": "The override changes the behavior of ConfiguredProject through the base type Project. The repository counts an override that changes class behavior as a preserved contract, also when no code calls the base method.",
+      "rejected_by": [
+        "a",
+        "b"
+      ]
+    }
+  }
 }
