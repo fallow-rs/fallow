@@ -12,7 +12,9 @@ const PRELUDE = readMutationConstant("PRELUDE");
 const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const CLOCK_MS = 1_767_225_600_000;
 
-const ORIGINAL = `let calls = 0;
+const ORIGINAL = `import { spawn } from "node:child_process";
+
+let calls = 0;
 
 export function next(): number {
   calls = calls + 1;
@@ -60,6 +62,22 @@ export async function pause(): Promise<number> {
   await new Promise((resolve) => setTimeout(resolve, 1));
   return 1;
 }
+
+export function tally(): number {
+  globalThis.fallowTally = (globalThis.fallowTally ?? 0) + 1;
+  return globalThis.fallowTally;
+}
+
+export function busy(): number {
+  const end = Date.now() + 20;
+  while (Date.now() < end) {}
+  return 1;
+}
+
+export function spawnLong(): number {
+  spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "inherit" });
+  return 1;
+}
 `;
 
 const m = (id, mutated, original) =>
@@ -67,6 +85,8 @@ const m = (id, mutated, original) =>
 
 const INSTRUMENTED = `// @ts-nocheck
 ${PRELUDE}
+import { spawn } from "node:child_process";
+
 let calls = 0;
 
 export function next(): number {
@@ -114,6 +134,22 @@ export function drain(limit: number): number {
 export async function pause(): Promise<number> {
   await new Promise((resolve) => setTimeout(resolve, ${m("r10", "60000", "1")}));
   return 1;
+}
+
+export function tally(): number {
+  globalThis.fallowTally = (globalThis.fallowTally ?? 0) + ${m("r11", "10", "1")};
+  return globalThis.fallowTally;
+}
+
+export function busy(): number {
+  const end = Date.now() + 20;
+  while (Date.now() < end) {}
+  return ${m("r12", "2", "1")};
+}
+
+export function spawnLong(): number {
+  spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "inherit" });
+  return ${m("r13", "2", "1")};
 }
 `;
 
@@ -236,8 +272,14 @@ const replaySuite = (label, options) => {
 
     test("the clock is fixed, so a value from the clock is the same on each call", async () => {
       const result = await project.replay({ export: "age", mutant_id: "r3", args: [10] });
-      assert.deepEqual(valuesOf(result, "original"), [CLOCK_MS - 10, CLOCK_MS - 10, CLOCK_MS - 10]);
-      assert.deepEqual(valuesOf(result, "mutant"), [CLOCK_MS + 10, CLOCK_MS + 10, CLOCK_MS + 10]);
+      const original = valuesOf(result, "original");
+      const mutant = valuesOf(result, "mutant");
+      // The runner can read the clock while it loads the module, so the
+      // value is near the fixed start, and the same on each call of a side.
+      assert.equal(new Set(original).size, 1);
+      assert.equal(new Set(mutant).size, 1);
+      assert.equal(mutant[0] - original[0], 20);
+      assert.ok(Math.abs(original[0] - (CLOCK_MS - 10)) < 1000, String(original[0]));
     });
 
     test("Math.random has a fixed seed, so each call of a side gets the same value", async () => {
@@ -293,6 +335,45 @@ const replaySuite = (label, options) => {
       });
       assert.deepEqual(outcomesOf(result, "original"), ["returned", "returned", "returned"]);
       assert.deepEqual(outcomesOf(result, "mutant"), ["timed_out", "timed_out", "timed_out"]);
+    });
+
+    test("a global that one call sets never reaches the next call or the other side", async () => {
+      const result = await project.replay({ export: "tally", mutant_id: "r11" });
+      assert.deepEqual(valuesOf(result, "original"), [1, 1, 1]);
+      assert.deepEqual(valuesOf(result, "mutant"), [10, 10, 10]);
+    });
+
+    test("a busy wait on the clock ends, because each clock read moves the fixed clock", async () => {
+      const result = await project.replay({
+        export: "busy",
+        mutant_id: "r12",
+        call_timeout_ms: 2000,
+      });
+      assert.deepEqual(outcomesOf(result, "original"), ["returned", "returned", "returned"]);
+      assert.deepEqual(valuesOf(result, "mutant"), [2, 2, 2]);
+    });
+
+    test("a child process that outlives its call neither delays nor fails the replay", async () => {
+      const started = performance.now();
+      const result = await project.replay({
+        export: "spawnLong",
+        mutant_id: "r13",
+        calls: 1,
+        call_timeout_ms: 2000,
+      });
+      assert.deepEqual(valuesOf(result, "original"), [1]);
+      assert.deepEqual(valuesOf(result, "mutant"), [2]);
+      assert.ok(performance.now() - started < 20_000, "the replay waited for the child");
+    });
+
+    test("a call limit that a timer cannot hold is a bad request", async () => {
+      const result = await project.replay({
+        export: "next",
+        mutant_id: "r1",
+        call_timeout_ms: 2 ** 31,
+      });
+      assert.equal(result.type, "error");
+      assert.equal(result.error.code, "bad-request");
     });
 
     test("an export that is not a function is not callable", async () => {

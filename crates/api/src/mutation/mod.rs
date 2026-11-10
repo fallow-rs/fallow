@@ -79,6 +79,9 @@ pub struct MutationReplayOptions {
     pub file: String,
     /// The id of the mutant.
     pub mutant_id: String,
+    /// The original byte span of the mutant. Two mutants can share an id
+    /// in runs of other scopes, so the span selects the mutant.
+    pub span: (u32, u32),
     /// The operator of the mutant, which finds the mutant faster and also
     /// for an opt-in operator. `None` tries each operator.
     pub operator: Option<Operator>,
@@ -91,7 +94,8 @@ pub struct MutationReplayOptions {
     pub runtime: Option<PathBuf>,
     /// The config file of the test runner, as for a run.
     pub runner_config: Option<PathBuf>,
-    /// The time limit of one call. `None` uses 5 seconds.
+    /// The time limit of one call, at most 10 minutes. `None` uses 5
+    /// seconds.
     pub call_timeout: Option<Duration>,
     /// The timeout of the companion `init`. `None` uses 120 seconds.
     pub runner_timeout: Option<Duration>,

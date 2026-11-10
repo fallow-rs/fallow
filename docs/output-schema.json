@@ -37216,7 +37216,7 @@
         },
         "duration_ms": {
           "type": "integer",
-          "description": "The time of the replay request, in milliseconds."
+          "description": "The wall time of the replay request, in milliseconds. It differs\nbetween two replays of the same input."
         }
       },
       "required": [
@@ -37252,7 +37252,7 @@
         {
           "type": "string",
           "const": "timeout",
-          "description": "A call did not end before the call timeout, or the replay did not end\nbefore its wall limit. The mutant can hang."
+          "description": "A call did not end before the call timeout, or the replay did not end\nbefore its wall limit. The module load, the original or the mutant\ncan block."
         },
         {
           "type": "string",

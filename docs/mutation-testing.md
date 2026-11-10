@@ -2015,10 +2015,18 @@ imports. It runs no test.
   whose declaration holds the function of the mutant: `export function f`,
   `export const f = () => {}`, `export default`, or a local function that an
   `export { f as g }` list exports. A mutant in a nested function calls the
-  outer export. A mutant in top-level code, or in a function that no export
-  holds, needs `--export`, for example the export that reads the value.
+  outer export. A class or an object literal is not a function, so a mutant
+  in a method needs `--export`. A mutant in top-level code, or in a function
+  that no callable export holds, needs `--export` too, for example the
+  export that reads the value.
+- `--call-timeout <duration>` sets the limit of one call (default `5s`, at
+  most `10m`). Another value exits with code 2 and
+  `FALLOW_INVALID_MUTATION_OPTIONS`.
 - The replay needs a `fresh` packet. A stale mutant exits with code 2 and
-  `FALLOW_MUTATION_REPLAY_STALE`.
+  `FALLOW_MUTATION_REPLAY_STALE`. The replay finds the mutant by its id and
+  its span. When the current file gives no such mutant, it exits with code 2
+  and `FALLOW_MUTATION_UNKNOWN_MUTANT`. `--args` that is not a JSON array
+  exits with code 2 and `FALLOW_INVALID_MUTATION_OPTIONS`.
 - The Vitest and `node:test` runners replay. The `bun test` runner exits
   with code 2 and `FALLOW_MUTATION_REPLAY_UNSUPPORTED`. A companion failure
   exits with code 2 and `FALLOW_MUTATION_REPLAY_FAILED`.
@@ -2028,14 +2036,16 @@ imports. It runs no test.
 The replay calls each side three times, in turns: original, mutant,
 original, mutant, original, mutant. A side is stable when each of its calls
 gives the same outcome and the same value. The comparison ignores the key
-order of an object, because a deep equality check of a test does not see it.
+order of an object and the order of a set and a map, because a deep
+equality check of a test does not see it. An outcome is part of the value:
+a `threw` call never equals a `returned` call.
 
 | Verdict | Meaning |
 |---|---|
 | `witness` | Both sides are stable, and they differ. A test with this input can kill the mutant. |
 | `no_witness_found` | Both sides are stable and equal. This input shows no difference. Another input can still show one. |
 | `unstable` | The calls of one side differ, for example from a source of random values that the replay does not fix. A difference that does not repeat is never a witness. |
-| `timeout` | A call did not end before the call limit (5 seconds), or the replay did not end before its wall limit. The mutant can hang. |
+| `timeout` | A call did not end before the call limit, or the replay did not end before its wall limit. The module load, the original or the mutant can block. |
 | `not_callable` | The export is not a function. |
 | `not_replayable` | The replay did not run: no export holds the mutant, or the file is a component file. `reason` says why. |
 
@@ -2055,36 +2065,53 @@ the output gives it as `replay.contract_version`. Version 1 has these rules:
   record for each call, in call order, with the side, the 1-based index, the
   outcome (`returned`, `threw`, `timed_out` or `not_callable`), the value and
   a short text. The API decides the verdict.
-- Each call loads the module again, so module state and a mutant in
-  top-level code never reach the next call. A switch in top-level code runs
-  once at import, so the load counts as part of the call: the mutant is
-  active when the module evaluates, and an error that the load throws is a
-  `threw` outcome. Vitest calls `vi.resetModules()` before each call.
-  `node:test` starts a new Node process for each call.
+- Each call runs in a new worker with new modules: Vitest runs the replay
+  test file once for each call, and `node:test` starts a new Node process
+  for each call. So module state, globals, the environment and the timers of
+  one call never reach the next call or the other side. A switch in
+  top-level code runs once at import, so the load counts as part of the
+  call: the mutant is active when the module evaluates, and an error that
+  the load throws is a `threw` outcome. On Unix, the end of a `node:test`
+  call stops each process that the call started.
 - Each call runs in an `AsyncLocalStorage` store with its own active mutant.
   A timer or a promise of one call reads the mutant of that call, also when
   it runs during a later call.
 - A Node process that a call starts inherits the side through the
   subprocess preload in `NODE_OPTIONS`, for the original and for the mutant.
-- In each call, `Date.now()`, `new Date()` and `Date()` give
-  2026-01-01T00:00:00Z, `performance.now()` gives 0, and `Math.random` starts
-  from seed 1. Values from the clock gave false witnesses before this rule.
-  Other sources (for example `crypto.randomUUID()`, the network or the file
-  system) are not fixed. They give `unstable`, never `witness`.
-- The replay of each mutant runs in its own worker: a new Vitest worker, or
-  a new Node process for each call. A call that runs past the call limit is
-  `timed_out`. A synchronous endless loop through instrumented code ends at
+- In each call, the clock starts at 2026-01-01T00:00:00Z for `Date.now()`,
+  `new Date()` and `Date()`, and at 0 for `performance.now()`. Each read
+  moves the clock by 1 ms, so a busy wait on the clock ends. `Math.random`
+  starts from seed 1. The runner can read the clock while it loads the
+  module, so a value can be some milliseconds after the start, but it is
+  the same on each call of a side. Values from the clock gave false
+  witnesses before this rule. Other sources (for example
+  `crypto.randomUUID()`, the network or the file system) are not fixed.
+  They give `unstable`, never `witness`.
+- A call that runs past the call limit is `timed_out`. The call timer uses
+  the timers of `node:timers`, so fake timers of the project do not stop it.
+  A synchronous endless loop of the mutant through instrumented code ends at
   the loop check. A loop that blocks the worker in other code ends at the
-  wall limit of the request: the API stops the companion, and the verdict is
-  `timeout`.
+  wall limit of the request (twice the call limit for each call, and 30
+  seconds): the API stops the companion, and the verdict is `timeout`.
 - Arguments use the replay encoding: JSON values, and objects with a
   `$replay` tag for `undefined` (`{"$replay": "undefined"}`), `NaN`,
   `Infinity` and `-0` (`{"$replay": "number", "value": "NaN"}`), bigints,
-  dates, regular expressions, maps, sets and typed arrays. Results use the
-  same encoding. A thrown error is `{"$replay": "error", "name", "message"}`
-  with no stack. A function, a symbol, a class instance, a proxy, a stream, a
-  DOM node, a cyclic value and an accessor property are not replayable as an
-  argument.
+  dates, regular expressions, maps, sets and typed arrays (`{"$replay":
+  "bytes", "type", "values"}`, with tagged special numbers). A plain object
+  with an own `$replay` key is `{"$replay": "object", "entries"}`. A
+  function, a symbol, a class instance (also a subclass of a built-in class,
+  such as `Buffer`), a proxy, a stream, a DOM node, a cyclic value and an
+  accessor property are not replayable as an argument. A hole of a sparse
+  array becomes `undefined`, and the extra own properties of an array, a map
+  or a date are not part of the value.
+- Results use the same encoding, with more tags for values that cannot be
+  arguments: `error` (`name` and `message`, no stack), `instance` (`class`
+  and the own enumerable `fields`), `function` (`name`), `symbol`
+  (`description`), `proxy`, `cycle`, `accessor`, `truncated` (more than 32
+  levels or 10,000 values) and `unreadable`. A `timed_out` call has the value
+  `null`, so read `outcome` before `value`. `text` is a short display text,
+  and `duration_ms` is wall time, so these two fields can differ between two
+  replays of the same input.
 
 ## Tasks
 

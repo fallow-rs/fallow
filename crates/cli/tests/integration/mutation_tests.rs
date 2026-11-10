@@ -2367,6 +2367,26 @@ fn inspect_replay_refuses_bad_args_a_stale_file_and_args_without_replay() {
     let without = mutation(root, &["inspect", &id, "--report", &plan, "--args", "[1]"]);
     assert_eq!(without.code, 2, "{}", without.stderr);
 
+    for limit in ["0s", "11m", "soon"] {
+        let (output, envelope) = json_mutation(
+            root,
+            &[
+                "inspect",
+                &id,
+                "--report",
+                &plan,
+                "--replay",
+                "--call-timeout",
+                limit,
+            ],
+        );
+        assert_eq!(output.code, 2, "{limit}: {}", output.stderr);
+        assert_eq!(
+            envelope["code"], "FALLOW_INVALID_MUTATION_OPTIONS",
+            "{limit}: {envelope}"
+        );
+    }
+
     fs::write(
         root.join("src/math.js"),
         "export const add = (a, b) => b + a;\n",

@@ -34,6 +34,8 @@ use crate::mutation::{MutationReplayOptions, MutationRunOptions, MutationRunScop
 const CALLS_PER_SIDE: u32 = 3;
 /// The default time limit of one call.
 const DEFAULT_CALL_TIMEOUT: Duration = Duration::from_secs(5);
+/// The longest time limit of one call. The companion refuses a longer one.
+const MAX_CALL_TIMEOUT: Duration = Duration::from_mins(10);
 /// The fixed `Date.now()` of each call: 2026-01-01T00:00:00Z.
 const REPLAY_CLOCK_MS: i64 = 1_767_225_600_000;
 /// The seed of `Math.random` in each call.
@@ -53,20 +55,54 @@ fn replay_error(message: impl Into<String>) -> crate::ProgrammaticError {
     mutation_error("FALLOW_MUTATION_REPLAY_FAILED", message).with_context("mutation.replay")
 }
 
-/// The operator sets that can give the mutant: its own operator, then each
-/// operator. A mutant id can depend on the other mutants of the file, so the
-/// second set is a fallback.
-fn operator_passes(operator: Option<Operator>) -> Vec<Vec<Operator>> {
-    let mut passes = Vec::new();
+/// The instrumentation options that can give the mutant, in order: its own
+/// operator, then each operator, each over the whole file and then over the
+/// span of the mutant only. A mutant id can depend on the other mutants of
+/// the file: a run of another scope can give the same id to another mutant
+/// with the same text, so the span selects the mutant.
+fn instrument_passes(operator: Option<Operator>, span: (u32, u32)) -> Vec<MutationOptions> {
+    let mut sets = Vec::new();
     if let Some(operator) = operator {
-        passes.push(vec![operator]);
+        sets.push(vec![operator]);
     }
-    passes.push(Operator::ALL.to_vec());
-    passes
+    sets.push(Operator::ALL.to_vec());
+    sets.into_iter()
+        .flat_map(|operators| {
+            [None, Some(vec![span])].map(|ranges| MutationOptions {
+                operators: operators.clone(),
+                ranges,
+            })
+        })
+        .collect()
 }
 
-/// Instruments `source` until a pass gives `mutant_id`, and finds the
-/// export to call.
+/// The export of the function of `mutant`, or the reason why none fits.
+fn export_of(
+    source: &str,
+    kind: SourceKind,
+    options: &MutationReplayOptions,
+    function: Option<&fallow_engine::mutation::FunctionRef>,
+) -> Result<String, String> {
+    match (&options.export, function) {
+        (Some(export), _) => Ok(export.clone()),
+        (None, Some(function)) => export_containing(source, kind, function.span).ok_or_else(|| {
+            format!(
+                "no callable export holds the function {}; pass --export to call an export of the file that runs it",
+                function
+                    .name
+                    .as_deref()
+                    .map_or_else(|| "of the mutant".to_owned(), |name| format!("`{name}`"))
+            )
+        }),
+        (None, None) => Err(
+            "the mutant is in top-level code; pass --export to call an export of the file that reads it"
+                .to_owned(),
+        ),
+    }
+}
+
+/// Instruments `source` until a pass gives `mutant_id` at its span, and
+/// finds the export to call.
 fn find_target(
     source: &str,
     options: &MutationReplayOptions,
@@ -75,11 +111,7 @@ fn find_target(
     let Some(kind) = SourceKind::from_path(file) else {
         return Ok(None);
     };
-    for operators in operator_passes(options.operator) {
-        let request = MutationOptions {
-            operators,
-            ranges: None,
-        };
+    for request in instrument_passes(options.operator, options.span) {
         let instrumented = match fallow_engine::mutation::instrument_source(source, file, &request)
         {
             Some(Ok(instrumented)) => instrumented,
@@ -99,23 +131,11 @@ fn find_target(
         let Some(mutant) = instrumented
             .mutants
             .iter()
-            .find(|mutant| mutant.id.as_str() == options.mutant_id)
+            .find(|mutant| mutant.id.as_str() == options.mutant_id && mutant.span == options.span)
         else {
             continue;
         };
-        let export = match (&options.export, &mutant.enclosing_function) {
-            (Some(export), _) => Ok(export.clone()),
-            (None, Some(function)) => export_containing(source, kind, function.span).ok_or_else(|| {
-                format!(
-                    "no export holds the function {}; pass --export to call an export of the file that runs it",
-                    function.name.as_deref().map_or_else(|| "of the mutant".to_owned(), |name| format!("`{name}`"))
-                )
-            }),
-            (None, None) => Err(
-                "the mutant is in top-level code; pass --export to call an export of the file that reads it"
-                    .to_owned(),
-            ),
-        };
+        let export = export_of(source, kind, options, mutant.enclosing_function.as_ref());
         return Ok(Some(Target {
             instrumented: instrumented.code,
             export,
@@ -124,8 +144,8 @@ fn find_target(
     Err(mutation_error(
         "FALLOW_MUTATION_UNKNOWN_MUTANT",
         format!(
-            "the current `{file}` gives no mutant `{}`",
-            options.mutant_id
+            "the current `{file}` gives no mutant `{}` at bytes {}..{}",
+            options.mutant_id, options.span.0, options.span.1
         ),
     )
     .with_context("mutation.mutantId")
@@ -141,9 +161,11 @@ fn without_calls(
     verdict: MutationReplayVerdict,
     reason: String,
     call_timeout: Duration,
-) -> MutationReplayOutput {
-    MutationReplayOutput {
-        contract_version: manifest().map_or(1, |manifest| manifest.replay.contract_version),
+) -> ProgrammaticResult<MutationReplayOutput> {
+    let manifest = manifest()
+        .map_err(|message| mutation_error("FALLOW_MUTATION_PROTOCOL_INVALID", message))?;
+    Ok(MutationReplayOutput {
+        contract_version: manifest.replay.contract_version,
         verdict,
         reason: Some(reason),
         export,
@@ -157,7 +179,7 @@ fn without_calls(
         seed: REPLAY_SEED,
         calls: Vec::new(),
         duration_ms: 0,
-    }
+    })
 }
 
 /// Sends `init` and checks the runner version and the replay capability.
@@ -296,7 +318,7 @@ fn completed(
 ) -> ProgrammaticResult<MutationReplayOutput> {
     check_calls(&result.calls, CALLS_PER_SIDE).map_err(replay_error)?;
     let verdict = verdict(&result.calls);
-    let mut output = without_calls(options, Some(export), verdict, String::new(), call_timeout);
+    let mut output = without_calls(options, Some(export), verdict, String::new(), call_timeout)?;
     output.reason = verdict_reason(verdict, output.export.as_deref().unwrap_or_default());
     output.duration_ms = result.duration_ms;
     output.calls = result
@@ -317,8 +339,9 @@ fn completed(
 /// one mutant, three times each, in turns, and gives the verdict. It runs
 /// project code: the module of the file and each module that it imports.
 ///
-/// Each call has a fresh module instance, a fixed clock and a fixed seed of
-/// `Math.random`. A mutant runs in its own worker with a wall limit. The
+/// Each call runs in its own worker with a fresh module instance, a clock
+/// that starts at a fixed time and a fixed seed of `Math.random`. The whole
+/// request has a wall limit. The
 /// verdict is never `equivalent`: equal results give `no_witness_found`.
 ///
 /// # Errors
@@ -329,6 +352,13 @@ pub fn replay_mutation(
     options: &MutationReplayOptions,
 ) -> ProgrammaticResult<MutationReplayOutput> {
     let call_timeout = options.call_timeout.unwrap_or(DEFAULT_CALL_TIMEOUT);
+    if call_timeout > MAX_CALL_TIMEOUT || call_timeout < Duration::from_millis(1) {
+        return Err(mutation_error(
+            "FALLOW_INVALID_MUTATION_OPTIONS",
+            "the replay call timeout must be from 1ms to 10m",
+        )
+        .with_context("mutation.replay.callTimeout"));
+    }
     let run_options = MutationRunOptions {
         analysis: options.analysis.clone(),
         scope: MutationRunScope::Paths(vec![options.file.clone().into()]),
@@ -349,13 +379,11 @@ pub fn replay_mutation(
         )
     };
     let Some(target) = find_target(&source, options)? else {
-        return Ok(not_replayable(
-            "a component file has no module exports to call".to_owned(),
-        ));
+        return not_replayable("a component file has no module exports to call".to_owned());
     };
     let export = match target.export {
         Ok(export) => export,
-        Err(reason) => return Ok(not_replayable(reason)),
+        Err(reason) => return not_replayable(reason),
     };
     let mut link = start_companion(&planned, options, &target.instrumented)?;
     let request = ReplayRequest {
@@ -383,14 +411,79 @@ pub fn replay_mutation(
                 Some(export),
                 MutationReplayVerdict::Timeout,
                 format!(
-                    "the replay did not end in its wall limit of {}s; a call blocks its worker, so the mutant can hang",
+                    "the replay did not end in its wall limit of {}s; the module load, the original or the mutant can block the worker, and a longer --call-timeout gives more time",
                     wall_limit.as_secs()
                 ),
                 call_timeout,
-            );
+            )?;
             output.duration_ms = millis(started.elapsed());
             Ok(output)
         }
         Err(fault) => Err(link_error("replay", &fault)),
+    }
+}
+
+#[cfg(test)]
+#[expect(clippy::expect_used, reason = "tests expect to keep the setup short")]
+mod tests {
+    use super::*;
+
+    const TWINS: &str =
+        "export const first = (a, b) => a + b;\nexport const second = (a, b) => a + b;\n";
+
+    fn span_of_nth(source: &str, needle: &str, nth: usize) -> (u32, u32) {
+        let start = source.match_indices(needle).nth(nth).expect("needle").0;
+        let start = u32::try_from(start).expect("small");
+        (start, start + u32::try_from(needle.len()).expect("small"))
+    }
+
+    /// The id that a run scoped to `span` gives the mutant of that span.
+    fn scoped_id(span: (u32, u32)) -> String {
+        let options = MutationOptions {
+            operators: Operator::ALL.to_vec(),
+            ranges: Some(vec![span]),
+        };
+        let instrumented = fallow_engine::mutation::instrument_source(TWINS, "src/a.js", &options)
+            .expect("layout")
+            .expect("instrumented");
+        instrumented
+            .mutants
+            .iter()
+            .find(|mutant| mutant.span == span)
+            .expect("the scoped mutant")
+            .id
+            .to_string()
+    }
+
+    #[test]
+    fn a_mutant_id_that_a_twin_shares_replays_the_mutant_at_its_own_span() {
+        let second = span_of_nth(TWINS, "a + b", 1);
+        let options = MutationReplayOptions {
+            file: "src/a.js".to_owned(),
+            mutant_id: scoped_id(second),
+            span: second,
+            ..MutationReplayOptions::default()
+        };
+        let target = find_target(TWINS, &options)
+            .expect("no error")
+            .expect("a target");
+        assert_eq!(target.export.as_deref(), Ok("second"));
+        assert!(target.instrumented.contains(&options.mutant_id));
+    }
+
+    #[test]
+    fn an_id_at_another_span_is_an_unknown_mutant() {
+        let second = span_of_nth(TWINS, "a + b", 1);
+        let options = MutationReplayOptions {
+            file: "src/a.js".to_owned(),
+            mutant_id: scoped_id(second),
+            span: (0, 1),
+            ..MutationReplayOptions::default()
+        };
+        let error = find_target(TWINS, &options).err().expect("an error");
+        assert_eq!(
+            error.code.as_deref(),
+            Some("FALLOW_MUTATION_UNKNOWN_MUTANT")
+        );
     }
 }

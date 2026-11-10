@@ -136,6 +136,8 @@ export const validateRun = (request) => {
 
 /** The most calls of each side that one replay request can ask for. */
 const MAX_REPLAY_CALLS = 10;
+/** The longest call limit: 10 minutes, well inside the range of a timer. */
+const MAX_REPLAY_CALL_TIMEOUT_MS = 600_000;
 
 /**
  * Checks the body of a `replay` request: one export of one source file,
@@ -159,8 +161,9 @@ export const validateReplay = (request) => {
     `calls must be an integer from 1 to ${MAX_REPLAY_CALLS}`,
   );
   expectRequest(
-    isPositiveInteger(request.call_timeout_ms),
-    "call_timeout_ms must be a positive integer",
+    isPositiveInteger(request.call_timeout_ms) &&
+      request.call_timeout_ms <= MAX_REPLAY_CALL_TIMEOUT_MS,
+    `call_timeout_ms must be an integer from 1 to ${MAX_REPLAY_CALL_TIMEOUT_MS}`,
   );
   expectRequest(Number.isSafeInteger(request.clock_ms), "clock_ms must be an integer");
   expectRequest(Number.isSafeInteger(request.seed), "seed must be an integer");

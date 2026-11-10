@@ -52,6 +52,11 @@ const specialNumber = (value) => {
 const typedArrayName = (value) =>
   Object.keys(TYPED_ARRAYS).find((name) => value instanceof TYPED_ARRAYS[name]) ?? null;
 
+/** The prototypes of the built-in classes that an argument can hold. */
+const BUILT_IN_PROTOTYPES = new Set(
+  [Array, Date, RegExp, Map, Set, ...Object.values(TYPED_ARRAYS)].map((type) => type.prototype),
+);
+
 const isPlainPrototype = (value) => {
   const prototype = Object.getPrototypeOf(value);
   return prototype === Object.prototype || prototype === null;
@@ -112,13 +117,20 @@ const createEncoder = (strict) => {
       }
       const descriptor = Reflect.getOwnPropertyDescriptor(value, key);
       if (!descriptor.enumerable) continue;
-      fields[key] =
+      const field =
         descriptor.get === undefined && descriptor.set === undefined
           ? encode(descriptor.value, path, depth + 1)
           : opaque({
               reason: `an accessor property \`${key}\``,
               tag: () => ({ [TAG]: "accessor" }),
             });
+      // A plain assignment of the key `__proto__` sets the prototype.
+      Object.defineProperty(fields, key, {
+        value: field,
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
     }
     return fields;
   };
@@ -164,14 +176,30 @@ const createEncoder = (strict) => {
       (value) => ({
         [TAG]: "bytes",
         type: typedArrayName(value),
-        values: [...value].map((item) => (typeof item === "bigint" ? String(item) : item)),
+        values: [...value].map((item) =>
+          typeof item === "bigint" ? String(item) : PRIMITIVES.number(item),
+        ),
       }),
     ],
   ];
 
-  const encodeObject = (value, path, depth) => {
+  /**
+   * The encoder of a built-in class. A subclass (for example `Buffer`)
+   * decodes as its base class, without its methods, so it is not the same
+   * argument.
+   */
+  const builtInEncoder = (value) => {
     const builtIn = BUILT_INS.find(([matches]) => matches(value));
-    if (builtIn !== undefined) return builtIn[1](value, path, depth);
+    if (builtIn === undefined) return undefined;
+    if (strict && !BUILT_IN_PROTOTYPES.has(Object.getPrototypeOf(value))) {
+      throw new NotReplayable(`a class instance (${className(value) || "anonymous"})`);
+    }
+    return builtIn[1];
+  };
+
+  const encodeObject = (value, path, depth) => {
+    const builtIn = builtInEncoder(value);
+    if (builtIn !== undefined) return builtIn(value, path, depth);
     if (value instanceof Error && !strict) {
       return { [TAG]: "error", name: String(value.name), message: String(value.message) };
     }
@@ -243,7 +271,9 @@ const DECODERS = {
   bytes: (value) => {
     const Type = TYPED_ARRAYS[value.type];
     if (Type === undefined) throw new TypeError(`unknown typed array ${value.type}`);
-    return Type.from(value.values, (item) => (typeof item === "string" ? BigInt(item) : item));
+    return Type.from(value.values, (item) =>
+      typeof item === "string" ? BigInt(item) : decodeValue(item),
+    );
   },
   object: (value) =>
     Object.fromEntries(value.entries.map(([key, item]) => [key, decodeValue(item)])),

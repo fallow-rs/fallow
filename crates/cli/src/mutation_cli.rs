@@ -68,6 +68,10 @@ pub enum MutationSubcommand {
         /// function).
         #[arg(long = "export", value_name = "NAME", requires = "replay")]
         replay_export: Option<String>,
+        /// The time limit of one replay call, for example `30s` (default:
+        /// 5s, at most 10m). A call past it is `timed_out`.
+        #[arg(long = "call-timeout", value_name = "DURATION", requires = "replay")]
+        call_timeout: Option<String>,
     },
     /// List the open tasks of a saved report as one batch. Runs no code.
     ///
@@ -604,11 +608,13 @@ pub fn run(input: &MutationCliInput<'_>) -> ExitCode {
         replay,
         replay_args,
         replay_export,
+        call_timeout,
     }) = &input.subcommand
     {
         let replay = replay.then(|| ReplayFlags {
             args: replay_args.as_deref(),
             export: replay_export.as_deref(),
+            call_timeout: call_timeout.as_deref(),
         });
         return run_inspect(input, mutant_id, report.as_deref(), replay);
     }
@@ -1033,6 +1039,7 @@ fn project_ancestors(root: &Path) -> Vec<PathBuf> {
 struct ReplayFlags<'a> {
     args: Option<&'a str>,
     export: Option<&'a str>,
+    call_timeout: Option<&'a str>,
 }
 
 /// Parses the `--args` value: a JSON array of replay values.
@@ -1075,6 +1082,15 @@ fn add_replay(
         .with_context("mutation.replay")
         .with_help("run `fallow mutation` again for a report of the current files"));
     }
+    let call_timeout = match flags.call_timeout {
+        Some(text) => Some(parse_duration(text).ok_or_else(|| {
+            input_error(
+                format!("--call-timeout `{text}` is not a duration such as 500ms, 30s or 2m"),
+                "mutation.replay.callTimeout",
+            )
+        })?),
+        None => None,
+    };
     let options = run_options(input)?;
     let replay = fallow_api::replay_mutation(&fallow_api::MutationReplayOptions {
         analysis: AnalysisOptions {
@@ -1083,12 +1099,13 @@ fn add_replay(
         },
         file: packet.location.file.clone(),
         mutant_id: packet.location.mutant_id.clone(),
+        span: packet.location.span,
         operator: fallow_api::mutation::Operator::from_name(&packet.location.operator),
         export: flags.export.map(str::to_owned),
         args,
         runtime: options.runtime,
         runner_config: options.runner_config,
-        call_timeout: None,
+        call_timeout,
         runner_timeout: options.runner_timeout,
     })?;
     packet.replay = Some(replay);

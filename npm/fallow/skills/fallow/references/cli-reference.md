@@ -2278,12 +2278,12 @@ fallow mutation inspect <mutant-id> --replay --args '[2, 3]' --format json --qui
 
 The replay calls the export that holds the mutated function with `--args` on the original and on the mutant, three times each, in turns. It runs project code, but no test. Read `replay.verdict`:
 
-- `witness`: each side repeats its result, and the sides differ. Write a test with this input that asserts the original result (`calls[].value` of the `original` side).
+- `witness`: each side repeats its result, and the sides differ. Read `calls[]` of the `original` side. When its `outcome` is `returned`, write a test with this input that asserts that `value`. When its `outcome` is `threw`, assert that the call throws (`value.name`, `value.message`).
 - `no_witness_found`: this input shows no difference. Try another input. This verdict never means that the mutant is equivalent.
 - `unstable`: one side changes between calls (for example `crypto.randomUUID()`). Do not use the difference as a test oracle.
-- `timeout`, `not_callable`, `not_replayable`: read `replay.reason`. A function that no export holds needs `--export <name>` of an export that calls it.
+- `timeout`, `not_callable`, `not_replayable`: read `replay.reason`. A function that no callable export holds (a method of a class or of an object literal, or a local function) needs `--export <name>` of an export that calls it. `--call-timeout 30s` gives a slow call more time.
 
-Each call loads a fresh module with `Date.now()` fixed and a fixed `Math.random` seed. Arguments and results use the replay encoding: JSON, plus `{"$replay": "undefined"}` and other `$replay` tags for values that JSON cannot hold. Only the Vitest and `node:test` runners replay.
+Each call runs in a new worker with a fresh module, a clock that starts at a fixed time, and a fixed `Math.random` seed. Arguments and results use the replay encoding: JSON, plus objects with a `$replay` tag for values that JSON cannot hold. Decode them when you write the test: `{"$replay": "undefined"}` is `undefined`, `{"$replay": "number", "value": "NaN"}` is `NaN`, `{"$replay": "bigint", "value": "12"}` is `12n`, and `map`, `set`, `date`, `regexp` and `bytes` are a `Map`, a `Set`, a `Date`, a `RegExp` and a typed array. Only the Vitest and `node:test` runners replay.
 
 ## `ci`: Provider-Aware Review Automation
 

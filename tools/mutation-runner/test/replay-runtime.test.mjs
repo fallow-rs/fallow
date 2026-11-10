@@ -4,7 +4,7 @@ import test from "node:test";
 
 import { installFallowMutation } from "../src/runtime/global.mjs";
 import { decodeValue, encodeArgs, encodeResult } from "../src/runtime/replay-value.mjs";
-import { installDeterminism } from "../src/runtime/replay.mjs";
+import { installDeterminism, runCall } from "../src/runtime/replay.mjs";
 
 const pause = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -54,8 +54,9 @@ test("the replay clock and random source are fixed and restored", () => {
   const again = [Date.now(), new Date().getTime(), Math.random(), Math.random()];
   second.restore();
   assert.deepEqual(again, values);
+  // Each read moves the clock by 1 ms, so a busy wait on the clock ends.
   assert.equal(values[0], 1_767_225_600_000);
-  assert.equal(values[1], 1_767_225_600_000);
+  assert.equal(values[1], 1_767_225_600_001);
   assert.notEqual(values[2], values[3]);
   assert.ok(values[2] >= 0 && values[2] < 1);
   assert.equal(Date.now, realNow);
@@ -145,4 +146,65 @@ test("a result encodes each value, also one that cannot be an argument", () => {
   const cyclic = { a: 1 };
   cyclic.self = cyclic;
   assert.deepEqual(encodeResult(cyclic), { a: 1, self: { $replay: "cycle" } });
+});
+
+test("typed arrays keep NaN, Infinity and -0", () => {
+  const encoded = encodeArgs([new Float64Array([Number.NaN, -0, Number.POSITIVE_INFINITY])]);
+  assert.equal(encoded.ok, true, JSON.stringify(encoded));
+  const [decoded] = decodeValue(JSON.parse(JSON.stringify(encoded.value)));
+  assert.equal(Number.isNaN(decoded[0]), true);
+  assert.equal(Object.is(decoded[1], -0), true);
+  assert.equal(decoded[2], Number.POSITIVE_INFINITY);
+  assert.notDeepEqual(
+    JSON.stringify(encodeResult(new Float64Array([Number.NaN]))),
+    JSON.stringify(encodeResult(new Float64Array([Number.POSITIVE_INFINITY]))),
+  );
+});
+
+test("a result keeps an own __proto__ key", () => {
+  assert.notDeepEqual(encodeResult(JSON.parse('{"__proto__":{"x":1}}')), encodeResult({}));
+});
+
+test("a subclass of a built-in class is not replayable as an argument", () => {
+  class Registry extends Map {}
+  for (const value of [new Registry(), Buffer.from("a")]) {
+    const encoded = encodeArgs([value]);
+    assert.equal(encoded.ok, false, value.constructor.name);
+    assert.match(encoded.reason, /class instance/u);
+  }
+});
+
+test("a value whose text cannot be read still returns", async () => {
+  const control = installFallowMutation();
+  control.enableContext(new AsyncLocalStorage());
+  const odd = {
+    [Symbol.for("nodejs.util.inspect.custom")]: () => {
+      throw new Error("no text");
+    },
+  };
+  const record = await runCall(
+    { export: "f", args: [], mutant_id: "m1", call_timeout_ms: 1000, clock_ms: 0, seed: 1 },
+    "original",
+    { control, load: async () => ({ f: () => odd }) },
+  );
+  assert.equal(record.outcome, "returned");
+  const badError = new Error("x");
+  Object.defineProperty(badError, "name", {
+    get: () => {
+      throw new Error("no name");
+    },
+  });
+  const thrown = await runCall(
+    { export: "f", args: [], mutant_id: "m1", call_timeout_ms: 1000, clock_ms: 0, seed: 1 },
+    "original",
+    {
+      control,
+      load: async () => ({
+        f: () => {
+          throw badError;
+        },
+      }),
+    },
+  );
+  assert.equal(thrown.outcome, "threw");
 });

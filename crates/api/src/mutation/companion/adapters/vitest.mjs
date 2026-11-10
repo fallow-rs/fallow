@@ -7,6 +7,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { CompanionError, expectRequest, isPlainObject } from "../protocol.mjs";
 import { overlayErrorsPath } from "../runtime/child.mjs";
 import { LOOP_TIMEOUT_NAME, WALL_LOOP_TIMEOUT_NAME } from "../runtime/global.mjs";
+import { SIDES } from "../runtime/replay.mjs";
 import { createWorkDir } from "./child-process.mjs";
 import { REUSED_POOLS, createReusedPool } from "./vitest-reuse.mjs";
 import {
@@ -735,6 +736,19 @@ const setVitestEnv = () => {
 };
 
 /**
+ * The project that loads a replay file: a project in Node (not browser mode)
+ * whose root holds the file, the deepest root first. Without such a project,
+ * the first project in Node, else the first project.
+ */
+const replayProject = (projects, path) => {
+  const inNode = projects.filter((project) => project.config.browser?.enabled !== true);
+  const holding = inNode
+    .filter((project) => !relative(project.config.root, path).startsWith(".."))
+    .toSorted((left, right) => right.config.root.length - left.config.root.length);
+  return holding[0] ?? inNode[0] ?? projects[0];
+};
+
+/**
  * Creates the Vitest adapter for an `init` request. It starts one Vitest
  * instance with no file parallelism and one worker, and keeps the project
  * `isolate` setting.
@@ -1054,24 +1068,12 @@ export const createAdapter = async (init) => {
     return (await runRequested(request, requested, false)).body;
   };
 
-  /**
-   * Runs the replay file as the only test of a run, in a new worker. The
-   * first project runs it, because the replay calls one export of a source
-   * file and needs no test file of a project.
-   */
-  const replay = async (request) => {
-    validateReplay(request);
-    const entry = replayEntry(overlay, request.file);
-    const testTimeoutMs = 2 * request.calls * request.call_timeout_ms + REPLAY_TEST_MARGIN_MS;
-    const [project] = vitest.projects;
+  /** Runs one replay call as the only test of a run, in a new worker. */
+  const replayCall = async (project, request, call) => {
+    const testTimeoutMs = request.call_timeout_ms + REPLAY_TEST_MARGIN_MS;
     for (const each of vitest.projects) {
-      each.provide(REPLAY_KEY, {
-        ...request,
-        module_path: entry.path,
-        test_timeout_ms: testTimeoutMs,
-      });
+      each.provide(REPLAY_KEY, { ...request, ...call, test_timeout_ms: testTimeoutMs });
     }
-    const started = performance.now();
     const result = await runSpecifications(() => [project.createSpecification(REPLAY_FILE)], {
       mutantId: null,
       bail: false,
@@ -1080,16 +1082,34 @@ export const createAdapter = async (init) => {
     const testCase = result.testModules.flatMap((testModule) => [
       ...testModule.children.allTests(),
     ])[0];
-    const calls = testCase?.meta().fallowReplay;
-    if (!Array.isArray(calls)) {
-      const errors = [
-        ...runErrors(result, root).map((error) => error.message),
-        ...(testCase?.result().errors ?? []).map((error) => errorMessage(error)),
-      ];
-      throw new CompanionError(
-        "internal",
-        `the replay test gave no result${errors.length > 0 ? `: ${errors.join("; ")}` : ""}`,
-      );
+    const record = testCase?.meta().fallowReplay;
+    if (isPlainObject(record)) return record;
+    const errors = [
+      ...runErrors(result, root).map((error) => error.message),
+      ...(testCase?.result().errors ?? []).map((error) => errorMessage(error)),
+    ];
+    throw new CompanionError(
+      "internal",
+      `the replay test gave no result${errors.length > 0 ? `: ${errors.join("; ")}` : ""}`,
+    );
+  };
+
+  /**
+   * Runs each call of the replay in its own run, so each call has a new
+   * worker: globals, the environment and leftover timers of one call never
+   * reach the next call or the other side.
+   */
+  const replay = async (request) => {
+    validateReplay(request);
+    const entry = replayEntry(overlay, request.file);
+    const project = replayProject(vitest.projects, entry.path);
+    const started = performance.now();
+    const calls = [];
+    for (let index = 1; index <= request.calls; index += 1) {
+      for (const side of SIDES) {
+        const record = await replayCall(project, request, { side, module_path: entry.path });
+        calls.push({ side, index, ...record });
+      }
     }
     return { calls, duration_ms: Math.round(performance.now() - started) };
   };

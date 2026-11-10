@@ -1386,7 +1386,8 @@ pub enum MutationReplayVerdict {
     /// difference is never a witness.
     Unstable,
     /// A call did not end before the call timeout, or the replay did not end
-    /// before its wall limit. The mutant can hang.
+    /// before its wall limit. The module load, the original or the mutant
+    /// can block.
     Timeout,
     /// The export is not a function.
     NotCallable,
@@ -1488,7 +1489,8 @@ pub struct MutationReplayOutput {
     pub seed: i64,
     /// Each call, in call order.
     pub calls: Vec<MutationReplayCall>,
-    /// The time of the replay request, in milliseconds.
+    /// The wall time of the replay request, in milliseconds. It differs
+    /// between two replays of the same input.
     pub duration_ms: u64,
 }
 

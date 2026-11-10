@@ -1,8 +1,8 @@
 //! The export that a replay calls for one function of a module.
 
 use oxc_ast::ast::{
-    BindingPattern, Declaration, ExportDefaultDeclarationKind, ModuleExportName, Program,
-    Statement, VariableDeclaration,
+    BindingPattern, Declaration, ExportDefaultDeclarationKind, Expression, ModuleExportName,
+    Program, Statement, VariableDeclaration,
 };
 use oxc_span::{GetSpan, Span};
 
@@ -10,7 +10,9 @@ use crate::SourceKind;
 
 /// The name of the export whose declaration holds `span`, for example the
 /// function of a mutant. A mutant in a nested function gives the export of
-/// the outer function. `default` names a default export.
+/// the outer function. `default` names a default export. A class or an
+/// object literal that holds the function is not a function to call, so it
+/// gives `None`.
 ///
 /// The lookup reads the top-level statements only: an export declaration
 /// (`export function f`, `export const f = () => {}`, `export default`), and
@@ -44,6 +46,12 @@ fn declarator_holding<'a>(
 ) -> Option<&'a str> {
     declaration.declarations.iter().find_map(|declarator| {
         let init = declarator.init.as_ref()?;
+        if matches!(
+            init,
+            Expression::ObjectExpression(_) | Expression::ClassExpression(_)
+        ) {
+            return None;
+        }
         holds(init.span(), target)
             .then(|| binding_name(&declarator.id))
             .flatten()
@@ -55,9 +63,6 @@ fn local_holding<'a>(declaration: &'a Declaration<'_>, target: Span) -> Option<&
     match declaration {
         Declaration::FunctionDeclaration(function) if holds(function.span, target) => {
             function.id.as_ref().map(|id| id.name.as_str())
-        }
-        Declaration::ClassDeclaration(class) if holds(class.span, target) => {
-            class.id.as_ref().map(|id| id.name.as_str())
         }
         Declaration::VariableDeclaration(variables) => declarator_holding(variables, target),
         _ => None,
@@ -72,8 +77,10 @@ fn declared_export(program: &Program<'_>, target: Span) -> Option<String> {
         Statement::ExportDefaultDeclaration(export) => {
             let span = match &export.declaration {
                 ExportDefaultDeclarationKind::FunctionDeclaration(function) => function.span,
-                ExportDefaultDeclarationKind::ClassDeclaration(class) => class.span,
-                ExportDefaultDeclarationKind::TSInterfaceDeclaration(_) => return None,
+                ExportDefaultDeclarationKind::ClassDeclaration(_)
+                | ExportDefaultDeclarationKind::TSInterfaceDeclaration(_)
+                | ExportDefaultDeclarationKind::ObjectExpression(_)
+                | ExportDefaultDeclarationKind::ClassExpression(_) => return None,
                 expression => expression.span(),
             };
             holds(span, target).then(|| "default".to_owned())
@@ -90,9 +97,6 @@ fn listed_export(program: &Program<'_>, target: Span) -> Option<String> {
     let local = program.body.iter().find_map(|statement| match statement {
         Statement::FunctionDeclaration(function) if holds(function.span, target) => {
             function.id.as_ref().map(|id| id.name.as_str())
-        }
-        Statement::ClassDeclaration(class) if holds(class.span, target) => {
-            class.id.as_ref().map(|id| id.name.as_str())
         }
         Statement::VariableDeclaration(variables) => declarator_holding(variables, target),
         _ => None,
@@ -165,6 +169,18 @@ mod tests {
         assert_eq!(lookup(source, "n + 1"), None);
         let reexport = "function add(a, b) { return a + b; }\nexport { add } from './other';";
         assert_eq!(lookup(reexport, "a + b"), None);
+    }
+
+    #[test]
+    fn a_class_or_an_object_that_holds_the_function_is_not_callable() {
+        let class = "export class Box { get(n) { return n + 1; } }";
+        assert_eq!(lookup(class, "n + 1"), None);
+        let object = "export const config = { run(n) { return n + 1; } };";
+        assert_eq!(lookup(object, "n + 1"), None);
+        let default_object = "export default { run(n) { return n + 1; } };";
+        assert_eq!(lookup(default_object, "n + 1"), None);
+        let listed = "class Box { get(n) { return n + 1; } }\nexport { Box };";
+        assert_eq!(lookup(listed, "n + 1"), None);
     }
 
     #[test]

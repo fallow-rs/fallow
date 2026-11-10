@@ -22047,7 +22047,8 @@ seed: number
  */
 calls: MutationReplayCall[]
 /**
- * The time of the replay request, in milliseconds.
+ * The wall time of the replay request, in milliseconds. It differs
+ * between two replays of the same input.
  */
 duration_ms: number
 }

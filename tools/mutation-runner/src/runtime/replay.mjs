@@ -9,10 +9,13 @@ export const SIDES = ["original", "mutant"];
 const TEXT_LIMIT = 200;
 const LOOP_TIMEOUT_NAMES = new Set([LOOP_TIMEOUT_NAME, WALL_LOOP_TIMEOUT_NAME]);
 
-// The real timer functions, read when the module loads. The call timeout
-// must fire also when the user code replaces the timers.
-const realSetTimeout = globalThis.setTimeout;
-const realClearTimeout = globalThis.clearTimeout;
+// The real timer functions. The call timeout must fire also when a setup
+// file of the project or the user code installs fake timers on the global
+// object, so Node gives them from `node:timers`, which fake timers leave as
+// they are.
+const timers = globalThis.process?.getBuiltinModule?.("node:timers") ?? globalThis;
+const realSetTimeout = timers.setTimeout;
+const realClearTimeout = timers.clearTimeout;
 
 const inspect = globalThis.process?.getBuiltinModule?.("node:util")?.inspect;
 
@@ -29,36 +32,43 @@ const seededRandom = (seed) => {
 };
 
 /**
- * Fixes the clock and the random source for one replay call: `Date.now()`,
- * `new Date()` and `Date()` give `clockMs`, `performance.now()` gives 0, and
- * `Math.random` starts from `seed`. Each call starts from the same values,
- * so a value from the clock or from `Math.random` cannot give a difference
- * between the calls. `restore` puts the real functions back. A date that
- * the real constructor made is still an `instanceof Date`.
+ * Fixes the clock and the random source for one replay call. The clock
+ * starts at `clockMs` and moves 1 ms at each read of `Date.now()`, `new
+ * Date()`, `Date()` or `performance.now()` (which starts at 0), so a busy
+ * wait on the clock ends. `Math.random` starts from `seed`. Each call starts
+ * from the same values, so a value from the clock or from `Math.random`
+ * gives no difference between the calls of a side that reads in the same
+ * order. `restore` puts the real functions back. A date that the real
+ * constructor made is still an `instanceof Date`.
  */
 export const installDeterminism = ({ clockMs, seed }) => {
   const RealDate = globalThis.Date;
   const realRandom = Math.random;
   const performance = globalThis.performance;
   const realPerformanceNow = performance?.now;
+  let reads = 0;
+  const tick = () => {
+    reads += 1;
+    return reads - 1;
+  };
   class ReplayDate extends RealDate {
     constructor(...args) {
-      if (args.length === 0) super(clockMs);
+      if (args.length === 0) super(clockMs + tick());
       else super(...args);
     }
 
     static now() {
-      return clockMs;
+      return clockMs + tick();
     }
   }
   Object.defineProperty(ReplayDate, Symbol.hasInstance, {
     value: (value) => value instanceof RealDate,
   });
   globalThis.Date = new Proxy(ReplayDate, {
-    apply: () => new RealDate(clockMs).toString(),
+    apply: () => new RealDate(clockMs + tick()).toString(),
   });
   Math.random = seededRandom(seed);
-  if (typeof realPerformanceNow === "function") performance.now = () => 0;
+  if (typeof realPerformanceNow === "function") performance.now = () => tick();
   return {
     restore: () => {
       globalThis.Date = RealDate;
@@ -68,14 +78,21 @@ export const installDeterminism = ({ clockMs, seed }) => {
   };
 };
 
+const readText = (value, threw) => {
+  if (threw && value instanceof Error) return `${value.name}: ${value.message}`;
+  if (typeof inspect === "function") {
+    return inspect(value, { depth: 4, breakLength: Number.POSITIVE_INFINITY });
+  }
+  return String(value);
+};
+
+/** A short text of a value. A value whose text throws gets a placeholder. */
 const textOf = (value, threw) => {
   let text;
-  if (threw && value instanceof Error) {
-    text = `${value.name}: ${value.message}`;
-  } else if (typeof inspect === "function") {
-    text = inspect(value, { depth: 4, breakLength: Number.POSITIVE_INFINITY });
-  } else {
-    text = String(value);
+  try {
+    text = readText(value, threw);
+  } catch {
+    text = "(a value with no readable text)";
   }
   return text.length > TEXT_LIMIT ? `${text.slice(0, TEXT_LIMIT - 1)}…` : text;
 };
@@ -85,7 +102,13 @@ const record = (outcome, value) => {
   return { outcome, value: encodeResult(value), text: textOf(value, outcome === "threw") };
 };
 
-const isLoopTimeout = (error) => LOOP_TIMEOUT_NAMES.has(error?.name);
+const isLoopTimeout = (error) => {
+  try {
+    return LOOP_TIMEOUT_NAMES.has(error?.name);
+  } catch {
+    return false;
+  }
+};
 
 /** Loads the module, calls the export and awaits a returned thenable. */
 const invoke = async (request, load) => {
@@ -120,19 +143,4 @@ export const runCall = async (request, side, { load, control, beforeCall = () =>
     control.finishCall();
     determinism.restore();
   }
-};
-
-/**
- * Runs `request.calls` calls of each side, in turns: the original, then the
- * mutant, and again. Each call record has its side, its 1-based index, its
- * outcome, the encoded value and a short text.
- */
-export const runReplay = async (request, environment) => {
-  const calls = [];
-  for (let index = 1; index <= request.calls; index += 1) {
-    for (const side of SIDES) {
-      calls.push({ side, index, ...(await runCall(request, side, environment)) });
-    }
-  }
-  return calls;
 };

@@ -10,21 +10,36 @@ use fallow_output::{MutationReplayOutcome, MutationReplaySide, MutationReplayVer
 
 use crate::mutation::protocol::{ReplayCall, ReplayOutcome, ReplaySide};
 
-/// The JSON text of `value` with the keys of each object in sorted order. Two
-/// results that differ only in the key order of an object are equal, because
-/// a deep equality check of a test does not see the order.
+/// The tag key of the replay encoding.
+const TAG: &str = "$replay";
+
+/// Sorts the items of a set or the entries of a map by their canonical text.
+fn sort_members(map: &mut serde_json::Map<String, serde_json::Value>, field: &str) {
+    if let Some(serde_json::Value::Array(items)) = map.get_mut(field) {
+        items.sort_by_cached_key(serde_json::Value::to_string);
+    }
+}
+
+/// The JSON text of `value` with the keys of each object, the items of each
+/// set and the entries of each map in sorted order. Two results that differ
+/// only in such an order are equal, because a deep equality check of a test
+/// does not see the order.
 fn canonical(value: &serde_json::Value) -> String {
     fn sorted(value: &serde_json::Value) -> serde_json::Value {
         match value {
             serde_json::Value::Object(map) => {
                 let mut entries: Vec<_> = map.iter().collect();
                 entries.sort_by(|left, right| left.0.cmp(right.0));
-                serde_json::Value::Object(
-                    entries
-                        .into_iter()
-                        .map(|(key, item)| (key.clone(), sorted(item)))
-                        .collect(),
-                )
+                let mut object: serde_json::Map<String, serde_json::Value> = entries
+                    .into_iter()
+                    .map(|(key, item)| (key.clone(), sorted(item)))
+                    .collect();
+                match object.get(TAG).and_then(serde_json::Value::as_str) {
+                    Some("set") => sort_members(&mut object, "values"),
+                    Some("map") => sort_members(&mut object, "entries"),
+                    _ => {}
+                }
+                serde_json::Value::Object(object)
             }
             serde_json::Value::Array(items) => {
                 serde_json::Value::Array(items.iter().map(sorted).collect())
@@ -206,6 +221,35 @@ mod tests {
             ],
         );
         assert_eq!(verdict(&calls), MutationReplayVerdict::NoWitnessFound);
+    }
+
+    #[test]
+    fn the_order_of_a_set_or_a_map_is_no_difference() {
+        let set = |values: serde_json::Value| json!({"$replay": "set", "values": values});
+        let map = |entries: serde_json::Value| json!({"$replay": "map", "entries": entries});
+        let calls = turns(
+            [set(json!([1, 2])), set(json!([1, 2])), set(json!([1, 2]))],
+            [set(json!([2, 1])), set(json!([2, 1])), set(json!([2, 1]))],
+        );
+        assert_eq!(verdict(&calls), MutationReplayVerdict::NoWitnessFound);
+        let calls = turns(
+            [
+                map(json!([["a", 1], ["b", 2]])),
+                map(json!([["a", 1], ["b", 2]])),
+                map(json!([["a", 1], ["b", 2]])),
+            ],
+            [
+                map(json!([["b", 2], ["a", 1]])),
+                map(json!([["b", 2], ["a", 1]])),
+                map(json!([["b", 2], ["a", 1]])),
+            ],
+        );
+        assert_eq!(verdict(&calls), MutationReplayVerdict::NoWitnessFound);
+        let other = turns(
+            [set(json!([1, 2])), set(json!([1, 2])), set(json!([1, 2]))],
+            [set(json!([1, 3])), set(json!([1, 3])), set(json!([1, 3]))],
+        );
+        assert_eq!(verdict(&other), MutationReplayVerdict::Witness);
     }
 
     #[test]
