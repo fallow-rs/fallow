@@ -499,6 +499,7 @@ fn visit_families<V: FamilyVisitor>(results: &mut AnalysisResults, visitor: &mut
         // Security findings carry their own `finding_id` from
         // `fallow_security::identity`. The other fields are not findings.
         security_findings: _,
+        suppressed_security_findings: _,
         security_unresolved_edge_files: _,
         security_unresolved_callee_sites: _,
         security_unresolved_callee_diagnostics: _,

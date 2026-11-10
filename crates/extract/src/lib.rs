@@ -67,6 +67,7 @@ mod sfc_props;
 mod sfc_template;
 mod shared_state;
 pub mod similar_code;
+mod sink_identity;
 mod source_map;
 mod stack;
 pub mod suppress;
@@ -137,9 +138,11 @@ pub use sfc_css::{
     scoped_unused_classes, sfc_preprocessor_virtual_stylesheet, sfc_virtual_stylesheet,
 };
 pub use similar_code::extract_similar_code_functions;
+pub use sink_identity::sink_identity_text;
 pub use source_map::{ExtractionResult, ScriptSection, embedded_script_sections};
 pub use stack::register_thread_stack;
 pub use tailwind::{TailwindArbitraryUse, scan_tailwind_arbitrary_values};
+pub use template_usage::TEMPLATE_SINK_CALLEE_PREFIX;
 
 #[expect(
     clippy::expect_used,

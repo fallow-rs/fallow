@@ -3,7 +3,7 @@
     reason = "tests use expect to keep fixture setup concise"
 )]
 
-use crate::common::{parse_json, run_fallow, run_fallow_raw};
+use crate::common::{CommandOutput, parse_json, run_fallow, run_fallow_in_root, run_fallow_raw};
 
 fn security_finding_json(
     finding_id: &str,
@@ -676,4 +676,176 @@ fn security_blind_spots_rejects_unsupported_parent_flags() {
             format!("{expected_flag} is not valid with `fallow security blind-spots`.")
         );
     }
+}
+
+const LINE_MOVE_PACKAGE_JSON: &str =
+    r#"{ "name": "fid-repro", "private": true, "type": "module", "main": "src/index.js" }"#;
+const LINE_MOVE_SOURCE: &str = "import { exec } from 'node:child_process'\n\nexport function run(name) {\n\texec(`git log ${name}`)\n}\n";
+
+fn write_line_move_project(root: &std::path::Path, source: &str) {
+    std::fs::create_dir_all(root.join("src")).expect("create src");
+    std::fs::write(root.join("package.json"), LINE_MOVE_PACKAGE_JSON).expect("write package.json");
+    std::fs::write(root.join("src/index.js"), source).expect("write source");
+}
+
+fn security_findings_in(root: &std::path::Path) -> (String, Vec<serde_json::Value>) {
+    let output = run_fallow_in_root(
+        "security",
+        root,
+        &["--no-cache", "--format", "json", "--quiet"],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    let findings = parse_json(&output)["security_findings"]
+        .as_array()
+        .expect("findings array")
+        .clone();
+    (output.stdout, findings)
+}
+
+fn stable_id(finding: &serde_json::Value) -> String {
+    finding["stable_finding_id"]
+        .as_str()
+        .expect("stable_finding_id")
+        .to_owned()
+}
+
+fn run_survivors(dir: &std::path::Path, candidates: &str, verdict_ids: &[&str]) -> CommandOutput {
+    let candidates_path = dir.join("candidates.json");
+    let verdicts_path = dir.join("verdicts.json");
+    std::fs::write(&candidates_path, candidates).expect("write candidates");
+    let verdicts: Vec<serde_json::Value> = verdict_ids
+        .iter()
+        .map(|id| {
+            serde_json::json!({
+                "schema_version": "fallow-security-verdict/v1",
+                "finding_id": id,
+                "verdict": "dismissed"
+            })
+        })
+        .collect();
+    std::fs::write(
+        &verdicts_path,
+        serde_json::Value::from(verdicts).to_string(),
+    )
+    .expect("write verdicts");
+    run_fallow_raw(&[
+        "security",
+        "survivors",
+        "--candidates",
+        &candidates_path.to_string_lossy(),
+        "--verdicts",
+        &verdicts_path.to_string_lossy(),
+        "--format",
+        "json",
+    ])
+}
+
+/// Issue #4429: a comment line above the function moves the sink one line
+/// down. A verdict keyed by the stable id must still match the candidate.
+#[test]
+fn security_stable_finding_id_survives_an_unrelated_line_move() {
+    let project = tempfile::tempdir().expect("project dir");
+    write_line_move_project(project.path(), LINE_MOVE_SOURCE);
+    let (_, before) = security_findings_in(project.path());
+    assert_eq!(before.len(), 1);
+
+    write_line_move_project(
+        project.path(),
+        &format!("// unrelated comment\n{LINE_MOVE_SOURCE}"),
+    );
+    let (after_json, after) = security_findings_in(project.path());
+    assert_eq!(after.len(), 1);
+    assert_ne!(before[0]["line"], after[0]["line"]);
+    assert_ne!(before[0]["finding_id"], after[0]["finding_id"]);
+    assert_eq!(stable_id(&before[0]), stable_id(&after[0]));
+
+    let work = tempfile::tempdir().expect("work dir");
+    let survivors = run_survivors(work.path(), &after_json, &[&stable_id(&before[0])]);
+    assert_eq!(survivors.code, 0, "stderr: {}", survivors.stderr);
+    let survivors = parse_json(&survivors);
+    assert_eq!(survivors["summary"]["dismissed"], 1);
+    assert_eq!(survivors["summary"]["unverdicted"], 0);
+
+    // A verdict keyed by the location id keeps working while the line stays.
+    let by_location = run_survivors(
+        work.path(),
+        &after_json,
+        &[after[0]["finding_id"].as_str().expect("finding id")],
+    );
+    assert_eq!(by_location.code, 0, "stderr: {}", by_location.stderr);
+}
+
+#[test]
+fn security_stable_finding_id_separates_identical_sinks_and_tracks_sink_text() {
+    let project = tempfile::tempdir().expect("project dir");
+    let twin = "import { exec } from 'node:child_process'\n\nexport function run(name) {\n\texec(`git log ${name}`)\n\texec(`git log ${name}`)\n}\n";
+    write_line_move_project(project.path(), twin);
+    let (twin_json, twins) = security_findings_in(project.path());
+    assert_eq!(twins.len(), 2);
+    let first = stable_id(&twins[0]);
+    let second = stable_id(&twins[1]);
+    assert_ne!(first, second);
+    assert_eq!(second, format!("{first}~1"));
+
+    // One verdict for each id: both resolve, and naming one candidate twice
+    // (by its location id and its stable id) is a duplicate.
+    let work = tempfile::tempdir().expect("work dir");
+    let both = run_survivors(work.path(), &twin_json, &[&first, &second]);
+    assert_eq!(both.code, 0, "stderr: {}", both.stderr);
+    assert_eq!(parse_json(&both)["summary"]["unverdicted"], 0);
+    let duplicate = run_survivors(
+        work.path(),
+        &twin_json,
+        &[&first, twins[0]["finding_id"].as_str().expect("finding id")],
+    );
+    assert_eq!(duplicate.code, 2);
+    assert!(
+        duplicate.stdout.contains("duplicate verdict"),
+        "stdout: {}",
+        duplicate.stdout
+    );
+
+    write_line_move_project(
+        project.path(),
+        &LINE_MOVE_SOURCE.replace("git log", "git show"),
+    );
+    let (_, changed) = security_findings_in(project.path());
+    assert_eq!(changed.len(), 1);
+    assert_ne!(stable_id(&changed[0]), first);
+}
+
+/// Two assignment sinks with the same target and different values must get
+/// different base ids. A verdict for a deleted sink then fails with exit 2,
+/// and does not move to the other sink.
+#[test]
+fn security_stable_finding_id_hashes_the_assigned_value() {
+    let project = tempfile::tempdir().expect("project dir");
+    let two_sinks = "export function render(safe, html) {\n\tdocument.getElementById('a').innerHTML = safe;\n\tdocument.getElementById('a').innerHTML =\n\t\thtml;\n}\n";
+    write_line_move_project(project.path(), two_sinks);
+    let (_, both) = security_findings_in(project.path());
+    assert_eq!(both.len(), 2);
+    let safe_id = stable_id(&both[0]);
+    let html_id = stable_id(&both[1]);
+    assert!(!safe_id.contains('~'), "safe id: {safe_id}");
+    assert!(!html_id.contains('~'), "html id: {html_id}");
+
+    // A reformat of the wrapped assignment keeps its id.
+    write_line_move_project(
+        project.path(),
+        &two_sinks.replace("innerHTML =\n\t\thtml", "innerHTML = html"),
+    );
+    let (_, reformatted) = security_findings_in(project.path());
+    assert_eq!(stable_id(&reformatted[1]), html_id);
+
+    write_line_move_project(
+        project.path(),
+        &two_sinks.replace("\tdocument.getElementById('a').innerHTML = safe;\n", ""),
+    );
+    let (only_html_json, only_html) = security_findings_in(project.path());
+    assert_eq!(only_html.len(), 1);
+    assert_eq!(stable_id(&only_html[0]), html_id);
+
+    let work = tempfile::tempdir().expect("work dir");
+    let stale = run_survivors(work.path(), &only_html_json, &[&safe_id]);
+    assert_eq!(stale.code, 2, "stdout: {}", stale.stdout);
 }

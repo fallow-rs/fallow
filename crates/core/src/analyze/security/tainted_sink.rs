@@ -14,6 +14,7 @@ use std::sync::OnceLock;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use fallow_extract::TEMPLATE_SINK_CALLEE_PREFIX;
 use fallow_types::extract::{
     ModuleInfo, SanitizedSinkArg, SanitizerScope, SecurityUrlShape, SinkSite, TaintedBinding,
 };
@@ -23,6 +24,7 @@ use fallow_types::results::{
     SecurityFindingKind, SecurityNetworkContext, SecuritySeverity,
     SecurityUnresolvedCalleeDiagnostic, TraceHop, TraceHopRole,
 };
+use fallow_types::security_stable_id::SecurityStableIdInput;
 use fallow_types::suppress::IssueKind;
 
 use super::rank::module_input_source_kinds;
@@ -96,6 +98,9 @@ pub struct TaintedSinkStats {
     pub sinks_skipped_dynamic_callee: usize,
     /// Location and reason metadata for skipped sink-shaped callees.
     pub unresolved_callee_diagnostics: Vec<SecurityUnresolvedCalleeDiagnostic>,
+    /// Findings that an inline suppression comment hides. The stable id step
+    /// counts them for the tiebreak ordinal only.
+    pub suppressed_findings: Vec<SecurityFinding>,
 }
 
 /// Build the machine-actionable file-level suppress hint emitted on every
@@ -485,6 +490,8 @@ fn build_tainted_sink_finding(input: &TaintedSinkFindingInput<'_>) -> SecurityFi
     let path = node.path.clone();
     SecurityFinding {
         finding_id: String::new(),
+        stable_finding_id: None,
+        stable_id_input: sink_stable_id_input(sink),
         kind: SecurityFindingKind::TaintedSink,
         category: Some(matcher.id.clone()),
         cwe: Some(matcher.cwe),
@@ -509,6 +516,20 @@ fn build_tainted_sink_finding(input: &TaintedSinkFindingInput<'_>) -> SecurityFi
         runtime: None,
         attack_surface: None,
     }
+}
+
+/// The exact span of the sink expression for the stable id. A template sink
+/// spans its tag or attribute, not the sink expression, so it gets no stable
+/// id.
+fn sink_stable_id_input(sink: &SinkSite) -> Option<SecurityStableIdInput> {
+    if sink.callee_path.starts_with(TEMPLATE_SINK_CALLEE_PREFIX) || sink.span_end <= sink.span_start
+    {
+        return None;
+    }
+    Some(SecurityStableIdInput::SinkSpan {
+        start: sink.span_start,
+        end: sink.span_end,
+    })
 }
 
 fn tainted_sink_source_read(input: &TaintedSinkFindingInput<'_>) -> Option<(u32, u32)> {
@@ -573,7 +594,13 @@ pub fn find_tainted_sinks(
         };
         // Always count the module's blind spots, even when it has no sinks.
         record_unresolved_callee_diagnostics(&mut stats, module, node, line_offsets_by_file);
-        collect_module_tainted_sinks(&run, node, module, &mut findings);
+        collect_module_tainted_sinks(
+            &run,
+            node,
+            module,
+            &mut findings,
+            &mut stats.suppressed_findings,
+        );
     }
 
     // Rank source-backed candidates first (issue #859): a sink whose argument
@@ -755,13 +782,15 @@ fn match_tainted_sink<'a>(
 }
 
 /// Match every sink in one module against the active catalogue and push a
-/// finding per admitted, non-sanitized, non-suppressed sink. Low-value-anchor
-/// and file-level-suppressed modules are skipped wholesale.
+/// finding per admitted, non-sanitized sink. A sink that an inline comment
+/// suppresses goes to `suppressed` instead. Low-value-anchor and
+/// file-level-suppressed modules are skipped wholesale.
 fn collect_module_tainted_sinks(
     run: &TaintedSinkRun<'_>,
     node: &ModuleNode,
     module: &ModuleInfo,
     findings: &mut Vec<SecurityFinding>,
+    suppressed: &mut Vec<SecurityFinding>,
 ) {
     let file_id = node.file_id;
     if !module_allows_tainted_sink_scan(run, node, module) {
@@ -780,6 +809,7 @@ fn collect_module_tainted_sinks(
     // of one call. Keep one candidate per call and row, and prefer a
     // source-backed argument over a source-free one.
     let mut variadic_calls: FxHashMap<(u32, *const Matcher), usize> = FxHashMap::default();
+    let mut suppressed_variadic_calls: FxHashSet<(u32, *const Matcher)> = FxHashSet::default();
 
     let module_kinds = ModuleSourceKinds::new(module);
 
@@ -795,13 +825,6 @@ fn collect_module_tainted_sinks(
 
         let (line, col) =
             byte_offset_to_line_col(run.line_offsets_by_file, file_id, sink.span_start);
-        if run
-            .suppressions
-            .is_suppressed(file_id, line, IssueKind::SecuritySink)
-        {
-            continue;
-        }
-
         let finding = build_tainted_sink_finding(&TaintedSinkFindingInput {
             matcher,
             sink,
@@ -811,6 +834,17 @@ fn collect_module_tainted_sinks(
             line_offsets_by_file: run.line_offsets_by_file,
             file_id,
         });
+        if run
+            .suppressions
+            .is_suppressed(file_id, line, IssueKind::SecuritySink)
+        {
+            if !matcher.variadic
+                || suppressed_variadic_calls.insert((sink.span_start, std::ptr::from_ref(matcher)))
+            {
+                suppressed.push(finding);
+            }
+            continue;
+        }
         if !matcher.variadic {
             findings.push(finding);
             continue;

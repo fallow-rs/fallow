@@ -16422,13 +16422,13 @@ new_count: number
  */
 export interface SecurityFinding {
 /**
- * Stable per-finding correlation id, identical across runs for the same
- * rule + anchor path + line + column. An autonomous agent that triaged this
- * candidate on a prior run uses it to correlate the candidate after a
- * rebase. Equal to the SARIF `partialFingerprints["fallowSecurity/v2"]`
- * value for the same finding (one shared helper computes both).
+ * Location id (rule, path, line, column), equal to SARIF `fallowSecurity/v2`; edits move it.
  */
 finding_id: string
+/**
+ * Line-independent id (`sec1:<hash>`, `~k` for repeats); a verdict may use it.
+ */
+stable_finding_id?: (string | null)
 kind: SecurityFindingKind
 /**
  * The catalogue category id (e.g. `"dangerous-html"`). `Some` for
@@ -16511,9 +16511,8 @@ taint_flow?: (SecurityTaintFlow | null)
  */
 runtime?: (SecurityRuntimeContext | null)
 /**
- * Internal projection used by `fallow security --surface`. The CLI strips
- * this from per-finding JSON and promotes it to the top-level
- * `attack_surface` field only when requested.
+ * Internal projection used by `fallow security --surface`. The CLI strips this from
+ * per-finding JSON and promotes it to the top-level `attack_surface` field only when requested.
  */
 attack_surface?: (SecurityAttackSurfaceEntry | null)
 }
@@ -17112,7 +17111,8 @@ elapsed_ms: ElapsedMs
 workspace_diagnostics?: WorkspaceDiagnostic[]
 summary: SecuritySurvivorsSummary
 /**
- * Verifier-retained candidates keyed by finding id.
+ * Verifier-retained candidates keyed by the candidate `finding_id`, also
+ * when the verdict names the candidate by its `stable_finding_id`.
  */
 survivors: {
 [k: string]: SecuritySurvivor

@@ -75,6 +75,7 @@ pub(super) fn classify_ignore_findings_fields(results: &AnalysisResults) {
         // path glob must never silence a leak candidate or turn an unresolved
         // blind spot into a clean bill.
         security_findings: _security_findings,
+        suppressed_security_findings: _suppressed_security_findings,
         security_unresolved_edge_files: _security_unresolved_edge_files,
         security_unresolved_callee_sites: _security_unresolved_callee_sites,
         security_unresolved_callee_diagnostics: _security_unresolved_callee_diagnostics,

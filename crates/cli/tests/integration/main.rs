@@ -141,6 +141,7 @@ mod scope_path_tests;
 mod search_visibility_tests;
 mod security_gate_tests;
 mod security_override_tests;
+mod security_stable_id_tests;
 mod security_workflow_tests;
 mod sfc_callee_line_tests;
 mod signal_tests;

@@ -4,10 +4,9 @@
 //! `tainted-sink` catalogue (one `TaintedSink` kind covering every CWE category
 //! in `security_matchers.toml`). Findings are CANDIDATES for downstream agent
 //! verification, NOT verified vulnerabilities.
-//! This command is the ONLY surface for security findings: they never appear
-//! under bare `fallow` or the `audit` gate. There is no `confidence` or
-//! `signal_strength` field; structural traces and reachability context are the
-//! only honest signals.
+//! This command is the ONLY surface for security findings: they never appear under bare `fallow`
+//! or the `audit` gate. There is no `confidence` or `signal_strength` field; structural traces
+//! and reachability context are the only honest signals.
 
 use crate::report::sink::outln;
 use colored::Colorize;
@@ -48,6 +47,10 @@ use crate::load_config_for_analysis;
 use fallow_output::{
     RuntimeCoverageFinding, RuntimeCoverageHotPath, RuntimeCoverageReport, RuntimeCoverageVerdict,
 };
+use survivors_input::{
+    CandidateInput, load_candidate_map, load_verdicts, resolve_verdict_candidate,
+    unknown_verdict_message,
+};
 
 pub use fallow_api::SecurityGateMode;
 
@@ -57,6 +60,8 @@ mod base_cache;
 mod gate_new;
 #[path = "security_sarif.rs"]
 mod sarif;
+#[path = "security_survivors_input.rs"]
+mod survivors_input;
 
 pub use sarif::build_security_sarif;
 use sarif::render_sarif;
@@ -633,6 +638,7 @@ fn build_survivors_output(
 ) -> Result<SecuritySurvivorsOutput, String> {
     let CandidateInput {
         candidates,
+        stable_ids,
         workspace_diagnostics,
     } = load_candidate_map(opts.candidates)?;
     let verdicts = load_verdicts(opts.verdicts)?;
@@ -643,29 +649,27 @@ fn build_survivors_output(
 
     for verdict in &verdicts {
         validate_verdict(verdict)?;
-        if !seen.insert(verdict.finding_id.clone()) {
+        let Some((finding_id, candidate)) =
+            resolve_verdict_candidate(&candidates, &stable_ids, &verdict.finding_id)
+        else {
+            return Err(unknown_verdict_message(&verdict.finding_id, &stable_ids));
+        };
+        if !seen.insert(finding_id.clone()) {
             return Err(format!(
-                "Verifier verdict file has duplicate verdict for finding_id `{}`.",
-                verdict.finding_id
+                "Verifier verdict file has duplicate verdict for finding_id `{finding_id}`."
             ));
         }
-        let Some(candidate) = candidates.get(&verdict.finding_id) else {
-            return Err(format!(
-                "Verifier verdict references unknown finding_id `{}`.",
-                verdict.finding_id
-            ));
-        };
         match verdict.verdict {
             SecurityVerifierVerdictStatus::Survivor => {
                 survivors.insert(
-                    verdict.finding_id.clone(),
+                    finding_id.clone(),
                     survivor_from_verdict(verdict, candidate),
                 );
             }
             SecurityVerifierVerdictStatus::Dismissed => dismissed += 1,
             SecurityVerifierVerdictStatus::NeedsHumanReview => {
                 needs_human_review.insert(
-                    verdict.finding_id.clone(),
+                    finding_id.clone(),
                     survivor_from_verdict(verdict, candidate),
                 );
             }
@@ -692,105 +696,6 @@ fn build_survivors_output(
     })
 }
 
-struct CandidateInput {
-    candidates: BTreeMap<String, SecurityFinding>,
-    workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
-}
-
-fn load_candidate_map(path: &Path) -> Result<CandidateInput, String> {
-    let mut value = load_json_file(path, "candidate")?;
-    let workspace_diagnostics = value
-        .get_mut("workspace_diagnostics")
-        .map(serde_json::Value::take)
-        .map(serde_json::from_value)
-        .transpose()
-        .map_err(|err| {
-            format!(
-                "Candidate file {} contains malformed workspace diagnostics: {err}",
-                path.display()
-            )
-        })?
-        .unwrap_or_default();
-    let Some(serde_json::Value::Array(findings)) = value
-        .get_mut("security_findings")
-        .map(serde_json::Value::take)
-    else {
-        return Err(format!(
-            "Candidate file {} must be raw `fallow security --format json` output with a security_findings array.",
-            path.display()
-        ));
-    };
-    let mut candidates = BTreeMap::new();
-    for finding in findings {
-        let finding: SecurityFinding = serde_json::from_value(finding).map_err(|err| {
-            format!(
-                "Candidate file {} contains a malformed security finding: {err}",
-                path.display()
-            )
-        })?;
-        if finding.finding_id.is_empty() {
-            return Err(format!(
-                "Candidate file {} contains a security finding with an empty finding_id.",
-                path.display()
-            ));
-        }
-        match candidates.entry(finding.finding_id.clone()) {
-            std::collections::btree_map::Entry::Vacant(entry) => {
-                entry.insert(finding);
-            }
-            std::collections::btree_map::Entry::Occupied(entry) => {
-                return Err(format!(
-                    "Candidate file {} contains duplicate finding_id `{}`.",
-                    path.display(),
-                    entry.key()
-                ));
-            }
-        }
-    }
-    Ok(CandidateInput {
-        candidates,
-        workspace_diagnostics,
-    })
-}
-
-fn load_verdicts(path: &Path) -> Result<Vec<SecurityVerifierVerdict>, String> {
-    let value = load_json_file(path, "verdict")?;
-    let verdicts_value = if let Some(items) = value.get("verdicts") {
-        if value
-            .get("schema_version")
-            .and_then(serde_json::Value::as_str)
-            != Some("fallow-security-verdicts/v1")
-        {
-            return Err(format!(
-                "Verifier verdict file {} must use schema_version `fallow-security-verdicts/v1`.",
-                path.display()
-            ));
-        }
-        if !items.is_array() {
-            return Err(format!(
-                "Verifier verdict file {} must contain a verdicts array.",
-                path.display()
-            ));
-        }
-        items.clone()
-    } else {
-        value
-    };
-    serde_json::from_value::<Vec<SecurityVerifierVerdict>>(verdicts_value).map_err(|err| {
-        format!(
-            "Failed to parse verifier verdict file {}: {err}",
-            path.display()
-        )
-    })
-}
-
-fn load_json_file(path: &Path, label: &str) -> Result<serde_json::Value, String> {
-    let src = std::fs::read_to_string(path)
-        .map_err(|err| format!("Failed to read {label} file {}: {err}", path.display()))?;
-    serde_json::from_str(&src)
-        .map_err(|err| format!("Failed to parse {label} file {}: {err}", path.display()))
-}
-
 fn validate_verdict(verdict: &SecurityVerifierVerdict) -> Result<(), String> {
     if verdict.schema_version != "fallow-security-verdict/v1" {
         return Err(format!(
@@ -809,7 +714,7 @@ fn survivor_from_verdict(
     candidate: &SecurityFinding,
 ) -> SecuritySurvivor {
     SecuritySurvivor {
-        finding_id: verdict.finding_id.clone(),
+        finding_id: candidate.finding_id.clone(),
         verdict: verdict.verdict,
         reason: verdict.reason.clone(),
         rationale: verdict.rationale.clone(),
@@ -2827,6 +2732,8 @@ mod tests {
             dead_code: None,
             reachability: None,
             finding_id: String::new(),
+            stable_finding_id: None,
+            stable_id_input: None,
             candidate: SecurityCandidate {
                 source_kind: None,
                 sink: SecurityCandidateSink {
@@ -3335,6 +3242,7 @@ mod tests {
         )
         .expect_err("missing candidate should fail");
         assert!(missing.contains("unknown finding_id"));
+        assert!(missing.contains("Key verdicts by stable_finding_id"));
     }
 
     #[test]

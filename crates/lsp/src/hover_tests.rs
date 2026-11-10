@@ -1258,6 +1258,8 @@ fn hover_on_different_file_returns_none() {
 fn tainted_sink_finding(path: PathBuf) -> fallow_api::editor_results::SecurityFinding {
     fallow_api::editor_results::SecurityFinding {
         finding_id: String::new(),
+        stable_finding_id: None,
+        stable_id_input: None,
         candidate: fallow_api::editor_results::SecurityCandidate::default(),
         taint_flow: None,
         attack_surface: None,
@@ -1934,6 +1936,8 @@ fn hover_on_client_server_leak_security_candidate() {
     let path = root.join("src/client/Secrets.tsx");
     let finding = fallow_api::editor_results::SecurityFinding {
         finding_id: String::new(),
+        stable_finding_id: None,
+        stable_id_input: None,
         candidate: fallow_api::editor_results::SecurityCandidate::default(),
         taint_flow: None,
         attack_surface: None,
