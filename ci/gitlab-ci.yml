@@ -310,6 +310,7 @@ variables:
         fi
         installed_version="$(fallow --version || echo 'unknown version')"
         echo "Skipping install; using pre-installed ${installed_version} ($(command -v fallow))"
+        printf 'PATH (FALLOW_SKIP_INSTALL)\n' > /tmp/fallow-version-source
         # Let the MR-integration script-prep block pin remote scripts to the
         # matching release tag when the binary reports an exact semver (parity
         # with the install path, which writes the resolved spec here).
@@ -325,13 +326,17 @@ variables:
       project_spec="$(project_fallow_spec "$root" || true)"
       project_spec="$(trim "$project_spec")"
       install_spec=""
+      # The run script names this source when the CLI is too old for a step.
+      install_source="the latest release"
 
       if [ -n "$requested_version" ]; then
         install_spec="$requested_version"
+        install_source="FALLOW_VERSION"
         echo "Using fallow version from FALLOW_VERSION: ${install_spec}"
       elif [ -n "$project_spec" ]; then
         if is_safe_version_spec "$project_spec"; then
           install_spec="$project_spec"
+          install_source="${root}/package.json"
           echo "Using fallow version from ${root}/package.json: ${install_spec}"
         else
           echo "WARNING: Ignoring unsupported fallow package.json spec '${project_spec}'. Use a semver version or range, or set FALLOW_VERSION explicitly."
@@ -347,6 +352,7 @@ variables:
       fi
 
       printf '%s\n' "$install_spec" > /tmp/fallow-version-spec
+      printf '%s\n' "$install_source" > /tmp/fallow-version-source
 
       if [ "$install_spec" = "latest" ]; then
         install_arg="fallow"
@@ -1016,12 +1022,13 @@ variables:
         return 0
       }
 
-      # An element-wise copy of the analysis argv with every narrowing flag and
-      # every workspace-writing flag removed. Never rebuilt from $FALLOW_ARGS:
-      # re-splitting user input would reintroduce word splitting.
-      build_stale_gate_args() {
-        GATE_ARGS=()
-        local skip_next=false skip_next_if_value=false arg dropped flag
+      # An element-wise copy of the analysis argv without the flags that write
+      # to the workspace. A second analysis run must not save a baseline or a
+      # snapshot again. Never rebuilt from $FALLOW_ARGS: re-splitting user
+      # input would reintroduce word splitting.
+      build_read_only_args() {
+        READ_ONLY_ARGS=()
+        local skip_next=false skip_next_if_value=false arg
         for arg in "${RUN_ARGS[@]}"; do
           if [ "$skip_next" = "true" ]; then
             skip_next=false
@@ -1037,13 +1044,6 @@ variables:
             esac
           fi
           case "$arg" in
-            --changed-since|--scope|--file)
-              skip_next=true
-              continue
-              ;;
-            --changed-since=*|--scope=*|--file=*)
-              continue
-              ;;
             --save-baseline|--save-regression-baseline)
               skip_next=true
               continue
@@ -1053,6 +1053,29 @@ variables:
               ;;
             --save-snapshot)
               skip_next_if_value=true
+              continue
+              ;;
+          esac
+          READ_ONLY_ARGS+=("$arg")
+        done
+      }
+
+      # The read-only argv with every narrowing flag removed too.
+      build_stale_gate_args() {
+        GATE_ARGS=()
+        local skip_next=false arg dropped flag
+        build_read_only_args
+        for arg in "${READ_ONLY_ARGS[@]}"; do
+          if [ "$skip_next" = "true" ]; then
+            skip_next=false
+            continue
+          fi
+          case "$arg" in
+            --changed-since|--scope|--file)
+              skip_next=true
+              continue
+              ;;
+            --changed-since=*|--scope=*|--file=*)
               continue
               ;;
             --fail-on-regression|--yes)
@@ -1467,6 +1490,30 @@ variables:
 
       # ── GitLab Code Quality report (CodeClimate format) ──────────────
       # Re-renders the saved JSON envelope for inline MR annotations.
+      # A fallow before CODEQUALITY_REPORT_VERSION has no `report`. Its
+      # analysis run gives the entries with `--format codeclimate`, without
+      # the mutation entries. A fallow that cannot do that either skips only
+      # this step, because the analysis and its gates already ran.
+      CODEQUALITY_REPORT_VERSION="3.4.2"
+      codequality_without_report() {
+        local cli_version origin installed i args
+        build_read_only_args
+        args=("${READ_ONLY_ARGS[@]}")
+        cli_version=$(fallow --version 2> /dev/null | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+([-.][a-zA-Z0-9.]+)?' | head -n 1 || true)
+        origin=$(cat /tmp/fallow-version-source 2> /dev/null || true)
+        installed="fallow ${cli_version:-(unknown version)} from ${origin:-the install step}"
+        for i in "${!args[@]}"; do
+          [ "${args[$i]}" != "--format" ] || args[i + 1]=codeclimate
+        done
+        [ "$FALLOW_RENDER_PATH_PREFIX_SET" != "1" ] \
+          || args+=(--report-path-prefix "${FALLOW_RENDER_PATH_PREFIX:-}")
+        echo "NOTE: ${installed} has no 'fallow report', so the analysis runs again with --format codeclimate. Use fallow ${CODEQUALITY_REPORT_VERSION} or later to render the saved result."
+        fallow "${args[@]}" > gl-code-quality-report.json 2> fallow-codequality-stderr.log || true
+        jq -e 'type == "array"' gl-code-quality-report.json > /dev/null 2>&1 && return 0
+        echo "WARNING: Skipped the Code Quality report: ${installed} cannot produce it. This step needs fallow ${CODEQUALITY_REPORT_VERSION} or later. Update the fallow dependency, or set FALLOW_VERSION."
+        [ -s fallow-codequality-stderr.log ] && cat fallow-codequality-stderr.log
+        echo "[]" > gl-code-quality-report.json
+      }
       if [ "$FALLOW_CODEQUALITY" = "true" ] && [ "$FALLOW_COMMAND" != "fix" ] && [ "$FALLOW_COMMAND" != "security" ]; then
         echo "Generating Code Quality report..."
         REPORT_ARGS=(report --from fallow-results.json --root "$FALLOW_ROOT" --format codeclimate --quiet)
@@ -1484,6 +1531,11 @@ variables:
         set +e
         fallow "${REPORT_ARGS[@]}" > gl-code-quality-report.json 2> fallow-codequality-stderr.log
         CODEQUALITY_EXIT=$?
+        if [ "$CODEQUALITY_EXIT" -ne 0 ] \
+            && grep -Eq "unrecognized subcommand ['\"]?report" fallow-codequality-stderr.log; then
+          codequality_without_report
+          CODEQUALITY_EXIT=0
+        fi
         set -e
         if [ ! -s gl-code-quality-report.json ] || ! jq -e 'type == "array"' gl-code-quality-report.json > /dev/null 2>&1; then
           echo "ERROR: GitLab Code Quality rendering failed."

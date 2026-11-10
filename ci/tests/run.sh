@@ -121,6 +121,7 @@ assert_contains "$GITLAB_RUN_WRITER_SCRIPT" "bash -eo pipefail <<'FALLOW_RUN_WRI
 OUT=$(run_gitlab_install "$INSTALL_TMP/pinned" "")
 assert_contains "$OUT" "Using fallow version from" "install: reads package.json pin"
 assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow@2.7.3" "install: installs project pin"
+assert_contains "$(cat /tmp/fallow-version-source)" "$INSTALL_TMP/pinned/package.json" "install: records package.json as the version source"
 
 OUT=$(run_gitlab_install "$INSTALL_TMP/range" "")
 assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow@^2.52.0" "install: supports package.json semver range"
@@ -128,13 +129,16 @@ assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow@^2.52.0"
 OUT=$(run_gitlab_install "$INSTALL_TMP/pinned" "latest")
 assert_contains "$OUT" "Using fallow version from FALLOW_VERSION: latest" "install: explicit FALLOW_VERSION wins"
 assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow" "install: explicit latest installs latest"
+assert_contains "$(cat /tmp/fallow-version-source)" "FALLOW_VERSION" "install: records FALLOW_VERSION as the version source"
 
 OUT=$(run_gitlab_install "$INSTALL_TMP/unsafe" "")
 assert_contains "$OUT" "Ignoring unsupported fallow package.json spec" "install: warns on unsupported package spec"
 assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow" "install: unsupported package spec falls back to latest"
+assert_contains "$(cat /tmp/fallow-version-source)" "the latest release" "install: records the latest release for an unsupported package spec"
 
 OUT=$(run_gitlab_install "$INSTALL_TMP/empty" "")
 assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow" "install: no package spec falls back to latest"
+assert_contains "$(cat /tmp/fallow-version-source)" "the latest release" "install: records the latest release as the version source"
 
 OUT=$(run_gitlab_install "$INSTALL_TMP/empty" "2.0.0 - 2.5.0")
 assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow@2.0.0 - 2.5.0" "install: supports npm hyphen ranges"
@@ -178,6 +182,7 @@ else
   fail "install: FALLOW_SKIP_INSTALL succeeds when fallow is on PATH" "exit=$skip_status: $OUT"
 fi
 assert_contains "$OUT" "using pre-installed fallow 9.9.9" "install: FALLOW_SKIP_INSTALL reuses fallow on PATH"
+assert_contains "$(cat /tmp/fallow-version-source 2>/dev/null || true)" "PATH (FALLOW_SKIP_INSTALL)" "install: FALLOW_SKIP_INSTALL records PATH as the version source"
 assert_not_contains "$OUT" "DRY RUN: npm install" "install: FALLOW_SKIP_INSTALL skips npm install"
 # The skip path must record the binary's semver to /tmp/fallow-version-spec so the
 # MR-integration script-prep block can pin remote scripts (parity with install path).
@@ -241,6 +246,25 @@ if [ -n "${FALLOW_TEST_ENV_FILE:-}" ]; then
     "FALLOW_TYPE_AWARE_PROJECTS=${FALLOW_TYPE_AWARE_PROJECTS:-}" \
     "FALLOW_TYPE_AWARE_REQUIRE=${FALLOW_TYPE_AWARE_REQUIRE:-}" \
     > "$FALLOW_TEST_ENV_FILE"
+fi
+if [ "${1:-}" = "--version" ] && [ -n "${MOCK_FALLOW_VERSION:-}" ]; then
+  printf 'fallow %s\n' "$MOCK_FALLOW_VERSION"
+  exit 0
+fi
+# MOCK_NO_REPORT mimics a fallow before 3.4.2: no `report` subcommand, and
+# `--format codeclimate` on the analysis run. MOCK_NO_CODECLIMATE also
+# rejects that format.
+if [ "${1:-}" = "report" ] && [ "${MOCK_NO_REPORT:-}" = "1" ]; then
+  printf "error: unrecognized subcommand 'report'\n" >&2
+  exit 2
+fi
+if [ "${MOCK_NO_REPORT:-}" = "1" ] && [[ " $* " == *" --format codeclimate "* ]]; then
+  if [ "${MOCK_NO_CODECLIMATE:-}" = "1" ]; then
+    printf "error: invalid value 'codeclimate' for '--format <FORMAT>'\n" >&2
+    exit 2
+  fi
+  printf '%s\n' '[{"type":"issue","check_name":"fallow/unused-file","description":"Unused file","categories":["Bug Risk"],"severity":"minor","fingerprint":"f1","location":{"path":"src/a.ts","lines":{"begin":1}}}]'
+  exit 0
 fi
 if [ "${1:-}" = "report" ]; then
   printf '[]\n'
@@ -1140,6 +1164,73 @@ fi
 assert_contains "$(cat "$CODEQUALITY_LOG")" \
   "report --from fallow-results.json --root $RUNNER_TMP/root --format codeclimate --quiet --report-path-prefix custom/base" \
   "run writer: Code Quality rendering preserves explicit path prefix"
+
+# A fallow before 3.4.2 has no `report` subcommand (issue #4481). The Code
+# Quality step then asks the analysis run for `--format codeclimate`.
+rm -rf "$CODEQUALITY_WORK"; mkdir -p "$CODEQUALITY_WORK"
+printf 'package.json\n' > /tmp/fallow-version-source
+OUT=$(run_generated_gitlab_fixture "$CODEQUALITY_WORK" \
+  MOCK_NO_REPORT=1 \
+  MOCK_FALLOW_VERSION=2.91.0 \
+  FALLOW_CODEQUALITY=true \
+  FALLOW_TEST_LOG="$CODEQUALITY_LOG")
+cmd_status=$?
+if [ "$cmd_status" -eq 0 ]; then
+  pass "run writer: Code Quality on a fallow without report does not fail the job"
+else
+  fail "run writer: Code Quality on a fallow without report does not fail the job" "exit $cmd_status: $OUT"
+fi
+assert_json_length "$(cat "$CODEQUALITY_WORK/gl-code-quality-report.json" 2> /dev/null)" 1 \
+  "run writer: Code Quality on a fallow without report keeps the findings"
+assert_contains "$(grep '^fallow check' "$CODEQUALITY_LOG")" "--format codeclimate" \
+  "run writer: Code Quality on a fallow without report runs the analysis as codeclimate"
+assert_contains "$OUT" "fallow 2.91.0 from package.json" \
+  "run writer: Code Quality fallback names the version and its source"
+assert_not_contains "$OUT" "unrecognized subcommand" \
+  "run writer: Code Quality fallback hides the raw clap error"
+
+# The second analysis run must not write a baseline or a snapshot again,
+# but it keeps the scope of the first run.
+rm -rf "$CODEQUALITY_WORK"; mkdir -p "$CODEQUALITY_WORK"
+run_generated_gitlab_fixture "$CODEQUALITY_WORK" \
+  MOCK_NO_REPORT=1 \
+  MOCK_FALLOW_VERSION=2.91.0 \
+  FALLOW_CODEQUALITY=true \
+  FALLOW_COMMAND= \
+  FALLOW_CHANGED_SINCE=main \
+  FALLOW_SAVE_SNAPSHOT=true \
+  FALLOW_SAVE_BASELINE=saved-baseline.json \
+  FALLOW_TEST_LOG="$CODEQUALITY_LOG" > /dev/null
+CODEQUALITY_RUN=$(grep -e '--format codeclimate' "$CODEQUALITY_LOG" | grep -v '^fallow report' || true)
+assert_contains "$(grep -c -e '--save-snapshot' "$CODEQUALITY_LOG")" "1" \
+  "run writer: Code Quality fallback saves the snapshot once"
+assert_not_contains "$CODEQUALITY_RUN" "--save-snapshot" \
+  "run writer: Code Quality fallback run saves no snapshot"
+assert_not_contains "$CODEQUALITY_RUN" "--save-baseline" \
+  "run writer: Code Quality fallback run saves no baseline"
+assert_contains "$CODEQUALITY_RUN" "--changed-since main" \
+  "run writer: Code Quality fallback run keeps the changed-files scope"
+
+# A fallow that cannot produce Code Quality at all skips only that step.
+rm -rf "$CODEQUALITY_WORK"; mkdir -p "$CODEQUALITY_WORK"
+OUT=$(run_generated_gitlab_fixture "$CODEQUALITY_WORK" \
+  MOCK_NO_REPORT=1 \
+  MOCK_NO_CODECLIMATE=1 \
+  MOCK_FALLOW_VERSION=2.0.0 \
+  FALLOW_CODEQUALITY=true)
+cmd_status=$?
+if [ "$cmd_status" -eq 0 ]; then
+  pass "run writer: Code Quality skip does not fail the job"
+else
+  fail "run writer: Code Quality skip does not fail the job" "exit $cmd_status: $OUT"
+fi
+assert_json_length "$(cat "$CODEQUALITY_WORK/gl-code-quality-report.json" 2> /dev/null)" 0 \
+  "run writer: Code Quality skip writes an empty report"
+assert_contains "$OUT" "WARNING: Skipped the Code Quality report: fallow 2.0.0 from package.json" \
+  "run writer: Code Quality skip names the version and its source"
+assert_contains "$OUT" "3.4.2" "run writer: Code Quality skip names the minimum version"
+assert_contains "$OUT" "FALLOW_VERSION" "run writer: Code Quality skip names the fix"
+rm -f /tmp/fallow-version-source
 
 # =========================================================================
 # Behavioral parity between action/scripts/install.sh and ci/gitlab-ci.yml
