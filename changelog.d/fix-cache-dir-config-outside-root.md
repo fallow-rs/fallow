@@ -1,0 +1,3 @@
+### Security
+
+- **A `cache.dir` in a config file must be inside the project.** A config file can come from the analyzed repository. Before, a committed `.fallowrc.json` with an absolute `cache.dir`, such as `/home/user`, made fallow write its cache files and a `.gitignore` with `*` in that directory. Fallow now ignores a `cache.dir` that is outside the project root, that leaves it with `..`, that is the root itself, or that is in `.git`. The run prints a warning and uses `.fallow`. A `cache.dir` inside the project works as before. To put the cache outside the project, for example a shared CI cache, set `FALLOW_CACHE_DIR`.

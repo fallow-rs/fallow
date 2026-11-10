@@ -572,6 +572,39 @@ pub fn package_baselines_disabled_by_env_value(raw: &OsStr) -> bool {
     })
 }
 
+/// The cache directory for the `cache.dir` value of a config file.
+///
+/// A config file can come from the analyzed repository, so its `cache.dir`
+/// must stay below the project root. An absolute path or a `..` path that
+/// leaves the root, the root itself, and a path in `.git` are ignored with a
+/// warning, and the
+/// default `<root>/.fallow` is used. A kept path has its `..` parts resolved.
+/// `FALLOW_CACHE_DIR` can still move the cache to any directory.
+#[must_use]
+pub fn config_cache_dir(root: &Path, configured: Option<PathBuf>) -> PathBuf {
+    let default = root.join(".fallow");
+    let Some(configured) = configured else {
+        return default;
+    };
+    let absolute = |path: &Path| {
+        let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
+        fallow_types::path_guard::lexically_normalized(&path)
+    };
+    let normalized = absolute(&resolve_cache_dir(root, Some(configured.clone())));
+    let root = absolute(root);
+    let in_git_dir = normalized
+        .strip_prefix(&root)
+        .is_ok_and(|rel| rel.components().any(|part| part.as_os_str() == ".git"));
+    if normalized.starts_with(&root) && normalized != root && !in_git_dir {
+        return normalized;
+    }
+    tracing::warn!(
+        "ignoring cache.dir `{}` from the config file: it must be a directory inside the project; set {CACHE_DIR_ENV} to put the cache outside the project",
+        configured.display()
+    );
+    default
+}
+
 fn resolve_cache_dir(root: &Path, configured: Option<PathBuf>) -> PathBuf {
     let Some(dir) = configured else {
         return root.join(".fallow");
@@ -876,7 +909,7 @@ fn resolve_cache_settings(
     config_hash: impl FnOnce() -> u64,
 ) -> ResolvedCacheSettings {
     ResolvedCacheSettings {
-        dir: resolve_cache_dir(root, configured_dir),
+        dir: config_cache_dir(root, configured_dir),
         max_size_mb: override_max_size_mb.or(configured_max_size_mb),
         config_hash: if no_cache { 0 } else { config_hash() },
     }

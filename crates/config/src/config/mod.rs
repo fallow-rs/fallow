@@ -65,7 +65,7 @@ pub use resolution::{
     IgnoreCatalogReferenceRule, IgnoreDependencyOverrideRule, IgnoreExportRule,
     PACKAGE_BASELINES_ENV, ResolvedConfig, ResolvedOverride, cache_config_hash,
     cache_dir_env_override, cache_dir_from_env_value, cache_max_size_env_override,
-    cache_max_size_from_env_value, package_baselines_disabled_by_env_value,
+    cache_max_size_from_env_value, config_cache_dir, package_baselines_disabled_by_env_value,
     resolve_max_file_size_bytes,
 };
 pub use resolve::ResolveConfig;
@@ -646,7 +646,9 @@ pub struct SecurityCategories {
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 pub struct CacheConfig {
     /// Directory for fallow's persistent analysis cache. Relative paths resolve
-    /// from the project root.
+    /// from the project root. The directory must be inside the project: an
+    /// absolute path or a path that leaves the root is ignored with a
+    /// warning. Use `FALLOW_CACHE_DIR` to put the cache outside the project.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dir: Option<PathBuf>,
     /// Maximum size of the persistent extraction cache, in megabytes.

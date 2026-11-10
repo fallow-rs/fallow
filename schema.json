@@ -3785,7 +3785,7 @@
       "type": "object",
       "properties": {
         "dir": {
-          "description": "Directory for fallow's persistent analysis cache. Relative paths resolve\nfrom the project root.",
+          "description": "Directory for fallow's persistent analysis cache. Relative paths resolve\nfrom the project root. The directory must be inside the project: an\nabsolute path or a path that leaves the root is ignored with a\nwarning. Use `FALLOW_CACHE_DIR` to put the cache outside the project.",
           "type": [
             "string",
             "null"
