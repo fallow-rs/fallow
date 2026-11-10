@@ -528,12 +528,26 @@ npm run type-aware:corpus -- evidence \
   --sidecar-bin tools/type-aware-sidecar/fallow-type-aware.mjs
 ```
 
-Review the pinned source and evidence for every proposed removal and every
-known-unused negative. Record independent approvals bound to the current
-candidate-set and evidence digests in `benchmarks/type-aware-adjudication.json`.
-`adjudicate` applies those decisions; it does not perform the source review.
+Review the pinned source and evidence for every confirmed use, every
+contract-preserved candidate and every known-unused negative. `review-packets`
+writes one packet for each project to `target/type-aware-corpus/review/`. Each
+packet holds the review criteria, the output format and the source lines around
+every declaration, use and contract.
+
+Give each packet to two or more reviewers who work separately. Each reviewer
+writes `<reviews>/<project>/<reviewer>.json` with a verdict for every record.
+`record-reviews --reviews <reviews>` then writes the independent reviews, bound
+to the current candidate-set and evidence digests, to
+`benchmarks/type-aware-adjudication.json`. It also writes a feature override for
+each confirmed use where all reviewers give the same allowed bucket. The command
+fails on any rejection. To keep a rejected record, write its reason in
+`<reviews>/overrule.json`. The decisions file then lists that record under
+`overruled_rejections`. `adjudicate` applies the decisions; it does not perform
+the source review.
 
 ```bash
+npm run type-aware:corpus -- review-packets
+npm run type-aware:corpus -- record-reviews --reviews <reviews>
 npm run type-aware:corpus -- adjudicate
 npm run type-aware:corpus -- verify-ledger
 npm run type-aware:corpus -- supplemental \

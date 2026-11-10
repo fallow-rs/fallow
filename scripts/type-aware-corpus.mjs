@@ -60,9 +60,12 @@ import {
   verifyLedgerData as verifyLedgerArtifact,
 } from "./type-aware-corpus/ledger.mjs";
 import {
+  COMMANDS,
+  corpusUsage,
   parseArgs as parseCorpusArgs,
   validateManifest as validateCorpusManifest,
 } from "./type-aware-corpus/config.mjs";
+import { recordReviews, writeReviewPackets } from "./type-aware-corpus/review.mjs";
 import {
   assertArtifactDirectoryInWorkspace,
   DEPENDENCY_DIRECTORY_NAMES,
@@ -203,21 +206,8 @@ const readOptionValue = (argv, index, option) => {
 };
 
 export const parseArgs = (argv) => {
-  const commands = new Set([
-    "prepare",
-    "discover",
-    "measure",
-    "focused",
-    "evidence",
-    "adjudicate",
-    "verify-ledger",
-    "summarize",
-    "verify-publication",
-    "supplemental",
-    "capabilities",
-  ]);
   return parseCorpusArgs(argv, {
-    commands,
+    commands: COMMANDS,
     defaults: () => ({
       discoveryRuns: DEFAULT_DISCOVERY_RUNS,
       fallowBin: DEFAULT_FALLOW_BIN,
@@ -234,33 +224,6 @@ export const parseArgs = (argv) => {
     resolve,
   });
 };
-
-const usage = () => `Usage: node scripts/type-aware-corpus.mjs <command> [options]
-
-Commands:
-  prepare        Materialize clean worktrees at the pinned public refs
-  discover       Run baseline and refined discovery for the pinned corpus
-  measure        Warm up, then alternate baseline/refined release runs
-  focused        Run the candidate-bearing semantic edge-case suite
-  evidence       Create or refresh the manual evidence ledger template
-  adjudicate     Apply the checked-in review decisions to the evidence ledger
-  verify-ledger  Require truth status and source evidence for every candidate
-  summarize      Verify the ledger and write compact gate metrics
-  verify-publication  Check tracked evidence and summary for generator drift
-  supplemental   Regenerate and verify the clean public Vitest smoke
-  capabilities   Prove all five semantic capabilities on Astro and Vitest
-
-Options:
-  --manifest PATH     Default: benchmarks/type-aware-corpus.json
-  --project ID        Select one project, repeatable
-  --fallow-bin PATH   Default: target/release/fallow
-  --sidecar-bin PATH  Required for discover, measure, focused, evidence, summarize, verify-publication, and supplemental
-  --out-dir PATH      Isolated artifact directory, required with --project
-  --discovery-runs N  Repeated normalized discovery runs, default: ${DEFAULT_DISCOVERY_RUNS}
-  --runs N            Measured pairs per project, default: ${DEFAULT_RUNS}
-  --warmups N         Warmup pairs per project, default: ${DEFAULT_WARMUPS}
-
-Canonical artifacts are written below target/type-aware-corpus. Corpus projects are read-only.`;
 
 const selectProjects = (manifest, selectedIds) => {
   if (selectedIds.length === 0) return manifest.projects;
@@ -554,7 +517,7 @@ export const candidateKey = (projectId, candidate) => {
   return `tac_${createHash("sha256").update(identity).digest("hex").slice(0, 20)}`;
 };
 
-const candidateSetDigest = (keys) =>
+export const candidateSetDigest = (keys) =>
   createHash("sha256")
     .update(`${[...keys].toSorted().join("\n")}\n`)
     .digest("hex");
@@ -2741,6 +2704,32 @@ const verifyPublication = async (manifest, options) => {
   await capabilities(manifest, options, "verify");
 };
 
+const reviewPackets = (manifest, outDir) =>
+  writeReviewPackets({
+    ledger: readJson(resolve(outDir, "ledger.json"), "evidence ledger"),
+    decisions: readJson(DEFAULT_ADJUDICATION, "adjudication decisions"),
+    manifest,
+    rootFor: (project) => projectRoot(project, outDir),
+    dependencyRoot: REPO_ROOT,
+    outDir,
+  });
+
+const writeRecordedReviews = (manifest, options) => {
+  if (!options.reviewsDir || options.projects.length > 0) {
+    fail("record-reviews requires --reviews DIR and the complete corpus, without --project");
+  }
+  const decisions = recordReviews({
+    ledger: readJson(resolve(options.outDir, "ledger.json"), "evidence ledger"),
+    decisions: readJson(DEFAULT_ADJUDICATION, "adjudication decisions"),
+    manifest,
+    reviewsDir: options.reviewsDir,
+    digests: { candidateSetDigest, independentReviewDigest },
+    reviewedOn: new Date().toISOString().slice(0, 10),
+    fail,
+  });
+  writeJson(DEFAULT_ADJUDICATION, decisions);
+};
+
 const executeCommand = async (manifest, projects, options) => {
   const handlers = {
     prepare: () => prepare(projects, options.outDir),
@@ -2754,6 +2743,8 @@ const executeCommand = async (manifest, projects, options) => {
     "verify-publication": () => verifyPublication(manifest, options),
     supplemental: () => supplemental(options),
     capabilities: () => capabilities(manifest, options),
+    "review-packets": () => reviewPackets(manifest, options.outDir),
+    "record-reviews": () => writeRecordedReviews(manifest, options),
   };
   await handlers[options.command]();
 };
@@ -2764,6 +2755,7 @@ const successMessage = (options) => {
     "verify-publication": "verify-publication: tracked evidence matches the generator",
     supplemental: `supplemental: artifact written to ${SUPPLEMENTAL_ARTIFACT}`,
     capabilities: `capabilities: artifact written to ${CAPABILITIES_ARTIFACT}`,
+    "record-reviews": `record-reviews: review decisions written to ${DEFAULT_ADJUDICATION}`,
   };
   return messages[options.command] ?? `${options.command}: artifacts written to ${options.outDir}`;
 };
@@ -2771,7 +2763,13 @@ const successMessage = (options) => {
 export const main = async (argv = process.argv.slice(2)) => {
   const options = parseArgs(argv);
   if (options.command === "help") {
-    console.log(usage());
+    console.log(
+      corpusUsage({
+        defaultDiscoveryRuns: DEFAULT_DISCOVERY_RUNS,
+        defaultRuns: DEFAULT_RUNS,
+        defaultWarmups: DEFAULT_WARMUPS,
+      }),
+    );
     return 0;
   }
   const manifest = loadManifest(options.manifest);
