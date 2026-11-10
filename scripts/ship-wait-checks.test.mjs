@@ -1177,6 +1177,8 @@ test(
       for (const [older, newer] of [
         ["CANCELLED", "SUCCESS"],
         ["SUCCESS", "CANCELLED"],
+        // A label event starts a new run of a job that failed before.
+        ["FAILURE", "SUCCESS"],
       ]) {
         const result = runWithFakeGh(
           {
