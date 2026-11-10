@@ -73,6 +73,7 @@ mod lean_profile;
 mod list_envelopes;
 mod mutation;
 mod mutation_ci;
+mod mutation_plan_runner;
 mod next_steps;
 mod package_baselines;
 mod pr_comment_envelope;
