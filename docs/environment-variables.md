@@ -33,9 +33,12 @@ documented here for completeness but stay out of the manifest.
 
 ### One cache directory for several projects
 
-A relative `FALLOW_CACHE_DIR`, and the default `.fallow`, resolve inside each
-project root. An absolute `FALLOW_CACHE_DIR` or `cache.dir` outside the root
-is one directory for every project. The hosts use it in two ways:
+A relative `FALLOW_CACHE_DIR`, `cache.dir` and the default `.fallow` resolve
+inside each project root. An absolute `FALLOW_CACHE_DIR` outside the root is
+one directory for every project. A `cache.dir` in a config file must stay
+inside the project, because the config file can come from the analyzed
+repository: fallow ignores a value outside the root with a warning. The hosts
+use an absolute `FALLOW_CACHE_DIR` in two ways:
 
 - The CLI, the MCP server and the Node bindings write `cache.bin` and
   `graph-cache.bin` directly into the directory. The parse cache keys on paths

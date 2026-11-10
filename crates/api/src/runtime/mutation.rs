@@ -505,7 +505,7 @@ pub fn plan_mutation(options: &MutationRunOptions) -> ProgrammaticResult<Mutatio
 fn unsafe_cache_dir(message: String) -> ProgrammaticError {
     mutation_error("FALLOW_MUTATION_UNSAFE_CACHE_DIR", message)
         .with_help(
-            "set cache.dir or FALLOW_CACHE_DIR to a directory that holds no project file, such as .fallow",
+            "set FALLOW_CACHE_DIR, or cache.dir inside the project, to a directory that holds no project file, such as .fallow",
         )
         .with_context("cache.dir")
 }

@@ -7,7 +7,7 @@
 use std::os::unix::fs::symlink;
 use std::path::{Path, PathBuf};
 
-use crate::common::run_fallow_in_root;
+use crate::common::{run_fallow_in_root, run_fallow_raw_with_env};
 
 struct Project {
     _dir: tempfile::TempDir,
@@ -146,4 +146,35 @@ fn a_linked_cache_subdir_gets_no_cache_write() {
     symlink(&p.outside, p.root.join(".fallow/snapshots")).expect("link");
     assert!(run_cache_writers(&p.root));
     assert_eq!(entries(&p.outside), Vec::<String>::new());
+}
+
+#[test]
+fn a_committed_cache_dir_outside_the_project_is_ignored() {
+    let p = project();
+    let outside = p.outside.display().to_string().replace('\\', "/");
+    std::fs::write(
+        p.root.join(".fallowrc.json"),
+        format!(
+            r#"{{"cache":{{"dir":"{outside}"}},"duplicates":{{"minCorpusSizeForTokenCache":1}}}}"#
+        ),
+    )
+    .expect("config");
+    let root = p.root.display().to_string();
+    let args = [
+        "check",
+        "--root",
+        root.as_str(),
+        "--format",
+        "json",
+        "--quiet",
+    ];
+    let output = run_fallow_raw_with_env(&args, &[("RUST_LOG", "warn")]);
+    assert!(output.code == 0 || output.code == 1, "{}", output.stderr);
+    assert_eq!(entries(&p.outside), Vec::<String>::new());
+    assert!(
+        output.stderr.contains("ignoring cache.dir"),
+        "{}",
+        output.stderr
+    );
+    assert!(p.root.join(".fallow/cache.bin").exists());
 }

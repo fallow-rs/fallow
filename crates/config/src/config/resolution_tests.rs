@@ -1177,6 +1177,67 @@ fn resolve_uses_relative_configured_cache_dir_from_root() {
 }
 
 #[test]
+fn a_configured_cache_dir_outside_the_project_is_ignored() {
+    for dir in [
+        "/home/user",
+        "../shared",
+        "sub/../..",
+        ".",
+        "",
+        ".git/hooks",
+    ] {
+        assert_eq!(
+            config_cache_dir(Path::new("/my/project"), Some(PathBuf::from(dir))),
+            PathBuf::from("/my/project/.fallow"),
+            "{dir}"
+        );
+    }
+}
+
+#[test]
+fn a_relative_root_does_not_accept_an_outside_cache_dir() {
+    let dir = config_cache_dir(Path::new("."), Some(PathBuf::from("/home/user")));
+    assert!(dir.ends_with(".fallow"), "{}", dir.display());
+}
+
+#[test]
+fn a_configured_cache_dir_inside_the_project_is_kept() {
+    for (dir, expected) in [
+        (".cache/fallow", "/my/project/.cache/fallow"),
+        ("/my/project/build/cache", "/my/project/build/cache"),
+        ("sub/../cache", "/my/project/cache"),
+    ] {
+        assert_eq!(
+            config_cache_dir(Path::new("/my/project"), Some(PathBuf::from(dir))),
+            PathBuf::from(expected),
+            "{dir}"
+        );
+    }
+}
+
+#[test]
+fn an_absolute_cache_dir_still_comes_from_the_environment() {
+    let config = FallowConfig {
+        cache: crate::CacheConfig {
+            dir: Some(PathBuf::from("/home/user")),
+            ..Default::default()
+        },
+        ..make_config(false)
+    };
+    let mut resolved = config.resolve(
+        PathBuf::from("/my/project"),
+        OutputFormat::Human,
+        1,
+        false,
+        true,
+        None,
+    );
+    assert_eq!(resolved.cache_dir, PathBuf::from("/my/project/.fallow"));
+    resolved.override_cache_dir(PathBuf::from("/tmp/fallow-cache"));
+    assert_eq!(resolved.cache_dir, PathBuf::from("/tmp/fallow-cache"));
+}
+
+#[test]
 fn cache_dir_override_wins_over_configured_cache_dir() {
     let config = FallowConfig {
         cache: crate::CacheConfig {
@@ -1262,26 +1323,6 @@ fn scoping_keeps_a_cache_dir_inside_the_root() {
     let mut absolute = resolved_with_cache_dir("/work/app", "/work/app/.fallow");
     absolute.scope_shared_cache_dir_to_root();
     assert_eq!(absolute.cache_dir, PathBuf::from("/work/app/.fallow"));
-}
-
-#[test]
-fn resolve_keeps_absolute_configured_cache_dir() {
-    let config = FallowConfig {
-        cache: crate::CacheConfig {
-            dir: Some(PathBuf::from("/tmp/fallow-cache")),
-            ..Default::default()
-        },
-        ..make_config(false)
-    };
-    let resolved = config.resolve(
-        PathBuf::from("/my/project"),
-        OutputFormat::Human,
-        1,
-        false,
-        true,
-        None,
-    );
-    assert_eq!(resolved.cache_dir, PathBuf::from("/tmp/fallow-cache"));
 }
 
 #[test]

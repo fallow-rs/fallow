@@ -85,10 +85,14 @@ pub fn run_audit_cache_prune(opts: &AuditCachePruneOptions<'_>) -> ExitCode {
 
 /// The project cache directory that holds the base-snapshot files, resolved
 /// like the analysis commands do: `FALLOW_CACHE_DIR`, then `cache.dir`, then
-/// `<root>/.fallow`. A relative path resolves from the root. A config that
-/// does not load gives the default, so prune never fails on a bad config.
+/// `<root>/.fallow`. A relative path resolves from the root, and a `cache.dir`
+/// outside the project is ignored. A config that does not load gives the
+/// default, so prune never fails on a bad config.
 fn project_cache_dir(opts: &AuditCachePruneOptions<'_>) -> PathBuf {
-    let configured = fallow_config::cache_dir_env_override().or_else(|| {
+    if let Some(dir) = fallow_config::cache_dir_env_override() {
+        return opts.root.join(dir);
+    }
+    let configured = {
         let load_options = fallow_config::ConfigLoadOptions {
             allow_remote_extends: opts.allow_remote_extends,
         };
@@ -102,12 +106,8 @@ fn project_cache_dir(opts: &AuditCachePruneOptions<'_>) -> PathBuf {
             }
         };
         config.and_then(|config| config.cache.dir)
-    });
-    match configured {
-        Some(dir) if dir.is_absolute() => dir,
-        Some(dir) => opts.root.join(dir),
-        None => opts.root.join(".fallow"),
-    }
+    };
+    fallow_config::config_cache_dir(opts.root, configured)
 }
 
 /// Aggregate decision counts. `removed + kept + skipped + failed == found ==

@@ -59,7 +59,8 @@ pub fn cache_write_base<'a>(root: &'a Path, cache_dir: &'a Path) -> &'a Path {
 
 /// `path` with each `..` applied to the component before it, and each `.`
 /// dropped, without a file system read.
-fn lexically_normalized(path: &Path) -> PathBuf {
+#[must_use]
+pub fn lexically_normalized(path: &Path) -> PathBuf {
     let mut normalized = PathBuf::new();
     for component in path.components() {
         match component {

@@ -450,7 +450,10 @@ fn the_last_report_is_saved_in_the_ignored_cache() {
 
 #[test]
 fn a_cache_dir_that_hides_project_files_is_refused() {
-    for (dir, shown) in [(".", "the project root"), ("src", "src/a.ts")] {
+    // A config `cache.dir` of `.` is ignored at config load, so the root case
+    // is covered by the unit tests of `guard_cache_dir`.
+    {
+        let (dir, shown) = ("src", "src/a.ts");
         let project = small_project();
         fs::write(
             project.path().join(".fallowrc.json"),
