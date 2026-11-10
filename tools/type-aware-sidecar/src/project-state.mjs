@@ -20,11 +20,32 @@ const INFERRED_PROJECT = "<inferred>";
 const compareText = (left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right));
 const slash = (value) => value.split(path.sep).join("/");
 
+const DIRECTIVE_LINE = /^(?:\/\/\/?|\/\*+)\s*@ts-(?:ignore|expect-error)\b/u;
+const COMMENT_OR_BLANK_LINE = /^(?:$|\/\/|\/\*|\*)/u;
+
+// The compiler drops a binding or semantic diagnostic when an `@ts-ignore` or
+// `@ts-expect-error` comment precedes its line, with only blank or comment
+// lines in between. Svelte, for example, declares `export const arguments`
+// under `// @ts-ignore` in an ambient file.
+const isSuppressedByDirective = (project, diagnostic) => {
+  const text = project.program.getSourceFile(diagnostic.fileName)?.text;
+  if (typeof text !== "string" || !Number.isInteger(diagnostic.pos)) return false;
+  const lines = text.slice(0, diagnostic.pos).split(/\r?\n/u);
+  for (let index = lines.length - 2; index >= 0; index -= 1) {
+    const line = lines[index].trim();
+    if (DIRECTIVE_LINE.test(line)) return true;
+    if (!COMMENT_OR_BLANK_LINE.test(line)) return false;
+  }
+  return false;
+};
+
 const structuralDiagnostics = (project) => [
   ...project.program.getConfigFileParsingDiagnostics(),
   ...project.program.getProgramDiagnostics(),
   ...project.program.getSyntacticDiagnostics(),
-  ...project.program.getBindDiagnostics(),
+  ...project.program
+    .getBindDiagnostics()
+    .filter((diagnostic) => !isSuppressedByDirective(project, diagnostic)),
 ];
 
 const isProjectLocalDiagnostic = (project, diagnostic) => {
