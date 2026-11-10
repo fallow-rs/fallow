@@ -196,6 +196,16 @@ const SCRIPT_RUNTIMES: &[ScriptRuntime] = &[
     },
 ];
 
+/// Shell utilities and file tools that only read, search, copy, move, delete,
+/// or change files. They run no
+/// file argument, so none of their arguments is an entry point
+/// (`cp ./README.md ./deno/lib`). `find` and `xargs` are absent: they can run
+/// another program.
+const FILE_UTILITIES: &[&str] = &[
+    "awk", "cat", "chmod", "chown", "cp", "echo", "grep", "head", "ln", "ls", "mkdir", "mv",
+    "rimraf", "rm", "rmdir", "sed", "sleep", "sort", "tail", "tee", "touch", "uniq", "wc",
+];
+
 /// Programs that run, load, bundle, or compile every file argument that they
 /// get: test runners, bundlers, compilers, and process managers. All their
 /// file arguments stay entry points.
@@ -309,6 +319,9 @@ pub fn argument_entries<'a>(binary: &str, args: &[&'a str]) -> ArgumentEntries<'
     }
     // An executable script file runs itself. Its arguments are data.
     if is_executable_script(binary) {
+        return ArgumentEntries::Listed(Vec::new());
+    }
+    if FILE_UTILITIES.contains(&name) {
         return ArgumentEntries::Listed(Vec::new());
     }
     // A program that fallow does not know can run a known program.
@@ -648,7 +661,7 @@ mod tests {
                 "serverless invoke local -f fn -p app/event.js --runtime node",
                 &["app/event.js"],
             ),
-            ("cp app/worker.js dist/node", &["app/worker.js"]),
+            ("my-copy app/worker.js dist/node", &["app/worker.js"]),
             (
                 "foo --target node app/x.js app/y.js",
                 &["app/x.js", "app/y.js"],

@@ -359,6 +359,43 @@ fn multiple_env_vars() {
 }
 
 #[test]
+fn file_utility_arguments_are_not_file_args() {
+    for script in [
+        "cp ./README.md ./deno/lib",
+        "node ./deno-build.mjs && cp ./README.md ./deno/lib",
+        "mv dist/index.js lib/index.js",
+        "cat src/banner.ts",
+        "chmod +x bin/cli.js",
+        "touch src/generated.ts",
+        "mkdir -p lib && rm -rf lib/old.js",
+        "echo src/banner.ts | tee dist/banner.ts",
+        "ln -s ../src/cli.js bin/cli.js",
+        "grep -l TODO src/a.ts && sed -i s/a/b/ src/b.ts",
+        "rimraf dist/index.js",
+        "npx cp src/a.js dist/a.js",
+    ] {
+        let cmds = parse_script(script);
+        assert!(
+            cmds.iter()
+                .filter(|cmd| cmd.binary != "node")
+                .all(|cmd| cmd.file_args.is_empty()),
+            "`{script}` must not make utility arguments file args, got: {cmds:?}"
+        );
+    }
+    let build = parse_script("node ./deno-build.mjs && cp ./README.md ./deno/lib");
+    assert_eq!(build[0].file_args, vec!["./deno-build.mjs".to_string()]);
+    // A program that runs another program keeps the entry point of that
+    // program.
+    let wrapped = parse_script("xargs node scripts/run.js");
+    assert!(
+        wrapped
+            .iter()
+            .any(|cmd| cmd.file_args.iter().any(|f| f == "scripts/run.js")),
+        "xargs must keep the script that it runs, got: {wrapped:?}"
+    );
+}
+
+#[test]
 fn formatter_and_linter_targets_are_not_file_args() {
     for script in [
         "oxfmt --check \"**/*.ts\"",
