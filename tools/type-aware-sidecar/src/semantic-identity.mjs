@@ -1,6 +1,6 @@
 import path from "node:path";
 
-import { sync, ast } from "./backend.mjs";
+import { ast, isInferredProject, projectConfigFileName, sync } from "./backend.mjs";
 
 import { canonicalFileIdentity } from "./file-identity.mjs";
 
@@ -307,15 +307,27 @@ export const isProjectSource = (project, sourceFile) =>
   !project.program.isSourceFileDefaultLibrary(sourceFile) &&
   !project.program.isSourceFileFromExternalLibrary(sourceFile);
 
-// Each `getSourceFile` call transfers a file from the checker. Files below
-// node_modules and declaration files are never project sources, so their names
-// skip the transfer. `isProjectSource` still checks every remaining file.
-const NODE_MODULES_PATH = /[\\/]node_modules[\\/]/u;
-const DECLARATION_FILE_NAME = /\.d\.(?:[cm]?ts|[^./\\]+\.ts)$/iu;
+// Each `getSourceFile` call transfers a file from the checker. A file below a
+// node_modules directory of the project and a declaration file are never
+// project sources, so their names skip the transfer. The node_modules test
+// uses the path relative to the tsconfig directory, because the project itself
+// can live below node_modules, and it keeps each root file that `include`
+// names. TypeScript matches declaration suffixes case-sensitively.
+// `isProjectSource` still checks every remaining file.
+const NODE_MODULES_PATH = /(?:^|[\\/])node_modules[\\/]/u;
+const DECLARATION_FILE_NAME = /\.d\.(?:[cm]?ts|[^./\\]+\.ts)$/u;
 const sourceFilesByProgram = new WeakMap();
 
-const mayBeProjectSource = (fileName) =>
-  !NODE_MODULES_PATH.test(fileName) && !DECLARATION_FILE_NAME.test(fileName);
+const sourceNameFilter = (project) => {
+  const configFileName = projectConfigFileName(project);
+  const configDirectory = isInferredProject(project) ? null : path.dirname(configFileName);
+  const rootFiles = new Set(project.rootFiles ?? []);
+  const belowNodeModules = (fileName) =>
+    configDirectory !== null &&
+    !rootFiles.has(fileName) &&
+    NODE_MODULES_PATH.test(path.relative(configDirectory, fileName));
+  return (fileName) => !DECLARATION_FILE_NAME.test(fileName) && !belowNodeModules(fileName);
+};
 
 /** The project source files of a program, read one time for each program. */
 export const projectSourceFiles = (project) => {
@@ -323,7 +335,7 @@ export const projectSourceFiles = (project) => {
   if (cached) return cached;
   const sourceFiles = project.program
     .getSourceFileNames()
-    .filter(mayBeProjectSource)
+    .filter(sourceNameFilter(project))
     .map((fileName) => project.program.getSourceFile(fileName))
     .filter((sourceFile) => isProjectSource(project, sourceFile));
   sourceFilesByProgram.set(project.program, sourceFiles);
