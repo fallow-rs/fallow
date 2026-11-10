@@ -1285,6 +1285,9 @@ pub struct MutationPlanCountsOutput {
     pub pruned_side_effect_sink: usize,
     /// Mutants in framework config exports.
     pub pruned_framework_config: usize,
+    /// Mutants in files that only tool config files reach. Absent when 0.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub pruned_build_tool_only: usize,
 }
 
 /// The envelope of `fallow mutation --plan`. It runs no user code.
@@ -1309,7 +1312,8 @@ pub struct MutationPlanOutput {
     pub test_files: Vec<String>,
     /// True when the project has no test files.
     pub no_test_files: bool,
-    /// True when the plan applied the `framework-config` prune rule.
+    /// True when the plan applied the `framework-config` and
+    /// `build-tool-only` prune rules.
     pub framework_config_checked: bool,
     /// The selected files that the plan did not instrument.
     pub skipped_files: Vec<MutationSkippedFile>,

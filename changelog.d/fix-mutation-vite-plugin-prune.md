@@ -1,0 +1,4 @@
+### Fixed
+
+- **`fallow mutation` prunes build-tool code that no test can reach.** In a tool config file such as `vite.config.ts` that no test and no application code imports, each mutant now gets the prune reason `framework-config`, also in an inline plugin hook or a middleware callback. A module that only tool config files reach, such as a Vite plugin module that only `vite.config.ts` imports, gets the new prune reason `build-tool-only`. A file that a test, a setup file or application code also imports keeps its status, for example an Angular `src/app/app.config.ts` that `src/main.ts` imports. Before, these mutants were `no_coverage` and lowered the reported coverage. The plan JSON counts these mutants in the new `pruned_build_tool_only` field, which is absent when it is 0.
+  (Fixes [#4471](https://github.com/fallow-rs/fallow/issues/4471))

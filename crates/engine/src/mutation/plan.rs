@@ -108,6 +108,9 @@ struct Context<'a> {
     runner_unreached: FxHashSet<FileId>,
     /// The files that load a database client package.
     database_files: FxHashSet<FileId>,
+    /// The reach facts of the tool config files. Empty when the plan has no
+    /// framework config facts.
+    build_tool: super::build_tool::BuildToolReach,
 }
 
 /// The result for one file.
@@ -154,6 +157,10 @@ pub(super) fn build(
         test_entries: FxHashMap::default(),
         runner_unreached: FxHashSet::default(),
         database_files: database_files(graph),
+        build_tool: inputs
+            .framework_config_exports
+            .map(|exports| super::build_tool::build_tool_reach(graph, inputs.root, exports))
+            .unwrap_or_default(),
     };
     let (candidates, unmatched_paths) = select_files(&context);
     let reachable: Vec<FileId> = candidates
@@ -393,7 +400,7 @@ fn plan_file(context: &Context<'_>, candidate: &Candidate<'_>) -> FileOutcome {
     };
     let covered = context.graph.is_test_reachable(candidate.file_id)
         && !context.runner_unreached.contains(&candidate.file_id);
-    let facts = FileFacts::new(context, candidate, module, source);
+    let facts = FileFacts::new(context, candidate, module, source, covered);
     let mut mutants = assign(candidate, &facts, covered, instrumented.mutants.clone());
     attach_test_reach(context, candidate, source, covered, &mut mutants);
     let static_test_files = if covered {
@@ -497,14 +504,9 @@ impl<'a> FileFacts<'a> {
         candidate: &'a Candidate<'a>,
         module: &'a ModuleInfo,
         source: &str,
+        covered: bool,
     ) -> Self {
-        let file_prune = if is_generated(candidate.path, source) {
-            Some(PruneReason::Generated)
-        } else if context.dead_files.contains(candidate.path) {
-            Some(PruneReason::DeadCode)
-        } else {
-            None
-        };
+        let file_prune = file_prune(context, candidate, source, covered);
         let framework_regions = context
             .inputs
             .framework_config_exports
@@ -622,6 +624,40 @@ impl<'a> FileFacts<'a> {
             MutantDisposition::NoCoverage
         }
     }
+}
+
+/// The prune reason that holds for each mutant of the file, if any. A tool
+/// config file that only the build tool loads gets the `framework-config`
+/// reason for each mutant, also in a plugin hook. A tool config file that a
+/// runner test or an application entry reaches keeps its function mutants,
+/// because that code can run outside the build tool.
+fn file_prune(
+    context: &Context<'_>,
+    candidate: &Candidate<'_>,
+    source: &str,
+    covered: bool,
+) -> Option<PruneReason> {
+    if is_generated(candidate.path, source) {
+        return Some(PruneReason::Generated);
+    }
+    if context.dead_files.contains(candidate.path) {
+        return Some(PruneReason::DeadCode);
+    }
+    let config_file = context
+        .inputs
+        .framework_config_exports
+        .is_some_and(|exports| exports.is_config_file(&candidate.rel));
+    let shared = context
+        .build_tool
+        .shared_configs
+        .contains(&candidate.file_id);
+    if config_file && !covered && !shared {
+        return Some(PruneReason::FrameworkConfig);
+    }
+    if context.build_tool.only.contains(&candidate.file_id) {
+        return Some(PruneReason::BuildToolOnly);
+    }
+    None
 }
 
 /// Whether the sorted `lines` hold a line from `first` to `last`, both
@@ -1119,6 +1155,9 @@ fn count(mutants: &[PlannedMutant]) -> MutationPlanCounts {
             }
             MutantDisposition::Pruned(PruneReason::FrameworkConfig) => {
                 counts.pruned.framework_config += 1;
+            }
+            MutantDisposition::Pruned(PruneReason::BuildToolOnly) => {
+                counts.pruned.build_tool_only += 1;
             }
             MutantDisposition::Pruned(PruneReason::NotSelected) => counts.pruned.not_selected += 1,
         }
