@@ -1,0 +1,3 @@
+### Fixed
+
+- **`npm install fallow` on Linux now installs one platform binary, not two.** The Linux platform packages now declare `libc`, so npm, pnpm and Yarn install only the glibc or the musl package. This makes the install 56 to 59 MB smaller on linux-arm64 and 65 to 71 MB smaller on linux-x64. When a `node_modules` tree was installed on musl and then runs on glibc, the launcher uses the musl binary, which is statically linked. When no matching binary is installed, the error names the detected libc and the `npm install --libc` flag. A cross-target install from macOS or Windows for a Linux image must now pass `--os=linux --cpu=<arch> --libc=<glibc|musl>`.
