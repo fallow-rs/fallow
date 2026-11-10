@@ -359,6 +359,29 @@ fn multiple_env_vars() {
 }
 
 #[test]
+fn file_utility_arguments_are_not_file_args() {
+    for script in [
+        "cp ./README.md ./deno/lib",
+        "node ./deno-build.mjs && cp ./README.md ./deno/lib",
+        "mv dist/index.js lib/index.js",
+        "cat src/banner.ts",
+        "chmod +x bin/cli.js",
+        "touch src/generated.ts",
+        "mkdir -p lib && rm -rf lib/old.js",
+    ] {
+        let cmds = parse_script(script);
+        assert!(
+            cmds.iter()
+                .filter(|cmd| cmd.binary != "node")
+                .all(|cmd| cmd.file_args.is_empty()),
+            "`{script}` must not make utility arguments file args, got: {cmds:?}"
+        );
+    }
+    let build = parse_script("node ./deno-build.mjs && cp ./README.md ./deno/lib");
+    assert_eq!(build[0].file_args, vec!["./deno-build.mjs".to_string()]);
+}
+
+#[test]
 fn formatter_and_linter_targets_are_not_file_args() {
     for script in [
         "oxfmt --check \"**/*.ts\"",

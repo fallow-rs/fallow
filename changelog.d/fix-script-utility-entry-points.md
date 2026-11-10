@@ -1,0 +1,3 @@
+### Fixed
+
+- **The arguments of `cp`, `mv` and other file utilities in package scripts no longer become entry points.** A script such as `cp ./README.md ./lib` made `README.md` and `lib/index.ts` entry points, so Fallow did not report an unused file behind them. The utilities that only read, copy, move or change files (`cat`, `chmod`, `chown`, `cp`, `echo`, `head`, `ln`, `ls`, `mkdir`, `mv`, `rm`, `rmdir`, `sort`, `tail`, `tee`, `touch`, `uniq`, `wc`) now make no entry points from their arguments. `find`, `xargs` and the shells keep their behavior, because they can run another program. (Closes [#4455](https://github.com/fallow-rs/fallow/issues/4455))
