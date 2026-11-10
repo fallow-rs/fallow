@@ -2094,6 +2094,29 @@ make("CanRead"); make("CanWrite"); make(kind);"#;
 }
 
 #[test]
+fn cache_roundtrip_preserves_function_contracts() {
+    let source = "import { format } from './format';\n\
+        export function save(id, strict?: boolean, ...rest) { if (strict) {} return id; }\n\
+        let mutable = () => {};\n\
+        save(1, true, ...more);\n\
+        format('a');\n\
+        items.map(save);";
+    let module = parse_from_content(FileId(0), Path::new("src/save.ts"), source);
+    let facts = module
+        .function_contracts
+        .as_deref()
+        .expect("the module has call evidence");
+    assert_eq!(facts.declarations.len(), 2);
+    assert_eq!(facts.calls.len(), 2);
+    assert_eq!(facts.escapes.len(), 1);
+    let cached = module_to_cached_from_parts(&module, 10, 20);
+    let decoded: CachedModule =
+        bitcode::decode(&bitcode::encode(&cached)).expect("decode cached module");
+    let restored = cached_to_module(&decoded, FileId(0));
+    assert_eq!(restored.function_contracts, module.function_contracts);
+}
+
+#[test]
 fn cache_roundtrip_preserves_import_binding_references() {
     let source = "import { useSelector, useDispatch, Provider } from 'react-redux';\n\
         export const useAppSelector = useSelector.withTypes<{ n: number }>();\n\

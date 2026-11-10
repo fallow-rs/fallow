@@ -513,6 +513,7 @@ fn release_resolution_payload_drops_copied_vectors_only() {
         component_props: Vec::new(),
         component_contracts: None,
         effect_facts: None,
+        function_contracts: None,
         has_props_attrs_fallthrough: false,
         has_define_expose: false,
         has_define_model: false,

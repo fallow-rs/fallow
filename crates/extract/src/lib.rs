@@ -43,6 +43,7 @@ mod effect_schema;
 pub mod federation_runtime;
 pub mod flags;
 mod function_body;
+mod function_contracts;
 mod function_hash;
 pub mod glimmer;
 pub(crate) mod graphql;
