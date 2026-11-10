@@ -616,6 +616,7 @@ pub(crate) fn parse_astro_to_module_with_mode(
 
     let mut info = extractor.into_module_info(file_id, content_hash, parsed_suppressions);
     degradation.apply_to(&mut info);
+    crate::visitor::mark_template_callers(&mut info);
     crate::component_contracts::merge(
         &mut info.component_contracts,
         std::mem::take(&mut semantic_usage.component_contracts),

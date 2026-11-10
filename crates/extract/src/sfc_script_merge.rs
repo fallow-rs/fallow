@@ -89,6 +89,7 @@ pub(super) fn merge_script_into_module(input: &mut SfcScriptMergeInput<'_>) {
     // real `dispatch(...)` call, not a body-relative position.
     let dispatch_base = input.combined.svelte_dispatched_events.len();
     extractor.merge_into(input.combined);
+    crate::visitor::mark_template_callers(input.combined);
     for event in &mut input.combined.svelte_dispatched_events[dispatch_base..] {
         event.span_start += input.script.byte_offset as u32;
     }

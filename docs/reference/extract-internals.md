@@ -302,6 +302,39 @@ local-loader fallback. Ordinary awaited loader calls still credit their accessed
 members; discarded imports and unread promise bindings credit no export. Changes
 to these cached import facts invalidate both extraction and graph caches.
 
+`FunctionContractFacts` (`crates/extract/src/function_contracts.rs`) is the
+call evidence of plain functions. The semantic pass records:
+
+- one contract for each function that a module-scope binding holds, with its
+  parameter facts and an `incomplete` reason when a use can be invisible;
+- one call record for each direct call whose callee is an admitted import
+  binding (`admitted_import_symbol`) or one of these local functions;
+- one escape for each other read of a local function, including a JSX
+  element name and a tagged template callee.
+
+Calls through bindings that are not admitted, and calls to globals, are not
+stored. Calls of a package import are stored, because extraction cannot tell a
+package from a workspace package or a path alias before resolution. The sites
+are grouped per callee, so the target and the member path are stored once. A
+call whose arguments are all `Unknown` stores no argument facts, only
+`arg_count`, and a string literal longer than `MAX_LITERAL_STRING_BYTES` is
+`Unknown`. The facts follow `import_binding_references`
+through the span remap and `merge_into`, so a call target index stays valid
+after the script blocks of a host file merge. A Vue, Svelte, Astro, Glimmer or
+MDX file sets `template_callers`, because the script facts do not see the
+calls of its template, of an inline script, or of another script block. The
+graph cache does not store these facts, so a change to them changes only
+`CACHE_VERSION`.
+
+A consumer of these facts reads them together with other facts:
+
+- A use of an import binding that is not a direct call is an
+  `ImportBindingReference`, not a `FunctionCall`.
+- `export { f }` and `export default f` are exports, not escapes, so the
+  consumer reads `exports` for them.
+- Calls through `require`, `import()` and CommonJS bindings are not admitted
+  and are not stored, so the consumer abstains for those modules.
+
 ## Embedded-source and import regression boundaries
 
 Asset references in HTML, JSX and HTML tagged templates must come from literal

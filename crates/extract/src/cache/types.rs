@@ -10,7 +10,7 @@ use crate::MemberKind;
 /// extraction semantics change, and give the reason in the commit message and
 /// the CHANGELOG. A stale version serves old extraction results from a warm
 /// cache. The `assert_cached_type_size!` guards below catch shape changes.
-pub(super) const CACHE_VERSION: u32 = 430;
+pub(super) const CACHE_VERSION: u32 = 431;
 
 /// Duplication token cache version. Bump it when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes, and give the
@@ -56,7 +56,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 1528);
+assert_cached_type_size!(CachedModule, 1536);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 64);
@@ -283,6 +283,8 @@ pub struct CachedModule {
     pub component_contracts: Option<Box<fallow_types::extract::ComponentContractFacts>>,
     /// Effect layer, tagged error and `catchTag` facts.
     pub effect_facts: Option<Box<fallow_types::extract::EffectFacts>>,
+    /// Function parameter contracts, admitted calls and local escapes.
+    pub function_contracts: Option<Box<fallow_types::extract::FunctionContractFacts>>,
     /// Whether the template spreads `$attrs`/`$props`/`props` or the
     /// `defineProps` return is rest-destructured. Round-trips for the abstain.
     pub has_props_attrs_fallthrough: bool,
