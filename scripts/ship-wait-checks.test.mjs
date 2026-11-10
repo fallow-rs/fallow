@@ -14,6 +14,7 @@ import {
   isChangelogFragment,
   parseGhChecks,
   parseGhMergeable,
+  reviewRequiredNote,
   parseGhRuns,
   parseGitAncestor,
   parseGitHead,
@@ -622,6 +623,16 @@ test("parseGhMergeable reads the mergeable field of gh pr view", () => {
     ok: false,
     error: "spawn gh ENOENT",
   });
+});
+
+test("reviewRequiredNote names the missing review only when GitHub requires one", () => {
+  assert.match(
+    reviewRequiredNote("REVIEW_REQUIRED", "4421"),
+    /4421.*approving review.*CODEOWNERS/u,
+  );
+  for (const decision of ["APPROVED", "CHANGES_REQUESTED", "", null, undefined]) {
+    assert.equal(reviewRequiredNote(decision, "4421"), null);
+  }
 });
 
 test("parseGhRuns turns each workflow run into a check", () => {

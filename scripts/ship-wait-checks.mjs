@@ -1471,6 +1471,33 @@ const reportPrSkillsSync = ({ pr, repo, label }) =>
     step: `After the merge, run ${SKILLS_SYNC_COMMAND} <merge commit> ${SKILLS_PUBLISH_STEP}`,
   });
 
+/**
+ * The note for a pull request whose checks passed but that still needs an
+ * approving review, or null. Pinned auto-merge waits on that review without
+ * a message. A maintainer commit under a CODEOWNERS path of a contributor
+ * pull request is a common cause.
+ */
+export const reviewRequiredNote = (decision, pr) =>
+  decision === "REVIEW_REQUIRED"
+    ? `Pull request ${pr}: the checks passed, but GitHub requires an approving review before the merge. Read the CODEOWNERS paths of the diff, and review the pull request (gh pr review ${pr} --approve) when the review is done.`
+    : null;
+
+const reportReviewRequired = ({ pr, repo }) => {
+  const args = ["pr", "view", pr, "--json", "reviewDecision"];
+  if (repo !== null) {
+    args.push("--repo", repo);
+  }
+  const read = parseGhApi(spawnSync("gh", args, { encoding: "utf8" }));
+  if (!read.ok) {
+    console.error(`Read of the review decision failed: ${read.error}`);
+    return;
+  }
+  const note = reviewRequiredNote(read.data.reviewDecision, pr);
+  if (note !== null) {
+    console.log(note);
+  }
+};
+
 // The merged commit needs the step on any result: the missing sync is itself
 // a reason for a failed contract job on main.
 const reportCommitSkillsSync = ({ commit, repo }) =>
@@ -1532,6 +1559,7 @@ const main = async () => {
   const code = reportChecks(compareWithMain(result, ghMainReaders(options)), options);
   if (code === 0) {
     reportPrSkillsSync(options);
+    reportReviewRequired(options);
   }
   return code;
 };
