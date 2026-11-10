@@ -23,6 +23,12 @@ pub struct FunctionContractFacts {
     /// and the facts do not hold those calls. A consumer must treat each
     /// contract of the file, and each import that the file calls, as open.
     pub template_callers: bool,
+    /// `true` when the module calls `eval` directly, at any depth. A direct
+    /// `eval` can call each binding in scope with any value, so a consumer
+    /// must treat each contract of the module, and each import that the
+    /// module calls, as open. A contract whose own body or default values
+    /// call `eval` also has [`ContractIncomplete::DirectEval`].
+    pub direct_eval: bool,
 }
 
 impl FunctionContractFacts {
@@ -43,6 +49,7 @@ impl FunctionContractFacts {
             && self.calls.is_empty()
             && self.escapes.is_empty()
             && !self.template_callers
+            && !self.direct_eval
     }
 }
 
@@ -110,7 +117,9 @@ pub enum ParamKind {
 pub enum ContractIncomplete {
     /// The function has TypeScript overload signatures.
     Overload,
-    /// The body or a default value reads `arguments`.
+    /// The body or a default value reads `arguments`, also in a decorator,
+    /// a method parameter decorator, an `extends` clause or a computed key
+    /// of a class inside the function.
     ArgumentsRead,
     /// The function calls `eval` directly.
     DirectEval,
@@ -247,8 +256,8 @@ pub enum LiteralValue {
     /// The unshadowed identifier `undefined`.
     Undefined,
     /// The IEEE 754 bits of a numeric literal or its negation, so `1` and
-    /// `1.0` are equal. `-0` is stored as `0`, so `-0` and `0` are equal; a
-    /// condition reads both as false.
+    /// `1.0` are equal. `-0` and `0` are different values, because
+    /// `Object.is` and `1 / x` tell them apart.
     Number(u64),
     /// The value of a string literal or of a template literal with no
     /// expression.
