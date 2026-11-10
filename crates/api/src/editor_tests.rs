@@ -1228,6 +1228,8 @@ pub fn merge_test_source_with_all_fields() -> EditorAnalysisResults {
         }),
         security_findings: vec![super::editor_results::SecurityFinding {
             finding_id: String::new(),
+            stable_finding_id: None,
+            stable_id_input: None,
             candidate: super::editor_results::SecurityCandidate::default(),
             taint_flow: None,
             attack_surface: None,
@@ -1247,6 +1249,7 @@ pub fn merge_test_source_with_all_fields() -> EditorAnalysisResults {
             reachability: None,
             runtime: None,
         }],
+        suppressed_security_findings: vec![],
         security_unresolved_edge_files: 2,
         security_unresolved_callee_sites: 3,
         security_unresolved_callee_diagnostics: vec![

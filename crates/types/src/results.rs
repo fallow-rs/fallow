@@ -605,15 +605,14 @@ pub struct AnalysisResults {
     /// Skipped during default serialization: injected separately in JSON output when enabled.
     #[serde(skip)]
     pub feature_flags: Vec<FeatureFlag>,
-    /// Local security candidates (e.g. `client-server-leak`). CANDIDATES for
-    /// downstream agent verification, NOT verified vulnerabilities. Off by
-    /// default; populated only when the corresponding `security_*` rule is
-    /// enabled (forced on by `fallow security`). Excluded from `total_issues`
-    /// and skipped during serialization so they never surface under bare
-    /// `fallow` or the `audit` gate; the `fallow security` command reads this
-    /// field and emits its own envelope. Mirrors [`Self::feature_flags`].
+    /// Security candidates to verify, not verified vulnerabilities. Set only when a `security_*`
+    /// rule is on (`fallow security` turns them on). Skipped in serialization and not counted in
+    /// `total_issues`, so bare `fallow` never shows them; `fallow security` has its own envelope.
     #[serde(skip)]
     pub security_findings: Vec<SecurityFinding>,
+    /// Inline-suppressed security candidates. The stable id ordinals count them; then cleared.
+    #[serde(skip)]
+    pub suppressed_security_findings: Vec<SecurityFinding>,
     /// In-band blind-spot count: number of `"use client"` files whose transitive
     /// import cone contains a dynamic `import()` the reachability BFS cannot
     /// follow. Surfaced by `fallow security` so a leak hidden behind an
@@ -826,6 +825,7 @@ struct AnalysisResultsMetadataMergeParts {
     active_suppressions: Vec<ActiveSuppression>,
     feature_flags: Vec<FeatureFlag>,
     security_findings: Vec<SecurityFinding>,
+    suppressed_security_findings: Vec<SecurityFinding>,
     security_unresolved_edge_files: usize,
     security_unresolved_callee_sites: usize,
     security_unresolved_callee_diagnostics: Vec<SecurityUnresolvedCalleeDiagnostic>,
@@ -3326,12 +3326,11 @@ pub struct SecurityAttackSurfaceEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityFinding {
-    /// Stable per-finding correlation id, identical across runs for the same
-    /// rule + anchor path + line + column. An autonomous agent that triaged this
-    /// candidate on a prior run uses it to correlate the candidate after a
-    /// rebase. Equal to the SARIF `partialFingerprints["fallowSecurity/v2"]`
-    /// value for the same finding (one shared helper computes both).
+    /// Location id (rule, path, line, column), equal to SARIF `fallowSecurity/v2`; edits move it.
     pub finding_id: String,
+    /// Line-independent id (`sec1:<hash>`, `~k` for repeats); a verdict may use it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stable_finding_id: Option<String>,
     /// The rule that produced this candidate.
     pub kind: SecurityFindingKind,
     /// The catalogue category id (e.g. `"dangerous-html"`). `Some` for
@@ -3399,10 +3398,9 @@ pub struct SecurityFinding {
     /// source-reachable candidates, then wider blast radius.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reachability: Option<SecurityReachability>,
-    /// Agent-actionable candidate record: the untrusted input kind, the sink,
-    /// and the boundary the flow crosses. fallow fills these three slots; the
-    /// exploitability verdict is the agent's job and is not a field here. Always
-    /// present.
+    /// Agent-actionable candidate record: the untrusted input kind, the sink, and the boundary
+    /// the flow crosses. fallow fills these three slots; the exploitability verdict is the
+    /// agent's job and is not a field here. Always present.
     pub candidate: SecurityCandidate,
     /// Source-to-sink taint-flow triple, present only when an untrusted source
     /// is import-reachable to this sink. Absent (skipped) otherwise.
@@ -3413,11 +3411,13 @@ pub struct SecurityFinding {
     /// runs and the candidate is a `tainted-sink`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime: Option<SecurityRuntimeContext>,
-    /// Internal projection used by `fallow security --surface`. The CLI strips
-    /// this from per-finding JSON and promotes it to the top-level
-    /// `attack_surface` field only when requested.
+    /// Internal projection used by `fallow security --surface`. The CLI strips this from
+    /// per-finding JSON and promotes it to the top-level `attack_surface` field only when requested.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attack_surface: Option<SecurityAttackSurfaceEntry>,
+    /// Internal input of `stable_finding_id`. Never serialized; `None` after a JSON round trip.
+    #[serde(skip)]
+    pub stable_id_input: Option<crate::security_stable_id::SecurityStableIdInput>,
 }
 
 /// A package manager catalog entry that no workspace package references via

@@ -3361,6 +3361,8 @@ async fn security_diagnostics_push_when_client_never_pulls() {
 
     let finding = fallow_api::editor_results::SecurityFinding {
         finding_id: String::new(),
+        stable_finding_id: None,
+        stable_id_input: None,
         candidate: fallow_api::editor_results::SecurityCandidate::default(),
         taint_flow: None,
         attack_surface: None,

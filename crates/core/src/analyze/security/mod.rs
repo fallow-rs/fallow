@@ -55,6 +55,7 @@ use fallow_types::results::{
     SecurityCandidate, SecurityCandidateBoundary, SecurityCandidateSink, SecurityFinding,
     SecurityFindingKind, SecuritySeverity, TraceHop, TraceHopRole,
 };
+use fallow_types::security_stable_id::SecurityStableIdInput;
 use fallow_types::suppress::IssueKind;
 
 use super::{LineOffsetsMap, byte_offset_to_line_col};
@@ -121,6 +122,8 @@ fn build_client_server_leak_finding(
 
     SecurityFinding {
         finding_id: String::new(),
+        stable_finding_id: None,
+        stable_id_input: None,
         kind: SecurityFindingKind::ClientServerLeak,
         category,
         cwe: None,
@@ -633,7 +636,12 @@ fn build_leak_finding(
         Some(SECRET_LEAK_CATEGORY.to_owned()),
     );
 
-    build_client_server_leak_finding(evidence, trace, candidate)
+    let mut finding = build_client_server_leak_finding(evidence, trace, candidate);
+    let mut secret_names = var_list.clone();
+    secret_names.sort_unstable();
+    secret_names.dedup();
+    finding.stable_id_input = Some(SecurityStableIdInput::SecretReads(secret_names));
+    finding
 }
 
 /// Build a finding for the SERVER-ONLY sink: a `"use client"` file whose

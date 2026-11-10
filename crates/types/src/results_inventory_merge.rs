@@ -8,6 +8,8 @@ impl AnalysisResults {
             .extend(parts.semantic_reachable_files);
         self.feature_flags.extend(parts.feature_flags);
         self.security_findings.extend(parts.security_findings);
+        self.suppressed_security_findings
+            .extend(parts.suppressed_security_findings);
         self.security_unresolved_edge_files += parts.security_unresolved_edge_files;
         self.security_unresolved_callee_sites += parts.security_unresolved_callee_sites;
         self.security_unresolved_callee_diagnostics

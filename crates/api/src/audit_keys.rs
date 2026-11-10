@@ -205,6 +205,7 @@ impl DeadCodeAuditLedger {
             active_suppressions: _active_suppressions,
             feature_flags: _feature_flags,
             security_findings: _security_findings,
+            suppressed_security_findings: _suppressed_security_findings,
             security_unresolved_edge_files: _security_unresolved_edge_files,
             security_unresolved_callee_sites: _security_unresolved_callee_sites,
             security_unresolved_callee_diagnostics: _security_unresolved_callee_diagnostics,
@@ -692,6 +693,7 @@ impl DeadCodeKeyCollector<'_> {
             // Security findings are emitted via `fallow security`, not the audit
             // dead-code gate; they have no dead-code key representation today.
             security_findings: _security_findings,
+            suppressed_security_findings: _suppressed_security_findings,
             security_unresolved_edge_files: _security_unresolved_edge_files,
             security_unresolved_callee_sites: _security_unresolved_callee_sites,
             security_unresolved_callee_diagnostics: _security_unresolved_callee_diagnostics,
@@ -1572,6 +1574,7 @@ fn classify_introduced_dead_code_fields(results: &fallow_types::results::Analysi
         // dead-code gate; they have no key representation and are not filtered
         // here.
         security_findings: _security_findings,
+        suppressed_security_findings: _suppressed_security_findings,
         security_unresolved_edge_files: _security_unresolved_edge_files,
         security_unresolved_callee_sites: _security_unresolved_callee_sites,
         security_unresolved_callee_diagnostics: _security_unresolved_callee_diagnostics,

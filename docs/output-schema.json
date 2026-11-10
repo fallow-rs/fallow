@@ -14980,7 +14980,14 @@
       "properties": {
         "finding_id": {
           "type": "string",
-          "description": "Stable per-finding correlation id, identical across runs for the same\nrule + anchor path + line + column. An autonomous agent that triaged this\ncandidate on a prior run uses it to correlate the candidate after a\nrebase. Equal to the SARIF `partialFingerprints[\"fallowSecurity/v2\"]`\nvalue for the same finding (one shared helper computes both)."
+          "description": "Location id (rule, path, line, column), equal to SARIF `fallowSecurity/v2`; edits move it."
+        },
+        "stable_finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Line-independent id (`sec1:<hash>`, `~k` for repeats); a verdict may use it."
         },
         "kind": {
           "description": "The rule that produced this candidate.",
@@ -15061,7 +15068,7 @@
           "description": "Graph-derived reachability ranking signal (issues #860 and #885). `None`\nuntil the post-detection ranking pass fills it; additive on the wire\n(skipped when absent). Drives the order findings are emitted in:\nruntime-reachable candidates sort first, followed by source-backed and\nsource-reachable candidates, then wider blast radius."
         },
         "candidate": {
-          "description": "Agent-actionable candidate record: the untrusted input kind, the sink,\nand the boundary the flow crosses. fallow fills these three slots; the\nexploitability verdict is the agent's job and is not a field here. Always\npresent.",
+          "description": "Agent-actionable candidate record: the untrusted input kind, the sink, and the boundary\nthe flow crosses. fallow fills these three slots; the exploitability verdict is the\nagent's job and is not a field here. Always present.",
           "$ref": "#/definitions/SecurityCandidate"
         },
         "taint_flow": {
@@ -15095,7 +15102,7 @@
               "type": "null"
             }
           ],
-          "description": "Internal projection used by `fallow security --surface`. The CLI strips\nthis from per-finding JSON and promotes it to the top-level\n`attack_surface` field only when requested."
+          "description": "Internal projection used by `fallow security --surface`. The CLI strips this from\nper-finding JSON and promotes it to the top-level `attack_surface` field only when requested."
         }
       },
       "required": [
@@ -19736,7 +19743,7 @@
           "additionalProperties": {
             "$ref": "#/definitions/SecuritySurvivor"
           },
-          "description": "Verifier-retained candidates keyed by finding id."
+          "description": "Verifier-retained candidates keyed by the candidate `finding_id`, also\nwhen the verdict names the candidate by its `stable_finding_id`."
         },
         "needs_human_review": {
           "type": "object",
@@ -19871,7 +19878,7 @@
         },
         "finding_id": {
           "type": "string",
-          "description": "Stable candidate id from `security_findings[].finding_id`."
+          "description": "Candidate id: `security_findings[].finding_id` or\n`security_findings[].stable_finding_id`. Use the stable id when the\nverdict must survive edits that move the sink to another line."
         },
         "verdict": {
           "description": "Verifier's verdict for the candidate.",

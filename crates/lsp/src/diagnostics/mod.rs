@@ -360,6 +360,8 @@ mod tests {
             .security_findings
             .push(fallow_api::editor_results::SecurityFinding {
                 finding_id: String::new(),
+                stable_finding_id: None,
+                stable_id_input: None,
                 candidate: fallow_api::editor_results::SecurityCandidate::default(),
                 taint_flow: None,
                 attack_surface: None,
@@ -574,6 +576,7 @@ mod severity_gate {
             // from rule severity, so they are intentionally outside the
             // dead-code severity table.
             security_findings: _,
+            suppressed_security_findings: _,
             security_unresolved_edge_files: _,
             security_unresolved_callee_sites: _,
             security_unresolved_callee_diagnostics: _,

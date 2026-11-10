@@ -2111,31 +2111,31 @@ fn populate_tainted_sink_findings(
         categories.and_then(|c| c.include.clone()),
         categories.and_then(|c| c.exclude.clone()),
     );
+    let sink_context = security::TaintedSinkContext {
+        category_filter: &filter,
+        request_receivers: ctx.request_receivers,
+        root: &ctx.config.root,
+    };
     let (sink_findings, sink_stats) = security::find_tainted_sinks(
         ctx.graph,
         ctx.modules,
         ctx.suppressions,
         ctx.line_offsets_by_file,
         ctx.declared_deps,
-        &security::TaintedSinkContext {
-            category_filter: &filter,
-            request_receivers: ctx.request_receivers,
-            root: &ctx.config.root,
-        },
+        &sink_context,
     );
     results.security_findings.extend(sink_findings);
     results.security_unresolved_callee_sites = sink_stats.sinks_skipped_dynamic_callee;
     results.security_unresolved_callee_diagnostics = sink_stats.unresolved_callee_diagnostics;
-    results
-        .security_findings
-        .extend(security::find_hardcoded_secret_candidates(
-            ctx.graph,
-            ctx.modules,
-            ctx.suppressions,
-            ctx.line_offsets_by_file,
-            &filter,
-            &ctx.config.root,
-        ));
+    results.suppressed_security_findings = sink_stats.suppressed_findings;
+    security::find_hardcoded_secret_candidates(
+        ctx.graph,
+        ctx.modules,
+        ctx.suppressions,
+        ctx.line_offsets_by_file,
+        &sink_context,
+        results,
+    );
 }
 
 fn annotate_security_findings(

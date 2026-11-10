@@ -55,17 +55,31 @@ pub fn security_finding_id(finding: &SecurityFinding, relative_path: &Path) -> S
     fallow_types::identity::fnv1a64_hex(fingerprint.as_bytes())
 }
 
-/// Set the `finding_id` of each finding in `findings`.
+/// Set the `finding_id` and the `stable_finding_id` of each finding in
+/// `findings`.
 ///
 /// The shared analysis pipeline calls this once, directly after detection, so
 /// the CLI, MCP and the LSP all read the same id. A path
 /// under `root` is made root-relative before the digest. A path outside `root`
 /// stays as it is, as in the CLI JSON output.
-pub fn stamp_security_finding_ids(findings: &mut [SecurityFinding], root: &Path) {
-    for finding in findings {
+///
+/// `suppressed` holds the candidates that an inline comment hides. They get
+/// no id, but they keep their tiebreak position for the stable id.
+///
+/// `sink_text` gets the absolute anchor path and the byte span of a sink, and
+/// returns the normalized source text of the sink expression. The stable id
+/// hashes that text. `None` leaves the finding without a stable id.
+pub fn stamp_security_finding_ids(
+    findings: &mut [SecurityFinding],
+    suppressed: &[SecurityFinding],
+    root: &Path,
+    sink_text: impl FnMut(&Path, u32, u32) -> Option<String>,
+) {
+    for finding in findings.iter_mut() {
         let relative = finding.path.strip_prefix(root).unwrap_or(&finding.path);
         finding.finding_id = security_finding_id(finding, relative);
     }
+    crate::stable_id::stamp_stable_security_finding_ids(findings, suppressed, root, sink_text);
 }
 
 #[cfg(test)]
@@ -86,6 +100,8 @@ mod tests {
         let path = PathBuf::from("/repo/src/a.ts");
         SecurityFinding {
             finding_id: String::new(),
+            stable_finding_id: None,
+            stable_id_input: None,
             kind,
             category: category.map(str::to_owned),
             cwe: Some(79),
@@ -202,7 +218,7 @@ mod tests {
     #[test]
     fn stamp_uses_the_root_relative_path() {
         let mut findings = vec![finding(SecurityFindingKind::ClientServerLeak, None)];
-        stamp_security_finding_ids(&mut findings, Path::new("/repo"));
+        stamp_security_finding_ids(&mut findings, &[], Path::new("/repo"), |_, _, _| None);
 
         assert_eq!(
             findings[0].finding_id,
@@ -213,7 +229,7 @@ mod tests {
     #[test]
     fn stamp_keeps_a_path_outside_the_root() {
         let mut findings = vec![finding(SecurityFindingKind::ClientServerLeak, None)];
-        stamp_security_finding_ids(&mut findings, Path::new("/elsewhere"));
+        stamp_security_finding_ids(&mut findings, &[], Path::new("/elsewhere"), |_, _, _| None);
 
         assert_eq!(
             findings[0].finding_id,

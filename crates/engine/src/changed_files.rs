@@ -785,6 +785,7 @@ fn classify_changed_file_filter_fields(results: &AnalysisResults) {
         active_suppressions: _active_suppressions,
         feature_flags: _feature_flags,
         security_findings: _security_findings,
+        suppressed_security_findings: _suppressed_security_findings,
         security_unresolved_edge_files: _security_unresolved_edge_files,
         security_unresolved_callee_sites: _security_unresolved_callee_sites,
         security_unresolved_callee_diagnostics: _security_unresolved_callee_diagnostics,

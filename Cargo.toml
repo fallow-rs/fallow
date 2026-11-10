@@ -355,6 +355,7 @@ allow = [
     { path = "crates/extract/src/sfc_script_merge.rs", max = 1 },
     { path = "crates/extract/src/sfc_template/component_contracts.rs", max = 1 },
     { path = "crates/extract/src/similar_code.rs", max = 1, require = ["parse_bounded("] },
+    { path = "crates/extract/src/sink_identity.rs", max = 1, require = ["parse_bounded("] },
     { path = "crates/extract/src/template_usage.rs", max = 3 },
     # fallow-mutation has no fallow dependencies. The engine calls it only
     # inside parse_bounded (crates/engine/src/mutation/layout.rs). regex.rs
