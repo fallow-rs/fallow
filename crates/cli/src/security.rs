@@ -53,6 +53,8 @@ pub use fallow_api::SecurityGateMode;
 
 #[path = "security_base_cache.rs"]
 mod base_cache;
+#[path = "security_gate_new.rs"]
+mod gate_new;
 #[path = "security_sarif.rs"]
 mod sarif;
 
@@ -500,11 +502,12 @@ fn build_security_command_output(
     enable_security_rules(&mut config);
     let effective_severities = security_rule_severities(&config);
 
+    let gate_new_diff = gate_new::resolve(opts)?;
     let mut analysis = analyze_security_candidates(opts, &config)?;
 
     apply_security_scopes(opts, &config.workspace_patterns, &mut analysis)?;
 
-    let gate_mode = apply_security_gate(opts, &config, &mut analysis.results)?;
+    let gate_mode = apply_security_gate(opts, &config, &mut analysis.results, gate_new_diff)?;
 
     let unresolved_edge_files = analysis.results.security_unresolved_edge_files;
     let unresolved_callee_sites = analysis.results.security_unresolved_callee_sites;
@@ -1110,6 +1113,7 @@ fn apply_security_gate(
     opts: &SecurityOptions<'_>,
     config: &fallow_config::ResolvedConfig,
     results: &mut AnalysisResults,
+    gate_new_diff: Option<gate_new::GateNewDiff>,
 ) -> Result<Option<SecurityGateMode>, ExitCode> {
     let Some(mode) = opts.gate else {
         return Ok(None);
@@ -1120,36 +1124,7 @@ fn apply_security_gate(
         return Ok(Some(mode));
     }
 
-    // Security gate (issue #886): narrow to the STRICT "new in changed lines"
-    // predicate and drive a dedicated exit code. The gate requires a diff
-    // source; a diff it cannot compute is a LOUD error (exit 2), never a green
-    // gate (a silent miss defeats a security gate).
-    let mut owned_gate_diff: Option<crate::report::ci::diff_filter::DiffIndex> = None;
-    let gate_diff: &crate::report::ci::diff_filter::DiffIndex =
-        if let Some(shared) = crate::report::ci::diff_filter::shared_diff_index() {
-            shared
-        } else if let Some(git_ref) = opts.changed_since {
-            match fallow_engine::changed_files::try_get_changed_diff(opts.root, git_ref) {
-                Ok(text) => owned_gate_diff
-                    .insert(crate::report::ci::diff_filter::DiffIndex::from_unified_diff(&text)),
-                Err(err) => {
-                    return Err(emit_input_error(
-                        &format!(
-                            "fallow security --gate could not compute the diff for '{git_ref}': {}",
-                            err.describe()
-                        ),
-                        opts.output,
-                    ));
-                }
-            }
-        } else {
-            return Err(emit_input_error(
-                "fallow security --gate requires a diff source: --changed-since <ref>, \
-                     --diff-file <path>, or --diff-stdin.",
-                opts.output,
-            ));
-        };
-    crate::check::filtering::retain_gate_new(results, gate_diff, opts.root);
+    gate_new::retain(opts, results, gate_new_diff)?;
     Ok(Some(mode))
 }
 

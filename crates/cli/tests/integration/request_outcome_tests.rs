@@ -325,6 +325,77 @@ fn audit_states_the_cause_without_claiming_a_whole_project_report() {
     );
 }
 
+/// `fallow security --gate new` needs the diff of `--changed-since`, so a ref
+/// that git cannot resolve stops the run with exit 2 and no report. The
+/// whole-project sentence belongs to a run that widens, so it must not appear
+/// here in any format (issue #4431).
+#[test]
+fn security_gate_states_the_cause_without_claiming_a_whole_project_report() {
+    let project = committed_project();
+    let root = root_arg(&project);
+    for format in ["human", "json"] {
+        let out = run(&[
+            "security",
+            "--root",
+            root,
+            "--gate",
+            "new",
+            "--changed-since",
+            "refs/heads/does-not-exist",
+            "--format",
+            format,
+        ]);
+        assert_eq!(
+            out.code, 2,
+            "{format}: the gate exits on an unresolvable ref: {}{}",
+            out.stdout, out.stderr
+        );
+        assert!(
+            !out.stderr.contains("covers the whole project"),
+            "{format}: a run that produced no report cannot claim a whole-project one: {}",
+            out.stderr
+        );
+        let error = if format == "json" {
+            parse_json(&out)["message"]
+                .as_str()
+                .expect("an error document")
+                .to_owned()
+        } else {
+            out.stderr.clone()
+        };
+        assert!(
+            error.contains("--gate could not compute the diff for 'refs/heads/does-not-exist'"),
+            "{format}: the run names the gate error and the ref: {error}"
+        );
+    }
+}
+
+/// Without `--gate`, the same ref still widens the security report to the whole
+/// project, and the run says so on stderr and in the envelope.
+#[test]
+fn security_without_gate_still_widens_on_an_unresolvable_ref() {
+    let project = committed_project();
+    let out = run(&[
+        "security",
+        "--root",
+        root_arg(&project),
+        "--changed-since",
+        "refs/heads/does-not-exist",
+        "--format",
+        "json",
+    ]);
+    assert_eq!(out.code, 0, "{}{}", out.stdout, out.stderr);
+    assert!(
+        out.stderr.contains("covers the whole project"),
+        "the widened run warns: {}",
+        out.stderr
+    );
+    assert_eq!(
+        request(&parse_json(&out), "changed-since")["status"],
+        "not-applied"
+    );
+}
+
 /// One case per diff stand-down, each driven into the real failure mode rather
 /// than asserted against the constant that produced it.
 #[test]
