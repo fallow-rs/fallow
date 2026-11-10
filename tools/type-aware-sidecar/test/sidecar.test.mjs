@@ -644,6 +644,61 @@ test("protocol v7 batches exact export and type-use queries through one Program"
   }
 });
 
+test("protocol v7 applies ts-ignore directives to binding diagnostics", () => {
+  const root = makeProject();
+  try {
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"] }),
+    );
+    const source = `export class Service {
+  run(): void {}
+}
+`;
+    write(root, "src/service.ts", source);
+    write(root, "src/consumer.ts", 'import { Service } from "./service";\nnew Service().run();\n');
+    const declarations = (directive) => `declare namespace Runtime {
+\t/** @deprecated */
+${directive}\texport const arguments: never;
+}
+`;
+    const query = {
+      id: 0,
+      operation: "symbol-use",
+      symbol: symbolIdentity({
+        source,
+        marker: "run()",
+        file: "src/service.ts",
+        namespace: "value",
+        declarationKind: "class_method",
+        exportedName: "run",
+        owner: "Service",
+      }),
+    };
+    const assertion = (directive) => {
+      write(root, "src/ambient.d.ts", declarations(directive));
+      const [result] = runSidecar(semanticRequest(root, [query])).results;
+      return [result.assertion, result.reason_code ?? null];
+    };
+
+    assert.deepEqual(assertion("\t// @ts-ignore\n"), ["confirmed-used", null]);
+    assert.deepEqual(assertion("\t// @ts-expect-error\n\n"), ["confirmed-used", null]);
+    const blocked = ["no-confirmed-use", "blocking-diagnostics"];
+    assert.deepEqual(assertion(""), blocked);
+    assert.deepEqual(assertion("\t// @ts-ignore\n\t/** @deprecated */\n"), blocked);
+    write(
+      root,
+      "src/ambient.d.ts",
+      "// @ts-ignore\ndeclare const twice: number;\n// @ts-ignore\ndeclare const twice: number;\n",
+    );
+    const [duplicate] = runSidecar(semanticRequest(root, [query])).results;
+    assert.deepEqual([duplicate.assertion, duplicate.reason_code], blocked);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("protocol v7 does not treat paired accessors as uses of each other", () => {
   const root = makeProject();
   try {
