@@ -744,6 +744,10 @@ test("file-size guard runs for commits and on every pull request", () => {
   // `base: auto` gives the check step the merge base, so `check` enforces
   // the file-growth gate.
   assert.match(job, /baseline: cargo-fallow-baseline\.json\n\s+base: auto/u);
+  // A rebase commits resolved conflicts without the pre-commit hook. So the
+  // pre-push check must also enforce the file-growth gate against the base.
+  const prePush = /\["pre-push"\][\s\S]*$/u.exec(preCommit)?.[0] ?? "";
+  assert.match(prePush, /sh scripts\/hook-cargo-fallow\.sh origin\/main upstream\/main/u);
 });
 
 test("fallow audit holds the file-length rule for .mjs and .ts files", () => {
