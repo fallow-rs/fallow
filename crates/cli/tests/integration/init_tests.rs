@@ -245,6 +245,33 @@ fn bare_run_setup_hint_offers_agent_install_dry_run() {
     cleanup(&dir);
 }
 
+/// After `npx fallow`, a bare `fallow` is usually not on `PATH`, so the
+/// setup hint names `npx fallow init`.
+#[test]
+fn bare_run_setup_hint_uses_npx_under_npm_exec() {
+    let dir = init_temp_dir("setup-hint-npx");
+    fs::write(dir.join("index.ts"), "export const used = 1;\n").unwrap();
+    fs::write(dir.join("orphan.ts"), "export const orphan = 2;\n").unwrap();
+    let mut cmd = Command::new(crate::common::fallow_bin());
+    crate::common::scrub_analysis_env(&mut cmd);
+    for var in ["CI", "GITHUB_ACTIONS", "GITLAB_CI", "FALLOW_SUGGESTIONS"] {
+        cmd.env_remove(var);
+    }
+    let output = cmd
+        .env("RUST_LOG", "")
+        .env("NO_COLOR", "1")
+        .env("npm_command", "exec")
+        .args(["--root", dir.to_str().unwrap()])
+        .output()
+        .unwrap();
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("Setup: `npx fallow init` writes a config"),
+        "the hint must name the npx form, stderr: {stderr}"
+    );
+    cleanup(&dir);
+}
+
 /// Issue #1794: without a local `node_modules/fallow/schema.json`, `fallow
 /// init` writes the remote GitHub URL fallback.
 #[test]

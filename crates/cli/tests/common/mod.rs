@@ -86,7 +86,10 @@ pub fn scrub_analysis_env(cmd: &mut Command) {
         // A test suite started inside a Claude Code session must not get the
         // plugin hint on stderr.
         .env_remove("CLAUDECODE")
-        .env_remove("CLAUDE_CODE_CHILD_SESSION");
+        .env_remove("CLAUDE_CODE_CHILD_SESSION")
+        // A test suite that `npx` or `npm exec` started must not get the
+        // `npx fallow` form of the human hints.
+        .env_remove("npm_command");
 }
 
 /// Build a fallow command with deterministic output settings.

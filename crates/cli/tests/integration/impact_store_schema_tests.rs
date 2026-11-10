@@ -108,3 +108,24 @@ fn older_binary_leaves_a_newer_schema_store_unchanged() {
     assert_eq!(status.code, 0, "reads stay available: {}", status.stderr);
     assert_eq!(read(&store), future);
 }
+
+/// After `npx fallow impact enable`, the tip names `npx fallow init --hooks`,
+/// because a bare `fallow` is usually not on `PATH`.
+#[test]
+fn impact_enable_tip_uses_npx_under_npm_exec() {
+    let home = tempfile::tempdir().expect("home tempdir");
+    let project = tempfile::tempdir().expect("project tempdir");
+    let root = project.path().to_str().expect("utf8 root");
+    let mut env = isolated_env(home.path());
+    env.push(("npm_command", "exec".to_owned()));
+    let env: Vec<(&str, &str)> = env.iter().map(|(k, v)| (*k, v.as_str())).collect();
+
+    let output = run_fallow_raw_with_env(&["impact", "enable", "--root", root], &env);
+
+    assert_eq!(output.code, 0, "enable failed: {}", output.stderr);
+    assert!(
+        output.stdout.contains("Tip: run `npx fallow init --hooks`"),
+        "the tip must name the npx form: {}",
+        output.stdout
+    );
+}

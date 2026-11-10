@@ -1145,7 +1145,7 @@ fn print_failure_followups(root: &Path) {
     if crate::report::suggestions::suggestions_enabled()
         && crate::report::suggestions::setup_pointer_applicable(root)
     {
-        eprintln!("{}", crate::report::suggestions::SETUP_HINT.dimmed());
+        eprintln!("{}", crate::report::suggestions::setup_hint().dimmed());
     }
 }
 

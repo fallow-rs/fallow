@@ -58,8 +58,36 @@ pub fn setup_pointer_applicable(root: &Path) -> bool {
 /// Worded as an offer, not a deficiency: zero-config is a supported happy path.
 /// It names `fallow agent install`, the one-pass agent setup, so that the
 /// skills and the MCP server are part of the offer, not only the guide and
-/// the gate.
-pub const SETUP_HINT: &str = "Setup: `fallow init` writes a config; `fallow agent install --dry-run` previews the agent guide, skills, MCP server, and commit gate (hide this hint: `fallow init --decline`).";
+/// the gate. The commands use [`fallow_command`].
+#[must_use]
+pub fn setup_hint() -> String {
+    setup_hint_for(std::env::var("npm_command").ok().as_deref())
+}
+
+fn setup_hint_for(npm_command: Option<&str>) -> String {
+    let fallow = fallow_command_for(npm_command);
+    format!(
+        "Setup: `{fallow} init` writes a config; `{fallow} agent install --dry-run` previews the agent guide, skills, MCP server, and commit gate (hide this hint: `{fallow} init --decline`)."
+    )
+}
+
+/// The command name for a human hint: `npx fallow` when `npx` or `npm exec`
+/// started fallow, because a bare `fallow` is then usually not on `PATH`.
+/// Otherwise `fallow`. JSON next steps keep the bare form as a stable contract.
+#[must_use]
+pub fn fallow_command() -> &'static str {
+    fallow_command_for(std::env::var("npm_command").ok().as_deref())
+}
+
+/// `npm_command` is the variable that npm 7 and later set for each command;
+/// `npx` and `npm exec` both set it to `exec`.
+fn fallow_command_for(npm_command: Option<&str>) -> &'static str {
+    if npm_command == Some("exec") {
+        "npx fallow"
+    } else {
+        "fallow"
+    }
+}
 
 /// Real-counter summary fragment shared by the next-step reason and the human
 /// one-liner. The output crate owns the `impact-report` command contract.
@@ -313,7 +341,7 @@ pub fn build_audit_next_steps(
 /// from the same candidates and ordering as the combined JSON array so a human
 /// and an agent on the same run never see a contradictory top step. The `setup`
 /// pointer is deliberately excluded here (`offer_setup: false`): humans get the
-/// dedicated prose [`SETUP_HINT`] line instead, so the `Next:` slot always
+/// dedicated prose [`setup_hint`] line instead, so the `Next:` slot always
 /// shows an analysis follow-up.
 #[must_use]
 pub fn top_combined_next_step(
@@ -342,6 +370,26 @@ mod tests {
     use fallow_types::results::{AnalysisResults, UnusedExport};
 
     use super::*;
+
+    #[test]
+    fn setup_hint_uses_npx_when_npm_exec_started_fallow() {
+        let hint = setup_hint_for(Some("exec"));
+        assert!(hint.contains("`npx fallow init`"), "{hint}");
+        assert!(
+            hint.contains("`npx fallow agent install --dry-run`"),
+            "{hint}"
+        );
+        assert!(hint.contains("`npx fallow init --decline`"), "{hint}");
+    }
+
+    #[test]
+    fn setup_hint_uses_bare_fallow_outside_npm_exec() {
+        for command in [None, Some("run-script"), Some("")] {
+            let hint = setup_hint_for(command);
+            assert!(!hint.contains("npx"), "{command:?}: {hint}");
+            assert!(hint.contains("`fallow init`"), "{command:?}: {hint}");
+        }
+    }
 
     fn build_dead_code_next_steps(
         results: &AnalysisResults,
