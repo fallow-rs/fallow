@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "reviewed_on": "2026-07-23",
+  "reviewed_on": "2026-11-10",
   "reviewer": "primary-source-adjudication",
   "method": "Confirmed uses require an exact checker-resolved declaration and concrete source use. Contract-preserved records require an exact inherited declaration and independently reviewed contract or override behavior. Retained candidates are indeterminate unless source review proves that only the declaration exists.",
   "default_confirmed_bucket": "exact-cross-file-symbol-use",
@@ -10,30 +10,63 @@
     "tac_32088e6c4f7a2034f692": "TypeScript Project.getPackageJsonCache occurs only at its internal declaration and has no source consumer in the pinned repository."
   },
   "feature_overrides": {
-    "tac_07a28376e3a5fd5d921e": [
-      "generic-inheritance"
+    "tac_71d52168787dffda875a": [
+      "callback-inference"
     ],
-    "tac_72e447024a66fb9722fa": [
-      "generic-class"
+    "tac_a58570150901b3248410": [
+      "callback-inference"
+    ],
+    "tac_b0978104a1568709a4db": [
+      "callback-inference"
+    ],
+    "tac_cb573da83a058bd610e6": [
+      "callback-inference"
     ]
   },
   "independent_reviews": [
     {
       "project_id": "astro",
-      "candidate_count": 62,
-      "candidate_set_sha256": "913dd1db987d4049d6647385e6e01b2180ad1f7d7622a3a866c89b8939e9a578",
-      "evidence_sha256": "67e67473bb581562517cfbff7a9778be2602411d7d30b34638050952fa117ade",
+      "candidate_count": 20,
+      "candidate_set_sha256": "b9e97b08f624956c7bb77fdbb8d91ce6bb085e40329758cb4df3e16b3f8f5e0e",
+      "evidence_sha256": "85533c9ad449200cb3766acbf8ff89e29a737b7d311b50d3f20fde524ef59c26",
       "reviewer": "independent-source-review-astro",
-      "method": "Confirmed uses were checked against pinned source evidence. Contract-preserved records were checked for declaration, heritage edge, signature, TypeScript contract diagnostics, or observably different inherited behavior.",
+      "method": "Two reviewers checked each record against the pinned source. Confirmed uses were checked for a concrete source use of the exact member, with accessor reads and writes credited to the matching half. Contract-preserved records were checked for the declaration, the heritage edge, the signature, and a required interface member, an abstract member, or an override that changes the behavior of the class.",
+      "verdict": "approved"
+    },
+    {
+      "project_id": "next.js",
+      "candidate_count": 64,
+      "candidate_set_sha256": "7f650cfcd2d4fb0dd784603f63ed390894452b53de5ca461be20b2c3a84c24f2",
+      "evidence_sha256": "0b3198e26039cced724b066c68a5844bc7a0d5cdf2136572c57b18e3a36e6b29",
+      "reviewer": "independent-source-review-next.js",
+      "method": "Two reviewers checked each record against the pinned source. Confirmed uses were checked for a concrete source use of the exact member, with accessor reads and writes credited to the matching half. Contract-preserved records were checked for the declaration, the heritage edge, the signature, and a required interface member, an abstract member, or an override that changes the behavior of the class.",
+      "verdict": "approved"
+    },
+    {
+      "project_id": "query",
+      "candidate_count": 3,
+      "candidate_set_sha256": "8e2a04bfe7918a1145f796aa9c44f0b0fd48cf71e898e49fd1279668ef3ab2e9",
+      "evidence_sha256": "fc8e89177c3589366b08e300e0a86548a957e5db4292628f0095d68c7bba8bca",
+      "reviewer": "independent-source-review-query",
+      "method": "Two reviewers checked each record against the pinned source. Confirmed uses were checked for a concrete source use of the exact member, with accessor reads and writes credited to the matching half. Contract-preserved records were checked for the declaration, the heritage edge, the signature, and a required interface member, an abstract member, or an override that changes the behavior of the class.",
       "verdict": "approved"
     },
     {
       "project_id": "typescript",
-      "candidate_count": 148,
-      "candidate_set_sha256": "9d799fb67b19bf82061f9c6780afb4231a2096b6e5df97c8f3c179aa1e8d94b5",
-      "evidence_sha256": "4c7be987c97d1e5ec1a3515508e1e36c422812976b70a3e5f2c8dbc1d1f35f82",
+      "candidate_count": 74,
+      "candidate_set_sha256": "bb9a3d9822393f596327cc8d5dcfe2f627d3295c92011e3911cb6ca51358d543",
+      "evidence_sha256": "1b22718975075a3145d6bbc8b332417edd7bf60b5732f4acdc093a9dc3209c3a",
       "reviewer": "independent-source-review-typescript",
-      "method": "Confirmed uses were checked against pinned source evidence. Contract-preserved records were checked for declaration, heritage edge, signature, TypeScript contract diagnostics, or observably different inherited behavior.",
+      "method": "Two reviewers checked each record against the pinned source. Confirmed uses were checked for a concrete source use of the exact member, with accessor reads and writes credited to the matching half. Contract-preserved records were checked for the declaration, the heritage edge, the signature, and a required interface member, an abstract member, or an override that changes the behavior of the class.",
+      "verdict": "approved"
+    },
+    {
+      "project_id": "vite",
+      "candidate_count": 17,
+      "candidate_set_sha256": "54609a071ff13c4f533f5288108376381acd289b0cbad11948a71508ee1270ba",
+      "evidence_sha256": "a6484c021405984f93eae6476654e979bf7923807b963a7cd602e70124c5ce8b",
+      "reviewer": "independent-source-review-vite",
+      "method": "Two reviewers checked each record against the pinned source. Confirmed uses were checked for a concrete source use of the exact member, with accessor reads and writes credited to the matching half. Contract-preserved records were checked for the declaration, the heritage edge, the signature, and a required interface member, an abstract member, or an override that changes the behavior of the class.",
       "verdict": "approved"
     }
   ],
