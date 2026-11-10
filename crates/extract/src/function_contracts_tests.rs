@@ -825,3 +825,47 @@ fn a_type_assertion_argument_is_transparent() {
         vec![ArgFact::Literal(LiteralValue::Boolean(true))]
     );
 }
+
+#[test]
+fn a_rest_parameter_is_not_pass_through() {
+    let info = parse("function f(...r) { f(r); }\nf(1);");
+    assert_eq!(local_calls(&info, "f")[0].args, vec![]);
+}
+
+#[test]
+fn a_redeclaration_in_the_body_writes_the_parameter() {
+    let info = parse(
+        "function varInit(a) { var a = 5; varInit(a); }
+         function varBare(a) { var a; varBare(a); }
+         function forVar(a, xs) { for (var a of xs) {} forVar(a, xs); }
+         function fnDecl(a) { function a() {} fnDecl(a); }
+         function shadowLet(a) { { let a = 1; } shadowLet(a); }",
+    );
+    assert_eq!(written(&info, "varInit"), vec![true]);
+    assert_eq!(written(&info, "varBare"), vec![true]);
+    assert_eq!(written(&info, "forVar"), vec![true, false]);
+    assert_eq!(written(&info, "fnDecl"), vec![true]);
+    assert_eq!(written(&info, "shadowLet"), vec![false]);
+    assert_eq!(local_calls(&info, "varInit")[0].args, vec![]);
+    assert_eq!(
+        local_calls(&info, "forVar")[0].args,
+        vec![ArgFact::Unknown, ArgFact::Param(1)]
+    );
+    assert_eq!(local_calls(&info, "fnDecl")[0].args, vec![]);
+    assert_eq!(
+        local_calls(&info, "shadowLet")[0].args,
+        vec![ArgFact::Param(0)]
+    );
+}
+
+#[test]
+fn a_write_through_arguments_opens_the_contract() {
+    let info = parse_at(
+        "script.cjs",
+        "function sloppy(a) { arguments[0] = false; if (a) {} sloppy(a); }\nsloppy(true);",
+    );
+    assert_eq!(
+        contract(&info, "sloppy").incomplete,
+        Some(ContractIncomplete::ArgumentsRead)
+    );
+}

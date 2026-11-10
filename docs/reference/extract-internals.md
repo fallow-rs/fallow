@@ -333,13 +333,16 @@ A contract also holds these facts:
 - `ParamFact.written` is `true` when the module writes the parameter binding:
   in the body, in a default value, or in a nested function or arrow. For an
   object or array pattern, a write of any binding of the pattern counts. A
-  written parameter can hold a value that no caller passes.
+  `var` or function declaration in the body that redeclares the parameter
+  also counts, because it can replace the value without a write reference.
+  A written parameter can hold a value that no caller passes.
 
 An argument fact is `Literal`, `Param` or `Unknown`. `Param(i)` exists only
 for a self-call: a call of a local function inside the body or a default
 value of that same function, at any depth, for example in an arrow callback.
 The argument must be the identifier of the formal identifier parameter at
 index `i` of that function, and the parameter must have `written == false`.
+A rest parameter never gets `Param`, because `f(r)` passes `[r]`.
 TypeScript wrappers such as `as`, `<T>x`, `satisfies` and `!` do not change
 the fact. A call of a different function that passes a parameter stores
 `Unknown`. `args` never holds a spread argument, because the list stops

@@ -88,7 +88,9 @@ pub struct ParamFact {
     /// a default value, or in a nested function or arrow, for example
     /// `p = !p`, `p ??= x`, `[p] = xs` or `p++`. For an object or array
     /// pattern, `true` when the module writes any binding of the pattern. A
-    /// written parameter can hold a value that no caller passes.
+    /// `var` or function declaration in the body that redeclares the
+    /// parameter also counts as a write. A written parameter can hold a
+    /// value that no caller passes.
     pub written: bool,
 }
 
@@ -226,7 +228,9 @@ pub enum ArgFact {
     /// a self-call has this fact: a call of a local function inside the
     /// body or a default value of that same function. The argument is the
     /// unchanged identifier of a formal identifier parameter that the module
-    /// never writes, so the call passes the value that the outer call got.
+    /// never writes, so the call passes the value that the outer call got. A
+    /// rest parameter never gets this fact, because the callee gets `[r]`
+    /// for `f(r)`.
     Param(u32),
     /// Each other expression. `args` never holds a spread argument, because
     /// the list stops before the first spread.

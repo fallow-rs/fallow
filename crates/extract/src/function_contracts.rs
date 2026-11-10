@@ -103,7 +103,8 @@ struct SelfCallScope {
     /// The span of the function, so a call inside it is a self-call.
     span: Span,
     /// One entry for each parameter: the symbol of a formal identifier
-    /// parameter that the module never writes, `None` otherwise.
+    /// parameter that is not a rest parameter and that the module never
+    /// writes, `None` otherwise.
     params: Vec<Option<SymbolId>>,
 }
 
@@ -324,7 +325,8 @@ fn build_contract(
         params: param_symbols
             .iter()
             .zip(&facts)
-            .map(|(symbol, fact)| symbol.filter(|_| !fact.written))
+            // A self-call `f(r)` with a rest parameter `r` passes `[r]`, not `r`.
+            .map(|(symbol, fact)| symbol.filter(|_| !fact.written && !fact.is_rest))
             .collect(),
     };
     let contract = FunctionContract {
@@ -376,12 +378,17 @@ fn param_facts(
 }
 
 /// `true` when the module writes any binding of a parameter pattern.
+///
+/// A `var` or function declaration in the body that redeclares the parameter
+/// can replace its value without a write reference, so each redeclaration
+/// also counts as a write.
 fn pattern_written(scoping: &Scoping, pattern: &BindingPattern<'_>) -> bool {
     pattern.get_binding_identifiers().iter().any(|id| {
         id.symbol_id.get().is_some_and(|symbol| {
-            scoping
-                .get_resolved_references(symbol)
-                .any(oxc_semantic::Reference::is_write)
+            !scoping.symbol_redeclarations(symbol).is_empty()
+                || scoping
+                    .get_resolved_references(symbol)
+                    .any(oxc_semantic::Reference::is_write)
         })
     })
 }
