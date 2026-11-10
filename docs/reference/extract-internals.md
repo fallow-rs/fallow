@@ -349,8 +349,9 @@ the fact. A call of a different function that passes a parameter stores
 before the first spread. `-0` and `0` are different `Number` facts, because
 `Object.is` and `1 / x` tell them apart.
 
-A read of `arguments` opens the contract also when a decorator, an `extends`
-clause or a computed key of a class inside the function reads it, because
+A read of `arguments` opens the contract also when a decorator, a parameter
+decorator of a method, an `extends` clause or a computed key of a class inside
+the function reads it, because
 these parts run in the scope of the function. Methods and field initializers
 bind their own `arguments`.
 

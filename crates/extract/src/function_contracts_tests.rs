@@ -222,6 +222,8 @@ fn arguments_in_a_class_key_or_heritage_opens_the_function() {
         "function key(a) { return class extends arguments[0] {}; }",
         "function key(a) { @tag(arguments[0]) class C {} }",
         "function key(a) { class C { @tag(arguments[0]) run() {} } }",
+        "function key(a) { class C { run(@tag(arguments[0]) p) {} } }",
+        "function key(a) { class C { constructor(@tag(arguments[0]) p) {} } }",
     ] {
         assert_eq!(
             incomplete(source, "key"),

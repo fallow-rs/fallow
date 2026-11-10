@@ -516,6 +516,12 @@ impl<'a> BodyScan<'_, '_> {
         if computed {
             self.visit_property_key(key);
         }
+        // A parameter decorator of a method runs when the class is defined.
+        if let ClassElement::MethodDefinition(method) = element {
+            for param in &method.value.params.items {
+                self.visit_decorators(&param.decorators);
+            }
+        }
     }
 
     /// The parts of a class element that bind their own `arguments`.

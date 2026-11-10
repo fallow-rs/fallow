@@ -118,7 +118,8 @@ pub enum ContractIncomplete {
     /// The function has TypeScript overload signatures.
     Overload,
     /// The body or a default value reads `arguments`, also in a decorator,
-    /// an `extends` clause or a computed key of a class inside the function.
+    /// a method parameter decorator, an `extends` clause or a computed key
+    /// of a class inside the function.
     ArgumentsRead,
     /// The function calls `eval` directly.
     DirectEval,
