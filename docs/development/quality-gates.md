@@ -381,7 +381,19 @@ On push to `main`, and on a pull request only with the `ci:perf` label:
 
 Add the `ci:perf` label to a pull request that changes a hot path. The label event starts the run. A pull request
 without the label starts these workflows, but every job skips and uses no
-runner.
+runner, except one.
+
+The `Perf label for cache formats` job of `Benchmarks` runs on each pull
+request event that the workflow paths match, also on a label event. It fails when the branch bumps
+`CACHE_VERSION` or `DUPES_CACHE_VERSION` (`crates/extract/src/cache/types.rs`)
+or `GRAPH_CACHE_VERSION` (`crates/graph/src/cache/mod.rs`) and the pull
+request has no `ci:perf` label. The benchmarks load and save these caches,
+so a format change can change the time of each warm run. Add the label to
+fix the failure. The label event starts a new run, and the job passes.
+
+```bash
+node scripts/check-perf-label.mjs --base origin/main --labels-json '[]'
+```
 
 `CI` uses no macOS runner. The `VS Code target host` job runs the Linux and
 Windows legs. The darwin-x64 leg runs in `Release Validation`: every week, in
