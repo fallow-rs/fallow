@@ -185,6 +185,7 @@ fn mutant_result(mutant: &PlannedMutant, outcome: Option<&ScheduleOutcome>) -> M
         resumed: false,
         type_error_codes: Vec::new(),
         equivalence_hint: None,
+        witness: None,
     };
     let scheduled = outcome.and_then(|outcome| outcome.results.get(mutant.mutant.id.as_str()));
     match (mutant.disposition, scheduled) {

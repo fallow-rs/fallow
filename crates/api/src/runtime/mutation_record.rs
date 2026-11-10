@@ -5,26 +5,15 @@
 use std::path::Path;
 use std::time::{Duration, Instant};
 
-use super::mutation::plan_with_wraps;
+use super::mutation::{plan_with_wraps, run_files};
+use super::mutation_witness::WitnessSearch;
 use crate::mutation::MutationRunOptions;
 use crate::mutation::RecordArgsMode;
 use crate::mutation::protocol::InitRequest;
 use crate::mutation::recorded_args::RecordPass;
-use crate::mutation::run_dir::{RunFile, write_run_dir};
+use crate::mutation::run_dir::write_run_dir;
 use crate::mutation::scheduler::{ScheduleConfig, ScheduleOutcome};
 use crate::mutation::transport::ProcessSpawner;
-
-/// Removes the expired recorded inputs, also when this run does not record,
-/// and stores the inputs of the record pass.
-pub(super) fn settle_recording(
-    options: &MutationRunOptions,
-    cache_dir: &Path,
-    pass: Option<&RecordPass>,
-) -> Option<fallow_output::MutationRecordingOutput> {
-    use crate::mutation::recorded_args::{now_secs, prune, save_recording};
-    prune(cache_dir, now_secs());
-    save_recording(cache_dir, options.record_args, pass)
-}
 
 /// Starts a new companion and sends `record`: the test files run once more
 /// with the recorder on. The pass runs after the mutant runs, so its test
@@ -49,15 +38,7 @@ pub(super) fn record_pass(
     let Ok(wrapped) = plan_with_wraps(options, |_, _| Ok(()), true) else {
         return failed("the plan of the record pass failed");
     };
-    let files: Vec<RunFile<'_>> = wrapped
-        .plan
-        .files
-        .iter()
-        .map(|file| RunFile {
-            path: &file.path,
-            code: &file.instrumented_code,
-        })
-        .collect();
+    let files = run_files(&wrapped.plan);
     let Ok(run_dir) = write_run_dir(mutation_cache, &files, Some(&spawner.companion)) else {
         return failed("the run directory of the record pass cannot be written");
     };
@@ -116,4 +97,39 @@ fn record_pass_with(
     };
     link.shutdown();
     pass
+}
+
+/// The record pass, and the companion facts of the witness search: only a
+/// `values` recording with a record pass searches.
+pub(super) fn record_and_search(
+    options: &MutationRunOptions,
+    outcome: &ScheduleOutcome,
+    spawner: ProcessSpawner,
+    config: &ScheduleConfig,
+    mutation_cache: &Path,
+) -> (Option<RecordPass>, Option<WitnessSearch>) {
+    let record = record_pass(options, outcome, &spawner, config, mutation_cache);
+    let search = (options.record_args == RecordArgsMode::Values
+        && record.as_ref().is_some_and(|pass| pass.error.is_none()))
+    .then(|| WitnessSearch {
+        spawner,
+        init: config.init.clone(),
+        runner_timeout: config.runner_timeout,
+        deadline: config.deadline,
+    });
+    (record, search)
+}
+
+/// Removes the expired recorded inputs, also when this run does not record,
+/// and stores the inputs of the record pass.
+pub(super) fn settle_recording(
+    options: &MutationRunOptions,
+    cache_dir: &Path,
+    pass: Option<&RecordPass>,
+) -> Option<fallow_output::MutationRecordingOutput> {
+    use crate::mutation::recorded_args::witnesses::prune_witnesses;
+    use crate::mutation::recorded_args::{now_secs, prune, save_recording};
+    prune(cache_dir, now_secs());
+    prune_witnesses(cache_dir, now_secs());
+    save_recording(cache_dir, options.record_args, pass)
 }

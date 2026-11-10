@@ -349,6 +349,7 @@ mod tests {
             resumed: false,
             type_error_codes: Vec::new(),
             equivalence_hint: None,
+            witness: None,
         }
     }
 

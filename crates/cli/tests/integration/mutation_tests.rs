@@ -2522,3 +2522,189 @@ fn a_run_without_recording_has_no_recording_and_writes_no_store() {
     let reason = packet["replay"]["reason"].as_str().expect("reason");
     assert!(reason.contains("--record-args values"), "{reason}");
 }
+
+/// A `node:test` project whose test calls `shout` but asserts nothing, so a
+/// mutant of `shout` survives and its recorded input is a witness.
+fn witness_project() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"witness-fixture","private":true,"type":"module","scripts":{"test":"node --test"}}"#,
+    )
+    .expect("package.json");
+    fs::create_dir_all(root.join("src")).expect("src");
+    fs::create_dir_all(root.join("test")).expect("test");
+    fs::write(
+        root.join("src/shout.js"),
+        "export function shout(text) {\n  return text.toUpperCase() + \"!\";\n}\n",
+    )
+    .expect("shout.js");
+    fs::write(
+        root.join("test/shout.test.js"),
+        "import { test } from \"node:test\";\nimport { shout } from \"../src/shout.js\";\ntest(\"shout\", () => { shout(\"qv-marker\"); });\n",
+    )
+    .expect("shout.test.js");
+    fs::write(root.join(".gitignore"), ".fallow\n").expect(".gitignore");
+    git(root, &["init", "-q"]);
+    commit_all(root, "init");
+    dir
+}
+
+#[test]
+fn a_recording_run_gives_survivors_a_witness_and_tasks_give_the_ready_input() {
+    let project = witness_project();
+    let root = project.path();
+    let (output, report) = json_mutation(root, &["--all", "--no-cache", "--record-args", "values"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert!(
+        !output.stdout.contains("qv-marker") && !output.stdout.contains("QV-MARKER"),
+        "the report holds a recorded value: {}",
+        output.stdout
+    );
+    let survivor = report["mutants"]
+        .as_array()
+        .expect("mutants")
+        .iter()
+        .find(|mutant| mutant["status"] == "survived" && mutant["change"]["to"] == "\"\"")
+        .unwrap_or_else(|| panic!("a string-literal survivor: {report}"));
+    let witness = &survivor["witness"];
+    assert_eq!(witness["verdict"], "witness", "{survivor}");
+    assert_eq!(witness["inputs_checked"], 1);
+    assert!(witness["input_id"].is_string(), "{witness}");
+    assert_ne!(witness["verdict"], "equivalent");
+
+    let (output, tasks) = json_mutation(root, &["tasks"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let id = survivor["mutant_id"].as_str().expect("id");
+    let task = tasks["tasks"]
+        .as_array()
+        .expect("tasks")
+        .iter()
+        .find(|task| task["mutant_id"] == id)
+        .expect("the task");
+    let witness = &task["witness"];
+    assert_eq!(witness["verdict"], "witness", "{task}");
+    assert_eq!(witness["args"], serde_json::json!(["qv-marker"]));
+    assert_eq!(witness["original"]["outcome"], "returned");
+    assert_eq!(witness["original"]["value"], "QV-MARKER!");
+    assert_eq!(witness["mutant"]["value"], "QV-MARKER");
+    assert_eq!(
+        witness["replay_command"],
+        format!("fallow mutation inspect {id} --replay")
+    );
+
+    let markdown = mutation(root, &["tasks", "--format", "markdown"]);
+    assert_eq!(markdown.code, 0, "{}", markdown.stderr);
+    assert!(markdown.stdout.contains("witness"), "{}", markdown.stdout);
+    assert!(
+        !markdown.stdout.contains("qv-marker"),
+        "markdown can go into a PR comment, so it holds no value: {}",
+        markdown.stdout
+    );
+    let human = mutation(root, &["tasks"]);
+    assert!(human.stdout.contains("\"qv-marker\""), "{}", human.stdout);
+}
+
+#[test]
+fn tasks_without_the_witness_cache_keep_the_reference_and_the_command() {
+    let project = witness_project();
+    let root = project.path();
+    let (output, _) = json_mutation(root, &["--all", "--no-cache", "--record-args", "values"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    fs::remove_file(root.join(".fallow/mutation/witnesses.json")).expect("remove");
+    let (output, tasks) = json_mutation(root, &["tasks"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let witness = tasks["tasks"]
+        .as_array()
+        .expect("tasks")
+        .iter()
+        .find_map(|task| {
+            task.get("witness")
+                .filter(|witness| witness["verdict"] == "witness")
+        })
+        .expect("a witness reference");
+    assert!(witness.get("args").is_none(), "{witness}");
+    assert!(
+        witness["replay_command"]
+            .as_str()
+            .expect("command")
+            .contains("--replay")
+    );
+}
+
+#[test]
+fn a_stale_task_keeps_the_witness_reference_but_shows_no_value() {
+    let project = witness_project();
+    let root = project.path();
+    let (output, _) = json_mutation(root, &["--all", "--no-cache", "--record-args", "values"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    fs::write(
+        root.join("src/shout.js"),
+        "export function shout(text) {\n  return text.toUpperCase() + \"?\";\n}\n",
+    )
+    .expect("edit");
+    let (output, tasks) = json_mutation(root, &["tasks"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    for task in tasks["tasks"].as_array().expect("tasks") {
+        assert!(task["stale_reason"].is_string(), "{task}");
+        if let Some(witness) = task.get("witness") {
+            assert!(
+                witness.get("args").is_none(),
+                "a stale task shows a value: {witness}"
+            );
+            assert!(witness["replay_command"].is_string());
+        }
+    }
+}
+
+#[test]
+fn a_file_that_a_witness_replay_writes_shows_as_a_changed_worktree() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"stamp-fixture","private":true,"type":"module","scripts":{"test":"node --test"}}"#,
+    )
+    .expect("package.json");
+    fs::create_dir_all(root.join("src")).expect("src");
+    fs::create_dir_all(root.join("test")).expect("test");
+    // The replay clock starts at 2026-01-01, so only a replay writes the
+    // file. The write is in an unmutated helper, so no mutant run writes it.
+    fs::create_dir_all(root.join("lib")).expect("lib");
+    fs::write(
+        root.join("lib/note.js"),
+        "import { writeFileSync } from \"node:fs\";\nexport function note(tag) {\n  const now = new Date();\n  if (now.getFullYear() === 2026 && now.getMonth() === 0 && now.getDate() === 1) writeFileSync(\"replay-stamp.txt\", tag);\n}\n",
+    )
+    .expect("note.js");
+    fs::write(
+        root.join("src/stamp.js"),
+        "import { note } from \"../lib/note.js\";\nexport function stamp(tag) {\n  note(tag);\n  return tag + \"!\";\n}\n",
+    )
+    .expect("stamp.js");
+    fs::write(
+        root.join("test/stamp.test.js"),
+        "import { test } from \"node:test\";\nimport { stamp } from \"../src/stamp.js\";\ntest(\"stamp\", () => { stamp(\"a\"); });\n",
+    )
+    .expect("stamp.test.js");
+    fs::write(root.join(".gitignore"), ".fallow\n").expect(".gitignore");
+    git(root, &["init", "-q"]);
+    commit_all(root, "init");
+    let (output, report) = json_mutation(
+        root,
+        &[
+            "src/stamp.js",
+            "--no-cache",
+            "--allow-side-effects",
+            "--record-args",
+            "values",
+        ],
+    );
+    assert!(output.code == 0 || output.code == 2, "{}", output.stderr);
+    assert!(
+        root.join("replay-stamp.txt").exists(),
+        "the replay ran no call"
+    );
+    let changed = report["worktree"]["changed_paths"].to_string();
+    assert!(changed.contains("replay-stamp.txt"), "{report}");
+}

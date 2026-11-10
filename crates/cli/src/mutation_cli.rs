@@ -1202,7 +1202,23 @@ fn run_tasks(input: &MutationCliInput<'_>, report: Option<&Path>) -> ExitCode {
     }
     let batch = inspect_report_path(input, report).and_then(|(path, root)| {
         let saved = crate::mutation_inspect::read_saved_report(&path)?;
-        tasks::tasks(&saved, &root)
+        let analysis = AnalysisOptions {
+            root: Some(root.clone()),
+            config_path: input.config_path.map(Path::to_path_buf),
+            allow_remote_extends: input.allow_remote_extends,
+            ..AnalysisOptions::default()
+        };
+        // Markdown can go into a PR comment, so it never holds a value.
+        let markdown = matches!(input.output, OutputFormat::Markdown);
+        let store = (!markdown)
+            .then(|| fallow_api::mutation::mutation_witness_store(&analysis))
+            .flatten();
+        let values = |mutant_id: &str, input_id: &str| {
+            store
+                .as_ref()
+                .and_then(|store| store.values(mutant_id, input_id))
+        };
+        tasks::tasks(&saved, &root, &values)
     });
     let batch = match batch {
         Ok(batch) => batch,

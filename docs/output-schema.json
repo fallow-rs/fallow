@@ -34092,6 +34092,17 @@
             }
           ],
           "description": "An advisory hint that the mutant may be equivalent to the original\ncode. The hint never changes the status: the mutant stays `survived`\nand counts in the score. A person decides, and records the decision in\na verdict file. The hint can be wrong."
+        },
+        "witness": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutantWitness"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The replay of a recorded input. Present only after a `--record-args\nvalues` run, for a survived or uncovered mutant with a recorded input\nof its export."
         }
       },
       "required": [
@@ -36615,6 +36626,17 @@
             "type": "string"
           },
           "description": "The test files of the tests that reached the mutant in the dry run,\nsorted. Empty for `no_coverage`. `fallow mutation inspect` gives the\ntest ids and the static test files of one mutant."
+        },
+        "witness": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutationTaskWitness"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The witness of the task: a recorded input that shows a difference, with\nthe results of both sides. Present only after a `--record-args\nvalues` run."
         }
       },
       "required": [
@@ -37354,6 +37376,14 @@
           "$ref": "#/definitions/MutationReplayOutcome"
         },
         "value": {
+          "type": [
+            "null",
+            "boolean",
+            "number",
+            "string",
+            "array",
+            "object"
+          ],
           "description": "The returned or thrown value in the replay encoding. An error is\n`{\"$replay\": \"error\", \"name\", \"message\"}`. `null` for a call that\ntimed out."
         },
         "text": {
@@ -37557,6 +37587,135 @@
         "count"
       ],
       "description": "The calls of one reason whose arguments a recording did not keep."
+    },
+    "MutantWitness": {
+      "type": "object",
+      "properties": {
+        "verdict": {
+          "description": "The verdict of the replay. Never `equivalent`.",
+          "$ref": "#/definitions/MutationReplayVerdict"
+        },
+        "input_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The recorded input of the verdict. `fallow mutation tasks` joins its\nvalues from the cache."
+        },
+        "inputs_checked": {
+          "type": "integer",
+          "description": "The recorded inputs that the replay ran."
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why the replay gave no witness, for example `no witness found (2\ninputs, recorded, 3 calls of each side)`. Absent for a witness."
+        }
+      },
+      "required": [
+        "verdict",
+        "inputs_checked"
+      ],
+      "description": "The replay of a recorded input against a survived or uncovered mutant,\nafter a `fallow mutation --record-args values` run. It holds no argument\nvalue: the values stay in the gitignored cache directory."
+    },
+    "MutationTaskWitness": {
+      "type": "object",
+      "properties": {
+        "verdict": {
+          "description": "The verdict of the replay. Never `equivalent`.",
+          "$ref": "#/definitions/MutationReplayVerdict"
+        },
+        "input_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The recorded input of the verdict."
+        },
+        "inputs_checked": {
+          "type": "integer",
+          "description": "The recorded inputs that the replay ran."
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why the replay gave no witness. Absent for a witness."
+        },
+        "replay_command": {
+          "type": "string",
+          "description": "The command that replays the mutant again and shows both sides."
+        },
+        "args": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": true,
+          "description": "The arguments of the input in the replay encoding: JSON, and objects\nwith a `$replay` tag for other values (`{\"$replay\": \"undefined\"}`,\n`{\"$replay\": \"bigint\", \"value\": \"12\"}`, and `date`, `regexp`, `map`,\n`set` and `bytes`). Absent for another verdict, for a stale task, when\nthe cache no longer has the input (7 days), and in the markdown\noutput."
+        },
+        "original": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutationWitnessSide"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The result on the original code: the value that a new test asserts.\nThe replay ran with a fixed clock and seed, so run the new test on the\ncurrent code to confirm it."
+        },
+        "mutant": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutationWitnessSide"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The result on the mutant."
+        }
+      },
+      "required": [
+        "verdict",
+        "inputs_checked",
+        "replay_command"
+      ],
+      "description": "The witness of a task: the reference of the report, and the values from\nthe local cache when the cache still has them. Only the verdict\n`witness` can have `args`, `original` and `mutant`."
+    },
+    "MutationWitnessSide": {
+      "type": "object",
+      "properties": {
+        "outcome": {
+          "description": "How the call ended.",
+          "$ref": "#/definitions/MutationReplayOutcome"
+        },
+        "value": {
+          "type": [
+            "null",
+            "boolean",
+            "number",
+            "string",
+            "array",
+            "object"
+          ],
+          "description": "The returned or thrown value in the replay encoding."
+        },
+        "text": {
+          "type": "string",
+          "description": "A short text of the value for people."
+        }
+      },
+      "required": [
+        "outcome",
+        "value",
+        "text"
+      ],
+      "description": "The result of one side of a witness."
     }
   }
 }

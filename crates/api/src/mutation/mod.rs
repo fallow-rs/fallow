@@ -39,7 +39,8 @@ use std::time::Duration;
 
 pub use fallow_engine::mutation::Operator;
 pub use last_report::{
-    last_mutation_report_path, remove_finished_mutation_journal, save_last_mutation_report,
+    MutationWitnessStore, last_mutation_report_path, mutation_witness_store,
+    remove_finished_mutation_journal, save_last_mutation_report,
 };
 pub use report::baseline_blocked_run_error;
 pub use scheduler::control::split_control_run_failure;

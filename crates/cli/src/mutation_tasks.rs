@@ -12,14 +12,15 @@ use std::fmt::Write as _;
 use std::path::Path;
 
 use fallow_output::{
-    MutantStatus, MutationTask, MutationTasksOutput, MutationTasksSchemaVersion,
-    MutationTasksSummary,
+    MutantStatus, MutationTask, MutationTaskWitness, MutationTasksOutput,
+    MutationTasksSchemaVersion, MutationTasksSummary,
 };
 use fallow_types::envelope::ToolVersion;
 
 use crate::mutation_human::EQUIVALENCE_HINT_TEXT;
 use crate::mutation_inspect::{
-    SavedMutant, SavedReport, mutant_code, report_input_error, report_relative_path, sha256_hex,
+    SavedMutant, SavedReport, SavedWitness, mutant_code, report_input_error, report_relative_path,
+    sha256_hex,
 };
 
 /// The current bytes of one file and their digest. `None` for a file that
@@ -35,6 +36,7 @@ type CurrentFile = Option<(Vec<u8>, String)>;
 pub fn tasks(
     report: &SavedReport,
     root: &Path,
+    witness_values: &dyn Fn(&str, &str) -> Option<WitnessValues>,
 ) -> Result<MutationTasksOutput, fallow_api::ProgrammaticError> {
     if report.kind.as_deref() == Some("mutation-plan") {
         return Err(report_input_error(
@@ -51,7 +53,15 @@ pub fn tasks(
                 (bytes, digest)
             })
         });
-        tasks.push(task(report, mutant, current.as_ref()));
+        let mut task = task(report, mutant, current.as_ref());
+        // A stale task describes older code, so it gets no cached values.
+        let fresh = task.stale_reason.is_none();
+        task.witness = mutant.witness.as_ref().map(|witness| {
+            task_witness(&mutant.mutant_id, witness, &|mutant_id, input_id| {
+                fresh.then(|| witness_values(mutant_id, input_id)).flatten()
+            })
+        });
+        tasks.push(task);
     }
     tasks.sort_by(|left, right| {
         (&left.file, left.line, left.column, &left.mutant_id).cmp(&(
@@ -71,6 +81,40 @@ pub fn tasks(
         summary: summary(&tasks),
         tasks,
     })
+}
+
+/// The cached values of a witness: the arguments and the result of each side.
+pub type WitnessValues = (
+    Vec<serde_json::Value>,
+    fallow_output::MutationWitnessSide,
+    fallow_output::MutationWitnessSide,
+);
+
+/// The witness of a task: the reference of the report, the replay command,
+/// and the values of a witness when the local cache still has them.
+fn task_witness(
+    mutant_id: &str,
+    witness: &SavedWitness,
+    witness_values: &dyn Fn(&str, &str) -> Option<WitnessValues>,
+) -> MutationTaskWitness {
+    let values = (witness.verdict == fallow_output::MutationReplayVerdict::Witness)
+        .then_some(witness.input_id.as_deref())
+        .flatten()
+        .and_then(|input_id| witness_values(mutant_id, input_id));
+    let (args, original, mutant) = match values {
+        Some((args, original, mutant)) => (Some(args), Some(original), Some(mutant)),
+        None => (None, None, None),
+    };
+    MutationTaskWitness {
+        verdict: witness.verdict,
+        input_id: witness.input_id.clone(),
+        inputs_checked: witness.inputs_checked,
+        reason: witness.reason.clone(),
+        replay_command: format!("fallow mutation inspect {mutant_id} --replay"),
+        args,
+        original,
+        mutant,
+    }
 }
 
 fn is_open(mutant: &SavedMutant) -> bool {
@@ -111,6 +155,7 @@ fn task(
         equivalence_hint: mutant.equivalence_hint,
         stale_reason,
         covering_test_files,
+        witness: None,
     }
 }
 
@@ -306,7 +351,44 @@ fn item_body(task: &MutationTask) -> ItemBody {
     if task.equivalence_hint.is_some() {
         body.notes.push(EQUIVALENCE_HINT_TEXT.to_owned());
     }
+    if let Some(witness) = &task.witness {
+        body.notes.push(witness_note(witness));
+    }
     body
+}
+
+/// The note of a witness. With the cached values, the note gives the
+/// input and the result of each side; the markdown output has no values.
+fn witness_note(witness: &MutationTaskWitness) -> String {
+    let command = &witness.replay_command;
+    match (
+        witness.verdict,
+        &witness.args,
+        &witness.original,
+        &witness.mutant,
+    ) {
+        (
+            fallow_output::MutationReplayVerdict::Witness,
+            Some(args),
+            Some(original),
+            Some(mutant),
+        ) => {
+            let args: Vec<String> = args.iter().map(ToString::to_string).collect();
+            format!(
+                "witness: input [{}] gives {} on the current code and {} on the changed code ({command})",
+                args.join(", "),
+                original.text,
+                mutant.text
+            )
+        }
+        (fallow_output::MutationReplayVerdict::Witness, ..) => {
+            format!("witness: a recorded input shows a difference ({command})")
+        }
+        _ => format!(
+            "replay: {} ({command})",
+            witness.reason.as_deref().unwrap_or("no witness")
+        ),
+    }
 }
 
 fn push_labeled(lines: &mut Vec<String>, label: &str, text: &str) {

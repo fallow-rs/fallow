@@ -2308,6 +2308,43 @@ no input can detect can be skipped. The markdown output puts the two lines in
 a fenced block. The MCP tool `mutation_tasks` returns the JSON batch. It runs
 no mutants.
 
+### Witnesses
+
+After a `fallow mutation --record-args values` run, the run replays the
+recorded inputs of up to 20 open tasks, in rank order, in one companion of
+the run, with a call limit of 5 seconds and within the time budget. Each
+task with recorded inputs gets `witness` in the report: the `verdict`, the
+`input_id`, `inputs_checked` and the `reason` of a verdict other than
+`witness`. The report holds no value. The values of each witness go to
+`<cache dir>/mutation/witnesses.json`, with the time to live and the file
+mode of the recorded inputs, and a run replaces the witnesses of the
+earlier run.
+
+`fallow mutation tasks` adds `witness` to such a task: the reference of the
+report, `replay_command` (`fallow mutation inspect <id> --replay`), and for
+a `witness` verdict the cached `args` with the result of the current code
+(`original`) and of the changed code (`mutant`). Read `witness.verdict`
+first: only `witness` can have these values. A test with these arguments
+that asserts the `original` value should kill the mutant. Run it on the
+current code to confirm, because the replay ran with a fixed clock and seed
+and a new worker for each call. A `threw` outcome means that the test
+asserts the throw. The values use the replay encoding (see Replay
+contract). A stale task, and a task whose cache entry expired, keeps the
+reference and the command, but no value. A saved witness with a verdict
+that the reader does not know reads as absent. The human output shows the input and both results. The markdown
+output can go into a PR comment, so it shows only that a recorded input
+shows a difference, and the command. The MCP tool `mutation_tasks` gives
+the JSON packets, and its guide `fallow://tools/mutation_tasks` explains
+the field. A verdict other than `witness` never means that the mutant is
+equivalent.
+
+The search stops before a step that does not fit in the time budget: it
+needs a minute for each recorded input, and it clamps each call and each
+companion start to the time left. The search runs only after a record pass
+that succeeded. The end check of the worktree comes after the search,
+because the replays run project code. Two runs in one cache directory at
+the same time can replace the witnesses of each other.
+
 ## Export
 
 `export` writes a saved `mutation` report in the open

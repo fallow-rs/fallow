@@ -411,27 +411,44 @@ pub fn replay_mutation(
         Ok(export) => export,
         Err(reason) => return not_replayable(None, reason),
     };
-    let inputs = match replay_inputs(&planned.cache_dir, options, &export) {
+    let inputs = match input_list(&planned.cache_dir, options, &export) {
         Ok(inputs) => inputs,
         Err(reason) => return not_replayable(Some(export), reason),
     };
     let mut link = start_companion(&planned, options, &target.instrumented)?;
+    let replay_target = ReplayTarget {
+        file: &options.file,
+        mutant_id: &options.mutant_id,
+        export: &export,
+    };
+    let output = replay_inputs(&mut link, &replay_target, &inputs, call_timeout, None);
+    link.shutdown();
+    output
+}
+
+/// Replays `inputs` on an open companion, up to the first input that ends
+/// the search or the deadline, and gives the result with `inputs_checked`
+/// and the rule 3 reason of "no witness found".
+pub(super) fn replay_inputs(
+    link: &mut Box<dyn CompanionLink>,
+    target: &ReplayTarget<'_>,
+    inputs: &[MutationReplayInput],
+    call_timeout: Duration,
+    deadline: Option<Instant>,
+) -> ProgrammaticResult<MutationReplayOutput> {
     let mut outputs = Vec::new();
-    for input in &inputs {
-        let output = match replay_one(&mut link, options, &export, input, call_timeout) {
-            Ok(output) => output,
-            Err(error) => {
-                link.shutdown();
-                return Err(error);
-            }
-        };
+    for input in inputs {
+        // The first input always runs, so the result is never empty.
+        if !outputs.is_empty() && deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            break;
+        }
+        let output = replay_one(link, target, input, call_timeout)?;
         let stop = ends_search(output.verdict);
         outputs.push(output);
         if stop {
             break;
         }
     }
-    link.shutdown();
     let checked = u32::try_from(outputs.len()).unwrap_or(u32::MAX);
     let mut output = pick_output(outputs).ok_or_else(|| replay_error("the replay has no input"))?;
     output.inputs_checked = checked;
@@ -485,7 +502,7 @@ fn no_witness_reason(output: &MutationReplayOutput) -> String {
 
 /// The inputs of the replay: the `--args` value, or the first recorded
 /// inputs of the export. The error is the reason why none can run.
-fn replay_inputs(
+fn input_list(
     cache_dir: &Path,
     options: &MutationReplayOptions,
     export: &str,
@@ -497,7 +514,17 @@ fn replay_inputs(
             args: args.clone(),
         }]);
     }
-    let key = format!("{}#{export}", options.file);
+    recorded_inputs(cache_dir, &options.file, export)
+}
+
+/// Up to [`MAX_RECORDED_INPUTS`] recorded inputs of `file#export` with their
+/// values. The error is the reason why none can run.
+pub(super) fn recorded_inputs(
+    cache_dir: &Path,
+    file: &str,
+    export: &str,
+) -> Result<Vec<MutationReplayInput>, String> {
+    let key = format!("{file}#{export}");
     let hint = "run `fallow mutation --record-args values` for this code, or pass --args";
     let Some(stored) = recorded_args::load(cache_dir, &key, recorded_args::now_secs()) else {
         return Err(format!(
@@ -539,19 +566,26 @@ fn replay_inputs(
     Ok(inputs)
 }
 
+/// The mutant and the export of one replay.
+pub(super) struct ReplayTarget<'a> {
+    pub file: &'a str,
+    pub mutant_id: &'a str,
+    pub export: &'a str,
+}
+
 /// Replays one input on an open companion. A wall-limit timeout gives the
 /// verdict `timeout`, and the companion is then gone.
 fn replay_one(
     link: &mut Box<dyn CompanionLink>,
-    options: &MutationReplayOptions,
-    export: &str,
+    target: &ReplayTarget<'_>,
     input: &MutationReplayInput,
     call_timeout: Duration,
 ) -> ProgrammaticResult<MutationReplayOutput> {
+    let export = target.export;
     let request = ReplayRequest {
-        file: options.file.clone(),
+        file: target.file.to_owned(),
         export: export.to_owned(),
-        mutant_id: options.mutant_id.clone(),
+        mutant_id: target.mutant_id.to_owned(),
         args: input.args.clone(),
         calls: CALLS_PER_SIDE,
         call_timeout_ms: millis(call_timeout),

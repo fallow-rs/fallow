@@ -21,7 +21,8 @@ use fallow_output::{
 use fallow_types::envelope::ElapsedMs;
 use rustc_hash::FxHashSet;
 
-use super::mutation_record::{record_pass, settle_recording};
+use super::mutation_record::{record_and_search, settle_recording};
+use super::mutation_witness::{WitnessSearch, search_witnesses};
 use crate::ProgrammaticError;
 use crate::analysis_context::{ProgrammaticAnalysisContext, resolve_programmatic_analysis_context};
 use crate::mutation::companion::{COMPANION_FILES, install};
@@ -868,6 +869,41 @@ struct Execution {
     setup_ms: u64,
     /// The record pass of `--record-args`. `None` without recording.
     record: Option<RecordPass>,
+    /// The companion facts of the witness search of `--record-args
+    /// values`. `None` otherwise.
+    witness: Option<WitnessSearch>,
+}
+
+/// Stores the recorded inputs, then searches the witnesses of the open
+/// tasks, because the search reads the stored inputs.
+fn recording_and_witnesses(
+    options: &MutationRunOptions,
+    planned: &Planned,
+    execution: &Execution,
+    results: &mut [fallow_output::MutantResult],
+) -> Option<fallow_output::MutationRecordingOutput> {
+    let recording = settle_recording(options, &planned.cache_dir, execution.record.as_ref());
+    if let Some(search) = &execution.witness {
+        search_witnesses(
+            search,
+            &planned.plan,
+            planned.resolved.root(),
+            &planned.cache_dir,
+            results,
+        );
+    }
+    recording
+}
+
+/// The instrumented files of `plan` as the run directory takes them.
+pub(super) fn run_files(plan: &MutationPlan) -> Vec<RunFile<'_>> {
+    plan.files
+        .iter()
+        .map(|file| RunFile {
+            path: &file.path,
+            code: &file.instrumented_code,
+        })
+        .collect()
 }
 
 /// The journal path as the report shows it: relative to the root, with `/`
@@ -1151,17 +1187,6 @@ fn runner_output(
     })
 }
 
-/// True when the run must start the runner. With no planned mutant, the dry
-/// run still runs the static test files, because a hit on a statically
-/// unreached mutant is a static map miss. With `--kill-matrix-for` targets,
-/// the scheduler checks the targets also when no mutant is planned, so a
-/// target that selects no test stops the run.
-fn needs_runner(schedule: &SchedulePlan, targets: &[String]) -> bool {
-    !schedule.mutants.is_empty()
-        || (!schedule.unreached.is_empty() && !schedule.test_files.is_empty())
-        || !targets.is_empty()
-}
-
 /// The public error of a schedule that stopped the run.
 fn execute(
     options: &MutationRunOptions,
@@ -1171,7 +1196,11 @@ fn execute(
 ) -> ProgrammaticResult<Execution> {
     let plan = &planned.plan;
     let schedule = schedule_plan(plan);
-    if !needs_runner(&schedule, &options.kill_matrix_targets) {
+    // With no planned mutant the dry run still runs the static test files,
+    // because a hit on a statically unreached mutant is a static map miss.
+    if schedule.mutants.is_empty()
+        && (schedule.unreached.is_empty() || schedule.test_files.is_empty())
+    {
         return Ok(Execution {
             outcome: None,
             runner: None,
@@ -1179,6 +1208,7 @@ fn execute(
             resume: unread_journal(options, planned),
             setup_ms: 0,
             record: None,
+            witness: None,
         });
     }
     progress(MutationProgress::Setup {
@@ -1203,15 +1233,8 @@ fn execute(
     let mutation_cache = planned.cache_dir.join("mutation");
     let companion = install(&mutation_cache, COMPANION_FILES)
         .map_err(|message| mutation_error("FALLOW_MUTATION_COMPANION_INTEGRITY", message))?;
-    let files: Vec<RunFile<'_>> = plan
-        .files
-        .iter()
-        .map(|file| RunFile {
-            path: &file.path,
-            code: &file.instrumented_code,
-        })
-        .collect();
-    let run_dir = write_run_dir(&mutation_cache, &files, Some(&companion)).map_err(cache_error)?;
+    let run_dir =
+        write_run_dir(&mutation_cache, &run_files(plan), Some(&companion)).map_err(cache_error)?;
     let root = planned.resolved.root().to_path_buf();
     let runtime_label = format!("{} {}", runtime.kind.name(), runtime.version);
     let (result_cache, run_journal) = open_stores(
@@ -1253,14 +1276,14 @@ fn execute(
     let mut outcome = run_schedule_with_progress(&spawner, &schedule, &config, progress)
         .map_err(|error| schedule_error(&error, &config.runner, config.runner_timeout))?;
     let runner = runner_output(&outcome, name, manifest, &runtime);
-    let cache = match (&result_cache, outcome.ready.is_some()) {
-        (Some(result_cache), true) => Some(store_results(result_cache, &mut outcome)),
-        _ => None,
-    };
+    let cache = (outcome.ready.is_some())
+        .then(|| result_cache.map(|result_cache| store_results(&result_cache, &mut outcome)))
+        .flatten();
     let resume = settle_journal(options, run_journal, &mut outcome);
-    let record = record_pass(options, &outcome, &spawner, &config, &mutation_cache);
+    let (record, witness) = record_and_search(options, &outcome, spawner, &config, &mutation_cache);
     Ok(Execution {
         record,
+        witness,
         outcome: Some(outcome),
         runner,
         cache,
@@ -1403,19 +1426,17 @@ pub fn run_mutation_with_progress(
     let plan_ms = millis(started.elapsed());
     let execution = execute(options, &planned, deadline, progress);
     progress(MutationProgress::Finalize);
-    let worktree_end = settle_worktree(start_snapshot.as_ref(), |start| {
-        take_worktree_snapshot(
-            planned.resolved.root(),
-            &planned.cache_dir,
-            &options.output_paths,
-            Some(start),
-        )
-    });
-    let execution = execution.map_err(|error| with_worktree_facts(error, &worktree_end))?;
-    let WorktreeEnd {
-        changed_paths,
-        check_error,
-    } = worktree_end;
+    let settle = || {
+        settle_worktree(start_snapshot.as_ref(), |start| {
+            take_worktree_snapshot(
+                planned.resolved.root(),
+                &planned.cache_dir,
+                &options.output_paths,
+                Some(start),
+            )
+        })
+    };
+    let execution = execution.map_err(|error| with_worktree_facts(error, &settle()))?;
     let plan = &planned.plan;
     let outcome = execution.outcome.as_ref();
     let mut results = mutant_results(plan, outcome);
@@ -1426,6 +1447,13 @@ pub fn run_mutation_with_progress(
         &mut results,
     );
     let typecheck_ms = millis(typecheck.elapsed);
+    let recording = recording_and_witnesses(options, &planned, &execution, &mut results);
+    // The end snapshot comes after the witness replays, because they run
+    // project code too.
+    let WorktreeEnd {
+        changed_paths,
+        check_error,
+    } = settle();
     let baseline = baseline_failures(outcome);
     let completion = completion(&CompletionFacts {
         plan,
@@ -1479,7 +1507,7 @@ pub fn run_mutation_with_progress(
         recheck: None,
         compare: None,
         gate_outcomes: None,
-        recording: settle_recording(options, &planned.cache_dir, execution.record.as_ref()),
+        recording,
     })
 }
 
@@ -1818,21 +1846,6 @@ mod tests {
             ..MutationRunOptions::default()
         };
         assert!(validate(&blank).is_err());
-    }
-
-    #[test]
-    fn targets_start_the_runner_also_with_no_planned_mutant() {
-        let schedule = SchedulePlan {
-            mutants: Vec::new(),
-            unreached: Vec::new(),
-            pending: Vec::new(),
-            sampled_out: Vec::new(),
-            known_ids: FxHashSet::default(),
-            test_files: Vec::new(),
-            file_test_files: std::collections::BTreeMap::new(),
-        };
-        assert!(!needs_runner(&schedule, &[]));
-        assert!(needs_runner(&schedule, &["test/a.test.ts".to_owned()]));
     }
 
     #[test]

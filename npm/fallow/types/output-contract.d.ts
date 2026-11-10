@@ -1847,6 +1847,12 @@ export type MutantFailureKind = ("assertion" | "error" | "timeout")
  */
 export type MutantEquivalenceHint = "type-non-nullish"
 /**
+ * The verdict of one replay. A replay never decides that a mutant is
+ * equivalent: equal results on both sides give `no_witness_found`, which
+ * says only that this input shows no difference.
+ */
+export type MutationReplayVerdict = ("witness" | "no_witness_found" | "unstable" | "timeout" | "not_callable" | "not_replayable")
+/**
  * Why the type check did not check a survivor.
  */
 export type MutationTypecheckSkipReason = ("no-project" | "not-type-checked" | "source-changed" | "file-missing" | "unsupported-file")
@@ -1882,12 +1888,6 @@ export type MutationInspectStatus = ("fresh" | "stale")
  * Why an inspect packet is stale.
  */
 export type MutationStaleReason = ("file-missing" | "no-digest" | "source-changed" | "mutant-not-reproduced")
-/**
- * The verdict of one replay. A replay never decides that a mutant is
- * equivalent: equal results on both sides give `no_witness_found`, which
- * says only that this input shows no difference.
- */
-export type MutationReplayVerdict = ("witness" | "no_witness_found" | "unstable" | "timeout" | "not_callable" | "not_replayable")
 /**
  * Where the arguments of a replay come from.
  */
@@ -21305,6 +21305,12 @@ type_error_codes?: number[]
  * a verdict file. The hint can be wrong.
  */
 equivalence_hint?: (MutantEquivalenceHint | null)
+/**
+ * The replay of a recorded input. Present only after a `--record-args
+ * values` run, for a survived or uncovered mutant with a recorded input
+ * of its export.
+ */
+witness?: (MutantWitness | null)
 }
 /**
  * The edit of a mutant, without project text.
@@ -21387,6 +21393,28 @@ failure_kind?: (MutantFailureKind | null)
  * The first line of the reason of a `runtime_error` run.
  */
 detail?: (string | null)
+}
+/**
+ * The replay of a recorded input against a survived or uncovered mutant,
+ * after a `fallow mutation --record-args values` run. It holds no argument
+ * value: the values stay in the gitignored cache directory.
+ */
+export interface MutantWitness {
+verdict: MutationReplayVerdict
+/**
+ * The recorded input of the verdict. `fallow mutation tasks` joins its
+ * values from the cache.
+ */
+input_id?: (string | null)
+/**
+ * The recorded inputs that the replay ran.
+ */
+inputs_checked: number
+/**
+ * Why the replay gave no witness, for example `no witness found (2
+ * inputs, recorded, 3 calls of each side)`. Absent for a witness.
+ */
+reason?: (string | null)
 }
 /**
  * The results of the mutants of one function.
@@ -22210,9 +22238,9 @@ outcome: MutationReplayOutcome
  * `{"$replay": "error", "name", "message"}`. `null` for a call that
  * timed out.
  */
-value: {
-[k: string]: unknown
-}
+value: (null | boolean | number | string | unknown[] | {
+
+})
 /**
  * A short text of the value for people, at most 200 characters.
  */
@@ -22315,6 +22343,71 @@ stale_reason?: (MutationStaleReason | null)
  * test ids and the static test files of one mutant.
  */
 covering_test_files: string[]
+/**
+ * The witness of the task: a recorded input that shows a difference, with
+ * the results of both sides. Present only after a `--record-args
+ * values` run.
+ */
+witness?: (MutationTaskWitness | null)
+}
+/**
+ * The witness of a task: the reference of the report, and the values from
+ * the local cache when the cache still has them. Only the verdict
+ * `witness` can have `args`, `original` and `mutant`.
+ */
+export interface MutationTaskWitness {
+verdict: MutationReplayVerdict
+/**
+ * The recorded input of the verdict.
+ */
+input_id?: (string | null)
+/**
+ * The recorded inputs that the replay ran.
+ */
+inputs_checked: number
+/**
+ * Why the replay gave no witness. Absent for a witness.
+ */
+reason?: (string | null)
+/**
+ * The command that replays the mutant again and shows both sides.
+ */
+replay_command: string
+/**
+ * The arguments of the input in the replay encoding: JSON, and objects
+ * with a `$replay` tag for other values (`{"$replay": "undefined"}`,
+ * `{"$replay": "bigint", "value": "12"}`, and `date`, `regexp`, `map`,
+ * `set` and `bytes`). Absent for another verdict, for a stale task, when
+ * the cache no longer has the input (7 days), and in the markdown
+ * output.
+ */
+args?: (unknown[] | null)
+/**
+ * The result on the original code: the value that a new test asserts.
+ * The replay ran with a fixed clock and seed, so run the new test on the
+ * current code to confirm it.
+ */
+original?: (MutationWitnessSide | null)
+/**
+ * The result on the mutant.
+ */
+mutant?: (MutationWitnessSide | null)
+}
+/**
+ * The result of one side of a witness.
+ */
+export interface MutationWitnessSide {
+outcome: MutationReplayOutcome
+/**
+ * The returned or thrown value in the replay encoding.
+ */
+value: (null | boolean | number | string | unknown[] | {
+
+})
+/**
+ * A short text of the value for people.
+ */
+text: string
 }
 /**
  * Single CodeClimate-compatible issue inside [`CodeClimateOutput`].

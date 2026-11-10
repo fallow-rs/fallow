@@ -23,6 +23,7 @@ mod feature_flags;
 mod mutation;
 mod mutation_record;
 mod mutation_replay;
+mod mutation_witness;
 mod similar_code;
 mod trace;
 mod type_aware_config;

@@ -1,0 +1,3 @@
+### Added
+
+- **`fallow mutation tasks` gives a ready test input for a survivor.** After a `fallow mutation --record-args values` run, the run replays the recorded inputs of up to 20 open tasks. A task gets `witness`: a recorded input that shows a difference, with the result of the current code and of the changed code, and the `fallow mutation inspect <id> --replay` command. A test with that input that asserts the current result kills the mutant. The MCP tool `mutation_tasks` gives the same field. The run report holds only the verdict and the input id, and the markdown output of `tasks` shows no value. A verdict other than `witness` never means that the mutant is equivalent.

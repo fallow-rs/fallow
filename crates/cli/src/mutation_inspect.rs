@@ -107,6 +107,11 @@ pub struct SavedMutant {
     kill_matrix_complete: bool,
     #[serde(default)]
     pub equivalence_hint: Option<fallow_output::MutantEquivalenceHint>,
+    /// The witness reference of a `--record-args values` run. A witness
+    /// with a verdict that this build does not know reads as absent, so the
+    /// rest of a report of a later version still reads.
+    #[serde(default, deserialize_with = "lenient_witness")]
+    pub witness: Option<SavedWitness>,
     #[serde(default)]
     pub prune_reason: Option<String>,
     #[serde(default)]
@@ -115,6 +120,25 @@ pub struct SavedMutant {
     pub duration_ms: Option<u64>,
     #[serde(default)]
     pub type_error_codes: Vec<u32>,
+}
+
+fn lenient_witness<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<SavedWitness>, D::Error> {
+    let value = Option::<serde_json::Value>::deserialize(deserializer)?;
+    Ok(value.and_then(|value| serde_json::from_value(value).ok()))
+}
+
+/// The witness reference of a saved mutant. It holds no value.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SavedWitness {
+    pub verdict: fallow_output::MutationReplayVerdict,
+    #[serde(default)]
+    pub input_id: Option<String>,
+    #[serde(default)]
+    pub inputs_checked: u32,
+    #[serde(default)]
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

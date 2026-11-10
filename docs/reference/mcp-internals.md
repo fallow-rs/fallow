@@ -184,7 +184,9 @@ Contract rules:
   `fallow mutation tasks [--report <file>]` as a subprocess, with the same
   `report`, `root`, `config` and `allow_remote_extends` rules. It refuses a
   plan document, and it refuses a Rust root with
-  `FALLOW_RUST_UNSUPPORTED_TOOL`. No MCP tool runs
+  `FALLOW_RUST_UNSUPPORTED_TOOL`. After a `--record-args values` run, a task
+  packet can have `witness` with the cached input and the result of each
+  side; the CLI joins them, so the tool stays thin. No MCP tool runs
   mutants in version 1: a run executes the tests of the project, so the agent
   host decides it through the CLI. The descriptions name `fallow mutation`
   for that reason. Code Mode refuses the three tools and names the
