@@ -371,9 +371,10 @@ pub use mutation_ci::{
     render_mutation_section, survived_description,
 };
 pub use mutation_replay::{
-    MutationNotReplayable, MutationRecordMode, MutationRecordedFunction, MutationRecordingOutput,
-    MutationReplayCall, MutationReplayInput, MutationReplayInputSource, MutationReplayOutcome,
-    MutationReplayOutput, MutationReplaySide, MutationReplayVerdict,
+    MutantWitness, MutationNotReplayable, MutationRecordMode, MutationRecordedFunction,
+    MutationRecordingOutput, MutationReplayCall, MutationReplayInput, MutationReplayInputSource,
+    MutationReplayOutcome, MutationReplayOutput, MutationReplaySide, MutationReplayVerdict,
+    MutationTaskWitness, MutationWitnessSide,
 };
 pub use next_steps::{
     AuditNextStepsInput, BaselineRecheckInput, CombinedNextStepsInput, DeadCodeNextStepsInput,

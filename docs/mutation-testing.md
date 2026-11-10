@@ -2308,6 +2308,30 @@ no input can detect can be skipped. The markdown output puts the two lines in
 a fenced block. The MCP tool `mutation_tasks` returns the JSON batch. It runs
 no mutants.
 
+### Witnesses
+
+After a `fallow mutation --record-args values` run, the run replays the
+recorded inputs of up to 20 open tasks, in rank order, in one companion of
+the run, with a call limit of 5 seconds and within the time budget. Each
+task with recorded inputs gets `witness` in the report: the `verdict`, the
+`input_id`, `inputs_checked` and the `reason` of a verdict other than
+`witness`. The report holds no value. The values of each witness go to
+`<cache dir>/mutation/witnesses.json`, with the time to live and the file
+mode of the recorded inputs, and a run replaces the witnesses of the
+earlier run.
+
+`fallow mutation tasks` adds `witness` to such a task: the reference of the
+report, `replay_command` (`fallow mutation inspect <id> --replay`), and for
+a `witness` verdict the cached `args` with the result of the current code
+(`original`) and of the changed code (`mutant`). A test with these
+arguments that asserts the `original` value kills the mutant. When the
+cache no longer has the values, the task keeps the reference and the
+command. The human output shows the input and both results. The markdown
+output can go into a PR comment, so it shows only that a recorded input
+shows a difference, and the command. The MCP tool `mutation_tasks` gives
+the JSON packets. A verdict other than `witness` never means that the
+mutant is equivalent.
+
 ## Export
 
 `export` writes a saved `mutation` report in the open

@@ -392,7 +392,7 @@ fn merged(functions: &[RecordedFunction]) -> Vec<RecordedFunction> {
 
 /// Writes `bytes` to `path` through a private staging file, so a reader
 /// never sees a partial file and other users cannot read the values.
-fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+pub(super) fn write_private(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     use std::io::Write as _;
     static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
     let unique = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -564,6 +564,8 @@ pub fn now_secs() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |elapsed| elapsed.as_secs())
 }
+
+pub mod witnesses;
 
 #[cfg(test)]
 mod tests;

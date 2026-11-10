@@ -1,12 +1,12 @@
 //! The output types of `fallow mutation inspect --replay` and of the
 //! argument recording of `fallow mutation --record-args`.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// The verdict of one replay. A replay never decides that a mutant is
 /// equivalent: equal results on both sides give `no_witness_found`, which
 /// says only that this input shows no difference.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum MutationReplayVerdict {
@@ -43,7 +43,7 @@ pub enum MutationReplaySide {
 }
 
 /// The outcome of one replay call.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum MutationReplayOutcome {
@@ -194,4 +194,66 @@ pub struct MutationRecordingOutput {
     pub error: Option<String>,
     /// The recorded exported functions, sorted by file and export.
     pub functions: Vec<MutationRecordedFunction>,
+}
+
+/// The replay of a recorded input against a survived or uncovered mutant,
+/// after a `fallow mutation --record-args values` run. It holds no argument
+/// value: the values stay in the gitignored cache directory.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MutantWitness {
+    /// The verdict of the replay. Never `equivalent`.
+    pub verdict: MutationReplayVerdict,
+    /// The recorded input of the verdict. `fallow mutation tasks` joins its
+    /// values from the cache.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_id: Option<String>,
+    /// The recorded inputs that the replay ran.
+    pub inputs_checked: u32,
+    /// Why the replay gave no witness, for example `no witness found (2
+    /// inputs, recorded, 3 calls of each side)`. Absent for a witness.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+/// The result of one side of a witness.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MutationWitnessSide {
+    /// How the call ended.
+    pub outcome: MutationReplayOutcome,
+    /// The returned or thrown value in the replay encoding.
+    pub value: serde_json::Value,
+    /// A short text of the value for people.
+    pub text: String,
+}
+
+/// The witness of a task: the reference of the report, and the values from
+/// the local cache when the cache still has them.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MutationTaskWitness {
+    /// The verdict of the replay. Never `equivalent`.
+    pub verdict: MutationReplayVerdict,
+    /// The recorded input of the verdict.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub input_id: Option<String>,
+    /// The recorded inputs that the replay ran.
+    pub inputs_checked: u32,
+    /// Why the replay gave no witness. Absent for a witness.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// The command that replays the mutant again and shows both sides.
+    pub replay_command: String,
+    /// The arguments of the input in the replay encoding: a ready test
+    /// input. Absent when the cache no longer has the input (7 days) or in
+    /// the markdown output.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub args: Option<Vec<serde_json::Value>>,
+    /// The result on the original code: the value that a new test asserts.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub original: Option<MutationWitnessSide>,
+    /// The result on the mutant.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mutant: Option<MutationWitnessSide>,
 }

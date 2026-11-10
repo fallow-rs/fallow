@@ -107,6 +107,9 @@ pub struct SavedMutant {
     kill_matrix_complete: bool,
     #[serde(default)]
     pub equivalence_hint: Option<fallow_output::MutantEquivalenceHint>,
+    /// The witness reference of a `--record-args values` run.
+    #[serde(default)]
+    pub witness: Option<SavedWitness>,
     #[serde(default)]
     pub prune_reason: Option<String>,
     #[serde(default)]
@@ -115,6 +118,18 @@ pub struct SavedMutant {
     pub duration_ms: Option<u64>,
     #[serde(default)]
     pub type_error_codes: Vec<u32>,
+}
+
+/// The witness reference of a saved mutant. It holds no value.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SavedWitness {
+    pub verdict: fallow_output::MutationReplayVerdict,
+    #[serde(default)]
+    pub input_id: Option<String>,
+    #[serde(default)]
+    pub inputs_checked: u32,
+    #[serde(default)]
+    pub reason: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

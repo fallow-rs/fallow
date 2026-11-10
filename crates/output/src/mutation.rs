@@ -12,7 +12,9 @@ use serde::{Deserialize, Serialize};
 use crate::audit_test_reach::TestReachClass;
 use crate::gate_outcomes::GateOutcomes;
 pub use crate::mutation_plan_runner::MutationPlanRunner;
-use crate::mutation_replay::{MutationRecordingOutput, MutationReplayOutput};
+use crate::mutation_replay::{
+    MutantWitness, MutationRecordingOutput, MutationReplayOutput, MutationTaskWitness,
+};
 use crate::root_envelopes::serialize_named_json_output;
 
 /// Current mutation report schema version.
@@ -442,6 +444,11 @@ pub struct MutantResult {
     /// a verdict file. The hint can be wrong.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub equivalence_hint: Option<MutantEquivalenceHint>,
+    /// The replay of a recorded input. Present only after a `--record-args
+    /// values` run, for a survived or uncovered mutant with a recorded input
+    /// of its export.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub witness: Option<MutantWitness>,
 }
 
 /// Why a survivor may be equivalent, as far as the type check can tell.
@@ -1485,6 +1492,11 @@ pub struct MutationTask {
     /// sorted. Empty for `no_coverage`. `fallow mutation inspect` gives the
     /// test ids and the static test files of one mutant.
     pub covering_test_files: Vec<String>,
+    /// The witness of the task: a recorded input that shows a difference, with
+    /// the results of both sides. Present only after a `--record-args
+    /// values` run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub witness: Option<MutationTaskWitness>,
 }
 
 /// The number of tasks for each status.
@@ -1635,6 +1647,7 @@ mod tests {
             resumed: false,
             type_error_codes: Vec::new(),
             equivalence_hint: None,
+            witness: None,
         }
     }
 
@@ -1778,6 +1791,7 @@ mod tests {
             resumed: false,
             type_error_codes: Vec::new(),
             equivalence_hint: None,
+            witness: None,
         };
         let value = serde_json::to_value(&result).expect("serializes");
         assert_eq!(
@@ -1845,6 +1859,7 @@ mod tests {
             resumed: false,
             type_error_codes: Vec::new(),
             equivalence_hint: None,
+            witness: None,
         };
         let value = serde_json::to_value(&result).expect("serializes");
         assert_eq!(

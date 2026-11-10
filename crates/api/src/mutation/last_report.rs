@@ -116,3 +116,32 @@ pub fn save_last_mutation_report(
         })?;
     Ok(path)
 }
+
+/// The cached values of the witness of `mutant_id` with the input
+/// `input_id`: the arguments and the result of each side. `None` when the
+/// cache no longer has them (7 days) or the config cannot load.
+pub fn mutation_witness_values(
+    analysis: &AnalysisOptions,
+    mutant_id: &str,
+    input_id: &str,
+) -> Option<(
+    Vec<serde_json::Value>,
+    fallow_output::MutationWitnessSide,
+    fallow_output::MutationWitnessSide,
+)> {
+    let cache_dir = cache_dir(analysis).ok()?;
+    let stored = super::recorded_args::witnesses::load_witness(
+        &cache_dir,
+        mutant_id,
+        input_id,
+        super::recorded_args::now_secs(),
+    )?;
+    let side = |side: super::recorded_args::witnesses::StoredSide| {
+        Some(fallow_output::MutationWitnessSide {
+            outcome: serde_json::from_value(serde_json::Value::String(side.outcome)).ok()?,
+            value: side.value,
+            text: side.text,
+        })
+    };
+    Some((stored.args, side(stored.original)?, side(stored.mutant)?))
+}
