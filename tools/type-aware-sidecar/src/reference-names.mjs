@@ -1,4 +1,4 @@
-import { ast } from "./backend.mjs";
+import { ast, projectCompilerOptions } from "./backend.mjs";
 import { canonicalFileIdentity } from "./file-identity.mjs";
 
 const {
@@ -92,20 +92,22 @@ export const ownSourceFiles = (project) =>
     .map((fileName) => project.program.getSourceFile(fileName))
     .filter((sourceFile) => isOwnSourceFile(project, sourceFile));
 
-// Alias edges come from every program file whose real path is outside
-// node_modules, also a linked workspace package that the program marks as an
-// external library or reaches through a node_modules path with
-// `preserveSymlinks`.
-const isAliasSourceFile = (fileName) =>
-  !NODE_MODULES_SEGMENT.test(fileName) ||
-  !NODE_MODULES_SEGMENT.test(canonicalFileIdentity(fileName));
-
-const aliasSourceFiles = (project) =>
-  project.program
+// Alias edges come from every program file outside node_modules, also from a
+// linked workspace package that the program marks as an external library.
+// With `preserveSymlinks`, such a package keeps a node_modules path, so only
+// then does a node_modules path need its real path, which costs a system call.
+const aliasSourceFiles = (project) => {
+  const linked = Boolean(projectCompilerOptions(project)?.preserveSymlinks);
+  return project.program
     .getSourceFileNames()
-    .filter(isAliasSourceFile)
+    .filter(
+      (fileName) =>
+        !NODE_MODULES_SEGMENT.test(fileName) ||
+        (linked && !NODE_MODULES_SEGMENT.test(canonicalFileIdentity(fileName))),
+    )
     .map((fileName) => project.program.getSourceFile(fileName))
     .filter((sourceFile) => sourceFile && !project.program.isSourceFileDefaultLibrary(sourceFile));
+};
 
 const programAliasEdges = (project) =>
   aliasSourceFiles(project)
