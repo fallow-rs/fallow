@@ -666,6 +666,7 @@ const surfaceEntriesForNode = (state, project, node, namespace) => {
 
 const scanSymbolUseFile = (root, state, project, sourceFile, names) => {
   const projectEntries = classMemberEntrySetForProject(state, project);
+  const fileNames = isJavaScriptFile(sourceFile) ? undefined : names;
   const nodes = [];
   visit(sourceFile, (node) => {
     recordDynamicImportUncertainty(state, project, node, moduleIdentityForSpecifier);
@@ -673,7 +674,7 @@ const scanSymbolUseFile = (root, state, project, sourceFile, names) => {
       recordStringDispatchedMemberAccess(state, projectEntries, node);
       recordComputedMemberAccess(state, project, projectEntries, node);
     }
-    if (isIdentifierReference(node, isJavaScriptFile(sourceFile) ? undefined : names)) {
+    if (isIdentifierReference(node, fileNames)) {
       nodes.push(node);
       return;
     }
