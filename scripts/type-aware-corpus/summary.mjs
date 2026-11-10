@@ -178,8 +178,9 @@ export const renderSummaryMarkdown = (summary) =>
     `- Abstention: ${display(summary.accuracy.abstention)}`,
     `- Candidates behind blocking diagnostics: ${summary.accuracy.blocking_diagnostics_count} (share ${display(summary.accuracy.blocking_diagnostics_share)})`,
     `- Candidates without type evidence (abstained or unresolved): ${summary.accuracy.no_type_evidence_count} (share ${display(summary.accuracy.no_type_evidence_share)})`,
-    `- Median marginal overhead: ${display(summary.performance.marginal_overhead_ms.median)} ms`,
-    `- P95 marginal overhead: ${display(summary.performance.marginal_overhead_ms.p95)} ms`,
+    `- Median marginal CPU overhead: ${display(summary.performance.marginal_overhead_ms.median)} ms`,
+    `- P95 marginal CPU overhead (gate): ${display(summary.performance.marginal_overhead_ms.p95)} ms`,
+    `- P95 marginal wall overhead: ${display(summary.performance.marginal_wall_overhead_ms?.p95)} ms`,
     `- Independent repositories with confirmed value: ${summary.value.confirmed_repository_count}`,
     `- Semantic buckets with confirmed value: ${summary.value.confirmed_feature_buckets.join(", ") || "none"}`,
     "",
@@ -205,21 +206,28 @@ export const requirePublicationGo = (summary, publicationMode, fail) => {
   fail(`publication gate is NO-GO; failed checks: ${detail}`);
 };
 
-const measuredPairs = (runs) => {
+// The runtime gate compares CPU time of the process tree, because wall time on
+// a shared machine depends more on other load than on the change. A platform
+// without a CPU sample (Windows) compares wall time.
+const gatedTime = (run) => (Number.isFinite(run.cpu_ms) ? run.cpu_ms : run.wall_ms);
+const wallTime = (run) => run.wall_ms;
+
+const measuredPairs = (runs, time) => {
   const pairs = new Map();
   runs
     .filter(({ warmup }) => !warmup)
     .forEach((run) => {
       const pair = pairs.get(run.iteration) ?? {};
-      pair[run.mode] = run.wall_ms;
+      pair[run.mode] = time(run);
       pairs.set(run.iteration, pair);
     });
   return [...pairs.values()];
 };
 
-export const pairedOverheads = (projects) =>
+/** Refined minus baseline time for each measured pair; CPU time by default, wall time with `"wall"`. */
+export const pairedOverheads = (projects, clock = "cpu") =>
   projects
-    .flatMap(({ runs }) => measuredPairs(runs))
+    .flatMap(({ runs }) => measuredPairs(runs, clock === "wall" ? wallTime : gatedTime))
     .filter(({ baseline, refined }) =>
       [Number.isFinite(baseline), Number.isFinite(refined)].every(Boolean),
     )

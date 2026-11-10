@@ -29,6 +29,11 @@ import {
   runExactSidecarRequest as executeExactSidecarRequest,
   writeProjectConfig,
 } from "./type-aware-corpus/runner.mjs";
+import {
+  processTreeCpuMs,
+  recordCpuSample,
+  sampleProcessTree,
+} from "./type-aware-corpus/process-tree.mjs";
 import { contractDeclarationPath, resolveEvidencePath } from "./type-aware-corpus/locations.mjs";
 import {
   aggregatePhaseTimings,
@@ -374,50 +379,6 @@ const prepare = (projects, outDir) => {
 
 const projectRoot = (project, outDir) => validatePreparedFixture(project, outDir).root;
 
-const processTreeIndexes = (rows) => {
-  const children = new Map();
-  const rssByPid = new Map();
-  rows.forEach(([pid, ppid, rss]) => {
-    rssByPid.set(pid, rss);
-    const siblings = arrayOrEmpty(children.get(ppid));
-    siblings.push(pid);
-    children.set(ppid, siblings);
-  });
-  return { children, rssByPid };
-};
-
-const processTreeRss = (rootPid, children, rssByPid) => {
-  const pending = [rootPid];
-  const seen = new Set();
-  let total = 0;
-  while (pending.length > 0) {
-    const pid = pending.pop();
-    if (seen.has(pid)) continue;
-    seen.add(pid);
-    total += integerOrFallback(rssByPid.get(pid), 0);
-    pending.push(...arrayOrEmpty(children.get(pid)));
-  }
-  return total;
-};
-
-const descendantsRssKb = (rootPid) => {
-  if (process.platform === "win32") return null;
-  const result = spawnSync("ps", ["-axo", "pid=,ppid=,rss="], {
-    encoding: "utf8",
-    maxBuffer: 8 * 1024 * 1024,
-  });
-  if (result.status !== 0) return null;
-  const rows = result.stdout
-    .trim()
-    .split("\n")
-    .map((line) => line.trim().split(/\s+/).map(Number))
-    .filter(
-      ([pid, ppid, rss]) => Number.isFinite(pid) && Number.isFinite(ppid) && Number.isFinite(rss),
-    );
-  const { children, rssByPid } = processTreeIndexes(rows);
-  return processTreeRss(rootPid, children, rssByPid);
-};
-
 export const runProcess = (binary, args, cwd, sidecarBin) =>
   new Promise((accept, reject) => {
     const started = process.hrtime.bigint();
@@ -431,6 +392,7 @@ export const runProcess = (binary, args, cwd, sidecarBin) =>
     let stdoutBytes = 0;
     let stderrBytes = 0;
     let peakRssKb = 0;
+    const maxCpuMsByPid = new Map();
     let killedForOutput = false;
     const collect = (chunks, chunk, stream) => {
       const nextBytes =
@@ -447,16 +409,16 @@ export const runProcess = (binary, args, cwd, sidecarBin) =>
     child.stdout.on("data", (chunk) => collect(stdout, chunk, "stdout"));
     child.stderr.on("data", (chunk) => collect(stderr, chunk, "stderr"));
     child.on("error", reject);
-    const sampleProcessTreeRss = () => {
-      const rss = descendantsRssKb(child.pid);
-      if (rss !== null) peakRssKb = Math.max(peakRssKb, rss);
+    const sampleUsage = () => {
+      const sample = sampleProcessTree(child.pid);
+      if (sample !== null) peakRssKb = Math.max(peakRssKb, sample.rssKb);
+      recordCpuSample(maxCpuMsByPid, sample);
     };
-    sampleProcessTreeRss();
-    const sampler = setInterval(sampleProcessTreeRss, PROCESS_TREE_RSS_SAMPLE_INTERVAL_MS);
+    sampleUsage();
+    const sampler = setInterval(sampleUsage, PROCESS_TREE_RSS_SAMPLE_INTERVAL_MS);
     child.on("close", (status, signal) => {
       clearInterval(sampler);
-      const finalRss = descendantsRssKb(child.pid);
-      if (finalRss !== null) peakRssKb = Math.max(peakRssKb, finalRss);
+      sampleUsage();
       const wallMs = Number(process.hrtime.bigint() - started) / 1_000_000;
       if (killedForOutput) reject(new Error(`fallow output exceeded ${MAX_OUTPUT_BYTES} bytes`));
       else
@@ -466,6 +428,7 @@ export const runProcess = (binary, args, cwd, sidecarBin) =>
           stdout: Buffer.concat(stdout).toString("utf8"),
           stderr: Buffer.concat(stderr).toString("utf8"),
           wall_ms: wallMs,
+          cpu_ms: processTreeCpuMs(maxCpuMsByPid),
           peak_process_tree_rss_kb: peakRssKb || null,
         });
     });
@@ -948,6 +911,7 @@ const compactRun = (run, mode, iteration, warmup) => {
     warmup,
     mode,
     wall_ms: run.wall_ms,
+    cpu_ms: run.cpu_ms,
     peak_process_tree_rss_kb: run.peak_process_tree_rss_kb,
     candidate_count: run.candidates.length,
     refinement_ms: finiteOrNull(meta.elapsed_ms),
@@ -2538,6 +2502,7 @@ const summarize = (manifest, options, publicationMode = "write") => {
   const baselineRuns = measuredRuns(measurements, "baseline");
   const refinedRuns = measuredRuns(measurements, "refined");
   const overheads = pairedOverheads(measurements.projects);
+  const wallOverheads = pairedOverheads(measurements.projects, "wall");
   const confirmedProjects = new Set(
     [...correctConfirmed, ...correctContracts].map(({ project_id }) => project_id),
   );
@@ -2595,7 +2560,7 @@ const summarize = (manifest, options, publicationMode = "write") => {
     zeroControlsClean,
   });
   const summary = {
-    schema_version: 5,
+    schema_version: 6,
     gate: {
       go: Object.values(checks).every(Boolean),
       checks,
@@ -2661,8 +2626,13 @@ const summarize = (manifest, options, publicationMode = "write") => {
         ),
       },
       marginal_overhead_ms: {
+        clock: "process-tree-cpu",
         median: percentile(overheads, 0.5),
         p95: marginalOverheadP95,
+      },
+      marginal_wall_overhead_ms: {
+        median: percentile(wallOverheads, 0.5),
+        p95: percentile(wallOverheads, 0.95),
       },
       process_tree_peak_rss_kb: {
         baseline_p95: percentile(

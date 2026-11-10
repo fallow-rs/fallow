@@ -410,6 +410,11 @@ const validateMeasurementRunShape = (projectId, run, measurements, dependencies)
     `${projectId} measurement has an invalid wall time`,
     fail,
   );
+  requireValid(
+    platform === "win32" ? true : [Number.isFinite(run.cpu_ms), run.cpu_ms >= 0].every(Boolean),
+    `${projectId} measurement has no process-tree CPU time`,
+    fail,
+  );
   const rssValid = [
     Number.isFinite(run.peak_process_tree_rss_kb),
     run.peak_process_tree_rss_kb > 0,
