@@ -307,11 +307,28 @@ export const isProjectSource = (project, sourceFile) =>
   !project.program.isSourceFileDefaultLibrary(sourceFile) &&
   !project.program.isSourceFileFromExternalLibrary(sourceFile);
 
-export const projectSourceFiles = (project) =>
-  project.program
+// Each `getSourceFile` call transfers a file from the checker. Files below
+// node_modules and declaration files are never project sources, so their names
+// skip the transfer. `isProjectSource` still checks every remaining file.
+const NODE_MODULES_PATH = /[\\/]node_modules[\\/]/u;
+const DECLARATION_FILE_NAME = /\.d\.(?:[cm]?ts|[^./\\]+\.ts)$/iu;
+const sourceFilesByProgram = new WeakMap();
+
+const mayBeProjectSource = (fileName) =>
+  !NODE_MODULES_PATH.test(fileName) && !DECLARATION_FILE_NAME.test(fileName);
+
+/** The project source files of a program, read one time for each program. */
+export const projectSourceFiles = (project) => {
+  const cached = sourceFilesByProgram.get(project.program);
+  if (cached) return cached;
+  const sourceFiles = project.program
     .getSourceFileNames()
+    .filter(mayBeProjectSource)
     .map((fileName) => project.program.getSourceFile(fileName))
     .filter((sourceFile) => isProjectSource(project, sourceFile));
+  sourceFilesByProgram.set(project.program, sourceFiles);
+  return sourceFiles;
+};
 
 const projectExportIndexes = new WeakMap();
 
