@@ -11,6 +11,7 @@ use rustc_hash::FxHashMap;
 
 use super::scheduler::targets::ResolvedTarget;
 
+mod baseline_scope;
 mod targets;
 
 type KillSets = BTreeMap<String, BTreeSet<String>>;

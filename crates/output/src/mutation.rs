@@ -897,9 +897,15 @@ pub struct MutationKillMatrixTarget {
     /// `complete` or `incomplete`. Only the tests of a complete target can
     /// be candidates.
     pub status: MutationKillMatrixTargetStatus,
-    /// Why the evidence of this target is incomplete, sorted. The run-wide
-    /// reasons `partial-mutation-run`, `baseline-failure`, and
-    /// `missing-test-file-metadata` apply to each target.
+    /// Why the evidence of this target is incomplete, sorted.
+    /// `baseline-failure` means that a test failed with no active mutant, and
+    /// that the failure can affect this target: the failing test is a test
+    /// of the target or is in a test file of the target, or it covers, kills,
+    /// or ran without a mutant that a test of the target covers or kills.
+    /// `partial-mutation-run` means that the run is partial. When baseline
+    /// failures are the only cause of a partial run, only the targets with
+    /// `baseline-failure` get it. Each other cause applies to each target,
+    /// and so does `missing-test-file-metadata`.
     /// `incomplete-mutant-results` means that a test of this target covers a
     /// mutant with incomplete evidence. `unmatched-target` means that the
     /// target selects no test. With it, `not-a-test-file` means that the
@@ -908,6 +914,13 @@ pub struct MutationKillMatrixTarget {
     /// the dry run does not run it. A run stops only when no target selects
     /// a test.
     pub reasons: Vec<String>,
+    /// The baseline failures that give this target `baseline-failure`,
+    /// sorted: the test id, or the test file for an error outside a test.
+    /// Never serialized: the human output names them, and the JSON consumer
+    /// reads `baseline_failures` of the report.
+    #[serde(skip)]
+    #[cfg_attr(feature = "schema", schemars(skip))]
+    pub baseline_failures: Vec<String>,
 }
 
 /// Redundancy signals over the observed mutants. Candidates need review.

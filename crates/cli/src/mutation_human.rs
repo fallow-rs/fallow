@@ -808,6 +808,24 @@ fn render_kill_id_list(out: &mut String, label: &str, ids: &[String], one: &str,
     }
 }
 
+/// The baseline failures that make one target incomplete, at most
+/// [`MAX_MATRIX_IDS_SHOWN`] of them.
+fn render_target_baseline_failures(out: &mut String, failures: &[String]) {
+    if failures.is_empty() {
+        return;
+    }
+    let mut shown: Vec<String> = failures
+        .iter()
+        .take(MAX_MATRIX_IDS_SHOWN)
+        .map(|id| shorten(id, MAX_TEST_NAME_CHARS))
+        .collect();
+    let hidden = failures.len().saturating_sub(MAX_MATRIX_IDS_SHOWN);
+    if hidden > 0 {
+        shown.push(format!("+{hidden} more"));
+    }
+    let _ = writeln!(out, "    Baseline failures: {}", shown.join(", "));
+}
+
 fn render_subsuming_tests(out: &mut String, tests: &[String]) {
     if tests
         .iter()
@@ -935,6 +953,7 @@ fn render_kill_matrix(out: &mut String, matrix: &MutationKillMatrix) {
             let _ = write!(out, " ({})", target.reasons.join(", "));
         }
         out.push('\n');
+        render_target_baseline_failures(out, &target.baseline_failures);
     }
     for reason in &matrix.reasons {
         let _ = writeln!(out, "  {reason}: {}", kill_matrix_reason(reason));
