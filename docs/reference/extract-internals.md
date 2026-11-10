@@ -326,8 +326,43 @@ calls of its template, of an inline script, or of another script block. The
 graph cache does not store these facts, so a change to them changes only
 `CACHE_VERSION`.
 
+A contract also holds these facts:
+
+- `is_async` is `true` for an `async` function declaration, function
+  expression or arrow function.
+- `ParamFact.written` is `true` when the module writes the parameter binding:
+  in the body, in a default value, or in a nested function or arrow. For an
+  object or array pattern, a write of any binding of the pattern counts. A
+  `var` or function declaration in the body that redeclares the parameter
+  also counts, because it can replace the value without a write reference.
+  A written parameter can hold a value that no caller passes.
+
+An argument fact is `Literal`, `Param` or `Unknown`. `Param(i)` exists only
+for a self-call: a call of a local function inside the body or a default
+value of that same function, at any depth, for example in an arrow callback.
+The argument must be the identifier of the formal identifier parameter at
+index `i` of that function, and the parameter must have `written == false`.
+A rest parameter never gets `Param`, because `f(r)` passes `[r]`.
+TypeScript wrappers such as `as`, `<T>x`, `satisfies` and `!` do not change
+the fact. A call of a different function that passes a parameter stores
+`Unknown`. `args` never holds a spread argument, because the list stops
+before the first spread. `-0` and `0` are the same `Number` fact, and a
+condition reads both as false.
+
+Read an argument with `CallSite::arg_at`, not by an index into `args`. It
+gives one of three outcomes for a parameter position:
+
+- `ArgAt::Fact` for a known fact, never `Unknown`;
+- `ArgAt::Unknown` from the first spread on, past the kept facts, or for a
+  stored `Unknown`;
+- `ArgAt::Omitted` at or past `arg_count`.
+
 A consumer of these facts reads them together with other facts:
 
+- For a named or default import of a function, a non-empty `member_path`,
+  for example `call`, `apply` or `bind`, is not a plain call of the function.
+  The consumer treats the function as open for that site. For a namespace
+  import, the first segment of `member_path` is the export name.
 - A use of an import binding that is not a direct call is an
   `ImportBindingReference`, not a `FunctionCall`.
 - `export { f }` and `export default f` are exports, not escapes, so the
