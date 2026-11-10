@@ -29,6 +29,7 @@ import {
   runExactSidecarRequest as executeExactSidecarRequest,
   writeProjectConfig,
 } from "./type-aware-corpus/runner.mjs";
+import { contractDeclarationPath, resolveEvidencePath } from "./type-aware-corpus/locations.mjs";
 import {
   aggregatePhaseTimings,
   aggregateReasonCounts,
@@ -1513,18 +1514,19 @@ const supplemental = async (options, publicationMode = "write") => {
 
 const readDiscovery = (outDir) => readJson(resolve(outDir, "discovery.json"), "discovery artifact");
 
-const sourceLineEvidence = (root, candidate) => {
-  const sourcePath = resolve(root, candidate.path);
-  const relativeToRoot = relative(root, sourcePath);
-  if ([relativeToRoot.startsWith(`..${sep}`), relativeToRoot === ".."].some(Boolean)) {
-    fail(`${candidate.key} source path escapes its fixture`);
-  }
+const sourceLineEvidence = (root, candidate, dependencyRoot = null) => {
+  const path = dependencyRoot
+    ? contractDeclarationPath(root, dependencyRoot, candidate.path)
+    : candidate.path;
+  const sourcePath = path === null ? null : resolveEvidencePath(root, path, dependencyRoot);
+  if (sourcePath === null)
+    fail(`${candidate.key ?? candidate.path} source path escapes its fixture`);
   let excerpt = "";
   if (existingFile(sourcePath)) {
     const lines = readFileSync(sourcePath, "utf8").split(/\r?\n/);
     excerpt = (lines[Math.max(0, candidate.line - 1)] ?? "").trim();
   }
-  return { path: candidate.path, line: candidate.line, col: candidate.col, excerpt };
+  return { path, line: candidate.line, col: candidate.col, excerpt };
 };
 
 const sourceLocationEvidence = (root, location) => {
@@ -2084,7 +2086,7 @@ const evidenceLedgerEntry = (
         : {
             relation: candidate.contract.relation,
             optional: candidate.contract.optional,
-            declaration: sourceLineEvidence(root, candidate.contract.declaration),
+            declaration: sourceLineEvidence(root, candidate.contract.declaration, REPO_ROOT),
           },
     ...featureBuckets,
     truth: firstDefined([old.truth, "pending"]),
@@ -2324,10 +2326,9 @@ export const verifyLedgerData = (discovery, ledger) => {
   });
 };
 
-const evidenceSourcePath = (entry, location, root, errors) => {
-  const sourcePath = resolve(root, location.path);
-  const relativeToRoot = relative(root, sourcePath);
-  if ([relativeToRoot.startsWith(`..${sep}`), relativeToRoot === ".."].some(Boolean)) {
+const evidenceSourcePath = (entry, location, root, errors, dependencyRoot) => {
+  const sourcePath = resolveEvidencePath(root, location.path, dependencyRoot);
+  if (sourcePath === null) {
     errors.push(`${entry.key}: evidence path escapes the prepared fixture`);
     return null;
   }
@@ -2349,9 +2350,9 @@ const verifyEvidenceExcerpt = (entry, location, sourcePath, errors) => {
   }
 };
 
-const verifyEvidenceLocation = (entry, location, root, errors) => {
+const verifyEvidenceLocation = (entry, location, root, errors, dependencyRoot = null) => {
   if (!evidenceLocationValid(location)) return;
-  const sourcePath = evidenceSourcePath(entry, location, root, errors);
+  const sourcePath = evidenceSourcePath(entry, location, root, errors, dependencyRoot);
   if (sourcePath === null) return;
   verifyEvidenceExcerpt(entry, location, sourcePath, errors);
 };
@@ -2363,14 +2364,13 @@ const verifyEntrySourceEvidence = (entry, projects, roots, errors) => {
     return;
   }
   const sourceEvidence = Object(entry.source_evidence);
-  const locations = [
-    sourceEvidence.declaration,
-    ...arrayOrEmpty(sourceEvidence.uses),
-    ...(entry.contract == null ? [] : [Object(entry.contract).declaration]),
-  ];
-  locations.forEach((location) =>
-    verifyEvidenceLocation(entry, location, roots.get(project.id), errors),
+  const root = roots.get(project.id);
+  [sourceEvidence.declaration, ...arrayOrEmpty(sourceEvidence.uses)].forEach((location) =>
+    verifyEvidenceLocation(entry, location, root, errors),
   );
+  if (entry.contract != null) {
+    verifyEvidenceLocation(entry, Object(entry.contract).declaration, root, errors, REPO_ROOT);
+  }
 };
 
 const verifySourceEvidence = (manifest, ledger, outDir) => {
