@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -112,3 +112,108 @@ test("reference names follow alias chains and leave out unrelated imports", () =
     "twice",
   ]);
 });
+
+const traceHelperUses = (root, tsconfig, files, helperPath) => {
+  write(root, "tsconfig.json", JSON.stringify(tsconfig));
+  Object.entries(files).forEach(([file, contents]) => write(root, file, contents));
+  const source = files[helperPath];
+  const analysis = analyzeSemanticQueries(
+    parseRequest({
+      protocol_version: WIRE_PROTOCOL_VERSION,
+      operation: ANALYSIS_OPERATION,
+      root,
+      projects: ["tsconfig.json"],
+      evidence_limit: 40,
+      queries: [
+        {
+          id: 0,
+          operation: "symbol-trace",
+          symbol: {
+            path: helperPath,
+            namespace: "value",
+            declaration_kind: "variable",
+            exported_name: "helper",
+            local_name: "helper",
+            line: 1,
+            col: source.indexOf("helper"),
+          },
+        },
+      ],
+    }),
+  );
+  return analysis.results[0].evidence.map((entry) => [entry.path, entry.role]);
+};
+
+test("symbol-trace keeps uses that reach an export through a CommonJS export name", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "fallow-type-aware-reference-names-cjs-"));
+  try {
+    const uses = traceHelperUses(
+      root,
+      {
+        compilerOptions: {
+          allowJs: true,
+          checkJs: false,
+          module: "esnext",
+          moduleResolution: "bundler",
+          noEmit: true,
+        },
+        include: ["src/**/*"],
+      },
+      {
+        "src/helpers.js":
+          "const helper = (value) => value;\nexports.run = helper;\nmodule.exports.go = helper;\n",
+        "src/use.ts": 'import { run, go } from "./helpers.js";\nrun(1);\ngo(2);\n',
+      },
+      "src/helpers.js",
+    );
+    assert.deepEqual(uses.filter(([file]) => file === "src/use.ts").toSorted(), [
+      ["src/use.ts", "call"],
+      ["src/use.ts", "call"],
+    ]);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test(
+  "symbol-trace keeps uses that reach an export through a linked workspace package",
+  { skip: process.platform === "win32" },
+  () => {
+    const root = realpathSync(
+      mkdtempSync(path.join(tmpdir(), "fallow-type-aware-reference-names-link-")),
+    );
+    try {
+      write(
+        root,
+        "packages/lib/package.json",
+        JSON.stringify({ name: "@scope/lib", types: "index.ts" }),
+      );
+      mkdirSync(path.join(root, "node_modules/@scope"), { recursive: true });
+      symlinkSync(path.join(root, "packages/lib"), path.join(root, "node_modules/@scope/lib"));
+      const uses = traceHelperUses(
+        root,
+        {
+          compilerOptions: {
+            strict: true,
+            preserveSymlinks: true,
+            moduleResolution: "bundler",
+            module: "esnext",
+          },
+          include: ["src/**/*.ts", "packages/lib/helpers.ts"],
+        },
+        {
+          "packages/lib/helpers.ts": "export const helper = (value: number): number => value;\n",
+          "packages/lib/index.ts": 'export { helper as run } from "./helpers";\n',
+          "src/use.ts": 'import { run } from "@scope/lib";\nrun(1);\n',
+        },
+        "packages/lib/helpers.ts",
+      );
+      assert.ok(
+        uses.some(([file, role]) => file === "src/use.ts" && role === "call"),
+        `the call in src/use.ts must be a use, got: ${JSON.stringify(uses)}`,
+      );
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);

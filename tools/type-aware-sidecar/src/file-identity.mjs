@@ -6,7 +6,7 @@ import path from "node:path";
 // between session requests resolves again.
 const identities = new Map();
 
-/** Forgets the resolved file identities. Call it at the start of each request. */
+/** Forgets the resolved file identities. Each semantic analysis calls it at its start. */
 export const resetFileIdentityCache = () => identities.clear();
 
 const resolveIdentity = (absolutePath) => {

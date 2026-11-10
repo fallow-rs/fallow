@@ -1,7 +1,6 @@
 import path from "node:path";
 import { createInterface } from "node:readline";
 
-import { resetFileIdentityCache } from "./file-identity.mjs";
 import {
   MUTANT_TYPECHECK_OPERATION,
   SESSION_ENVELOPE_TYPES,
@@ -107,7 +106,6 @@ const runSession = async (input, output) => {
         session = createSemanticSession(root);
       }
       if (request.root !== root) throw new Error("semantic session root mismatch");
-      resetFileIdentityCache();
       const startedAt = performance.now();
       const result = session.analyze(request, {
         revision: envelope.revision,
@@ -165,7 +163,6 @@ export const run = async ({ input, output, args = [] }) => {
     );
     return;
   }
-  resetFileIdentityCache();
   const result = analyzeSemanticQueries(request);
   writeJson(output, responseFor(result, performance.now() - startedAt));
 };

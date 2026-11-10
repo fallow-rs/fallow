@@ -1,7 +1,11 @@
-import { ast } from "./backend.mjs";
+import { ast, SyntaxKind } from "./backend.mjs";
+import { canonicalFileIdentity } from "./file-identity.mjs";
 
 const {
+  isBinaryExpression,
   isExportDeclaration,
+  isExpressionStatement,
+  isIdentifier,
   isImportDeclaration,
   isImportEqualsDeclaration,
   isModuleBlock,
@@ -9,6 +13,7 @@ const {
   isNamedExports,
   isNamespaceExportDeclaration,
   isNamespaceImport,
+  isPropertyAccessExpression,
 } = ast;
 
 const JAVASCRIPT_FILE = /\.[cm]?jsx?$/iu;
@@ -46,7 +51,29 @@ export const moduleBodyStatements = (body) => {
   return body && isModuleBlock(body) ? body.statements : [];
 };
 
+const isExportsObject = (node) =>
+  (isIdentifier(node) && node.text === "exports") ||
+  (isPropertyAccessExpression(node) &&
+    isIdentifier(node.expression) &&
+    node.expression.text === "module" &&
+    node.name.text === "exports");
+
+// `exports.run = helper` and `module.exports.run = helper` make `run` an
+// alias in a JavaScript file, so a TypeScript importer of `run` must keep it.
+const commonJsExportEdges = (expression) => {
+  if (!isBinaryExpression(expression) || expression.operatorToken.kind !== SyntaxKind.EqualsToken) {
+    return [];
+  }
+  const { left } = expression;
+  const own =
+    isPropertyAccessExpression(left) && isExportsObject(left.expression)
+      ? [{ from: ALWAYS, to: left.name.text }]
+      : [];
+  return [...own, ...commonJsExportEdges(expression.right)];
+};
+
 const statementAliasEdges = (statement) => {
+  if (isExpressionStatement(statement)) return commonJsExportEdges(statement.expression);
   if (isImportDeclaration(statement)) return importEdges(statement);
   if (isImportEqualsDeclaration(statement) || isNamespaceExportDeclaration(statement)) {
     return [{ from: ALWAYS, to: statement.name?.text }];
@@ -76,8 +103,22 @@ export const ownSourceFiles = (project) =>
     .map((fileName) => project.program.getSourceFile(fileName))
     .filter((sourceFile) => isOwnSourceFile(project, sourceFile));
 
+// A workspace package that a symlink below node_modules points to, with
+// `preserveSymlinks`, keeps its node_modules path. Its re-exports can still
+// lead to a project target.
+const linkedWorkspaceFiles = (project) =>
+  project.program
+    .getSourceFileNames()
+    .filter(
+      (fileName) =>
+        NODE_MODULES_SEGMENT.test(fileName) &&
+        !NODE_MODULES_SEGMENT.test(canonicalFileIdentity(fileName)),
+    )
+    .map((fileName) => project.program.getSourceFile(fileName))
+    .filter((sourceFile) => sourceFile && !project.program.isSourceFileDefaultLibrary(sourceFile));
+
 const programAliasEdges = (project) =>
-  ownSourceFiles(project)
+  [...ownSourceFiles(project), ...linkedWorkspaceFiles(project)]
     .flatMap((sourceFile) => sourceFile.statements.flatMap(statementAliasEdges))
     .filter(({ to }) => typeof to === "string");
 
