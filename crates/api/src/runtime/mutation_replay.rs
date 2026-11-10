@@ -15,7 +15,7 @@ use fallow_output::{
 
 use super::mutation::{
     DEFAULT_RUNNER_TIMEOUT, Planned, ProgrammaticResult, guard_cache_dir, init_options, millis,
-    mutation_error, plan_for, runner_version_help, runtime_error,
+    mutation_error, plan_for, runtime_error,
 };
 use crate::mutation::companion::{COMPANION_FILES, install};
 use crate::mutation::discovery::discover_runtime;
@@ -26,6 +26,7 @@ use crate::mutation::protocol::{
 };
 use crate::mutation::replay::{check_calls, output_outcome, output_side, verdict};
 use crate::mutation::run_dir::{RunFile, write_run_dir};
+use crate::mutation::runner_version::runner_version_help;
 use crate::mutation::transport::{CompanionLink, CompanionSpawner, ProcessSpawner, SpawnFailure};
 use crate::mutation::{MutationReplayOptions, MutationRunOptions, MutationRunScope};
 

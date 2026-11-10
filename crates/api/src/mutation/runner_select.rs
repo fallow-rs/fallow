@@ -101,6 +101,13 @@ fn detect_runner(root: &Path, test_files: &[String]) -> Runner {
     Runner::Vitest
 }
 
+/// True when the root `package.json` declares `vitest` as a dependency.
+pub fn declares_vitest(root: &Path) -> bool {
+    read_manifest(root)
+        .as_ref()
+        .is_some_and(has_vitest_dependency)
+}
+
 fn read_manifest(root: &Path) -> Option<serde_json::Value> {
     let text = fs::read_to_string(root.join("package.json")).ok()?;
     serde_json::from_str(&text).ok()

@@ -73,6 +73,7 @@ mod lean_profile;
 mod list_envelopes;
 mod mutation;
 mod mutation_ci;
+mod mutation_plan_runner;
 mod next_steps;
 mod package_baselines;
 mod pr_comment_envelope;
@@ -350,19 +351,19 @@ pub use mutation::{
     MutationInspectSchemaVersion, MutationInspectStatus, MutationKillMatrix,
     MutationKillMatrixStatus, MutationKillMatrixTarget, MutationKillMatrixTargetStatus,
     MutationPlanCountsOutput, MutationPlanDisposition, MutationPlanFile, MutationPlanMutant,
-    MutationPlanOutput, MutationPlanSchemaVersion, MutationRecheck, MutationRecheckMutant,
-    MutationRecheckOutcome, MutationReplayCall, MutationReplayInput, MutationReplayInputSource,
-    MutationReplayOutcome, MutationReplayOutput, MutationReplaySide, MutationReplayVerdict,
-    MutationReport, MutationResumeOutput, MutationRunIssue, MutationRunnerOutput,
-    MutationRuntimeOutput, MutationSchemaVersion, MutationScopeKind, MutationScopeOutput,
-    MutationSkippedFile, MutationStaleReason, MutationStatusCounts, MutationSummary,
-    MutationTargetOnlyKill, MutationTask, MutationTasksOutput, MutationTasksSchemaVersion,
-    MutationTasksSummary, MutationTestKillRow, MutationTimings, MutationTypecheckOutput,
-    MutationTypecheckSkip, MutationTypecheckSkipReason, MutationVerdict, MutationVerdictInput,
-    MutationVerdictJoin, MutationVerdictKind, MutationVerdictSchemaVersion, MutationWorktreeCheck,
-    SAMPLED_OUT_REASON, SKIPPED_TESTS_CODE, serialize_mutation_inspect_json_output,
-    serialize_mutation_json_output, serialize_mutation_plan_json_output,
-    serialize_mutation_tasks_json_output,
+    MutationPlanOutput, MutationPlanRunner, MutationPlanSchemaVersion, MutationRecheck,
+    MutationRecheckMutant, MutationRecheckOutcome, MutationReplayCall, MutationReplayInput,
+    MutationReplayInputSource, MutationReplayOutcome, MutationReplayOutput, MutationReplaySide,
+    MutationReplayVerdict, MutationReport, MutationResumeOutput, MutationRunIssue,
+    MutationRunnerOutput, MutationRuntimeOutput, MutationSchemaVersion, MutationScopeKind,
+    MutationScopeOutput, MutationSkippedFile, MutationStaleReason, MutationStatusCounts,
+    MutationSummary, MutationTargetOnlyKill, MutationTask, MutationTasksOutput,
+    MutationTasksSchemaVersion, MutationTasksSummary, MutationTestKillRow, MutationTimings,
+    MutationTypecheckOutput, MutationTypecheckSkip, MutationTypecheckSkipReason, MutationVerdict,
+    MutationVerdictInput, MutationVerdictJoin, MutationVerdictKind, MutationVerdictSchemaVersion,
+    MutationWorktreeCheck, SAMPLED_OUT_REASON, SKIPPED_TESTS_CODE,
+    serialize_mutation_inspect_json_output, serialize_mutation_json_output,
+    serialize_mutation_plan_json_output, serialize_mutation_tasks_json_output,
 };
 pub use mutation_ci::{
     MUTATION_MESSAGE_MAX_CHARS, MUTATION_NO_COVERAGE_ITEMS, MUTATION_SECTION_MAX_CHARS,

@@ -616,6 +616,33 @@ coverage. The scheduler corrects this after the dry run:
 view before the coverage is known. A run can execute a mutant that the plan
 shows as `pending`.
 
+## Runner version check before a run
+
+A run gets the runner version from the `ready` response of the companion.
+It stops with `FALLOW_MUTATION_RUNNER_UNSUPPORTED` when the version is
+outside the range of `crates/api/mutation-runner-protocol.json`. `--plan` and
+`fallow doctor` start no companion. They read the `package.json` of the
+installed Vitest (`crates/api/src/mutation/runner_version.rs`). The lookup
+follows the Node resolution of the companion: the `node_modules` directory of
+the project root, then the `node_modules` directory of each ancestor. It runs
+no project code.
+
+- The `mutation-plan` JSON has a `runner` object: `name`, `package`,
+  `installed_version`, `supported_range`, `supported`, `message` and `help`.
+  `supported` is false for a version outside the range and for a Vitest that
+  is not installed. It is `null` for `node-test` and `bun-test`, because their
+  range applies to the runtime that the run selects.
+- The human plan prints a `Runner:` line and a `hint:` line only when the run
+  starts a runner: the plan has a test file and a mutant.
+- The plan exits 0 also when `supported` is false. A plan is not a run, and
+  the exit code table promises 0 for a finished plan.
+- `fallow doctor` has the advisory `mutation-runner` check, with the same
+  message and help. It is skipped when `mutation.runner` does not select
+  Vitest, the root `package.json` declares no Vitest, and the root
+  `node_modules` holds no Vitest. The root install counts because a
+  workspace package can declare a Vitest that the package manager installs
+  at the root.
+
 ## Function scope
 
 The changed-code scope mutates the added lines of the diff only. A change to

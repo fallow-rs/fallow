@@ -11,6 +11,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::audit_test_reach::TestReachClass;
 use crate::gate_outcomes::GateOutcomes;
+pub use crate::mutation_plan_runner::MutationPlanRunner;
 use crate::root_envelopes::serialize_named_json_output;
 
 /// Current mutation report schema version.
@@ -1332,6 +1333,8 @@ pub struct MutationPlanOutput {
     pub skipped_files: Vec<MutationSkippedFile>,
     /// The paths of a `paths` scope that select no file.
     pub unmatched_paths: Vec<String>,
+    /// The selected test runner and the verdict on its installed version.
+    pub runner: MutationPlanRunner,
 }
 
 /// Version singleton for a mutation inspect packet.

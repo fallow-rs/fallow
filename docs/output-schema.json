@@ -28149,6 +28149,11 @@
           "type": "string",
           "const": "graph-cache",
           "description": "Persisted module-graph reuse.\n\nSeparate from [`Cache`](Self::Cache) because a warm run reuses the two\nblobs independently: the extraction cache can be perfectly reusable\nwhile the graph is discarded on every run, and the graph is the larger\nof the two on a real project."
+        },
+        {
+          "type": "string",
+          "const": "mutation-runner",
+          "description": "The installed version of the mutation test runner."
         }
       ],
       "description": "Stable identifier for a doctor check. Declaration order is output order."
@@ -33321,6 +33326,10 @@
             "type": "string"
           },
           "description": "The paths of a `paths` scope that select no file."
+        },
+        "runner": {
+          "description": "The selected test runner and the verdict on its installed version.",
+          "$ref": "#/definitions/MutationPlanRunner"
         }
       },
       "required": [
@@ -33335,7 +33344,8 @@
         "no_test_files",
         "framework_config_checked",
         "skipped_files",
-        "unmatched_paths"
+        "unmatched_paths",
+        "runner"
       ],
       "description": "The envelope of `fallow mutation --plan`. It runs no user code."
     },
@@ -37371,6 +37381,57 @@
         }
       ],
       "description": "The outcome of one replay call."
+    },
+    "MutationPlanRunner": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The runner: `vitest`, `node-test` or `bun-test`."
+        },
+        "package": {
+          "type": "string",
+          "description": "The package or runtime that the supported range applies to."
+        },
+        "installed_version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The installed version of the package. `null` when the package is not\ninstalled, or when `supported` is `null`."
+        },
+        "supported_range": {
+          "type": "string",
+          "description": "The supported range, for example `>=4.1.0 <6.0.0`."
+        },
+        "supported": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "True when the installed version is in the range. False when it is\noutside the range or when the package is not installed. `null` for\n`node-test` and `bun-test`: their range applies to the runtime, and a\nrun selects the runtime when it starts."
+        },
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The problem when `supported` is false, else `null`."
+        },
+        "help": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The install step when `supported` is false, else `null`."
+        }
+      },
+      "required": [
+        "name",
+        "package",
+        "supported_range"
+      ],
+      "description": "The test runner of a plan. The plan reads the `package.json` of the\ninstalled runner package and runs no code. A run that starts the runner\nstops when `supported` is false: with `FALLOW_MUTATION_RUNNER_UNSUPPORTED`\nfor a version outside the range, and with the companion error\n`runner-not-found` for a runner that is not installed. A run of a plan\nwith no test file or no mutant starts no runner."
     }
   }
 }
