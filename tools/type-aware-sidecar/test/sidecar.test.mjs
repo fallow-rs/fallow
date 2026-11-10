@@ -687,6 +687,86 @@ test("protocol v7 does not treat paired accessors as uses of each other", () => 
   }
 });
 
+test("protocol v7 credits a read to the getter and a write to the setter of an accessor pair", () => {
+  const root = makeProject();
+  try {
+    const pair = (name) => `export class ${name} {
+  get value(): string { return ""; }
+  set value(next: string) { console.log(next); }
+}
+`;
+    const owners = ["Read", "Written", "Compound", "Shorthand", "Looped", "Incremented"];
+    const source = owners.map(pair).join("");
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src/**/*.ts"] }),
+    );
+    write(root, "src/accessor.ts", source);
+    write(
+      root,
+      "src/consumer.ts",
+      `import { Compound, Incremented, Looped, Read, Shorthand, Written } from "./accessor";
+console.log(new Read().value);
+new Written().value = "next";
+const compound = new Compound();
+compound.value += "next";
+let value = "";
+({ value } = new Shorthand());
+console.log(value);
+const looped = new Looped();
+for (looped.value of ["a", "b"]) console.log("loop");
+const incremented = new Incremented();
+incremented.value++;
+`,
+    );
+    const queries = owners.flatMap((owner, index) =>
+      ["get value", "set value"].map((marker) => ({
+        operation: "symbol-use",
+        symbol: {
+          ...symbolIdentity({
+            source,
+            marker,
+            file: "src/accessor.ts",
+            namespace: "value",
+            declarationKind: "class_method",
+            exportedName: "value",
+            owner,
+          }),
+          ...utf8Position(source, marker, index + 1),
+        },
+      })),
+    );
+
+    const response = runSidecar(
+      semanticRequest(
+        root,
+        queries.map((query, id) => ({ id, ...query })),
+      ),
+    );
+
+    assert.deepEqual(
+      response.results.map(({ assertion }) => assertion),
+      [
+        "confirmed-used",
+        "no-confirmed-use",
+        "no-confirmed-use",
+        "confirmed-used",
+        "confirmed-used",
+        "confirmed-used",
+        "confirmed-used",
+        "no-confirmed-use",
+        "no-confirmed-use",
+        "confirmed-used",
+        "confirmed-used",
+        "confirmed-used",
+      ],
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("protocol v7 maps public API leaks and project-local public-signature coupling", () => {
   const root = makeProject();
   try {

@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { existsSync } from "node:fs";
 import path from "node:path";
 
+import { accessorPairExists, countsAsAccessorUse } from "./accessor-direction.mjs";
 import { ast, createApi as createBackendApi, heritageTypeName, sync } from "./backend.mjs";
 
 import { canonicalFileIdentity } from "./file-identity.mjs";
@@ -65,7 +66,6 @@ const {
   isExportDeclaration,
   isExportSpecifier,
   isFunctionBody,
-  isGetAccessorDeclaration,
   isIdentifier,
   isImportDeclaration,
   isImportSpecifier,
@@ -73,7 +73,6 @@ const {
   isNamespaceImport,
   isPropertyAccessExpression,
   isPrivateIdentifier,
-  isSetAccessorDeclaration,
   isStringLiteralLikeNode,
   isTypeNode,
   isTypeQueryNode,
@@ -589,6 +588,7 @@ const recordSymbolUse = (root, state, project, entry, node, namespace) => {
   const moduleEdge = moduleEdgeDeclaration(node);
   if (moduleEdge) return;
   if (!isExactExportReference(project, entry, node)) return;
+  if (!countsAsAccessorUse(entry.resolved.declaration, node)) return;
   const evidence = state.evidenceByQuery.get(entry.query.id);
   state.totalByQuery.set(entry.query.id, state.totalByQuery.get(entry.query.id) + 1);
   state.directFilesByQuery.get(entry.query.id).add(sourceFileIdentity(node.getSourceFile()));
@@ -842,22 +842,6 @@ const modifierNamed = (node, name) =>
 const hasDecorator = (node) =>
   Boolean(node?.decorators?.length) ||
   Boolean(node?.modifiers?.some((modifier) => isDecorator(modifier)));
-
-const accessorPairExists = (declaration) => {
-  if (!isGetAccessorDeclaration(declaration) && !isSetAccessorDeclaration(declaration)) {
-    return false;
-  }
-  const owner = ownerDeclaration(declaration);
-  const name = declarationName(declaration);
-  return Boolean(
-    owner?.members?.some(
-      (member) =>
-        member !== declaration &&
-        declarationName(member) === name &&
-        (isGetAccessorDeclaration(member) || isSetAccessorDeclaration(member)),
-    ),
-  );
-};
 
 const sameNamedMemberCount = (declaration) => {
   const owner = ownerDeclaration(declaration);

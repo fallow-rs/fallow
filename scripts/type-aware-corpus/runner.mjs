@@ -3,6 +3,8 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
+import { projectFallowConfig } from "./config.mjs";
+
 const BACKEND_ENV = "FALLOW_TYPE_AWARE_BACKEND";
 const DEFAULT_BACKEND = "typescript-go";
 
@@ -22,6 +24,34 @@ export const normalizedEvidenceResponseDigest = (response) => {
 };
 
 export const requestDigest = (request) => hashJson(request);
+
+/** The `fallow dead-code` arguments of one corpus run. */
+export const fallowArgs = (root, refined, configPath = null) => [
+  "dead-code",
+  "--root",
+  root,
+  ...(configPath === null ? [] : ["--config", configPath]),
+  "--unused-class-members",
+  ...(refined ? ["--type-aware"] : []),
+  "--format",
+  "json",
+  "--quiet",
+  "--no-cache",
+];
+
+/** Writes the Fallow config of a project with `ignore_patterns`; returns its path or null. */
+export const writeProjectConfig = (project, outDir) => {
+  const config = projectFallowConfig(project);
+  if (config === null) return null;
+  const path = resolve(
+    outDir,
+    "fallow-config",
+    `${project.id.replaceAll(/[^A-Za-z0-9_.-]/g, "_")}.fallowrc.json`,
+  );
+  mkdirSync(dirname(path), { recursive: true });
+  writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`);
+  return path;
+};
 
 export const digestSet = (digests) =>
   createHash("sha256")

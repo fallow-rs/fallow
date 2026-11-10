@@ -21,16 +21,20 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   checkerEvidenceRequest as createCheckerEvidenceRequest,
   digestSet,
+  fallowArgs,
   normalizedEvidenceResponseDigest,
   assertBackendIsolation,
   minimalEnvironment,
   requestDigest,
   runExactSidecarRequest as executeExactSidecarRequest,
+  writeProjectConfig,
 } from "./type-aware-corpus/runner.mjs";
+import { contractDeclarationPath, resolveEvidencePath } from "./type-aware-corpus/locations.mjs";
 import {
   aggregatePhaseTimings,
   aggregateReasonCounts,
   blockedProjects,
+  ignoredPaths as manifestIgnoredPaths,
   percentile,
   pairedOverheads,
   renderSummaryMarkdown,
@@ -594,18 +598,6 @@ const parseMachineOutput = (stdout, projectId) => {
   };
 };
 
-const fallowArgs = (root, refined) => [
-  "dead-code",
-  "--root",
-  root,
-  "--unused-class-members",
-  ...(refined ? ["--type-aware"] : []),
-  "--format",
-  "json",
-  "--quiet",
-  "--no-cache",
-];
-
 const machineErrorDetail = (result) => {
   let detail = result.stderr.trim();
   try {
@@ -627,8 +619,12 @@ const persistProcessResult = (rawPath, result, failureMessage) => {
 };
 
 const executeFallow = async ({ project, fallowBin, sidecarBin, refined, rawPath, outDir }) => {
-  const root = projectRoot(project, outDir);
-  const result = await runProcess(fallowBin, fallowArgs(root, refined), REPO_ROOT, sidecarBin);
+  const args = fallowArgs(
+    projectRoot(project, outDir),
+    refined,
+    writeProjectConfig(project, outDir),
+  );
+  const result = await runProcess(fallowBin, args, REPO_ROOT, sidecarBin);
   persistProcessResult(rawPath, result, (failedResult) => {
     const detail = machineErrorDetail(result);
     const mode = refined ? "refined" : "baseline";
@@ -639,7 +635,7 @@ const executeFallow = async ({ project, fallowBin, sidecarBin, refined, rawPath,
   return { ...result, ...parsed };
 };
 
-const validateCandidateExpectation = (project, count, refinedCount) => {
+const validateCandidateExpectation = (project, count, refinedCount = 0) => {
   if (project.candidate_expectation === "zero" && (count !== 0 || refinedCount !== 0)) {
     fail(
       `${project.id} zero-candidate control emitted ${count} baseline and ${refinedCount} refined candidates`,
@@ -683,12 +679,13 @@ const ensureRuntimeInputs = (options) => {
 };
 
 const corpusIdentity = (projects) =>
-  projects.map(({ id, repo, ref, role, candidate_expectation }) => ({
+  projects.map(({ id, repo, ref, role, candidate_expectation, ignore_patterns }) => ({
     id,
     repo,
     ref,
     role,
     candidate_expectation,
+    ...(ignore_patterns === undefined ? {} : { ignore_patterns }),
   }));
 
 const sha256File = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
@@ -1032,6 +1029,7 @@ const validateBaselineMeasurement = (project, run, state) => {
 
 const validateRefinedMeasurement = (project, run, state) => {
   if (!Array.isArray(state.baselineKeys)) return;
+  validateCandidateExpectation(project, state.baselineKeys.length, run.candidates.length);
   const unexpected = run.candidates.filter(({ key }) => !state.baselineKeys.includes(key));
   if (unexpected.length > 0) fail(`${project.id} refined run added unexpected candidates`);
   const normalized = normalizedRefinement(run);
@@ -1517,18 +1515,19 @@ const supplemental = async (options, publicationMode = "write") => {
 
 const readDiscovery = (outDir) => readJson(resolve(outDir, "discovery.json"), "discovery artifact");
 
-const sourceLineEvidence = (root, candidate) => {
-  const sourcePath = resolve(root, candidate.path);
-  const relativeToRoot = relative(root, sourcePath);
-  if ([relativeToRoot.startsWith(`..${sep}`), relativeToRoot === ".."].some(Boolean)) {
-    fail(`${candidate.key} source path escapes its fixture`);
-  }
+const sourceLineEvidence = (root, candidate, dependencyRoot = null) => {
+  const path = dependencyRoot
+    ? contractDeclarationPath(root, dependencyRoot, candidate.path)
+    : candidate.path;
+  const sourcePath = path === null ? null : resolveEvidencePath(root, path, dependencyRoot);
+  if (sourcePath === null || (dependencyRoot && !existingFile(sourcePath)))
+    fail(`${candidate.key ?? candidate.path} source path is missing or escapes its fixture`);
   let excerpt = "";
   if (existingFile(sourcePath)) {
     const lines = readFileSync(sourcePath, "utf8").split(/\r?\n/);
     excerpt = (lines[Math.max(0, candidate.line - 1)] ?? "").trim();
   }
-  return { path: candidate.path, line: candidate.line, col: candidate.col, excerpt };
+  return { path, line: candidate.line, col: candidate.col, excerpt };
 };
 
 const sourceLocationEvidence = (root, location) => {
@@ -2088,7 +2087,7 @@ const evidenceLedgerEntry = (
         : {
             relation: candidate.contract.relation,
             optional: candidate.contract.optional,
-            declaration: sourceLineEvidence(root, candidate.contract.declaration),
+            declaration: sourceLineEvidence(root, candidate.contract.declaration, REPO_ROOT),
           },
     ...featureBuckets,
     truth: firstDefined([old.truth, "pending"]),
@@ -2328,10 +2327,9 @@ export const verifyLedgerData = (discovery, ledger) => {
   });
 };
 
-const evidenceSourcePath = (entry, location, root, errors) => {
-  const sourcePath = resolve(root, location.path);
-  const relativeToRoot = relative(root, sourcePath);
-  if ([relativeToRoot.startsWith(`..${sep}`), relativeToRoot === ".."].some(Boolean)) {
+const evidenceSourcePath = (entry, location, root, errors, dependencyRoot) => {
+  const sourcePath = resolveEvidencePath(root, location.path, dependencyRoot);
+  if (sourcePath === null) {
     errors.push(`${entry.key}: evidence path escapes the prepared fixture`);
     return null;
   }
@@ -2353,9 +2351,9 @@ const verifyEvidenceExcerpt = (entry, location, sourcePath, errors) => {
   }
 };
 
-const verifyEvidenceLocation = (entry, location, root, errors) => {
+const verifyEvidenceLocation = (entry, location, root, errors, dependencyRoot = null) => {
   if (!evidenceLocationValid(location)) return;
-  const sourcePath = evidenceSourcePath(entry, location, root, errors);
+  const sourcePath = evidenceSourcePath(entry, location, root, errors, dependencyRoot);
   if (sourcePath === null) return;
   verifyEvidenceExcerpt(entry, location, sourcePath, errors);
 };
@@ -2367,14 +2365,13 @@ const verifyEntrySourceEvidence = (entry, projects, roots, errors) => {
     return;
   }
   const sourceEvidence = Object(entry.source_evidence);
-  const locations = [
-    sourceEvidence.declaration,
-    ...arrayOrEmpty(sourceEvidence.uses),
-    ...(entry.contract == null ? [] : [Object(entry.contract).declaration]),
-  ];
-  locations.forEach((location) =>
-    verifyEvidenceLocation(entry, location, roots.get(project.id), errors),
+  const root = roots.get(project.id);
+  [sourceEvidence.declaration, ...arrayOrEmpty(sourceEvidence.uses)].forEach((location) =>
+    verifyEvidenceLocation(entry, location, root, errors),
   );
+  if (entry.contract != null) {
+    verifyEvidenceLocation(entry, Object(entry.contract).declaration, root, errors, REPO_ROOT);
+  }
 };
 
 const verifySourceEvidence = (manifest, ledger, outDir) => {
@@ -2635,7 +2632,7 @@ const summarize = (manifest, options, publicationMode = "write") => {
     zeroControlsClean,
   });
   const summary = {
-    schema_version: 4,
+    schema_version: 5,
     gate: {
       go: Object.values(checks).every(Boolean),
       checks,
@@ -2673,6 +2670,7 @@ const summarize = (manifest, options, publicationMode = "write") => {
       unresolved_count: unresolvedCount,
       unresolved: safeRatio(unresolvedCount, entries.length),
     },
+    ignored_paths: manifestIgnoredPaths(manifest.projects),
     value: {
       confirmed_repository_count: confirmedProjects.size,
       confirmed_repositories: [...confirmedProjects].toSorted(),

@@ -119,6 +119,24 @@ const blockedProjectLine = ({ project_id: projectId, blocked_candidate_count: co
     )
     .join(", ")}`;
 
+/** Manifest paths that the corpus runs ignore, with the reason for each project. */
+export const ignoredPaths = (projects) =>
+  projects
+    .filter(({ ignore_patterns: patterns }) => patterns !== undefined)
+    .map(({ id, ignore_patterns: patterns, ignore_reason: reason }) => ({
+      project_id: id,
+      patterns,
+      reason,
+    }));
+
+const ignoredPathLine = ({ project_id: projectId, patterns, reason }) =>
+  `- ${projectId}: ${patterns.map((pattern) => `\`${pattern}\``).join(", ")}. ${reason}`;
+
+const ignoredPathSection = (ignored = []) =>
+  ignored.length === 0
+    ? []
+    : ["Paths that both corpus runs ignore:", "", ...ignored.map(ignoredPathLine), ""];
+
 const confirmedUsed = ({ semantic_status: semanticStatus, truth }) =>
   semanticStatus === "confirmed-used" && truth === "used";
 
@@ -171,6 +189,7 @@ export const renderSummaryMarkdown = (summary) =>
     "",
     ...(summary.accuracy.blocked_projects ?? []).map(blockedProjectLine),
     "",
+    ...ignoredPathSection(summary.ignored_paths),
     "Raw machine output and source evidence remain under target/type-aware-corpus and are not tracked.",
     "",
   ].join("\n");

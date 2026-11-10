@@ -18,6 +18,7 @@
   ],
   "ignoreDependencies": [
     "@fallow-cli/fallow-node-*",
+    "@types/trusted-types",
     "vitest4",
     "zod"
   ],

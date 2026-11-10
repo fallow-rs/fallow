@@ -472,6 +472,11 @@ directory, for example from a build cache wrapper, is rejected: replace it with
 a real directory before the run. The supplemental Vitest fixture always uses
 `target/type-aware-corpus`, so `--out-dir` does not avoid this check. A
 workspace without installed dependencies also fails: run `pnpm install` first.
+Fixture programs resolve the type packages in their `types` option from the
+workspace root. The root `package.json` pins `@types/node`, `@types/jest` and
+`@types/trusted-types` as devDependencies for this reason. pnpm does not hoist
+a transitive type package, so a program without its type packages fails with
+blocking diagnostics.
 Published dependency paths explicitly use the Fallow workspace root as their
 base. Discovery records the
 manifest, release binary, full sidecar runtime, TypeScript installation,
@@ -500,6 +505,12 @@ discovery. It does not import semantic implementation modules from the current
 workspace. The ledger records the sidecar hash, protocol version, and digests of
 the complete request and normalized response sets. Raw bounded stdout and
 stderr are retained under the local corpus artifact directory for auditability.
+A contract declaration can be in a type package, for example when a class
+implements an interface of `@types/node`. The ledger then records the path as
+`node_modules/...` relative to the workspace dependency root, and the file must
+exist. The TypeScript lib files are only in the platform package of the native
+compiler, so such a path names the platform. Publication verification already
+binds the platform. Candidate declarations and uses must be in the fixture.
 Ledger verification recomputes both digests from the pinned requests and stored
 raw responses. A hash mismatch, malformed or oversized response, missing query
 result, duplicate query identity, invalid source location, timeout, or non-zero
@@ -589,6 +600,14 @@ analysis has known gaps. A `zero-control` project exposes its class members as
 public API by design, so it must report no candidates. Vue Core is a
 zero-control because each package declares `"./*": "./*"` in `exports`, which
 makes every module a public entry under Node subpath rules.
+
+A manifest project can set `ignore_patterns` with an `ignore_reason`. Both
+corpus runs then use a Fallow config with these `ignorePatterns`, the discovery
+identity records the patterns, and the summary lists them with the reason. Use
+this only for paths that are public API through a channel that no package
+manifest declares. Zod is the example: the `build:deno` script copies `src` to
+`deno/lib` for `deno.land/x`, so the class members in `deno/lib` are public,
+but the package `exports` do not name them.
 
 Feature-bucket value requires two separate candidates that are both manually
 classified as used and correctly confirmed by semantic refinement. The two

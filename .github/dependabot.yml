@@ -59,6 +59,12 @@ updates:
       # `tools/type-aware-sidecar`. A root-only bump fails the lockstep test
       # of the sidecar. Bump all three together by hand.
       - dependency-name: typescript
+      # The type-aware corpus resolves the `types` entries of its fixtures
+      # from these root packages, and its evidence records a hash of that
+      # tree. Bump them with a corpus regeneration only.
+      - dependency-name: "@types/jest"
+      - dependency-name: "@types/node"
+      - dependency-name: "@types/trusted-types"
 
   - package-ecosystem: npm
     directory: /editors/vscode

@@ -53,9 +53,15 @@ const validateProjectSource = (project, dependencies) => {
 
 const expectedCandidates = (role) => new Map([["zero-control", "zero"]]).get(role) ?? "nonzero";
 
-const validFeatureBuckets = (buckets) =>
-  Array.isArray(buckets) &&
-  buckets.every((bucket) => typeof bucket === "string" && bucket.trim() !== "");
+const validStringList = (values) =>
+  Array.isArray(values) &&
+  values.every((value) => typeof value === "string" && value.trim() !== "");
+
+const validFeatureBuckets = validStringList;
+
+/** The Fallow config that a project with `ignore_patterns` runs with, or null. */
+export const projectFallowConfig = (project) =>
+  project.ignore_patterns === undefined ? null : { ignorePatterns: project.ignore_patterns };
 
 const validateProjectContract = (project, fail) => {
   const expectation = expectedCandidates(project.role);
@@ -85,10 +91,40 @@ const validateProjectContract = (project, fail) => {
   );
 };
 
+/**
+ * Optional `ignore_patterns` remove paths of a fixture from both corpus runs,
+ * for example a generated copy of the source that Fallow cannot see as public
+ * API. Each list needs an `ignore_reason`, so the summary can state why the
+ * paths are not measured.
+ */
+const validateProjectIgnores = (project, fail) => {
+  const hasPatterns = project.ignore_patterns !== undefined;
+  const hasReason = project.ignore_reason !== undefined;
+  if (!hasPatterns && !hasReason) return;
+  requireValid(
+    Array.isArray(project.ignore_patterns) &&
+      project.ignore_patterns.length > 0 &&
+      validStringList(project.ignore_patterns),
+    `${project.id}.ignore_patterns must be a non-empty array of non-empty strings`,
+    fail,
+  );
+  requireValid(
+    new Set(project.ignore_patterns).size === project.ignore_patterns.length,
+    `${project.id}.ignore_patterns must be unique`,
+    fail,
+  );
+  requireValid(
+    typeof project.ignore_reason === "string" && project.ignore_reason.trim() !== "",
+    `${project.id}.ignore_reason must be a non-empty string`,
+    fail,
+  );
+};
+
 const validateProject = (project, seen, dependencies) => {
   validateProjectIdentity(project, seen, dependencies);
   validateProjectSource(project, dependencies);
   validateProjectContract(project, dependencies.fail);
+  validateProjectIgnores(project, dependencies.fail);
 };
 
 export const validateManifest = (manifest, dependencies) => {
