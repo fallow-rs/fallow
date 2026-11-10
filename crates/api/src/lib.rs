@@ -182,8 +182,8 @@ pub use markdown_output::{
     build_grouped_markdown, build_health_markdown, build_markdown, build_walkthrough_markdown,
 };
 pub use mutation::{
-    MutationProgress, MutationProgressSink, MutationRunOptions, MutationRunScope,
-    apply_mutation_verdicts, validate_mutation_verdicts,
+    MutationProgress, MutationProgressSink, MutationReplayOptions, MutationRunOptions,
+    MutationRunScope, apply_mutation_verdicts, validate_mutation_verdicts,
 };
 pub use output_contracts::{
     AuditOutput, BoundariesListLogicalGroup, BoundariesListRule, BoundariesListZone,
@@ -209,7 +209,7 @@ pub use runtime::{
     TraceFileProgrammaticOutput, TraceImportPathOutput, TraceImportPathProgrammaticOutput,
     benchmark_trace_clone_compact_json, benchmark_trace_graph_family_compact_json,
     inspect_similar_code, load_health_config, parse_similar_code_candidate_snapshot, plan_mutation,
-    review_similar_code, run_architecture, run_audit, run_boundary_violations,
+    replay_mutation, review_similar_code, run_architecture, run_audit, run_boundary_violations,
     run_circular_dependencies, run_combined, run_complexity_with_runner, run_dead_code,
     run_dead_code_with_baseline, run_decision_surface, run_duplication, run_feature_flags,
     run_health, run_health_with_runner, run_mutation, run_mutation_with_progress, run_similar_code,

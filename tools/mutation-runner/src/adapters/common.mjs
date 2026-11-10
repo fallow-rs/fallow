@@ -4,6 +4,7 @@ import { pathToFileURL } from "node:url";
 import { RUNNERS } from "../generated-protocol.mjs";
 import { CompanionError, expectRequest, isPlainObject } from "../protocol.mjs";
 import { escapeRegExp, realPath } from "../runtime/child.mjs";
+import { decodeValue } from "../runtime/replay-value.mjs";
 
 export { escapeRegExp, realPath };
 
@@ -131,6 +132,48 @@ export const validateRun = (request) => {
     request.loop_budget_ms === undefined || isPositiveInteger(request.loop_budget_ms),
     "loop_budget_ms must be a positive integer when present",
   );
+};
+
+/** The most calls of each side that one replay request can ask for. */
+const MAX_REPLAY_CALLS = 10;
+/** The longest call limit: 10 minutes, well inside the range of a timer. */
+const MAX_REPLAY_CALL_TIMEOUT_MS = 600_000;
+
+/**
+ * Checks the body of a `replay` request: one export of one source file,
+ * called with `args` on the original and on `mutant_id` (replay contract 1).
+ */
+export const validateReplay = (request) => {
+  for (const field of ["file", "export", "mutant_id"]) {
+    expectRequest(
+      typeof request[field] === "string" && request[field].length > 0,
+      `${field} must be a non-empty string`,
+    );
+  }
+  expectRequest(Array.isArray(request.args), "args must be a list");
+  try {
+    decodeValue(request.args);
+  } catch (error) {
+    expectRequest(false, `args do not decode: ${error.message}`);
+  }
+  expectRequest(
+    isPositiveInteger(request.calls) && request.calls <= MAX_REPLAY_CALLS,
+    `calls must be an integer from 1 to ${MAX_REPLAY_CALLS}`,
+  );
+  expectRequest(
+    isPositiveInteger(request.call_timeout_ms) &&
+      request.call_timeout_ms <= MAX_REPLAY_CALL_TIMEOUT_MS,
+    `call_timeout_ms must be an integer from 1 to ${MAX_REPLAY_CALL_TIMEOUT_MS}`,
+  );
+  expectRequest(Number.isSafeInteger(request.clock_ms), "clock_ms must be an integer");
+  expectRequest(Number.isSafeInteger(request.seed), "seed must be an integer");
+};
+
+/** The overlay entry of the replay file. The file must be in the path map. */
+export const replayEntry = (overlay, file) => {
+  const entry = [...overlay.values()].find((candidate) => candidate.source === file);
+  expectRequest(entry !== undefined, `the replay file ${file} is not in the path_map`);
+  return entry;
 };
 
 /**

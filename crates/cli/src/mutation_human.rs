@@ -14,10 +14,11 @@ use fallow_api::mutation::split_control_run_failure;
 use fallow_output::{
     DUPLICATE_TEST_IDS_CODE, MutantResult, MutantStatus, MutationCompletionStatus,
     MutationInspectOutput, MutationInspectStatus, MutationKillMatrix, MutationKillMatrixStatus,
-    MutationKillMatrixTargetStatus, MutationPlanDisposition, MutationPlanOutput, MutationReport,
-    MutationResumeOutput, MutationScopeKind, MutationScopeOutput, MutationSkippedFile,
-    MutationStaleReason, MutationTargetOnlyKill, MutationTestKillRow, MutationTypecheckOutput,
-    SKIPPED_TESTS_CODE, TestReachClass,
+    MutationKillMatrixTargetStatus, MutationPlanDisposition, MutationPlanOutput,
+    MutationReplayCall, MutationReplayOutcome, MutationReplayOutput, MutationReplaySide,
+    MutationReplayVerdict, MutationReport, MutationResumeOutput, MutationScopeKind,
+    MutationScopeOutput, MutationSkippedFile, MutationStaleReason, MutationTargetOnlyKill,
+    MutationTestKillRow, MutationTypecheckOutput, SKIPPED_TESTS_CODE, TestReachClass,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -1214,6 +1215,15 @@ pub fn render_inspect(packet: &MutationInspectOutput) -> String {
             let _ = writeln!(out, "{}", more_line(hidden, "file", "files"));
         }
     }
+    write_killing_tests(&mut out, packet);
+    if let Some(replay) = &packet.replay {
+        write_replay(&mut out, replay);
+    }
+    out
+}
+
+/// The killing tests of an inspect packet, or the first killer.
+fn write_killing_tests(out: &mut String, packet: &MutationInspectOutput) {
     if packet.kill_matrix_complete || !packet.killing_tests.is_empty() {
         let title = if packet.kill_matrix_complete {
             "Killing tests (complete matrix)"
@@ -1244,5 +1254,78 @@ pub fn render_inspect(packet: &MutationInspectOutput) -> String {
     } else if let Some(killed_by) = &packet.killed_by {
         let _ = writeln!(out, "\nKilled by: {killed_by}");
     }
-    out
+}
+
+/// The widest text of one replay column.
+const MAX_REPLAY_TEXT_CHARS: usize = 40;
+
+fn replay_cell(call: &MutationReplayCall) -> String {
+    let text = match call.outcome {
+        MutationReplayOutcome::Returned => call.text.clone(),
+        MutationReplayOutcome::Threw => format!("threw {}", call.text),
+        MutationReplayOutcome::TimedOut => "timed out".to_owned(),
+        MutationReplayOutcome::NotCallable => "not a function".to_owned(),
+    };
+    shorten(&text, MAX_REPLAY_TEXT_CHARS)
+}
+
+fn replay_verdict_line(replay: &MutationReplayOutput) -> String {
+    let reason = replay.reason.as_deref().unwrap_or_default();
+    match replay.verdict {
+        MutationReplayVerdict::Witness => format!(
+            "{}: each side gave the same result on each call, and the sides differ. A test with this input can kill the mutant.",
+            "Witness".green().bold()
+        ),
+        MutationReplayVerdict::NoWitnessFound => format!(
+            "No witness found: both sides gave the same result for this input ({} calls each). Another input can still show a difference.",
+            replay.calls_per_side
+        ),
+        MutationReplayVerdict::Unstable => format!(
+            "{}: {reason}. A difference that does not repeat is not a witness.",
+            "Unstable".yellow().bold()
+        ),
+        MutationReplayVerdict::Timeout => format!("{}: {reason}.", "Timeout".yellow().bold()),
+        MutationReplayVerdict::NotCallable => format!("Not callable: {reason}."),
+        MutationReplayVerdict::NotReplayable => format!("Not replayable: {reason}."),
+    }
+}
+
+/// The replay section: the call, the results of each side side by side, the
+/// verdict and the fixed values of the replay.
+fn write_replay(out: &mut String, replay: &MutationReplayOutput) {
+    let args: Vec<String> = replay.input.args.iter().map(ToString::to_string).collect();
+    let call = format!(
+        "{}({})",
+        replay.export.as_deref().unwrap_or("?"),
+        args.join(", ")
+    );
+    let _ = writeln!(out, "\nReplay  {}", shorten(&call, MAX_TEST_NAME_CHARS));
+    if !replay.calls.is_empty() {
+        let cells = |side: MutationReplaySide| -> Vec<String> {
+            replay
+                .calls
+                .iter()
+                .filter(|call| call.side == side)
+                .map(replay_cell)
+                .collect()
+        };
+        let original = cells(MutationReplaySide::Original);
+        let mutant = cells(MutationReplaySide::Mutant);
+        let width = original
+            .iter()
+            .map(|cell| cell.chars().count())
+            .chain(std::iter::once("original".len()))
+            .max()
+            .unwrap_or(0);
+        let _ = writeln!(out, "  call  {:<width$}  mutant", "original");
+        for (index, (left, right)) in original.iter().zip(&mutant).enumerate() {
+            let _ = writeln!(out, "  {:<4}  {left:<width$}  {right}", index + 1);
+        }
+    }
+    let _ = writeln!(out, "{}", replay_verdict_line(replay));
+    let _ = writeln!(
+        out,
+        "Replay contract {}: the clock starts at {} ms and moves 1 ms at each read, Math.random seed {}, a new worker for each call, {} ms call limit.",
+        replay.contract_version, replay.clock_ms, replay.seed, replay.call_timeout_ms
+    );
 }

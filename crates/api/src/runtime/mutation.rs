@@ -50,12 +50,12 @@ use crate::mutation::{
     MutationProgress, MutationProgressSink, MutationRunOptions, MutationRunScope,
 };
 
-type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
+pub(super) type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
 
 /// The default timeout of `init` and the dry run (`protocol.md` section 8).
-const DEFAULT_RUNNER_TIMEOUT: Duration = Duration::from_secs(120);
+pub(super) const DEFAULT_RUNNER_TIMEOUT: Duration = Duration::from_secs(120);
 
-fn mutation_error(code: &str, message: impl Into<String>) -> ProgrammaticError {
+pub(super) fn mutation_error(code: &str, message: impl Into<String>) -> ProgrammaticError {
     ProgrammaticError::new(message, 2).with_code(code)
 }
 
@@ -63,7 +63,7 @@ fn mutation_error(code: &str, message: impl Into<String>) -> ProgrammaticError {
     clippy::cast_possible_truncation,
     reason = "a run lasts far less than 2^64 milliseconds"
 )]
-const fn millis(duration: Duration) -> u64 {
+pub(super) const fn millis(duration: Duration) -> u64 {
     duration.as_millis() as u64
 }
 
@@ -336,15 +336,15 @@ fn config_operators(
         .map(Some)
 }
 
-struct Planned {
-    resolved: ProgrammaticAnalysisContext,
-    cache_dir: PathBuf,
+pub(super) struct Planned {
+    pub(super) resolved: ProgrammaticAnalysisContext,
+    pub(super) cache_dir: PathBuf,
     /// The test runner, selected from the config value and the first plan.
-    runner: Runner,
-    plan: MutationPlan,
+    pub(super) runner: Runner,
+    pub(super) plan: MutationPlan,
     base_ref: Option<String>,
     /// The selected runner config file, relative to the project root.
-    runner_config: Option<String>,
+    pub(super) runner_config: Option<String>,
     /// The names of the selected operators. `None` uses the default set.
     operators: Option<Vec<String>>,
 }
@@ -411,7 +411,7 @@ fn runner_config(
     ))
 }
 
-fn plan_for(
+pub(super) fn plan_for(
     options: &MutationRunOptions,
     before_plan: impl FnOnce(&Path, &Path) -> ProgrammaticResult<()>,
 ) -> ProgrammaticResult<Planned> {
@@ -514,7 +514,7 @@ fn unsafe_cache_dir(message: String) -> ProgrammaticError {
 /// worktree check leaves the mutation cache out, and the analysis writes a
 /// `.gitignore` that ignores the whole cache directory, so such a cache
 /// directory hides each stray write from the check.
-fn guard_cache_dir(root: &Path, cache_dir: &Path) -> ProgrammaticResult<()> {
+pub(super) fn guard_cache_dir(root: &Path, cache_dir: &Path) -> ProgrammaticResult<()> {
     if !canonical_path(root).starts_with(canonical_path(cache_dir)) {
         return Ok(());
     }
@@ -746,7 +746,7 @@ fn guard_mutant_ids(options: &MutationRunOptions, plan: &MutationPlan) -> Progra
 /// The help of a runner version outside `range`. It names the supported
 /// range as an install step. When the minimum is not a `.0.0` release, it
 /// also says that a minor update inside the major version is enough.
-fn runner_version_help(range: &RunnerRange) -> String {
+pub(super) fn runner_version_help(range: &RunnerRange) -> String {
     let RunnerRange {
         package,
         min_version,
@@ -824,7 +824,7 @@ fn default_concurrency() -> usize {
         .max(1)
 }
 
-fn runtime_error(runner: Runner, message: String) -> ProgrammaticError {
+pub(super) fn runtime_error(runner: Runner, message: String) -> ProgrammaticError {
     mutation_error("FALLOW_MUTATION_RUNTIME_NOT_FOUND", message)
         .with_help(runner.runtime_help())
         .with_context("mutation.runtime")
@@ -1106,7 +1106,11 @@ fn store_results(cache: &ResultCache, outcome: &mut ScheduleOutcome) -> Mutation
 /// `node:test` and `bun:test` runners get the static test files, because
 /// their glob discovery does not go into dot directories. Vitest has its own
 /// include configuration.
-fn init_options(runner: Runner, root: &Path, static_test_files: &[String]) -> InitOptions {
+pub(super) fn init_options(
+    runner: Runner,
+    root: &Path,
+    static_test_files: &[String],
+) -> InitOptions {
     let node_args = match runner {
         Runner::NodeTest => node_test_args(root),
         Runner::Vitest | Runner::BunTest => Vec::new(),

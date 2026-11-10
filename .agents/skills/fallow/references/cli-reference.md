@@ -2270,6 +2270,21 @@ Use this mode to check whether specific tests are redundant without a full kill 
 - A target with kills and no `unique_kills` is a candidate. With `target_only_kills`, it stays redundant only while one of the sharing targets stays. Do not remove all sharing targets together.
 - The evidence covers the planned scope only. A unique kill outside the scope is not visible.
 
+### `mutation inspect --replay`: Find a test input for a survivor
+
+```bash
+fallow mutation inspect <mutant-id> --replay --args '[2, 3]' --format json --quiet
+```
+
+The replay calls the export that holds the mutated function with `--args` on the original and on the mutant, three times each, in turns. It runs project code, but no test. Read `replay.verdict`:
+
+- `witness`: each side repeats its result, and the sides differ. Read `calls[]` of the `original` side. When its `outcome` is `returned`, write a test with this input that asserts that `value`. When its `outcome` is `threw`, assert that the call throws (`value.name`, `value.message`).
+- `no_witness_found`: this input shows no difference. Try another input. This verdict never means that the mutant is equivalent.
+- `unstable`: one side changes between calls (for example `crypto.randomUUID()`). Do not use the difference as a test oracle.
+- `timeout`, `not_callable`, `not_replayable`: read `replay.reason`. A function that no callable export holds (a method of a class or of an object literal, or a local function) needs `--export <name>` of an export that calls it. `--call-timeout 30s` gives a slow call more time.
+
+Each call runs in a new worker with a fresh module, a clock that starts at a fixed time, and a fixed `Math.random` seed. Arguments and results use the replay encoding: JSON, plus objects with a `$replay` tag for values that JSON cannot hold. Decode them when you write the test: `{"$replay": "undefined"}` is `undefined`, `{"$replay": "number", "value": "NaN"}` is `NaN`, `{"$replay": "bigint", "value": "12"}` is `12n`, and `map`, `set`, `date`, `regexp` and `bytes` are a `Map`, a `Set`, a `Date`, a `RegExp` and a typed array. Only the Vitest and `node:test` runners replay.
+
 ## `ci`: Provider-Aware Review Automation
 
 `fallow ci reconcile-review` reads a typed review envelope (`--format review-github` / `review-gitlab`), looks up existing fingerprints on the PR/MR, and resolves stale review threads when their finding is no longer present in the new envelope. Posts an idempotent "Resolved in `<sha>`" follow-up comment per stale finding (skipped if a marker for the same fingerprint at the current SHA already exists).

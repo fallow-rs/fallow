@@ -108,6 +108,14 @@ const createSession = () => {
     run: async (request) => response(request.id, "run_result", await requireAdapter().run(request)),
     reload: async (request) =>
       response(request.id, "reloaded", await requireAdapter().reload(request)),
+    replay: async (request) => {
+      const current = requireAdapter();
+      expectRequest(
+        typeof current.replay === "function",
+        "the runner has no replay capability; ready.capabilities.replay is false",
+      );
+      return response(request.id, "replay_result", await current.replay(request));
+    },
   };
 
   const close = async () => {

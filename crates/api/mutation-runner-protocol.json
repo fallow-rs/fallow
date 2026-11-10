@@ -8,6 +8,7 @@
     "dry_run",
     "run",
     "reload",
+    "replay",
     "shutdown"
   ],
   "response_types": [
@@ -15,6 +16,7 @@
     "dry_run_result",
     "run_result",
     "reloaded",
+    "replay_result",
     "error"
   ],
   "test_statuses": [
@@ -56,7 +58,8 @@
     "hot_switch",
     "bail",
     "fresh_modules_per_run",
-    "batch_mutants"
+    "batch_mutants",
+    "replay"
   ],
   "isolation_modes": [
     "process",
@@ -73,6 +76,19 @@
     "global_name": "__fallowMutation",
     "active_function": "__fallow_m_a",
     "hit_function": "__fallow_m_c"
+  },
+  "replay": {
+    "contract_version": 1,
+    "sides": [
+      "original",
+      "mutant"
+    ],
+    "outcomes": [
+      "returned",
+      "threw",
+      "timed_out",
+      "not_callable"
+    ]
   },
   "runners": [
     {

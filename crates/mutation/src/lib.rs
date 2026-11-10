@@ -20,6 +20,7 @@
 mod blocks;
 mod collect;
 mod emit;
+mod exports;
 mod id;
 mod logging_only;
 mod operator;
@@ -29,6 +30,7 @@ mod replacements;
 use serde::Serialize;
 
 pub use blocks::{ScriptBlock, ScriptRole, instrument_blocks};
+pub use exports::export_containing;
 pub use operator::Operator;
 
 /// The language of a source text.

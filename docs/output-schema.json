@@ -33498,6 +33498,17 @@
         "kill_matrix_complete": {
           "type": "boolean",
           "description": "True only for exact requested membership with terminal pass or fail results."
+        },
+        "replay": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutationReplayOutput"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The replay of the mutant. Present only with `--replay`."
         }
       },
       "required": [
@@ -33515,7 +33526,7 @@
         "killing_tests",
         "kill_matrix_complete"
       ],
-      "description": "The envelope of `fallow mutation inspect`. It runs no user code."
+      "description": "The envelope of `fallow mutation inspect`. It runs no user code, except\nwith `--replay`."
     },
     "MutationVerdictInput": {
       "type": "object",
@@ -37150,6 +37161,212 @@
         }
       ],
       "description": "Runtime relationships that static observations cannot establish."
+    },
+    "MutationReplayOutput": {
+      "type": "object",
+      "properties": {
+        "contract_version": {
+          "type": "integer",
+          "description": "The version of the replay contract of the runner companion."
+        },
+        "verdict": {
+          "description": "The verdict of the replay.",
+          "$ref": "#/definitions/MutationReplayVerdict"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why the replay did not run or did not end. Absent otherwise."
+        },
+        "export": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The export that the replay called. `null` when no export holds the\nmutant."
+        },
+        "input": {
+          "description": "The arguments of each call.",
+          "$ref": "#/definitions/MutationReplayInput"
+        },
+        "calls_per_side": {
+          "type": "integer",
+          "description": "The calls of each side. The sides take turns."
+        },
+        "call_timeout_ms": {
+          "type": "integer",
+          "description": "The time limit of one call, in milliseconds."
+        },
+        "clock_ms": {
+          "type": "integer",
+          "description": "The fixed value of `Date.now()` in each call."
+        },
+        "seed": {
+          "type": "integer",
+          "description": "The seed of `Math.random` in each call."
+        },
+        "calls": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MutationReplayCall"
+          },
+          "description": "Each call, in call order."
+        },
+        "duration_ms": {
+          "type": "integer",
+          "description": "The wall time of the replay request, in milliseconds. It differs\nbetween two replays of the same input."
+        }
+      },
+      "required": [
+        "contract_version",
+        "verdict",
+        "input",
+        "calls_per_side",
+        "call_timeout_ms",
+        "clock_ms",
+        "seed",
+        "calls",
+        "duration_ms"
+      ],
+      "description": "The replay of one export on the original and on one mutant (replay\ncontract 1)."
+    },
+    "MutationReplayVerdict": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "witness",
+          "description": "Each call of a side gave the same result, and the two sides differ.\nThe input is a witness: a test with this input can kill the mutant."
+        },
+        {
+          "type": "string",
+          "const": "no_witness_found",
+          "description": "Each call of both sides gave the same result. The input shows no\ndifference. Another input can still show one."
+        },
+        {
+          "type": "string",
+          "const": "unstable",
+          "description": "The calls of one side gave different results, for example from a\nclock or a random source that the replay does not fix. Such a\ndifference is never a witness."
+        },
+        {
+          "type": "string",
+          "const": "timeout",
+          "description": "A call did not end before the call timeout, or the replay did not end\nbefore its wall limit. The module load, the original or the mutant\ncan block."
+        },
+        {
+          "type": "string",
+          "const": "not_callable",
+          "description": "The export is not a function."
+        },
+        {
+          "type": "string",
+          "const": "not_replayable",
+          "description": "The replay did not run: the function has no export to call, or the\nfile is a component file. `reason` says why."
+        }
+      ],
+      "description": "The verdict of one replay. A replay never decides that a mutant is\nequivalent: equal results on both sides give `no_witness_found`, which\nsays only that this input shows no difference."
+    },
+    "MutationReplayInput": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "description": "Where the arguments come from.",
+          "$ref": "#/definitions/MutationReplayInputSource"
+        },
+        "args": {
+          "type": "array",
+          "items": true,
+          "description": "The arguments in the replay encoding: JSON values, and objects with a\n`$replay` tag for `undefined`, special numbers, bigints, dates,\nregular expressions, maps, sets and typed arrays."
+        }
+      },
+      "required": [
+        "source",
+        "args"
+      ],
+      "description": "The input of a replay."
+    },
+    "MutationReplayInputSource": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "argument",
+          "description": "The `--args` value of the command."
+        }
+      ],
+      "description": "Where the arguments of a replay come from."
+    },
+    "MutationReplayCall": {
+      "type": "object",
+      "properties": {
+        "side": {
+          "description": "The side of the call.",
+          "$ref": "#/definitions/MutationReplaySide"
+        },
+        "index": {
+          "type": "integer",
+          "description": "The 1-based number of the call on its side."
+        },
+        "outcome": {
+          "description": "How the call ended.",
+          "$ref": "#/definitions/MutationReplayOutcome"
+        },
+        "value": {
+          "description": "The returned or thrown value in the replay encoding. An error is\n`{\"$replay\": \"error\", \"name\", \"message\"}`. `null` for a call that\ntimed out."
+        },
+        "text": {
+          "type": "string",
+          "description": "A short text of the value for people, at most 200 characters."
+        }
+      },
+      "required": [
+        "side",
+        "index",
+        "outcome",
+        "value",
+        "text"
+      ],
+      "description": "One call of a replay."
+    },
+    "MutationReplaySide": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "original",
+          "description": "The original code: no mutant is active."
+        },
+        {
+          "type": "string",
+          "const": "mutant",
+          "description": "The code with the mutant active."
+        }
+      ],
+      "description": "The side of one replay call."
+    },
+    "MutationReplayOutcome": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "returned",
+          "description": "The function returned. A returned promise counts with its value."
+        },
+        {
+          "type": "string",
+          "const": "threw",
+          "description": "The function, or the load of its module, threw. A rejected promise\ncounts too."
+        },
+        {
+          "type": "string",
+          "const": "timed_out",
+          "description": "The call did not end before the call timeout."
+        },
+        {
+          "type": "string",
+          "const": "not_callable",
+          "description": "The export is not a function."
+        }
+      ],
+      "description": "The outcome of one replay call."
     }
   }
 }

@@ -1,11 +1,12 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { join, relative, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { CompanionError, expectRequest, isPlainObject } from "../protocol.mjs";
 import { overlayErrorsPath } from "../runtime/child.mjs";
 import { LOOP_TIMEOUT_NAME, WALL_LOOP_TIMEOUT_NAME } from "../runtime/global.mjs";
+import { SIDES } from "../runtime/replay.mjs";
 import { createWorkDir } from "./child-process.mjs";
 import { REUSED_POOLS, createReusedPool } from "./vitest-reuse.mjs";
 import {
@@ -22,6 +23,7 @@ import {
   isSupportedVersion,
   parseVersion,
   realPath,
+  replayEntry,
   runResult,
   testErrorText,
   toPosix,
@@ -30,6 +32,7 @@ import {
   unsupportedVersion,
   validateDryRun,
   validateInit,
+  validateReplay,
   validateRun,
 } from "./common.mjs";
 
@@ -41,6 +44,11 @@ const OVERLAY_KEY = "fallowOverlay";
 const SUBPROCESS_PRELOAD_KEY = "fallowSubprocessPreload";
 const SUBPROCESS_PRELOAD = new URL("../runtime/node-subprocess-preload.mjs", import.meta.url);
 const SETUP_FILE = fileURLToPath(new URL("../runtime/vitest-setup.mjs", import.meta.url));
+const REPLAY_FILE = fileURLToPath(new URL("../runtime/vitest-replay.mjs", import.meta.url));
+const REPLAY_KEY = "fallowReplay";
+// The time of the module loads and of Vitest itself in a replay test, on top
+// of the call timeouts.
+const REPLAY_TEST_MARGIN_MS = 10_000;
 /** The companion directory, with the runtime files that a test worker loads. */
 const COMPANION_DIR = fileURLToPath(new URL("..", import.meta.url));
 const TIMEOUT_MESSAGE = /\b(?:Test|Hook) timed out in \d+ms/u;
@@ -727,6 +735,24 @@ const setVitestEnv = () => {
 };
 
 /**
+ * The project that loads a replay file: a project in Node (not browser mode)
+ * whose root holds the file, the deepest root first. Without such a project,
+ * the first project in Node, else the first project.
+ */
+const holdsPath = (root, path) => {
+  const rel = relative(root, path);
+  return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+};
+
+const replayProject = (projects, path) => {
+  const inNode = projects.filter((project) => project.config.browser?.enabled !== true);
+  const holding = inNode
+    .filter((project) => holdsPath(project.config.root, path))
+    .toSorted((left, right) => right.config.root.length - left.config.root.length);
+  return holding[0] ?? inNode[0] ?? projects[0];
+};
+
+/**
  * Creates the Vitest adapter for an `init` request. It starts one Vitest
  * instance with no file parallelism and one worker, and keeps the project
  * `isolate` setting.
@@ -1046,6 +1072,52 @@ export const createAdapter = async (init) => {
     return (await runRequested(request, requested, false)).body;
   };
 
+  /** Runs one replay call as the only test of a run, in a new worker. */
+  const replayCall = async (project, request, call) => {
+    const testTimeoutMs = request.call_timeout_ms + REPLAY_TEST_MARGIN_MS;
+    for (const each of vitest.projects) {
+      each.provide(REPLAY_KEY, { ...request, ...call, test_timeout_ms: testTimeoutMs });
+    }
+    const result = await runSpecifications(() => [project.createSpecification(REPLAY_FILE)], {
+      mutantId: null,
+      bail: false,
+      timeoutMs: testTimeoutMs,
+    });
+    const testCase = result.testModules.flatMap((testModule) => [
+      ...testModule.children.allTests(),
+    ])[0];
+    const record = testCase?.meta().fallowReplay;
+    if (isPlainObject(record)) return record;
+    const errors = [
+      ...runErrors(result, root).map((error) => error.message),
+      ...(testCase?.result().errors ?? []).map((error) => errorMessage(error)),
+    ];
+    throw new CompanionError(
+      "internal",
+      `the replay test gave no result${errors.length > 0 ? `: ${errors.join("; ")}` : ""}`,
+    );
+  };
+
+  /**
+   * Runs each call of the replay in its own run, so each call has a new
+   * worker: globals, the environment and leftover timers of one call never
+   * reach the next call or the other side.
+   */
+  const replay = async (request) => {
+    validateReplay(request);
+    const entry = replayEntry(overlay, request.file);
+    const project = replayProject(vitest.projects, entry.path);
+    const started = performance.now();
+    const calls = [];
+    for (let index = 1; index <= request.calls; index += 1) {
+      for (const side of SIDES) {
+        const record = await replayCall(project, request, { side, module_path: entry.path });
+        calls.push({ side, index, ...record });
+      }
+    }
+    return { calls, duration_ms: Math.round(performance.now() - started) };
+  };
+
   return {
     runnerVersion: version,
     testFiles: [...new Set(initFiles.map(([file]) => file))],
@@ -1056,10 +1128,12 @@ export const createAdapter = async (init) => {
       bail: true,
       fresh_modules_per_run: freshModulesPerRun,
       batch_mutants: false,
+      replay: true,
     },
     notes: runnerNotes(vitest.projects),
     dryRun,
     run,
+    replay,
     reload: async () => ({ method: freshModulesPerRun ? "noop" : "restart_required" }),
     close: async () => {
       try {

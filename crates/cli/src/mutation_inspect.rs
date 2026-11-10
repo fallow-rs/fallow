@@ -424,6 +424,7 @@ pub fn inspect(
         killed_by: mutant.killed_by.clone(),
         killing_tests,
         kill_matrix_complete: mutant.kill_matrix_complete,
+        replay: None,
     })
 }
 
