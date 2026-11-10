@@ -132,6 +132,11 @@ const ANALYZE_SECTIONS: &[ToolGuideSection] = &[
         detail: r#"Select issue_types: ["absent-component-props"] to enable this default-off rule. Each candidate carries the declaration, framework, default presence and inspected caller locations. Review defaults and API intent manually; static evidence does not prove runtime unreachability. Its actions are not auto-fixable. Configured warning or error severity still controls the normal issue gates."#,
     },
     ToolGuideSection {
+        topic: "constant_parameters",
+        summary: "Parameters that each visible call passes in one way.",
+        detail: r#"Select issue_types: ["constant-parameters"] to enable this default-off rule. Each candidate carries the function, the parameter, the reason (identical-argument or never-passed), the value, the call count, the condition reads and up to 20 inspected calls. The rule abstains when any caller can be invisible. Review the calls and the intent manually; a test caller counts unless production mode is on. Its actions are not auto-fixable."#,
+    },
+    ToolGuideSection {
         topic: "boundary_violations",
         summary: "The alias that limits a run to architecture boundary violations.",
         detail: r#"Set boundary_violations=true to check only architecture boundary violations. It is a convenience alias for issue_types: ["boundary-violations"]. The response is the same structured JSON as a full run, with all issues found of that one type."#,

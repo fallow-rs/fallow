@@ -63,6 +63,7 @@ pub(super) fn baseline_member_import_keys(
             &results.absent_component_props,
             root,
         ),
+        constant_parameters: constant_parameter_baseline_keys(&results.constant_parameters, root),
         unused_component_emits: component_emit_baseline_keys(&results.unused_component_emits, root),
         unused_component_inputs: component_input_baseline_keys(
             &results.unused_component_inputs,

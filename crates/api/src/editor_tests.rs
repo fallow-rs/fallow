@@ -494,6 +494,10 @@ fn merge_results_covers_all_fields() {
     assert_eq!(target.unprovided_injects.len(), 1);
     assert_eq!(target.unrendered_components.len(), 1);
     assert_eq!(target.unused_component_props.len(), 1);
+    assert_eq!(
+        target.constant_parameters[0].parameter.parameter_name,
+        "compact"
+    );
     let candidate = &target.absent_component_props[0];
     assert_eq!(candidate.prop.component_name, "Widget");
     assert_eq!(candidate.prop.prop_name, "highlight");
@@ -1036,6 +1040,33 @@ pub fn merge_test_source_with_all_fields() -> EditorAnalysisResults {
                         col: 0,
                     }],
                     explanation: "Review optional prop contract".to_string(),
+                },
+            ),
+        ],
+        constant_parameters: vec![
+            super::editor_results::ConstantParameterFinding::with_actions(
+                super::editor_results::ConstantParameter {
+                    path: "/format.ts".into(),
+                    function_name: "format".to_string(),
+                    parameter_name: "compact".to_string(),
+                    parameter_index: 1,
+                    line: 3,
+                    col: 4,
+                    reason: super::editor_results::ConstantParameterReason::IdenticalArgument,
+                    value: Some(super::editor_results::ConstantParameterValue {
+                        kind: super::editor_results::ConstantParameterValueKind::Boolean,
+                        text: "true".to_string(),
+                    }),
+                    optional: false,
+                    has_default: false,
+                    condition_reads: 1,
+                    call_site_count: 3,
+                    inspected_call_sites: vec![super::editor_results::ConstantParameterCallSite {
+                        path: "/main.ts".into(),
+                        line: 2,
+                        col: 0,
+                    }],
+                    explanation: "Review the parameter".to_string(),
                 },
             ),
         ],

@@ -1926,6 +1926,31 @@ fn absent_component_prop_results(root: &Path) -> AnalysisResults {
             },
         ));
     results
+        .constant_parameters
+        .push(ConstantParameterFinding::with_actions(ConstantParameter {
+            path: root.join("src/format.ts"),
+            function_name: "format".into(),
+            parameter_name: "compact".into(),
+            parameter_index: 1,
+            line: 1,
+            col: 38,
+            reason: ConstantParameterReason::IdenticalArgument,
+            value: Some(ConstantParameterValue {
+                kind: ConstantParameterValueKind::Boolean,
+                text: "true".into(),
+            }),
+            optional: false,
+            has_default: false,
+            condition_reads: 1,
+            call_site_count: 3,
+            inspected_call_sites: vec![ConstantParameterCallSite {
+                path: root.join("src/main.ts"),
+                line: 2,
+                col: 0,
+            }],
+            explanation: "Review the calls and the intent.".into(),
+        }));
+    results
 }
 
 /// A config that sets every rule by `base` and, for the files of the

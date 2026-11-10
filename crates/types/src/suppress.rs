@@ -246,6 +246,8 @@ pub enum IssueKind {
     UnusedNamespaceMember,
     /// Optional shared-state inventory sites, consumed outside core detectors.
     SharedState,
+    /// A parameter that each visible call of its function passes in one way.
+    ConstantParameter,
 }
 
 impl IssueKind {
@@ -319,6 +321,7 @@ impl IssueKind {
         Self::DuplicateExportAlias,
         Self::UnusedNamespaceMember,
         Self::SharedState,
+        Self::ConstantParameter,
     ];
 
     /// Parse an issue kind from the string tokens used in CLI output and suppression comments.
@@ -399,6 +402,7 @@ impl IssueKind {
             Self::UnlistedBinary => 66,
             Self::UnusedNamespaceMember => 67,
             Self::SharedState => 68,
+            Self::ConstantParameter => 69,
         }
     }
 
@@ -474,6 +478,7 @@ impl IssueKind {
             66 => Some(Self::UnlistedBinary),
             67 => Some(Self::UnusedNamespaceMember),
             68 => Some(Self::SharedState),
+            69 => Some(Self::ConstantParameter),
             _ => None,
         }
     }
@@ -912,6 +917,7 @@ mod tests {
             (65, IssueKind::DuplicateExportAlias),
             (66, IssueKind::UnlistedBinary),
             (67, IssueKind::UnusedNamespaceMember),
+            (69, IssueKind::ConstantParameter),
         ];
         for &(discriminant, kind) in cases {
             assert_eq!(kind.to_discriminant(), discriminant, "{kind:?} drifted");

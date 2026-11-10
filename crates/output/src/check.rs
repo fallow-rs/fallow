@@ -667,6 +667,13 @@ macro_rules! visit_suppress_line_findings {
         for finding in &results.absent_component_props {
             $visit(&finding.prop.path, finding.prop.line, &finding.actions);
         }
+        for finding in &results.constant_parameters {
+            $visit(
+                &finding.parameter.path,
+                finding.parameter.line,
+                &finding.actions,
+            );
+        }
         for finding in &results.unused_component_emits {
             $visit(&finding.emit.path, finding.emit.line, &finding.actions);
         }
@@ -926,6 +933,13 @@ macro_rules! visit_suppress_line_findings_mut {
         }
         for finding in &mut results.absent_component_props {
             $visit(&finding.prop.path, finding.prop.line, &mut finding.actions);
+        }
+        for finding in &mut results.constant_parameters {
+            $visit(
+                &finding.parameter.path,
+                finding.parameter.line,
+                &mut finding.actions,
+            );
         }
         for finding in &mut results.unused_component_emits {
             $visit(&finding.emit.path, finding.emit.line, &mut finding.actions);
@@ -1290,6 +1304,7 @@ pub fn build_check_summary(results: &AnalysisResults) -> CheckSummary {
         unrendered_components: results.unrendered_components.len(),
         unused_component_props: results.unused_component_props.len(),
         absent_component_props: results.absent_component_props.len(),
+        constant_parameters: results.constant_parameters.len(),
         unused_component_emits: results.unused_component_emits.len(),
         unused_component_inputs: results.unused_component_inputs.len(),
         unused_component_outputs: results.unused_component_outputs.len(),

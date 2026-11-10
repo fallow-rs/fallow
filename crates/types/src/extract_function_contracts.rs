@@ -80,6 +80,9 @@ pub struct FunctionContract {
 pub struct ParamFact {
     /// The parameter name. `None` for an object or array pattern.
     pub name: Option<Box<str>>,
+    /// Start byte of the parameter: the `...` of a rest parameter, else the
+    /// binding or pattern.
+    pub span_start: u32,
     /// The binding shape of the parameter.
     pub kind: ParamKind,
     /// `true` for a TypeScript `?` marker.

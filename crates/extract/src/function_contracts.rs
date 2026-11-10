@@ -374,6 +374,7 @@ fn param_facts(
         symbols.push(symbol);
         facts.push(ParamFact {
             name,
+            span_start: param.span.start,
             kind,
             optional: param.optional,
             has_default: param.initializer.is_some(),
@@ -387,6 +388,7 @@ fn param_facts(
         symbols.push(symbol);
         facts.push(ParamFact {
             name,
+            span_start: rest.span.start,
             kind,
             optional: false,
             has_default: false,

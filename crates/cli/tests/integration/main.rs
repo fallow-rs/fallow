@@ -58,6 +58,7 @@ mod combined_health_duplication_tests;
 mod complexity_gate_tests;
 mod config_pattern_parity_tests;
 mod config_string_package_names_tests;
+mod constant_parameter_tests;
 mod coverage_analyze_tests;
 mod coverage_cloud_reads_tests;
 mod coverage_setup_cloud_tests;

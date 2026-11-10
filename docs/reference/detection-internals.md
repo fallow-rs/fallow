@@ -1034,6 +1034,60 @@ Without a base file, the first result stays. The family edges that
 `crates/graph/src/resolve/react_native.rs` adds never point to the importing
 file.
 
+## Constant parameters
+
+`crates/core/src/analyze/constant_parameter.rs` reads the function contract
+facts of extraction (see the extraction reference). It joins the calls of each
+module-scope function across the project. An import call resolves to its
+origin export through re-export chains with `ModuleGraph::resolve_export`
+and `export_binding_origin`, so two imports of one function, through a barrel
+or directly, merge into one call list. The rule reports a parameter only when
+the world is closed. Each condition that can hide a caller makes it abstain
+for the function with one `Abstain` reason; `RUST_LOG=debug` logs the count of
+each reason:
+
+- `parse-incomplete`: a module of the project has a parse error or a panic.
+- `open-contract`: the contract has an `incomplete` reason.
+- `public-api`: the value surface of a package entry point, or an export with
+  a visibility tag such as `@public`.
+- `entry-export`: the value surface of an entry point (this covers
+  `dynamicallyLoaded`), an export that a plugin `used_exports` rule matches,
+  or a side-effect registration.
+- `dynamic-import`: a dynamic import or a dynamic import pattern reaches the
+  module.
+- `commonjs`: the module has CommonJS exports, or a `require` reads it.
+- `namespace-escape`: a namespace import of the module is read as a value, or
+  a named import resolves to a namespace re-export.
+- `value-reference`: a local escape, an import binding reference that is not
+  a call, a call with a member path on a named or default import (`call`,
+  `apply`, `bind`), or an import whose uses the facts do not hold. The last
+  case covers a used binding with no recorded call or reference, and an
+  `ImportedCallSite` with no matching call fact.
+- `unresolved-target`: a call or reference whose target does not resolve to
+  one export blocks each exported function with that export name.
+- `template-callers`: a template host, or a file that is not a JavaScript or
+  TypeScript module, blocks its own contracts and each function that it
+  imports. A side-effect import from such a file blocks each contract of the
+  target, which covers a Vue `<script src>`.
+- `direct-eval`: the same, for a module with a direct `eval`.
+- `classic-script`: a module with no imports, no exports and no re-exports.
+- `auto-import`: a synthetic auto-import edge reaches the module.
+- `too-few-calls`: fewer than `MIN_CALL_SITES` (3) calls.
+
+The analysis also reads `import_binding_references`, which
+`release_resolution_payload` drops before analysis. While the rule is on,
+`analyze::release_resolution_payloads` keeps that one field.
+
+For one parameter, a written, rest or pattern parameter gives no finding. A
+self-call that passes the parameter on at the same position is neutral and
+does not count; `ArgFact::Param` at another position is unknown. Each other
+call must give `ArgAt::Fact(Literal)` with one value (`identical-argument`),
+or `ArgAt::Omitted` for an optional or defaulted parameter (`never-passed`).
+An omitted argument and a literal `undefined` are different. A
+`constant-parameter` suppression on the line of the parameter or of the
+function hides the finding. Calls from each module count, also from test
+files and unreachable files; `--production` drops test files at discovery.
+
 ## Framework and analysis regression boundaries
 
 Framework activation needs explicit project evidence. Plugin entries and

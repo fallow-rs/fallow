@@ -36,11 +36,12 @@ use crate::output::{
     IgnoreExportsRule, IssueAction, SuppressFileAction, SuppressFileKind, SuppressLineAction,
     SuppressLineKind, SuppressLineScope,
 };
+pub use crate::results::AbsentComponentPropFinding;
 use crate::results::{
-    AbsentComponentProp, BoundaryCallViolation, BoundaryCoverageViolation, BoundaryViolation,
-    CircularDependency, DependencyOverrideSource, DeprecatedExportInUse, DevDependencyInProduction,
-    DuplicateExport, DuplicateExportAlias, DuplicatePropShape, DynamicSegmentNameConflict,
-    EmptyCatalogGroup, InvalidClientExport, MisconfiguredDependencyOverride, MisplacedDirective,
+    BoundaryCallViolation, BoundaryCoverageViolation, BoundaryViolation, CircularDependency,
+    DependencyOverrideSource, DeprecatedExportInUse, DevDependencyInProduction, DuplicateExport,
+    DuplicateExportAlias, DuplicatePropShape, DynamicSegmentNameConflict, EmptyCatalogGroup,
+    InvalidClientExport, MisconfiguredDependencyOverride, MisplacedDirective,
     MixedClientServerBarrel, PackageCycle, PolicyViolation, PrivateTypeLeak, PropDrillingChain,
     ReExportCycle, ReExportCycleKind, RouteCollision, TestOnlyDependency, ThinWrapper,
     TypeOnlyDependency, UnlistedBinary, UnlistedDependency, UnproducedCatchTag, UnprovidedInject,
@@ -73,7 +74,11 @@ const IGNORE_CATALOG_REFERENCES_VALUE_SCHEMA: &str = "https://raw.githubusercont
 /// misconfigured-override findings.
 const IGNORE_DEPENDENCY_OVERRIDES_VALUE_SCHEMA: &str = "https://raw.githubusercontent.com/fallow-rs/fallow/main/schema.json#/properties/ignoreDependencyOverrides/items";
 
-fn manual_framework_fix(kind: FixActionType, description: &str, note: &str) -> IssueAction {
+pub(crate) fn manual_framework_fix(
+    kind: FixActionType,
+    description: &str,
+    note: &str,
+) -> IssueAction {
     IssueAction::Fix(FixAction {
         kind,
         auto_fixable: false,
@@ -84,7 +89,7 @@ fn manual_framework_fix(kind: FixActionType, description: &str, note: &str) -> I
     })
 }
 
-fn suppress_line(comment: &str) -> IssueAction {
+pub(crate) fn suppress_line(comment: &str) -> IssueAction {
     IssueAction::SuppressLine(SuppressLineAction {
         kind: SuppressLineKind::SuppressLine,
         auto_fixable: false,
@@ -1986,65 +1991,6 @@ impl UnusedComponentPropFinding {
                 "Manual review required: public component APIs can intentionally keep stable props for external consumers.",
             ),
             suppress_line("// fallow-ignore-next-line unused-component-prop"),
-        ];
-        Self {
-            finding_id: None,
-            prop,
-            actions,
-            introduced: None,
-            effective_severity: None,
-        }
-    }
-}
-
-/// Wire-shape envelope for an [`AbsentComponentProp`] finding. There is no safe
-/// auto-fix: removing a declared prop is judgement-bearing (the prop may be part
-/// of a deliberately-stable public component API). Actions are manual
-/// remediation guidance plus a line-level suppress at the prop declaration.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct AbsentComponentPropFinding {
-    /// The underlying finding.
-    #[serde(flatten)]
-    pub prop: AbsentComponentProp,
-    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
-    /// `~<k>` suffix when several findings of one type share an identity.
-    /// Line and column are not inputs, so the id survives line shifts,
-    /// reformats and reorders. A rename of the file or the symbol gives a
-    /// new id. Absent in output from older versions.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub finding_id: Option<String>,
-    /// Suggested next steps. Always emitted (possibly empty for
-    /// forward-compat).
-    pub actions: Vec<IssueAction>,
-    /// Set by the audit pass when this finding is introduced relative to
-    /// the merge-base.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub introduced: Option<AuditIntroduced>,
-    /// Gate severity of this finding after `rules` and `overrides[].rules`
-    /// resolve for its path. CI formats read it for the annotation, SARIF
-    /// and CodeClimate level. Absent in output from older versions. Not
-    /// part of the finding identity, baseline keys or fingerprints.
-    #[serde(
-        default,
-        skip_serializing_if = "Option::is_none",
-        deserialize_with = "deserialize_effective_severity"
-    )]
-    pub effective_severity: Option<EffectiveSeverity>,
-}
-
-impl AbsentComponentPropFinding {
-    /// Build the wrapper from a raw [`AbsentComponentProp`]. Emits a manual
-    /// fix action plus a line-level suppress.
-    #[must_use]
-    pub fn with_actions(prop: AbsentComponentProp) -> Self {
-        let actions = vec![
-            manual_framework_fix(
-                FixActionType::ReviewComponentProp,
-                "Review inspected callers, defaults and API intent",
-                "Retain or suppress intentional stable props, or update the component manually; static analysis does not prove runtime unreachability.",
-            ),
-            suppress_line("// fallow-ignore-next-line absent-component-prop"),
         ];
         Self {
             finding_id: None,

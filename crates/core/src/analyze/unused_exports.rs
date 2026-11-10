@@ -36,7 +36,7 @@ use types::drop_types_paired_with_schemas;
 pub use types::suppress_signature_backing_types;
 
 /// Pre-compiled glob matchers for plugin/framework used_exports rules.
-type PluginMatchers<'a> = Vec<CompiledUsedExportRule<'a>>;
+pub(super) type PluginMatchers<'a> = Vec<CompiledUsedExportRule<'a>>;
 
 const TANSTACK_ROUTER_PLUGIN_NAME: &str = "tanstack-router";
 
@@ -59,7 +59,7 @@ struct UnusedExportModuleContext<'a> {
 }
 
 /// Compile plugin-discovered used_exports rules (includes framework preset rules).
-fn compile_plugin_matchers(
+pub(super) fn compile_plugin_matchers(
     plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
 ) -> PluginMatchers<'_> {
     let Some(pr) = plugin_result else {
@@ -102,13 +102,13 @@ fn is_react_native_active(plugin_result: Option<&crate::plugins::AggregatedPlugi
     plugin_result.is_some_and(|pr| has_react_native_plugin(&pr.active_plugins))
 }
 
-struct CompiledUsedExportRule<'a> {
+pub(super) struct CompiledUsedExportRule<'a> {
     path: crate::plugins::CompiledPathRule,
     exports: Vec<&'a str>,
 }
 
 impl CompiledUsedExportRule<'_> {
-    fn matches(&self, path: &str) -> bool {
+    pub(super) fn matches(&self, path: &str) -> bool {
         self.path.matches(path)
     }
 }

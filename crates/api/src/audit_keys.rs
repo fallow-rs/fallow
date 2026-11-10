@@ -186,6 +186,7 @@ impl DeadCodeAuditLedger {
             unrendered_components,
             unused_component_props,
             absent_component_props,
+            constant_parameters,
             unused_component_emits,
             unused_component_inputs,
             unused_component_outputs,
@@ -289,6 +290,7 @@ impl DeadCodeAuditLedger {
         );
         annotate!(unused_component_props, "unused_component_props");
         annotate!(absent_component_props, "absent_component_props");
+        annotate!(constant_parameters, "constant_parameters");
         annotate!(unused_component_emits, "unused_component_emits");
         annotate!(unused_component_inputs, "unused_component_inputs");
         annotate!(unused_component_outputs, "unused_component_outputs");
@@ -579,6 +581,7 @@ struct FrameworkFindingSlices<'a> {
 struct ComponentContractFindingSlices<'a> {
     unused_component_props: &'a [fallow_types::output_dead_code::UnusedComponentPropFinding],
     absent_component_props: &'a [fallow_types::output_dead_code::AbsentComponentPropFinding],
+    constant_parameters: &'a [fallow_types::results::ConstantParameterFinding],
     unused_component_emits: &'a [fallow_types::output_dead_code::UnusedComponentEmitFinding],
     unused_component_inputs: &'a [fallow_types::output_dead_code::UnusedComponentInputFinding],
     unused_component_outputs: &'a [fallow_types::output_dead_code::UnusedComponentOutputFinding],
@@ -671,6 +674,7 @@ impl DeadCodeKeyCollector<'_> {
             unrendered_components,
             unused_component_props,
             absent_component_props,
+            constant_parameters,
             unused_component_emits,
             unused_component_inputs,
             unused_component_outputs,
@@ -752,6 +756,7 @@ impl DeadCodeKeyCollector<'_> {
         self.add_component_contract_findings(&ComponentContractFindingSlices {
             unused_component_props,
             absent_component_props,
+            constant_parameters,
             unused_component_emits,
             unused_component_inputs,
             unused_component_outputs,
@@ -981,6 +986,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
         let ComponentContractFindingSlices {
             unused_component_props,
             absent_component_props,
+            constant_parameters,
             unused_component_emits,
             unused_component_inputs,
             unused_component_outputs,
@@ -994,6 +1000,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
             AuditCollection::AbsentComponentProps,
             absent_component_props,
         );
+        self.add_items(AuditCollection::ConstantParameters, constant_parameters);
         self.add_unused_component_emits(unused_component_emits);
         self.add_unused_component_inputs(unused_component_inputs);
         self.add_unused_component_outputs(unused_component_outputs);
@@ -1483,6 +1490,7 @@ pub fn retain_introduced_dead_code(
         unrendered_components,
         unused_component_props,
         absent_component_props,
+        constant_parameters,
         unused_component_emits,
         unused_component_inputs,
         unused_component_outputs,
@@ -1550,6 +1558,7 @@ fn classify_introduced_dead_code_fields(results: &fallow_types::results::Analysi
         unrendered_components: _unrendered_components,
         unused_component_props: _unused_component_props,
         absent_component_props: _absent_component_props,
+        constant_parameters: _constant_parameters,
         unused_component_emits: _unused_component_emits,
         unused_component_inputs: _unused_component_inputs,
         unused_component_outputs: _unused_component_outputs,
@@ -1694,6 +1703,7 @@ pub fn annotate_dead_code_json(
         unrendered_components,
         unused_component_props,
         absent_component_props,
+        constant_parameters,
         unused_component_emits,
         unused_component_inputs,
         unused_component_outputs,

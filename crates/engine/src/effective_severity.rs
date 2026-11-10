@@ -51,6 +51,7 @@ use fallow_types::output_dead_code::{
 use fallow_types::output_dead_code::{
     UnproducedCatchTagFinding, UnusedEffectLayerFinding, UnusedTaggedErrorFinding,
 };
+use fallow_types::results::ConstantParameterFinding;
 use fallow_types::results::{AnalysisResults, PolicyViolationSeverity, StaleSuppression};
 
 use crate::error_severity::promote_warns_to_errors;
@@ -189,6 +190,7 @@ file_scoped! {
     UnrenderedComponentFinding => component.path, unrendered_components;
     UnusedComponentPropFinding => prop.path, unused_component_props;
     AbsentComponentPropFinding => prop.path, absent_component_props;
+    ConstantParameterFinding => parameter.path, constant_parameters;
     UnusedComponentEmitFinding => emit.path, unused_component_emits;
     UnusedComponentInputFinding => input.path, unused_component_inputs;
     UnusedComponentOutputFinding => output.path, unused_component_outputs;
@@ -533,6 +535,7 @@ fn for_each_gated_finding(
         dynamic_segment_name_conflicts,
         unused_component_props,
         absent_component_props,
+        constant_parameters,
         unused_component_emits,
         unused_component_inputs,
         unused_component_outputs,
@@ -610,6 +613,7 @@ fn for_each_gated_finding(
     visit(dynamic_segment_name_conflicts, f);
     visit(unused_component_props, f);
     visit(absent_component_props, f);
+    visit(constant_parameters, f);
     visit(unused_component_emits, f);
     visit(unused_component_inputs, f);
     visit(unused_component_outputs, f);
@@ -674,6 +678,7 @@ fn tally_gated_findings(results: &AnalysisResults, tally: &mut SeverityTally<'_,
         dynamic_segment_name_conflicts,
         unused_component_props,
         absent_component_props,
+        constant_parameters,
         unused_component_emits,
         unused_component_inputs,
         unused_component_outputs,
@@ -747,6 +752,7 @@ fn tally_gated_findings(results: &AnalysisResults, tally: &mut SeverityTally<'_,
         || tally.add(dynamic_segment_name_conflicts)
         || tally.add(unused_component_props)
         || tally.add(absent_component_props)
+        || tally.add(constant_parameters)
         || tally.add(unused_component_emits)
         || tally.add(unused_component_inputs)
         || tally.add(unused_component_outputs)

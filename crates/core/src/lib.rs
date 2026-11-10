@@ -582,7 +582,7 @@ impl<'a> AnalysisSession<'a> {
                     (resolved, graph)
                 }
             };
-        release_resolution_payloads(&mut modules);
+        analyze::release_resolution_payloads(&mut modules, self.config);
         let analysis = analyze_dead_code_timed(
             &shared,
             &graph.graph,
@@ -1286,12 +1286,6 @@ fn orphan_module_declaration_files(
     modules: &[extract::ModuleInfo],
 ) -> FxHashSet<discover::FileId> {
     discover::find_orphan_module_declaration_files(&input.config.root, input.files, modules)
-}
-
-fn release_resolution_payloads(modules: &mut [extract::ModuleInfo]) {
-    for module in modules {
-        module.release_resolution_payload();
-    }
 }
 
 fn analyze_dead_code_timed(

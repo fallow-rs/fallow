@@ -90,6 +90,31 @@ const absentProp = {
     },
   ],
 } satisfies NonNullable<FallowCheckResult["absent_component_props"]>[number];
+const constantParameter = {
+  path: "src/format.ts",
+  line: 1,
+  col: 38,
+  function_name: "format",
+  parameter_name: "compact",
+  parameter_index: 1,
+  reason: "identical-argument",
+  value: { kind: "boolean", text: "true" },
+  optional: false,
+  has_default: false,
+  condition_reads: 1,
+  call_site_count: 3,
+  inspected_call_sites: [{ path: "src/main.ts", line: 2, col: 0 }],
+  explanation: "Each visible call passes the same value for this parameter.",
+  finding_id: "dc1:constant-parameter:0123456789abcdef",
+  effective_severity: "warn",
+  actions: [
+    {
+      type: "review-constant-parameter",
+      auto_fixable: false,
+      description: "Review the calls, the default and the intent of the parameter",
+    },
+  ],
+} satisfies NonNullable<FallowCheckResult["constant_parameters"]>[number];
 
 /**
  * Code -> wiring. Keyed by the dead-code subset of `DIAGNOSTIC_CATEGORIES`
@@ -173,6 +198,11 @@ const DEAD_CODE_WIRING = {
     field: "absent_component_props",
     category: "absent-component-prop",
     finding: absentProp,
+  },
+  "constant-parameter": {
+    field: "constant_parameters",
+    category: "constant-parameter",
+    finding: constantParameter,
   },
   "unused-component-emit": {
     field: "unused_component_emits",

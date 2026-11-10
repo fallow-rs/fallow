@@ -245,6 +245,9 @@ pub enum FixActionType {
     UseComponentProp,
     /// Review caller evidence, defaults and component API intent manually.
     ReviewComponentProp,
+    /// Review the calls, the default and the intent of a parameter that each
+    /// call passes in one way (manual; used by constant-parameter findings).
+    ReviewConstantParameter,
     /// Emit a declared component event or remove it from the component API
     /// (manual; used by unused-component-emit findings).
     EmitComponentEvent,
