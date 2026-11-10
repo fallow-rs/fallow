@@ -4,9 +4,16 @@
 //! mutation switch:
 //!
 //! ```text
-//! (__fallow_m_a("ID1") ? (MUT1) : __fallow_m_a("ID2") ? (MUT2)
-//!   : (__fallow_m_c("ID1"), __fallow_m_c("ID2"), (ORIGINAL)))
+//! (A("ID1") ? (MUT1) : A("ID2") ? (MUT2) : (C("ID1"), C("ID2"), (ORIGINAL)))
 //! ```
+//!
+//! `A("ID")` stands for `typeof __fallow_m_a === "function" &&
+//! __fallow_m_a("ID")`, and `C("ID")` for the same guard on `__fallow_m_c`.
+//! A test can serialize a function with `toString` and run it in another
+//! realm, such as a `node:vm` context or a browser page. The prelude
+//! functions do not exist there. `typeof` of an undeclared name gives
+//! `"undefined"` and does not throw, so the guard is false and the original
+//! code runs.
 //!
 //! A mutated branch copies the raw original text of the site with one region
 //! replaced. Only the original branch holds the instrumented inner sites, so
@@ -18,8 +25,8 @@
 //! `if` statement in a block:
 //!
 //! ```text
-//! {if (__fallow_m_a("ID1")) {MUT1} else if (__fallow_m_a("ID2")) {MUT2}
-//!   else {__fallow_m_c("ID1"); __fallow_m_c("ID2"); ORIGINAL}}
+//! {if (A("ID1")) {MUT1} else if (A("ID2")) {MUT2}
+//!   else {C("ID1"); C("ID2"); ORIGINAL}}
 //! ```
 //!
 //! The statements move into a nested block. The collector makes statement
@@ -86,6 +93,16 @@ impl Writer<'_> {
 
     fn push(&mut self, text: &str) {
         self.out.push_str(text);
+    }
+
+    /// Pushes a call of a prelude function that is false, and calls nothing,
+    /// in a realm without the prelude. See the module docs.
+    fn push_guarded(&mut self, function: &str, id: &str) {
+        use std::fmt::Write as _;
+        let _ = write!(
+            self.out,
+            "typeof {function} === \"function\" && {function}(\"{id}\")"
+        );
     }
 }
 
@@ -160,8 +177,8 @@ impl Emitter<'_, '_> {
         }
         self.writer.push("(");
         for mutant in &site.mutants {
-            self.writer
-                .push(&format!("{ACTIVE_FUNCTION}(\"{}\") ? (", mutant.id));
+            self.writer.push_guarded(ACTIVE_FUNCTION, &mutant.id);
+            self.writer.push(" ? (");
             self.writer.copy(start, mutant.region.0);
             self.writer.push(&mutant.replacement);
             self.writer.copy(mutant.region.1, end);
@@ -169,8 +186,8 @@ impl Emitter<'_, '_> {
         }
         self.writer.push("(");
         for mutant in &site.mutants {
-            self.writer
-                .push(&format!("{HIT_FUNCTION}(\"{}\"), ", mutant.id));
+            self.writer.push_guarded(HIT_FUNCTION, &mutant.id);
+            self.writer.push(", ");
         }
         self.writer.push("(");
         if start == end {
@@ -190,8 +207,9 @@ impl Emitter<'_, '_> {
         let (start, end) = site.span;
         self.writer.push("{");
         for mutant in &site.mutants {
-            self.writer
-                .push(&format!("if ({ACTIVE_FUNCTION}(\"{}\")) {{", mutant.id));
+            self.writer.push("if (");
+            self.writer.push_guarded(ACTIVE_FUNCTION, &mutant.id);
+            self.writer.push(") {");
             self.writer.copy(start, mutant.region.0);
             self.writer.push(&mutant.replacement);
             self.writer.copy(mutant.region.1, end);
@@ -199,8 +217,8 @@ impl Emitter<'_, '_> {
         }
         self.writer.push("{");
         for mutant in &site.mutants {
-            self.writer
-                .push(&format!("{HIT_FUNCTION}(\"{}\"); ", mutant.id));
+            self.writer.push_guarded(HIT_FUNCTION, &mutant.id);
+            self.writer.push("; ");
         }
         let children = std::mem::take(&mut self.tree.children[node]);
         self.range(start, end, &children, Some(start));
