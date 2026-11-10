@@ -52,10 +52,6 @@ const exitRecord = (code, signal, stderr) => ({
   text: `the process ended (${code ?? signal}) with no result${stderr ? `: ${stderr.trim().split("\n").at(-1)}` : ""}`,
 });
 
-/**
- * Runs one replay call of `side` in a new Node process with the Node flags
- * of the project, and gives its call record.
- */
 /** The call record in the result file, or null when it is missing or partial. */
 const readRecord = (resultPath) => {
   try {
@@ -65,25 +61,15 @@ const readRecord = (resultPath) => {
   }
 };
 
-// On Unix the replay process leads its own process group, so the end of a
-// call can stop each process that the call started. A child that holds the
-// stderr pipe then cannot delay the call or run into the next call. Windows
-// has no process group here; the Job Object of the API ends the tree.
-const OWN_GROUP = process.platform !== "win32";
-
-const killGroup = (child) => {
-  try {
-    if (OWN_GROUP) process.kill(-child.pid, "SIGKILL");
-    else child.kill("SIGKILL");
-  } catch {
-    // The group already ended.
-  }
-};
-
 /**
  * Runs one replay call of `side` in a new Node process with the Node flags
  * of the project, and gives its call record. The call ends when the replay
  * process exits, not when each holder of its stderr pipe closes it.
+ *
+ * The replay process stays in the process tree of the companion, so the API
+ * ends it with the companion. A process that a call starts and that
+ * outlives the call runs until the replay request ends, because the API
+ * stops the companion after each replay request.
  */
 const replayCall = ({ root, execArgv, overlayPath, request, requestPath, resultPath, side }) =>
   new Promise((resolveCall) => {
@@ -95,17 +81,15 @@ const replayCall = ({ root, execArgv, overlayPath, request, requestPath, resultP
         cwd: root,
         env: { ...process.env, NODE_OPTIONS: replayNodeOptions(overlayPath, active) },
         tailBytes: STDERR_TAIL_BYTES,
-        detached: OWN_GROUP,
       },
     );
     let timedOut = false;
     const timer = setTimeout(() => {
       timedOut = true;
-      killGroup(child);
+      child.kill("SIGKILL");
     }, request.call_timeout_ms + REPLAY_PROCESS_MARGIN_MS);
     child.on("exit", (code, signal) => {
       clearTimeout(timer);
-      killGroup(child);
       const record = readRecord(resultPath);
       if (record !== null) resolveCall(record);
       else if (timedOut) resolveCall({ outcome: "timed_out", value: null, text: "timed out" });

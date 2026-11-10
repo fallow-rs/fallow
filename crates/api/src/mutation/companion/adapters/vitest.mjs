@@ -1,7 +1,7 @@
 // Generated from tools/mutation-runner/src/adapters/vitest.mjs. Do not edit.
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { join, relative, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { CompanionError, expectRequest, isPlainObject } from "../protocol.mjs";
@@ -740,10 +740,15 @@ const setVitestEnv = () => {
  * whose root holds the file, the deepest root first. Without such a project,
  * the first project in Node, else the first project.
  */
+const holdsPath = (root, path) => {
+  const rel = relative(root, path);
+  return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+};
+
 const replayProject = (projects, path) => {
   const inNode = projects.filter((project) => project.config.browser?.enabled !== true);
   const holding = inNode
-    .filter((project) => !relative(project.config.root, path).startsWith(".."))
+    .filter((project) => holdsPath(project.config.root, path))
     .toSorted((left, right) => right.config.root.length - left.config.root.length);
   return holding[0] ?? inNode[0] ?? projects[0];
 };

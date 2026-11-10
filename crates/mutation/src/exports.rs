@@ -33,6 +33,15 @@ const fn holds(outer: Span, inner: Span) -> bool {
     outer.start <= inner.start && inner.end <= outer.end
 }
 
+/// True for an object literal or a class expression, also inside
+/// parentheses or a TypeScript `as`, `satisfies` or `!` wrapper.
+fn is_not_callable(expression: &Expression<'_>) -> bool {
+    matches!(
+        expression.get_inner_expression(),
+        Expression::ObjectExpression(_) | Expression::ClassExpression(_)
+    )
+}
+
 /// The single binding name of a declarator, or `None` for a pattern.
 fn binding_name<'a>(pattern: &'a BindingPattern<'_>) -> Option<&'a str> {
     pattern.get_binding_identifier().map(|id| id.name.as_str())
@@ -46,10 +55,7 @@ fn declarator_holding<'a>(
 ) -> Option<&'a str> {
     declaration.declarations.iter().find_map(|declarator| {
         let init = declarator.init.as_ref()?;
-        if matches!(
-            init,
-            Expression::ObjectExpression(_) | Expression::ClassExpression(_)
-        ) {
+        if is_not_callable(init) {
             return None;
         }
         holds(init.span(), target)
@@ -81,7 +87,12 @@ fn declared_export(program: &Program<'_>, target: Span) -> Option<String> {
                 | ExportDefaultDeclarationKind::TSInterfaceDeclaration(_)
                 | ExportDefaultDeclarationKind::ObjectExpression(_)
                 | ExportDefaultDeclarationKind::ClassExpression(_) => return None,
-                expression => expression.span(),
+                expression => {
+                    if expression.as_expression().is_some_and(is_not_callable) {
+                        return None;
+                    }
+                    expression.span()
+                }
             };
             holds(span, target).then(|| "default".to_owned())
         }
@@ -181,6 +192,14 @@ mod tests {
         assert_eq!(lookup(default_object, "n + 1"), None);
         let listed = "class Box { get(n) { return n + 1; } }\nexport { Box };";
         assert_eq!(lookup(listed, "n + 1"), None);
+        let satisfies = "export const config = { run(n) { return n + 1; } } satisfies object;";
+        assert_eq!(lookup(satisfies, "n + 1"), None);
+        let constant = "export const config = ({ run(n) { return n + 1; } }) as const;";
+        assert_eq!(lookup(constant, "n + 1"), None);
+        let wrapped = "export default ({ run(n) { return n + 1; } }) satisfies object;";
+        assert_eq!(lookup(wrapped, "n + 1"), None);
+        let arrow = "export const run = ((n: number) => n + 1) satisfies object;";
+        assert_eq!(lookup(arrow, "n + 1").as_deref(), Some("run"));
     }
 
     #[test]

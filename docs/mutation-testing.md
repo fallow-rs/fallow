@@ -2071,8 +2071,7 @@ the output gives it as `replay.contract_version`. Version 1 has these rules:
   one call never reach the next call or the other side. A switch in
   top-level code runs once at import, so the load counts as part of the
   call: the mutant is active when the module evaluates, and an error that
-  the load throws is a `threw` outcome. On Unix, the end of a `node:test`
-  call stops each process that the call started.
+  the load throws is a `threw` outcome.
 - Each call runs in an `AsyncLocalStorage` store with its own active mutant.
   A timer or a promise of one call reads the mutant of that call, also when
   it runs during a later call.
@@ -2091,8 +2090,11 @@ the output gives it as `replay.contract_version`. Version 1 has these rules:
   the timers of `node:timers`, so fake timers of the project do not stop it.
   A synchronous endless loop of the mutant through instrumented code ends at
   the loop check. A loop that blocks the worker in other code ends at the
-  wall limit of the request (twice the call limit for each call, and 30
-  seconds): the API stops the companion, and the verdict is `timeout`.
+  wall limit of the request (the call limit and 20 seconds for each call,
+  and 30 seconds more): the API stops the companion, and the verdict is
+  `timeout`. A process that a `node:test` call starts and that outlives the
+  call runs until the request ends, because the API stops the companion and
+  its process tree after each replay request.
 - Arguments use the replay encoding: JSON values, and objects with a
   `$replay` tag for `undefined` (`{"$replay": "undefined"}`), `NaN`,
   `Infinity` and `-0` (`{"$replay": "number", "value": "NaN"}`), bigints,

@@ -40,10 +40,19 @@ const MAX_CALL_TIMEOUT: Duration = Duration::from_mins(10);
 const REPLAY_CLOCK_MS: i64 = 1_767_225_600_000;
 /// The seed of `Math.random` in each call.
 const REPLAY_SEED: i64 = 1;
-/// The time of the process starts and the module loads of a replay request,
-/// on top of the call timeouts. The wall limit of the whole request is the
-/// sum, so a mutant that blocks its worker cannot stop the command.
+/// The time of the worker start, the setup files and the module load of one
+/// replay call, on top of its call timeout.
+const REPLAY_CALL_MARGIN: Duration = Duration::from_secs(20);
+/// The time of the replay request outside the calls. The wall limit of the
+/// whole request is the sum, so a call that blocks its worker cannot stop
+/// the command.
 const REPLAY_REQUEST_MARGIN: Duration = Duration::from_secs(30);
+
+/// The wall limit of one replay request: each call with its margin, and the
+/// margin of the request.
+fn wall_limit(call_timeout: Duration) -> Duration {
+    (call_timeout + REPLAY_CALL_MARGIN) * (2 * CALLS_PER_SIDE) + REPLAY_REQUEST_MARGIN
+}
 
 /// The facts of the mutant that the replay needs.
 struct Target {
@@ -396,7 +405,7 @@ pub fn replay_mutation(
         clock_ms: REPLAY_CLOCK_MS,
         seed: REPLAY_SEED,
     };
-    let wall_limit = call_timeout * (2 * CALLS_PER_SIDE) + REPLAY_REQUEST_MARGIN;
+    let wall_limit = wall_limit(call_timeout);
     let started = Instant::now();
     let response = link.request(&Request::Replay(request), wall_limit);
     link.shutdown();
@@ -469,6 +478,22 @@ mod tests {
             .expect("a target");
         assert_eq!(target.export.as_deref(), Ok("second"));
         assert!(target.instrumented.contains(&options.mutant_id));
+    }
+
+    #[test]
+    fn the_wall_limit_leaves_room_for_the_per_call_limits_of_the_companion() {
+        // The Vitest adapter gives each call its call timeout and 10 seconds
+        // as the test timeout, and node:test gives it 5 seconds more. Each
+        // call also starts a worker before its test timeout runs.
+        const COMPANION_CALL_MARGIN: Duration = Duration::from_secs(10);
+        for call_timeout in [
+            Duration::from_millis(1),
+            DEFAULT_CALL_TIMEOUT,
+            MAX_CALL_TIMEOUT,
+        ] {
+            let calls = (call_timeout + COMPANION_CALL_MARGIN) * (2 * CALLS_PER_SIDE);
+            assert!(wall_limit(call_timeout) >= calls + Duration::from_secs(60));
+        }
     }
 
     #[test]

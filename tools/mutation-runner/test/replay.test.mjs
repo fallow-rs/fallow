@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,6 +13,7 @@ const PACKAGE_ROOT = fileURLToPath(new URL("..", import.meta.url));
 const CLOCK_MS = 1_767_225_600_000;
 
 const ORIGINAL = `import { spawn } from "node:child_process";
+import { appendFileSync } from "node:fs";
 
 let calls = 0;
 
@@ -75,7 +76,16 @@ export function busy(): number {
 }
 
 export function spawnLong(): number {
-  spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "inherit" });
+  const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "inherit" });
+  if (process.env.REPLAY_PID_FILE) appendFileSync(process.env.REPLAY_PID_FILE, \`\${child.pid}\\n\`);
+  return 1;
+}
+export async function holdOn(): Promise<number> {
+  const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore" });
+  if (process.env.REPLAY_PID_FILE) {
+    appendFileSync(process.env.REPLAY_PID_FILE, \`\${process.pid}\\n\${child.pid}\\n\`);
+  }
+  await new Promise((resolve) => setTimeout(resolve, 60000));
   return 1;
 }
 `;
@@ -86,6 +96,7 @@ const m = (id, mutated, original) =>
 const INSTRUMENTED = `// @ts-nocheck
 ${PRELUDE}
 import { spawn } from "node:child_process";
+import { appendFileSync } from "node:fs";
 
 let calls = 0;
 
@@ -148,8 +159,17 @@ export function busy(): number {
 }
 
 export function spawnLong(): number {
-  spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "inherit" });
+  const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "inherit" });
+  if (process.env.REPLAY_PID_FILE) appendFileSync(process.env.REPLAY_PID_FILE, \`\${child.pid}\\n\`);
   return ${m("r13", "2", "1")};
+}
+export async function holdOn(): Promise<number> {
+  const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60000)"], { stdio: "ignore" });
+  if (process.env.REPLAY_PID_FILE) {
+    appendFileSync(process.env.REPLAY_PID_FILE, \`\${process.pid}\\n\${child.pid}\\n\`);
+  }
+  await new Promise((resolve) => setTimeout(resolve, 60000));
+  return ${m("r14", "2", "1")};
 }
 `;
 
@@ -196,9 +216,10 @@ const createReplayProject = ({ runner, packageName }) => {
   };
 };
 
-const startProject = async (options) => {
+const startProject = async (options, setEnv = {}) => {
   const project = createReplayProject(options);
-  const companion = startCompanion();
+  // The companion leads its own process group, as the API starts it on Unix.
+  const companion = startCompanion({ detached: process.platform !== "win32", setEnv });
   let nextId = 1;
   const request = (message) => companion.request({ v: 1, id: nextId++, ...message });
   const ready = await request({
@@ -212,6 +233,7 @@ const startProject = async (options) => {
   });
   return {
     ready,
+    companion,
     replay: (fields) =>
       request({
         type: "replay",
@@ -365,6 +387,39 @@ const replaySuite = (label, options) => {
       assert.deepEqual(valuesOf(result, "mutant"), [2]);
       assert.ok(performance.now() - started < 20_000, "the replay waited for the child");
     });
+
+    test(
+      "a kill of the companion group also ends the processes of a replay",
+      { skip: process.platform === "win32" && "no process group on Windows" },
+      async () => {
+        const pidFile = join(tmpdir(), `fallow-replay-pids-${process.pid}-${Date.now()}`);
+        writeFileSync(pidFile, "");
+        const other = await startProject(options, { REPLAY_PID_FILE: pidFile });
+        // The call waits for a minute, so the kill comes during the call.
+        other
+          .replay({ export: "holdOn", mutant_id: "r14", calls: 1, call_timeout_ms: 120_000 })
+          .catch(() => {});
+        while (readFileSync(pidFile, "utf8").trim() === "") {
+          await new Promise((resolve) => setTimeout(resolve, 100));
+        }
+        const pids = readFileSync(pidFile, "utf8").trim().split("\n").map(Number);
+        process.kill(-other.companion.child.pid, "SIGKILL");
+        await other.companion.exited;
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        const alive = pids.filter((pid) => {
+          try {
+            process.kill(pid, 0);
+            return true;
+          } catch {
+            return false;
+          }
+        });
+        for (const pid of alive) process.kill(pid, "SIGKILL");
+        other.stop();
+        rmSync(pidFile, { force: true });
+        assert.deepEqual(alive, [], "a child of a replay call outlived the companion");
+      },
+    );
 
     test("a call limit that a timer cannot hold is a bad request", async () => {
       const result = await project.replay({

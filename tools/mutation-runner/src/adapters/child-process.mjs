@@ -116,11 +116,10 @@ const selectTestFiles = (requested, testFiles, runnerName) => {
 
 /**
  * Starts `command` with no stdin and no stdout, and keeps the last
- * `tailBytes` of its stderr. `stderr()` gives the tail so far. `detached`
- * starts the process as the leader of a new process group on Unix.
+ * `tailBytes` of its stderr. `stderr()` gives the tail so far.
  */
-export const spawnWithStderrTail = (command, args, { cwd, env, tailBytes, detached = false }) => {
-  const child = spawn(command, args, { cwd, env, detached, stdio: ["ignore", "ignore", "pipe"] });
+export const spawnWithStderrTail = (command, args, { cwd, env, tailBytes }) => {
+  const child = spawn(command, args, { cwd, env, stdio: ["ignore", "ignore", "pipe"] });
   let tail = "";
   child.stderr.setEncoding("utf8");
   child.stderr.on("data", (chunk) => {
