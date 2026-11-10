@@ -38,6 +38,7 @@ impl Selection {
                 .map(|target| ResolvedTarget {
                     target: target.clone(),
                     test_ids: Vec::new(),
+                    unmatched: None,
                 })
                 .collect()
         } else {
@@ -170,6 +171,7 @@ fn target_entry(
     }
     if target.test_ids.is_empty() {
         reasons.insert(UNMATCHED_TARGET);
+        reasons.extend(target.unmatched.and_then(|unmatched| unmatched.reason()));
     }
     MutationKillMatrixTarget {
         target: target.target.clone(),
@@ -350,6 +352,7 @@ mod tests {
         let resolved = [ResolvedTarget {
             target: "test/a.ts".to_owned(),
             test_ids: vec![A.to_owned(), B.to_owned()],
+            unmatched: None,
         }];
         build(
             &Selection::new(&["test/a.ts".to_owned()], &resolved),
@@ -458,10 +461,12 @@ mod tests {
             ResolvedTarget {
                 target: "test/a.ts".to_owned(),
                 test_ids: vec![A.to_owned(), B.to_owned()],
+                unmatched: None,
             },
             ResolvedTarget {
                 target: "test/c.ts".to_owned(),
                 test_ids: vec![C.to_owned()],
+                unmatched: None,
             },
         ];
         let matrix = build(
@@ -490,6 +495,59 @@ mod tests {
     }
 
     #[test]
+    fn an_unmatched_target_names_its_reason_and_keeps_the_candidates_of_the_others() {
+        use crate::mutation::scheduler::targets::Unmatched;
+        let resolved = [
+            ResolvedTarget {
+                target: "test/a.ts".to_owned(),
+                test_ids: vec![A.to_owned(), B.to_owned()],
+                unmatched: None,
+            },
+            ResolvedTarget {
+                target: "test/cli.ts".to_owned(),
+                test_ids: Vec::new(),
+                unmatched: Some(Unmatched::NoPlannedCode),
+            },
+            ResolvedTarget {
+                target: "src/a.ts".to_owned(),
+                test_ids: Vec::new(),
+                unmatched: Some(Unmatched::NotATestFile),
+            },
+            ResolvedTarget {
+                target: "test/a.ts::gone".to_owned(),
+                test_ids: Vec::new(),
+                unmatched: Some(Unmatched::NoTest),
+            },
+        ];
+        let requested: Vec<String> = resolved.iter().map(|t| t.target.clone()).collect();
+        let matrix = build(
+            &Selection::new(&requested, &resolved),
+            &[result("m1", MutantStatus::Killed, &[A, B])],
+            &[],
+            &MutationCompletion::from_reasons(Vec::new()),
+            &files(),
+        );
+        assert_eq!(matrix.reasons, ["unmatched-target"]);
+        assert_eq!(matrix.candidates, [A, B]);
+        let targets = matrix.targets.expect("target mode");
+        assert_eq!(targets[0].status, MutationKillMatrixTargetStatus::Complete);
+        let reasons: Vec<&[String]> = targets[1..].iter().map(|t| t.reasons.as_slice()).collect();
+        assert_eq!(
+            reasons,
+            [
+                &["no-planned-code".to_owned(), "unmatched-target".to_owned()][..],
+                &["not-a-test-file".to_owned(), "unmatched-target".to_owned()][..],
+                &["unmatched-target".to_owned()][..],
+            ]
+        );
+        assert!(
+            targets[1..]
+                .iter()
+                .all(|t| t.status == MutationKillMatrixTargetStatus::Incomplete)
+        );
+    }
+
+    #[test]
     fn an_incomplete_mutant_without_a_known_target_test_makes_each_target_incomplete() {
         let mut unknown = result("m2", MutantStatus::RuntimeError, &[]);
         unknown.covering_tests.clear();
@@ -509,6 +567,7 @@ mod tests {
         let resolved = [ResolvedTarget {
             target: "test/a.ts".to_owned(),
             test_ids: vec![A.to_owned(), B.to_owned()],
+            unmatched: None,
         }];
         let matrix = build(
             &Selection::new(&["test/a.ts".to_owned()], &resolved),
@@ -532,6 +591,7 @@ mod tests {
         let resolved = [ResolvedTarget {
             target: "test/a.ts".to_owned(),
             test_ids: vec![A.to_owned(), B.to_owned()],
+            unmatched: None,
         }];
         let failure = MutationBaselineFailure {
             file: Some("test/a.ts".to_owned()),
