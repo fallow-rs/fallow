@@ -13,20 +13,21 @@ const path = require("node:path");
 const fs = require("node:fs");
 const os = require("node:os");
 
-const { getPlatformPackage } = require("./platform-package");
+const {
+  getPlatformPackageCandidates,
+  resolveInstalledPlatformPackage,
+} = require("./platform-package");
 const { ensureVerified } = require("./lazy-verify");
 const { isPreSigningVersion } = require("./verify-binary");
 
-function resolvePlatformPackageName() {
-  if (process.platform !== "linux") {
-    return getPlatformPackage(process.platform, process.arch);
-  }
+function detectLibcFamily() {
+  if (process.platform !== "linux") return undefined;
   try {
-    const { familySync } = require("detect-libc");
-    return getPlatformPackage(process.platform, process.arch, familySync());
+    return require("detect-libc").familySync();
   } catch {
-    // musl binaries are statically linked and work on both glibc and musl
-    return getPlatformPackage(process.platform, process.arch, "musl");
+    // Unknown libc selects the musl package: musl binaries are statically
+    // linked and work on both glibc and musl.
+    return null;
   }
 }
 
@@ -77,20 +78,28 @@ function describeVerifiedStatus(result) {
 // Resolve the platform package directory + manifest path, or print an
 // actionable error and exit. Keeps `runBinary` a flat top-level sequence.
 function resolvePlatformPaths() {
-  const pkg = resolvePlatformPackageName();
-  if (!pkg) {
+  const libcFamily = detectLibcFamily();
+  const candidates = getPlatformPackageCandidates(process.platform, process.arch, libcFamily);
+  if (candidates.length === 0) {
     process.stderr.write(`Unsupported platform: ${process.platform}-${process.arch}\n`);
     process.exit(1);
   }
-  try {
-    const manifestPath = require.resolve(`${pkg}/package.json`);
-    return { pkg, manifestPath, platformPkgDir: path.dirname(manifestPath) };
-  } catch {
-    process.stderr.write(
-      `Could not find ${pkg}. Run 'npm install' to install the platform-specific binary.\n`,
-    );
+  const resolved = resolveInstalledPlatformPackage(candidates);
+  if (resolved === null) {
+    process.stderr.write(missingPlatformPackageMessage(candidates[0], libcFamily));
     process.exit(1);
   }
+  return { ...resolved, platformPkgDir: path.dirname(resolved.manifestPath) };
+}
+
+// npm installs a Linux platform package only for the libc that it detects at
+// install time, so a tree installed for another libc, or from macOS or
+// Windows without `--libc`, has no matching binary.
+function missingPlatformPackageMessage(pkg, libcFamily) {
+  const hint = libcFamily
+    ? ` This host uses ${libcFamily}. When node_modules was installed on another libc or OS, reinstall with \`npm install --os=linux --cpu=${process.arch} --libc=${libcFamily}\`.`
+    : "";
+  return `Could not find ${pkg}. Run 'npm install' to install the platform-specific binary.${hint}\n`;
 }
 
 function printVerifyError(verifyResult) {
@@ -254,6 +263,7 @@ module.exports = {
   isVersionQuery, // test-only
   guardBrokenStdout, // test-only
   exitCodeForChildFailure, // test-only
+  missingPlatformPackageMessage, // test-only
   resolveTypeAwareCompanion, // test-only
   childEnvironment, // test-only
 };

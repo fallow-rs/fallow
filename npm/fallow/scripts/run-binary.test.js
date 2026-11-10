@@ -291,3 +291,15 @@ test(
     ]);
   },
 );
+
+test("missingPlatformPackageMessage names the detected libc and the reinstall flag", () => {
+  const { missingPlatformPackageMessage } = require(RUN_BINARY);
+  const message = missingPlatformPackageMessage("@fallow-cli/linux-x64-musl", "musl");
+  assert.match(message, /Could not find @fallow-cli\/linux-x64-musl\./);
+  assert.match(message, /This host uses musl\./);
+  assert.match(message, /--libc=musl/);
+  assert.doesNotMatch(
+    missingPlatformPackageMessage("@fallow-cli/darwin-arm64", undefined),
+    /--libc/,
+  );
+});
