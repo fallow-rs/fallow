@@ -24,6 +24,8 @@ const constantOptions: DeadCodeOptions = { root: ".", constantParameters: true }
 const consumeConstantParameters = async (): Promise<void> => {
   const report = await detectDeadCode(constantOptions);
   const candidates: ConstantParameterFinding[] = report.constant_parameters ?? [];
+  const total: number | undefined = report.summary.constant_parameters;
+  void total;
   for (const candidate of candidates) {
     const reason: string = candidate.reason;
     const text: string | undefined = candidate.value?.text;

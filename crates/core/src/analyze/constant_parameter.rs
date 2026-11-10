@@ -227,6 +227,13 @@ impl<'a> Gate<'a> {
         }
     }
 
+    fn block_all_exports(&mut self, reason: Abstain) {
+        let ids: Vec<FnId> = self.by_export_name.values().flatten().copied().collect();
+        for id in ids {
+            self.block(id, reason);
+        }
+    }
+
     fn block_name(&mut self, name: &str, reason: Abstain) {
         let ids = self.by_export_name.get(name).cloned().unwrap_or_default();
         for id in ids {
@@ -335,7 +342,14 @@ impl<'a> Gate<'a> {
                 self.block_import_targets(module, reason);
             }
         }
+        let html = node.is_some_and(|node| node.path.extension().is_some_and(|ext| ext == "html"));
+        if html && facts.is_some_and(|facts| facts.template_callers) {
+            // An inline module script of an HTML page can import any module,
+            // and extraction records none of its imports.
+            self.block_all_exports(Abstain::TemplateCallers);
+        }
         self.block_exports(module);
+        self.block_import_references(module);
         let Some(facts) = facts else {
             self.block_unrecorded_imports(module, None);
             return;
@@ -350,7 +364,6 @@ impl<'a> Gate<'a> {
         for escape in &facts.escapes {
             self.block((file, escape.contract), Abstain::ValueReference);
         }
-        self.block_import_references(module);
         self.collect_calls(module, facts);
         self.block_unrecorded_imports(module, Some(facts));
     }

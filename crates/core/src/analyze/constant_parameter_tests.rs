@@ -494,3 +494,66 @@ fn a_framework_auto_import_abstains() {
     let reason = project.reason("composables/useFlag.ts", "useFlag");
     assert!(reason == Some("auto-import"), "{reason:?}");
 }
+
+#[test]
+fn a_value_reference_in_a_module_without_functions_abstains() {
+    let main = "import { format } from './format';\nimport './use';\nformat(1, true);\nformat(2, true);\nformat(3, true);\n";
+    for user in [
+        "import { format } from './format';\nexport const mapped = [1].map(format);\n",
+        "import { format } from './format';\n[1].map(format);\nexport {};\n",
+    ] {
+        let project = analyze(&base_with(&[("src/use.ts", user)], main));
+        assert_abstains(&project, "src/format.ts", "format", "value-reference");
+    }
+}
+
+#[test]
+fn a_jsx_use_in_a_module_without_functions_abstains() {
+    let card = "export function Card(props: { a: number }) {\n  return props.a;\n}\n";
+    let main = "import { Card } from './Card';\nimport './view';\nCard({ a: 1 });\nCard({ a: 1 });\nCard({ a: 1 });\n";
+    let view = "import { Card } from './Card';\nexport const element = <Card a={2} />;\n";
+    let config = serde_json::json!({ "entry": ["src/main.tsx"] });
+    let project = analyze_with(
+        &private_package(),
+        &config,
+        &[
+            ("src/Card.tsx", card),
+            ("src/main.tsx", main),
+            ("src/view.tsx", view),
+        ],
+    );
+    assert_abstains(&project, "src/Card.tsx", "Card", "value-reference");
+}
+
+#[test]
+fn an_inline_module_script_in_html_abstains() {
+    let html = "<!doctype html>\n<script type=\"module\">\n  import { format } from './src/format.ts';\n  format(4, false);\n</script>\n";
+    let config = serde_json::json!({ "entry": ["src/main.ts", "index.html"] });
+    let project = analyze_with(
+        &private_package(),
+        &config,
+        &base_with(&[("index.html", html)], MAIN),
+    );
+    assert_abstains(&project, "src/format.ts", "format", "template-callers");
+
+    let html_with_src =
+        "<!doctype html>\n<script type=\"module\" src=\"./src/main.ts\"></script>\n";
+    let project = analyze_with(
+        &private_package(),
+        &config,
+        &base_with(&[("index.html", html_with_src)], MAIN),
+    );
+    assert_eq!(project.findings("format").len(), 2);
+}
+
+#[test]
+fn a_template_host_blocks_only_what_it_imports() {
+    let main = "import { format } from './format';\nimport './View.vue';\nformat(1, true);\nformat(2, true);\nformat(3, true);\n";
+    let view = "<script setup lang=\"ts\">\nimport { other } from './other';\n</script>\n<template><p>{{ other() }}</p></template>\n";
+    let other = "export function other() {\n  return 1;\n}\n";
+    let project = analyze(&base_with(
+        &[("src/View.vue", view), ("src/other.ts", other)],
+        main,
+    ));
+    assert_eq!(project.findings("format").len(), 2);
+}

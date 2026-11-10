@@ -1059,7 +1059,8 @@ each reason:
 - `namespace-escape`: a namespace import of the module is read as a value, or
   a named import resolves to a namespace re-export.
 - `value-reference`: a local escape, an import binding reference that is not
-  a call, a call with a member path on a named or default import (`call`,
+  a call (also in a module without function facts, for example `[1].map(f)`
+  or `<F />`), a call with a member path on a named or default import (`call`,
   `apply`, `bind`), or an import whose uses the facts do not hold. The last
   case covers a used binding with no recorded call or reference, and an
   `ImportedCallSite` with no matching call fact.
@@ -1068,7 +1069,9 @@ each reason:
 - `template-callers`: a template host, or a file that is not a JavaScript or
   TypeScript module, blocks its own contracts and each function that it
   imports. A side-effect import from such a file blocks each contract of the
-  target, which covers a Vue `<script src>`.
+  target, which covers a Vue `<script src>`. An HTML page with an inline
+  `<script type="module">` blocks each exported function of the project,
+  because extraction does not record the imports of that script.
 - `direct-eval`: the same, for a module with a direct `eval`.
 - `classic-script`: a module with no imports, no exports and no re-exports.
 - `auto-import`: a synthetic auto-import edge reaches the module.

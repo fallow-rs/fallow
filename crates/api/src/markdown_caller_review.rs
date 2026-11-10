@@ -61,6 +61,14 @@ pub(super) fn push_markdown_caller_review_sections(
             if more > 0 {
                 let _ = write!(callers, " (+{more} more)");
             }
+            // A string value comes from project source, so it renders as
+            // a code span, never as markdown.
+            let summary = match &parameter.value {
+                Some(value) => {
+                    format!("every call passes {}", markdown_code_span(&value.display()))
+                }
+                None => parameter.summary(),
+            };
             vec![format!(
                 "- {} in {}: {} ({} calls). Callers: {}",
                 markdown_code_span(&format!(
@@ -68,10 +76,55 @@ pub(super) fn push_markdown_caller_review_sections(
                     parameter.function_name, parameter.parameter_name
                 )),
                 markdown_code_span(&format!("{}:{}", rel(&parameter.path), parameter.line)),
-                parameter.summary(),
+                summary,
                 parameter.call_site_count,
                 callers
             )]
         },
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use fallow_types::results::{
+        ConstantParameter, ConstantParameterFinding, ConstantParameterReason,
+        ConstantParameterValue, ConstantParameterValueKind,
+    };
+
+    use super::*;
+
+    #[test]
+    fn a_string_value_renders_as_a_code_span() {
+        let mut results = AnalysisResults::default();
+        results
+            .constant_parameters
+            .push(ConstantParameterFinding::with_actions(ConstantParameter {
+                path: "src/a.ts".into(),
+                function_name: "f".into(),
+                parameter_name: "p".into(),
+                parameter_index: 0,
+                line: 1,
+                col: 11,
+                reason: ConstantParameterReason::IdenticalArgument,
+                value: Some(ConstantParameterValue {
+                    kind: ConstantParameterValueKind::String,
+                    text: "<img src=x> `tick`".into(),
+                }),
+                optional: false,
+                has_default: false,
+                condition_reads: 0,
+                call_site_count: 3,
+                inspected_call_sites: vec![],
+                explanation: String::new(),
+            }));
+        let mut out = String::new();
+        push_markdown_caller_review_sections(&mut out, &results, &|path| {
+            path.display().to_string()
+        });
+        let expected = markdown_code_span("\"<img src=x> `tick`\"");
+        assert!(
+            out.contains(&format!("every call passes {expected}")),
+            "{out}"
+        );
+    }
 }

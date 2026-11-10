@@ -321,7 +321,8 @@ call whose arguments are all `Unknown` stores no argument facts, only
 `Unknown`. The facts follow `import_binding_references`
 through the span remap and `merge_into`, so a call target index stays valid
 after the script blocks of a host file merge. A Vue, Svelte, Astro, Glimmer or
-MDX file sets `template_callers`, because the script facts do not see the
+MDX file sets `template_callers`, and so does an HTML page with an inline
+`<script type="module">`, because the script facts do not see the
 calls of its template, of an inline script, or of another script block. The
 graph cache does not store these facts, so a change to them changes only
 `CACHE_VERSION`.

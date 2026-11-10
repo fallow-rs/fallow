@@ -165,7 +165,7 @@ export interface AnalysisAction {
 
 export interface DeadCodeSummary {
   absent_component_props: number;
-  constant_parameters: number;
+  constant_parameters?: number;
   total_issues: number;
   unused_files: number;
   unused_exports: number;
