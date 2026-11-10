@@ -87,21 +87,34 @@ const isComponent = (source) => COMPONENT_FILE.test(source);
 /** A request for a file on disk: no virtual module and no query. */
 const isPlainRequest = (id) => !id.startsWith("\0") && !id.includes("?");
 
-/** The overlay entry of a plain request for a component file, or undefined. */
-const componentEntry = (overlay, id) => {
-  if (!isPlainRequest(id)) return undefined;
-  const entry = overlay.get(realPath(id));
-  return entry !== undefined && isComponent(entry.source) ? entry : undefined;
+/**
+ * The overlay entry that the plugin serves for a request, or undefined. A
+ * script file gets its copy also for a request with a query. A component file
+ * gets its copy only for a plain request.
+ */
+const servedEntry = (overlay, id) => {
+  if (id.startsWith("\0")) return undefined;
+  const entry = overlay.get(realPath(id.split("?", 1)[0]));
+  if (entry === undefined) return undefined;
+  return !isComponent(entry.source) || isPlainRequest(id) ? entry : undefined;
 };
 
 /**
- * Serves the instrumented copy of each mapped file. A script file gets its
- * copy in the `transform` hook. A component file gets its copy in the `load`
- * hook, so the framework plugin compiles the instrumented component also when
- * its own `transform` hook runs first. A component request with a query (a
+ * Serves the instrumented copy of each mapped file in the `load` hook, as
+ * if the copy were the file on disk. Each `transform` hook of Vite, Vitest
+ * and the project then runs on the copy, as `vitest run` runs it on the
+ * original. For example, Vitest rewrites each `import.meta.env` read to the
+ * environment object that `vi.stubEnv` changes, and a framework plugin
+ * compiles the instrumented component. A component request with a query (a
  * style or a template block) is not served: the framework plugin makes it
- * from the component that it compiled. The `config` hook also
- * adds this plugin to each inline project definition. Vitest 4 gives the
+ * from the component that it compiled.
+ *
+ * A project plugin with `enforce: "pre"` can load a script file before this
+ * plugin, and Vite keeps the first `load` result. The `transform` hook then
+ * replaces the code of that file with the copy. The transforms that ran
+ * before this plugin do not apply to the copy in that case.
+ *
+ * The `config` hook adds this plugin to each inline project definition. Vitest 4 gives the
  * plugins of `createVitest` to the root project only. Vitest 5 does not give
  * them to an inline project with a `browser` block, also when browser mode
  * is off. Vite keeps one copy of a plugin that a project gets twice.
@@ -114,6 +127,14 @@ const componentEntry = (overlay, id) => {
  * its own default entries to the list, so the workspace root stays allowed.
  */
 const overlayPlugin = (overlay, loaded) => {
+  const servedIds = new Set();
+  const serve = (entry) => {
+    loaded.add(entry.source);
+    return {
+      code: readFileSync(entry.target, "utf8"),
+      map: readSourceMap(`${entry.target}.map`),
+    };
+  };
   const plugin = {
     name: OVERLAY_PLUGIN,
     enforce: "pre",
@@ -129,20 +150,16 @@ const overlayPlugin = (overlay, loaded) => {
       return { server: { fs: { allow: [COMPANION_DIR] } } };
     },
     load(id) {
-      const entry = componentEntry(overlay, id);
+      const entry = servedEntry(overlay, id);
       if (entry === undefined) return null;
-      loaded.add(entry.source);
-      return readFileSync(entry.target, "utf8");
+      servedIds.add(id);
+      return serve(entry);
     },
     transform(_code, id) {
-      if (id.startsWith("\0")) return null;
-      const entry = overlay.get(realPath(id.split("?", 1)[0]));
+      if (servedIds.delete(id)) return null;
+      const entry = servedEntry(overlay, id);
       if (entry === undefined || isComponent(entry.source)) return null;
-      loaded.add(entry.source);
-      return {
-        code: readFileSync(entry.target, "utf8"),
-        map: readSourceMap(`${entry.target}.map`),
-      };
+      return serve(entry);
     },
   };
   return plugin;
