@@ -322,3 +322,62 @@ fn security_dead_code_note_follows_unused_files_and_exports_overrides() {
         "an off override removes the dead-code note for matching files"
     );
 }
+
+/// Kinds of `workspace_diagnostics` in the JSON output of `subcommand`.
+fn diagnostic_kinds(subcommand: &str, root: &Path) -> Vec<String> {
+    let out = crate::common::run_fallow_in_root(
+        subcommand,
+        root,
+        &["--format", "json", "--quiet", "--no-cache"],
+    );
+    let json = crate::common::parse_json(&out);
+    json["workspace_diagnostics"]
+        .as_array()
+        .map(|entries| {
+            entries
+                .iter()
+                .filter_map(|entry| entry["kind"].as_str().map(str::to_owned))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// `fallow security` raises a top-level `off` leak rule to `warn`, so the user
+/// cannot silence `client-server-leak-no-client-roots` there. Other commands
+/// keep the `off` rule and report no entry.
+#[test]
+fn security_reports_no_client_roots_also_when_the_config_sets_the_leak_rule_off() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).expect("src dir");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{ "name": "no-client-roots", "private": true, "type": "module", "main": "src/main.js" }"#,
+    )
+    .expect("package");
+    std::fs::write(
+        root.join("src/config.js"),
+        "export const apiKey = process.env.API_SECRET;\n",
+    )
+    .expect("config module");
+    std::fs::write(
+        root.join("src/main.js"),
+        "import { apiKey } from \"./config.js\";\nconsole.log(apiKey);\n",
+    )
+    .expect("entry");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{ "rules": { "security-client-server-leak": "off" } }"#,
+    )
+    .expect("fallow config");
+
+    let kind = "client-server-leak-no-client-roots".to_owned();
+    assert!(
+        diagnostic_kinds("security", root).contains(&kind),
+        "fallow security always runs the leak rule"
+    );
+    assert!(
+        !diagnostic_kinds("dead-code", root).contains(&kind),
+        "dead-code keeps the rule off"
+    );
+}

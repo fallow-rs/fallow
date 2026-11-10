@@ -171,6 +171,7 @@ fn verdict_warnings(root: &Map<String, Value>) -> Vec<String> {
     warnings.extend(gate_warnings(root, baseline_reported));
     warnings.extend(degraded_analysis_warning(root));
     warnings.extend(requested_rule_off_warning(root));
+    warnings.extend(no_client_roots_warning(root));
     warnings.extend(unapplied_request_warning(root));
     warnings.extend(empty_scope_request_warning(root));
     warnings
@@ -552,6 +553,27 @@ fn requested_rule_off_warning(root: &Map<String, Value>) -> Option<String> {
     ))
 }
 
+/// One sentence when `client-server-leak` was active but had no `"use client"`
+/// file to start from. An agent that reads zero leak findings and an empty
+/// `warnings` array concludes that no secret reaches client code, but the rule
+/// checked nothing. The kind is not `degrades_analysis`, so the degraded
+/// sentence does not cover it.
+fn no_client_roots_warning(root: &Map<String, Value>) -> Option<String> {
+    DIAGNOSTIC_SITES
+        .iter()
+        .filter_map(|path| fallow_types::envelope_sites::lookup(root, path)?.as_array())
+        .flatten()
+        .any(|diagnostic| {
+            diagnostic.get("kind").and_then(Value::as_str)
+                == Some("client-server-leak-no-client-roots")
+        })
+        .then(|| {
+            "client-server-leak checked nothing: no file has a top-level \"use client\" \
+             directive, so a zero leak count does not mean that no secret reaches client code."
+                .to_owned()
+        })
+}
+
 /// One sentence for every request the run could not apply, never one per
 /// request.
 ///
@@ -695,6 +717,25 @@ mod tests {
             .iter()
             .map(|entry| entry.as_str().expect("warning is a string").to_string())
             .collect()
+    }
+
+    #[test]
+    fn a_leak_rule_without_client_roots_is_one_sentence() {
+        let warnings = warnings_of(&serde_json::json!({
+            "workspace_diagnostics": [
+                { "kind": "boundaries-not-configured" },
+                { "kind": "client-server-leak-no-client-roots" },
+            ],
+        }));
+        assert_eq!(
+            warnings,
+            vec![
+                "client-server-leak checked nothing: no file has a top-level \"use client\" \
+                 directive, so a zero leak count does not mean that no secret reaches client \
+                 code."
+                    .to_owned()
+            ]
+        );
     }
 
     #[test]

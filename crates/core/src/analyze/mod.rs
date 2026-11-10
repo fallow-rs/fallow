@@ -39,6 +39,7 @@ mod security;
 mod semantic_scope;
 mod server_only;
 mod thin_wrapper;
+mod unconfigured_check;
 mod unlisted_binaries;
 mod unprovided_inject;
 mod unrendered_component;
@@ -96,6 +97,7 @@ use crate::results::{
     UnusedDependency, UnusedExport, UnusedMember,
 };
 use crate::suppress::{IssueKind, SuppressionContext};
+use unconfigured_check::record_unconfigured_check;
 
 use class_member_rules::ClassMemberRules;
 use component_health::{populate_duplicate_prop_shape_findings, populate_thin_wrapper_findings};
@@ -1971,21 +1973,6 @@ fn run_boundary_violation_detector(
         .collect()
 }
 
-/// Report that a detector produced structurally zero findings because it was
-/// never configured, so a consumer does not read the counter as a measurement.
-///
-/// `rules: off` is deliberately NOT reported here: that zero is the user's own
-/// choice and is already visible in `fallow config`.
-fn record_unconfigured_check(config: &ResolvedConfig, kind: WorkspaceDiagnosticKind) {
-    // Anchored at the project root, stored project-relative: the envelopes'
-    // post-serialisation strip only removes a `root + separator` prefix, so a
-    // root-anchored absolute path would reach JSON output verbatim.
-    let diagnostic =
-        fallow_config::WorkspaceDiagnostic::new(&config.root, config.root.clone(), kind)
-            .into_root_relative(&config.root);
-    fallow_config::record_workspace_diagnostics(&config.root, vec![diagnostic]);
-}
-
 fn filter_public_workspace_results(
     config: &ResolvedConfig,
     workspaces: &[fallow_config::WorkspaceInfo],
@@ -2096,6 +2083,12 @@ fn populate_security_findings(
         );
         results.security_findings = security_findings;
         results.security_unresolved_edge_files = stats.client_files_with_unresolved_edges;
+        if stats.client_roots == 0 {
+            record_unconfigured_check(
+                ctx.config,
+                WorkspaceDiagnosticKind::ClientServerLeakNoClientRoots,
+            );
+        }
     }
 
     if ctx.config.rules.security_sink != Severity::Off {
