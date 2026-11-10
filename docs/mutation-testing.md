@@ -94,6 +94,15 @@ read-only next steps. It never writes a test and never proposes a code change.
 - The prelude goes into each block with module scope (the Vue `<script>`, the
   Svelte module script). When a component has no such block, each block gets
   its own prelude.
+- Each call of a prelude function in a switch has a `typeof` guard, as in
+  `typeof __fallow_m_a === "function" && __fallow_m_a("ID")`. A test can
+  serialize a source function with `toString` and run it in another realm:
+  a `node:vm` context, or a browser page through Playwright `page.evaluate`
+  or `addInitScript`. The prelude functions do not exist in that realm.
+  Without the guard, the function throws
+  `ReferenceError: __fallow_m_a is not defined`, and the test is a baseline
+  failure. With the guard, the function runs the original code there. The
+  mutants of that function then get no hit and no kill from that realm.
 - The framework compiler moves some code out of the block scope, where the
   prelude is not visible or where a switch is not valid. These positions give
   no mutant:

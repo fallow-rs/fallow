@@ -289,7 +289,9 @@ pub const RESERVED_PREFIX: &str = "__fallow_m_";
 ///
 /// The instrumented output calls `__fallow_m_a(id)` before each mutated
 /// branch. The function returns `globalThis.__fallowMutation.a(id)`, or
-/// `false` when the runtime object is not set.
+/// `false` when the runtime object is not set. Each call has a `typeof`
+/// guard, so code that runs in another realm without the prelude runs the
+/// original branch.
 pub const ACTIVE_FUNCTION: &str = "__fallow_m_a";
 
 /// The prelude function that reports a hit on the original branch.
