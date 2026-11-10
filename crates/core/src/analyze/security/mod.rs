@@ -31,7 +31,7 @@
 //! fallow emits the structural import-hop trace; it does not prove the path is
 //! exploitable.
 //!
-//! Blind spots (surfaced in-band via [`UnresolvedEdgeStats`], not silently
+//! Blind spots (surfaced in-band via [`LeakScanStats`], not silently
 //! dropped): the BFS follows only resolved static import edges, so glob-shaped
 //! dynamic `import()` patterns and unresolved specifiers can hide a real leak.
 //!
@@ -168,11 +168,14 @@ use fallow_types::extract::is_public_env_var;
 /// Blind-spot accounting surfaced in-band so the user is never told "clean" when
 /// the analysis could not see part of the import graph.
 #[derive(Debug, Default, Clone, Copy)]
-pub struct UnresolvedEdgeStats {
+pub struct LeakScanStats {
     /// Number of `"use client"` files whose transitive import cone contains a
     /// dynamic `import()` pattern the reachability BFS cannot follow, so a leak
     /// could be hiding behind it.
     pub client_files_with_unresolved_edges: usize,
+    /// Number of files with a top-level `"use client"` directive, the starting
+    /// points of the leak scan. Zero means the rule checked nothing.
+    pub client_roots: usize,
 }
 
 /// Run the security MVP rules over the graph. Returns the findings plus the
@@ -184,7 +187,7 @@ pub fn find_security_findings(
     modules: &[ModuleInfo],
     suppressions: &SuppressionContext<'_>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
-) -> (Vec<SecurityFinding>, UnresolvedEdgeStats) {
+) -> (Vec<SecurityFinding>, LeakScanStats) {
     let modules_by_id: FxHashMap<FileId, &ModuleInfo> =
         modules.iter().map(|m| (m.file_id, m)).collect();
 
@@ -366,9 +369,9 @@ fn find_client_server_leaks(
     server_only_sources: &FxHashSet<FileId>,
     suppressions: &SuppressionContext<'_>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
-) -> (Vec<SecurityFinding>, UnresolvedEdgeStats) {
+) -> (Vec<SecurityFinding>, LeakScanStats) {
     let mut findings = Vec::new();
-    let mut stats = UnresolvedEdgeStats::default();
+    let mut stats = LeakScanStats::default();
 
     // Per-file set of `next/dynamic(..., { ssr: false })` dynamic-import span
     // starts. The BFS excludes an edge reached ONLY through one of these so a
@@ -430,7 +433,7 @@ fn scan_client_file_for_leaks(
     scan: &LeakScanInput<'_>,
     node: &ModuleNode,
     findings: &mut Vec<SecurityFinding>,
-    stats: &mut UnresolvedEdgeStats,
+    stats: &mut LeakScanStats,
 ) {
     let Some(module) = scan.modules_by_id.get(&node.file_id) else {
         return;
@@ -438,6 +441,7 @@ fn scan_client_file_for_leaks(
     if !module.directives.iter().any(|d| d == USE_CLIENT) {
         return;
     }
+    stats.client_roots += 1;
     let client_id = node.file_id;
     // A file-level `// fallow-ignore-file security-client-server-leak`
     // (or a blanket file ignore) opts the whole client file out. Routed
@@ -484,7 +488,7 @@ fn emit_transitive_client_file_leaks(
     scan: &LeakScanInput<'_>,
     client_id: FileId,
     findings: &mut Vec<SecurityFinding>,
-    stats: &mut UnresolvedEdgeStats,
+    stats: &mut LeakScanStats,
 ) {
     // Transitive case: BFS the import cone.
     let cone = walk_client_cone(scan, client_id);

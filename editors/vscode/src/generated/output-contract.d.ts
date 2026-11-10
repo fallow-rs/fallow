@@ -674,6 +674,8 @@ kind: "boundaries-not-configured"
 } | {
 kind: "rule-packs-not-configured"
 } | {
+kind: "client-server-leak-no-client-roots"
+} | {
 kind: "excluded-by-default-ignore"
 /**
  * The built-in glob that matched, verbatim (for example

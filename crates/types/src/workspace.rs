@@ -328,6 +328,16 @@ pub enum WorkspaceDiagnosticKind {
     /// zero. The unconfigured counterpart of
     /// [`Self::BoundariesNotConfigured`].
     RulePacksNotConfigured,
+    /// `client-server-leak` is not `off`, but no analyzed file has a
+    /// top-level `"use client"` directive. The detector starts only from those
+    /// files, so it had no starting point and its zero count measures
+    /// nothing. React Router Framework Mode and a plain Vite SPA are typical
+    /// projects of this shape: their client code carries no directive.
+    ///
+    /// Like [`Self::BoundariesNotConfigured`], an analyze pass with the rule
+    /// `off` does not report it. `fallow security` raises a top-level `off`
+    /// to `warn` before the pass, so that command always reports it.
+    ClientServerLeakNoClientRoots,
     /// One of fallow's built-in discovery ignore patterns (`**/dist/**`,
     /// `**/build/**`, `**/coverage/**`, and the four minified-bundle globs)
     /// removed at least one candidate source file from this walk. The files
@@ -723,6 +733,7 @@ impl WorkspaceDiagnosticKind {
             Self::NodeModulesMissing => "node-modules-missing",
             Self::BoundariesNotConfigured => "boundaries-not-configured",
             Self::RulePacksNotConfigured => "rule-packs-not-configured",
+            Self::ClientServerLeakNoClientRoots => "client-server-leak-no-client-roots",
             Self::ExcludedByDefaultIgnore { .. } => "excluded-by-default-ignore",
             Self::NoSourceFilesAnalyzed { .. } => "no-source-files-analyzed",
             Self::FileScoresUnavailable { .. } => "file-scores-unavailable",
@@ -779,6 +790,7 @@ impl WorkspaceDiagnosticKind {
         match self {
             Self::BoundariesNotConfigured
             | Self::RulePacksNotConfigured
+            | Self::ClientServerLeakNoClientRoots
             | Self::ExcludedByDefaultIgnore { .. }
             | Self::PluginEffectNotModeled { .. }
             | Self::CoverageAutoDetected
@@ -943,6 +955,7 @@ impl WorkspaceDiagnosticKind {
             | Self::NodeModulesMissing
             | Self::BoundariesNotConfigured
             | Self::RulePacksNotConfigured
+            | Self::ClientServerLeakNoClientRoots
             | Self::ExcludedByDefaultIgnore { .. }
             | Self::NoSourceFilesAnalyzed { .. }
             | Self::FileScoresUnavailable { .. }
@@ -994,7 +1007,8 @@ impl WorkspaceDiagnosticKind {
             | Self::BunResolutionsShadowedByOverrides
             | Self::PnpmWorkspaceOverridesIgnored { .. }
             | Self::BoundariesNotConfigured
-            | Self::RulePacksNotConfigured => true,
+            | Self::RulePacksNotConfigured
+            | Self::ClientServerLeakNoClientRoots => true,
             Self::UndeclaredWorkspace
             | Self::MalformedPackageJson { .. }
             | Self::GlobMatchedNoPackageJson { .. }
@@ -1088,6 +1102,7 @@ impl WorkspaceDiagnosticKind {
             | Self::NodeModulesMissing
             | Self::BoundariesNotConfigured
             | Self::RulePacksNotConfigured
+            | Self::ClientServerLeakNoClientRoots
             | Self::ExcludedByDefaultIgnore { .. }
             | Self::PluginConfigUnreadable { .. }
             | Self::PluginEffectNotModeled { .. }
@@ -1151,6 +1166,7 @@ impl WorkspaceDiagnosticKind {
             | Self::NodeModulesMissing
             | Self::BoundariesNotConfigured
             | Self::RulePacksNotConfigured
+            | Self::ClientServerLeakNoClientRoots
             | Self::ExcludedByDefaultIgnore { .. }
             | Self::NoSourceFilesAnalyzed { .. }
             | Self::FileScoresUnavailable { .. }
@@ -1697,6 +1713,13 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
             "No rule packs are configured, so the policy detector did not run and its violation \
              counts are zero because nothing was measured. Add `rulePacks` to the config, or set \
              `policy-violation` to off to state that the check is not wanted."
+                .to_string()
+        }
+        WorkspaceDiagnosticKind::ClientServerLeakNoClientRoots => {
+            "No file has a top-level \"use client\" directive, so the client-server-leak \
+             detector had no starting point and its zero count measures nothing. The rule does \
+             not apply to projects whose client code has no \"use client\" directive, such as \
+             React Router Framework Mode or a Vite SPA."
                 .to_string()
         }
         WorkspaceDiagnosticKind::NoSourceFilesAnalyzed {

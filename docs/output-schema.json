@@ -13454,6 +13454,19 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "client-server-leak-no-client-roots"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "description": "`client-server-leak` is not `off`, but no analyzed file has a\ntop-level `\"use client\"` directive. The detector starts only from those\nfiles, so it had no starting point and its zero count measures\nnothing. React Router Framework Mode and a plain Vite SPA are typical\nprojects of this shape: their client code carries no directive.\n\nLike [`Self::BoundariesNotConfigured`], an analyze pass with the rule\n`off` does not report it. `fallow security` raises a top-level `off`\nto `warn` before the pass, so that command always reports it."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "excluded-by-default-ignore"
             },
             "pattern": {
