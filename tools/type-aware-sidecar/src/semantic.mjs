@@ -5,7 +5,7 @@ import path from "node:path";
 import { accessorPairExists, countsAsAccessorUse } from "./accessor-direction.mjs";
 import { ast, createApi as createBackendApi, heritageTypeName, sync } from "./backend.mjs";
 
-import { canonicalFileIdentity } from "./file-identity.mjs";
+import { canonicalFileIdentity, resetFileIdentityCache } from "./file-identity.mjs";
 import { packagePathTargets, projectPackage } from "./project-package.mjs";
 import { projectResult, projectState } from "./project-state.mjs";
 import {
@@ -2082,6 +2082,7 @@ export const analyzeSemanticQueries = (
   { createApi = (cwd) => createBackendApi({ cwd }) } = {},
 ) => {
   if (queries.length === 0) return emptyRequestedAnalysis();
+  resetFileIdentityCache();
   const setupStartedAt = performance.now();
   const api = createApi(root);
   try {
@@ -2120,6 +2121,7 @@ export const createSemanticSession = (
         throw new Error("semantic session revision must increase");
       }
       state.fileChanges = fileChanges;
+      resetFileIdentityCache();
       const setupStartedAt = performance.now();
       const result = executeSemanticAnalysis({
         root,

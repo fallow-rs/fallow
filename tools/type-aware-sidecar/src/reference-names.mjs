@@ -1,4 +1,5 @@
-import { ast } from "./backend.mjs";
+import { ast, projectCompilerOptions } from "./backend.mjs";
+import { canonicalFileIdentity } from "./file-identity.mjs";
 
 const {
   isExportDeclaration,
@@ -17,17 +18,27 @@ const JAVASCRIPT_FILE = /\.[cm]?jsx?$/iu;
 // The scan keeps every identifier of these files.
 export const isJavaScriptFile = (sourceFile) => JAVASCRIPT_FILE.test(sourceFile.fileName);
 
-const importNames = ({ importClause }) => {
+// An alias edge says that the local name of an import or export specifier
+// refers to the imported name. A `from` of null means that the local name is
+// always kept: a default import, a namespace import or export, or an
+// `import x =` declaration.
+const ALWAYS = null;
+const edge = (from, to) => ({ from: from?.text ?? ALWAYS, to: to?.text });
+const specifierEdge = (element) => edge(element.propertyName ?? element.name, element.name);
+
+const importEdges = ({ importClause }) => {
   const bindings = importClause?.namedBindings;
-  if (!bindings) return [importClause?.name];
-  if (isNamespaceImport(bindings)) return [importClause.name, bindings.name];
-  return [importClause.name, ...bindings.elements.map((element) => element.name)];
+  const defaultEdge = importClause?.name ? [{ from: ALWAYS, to: importClause.name.text }] : [];
+  if (!bindings) return defaultEdge;
+  if (isNamespaceImport(bindings))
+    return [...defaultEdge, { from: ALWAYS, to: bindings.name.text }];
+  return [...defaultEdge, ...bindings.elements.map(specifierEdge)];
 };
 
-const exportNames = ({ exportClause }) => {
+const exportEdges = ({ exportClause }) => {
   if (!exportClause) return [];
-  if (isNamedExports(exportClause)) return exportClause.elements.map((element) => element.name);
-  return [exportClause.name];
+  if (isNamedExports(exportClause)) return exportClause.elements.map(specifierEdge);
+  return [{ from: ALWAYS, to: exportClause.name.text }];
 };
 
 /** Returns the statements of a `namespace` or `declare module` body, also when nested. */
@@ -36,14 +47,29 @@ export const moduleBodyStatements = (body) => {
   return body && isModuleBlock(body) ? body.statements : [];
 };
 
-const statementAliasNames = (statement) => {
-  if (isImportDeclaration(statement)) return importNames(statement);
+// A JavaScript file can make an alias with `exports.run =`, `exports["run"] =`
+// or `module.exports.run =`, also inside a comma sequence, a condition or a
+// wrapper function. The text match finds each such name, and the scan keeps
+// it, because a TypeScript importer of `run` can reach a target through it.
+const COMMON_JS_EXPORT =
+  /\b(?:module\s*\.\s*)?exports\s*(?:\.\s*([A-Za-z_$][\w$]*)|\[\s*(["'`])([^"'`]+)\2\s*\])/gu;
+
+const commonJsExportEdges = (sourceFile) =>
+  isJavaScriptFile(sourceFile)
+    ? [...(sourceFile.text ?? "").matchAll(COMMON_JS_EXPORT)].map((match) => ({
+        from: ALWAYS,
+        to: match[1] ?? match[3],
+      }))
+    : [];
+
+const statementAliasEdges = (statement) => {
+  if (isImportDeclaration(statement)) return importEdges(statement);
   if (isImportEqualsDeclaration(statement) || isNamespaceExportDeclaration(statement)) {
-    return [statement.name];
+    return [{ from: ALWAYS, to: statement.name?.text }];
   }
-  if (isExportDeclaration(statement)) return exportNames(statement);
+  if (isExportDeclaration(statement)) return exportEdges(statement);
   if (isModuleDeclaration(statement)) {
-    return moduleBodyStatements(statement.body).flatMap(statementAliasNames);
+    return moduleBodyStatements(statement.body).flatMap(statementAliasEdges);
   }
   return [];
 };
@@ -66,19 +92,68 @@ export const ownSourceFiles = (project) =>
     .map((fileName) => project.program.getSourceFile(fileName))
     .filter((sourceFile) => isOwnSourceFile(project, sourceFile));
 
-const programAliasNames = (project) =>
-  ownSourceFiles(project)
-    .flatMap((sourceFile) => sourceFile.statements.flatMap(statementAliasNames))
-    .map((name) => name?.text)
-    .filter((text) => typeof text === "string");
+// Alias edges come from every program file outside node_modules, also from a
+// linked workspace package that the program marks as an external library.
+// With `preserveSymlinks`, such a package keeps a node_modules path, so only
+// then does a node_modules path need its real path, which costs a system call.
+const aliasSourceFiles = (project) => {
+  const linked = Boolean(projectCompilerOptions(project)?.preserveSymlinks);
+  return project.program
+    .getSourceFileNames()
+    .filter(
+      (fileName) =>
+        !NODE_MODULES_SEGMENT.test(fileName) ||
+        (linked && !NODE_MODULES_SEGMENT.test(canonicalFileIdentity(fileName))),
+    )
+    .map((fileName) => project.program.getSourceFile(fileName))
+    .filter((sourceFile) => sourceFile && !project.program.isSourceFileDefaultLibrary(sourceFile));
+};
+
+const programAliasEdges = (project) =>
+  aliasSourceFiles(project)
+    .flatMap((sourceFile) => [
+      ...sourceFile.statements.flatMap(statementAliasEdges),
+      ...commonJsExportEdges(sourceFile),
+    ])
+    .filter(({ to }) => typeof to === "string");
+
+/** Adds the local name of each edge whose imported name is in `names`, until no name is added. */
+const closeOverAliases = (names, edges) => {
+  let pending = edges.filter(({ from }) => from !== ALWAYS);
+  let added = true;
+  while (added) {
+    added = false;
+    const next = [];
+    for (const aliasEdge of pending) {
+      if (!names.has(aliasEdge.from)) {
+        next.push(aliasEdge);
+      } else if (!names.has(aliasEdge.to)) {
+        names.add(aliasEdge.to);
+        added = true;
+      }
+    }
+    pending = next;
+  }
+  return names;
+};
 
 /**
  * Returns the identifier names that can reach a symbol-use target.
  *
  * An identifier resolves to a declaration with its own name, or to an alias
- * that an import or export declares under that name. So the scan needs only
- * the target names and the names that the alias declarations of the project
- * files declare, project declaration files included.
+ * that an import or export declares under that name. An alias can reach a
+ * target only when the name that it imports or re-exports can. So the scan
+ * needs the target names, `default`, and the local name of each alias whose
+ * imported name is one of these names, followed through re-export chains. The
+ * local names of default imports, namespace imports and exports, and
+ * `import x =` declarations are always kept.
  */
 export const referenceNames = (projects, targetNames) =>
-  new Set([...targetNames, "default", ...projects.flatMap(programAliasNames)]);
+  referenceNamesFromEdges(projects.flatMap(programAliasEdges), targetNames);
+
+/** The reference names for alias edges `{ from, to }`, where `from: null` always keeps `to`. */
+export const referenceNamesFromEdges = (edges, targetNames) => {
+  const names = new Set([...targetNames, "default"]);
+  edges.filter(({ from }) => from === ALWAYS).forEach(({ to }) => names.add(to));
+  return closeOverAliases(names, edges);
+};
