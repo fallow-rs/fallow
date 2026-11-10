@@ -196,13 +196,14 @@ const SCRIPT_RUNTIMES: &[ScriptRuntime] = &[
     },
 ];
 
-/// Shell utilities that only read, copy, move, or change files. They run no
+/// Shell utilities and file tools that only read, search, copy, move, delete,
+/// or change files. They run no
 /// file argument, so none of their arguments is an entry point
 /// (`cp ./README.md ./deno/lib`). `find` and `xargs` are absent: they can run
 /// another program.
 const FILE_UTILITIES: &[&str] = &[
-    "cat", "chmod", "chown", "cp", "echo", "head", "ln", "ls", "mkdir", "mv", "rm", "rmdir",
-    "sort", "tail", "tee", "touch", "uniq", "wc",
+    "awk", "cat", "chmod", "chown", "cp", "echo", "grep", "head", "ln", "ls", "mkdir", "mv",
+    "rimraf", "rm", "rmdir", "sed", "sleep", "sort", "tail", "tee", "touch", "uniq", "wc",
 ];
 
 /// Programs that run, load, bundle, or compile every file argument that they
