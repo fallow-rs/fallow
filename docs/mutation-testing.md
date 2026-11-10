@@ -837,13 +837,40 @@ fallow mutation src/math.ts \
 
 Each entry of `kill_matrix.targets` has its own `status` and `reasons`. A
 target is `incomplete` with the reason `incomplete-mutant-results` when one
-of its tests covers a mutant with incomplete evidence. The run-wide reasons
-`partial-mutation-run`, `baseline-failure`, and `missing-test-file-metadata`
-make each target incomplete. Only the tests of a complete target can be
-candidates. One incomplete mutant therefore removes the candidates of the
-targets that cover it, not of all targets. The top-level `status` stays
-`incomplete` when any evidence is incomplete, so `candidates` can be nonempty
-while `status` is `incomplete`.
+of its tests covers a mutant with incomplete evidence. Only the tests of a
+complete target can be candidates. One incomplete mutant therefore removes the
+candidates of the targets that cover it, not of all targets. The top-level
+`status` stays `incomplete` when any evidence is incomplete, so `candidates`
+can be nonempty while `status` is `incomplete`.
+
+A baseline failure (a test or a test file that fails with no active mutant)
+gives a target the reason `baseline-failure` only when the failure can affect
+the target:
+
+- the failing test is a test of the target;
+- the failing test, or a file error, is in the test file of a test of the
+  target;
+- the failing test failed a control run or the dry run of a restarted
+  companion. It covers or kills a mutant that a test of the target covers or
+  kills, or that mutant ran without it (`mutant_ids` of the failure).
+
+A failure in the first dry run drops the coverage of the failing test. For
+such a failure, only the test file can connect it to a target. Shared state
+across test files, for example a global or a database, is outside this rule.
+The human report names the failures of each target under its line.
+
+When baseline failures are the only cause of a partial run, only the targets
+with `baseline-failure` also get `partial-mutation-run`. Each other cause of
+a partial run, for example the time budget, gives each target
+`partial-mutation-run`. `missing-test-file-metadata` also applies to each
+target.
+
+A failing test gives no kill evidence. A passing test in the test file of a
+baseline failure can share state with the failure. Neither test makes the kill
+of a target test shared. This is also true for a test of another target. A
+kill that only such tests also make stays in `unique_kills`, and the target
+test is not a candidate. The `target_only_kills` of the target test do not
+name such a test.
 
 Each target test with coverage gets a row in `kill_matrix.tests`. Other tests
 get no row.

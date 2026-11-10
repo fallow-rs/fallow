@@ -20993,9 +20993,15 @@ target: string
 test_ids: string[]
 status: MutationKillMatrixTargetStatus
 /**
- * Why the evidence of this target is incomplete, sorted. The run-wide
- * reasons `partial-mutation-run`, `baseline-failure`, and
- * `missing-test-file-metadata` apply to each target.
+ * Why the evidence of this target is incomplete, sorted.
+ * `baseline-failure` means that a test failed with no active mutant, and
+ * that the failure can affect this target: the failing test is a test
+ * of the target or is in a test file of the target, or it covers, kills,
+ * or ran without a mutant that a test of the target covers or kills.
+ * `partial-mutation-run` means that the run is partial. When baseline
+ * failures are the only cause of a partial run, only the targets with
+ * `baseline-failure` get it. Each other cause applies to each target,
+ * and so does `missing-test-file-metadata`.
  * `incomplete-mutant-results` means that a test of this target covers a
  * mutant with incomplete evidence. `unmatched-target` means that the
  * target selects no test. With it, `not-a-test-file` means that the

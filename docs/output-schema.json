@@ -36166,7 +36166,7 @@
           "items": {
             "type": "string"
           },
-          "description": "Why the evidence of this target is incomplete, sorted. The run-wide\nreasons `partial-mutation-run`, `baseline-failure`, and\n`missing-test-file-metadata` apply to each target.\n`incomplete-mutant-results` means that a test of this target covers a\nmutant with incomplete evidence. `unmatched-target` means that the\ntarget selects no test. With it, `not-a-test-file` means that the\nrunner does not list the file of the target as a test file, and\n`no-planned-code` means that the file reaches no planned code, so\nthe dry run does not run it. A run stops only when no target selects\na test."
+          "description": "Why the evidence of this target is incomplete, sorted.\n`baseline-failure` means that a test failed with no active mutant, and\nthat the failure can affect this target: the failing test is a test\nof the target or is in a test file of the target, or it covers, kills,\nor ran without a mutant that a test of the target covers or kills.\n`partial-mutation-run` means that the run is partial. When baseline\nfailures are the only cause of a partial run, only the targets with\n`baseline-failure` get it. Each other cause applies to each target,\nand so does `missing-test-file-metadata`.\n`incomplete-mutant-results` means that a test of this target covers a\nmutant with incomplete evidence. `unmatched-target` means that the\ntarget selects no test. With it, `not-a-test-file` means that the\nrunner does not list the file of the target as a test file, and\n`no-planned-code` means that the file reaches no planned code, so\nthe dry run does not run it. A run stops only when no target selects\na test."
         }
       },
       "required": [

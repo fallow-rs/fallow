@@ -190,89 +190,6 @@ fn mutation_kill_matrix_for_targets_reach_the_run_options_and_exclude_the_full_m
 }
 
 #[test]
-fn mutation_kill_matrix_for_human_report_names_targets_and_shared_kills() {
-    use fallow_output::{
-        MutationKillMatrixTarget, MutationKillMatrixTargetStatus, MutationTargetOnlyKill,
-    };
-
-    let mut measured = report(
-        vec![mutant("m1", "src/math.ts", 1, MutantStatus::Killed)],
-        Vec::new(),
-    );
-    let mut matrix = kill_matrix_fixture();
-    matrix.tests.truncate(2);
-    matrix.coverage_without_kills.clear();
-    matrix.targets = Some(vec![MutationKillMatrixTarget {
-        target: "test/a.test.ts".to_owned(),
-        test_ids: vec!["test/a.test.ts::adds".to_owned()],
-        status: MutationKillMatrixTargetStatus::Complete,
-        reasons: Vec::new(),
-    }]);
-    matrix.tests[0].subsuming_tests.clear();
-    matrix.tests[0].notes = vec!["subsumers-not-computed".to_owned()];
-    matrix.tests[0].target_only_kills = Some(vec![MutationTargetOnlyKill {
-        mutant_id: "m1".to_owned(),
-        targets: vec!["test/b.test.ts::adds".to_owned()],
-    }]);
-    matrix.tests[1].target_only_kills = Some(Vec::new());
-    measured.kill_matrix = matrix;
-    let text = run_text(&measured, &OPTIONS);
-    for expected in [
-        "Target test/a.test.ts: 1 test, complete\n",
-        "Kills shared only with other targets:\n      m1 (also: test/b.test.ts::adds)",
-        "Kills shared only with other targets: none",
-        "Subsumers are not computed: the other tests stop at the first failure.",
-    ] {
-        assert!(text.contains(expected), "missing {expected:?}: {text}");
-    }
-    assert!(!text.contains("Individual subsumers"), "{text}");
-}
-
-#[test]
-fn mutation_kill_matrix_for_human_report_shows_candidates_of_complete_targets() {
-    use fallow_output::{
-        MutationKillMatrixStatus, MutationKillMatrixTarget, MutationKillMatrixTargetStatus,
-    };
-
-    let mut measured = report(
-        vec![mutant("m1", "src/math.ts", 1, MutantStatus::Killed)],
-        Vec::new(),
-    );
-    let mut matrix = kill_matrix_fixture();
-    matrix.status = MutationKillMatrixStatus::Incomplete;
-    matrix.reasons = vec!["incomplete-mutant-results".to_owned()];
-    matrix.targets = Some(vec![
-        MutationKillMatrixTarget {
-            target: "test/a.test.ts".to_owned(),
-            test_ids: vec!["test/a.test.ts::adds".to_owned()],
-            status: MutationKillMatrixTargetStatus::Complete,
-            reasons: Vec::new(),
-        },
-        MutationKillMatrixTarget {
-            target: "test/c.test.ts".to_owned(),
-            test_ids: vec!["test/c.test.ts::loads".to_owned()],
-            status: MutationKillMatrixTargetStatus::Incomplete,
-            reasons: vec!["incomplete-mutant-results".to_owned()],
-        },
-    ]);
-    measured.kill_matrix = matrix;
-    let text = run_text(&measured, &OPTIONS);
-    for expected in [
-        "Test kill evidence: incomplete",
-        "Target test/a.test.ts: 1 test, complete\n",
-        "Target test/c.test.ts: 1 test, incomplete (incomplete-mutant-results)\n",
-        "Only the tests of complete targets can be candidates.",
-        "Redundant-test candidates for review (1)",
-    ] {
-        assert!(text.contains(expected), "missing {expected:?}: {text}");
-    }
-    assert!(
-        !text.contains("Candidates are unavailable because the kill matrix is incomplete."),
-        "{text}"
-    );
-}
-
-#[test]
 fn mutation_plan_rejects_a_kill_matrix_before_analysis() {
     let args = MutationArgs {
         plan: true,
@@ -2402,3 +2319,6 @@ fn a_hinted_survivor_shows_the_advisory_note() {
     let without = run_text(&report(vec![plain], Vec::new()), &OPTIONS);
     assert!(!without.contains("hint: the type"), "{without}");
 }
+
+#[path = "mutation_cli_kill_matrix_tests.rs"]
+mod kill_matrix_targets;
