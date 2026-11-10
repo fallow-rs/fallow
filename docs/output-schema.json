@@ -36166,7 +36166,7 @@
           "items": {
             "type": "string"
           },
-          "description": "Why the evidence of this target is incomplete, sorted. The run-wide\nreasons `partial-mutation-run`, `baseline-failure`, and\n`missing-test-file-metadata` apply to each target.\n`incomplete-mutant-results` means that a test of this target covers a\nmutant with incomplete evidence. `unmatched-target` means that the\ntarget selects no test."
+          "description": "Why the evidence of this target is incomplete, sorted. The run-wide\nreasons `partial-mutation-run`, `baseline-failure`, and\n`missing-test-file-metadata` apply to each target.\n`incomplete-mutant-results` means that a test of this target covers a\nmutant with incomplete evidence. `unmatched-target` means that the\ntarget selects no test. With it, `not-a-test-file` means that the\nrunner does not list the file of the target as a test file, and\n`no-planned-code` means that the file reaches no planned code, so\nthe dry run does not run it. A run stops only when no target selects\na test."
         }
       },
       "required": [

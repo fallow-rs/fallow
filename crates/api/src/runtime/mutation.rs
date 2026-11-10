@@ -1147,6 +1147,17 @@ fn runner_output(
     })
 }
 
+/// True when the run must start the runner. With no planned mutant, the dry
+/// run still runs the static test files, because a hit on a statically
+/// unreached mutant is a static map miss. With `--kill-matrix-for` targets,
+/// the scheduler checks the targets also when no mutant is planned, so a
+/// target that selects no test stops the run.
+fn needs_runner(schedule: &SchedulePlan, targets: &[String]) -> bool {
+    !schedule.mutants.is_empty()
+        || (!schedule.unreached.is_empty() && !schedule.test_files.is_empty())
+        || !targets.is_empty()
+}
+
 /// The public error of a schedule that stopped the run.
 fn execute(
     options: &MutationRunOptions,
@@ -1156,11 +1167,7 @@ fn execute(
 ) -> ProgrammaticResult<Execution> {
     let plan = &planned.plan;
     let schedule = schedule_plan(plan);
-    // With no planned mutant the dry run still runs the static test files,
-    // because a hit on a statically unreached mutant is a static map miss.
-    if schedule.mutants.is_empty()
-        && (schedule.unreached.is_empty() || schedule.test_files.is_empty())
-    {
+    if !needs_runner(&schedule, &options.kill_matrix_targets) {
         return Ok(Execution {
             outcome: None,
             runner: None,
@@ -1803,6 +1810,21 @@ mod tests {
             ..MutationRunOptions::default()
         };
         assert!(validate(&blank).is_err());
+    }
+
+    #[test]
+    fn targets_start_the_runner_also_with_no_planned_mutant() {
+        let schedule = SchedulePlan {
+            mutants: Vec::new(),
+            unreached: Vec::new(),
+            pending: Vec::new(),
+            sampled_out: Vec::new(),
+            known_ids: FxHashSet::default(),
+            test_files: Vec::new(),
+            file_test_files: std::collections::BTreeMap::new(),
+        };
+        assert!(!needs_runner(&schedule, &[]));
+        assert!(needs_runner(&schedule, &["test/a.test.ts".to_owned()]));
     }
 
     #[test]

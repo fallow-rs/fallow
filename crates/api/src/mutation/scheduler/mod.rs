@@ -34,7 +34,7 @@ mod window;
 use classification::{attempt_record, classify, is_load_kill, kill_kind, matrix_evidence};
 use dry_facts::{DryRunFacts, covering_tests, read_dry_run, record_dry_run, reported_duplicates};
 use issues::{no_covering_test_message, static_map_miss_issue, undiscovered_issue};
-use targets::{config_targets, job_targets};
+use targets::{TargetFiles, check_targets, config_targets, job_targets};
 use window::{loop_budget_ms, round_ms, scaled_ms, settles_loop_timeout, timeout_ms};
 mod stored;
 
@@ -262,8 +262,9 @@ pub enum ScheduleError {
     /// The control run of the self-check, with no active mutant, did not pass
     /// through the run path of a mutant run.
     RunPath { message: String, help: String },
-    /// A `--kill-matrix-for` target selects no test of the dry run.
-    UnmatchedTargets(Vec<String>),
+    /// No `--kill-matrix-for` target selects a test of the dry run. Each
+    /// target has the reason.
+    UnmatchedTargets(Vec<targets::ResolvedTarget>),
     /// The runner cannot run a subset of the tests of a file, so the target
     /// tests cannot run apart from the other tests.
     TargetsNeedTestFilter,
@@ -287,11 +288,7 @@ impl std::fmt::Display for ScheduleError {
                 "the test suite fails with no active mutant: {}",
                 messages.join("; ")
             ),
-            Self::UnmatchedTargets(targets) => write!(
-                f,
-                "these --kill-matrix-for targets select no test of the dry run: {}; the dry run runs the test files that reach the planned code",
-                targets.join(", ")
-            ),
+            Self::UnmatchedTargets(targets) => f.write_str(&targets::unmatched_message(targets)),
             Self::TargetsNeedTestFilter => f.write_str(
                 "the runner cannot run single tests, so --kill-matrix-for cannot run the target tests apart from the other tests",
             ),
@@ -1862,6 +1859,16 @@ pub fn run_schedule(
     run_schedule_with_progress(spawner, plan, config, &|_| {})
 }
 
+/// Gives `no_coverage` to each planned and pending mutant of a run with no
+/// dry run.
+fn no_coverage_for_all(plan: &SchedulePlan, outcome: &mut ScheduleOutcome) {
+    for mutant in plan.mutants.iter().chain(&plan.pending) {
+        outcome
+            .results
+            .insert(mutant.id.clone(), MutantOutcome::no_coverage());
+    }
+}
+
 /// Runs the plan: dry run, mutant runs, and retries of survivors and
 /// timeouts. `progress` receives the baseline, mutant and retry events.
 ///
@@ -1875,15 +1882,12 @@ pub fn run_schedule_with_progress(
     progress: MutationProgressSink<'_>,
 ) -> Result<ScheduleOutcome, ScheduleError> {
     let mut outcome = ScheduleOutcome::empty();
-    let no_coverage_for_all = |outcome: &mut ScheduleOutcome| {
-        for mutant in plan.mutants.iter().chain(&plan.pending) {
-            outcome
-                .results
-                .insert(mutant.id.clone(), MutantOutcome::no_coverage());
-        }
-    };
-    if (plan.mutants.is_empty() && plan.unreached.is_empty()) || plan.test_files.is_empty() {
-        no_coverage_for_all(&mut outcome);
+    // In target mode, the runner starts also when no dry run happens. Its
+    // list of test files gives the reason of each target.
+    let no_dry_run =
+        (plan.mutants.is_empty() && plan.unreached.is_empty()) || plan.test_files.is_empty();
+    if no_dry_run && config.targets.is_empty() {
+        no_coverage_for_all(plan, &mut outcome);
         return Ok(outcome);
     }
 
@@ -1907,12 +1911,14 @@ pub fn run_schedule_with_progress(
     };
     outcome.ready = Some(ready.clone());
     outcome.timings.setup = config.clock.now().saturating_duration_since(started);
-    if dry_files.is_empty() {
+    let dry_ran: &[String] = if no_dry_run { &[] } else { &dry_files };
+    let files = TargetFiles::new(&ready.test_files, dry_ran);
+    check_targets(config, runner.caps, files).inspect_err(|_| link.shutdown())?;
+    if dry_ran.is_empty() {
         link.shutdown();
-        no_coverage_for_all(&mut outcome);
+        no_coverage_for_all(plan, &mut outcome);
         return Ok(outcome);
     }
-
     progress(MutationProgress::Baseline {
         test_files: dry_files.len(),
     });
@@ -1928,8 +1934,8 @@ pub fn run_schedule_with_progress(
         }
     };
     record_dry_run(&mut outcome, &dry);
-    let target_ids =
-        config_targets(config, &dry, runner.caps, &mut outcome).inspect_err(|_| link.shutdown())?;
+    let target_ids = config_targets(config, &dry, runner.caps, files, &mut outcome)
+        .inspect_err(|_| link.shutdown())?;
     outcome.unloaded_paths = dry.unloaded_paths;
     let context = JobContext {
         dry_files: &dry_files,

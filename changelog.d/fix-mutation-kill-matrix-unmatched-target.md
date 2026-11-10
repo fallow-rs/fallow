@@ -1,0 +1,4 @@
+### Fixed
+
+- **`fallow mutation --kill-matrix-for` no longer stops the run for one target that selects no test.** Before, one such target made the full run exit `2` with `FALLOW_MUTATION_TARGET_UNMATCHED` after the dry run, and the report had no results for the other targets. A test that runs the code only in a child process, for example with `spawnSync`, is a usual cause. Now the run goes on with the other targets. The entry of the target in `kill_matrix.targets` has the status `incomplete` and the reason `unmatched-target`. The new reasons `not-a-test-file` and `no-planned-code` tell why. The run exits `2` only when no target selects a test. When the dry run runs the file of no target, the run stops before the dry run, so the error comes fast. This is also true when no test file reaches the planned code.
+  (Closes [#4439](https://github.com/fallow-rs/fallow/issues/4439))

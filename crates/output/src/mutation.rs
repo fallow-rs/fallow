@@ -902,7 +902,11 @@ pub struct MutationKillMatrixTarget {
     /// `missing-test-file-metadata` apply to each target.
     /// `incomplete-mutant-results` means that a test of this target covers a
     /// mutant with incomplete evidence. `unmatched-target` means that the
-    /// target selects no test.
+    /// target selects no test. With it, `not-a-test-file` means that the
+    /// runner does not list the file of the target as a test file, and
+    /// `no-planned-code` means that the file reaches no planned code, so
+    /// the dry run does not run it. A run stops only when no target selects
+    /// a test.
     pub reasons: Vec<String>,
 }
 
