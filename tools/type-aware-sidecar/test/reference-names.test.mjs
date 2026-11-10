@@ -5,6 +5,7 @@ import path from "node:path";
 import test from "node:test";
 
 import { parseRequest } from "../src/protocol.mjs";
+import { referenceNamesFromEdges } from "../src/reference-names.mjs";
 import { analyzeSemanticQueries } from "../src/semantic.mjs";
 import { ANALYSIS_OPERATION, WIRE_PROTOCOL_VERSION } from "../src/generated-protocol.mjs";
 
@@ -26,6 +27,11 @@ const FILES = {
     "",
   ].join("\n"),
   "src/ambient.ts": 'import * as types from "./declared";\nexport const d = types.declared(4);\n',
+  "src/chain.ts": 'export { aliased as twice } from "./barrel";\n',
+  "src/chained.ts": 'import { twice as thrice } from "./chain";\nexport const e = thrice(5);\n',
+  "src/unrelated.ts":
+    'import { helper as unrelated } from "./other";\nexport const f = unrelated;\n',
+  "src/other.ts": "export const helper = 1;\n",
 };
 
 const write = (root, relativePath, contents) => {
@@ -72,6 +78,7 @@ test("symbol-trace keeps uses that reach an export only through other names", ()
       analysis.results[0].evidence.map((entry) => [entry.path, entry.role]).toSorted(),
       [
         ["src/ambient.ts", "property-access"],
+        ["src/chained.ts", "call"],
         ["src/helpers.ts", "declaration"],
         ["src/namespace.ts", "property-access"],
         ["src/namespace.ts", "value-reference"],
@@ -83,4 +90,25 @@ test("symbol-trace keeps uses that reach an export only through other names", ()
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+test("reference names follow alias chains and leave out unrelated imports", () => {
+  const edges = [
+    { from: "helper", to: "renamed" },
+    { from: "renamed", to: "twice" },
+    { from: "twice", to: "thrice" },
+    { from: "useState", to: "useState" },
+    { from: "path", to: "join" },
+    { from: null, to: "React" },
+    { from: null, to: "ns" },
+  ];
+  assert.deepEqual([...referenceNamesFromEdges(edges.toReversed(), ["helper"])].toSorted(), [
+    "React",
+    "default",
+    "helper",
+    "ns",
+    "renamed",
+    "thrice",
+    "twice",
+  ]);
 });

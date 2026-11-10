@@ -1,0 +1,3 @@
+### Performance
+
+- **`--type-aware` does less checker work in projects with many imports.** The symbol scan looked up every identifier that an import or export of the project declares, because an alias can lead to a class member or an export that Fallow checks. It now keeps only the aliases whose imported name can lead to such a target, followed through re-export chains. File paths are also resolved once for each request instead of at each use. On the Next.js repository with its root `tsconfig.json`, the scan looks up about half as many identifiers, makes 83% fewer alias round trips, and uses about 30% less CPU. The results do not change.
