@@ -27,6 +27,7 @@
 import path from "node:path";
 
 import { ast, NodeFlags, projectCompilerOptions, sync, SyntaxKind } from "./backend.mjs";
+import { targetDirection } from "./accessor-direction.mjs";
 import { declarationsForSymbol } from "./semantic-identity.mjs";
 
 const { TypeFlags, SymbolFlags } = sync;
@@ -191,53 +192,7 @@ const uniqueDeclaration = (project, symbol) => {
   return declarations.length === 1 ? declarations[0] : null;
 };
 
-// Node kinds that a write target passes through on the way to its assignment:
-// `[a] = xs`, `({ a } = o)`, `({ k: a } = o)`, `(a as T) = v`.
-const TARGET_WRAPPERS = new Set([
-  SyntaxKind.ParenthesizedExpression,
-  SyntaxKind.ArrayLiteralExpression,
-  SyntaxKind.ObjectLiteralExpression,
-  SyntaxKind.ShorthandPropertyAssignment,
-  SyntaxKind.SpreadElement,
-  SyntaxKind.SpreadAssignment,
-  SyntaxKind.AsExpression,
-  SyntaxKind.TypeAssertionExpression,
-  SyntaxKind.NonNullExpression,
-  SyntaxKind.SatisfiesExpression,
-]);
-
-const isAssignmentOperator = (kind) =>
-  kind >= SyntaxKind.FirstAssignment && kind <= SyntaxKind.LastAssignment;
-
-const isIncrementOperator = (kind) =>
-  kind === SyntaxKind.PlusPlusToken || kind === SyntaxKind.MinusMinusToken;
-
-const isWriteTarget = (identifier) => {
-  let node = identifier;
-  for (let parent = node.parent; parent; parent = node.parent) {
-    if (TARGET_WRAPPERS.has(parent.kind)) {
-      node = parent;
-      continue;
-    }
-    switch (parent.kind) {
-      case SyntaxKind.PropertyAssignment:
-        if (parent.initializer !== node) return false;
-        node = parent;
-        continue;
-      case SyntaxKind.BinaryExpression:
-        return parent.left === node && isAssignmentOperator(parent.operatorToken.kind);
-      case SyntaxKind.PrefixUnaryExpression:
-      case SyntaxKind.PostfixUnaryExpression:
-        return isIncrementOperator(parent.operator);
-      case SyntaxKind.ForInStatement:
-      case SyntaxKind.ForOfStatement:
-        return parent.initializer === node;
-      default:
-        return false;
-    }
-  }
-  return false;
-};
+const isWriteTarget = (identifier) => targetDirection(identifier) !== "read";
 
 const writtenSymbolId = (project, identifier) => {
   const symbol = isShorthandName(identifier)

@@ -1519,8 +1519,8 @@ const sourceLineEvidence = (root, candidate, dependencyRoot = null) => {
     ? contractDeclarationPath(root, dependencyRoot, candidate.path)
     : candidate.path;
   const sourcePath = path === null ? null : resolveEvidencePath(root, path, dependencyRoot);
-  if (sourcePath === null)
-    fail(`${candidate.key ?? candidate.path} source path escapes its fixture`);
+  if (sourcePath === null || (dependencyRoot && !existingFile(sourcePath)))
+    fail(`${candidate.key ?? candidate.path} source path is missing or escapes its fixture`);
   let excerpt = "";
   if (existingFile(sourcePath)) {
     const lines = readFileSync(sourcePath, "utf8").split(/\r?\n/);

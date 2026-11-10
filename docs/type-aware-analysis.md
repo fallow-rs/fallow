@@ -505,6 +505,12 @@ discovery. It does not import semantic implementation modules from the current
 workspace. The ledger records the sidecar hash, protocol version, and digests of
 the complete request and normalized response sets. Raw bounded stdout and
 stderr are retained under the local corpus artifact directory for auditability.
+A contract declaration can be in a type package, for example when a class
+implements an interface of `@types/node`. The ledger then records the path as
+`node_modules/...` relative to the workspace dependency root, and the file must
+exist. The TypeScript lib files are only in the platform package of the native
+compiler, so such a path names the platform. Publication verification already
+binds the platform. Candidate declarations and uses must be in the fixture.
 Ledger verification recomputes both digests from the pinned requests and stored
 raw responses. A hash mismatch, malformed or oversized response, missing query
 result, duplicate query identity, invalid source location, timeout, or non-zero
