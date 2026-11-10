@@ -224,6 +224,12 @@ const measuredPairs = (runs, time) => {
   return [...pairs.values()];
 };
 
+/** The clock of the gated overhead: process-tree CPU time when every run has it, else wall time. */
+export const overheadClock = (projects) =>
+  projects.every(({ runs }) => runs.every((run) => Number.isFinite(run.cpu_ms)))
+    ? "process-tree-cpu"
+    : "wall";
+
 /** Refined minus baseline time for each measured pair; CPU time by default, wall time with `"wall"`. */
 export const pairedOverheads = (projects, clock = "cpu") =>
   projects

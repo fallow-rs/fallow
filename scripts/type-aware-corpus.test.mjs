@@ -1052,7 +1052,8 @@ test(
   "measurement captures the CPU time of the process tree, also of a child process",
   { skip: !PROCESS_TREE_RSS_AVAILABLE },
   async () => {
-    const busy = "const end = Date.now() + 400; while (Date.now() < end) {}";
+    // A fixed amount of work, so the CPU time does not depend on the machine load.
+    const busy = "let x = 0; for (let i = 0; i < 4e8; i++) x += i; if (x < 0) console.log(x);";
     const result = await runProcess(
       process.execPath,
       [
@@ -1065,6 +1066,28 @@ test(
 
     assert.equal(result.status, 0);
     assert.ok(result.cpu_ms >= 250, `expected the busy child in cpu_ms, got ${result.cpu_ms}`);
+  },
+);
+
+test(
+  "measurement keeps the CPU time of a run that ends before the first sample",
+  { skip: !PROCESS_TREE_RSS_AVAILABLE },
+  async () => {
+    // The child reports its own CPU time; the runner must not lose the end of the run.
+    const busy = [
+      "let x = 0; for (let i = 0; i < 3e7; i++) x += i; if (x < 0) console.log(x);",
+      "const { user, system } = process.cpuUsage();",
+      "console.log(Math.round((user + system) / 1000));",
+    ].join(" ");
+    const result = await runProcess(process.execPath, ["-e", busy], REPO_ROOT, null);
+    const ownCpuMs = Number(result.stdout.trim());
+
+    assert.equal(result.status, 0);
+    assert.ok(
+      result.cpu_ms >= ownCpuMs - 20,
+      `expected at least the ${ownCpuMs} ms that the child used, got ${result.cpu_ms}`,
+    );
+    assert.doesNotMatch(result.stderr, /^(?:real|user|sys) /mu);
   },
 );
 
@@ -1144,11 +1167,14 @@ test("measurement validation requires complete paired runs", () => {
     /iteration is outside its expected range/,
   );
 
-  if (process.platform !== "win32") {
-    const noCpu = structuredClone(measurements);
-    delete noCpu.projects[0].runs[0].cpu_ms;
-    assert.throws(() => validateMeasurements(discovery, noCpu), /no process-tree CPU time/);
-  }
+  const noCpu = structuredClone(measurements);
+  delete noCpu.projects[0].runs[0].cpu_ms;
+  assert.throws(
+    () => validateMeasurements(discovery, noCpu),
+    process.platform === "win32"
+      ? /mix process-tree CPU time and wall time/
+      : /no process-tree CPU time/,
+  );
 
   measurements.projects[0].runs.pop();
   assert.throws(() => validateMeasurements(discovery, measurements), /incomplete run matrix/);

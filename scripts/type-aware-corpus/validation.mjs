@@ -506,6 +506,16 @@ export const validateMeasurements = (discovery, measurements, dependencies) => {
     seen.add(project.id);
     validateMeasurementProject(project, discovered, measurements, dependencies);
   });
+  // One clock for the whole gate: a mix of CPU and wall time would subtract
+  // one from the other in a pair.
+  const cpuRuns = measurements.projects.flatMap(({ runs }) =>
+    runs.map((run) => Number.isFinite(Object(run).cpu_ms)),
+  );
+  requireValid(
+    cpuRuns.every(Boolean) || !cpuRuns.some(Boolean),
+    "measurement runs mix process-tree CPU time and wall time; rerun measure",
+    dependencies.fail,
+  );
   requireValid(
     equalJson(
       comparableProvenance(discovery.provenance),

@@ -16,6 +16,7 @@
     "tests/coverage-producer-corpus/**",
     "tests/semantic-clone-corpus/**"
   ],
+  "ignoreBinaries": ["getconf"],
   "ignoreDependencies": [
     "@fallow-cli/fallow-node-*",
     "@types/trusted-types",

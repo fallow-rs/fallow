@@ -2,6 +2,8 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  splitTimeReport,
+  timedCommand,
   parsePsCpuTime,
   processTreeCpuMs,
   processTreePids,
@@ -56,4 +58,14 @@ test("overheads use CPU time, and wall time without a CPU sample or on request",
   ];
   assert.deepEqual(pairedOverheads(projects), [500, 200]);
   assert.deepEqual(pairedOverheads(projects, "wall"), [8000, 200]);
+});
+
+test("a time -p report at the end of stderr gives the CPU time and the own stderr", () => {
+  assert.deepEqual(splitTimeReport("warning: x\nreal 1.18\nuser 1.47\nsys 0.97\n"), {
+    stderr: "warning: x\n",
+    cpuMs: 2440,
+  });
+  assert.deepEqual(splitTimeReport("real 0.10\nuser 0.00\nsys 0.01\n"), { stderr: "", cpuMs: 10 });
+  assert.deepEqual(splitTimeReport("user 1.00\n"), { stderr: "user 1.00\n", cpuMs: null });
+  assert.equal(timedCommand("fallow", ["x"], "win32").timed, false);
 });

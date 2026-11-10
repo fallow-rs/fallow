@@ -14,7 +14,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { basename, dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -30,9 +30,9 @@ import {
   writeProjectConfig,
 } from "./type-aware-corpus/runner.mjs";
 import {
-  processTreeCpuMs,
-  recordCpuSample,
-  sampleProcessTree,
+  spawnTimed,
+  splitTimeReport,
+  startUsageMonitor,
 } from "./type-aware-corpus/process-tree.mjs";
 import { contractDeclarationPath, resolveEvidencePath } from "./type-aware-corpus/locations.mjs";
 import {
@@ -41,6 +41,7 @@ import {
   blockedProjects,
   ignoredPaths as manifestIgnoredPaths,
   percentile,
+  overheadClock,
   pairedOverheads,
   renderSummaryMarkdown,
   requirePublicationGo as assertPublicationGo,
@@ -382,7 +383,7 @@ const projectRoot = (project, outDir) => validatePreparedFixture(project, outDir
 export const runProcess = (binary, args, cwd, sidecarBin) =>
   new Promise((accept, reject) => {
     const started = process.hrtime.bigint();
-    const child = spawn(binary, args, {
+    const { child, kill } = spawnTimed(binary, args, {
       cwd,
       env: minimalEnvironment(sidecarBin),
       stdio: ["ignore", "pipe", "pipe"],
@@ -391,15 +392,13 @@ export const runProcess = (binary, args, cwd, sidecarBin) =>
     const stderr = [];
     let stdoutBytes = 0;
     let stderrBytes = 0;
-    let peakRssKb = 0;
-    const maxCpuMsByPid = new Map();
     let killedForOutput = false;
     const collect = (chunks, chunk, stream) => {
       const nextBytes =
         stream === "stdout" ? stdoutBytes + chunk.length : stderrBytes + chunk.length;
       if (nextBytes > MAX_OUTPUT_BYTES) {
         killedForOutput = true;
-        child.kill("SIGKILL");
+        kill();
         return;
       }
       chunks.push(chunk);
@@ -409,27 +408,21 @@ export const runProcess = (binary, args, cwd, sidecarBin) =>
     child.stdout.on("data", (chunk) => collect(stdout, chunk, "stdout"));
     child.stderr.on("data", (chunk) => collect(stderr, chunk, "stderr"));
     child.on("error", reject);
-    const sampleUsage = () => {
-      const sample = sampleProcessTree(child.pid);
-      if (sample !== null) peakRssKb = Math.max(peakRssKb, sample.rssKb);
-      recordCpuSample(maxCpuMsByPid, sample);
-    };
-    sampleUsage();
-    const sampler = setInterval(sampleUsage, PROCESS_TREE_RSS_SAMPLE_INTERVAL_MS);
+    const monitor = startUsageMonitor(child.pid, PROCESS_TREE_RSS_SAMPLE_INTERVAL_MS);
     child.on("close", (status, signal) => {
-      clearInterval(sampler);
-      sampleUsage();
+      const usage = monitor.stop();
       const wallMs = Number(process.hrtime.bigint() - started) / 1_000_000;
+      const timedStderr = splitTimeReport(Buffer.concat(stderr).toString("utf8"));
       if (killedForOutput) reject(new Error(`fallow output exceeded ${MAX_OUTPUT_BYTES} bytes`));
       else
         accept({
           status,
           signal,
           stdout: Buffer.concat(stdout).toString("utf8"),
-          stderr: Buffer.concat(stderr).toString("utf8"),
+          stderr: timedStderr.stderr,
           wall_ms: wallMs,
-          cpu_ms: processTreeCpuMs(maxCpuMsByPid),
-          peak_process_tree_rss_kb: peakRssKb || null,
+          cpu_ms: timedStderr.cpuMs ?? usage.sampledCpuMs,
+          peak_process_tree_rss_kb: usage.peakRssKb,
         });
     });
   });
@@ -2626,7 +2619,7 @@ const summarize = (manifest, options, publicationMode = "write") => {
         ),
       },
       marginal_overhead_ms: {
-        clock: "process-tree-cpu",
+        clock: overheadClock(measurements.projects),
         median: percentile(overheads, 0.5),
         p95: marginalOverheadP95,
       },
