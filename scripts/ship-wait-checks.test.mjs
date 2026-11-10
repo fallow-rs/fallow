@@ -18,6 +18,7 @@ import {
   parseGitAncestor,
   parseGitHead,
   reportChecks,
+  reviewRequiredNote,
   waitForChecks,
   waitForCommitRuns,
   waitForPullRequestChecks,
@@ -622,6 +623,19 @@ test("parseGhMergeable reads the mergeable field of gh pr view", () => {
     ok: false,
     error: "spawn gh ENOENT",
   });
+});
+
+test("reviewRequiredNote names the missing review only when GitHub requires one", () => {
+  const note = reviewRequiredNote("REVIEW_REQUIRED", { pr: "4421", repo: null });
+  assert.match(note, /4421.*approving review.*CODEOWNERS/u);
+  assert.match(note, /gh pr review 4421 --approve`/u);
+  assert.match(
+    reviewRequiredNote("REVIEW_REQUIRED", { pr: "288", repo: "fallow-rs/docs" }),
+    /gh pr review 288 --approve --repo fallow-rs\/docs`/u,
+  );
+  for (const decision of ["APPROVED", "CHANGES_REQUESTED", "", null, undefined]) {
+    assert.equal(reviewRequiredNote(decision, { pr: "4421", repo: null }), null);
+  }
 });
 
 test("parseGhRuns turns each workflow run into a check", () => {
