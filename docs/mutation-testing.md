@@ -508,10 +508,28 @@ or relational mutant, so it adds little test-strength signal for its run time.
   `rc` suffix counts, because some plugins also list application files as
   config, for example `codegen*.ts`, `src/module.ts` or `app/routes.ts`.
   The config and always-used globs of external plugins count too. In a tool config file, a
-  top-level `module.exports = ...` statement counts as the default export. A mutant inside a function in such an export is not
-  pruned, so an inline Vite plugin keeps its mutants. The rule lives in
-  `framework_config_exports` (`crates/engine/src/mutation/mod.rs`) and
-  `framework_regions` (`crates/engine/src/mutation/plan.rs`).
+  top-level `module.exports = ...` statement counts as the default export.
+  When no runner test and no other entry point reaches a tool config file,
+  each of its mutants is pruned, also a mutant in a function such as an inline
+  Vite plugin hook or a middleware callback. That code runs only in the build
+  tool. When a test or an application entry imports the tool config file, only
+  the config object is pruned, because that code can call the functions. An
+  example is an Angular `src/app/app.config.ts` that `src/main.ts` imports. In a framework config export of another file,
+  a mutant inside a function is not pruned. The rule lives in
+  `framework_config_exports` (`crates/engine/src/mutation/mod.rs`),
+  `framework_regions` and `file_prune` (`crates/engine/src/mutation/plan.rs`).
+- Mutants in a file that only tool config files reach are pruned
+  (`build-tool-only`). An example is a Vite plugin module that only
+  `vite.config.ts` imports, and the modules that it imports. The plan walks
+  the module graph from the tool config files of the `framework-config` rule,
+  and a second time from each other entry point. A file that the second walk
+  reaches is not pruned, so a file that a test, a setup file or application
+  code also imports keeps its normal status. The rule runs only when the plan
+  applies the `framework-config` rule. Like `dead-code` and `generated`, the
+  reason holds for the full file, so it comes before `side-effect-sink`. The
+  plan counts report these mutants as `pruned_build_tool_only`, a field that
+  is absent when it is 0. The rule lives in `build_tool_reach`
+  (`crates/engine/src/mutation/build_tool.rs`).
 - Fallow does not write to project files. The instrumented files live in the
   Fallow cache. The report lists any path that the tests changed.
 - The companions run in their own process group on Unix and in a Job Object on

@@ -21773,7 +21773,8 @@ test_files: string[]
  */
 no_test_files: boolean
 /**
- * True when the plan applied the `framework-config` prune rule.
+ * True when the plan applied the `framework-config` and
+ * `build-tool-only` prune rules.
  */
 framework_config_checked: boolean
 /**
@@ -21825,6 +21826,10 @@ pruned_side_effect_sink: number
  * Mutants in framework config exports.
  */
 pruned_framework_config: number
+/**
+ * Mutants in files that only tool config files reach. Absent when 0.
+ */
+pruned_build_tool_only?: number
 }
 /**
  * One mutant of a plan.

@@ -1052,7 +1052,8 @@ pub fn render_plan(plan: &MutationPlanOutput) -> String {
     let pruned = counts.pruned_dead_code
         + counts.pruned_generated
         + counts.pruned_side_effect_sink
-        + counts.pruned_framework_config;
+        + counts.pruned_framework_config
+        + counts.pruned_build_tool_only;
     let sampled = if counts.sampled_out > 0 {
         format!(" ({} sampled out)", counts.sampled_out)
     } else {

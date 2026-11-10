@@ -129,6 +129,7 @@ pub const fn plan_counts(plan: &MutationPlan) -> MutationPlanCountsOutput {
         pruned_generated: plan.counts.pruned.generated,
         pruned_side_effect_sink: plan.counts.pruned.side_effect_sink,
         pruned_framework_config: plan.counts.pruned.framework_config,
+        pruned_build_tool_only: plan.counts.pruned.build_tool_only,
     }
 }
 
@@ -1272,6 +1273,29 @@ mod tests {
             "{mutants}"
         );
         assert!(files.contains("test/a.test.ts"), "{files}");
+    }
+
+    #[test]
+    fn the_build_tool_only_count_is_absent_when_zero() {
+        let mut plan = plan(
+            vec![planned(
+                "m1",
+                Some(1),
+                MutantDisposition::Pruned(PruneReason::BuildToolOnly),
+                None,
+            )],
+            0,
+        );
+        let mutants = serde_json::to_string(&plan_mutants(&plan)).expect("json");
+        assert!(
+            mutants.contains(r#""prune_reason":"build-tool-only""#),
+            "{mutants}"
+        );
+        let without = serde_json::to_string(&plan_counts(&plan)).expect("json");
+        assert!(!without.contains("pruned_build_tool_only"), "{without}");
+        plan.counts.pruned.build_tool_only = 1;
+        let with = serde_json::to_string(&plan_counts(&plan)).expect("json");
+        assert!(with.contains(r#""pruned_build_tool_only":1"#), "{with}");
     }
 
     #[test]

@@ -33306,7 +33306,7 @@
         },
         "framework_config_checked": {
           "type": "boolean",
-          "description": "True when the plan applied the `framework-config` prune rule."
+          "description": "True when the plan applied the `framework-config` and\n`build-tool-only` prune rules."
         },
         "skipped_files": {
           "type": "array",
@@ -34618,6 +34618,10 @@
         "pruned_framework_config": {
           "type": "integer",
           "description": "Mutants in framework config exports."
+        },
+        "pruned_build_tool_only": {
+          "type": "integer",
+          "description": "Mutants in files that only tool config files reach. Absent when 0."
         }
       },
       "required": [
