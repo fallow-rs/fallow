@@ -191,13 +191,7 @@ pub(super) fn build(
         skipped_files.extend(outcome.skipped);
     }
     if let Some(ids) = &request.mutant_ids {
-        for entry in &mut mutants {
-            if !ids.contains(entry.planned.mutant.id.as_str())
-                && !matches!(entry.planned.disposition, MutantDisposition::Pruned(_))
-            {
-                entry.planned.disposition = MutantDisposition::Pruned(PruneReason::NotSelected);
-            }
-        }
+        prune_unselected(&mut mutants, ids);
     }
     if let Some(per_line) = request.mutants_per_line {
         super::sampling::sample_per_line(&mut mutants, per_line);
@@ -234,6 +228,17 @@ pub(super) fn build(
         skipped_files,
         unmatched_paths,
         skipped_tests: skipped_tests(&context),
+    }
+}
+
+/// Prunes each mutant that is not in `ids` and that no other rule pruned.
+fn prune_unselected(mutants: &mut [RankEntry], ids: &BTreeSet<String>) {
+    for entry in mutants {
+        if !ids.contains(entry.planned.mutant.id.as_str())
+            && !matches!(entry.planned.disposition, MutantDisposition::Pruned(_))
+        {
+            entry.planned.disposition = MutantDisposition::Pruned(PruneReason::NotSelected);
+        }
     }
 }
 
