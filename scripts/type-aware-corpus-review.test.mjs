@@ -5,6 +5,11 @@ import { resolve } from "node:path";
 import test from "node:test";
 
 import {
+  candidateSetDigest,
+  independentReviewDigest,
+  independentReviewErrors,
+} from "./type-aware-corpus.mjs";
+import {
   recordReviews,
   reviewableEntries,
   writeReviewPackets,
@@ -16,7 +21,14 @@ const entry = (key, status, extra = {}) => ({
   key,
   project_id: "p",
   semantic_status: status,
-  candidate: { parent_name: "Owner", member_name: key, kind: "class_method" },
+  candidate: {
+    path: "src/owner.ts",
+    parent_name: "Owner",
+    member_name: key,
+    kind: "class_method",
+    line: 2,
+    col: 2,
+  },
   source_evidence: { declaration: location("src/owner.ts", 2), uses: [] },
   contract: null,
   ...extra,
@@ -61,12 +73,17 @@ const fail = (message) => {
   throw new Error(message);
 };
 
-const approve = (key, buckets = []) => ({
+const approve = (key, buckets = [], reason = "ok") => ({
   key,
   verdict: "approve",
-  reason: "ok",
+  reason,
   feature_buckets: buckets,
 });
+
+const reject = (key, reason) => ({ key, verdict: "reject", reason, feature_buckets: [] });
+
+const review = (reason, overrides = {}) =>
+  ["tac_a", "tac_b", "tac_c"].map((key) => overrides[key] ?? approve(key, [], reason));
 
 const reviewsFixture = (t, reviewers, overrule = null) => {
   const root = mkdtempSync(resolve(tmpdir(), "fallow-corpus-reviews-"));
@@ -79,13 +96,13 @@ const reviewsFixture = (t, reviewers, overrule = null) => {
   return root;
 };
 
-const record = (reviewsDir) =>
+const record = (reviewsDir, reviewDigests = digests) =>
   recordReviews({
     ledger,
     decisions,
     manifest,
     reviewsDir,
-    digests,
+    digests: reviewDigests,
     reviewedOn: "2026-11-10",
     fail,
   });
@@ -99,8 +116,11 @@ test("reviewable entries are the confirmed, contract and known-unused records", 
 
 test("record-reviews binds the reviews and keeps only the buckets that all reviewers give", (t) => {
   const reviewsDir = reviewsFixture(t, {
-    first: [approve("tac_a", ["generics", "unlisted"]), approve("tac_b"), approve("tac_c")],
-    second: [approve("tac_a", ["generics"]), approve("tac_b", ["generics"]), approve("tac_c")],
+    first: review("first", { tac_a: approve("tac_a", ["generics", "unlisted"]) }),
+    second: review("second", {
+      tac_a: approve("tac_a", ["generics"]),
+      tac_b: approve("tac_b", ["generics"]),
+    }),
   });
   const result = record(reviewsDir);
   assert.equal(result.reviewed_on, "2026-11-10");
@@ -127,45 +147,60 @@ test("record-reviews binds the reviews and keeps only the buckets that all revie
   );
 });
 
+test("recorded reviews pass the review validation of adjudicate", (t) => {
+  const result = record(reviewsFixture(t, { first: review("first"), second: review("second") }), {
+    candidateSetDigest,
+    independentReviewDigest,
+  });
+  assert.deepEqual(independentReviewErrors(ledger.candidates, result.independent_reviews), []);
+});
+
 test("record-reviews fails on a rejection without a recorded overrule", (t) => {
-  const rejected = { key: "tac_b", verdict: "reject", reason: "no caller", feature_buckets: [] };
-  const records = [approve("tac_a"), rejected, approve("tac_c")];
+  const rejected = { tac_b: reject("tac_b", "no caller") };
   assert.throws(
-    () =>
-      record(
-        reviewsFixture(t, {
-          first: records,
-          second: [approve("tac_a"), approve("tac_b"), approve("tac_c")],
-        }),
-      ),
+    () => record(reviewsFixture(t, { first: review("first", rejected), second: review("second") })),
     /tac_b is rejected \(first: no caller\)/,
   );
+  const reviewers = { first: review("first", rejected), second: review("second", rejected) };
+  assert.throws(() => record(reviewsFixture(t, reviewers, { tac_b: " " })), /tac_b is rejected/);
   const overruled = record(
-    reviewsFixture(
-      t,
-      { first: records, second: records },
-      { tac_b: "Overrides behavior of its class." },
-    ),
+    reviewsFixture(t, reviewers, { tac_b: "Overrides behavior of its class." }),
   );
   assert.deepEqual(overruled.overruled_rejections, {
     tac_b: { reason: "Overrides behavior of its class.", rejected_by: ["first", "second"] },
   });
 });
 
-test("record-reviews requires two complete reviewer files for each project", (t) => {
-  const complete = [approve("tac_a"), approve("tac_b"), approve("tac_c")];
-  assert.throws(
-    () => record(reviewsFixture(t, { only: complete })),
-    /needs two or more reviewer files/,
-  );
-  assert.throws(
-    () => record(reviewsFixture(t, { first: complete, second: complete.slice(1) })),
-    /second must review exactly the packet records \(missing: tac_a/,
-  );
-  assert.throws(
-    () => record(reviewsFixture(t, { first: complete, second: [...complete, approve("tac_x")] })),
-    /unknown: tac_x/,
-  );
+test("record-reviews requires two separate and complete reviewer files", (t) => {
+  const first = review("first");
+  const cases = [
+    [{ only: first }, /needs two or more reviewer files/],
+    [{ first, second: first }, /identical reviewer files/],
+    [
+      { first, second: review("second").slice(1) },
+      /second must review exactly the packet records \(missing: tac_a/,
+    ],
+    [{ first, second: [...review("second"), approve("tac_x")] }, /unknown: tac_x/],
+    [
+      { first, second: [...review("second"), reject("tac_b", "late")] },
+      /second\.json repeats a record key/,
+    ],
+    [
+      { first, second: review("second", { tac_a: { ...approve("tac_a"), verdict: "maybe" } }) },
+      /invalid verdict for tac_a/,
+    ],
+    [
+      {
+        first,
+        second: review("second", { tac_a: { ...approve("tac_a"), feature_buckets: "generics" } }),
+      },
+      /feature_buckets of tac_a as an array of strings/,
+    ],
+    [{ first, overrule: review("second") }, /overrule\.json belongs in/],
+  ];
+  for (const [reviewers, message] of cases) {
+    assert.throws(() => record(reviewsFixture(t, reviewers)), message);
+  }
 });
 
 test("review packets show the source around each location, also in the dependency root", (t) => {

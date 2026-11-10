@@ -517,7 +517,7 @@ export const candidateKey = (projectId, candidate) => {
   return `tac_${createHash("sha256").update(identity).digest("hex").slice(0, 20)}`;
 };
 
-const candidateSetDigest = (keys) =>
+export const candidateSetDigest = (keys) =>
   createHash("sha256")
     .update(`${[...keys].toSorted().join("\n")}\n`)
     .digest("hex");
@@ -2715,7 +2715,9 @@ const reviewPackets = (manifest, outDir) =>
   });
 
 const writeRecordedReviews = (manifest, options) => {
-  if (!options.reviewsDir) fail("record-reviews requires --reviews DIR");
+  if (!options.reviewsDir || options.projects.length > 0) {
+    fail("record-reviews requires --reviews DIR and the complete corpus, without --project");
+  }
   const decisions = recordReviews({
     ledger: readJson(resolve(options.outDir, "ledger.json"), "evidence ledger"),
     decisions: readJson(DEFAULT_ADJUDICATION, "adjudication decisions"),

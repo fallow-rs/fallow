@@ -149,12 +149,24 @@ const readReviewerFiles = (reviewsDir, projectId, fail) => {
         .toSorted()
     : [];
   if (files.length < 2) fail(`${projectId} needs two or more reviewer files in ${directory}`);
-  return files.map((name) => {
+  if (files.includes(OVERRULE_FILE))
+    fail(`${OVERRULE_FILE} belongs in ${reviewsDir}, not in ${directory}`);
+  const reviewers = files.map((name) => {
     const records = Object(JSON.parse(readFileSync(resolve(directory, name), "utf8"))).records;
     if (!Array.isArray(records)) fail(`${projectId}/${name} must have a records array`);
-    return { reviewer: basename(name, ".json"), records: new Map(records.map((r) => [r.key, r])) };
+    const byKey = new Map(records.map((r) => [r.key, r]));
+    if (byKey.size !== records.length) fail(`${projectId}/${name} repeats a record key`);
+    return { reviewer: basename(name, ".json"), records: byKey, text: JSON.stringify(records) };
   });
+  if (new Set(reviewers.map(({ text }) => text)).size !== reviewers.length) {
+    fail(`${projectId} has identical reviewer files; each reviewer must review separately`);
+  }
+  return reviewers;
 };
+
+const validBuckets = (buckets) =>
+  buckets === undefined ||
+  (Array.isArray(buckets) && buckets.every((bucket) => typeof bucket === "string"));
 
 const requireCompleteReview = (projectId, reviewer, keys, fail) => {
   const expected = new Set(keys);
@@ -168,6 +180,11 @@ const requireCompleteReview = (projectId, reviewer, keys, fail) => {
   for (const [key, record] of reviewer.records) {
     if (!["approve", "reject"].includes(record.verdict)) {
       fail(`${projectId}/${reviewer.reviewer} has an invalid verdict for ${key}`);
+    }
+    if (!validBuckets(record.feature_buckets)) {
+      fail(
+        `${projectId}/${reviewer.reviewer} must give feature_buckets of ${key} as an array of strings`,
+      );
     }
   }
 };
