@@ -6,11 +6,13 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { CompanionError, expectRequest, isPlainObject } from "../protocol.mjs";
 import { overlayErrorsPath } from "../runtime/child.mjs";
 import { LOOP_TIMEOUT_NAME, WALL_LOOP_TIMEOUT_NAME } from "../runtime/global.mjs";
+import { recordEntries } from "../runtime/records.mjs";
 import { SIDES } from "../runtime/replay.mjs";
 import { createWorkDir } from "./child-process.mjs";
 import { REUSED_POOLS, createReusedPool } from "./vitest-reuse.mjs";
 import {
   TEST_ID_SEPARATOR,
+  addRecords,
   attributeHits,
   buildOverlay,
   byCodeUnit,
@@ -32,6 +34,7 @@ import {
   unsupportedVersion,
   validateDryRun,
   validateInit,
+  validateRecord,
   validateReplay,
   validateRun,
 } from "./common.mjs";
@@ -46,6 +49,7 @@ const SUBPROCESS_PRELOAD = new URL("../runtime/node-subprocess-preload.mjs", imp
 const SETUP_FILE = fileURLToPath(new URL("../runtime/vitest-setup.mjs", import.meta.url));
 const REPLAY_FILE = fileURLToPath(new URL("../runtime/vitest-replay.mjs", import.meta.url));
 const REPLAY_KEY = "fallowReplay";
+const RECORD_ARGS_KEY = "fallowRecordArgs";
 // The time of the module loads and of Vitest itself in a replay test, on top
 // of the call timeouts.
 const REPLAY_TEST_MARGIN_MS = 10_000;
@@ -820,9 +824,18 @@ export const createAdapter = async (init) => {
   const reuse = createReuseControl(vitest.projects, workers);
   const runSpecifications = async (
     specifications,
-    { mutantId, bail, timeoutMs = null, loopBudgetMs = null, shared = false, reuseProcess = null },
+    {
+      mutantId,
+      bail,
+      timeoutMs = null,
+      loopBudgetMs = null,
+      shared = false,
+      reuseProcess = null,
+      recordArgs = false,
+    },
   ) => {
     provideActiveMutant(vitest, mutantId, loopBudgetMs);
+    for (const project of vitest.projects) project.provide(RECORD_ARGS_KEY, recordArgs);
     // A mutant run in a shared worker keeps the worker process for the next
     // mutant run. Control and dry runs, and runs without bail, start a new
     // one. The dry-run check passes `reuseProcess` to test the reused process.
@@ -969,6 +982,32 @@ export const createAdapter = async (init) => {
     });
   };
 
+  /**
+   * Runs the dry-run test files once more with the recorder on, and gives
+   * the recorded arguments. The test results of this pass count for
+   * nothing, so a test that the wraps change never changes a run.
+   */
+  const record = async (request) => {
+    validateRecord(request);
+    const started = performance.now();
+    const specifications = dryRunSelection(request.test_files).map(([, spec]) => spec);
+    const result = await runSpecifications(specifications, {
+      mutantId: null,
+      bail: false,
+      recordArgs: true,
+    });
+    const records = new Map();
+    for (const testModule of result.testModules) {
+      for (const testCase of testModule.children.allTests()) {
+        addRecords(records, testCase.meta().fallowArgs);
+      }
+    }
+    return {
+      recorded_args: recordEntries(records),
+      duration_ms: Math.round(performance.now() - started),
+    };
+  };
+
   /** Groups the requested tests into one specification for each test module. */
   const specificationsFor = (requested) => {
     const groups = new Map();
@@ -1103,8 +1142,8 @@ export const createAdapter = async (init) => {
     const testCase = result.testModules.flatMap((testModule) => [
       ...testModule.children.allTests(),
     ])[0];
-    const record = testCase?.meta().fallowReplay;
-    if (isPlainObject(record)) return record;
+    const replayed = testCase?.meta().fallowReplay;
+    if (isPlainObject(replayed)) return replayed;
     const errors = [
       ...runErrors(result, root).map((error) => error.message),
       ...(testCase?.result().errors ?? []).map((error) => errorMessage(error)),
@@ -1128,8 +1167,8 @@ export const createAdapter = async (init) => {
     const calls = [];
     for (let index = 1; index <= request.calls; index += 1) {
       for (const side of SIDES) {
-        const record = await replayCall(project, request, { side, module_path: entry.path });
-        calls.push({ side, index, ...record });
+        const call = await replayCall(project, request, { side, module_path: entry.path });
+        calls.push({ side, index, ...call });
       }
     }
     return { calls, duration_ms: Math.round(performance.now() - started) };
@@ -1146,11 +1185,13 @@ export const createAdapter = async (init) => {
       fresh_modules_per_run: freshModulesPerRun,
       batch_mutants: false,
       replay: true,
+      record: true,
     },
     notes: runnerNotes(vitest.projects),
     dryRun,
     run,
     replay,
+    record,
     reload: async () => ({ method: freshModulesPerRun ? "noop" : "restart_required" }),
     close: async () => {
       try {

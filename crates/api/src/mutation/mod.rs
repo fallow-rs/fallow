@@ -14,6 +14,7 @@ pub(crate) mod last_report;
 pub(crate) mod manifest;
 pub(crate) mod node_args;
 pub(crate) mod protocol;
+pub(crate) mod recorded_args;
 pub(crate) mod replay;
 pub(crate) mod report;
 pub(crate) mod result_cache;
@@ -69,6 +70,21 @@ impl Default for MutationRunScope {
     }
 }
 
+/// How a run records the arguments of the changed exported functions in its
+/// dry run. The values stay in the gitignored cache directory.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RecordArgsMode {
+    /// No recording.
+    #[default]
+    Off,
+    /// Keep the types of the arguments only.
+    Shapes,
+    /// Keep the argument values, after the redaction of secrets, so that a
+    /// replay can use them.
+    Values,
+}
+
 /// Options of [`crate::replay_mutation`]: one export called on the original
 /// and on one mutant.
 #[derive(Debug, Clone, Default)]
@@ -89,8 +105,10 @@ pub struct MutationReplayOptions {
     /// The export to call. `None` calls the export whose declaration holds
     /// the function of the mutant.
     pub export: Option<String>,
-    /// The arguments of each call, in the replay encoding.
-    pub args: Vec<serde_json::Value>,
+    /// The arguments of each call, in the replay encoding. `None` replays
+    /// the inputs that a `--record-args values` run recorded for the
+    /// export, up to the first witness.
+    pub args: Option<Vec<serde_json::Value>>,
     /// The JavaScript runtime, as for a run.
     pub runtime: Option<PathBuf>,
     /// The config file of the test runner, as for a run.
@@ -227,4 +245,7 @@ pub struct MutationRunOptions {
     /// dirty path fails the run with `FALLOW_MUTATION_NON_TEST_CHANGE`, so
     /// the run proves a change of the tests only. `allow_dirty` wins.
     pub test_changes_only: bool,
+    /// Record the arguments of the changed exported functions in a record
+    /// pass after the mutant runs. Off by default.
+    pub record_args: RecordArgsMode,
 }

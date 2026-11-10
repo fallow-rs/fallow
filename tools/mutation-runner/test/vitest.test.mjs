@@ -66,6 +66,7 @@ for (const { packageName, version } of VITEST_MAJORS) {
         fresh_modules_per_run: true,
         batch_mutants: false,
         replay: true,
+        record: true,
       });
       assert.deepEqual(ready.notes, []);
     });

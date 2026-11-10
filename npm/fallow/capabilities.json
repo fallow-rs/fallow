@@ -1326,6 +1326,16 @@
           ]
         },
         {
+          "name": "--record-args",
+          "type": "string",
+          "required": false,
+          "description": "Record the arguments of the changed exported functions in a record pass (off by default). `shapes` keeps their types, `values` keeps the values for `fallow mutation inspect --replay`. The values stay in the gitignored cache directory for 7 days, and an input with a secret (by key name or by entropy) is not kept",
+          "possible_values": [
+            "shapes",
+            "values"
+          ]
+        },
+        {
           "name": "--min-score",
           "type": "string",
           "required": false,

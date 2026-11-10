@@ -35,6 +35,15 @@ const MIN_SCORE_EXIT_CODE: u8 = 1;
 /// The exit code of invalid input and execution errors.
 const INPUT_EXIT_CODE: u8 = 2;
 
+/// The values of `--record-args`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum RecordArgsFlag {
+    /// Keep the types of the arguments only.
+    Shapes,
+    /// Keep the argument values, after the redaction of secrets.
+    Values,
+}
+
 #[derive(Subcommand)]
 pub enum MutationSubcommand {
     /// Show one mutant of a saved report against the current file. Runs no code.
@@ -61,7 +70,8 @@ pub enum MutationSubcommand {
         /// The arguments of the replay call as a JSON array, for example
         /// `[2, 3]`. Objects with a `$replay` tag give `undefined`, special
         /// numbers, bigints, dates, regular expressions, maps, sets and
-        /// typed arrays (default: no arguments).
+        /// typed arrays (default: up to 3 inputs that a `fallow mutation
+        /// --record-args values` run recorded for the export).
         #[arg(long = "args", value_name = "JSON", requires = "replay")]
         replay_args: Option<String>,
         /// The export to call (default: the export that holds the mutated
@@ -148,6 +158,13 @@ pub struct MutationArgs {
     /// effect. This is a flag only, never a config key.
     #[arg(long)]
     pub allow_side_effects: bool,
+    /// Record the arguments of the changed exported functions in a record pass
+    /// (off by default). `shapes` keeps their types, `values` keeps the
+    /// values for `fallow mutation inspect --replay`. The values stay in the
+    /// gitignored cache directory for 7 days, and an input with a secret
+    /// (by key name or by entropy) is not kept.
+    #[arg(long, value_name = "MODE", value_enum)]
+    pub record_args: Option<RecordArgsFlag>,
     /// Exit with code 1 when the mutation score is below this percentage.
     #[arg(long, value_name = "0-100")]
     pub min_score: Option<f64>,
@@ -434,6 +451,11 @@ pub fn run_options(input: &MutationCliInput<'_>) -> Result<MutationRunOptions, P
         kill_matrix_targets: input.args.kill_matrix_for.clone(),
         mutant_ids: Vec::new(),
         test_changes_only: false,
+        record_args: match input.args.record_args {
+            None => fallow_api::mutation::RecordArgsMode::Off,
+            Some(RecordArgsFlag::Shapes) => fallow_api::mutation::RecordArgsMode::Shapes,
+            Some(RecordArgsFlag::Values) => fallow_api::mutation::RecordArgsMode::Values,
+        },
     })
 }
 
@@ -1042,13 +1064,14 @@ struct ReplayFlags<'a> {
     call_timeout: Option<&'a str>,
 }
 
-/// Parses the `--args` value: a JSON array of replay values.
-fn replay_args(text: Option<&str>) -> Result<Vec<serde_json::Value>, ProgrammaticError> {
+/// Parses the `--args` value: a JSON array of replay values. Without
+/// `--args`, the replay uses the recorded inputs.
+fn replay_args(text: Option<&str>) -> Result<Option<Vec<serde_json::Value>>, ProgrammaticError> {
     let Some(text) = text else {
-        return Ok(Vec::new());
+        return Ok(None);
     };
     match serde_json::from_str::<serde_json::Value>(text) {
-        Ok(serde_json::Value::Array(args)) => Ok(args),
+        Ok(serde_json::Value::Array(args)) => Ok(Some(args)),
         Ok(_) => Err(input_error(
             "--args must be a JSON array, for example [2, 3]",
             "mutation.replay.args",

@@ -153,6 +153,7 @@ pub(super) fn build(
                 .clone()
                 .unwrap_or_else(|| Operator::DEFAULT.to_vec()),
             ranges: None,
+            record_exports: request.record_exports,
         },
         test_entries: FxHashMap::default(),
         runner_unreached: FxHashSet::default(),

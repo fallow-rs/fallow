@@ -5,7 +5,7 @@ import { pathToFileURL } from "node:url";
 import { RUNNERS } from "../generated-protocol.mjs";
 import { CompanionError, expectRequest, isPlainObject } from "../protocol.mjs";
 import { escapeRegExp, realPath } from "../runtime/child.mjs";
-import { decodeValue } from "../runtime/replay-value.mjs";
+import { RECORD_LIMIT, decodeValue } from "../runtime/replay-value.mjs";
 
 export { escapeRegExp, realPath };
 
@@ -114,6 +114,32 @@ export const dryRunTimeout = (timeoutMs) =>
 
 export const validateDryRun = (request) => {
   expectRequest(isOptional(request.test_files, isStringList), "test_files must be a list of paths");
+};
+
+/** Checks a `record` request: the optional test files, as for a dry run. */
+export const validateRecord = validateDryRun;
+
+/**
+ * Adds the argument records of one test or one file to `records`, a map
+ * from a function key to its distinct inputs and its counts of reasons. A
+ * function keeps at most `RECORD_LIMIT` inputs, in first record order.
+ */
+export const addRecords = (records, entries = []) => {
+  for (const { key, inputs, not_replayable: refused } of entries) {
+    let entry = records.get(key);
+    if (entry === undefined) {
+      entry = { inputs: new Map(), refused: new Map() };
+      records.set(key, entry);
+    }
+    for (const input of inputs) {
+      const text = JSON.stringify(input);
+      if (entry.inputs.size < RECORD_LIMIT && !entry.inputs.has(text))
+        entry.inputs.set(text, input);
+    }
+    for (const { reason, count } of refused) {
+      entry.refused.set(reason, (entry.refused.get(reason) ?? 0) + count);
+    }
+  }
 };
 
 /**

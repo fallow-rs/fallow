@@ -49,6 +49,7 @@ pub const COMPANION_FILES: &[EmbeddedFile] = embedded!(
     "runtime/node-subprocess-preload.mjs",
     "runtime/node-test-preload.mjs",
     "runtime/overlay-hook.mjs",
+    "runtime/records.mjs",
     "runtime/replay-value.mjs",
     "runtime/replay.mjs",
     "runtime/subprocess-options.mjs",

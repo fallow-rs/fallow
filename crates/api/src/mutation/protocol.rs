@@ -76,7 +76,15 @@ pub struct ReplayRequest {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
     Init(InitRequest),
-    DryRun { test_files: Vec<String> },
+    DryRun {
+        test_files: Vec<String>,
+    },
+    /// Runs the dry-run test files again with the recorder on, and gives the
+    /// recorded arguments of the wrapped exports. Its test results count for
+    /// nothing.
+    Record {
+        test_files: Vec<String>,
+    },
     Run(RunRequest),
     Reload,
     Replay(ReplayRequest),
@@ -91,6 +99,7 @@ impl Request {
             Self::Run(_) => "run",
             Self::Reload => "reload",
             Self::Replay(_) => "replay",
+            Self::Record { .. } => "record",
             Self::Shutdown => "shutdown",
         }
     }
@@ -103,6 +112,7 @@ impl Request {
             Self::Run(_) => Some("run_result"),
             Self::Reload => Some("reloaded"),
             Self::Replay(_) => Some("replay_result"),
+            Self::Record { .. } => Some("record_result"),
             Self::Shutdown => None,
         }
     }
@@ -115,7 +125,9 @@ impl Request {
         object.insert("type".to_owned(), self.type_name().into());
         let body = match self {
             Self::Init(body) => serde_json::to_value(body),
-            Self::DryRun { test_files } => Ok(serde_json::json!({ "test_files": test_files })),
+            Self::DryRun { test_files } | Self::Record { test_files } => {
+                Ok(serde_json::json!({ "test_files": test_files }))
+            }
             Self::Run(body) => serde_json::to_value(body),
             Self::Replay(body) => serde_json::to_value(body),
             Self::Reload | Self::Shutdown => Ok(serde_json::Value::Null),
@@ -140,6 +152,8 @@ pub struct Capabilities {
     pub batch_mutants: bool,
     /// The adapter answers a `replay` request.
     pub replay: bool,
+    /// The adapter answers a `record` request.
+    pub record: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -211,6 +225,35 @@ pub struct DryRunResult {
     /// these ids is not reliable. An older companion leaves it out.
     #[serde(default)]
     pub duplicate_test_ids: Vec<String>,
+}
+
+/// The body of a `record_result` response.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct RecordResult {
+    #[serde(default)]
+    pub recorded_args: Vec<RecordedFunction>,
+    #[serde(default)]
+    pub duration_ms: u64,
+}
+
+/// The arguments that a recording dry run gives for one exported function.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct RecordedFunction {
+    /// `<root-relative file>#<export name>`.
+    pub key: String,
+    /// The distinct inputs, each an argument list in the replay encoding.
+    #[serde(default)]
+    pub inputs: Vec<Vec<serde_json::Value>>,
+    /// The calls whose arguments cannot be replayed, by reason.
+    #[serde(default)]
+    pub not_replayable: Vec<RecordRefusal>,
+}
+
+/// The count of calls of one reason that a recording dry run did not keep.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct RecordRefusal {
+    pub reason: String,
+    pub count: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -329,6 +372,7 @@ pub enum Response {
     Run(RunResult),
     Reloaded(Reloaded),
     Replay(ReplayResult),
+    Record(RecordResult),
 }
 
 /// Why a companion exchange failed.
@@ -436,6 +480,7 @@ pub fn decode_response(
         "run_result" => Response::Run(serde_json::from_value(value).map_err(body)?),
         "reloaded" => Response::Reloaded(serde_json::from_value(value).map_err(body)?),
         "replay_result" => Response::Replay(serde_json::from_value(value).map_err(body)?),
+        "record_result" => Response::Record(serde_json::from_value(value).map_err(body)?),
         other => {
             return Err(LinkFault::Protocol(format!(
                 "no response type `{other}` exists"

@@ -24,6 +24,7 @@ mod exports;
 mod id;
 mod logging_only;
 mod operator;
+mod record;
 mod regex;
 mod replacements;
 
@@ -81,6 +82,10 @@ pub struct MutationOptions {
     /// Byte ranges in the original text. When set, a mutant is kept only when
     /// its span overlaps one of the ranges. `None` mutates the whole file.
     pub ranges: Option<Vec<(u32, u32)>>,
+    /// Wrap each exported function that holds a kept mutant, so that the
+    /// runtime can record its arguments. The wraps do not change the mutant
+    /// ids. A script block of a component gets no wrap.
+    pub record_exports: bool,
 }
 
 impl Default for MutationOptions {
@@ -88,6 +93,7 @@ impl Default for MutationOptions {
         Self {
             operators: Operator::DEFAULT.to_vec(),
             ranges: None,
+            record_exports: false,
         }
     }
 }
@@ -361,7 +367,9 @@ fn instrument_text(
         .role
         .map(|role| blocks::protected_spans(&parsed.program, role))
         .unwrap_or_default();
-    let insertions = header_insertions(&parsed.program, source, input.prelude);
+    // A component block has no module exports to wrap.
+    let record = options.record_exports && input.role.is_none() && input.prelude;
+    let insertions = header_insertions(&parsed.program, source, input.prelude, record);
     let line_starts = line_starts(source);
 
     let mut mutants = Vec::new();
@@ -402,11 +410,26 @@ fn instrument_text(
         });
     }
     mutants.sort_by_key(|mutant| mutant.span);
+    let top_level = if record {
+        let mutant_spans: Vec<(u32, u32)> = mutants.iter().map(|mutant| mutant.span).collect();
+        let site_spans: Vec<(u32, u32)> = emit_sites.iter().map(|site| site.span).collect();
+        record::record_insertions(
+            &parsed.program,
+            &record::RecordInput {
+                path: input.path,
+                mutants: &mutant_spans,
+                sites: &site_spans,
+            },
+        )
+    } else {
+        Vec::new()
+    };
     let (code, map) = emit::emit(
         source,
         &emit_sites,
         &collected.statement_starts,
         &insertions,
+        &top_level,
     );
     // The splice map holds `u32` offsets. When the output fits, no offset
     // was truncated.
@@ -427,7 +450,9 @@ fn reserved_binding(program: &oxc_ast::ast::Program<'_>) -> Option<String> {
     impl<'a> Visit<'a> for Finder {
         fn visit_binding_identifier(&mut self, it: &oxc_ast::ast::BindingIdentifier<'a>) {
             let name = it.name.as_str();
-            if self.found.is_none() && (name == ACTIVE_FUNCTION || name == HIT_FUNCTION) {
+            if self.found.is_none()
+                && (name == ACTIVE_FUNCTION || name == HIT_FUNCTION || name == RECORD_FUNCTION)
+            {
                 self.found = Some(name.to_owned());
             }
         }
@@ -449,6 +474,13 @@ fn reserved_binding(program: &oxc_ast::ast::Program<'_>) -> Option<String> {
 /// redeclaration error.
 const PRELUDE: &str = "function __fallow_m_a(id) { const m = globalThis.__fallowMutation; return m ? m.a(id) : false; } function __fallow_m_c(id) { const m = globalThis.__fallowMutation; if (m) m.c(id); }";
 
+/// The prelude part of the argument recording wraps (see `record.rs`). It
+/// follows [`PRELUDE`] only when the options record exports.
+/// The prelude function of the argument recording wraps.
+const RECORD_FUNCTION: &str = "__fallow_m_w";
+
+const RECORD_PRELUDE: &str = " function __fallow_m_w(k, f) { const m = globalThis.__fallowMutation; return m && m.w ? m.w(k, f) : f; }";
+
 const TS_NOCHECK: &str = "// @ts-nocheck";
 
 /// The `// @ts-nocheck` comment goes after the hashbang and the leading
@@ -465,7 +497,13 @@ fn header_insertions(
     program: &oxc_ast::ast::Program<'_>,
     source: &str,
     prelude: bool,
+    record: bool,
 ) -> Vec<emit::Insertion> {
+    let prelude_text = if record {
+        format!("{PRELUDE}{RECORD_PRELUDE}")
+    } else {
+        PRELUDE.to_owned()
+    };
     let offset = leading_end(program, source);
     let line_break_follows = source
         .get(offset as usize..)
@@ -485,9 +523,9 @@ fn header_insertions(
     }
     let Some(last) = program.directives.last() else {
         let text = if offset == 0 {
-            format!("{nocheck}{PRELUDE}\n")
+            format!("{nocheck}{prelude_text}\n")
         } else {
-            format!("{nocheck}\n{PRELUDE}")
+            format!("{nocheck}\n{prelude_text}")
         };
         return vec![emit::Insertion { offset, text }];
     };
@@ -503,7 +541,7 @@ fn header_insertions(
         },
         emit::Insertion {
             offset: end,
-            text: format!("{separator}{PRELUDE}"),
+            text: format!("{separator}{prelude_text}"),
         },
     ]
 }

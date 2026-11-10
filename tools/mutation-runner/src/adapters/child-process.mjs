@@ -4,8 +4,10 @@ import { tmpdir } from "node:os";
 import { isAbsolute, join, matchesGlob, resolve } from "node:path";
 
 import { CompanionError } from "../protocol.mjs";
+import { recordEntries } from "../runtime/records.mjs";
 import {
   TEST_ID_SEPARATOR,
+  addRecords,
   attributeHits,
   byCodeUnit,
   dryRunResult,
@@ -19,6 +21,7 @@ import {
   repeatedNameFlags,
   uniqueNames,
   validateDryRun,
+  validateRecord,
   validateRun,
 } from "./common.mjs";
 
@@ -310,7 +313,9 @@ const createChildProcessRunner = ({ runnerName, init, testFiles, runFile }) => {
     const started = performance.now();
     const summary = emptySummary();
     for (const file of files) {
-      const result = await runFile(file, { mutantId: null });
+      const result = await runFile(file, {
+        mutantId: null,
+      });
       for (const test of result.tests) testIndex.set(test.testId, { file, parts: test.parts });
       recordDryRunFile(file, result, summary, directories);
     }
@@ -321,6 +326,22 @@ const createChildProcessRunner = ({ runnerName, init, testFiles, runFile }) => {
       pathMap: init.path_map,
       loaded: summary.loaded,
     });
+  };
+
+  // A record pass runs each file again with the recorder on. Its test
+  // results count for nothing.
+  const record = async (request) => {
+    validateRecord(request);
+    const started = performance.now();
+    const records = new Map();
+    for (const file of selectTestFiles(request.test_files, testFiles, runnerName)) {
+      const result = await runFile(file, { mutantId: null, recordArgs: true });
+      addRecords(records, recordEntries(result.records ?? new Map()));
+    }
+    return {
+      recorded_args: recordEntries(records),
+      duration_ms: Math.round(performance.now() - started),
+    };
   };
 
   // A run starts one process for each file, in file order. With `bail`, a
@@ -352,7 +373,7 @@ const createChildProcessRunner = ({ runnerName, init, testFiles, runFile }) => {
     });
   };
 
-  return { dryRun, run };
+  return { dryRun, run, record };
 };
 
 /**
@@ -360,8 +381,21 @@ const createChildProcessRunner = ({ runnerName, init, testFiles, runFile }) => {
  * run starts new test processes, so no module state remains and a reload
  * needs no action. A run stops the test process at the first failure.
  */
-export const childProcessAdapter = ({ runnerName, init, version, testFiles, workDir, runFile }) => {
-  const { dryRun, run } = createChildProcessRunner({ runnerName, init, testFiles, runFile });
+export const childProcessAdapter = ({
+  runnerName,
+  init,
+  version,
+  testFiles,
+  workDir,
+  runFile,
+  records = false,
+}) => {
+  const { dryRun, run, record } = createChildProcessRunner({
+    runnerName,
+    init,
+    testFiles,
+    runFile,
+  });
   return {
     runnerVersion: version,
     testFiles,
@@ -376,6 +410,7 @@ export const childProcessAdapter = ({ runnerName, init, version, testFiles, work
     notes: [],
     dryRun,
     run,
+    ...(records ? { record } : {}),
     reload: async () => ({ method: "noop" }),
     close: async () => workDir.remove(),
   };

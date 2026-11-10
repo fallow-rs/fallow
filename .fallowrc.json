@@ -26,6 +26,10 @@
     {
       "file": "tools/mutation-runner/src/adapters/{bun-test,node-test,vitest}.mjs",
       "exports": ["createAdapter"]
+    },
+    {
+      "file": "tools/mutation-runner/src/runtime/overlay-hook.mjs",
+      "exports": ["registerOverlayHook"]
     }
   ],
   "ignoreUnresolvedImports": [

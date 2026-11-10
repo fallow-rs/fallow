@@ -14,6 +14,7 @@ fn only(source: &str, kind: SourceKind, operator: Operator) -> Instrumented {
     let options = MutationOptions {
         operators: vec![operator],
         ranges: None,
+        record_exports: false,
     };
     run_with(source, kind, &options)
 }
@@ -55,6 +56,7 @@ fn the_default_set_leaves_out_each_opt_in_operator() {
         &MutationOptions {
             operators: Operator::ALL.to_vec(),
             ranges: None,
+            record_exports: false,
         },
     );
     for operator in Operator::OPT_IN {
@@ -145,6 +147,7 @@ fn block_statement_keeps_nested_mutants_and_declarations_valid() {
                 Operator::ReturnValue,
             ],
             ranges: None,
+            record_exports: false,
         },
     );
     // The body of `f` declares the function `g`, so only the body of `g`
@@ -386,6 +389,7 @@ fn statement_sites_keep_each_line_and_parse() {
         &MutationOptions {
             operators: Operator::ALL.to_vec(),
             ranges: None,
+            record_exports: false,
         },
     );
     assert_eq!(result.code.lines().count(), source.lines().count() + 2);
@@ -504,6 +508,7 @@ fn opt_in_mutants_run_like_the_applied_mutant() {
     let options = MutationOptions {
         operators: Operator::ALL.to_vec(),
         ranges: None,
+        record_exports: false,
     };
     for fixture in [SLOPPY_FIXTURE, STRICT_FIXTURE] {
         let count = assert_runs_like_each_mutant(fixture, &options);
@@ -542,6 +547,7 @@ fn statement_start_guard_keeps_the_statement_grouping() {
         let options = MutationOptions {
             operators,
             ranges: None,
+            record_exports: false,
         };
         assert_runs_like_each_mutant(STATEMENT_START_FIXTURE, &options);
     }

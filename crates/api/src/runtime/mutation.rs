@@ -30,6 +30,7 @@ use crate::mutation::last_report::ignore_cache_dir;
 use crate::mutation::manifest::{Manifest, RunnerRange, manifest};
 use crate::mutation::node_args::node_test_args;
 use crate::mutation::protocol::{InitOptions, InitRequest};
+use crate::mutation::recorded_args::RecordPass;
 use crate::mutation::report::{
     CompletionFacts, baseline_failures, completion, function_results, issues, mutant_results,
     plan_counts, plan_files, plan_mutants, skipped_files, skipped_tests_issue, summary,
@@ -48,7 +49,7 @@ use crate::mutation::transport::ProcessSpawner;
 use crate::mutation::typecheck::typecheck_survivors;
 use crate::mutation::worktree::{Exclusions, WorktreeSnapshot, canonical_path, snapshot};
 use crate::mutation::{
-    MutationProgress, MutationProgressSink, MutationRunOptions, MutationRunScope,
+    MutationProgress, MutationProgressSink, MutationRunOptions, MutationRunScope, RecordArgsMode,
 };
 
 pub(super) type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
@@ -416,6 +417,18 @@ pub(super) fn plan_for(
     options: &MutationRunOptions,
     before_plan: impl FnOnce(&Path, &Path) -> ProgrammaticResult<()>,
 ) -> ProgrammaticResult<Planned> {
+    plan_with_wraps(options, before_plan, false)
+}
+
+/// [`plan_for`] with the argument recording wraps when `record_exports` is
+/// set. Only the record pass loads a plan with wraps: a wrap changes the
+/// inferred name of a function value, so the dry run and the mutant runs
+/// load the plan without them.
+fn plan_with_wraps(
+    options: &MutationRunOptions,
+    before_plan: impl FnOnce(&Path, &Path) -> ProgrammaticResult<()>,
+    record_exports: bool,
+) -> ProgrammaticResult<Planned> {
     validate(options)?;
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
     let session = load_session(&resolved)?;
@@ -450,6 +463,7 @@ pub(super) fn plan_for(
         skip_component_files: false,
         mutant_ids: (!options.mutant_ids.is_empty())
             .then(|| options.mutant_ids.iter().cloned().collect()),
+        record_exports,
     };
     // The runner decision reads the test files of the first plan. A second
     // plan without the component files keeps that decision.
@@ -851,6 +865,112 @@ struct Execution {
     cache: Option<MutationCacheOutput>,
     resume: Option<MutationResumeOutput>,
     setup_ms: u64,
+    /// The record pass of `--record-args`. `None` without recording.
+    record: Option<RecordPass>,
+}
+
+/// Removes the expired recorded inputs, also when this run does not record,
+/// and stores the inputs of the record pass.
+fn settle_recording(
+    options: &MutationRunOptions,
+    cache_dir: &Path,
+    pass: Option<&RecordPass>,
+) -> Option<fallow_output::MutationRecordingOutput> {
+    use crate::mutation::recorded_args::{now_secs, prune, save_recording};
+    prune(cache_dir, now_secs());
+    save_recording(cache_dir, options.record_args, pass)
+}
+
+/// Starts a new companion and sends `record`: the test files run once more
+/// with the recorder on. The pass runs after the mutant runs, so its test
+/// results never change a result of the run.
+fn record_pass(
+    options: &MutationRunOptions,
+    outcome: &ScheduleOutcome,
+    spawner: &ProcessSpawner,
+    config: &ScheduleConfig,
+    mutation_cache: &Path,
+) -> Option<RecordPass> {
+    if options.record_args == RecordArgsMode::Off || outcome.ready.is_none() {
+        return None;
+    }
+    let failed = |error: &str| {
+        Some(RecordPass {
+            functions: Vec::new(),
+            error: Some(error.to_owned()),
+        })
+    };
+    // The same scope with the wraps gives the same mutants and files.
+    let Ok(wrapped) = plan_with_wraps(options, |_, _| Ok(()), true) else {
+        return failed("the plan of the record pass failed");
+    };
+    let files: Vec<RunFile<'_>> = wrapped
+        .plan
+        .files
+        .iter()
+        .map(|file| RunFile {
+            path: &file.path,
+            code: &file.instrumented_code,
+        })
+        .collect();
+    let Ok(run_dir) = write_run_dir(mutation_cache, &files, Some(&spawner.companion)) else {
+        return failed("the run directory of the record pass cannot be written");
+    };
+    let init = InitRequest {
+        run_dir: run_dir.dir.to_string_lossy().into_owned(),
+        path_map: run_dir.path_map,
+        ..config.init.clone()
+    };
+    let timeout = config.deadline.map_or(config.runner_timeout, |deadline| {
+        config
+            .runner_timeout
+            .min(deadline.saturating_duration_since(Instant::now()))
+    });
+    Some(record_pass_with(spawner, &init, timeout, config.deadline))
+}
+
+fn record_pass_with(
+    spawner: &ProcessSpawner,
+    init: &InitRequest,
+    timeout: Duration,
+    deadline: Option<Instant>,
+) -> RecordPass {
+    use crate::mutation::protocol::{Request, Response};
+    use crate::mutation::transport::CompanionSpawner as _;
+    let failed = |error: &str| RecordPass {
+        functions: Vec::new(),
+        error: Some(error.to_owned()),
+    };
+    if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+        return failed("the time budget ended before the record pass");
+    }
+    let Ok(mut link) = spawner.spawn() else {
+        return failed("the record companion did not start");
+    };
+    let pass = match link.request(&Request::Init(init.clone()), timeout) {
+        Ok(Response::Ready(ready)) if ready.capabilities.record => {
+            match link.request(
+                &Request::Record {
+                    test_files: Vec::new(),
+                },
+                timeout,
+            ) {
+                Ok(Response::Record(result)) => RecordPass {
+                    functions: result.recorded_args,
+                    error: None,
+                },
+                Ok(_) => failed("the companion answered record with another response"),
+                Err(crate::mutation::protocol::LinkFault::Timeout) => {
+                    failed("the record pass did not end before the setup timeout")
+                }
+                Err(_) => failed("the record pass failed"),
+            }
+        }
+        Ok(Response::Ready(_)) => failed("the runner records no arguments"),
+        _ => failed("the record companion did not start"),
+    };
+    link.shutdown();
+    pass
 }
 
 /// The journal path as the report shows it: relative to the root, with `/`
@@ -1161,6 +1281,7 @@ fn execute(
             cache: None,
             resume: unread_journal(options, planned),
             setup_ms: 0,
+            record: None,
         });
     }
     progress(MutationProgress::Setup {
@@ -1240,7 +1361,9 @@ fn execute(
         _ => None,
     };
     let resume = settle_journal(options, run_journal, &mut outcome);
+    let record = record_pass(options, &outcome, &spawner, &config, &mutation_cache);
     Ok(Execution {
+        record,
         outcome: Some(outcome),
         runner,
         cache,
@@ -1459,6 +1582,7 @@ pub fn run_mutation_with_progress(
         recheck: None,
         compare: None,
         gate_outcomes: None,
+        recording: settle_recording(options, &planned.cache_dir, execution.record.as_ref()),
     })
 }
 
