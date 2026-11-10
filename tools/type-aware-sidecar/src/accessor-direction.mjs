@@ -98,8 +98,16 @@ export const accessorPairExists = (declaration) => {
  * otherwise confirm the setter and a write would confirm the getter. A lone
  * accessor counts every reference.
  */
+const isShorthandKey = (reference) =>
+  reference.parent?.kind === SyntaxKind.ShorthandPropertyAssignment &&
+  reference.parent.name === reference;
+
+const memberDirection = (reference) =>
+  // The key of `({ value } = inst)` reads `inst.value` and writes only the local binding.
+  isShorthandKey(reference) ? "read" : targetDirection(memberAccess(reference));
+
 export const countsAsAccessorUse = (declaration, reference) => {
   if (!accessorPairExists(declaration)) return true;
-  const direction = targetDirection(memberAccess(reference));
+  const direction = memberDirection(reference);
   return isSetAccessorDeclaration(declaration) ? direction !== "read" : direction !== "write";
 };

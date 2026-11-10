@@ -695,7 +695,8 @@ test("protocol v7 credits a read to the getter and a write to the setter of an a
   set value(next: string) { console.log(next); }
 }
 `;
-    const source = ["Read", "Written", "Compound"].map(pair).join("");
+    const owners = ["Read", "Written", "Compound", "Shorthand", "Looped", "Incremented"];
+    const source = owners.map(pair).join("");
     write(
       root,
       "tsconfig.json",
@@ -705,14 +706,21 @@ test("protocol v7 credits a read to the getter and a write to the setter of an a
     write(
       root,
       "src/consumer.ts",
-      `import { Compound, Read, Written } from "./accessor";
+      `import { Compound, Incremented, Looped, Read, Shorthand, Written } from "./accessor";
 console.log(new Read().value);
 new Written().value = "next";
 const compound = new Compound();
 compound.value += "next";
+let value = "";
+({ value } = new Shorthand());
+console.log(value);
+const looped = new Looped();
+for (looped.value of ["a", "b"]) console.log("loop");
+const incremented = new Incremented();
+incremented.value++;
 `,
     );
-    const queries = [1, 2, 3].flatMap((occurrence, index) =>
+    const queries = owners.flatMap((owner, index) =>
       ["get value", "set value"].map((marker) => ({
         operation: "symbol-use",
         symbol: {
@@ -723,9 +731,9 @@ compound.value += "next";
             namespace: "value",
             declarationKind: "class_method",
             exportedName: "value",
-            owner: ["Read", "Written", "Compound"][index],
+            owner,
           }),
-          ...utf8Position(source, marker, occurrence),
+          ...utf8Position(source, marker, index + 1),
         },
       })),
     );
@@ -740,6 +748,12 @@ compound.value += "next";
     assert.deepEqual(
       response.results.map(({ assertion }) => assertion),
       [
+        "confirmed-used",
+        "no-confirmed-use",
+        "no-confirmed-use",
+        "confirmed-used",
+        "confirmed-used",
+        "confirmed-used",
         "confirmed-used",
         "no-confirmed-use",
         "no-confirmed-use",
