@@ -2125,6 +2125,66 @@ fn cache_roundtrip_preserves_function_contracts() {
 }
 
 #[test]
+fn cache_roundtrip_preserves_each_function_contract_fact_variant() {
+    use fallow_types::extract::{ArgFact, CallTarget, ContractIncomplete, LiteralValue, ParamKind};
+    let source = "import { format } from './format';\n\
+        function local(flag, { a }, [b], c?: number, d = 1, ...rest) { if (flag) {} }\n\
+        local(true, null, undefined, 1.5, -0, 's', `t`, x);\n\
+        local(false, ...more);\n\
+        format.call(null, 2);\n\
+        function reads() { return arguments; }\n\
+        let mutable = () => {};\n\
+        eval(code);";
+    let module = parse_from_content(FileId(0), Path::new("src/local.ts"), source);
+    let facts = module
+        .function_contracts
+        .as_deref()
+        .expect("the module has call evidence");
+    let kinds: Vec<_> = facts.declarations[0]
+        .params
+        .iter()
+        .map(|param| param.kind)
+        .collect();
+    assert!(kinds.contains(&ParamKind::Identifier));
+    assert!(kinds.contains(&ParamKind::Object));
+    assert!(kinds.contains(&ParamKind::Array));
+    let literals: Vec<_> = facts
+        .call_sites()
+        .filter(|(target, _, _)| *target == CallTarget::Local(0))
+        .flat_map(|(_, _, site)| site.args.iter())
+        .filter_map(|arg| match arg {
+            ArgFact::Literal(value) => Some(std::mem::discriminant(value)),
+            _ => None,
+        })
+        .collect();
+    for value in [
+        LiteralValue::Boolean(true),
+        LiteralValue::Null,
+        LiteralValue::Undefined,
+        LiteralValue::Number(0),
+        LiteralValue::String("s".into()),
+    ] {
+        assert!(literals.contains(&std::mem::discriminant(&value)));
+    }
+    assert!(facts.calls.iter().any(
+        |calls| matches!(calls.target, CallTarget::Import(_)) && &*calls.member_path == "call"
+    ));
+    let reasons: Vec<_> = facts
+        .declarations
+        .iter()
+        .filter_map(|contract| contract.incomplete)
+        .collect();
+    assert!(reasons.contains(&ContractIncomplete::ArgumentsRead));
+    assert!(reasons.contains(&ContractIncomplete::MutableBinding));
+    assert!(facts.direct_eval);
+    let cached = module_to_cached_from_parts(&module, 10, 20);
+    let decoded: CachedModule =
+        bitcode::decode(&bitcode::encode(&cached)).expect("decode cached module");
+    let restored = cached_to_module(&decoded, FileId(0));
+    assert_eq!(restored.function_contracts, module.function_contracts);
+}
+
+#[test]
 fn cache_roundtrip_preserves_import_binding_references() {
     let source = "import { useSelector, useDispatch, Provider } from 'react-redux';\n\
         export const useAppSelector = useSelector.withTypes<{ n: number }>();\n\

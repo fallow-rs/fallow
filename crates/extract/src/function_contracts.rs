@@ -13,9 +13,9 @@ use fallow_types::extract::{
 };
 use oxc_ast::AstKind;
 use oxc_ast::ast::{
-    Argument, ArrowFunctionExpression, BindingPattern, Declaration, ExportDefaultDeclarationKind,
-    Expression, FormalParameters, Function, IdentifierReference, Program, Statement,
-    VariableDeclaration, VariableDeclarationKind,
+    Argument, ArrowFunctionExpression, BindingPattern, ClassElement, Declaration,
+    ExportDefaultDeclarationKind, Expression, FormalParameters, Function, IdentifierReference,
+    Program, Statement, VariableDeclaration, VariableDeclarationKind,
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_semantic::{AstNodes, NodeId, Scoping, Semantic, SymbolId};
@@ -55,7 +55,28 @@ pub fn collect(
         calls: group_calls(calls),
         escapes,
         template_callers: false,
+        direct_eval: calls_direct_eval(semantic),
     }
+}
+
+/// `true` when an `eval` that no binding shadows is the callee of a call.
+fn calls_direct_eval(semantic: &Semantic<'_>) -> bool {
+    let scoping = semantic.scoping();
+    let nodes = semantic.nodes();
+    let Some(references) = scoping.root_unresolved_references().get("eval") else {
+        return false;
+    };
+    references.iter().any(|&reference| {
+        let node_id = scoping.get_reference(reference).node_id();
+        let AstKind::IdentifierReference(identifier) = nodes.kind(node_id) else {
+            return false;
+        };
+        let (outer, outer_span) = unwrap_upward(nodes, node_id, identifier.span);
+        matches!(
+            nodes.parent_kind(outer),
+            AstKind::CallExpression(call) if call.callee.span() == outer_span
+        )
+    })
 }
 
 /// The contracts of the module, each binding symbol with the index of its
@@ -476,6 +497,49 @@ struct BodyScan<'s, 'p> {
     non_arrow_depth: u32,
 }
 
+impl<'a> BodyScan<'_, '_> {
+    /// The parts of a class element that run in the enclosing scope.
+    fn visit_class_element_outer(&mut self, element: &ClassElement<'a>) {
+        let (decorators, key, computed) = match element {
+            ClassElement::MethodDefinition(method) => {
+                (&method.decorators, &method.key, method.computed)
+            }
+            ClassElement::PropertyDefinition(property) => {
+                (&property.decorators, &property.key, property.computed)
+            }
+            ClassElement::AccessorProperty(accessor) => {
+                (&accessor.decorators, &accessor.key, accessor.computed)
+            }
+            ClassElement::StaticBlock(_) | ClassElement::TSIndexSignature(_) => return,
+        };
+        self.visit_decorators(decorators);
+        if computed {
+            self.visit_property_key(key);
+        }
+    }
+
+    /// The parts of a class element that bind their own `arguments`.
+    fn visit_class_element_inner(&mut self, element: &ClassElement<'a>) {
+        match element {
+            ClassElement::MethodDefinition(method) => {
+                self.visit_function(&method.value, ScopeFlags::Function);
+            }
+            ClassElement::PropertyDefinition(property) => {
+                if let Some(value) = &property.value {
+                    self.visit_expression(value);
+                }
+            }
+            ClassElement::AccessorProperty(accessor) => {
+                if let Some(value) = &accessor.value {
+                    self.visit_expression(value);
+                }
+            }
+            ClassElement::StaticBlock(block) => self.visit_static_block(block),
+            ClassElement::TSIndexSignature(_) => {}
+        }
+    }
+}
+
 impl BodyScan<'_, '_> {
     fn count_test(&mut self, test: &Expression<'_>) {
         let mut expr = unwrap_transparent(test);
@@ -517,11 +581,22 @@ impl<'a> Visit<'a> for BodyScan<'_, '_> {
     }
 
     fn visit_class(&mut self, class: &oxc_ast::ast::Class<'a>) {
-        // A class body binds its own `arguments` in methods and field
-        // initializers, and its returns belong to the methods.
+        // Decorators, the `extends` clause and computed keys run in the
+        // enclosing scope, so they read its `arguments`. Methods and field
+        // initializers bind their own `arguments`, and their returns are not
+        // returns of the scanned function.
+        self.visit_decorators(&class.decorators);
+        if let Some(heritage) = &class.heritage {
+            self.visit_expression(&heritage.expression);
+        }
+        for element in &class.body.body {
+            self.visit_class_element_outer(element);
+        }
         self.function_depth += 1;
         self.non_arrow_depth += 1;
-        walk::walk_class(self, class);
+        for element in &class.body.body {
+            self.visit_class_element_inner(element);
+        }
         self.non_arrow_depth -= 1;
         self.function_depth -= 1;
     }
@@ -842,8 +917,7 @@ fn string(value: &str) -> Option<LiteralValue> {
 }
 
 fn number(value: f64) -> LiteralValue {
-    let canonical = if value == 0.0 { 0.0 } else { value };
-    LiteralValue::Number(canonical.to_bits())
+    LiteralValue::Number(value.to_bits())
 }
 
 /// `false` when the call, under parentheses, `await` or `void`, is the whole

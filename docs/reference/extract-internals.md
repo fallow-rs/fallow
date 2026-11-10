@@ -346,8 +346,13 @@ A rest parameter never gets `Param`, because `f(r)` passes `[r]`.
 TypeScript wrappers such as `as`, `<T>x`, `satisfies` and `!` do not change
 the fact. A call of a different function that passes a parameter stores
 `Unknown`. `args` never holds a spread argument, because the list stops
-before the first spread. `-0` and `0` are the same `Number` fact, and a
-condition reads both as false.
+before the first spread. `-0` and `0` are different `Number` facts, because
+`Object.is` and `1 / x` tell them apart.
+
+A read of `arguments` opens the contract also when a decorator, an `extends`
+clause or a computed key of a class inside the function reads it, because
+these parts run in the scope of the function. Methods and field initializers
+bind their own `arguments`.
 
 Read an argument with `CallSite::arg_at`, not by an index into `args`. It
 gives one of three outcomes for a parameter position:
@@ -369,6 +374,18 @@ A consumer of these facts reads them together with other facts:
   consumer reads `exports` for them.
 - Calls through `require`, `import()` and CommonJS bindings are not admitted
   and are not stored, so the consumer abstains for those modules.
+- `direct_eval` is `true` when the module calls `eval` directly at any depth.
+  A direct `eval` can call each binding in scope, so the consumer treats each
+  contract of the module, and each import that the module calls, as open.
+- A file with no imports, no exports and no CommonJS exports can be a classic
+  script. Its top-level functions are globals, which another script or an
+  inline handler can call. The collector records facts for such a file, so
+  the consumer abstains for its contracts.
+- A Vue `<script src="./x.ts">` adds a side-effect import of `x.ts` to the
+  host file. `x.ts` parses as a plain module without `template_callers`. The
+  template reaches its bindings only through component options, which are
+  escapes, but the consumer treats a module that a template host imports for
+  side effects as a template host too.
 
 ## Embedded-source and import regression boundaries
 

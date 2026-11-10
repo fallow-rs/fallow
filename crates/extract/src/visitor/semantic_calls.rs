@@ -65,6 +65,7 @@ impl ModuleInfoExtractor {
                 escape
             }));
         facts.template_callers |= incoming.template_callers;
+        facts.direct_eval |= incoming.direct_eval;
         facts
             .calls
             .sort_by_key(|calls| calls.sites.first().map_or(0, |site| site.span_start));

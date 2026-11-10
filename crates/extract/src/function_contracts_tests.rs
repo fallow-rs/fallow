@@ -214,6 +214,59 @@ fn arguments_in_a_nested_arrow_opens_the_function_but_not_a_nested_function() {
 }
 
 #[test]
+fn arguments_in_a_class_key_or_heritage_opens_the_function() {
+    for source in [
+        "function key(a) { class C { [arguments[0]]() {} } }",
+        "function key(a) { class C { static [arguments[0]] = 1; } }",
+        "function key(a) { class C { accessor [arguments[0]] = 1; } }",
+        "function key(a) { return class extends arguments[0] {}; }",
+        "function key(a) { @tag(arguments[0]) class C {} }",
+        "function key(a) { class C { @tag(arguments[0]) run() {} } }",
+    ] {
+        assert_eq!(
+            incomplete(source, "key"),
+            Some(ContractIncomplete::ArgumentsRead),
+            "{source}"
+        );
+    }
+    for source in [
+        "function key(a) { class C { run() { return arguments; } } }",
+        "function key(a) { class C { [`k`]() { return arguments; } } }",
+    ] {
+        assert_eq!(incomplete(source, "key"), None, "{source}");
+    }
+}
+
+#[test]
+fn a_class_key_does_not_set_returns_value_or_hide_a_return() {
+    let info = parse(
+        "function quiet(a) { class C { [(() => { return 1; })()]() {} } }\nfunction loud(a) { class C {} return a; }",
+    );
+    assert!(!contract(&info, "quiet").returns_value);
+    assert!(contract(&info, "loud").returns_value);
+}
+
+#[test]
+fn a_typescript_this_parameter_is_not_a_formal_parameter() {
+    let source = "function bound(this: Window, flag: boolean) { if (flag) {} }\nbound.call(window, true);\nbound(false);";
+    let info = parse(source);
+    let bound = contract(&info, "bound");
+    let names: Vec<_> = bound
+        .params
+        .iter()
+        .map(|param| param.name.as_deref())
+        .collect();
+    assert_eq!(names, vec![Some("flag")]);
+    assert_eq!(bound.params[0].condition_reads, 1);
+    let calls = local_calls(&info, "bound");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(
+        calls[0].args,
+        vec![ArgFact::Literal(LiteralValue::Boolean(false))]
+    );
+}
+
+#[test]
 fn records_local_calls_with_literal_argument_facts() {
     let info = parse(
         "function format(value, compact, locale) { return value; }
@@ -231,7 +284,7 @@ fn records_local_calls_with_literal_argument_facts() {
         vec![
             vec![number(1.0), ArgFact::Literal(LiteralValue::Boolean(true))],
             vec![
-                number(0.0),
+                number(-0.0),
                 ArgFact::Literal(LiteralValue::Boolean(false)),
                 ArgFact::Literal(LiteralValue::String("nl".into())),
             ],
@@ -248,6 +301,60 @@ fn records_local_calls_with_literal_argument_facts() {
     assert_eq!(counts, vec![2, 3, 3, 2, 3]);
     let used: Vec<_> = calls.iter().map(|call| call.result_used).collect();
     assert_eq!(used, vec![false, false, false, false, true]);
+}
+
+#[test]
+fn negative_zero_and_zero_are_different_values() {
+    let info = parse("function scale(n) {}\nscale(0);\nscale(-0);\nscale(-(0));\nscale(0.0);");
+    let args: Vec<_> = local_calls(&info, "scale")
+        .iter()
+        .map(|call| call.args.clone())
+        .collect();
+    let zero = ArgFact::Literal(LiteralValue::Number(0.0f64.to_bits()));
+    let negative = ArgFact::Literal(LiteralValue::Number((-0.0f64).to_bits()));
+    assert_ne!(zero, negative);
+    assert_eq!(
+        args,
+        vec![
+            vec![zero.clone()],
+            vec![negative.clone()],
+            vec![negative],
+            vec![zero]
+        ]
+    );
+}
+
+#[test]
+fn a_vue_script_src_file_is_a_plain_module_that_the_host_imports() {
+    let host = parse_at(
+        "view.vue",
+        "<template><p>{{ label(1) }}</p></template>\n<script src=\"./view-logic.ts\" lang=\"ts\"></script>",
+    );
+    assert!(host.imports.iter().any(|import| {
+        import.source == "./view-logic.ts"
+            && matches!(
+                import.imported_name,
+                fallow_types::extract::ImportedName::SideEffect
+            )
+    }));
+    let logic = parse_at(
+        "view-logic.ts",
+        "function label(n) { return n; }\nlabel(2);\nexport default { methods: { label } };",
+    );
+    let facts = facts(&logic);
+    assert!(!facts.template_callers);
+    assert_eq!(facts.escapes.len(), 1);
+}
+
+#[test]
+fn a_classic_script_records_its_global_functions() {
+    let info = parse_at("legacy.js", "function greet(name) {}\ngreet('a');");
+    assert!(info.imports.is_empty());
+    assert!(info.exports.is_empty());
+    let facts = facts(&info);
+    assert!(!facts.template_callers);
+    assert_eq!(facts.declarations.len(), 1);
+    assert_eq!(local_calls(&info, "greet").len(), 1);
 }
 
 #[test]
@@ -609,6 +716,33 @@ fn a_direct_eval_opens_the_contract() {
         Some(ContractIncomplete::DirectEval)
     );
     assert_eq!(incomplete("function run(eval) { eval('x'); }", "run"), None);
+}
+
+#[test]
+fn a_direct_eval_anywhere_in_the_module_marks_the_module() {
+    for source in [
+        "function f(a) {}\nf(1);\nfunction g() { eval('f(2)'); }",
+        "function f(a) {}\nf(1);\neval('f(2)');",
+        "function f(a) {}\nf(1);\n(eval)('f(2)');",
+        "import { h } from './h';\nh(1);\nconst run = () => [0].map(() => eval('h(2)'));",
+    ] {
+        let info = parse(source);
+        assert!(facts(&info).direct_eval, "{source}");
+    }
+    for source in [
+        "function f(a) {}\nf(1);",
+        "function f(a) {}\nf(1);\nfunction g(eval) { eval('f(2)'); }",
+        "function f(a) {}\nf(1);\nconst text = 'eval';\nobj.eval('f(2)');",
+    ] {
+        let info = parse(source);
+        assert!(!facts(&info).direct_eval, "{source}");
+    }
+}
+
+#[test]
+fn a_module_with_only_a_direct_eval_stores_the_flag() {
+    let info = parse("eval(code);");
+    assert!(facts(&info).direct_eval);
 }
 
 #[test]
