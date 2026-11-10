@@ -684,7 +684,16 @@ ${directive}\texport const arguments: never;
 
     assert.deepEqual(assertion("\t// @ts-ignore\n"), ["confirmed-used", null]);
     assert.deepEqual(assertion("\t// @ts-expect-error\n\n"), ["confirmed-used", null]);
-    assert.equal(assertion("")[0], "no-confirmed-use");
+    const blocked = ["no-confirmed-use", "blocking-diagnostics"];
+    assert.deepEqual(assertion(""), blocked);
+    assert.deepEqual(assertion("\t// @ts-ignore\n\t/** @deprecated */\n"), blocked);
+    write(
+      root,
+      "src/ambient.d.ts",
+      "// @ts-ignore\ndeclare const twice: number;\n// @ts-ignore\ndeclare const twice: number;\n",
+    );
+    const [duplicate] = runSidecar(semanticRequest(root, [query])).results;
+    assert.deepEqual([duplicate.assertion, duplicate.reason_code], blocked);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
