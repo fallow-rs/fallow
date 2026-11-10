@@ -1472,15 +1472,19 @@ const reportPrSkillsSync = ({ pr, repo, label }) =>
   });
 
 /**
- * The note for a pull request whose checks passed but that still needs an
- * approving review, or null. Pinned auto-merge waits on that review without
- * a message. A maintainer commit under a CODEOWNERS path of a contributor
- * pull request is a common cause.
+ * The note for a pull request whose wait ended without a failure but that
+ * still needs an approving review, or null. Armed auto-merge waits on that
+ * review without a message. A maintainer commit under a CODEOWNERS path of a
+ * contributor pull request is a common cause. GitHub refuses an approval
+ * from the author of the pull request.
  */
-export const reviewRequiredNote = (decision, pr) =>
-  decision === "REVIEW_REQUIRED"
-    ? `Pull request ${pr}: the checks passed, but GitHub requires an approving review before the merge. Read the CODEOWNERS paths of the diff, and review the pull request (gh pr review ${pr} --approve) when the review is done.`
-    : null;
+export const reviewRequiredNote = (decision, { pr, repo }) => {
+  if (decision !== "REVIEW_REQUIRED") {
+    return null;
+  }
+  const repoFlag = repo === null ? "" : ` --repo ${repo}`;
+  return `Pull request ${pr}: the pull request also needs an approving review before the merge. Review the changes under the CODEOWNERS paths. When that review is done, a person who is not the author approves: \`gh pr review ${pr} --approve${repoFlag}\`.`;
+};
 
 const reportReviewRequired = ({ pr, repo }) => {
   const args = ["pr", "view", pr, "--json", "reviewDecision"];
@@ -1492,7 +1496,7 @@ const reportReviewRequired = ({ pr, repo }) => {
     console.error(`Read of the review decision failed: ${read.error}`);
     return;
   }
-  const note = reviewRequiredNote(read.data.reviewDecision, pr);
+  const note = reviewRequiredNote(read.data.reviewDecision, { pr, repo });
   if (note !== null) {
     console.log(note);
   }

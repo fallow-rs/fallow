@@ -14,11 +14,11 @@ import {
   isChangelogFragment,
   parseGhChecks,
   parseGhMergeable,
-  reviewRequiredNote,
   parseGhRuns,
   parseGitAncestor,
   parseGitHead,
   reportChecks,
+  reviewRequiredNote,
   waitForChecks,
   waitForCommitRuns,
   waitForPullRequestChecks,
@@ -626,12 +626,15 @@ test("parseGhMergeable reads the mergeable field of gh pr view", () => {
 });
 
 test("reviewRequiredNote names the missing review only when GitHub requires one", () => {
+  const note = reviewRequiredNote("REVIEW_REQUIRED", { pr: "4421", repo: null });
+  assert.match(note, /4421.*approving review.*CODEOWNERS/u);
+  assert.match(note, /gh pr review 4421 --approve`/u);
   assert.match(
-    reviewRequiredNote("REVIEW_REQUIRED", "4421"),
-    /4421.*approving review.*CODEOWNERS/u,
+    reviewRequiredNote("REVIEW_REQUIRED", { pr: "288", repo: "fallow-rs/docs" }),
+    /gh pr review 288 --approve --repo fallow-rs\/docs`/u,
   );
   for (const decision of ["APPROVED", "CHANGES_REQUESTED", "", null, undefined]) {
-    assert.equal(reviewRequiredNote(decision, "4421"), null);
+    assert.equal(reviewRequiredNote(decision, { pr: "4421", repo: null }), null);
   }
 });
 
