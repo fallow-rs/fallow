@@ -110,3 +110,90 @@ fn a_disabled_check_is_the_users_own_zero_and_is_not_reported() {
         "a check the user switched off is already visible in the config, got {ids:?}"
     );
 }
+
+/// Write the issue #4430 shape: a server secret reaches a module that a
+/// browser bundle could import, but no file declares `"use client"`.
+fn write_project_without_client_roots(root: &Path) {
+    std::fs::create_dir_all(root.join("src")).expect("create project src");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{ "name": "ucr-repro", "private": true, "type": "module", "main": "src/main.js" }"#,
+    )
+    .expect("write manifest");
+    std::fs::write(
+        root.join("src/config.js"),
+        "export const apiKey = process.env.API_SECRET\n",
+    )
+    .expect("write config module");
+    std::fs::write(
+        root.join("src/app.js"),
+        "import { apiKey } from './config.js'\n\nexport function App() {\n\treturn apiKey\n}\n",
+    )
+    .expect("write app module");
+    std::fs::write(
+        root.join("src/main.js"),
+        "import { App } from './app.js'\nconsole.log(App())\n",
+    )
+    .expect("write entry module");
+}
+
+#[test]
+fn an_active_client_server_leak_rule_without_client_roots_is_reported() {
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let root = temp.path().join("project");
+    write_project_without_client_roots(&root);
+    let mut config = create_config_with_cache(root, temp.path().join("cache"));
+    config.rules.security_client_server_leak = Severity::Warn;
+
+    let results = fallow_core::analyze(&config).expect("analysis succeeds");
+
+    assert!(results.security_findings.is_empty());
+    let ids = diagnostic_ids(&config.root);
+    assert!(
+        ids.iter()
+            .any(|id| id == "client-server-leak-no-client-roots"),
+        "zero leaks from zero \"use client\" files is not a measurement, got {ids:?}"
+    );
+}
+
+#[test]
+fn a_client_root_suppresses_the_no_client_roots_diagnostic() {
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let root = temp.path().join("project");
+    write_project_without_client_roots(&root);
+    std::fs::write(
+        root.join("src/app.js"),
+        "'use client'\nimport { apiKey } from './config.js'\n\nexport function App() {\n\treturn apiKey\n}\n",
+    )
+    .expect("write client module");
+    let mut config = create_config_with_cache(root, temp.path().join("cache"));
+    config.rules.security_client_server_leak = Severity::Warn;
+
+    let results = fallow_core::analyze(&config).expect("analysis succeeds");
+
+    assert_eq!(results.security_findings.len(), 1);
+    let ids = diagnostic_ids(&config.root);
+    assert!(
+        !ids.iter()
+            .any(|id| id == "client-server-leak-no-client-roots"),
+        "a project with a \"use client\" file gave the rule a starting point, got {ids:?}"
+    );
+}
+
+#[test]
+fn a_disabled_client_server_leak_rule_is_not_reported() {
+    let temp = tempfile::tempdir().expect("create temp dir");
+    let root = temp.path().join("project");
+    write_project_without_client_roots(&root);
+    let mut config = create_config_with_cache(root, temp.path().join("cache"));
+    config.rules.security_client_server_leak = Severity::Off;
+
+    let _ = fallow_core::analyze(&config).expect("analysis succeeds");
+
+    let ids = diagnostic_ids(&config.root);
+    assert!(
+        !ids.iter()
+            .any(|id| id == "client-server-leak-no-client-roots"),
+        "a rule that is off checks nothing by choice, got {ids:?}"
+    );
+}
