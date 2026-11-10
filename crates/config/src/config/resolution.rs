@@ -590,13 +590,18 @@ pub fn config_cache_dir(root: &Path, configured: Option<PathBuf>) -> PathBuf {
         let path = std::path::absolute(path).unwrap_or_else(|_| path.to_path_buf());
         fallow_types::path_guard::lexically_normalized(&path)
     };
-    let normalized = absolute(&resolve_cache_dir(root, Some(configured.clone())));
-    let root = absolute(root);
-    let in_git_dir = normalized
-        .strip_prefix(&root)
-        .is_ok_and(|rel| rel.components().any(|part| part.as_os_str() == ".git"));
-    if normalized.starts_with(&root) && normalized != root && !in_git_dir {
-        return normalized;
+    let dir = resolve_cache_dir(root, Some(configured.clone()));
+    // The check uses absolute paths, so a relative root such as `.` cannot
+    // accept every path. The result keeps the form of the caller's root.
+    let relative = absolute(&dir)
+        .strip_prefix(absolute(root))
+        .map(Path::to_path_buf)
+        .ok();
+    if let Some(relative) = relative
+        && relative.components().next().is_some()
+        && !relative.components().any(|part| part.as_os_str() == ".git")
+    {
+        return root.join(relative);
     }
     tracing::warn!(
         "ignoring cache.dir `{}` from the config file: it must be a directory inside the project; set {CACHE_DIR_ENV} to put the cache outside the project",
