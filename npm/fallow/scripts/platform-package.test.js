@@ -24,3 +24,19 @@ test("returns null for unsupported targets", () => {
   assert.equal(getPlatformPackage("linux", "ppc64"), null);
   assert.equal(getPlatformPackage("freebsd", "x64"), null);
 });
+
+test("Linux platform manifests declare libc so npm installs only the matching package", () => {
+  const path = require("node:path");
+  const npmRoot = path.join(__dirname, "..", "..");
+  const { optionalDependencies } = require("../package.json");
+  const linuxPackages = Object.keys(optionalDependencies).filter((name) =>
+    name.startsWith("@fallow-cli/linux-"),
+  );
+  assert.ok(linuxPackages.length > 0);
+  for (const name of linuxPackages) {
+    const dir = name.slice("@fallow-cli/".length);
+    const manifest = require(path.join(npmRoot, dir, "package.json"));
+    const expected = dir.endsWith("-gnu") ? ["glibc"] : ["musl"];
+    assert.deepEqual(manifest.libc, expected, `${name} must declare libc ${expected}`);
+  }
+});
