@@ -1368,7 +1368,132 @@ pub struct MutationInspectCode {
     pub mutated_lines: String,
 }
 
-/// The envelope of `fallow mutation inspect`. It runs no user code.
+/// The verdict of one replay. A replay never decides that a mutant is
+/// equivalent: equal results on both sides give `no_witness_found`, which
+/// says only that this input shows no difference.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum MutationReplayVerdict {
+    /// Each call of a side gave the same result, and the two sides differ.
+    /// The input is a witness: a test with this input can kill the mutant.
+    Witness,
+    /// Each call of both sides gave the same result. The input shows no
+    /// difference. Another input can still show one.
+    NoWitnessFound,
+    /// The calls of one side gave different results, for example from a
+    /// clock or a random source that the replay does not fix. Such a
+    /// difference is never a witness.
+    Unstable,
+    /// A call did not end before the call timeout, or the replay did not end
+    /// before its wall limit. The mutant can hang.
+    Timeout,
+    /// The export is not a function.
+    NotCallable,
+    /// The replay did not run: the function has no export to call, or the
+    /// file is a component file. `reason` says why.
+    NotReplayable,
+}
+
+/// The side of one replay call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum MutationReplaySide {
+    /// The original code: no mutant is active.
+    Original,
+    /// The code with the mutant active.
+    Mutant,
+}
+
+/// The outcome of one replay call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum MutationReplayOutcome {
+    /// The function returned. A returned promise counts with its value.
+    Returned,
+    /// The function, or the load of its module, threw. A rejected promise
+    /// counts too.
+    Threw,
+    /// The call did not end before the call timeout.
+    TimedOut,
+    /// The export is not a function.
+    NotCallable,
+}
+
+/// Where the arguments of a replay come from.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum MutationReplayInputSource {
+    /// The `--args` value of the command.
+    Argument,
+}
+
+/// The input of a replay.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MutationReplayInput {
+    /// Where the arguments come from.
+    pub source: MutationReplayInputSource,
+    /// The arguments in the replay encoding: JSON values, and objects with a
+    /// `$replay` tag for `undefined`, special numbers, bigints, dates,
+    /// regular expressions, maps, sets and typed arrays.
+    pub args: Vec<serde_json::Value>,
+}
+
+/// One call of a replay.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MutationReplayCall {
+    /// The side of the call.
+    pub side: MutationReplaySide,
+    /// The 1-based number of the call on its side.
+    pub index: u32,
+    /// How the call ended.
+    pub outcome: MutationReplayOutcome,
+    /// The returned or thrown value in the replay encoding. An error is
+    /// `{"$replay": "error", "name", "message"}`. `null` for a call that
+    /// timed out.
+    pub value: serde_json::Value,
+    /// A short text of the value for people, at most 200 characters.
+    pub text: String,
+}
+
+/// The replay of one export on the original and on one mutant (replay
+/// contract 1).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct MutationReplayOutput {
+    /// The version of the replay contract of the runner companion.
+    pub contract_version: u32,
+    /// The verdict of the replay.
+    pub verdict: MutationReplayVerdict,
+    /// Why the replay did not run or did not end. Absent otherwise.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+    /// The export that the replay called. `null` when no export holds the
+    /// mutant.
+    pub export: Option<String>,
+    /// The arguments of each call.
+    pub input: MutationReplayInput,
+    /// The calls of each side. The sides take turns.
+    pub calls_per_side: u32,
+    /// The time limit of one call, in milliseconds.
+    pub call_timeout_ms: u64,
+    /// The fixed value of `Date.now()` in each call.
+    pub clock_ms: i64,
+    /// The seed of `Math.random` in each call.
+    pub seed: i64,
+    /// Each call, in call order.
+    pub calls: Vec<MutationReplayCall>,
+    /// The time of the replay request, in milliseconds.
+    pub duration_ms: u64,
+}
+
+/// The envelope of `fallow mutation inspect`. It runs no user code, except
+/// with `--replay`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MutationInspectOutput {
@@ -1405,6 +1530,9 @@ pub struct MutationInspectOutput {
     pub killing_tests: Vec<String>,
     /// True only for exact requested membership with terminal pass or fail results.
     pub kill_matrix_complete: bool,
+    /// The replay of the mutant. Present only with `--replay`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay: Option<MutationReplayOutput>,
 }
 
 /// Version singleton for the open tasks of a mutation report.

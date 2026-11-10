@@ -2270,6 +2270,21 @@ Use this mode to check whether specific tests are redundant without a full kill 
 - A target with kills and no `unique_kills` is a candidate. With `target_only_kills`, it stays redundant only while one of the sharing targets stays. Do not remove all sharing targets together.
 - The evidence covers the planned scope only. A unique kill outside the scope is not visible.
 
+### `mutation inspect --replay`: Find a test input for a survivor
+
+```bash
+fallow mutation inspect <mutant-id> --replay --args '[2, 3]' --format json --quiet
+```
+
+The replay calls the export that holds the mutated function with `--args` on the original and on the mutant, three times each, in turns. It runs project code, but no test. Read `replay.verdict`:
+
+- `witness`: each side repeats its result, and the sides differ. Write a test with this input that asserts the original result (`calls[].value` of the `original` side).
+- `no_witness_found`: this input shows no difference. Try another input. This verdict never means that the mutant is equivalent.
+- `unstable`: one side changes between calls (for example `crypto.randomUUID()`). Do not use the difference as a test oracle.
+- `timeout`, `not_callable`, `not_replayable`: read `replay.reason`. A function that no export holds needs `--export <name>` of an export that calls it.
+
+Each call loads a fresh module with `Date.now()` fixed and a fixed `Math.random` seed. Arguments and results use the replay encoding: JSON, plus `{"$replay": "undefined"}` and other `$replay` tags for values that JSON cannot hold. Only the Vitest and `node:test` runners replay.
+
 ## `ci`: Provider-Aware Review Automation
 
 `fallow ci reconcile-review` reads a typed review envelope (`--format review-github` / `review-gitlab`), looks up existing fingerprints on the PR/MR, and resolves stale review threads when their finding is no longer present in the new envelope. Posts an idempotent "Resolved in `<sha>`" follow-up comment per stale finding (skipped if a marker for the same fingerprint at the current SHA already exists).

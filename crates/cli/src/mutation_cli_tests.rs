@@ -1440,6 +1440,7 @@ fn inspect_marks_each_line_of_a_multi_line_mutant() {
         killed_by: None,
         killing_tests: Vec::new(),
         kill_matrix_complete: false,
+        replay: None,
     };
     let text = plain(&render_inspect(&packet));
     let diff: Vec<&str> = text.lines().skip(2).take(5).collect();
@@ -1612,7 +1613,123 @@ fn inspect_packet(
         killed_by: None,
         killing_tests: Vec::new(),
         kill_matrix_complete: false,
+        replay: None,
     }
+}
+
+fn replay_call(
+    side: fallow_output::MutationReplaySide,
+    index: u32,
+    outcome: fallow_output::MutationReplayOutcome,
+    text: &str,
+) -> fallow_output::MutationReplayCall {
+    fallow_output::MutationReplayCall {
+        side,
+        index,
+        outcome,
+        value: serde_json::Value::Null,
+        text: text.to_owned(),
+    }
+}
+
+fn replay_output(
+    verdict: fallow_output::MutationReplayVerdict,
+    reason: Option<&str>,
+    mutant: (fallow_output::MutationReplayOutcome, &str),
+) -> fallow_output::MutationReplayOutput {
+    use fallow_output::{MutationReplayOutcome, MutationReplaySide};
+    let calls = (1..=3)
+        .flat_map(|index| {
+            [
+                replay_call(
+                    MutationReplaySide::Original,
+                    index,
+                    MutationReplayOutcome::Returned,
+                    "5",
+                ),
+                replay_call(MutationReplaySide::Mutant, index, mutant.0, mutant.1),
+            ]
+        })
+        .collect();
+    fallow_output::MutationReplayOutput {
+        contract_version: 1,
+        verdict,
+        reason: reason.map(str::to_owned),
+        export: Some("add".to_owned()),
+        input: fallow_output::MutationReplayInput {
+            source: fallow_output::MutationReplayInputSource::Argument,
+            args: vec![serde_json::json!(2), serde_json::json!(3)],
+        },
+        calls_per_side: 3,
+        call_timeout_ms: 5000,
+        clock_ms: 1_767_225_600_000,
+        seed: 1,
+        calls,
+        duration_ms: 10,
+    }
+}
+
+#[test]
+fn an_inspect_replay_shows_both_sides_side_by_side_and_the_verdict() {
+    use fallow_output::{MutationReplayOutcome, MutationReplayVerdict};
+    let mut packet = inspect_packet(fallow_output::MutationInspectStatus::Fresh, None);
+    packet.replay = Some(replay_output(
+        MutationReplayVerdict::Witness,
+        None,
+        (MutationReplayOutcome::Threw, "RangeError: too big"),
+    ));
+    let text = plain(&render_inspect(&packet));
+    assert!(text.contains("Replay  add(2, 3)\n"), "{text}");
+    assert!(text.contains("  call  original  mutant\n"), "{text}");
+    assert!(
+        text.contains("  1     5         threw RangeError: too big\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("Witness: each side gave the same result"),
+        "{text}"
+    );
+    assert!(text.contains("Replay contract 1:"), "{text}");
+
+    for (verdict, reason, expected) in [
+        (
+            MutationReplayVerdict::NoWitnessFound,
+            None,
+            "No witness found: both sides gave the same result for this input (3 calls each).",
+        ),
+        (
+            MutationReplayVerdict::Unstable,
+            Some("the calls differ"),
+            "Unstable: the calls differ. A difference that does not repeat is not a witness.",
+        ),
+        (
+            MutationReplayVerdict::Timeout,
+            Some("a call did not end"),
+            "Timeout: a call did not end.",
+        ),
+        (
+            MutationReplayVerdict::NotReplayable,
+            Some("no export holds it"),
+            "Not replayable: no export holds it.",
+        ),
+    ] {
+        packet.replay = Some(replay_output(
+            verdict,
+            reason,
+            (MutationReplayOutcome::Returned, "5"),
+        ));
+        let text = plain(&render_inspect(&packet));
+        assert!(text.contains(expected), "{verdict:?}: {text}");
+        assert!(!text.contains("equivalent"), "{verdict:?}: {text}");
+    }
+    let mut empty = replay_output(
+        MutationReplayVerdict::NotReplayable,
+        Some("x"),
+        (MutationReplayOutcome::Returned, "5"),
+    );
+    empty.calls.clear();
+    packet.replay = Some(empty);
+    assert!(!plain(&render_inspect(&packet)).contains("call  original"));
 }
 
 #[test]

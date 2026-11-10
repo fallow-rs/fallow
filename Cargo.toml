@@ -360,6 +360,7 @@ allow = [
     # fallow-mutation has no fallow dependencies. The engine calls it only
     # inside parse_bounded (crates/engine/src/mutation/layout.rs). regex.rs
     # parses one mutated regular expression literal to check its syntax.
+    { path = "crates/mutation/src/exports.rs", max = 1 },
     { path = "crates/mutation/src/lib.rs", max = 1 },
     { path = "crates/mutation/src/regex.rs", max = 1 },
 ]

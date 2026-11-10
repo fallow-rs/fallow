@@ -13,6 +13,7 @@ read-only next steps. It never writes a test and never proposes a code change.
 | `fallow mutation --plan` | no | `mutation-plan` |
 | `fallow mutation` | yes | `mutation` |
 | `fallow mutation inspect <mutant_id> [--report <file>]` | no | `mutation-inspect` |
+| `fallow mutation inspect <mutant_id> --replay [--args <json>] [--export <name>]` | yes | `mutation-inspect` with `replay` |
 | `fallow mutation tasks [--report <file>]` | no | `mutation-tasks` |
 | `fallow mutation export [--report <file>]` | no | `mutation-testing-report-schema` document |
 | `fallow mutation --recheck [--report <file>] [--mutant <id>]` | yes | `mutation` |
@@ -538,7 +539,7 @@ or relational mutant, so it adds little test-strength signal for its run time.
 |---|---|
 | `0` | The plan, the run or inspect finished. Survivors do not fail a run. |
 | `1` | `--min-score` or `mutation.minScore` is set, and the score is lower. |
-| `2` | Invalid input or an execution error: a dirty worktree without `--allow-dirty`, a cache directory that hides project files, a missing runtime or runner, a companion file with a wrong digest, an invalid verdict document, `--typecheck` without a type-aware companion, a run in which baseline failures leave each mutant without a test result, a run path that fails the self-check (see Run-path self-check), a `--resume` journal of other inputs (`FALLOW_MUTATION_RESUME_MISMATCH`), a `--kill-matrix-for` run in which no target selects a test of the dry run (`FALLOW_MUTATION_TARGET_UNMATCHED`), a `--kill-matrix-for` test ID target that names a duplicate test ID (`FALLOW_MUTATION_TARGET_DUPLICATE_TEST_ID`), a `--recheck` with a changed source file, an unknown mutant id or no open task (see Recheck), a `--compare` with a saved report or a run that is not complete (`FALLOW_MUTATION_COMPARE_INCOMPLETE`, see Compare). |
+| `2` | Invalid input or an execution error: a dirty worktree without `--allow-dirty`, a cache directory that hides project files, a missing runtime or runner, a companion file with a wrong digest, an invalid verdict document, `--typecheck` without a type-aware companion, a run in which baseline failures leave each mutant without a test result, a run path that fails the self-check (see Run-path self-check), a `--resume` journal of other inputs (`FALLOW_MUTATION_RESUME_MISMATCH`), a `--kill-matrix-for` run in which no target selects a test of the dry run (`FALLOW_MUTATION_TARGET_UNMATCHED`), a `--kill-matrix-for` test ID target that names a duplicate test ID (`FALLOW_MUTATION_TARGET_DUPLICATE_TEST_ID`), a `--recheck` with a changed source file, an unknown mutant id or no open task (see Recheck), a `--compare` with a saved report or a run that is not complete (`FALLOW_MUTATION_COMPARE_INCOMPLETE`, see Compare), a replay of a stale mutant, a runner with no replay, or a replay companion that fails (see Replay). |
 | `128 + signal` | SIGINT, SIGTERM, SIGHUP or SIGQUIT stopped the run (`130` for SIGINT). A run that a signal stops during the mutant runs prints the report of the finished mutants, with the completion `partial`. A run that a signal stops earlier prints no report and no error. |
 
 The flag wins over the config key. The minimum applies to the score, in
@@ -1999,6 +2000,91 @@ and span.
 The run report lists a digest for each mutated file. The plan lists digests
 only for the files that it instruments, so a plan mutant in a file that no test
 reaches inspects as `no-digest`.
+
+## Replay
+
+`fallow mutation inspect <mutant_id> --replay` calls one export of the file of
+the mutant with one input on the original code and on the mutant, and shows
+the results side by side. Use it to find a ready test input for a survivor.
+The replay runs project code: the module of the file and each module that it
+imports. It runs no test.
+
+- `--args <json>` gives the arguments as a JSON array, for example
+  `--args '[2, 3]'`. The default is no arguments.
+- `--export <name>` names the export to call. The default is the export
+  whose declaration holds the function of the mutant: `export function f`,
+  `export const f = () => {}`, `export default`, or a local function that an
+  `export { f as g }` list exports. A mutant in a nested function calls the
+  outer export. A mutant in top-level code, or in a function that no export
+  holds, needs `--export`, for example the export that reads the value.
+- The replay needs a `fresh` packet. A stale mutant exits with code 2 and
+  `FALLOW_MUTATION_REPLAY_STALE`.
+- The Vitest and `node:test` runners replay. The `bun test` runner exits
+  with code 2 and `FALLOW_MUTATION_REPLAY_UNSUPPORTED`. A companion failure
+  exits with code 2 and `FALLOW_MUTATION_REPLAY_FAILED`.
+
+### Verdicts
+
+The replay calls each side three times, in turns: original, mutant,
+original, mutant, original, mutant. A side is stable when each of its calls
+gives the same outcome and the same value. The comparison ignores the key
+order of an object, because a deep equality check of a test does not see it.
+
+| Verdict | Meaning |
+|---|---|
+| `witness` | Both sides are stable, and they differ. A test with this input can kill the mutant. |
+| `no_witness_found` | Both sides are stable and equal. This input shows no difference. Another input can still show one. |
+| `unstable` | The calls of one side differ, for example from a source of random values that the replay does not fix. A difference that does not repeat is never a witness. |
+| `timeout` | A call did not end before the call limit (5 seconds), or the replay did not end before its wall limit. The mutant can hang. |
+| `not_callable` | The export is not a function. |
+| `not_replayable` | The replay did not run: no export holds the mutant, or the file is a component file. `reason` says why. |
+
+A replay never gives the verdict `equivalent`. Equal results say only that
+this input shows no difference. Use `--verdicts` to record an equivalent
+mutant after a review.
+
+### Replay contract
+
+The runner companion owns the replay contract. Its version is
+`replay.contract_version` in `crates/api/mutation-runner-protocol.json`, and
+the output gives it as `replay.contract_version`. Version 1 has these rules:
+
+- The API sends one `replay` request with the file, the export, the mutant
+  id, the arguments, the number of calls of each side, the call limit, the
+  fixed clock and the seed. The companion answers with `replay_result`: one
+  record for each call, in call order, with the side, the 1-based index, the
+  outcome (`returned`, `threw`, `timed_out` or `not_callable`), the value and
+  a short text. The API decides the verdict.
+- Each call loads the module again, so module state and a mutant in
+  top-level code never reach the next call. A switch in top-level code runs
+  once at import, so the load counts as part of the call: the mutant is
+  active when the module evaluates, and an error that the load throws is a
+  `threw` outcome. Vitest calls `vi.resetModules()` before each call.
+  `node:test` starts a new Node process for each call.
+- Each call runs in an `AsyncLocalStorage` store with its own active mutant.
+  A timer or a promise of one call reads the mutant of that call, also when
+  it runs during a later call.
+- A Node process that a call starts inherits the side through the
+  subprocess preload in `NODE_OPTIONS`, for the original and for the mutant.
+- In each call, `Date.now()`, `new Date()` and `Date()` give
+  2026-01-01T00:00:00Z, `performance.now()` gives 0, and `Math.random` starts
+  from seed 1. Values from the clock gave false witnesses before this rule.
+  Other sources (for example `crypto.randomUUID()`, the network or the file
+  system) are not fixed. They give `unstable`, never `witness`.
+- The replay of each mutant runs in its own worker: a new Vitest worker, or
+  a new Node process for each call. A call that runs past the call limit is
+  `timed_out`. A synchronous endless loop through instrumented code ends at
+  the loop check. A loop that blocks the worker in other code ends at the
+  wall limit of the request: the API stops the companion, and the verdict is
+  `timeout`.
+- Arguments use the replay encoding: JSON values, and objects with a
+  `$replay` tag for `undefined` (`{"$replay": "undefined"}`), `NaN`,
+  `Infinity` and `-0` (`{"$replay": "number", "value": "NaN"}`), bigints,
+  dates, regular expressions, maps, sets and typed arrays. Results use the
+  same encoding. A thrown error is `{"$replay": "error", "name", "message"}`
+  with no stack. A function, a symbol, a class instance, a proxy, a stream, a
+  DOM node, a cyclic value and an accessor property are not replayable as an
+  argument.
 
 ## Tasks
 

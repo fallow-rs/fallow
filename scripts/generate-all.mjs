@@ -284,6 +284,7 @@ const MUTATION_RUNNER_LIST_KEYS = [
   "in_band_markers",
 ];
 const MUTATION_RUNNER_RUNTIME_KEYS = ["global_name", "active_function", "hit_function"];
+const MUTATION_RUNNER_REPLAY_LIST_KEYS = ["sides", "outcomes"];
 const SEMVER_CORE = /^\d+\.\d+\.\d+$/u;
 const versionCoreParts = (version) =>
   version
@@ -315,6 +316,10 @@ const MUTATION_RUNNER_MANIFEST_CHECKS = [
   (manifest) => ENV_NAME.test(manifest.session_token_env ?? ""),
   (manifest) => MUTATION_RUNNER_LIST_KEYS.every((key) => isNonEmptyStringList(manifest[key])),
   (manifest) => hasStringFields(manifest.runtime, MUTATION_RUNNER_RUNTIME_KEYS),
+  (manifest) =>
+    Number.isSafeInteger(manifest.replay?.contract_version) &&
+    manifest.replay.contract_version > 0 &&
+    MUTATION_RUNNER_REPLAY_LIST_KEYS.every((key) => isNonEmptyStringList(manifest.replay[key])),
   (manifest) =>
     Array.isArray(manifest.runners) &&
     manifest.runners.length > 0 &&

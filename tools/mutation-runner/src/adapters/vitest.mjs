@@ -22,6 +22,7 @@ import {
   isSupportedVersion,
   parseVersion,
   realPath,
+  replayEntry,
   runResult,
   testErrorText,
   toPosix,
@@ -30,6 +31,7 @@ import {
   unsupportedVersion,
   validateDryRun,
   validateInit,
+  validateReplay,
   validateRun,
 } from "./common.mjs";
 
@@ -41,6 +43,11 @@ const OVERLAY_KEY = "fallowOverlay";
 const SUBPROCESS_PRELOAD_KEY = "fallowSubprocessPreload";
 const SUBPROCESS_PRELOAD = new URL("../runtime/node-subprocess-preload.mjs", import.meta.url);
 const SETUP_FILE = fileURLToPath(new URL("../runtime/vitest-setup.mjs", import.meta.url));
+const REPLAY_FILE = fileURLToPath(new URL("../runtime/vitest-replay.mjs", import.meta.url));
+const REPLAY_KEY = "fallowReplay";
+// The time of the module loads and of Vitest itself in a replay test, on top
+// of the call timeouts.
+const REPLAY_TEST_MARGIN_MS = 10_000;
 /** The companion directory, with the runtime files that a test worker loads. */
 const COMPANION_DIR = fileURLToPath(new URL("..", import.meta.url));
 const TIMEOUT_MESSAGE = /\b(?:Test|Hook) timed out in \d+ms/u;
@@ -1046,6 +1053,46 @@ export const createAdapter = async (init) => {
     return (await runRequested(request, requested, false)).body;
   };
 
+  /**
+   * Runs the replay file as the only test of a run, in a new worker. The
+   * first project runs it, because the replay calls one export of a source
+   * file and needs no test file of a project.
+   */
+  const replay = async (request) => {
+    validateReplay(request);
+    const entry = replayEntry(overlay, request.file);
+    const testTimeoutMs = 2 * request.calls * request.call_timeout_ms + REPLAY_TEST_MARGIN_MS;
+    const [project] = vitest.projects;
+    for (const each of vitest.projects) {
+      each.provide(REPLAY_KEY, {
+        ...request,
+        module_path: entry.path,
+        test_timeout_ms: testTimeoutMs,
+      });
+    }
+    const started = performance.now();
+    const result = await runSpecifications(() => [project.createSpecification(REPLAY_FILE)], {
+      mutantId: null,
+      bail: false,
+      timeoutMs: testTimeoutMs,
+    });
+    const testCase = result.testModules.flatMap((testModule) => [
+      ...testModule.children.allTests(),
+    ])[0];
+    const calls = testCase?.meta().fallowReplay;
+    if (!Array.isArray(calls)) {
+      const errors = [
+        ...runErrors(result, root).map((error) => error.message),
+        ...(testCase?.result().errors ?? []).map((error) => errorMessage(error)),
+      ];
+      throw new CompanionError(
+        "internal",
+        `the replay test gave no result${errors.length > 0 ? `: ${errors.join("; ")}` : ""}`,
+      );
+    }
+    return { calls, duration_ms: Math.round(performance.now() - started) };
+  };
+
   return {
     runnerVersion: version,
     testFiles: [...new Set(initFiles.map(([file]) => file))],
@@ -1056,10 +1103,12 @@ export const createAdapter = async (init) => {
       bail: true,
       fresh_modules_per_run: freshModulesPerRun,
       batch_mutants: false,
+      replay: true,
     },
     notes: runnerNotes(vitest.projects),
     dryRun,
     run,
+    replay,
     reload: async () => ({ method: freshModulesPerRun ? "noop" : "restart_required" }),
     close: async () => {
       try {

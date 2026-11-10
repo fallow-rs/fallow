@@ -80,6 +80,15 @@ const createRuntime = () => {
     loopSpent: 0,
     testStarted: 0,
     evaluations: 0,
+    // An `AsyncLocalStorage` of a replay. A replay call runs in a store with
+    // its own active mutant, so a timer or a promise of one call reads the
+    // mutant of that call, also when it runs during a later call.
+    context: null,
+  };
+  /** The active mutant of the current replay call, else the process value. */
+  const currentActive = () => {
+    const store = state.context?.getStore();
+    return store === undefined ? state.active : store.active;
   };
   // A synchronous endless loop blocks the test worker, so no timer can stop
   // it. In a mutant run, each instrumented site calls `a` on each
@@ -100,7 +109,7 @@ const createRuntime = () => {
   // error that `a` throws is the loop timeout.
   const runtime = {
     a: (id) => {
-      const current = state.active;
+      const current = state.context === null ? state.active : currentActive();
       if (current === null) return false;
       let active;
       try {
@@ -125,6 +134,27 @@ const createRuntime = () => {
     },
     setLoopBudget: (ms) => {
       state.loopBudget = Number.isFinite(ms) && ms > 0 ? ms : null;
+    },
+    // The replay gives an `AsyncLocalStorage` instance, because this module
+    // has no Node import (the Vitest setup file loads it in browser mode).
+    enableContext: (storage) => {
+      state.context ??= storage;
+    },
+    runWithActive: (id, task) => {
+      if (state.context === null) throw new Error("the replay context is not enabled");
+      return state.context.run({ active: typeof id === "string" ? id : null }, task);
+    },
+    // One replay call is one test for the loop check: it starts with the
+    // full budget, and the time of the earlier calls does not count.
+    startCall: (budgetMs) => {
+      state.loopBudget = Number.isFinite(budgetMs) && budgetMs > 0 ? budgetMs : null;
+      state.loopSpent = 0;
+      state.evaluations = 0;
+      state.testStarted = readClock() ?? 0;
+      state.running = Math.max(state.running, 1);
+    },
+    finishCall: () => {
+      state.loopBudget = null;
     },
     // A test that never finished (for example a killed worker) must not
     // turn the module-scope hits of the next file into test hits.

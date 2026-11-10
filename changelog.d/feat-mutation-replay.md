@@ -1,0 +1,3 @@
+### Added
+
+- **`fallow mutation inspect <id> --replay` calls the mutated function on the original and on the mutant.** Pass the arguments with `--args '[2, 3]'`. The replay calls the export three times on each side, in turns, and shows the results side by side. A difference that each call repeats is a `witness`: a test with this input can kill the mutant. Equal results are `no_witness_found`, never `equivalent`. A side whose calls differ is `unstable`. Each call loads a fresh module instance with a fixed clock and a fixed `Math.random` seed, and the replay of each mutant runs in its own worker with a wall limit. The Vitest and `node:test` runners replay. The JSON output adds the `replay` object, and the runner companion has a versioned replay contract.

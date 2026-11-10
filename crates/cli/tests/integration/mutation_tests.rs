@@ -2203,3 +2203,184 @@ mod compare {
 
 #[path = "mutation_copy_scope_tests.rs"]
 mod copy_scope;
+
+/// A `node:test` project for `inspect --replay`. `add` is exported, `hidden`
+/// is not, and `useHidden` calls it. The replay needs only `node`.
+fn replay_project() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"replay-fixture","private":true,"type":"module","scripts":{"test":"node --test"}}"#,
+    )
+    .expect("package.json");
+    fs::create_dir_all(root.join("src")).expect("src");
+    fs::create_dir_all(root.join("test")).expect("test");
+    fs::write(
+        root.join("src/math.js"),
+        "export const add = (a, b) => a + b;\nconst hidden = (n) => n * 2;\nexport const useHidden = (n) => hidden(n);\n",
+    )
+    .expect("math.js");
+    fs::write(
+        root.join("test/math.test.js"),
+        "import assert from \"node:assert/strict\";\nimport { test } from \"node:test\";\nimport { add, useHidden } from \"../src/math.js\";\ntest(\"add\", () => { add(1, 2); useHidden(1); assert.ok(true); });\n",
+    )
+    .expect("math.test.js");
+    fs::write(root.join(".gitignore"), ".fallow\nplan.json\n").expect(".gitignore");
+    git(root, &["init", "-q"]);
+    commit_all(root, "init");
+    dir
+}
+
+/// The plan of the replay project and the id of the mutant that turns
+/// `original` into `replacement`.
+fn replay_plan(root: &Path, original: &str, replacement: &str) -> (String, String) {
+    let plan = root.join("plan.json");
+    let plan_path = plan.to_str().expect("utf-8 path").to_owned();
+    let output = mutation(
+        root,
+        &[
+            "--plan", "--all", "--format", "json", "--quiet", "-o", &plan_path,
+        ],
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let saved: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&plan).expect("plan")).expect("plan json");
+    let mutant = saved["mutants"]
+        .as_array()
+        .expect("mutants")
+        .iter()
+        .find(|mutant| {
+            mutant["change"]["from"] == original && mutant["change"]["to"] == replacement
+        })
+        .unwrap_or_else(|| panic!("no {original} to {replacement} mutant: {saved}"));
+    (
+        mutant["mutant_id"].as_str().expect("id").to_owned(),
+        plan_path,
+    )
+}
+
+#[test]
+fn inspect_replay_shows_a_witness_for_an_exported_function() {
+    let project = replay_project();
+    let root = project.path();
+    let (id, plan) = replay_plan(root, "+", "-");
+    let (output, packet) = json_mutation(
+        root,
+        &[
+            "inspect", &id, "--report", &plan, "--replay", "--args", "[2, 3]",
+        ],
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let replay = &packet["replay"];
+    assert_eq!(replay["verdict"], "witness", "{packet}");
+    assert_eq!(replay["export"], "add");
+    assert_eq!(replay["input"]["args"], serde_json::json!([2, 3]));
+    assert_eq!(replay["contract_version"], 1);
+    let values = |side: &str| -> Vec<serde_json::Value> {
+        replay["calls"]
+            .as_array()
+            .expect("calls")
+            .iter()
+            .filter(|call| call["side"] == side)
+            .map(|call| call["value"].clone())
+            .collect()
+    };
+    assert_eq!(values("original"), vec![serde_json::json!(5); 3]);
+    assert_eq!(values("mutant"), vec![serde_json::json!(-1); 3]);
+
+    let human = mutation(
+        root,
+        &[
+            "inspect", &id, "--report", &plan, "--replay", "--args", "[2, 3]",
+        ],
+    );
+    assert_eq!(human.code, 0, "{}", human.stderr);
+    assert!(
+        human.stdout.contains("Replay  add(2, 3)"),
+        "{}",
+        human.stdout
+    );
+    assert!(human.stdout.contains("Witness"), "{}", human.stdout);
+}
+
+#[test]
+fn inspect_replay_of_a_function_without_export_names_the_export_flag() {
+    let project = replay_project();
+    let root = project.path();
+    let (id, plan) = replay_plan(root, "*", "/");
+    let (output, packet) = json_mutation(
+        root,
+        &[
+            "inspect", &id, "--report", &plan, "--replay", "--args", "[3]",
+        ],
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert_eq!(packet["replay"]["verdict"], "not_replayable", "{packet}");
+    let reason = packet["replay"]["reason"].as_str().expect("reason");
+    assert!(
+        reason.contains("`hidden`") && reason.contains("--export"),
+        "{reason}"
+    );
+
+    let (output, packet) = json_mutation(
+        root,
+        &[
+            "inspect",
+            &id,
+            "--report",
+            &plan,
+            "--replay",
+            "--args",
+            "[3]",
+            "--export",
+            "useHidden",
+        ],
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert_eq!(packet["replay"]["verdict"], "witness", "{packet}");
+}
+
+#[test]
+fn inspect_replay_refuses_bad_args_a_stale_file_and_args_without_replay() {
+    let project = replay_project();
+    let root = project.path();
+    let (id, plan) = replay_plan(root, "+", "-");
+    let (output, envelope) = json_mutation(
+        root,
+        &[
+            "inspect",
+            &id,
+            "--report",
+            &plan,
+            "--replay",
+            "--args",
+            "{\"a\":1}",
+        ],
+    );
+    assert_eq!(output.code, 2, "{}", output.stderr);
+    assert_eq!(
+        envelope["code"], "FALLOW_INVALID_MUTATION_OPTIONS",
+        "{envelope}"
+    );
+
+    let without = mutation(root, &["inspect", &id, "--report", &plan, "--args", "[1]"]);
+    assert_eq!(without.code, 2, "{}", without.stderr);
+
+    fs::write(
+        root.join("src/math.js"),
+        "export const add = (a, b) => b + a;\n",
+    )
+    .expect("edit");
+    let (output, envelope) = json_mutation(
+        root,
+        &[
+            "inspect", &id, "--report", &plan, "--replay", "--args", "[1, 2]",
+        ],
+    );
+    assert_eq!(output.code, 2, "{}", output.stderr);
+    assert_eq!(
+        envelope["code"], "FALLOW_MUTATION_REPLAY_STALE",
+        "{envelope}"
+    );
+}

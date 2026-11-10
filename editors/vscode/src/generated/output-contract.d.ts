@@ -1879,6 +1879,24 @@ export type MutationInspectStatus = ("fresh" | "stale")
  */
 export type MutationStaleReason = ("file-missing" | "no-digest" | "source-changed" | "mutant-not-reproduced")
 /**
+ * The verdict of one replay. A replay never decides that a mutant is
+ * equivalent: equal results on both sides give `no_witness_found`, which
+ * says only that this input shows no difference.
+ */
+export type MutationReplayVerdict = ("witness" | "no_witness_found" | "unstable" | "timeout" | "not_callable" | "not_replayable")
+/**
+ * Where the arguments of a replay come from.
+ */
+export type MutationReplayInputSource = "argument"
+/**
+ * The side of one replay call.
+ */
+export type MutationReplaySide = ("original" | "mutant")
+/**
+ * The outcome of one replay call.
+ */
+export type MutationReplayOutcome = ("returned" | "threw" | "timed_out" | "not_callable")
+/**
  * Version singleton for the open tasks of a mutation report.
  */
 export type MutationTasksSchemaVersion = "1"
@@ -21869,7 +21887,8 @@ pending_reason?: (string | null)
 test_reach?: (MutantTestReach | null)
 }
 /**
- * The envelope of `fallow mutation inspect`. It runs no user code.
+ * The envelope of `fallow mutation inspect`. It runs no user code, except
+ * with `--replay`.
  */
 export interface MutationInspectOutput {
 schema_version: MutationInspectSchemaVersion
@@ -21961,6 +21980,10 @@ killing_tests: string[]
  * True only for exact requested membership with terminal pass or fail results.
  */
 kill_matrix_complete: boolean
+/**
+ * The replay of the mutant. Present only with `--replay`.
+ */
+replay?: (MutationReplayOutput | null)
 }
 /**
  * The code of one mutant, from the current file.
@@ -21982,6 +22005,86 @@ original_lines: string
  * The same lines with the replacement applied.
  */
 mutated_lines: string
+}
+/**
+ * The replay of one export on the original and on one mutant (replay
+ * contract 1).
+ */
+export interface MutationReplayOutput {
+/**
+ * The version of the replay contract of the runner companion.
+ */
+contract_version: number
+verdict: MutationReplayVerdict
+/**
+ * Why the replay did not run or did not end. Absent otherwise.
+ */
+reason?: (string | null)
+/**
+ * The export that the replay called. `null` when no export holds the
+ * mutant.
+ */
+export?: (string | null)
+input: MutationReplayInput
+/**
+ * The calls of each side. The sides take turns.
+ */
+calls_per_side: number
+/**
+ * The time limit of one call, in milliseconds.
+ */
+call_timeout_ms: number
+/**
+ * The fixed value of `Date.now()` in each call.
+ */
+clock_ms: number
+/**
+ * The seed of `Math.random` in each call.
+ */
+seed: number
+/**
+ * Each call, in call order.
+ */
+calls: MutationReplayCall[]
+/**
+ * The time of the replay request, in milliseconds.
+ */
+duration_ms: number
+}
+/**
+ * The input of a replay.
+ */
+export interface MutationReplayInput {
+source: MutationReplayInputSource
+/**
+ * The arguments in the replay encoding: JSON values, and objects with a
+ * `$replay` tag for `undefined`, special numbers, bigints, dates,
+ * regular expressions, maps, sets and typed arrays.
+ */
+args: unknown[]
+}
+/**
+ * One call of a replay.
+ */
+export interface MutationReplayCall {
+side: MutationReplaySide
+/**
+ * The 1-based number of the call on its side.
+ */
+index: number
+outcome: MutationReplayOutcome
+/**
+ * The returned or thrown value in the replay encoding. An error is
+ * `{"$replay": "error", "name", "message"}`. `null` for a call that
+ * timed out.
+ */
+value: {
+[k: string]: unknown
+}
+/**
+ * A short text of the value for people, at most 200 characters.
+ */
+text: string
 }
 /**
  * The envelope of `fallow mutation tasks`: the open tasks of one saved

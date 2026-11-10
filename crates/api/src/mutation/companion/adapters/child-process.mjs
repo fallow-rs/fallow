@@ -1,4 +1,5 @@
 // Generated from tools/mutation-runner/src/adapters/child-process.mjs. Do not edit.
+import { spawn } from "node:child_process";
 import { existsSync, globSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { isAbsolute, join, matchesGlob, resolve } from "node:path";
@@ -112,6 +113,20 @@ const selectTestFiles = (requested, testFiles, runnerName) => {
     throw new CompanionError("test-file-missing", `not a ${runnerName} test file: ${unknown}`);
   }
   return files;
+};
+
+/**
+ * Starts `command` with no stdin and no stdout, and keeps the last
+ * `tailBytes` of its stderr. `stderr()` gives the tail so far.
+ */
+export const spawnWithStderrTail = (command, args, { cwd, env, tailBytes }) => {
+  const child = spawn(command, args, { cwd, env, stdio: ["ignore", "ignore", "pipe"] });
+  let tail = "";
+  child.stderr.setEncoding("utf8");
+  child.stderr.on("data", (chunk) => {
+    tail = (tail + chunk).slice(-tailBytes);
+  });
+  return { child, stderr: () => tail };
 };
 
 /**

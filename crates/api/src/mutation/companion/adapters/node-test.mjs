@@ -1,27 +1,89 @@
 // Generated from tools/mutation-runner/src/adapters/node-test.mjs. Do not edit.
-import { readFileSync, writeFileSync } from "node:fs";
-import { resolve } from "node:path";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
 import { run as runNodeTests } from "node:test";
-import { pathToFileURL } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { CompanionError } from "../protocol.mjs";
 import { CHILD_ENV, HITS_DIAGNOSTIC, overlayErrorsPath } from "../runtime/child.mjs";
+import { SIDES } from "../runtime/replay.mjs";
 import {
   childProcessAdapter,
   createWorkDir,
   initTestFiles,
+  spawnWithStderrTail,
   withTestIds,
 } from "./child-process.mjs";
 import {
   buildOverlay,
   errorMessage,
   isSupportedVersion,
+  replayEntry,
   unsupportedVersion,
   validateInit,
+  validateReplay,
 } from "./common.mjs";
 
 const RUNNER_NAME = "node-test";
 const PRELOAD = new URL("../runtime/node-test-preload.mjs", import.meta.url).href;
+const SUBPROCESS_PRELOAD = new URL("../runtime/node-subprocess-preload.mjs", import.meta.url);
+const REPLAY_FILE = fileURLToPath(new URL("../runtime/node-replay.mjs", import.meta.url));
+// The time of the process start and the module loads of one replay call, on
+// top of its call timeout. A call that blocks its process past it is killed.
+const REPLAY_PROCESS_MARGIN_MS = 5000;
+const STDERR_TAIL_BYTES = 4096;
+
+/**
+ * The NODE_OPTIONS of a replay process: the subprocess preload with the
+ * overlay and the active mutant of the side. A Node process that the call
+ * starts inherits the value, so it loads the same side.
+ */
+const replayNodeOptions = (overlayPath, active) => {
+  const preload = new URL(SUBPROCESS_PRELOAD);
+  preload.searchParams.set("overlay", overlayPath);
+  if (active !== null) preload.searchParams.set("active", active);
+  return [process.env.NODE_OPTIONS, `--import=${preload.href}`].filter(Boolean).join(" ");
+};
+
+/** The record of a replay process that ended with no result. */
+const exitRecord = (code, signal, stderr) => ({
+  outcome: "threw",
+  value: { $replay: "exit", code, signal },
+  text: `the process ended (${code ?? signal}) with no result${stderr ? `: ${stderr.trim().split("\n").at(-1)}` : ""}`,
+});
+
+/**
+ * Runs one replay call of `side` in a new Node process with the Node flags
+ * of the project, and gives its call record.
+ */
+const replayCall = ({ root, execArgv, overlayPath, request, requestPath, resultPath, side }) =>
+  new Promise((resolveCall) => {
+    const active = side === "mutant" ? request.mutant_id : null;
+    const { child, stderr } = spawnWithStderrTail(
+      process.execPath,
+      [...execArgv, REPLAY_FILE, requestPath, side, resultPath],
+      {
+        cwd: root,
+        env: { ...process.env, NODE_OPTIONS: replayNodeOptions(overlayPath, active) },
+        tailBytes: STDERR_TAIL_BYTES,
+      },
+    );
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      child.kill("SIGKILL");
+    }, request.call_timeout_ms + REPLAY_PROCESS_MARGIN_MS);
+    child.on("close", (code, signal) => {
+      clearTimeout(timer);
+      if (timedOut) {
+        resolveCall({ outcome: "timed_out", value: null, text: "timed out" });
+      } else if (existsSync(resultPath)) {
+        resolveCall(JSON.parse(readFileSync(resultPath, "utf8")));
+      } else {
+        resolveCall(exitRecord(code, signal, stderr()));
+      }
+    });
+  });
 
 /**
  * The default test file patterns of `node --test`, with the TypeScript
@@ -380,7 +442,35 @@ export const createAdapter = async (init) => {
     }
   };
 
-  return childProcessAdapter({
+  const projectArgs = nodeArgs(root, init.options?.node_args);
+  let replays = 0;
+  const replay = async (request) => {
+    validateReplay(request);
+    const entry = replayEntry(overlay, request.file);
+    replays += 1;
+    const requestPath = join(workDir.dir, `replay-${replays}.json`);
+    writeFileSync(requestPath, JSON.stringify({ ...request, module_path: entry.path }));
+    const started = performance.now();
+    const calls = [];
+    for (let index = 1; index <= request.calls; index += 1) {
+      for (const side of SIDES) {
+        const resultPath = join(workDir.dir, `replay-${replays}-${side}-${index}.json`);
+        const record = await replayCall({
+          root,
+          execArgv: projectArgs,
+          overlayPath: workDir.overlayPath,
+          request,
+          requestPath,
+          resultPath,
+          side,
+        });
+        calls.push({ side, index, ...record });
+      }
+    }
+    return { calls, duration_ms: Math.round(performance.now() - started) };
+  };
+
+  const adapter = childProcessAdapter({
     runnerName: RUNNER_NAME,
     init,
     version,
@@ -388,4 +478,5 @@ export const createAdapter = async (init) => {
     workDir,
     runFile,
   });
+  return { ...adapter, capabilities: { ...adapter.capabilities, replay: true }, replay };
 };

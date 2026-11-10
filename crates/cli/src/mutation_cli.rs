@@ -51,6 +51,23 @@ pub enum MutationSubcommand {
         /// (default: the report of the last run).
         #[arg(long, value_name = "PATH")]
         report: Option<PathBuf>,
+        /// Call the export of the mutated function with `--args` on the
+        /// original and on the mutant, three times each, and compare the
+        /// results. Runs project code. A difference that each call repeats is
+        /// a witness. Equal results are "no witness found", never
+        /// "equivalent".
+        #[arg(long)]
+        replay: bool,
+        /// The arguments of the replay call as a JSON array, for example
+        /// `[2, 3]`. Objects with a `$replay` tag give `undefined`, special
+        /// numbers, bigints, dates, regular expressions, maps, sets and
+        /// typed arrays (default: no arguments).
+        #[arg(long = "args", value_name = "JSON", requires = "replay")]
+        replay_args: Option<String>,
+        /// The export to call (default: the export that holds the mutated
+        /// function).
+        #[arg(long = "export", value_name = "NAME", requires = "replay")]
+        replay_export: Option<String>,
     },
     /// List the open tasks of a saved report as one batch. Runs no code.
     ///
@@ -581,8 +598,19 @@ pub fn run(input: &MutationCliInput<'_>) -> ExitCode {
             style,
         );
     }
-    if let Some(MutationSubcommand::Inspect { mutant_id, report }) = &input.subcommand {
-        return run_inspect(input, mutant_id, report.as_deref());
+    if let Some(MutationSubcommand::Inspect {
+        mutant_id,
+        report,
+        replay,
+        replay_args,
+        replay_export,
+    }) = &input.subcommand
+    {
+        let replay = replay.then(|| ReplayFlags {
+            args: replay_args.as_deref(),
+            export: replay_export.as_deref(),
+        });
+        return run_inspect(input, mutant_id, report.as_deref(), replay);
     }
     match run_inner(input) {
         Ok(code) => code,
@@ -1000,11 +1028,87 @@ fn project_ancestors(root: &Path) -> Vec<PathBuf> {
     Vec::new()
 }
 
-fn run_inspect(input: &MutationCliInput<'_>, mutant_id: &str, report: Option<&Path>) -> ExitCode {
+/// The replay flags of `fallow mutation inspect`.
+#[derive(Debug, Clone, Copy)]
+struct ReplayFlags<'a> {
+    args: Option<&'a str>,
+    export: Option<&'a str>,
+}
+
+/// Parses the `--args` value: a JSON array of replay values.
+fn replay_args(text: Option<&str>) -> Result<Vec<serde_json::Value>, ProgrammaticError> {
+    let Some(text) = text else {
+        return Ok(Vec::new());
+    };
+    match serde_json::from_str::<serde_json::Value>(text) {
+        Ok(serde_json::Value::Array(args)) => Ok(args),
+        Ok(_) => Err(input_error(
+            "--args must be a JSON array, for example [2, 3]",
+            "mutation.replay.args",
+        )),
+        Err(error) => Err(input_error(
+            format!("--args is not valid JSON: {error}"),
+            "mutation.replay.args",
+        )),
+    }
+}
+
+/// Replays the mutant of a fresh packet and adds the result. A stale packet
+/// cannot replay, because the current file no longer gives the mutant of
+/// the report.
+fn add_replay(
+    input: &MutationCliInput<'_>,
+    packet: &mut fallow_output::MutationInspectOutput,
+    root: &Path,
+    flags: ReplayFlags<'_>,
+) -> Result<(), ProgrammaticError> {
+    let args = replay_args(flags.args)?;
+    if packet.status != fallow_output::MutationInspectStatus::Fresh {
+        return Err(ProgrammaticError::new(
+            format!(
+                "the mutant `{}` is stale, so it cannot replay",
+                packet.location.mutant_id
+            ),
+            INPUT_EXIT_CODE,
+        )
+        .with_code("FALLOW_MUTATION_REPLAY_STALE")
+        .with_context("mutation.replay")
+        .with_help("run `fallow mutation` again for a report of the current files"));
+    }
+    let options = run_options(input)?;
+    let replay = fallow_api::replay_mutation(&fallow_api::MutationReplayOptions {
+        analysis: AnalysisOptions {
+            root: Some(root.to_path_buf()),
+            ..options.analysis
+        },
+        file: packet.location.file.clone(),
+        mutant_id: packet.location.mutant_id.clone(),
+        operator: fallow_api::mutation::Operator::from_name(&packet.location.operator),
+        export: flags.export.map(str::to_owned),
+        args,
+        runtime: options.runtime,
+        runner_config: options.runner_config,
+        call_timeout: None,
+        runner_timeout: options.runner_timeout,
+    })?;
+    packet.replay = Some(replay);
+    Ok(())
+}
+
+fn run_inspect(
+    input: &MutationCliInput<'_>,
+    mutant_id: &str,
+    report: Option<&Path>,
+    replay: Option<ReplayFlags<'_>>,
+) -> ExitCode {
     let (output, style) = (input.output, input.json_style);
     let packet = inspect_report_path(input, report).and_then(|(path, root)| {
         let saved = crate::mutation_inspect::read_saved_report(&path)?;
-        crate::mutation_inspect::inspect(&saved, mutant_id, &root)
+        let mut packet = crate::mutation_inspect::inspect(&saved, mutant_id, &root)?;
+        if let Some(flags) = replay {
+            add_replay(input, &mut packet, &root, flags)?;
+        }
+        Ok(packet)
     });
     let packet = match packet {
         Ok(packet) => packet,

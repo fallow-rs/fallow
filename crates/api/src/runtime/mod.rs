@@ -21,6 +21,7 @@ mod decision_surface;
 mod duplication;
 mod feature_flags;
 mod mutation;
+mod mutation_replay;
 mod similar_code;
 mod trace;
 mod type_aware_config;
@@ -48,6 +49,7 @@ pub use decision_surface::run_decision_surface;
 pub use duplication::run_duplication;
 pub use feature_flags::run_feature_flags;
 pub use mutation::{plan_mutation, run_mutation, run_mutation_with_progress};
+pub use mutation_replay::replay_mutation;
 pub use similar_code::{
     inspect_similar_code, parse_similar_code_candidate_snapshot, review_similar_code,
     run_similar_code, select_similar_code_candidate_snapshot,
