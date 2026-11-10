@@ -1325,7 +1325,7 @@ fn write_replay(out: &mut String, replay: &MutationReplayOutput) {
     let _ = writeln!(out, "{}", replay_verdict_line(replay));
     let _ = writeln!(
         out,
-        "Replay contract {}: Date.now() fixed at {} ms, Math.random seed {}, a fresh module for each call, {} ms call limit.",
+        "Replay contract {}: the clock starts at {} ms and moves 1 ms at each read, Math.random seed {}, a new worker for each call, {} ms call limit.",
         replay.contract_version, replay.clock_ms, replay.seed, replay.call_timeout_ms
     );
 }
