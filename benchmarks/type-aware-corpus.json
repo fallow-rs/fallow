@@ -110,7 +110,9 @@
       "ref": "v3.24.2",
       "fixture": "benchmarks/fixtures/real-world/zod",
       "candidate_expectation": "zero",
-      "feature_buckets": []
+      "feature_buckets": [],
+      "ignore_patterns": ["deno/lib/**"],
+      "ignore_reason": "deno/lib is a copy of src that the build:deno script generates for deno.land/x. Its class members are public API there, but no package.json entry declares that."
     }
   ]
 }

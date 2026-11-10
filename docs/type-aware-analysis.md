@@ -590,6 +590,14 @@ public API by design, so it must report no candidates. Vue Core is a
 zero-control because each package declares `"./*": "./*"` in `exports`, which
 makes every module a public entry under Node subpath rules.
 
+A manifest project can set `ignore_patterns` with an `ignore_reason`. Both
+corpus runs then use a Fallow config with these `ignorePatterns`, the discovery
+identity records the patterns, and the summary lists them with the reason. Use
+this only for paths that are public API through a channel that no package
+manifest declares. Zod is the example: the `build:deno` script copies `src` to
+`deno/lib` for `deno.land/x`, so the class members in `deno/lib` are public,
+but the package `exports` do not name them.
+
 Feature-bucket value requires two separate candidates that are both manually
 classified as used and correctly confirmed by semantic refinement. The two
 candidates must provide explicitly adjudicated evidence for distinct buckets.

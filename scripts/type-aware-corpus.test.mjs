@@ -49,11 +49,13 @@ import {
 } from "./type-aware-corpus.mjs";
 import {
   assertBackendIsolation,
+  fallowArgs,
   minimalEnvironment,
   selectedBackend,
 } from "./type-aware-corpus/runner.mjs";
 import {
   blockedProjects,
+  ignoredPaths,
   renderSummaryMarkdown,
   summaryChecks,
   typeAwareResolutionCounts,
@@ -410,6 +412,53 @@ test("manifest contains the complete pinned accuracy and control corpus", () => 
   assert.throws(() => validateManifest(invalid), /fastify\.candidate_expectation must be zero/);
 });
 
+test("manifest ignore patterns need a reason and a non-empty unique list", () => {
+  const zod = manifest.projects.find(({ id }) => id === "zod");
+  assert.deepEqual(zod.ignore_patterns, ["deno/lib/**"]);
+
+  const withIgnores = (fields) => {
+    const invalid = structuredClone(manifest);
+    const project = invalid.projects.find(({ id }) => id === "fastify");
+    Object.assign(project, fields);
+    return invalid;
+  };
+  assert.throws(
+    () => validateManifest(withIgnores({ ignore_patterns: ["dist/**"] })),
+    /fastify\.ignore_reason must be a non-empty string/,
+  );
+  assert.throws(
+    () => validateManifest(withIgnores({ ignore_reason: "generated" })),
+    /fastify\.ignore_patterns must be a non-empty array of non-empty strings/,
+  );
+  for (const patterns of [[], [""], [42], "dist/**"]) {
+    assert.throws(
+      () =>
+        validateManifest(withIgnores({ ignore_patterns: patterns, ignore_reason: "generated" })),
+      /fastify\.ignore_patterns must be a non-empty array of non-empty strings/,
+    );
+  }
+  assert.throws(
+    () =>
+      validateManifest(
+        withIgnores({ ignore_patterns: ["dist/**", "dist/**"], ignore_reason: "generated" }),
+      ),
+    /fastify\.ignore_patterns must be unique/,
+  );
+});
+
+test("corpus runs pass a config only for a project with ignore patterns", () => {
+  assert.equal(fallowArgs("/fixture", false).includes("--config"), false);
+  const args = fallowArgs("/fixture", true, "/out/fallow-config/zod.fallowrc.json");
+  assert.deepEqual(args.slice(0, 5), [
+    "dead-code",
+    "--root",
+    "/fixture",
+    "--config",
+    "/out/fallow-config/zod.fallowrc.json",
+  ]);
+  assert.ok(args.includes("--type-aware"));
+});
+
 test("manifest reports malformed containers and feature buckets without dereferencing them", () => {
   assert.throws(() => validateManifest(null), /manifest schema_version must be 1/);
   assert.throws(
@@ -707,14 +756,23 @@ test("semantic capability proof cannot be neutered or reassigned to tsc and Oxli
 });
 
 test("publication gate rejects a subset missing the zero-control projects", () => {
-  const corpus = manifest.projects.map(({ id, repo, ref, role, candidate_expectation }) => ({
-    id,
-    repo,
-    ref,
-    role,
-    candidate_expectation,
-  }));
+  const corpus = manifest.projects.map(
+    ({ id, repo, ref, role, candidate_expectation, ignore_patterns }) => ({
+      id,
+      repo,
+      ref,
+      role,
+      candidate_expectation,
+      ...(ignore_patterns === undefined ? {} : { ignore_patterns }),
+    }),
+  );
   assert.doesNotThrow(() => requireCompletePublicationCorpus(manifest, { corpus }));
+
+  const withoutIgnores = corpus.map(({ ignore_patterns: _ignored, ...project }) => project);
+  assert.throws(
+    () => requireCompletePublicationCorpus(manifest, { corpus: withoutIgnores }),
+    /complete manifest corpus/,
+  );
 
   const accuracyOnly = corpus.filter(({ role }) => role === "accuracy-core");
   assert.throws(
@@ -1305,6 +1363,27 @@ test("type-evidence gates fail on a high blocked share or too few checked candid
   );
 });
 
+test("summary lists the ignored paths of each project with the reason", () => {
+  const ignored = ignoredPaths([
+    { id: "fastify" },
+    { id: "zod", ignore_patterns: ["deno/lib/**"], ignore_reason: "Generated Deno copy." },
+  ]);
+  assert.deepEqual(ignored, [
+    { project_id: "zod", patterns: ["deno/lib/**"], reason: "Generated Deno copy." },
+  ]);
+  const rendered = renderSummaryMarkdown({
+    gate: { go: false },
+    accuracy: { truth_counts: {} },
+    performance: { marginal_overhead_ms: {} },
+    value: { confirmed_feature_buckets: [] },
+    ignored_paths: ignored,
+  });
+  assert.match(
+    rendered,
+    /Paths that both corpus runs ignore:\n\n- zod: `deno\/lib\/\*\*`\. Generated Deno copy\./,
+  );
+});
+
 test("summary reports bounded evidence without claiming corpus-wide recall", () => {
   const rendered = renderSummaryMarkdown({
     gate: { go: true },
@@ -1341,6 +1420,7 @@ test("summary reports bounded evidence without claiming corpus-wide recall", () 
   });
 
   assert.match(rendered, /Confirmed as used: 3 of 10 candidates \(confirmation yield 0.3\)/);
+  assert.doesNotMatch(rendered, /Paths that both corpus runs ignore/);
   assert.match(rendered, /Checked confirmation yield \(gate\): 0.5 over 6 checked candidates/);
   assert.match(rendered, /without type evidence \(abstained or unresolved\): 5 \(share 0.5\)/);
   assert.match(rendered, /- svelte: 4 blocked candidates; `tsconfig.json` \(2 diagnostics\)/);

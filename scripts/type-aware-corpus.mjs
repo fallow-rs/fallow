@@ -21,16 +21,19 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import {
   checkerEvidenceRequest as createCheckerEvidenceRequest,
   digestSet,
+  fallowArgs,
   normalizedEvidenceResponseDigest,
   assertBackendIsolation,
   minimalEnvironment,
   requestDigest,
   runExactSidecarRequest as executeExactSidecarRequest,
+  writeProjectConfig,
 } from "./type-aware-corpus/runner.mjs";
 import {
   aggregatePhaseTimings,
   aggregateReasonCounts,
   blockedProjects,
+  ignoredPaths as manifestIgnoredPaths,
   percentile,
   pairedOverheads,
   renderSummaryMarkdown,
@@ -594,18 +597,6 @@ const parseMachineOutput = (stdout, projectId) => {
   };
 };
 
-const fallowArgs = (root, refined) => [
-  "dead-code",
-  "--root",
-  root,
-  "--unused-class-members",
-  ...(refined ? ["--type-aware"] : []),
-  "--format",
-  "json",
-  "--quiet",
-  "--no-cache",
-];
-
 const machineErrorDetail = (result) => {
   let detail = result.stderr.trim();
   try {
@@ -627,8 +618,12 @@ const persistProcessResult = (rawPath, result, failureMessage) => {
 };
 
 const executeFallow = async ({ project, fallowBin, sidecarBin, refined, rawPath, outDir }) => {
-  const root = projectRoot(project, outDir);
-  const result = await runProcess(fallowBin, fallowArgs(root, refined), REPO_ROOT, sidecarBin);
+  const args = fallowArgs(
+    projectRoot(project, outDir),
+    refined,
+    writeProjectConfig(project, outDir),
+  );
+  const result = await runProcess(fallowBin, args, REPO_ROOT, sidecarBin);
   persistProcessResult(rawPath, result, (failedResult) => {
     const detail = machineErrorDetail(result);
     const mode = refined ? "refined" : "baseline";
@@ -683,12 +678,13 @@ const ensureRuntimeInputs = (options) => {
 };
 
 const corpusIdentity = (projects) =>
-  projects.map(({ id, repo, ref, role, candidate_expectation }) => ({
+  projects.map(({ id, repo, ref, role, candidate_expectation, ignore_patterns }) => ({
     id,
     repo,
     ref,
     role,
     candidate_expectation,
+    ...(ignore_patterns === undefined ? {} : { ignore_patterns }),
   }));
 
 const sha256File = (path) => createHash("sha256").update(readFileSync(path)).digest("hex");
@@ -2635,7 +2631,7 @@ const summarize = (manifest, options, publicationMode = "write") => {
     zeroControlsClean,
   });
   const summary = {
-    schema_version: 4,
+    schema_version: 5,
     gate: {
       go: Object.values(checks).every(Boolean),
       checks,
@@ -2673,6 +2669,7 @@ const summarize = (manifest, options, publicationMode = "write") => {
       unresolved_count: unresolvedCount,
       unresolved: safeRatio(unresolvedCount, entries.length),
     },
+    ignored_paths: manifestIgnoredPaths(manifest.projects),
     value: {
       confirmed_repository_count: confirmedProjects.size,
       confirmed_repositories: [...confirmedProjects].toSorted(),
