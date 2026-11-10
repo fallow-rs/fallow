@@ -2447,25 +2447,48 @@ fallow mutation tasks              # what is still open
   committed after the report to another file, for example a module that a
   selected file imports or the runner config. Run `fallow mutation` again
   after such a commit.
-- The run plans the files of the selected mutants. The other mutants of
-  these files are `pruned` with `prune_reason` `not-selected`, because the
-  instrumented file holds their switch too. They leave the score.
+- The run plans the files of the selected mutants only. The report then
+  merges the earlier report: each mutant that the recheck did not select
+  keeps its earlier status and evidence, and gets `carried: true`. This is
+  also true for the mutants of the files outside the run. The summary, the
+  score and `functions` count the merged set. The kill matrix stays the
+  evidence of this run, so it has no data of a carried mutant.
+- An earlier result applies only while its file has the SHA-256 digest of
+  the earlier report. An earlier kill also needs each test file of its
+  killing tests (`killed_by` and `killing_tests`). The report leaves out the
+  mutants of a file outside the run when one of its earlier results does
+  not apply, and `recheck.stale_files` names the file. This is also true
+  for a file outside the run with an earlier entry that does not parse.
+- In a file of the run, a mutant without an earlier result that applies
+  stays `pruned` with `prune_reason` `not-selected`. Examples are an entry
+  that does not parse, a kill whose test file is gone, and a mutant that
+  the earlier report does not list. A recheck resets `--mutants-per-line`
+  and `--function-scope`, so it can plan a mutant that an earlier run with
+  these options did not list.
+- The recheck does not run a carried mutant again. A test that you removed
+  from a test file that still exists, or a test that you made weaker, does
+  not change a carried kill. After such a change, run `fallow mutation`
+  without `--recheck` for a score that the current tests support.
 - An id that the report does not have exits with code 2 and
   `FALLOW_MUTATION_UNKNOWN_MUTANT`. A report without an open task exits with
   code 2 and `FALLOW_MUTATION_NOTHING_TO_RECHECK`.
 - `--recheck` conflicts with `--all`, paths, `--changed-since`, `--plan`,
-  `--resume`, `--allow-dirty`, `--max-mutants` and `--min-score`. The score
-  covers only the rechecked mutants, so `mutation.minScore` does not apply.
+  `--resume`, `--allow-dirty`, `--max-mutants` and `--min-score`. The run
+  tests only the rechecked mutants, so `mutation.minScore` does not apply.
   The other run flags apply.
 - The output is a normal `mutation` report with the optional `recheck`
-  object. A recheck without `--mutant` replaces the saved report, so `tasks`
-  then lists the mutants that are still open. A recheck with `--mutant`
-  keeps the saved report, so the other open tasks stay in it. Pass
+  object. A recheck without `--mutant` replaces the saved report of the last
+  run and, with `--report <file>`, also that file, so `tasks` then lists the
+  mutants that are still open. The write goes to a temporary file first,
+  then a rename replaces the file. A failed write is a warning. A recheck
+  with `--mutant` keeps the saved report and the `--report` file. Pass
   `-o <file>` to keep a copy of the output.
 
 The `recheck` object has `report_sha256` (the digest of the earlier report),
-a count for each outcome, and `mutants`: each selected mutant with its
-`mutant_id`, `file`, `line`, `previous_status`, `status` and `outcome`.
+a count for each outcome, `mutants`: each selected mutant with its
+`mutant_id`, `file`, `line`, `previous_status`, `status` and `outcome`,
+`carried`: the number of mutants with an earlier result, and the optional
+`stale_files`.
 
 | `outcome` | Meaning |
 |---|---|

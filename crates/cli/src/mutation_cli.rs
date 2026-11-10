@@ -214,15 +214,20 @@ pub struct MutationArgs {
     pub kill_matrix_for: Vec<String>,
     /// Rerun the open tasks of a saved report (its `survived` and
     /// `no_coverage` mutants) against the current tests. The worktree may
-    /// change test files only. The run replaces the saved report, so
-    /// `fallow mutation tasks` then lists the mutants that are still open.
+    /// change test files only. The report keeps the earlier result of each
+    /// other mutant, so its summary counts the full set. The recheck does not
+    /// run those mutants again: after you remove or change a test that killed
+    /// them, run `fallow mutation` without `--recheck`. The run replaces the
+    /// saved report, so `fallow mutation tasks` then lists the mutants that
+    /// are still open.
     #[arg(
         long,
         conflicts_with_all = ["all", "paths", "plan", "resume", "allow_dirty", "max_mutants", "mutants_per_line", "function_scope", "min_score"]
     )]
     pub recheck: bool,
     /// The saved report of `--recheck` (default: the report of the last run).
-    /// A recheck without `--mutant` replaces the saved report.
+    /// A recheck without `--mutant` replaces this file and the report of the
+    /// last run.
     #[arg(long, value_name = "PATH", requires = "recheck")]
     pub report: Option<PathBuf>,
     /// Recheck only these mutant ids of the report, comma-separated or
@@ -442,8 +447,9 @@ pub fn run_options(input: &MutationCliInput<'_>) -> Result<MutationRunOptions, P
         runner_config,
         output_paths: input
             .output_file
-            .map(absolute_output_path)
             .into_iter()
+            .chain(recheck_report_file(input))
+            .map(absolute_output_path)
             .collect(),
         typecheck: input.args.typecheck || input.config.typecheck == Some(true),
         resume: input.args.resume,
@@ -734,10 +740,13 @@ fn run_inner(input: &MutationCliInput<'_>) -> Result<ExitCode, ProgrammaticError
     let mut report = run_with_progress(&options, input)
         .map_err(|error| diff::contextualize(error, stdin_diff.as_ref()))?;
     complete_file_digests(&mut report, input.root);
-    report.recheck = recheck.as_ref().map(|selection| selection.section(&report));
     // Before the verdicts: an equivalent verdict for a survivor does not make
-    // the run one in which no mutant has a test result.
+    // the run one in which no mutant has a test result. Before the merge of
+    // a recheck: an earlier result is no test result of this run.
     let blocked = baseline_blocked_run_error(&report);
+    report.recheck = recheck
+        .as_ref()
+        .map(|selection| selection.merge_into(&mut report));
     if let Some(verdicts) = verdicts {
         apply_mutation_verdicts(&mut report, &verdicts)?;
     }
@@ -754,14 +763,7 @@ fn run_inner(input: &MutationCliInput<'_>) -> Result<ExitCode, ProgrammaticError
             2,
         )
     })?;
-    // A recheck of named mutants keeps the saved report, so the other open
-    // tasks stay in it.
-    let saved_path = input
-        .args
-        .mutants
-        .is_empty()
-        .then(|| save_report(&options.analysis, &value))
-        .flatten();
+    let saved_path = save_reports(input, &options.analysis, &value);
     let saved = saved_path.is_some();
     if saved {
         remove_journal(&options.analysis, &report);
@@ -863,8 +865,9 @@ fn compare_with(
 }
 
 /// Narrows the run options to the mutants of a recheck and gives the minimum
-/// score. The score of a recheck covers only the rechecked mutants, so the
-/// project gate of `mutation.minScore` does not apply to it.
+/// score. A recheck runs only the selected mutants, and the other results
+/// come from the earlier report, so the project gate of `mutation.minScore`
+/// does not apply to it.
 fn apply_recheck(
     input: &MutationCliInput<'_>,
     options: &mut MutationRunOptions,
@@ -911,6 +914,87 @@ fn save_report(analysis: &AnalysisOptions, value: &serde_json::Value) -> Option<
             );
             None
         }
+    }
+}
+
+/// Saves the report of the run and gives the path of the saved report of
+/// the last run. A recheck also replaces its `--report` file. A recheck of
+/// named mutants saves nothing, so the other open tasks stay in the saved
+/// reports.
+fn save_reports(
+    input: &MutationCliInput<'_>,
+    analysis: &AnalysisOptions,
+    value: &serde_json::Value,
+) -> Option<PathBuf> {
+    if !input.args.mutants.is_empty() {
+        return None;
+    }
+    let saved = save_report(analysis, value);
+    if let Some(path) = recheck_report_file(input) {
+        replace_report_file(path, value, input.json_style, saved.as_deref());
+    }
+    saved
+}
+
+/// The `--report` file of a recheck, which the run replaces. The run writes
+/// it after the run, so the worktree check leaves it out, as it does for the
+/// `--output-file`.
+fn recheck_report_file<'a>(input: &'a MutationCliInput<'_>) -> Option<&'a Path> {
+    input
+        .args
+        .recheck
+        .then_some(input.args.report.as_deref())
+        .flatten()
+}
+
+/// Gives `temporary` the permissions of the file at `target`, when it
+/// exists.
+fn keep_permissions(target: &Path, temporary: &Path) -> std::io::Result<()> {
+    match std::fs::metadata(target) {
+        Ok(metadata) => std::fs::set_permissions(temporary, metadata.permissions()),
+        Err(_) => Ok(()),
+    }
+}
+
+/// Replaces the `--report` file of a recheck with the merged report, so a
+/// later `fallow mutation tasks --report <file>` lists the open mutants. The
+/// write goes to a temporary file in the directory of the target first, so
+/// a reader never sees half a report. A symlink stays a symlink, and the
+/// file keeps its permissions. A file that is the saved report `saved` has the
+/// report already. A failed write is a warning, not a run error.
+fn replace_report_file(
+    path: &Path,
+    value: &serde_json::Value,
+    style: JsonStyle,
+    saved: Option<&Path>,
+) {
+    let same = |saved: &Path| dunce::canonicalize(saved).ok() == dunce::canonicalize(path).ok();
+    if saved.is_some_and(same) {
+        return;
+    }
+    let result = style
+        .serialize(value)
+        .map_err(|error| error.to_string())
+        .and_then(|json| {
+            let name = path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .ok_or_else(|| "the path has no file name".to_owned())?;
+            let target = dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+            let temporary = target.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
+            std::fs::write(&temporary, format!("{json}\n"))
+                .and_then(|()| keep_permissions(&target, &temporary))
+                .and_then(|()| std::fs::rename(&temporary, &target))
+                .map_err(|error| {
+                    let _ = std::fs::remove_file(&temporary);
+                    error.to_string()
+                })
+        });
+    if let Err(error) = result {
+        eprintln!(
+            "fallow: warning: the recheck did not replace {}: {error}",
+            path.display()
+        );
     }
 }
 

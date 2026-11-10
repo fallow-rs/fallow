@@ -34075,6 +34075,10 @@
           "type": "boolean",
           "description": "True when the status comes from the journal of an interrupted run\n(`--resume`). The mutant did not run in this run."
         },
+        "carried": {
+          "type": "boolean",
+          "description": "True when the status and its evidence come from the earlier report\nof a `--recheck` run: the recheck did not select the mutant, its file\nhas the digest of that report, and each test file of its killing\ntests exists. The mutant did not run in this run, and the kill matrix\nof this run has no evidence of it."
+        },
         "type_error_codes": {
           "type": "array",
           "items": {
@@ -36711,6 +36715,17 @@
             "$ref": "#/definitions/MutationRecheckMutant"
           },
           "description": "The rechecked mutants, sorted by file, line and mutant id."
+        },
+        "carried": {
+          "type": "integer",
+          "description": "The mutants of the report that keep their result from the earlier\nreport (`carried`), because the recheck did not select them. The\nsummary counts them. The recheck does not run them again, so a test\nthat became weaker does not change their result."
+        },
+        "stale_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The files of the earlier report outside this run whose earlier\nresults do not apply, sorted: the source changed after the report,\nthe test file of a killing test is gone, or the report has no digest\nor no readable entry for the file. The report leaves out their\nmutants. Run `fallow mutation` on them for new\nresults."
         }
       },
       "required": [

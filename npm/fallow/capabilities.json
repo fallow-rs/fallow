@@ -1405,7 +1405,7 @@
           "name": "--recheck",
           "type": "bool",
           "required": false,
-          "description": "Rerun the open tasks of a saved report (its `survived` and `no_coverage` mutants) against the current tests. The worktree may change test files only. The run replaces the saved report, so `fallow mutation tasks` then lists the mutants that are still open",
+          "description": "Rerun the open tasks of a saved report (its `survived` and `no_coverage` mutants) against the current tests. The worktree may change test files only. The report keeps the earlier result of each other mutant, so its summary counts the full set. The recheck does not run those mutants again: after you remove or change a test that killed them, run `fallow mutation` without `--recheck`. The run replaces the saved report, so `fallow mutation tasks` then lists the mutants that are still open",
           "possible_values": [
             "true",
             "false"
@@ -1415,7 +1415,7 @@
           "name": "--report",
           "type": "string",
           "required": false,
-          "description": "The saved report of `--recheck` (default: the report of the last run). A recheck without `--mutant` replaces the saved report"
+          "description": "The saved report of `--recheck` (default: the report of the last run). A recheck without `--mutant` replaces this file and the report of the last run"
         },
         {
           "name": "--mutant",

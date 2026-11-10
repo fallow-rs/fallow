@@ -383,6 +383,7 @@ mod tests {
             attempts: Vec::new(),
             cached: false,
             resumed: false,
+            carried: false,
             type_error_codes: Vec::new(),
             equivalence_hint: None,
             witness: None,

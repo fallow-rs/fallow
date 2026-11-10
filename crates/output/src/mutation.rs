@@ -317,7 +317,7 @@ pub struct MutationRunnerOutput {
 }
 
 /// The source position of a mutant. No source text.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MutantLocation {
     /// The stable mutant id.
@@ -366,7 +366,7 @@ pub struct MutantChange {
 }
 
 /// One mutant of a run.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MutantResult {
     /// The mutant and its position.
@@ -434,6 +434,13 @@ pub struct MutantResult {
     /// (`--resume`). The mutant did not run in this run.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub resumed: bool,
+    /// True when the status and its evidence come from the earlier report
+    /// of a `--recheck` run: the recheck did not select the mutant, its file
+    /// has the digest of that report, and each test file of its killing
+    /// tests exists. The mutant did not run in this run, and the kill matrix
+    /// of this run has no evidence of it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub carried: bool,
     /// The TypeScript diagnostic codes of the new errors of a
     /// `compile_error` mutant, sorted, at most 8.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -465,7 +472,7 @@ pub enum MutantEquivalenceHint {
 }
 
 /// One run of a retried mutant.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MutantAttempt {
     /// The status of this run alone.
@@ -492,7 +499,7 @@ pub struct MutantAttempt {
 }
 
 /// How a run detected a mutant.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum MutantFailureKind {
@@ -526,7 +533,7 @@ impl MutantFailureKind {
 /// of its file: `none-file` when no test loads the file, `mocked-only` when no
 /// test loads the file and a mock explains an export of the file, and `none`
 /// when a test loads the file.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MutantTestReach {
     /// The reach class. The same open set as the test reach of `audit`.
@@ -585,7 +592,7 @@ pub struct MutationResumeOutput {
 }
 
 /// The results of the mutants of one function.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MutationFunctionResult {
     /// The root-relative path, with forward slashes.
@@ -1166,6 +1173,20 @@ pub struct MutationRecheck {
     pub unsettled: usize,
     /// The rechecked mutants, sorted by file, line and mutant id.
     pub mutants: Vec<MutationRecheckMutant>,
+    /// The mutants of the report that keep their result from the earlier
+    /// report (`carried`), because the recheck did not select them. The
+    /// summary counts them. The recheck does not run them again, so a test
+    /// that became weaker does not change their result.
+    #[serde(default)]
+    pub carried: usize,
+    /// The files of the earlier report outside this run whose earlier
+    /// results do not apply, sorted: the source changed after the report,
+    /// the test file of a killing test is gone, or the report has no digest
+    /// or no readable entry for the file. The report leaves out their
+    /// mutants. Run `fallow mutation` on them for new
+    /// results.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stale_files: Vec<String>,
 }
 
 /// Version singleton for a mutation verdict document.
@@ -1278,7 +1299,7 @@ pub struct MutationPlanMutant {
 }
 
 /// One instrumented file of a plan.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MutationPlanFile {
     /// The root-relative path, with forward slashes.
@@ -1645,6 +1666,7 @@ mod tests {
             attempts: Vec::new(),
             cached: false,
             resumed: false,
+            carried: false,
             type_error_codes: Vec::new(),
             equivalence_hint: None,
             witness: None,
@@ -1789,6 +1811,7 @@ mod tests {
             attempts: Vec::new(),
             cached: false,
             resumed: false,
+            carried: false,
             type_error_codes: Vec::new(),
             equivalence_hint: None,
             witness: None,
@@ -1857,6 +1880,7 @@ mod tests {
             ],
             cached: false,
             resumed: false,
+            carried: false,
             type_error_codes: Vec::new(),
             equivalence_hint: None,
             witness: None,
