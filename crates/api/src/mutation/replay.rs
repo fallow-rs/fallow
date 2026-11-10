@@ -24,7 +24,7 @@ fn sort_members(map: &mut serde_json::Map<String, serde_json::Value>, field: &st
 /// set and the entries of each map in sorted order. Two results that differ
 /// only in such an order are equal, because a deep equality check of a test
 /// does not see the order.
-fn canonical(value: &serde_json::Value) -> String {
+pub fn canonical(value: &serde_json::Value) -> String {
     fn sorted(value: &serde_json::Value) -> serde_json::Value {
         match value {
             serde_json::Value::Object(map) => {

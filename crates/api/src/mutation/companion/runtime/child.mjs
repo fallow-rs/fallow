@@ -14,6 +14,8 @@ export const CHILD_ENV = Object.freeze({
   active: "FALLOW_MUTATION_ACTIVE",
   /** The path of the file that receives one JSON line for each finished test. */
   hits: "FALLOW_MUTATION_HITS",
+  /** `1` in a dry run that records the arguments of the wrapped exports. */
+  record: "FALLOW_MUTATION_RECORD",
 });
 
 /** The prefix of the test diagnostic that carries the hits of a test. */

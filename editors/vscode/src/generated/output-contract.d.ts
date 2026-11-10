@@ -1859,6 +1859,10 @@ export type MutationRecheckOutcome = ("killed" | "survived" | "no_coverage" | "t
  */
 export type MutationCompareChange = ("regressed" | "inconclusive" | "added" | "removed")
 /**
+ * What a record pass keeps of the arguments.
+ */
+export type MutationRecordMode = ("shapes" | "values")
+/**
  * Version singleton for a mutation plan.
  */
 export type MutationPlanSchemaVersion = "1"
@@ -1887,7 +1891,7 @@ export type MutationReplayVerdict = ("witness" | "no_witness_found" | "unstable"
 /**
  * Where the arguments of a replay come from.
  */
-export type MutationReplayInputSource = "argument"
+export type MutationReplayInputSource = ("argument" | "recorded")
 /**
  * The side of one replay call.
  */
@@ -20906,6 +20910,11 @@ compare?: (MutationCompare | null)
  * the run is not a recheck. The exit code of the run reads this entry.
  */
 gate_outcomes?: (GateOutcomes | null)
+/**
+ * The argument recording of the dry run. Present only with
+ * `--record-args`. It holds counts and reasons, never argument values.
+ */
+recording?: (MutationRecordingOutput | null)
 }
 /**
  * The completion status of a run.
@@ -21748,6 +21757,66 @@ status?: (MutantStatus | null)
 previous_killing_tests: string[]
 }
 /**
+ * The argument recording of a run.
+ */
+export interface MutationRecordingOutput {
+mode: MutationRecordMode
+/**
+ * True when the inputs are in the cache file
+ * `<cache dir>/mutation/recorded-args.json`.
+ */
+saved: boolean
+/**
+ * Why the run recorded nothing or saved nothing, for example a runner
+ * that records no arguments. Absent when the inputs are saved.
+ */
+error?: (string | null)
+/**
+ * The recorded exported functions, sorted by file and export.
+ */
+functions: MutationRecordedFunction[]
+}
+/**
+ * The recorded arguments of one exported function.
+ */
+export interface MutationRecordedFunction {
+/**
+ * The project-root-relative path of the file.
+ */
+file: string
+/**
+ * The export name. `fallow mutation inspect --replay` calls it.
+ */
+export: string
+/**
+ * The number of distinct inputs that the cache keeps.
+ */
+input_count: number
+/**
+ * The calls whose arguments the cache does not keep, by reason.
+ */
+not_replayable: MutationNotReplayable[]
+}
+/**
+ * The calls of one reason whose arguments a recording did not keep.
+ */
+export interface MutationNotReplayable {
+/**
+ * Why the arguments cannot be replayed. One of a fixed set: `a
+ * function`, `a symbol`, `a proxy`, `a cyclic value`, `a class
+ * instance`, `a value that is too large`, `an accessor property`, `an
+ * object with a symbol key`, `an object that this runtime cannot check
+ * for a proxy`, `a value that cannot be read`, `a value under a secret
+ * key name` or `a string that looks like a secret`. It never holds text
+ * of the code or of a value.
+ */
+reason: string
+/**
+ * The number of calls.
+ */
+count: number
+}
+/**
  * The envelope of `fallow mutation --plan`. It runs no user code.
  */
 export interface MutationPlanOutput {
@@ -22081,6 +22150,10 @@ reason?: (string | null)
 export?: (string | null)
 input: MutationReplayInput
 /**
+ * The inputs that the replay ran, in order, up to the first witness.
+ */
+inputs_checked: number
+/**
  * The calls of each side. The sides take turns.
  */
 calls_per_side: number
@@ -22111,6 +22184,10 @@ duration_ms: number
  */
 export interface MutationReplayInput {
 source: MutationReplayInputSource
+/**
+ * The id of a recorded input. Absent for `--args`.
+ */
+input_id?: (string | null)
 /**
  * The arguments in the replay encoding: JSON values, and objects with a
  * `$replay` tag for `undefined`, special numbers, bigints, dates,

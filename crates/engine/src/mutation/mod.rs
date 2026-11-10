@@ -118,6 +118,9 @@ pub struct MutationPlanRequest {
     /// [`PruneReason::NotSelected`]. It stays in the plan, because the
     /// instrumented file still holds its switch. `None` selects each mutant.
     pub mutant_ids: Option<BTreeSet<String>>,
+    /// Wrap each exported function that holds a planned mutant, so that a
+    /// recording dry run can record its arguments.
+    pub record_exports: bool,
 }
 
 impl MutationPlanRequest {
@@ -133,6 +136,7 @@ impl MutationPlanRequest {
             function_scope: false,
             skip_component_files: false,
             mutant_ids: None,
+            record_exports: false,
         }
     }
 }

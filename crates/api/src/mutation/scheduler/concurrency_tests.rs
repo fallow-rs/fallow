@@ -40,7 +40,7 @@ fn restarted_setup_faults_suggest_serial_runs_only_for_parallel_phases() {
                         method: ReloadMethod::RestartRequired,
                     })),
                     Request::Run(run) => Ok(passing_control(run)),
-                    Request::Shutdown | Request::Replay(_) => {
+                    Request::Shutdown | Request::Replay(_) | Request::Record { .. } => {
                         Err(LinkFault::Protocol("no response".to_owned()))
                     }
                 }
@@ -237,7 +237,7 @@ fn retry_diagnostics_use_the_retry_phase_worker_count() {
                     Request::Reload => Ok(Response::Reloaded(Reloaded {
                         method: ReloadMethod::Noop,
                     })),
-                    Request::Shutdown | Request::Replay(_) => {
+                    Request::Shutdown | Request::Replay(_) | Request::Record { .. } => {
                         Err(LinkFault::Protocol("no response".to_owned()))
                     }
                 }

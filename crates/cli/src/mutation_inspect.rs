@@ -229,10 +229,12 @@ pub fn reproduce(
         MutationOptions {
             operators: operators.clone(),
             ranges: None,
+            record_exports: false,
         },
         MutationOptions {
             operators,
             ranges: Some(vec![span]),
+            record_exports: false,
         },
     ];
     passes.iter().find_map(|options| {

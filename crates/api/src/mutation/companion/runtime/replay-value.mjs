@@ -16,6 +16,8 @@
  */
 
 const TAG = "$replay";
+
+export { RECORD_CALL_LIMIT, RECORD_LIMIT } from "./records.mjs";
 const MAX_DEPTH = 32;
 const MAX_NODES = 10_000;
 
@@ -36,9 +38,12 @@ const TYPED_ARRAYS = {
 /** An error that ends the encoding of an argument with its reason. */
 class NotReplayable extends Error {}
 
-const isProxy = (() => {
+// Without `util.types.isProxy` (browser mode, Node before 20.16), the encoder
+// cannot tell a proxy, so an argument object is not replayable: reading it
+// could run the traps of a proxy.
+const proxyCheck = (() => {
   const types = globalThis.process?.getBuiltinModule?.("node:util")?.types;
-  return typeof types?.isProxy === "function" ? (value) => types.isProxy(value) : () => false;
+  return typeof types?.isProxy === "function" ? (value) => types.isProxy(value) : null;
 })();
 
 const specialNumber = (value) => {
@@ -92,9 +97,29 @@ const OPAQUE = {
 };
 const PROXY = { reason: "a proxy", tag: () => ({ [TAG]: "proxy" }) };
 const CYCLE = { reason: "a cyclic value", tag: () => ({ [TAG]: "cycle" }) };
-const TOO_LARGE = {
-  reason: "a value that is too large or too deep",
-  tag: () => ({ [TAG]: "truncated" }),
+const TOO_LARGE = { reason: "a value that is too large", tag: () => ({ [TAG]: "truncated" }) };
+const UNCHECKED = {
+  reason: "an object that this runtime cannot check for a proxy",
+  tag: () => ({ [TAG]: "unchecked" }),
+};
+const ACCESSOR = { reason: "an accessor property", tag: () => ({ [TAG]: "accessor" }) };
+
+/**
+ * The number of items that a built-in collection holds, or 0. The size comes
+ * from the getter of the built-in prototype, so a subclass with its own
+ * `length` or `size` getter runs no code here.
+ */
+const TYPED_LENGTH = Object.getOwnPropertyDescriptor(
+  Object.getPrototypeOf(Uint8Array.prototype),
+  "length",
+).get;
+const MAP_SIZE = Object.getOwnPropertyDescriptor(Map.prototype, "size").get;
+const SET_SIZE = Object.getOwnPropertyDescriptor(Set.prototype, "size").get;
+const itemCount = (value) => {
+  if (Array.isArray(value)) return Reflect.getOwnPropertyDescriptor(value, "length").value;
+  if (value instanceof Map) return MAP_SIZE.call(value);
+  if (value instanceof Set) return SET_SIZE.call(value);
+  return typedArrayName(value) === null ? 0 : TYPED_LENGTH.call(value);
 };
 
 /**
@@ -120,10 +145,7 @@ const createEncoder = (strict) => {
       const field =
         descriptor.get === undefined && descriptor.set === undefined
           ? encode(descriptor.value, path, depth + 1)
-          : opaque({
-              reason: `an accessor property \`${key}\``,
-              tag: () => ({ [TAG]: "accessor" }),
-            });
+          : opaque(ACCESSOR);
       // A plain assignment of the key `__proto__` sets the prototype.
       Object.defineProperty(fields, key, {
         value: field,
@@ -135,10 +157,14 @@ const createEncoder = (strict) => {
     return fields;
   };
 
+  // Each index goes through its descriptor, so a getter never runs.
   const encodeArray = (value, path, depth) =>
-    Array.from({ length: value.length }, (_, index) =>
-      Object.hasOwn(value, index) ? encode(value[index], path, depth + 1) : { [TAG]: "undefined" },
-    );
+    Array.from({ length: value.length }, (_, index) => {
+      const descriptor = Reflect.getOwnPropertyDescriptor(value, index);
+      if (descriptor === undefined) return { [TAG]: "undefined" };
+      if (descriptor.get !== undefined || descriptor.set !== undefined) return opaque(ACCESSOR);
+      return encode(descriptor.value, path, depth + 1);
+    });
 
   /** The built-in classes with an exact encoding, in check order. */
   const BUILT_INS = [
@@ -214,8 +240,14 @@ const createEncoder = (strict) => {
   };
 
   const encodeReference = (value, path, depth) => {
-    if (isProxy(value)) return opaque(PROXY, value);
+    if (proxyCheck === null) {
+      if (strict) return opaque(UNCHECKED, value);
+    } else if (proxyCheck(value)) {
+      return opaque(PROXY, value);
+    }
     if (path.includes(value)) return opaque(CYCLE, value);
+    // The size check comes before any copy of a large collection.
+    if (nodes + itemCount(value) > MAX_NODES) return opaque(TOO_LARGE, value);
     path.push(value);
     try {
       return encodeObject(value, path, depth);
@@ -245,7 +277,7 @@ export const encodeArgs = (args) => {
     return { ok: true, value: [...args].map(createEncoder(true)) };
   } catch (error) {
     if (error instanceof NotReplayable) return { ok: false, reason: error.message };
-    return { ok: false, reason: `the value cannot be read: ${error?.message ?? error}` };
+    return { ok: false, reason: "a value that cannot be read" };
   }
 };
 

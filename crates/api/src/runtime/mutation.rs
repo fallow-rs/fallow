@@ -21,6 +21,7 @@ use fallow_output::{
 use fallow_types::envelope::ElapsedMs;
 use rustc_hash::FxHashSet;
 
+use super::mutation_record::{record_pass, settle_recording};
 use crate::ProgrammaticError;
 use crate::analysis_context::{ProgrammaticAnalysisContext, resolve_programmatic_analysis_context};
 use crate::mutation::companion::{COMPANION_FILES, install};
@@ -30,6 +31,7 @@ use crate::mutation::last_report::ignore_cache_dir;
 use crate::mutation::manifest::{Manifest, RunnerRange, manifest};
 use crate::mutation::node_args::node_test_args;
 use crate::mutation::protocol::{InitOptions, InitRequest};
+use crate::mutation::recorded_args::RecordPass;
 use crate::mutation::report::{
     CompletionFacts, baseline_failures, completion, function_results, issues, mutant_results,
     plan_counts, plan_files, plan_mutants, skipped_files, skipped_tests_issue, summary,
@@ -416,6 +418,18 @@ pub(super) fn plan_for(
     options: &MutationRunOptions,
     before_plan: impl FnOnce(&Path, &Path) -> ProgrammaticResult<()>,
 ) -> ProgrammaticResult<Planned> {
+    plan_with_wraps(options, before_plan, false)
+}
+
+/// [`plan_for`] with the argument recording wraps when `record_exports` is
+/// set. Only the record pass loads a plan with wraps: a wrap changes the
+/// inferred name of a function value, so the dry run and the mutant runs
+/// load the plan without them.
+pub(super) fn plan_with_wraps(
+    options: &MutationRunOptions,
+    before_plan: impl FnOnce(&Path, &Path) -> ProgrammaticResult<()>,
+    record_exports: bool,
+) -> ProgrammaticResult<Planned> {
     validate(options)?;
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
     let session = load_session(&resolved)?;
@@ -450,6 +464,7 @@ pub(super) fn plan_for(
         skip_component_files: false,
         mutant_ids: (!options.mutant_ids.is_empty())
             .then(|| options.mutant_ids.iter().cloned().collect()),
+        record_exports,
     };
     // The runner decision reads the test files of the first plan. A second
     // plan without the component files keeps that decision.
@@ -851,6 +866,8 @@ struct Execution {
     cache: Option<MutationCacheOutput>,
     resume: Option<MutationResumeOutput>,
     setup_ms: u64,
+    /// The record pass of `--record-args`. `None` without recording.
+    record: Option<RecordPass>,
 }
 
 /// The journal path as the report shows it: relative to the root, with `/`
@@ -1161,6 +1178,7 @@ fn execute(
             cache: None,
             resume: unread_journal(options, planned),
             setup_ms: 0,
+            record: None,
         });
     }
     progress(MutationProgress::Setup {
@@ -1240,7 +1258,9 @@ fn execute(
         _ => None,
     };
     let resume = settle_journal(options, run_journal, &mut outcome);
+    let record = record_pass(options, &outcome, &spawner, &config, &mutation_cache);
     Ok(Execution {
+        record,
         outcome: Some(outcome),
         runner,
         cache,
@@ -1459,6 +1479,7 @@ pub fn run_mutation_with_progress(
         recheck: None,
         compare: None,
         gate_outcomes: None,
+        recording: settle_recording(options, &planned.cache_dir, execution.record.as_ref()),
     })
 }
 

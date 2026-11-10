@@ -48,7 +48,7 @@ read-only next steps. It never writes a test and never proposes a code change.
   `--time-budget` (`90s`, `10m`, `1h`),
   `--setup-timeout` (default `2m`), `--runner-config`, `--kill-matrix`,
   `--kill-matrix-for`, `--concurrency`, `--runtime`, `--allow-dirty`, `--allow-side-effects`,
-  `--min-score`, `--operators`, `--verdicts`, `--typecheck`, `--resume` and
+  `--min-score`, `--operators`, `--verdicts`, `--typecheck`, `--record-args`, `--resume` and
   `--recheck` (with `--report` and `--mutant`) and `--compare`.
   The global `--no-cache` flag also turns off the result cache (see "Result
   cache"). `--resume` continues an interrupted or partial run (see "Outcome
@@ -2087,7 +2087,15 @@ The replay runs project code: the module of the file and each module that it
 imports. It runs no test.
 
 - `--args <json>` gives the arguments as a JSON array, for example
-  `--args '[2, 3]'`. The default is no arguments.
+  `--args '[2, 3]'`. Without `--args`, the replay runs up to 3 inputs that a
+  `--record-args values` run recorded for the export (see Argument
+  recording). It stops at the first witness, a timeout or an export that is
+  not a function. An unstable input does not stop it, and when no input
+  shows a witness, an unstable input is the result. `replay.inputs_checked`
+  counts the inputs that ran, and `replay.input` is the input of the result,
+  with its `input_id` and `source: "recorded"`. With no usable recorded
+  input, the verdict is `not_replayable`, and the reason names the recording
+  or the reasons of the calls.
 - `--export <name>` names the export to call. The default is the export
   whose declaration holds the function of the mutant: `export function f`,
   `export const f = () => {}`, `export default`, or a local function that an
@@ -2120,7 +2128,7 @@ a `threw` call never equals a `returned` call.
 | Verdict | Meaning |
 |---|---|
 | `witness` | Both sides are stable, and they differ. A test with this input can kill the mutant. |
-| `no_witness_found` | Both sides are stable and equal. This input shows no difference. Another input can still show one. |
+| `no_witness_found` | Both sides are stable and equal for each input. The reason says `no witness found (N inputs, source, 3 calls of each side)`. Another input can still show a difference. |
 | `unstable` | The calls of one side differ, for example from a source of random values that the replay does not fix. A difference that does not repeat is never a witness. |
 | `timeout` | A call did not end before the call limit, or the replay did not end before its wall limit. The module load, the original or the mutant can block. |
 | `not_callable` | The export is not a function. |
@@ -2191,6 +2199,72 @@ the output gives it as `replay.contract_version`. Version 1 has these rules:
   `null`, so read `outcome` before `value`. `text` is a short display text,
   and `duration_ms` is wall time, so these two fields can differ between two
   replays of the same input.
+
+## Argument recording
+
+`fallow mutation --record-args <shapes|values>` records the arguments of the
+changed exported functions. A replay without `--args` uses them. Recording is
+off by default.
+
+- The record pass wraps each exported function that holds a planned mutant: an
+  `export function`, an `export const` with a function value, and a local
+  function or function value that an `export { a as b }` list exports. A
+  default export declaration, a class, a method and an object literal get
+  no wrap. A local that an export list names twice gets the wrap of its
+  first name only.
+- The arguments come from a record pass: after the mutant runs, a new
+  companion runs the test files once more with the recorder on, from its
+  own run directory. Only the files of this pass hold the wraps, and its
+  test results count for nothing. The dry run and each mutant run load the
+  files without the wraps, so recording never changes a result of the run
+  or a key of the result cache. A wrap is a plain function that keeps
+  `this`, `new`, the return value, the thrown error, `name` and `length`, but
+  not the own properties, `toString` or the stack frames of the function.
+- Only calls with no active mutant count. A function keeps up to 8 distinct
+  inputs, in the order of the first call, and the pass encodes at most 64
+  calls of each function. An input with a JSON text of more than 16 KiB, or
+  a collection with more than 10,000 values, is "a value that is too large".
+- A call whose arguments cannot be replayed counts under one fixed reason:
+  `a function`, `a symbol`, `a proxy`, `a cyclic value`, `a class instance`,
+  `a value that is too large`, `an accessor property`, `an object with a
+  symbol key`, `an object that this runtime cannot check for a proxy`, `a
+  value that cannot be read`, `a value under a secret key name` or `a string
+  that looks like a secret`. A reason never holds text of the code or of a
+  value. Without `util.types.isProxy` (Vitest browser mode, Node before
+  20.16), each argument object is not replayable, because a read could run
+  the traps of a proxy.
+- The cache file `<cache dir>/mutation/recorded-args.json` keeps the inputs
+  for 7 days. The file is readable only by its owner, and the cache
+  directory has a `.gitignore` with `*`. Each `fallow mutation` run removes
+  the expired entries, and a recording run replaces the entries of its
+  functions.
+- Before an input goes into the cache, the redaction removes each input
+  that holds a value under a secret key name (a name that holds `token`,
+  `secret`, `password`, `passwd`, `pwd`, `authorization`, `auth`, `bearer`,
+  `jwt`, `apikey`, `accesskey`, `signature`, `cookie`, `credential`,
+  `privatekey` or `session`, in any case and with `-` or `_`), also the key
+  of a `Map`. It also removes each input with a string that looks like a
+  secret: an `Authorization` scheme (`Bearer`, `Basic`), a PEM block, a URL
+  with a password, a JSON Web Token, or a word of at least 24 characters
+  with an entropy of at least 4.2 bits for each character, or a hex text of
+  at least 32 characters. A word splits at `/`, `\`, `:`, `?`, `&`, `=`,
+  `#`, `,` and `;` first, so a file path is no secret, but a word of base64
+  characters also counts as a whole. A typed array of 16 to 512 bytes with
+  a byte entropy of at least 3.5 bits counts as a key too. The input then
+  counts as not replayable. The redaction is a heuristic: do not record in a
+  project whose tests pass real credentials.
+- `shapes` keeps only the types of the arguments, for example
+  `["number", {"name": "string"}]`. A replay needs `values`.
+- The report gets the object `recording`: the `mode`, `saved`, an `error`
+  when the run recorded or saved nothing (for example `the runner records no
+  arguments` for `bun test`), and for each recorded function its `file`,
+  `export`, `input_count` and the `not_replayable` reasons, sorted by reason.
+  The report, the export, SARIF, a PR comment and an uploaded artifact never
+  hold an argument value.
+- The output of `fallow mutation inspect --replay` is the exception: it is
+  local output on stdout, and it shows the recorded input that it replays,
+  with the results of both sides. Do not paste it where the values must not
+  go.
 
 ## Tasks
 

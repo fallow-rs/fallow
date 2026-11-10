@@ -474,6 +474,7 @@ fn report(mutants: Vec<MutantResult>, reasons: Vec<MutationIncompleteReason>) ->
         recheck: None,
         compare: None,
         gate_outcomes: None,
+        recording: None,
     }
 }
 
@@ -1568,8 +1569,10 @@ fn replay_output(
         verdict,
         reason: reason.map(str::to_owned),
         export: Some("add".to_owned()),
+        inputs_checked: 1,
         input: fallow_output::MutationReplayInput {
             source: fallow_output::MutationReplayInputSource::Argument,
+            input_id: None,
             args: vec![serde_json::json!(2), serde_json::json!(3)],
         },
         calls_per_side: 3,
@@ -1606,8 +1609,8 @@ fn an_inspect_replay_shows_both_sides_side_by_side_and_the_verdict() {
     for (verdict, reason, expected) in [
         (
             MutationReplayVerdict::NoWitnessFound,
-            None,
-            "No witness found: both sides gave the same result for this input (3 calls each).",
+            Some("no witness found (1 input, --args, 3 calls of each side)"),
+            "No witness found (1 input, --args, 3 calls of each side). Another input can still show a difference.",
         ),
         (
             MutationReplayVerdict::Unstable,

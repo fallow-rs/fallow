@@ -316,6 +316,7 @@ mod tests {
             recheck: None,
             compare: None,
             gate_outcomes: None,
+            recording: None,
         }
     }
 

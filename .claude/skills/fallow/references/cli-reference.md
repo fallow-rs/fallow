@@ -2283,6 +2283,8 @@ The replay calls the export that holds the mutated function with `--args` on the
 - `unstable`: one side changes between calls (for example `crypto.randomUUID()`). Do not use the difference as a test oracle.
 - `timeout`, `not_callable`, `not_replayable`: read `replay.reason`. A function that no callable export holds (a method of a class or of an object literal, or a local function) needs `--export <name>` of an export that calls it. `--call-timeout 30s` gives a slow call more time.
 
+Without `--args`, the replay uses up to 3 inputs that `fallow mutation --record-args values` recorded (`replay.input.source` is `recorded`, with its `input_id`; `replay.inputs_checked` counts the inputs that ran). The values stay in the local cache, and the inspect output shows them, so keep that output local. The run report shows only counts and reasons under `recording`.
+
 Each call runs in a new worker with a fresh module, a clock that starts at a fixed time, and a fixed `Math.random` seed. Arguments and results use the replay encoding: JSON, plus objects with a `$replay` tag for values that JSON cannot hold. Decode them when you write the test: `{"$replay": "undefined"}` is `undefined`, `{"$replay": "number", "value": "NaN"}` is `NaN`, `{"$replay": "bigint", "value": "12"}` is `12n`, and `map`, `set`, `date`, `regexp` and `bytes` are a `Map`, a `Set`, a `Date`, a `RegExp` and a typed array. Only the Vitest and `node:test` runners replay.
 
 ## `ci`: Provider-Aware Review Automation

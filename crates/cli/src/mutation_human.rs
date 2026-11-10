@@ -1317,10 +1317,14 @@ fn replay_verdict_line(replay: &MutationReplayOutput) -> String {
             "{}: each side gave the same result on each call, and the sides differ. A test with this input can kill the mutant.",
             "Witness".green().bold()
         ),
-        MutationReplayVerdict::NoWitnessFound => format!(
-            "No witness found: both sides gave the same result for this input ({} calls each). Another input can still show a difference.",
-            replay.calls_per_side
-        ),
+        MutationReplayVerdict::NoWitnessFound => {
+            let mut chars = reason.chars();
+            let detail = chars.next().map_or_else(
+                || "No witness found".to_owned(),
+                |first| first.to_uppercase().chain(chars).collect(),
+            );
+            format!("{detail}. Another input can still show a difference.")
+        }
         MutationReplayVerdict::Unstable => format!(
             "{}: {reason}. A difference that does not repeat is not a witness.",
             "Unstable".yellow().bold()
@@ -1340,7 +1344,15 @@ fn write_replay(out: &mut String, replay: &MutationReplayOutput) {
         replay.export.as_deref().unwrap_or("?"),
         args.join(", ")
     );
-    let _ = writeln!(out, "\nReplay  {}", shorten(&call, MAX_TEST_NAME_CHARS));
+    let _ = write!(out, "\nReplay  {}", shorten(&call, MAX_TEST_NAME_CHARS));
+    if let Some(id) = &replay.input.input_id {
+        let _ = write!(
+            out,
+            "  recorded input {id} ({} of the recorded inputs ran)",
+            replay.inputs_checked
+        );
+    }
+    out.push('\n');
     if !replay.calls.is_empty() {
         let cells = |side: MutationReplaySide| -> Vec<String> {
             replay

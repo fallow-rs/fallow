@@ -1678,12 +1678,12 @@ fn retry_suspects(
 fn first_dry_run(
     link: &mut Box<dyn CompanionLink>,
     dry_files: &[String],
-    timeout: Duration,
+    config: &ScheduleConfig,
 ) -> Result<DryRunResult, ScheduleError> {
     let request = Request::DryRun {
         test_files: dry_files.to_vec(),
     };
-    let Response::DryRun(dry) = setup_request(link, &request, timeout)? else {
+    let Response::DryRun(dry) = setup_request(link, &request, config.runner_timeout)? else {
         link.shutdown();
         return Err(setup_error(
             "dry_run",
@@ -1923,7 +1923,7 @@ pub fn run_schedule_with_progress(
         test_files: dry_files.len(),
     });
     let dry_started = config.clock.now();
-    let dry = first_dry_run(&mut link, &dry_files, config.runner_timeout)?;
+    let dry = first_dry_run(&mut link, &dry_files, config)?;
     outcome.timings.dry_run = config.clock.now().saturating_duration_since(dry_started);
     runner.first_dry_run = outcome.timings.dry_run;
     let mut facts = match read_dry_run(plan, runner.caps, &dry) {

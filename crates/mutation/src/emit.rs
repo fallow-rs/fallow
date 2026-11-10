@@ -139,18 +139,49 @@ struct Emitter<'s, 't> {
     sites: &'t [EmitSite],
     tree: Tree,
     statement_starts: &'t BTreeSet<u32>,
+    /// The top-level insertions, sorted by offset, and the index of the next
+    /// one to write.
+    top_level: &'t [Insertion],
+    next_top_level: usize,
 }
 
 impl Emitter<'_, '_> {
+    /// Copies `from..to` of the original text with each top-level insertion
+    /// at an offset in `from..=to`. Only the gaps between root sites call it,
+    /// so an insertion never lands in a branch of a site.
+    fn copy_top_level(&mut self, from: u32, to: u32) {
+        let mut cursor = from;
+        while let Some(insertion) = self.top_level.get(self.next_top_level) {
+            if insertion.offset > to {
+                break;
+            }
+            let offset = insertion.offset.max(cursor);
+            self.writer.copy(cursor, offset);
+            self.writer.push(&insertion.text);
+            cursor = offset;
+            self.next_top_level += 1;
+        }
+        self.writer.copy(cursor, to);
+    }
+
     fn range(&mut self, from: u32, to: u32, nodes: &[usize], parent_start: Option<u32>) {
+        let top = parent_start.is_none();
         let mut cursor = from;
         for &node in nodes {
             let span = self.sites[node].span;
-            self.writer.copy(cursor, span.0);
+            if top {
+                self.copy_top_level(cursor, span.0);
+            } else {
+                self.writer.copy(cursor, span.0);
+            }
             self.site(node, parent_start);
             cursor = span.1;
         }
-        self.writer.copy(cursor, to);
+        if top {
+            self.copy_top_level(cursor, to);
+        } else {
+            self.writer.copy(cursor, to);
+        }
     }
 
     fn site(&mut self, node: usize, parent_start: Option<u32>) {
@@ -230,11 +261,16 @@ impl Emitter<'_, '_> {
 }
 
 /// Emits the instrumented text and its splice map.
+///
+/// `insertions` go before the first site, in order. `top_level` holds
+/// insertions at offsets outside each site, or at a boundary of a root
+/// site, sorted by offset.
 pub fn emit(
     source: &str,
     sites: &[EmitSite],
     statement_starts: &BTreeSet<u32>,
     insertions: &[Insertion],
+    top_level: &[Insertion],
 ) -> (String, SpliceMap) {
     let tree = build_tree(sites);
     let mut emitter = Emitter {
@@ -246,6 +282,8 @@ pub fn emit(
         sites,
         tree,
         statement_starts,
+        top_level,
+        next_top_level: 0,
     };
     let mut cursor = 0;
     for insertion in insertions {

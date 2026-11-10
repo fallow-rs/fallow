@@ -2404,3 +2404,121 @@ fn inspect_replay_refuses_bad_args_a_stale_file_and_args_without_replay() {
         "{envelope}"
     );
 }
+
+/// A `node:test` project whose test calls `greet` with a marker string and
+/// `apply` with a callback, which is not replayable.
+fn recording_project() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"record-fixture","private":true,"type":"module","scripts":{"test":"node --test"}}"#,
+    )
+    .expect("package.json");
+    fs::create_dir_all(root.join("src")).expect("src");
+    fs::create_dir_all(root.join("test")).expect("test");
+    fs::write(
+        root.join("src/greet.js"),
+        "export function greet(name) {\n  return name.length > 3 ? `hello ${name}` : \"hi\";\n}\nexport const apply = (fn, n) => fn(n) + 1;\n",
+    )
+    .expect("greet.js");
+    fs::write(
+        root.join("test/greet.test.js"),
+        "import assert from \"node:assert/strict\";\nimport { test } from \"node:test\";\nimport { apply, greet } from \"../src/greet.js\";\ntest(\"greet\", () => { assert.ok(greet(\"zq-marker\").length > 0); });\ntest(\"apply\", () => { assert.ok(apply((n) => n, 1) > 0); });\ntest(\"source\", () => { assert.match(greet.toString(), /name\\.length/); });\ntest(\"name\", () => { assert.equal(apply.name, \"apply\"); });\n",
+    )
+    .expect("greet.test.js");
+    fs::write(root.join(".gitignore"), ".fallow\n").expect(".gitignore");
+    git(root, &["init", "-q"]);
+    commit_all(root, "init");
+    dir
+}
+
+#[test]
+fn a_recording_run_feeds_the_replay_and_keeps_values_out_of_the_report() {
+    let project = recording_project();
+    let root = project.path();
+    let (output, report) = json_mutation(root, &["--all", "--no-cache", "--record-args", "values"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert!(
+        !output.stdout.contains("zq-marker"),
+        "the report holds a recorded value: {}",
+        output.stdout
+    );
+    let recording = &report["recording"];
+    assert_eq!(recording["mode"], "values", "{report}");
+    assert_eq!(recording["saved"], true);
+    let functions = recording["functions"].as_array().expect("functions");
+    let greet = functions
+        .iter()
+        .find(|function| function["export"] == "greet")
+        .expect("greet");
+    assert_eq!(greet["input_count"], 1);
+    let apply = functions
+        .iter()
+        .find(|function| function["export"] == "apply")
+        .expect("apply");
+    assert_eq!(apply["input_count"], 0);
+    assert_eq!(apply["not_replayable"][0]["reason"], "a function");
+    // Only the record pass sees the wraps, so a test of a function name or of
+    // the source text is no baseline failure of the run.
+    assert_eq!(
+        report["baseline_failures"],
+        serde_json::json!([]),
+        "{}",
+        report["baseline_failures"]
+    );
+    let saved =
+        fs::read_to_string(root.join(".fallow/mutation/recorded-args.json")).expect("store");
+    assert!(saved.contains("zq-marker"), "{saved}");
+
+    let survivor = report["mutants"]
+        .as_array()
+        .expect("mutants")
+        .iter()
+        .find(|mutant| mutant["function"] == "greet" && mutant["status"] == "survived")
+        .unwrap_or_else(|| panic!("a greet survivor: {report}"));
+    let id = survivor["mutant_id"].as_str().expect("id");
+    let (output, packet) = json_mutation(root, &["inspect", id, "--replay"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let replay = &packet["replay"];
+    assert_eq!(replay["input"]["source"], "recorded", "{packet}");
+    assert_eq!(replay["input"]["args"], serde_json::json!(["zq-marker"]));
+    assert_eq!(replay["inputs_checked"], 1);
+    assert_ne!(replay["verdict"], "equivalent");
+
+    let (output, packet) = json_mutation(
+        root,
+        &["inspect", &first_mutant_of(&report, "apply"), "--replay"],
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert_eq!(packet["replay"]["verdict"], "not_replayable", "{packet}");
+    let reason = packet["replay"]["reason"].as_str().expect("reason");
+    assert!(reason.contains("a function (1)"), "{reason}");
+}
+
+fn first_mutant_of(report: &serde_json::Value, function: &str) -> String {
+    report["mutants"]
+        .as_array()
+        .expect("mutants")
+        .iter()
+        .find(|mutant| mutant["function"] == function)
+        .and_then(|mutant| mutant["mutant_id"].as_str())
+        .unwrap_or_else(|| panic!("a mutant of {function}"))
+        .to_owned()
+}
+
+#[test]
+fn a_run_without_recording_has_no_recording_and_writes_no_store() {
+    let project = recording_project();
+    let root = project.path();
+    let (output, report) = json_mutation(root, &["--all", "--no-cache"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert!(report.get("recording").is_none(), "{report}");
+    assert!(!root.join(".fallow/mutation/recorded-args.json").exists());
+    let id = first_mutant_of(&report, "greet");
+    let (output, packet) = json_mutation(root, &["inspect", &id, "--replay"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert_eq!(packet["replay"]["verdict"], "not_replayable");
+    let reason = packet["replay"]["reason"].as_str().expect("reason");
+    assert!(reason.contains("--record-args values"), "{reason}");
+}

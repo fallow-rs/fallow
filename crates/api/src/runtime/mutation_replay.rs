@@ -24,12 +24,17 @@ use crate::mutation::manifest::manifest;
 use crate::mutation::protocol::{
     InitRequest, LinkFault, ReplayRequest, ReplayResult, Request, Response,
 };
+use crate::mutation::recorded_args;
 use crate::mutation::replay::{check_calls, output_outcome, output_side, verdict};
 use crate::mutation::run_dir::{RunFile, write_run_dir};
 use crate::mutation::runner_version::runner_version_help;
 use crate::mutation::transport::{CompanionLink, CompanionSpawner, ProcessSpawner, SpawnFailure};
-use crate::mutation::{MutationReplayOptions, MutationRunOptions, MutationRunScope};
+use crate::mutation::{
+    MutationReplayOptions, MutationRunOptions, MutationRunScope, RecordArgsMode,
+};
 
+/// The most recorded inputs that one replay runs.
+const MAX_RECORDED_INPUTS: usize = 3;
 /// The calls of each side. Three calls show a value that changes from one
 /// call to the next, for example from a clock that the replay does not fix.
 const CALLS_PER_SIDE: u32 = 3;
@@ -81,6 +86,7 @@ fn instrument_passes(operator: Option<Operator>, span: (u32, u32)) -> Vec<Mutati
             [None, Some(vec![span])].map(|ranges| MutationOptions {
                 operators: operators.clone(),
                 ranges,
+                record_exports: false,
             })
         })
         .collect()
@@ -166,7 +172,7 @@ fn find_target(
 
 /// An output with no call, for a replay that did not run or did not end.
 fn without_calls(
-    options: &MutationReplayOptions,
+    input: &MutationReplayInput,
     export: Option<String>,
     verdict: MutationReplayVerdict,
     reason: String,
@@ -179,10 +185,8 @@ fn without_calls(
         verdict,
         reason: Some(reason),
         export,
-        input: MutationReplayInput {
-            source: MutationReplayInputSource::Argument,
-            args: options.args.clone(),
-        },
+        input: input.clone(),
+        inputs_checked: 0,
         calls_per_side: CALLS_PER_SIDE,
         call_timeout_ms: millis(call_timeout),
         clock_ms: REPLAY_CLOCK_MS,
@@ -321,14 +325,14 @@ fn verdict_reason(verdict: MutationReplayVerdict, export: &str) -> Option<String
 
 /// The output of a replay result that keeps the contract.
 fn completed(
-    options: &MutationReplayOptions,
+    input: &MutationReplayInput,
     export: String,
     result: ReplayResult,
     call_timeout: Duration,
 ) -> ProgrammaticResult<MutationReplayOutput> {
     check_calls(&result.calls, CALLS_PER_SIDE).map_err(replay_error)?;
     let verdict = verdict(&result.calls);
-    let mut output = without_calls(options, Some(export), verdict, String::new(), call_timeout)?;
+    let mut output = without_calls(input, Some(export), verdict, String::new(), call_timeout)?;
     output.reason = verdict_reason(verdict, output.export.as_deref().unwrap_or_default());
     output.duration_ms = result.duration_ms;
     output.calls = result
@@ -379,28 +383,176 @@ pub fn replay_mutation(
     };
     let planned = plan_for(&run_options, guard_cache_dir)?;
     let source = read_source(planned.resolved.root(), &options.file)?;
-    let not_replayable = |reason: String| {
+    let unknown = MutationReplayInput {
+        source: if options.args.is_some() {
+            MutationReplayInputSource::Argument
+        } else {
+            MutationReplayInputSource::Recorded
+        },
+        input_id: None,
+        args: options.args.clone().unwrap_or_default(),
+    };
+    let not_replayable = |export: Option<String>, reason: String| {
         without_calls(
-            options,
-            None,
+            &unknown,
+            export,
             MutationReplayVerdict::NotReplayable,
             reason,
             call_timeout,
         )
     };
     let Some(target) = find_target(&source, options)? else {
-        return not_replayable("a component file has no module exports to call".to_owned());
+        return not_replayable(
+            None,
+            "a component file has no module exports to call".to_owned(),
+        );
     };
     let export = match target.export {
         Ok(export) => export,
-        Err(reason) => return not_replayable(reason),
+        Err(reason) => return not_replayable(None, reason),
+    };
+    let inputs = match replay_inputs(&planned.cache_dir, options, &export) {
+        Ok(inputs) => inputs,
+        Err(reason) => return not_replayable(Some(export), reason),
     };
     let mut link = start_companion(&planned, options, &target.instrumented)?;
+    let mut outputs = Vec::new();
+    for input in &inputs {
+        let output = match replay_one(&mut link, options, &export, input, call_timeout) {
+            Ok(output) => output,
+            Err(error) => {
+                link.shutdown();
+                return Err(error);
+            }
+        };
+        let stop = ends_search(output.verdict);
+        outputs.push(output);
+        if stop {
+            break;
+        }
+    }
+    link.shutdown();
+    let checked = u32::try_from(outputs.len()).unwrap_or(u32::MAX);
+    let mut output = pick_output(outputs).ok_or_else(|| replay_error("the replay has no input"))?;
+    output.inputs_checked = checked;
+    if output.verdict == MutationReplayVerdict::NoWitnessFound {
+        output.reason = Some(no_witness_reason(&output));
+    }
+    Ok(output)
+}
+
+/// True when the replay of the next input cannot change the result: a
+/// witness, a call that hangs (the companion is gone), or an export that is
+/// no function. An unstable input says nothing about the next input.
+const fn ends_search(verdict: MutationReplayVerdict) -> bool {
+    matches!(
+        verdict,
+        MutationReplayVerdict::Witness
+            | MutationReplayVerdict::Timeout
+            | MutationReplayVerdict::NotCallable
+    )
+}
+
+/// The output of a replay of several inputs: the last one, unless it shows
+/// no witness and an earlier input was unstable. An unstable input is then
+/// the result, because it can hide a difference.
+fn pick_output(outputs: Vec<MutationReplayOutput>) -> Option<MutationReplayOutput> {
+    let unstable = outputs
+        .iter()
+        .position(|output| output.verdict == MutationReplayVerdict::Unstable);
+    let last_is_plain = outputs
+        .last()
+        .is_some_and(|output| output.verdict == MutationReplayVerdict::NoWitnessFound);
+    match (unstable, last_is_plain) {
+        (Some(index), true) => outputs.into_iter().nth(index),
+        _ => outputs.into_iter().last(),
+    }
+}
+
+/// The wording of rule 3: the inputs, where they come from, and the calls.
+fn no_witness_reason(output: &MutationReplayOutput) -> String {
+    let inputs = output.inputs_checked;
+    let noun = if inputs == 1 { "input" } else { "inputs" };
+    let source = match output.input.source {
+        MutationReplayInputSource::Argument => "--args",
+        MutationReplayInputSource::Recorded => "recorded",
+    };
+    format!(
+        "no witness found ({inputs} {noun}, {source}, {} calls of each side)",
+        output.calls_per_side
+    )
+}
+
+/// The inputs of the replay: the `--args` value, or the first recorded
+/// inputs of the export. The error is the reason why none can run.
+fn replay_inputs(
+    cache_dir: &Path,
+    options: &MutationReplayOptions,
+    export: &str,
+) -> Result<Vec<MutationReplayInput>, String> {
+    if let Some(args) = &options.args {
+        return Ok(vec![MutationReplayInput {
+            source: MutationReplayInputSource::Argument,
+            input_id: None,
+            args: args.clone(),
+        }]);
+    }
+    let key = format!("{}#{export}", options.file);
+    let hint = "run `fallow mutation --record-args values` for this code, or pass --args";
+    let Some(stored) = recorded_args::load(cache_dir, &key, recorded_args::now_secs()) else {
+        return Err(format!(
+            "no recorded input of `{export}` in the last 7 days; {hint}"
+        ));
+    };
+    if stored.mode != RecordArgsMode::Values {
+        return Err(format!(
+            "the recording of `{export}` keeps argument types only; {hint}"
+        ));
+    }
+    let inputs: Vec<MutationReplayInput> = stored
+        .inputs
+        .into_iter()
+        .filter_map(|input| {
+            Some(MutationReplayInput {
+                source: MutationReplayInputSource::Recorded,
+                input_id: Some(input.input_id),
+                args: input.args?,
+            })
+        })
+        .take(MAX_RECORDED_INPUTS)
+        .collect();
+    if inputs.is_empty() {
+        let reasons: Vec<String> = stored
+            .not_replayable
+            .iter()
+            .map(|refusal| format!("{} ({})", refusal.reason, refusal.count))
+            .collect();
+        let detail = if reasons.is_empty() {
+            "no call of the dry run reached it".to_owned()
+        } else {
+            format!("the calls were not replayable: {}", reasons.join(", "))
+        };
+        return Err(format!(
+            "no recorded input of `{export}` can run: {detail}; {hint}"
+        ));
+    }
+    Ok(inputs)
+}
+
+/// Replays one input on an open companion. A wall-limit timeout gives the
+/// verdict `timeout`, and the companion is then gone.
+fn replay_one(
+    link: &mut Box<dyn CompanionLink>,
+    options: &MutationReplayOptions,
+    export: &str,
+    input: &MutationReplayInput,
+    call_timeout: Duration,
+) -> ProgrammaticResult<MutationReplayOutput> {
     let request = ReplayRequest {
         file: options.file.clone(),
-        export: export.clone(),
+        export: export.to_owned(),
         mutant_id: options.mutant_id.clone(),
-        args: options.args.clone(),
+        args: input.args.clone(),
         calls: CALLS_PER_SIDE,
         call_timeout_ms: millis(call_timeout),
         clock_ms: REPLAY_CLOCK_MS,
@@ -408,17 +560,15 @@ pub fn replay_mutation(
     };
     let wall_limit = wall_limit(call_timeout);
     let started = Instant::now();
-    let response = link.request(&Request::Replay(request), wall_limit);
-    link.shutdown();
-    match response {
-        Ok(Response::Replay(result)) => completed(options, export, result, call_timeout),
+    match link.request(&Request::Replay(request), wall_limit) {
+        Ok(Response::Replay(result)) => completed(input, export.to_owned(), result, call_timeout),
         Ok(_) => Err(replay_error(
             "the companion answered replay with another response",
         )),
         Err(LinkFault::Timeout) => {
             let mut output = without_calls(
-                options,
-                Some(export),
+                input,
+                Some(export.to_owned()),
                 MutationReplayVerdict::Timeout,
                 format!(
                     "the replay did not end in its wall limit of {}s; the module load, the original or the mutant can block the worker, and a longer --call-timeout gives more time",
@@ -452,6 +602,7 @@ mod tests {
         let options = MutationOptions {
             operators: Operator::ALL.to_vec(),
             ranges: Some(vec![span]),
+            record_exports: false,
         };
         let instrumented = fallow_engine::mutation::instrument_source(TWINS, "src/a.js", &options)
             .expect("layout")
@@ -495,6 +646,36 @@ mod tests {
             let calls = (call_timeout + COMPANION_CALL_MARGIN) * (2 * CALLS_PER_SIDE);
             assert!(wall_limit(call_timeout) >= calls + Duration::from_secs(60));
         }
+    }
+
+    fn output(verdict: MutationReplayVerdict, id: &str) -> MutationReplayOutput {
+        let input = MutationReplayInput {
+            source: MutationReplayInputSource::Recorded,
+            input_id: Some(id.to_owned()),
+            args: Vec::new(),
+        };
+        without_calls(
+            &input,
+            Some("f".to_owned()),
+            verdict,
+            String::new(),
+            DEFAULT_CALL_TIMEOUT,
+        )
+        .expect("output")
+    }
+
+    #[test]
+    fn an_unstable_input_does_not_end_the_search_and_stays_the_result_without_a_witness() {
+        use MutationReplayVerdict::{NoWitnessFound, Unstable, Witness};
+        assert!(!ends_search(Unstable));
+        assert!(!ends_search(NoWitnessFound));
+        assert!(ends_search(Witness));
+        let picked = pick_output(vec![output(Unstable, "a"), output(Witness, "b")]).expect("one");
+        assert_eq!(picked.verdict, Witness);
+        let picked =
+            pick_output(vec![output(Unstable, "a"), output(NoWitnessFound, "b")]).expect("one");
+        assert_eq!(picked.verdict, Unstable);
+        assert_eq!(picked.input.input_id.as_deref(), Some("a"));
     }
 
     #[test]

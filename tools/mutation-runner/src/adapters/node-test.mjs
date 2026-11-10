@@ -14,6 +14,7 @@ import {
   withTestIds,
 } from "./child-process.mjs";
 import {
+  addRecords,
   buildOverlay,
   errorMessage,
   isSupportedVersion,
@@ -311,6 +312,7 @@ const recordDiagnostic = (state, data) => {
   const payload = JSON.parse(data.message.slice(HITS_DIAGNOSTIC.length));
   addAll(state.loaded, payload.loaded);
   addAll(state.staticHits, payload.static_hits);
+  addRecords(state.records, payload.args);
   const joined = isSameLocation(state.last, data);
   attachHits(state, payload.hits, joined);
   state.shared ||= !joined || payload.overlap;
@@ -355,6 +357,7 @@ const newFileState = (file) => ({
   durationMs: null,
   shared: false,
   timedOut: false,
+  records: new Map(),
 });
 
 /**
@@ -370,8 +373,9 @@ const readFileEvents = async (stream, file, stopAtFailure) => {
     handleEvent(state, event);
     if (shouldStop(state, event.type, stopAtFailure)) break;
   }
-  const { tests, errors, loaded, staticHits, shared, timedOut, durationMs } = state;
+  const { tests, errors, loaded, staticHits, shared, timedOut, durationMs, records } = state;
   return {
+    records,
     tests: withTestIds(file, tests),
     errors,
     loaded,
@@ -432,6 +436,7 @@ export const createAdapter = async (init) => {
       return options.bail === true;
     };
     process.env[CHILD_ENV.overlay] = workDir.overlayPath;
+    if (options.recordArgs === true) process.env[CHILD_ENV.record] = "1";
     setActiveMutant(options.mutantId);
     try {
       const stream = runNodeTests({
@@ -449,6 +454,7 @@ export const createAdapter = async (init) => {
       return result;
     } finally {
       delete process.env[CHILD_ENV.overlay];
+      delete process.env[CHILD_ENV.record];
       setActiveMutant(null);
     }
   };
@@ -488,6 +494,11 @@ export const createAdapter = async (init) => {
     testFiles,
     workDir,
     runFile,
+    records: true,
   });
-  return { ...adapter, capabilities: { ...adapter.capabilities, replay: true }, replay };
+  return {
+    ...adapter,
+    capabilities: { ...adapter.capabilities, replay: true, record: true },
+    replay,
+  };
 };
