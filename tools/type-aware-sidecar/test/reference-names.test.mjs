@@ -160,60 +160,78 @@ test("symbol-trace keeps uses that reach an export through a CommonJS export nam
         include: ["src/**/*"],
       },
       {
-        "src/helpers.js":
-          "const helper = (value) => value;\nexports.run = helper;\nmodule.exports.go = helper;\n",
-        "src/use.ts": 'import { run, go } from "./helpers.js";\nrun(1);\ngo(2);\n',
+        "src/helpers.js": [
+          "const helper = (value) => value;",
+          "exports.run = helper;",
+          "module.exports.go = helper;",
+          'exports["byKey"] = helper;',
+          "exports.first = helper, exports.second = helper;",
+          'if (typeof exports === "object") { module.exports.nested = helper; }',
+          "",
+        ].join("\n"),
+        "src/use.ts": [
+          'import { run, go, byKey, first, second, nested } from "./helpers.js";',
+          "run(1);",
+          "go(2);",
+          "byKey(3);",
+          "first(4);",
+          "second(5);",
+          "nested(6);",
+          "",
+        ].join("\n"),
       },
       "src/helpers.js",
     );
-    assert.deepEqual(uses.filter(([file]) => file === "src/use.ts").toSorted(), [
-      ["src/use.ts", "call"],
-      ["src/use.ts", "call"],
-    ]);
+    assert.deepEqual(
+      uses.filter(([file]) => file === "src/use.ts"),
+      Array.from({ length: 6 }, () => ["src/use.ts", "call"]),
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
 });
 
-test(
-  "symbol-trace keeps uses that reach an export through a linked workspace package",
-  { skip: process.platform === "win32" },
-  () => {
-    const root = realpathSync(
-      mkdtempSync(path.join(tmpdir(), "fallow-type-aware-reference-names-link-")),
-    );
-    try {
-      write(
-        root,
-        "packages/lib/package.json",
-        JSON.stringify({ name: "@scope/lib", types: "index.ts" }),
+for (const preserveSymlinks of [false, true]) {
+  test(
+    `symbol-trace keeps uses through a linked workspace package (preserveSymlinks: ${preserveSymlinks})`,
+    { skip: process.platform === "win32" },
+    () => {
+      const root = realpathSync(
+        mkdtempSync(path.join(tmpdir(), "fallow-type-aware-reference-names-link-")),
       );
-      mkdirSync(path.join(root, "node_modules/@scope"), { recursive: true });
-      symlinkSync(path.join(root, "packages/lib"), path.join(root, "node_modules/@scope/lib"));
-      const uses = traceHelperUses(
-        root,
-        {
-          compilerOptions: {
-            strict: true,
-            preserveSymlinks: true,
-            moduleResolution: "bundler",
-            module: "esnext",
+      try {
+        write(
+          root,
+          "packages/lib/package.json",
+          JSON.stringify({ name: "@scope/lib", types: "index.ts" }),
+        );
+        mkdirSync(path.join(root, "node_modules/@scope"), { recursive: true });
+        symlinkSync(path.join(root, "packages/lib"), path.join(root, "node_modules/@scope/lib"));
+        const uses = traceHelperUses(
+          root,
+          {
+            compilerOptions: {
+              strict: true,
+              preserveSymlinks,
+              moduleResolution: "bundler",
+              module: "esnext",
+            },
+            include: ["src/**/*.ts", "packages/lib/helpers.ts"],
           },
-          include: ["src/**/*.ts", "packages/lib/helpers.ts"],
-        },
-        {
-          "packages/lib/helpers.ts": "export const helper = (value: number): number => value;\n",
-          "packages/lib/index.ts": 'export { helper as run } from "./helpers";\n',
-          "src/use.ts": 'import { run } from "@scope/lib";\nrun(1);\n',
-        },
-        "packages/lib/helpers.ts",
-      );
-      assert.ok(
-        uses.some(([file, role]) => file === "src/use.ts" && role === "call"),
-        `the call in src/use.ts must be a use, got: ${JSON.stringify(uses)}`,
-      );
-    } finally {
-      rmSync(root, { recursive: true, force: true });
-    }
-  },
-);
+          {
+            "packages/lib/helpers.ts": "export const helper = (value: number): number => value;\n",
+            "packages/lib/index.ts": 'export { helper as run } from "./helpers";\n',
+            "src/use.ts": 'import { run as go } from "@scope/lib";\ngo(1);\n',
+          },
+          "packages/lib/helpers.ts",
+        );
+        assert.ok(
+          uses.some(([file, role]) => file === "src/use.ts" && role === "call"),
+          `the call in src/use.ts must be a use, got: ${JSON.stringify(uses)}`,
+        );
+      } finally {
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
+}
