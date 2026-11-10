@@ -677,3 +677,151 @@ fn a_long_string_literal_is_unknown() {
         ]
     );
 }
+
+fn written(info: &ModuleInfo, name: &str) -> Vec<bool> {
+    contract(info, name)
+        .params
+        .iter()
+        .map(|param| param.written)
+        .collect()
+}
+
+#[test]
+fn records_each_write_of_a_parameter() {
+    let info = parse(
+        "function toggle(compact) { compact = !compact; }
+         function nested(compact) { const set = () => { compact = 1; }; }
+         function nullish(compact) { compact ??= true; }
+         function pattern(compact, xs) { [compact] = xs; }
+         function update(compact) { compact++; }
+         function inDefault(compact, other = (compact = 2)) {}
+         function object({ x, y }) { y = 1; }
+         function array([x]) { x += 1; }
+         function rest(...items) { items = []; }
+         function closed(compact, { x }, [y], ...rest) { if (compact) {} return x + y + rest.length; }",
+    );
+    assert_eq!(written(&info, "toggle"), vec![true]);
+    assert_eq!(written(&info, "nested"), vec![true]);
+    assert_eq!(written(&info, "nullish"), vec![true]);
+    assert_eq!(written(&info, "pattern"), vec![true, false]);
+    assert_eq!(written(&info, "update"), vec![true]);
+    assert_eq!(written(&info, "inDefault"), vec![true, false]);
+    assert_eq!(written(&info, "object"), vec![true]);
+    assert_eq!(written(&info, "array"), vec![true]);
+    assert_eq!(written(&info, "rest"), vec![true]);
+    assert_eq!(written(&info, "closed"), vec![false, false, false, false]);
+}
+
+#[test]
+fn records_whether_the_function_is_async() {
+    let info = parse(
+        "async function declared() {}
+         const expression = async function () {};
+         const arrow = async () => {};
+         function plain() {}
+         const plainArrow = () => {};",
+    );
+    let flags: Vec<_> = facts(&info)
+        .declarations
+        .iter()
+        .map(|contract| (&*contract.binding_name, contract.is_async))
+        .collect();
+    assert_eq!(
+        flags,
+        vec![
+            ("declared", true),
+            ("expression", true),
+            ("arrow", true),
+            ("plain", false),
+            ("plainArrow", false),
+        ]
+    );
+}
+
+#[test]
+fn a_self_call_records_a_parameter_that_it_passes_through() {
+    let info = parse(
+        "function walk(node, depth) {
+           walk(node as any, 1);
+           node.kids.forEach((kid) => walk(kid, depth!));
+           walk(depth, node);
+         }
+         walk(node, 1);",
+    );
+    let args: Vec<_> = local_calls(&info, "walk")
+        .iter()
+        .map(|call| call.args.clone())
+        .collect();
+    let one = ArgFact::Literal(LiteralValue::Number(1.0_f64.to_bits()));
+    assert_eq!(
+        args,
+        vec![
+            vec![ArgFact::Param(0), one.clone()],
+            vec![ArgFact::Unknown, ArgFact::Param(1)],
+            vec![ArgFact::Param(1), ArgFact::Param(0)],
+            vec![ArgFact::Unknown, one],
+        ]
+    );
+}
+
+#[test]
+fn a_self_call_of_a_named_function_expression_records_pass_through() {
+    let info = parse("const outer = function inner(a) { inner(a); };");
+    assert_eq!(local_calls(&info, "outer")[0].args, vec![ArgFact::Param(0)]);
+}
+
+#[test]
+fn a_written_pattern_or_shadowed_parameter_is_not_pass_through() {
+    let info = parse(
+        "function count(n, step) { step = step + 1; count(n, step); }
+         function pick({ a }, b) { pick({ a }, b); }
+         function shadow(a) { function inner(a) { shadow(a); } }",
+    );
+    let args = |name: &str| -> Vec<Vec<ArgFact>> {
+        local_calls(&info, name)
+            .iter()
+            .map(|call| call.args.clone())
+            .collect()
+    };
+    assert_eq!(
+        args("count"),
+        vec![vec![ArgFact::Param(0), ArgFact::Unknown]]
+    );
+    assert_eq!(
+        args("pick"),
+        vec![vec![ArgFact::Unknown, ArgFact::Param(1)]]
+    );
+    assert_eq!(args("shadow"), vec![vec![]]);
+}
+
+#[test]
+fn a_call_of_another_function_keeps_a_parameter_unknown() {
+    let info = parse(
+        "function walk(node, depth) {}
+         function other(x) { walk(x, 1); }
+         function relay(a, b) { walk(a, b); }",
+    );
+    let args: Vec<_> = local_calls(&info, "walk")
+        .iter()
+        .map(|call| call.args.clone())
+        .collect();
+    assert_eq!(
+        args,
+        vec![
+            vec![
+                ArgFact::Unknown,
+                ArgFact::Literal(LiteralValue::Number(1.0_f64.to_bits()))
+            ],
+            vec![],
+        ]
+    );
+}
+
+#[test]
+fn a_type_assertion_argument_is_transparent() {
+    let info = parse("function f(a) {}\nf(<any>true);");
+    assert_eq!(
+        local_calls(&info, "f")[0].args,
+        vec![ArgFact::Literal(LiteralValue::Boolean(true))]
+    );
+}

@@ -44,10 +44,10 @@ pub fn collect(
     program: &Program<'_>,
     imports: &[ImportInfo],
 ) -> FunctionContractFacts {
-    let (declarations, bindings) = collect_contracts(semantic, program);
+    let (declarations, bindings, scopes) = collect_contracts(semantic, program);
     let mut calls = Vec::new();
     let mut escapes = Vec::new();
-    collect_local_uses(semantic, &bindings, &mut calls, &mut escapes);
+    collect_local_uses(semantic, &bindings, &scopes, &mut calls, &mut escapes);
     collect_import_calls(semantic, imports, &mut calls);
     escapes.sort_by_key(|escape| escape.span_start);
     FunctionContractFacts {
@@ -58,13 +58,18 @@ pub fn collect(
     }
 }
 
-/// The contracts of the module, and each binding symbol with the index of
-/// its contract.
+/// The contracts of the module, each binding symbol with the index of its
+/// contract, and the self-call scope of each contract.
 fn collect_contracts(
     semantic: &Semantic<'_>,
     program: &Program<'_>,
-) -> (Vec<FunctionContract>, Vec<(SymbolId, u32)>) {
+) -> (
+    Vec<FunctionContract>,
+    Vec<(SymbolId, u32)>,
+    Vec<SelfCallScope>,
+) {
     let mut contracts = Vec::new();
+    let mut scopes = Vec::new();
     let mut seen: FxHashSet<SymbolId> = FxHashSet::default();
     let mut bindings = Vec::new();
     for candidate in module_functions(program) {
@@ -86,15 +91,35 @@ fn collect_contracts(
         {
             bindings.push((inner, index));
         }
-        contracts.push(build_contract(semantic, &candidate, symbol));
+        let (contract, scope) = build_contract(semantic, &candidate, symbol);
+        contracts.push(contract);
+        scopes.push(scope);
     }
-    (contracts, bindings)
+    (contracts, bindings, scopes)
+}
+
+/// The parameters that a self-call of one contract can pass through.
+struct SelfCallScope {
+    /// The span of the function, so a call inside it is a self-call.
+    span: Span,
+    /// One entry for each parameter: the symbol of a formal identifier
+    /// parameter that the module never writes, `None` otherwise.
+    params: Vec<Option<SymbolId>>,
+}
+
+impl SelfCallScope {
+    /// The pass-through parameters for a call at `span`, when the call is
+    /// inside the function.
+    fn for_call(&self, span: Span) -> Option<&[Option<SymbolId>]> {
+        (self.span.start <= span.start && span.end <= self.span.end).then_some(&*self.params)
+    }
 }
 
 /// Record each read of a local function binding as a call or an escape.
 fn collect_local_uses(
     semantic: &Semantic<'_>,
     bindings: &[(SymbolId, u32)],
+    scopes: &[SelfCallScope],
     calls: &mut Vec<FlatCall>,
     escapes: &mut Vec<LocalFunctionEscape>,
 ) {
@@ -114,8 +139,8 @@ fn collect_local_uses(
                     nodes,
                     scoping,
                     call_id,
-                    CallTarget::Local(index),
-                    String::new(),
+                    (CallTarget::Local(index), String::new()),
+                    scopes.get(index as usize),
                 )),
                 LocalUse::Export => {}
                 LocalUse::Escape => escapes.push(LocalFunctionEscape {
@@ -147,6 +172,20 @@ impl<'b, 'a> FunctionShape<'b, 'a> {
         match self {
             Self::Function(function) => &function.params,
             Self::Arrow(arrow) => &arrow.params,
+        }
+    }
+
+    fn span(self) -> Span {
+        match self {
+            Self::Function(function) => function.span,
+            Self::Arrow(arrow) => arrow.span,
+        }
+    }
+
+    fn is_async(self) -> bool {
+        match self {
+            Self::Function(function) => function.r#async,
+            Self::Arrow(arrow) => arrow.r#async,
         }
     }
 }
@@ -235,6 +274,7 @@ fn unwrap_transparent<'b, 'a>(mut expr: &'b Expression<'a>) -> &'b Expression<'a
         expr = match expr {
             Expression::ParenthesizedExpression(inner) => &inner.expression,
             Expression::TSAsExpression(inner) => &inner.expression,
+            Expression::TSTypeAssertion(inner) => &inner.expression,
             Expression::TSSatisfiesExpression(inner) => &inner.expression,
             Expression::TSNonNullExpression(inner) => &inner.expression,
             _ => return expr,
@@ -246,38 +286,10 @@ fn build_contract(
     semantic: &Semantic<'_>,
     candidate: &Candidate<'_, '_>,
     symbol: SymbolId,
-) -> FunctionContract {
+) -> (FunctionContract, SelfCallScope) {
     let scoping = semantic.scoping();
     let params = candidate.shape.params();
-    let mut param_symbols = Vec::new();
-    let mut facts: Vec<ParamFact> = params
-        .items
-        .iter()
-        .map(|param| {
-            let (name, kind, symbol) = pattern_fact(&param.pattern);
-            param_symbols.push(symbol);
-            ParamFact {
-                name,
-                kind,
-                optional: param.optional,
-                has_default: param.initializer.is_some(),
-                is_rest: false,
-                condition_reads: 0,
-            }
-        })
-        .collect();
-    if let Some(rest) = &params.rest {
-        let (name, kind, symbol) = pattern_fact(&rest.rest.argument);
-        param_symbols.push(symbol);
-        facts.push(ParamFact {
-            name,
-            kind,
-            optional: false,
-            has_default: false,
-            is_rest: true,
-            condition_reads: 0,
-        });
-    }
+    let (mut facts, param_symbols) = param_facts(scoping, params);
 
     let mut scan = BodyScan {
         scoping,
@@ -307,13 +319,71 @@ fn build_contract(
     }
 
     let incomplete = incomplete_reason(semantic, candidate, symbol, &scan, is_arrow);
-    FunctionContract {
+    let scope = SelfCallScope {
+        span: candidate.shape.span(),
+        params: param_symbols
+            .iter()
+            .zip(&facts)
+            .map(|(symbol, fact)| symbol.filter(|_| !fact.written))
+            .collect(),
+    };
+    let contract = FunctionContract {
         binding_name: candidate.name.into(),
         span_start: candidate.span_start,
         params: facts,
         returns_value: scan.returns_value,
+        is_async: candidate.shape.is_async(),
         incomplete,
+    };
+    (contract, scope)
+}
+
+/// One fact for each formal parameter, and the symbol of each identifier
+/// parameter.
+fn param_facts(
+    scoping: &Scoping,
+    params: &FormalParameters<'_>,
+) -> (Vec<ParamFact>, Vec<Option<SymbolId>>) {
+    let mut facts = Vec::new();
+    let mut symbols = Vec::new();
+    for param in &params.items {
+        let (name, kind, symbol) = pattern_fact(&param.pattern);
+        symbols.push(symbol);
+        facts.push(ParamFact {
+            name,
+            kind,
+            optional: param.optional,
+            has_default: param.initializer.is_some(),
+            is_rest: false,
+            condition_reads: 0,
+            written: pattern_written(scoping, &param.pattern),
+        });
     }
+    if let Some(rest) = &params.rest {
+        let (name, kind, symbol) = pattern_fact(&rest.rest.argument);
+        symbols.push(symbol);
+        facts.push(ParamFact {
+            name,
+            kind,
+            optional: false,
+            has_default: false,
+            is_rest: true,
+            condition_reads: 0,
+            written: pattern_written(scoping, &rest.rest.argument),
+        });
+    }
+    (facts, symbols)
+}
+
+/// `true` when the module writes any binding of a parameter pattern.
+fn pattern_written(scoping: &Scoping, pattern: &BindingPattern<'_>) -> bool {
+    pattern.get_binding_identifiers().iter().any(|id| {
+        id.symbol_id.get().is_some_and(|symbol| {
+            scoping
+                .get_resolved_references(symbol)
+                .any(oxc_semantic::Reference::is_write)
+        })
+    })
 }
 
 fn pattern_fact(pattern: &BindingPattern<'_>) -> (Option<Box<str>>, ParamKind, Option<SymbolId>) {
@@ -590,8 +660,8 @@ fn collect_import_calls(
                 nodes,
                 scoping,
                 call_id,
-                CallTarget::Import(import_index),
-                path,
+                (CallTarget::Import(import_index), path),
+                None,
             ) {
                 calls.push(call);
             }
@@ -630,16 +700,21 @@ fn static_member_chain(
     (current, current_span, path)
 }
 
+/// The call site at `call_id`. `scope` is the self-call scope of a local
+/// target, so a self-call can record a pass-through parameter.
 fn function_call(
     nodes: &AstNodes<'_>,
     scoping: &Scoping,
     call_id: NodeId,
-    target: CallTarget,
-    member_path: String,
+    (target, member_path): (CallTarget, String),
+    scope: Option<&SelfCallScope>,
 ) -> Option<FlatCall> {
     let AstKind::CallExpression(call) = nodes.kind(call_id) else {
         return None;
     };
+    let pass_through = scope
+        .and_then(|scope| scope.for_call(call.span))
+        .unwrap_or_default();
     let arg_count = u32::try_from(call.arguments.len()).unwrap_or(u32::MAX);
     let spread_from = call
         .arguments
@@ -650,7 +725,7 @@ fn function_call(
         .arguments
         .iter()
         .take(spread_from.map_or(MAX_ARG_FACTS, |index| MAX_ARG_FACTS.min(index as usize)))
-        .map(|argument| arg_fact(scoping, argument))
+        .map(|argument| arg_fact(scoping, argument, pass_through))
         .collect();
     if args.iter().all(|arg| *arg == ArgFact::Unknown) {
         args = Vec::new();
@@ -690,11 +765,39 @@ fn group_calls(mut flat: Vec<FlatCall>) -> Vec<FunctionCalls> {
     groups
 }
 
-fn arg_fact(scoping: &Scoping, argument: &Argument<'_>) -> ArgFact {
+/// The fact of one argument. `pass_through` holds the parameters that a
+/// self-call can pass on unchanged, and is empty for each other call.
+fn arg_fact(
+    scoping: &Scoping,
+    argument: &Argument<'_>,
+    pass_through: &[Option<SymbolId>],
+) -> ArgFact {
     let Some(expr) = argument.as_expression() else {
         return ArgFact::Unknown;
     };
-    literal_value(scoping, unwrap_transparent(expr)).map_or(ArgFact::Unknown, ArgFact::Literal)
+    let expr = unwrap_transparent(expr);
+    if let Some(literal) = literal_value(scoping, expr) {
+        return ArgFact::Literal(literal);
+    }
+    pass_through_param(scoping, expr, pass_through).map_or(ArgFact::Unknown, ArgFact::Param)
+}
+
+/// The index of the pass-through parameter that `expr` names.
+fn pass_through_param(
+    scoping: &Scoping,
+    expr: &Expression<'_>,
+    pass_through: &[Option<SymbolId>],
+) -> Option<u32> {
+    let Expression::Identifier(identifier) = expr else {
+        return None;
+    };
+    let symbol = scoping
+        .get_reference(identifier.reference_id.get()?)
+        .symbol_id()?;
+    let index = pass_through
+        .iter()
+        .position(|param| *param == Some(symbol))?;
+    u32::try_from(index).ok()
 }
 
 fn literal_value(scoping: &Scoping, expr: &Expression<'_>) -> Option<LiteralValue> {

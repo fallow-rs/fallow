@@ -2096,7 +2096,7 @@ make("CanRead"); make("CanWrite"); make(kind);"#;
 #[test]
 fn cache_roundtrip_preserves_function_contracts() {
     let source = "import { format } from './format';\n\
-        export function save(id, strict?: boolean, ...rest) { if (strict) {} return id; }\n\
+        export async function save(id, strict?: boolean, ...rest) { if (strict) {} strict = !strict; save(id); return id; }\n\
         let mutable = () => {};\n\
         save(1, true, ...more);\n\
         format('a');\n\
@@ -2107,6 +2107,14 @@ fn cache_roundtrip_preserves_function_contracts() {
         .as_deref()
         .expect("the module has call evidence");
     assert_eq!(facts.declarations.len(), 2);
+    let save = &facts.declarations[0];
+    assert!(save.is_async);
+    assert!(save.params[1].written);
+    assert!(
+        facts
+            .call_sites()
+            .any(|(_, _, site)| site.args == [fallow_types::extract::ArgFact::Param(0)])
+    );
     assert_eq!(facts.calls.len(), 2);
     assert_eq!(facts.escapes.len(), 1);
     let cached = module_to_cached_from_parts(&module, 10, 20);
