@@ -297,6 +297,12 @@ Dependency-level findings (unused, misplaced, type-only, or test-only dependenci
     },
 ];
 
+const MUTATION_TASKS_SECTIONS: &[ToolGuideSection] = &[ToolGuideSection {
+    topic: "witness",
+    summary: "How to read the witness of a task and turn it into a test.",
+    detail: "After a `fallow mutation --record-args values` run, a task can have witness. Read witness.verdict first. Only verdict witness can have args, original and mutant: args is a recorded input, original the result of the current code, and mutant the result of the changed code. A test that calls the export with args and asserts original should kill the mutant; run it on the current code to confirm, because the replay ran each call in a new worker with a clock that starts at a fixed time and a fixed Math.random seed. When original.outcome is threw, assert that the call throws (value.name, value.message). Values use the replay encoding: JSON, and objects with a $replay tag for other values: {\"$replay\":\"undefined\"} is undefined, {\"$replay\":\"number\",\"value\":\"NaN\"} is NaN, {\"$replay\":\"bigint\",\"value\":\"12\"} is 12n, and date, regexp, map, set and bytes are a Date, a RegExp, a Map, a Set and a typed array. The text fields are for people, not test code. Other verdicts (no_witness_found, unstable, timeout, not_callable, not_replayable) give no input; none of them means that the mutant is equivalent. A stale task has no args. replay_command shows both sides again.",
+}];
+
 /// Every tool with a long-form guide, in catalogue order.
 pub const TOOL_GUIDES: &[ToolGuide] = &[
     ToolGuide {
@@ -330,6 +336,10 @@ pub const TOOL_GUIDES: &[ToolGuide] = &[
     ToolGuide {
         tool: "inspect_target",
         sections: INSPECT_TARGET_SECTIONS,
+    },
+    ToolGuide {
+        tool: "mutation_tasks",
+        sections: MUTATION_TASKS_SECTIONS,
     },
 ];
 

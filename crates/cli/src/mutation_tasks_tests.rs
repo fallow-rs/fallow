@@ -301,3 +301,11 @@ fn a_task_carries_the_equivalence_hint_of_its_survivor() {
         .count();
     assert_eq!(json_hints, 1, "{json}");
 }
+
+#[test]
+fn a_witness_with_a_verdict_of_a_later_version_reads_as_absent() {
+    let json = r#"{"kind":"mutation","mutants":[{"mutant_id":"m1","file":"src/a.ts","line":1,"column":0,"span":[0,1],"operator":"arithmetic-operator","status":"survived","witness":{"verdict":"a_later_verdict","inputs_checked":1}}],"files":[]}"#;
+    let report =
+        crate::mutation_inspect::parse_saved_report(json.as_bytes()).expect("the report reads");
+    assert!(report.mutants[0].witness.is_none());
+}

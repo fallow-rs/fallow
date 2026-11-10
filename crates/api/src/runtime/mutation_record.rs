@@ -109,13 +109,13 @@ pub(super) fn record_and_search(
     mutation_cache: &Path,
 ) -> (Option<RecordPass>, Option<WitnessSearch>) {
     let record = record_pass(options, outcome, &spawner, config, mutation_cache);
-    let search = (options.record_args == RecordArgsMode::Values && record.is_some()).then(|| {
-        WitnessSearch {
-            spawner,
-            init: config.init.clone(),
-            runner_timeout: config.runner_timeout,
-            deadline: config.deadline,
-        }
+    let search = (options.record_args == RecordArgsMode::Values
+        && record.as_ref().is_some_and(|pass| pass.error.is_none()))
+    .then(|| WitnessSearch {
+        spawner,
+        init: config.init.clone(),
+        runner_timeout: config.runner_timeout,
+        deadline: config.deadline,
     });
     (record, search)
 }

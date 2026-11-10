@@ -37376,6 +37376,14 @@
           "$ref": "#/definitions/MutationReplayOutcome"
         },
         "value": {
+          "type": [
+            "null",
+            "boolean",
+            "number",
+            "string",
+            "array",
+            "object"
+          ],
           "description": "The returned or thrown value in the replay encoding. An error is\n`{\"$replay\": \"error\", \"name\", \"message\"}`. `null` for a call that\ntimed out."
         },
         "text": {
@@ -37647,7 +37655,7 @@
             "null"
           ],
           "items": true,
-          "description": "The arguments of the input in the replay encoding: a ready test\ninput. Absent when the cache no longer has the input (7 days) or in\nthe markdown output."
+          "description": "The arguments of the input in the replay encoding: JSON, and objects\nwith a `$replay` tag for other values (`{\"$replay\": \"undefined\"}`,\n`{\"$replay\": \"bigint\", \"value\": \"12\"}`, and `date`, `regexp`, `map`,\n`set` and `bytes`). Absent for another verdict, for a stale task, when\nthe cache no longer has the input (7 days), and in the markdown\noutput."
         },
         "original": {
           "anyOf": [
@@ -37658,7 +37666,7 @@
               "type": "null"
             }
           ],
-          "description": "The result on the original code: the value that a new test asserts."
+          "description": "The result on the original code: the value that a new test asserts.\nThe replay ran with a fixed clock and seed, so run the new test on the\ncurrent code to confirm it."
         },
         "mutant": {
           "anyOf": [
@@ -37677,7 +37685,7 @@
         "inputs_checked",
         "replay_command"
       ],
-      "description": "The witness of a task: the reference of the report, and the values from\nthe local cache when the cache still has them."
+      "description": "The witness of a task: the reference of the report, and the values from\nthe local cache when the cache still has them. Only the verdict\n`witness` can have `args`, `original` and `mutant`."
     },
     "MutationWitnessSide": {
       "type": "object",
@@ -37687,6 +37695,14 @@
           "$ref": "#/definitions/MutationReplayOutcome"
         },
         "value": {
+          "type": [
+            "null",
+            "boolean",
+            "number",
+            "string",
+            "array",
+            "object"
+          ],
           "description": "The returned or thrown value in the replay encoding."
         },
         "text": {

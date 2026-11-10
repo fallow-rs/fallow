@@ -2632,3 +2632,79 @@ fn tasks_without_the_witness_cache_keep_the_reference_and_the_command() {
             .contains("--replay")
     );
 }
+
+#[test]
+fn a_stale_task_keeps_the_witness_reference_but_shows_no_value() {
+    let project = witness_project();
+    let root = project.path();
+    let (output, _) = json_mutation(root, &["--all", "--no-cache", "--record-args", "values"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    fs::write(
+        root.join("src/shout.js"),
+        "export function shout(text) {\n  return text.toUpperCase() + \"?\";\n}\n",
+    )
+    .expect("edit");
+    let (output, tasks) = json_mutation(root, &["tasks"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    for task in tasks["tasks"].as_array().expect("tasks") {
+        assert!(task["stale_reason"].is_string(), "{task}");
+        if let Some(witness) = task.get("witness") {
+            assert!(
+                witness.get("args").is_none(),
+                "a stale task shows a value: {witness}"
+            );
+            assert!(witness["replay_command"].is_string());
+        }
+    }
+}
+
+#[test]
+fn a_file_that_a_witness_replay_writes_shows_as_a_changed_worktree() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"stamp-fixture","private":true,"type":"module","scripts":{"test":"node --test"}}"#,
+    )
+    .expect("package.json");
+    fs::create_dir_all(root.join("src")).expect("src");
+    fs::create_dir_all(root.join("test")).expect("test");
+    // The replay clock starts at 2026-01-01, so only a replay writes the
+    // file. The write is in an unmutated helper, so no mutant run writes it.
+    fs::create_dir_all(root.join("lib")).expect("lib");
+    fs::write(
+        root.join("lib/note.js"),
+        "import { writeFileSync } from \"node:fs\";\nexport function note(tag) {\n  const now = new Date();\n  if (now.getFullYear() === 2026 && now.getMonth() === 0 && now.getDate() === 1) writeFileSync(\"replay-stamp.txt\", tag);\n}\n",
+    )
+    .expect("note.js");
+    fs::write(
+        root.join("src/stamp.js"),
+        "import { note } from \"../lib/note.js\";\nexport function stamp(tag) {\n  note(tag);\n  return tag + \"!\";\n}\n",
+    )
+    .expect("stamp.js");
+    fs::write(
+        root.join("test/stamp.test.js"),
+        "import { test } from \"node:test\";\nimport { stamp } from \"../src/stamp.js\";\ntest(\"stamp\", () => { stamp(\"a\"); });\n",
+    )
+    .expect("stamp.test.js");
+    fs::write(root.join(".gitignore"), ".fallow\n").expect(".gitignore");
+    git(root, &["init", "-q"]);
+    commit_all(root, "init");
+    let (output, report) = json_mutation(
+        root,
+        &[
+            "src/stamp.js",
+            "--no-cache",
+            "--allow-side-effects",
+            "--record-args",
+            "values",
+        ],
+    );
+    assert!(output.code == 0 || output.code == 2, "{}", output.stderr);
+    assert!(
+        root.join("replay-stamp.txt").exists(),
+        "the replay ran no call"
+    );
+    let changed = report["worktree"]["changed_paths"].to_string();
+    assert!(changed.contains("replay-stamp.txt"), "{report}");
+}

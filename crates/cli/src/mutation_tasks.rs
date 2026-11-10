@@ -54,10 +54,13 @@ pub fn tasks(
             })
         });
         let mut task = task(report, mutant, current.as_ref());
-        task.witness = mutant
-            .witness
-            .as_ref()
-            .map(|witness| task_witness(&mutant.mutant_id, witness, witness_values));
+        // A stale task describes older code, so it gets no cached values.
+        let fresh = task.stale_reason.is_none();
+        task.witness = mutant.witness.as_ref().map(|witness| {
+            task_witness(&mutant.mutant_id, witness, &|mutant_id, input_id| {
+                fresh.then(|| witness_values(mutant_id, input_id)).flatten()
+            })
+        });
         tasks.push(task);
     }
     tasks.sort_by(|left, right| {

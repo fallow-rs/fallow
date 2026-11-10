@@ -27,6 +27,19 @@ use crate::mutation::transport::{CompanionLink, CompanionSpawner, ProcessSpawner
 const MAX_WITNESS_MUTANTS: usize = 20;
 /// The time limit of one replay call of the search.
 const WITNESS_CALL_TIMEOUT: Duration = Duration::from_secs(5);
+/// The time that one recorded input of the search needs at most: six calls
+/// and their worker starts.
+const INPUT_COST: Duration = Duration::from_secs(60);
+
+/// `cap`, clamped to the time left before `deadline`. `None` when the time
+/// left is shorter than `need`.
+fn within_budget(deadline: Option<Instant>, cap: Duration, need: Duration) -> Option<Duration> {
+    let Some(deadline) = deadline else {
+        return Some(cap);
+    };
+    let left = deadline.saturating_duration_since(Instant::now());
+    (left >= need).then(|| cap.min(left))
+}
 
 /// The companion facts of the run that the search reuses.
 pub(super) struct WitnessSearch {
@@ -55,11 +68,9 @@ impl SearchLink<'_> {
     }
 
     fn start(&self) -> Option<Box<dyn CompanionLink>> {
+        let timeout = within_budget(self.search.deadline, self.search.runner_timeout, INPUT_COST)?;
         let mut link = self.search.spawner.spawn().ok()?;
-        match link.request(
-            &Request::Init(self.search.init.clone()),
-            self.search.runner_timeout,
-        ) {
+        match link.request(&Request::Init(self.search.init.clone()), timeout) {
             Ok(Response::Ready(ready)) if ready.capabilities.replay => Some(link),
             _ => {
                 link.shutdown();
@@ -162,13 +173,10 @@ pub(super) fn search_witnesses(
     let mut stored = BTreeMap::new();
     let mut searched = 0;
     for index in order {
-        if searched >= MAX_WITNESS_MUTANTS
-            || search
-                .deadline
-                .is_some_and(|deadline| Instant::now() >= deadline)
-        {
+        let budget = within_budget(search.deadline, WITNESS_CALL_TIMEOUT, INPUT_COST);
+        let Some(call_timeout) = budget.filter(|_| searched < MAX_WITNESS_MUTANTS) else {
             break;
-        }
+        };
         let mutant_id = results[index].location.mutant_id.clone();
         let Some((file, export)) = export_of(plan, root, &mut sources, &mutant_id) else {
             continue;
@@ -185,7 +193,8 @@ pub(super) fn search_witnesses(
             mutant_id: &mutant_id,
             export: &export,
         };
-        let Ok(output) = replay_inputs(companion, &target, &inputs, WITNESS_CALL_TIMEOUT) else {
+        let Ok(output) = replay_inputs(companion, &target, &inputs, call_timeout, search.deadline)
+        else {
             link.reset();
             continue;
         };
@@ -206,4 +215,20 @@ pub(super) fn search_witnesses(
     // The witnesses of an earlier run describe older code, so the store
     // keeps only the witnesses of this run.
     let _ = store_witnesses(cache_dir, stored);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_budget_clamps_a_timeout_and_refuses_a_step_that_does_not_fit() {
+        let cap = Duration::from_secs(5);
+        let need = Duration::from_secs(60);
+        assert_eq!(within_budget(None, cap, need), Some(cap));
+        let later = Instant::now() + Duration::from_secs(120);
+        assert_eq!(within_budget(Some(later), cap, need), Some(cap));
+        let soon = Instant::now() + Duration::from_secs(30);
+        assert_eq!(within_budget(Some(soon), cap, need), None);
+    }
 }

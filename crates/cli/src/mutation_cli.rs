@@ -1210,12 +1210,13 @@ fn run_tasks(input: &MutationCliInput<'_>, report: Option<&Path>) -> ExitCode {
         };
         // Markdown can go into a PR comment, so it never holds a value.
         let markdown = matches!(input.output, OutputFormat::Markdown);
+        let store = (!markdown)
+            .then(|| fallow_api::mutation::mutation_witness_store(&analysis))
+            .flatten();
         let values = |mutant_id: &str, input_id: &str| {
-            (!markdown)
-                .then(|| {
-                    fallow_api::mutation::mutation_witness_values(&analysis, mutant_id, input_id)
-                })
-                .flatten()
+            store
+                .as_ref()
+                .and_then(|store| store.values(mutant_id, input_id))
         };
         tasks::tasks(&saved, &root, &values)
     });

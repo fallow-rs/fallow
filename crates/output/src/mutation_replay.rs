@@ -3,6 +3,15 @@
 
 use serde::{Deserialize, Serialize};
 
+/// The schema of a field that holds any JSON value: a primitive, an array
+/// or an object.
+#[cfg(feature = "schema")]
+fn any_json_value(_: &mut schemars::SchemaGenerator) -> schemars::Schema {
+    schemars::json_schema!({
+        "type": ["null", "boolean", "number", "string", "array", "object"]
+    })
+}
+
 /// The verdict of one replay. A replay never decides that a mutant is
 /// equivalent: equal results on both sides give `no_witness_found`, which
 /// says only that this input shows no difference.
@@ -95,6 +104,7 @@ pub struct MutationReplayCall {
     pub index: u32,
     /// How the call ended.
     pub outcome: MutationReplayOutcome,
+    #[cfg_attr(feature = "schema", schemars(schema_with = "any_json_value"))]
     /// The returned or thrown value in the replay encoding. An error is
     /// `{"$replay": "error", "name", "message"}`. `null` for a call that
     /// timed out.
@@ -223,13 +233,15 @@ pub struct MutationWitnessSide {
     /// How the call ended.
     pub outcome: MutationReplayOutcome,
     /// The returned or thrown value in the replay encoding.
+    #[cfg_attr(feature = "schema", schemars(schema_with = "any_json_value"))]
     pub value: serde_json::Value,
     /// A short text of the value for people.
     pub text: String,
 }
 
 /// The witness of a task: the reference of the report, and the values from
-/// the local cache when the cache still has them.
+/// the local cache when the cache still has them. Only the verdict
+/// `witness` can have `args`, `original` and `mutant`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MutationTaskWitness {
@@ -245,12 +257,17 @@ pub struct MutationTaskWitness {
     pub reason: Option<String>,
     /// The command that replays the mutant again and shows both sides.
     pub replay_command: String,
-    /// The arguments of the input in the replay encoding: a ready test
-    /// input. Absent when the cache no longer has the input (7 days) or in
-    /// the markdown output.
+    /// The arguments of the input in the replay encoding: JSON, and objects
+    /// with a `$replay` tag for other values (`{"$replay": "undefined"}`,
+    /// `{"$replay": "bigint", "value": "12"}`, and `date`, `regexp`, `map`,
+    /// `set` and `bytes`). Absent for another verdict, for a stale task, when
+    /// the cache no longer has the input (7 days), and in the markdown
+    /// output.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub args: Option<Vec<serde_json::Value>>,
     /// The result on the original code: the value that a new test asserts.
+    /// The replay ran with a fixed clock and seed, so run the new test on the
+    /// current code to confirm it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub original: Option<MutationWitnessSide>,
     /// The result on the mutant.

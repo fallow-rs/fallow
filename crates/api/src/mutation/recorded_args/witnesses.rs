@@ -78,16 +78,23 @@ pub fn store_witnesses(
     write_private(&path, &bytes)
 }
 
+/// The witnesses of a store, keyed by mutant id.
+pub type WitnessMap = BTreeMap<String, StoredWitness>;
+
+/// The witnesses of the store of `cache_dir`.
+pub fn read_witnesses(cache_dir: &Path) -> WitnessMap {
+    read(&witness_path(cache_dir)).witnesses
+}
+
 /// The fresh witness of `mutant_id` with the input `input_id`, or `None`.
-pub fn load_witness(
-    cache_dir: &Path,
+pub fn fresh_witness<'a>(
+    witnesses: &'a WitnessMap,
     mutant_id: &str,
     input_id: &str,
     now: u64,
-) -> Option<StoredWitness> {
-    read(&witness_path(cache_dir))
-        .witnesses
-        .remove(mutant_id)
+) -> Option<&'a StoredWitness> {
+    witnesses
+        .get(mutant_id)
         .filter(|witness| witness.input_id == input_id && is_fresh(witness, now))
 }
 
@@ -142,9 +149,10 @@ mod tests {
             BTreeMap::from([("m1".to_owned(), witness(100))]),
         )
         .expect("store");
-        assert!(load_witness(dir.path(), "m1", "abc", 100).is_some());
-        assert!(load_witness(dir.path(), "m1", "other", 100).is_none());
-        assert!(load_witness(dir.path(), "m1", "abc", 100 + TIME_TO_LIVE_SECS + 1).is_none());
+        let witnesses = read_witnesses(dir.path());
+        assert!(fresh_witness(&witnesses, "m1", "abc", 100).is_some());
+        assert!(fresh_witness(&witnesses, "m1", "other", 100).is_none());
+        assert!(fresh_witness(&witnesses, "m1", "abc", 100 + TIME_TO_LIVE_SECS + 1).is_none());
         prune_witnesses(dir.path(), 100 + TIME_TO_LIVE_SECS + 1);
         assert!(!witness_path(dir.path()).exists());
     }

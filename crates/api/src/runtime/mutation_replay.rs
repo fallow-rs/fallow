@@ -421,22 +421,27 @@ pub fn replay_mutation(
         mutant_id: &options.mutant_id,
         export: &export,
     };
-    let output = replay_inputs(&mut link, &replay_target, &inputs, call_timeout);
+    let output = replay_inputs(&mut link, &replay_target, &inputs, call_timeout, None);
     link.shutdown();
     output
 }
 
 /// Replays `inputs` on an open companion, up to the first input that ends
-/// the search, and gives the result with `inputs_checked` and the rule 3
-/// reason of "no witness found".
+/// the search or the deadline, and gives the result with `inputs_checked`
+/// and the rule 3 reason of "no witness found".
 pub(super) fn replay_inputs(
     link: &mut Box<dyn CompanionLink>,
     target: &ReplayTarget<'_>,
     inputs: &[MutationReplayInput],
     call_timeout: Duration,
+    deadline: Option<Instant>,
 ) -> ProgrammaticResult<MutationReplayOutput> {
     let mut outputs = Vec::new();
     for input in inputs {
+        // The first input always runs, so the result is never empty.
+        if !outputs.is_empty() && deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+            break;
+        }
         let output = replay_one(link, target, input, call_timeout)?;
         let stop = ends_search(output.verdict);
         outputs.push(output);
@@ -561,8 +566,6 @@ pub(super) fn recorded_inputs(
     Ok(inputs)
 }
 
-/// Replays one input on an open companion. A wall-limit timeout gives the
-/// verdict `timeout`, and the companion is then gone.
 /// The mutant and the export of one replay.
 pub(super) struct ReplayTarget<'a> {
     pub file: &'a str,
@@ -570,6 +573,8 @@ pub(super) struct ReplayTarget<'a> {
     pub export: &'a str,
 }
 
+/// Replays one input on an open companion. A wall-limit timeout gives the
+/// verdict `timeout`, and the companion is then gone.
 fn replay_one(
     link: &mut Box<dyn CompanionLink>,
     target: &ReplayTarget<'_>,

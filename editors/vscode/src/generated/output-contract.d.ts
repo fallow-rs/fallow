@@ -22238,9 +22238,9 @@ outcome: MutationReplayOutcome
  * `{"$replay": "error", "name", "message"}`. `null` for a call that
  * timed out.
  */
-value: {
-[k: string]: unknown
-}
+value: (null | boolean | number | string | unknown[] | {
+
+})
 /**
  * A short text of the value for people, at most 200 characters.
  */
@@ -22352,7 +22352,8 @@ witness?: (MutationTaskWitness | null)
 }
 /**
  * The witness of a task: the reference of the report, and the values from
- * the local cache when the cache still has them.
+ * the local cache when the cache still has them. Only the verdict
+ * `witness` can have `args`, `original` and `mutant`.
  */
 export interface MutationTaskWitness {
 verdict: MutationReplayVerdict
@@ -22373,13 +22374,18 @@ reason?: (string | null)
  */
 replay_command: string
 /**
- * The arguments of the input in the replay encoding: a ready test
- * input. Absent when the cache no longer has the input (7 days) or in
- * the markdown output.
+ * The arguments of the input in the replay encoding: JSON, and objects
+ * with a `$replay` tag for other values (`{"$replay": "undefined"}`,
+ * `{"$replay": "bigint", "value": "12"}`, and `date`, `regexp`, `map`,
+ * `set` and `bytes`). Absent for another verdict, for a stale task, when
+ * the cache no longer has the input (7 days), and in the markdown
+ * output.
  */
 args?: (unknown[] | null)
 /**
  * The result on the original code: the value that a new test asserts.
+ * The replay ran with a fixed clock and seed, so run the new test on the
+ * current code to confirm it.
  */
 original?: (MutationWitnessSide | null)
 /**
@@ -22395,9 +22401,9 @@ outcome: MutationReplayOutcome
 /**
  * The returned or thrown value in the replay encoding.
  */
-value: {
-[k: string]: unknown
-}
+value: (null | boolean | number | string | unknown[] | {
+
+})
 /**
  * A short text of the value for people.
  */

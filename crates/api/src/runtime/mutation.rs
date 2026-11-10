@@ -1426,19 +1426,17 @@ pub fn run_mutation_with_progress(
     let plan_ms = millis(started.elapsed());
     let execution = execute(options, &planned, deadline, progress);
     progress(MutationProgress::Finalize);
-    let worktree_end = settle_worktree(start_snapshot.as_ref(), |start| {
-        take_worktree_snapshot(
-            planned.resolved.root(),
-            &planned.cache_dir,
-            &options.output_paths,
-            Some(start),
-        )
-    });
-    let execution = execution.map_err(|error| with_worktree_facts(error, &worktree_end))?;
-    let WorktreeEnd {
-        changed_paths,
-        check_error,
-    } = worktree_end;
+    let settle = || {
+        settle_worktree(start_snapshot.as_ref(), |start| {
+            take_worktree_snapshot(
+                planned.resolved.root(),
+                &planned.cache_dir,
+                &options.output_paths,
+                Some(start),
+            )
+        })
+    };
+    let execution = execution.map_err(|error| with_worktree_facts(error, &settle()))?;
     let plan = &planned.plan;
     let outcome = execution.outcome.as_ref();
     let mut results = mutant_results(plan, outcome);
@@ -1450,6 +1448,12 @@ pub fn run_mutation_with_progress(
     );
     let typecheck_ms = millis(typecheck.elapsed);
     let recording = recording_and_witnesses(options, &planned, &execution, &mut results);
+    // The end snapshot comes after the witness replays, because they run
+    // project code too.
+    let WorktreeEnd {
+        changed_paths,
+        check_error,
+    } = settle();
     let baseline = baseline_failures(outcome);
     let completion = completion(&CompletionFacts {
         plan,
