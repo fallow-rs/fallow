@@ -192,6 +192,58 @@ test(
   },
 );
 
+const measure = (context, project, name) => {
+  const { root, binary, sidecar, manifestPath } = context;
+  const script = resolve(root, "scripts/type-aware-corpus.mjs");
+  return run(
+    process.execPath,
+    [
+      script,
+      "measure",
+      "--manifest",
+      manifestPath,
+      "--out-dir",
+      resolve(root, name),
+      "--project",
+      project,
+      "--fallow-bin",
+      binary,
+      "--sidecar-bin",
+      sidecar,
+      "--runs",
+      "1",
+      "--warmups",
+      "1",
+    ],
+    root,
+  );
+};
+
+test(
+  "measurement accepts a clean zero-control and rejects a refined candidate on it",
+  { skip: process.platform === "win32" },
+  (t) => {
+    const context = sandbox(t);
+    requireSuccess(discover(context, "vue-core", "clean", false, false).result);
+    requireSuccess(measure(context, "vue-core", "clean"));
+
+    requireSuccess(discover(context, "vue-core", "late-promotion", false, false).result);
+    writeFileSync(
+      resolve(context.root, "payload.json"),
+      JSON.stringify({
+        baseline: { unused_class_members: [] },
+        refined: {
+          unused_class_members: [source("unused")],
+          _meta: { type_aware: metadata(false, true) },
+        },
+      }),
+    );
+    const promoted = measure(context, "vue-core", "late-promotion");
+    assert.notEqual(promoted.status, 0, "a refined candidate on a zero-control must fail");
+    assert.match(promoted.stderr, /zero-candidate control.*refined|unexpected candidates/);
+  },
+);
+
 test("summary gate rejects a promoted zero-control while allowing accuracy-core promotions", () => {
   const gate = (role, baseline, refined) =>
     summaryChecks({

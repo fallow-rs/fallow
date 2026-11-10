@@ -635,7 +635,7 @@ const executeFallow = async ({ project, fallowBin, sidecarBin, refined, rawPath,
   return { ...result, ...parsed };
 };
 
-const validateCandidateExpectation = (project, count, refinedCount) => {
+const validateCandidateExpectation = (project, count, refinedCount = 0) => {
   if (project.candidate_expectation === "zero" && (count !== 0 || refinedCount !== 0)) {
     fail(
       `${project.id} zero-candidate control emitted ${count} baseline and ${refinedCount} refined candidates`,
@@ -1029,6 +1029,7 @@ const validateBaselineMeasurement = (project, run, state) => {
 
 const validateRefinedMeasurement = (project, run, state) => {
   if (!Array.isArray(state.baselineKeys)) return;
+  validateCandidateExpectation(project, state.baselineKeys.length, run.candidates.length);
   const unexpected = run.candidates.filter(({ key }) => !state.baselineKeys.includes(key));
   if (unexpected.length > 0) fail(`${project.id} refined run added unexpected candidates`);
   const normalized = normalizedRefinement(run);
