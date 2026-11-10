@@ -44,8 +44,8 @@ fn an_input_with_a_secret_key_or_a_high_entropy_string_is_not_stored() {
     )];
     store(dir.path(), RecordArgsMode::Values, &functions, NOW).expect("store");
     let text = std::fs::read_to_string(store_path(dir.path())).expect("file");
-    for secret in ["hunter2", "Bearer x", "q9fQ2xLmZ7rT4bW8nKc3VhYp6Zt"] {
-        assert!(!text.contains(secret), "{secret} leaked: {text}");
+    for fragment in ["hunter2", "Bearer x", "q9fQ2xLmZ7rT4bW8nKc3VhYp6Zt"] {
+        assert!(!text.contains(fragment), "{fragment} leaked: {text}");
     }
     let inputs = load(dir.path(), "src/a.ts#login", NOW).expect("entry");
     assert_eq!(inputs.inputs.len(), 1, "the plain input stays");
@@ -139,7 +139,7 @@ fn the_keys_of_a_map_and_an_escaped_object_count_as_key_names() {
 #[test]
 fn credential_shapes_and_a_secret_word_in_a_sentence_are_not_stored() {
     let dir = tempfile::tempdir().expect("dir");
-    let secrets = [
+    let samples = [
         "Bearer q9fQ2xLmZ7rT4bW8nKc3VhYp6Zt",
         "Basic dXNlcjpwYXNz",
         "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjMifQ.abcdefghijklmnop",
@@ -149,11 +149,11 @@ fn credential_shapes_and_a_secret_word_in_a_sentence_are_not_stored() {
     ];
     let functions = [function(
         "src/a.ts#connect",
-        secrets.iter().map(|secret| vec![json!(secret)]).collect(),
+        samples.iter().map(|sample| vec![json!(sample)]).collect(),
     )];
     store(dir.path(), RecordArgsMode::Values, &functions, NOW).expect("store");
     let text = std::fs::read_to_string(store_path(dir.path())).expect("file");
-    for secret in [
+    for fragment in [
         "q9fQ2xLm",
         "dXNlcjpwYXNz",
         "eyJhbGci",
@@ -161,7 +161,7 @@ fn credential_shapes_and_a_secret_word_in_a_sentence_are_not_stored() {
         "hunter2",
         "9fQ2xLmZ",
     ] {
-        assert!(!text.contains(secret), "{secret} leaked: {text}");
+        assert!(!text.contains(fragment), "{fragment} leaked: {text}");
     }
     for plain in ["hello world", "a plain sentence with words"] {
         assert!(secret_reason(&json!(plain)).is_none(), "{plain}");
