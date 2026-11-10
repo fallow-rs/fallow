@@ -38,6 +38,7 @@ use crate::mutation::report::{
 use crate::mutation::result_cache::{KeyFiles, NOT_KEYED, ResultCache};
 use crate::mutation::run_dir::{RunFile, write_run_dir};
 use crate::mutation::runner_select::{Runner, select_runner};
+use crate::mutation::runner_version::{plan_runner, runner_version_help};
 use crate::mutation::scheduler::clock::SystemClock;
 use crate::mutation::scheduler::{
     OutcomeJournal, ResultLookup, ScheduleConfig, ScheduleError, ScheduleIssue, ScheduleOutcome,
@@ -499,6 +500,8 @@ pub fn plan_mutation(options: &MutationRunOptions) -> ProgrammaticResult<Mutatio
         framework_config_checked: plan.framework_config_checked,
         skipped_files: skipped_files(plan),
         unmatched_paths: plan.unmatched_paths.clone(),
+        runner: plan_runner(planned.runner, planned.resolved.root())
+            .map_err(|message| mutation_error("FALLOW_MUTATION_PROTOCOL_INVALID", message))?,
     })
 }
 
@@ -741,26 +744,6 @@ fn guard_mutant_ids(options: &MutationRunOptions, plan: &MutationPlan) -> Progra
     .with_help(
         "a mutant id changes when its source changes; run `fallow mutation` again for new ids",
     ))
-}
-
-/// The help of a runner version outside `range`. It names the supported
-/// range as an install step. When the minimum is not a `.0.0` release, it
-/// also says that a minor update inside the major version is enough.
-pub(super) fn runner_version_help(range: &RunnerRange) -> String {
-    let RunnerRange {
-        package,
-        min_version,
-        max_version_exclusive,
-        ..
-    } = range;
-    let install =
-        format!("install {package} {min_version} or a later version below {max_version_exclusive}");
-    match min_version.split_once('.') {
-        Some((major, rest)) if rest != "0.0" => {
-            format!("{install}; a {package} {major}.x release from {min_version} is in the range")
-        }
-        _ => install,
-    }
 }
 
 /// Maps a schedule error to its public error. A setup watchdog fault names

@@ -1044,6 +1044,26 @@ pub fn render_run(report: &MutationReport, options: &RunReportOptions<'_>) -> St
     out
 }
 
+/// Writes the runner line of a plan whose runner a run refuses. A plan with
+/// a supported runner, or with a runtime runner that the plan does not
+/// check, gets no line. A plan with no test file or no mutant gets no line
+/// either, because its run starts no runner.
+fn write_unsupported_runner(out: &mut String, plan: &MutationPlanOutput) {
+    let runner = &plan.runner;
+    if runner.supported != Some(false) || plan.no_test_files || plan.counts.total == 0 {
+        return;
+    }
+    if let Some(message) = &runner.message {
+        let _ = writeln!(
+            out,
+            "Runner: {message}. A run stops before the first mutant."
+        );
+    }
+    if let Some(help) = &runner.help {
+        let _ = writeln!(out, "  hint: {help}");
+    }
+}
+
 /// Renders the human output of `--plan`.
 pub fn render_plan(plan: &MutationPlanOutput) -> String {
     let counts = &plan.counts;
@@ -1079,6 +1099,7 @@ pub fn render_plan(plan: &MutationPlanOutput) -> String {
     } else if counts.total == 0 {
         out.push_str(&no_data_line(&plan.scope));
     }
+    write_unsupported_runner(&mut out, plan);
     let pruned_by_reason = prune_counts(
         plan.mutants
             .iter()

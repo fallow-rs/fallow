@@ -1725,7 +1725,7 @@ export type DoctorStatus = ("pass" | "warn" | "fail")
 /**
  * Stable identifier for a doctor check. Declaration order is output order.
  */
-export type DoctorCheckId = ("root" | "config" | "workspaces" | "plugins" | "type-aware" | "dependencies" | "cache" | "graph-cache")
+export type DoctorCheckId = ("root" | "config" | "workspaces" | "plugins" | "type-aware" | "dependencies" | "cache" | "graph-cache" | "mutation-runner")
 /**
  * Stable category for a doctor check.
  */
@@ -21784,6 +21784,7 @@ skipped_files: MutationSkippedFile[]
  * The paths of a `paths` scope that select no file.
  */
 unmatched_paths: string[]
+runner: MutationPlanRunner
 }
 /**
  * The totals of a plan.
@@ -21891,6 +21892,48 @@ pending_reason?: (string | null)
  * `no_coverage` mutant has this field.
  */
 test_reach?: (MutantTestReach | null)
+}
+/**
+ * The test runner of a plan. The plan reads the `package.json` of the
+ * installed runner package and runs no code. A run that starts the runner
+ * stops when `supported` is false: with `FALLOW_MUTATION_RUNNER_UNSUPPORTED`
+ * for a version outside the range, and with the companion error
+ * `runner-not-found` for a runner that is not installed. A run of a plan
+ * with no test file or no mutant starts no runner.
+ */
+export interface MutationPlanRunner {
+/**
+ * The runner: `vitest`, `node-test` or `bun-test`.
+ */
+name: string
+/**
+ * The package or runtime that the supported range applies to.
+ */
+package: string
+/**
+ * The installed version of the package. `null` when the package is not
+ * installed, or when `supported` is `null`.
+ */
+installed_version?: (string | null)
+/**
+ * The supported range, for example `>=4.1.0 <6.0.0`.
+ */
+supported_range: string
+/**
+ * True when the installed version is in the range. False when it is
+ * outside the range or when the package is not installed. `null` for
+ * `node-test` and `bun-test`: their range applies to the runtime, and a
+ * run selects the runtime when it starts.
+ */
+supported?: (boolean | null)
+/**
+ * The problem when `supported` is false, else `null`.
+ */
+message?: (string | null)
+/**
+ * The install step when `supported` is false, else `null`.
+ */
+help?: (string | null)
 }
 /**
  * The envelope of `fallow mutation inspect`. It runs no user code, except

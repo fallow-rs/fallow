@@ -961,9 +961,9 @@ fn the_summary_line_names_the_sampled_out_mutants() {
     );
 }
 
-#[test]
-fn the_plan_line_names_the_sampled_out_mutants() {
-    let plan = MutationPlanOutput {
+/// A plan with no mutant, of a project with a supported Vitest.
+fn empty_plan() -> MutationPlanOutput {
+    MutationPlanOutput {
         schema_version: MutationPlanSchemaVersion::V1,
         version: ToolVersion("0.0.0".to_owned()),
         elapsed_ms: ElapsedMs(0),
@@ -971,13 +971,7 @@ fn the_plan_line_names_the_sampled_out_mutants() {
             kind: MutationScopeKind::All,
             base_ref: None,
         },
-        counts: MutationPlanCountsOutput {
-            total: 4,
-            planned: 1,
-            pending: 3,
-            sampled_out: 2,
-            ..MutationPlanCountsOutput::default()
-        },
+        counts: MutationPlanCountsOutput::default(),
         mutants: Vec::new(),
         files: Vec::new(),
         test_files: Vec::new(),
@@ -985,6 +979,29 @@ fn the_plan_line_names_the_sampled_out_mutants() {
         framework_config_checked: true,
         skipped_files: Vec::new(),
         unmatched_paths: Vec::new(),
+        runner: fallow_output::MutationPlanRunner {
+            name: "vitest".to_owned(),
+            package: "vitest".to_owned(),
+            installed_version: Some("4.1.5".to_owned()),
+            supported_range: ">=4.1.0 <6.0.0".to_owned(),
+            supported: Some(true),
+            message: None,
+            help: None,
+        },
+    }
+}
+
+#[test]
+fn the_plan_line_names_the_sampled_out_mutants() {
+    let plan = MutationPlanOutput {
+        counts: MutationPlanCountsOutput {
+            total: 4,
+            planned: 1,
+            pending: 3,
+            sampled_out: 2,
+            ..MutationPlanCountsOutput::default()
+        },
+        ..empty_plan()
     };
     let text = plain(&render_plan(&plan));
     assert!(
@@ -1429,13 +1446,6 @@ fn human_plan_counts_the_no_coverage_mutants_by_test_reach() {
         }),
     };
     let plan = MutationPlanOutput {
-        schema_version: MutationPlanSchemaVersion::V1,
-        version: ToolVersion("0.0.0".to_owned()),
-        elapsed_ms: ElapsedMs(0),
-        scope: MutationScopeOutput {
-            kind: MutationScopeKind::All,
-            base_ref: None,
-        },
         counts: MutationPlanCountsOutput {
             total: 3,
             no_coverage: 3,
@@ -1446,12 +1456,7 @@ fn human_plan_counts_the_no_coverage_mutants_by_test_reach() {
             entry("m2", Some(TestReachClass::MockedOnly)),
             entry("m3", Some(TestReachClass::MockedOnly)),
         ],
-        files: Vec::new(),
-        test_files: Vec::new(),
-        no_test_files: false,
-        framework_config_checked: true,
-        skipped_files: Vec::new(),
-        unmatched_paths: Vec::new(),
+        ..empty_plan()
     };
     let text = plain(&render_plan(&plan));
     assert!(
@@ -1470,13 +1475,6 @@ fn human_plan_lists_planned_mutants_and_prune_reasons() {
         test_reach: None,
     };
     let plan = MutationPlanOutput {
-        schema_version: MutationPlanSchemaVersion::V1,
-        version: ToolVersion("0.0.0".to_owned()),
-        elapsed_ms: ElapsedMs(0),
-        scope: MutationScopeOutput {
-            kind: MutationScopeKind::All,
-            base_ref: None,
-        },
         counts: MutationPlanCountsOutput {
             total: 4,
             planned: 2,
@@ -1503,10 +1501,7 @@ fn human_plan_lists_planned_mutants_and_prune_reasons() {
             static_test_files: vec!["test/a.test.ts".to_owned()],
         }],
         test_files: vec!["test/a.test.ts".to_owned()],
-        no_test_files: false,
-        framework_config_checked: true,
-        skipped_files: Vec::new(),
-        unmatched_paths: Vec::new(),
+        ..empty_plan()
     };
     insta::assert_snapshot!(render_plan(&plan));
 }
@@ -2043,13 +2038,6 @@ fn a_relative_output_file_resolves_against_the_process_directory() {
 #[test]
 fn the_plan_list_shows_twenty_mutants_and_one_more_line() {
     let plan = MutationPlanOutput {
-        schema_version: MutationPlanSchemaVersion::V1,
-        version: ToolVersion("0.0.0".to_owned()),
-        elapsed_ms: ElapsedMs(0),
-        scope: MutationScopeOutput {
-            kind: MutationScopeKind::All,
-            base_ref: None,
-        },
         counts: MutationPlanCountsOutput {
             total: 21,
             planned: 21,
@@ -2065,12 +2053,8 @@ fn the_plan_list_shows_twenty_mutants_and_one_more_line() {
                 test_reach: None,
             })
             .collect(),
-        files: Vec::new(),
         test_files: vec!["test/a.test.ts".to_owned()],
-        no_test_files: false,
-        framework_config_checked: true,
-        skipped_files: Vec::new(),
-        unmatched_paths: Vec::new(),
+        ..empty_plan()
     };
     let text = plain(&render_plan(&plan));
     assert!(text.contains("  p20\n"), "{text}");
@@ -2106,21 +2090,8 @@ fn skipped_files_get_one_line_with_the_count_of_each_reason() {
     );
 
     let mut plan = MutationPlanOutput {
-        schema_version: MutationPlanSchemaVersion::V1,
-        version: ToolVersion("0.0.0".to_owned()),
-        elapsed_ms: ElapsedMs(0),
-        scope: MutationScopeOutput {
-            kind: MutationScopeKind::All,
-            base_ref: None,
-        },
-        counts: MutationPlanCountsOutput::default(),
-        mutants: Vec::new(),
-        files: Vec::new(),
-        test_files: Vec::new(),
-        no_test_files: false,
-        framework_config_checked: true,
         skipped_files: vec![skipped("src/A.vue", "runner-cannot-load")],
-        unmatched_paths: Vec::new(),
+        ..empty_plan()
     };
     let text = plain(&render_plan(&plan));
     assert!(

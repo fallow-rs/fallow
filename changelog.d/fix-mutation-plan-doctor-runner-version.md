@@ -1,0 +1,4 @@
+### Fixed
+
+- **`fallow mutation --plan` and `fallow doctor` now report an unsupported Vitest version.** Before, only the run stopped, with `FALLOW_MUTATION_RUNNER_UNSUPPORTED`, after the full setup. The plan and doctor now read the `package.json` of the installed Vitest, and run no code. The `mutation-plan` JSON has a new `runner` object with `name`, `package`, `installed_version`, `supported_range`, `supported`, `message` and `help`. The human plan prints a `Runner:` line and a hint when the run cannot start. The plan still exits `0`. Doctor has a new `mutation-runner` check. It warns when Vitest is outside the supported range or is not installed, and names the install command. It passes for a supported Vitest. It is skipped for the `node-test` and `bun-test` runners, and when neither the root `package.json` nor the root `node_modules` has Vitest. The doctor `schema_version` stays `2`.
+  (Closes [#4465](https://github.com/fallow-rs/fallow/issues/4465))
