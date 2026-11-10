@@ -1391,8 +1391,13 @@ test run.
 ### Vitest module loading
 
 - A Vite plugin of the adapter serves the instrumented files to each
-  `import` that the Vite module runner handles. A script file gets its copy
-  in the `transform` hook, and a component file in the `load` hook.
+  `import` that the Vite module runner handles. The plugin gives each copy in
+  the `load` hook, as if the copy were the file on disk. Each `transform`
+  hook of Vite, Vitest and the project then runs on the copy, as with
+  `vitest run`. For example, Vitest rewrites each `import.meta.env` read to
+  the environment object that `vi.stubEnv` changes. When a project plugin
+  with `enforce: "pre"` loads a mapped script file first, the plugin replaces
+  the code of that file with the copy in its `transform` hook.
 - A native `require`, for example through `createRequire(import.meta.url)`,
   does not go through Vite. The setup file of the adapter registers a
   synchronous module hook (`module.registerHooks`) in each worker, so that
