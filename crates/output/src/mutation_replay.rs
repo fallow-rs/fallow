@@ -209,7 +209,7 @@ pub struct MutationRecordingOutput {
 /// The replay of a recorded input against a survived or uncovered mutant,
 /// after a `fallow mutation --record-args values` run. It holds no argument
 /// value: the values stay in the gitignored cache directory.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MutantWitness {
     /// The verdict of the replay. Never `equivalent`.

@@ -55,6 +55,7 @@ fn current(id: &str, line: u32, status: MutantStatus) -> MutantResult {
         attempts: Vec::new(),
         cached: false,
         resumed: false,
+        carried: false,
         type_error_codes: Vec::new(),
         equivalence_hint: None,
         witness: None,

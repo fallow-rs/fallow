@@ -849,7 +849,12 @@ fn recheck_reruns_the_open_tasks_and_refuses_a_changed_source() {
         .iter()
         .filter(|mutant| mutant["prune_reason"] == "not-selected")
         .count();
-    assert_eq!(not_selected, open.len() - 1);
+    assert_eq!(
+        not_selected, 0,
+        "each other mutant keeps its result from the saved report"
+    );
+    assert_eq!(single["recheck"]["carried"], open.len() - 1);
+    assert_eq!(single["summary"]["counts"]["no_coverage"], open.len());
     let (_, tasks) = json_mutation(project.path(), &["tasks"]);
     assert_eq!(
         tasks["summary"]["tasks"],
@@ -885,6 +890,256 @@ fn recheck_reruns_the_open_tasks_and_refuses_a_changed_source() {
     let (changed, error) = json_mutation(project.path(), &["--recheck"]);
     assert_eq!(changed.code, 2);
     assert_eq!(error["code"], "FALLOW_MUTATION_SOURCE_CHANGED", "{error}");
+}
+
+/// A source file whose mutants the recheck fixture marks as killed, so no
+/// recheck selects them.
+const EXTRA: &str = "export function double(n: number): number {\n  return n * 2;\n}\n";
+
+/// The untested project with a second source file, and a saved report of
+/// `--all` in a directory outside the project. The saved report marks the
+/// first mutant of `src/math.ts` and each mutant of `src/extra.ts` as
+/// killed, the result of an earlier run with tests. Returns the project, the
+/// directory of the report, the report path and the ids of the killed
+/// mutants, the one of `src/math.ts` first.
+fn recheck_fixture() -> (
+    tempfile::TempDir,
+    tempfile::TempDir,
+    std::path::PathBuf,
+    Vec<String>,
+) {
+    let project = untested_project();
+    fs::write(project.path().join("src/extra.ts"), EXTRA).expect("extra.ts");
+    commit_all(project.path(), "extra");
+    let (output, mut report) = json_mutation(project.path(), &["--all"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let mut killed = Vec::new();
+    let mut math_killed = false;
+    for mutant in report["mutants"].as_array_mut().unwrap() {
+        let in_math = mutant["file"] == "src/math.ts";
+        if in_math && math_killed {
+            continue;
+        }
+        math_killed |= in_math;
+        mutant["status"] = "killed".into();
+        mutant["killed_by"] = "test/math.test.ts > adds".into();
+        mutant["covering_tests"] = serde_json::json!(["test/math.test.ts > adds"]);
+        let fields = mutant.as_object_mut().unwrap();
+        fields.remove("test_reach");
+        fields.remove("prune_reason");
+        let id = mutant["mutant_id"].as_str().unwrap().to_owned();
+        if in_math {
+            killed.insert(0, id);
+        } else {
+            killed.push(id);
+        }
+    }
+    let dir = tempfile::tempdir().expect("report dir");
+    let path = dir.path().join("saved.json");
+    fs::write(&path, serde_json::to_string(&report).unwrap()).expect("saved report");
+    (project, dir, path, killed)
+}
+
+fn mutant<'a>(report: &'a serde_json::Value, id: &str) -> Option<&'a serde_json::Value> {
+    report["mutants"]
+        .as_array()?
+        .iter()
+        .find(|mutant| mutant["mutant_id"] == id)
+}
+
+#[test]
+fn recheck_replaces_the_named_report_and_keeps_the_earlier_kills() {
+    let (project, _dir, path, killed) = recheck_fixture();
+    let report = path.to_str().unwrap();
+    let (output, recheck) = json_mutation(project.path(), &["--recheck", "--report", report]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+
+    let saved: serde_json::Value =
+        serde_json::from_slice(&fs::read(&path).expect("saved report")).unwrap();
+    assert_eq!(saved, recheck, "the recheck replaces the named report");
+    let last: serde_json::Value = serde_json::from_slice(
+        &fs::read(project.path().join(".fallow/mutation/last-report.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(last, recheck, "the last report stays in step");
+
+    let counts = &recheck["summary"]["counts"];
+    let total = recheck["mutants"].as_array().unwrap().len();
+    assert_eq!(counts["killed"], killed.len(), "{counts}");
+    assert_eq!(counts["pruned"], 0, "{counts}");
+    assert_eq!(counts["no_coverage"], total - killed.len(), "{counts}");
+    assert_eq!(recheck["recheck"]["carried"], killed.len());
+    for id in &killed {
+        let carried = mutant(&recheck, id).expect("each earlier mutant stays in the report");
+        assert_eq!(carried["status"], "killed", "{carried}");
+        assert_eq!(carried["carried"], true, "{carried}");
+        assert_eq!(carried["killed_by"], "test/math.test.ts > adds");
+    }
+    let rechecked = recheck["recheck"]["mutants"][0]["mutant_id"]
+        .as_str()
+        .unwrap();
+    assert!(
+        mutant(&recheck, rechecked)
+            .unwrap()
+            .get("carried")
+            .is_none(),
+        "a rechecked mutant has the result of this run"
+    );
+    let extra = recheck["functions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|function| function["file"] == "src/extra.ts")
+        .expect("the function of the file that no mutant of the recheck is in");
+    assert_eq!(extra["score"], 1.0);
+    let pruned: u64 = recheck["functions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|function| function["counts"]["pruned"].as_u64().unwrap())
+        .sum();
+    assert_eq!(pruned, 0, "the function results count the merged mutants");
+
+    let (_, tasks) = json_mutation(project.path(), &["tasks", "--report", report]);
+    assert_eq!(tasks["summary"]["tasks"], total - killed.len());
+}
+
+#[test]
+fn recheck_does_not_keep_the_earlier_kills_of_a_changed_source() {
+    let (project, _dir, path, killed) = recheck_fixture();
+    fs::write(
+        project.path().join("src/extra.ts"),
+        EXTRA.replace("n * 2", "n * 3"),
+    )
+    .expect("edit extra.ts");
+    commit_all(project.path(), "edit extra");
+    let report = path.to_str().unwrap();
+    let (output, recheck) = json_mutation(project.path(), &["--recheck", "--report", report]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+
+    assert!(
+        recheck["mutants"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|mutant| mutant["file"] != "src/extra.ts"),
+        "the earlier results of a changed file do not apply"
+    );
+    assert_eq!(
+        recheck["recheck"]["stale_files"],
+        serde_json::json!(["src/extra.ts"])
+    );
+    assert_eq!(recheck["recheck"]["carried"], 1);
+    assert_eq!(recheck["summary"]["counts"]["killed"], 1);
+    assert_eq!(mutant(&recheck, &killed[0]).unwrap()["status"], "killed");
+}
+
+#[test]
+fn recheck_does_not_keep_a_kill_of_a_test_file_that_is_gone() {
+    let (project, _dir, path, killed) = recheck_fixture();
+    fs::create_dir_all(project.path().join("fixtures")).expect("fixtures");
+    fs::write(project.path().join("fixtures/kept.js"), "export {};\n").expect("kept.js");
+    commit_all(project.path(), "kept test file");
+    set_killing_test(&path, "src/math.ts", "test/gone.test.ts::adds");
+    set_killing_test(&path, "src/extra.ts", "fixtures/kept.js::doubles");
+    let report = path.to_str().unwrap();
+    let (output, recheck) = json_mutation(project.path(), &["--recheck", "--report", report]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+
+    let gone = mutant(&recheck, &killed[0]).expect("the mutant of a run file stays");
+    assert_eq!(gone["status"], "pruned", "{gone}");
+    assert_eq!(gone["prune_reason"], "not-selected", "{gone}");
+    assert_eq!(recheck["recheck"]["carried"], killed.len() - 1);
+    for id in &killed[1..] {
+        assert_eq!(mutant(&recheck, id).unwrap()["carried"], true);
+    }
+
+    set_killing_test(&path, "src/extra.ts", "test/gone.test.ts::doubles");
+    let (output, recheck) = json_mutation(project.path(), &["--recheck", "--report", report]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert_eq!(
+        recheck["recheck"]["stale_files"],
+        serde_json::json!(["src/extra.ts"])
+    );
+    assert_eq!(recheck["recheck"]["carried"], 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn recheck_replaces_the_target_of_a_report_symlink_and_keeps_its_mode() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (project, dir, path, _) = recheck_fixture();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).expect("mode");
+    let link = dir.path().join("link.json");
+    std::os::unix::fs::symlink(&path, &link).expect("symlink");
+    let (output, recheck) = json_mutation(
+        project.path(),
+        &["--recheck", "--report", link.to_str().unwrap()],
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+
+    assert!(
+        fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    let saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    assert_eq!(
+        saved, recheck,
+        "the recheck replaces the target of the link"
+    );
+    let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o640);
+}
+
+/// Sets the killing test of each killed mutant of `file` in the saved report
+/// at `path` to `test`.
+fn set_killing_test(path: &Path, file: &str, test: &str) {
+    let mut saved: serde_json::Value =
+        serde_json::from_slice(&fs::read(path).expect("saved report")).unwrap();
+    for mutant in saved["mutants"].as_array_mut().unwrap() {
+        if mutant["status"] == "killed" && mutant["file"] == file {
+            mutant["killed_by"] = test.into();
+            mutant["killing_tests"] = serde_json::json!([test]);
+        }
+    }
+    fs::write(path, serde_json::to_string(&saved).unwrap()).expect("saved report");
+}
+
+#[test]
+fn recheck_leaves_out_a_file_with_an_earlier_entry_that_does_not_parse() {
+    let (project, _dir, path, _) = recheck_fixture();
+    let mut saved: serde_json::Value =
+        serde_json::from_slice(&fs::read(&path).expect("saved report")).unwrap();
+    let extra = saved["mutants"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|mutant| mutant["file"] == "src/extra.ts")
+        .expect("a mutant of src/extra.ts");
+    // A report of a version before the kill matrix has no such field.
+    extra
+        .as_object_mut()
+        .unwrap()
+        .remove("kill_matrix_complete");
+    fs::write(&path, serde_json::to_string(&saved).unwrap()).expect("saved report");
+    let report = path.to_str().unwrap();
+    let (output, recheck) = json_mutation(project.path(), &["--recheck", "--report", report]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert_eq!(
+        recheck["recheck"]["stale_files"],
+        serde_json::json!(["src/extra.ts"])
+    );
+    assert!(
+        recheck["mutants"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|mutant| mutant["file"] != "src/extra.ts"),
+        "the report shows no part of the file"
+    );
 }
 
 #[test]

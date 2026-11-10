@@ -21294,6 +21294,14 @@ cached?: boolean
  */
 resumed?: boolean
 /**
+ * True when the status and its evidence come from the earlier report
+ * of a `--recheck` run: the recheck did not select the mutant, its file
+ * has the digest of that report, and each test file of its killing
+ * tests exists. The mutant did not run in this run, and the kill matrix
+ * of this run has no evidence of it.
+ */
+carried?: boolean
+/**
  * The TypeScript diagnostic codes of the new errors of a
  * `compile_error` mutant, sorted, at most 8.
  */
@@ -21697,6 +21705,22 @@ unsettled: number
  * The rechecked mutants, sorted by file, line and mutant id.
  */
 mutants: MutationRecheckMutant[]
+/**
+ * The mutants of the report that keep their result from the earlier
+ * report (`carried`), because the recheck did not select them. The
+ * summary counts them. The recheck does not run them again, so a test
+ * that became weaker does not change their result.
+ */
+carried?: number
+/**
+ * The files of the earlier report outside this run whose earlier
+ * results do not apply, sorted: the source changed after the report,
+ * the test file of a killing test is gone, or the report has no digest
+ * or no readable entry for the file. The report leaves out their
+ * mutants. Run `fallow mutation` on them for new
+ * results.
+ */
+stale_files?: string[]
 }
 /**
  * One rechecked mutant.
