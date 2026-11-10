@@ -21,6 +21,7 @@ mod decision_surface;
 mod duplication;
 mod feature_flags;
 mod mutation;
+mod mutation_record;
 mod mutation_replay;
 mod similar_code;
 mod trace;
