@@ -412,6 +412,13 @@ test("manifest contains the complete pinned accuracy and control corpus", () => 
   assert.throws(() => validateManifest(invalid), /fastify\.candidate_expectation must be zero/);
 });
 
+test("workspace root pins the type definitions that corpus fixtures resolve", () => {
+  const rootPackage = JSON.parse(readFileSync(resolve(REPO_ROOT, "package.json"), "utf8"));
+  for (const name of ["@types/jest", "@types/node", "@types/trusted-types"]) {
+    assert.match(rootPackage.devDependencies?.[name] ?? "", /^\d+\.\d+\.\d+$/, name);
+  }
+});
+
 test("manifest ignore patterns need a reason and a non-empty unique list", () => {
   const zod = manifest.projects.find(({ id }) => id === "zod");
   assert.deepEqual(zod.ignore_patterns, ["deno/lib/**"]);

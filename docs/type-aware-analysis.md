@@ -472,6 +472,11 @@ directory, for example from a build cache wrapper, is rejected: replace it with
 a real directory before the run. The supplemental Vitest fixture always uses
 `target/type-aware-corpus`, so `--out-dir` does not avoid this check. A
 workspace without installed dependencies also fails: run `pnpm install` first.
+Fixture programs resolve the type packages in their `types` option from the
+workspace root. The root `package.json` pins `@types/node`, `@types/jest` and
+`@types/trusted-types` as devDependencies for this reason. pnpm does not hoist
+a transitive type package, so a program without its type packages fails with
+blocking diagnostics.
 Published dependency paths explicitly use the Fallow workspace root as their
 base. Discovery records the
 manifest, release binary, full sidecar runtime, TypeScript installation,
