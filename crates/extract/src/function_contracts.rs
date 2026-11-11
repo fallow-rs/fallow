@@ -900,9 +900,11 @@ fn local_use(nodes: &AstNodes<'_>, node_id: NodeId, span: Span) -> LocalUse {
         }
         // The opening element of the same JSX element records the use of a
         // closing element.
-        AstKind::ExportSpecifier(_)
-        | AstKind::ExportDefaultDeclaration(_)
-        | AstKind::JSXClosingElement(_) => LocalUse::Export,
+        AstKind::ExportSpecifier(_) | AstKind::JSXClosingElement(_) => LocalUse::Export,
+        // Only a bare identifier gives the default export a local name. A
+        // wrapped one (`export default f as T`) leaves the calls of each
+        // importer with no path to the function, so the read is an escape.
+        AstKind::ExportDefaultDeclaration(_) if outer == node_id => LocalUse::Export,
         _ => LocalUse::Escape,
     }
 }

@@ -1344,3 +1344,24 @@ fn a_local_binding_of_a_script_block_is_unknown_after_the_merge() {
         ]
     );
 }
+
+/// An importer of a wrapped default export has no local name to connect its
+/// calls to the function, so the wrapped read must be an escape.
+#[test]
+fn a_wrapped_default_export_is_an_escape_and_a_bare_one_is_not() {
+    for wrapped in [
+        "export default pad as Fn;",
+        "export default pad satisfies Fn;",
+        "export default pad!;",
+        "export default (pad);",
+    ] {
+        let source = format!("function pad(n: number) {{ return n; }}\npad(1);\n{wrapped}");
+        let info = parse_at("module.ts", &source);
+        assert_eq!(facts(&info).escapes.len(), 1, "{wrapped}");
+    }
+    let info = parse_at(
+        "module.ts",
+        "function pad(n: number) { return n; }\npad(1);\nexport default pad;",
+    );
+    assert!(facts(&info).escapes.is_empty());
+}

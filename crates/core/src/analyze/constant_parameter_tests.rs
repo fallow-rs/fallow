@@ -1028,3 +1028,31 @@ fn an_asset_import_of_another_module_or_a_type_keeps_the_findings() {
         );
     }
 }
+
+/// The calls of an importer do not reach a function behind a wrapped default
+/// export, so the rule must not report from the local calls alone.
+#[test]
+fn a_wrapped_default_export_gives_no_finding() {
+    for wrapped in ["pad as Fn", "pad satisfies Fn", "pad!", "(pad)"] {
+        let pad = format!(
+            "type Fn = (s: string, n: number) => string;\nfunction pad(s: string, n: number) {{ return s + n; }}\npad('x', 1);\npad('y', 1);\nexport default {wrapped};\n"
+        );
+        let project = analyze(&[
+            ("src/pad.ts", pad.as_str()),
+            ("src/main.ts", "import pad from './pad';\npad('z', 2);\n"),
+        ]);
+        assert_abstains(&project, "src/pad.ts", "pad", "value-reference");
+    }
+}
+
+#[test]
+fn a_bare_default_export_counts_the_calls_of_the_importer() {
+    let project = analyze(&[
+        (
+            "src/pad.ts",
+            "function pad(s: string, n: number) { return s + n; }\npad('x', 1);\npad('y', 1);\nexport default pad;\n",
+        ),
+        ("src/main.ts", "import pad from './pad';\npad('z', 2);\n"),
+    ]);
+    assert!(project.findings("pad").is_empty());
+}
