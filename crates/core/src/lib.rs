@@ -2241,8 +2241,8 @@ fn push_script_entry_patterns(
     }
 }
 
-/// Analyze git hook and staged-file commands for binary invocations and merge
-/// the invoked packages into the script-used set.
+/// Analyze git hook, staged-file and agent hook commands for binary
+/// invocations and merge the invoked packages into the script-used set.
 ///
 /// Hooks run on a developer machine, never in production, so production mode
 /// skips them, like the non-production package.json scripts.

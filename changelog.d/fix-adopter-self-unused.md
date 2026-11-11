@@ -1,0 +1,3 @@
+### Fixed
+
+- **Agent hook commands now credit the packages that they run.** Fallow reads the `hooks.<Event>[].hooks[].command` entries of `.claude/settings.json`, `.claude/settings.local.json` and `.codex/hooks.json`, the same way that it reads git hook commands. A hook that runs `npx some-tool`, or a shell script that runs it, marks `some-tool` as used. A hook that runs the gate that `fallow agent install` writes marks `fallow` as used. Before this fix, a project with no fallow config file that ran `fallow agent install` got `fallow` as an unused devDependency. Production mode skips these hooks, like the git hooks.
