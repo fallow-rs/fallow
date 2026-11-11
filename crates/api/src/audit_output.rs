@@ -400,7 +400,11 @@ pub fn build_audit_sarif(input: AuditSarifOutputInput<'_>) -> serde_json::Value 
     let mut all_runs = Vec::new();
 
     if let Some(sarif) = input.dead_code {
-        extend_sarif_runs(&mut all_runs, sarif);
+        fallow_output::extend_sarif_runs_with_category(
+            &mut all_runs,
+            sarif,
+            fallow_output::SARIF_CATEGORY_AUDIT_DEAD_CODE,
+        );
     }
 
     if let Some(duplication) = input.duplication
@@ -410,7 +414,11 @@ pub fn build_audit_sarif(input: AuditSarifOutputInput<'_>) -> serde_json::Value 
     }
 
     if let Some(sarif) = input.health {
-        extend_sarif_runs(&mut all_runs, sarif);
+        fallow_output::extend_sarif_runs_with_category(
+            &mut all_runs,
+            sarif,
+            fallow_output::SARIF_CATEGORY_AUDIT_HEALTH,
+        );
     }
 
     if let Some(diff_risk) = input.diff_risk
@@ -424,12 +432,6 @@ pub fn build_audit_sarif(input: AuditSarifOutputInput<'_>) -> serde_json::Value 
         "version": "2.1.0",
         "runs": all_runs,
     })
-}
-
-fn extend_sarif_runs(all_runs: &mut Vec<serde_json::Value>, sarif: &serde_json::Value) {
-    if let Some(runs) = sarif.get("runs").and_then(|runs| runs.as_array()) {
-        all_runs.extend(runs.iter().cloned());
-    }
 }
 
 fn build_audit_duplication_sarif_run(duplication: &DuplicationReport) -> serde_json::Value {

@@ -439,9 +439,60 @@ pub fn build_sarif_document(input: SarifDocumentInput<'_>) -> Value {
     })
 }
 
+/// SARIF category of the dead-code run in the bare `fallow` document.
+pub const SARIF_CATEGORY_DEAD_CODE: &str = "fallow/dead-code";
+/// SARIF category of the health run in the bare `fallow` document.
+pub const SARIF_CATEGORY_HEALTH: &str = "fallow/health";
+/// SARIF category of the dead-code run in the `fallow audit` document.
+pub const SARIF_CATEGORY_AUDIT_DEAD_CODE: &str = "fallow/audit/dead-code";
+/// SARIF category of the health run in the `fallow audit` document.
+pub const SARIF_CATEGORY_AUDIT_HEALTH: &str = "fallow/audit/health";
+
+/// Copy the runs of `sarif` into `runs` and give each copied run the SARIF
+/// category `category` (`automationDetails.id`).
+///
+/// GitHub code scanning rejects a SARIF file with two runs that have the same
+/// tool and the same category. A multi-analysis document must therefore give
+/// each analysis its own category. A run that already has an id keeps it.
+pub fn extend_sarif_runs_with_category(runs: &mut Vec<Value>, sarif: &Value, category: &str) {
+    let Some(source_runs) = sarif.get("runs").and_then(Value::as_array) else {
+        return;
+    };
+    runs.extend(source_runs.iter().cloned().map(|mut run| {
+        if let Some(object) = run.as_object_mut()
+            && object
+                .get("automationDetails")
+                .and_then(|details| details.get("id"))
+                .is_none()
+        {
+            object.insert(
+                "automationDetails".to_string(),
+                serde_json::json!({ "id": category }),
+            );
+        }
+        run
+    }));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extend_sarif_runs_with_category_sets_missing_ids_only() {
+        let sarif = serde_json::json!({
+            "runs": [
+                { "results": [] },
+                { "automationDetails": { "id": "kept" }, "results": [] },
+            ]
+        });
+        let mut runs = Vec::new();
+        extend_sarif_runs_with_category(&mut runs, &sarif, "fallow/dead-code");
+
+        assert_eq!(runs.len(), 2);
+        assert_eq!(runs[0]["automationDetails"]["id"], "fallow/dead-code");
+        assert_eq!(runs[1]["automationDetails"]["id"], "kept");
+    }
 
     #[test]
     fn sarif_result_includes_location_and_fingerprints() {

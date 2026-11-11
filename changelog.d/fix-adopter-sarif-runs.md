@@ -1,0 +1,3 @@
+### Fixed
+
+- **Each run of a multi-analysis SARIF document now has its own category.** GitHub code scanning takes the category of a run from `automationDetails.id`, and it rejects a file with two runs that have the same tool and the same category. Before, the dead-code run and the health run had no id, so the upload failed. Now bare `fallow --format sarif` gives the ids `fallow/dead-code`, `fallow/dupes` and `fallow/health`. `fallow audit --format sarif` gives `fallow/audit/dead-code`, `fallow/audit/dupes`, `fallow/audit/health` and `fallow/audit/diff-risk`. `fallow report --from <file> --format sarif` gives the same ids as the direct output. The SARIF of a single command, such as `fallow dead-code --format sarif`, does not change.
