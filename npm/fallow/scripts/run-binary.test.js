@@ -256,29 +256,66 @@ test("resolveTypeAwareCompanion accepts only an exact matching package", (t) => 
 
 // `fallow` does not depend on `fallow-type-aware`. pnpm links a project
 // devDependency only into the project node_modules, where the wrapper package
-// cannot resolve it, so the launcher also resolves from the project root.
-test("resolveTypeAwareCompanion finds an exact-version companion in the project node_modules", (t) => {
-  const { resolveTypeAwareCompanion } = require(RUN_BINARY);
+// cannot resolve it, so the launcher also resolves from the project root. It
+// accepts that companion only when the running `fallow` package is in the same
+// node_modules tree, so a global install never runs a project's companion.
+function writeProjectCompanion(t, version) {
   const project = fs.mkdtempSync(path.join(os.tmpdir(), "fallow-type-aware-project-"));
   t.after(() => fs.rmSync(project, { recursive: true, force: true }));
-  const packageDir = path.join(project, "node_modules", "fallow-type-aware");
-  fs.mkdirSync(packageDir, { recursive: true });
-  const companionPath = path.join(packageDir, "fallow-type-aware.mjs");
-  fs.writeFileSync(companionPath, "#!/usr/bin/env node\n");
-  const writeVersion = (version) =>
-    fs.writeFileSync(
-      path.join(packageDir, "package.json"),
-      JSON.stringify({ name: "fallow-type-aware", version }),
-    );
-
-  writeVersion("3.8.0");
-  assert.equal(
-    fs.realpathSync(resolveTypeAwareCompanion("3.8.0", undefined, undefined, project)),
-    fs.realpathSync(companionPath),
+  const nodeModules = path.join(project, "node_modules");
+  const companionDir = path.join(
+    nodeModules,
+    ".pnpm",
+    "fallow-type-aware@x",
+    "node_modules",
+    "fallow-type-aware",
   );
+  fs.mkdirSync(companionDir, { recursive: true });
+  fs.symlinkSync(companionDir, path.join(nodeModules, "fallow-type-aware"), "dir");
+  fs.writeFileSync(path.join(companionDir, "fallow-type-aware.mjs"), "#!/usr/bin/env node\n");
+  fs.writeFileSync(
+    path.join(companionDir, "package.json"),
+    JSON.stringify({ name: "fallow-type-aware", version }),
+  );
+  const fallowScripts = path.join(
+    nodeModules,
+    ".pnpm",
+    "fallow@x",
+    "node_modules",
+    "fallow",
+    "scripts",
+  );
+  fs.mkdirSync(fallowScripts, { recursive: true });
+  return { project, companion: path.join(companionDir, "fallow-type-aware.mjs"), fallowScripts };
+}
 
-  writeVersion("3.7.0");
-  assert.equal(resolveTypeAwareCompanion("3.8.0", undefined, undefined, project), undefined);
+test("resolveTypeAwareCompanion finds an exact-version companion in the project node_modules", (t) => {
+  const { resolveTypeAwareCompanion } = require(RUN_BINARY);
+  const { project, companion, fallowScripts } = writeProjectCompanion(t, "3.8.0");
+  assert.equal(
+    fs.realpathSync(
+      resolveTypeAwareCompanion("3.8.0", undefined, undefined, project, fallowScripts),
+    ),
+    fs.realpathSync(companion),
+  );
+  assert.equal(
+    resolveTypeAwareCompanion("3.9.0", undefined, undefined, project, fallowScripts),
+    undefined,
+    "a companion of another version is rejected",
+  );
+});
+
+test("resolveTypeAwareCompanion ignores a project companion for a fallow from another install", (t) => {
+  const { resolveTypeAwareCompanion } = require(RUN_BINARY);
+  const { project } = writeProjectCompanion(t, "3.8.0");
+  const globalInstall = fs.mkdtempSync(path.join(os.tmpdir(), "fallow-global-"));
+  t.after(() => fs.rmSync(globalInstall, { recursive: true, force: true }));
+  const globalScripts = path.join(globalInstall, "lib", "node_modules", "fallow", "scripts");
+  fs.mkdirSync(globalScripts, { recursive: true });
+  assert.equal(
+    resolveTypeAwareCompanion("3.8.0", undefined, undefined, project, globalScripts),
+    undefined,
+  );
 });
 
 test("childEnvironment marks launcher-wired companions as npm-wrapper", (t) => {

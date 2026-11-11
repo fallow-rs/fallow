@@ -35,8 +35,11 @@ npx fallow dead-code --unused-class-members --type-aware --format json --quiet
 
 The `fallow` launcher looks for the companion next to the `fallow` package
 first (npm and Yarn hoist it there), then from the project root (pnpm links
-it only there). It accepts only an exact version match and passes the trusted
-executable path to the native binary. Without the companion, `--type-aware`
+it only there). It accepts a companion from the project root only when it is in
+the same `node_modules` tree as the running `fallow` package, so a global
+`fallow` never runs a companion that a cloned project ships. It accepts only an
+exact version match and passes the trusted executable path to the native
+binary. Without the companion, `--type-aware`
 and `type-aware status` name the install command.
 
 The companion depends on `typescript@7.0.2`, accepts any TypeScript 7 release that a package manager override selects, and uses `typescript/unstable/sync`, which

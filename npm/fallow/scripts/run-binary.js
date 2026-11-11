@@ -146,18 +146,38 @@ function readResolvedVersion(manifestPath) {
 // `fallow` does not depend on `fallow-type-aware`: the project installs it at
 // the same version when it uses `--type-aware`. npm and Yarn hoist it next to
 // `fallow`. pnpm links it only into the project node_modules, so a second
-// lookup starts at the project root. Only an exact version match is accepted.
+// lookup starts at the project root. That lookup accepts the companion only
+// when it is in the same node_modules tree as the running `fallow` package,
+// so a global `fallow` never runs a companion that a cloned project ships.
+// Only an exact version match is accepted.
 function resolveTypeAwareCompanion(
   fallowVersion,
   resolvePackage = require.resolve,
   readFile = fs.readFileSync,
   projectRoot = process.cwd(),
+  launcherDir = __dirname,
 ) {
-  for (const options of [undefined, { paths: [projectRoot] }]) {
-    const companion = matchingTypeAwareCompanion(fallowVersion, resolvePackage, readFile, options);
-    if (companion !== undefined) return companion;
+  const local = matchingTypeAwareCompanion(fallowVersion, resolvePackage, readFile, undefined);
+  if (local !== undefined) return local;
+  const project = matchingTypeAwareCompanion(fallowVersion, resolvePackage, readFile, {
+    paths: [projectRoot],
+  });
+  if (project === undefined) return undefined;
+  const tree = installTree(launcherDir);
+  return tree !== null && tree === installTree(project) ? project : undefined;
+}
+
+// The outermost node_modules directory of a real path, or null outside one.
+function installTree(file) {
+  let real;
+  try {
+    real = fs.realpathSync(file);
+  } catch {
+    return null;
   }
-  return undefined;
+  const parts = real.split(path.sep);
+  const index = parts.indexOf("node_modules");
+  return index === -1 ? null : parts.slice(0, index + 1).join(path.sep);
 }
 
 function matchingTypeAwareCompanion(fallowVersion, resolvePackage, readFile, options) {
