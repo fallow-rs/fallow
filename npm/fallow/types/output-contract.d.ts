@@ -19196,14 +19196,39 @@ change_shape: number
 /**
  * Runtime-weight component (paid): a hot path (runtime evidence of high
  * invocation) adds an invocation-bucketed weight so it amplifies the blast
- * and outranks an otherwise-equal cold unit. `0` in free mode (no runtime
- * input), so the free-tier total stays the four deterministic components and
- * is byte-identical to the no-runtime baseline.
+ * and outranks an otherwise-equal cold unit. `0` and omitted in free mode
+ * (no runtime input).
  */
 runtime?: number
 /**
- * The summed total of every present component (the four deterministic ones
- * plus the runtime weight).
+ * Churn component: the recency-weighted commit count of the file in the
+ * churn window (90-day half-life), in capped bands. Omitted while it is
+ * zero, which includes a test file and a run without a git history or on a
+ * shallow clone.
+ */
+churn?: number
+/**
+ * Worsened component: the functions of the file whose complexity metrics
+ * grew against the matched base finding (`worsened_metrics`), capped.
+ * Omitted while it is zero, which includes a run without a base.
+ */
+worsened?: number
+/**
+ * Test-reach component: the changed exports of the file that no test
+ * runs for real (`mocked-only`, `none`, or `none-file` in a project with
+ * tests), capped. Omitted while it is zero.
+ */
+test_reach?: number
+/**
+ * Mutation component: the surviving mutants on the added lines of the
+ * file, from the `--mutation-report` file, capped. Omitted while it is
+ * zero. Without `--mutation-report` the component is not measured, which
+ * does not mean that no mutant survives.
+ */
+mutation?: number
+/**
+ * The sum of every component, also of the components that the wire
+ * omits because they are zero.
  */
 total: number
 }

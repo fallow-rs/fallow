@@ -646,6 +646,12 @@
     },
     {
       "section": "flags:audit",
+      "row": "--mutation-report",
+      "column": "Description",
+      "seed": "Saved `fallow mutation --format json` report (for example `.fallow/mutation/last-report.json`). The review brief counts the surviving mutants on the added lines of each changed file in the `mutation` component of the focus score. A file whose source changed since the run adds nothing. Reads the file only; it runs no test. Only the review brief reads it"
+    },
+    {
+      "section": "flags:audit",
       "row": "--no-css",
       "column": "Description",
       "seed": "Disable styling analytics in audit"

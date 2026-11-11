@@ -10,9 +10,10 @@
 //!
 //! ## The composite score (deterministic, no runtime input)
 //!
-//! `score = fan_io + security_taint + risk_zone + change_shape`, an integer sum
-//! (no floats, matching the partition + order engine's determinism posture) of four deterministic signals,
-//! each derived from data the brief already retains:
+//! The graph part of the score is `fan_io + security_taint + risk_zone +
+//! change_shape`, an integer sum (no floats, matching the partition + order
+//! engine's determinism posture) of four deterministic signals, each derived
+//! from data the brief already retains:
 //!
 //! 1. **fan-in / fan-out** (graph blast): from engine-owned focus fact helpers.
 //! 2. **security taint touch**: a source -> sink taint trace touches the unit
@@ -25,6 +26,24 @@
 //! 4. **change shape**: new export / widened visibility / signature change (the
 //!    coordination-gap proxy, ADR-001 syntactic).
 //!
+//! ## The evidence components
+//!
+//! Four more components add evidence that the audit already computes. Each one
+//! is zero, and stays off the wire, when its source measured nothing:
+//!
+//! - **churn**: the recency-weighted commit count of the file in the churn pass
+//!   of the brief, in capped bands. Zero without a git history and for a test
+//!   file.
+//! - **worsened**: the changed functions whose complexity grew against the base
+//!   (`worsened_metrics`). Zero without a base.
+//! - **test reach**: the changed exports that no test runs for real.
+//! - **mutation**: the surviving mutants on added lines, from
+//!   `--mutation-report`. Not measured without that flag.
+//!
+//! The components only add to the sum. No component multiplies another, so a
+//! reader can see which component moved the total. `triage.risk_class` does
+//! not read the focus score.
+//!
 //! ## The runtime layer (paid, built)
 //!
 //! When `FocusInputs::runtime` is `Some` (the paid `--runtime-coverage` path),
@@ -35,6 +54,9 @@
 //! mode) the layer contributes nothing: the `runtime` component is `0`, no unit
 //! can reach the `Skip` arm, and the output is byte-identical to the no-runtime baseline. The free
 //! tier ranks but never skips; safe-skip is runtime-backed only.
+
+#[path = "audit_mutation_focus.rs"]
+pub mod mutation;
 
 use fallow_engine::module_graph::FocusFileFactsPaths;
 pub use fallow_output::{ConfidenceFlag, FocusLabel, FocusMap, FocusScore, FocusUnit};
@@ -75,6 +97,38 @@ const RUNTIME_HOT_BLAZING: u32 = 6;
 const RUNTIME_WARM_INVOCATIONS: u64 = 100;
 /// Invocation count at/above which a hot path is "blazing".
 const RUNTIME_BLAZING_INVOCATIONS: u64 = 1_000;
+
+/// Recency-weighted commit counts (90-day half-life) at which the churn
+/// component reaches each band. The first band sits above the commits of a
+/// short branch, so a file that changed only in the pull request adds no churn.
+const CHURN_BANDS: [f64; 3] = [3.0, 8.0, 20.0];
+/// Points per changed function whose complexity grew against the base.
+const WORSENED_WEIGHT: u32 = 2;
+/// Cap on the worsened component.
+const WORSENED_CAP: u32 = 4;
+/// Points per changed export that no test runs for real.
+const TEST_REACH_WEIGHT: u32 = 1;
+/// Cap on the test-reach component.
+const TEST_REACH_CAP: u32 = 3;
+/// Points per surviving mutant on an added line.
+const MUTATION_WEIGHT: u32 = 1;
+/// Cap on the mutation component.
+const MUTATION_CAP: u32 = 4;
+
+/// The churn band of a file: one point for each band of [`CHURN_BANDS`] that
+/// its recency-weighted commit count reaches.
+fn churn_weight(weighted_commits: f64) -> u32 {
+    let bands = CHURN_BANDS
+        .iter()
+        .filter(|band| weighted_commits >= **band)
+        .count();
+    u32::try_from(bands).unwrap_or(u32::MAX)
+}
+
+/// `count * weight`, capped at `cap`.
+fn capped(count: u32, weight: u32, cap: u32) -> u32 {
+    count.saturating_mul(weight).min(cap)
+}
 
 /// The bucketed runtime weight for a hot file's peak invocation count. Bucketed
 /// (three bands) rather than raw so the weight stays bounded and deterministic.
@@ -120,6 +174,34 @@ pub struct RuntimeFocus {
     pub cold_files: Vec<String>,
 }
 
+/// The churn of one changed file in the churn window of the brief.
+#[derive(Debug, Clone)]
+pub struct ChurnFocusFile {
+    /// Root-relative path of the changed file.
+    pub file: String,
+    /// Commits that touched the file in the churn window.
+    pub commits: u32,
+    /// Recency-weighted commit count (90-day half-life); drives the band.
+    pub weighted_commits: f64,
+}
+
+/// A count of one signal in one changed file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FocusFileCount {
+    /// Root-relative path of the changed file.
+    pub file: String,
+    /// The number of functions, exports or mutants that carry the signal.
+    pub count: u32,
+}
+
+/// The count of `file` in `counts`, or zero.
+fn count_for(counts: &[FocusFileCount], file: &str) -> u32 {
+    counts
+        .iter()
+        .find(|entry| entry.file == file)
+        .map_or(0, |entry| entry.count)
+}
+
 /// Everything the focus extractor needs, gathered from the assembled brief data.
 /// All path-spaces are root-relative + forward-slashed (the brief's canonical
 /// space), so signal joins are byte-exact.
@@ -147,6 +229,17 @@ pub struct FocusInputs<'a> {
     /// map degrades to the deterministic no-runtime baseline byte-for-byte; `Some` on the
     /// `--runtime-coverage` path, where it weights hot files and enables safe-skip.
     pub runtime: Option<&'a RuntimeFocus>,
+    /// Churn of the changed files. Empty without a git history or on a shallow
+    /// clone.
+    pub churn_files: &'a [ChurnFocusFile],
+    /// Changed functions whose complexity grew against the base, by file.
+    /// Empty without a base.
+    pub worsened_files: &'a [FocusFileCount],
+    /// Changed exports that no test runs for real, by file.
+    pub weak_test_reach_files: &'a [FocusFileCount],
+    /// Surviving mutants on added lines, by file. `None` without
+    /// `--mutation-report` (not measured).
+    pub mutation_survivors: Option<&'a [FocusFileCount]>,
 }
 
 /// Whether a unit `file` is the `<rel_path>` prefix of any public-API delta key
@@ -192,8 +285,7 @@ fn score_unit(facts: &FocusFileFactsPaths, inputs: &FocusInputs<'_>) -> FocusSco
     // Runtime layer (paid): a hot file adds an invocation-bucketed weight so a
     // hot path amplifies the blast and outranks an otherwise-equal cold unit. The
     // deterministic components stay on the wire, so this ADDS without recomputing
-    // them. `0` when no runtime input (free mode), keeping `total` the four
-    // deterministic components and the output byte-identical to the no-runtime baseline.
+    // them. `0` when no runtime input (free mode).
     let runtime = inputs.runtime.map_or(0, |rt| {
         rt.hot_files
             .iter()
@@ -201,7 +293,38 @@ fn score_unit(facts: &FocusFileFactsPaths, inputs: &FocusInputs<'_>) -> FocusSco
             .map_or(0, |hot| runtime_weight(hot.invocations))
     });
 
-    let total = fan_io + security_taint + risk_zone + change_shape + runtime;
+    let churn = inputs
+        .churn_files
+        .iter()
+        .find(|entry| entry.file == facts.file)
+        .map_or(0, |entry| churn_weight(entry.weighted_commits));
+    let worsened = capped(
+        count_for(inputs.worsened_files, &facts.file),
+        WORSENED_WEIGHT,
+        WORSENED_CAP,
+    );
+    let test_reach = capped(
+        count_for(inputs.weak_test_reach_files, &facts.file),
+        TEST_REACH_WEIGHT,
+        TEST_REACH_CAP,
+    );
+    let mutation = inputs.mutation_survivors.map_or(0, |survivors| {
+        capped(
+            count_for(survivors, &facts.file),
+            MUTATION_WEIGHT,
+            MUTATION_CAP,
+        )
+    });
+
+    let total = fan_io
+        + security_taint
+        + risk_zone
+        + change_shape
+        + runtime
+        + churn
+        + worsened
+        + test_reach
+        + mutation;
 
     FocusScore {
         fan_io,
@@ -209,6 +332,10 @@ fn score_unit(facts: &FocusFileFactsPaths, inputs: &FocusInputs<'_>) -> FocusSco
         risk_zone,
         change_shape,
         runtime,
+        churn,
+        worsened,
+        test_reach,
+        mutation,
         total,
     }
 }
@@ -285,11 +412,63 @@ fn build_reason(
     {
         parts.push("changes a contract consumed outside the diff".to_string());
     }
+    push_evidence_reasons(&mut parts, facts, score, inputs);
     if parts.is_empty() {
         "isolated change, no blast beyond the diff".to_string()
     } else {
         parts.join(", ")
     }
+}
+
+/// Add one clause for each present churn, worsened, test-reach and mutation
+/// component, after the graph clauses, so a reason without these components
+/// keeps its earlier text.
+fn push_evidence_reasons(
+    parts: &mut Vec<String>,
+    facts: &FocusFileFactsPaths,
+    score: &FocusScore,
+    inputs: &FocusInputs<'_>,
+) {
+    if score.churn > 0
+        && let Some(entry) = inputs
+            .churn_files
+            .iter()
+            .find(|entry| entry.file == facts.file)
+    {
+        parts.push(format!(
+            "changed often ({} recent commit{})",
+            entry.commits,
+            plural(u64::from(entry.commits))
+        ));
+    }
+    if score.worsened > 0 {
+        let count = count_for(inputs.worsened_files, &facts.file);
+        parts.push(format!(
+            "makes {count} function{} more complex",
+            plural(u64::from(count))
+        ));
+    }
+    if score.test_reach > 0 {
+        let count = count_for(inputs.weak_test_reach_files, &facts.file);
+        parts.push(format!(
+            "{count} changed export{} with no real test run",
+            plural(u64::from(count))
+        ));
+    }
+    if score.mutation > 0 {
+        let count = inputs
+            .mutation_survivors
+            .map_or(0, |survivors| count_for(survivors, &facts.file));
+        parts.push(format!(
+            "{count} surviving mutant{} on changed lines",
+            plural(u64::from(count))
+        ));
+    }
+}
+
+/// The plural suffix of an English count.
+const fn plural(count: u64) -> &'static str {
+    if count == 1 { "" } else { "s" }
 }
 
 /// Collect a unit's confidence flags from its graph facts (sorted, deduped).
@@ -403,6 +582,10 @@ mod tests {
             coordination_changed_files,
             taint_touched_files,
             runtime: None,
+            churn_files: &[],
+            worsened_files: &[],
+            weak_test_reach_files: &[],
+            mutation_survivors: None,
         }
     }
 
@@ -434,6 +617,10 @@ mod tests {
             coordination_changed_files: &[],
             taint_touched_files,
             runtime: Some(runtime),
+            churn_files: &[],
+            worsened_files: &[],
+            weak_test_reach_files: &[],
+            mutation_survivors: None,
         }
     }
 
@@ -682,7 +869,7 @@ mod tests {
     // done-condition (c): the symbol-level call chain (`fallow trace`) is
     // EXPLICITLY OFF the ranked path. The focus-map ranking inputs
     // (`FocusInputs`) carry NO trace / symbol-chain field, and the composite
-    // `FocusScore.total` is the sum of EXACTLY the four documented components
+    // `FocusScore.total` is the sum of EXACTLY the documented components
     // (no symbol-chain term). This pins the trace as never feeding
     // de-prioritization.
     #[test]
@@ -706,6 +893,10 @@ mod tests {
             // exists. If the trace ever wired one in, this destructure would fail
             // to compile -- the guard that the trace stays OUT of the focus inputs.
             runtime: _,
+            churn_files: _,
+            worsened_files: _,
+            weak_test_reach_files: _,
+            mutation_survivors: _,
         } = inputs(
             empty_facts,
             empty_boundary,
@@ -714,7 +905,7 @@ mod tests {
             empty_strings,
         );
 
-        // The composite total is the sum of exactly the four documented
+        // The composite total is the sum of exactly the documented
         // components. A symbol-chain term would break this invariant.
         let gf = vec![facts("src/x.ts", 4, 2, false, false)];
         let map = build_focus_map(&inputs(&gf, &[], &[], &[], &[]));
@@ -731,11 +922,14 @@ mod tests {
                 + score.security_taint
                 + score.risk_zone
                 + score.change_shape
-                + score.runtime,
+                + score.runtime
+                + score.churn
+                + score.worsened
+                + score.test_reach
+                + score.mutation,
             "the focus total must be the documented components only -- no symbol-chain term"
         );
-        // Free-mode (no runtime input): the runtime component is 0, so the total
-        // is the four deterministic components, byte-identical to the no-runtime baseline.
+        // Free mode (no runtime input) adds no runtime weight.
         assert_eq!(score.runtime, 0, "free mode adds no runtime weight");
     }
 
@@ -879,6 +1073,178 @@ mod tests {
         assert_eq!(
             serde_json::to_string_pretty(&first).unwrap(),
             serde_json::to_string_pretty(&second).unwrap()
+        );
+    }
+
+    fn file_count(file: &str, count: u32) -> FocusFileCount {
+        FocusFileCount {
+            file: file.to_string(),
+            count,
+        }
+    }
+
+    fn only_unit(map: &FocusMap) -> &FocusUnit {
+        map.review_here
+            .iter()
+            .chain(map.deprioritized.iter())
+            .next()
+            .unwrap()
+    }
+
+    fn churn_file(file: &str, commits: u32, weighted_commits: f64) -> ChurnFocusFile {
+        ChurnFocusFile {
+            file: file.to_string(),
+            commits,
+            weighted_commits,
+        }
+    }
+
+    #[test]
+    fn churn_component_follows_the_weighted_bands() {
+        let gf = vec![facts("src/a.ts", 0, 0, false, false)];
+        let cases = [
+            (0.0, 0),
+            (2.9, 0),
+            (3.0, 1),
+            (7.9, 1),
+            (8.0, 2),
+            (20.0, 3),
+            (500.0, 3),
+        ];
+        for (weighted, expected) in cases {
+            let churn = vec![churn_file("src/a.ts", 9, weighted)];
+            let mut input = inputs(&gf, &[], &[], &[], &[]);
+            input.churn_files = &churn;
+            let map = build_focus_map(&input);
+            assert_eq!(only_unit(&map).score.churn, expected, "weighted {weighted}");
+        }
+    }
+
+    #[test]
+    fn churn_component_adds_a_reason_and_ranks_the_file_higher() {
+        let gf = vec![
+            facts("src/a.ts", 1, 0, false, false),
+            facts("src/b.ts", 1, 0, false, false),
+        ];
+        let churn = vec![churn_file("src/b.ts", 14, 9.5)];
+        let mut input = inputs(&gf, &[], &[], &[], &[]);
+        input.churn_files = &churn;
+        let map = build_focus_map(&input);
+        assert_eq!(map.review_here[0].file, "src/b.ts");
+        assert_eq!(map.review_here[0].score.churn, 2);
+        assert_eq!(map.review_here[0].score.total, 4);
+        assert!(
+            map.review_here[0]
+                .reason
+                .ends_with("changed often (14 recent commits)"),
+            "{}",
+            map.review_here[0].reason
+        );
+    }
+
+    #[test]
+    fn worsened_component_weights_each_function_and_caps() {
+        let gf = vec![facts("src/a.ts", 0, 0, false, false)];
+        for (count, expected) in [(1, 2), (2, 4), (5, 4)] {
+            let worsened = vec![file_count("src/a.ts", count)];
+            let mut input = inputs(&gf, &[], &[], &[], &[]);
+            input.worsened_files = &worsened;
+            let map = build_focus_map(&input);
+            let unit = only_unit(&map);
+            assert_eq!(unit.score.worsened, expected);
+            assert!(unit.reason.contains("more complex"), "{}", unit.reason);
+        }
+    }
+
+    #[test]
+    fn test_reach_component_weights_each_export_and_caps() {
+        let gf = vec![facts("src/a.ts", 0, 0, false, false)];
+        for (count, expected) in [(1, 1), (3, 3), (9, 3)] {
+            let weak = vec![file_count("src/a.ts", count)];
+            let mut input = inputs(&gf, &[], &[], &[], &[]);
+            input.weak_test_reach_files = &weak;
+            let map = build_focus_map(&input);
+            let unit = only_unit(&map);
+            assert_eq!(unit.score.test_reach, expected);
+            assert!(unit.reason.contains("no real test run"), "{}", unit.reason);
+        }
+    }
+
+    #[test]
+    fn mutation_component_weights_each_survivor_and_caps() {
+        let gf = vec![facts("src/a.ts", 0, 0, false, false)];
+        for (count, expected) in [(1, 1), (4, 4), (12, 4)] {
+            let survivors = vec![file_count("src/a.ts", count)];
+            let mut input = inputs(&gf, &[], &[], &[], &[]);
+            input.mutation_survivors = Some(&survivors);
+            let map = build_focus_map(&input);
+            let unit = only_unit(&map);
+            assert_eq!(unit.score.mutation, expected);
+            assert!(unit.reason.contains("surviving mutant"), "{}", unit.reason);
+        }
+    }
+
+    #[test]
+    fn absent_evidence_components_add_nothing_and_stay_off_the_wire() {
+        let gf = vec![facts("src/a.ts", 2, 1, false, false)];
+        let baseline = build_focus_map(&inputs(&gf, &[], &[], &[], &[]));
+
+        let other_file_churn = vec![churn_file("src/other.ts", 40, 30.0)];
+        let other_file_counts = vec![file_count("src/other.ts", 3)];
+        let no_survivors: Vec<FocusFileCount> = Vec::new();
+        let mut input = inputs(&gf, &[], &[], &[], &[]);
+        input.churn_files = &other_file_churn;
+        input.worsened_files = &other_file_counts;
+        input.weak_test_reach_files = &other_file_counts;
+        input.mutation_survivors = Some(&no_survivors);
+        let measured_zero = build_focus_map(&input);
+
+        let unit = only_unit(&measured_zero);
+        assert_eq!(
+            (
+                unit.score.churn,
+                unit.score.worsened,
+                unit.score.test_reach,
+                unit.score.mutation
+            ),
+            (0, 0, 0, 0)
+        );
+        let json = serde_json::to_value(unit).unwrap();
+        for key in ["churn", "worsened", "test_reach", "mutation"] {
+            assert!(
+                json["score"].get(key).is_none(),
+                "{key} must stay off the wire"
+            );
+        }
+        assert_eq!(
+            serde_json::to_string(&measured_zero.review_here).unwrap(),
+            serde_json::to_string(&baseline.review_here).unwrap()
+        );
+        assert_eq!(unit.reason, only_unit(&baseline).reason);
+    }
+
+    #[test]
+    fn present_evidence_components_serialize_before_the_total() {
+        let gf = vec![facts("src/a.ts", 0, 0, false, false)];
+        let churn = vec![churn_file("src/a.ts", 30, 25.0)];
+        let worsened = vec![file_count("src/a.ts", 1)];
+        let weak = vec![file_count("src/a.ts", 2)];
+        let survivors = vec![file_count("src/a.ts", 3)];
+        let mut input = inputs(&gf, &[], &[], &[], &[]);
+        input.churn_files = &churn;
+        input.worsened_files = &worsened;
+        input.weak_test_reach_files = &weak;
+        input.mutation_survivors = Some(&survivors);
+        let map = build_focus_map(&input);
+        let unit = only_unit(&map);
+        assert_eq!(
+            serde_json::to_string(&unit.score).unwrap(),
+            r#"{"fan_io":0,"risk_zone":0,"change_shape":0,"churn":3,"worsened":2,"test_reach":2,"mutation":3,"total":10}"#
+        );
+        assert_eq!(
+            unit.reason,
+            "changed often (30 recent commits), makes 1 function more complex, \
+             2 changed exports with no real test run, 3 surviving mutants on changed lines"
         );
     }
 }

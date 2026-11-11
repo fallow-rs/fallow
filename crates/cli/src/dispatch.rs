@@ -1193,6 +1193,7 @@ fn dispatch_audit_command(command: Command, dispatch: &DispatchContext<'_>) -> E
         worsened,
         runtime_coverage,
         min_invocations_hot,
+        mutation_report,
         gate_marker,
         brief,
         max_decisions,
@@ -1239,6 +1240,7 @@ fn dispatch_audit_command(command: Command, dispatch: &DispatchContext<'_>) -> E
             worsened,
             runtime_coverage,
             min_invocations_hot,
+            mutation_report,
             gate_marker,
             brief,
             max_decisions,
@@ -1976,6 +1978,8 @@ struct AuditDispatchArgs {
     worsened: Option<AuditWorsenedArg>,
     runtime_coverage: Option<PathBuf>,
     min_invocations_hot: u64,
+    /// Saved `fallow mutation` report for the `mutation` focus component.
+    mutation_report: Option<PathBuf>,
     gate_marker: Option<String>,
     brief: bool,
     max_decisions: usize,
@@ -2033,6 +2037,12 @@ fn dispatch_audit(dispatch: &DispatchContext<'_>, args: &AuditDispatchArgs) -> E
         );
     }
     note_inert_health_flags(args, inputs.analyses);
+    if args.mutation_report.is_some() && !audit_renders_brief(args) {
+        eprintln!(
+            "Note: --mutation-report has no effect without --brief: only the review brief \
+             reads it."
+        );
+    }
 
     // The brief and the walkthrough views always exit 0, so the gate stands
     // down there and says so.
@@ -2137,6 +2147,21 @@ fn run_resolved_audit(
     inputs: &ResolvedAuditInputs,
 ) -> ExitCode {
     let cli = dispatch.cli;
+    let mutation_report = match args
+        .mutation_report
+        .as_deref()
+        .filter(|_| audit_renders_brief(args))
+        .map(crate::audit_focus::mutation::read_audit_mutation_report)
+    {
+        Some(Err(error)) => {
+            return crate::error::emit_programmatic_error(
+                &error,
+                dispatch.output,
+                dispatch.json_style,
+            );
+        }
+        report => report.and_then(Result::ok),
+    };
     audit::run_audit_with_type_aware(
         &audit::AuditOptions {
             root: dispatch.root,
@@ -2181,6 +2206,7 @@ fn run_resolved_audit(
             css_deep: audit_css_deep_enabled(&inputs.audit_cfg, args),
             runtime_coverage: args.runtime_coverage.as_deref(),
             min_invocations_hot: args.min_invocations_hot,
+            mutation_report: mutation_report.as_ref(),
             brief: args.brief,
             max_decisions: args.max_decisions,
             walkthrough_guide: args.walkthrough_guide,
@@ -2231,39 +2257,6 @@ fn dispatch_decision_surface(dispatch: &DispatchContext<'_>, max_decisions: usiz
         &inputs,
         max_decisions,
     ))
-}
-
-fn decision_surface_audit_args(max_decisions: usize) -> AuditDispatchArgs {
-    AuditDispatchArgs {
-        production_dead_code: false,
-        production_health: false,
-        production_dupes: false,
-        dead_code_baseline: None,
-        health_baseline: None,
-        dupes_baseline: None,
-        max_crap: None,
-        coverage: None,
-        coverage_root: None,
-        only: Vec::new(),
-        skip: Vec::new(),
-        no_css: true,
-        css_deep: false,
-        no_css_deep: false,
-        gate: None,
-        worsened: None,
-        runtime_coverage: None,
-        min_invocations_hot: 0,
-        gate_marker: None,
-        brief: true,
-        max_decisions,
-        walkthrough_guide: false,
-        walkthrough_file: None,
-        walkthrough: false,
-        mark_viewed: Vec::new(),
-        show_cleared: false,
-        show_deprioritized: false,
-        scope: None,
-    }
 }
 
 #[path = "dispatch_decision_surface.rs"]

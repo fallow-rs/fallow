@@ -52,6 +52,7 @@ pub(super) fn decision_surface_audit_options<'a>(
         css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 0,
+        mutation_report: None,
         brief: true,
         max_decisions,
         walkthrough_guide: false,
@@ -59,6 +60,42 @@ pub(super) fn decision_surface_audit_options<'a>(
         mark_viewed: &[],
         show_cleared: false,
         walkthrough_file: None,
+        show_deprioritized: false,
+        scope: None,
+    }
+}
+
+/// The audit arguments of the decision-surface path: brief mode with every
+/// gate, coverage and baseline input left at its default.
+pub(super) fn decision_surface_audit_args(max_decisions: usize) -> AuditDispatchArgs {
+    AuditDispatchArgs {
+        production_dead_code: false,
+        production_health: false,
+        production_dupes: false,
+        dead_code_baseline: None,
+        health_baseline: None,
+        dupes_baseline: None,
+        max_crap: None,
+        coverage: None,
+        coverage_root: None,
+        only: Vec::new(),
+        skip: Vec::new(),
+        no_css: true,
+        css_deep: false,
+        no_css_deep: false,
+        gate: None,
+        worsened: None,
+        runtime_coverage: None,
+        min_invocations_hot: 0,
+        mutation_report: None,
+        gate_marker: None,
+        brief: true,
+        max_decisions,
+        walkthrough_guide: false,
+        walkthrough_file: None,
+        walkthrough: false,
+        mark_viewed: Vec::new(),
+        show_cleared: false,
         show_deprioritized: false,
         scope: None,
     }

@@ -165,6 +165,8 @@ pub struct AuditOptions<'a> {
     pub runtime_coverage: Option<&'a std::path::Path>,
     /// Threshold for hot-path classification, forwarded to the sidecar.
     pub min_invocations_hot: u64,
+    /// Parsed `--mutation-report` file for the brief. `None`: not measured.
+    pub mutation_report: Option<&'a crate::audit_focus::mutation::AuditMutationReport>,
     /// Render the deterministic, always-exit-0 review brief (`fallow audit
     /// --brief` / `fallow review`) instead of the gating audit report. The
     /// audit analysis still runs and the verdict is still computed and carried
@@ -365,6 +367,7 @@ fn build_base_audit_options<'a>(
         css_deep: opts.css_deep,
         runtime_coverage: None,
         min_invocations_hot: opts.min_invocations_hot,
+        mutation_report: None,
         brief: false,
         max_decisions: 4,
         walkthrough_guide: false,
@@ -831,6 +834,10 @@ fn run_audit_head_analyses(
                         .and_then(|evidence| evidence.diff_index.as_ref()),
                 )
             });
+        check.brief_mutation_survivors = opts.mutation_report.map(|report| {
+            let diff_index = diff_evidence.as_ref().and_then(|e| e.diff_index.as_ref());
+            report.brief_survivors(opts.root, opts.quiet, diff_index)
+        });
         brief_diff_evidence = diff_evidence;
         check.search_gaps =
             compute_brief_search_gaps(opts.root, check, changed_files, changed_exports.as_deref());
@@ -888,21 +895,6 @@ fn compute_brief_impact_closure(
         .and_then(|out| out.graph.as_ref())?;
 
     fallow_engine::module_graph::impact_closure_for_changed_paths(graph, root, changed_files)
-}
-
-/// Reviewer routing for the brief. Reuses the churn pass that the co-change
-/// gaps read, and reads the history only when no such pass is on `check`.
-fn brief_routing(
-    root: &std::path::Path,
-    check: &CheckResult,
-    changed_files: &FxHashSet<PathBuf>,
-) -> routing::RoutingFacts {
-    match check.brief_churn.as_ref() {
-        Some(churn) => {
-            routing::compute_routing_from_churn(root, &check.config, changed_files, churn)
-        }
-        None => routing::compute_routing(root, &check.config, changed_files),
-    }
 }
 
 /// Scope note on every co-change gap fact.
@@ -1443,7 +1435,7 @@ fn prepare_audit_brief_external_data(
     base_ref: &str,
 ) -> AuditBriefExternalData {
     let security_step_signals = compute_security_step_signals(opts.root, base_ref, changed_files);
-    let routing = check.map(|check| brief_routing(opts.root, check, changed_files));
+    let routing = check.map(|check| routing::brief_routing(opts.root, check, changed_files));
     let diff_evidence = compute_brief_diff_evidence(opts.root, base_ref, opts.walkthrough_file);
     let dependency_anchors = compute_dependency_anchors(
         opts.root,
@@ -1799,9 +1791,9 @@ fn compute_audit_brief_data_with_lookups(
         match preloaded {
             None => (
                 compute_security_step_signals(input.opts.root, input.base_ref, input.changed_files),
-                input
-                    .check
-                    .map(|check| brief_routing(input.opts.root, check, input.changed_files)),
+                input.check.map(|check| {
+                    routing::brief_routing(input.opts.root, check, input.changed_files)
+                }),
                 None,
                 compute_dependency_anchors(
                     input.opts.root,

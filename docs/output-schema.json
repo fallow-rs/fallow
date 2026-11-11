@@ -21781,11 +21781,27 @@
         },
         "runtime": {
           "type": "integer",
-          "description": "Runtime-weight component (paid): a hot path (runtime evidence of high\ninvocation) adds an invocation-bucketed weight so it amplifies the blast\nand outranks an otherwise-equal cold unit. `0` in free mode (no runtime\ninput), so the free-tier total stays the four deterministic components and\nis byte-identical to the no-runtime baseline."
+          "description": "Runtime-weight component (paid): a hot path (runtime evidence of high\ninvocation) adds an invocation-bucketed weight so it amplifies the blast\nand outranks an otherwise-equal cold unit. `0` and omitted in free mode\n(no runtime input)."
+        },
+        "churn": {
+          "type": "integer",
+          "description": "Churn component: the recency-weighted commit count of the file in the\nchurn window (90-day half-life), in capped bands. Omitted while it is\nzero, which includes a test file and a run without a git history or on a\nshallow clone."
+        },
+        "worsened": {
+          "type": "integer",
+          "description": "Worsened component: the functions of the file whose complexity metrics\ngrew against the matched base finding (`worsened_metrics`), capped.\nOmitted while it is zero, which includes a run without a base."
+        },
+        "test_reach": {
+          "type": "integer",
+          "description": "Test-reach component: the changed exports of the file that no test\nruns for real (`mocked-only`, `none`, or `none-file` in a project with\ntests), capped. Omitted while it is zero."
+        },
+        "mutation": {
+          "type": "integer",
+          "description": "Mutation component: the surviving mutants on the added lines of the\nfile, from the `--mutation-report` file, capped. Omitted while it is\nzero. Without `--mutation-report` the component is not measured, which\ndoes not mean that no mutant survives."
         },
         "total": {
           "type": "integer",
-          "description": "The summed total of every present component (the four deterministic ones\nplus the runtime weight)."
+          "description": "The sum of every component, also of the components that the wire\nomits because they are zero."
         }
       },
       "required": [
