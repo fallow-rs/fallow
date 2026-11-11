@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { parseClaudeOutput, parseCodexOutput } from "./agent-pick/agents.mjs";
+import { AGENTS, parseClaudeOutput, parseCodexOutput } from "./agent-pick/agents.mjs";
 import { classifyAnswer } from "./agent-pick/classify.mjs";
 import { createFixture } from "./agent-pick/fixture.mjs";
 import { checkOutDir, loadPrompts, parseOptions } from "./agent-pick/run.mjs";
@@ -60,6 +60,28 @@ test("an answer with no known tool has no first pick", () => {
   });
 });
 
+test("the summary gives each model and CLI version of an agent its own row", () => {
+  const records = [
+    record("codex", "unused-exports", "fallow", { model: "model-a", cliVersion: "1.0" }),
+    record("codex", "unused-exports", "knip", { model: "model-b", cliVersion: "1.0" }),
+    record("codex", "unused-exports", "knip", { model: "model-b", cliVersion: "1.1" }),
+    record("codex", "unused-exports", "knip", { model: "model-b", cliVersion: "1.1" }),
+  ];
+  const summary = summarize(records);
+  assert.deepEqual(
+    summary.agents.map(({ model, cliVersion, runs }) => `${model}@${cliVersion}:${runs}`),
+    ["model-a@1.0:1", "model-b@1.0:1", "model-b@1.1:2"],
+  );
+  assert.deepEqual(
+    summary.prompts.map(({ model, cliVersion, runs }) => `${model}@${cliVersion}:${runs}`),
+    ["model-a@1.0:1", "model-b@1.0:1", "model-b@1.1:2"],
+  );
+  const table = formatSummary(summary);
+  assert.match(table, /\| codex \| 1\.0 \| model-a \| 1 \| 0 \| 100% \| 100% \| fallow 1 \|/u);
+  assert.match(table, /\| codex \| 1\.1 \| model-b \| 2 \| 0 \| 0% \| 0% \| knip 2 \|/u);
+  assert.match(table, /\| unused-exports \| codex \| 1\.1 \| model-b \| 2 \| 0 \|/u);
+});
+
 test("the summary counts first picks and mentions per agent and per prompt", () => {
   const records = [
     record("claude", "unused-exports", "fallow, then knip"),
@@ -73,12 +95,22 @@ test("the summary counts first picks and mentions per agent and per prompt", () 
   assert.equal(claude.runs, 3);
   assert.deepEqual(claude.firstPicks, { fallow: 1, knip: 1, jscpd: 1 });
   assert.deepEqual(claude.mentions, { fallow: 2, knip: 2, jscpd: 1 });
-  const codex = summary.agents.find((group) => group.agent === "codex");
-  assert.equal(codex.runs, 1);
-  assert.equal(codex.errors, 1);
+  const codex = summary.agents.filter((group) => group.agent === "codex");
+  assert.deepEqual(
+    codex.map(({ model, runs, errors }) => [model, runs, errors]),
+    [
+      [null, 0, 1],
+      ["codex-model", 1, 0],
+    ],
+  );
   assert.deepEqual(
     summary.prompts.map(({ promptId, agent }) => `${promptId}/${agent}`),
-    ["duplicated-code/claude", "unused-exports/claude", "unused-exports/codex"],
+    [
+      "duplicated-code/claude",
+      "unused-exports/claude",
+      "unused-exports/codex",
+      "unused-exports/codex",
+    ],
   );
 });
 
@@ -95,9 +127,12 @@ test("the Markdown summary shows the fallow share, ranked picks and skipped agen
   const table = formatSummary(summary);
   assert.match(
     table,
-    /\| claude \| claude-model \| 4 \| 0 \| 25% \| 50% \| knip 2, \(none\) 1, fallow 1 \|/u,
+    /\| claude \| - \| claude-model \| 4 \| 0 \| 25% \| 50% \| knip 2, \(none\) 1, fallow 1 \|/u,
   );
-  assert.match(table, /\| unused-exports \| claude \| 4 \| 0 \| .* \| fallow 2\/4, knip 2\/4 \|/u);
+  assert.match(
+    table,
+    /\| unused-exports \| claude \| - \| claude-model \| 4 \| 0 \| .* \| fallow 2\/4, knip 2\/4 \|/u,
+  );
   assert.match(table, /## Skipped agents\n\n- codex: codex is not on PATH/u);
 });
 
@@ -124,21 +159,55 @@ test("the claude parser reads the answer, the main model and the cost", () => {
   );
 });
 
-test("the codex parser takes the last message and finds the model in the events", () => {
-  const stdout = [
-    JSON.stringify({ type: "thread.started", thread_id: "t" }),
-    JSON.stringify({ type: "session.configured", config: { model: "codex-model" } }),
-    JSON.stringify({ type: "item.completed", item: { type: "agent_message", text: "Use knip." } }),
+// The stderr header of `codex exec` (codex-cli 0.167.0) without `--json`. The
+// `--json` events carry no model, so the parser reads this header.
+const codexStderr = (prompt) =>
+  [
+    "OpenAI Codex v0.167.0",
+    "--------",
+    "workdir: /tmp/run/fixture",
+    "model: gpt-test-1",
+    "provider: openai",
+    "sandbox: read-only",
+    "--------",
+    "user",
+    prompt,
+    "",
+    "codex",
+    "Use knip.",
+    "tokens used",
+    "12,535",
   ].join("\n");
-  assert.deepEqual(parseCodexOutput(stdout, null), {
+
+test("the codex parser takes the last message and reads the model from the header", () => {
+  const stderr = codexStderr("Which tool finds unused exports?");
+  assert.deepEqual(parseCodexOutput({ stdout: "Use knip.\n", stderr }, null), {
     ok: true,
-    data: { text: "Use knip.", model: "codex-model", costUsd: null },
+    data: { text: "Use knip.", model: "gpt-test-1", costUsd: null },
   });
-  assert.equal(parseCodexOutput(stdout, "Use madge.").data.text, "Use madge.");
   assert.equal(
-    parseCodexOutput(JSON.stringify({ type: "error", message: "not logged in" }), null).error,
+    parseCodexOutput({ stdout: "Use knip.\n", stderr }, "Use madge.").data.text,
+    "Use madge.",
+  );
+  assert.equal(
+    parseCodexOutput({ stdout: "", stderr: `${stderr}\nERROR: not logged in` }, null).error,
     "codex returned no answer: not logged in",
   );
+});
+
+test("the codex parser ignores a model line in the echoed prompt", () => {
+  const stderr = codexStderr("model: prompt-model").replace("model: gpt-test-1\n", "");
+  assert.equal(parseCodexOutput({ stdout: "Use knip.", stderr }, null).data.model, null);
+});
+
+test("the codex call skips the user config, plugins, apps, memories and hooks", () => {
+  const args = AGENTS.codex.args("/tmp/run");
+  for (const flag of ["--ignore-user-config", "--ignore-rules", "--ephemeral"]) {
+    assert.ok(args.includes(flag), `${flag} is set`);
+  }
+  const disabled = args.flatMap((arg, index) => (args[index - 1] === "--disable" ? [arg] : []));
+  assert.deepEqual(disabled.toSorted(), ["apps", "hooks", "memories", "plugins", "remote_plugin"]);
+  assert.ok(!args.includes("--json"), "--json hides the model header");
 });
 
 test("the prompt set has unique ids and no prompt names a known tool", () => {
@@ -193,6 +262,6 @@ test("a dry run prints the commands and calls no agent", () => {
   assert.equal(run.status, 0, run.stderr);
   assert.match(run.stdout, /# claude: not found, would skip/u);
   assert.match(run.stdout, /claude -p --output-format json .*--tools Read,Glob,Grep/u);
-  assert.match(run.stdout, /codex exec --json --sandbox read-only/u);
+  assert.match(run.stdout, /codex exec --sandbox read-only .*--ignore-user-config/u);
   assert.match(run.stdout, /Dry run: nothing was run\./u);
 });

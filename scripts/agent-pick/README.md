@@ -9,7 +9,10 @@ tool. The tracker then records the tools that each answer names.
 For each prompt, agent and run, the tracker records these fields:
 
 - `agent` and `cliVersion`: the CLI and its version.
-- `model`: the model id that the CLI output reports.
+- `model`: the model id that the CLI output reports. For `claude`, this is the
+  model with the most output tokens in the JSON result. For `codex`, this is the
+  `model:` line of the settings header that `codex exec` prints to standard
+  error. The `codex exec --json` events do not contain the model.
 - `promptId` and `category`: the request from `prompts.json`.
 - `firstPick`: the known tool that the answer names first.
 - `picks`: all known tools that the answer names, in order of first appearance.
@@ -31,7 +34,15 @@ mention. Read the `answer` field when a count looks wrong.
    - `claude -p` gets only the read-only `Read`, `Glob` and `Grep` tools. It
      also gets `--safe-mode` and `--strict-mcp-config`, so local plugins,
      skills, memory and MCP servers do not change the answer.
-   - `codex exec` runs in the `read-only` sandbox with `--ephemeral`.
+   - `codex exec` runs in the `read-only` sandbox with `--ephemeral`. It also
+     gets `--ignore-user-config`, `--ignore-rules` and `--disable` for the
+     `plugins`, `remote_plugin`, `apps`, `memories` and `hooks` features, so
+     the local config and extensions do not change the answer.
+
+   `codex` has no flag that skips the global `AGENTS.md` file or the user
+   skills. A run on a machine with fallow instructions in those files can
+   still push `codex` toward fallow. For a fair `codex` run, use a user
+   account or a `CODEX_HOME` without these files.
 
 ## How to run it
 
@@ -59,7 +70,9 @@ Options:
 - `--dry-run`: print the commands and run nothing.
 
 The tracker writes `results.jsonl`, `summary.json` and `summary.md` to the
-output directory. It refuses an output directory inside the repository that
+output directory. The summary has one row for each agent version: the agent,
+its CLI version and the model. A call that fails reports no model, so its
+error counts in a row with the model `-`. It refuses an output directory inside the repository that
 git does not ignore, so results never go into tracked files.
 
 ## What it costs

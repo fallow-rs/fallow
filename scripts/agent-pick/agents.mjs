@@ -8,6 +8,9 @@ import { join } from "node:path";
 /** The file name that `codex exec -o` writes the last agent message to. */
 const CODEX_LAST_MESSAGE = "codex-last-message.txt";
 
+/** The codex features that load local extensions into the agent context. */
+const CODEX_DISABLED_FEATURES = ["plugins", "remote_plugin", "apps", "memories", "hooks"];
+
 /**
  * Pick the model that produced the most output tokens. Claude Code can call
  * a small model for internal steps, and that model is not the one that wrote
@@ -48,50 +51,55 @@ export const parseClaudeOutput = (stdout) => {
   };
 };
 
-const findModel = (value) => {
-  if (value === null || typeof value !== "object") return null;
-  if (typeof value.model === "string" && value.model.length > 0) return value.model;
-  for (const child of Object.values(value)) {
-    const model = findModel(child);
-    if (model) return model;
+/** The line that opens and closes the settings header of `codex exec`. */
+const CODEX_HEADER_RULE = "--------";
+const CODEX_MODEL_LINE = /^model: (?<model>\S+)$/u;
+const CODEX_ERROR_LINE = /^ERROR: (?<message>.+)$/u;
+
+/**
+ * Read the model from the settings header that `codex exec` prints to
+ * standard error. The `--json` events carry no model, so the codex call does
+ * not use `--json`. Only the lines between the first two rules count, because
+ * the prompt echo after the header can hold any text.
+ */
+const codexHeaderModel = (stderr) => {
+  const lines = stderr.split("\n").map((line) => line.trimEnd());
+  const open = lines.indexOf(CODEX_HEADER_RULE);
+  if (open === -1) return null;
+  const close = lines.indexOf(CODEX_HEADER_RULE, open + 1);
+  if (close === -1) return null;
+  for (const line of lines.slice(open + 1, close)) {
+    const match = CODEX_MODEL_LINE.exec(line);
+    if (match) return match.groups.model;
   }
   return null;
 };
 
 /**
- * Parse the JSONL events of `codex exec --json`. The text comes from the
- * last-message file when it exists, and else from the last agent message event.
- * @param {string} stdout
+ * Parse the output of `codex exec` without `--json`. The text comes from the
+ * last-message file when it exists, and else from standard output, which holds
+ * only the last agent message.
+ * @param {{ stdout: string, stderr: string }} output
  * @param {string | null} lastMessage
  * @returns {{ ok: true, data: { text: string, model: string | null, costUsd: null } }
  *   | { ok: false, error: string }}
  */
-export const parseCodexOutput = (stdout, lastMessage) => {
-  const events = stdout
-    .split("\n")
-    .filter((line) => line.trim().startsWith("{"))
-    .flatMap((line) => {
-      try {
-        return [JSON.parse(line)];
-      } catch {
-        return [];
-      }
-    });
-  const failure = events.find((event) => event.type === "error" || event.type === "turn.failed");
-  const messages = events
-    .map((event) => event.item)
-    .filter((item) => item?.type === "agent_message" && typeof item.text === "string");
-  const text = lastMessage?.trim() ? lastMessage : messages.at(-1)?.text;
+export const parseCodexOutput = ({ stdout, stderr }, lastMessage) => {
+  const text = lastMessage?.trim() ? lastMessage : stdout.trim();
   if (!text) {
-    const detail = failure?.message ?? failure?.error?.message;
+    const detail = stderr
+      .split("\n")
+      .map((line) => CODEX_ERROR_LINE.exec(line.trim())?.groups.message)
+      .findLast(Boolean);
     return { ok: false, error: `codex returned no answer${detail ? `: ${detail}` : ""}` };
   }
-  return { ok: true, data: { text, model: findModel(events), costUsd: null } };
+  return { ok: true, data: { text, model: codexHeaderModel(stderr), costUsd: null } };
 };
 
 /**
  * The supported agents. `args` receives the run directory, which holds the
  * fixture project in `fixture/` and is a safe place for CLI side files.
+ * `parse` receives the standard output and standard error of the call.
  */
 export const AGENTS = {
   claude: {
@@ -114,33 +122,37 @@ export const AGENTS = {
       "--max-budget-usd",
       "1",
     ],
-    parse: (stdout) => parseClaudeOutput(stdout),
+    parse: ({ stdout }) => parseClaudeOutput(stdout),
   },
   codex: {
     binary: "codex",
     args: (runDir) => [
       "exec",
-      "--json",
       // The read-only sandbox blocks file writes and network for every
       // command that the agent runs.
       "--sandbox",
       "read-only",
       "--ephemeral",
       "--skip-git-repo-check",
+      // The answer must reflect the agent itself, not the config, plugins,
+      // apps, memories and hooks of the machine that runs the tracker.
+      "--ignore-user-config",
+      "--ignore-rules",
+      ...CODEX_DISABLED_FEATURES.flatMap((feature) => ["--disable", feature]),
       "--color",
       "never",
       "-o",
       join(runDir, CODEX_LAST_MESSAGE),
       "-",
     ],
-    parse: (stdout, runDir) => {
+    parse: (output, runDir) => {
       let lastMessage = null;
       try {
         lastMessage = readFileSync(join(runDir, CODEX_LAST_MESSAGE), "utf8");
       } catch {
         lastMessage = null;
       }
-      return parseCodexOutput(stdout, lastMessage);
+      return parseCodexOutput(output, lastMessage);
     },
   },
 };

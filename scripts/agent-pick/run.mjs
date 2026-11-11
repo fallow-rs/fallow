@@ -176,7 +176,7 @@ const callAgent = async ({ agentId, prompt, promptSet, run, timeoutMs, version }
       input: buildPrompt(promptSet, prompt),
       timeoutMs,
     });
-    const parsed = agent.parse(result.stdout, fixture.runDir);
+    const parsed = agent.parse(result, fixture.runDir);
     const base = {
       timestamp: new Date(started).toISOString(),
       agent: agentId,
