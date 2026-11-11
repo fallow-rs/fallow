@@ -2255,14 +2255,6 @@ mod tests {
         let results = AnalysisResults::default();
         let type_aware = fallow_types::envelope::TypeAwareMeta {
             executed: true,
-            identity: None,
-            required_completeness: None,
-            queries: Vec::new(),
-            candidate_decisions: Vec::new(),
-            symbol_traces: Vec::new(),
-            api_surface: None,
-            symbol_impacts: Vec::new(),
-            type_coupling: None,
             protocol_version: 2,
             sidecar_version: Some("0.1.0".to_string()),
             backend: "typescript-go".to_string(),
@@ -2281,6 +2273,7 @@ mod tests {
             warnings: vec!["unresolved finding kept".to_owned()],
             elapsed_ms: 12,
             phase_timings_ms: fallow_types::envelope::TypeAwarePhaseTimings::default(),
+            ..fallow_types::envelope::TypeAwareMeta::default()
         };
         let output = api_check_json_document_with_config_fixable_meta_and_extras(
             &results,

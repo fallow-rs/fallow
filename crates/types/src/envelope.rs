@@ -412,6 +412,10 @@ pub struct TypeAwareMeta {
     /// Advisory project-local public-signature coupling.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub type_coupling: Option<TypeCouplingReport>,
+    /// The call evidence of the `constant-parameter` rule. Present when the
+    /// rule sent candidates to the companion.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub call_evidence: Option<TypeAwareCallEvidenceMeta>,
     /// Whether the semantic companion executed at least one query.
     pub executed: bool,
     /// Version of Fallow's backend-neutral sidecar protocol.
@@ -452,6 +456,26 @@ pub struct TypeAwareMeta {
     pub elapsed_ms: u64,
     /// Bounded semantic phase timings reported by the sidecar.
     pub phase_timings_ms: TypeAwarePhaseTimings,
+}
+
+/// The call evidence that the `constant-parameter` rule asked the companion
+/// for.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct TypeAwareCallEvidenceMeta {
+    /// Parameters with a default whose arguments the companion typed.
+    pub default_candidates: usize,
+    /// Methods of exported classes whose calls the companion read.
+    pub method_candidates: usize,
+    /// Findings that the evidence proved.
+    pub findings: usize,
+    /// The count of each reason that a candidate got no evidence, such as
+    /// `outside-program` or `decorator`. An open set: a later version can
+    /// add a reason.
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub abstention_reasons: std::collections::BTreeMap<String, usize>,
+    /// Duration of the request as reported by the companion.
+    pub elapsed_ms: u64,
 }
 
 /// Closed set of reasons for retaining a candidate without semantic scanning.

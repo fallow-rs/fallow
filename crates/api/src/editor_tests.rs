@@ -655,6 +655,8 @@ fn merge_test_unused_member(
 )]
 pub fn merge_test_source_with_all_fields() -> EditorAnalysisResults {
     EditorAnalysisResults {
+        constant_parameter_candidates: fallow_types::results::ConstantParameterCandidates::default(
+        ),
         shared_state: None,
         unused_files: vec![UnusedFileFinding::with_actions(UnusedFile {
             path: "/f.ts".into(),
@@ -1054,6 +1056,7 @@ pub fn merge_test_source_with_all_fields() -> EditorAnalysisResults {
                     line: 3,
                     col: 4,
                     reason: super::editor_results::ConstantParameterReason::IdenticalArgument,
+                    evidence: None,
                     value: Some(super::editor_results::ConstantParameterValue {
                         kind: super::editor_results::ConstantParameterValueKind::Boolean,
                         text: "true".to_string(),

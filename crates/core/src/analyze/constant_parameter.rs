@@ -25,7 +25,8 @@ use crate::graph::{
 };
 use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
 use crate::results::{
-    ConstantParameter, ConstantParameterCallSite, ConstantParameterReason, MAX_INSPECTED_CALL_SITES,
+    ConstantParameter, ConstantParameterCallSite, ConstantParameterCandidates,
+    ConstantParameterReason, MAX_INSPECTED_CALL_SITES, constant_parameter_explanation,
 };
 
 /// The fewest calls that the rule reads for one parameter. With one call,
@@ -33,10 +34,6 @@ use crate::results::{
 /// read of public projects found findings with two calls as useful as
 /// findings with more calls.
 const MIN_CALL_SITES: usize = 2;
-
-const IDENTICAL_EXPLANATION: &str = "Each visible call passes the same value for this parameter. Review whether the parameter is needed; static analysis does not prove that no caller outside the project exists.";
-const NEVER_SET_EXPLANATION: &str = "No visible call sets this option key, so it always has its default or is undefined. Review whether the option is needed; static analysis does not prove that no caller outside the project exists.";
-const NEVER_PASSED_EXPLANATION: &str = "No visible call passes this optional parameter, so its default always applies. Review whether the parameter is needed; static analysis does not prove that no caller outside the project exists.";
 
 /// Why the rule abstains for one function.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
@@ -201,6 +198,10 @@ struct ConstantParameterInput<'a> {
     line_offsets_by_file: &'a LineOffsetsMap<'a>,
     /// `true` when a `constant-parameter` suppression covers the line.
     is_suppressed: &'a dyn Fn(FileId, u32) -> bool,
+    /// `true` when the run has type-aware mode on. The gate then also reads
+    /// exported classes, and the rule collects the candidates that need
+    /// type evidence.
+    type_aware: bool,
 }
 
 /// One parameter, or one option key of an object-pattern parameter, that
@@ -228,6 +229,8 @@ struct Call<'a> {
 /// the rule abstained for.
 struct Evaluation {
     findings: Vec<ConstantParameter>,
+    /// The candidates that need type evidence, empty without type-aware mode.
+    candidates: ConstantParameterCandidates,
     #[cfg(test)]
     abstained: FxHashMap<FnId, Abstain>,
     /// Present when debug logging or a test reads it.
@@ -241,6 +244,8 @@ struct Gate<'a> {
     /// Each exported contract by its export name, for a target that does not
     /// resolve to one export.
     by_export_name: FxHashMap<&'a str, Vec<FnId>>,
+    /// The class targets of type-aware mode.
+    classes: ClassTargets<'a>,
     blocked: FxHashMap<FnId, Abstain>,
     reasons: FxHashMap<FnId, Reasons>,
     calls: FxHashMap<FnId, Vec<Call<'a>>>,
@@ -270,7 +275,12 @@ fn find_constant_parameters(input: &ConstantParameterInput<'_>) -> Evaluation {
         gate.scan_module(module);
     }
     let findings = gate.emit();
-    gate.finish(findings)
+    let candidates = if input.type_aware {
+        gate.type_candidates()
+    } else {
+        ConstantParameterCandidates::default()
+    };
+    gate.finish(findings, candidates)
 }
 
 impl<'a> Gate<'a> {
@@ -282,9 +292,14 @@ impl<'a> Gate<'a> {
             .iter()
             .map(|m| (m.file_id, m))
             .collect();
+        let classes = if input.type_aware {
+            class_targets(input.modules)
+        } else {
+            ClassTargets::default()
+        };
         let mut by_export_name: FxHashMap<&str, Vec<FnId>> = FxHashMap::default();
         for module in input.modules {
-            for (contract, name) in exported_contracts(module) {
+            for (contract, name) in exported_contracts(module, &classes) {
                 by_export_name
                     .entry(name)
                     .or_default()
@@ -296,6 +311,7 @@ impl<'a> Gate<'a> {
             modules,
             resolved,
             by_export_name,
+            classes,
             blocked: FxHashMap::default(),
             reasons: FxHashMap::default(),
             calls: FxHashMap::default(),
@@ -310,11 +326,16 @@ impl<'a> Gate<'a> {
         }
     }
 
-    fn finish(self, findings: Vec<ConstantParameter>) -> Evaluation {
+    fn finish(
+        self,
+        findings: Vec<ConstantParameter>,
+        candidates: ConstantParameterCandidates,
+    ) -> Evaluation {
         let stats = (cfg!(test) || tracing::enabled!(tracing::Level::DEBUG))
             .then(|| self.stats(findings.len()));
         Evaluation {
             findings,
+            candidates,
             #[cfg(test)]
             abstained: self.blocked,
             stats,
@@ -387,8 +408,7 @@ impl<'a> Gate<'a> {
         let count = self
             .modules
             .get(&file)
-            .and_then(|module| facts(module))
-            .map_or(0, |facts| facts.declarations.len());
+            .map_or(0, |module| target_count(module, &self.classes));
         for index in 0..count {
             if let Ok(index) = u32::try_from(index) {
                 self.block((file, index), reason);
@@ -541,7 +561,7 @@ impl<'a> Gate<'a> {
             return None;
         }
         let local = export_local_name(export)?;
-        Some((file, local_contract(module, local)?))
+        Some((file, local_target(module, local, &self.classes)?))
     }
 
     /// Block the surfaces that callers outside the facts can reach: package
@@ -663,8 +683,8 @@ impl<'a> Gate<'a> {
         let file = module.file_id;
         let plugin = self.input.plugin_used_export_files.contains(&file);
         for export in module.exports.iter() {
-            let Some(contract) =
-                export_local_name(export).and_then(|local| local_contract(module, local))
+            let Some(contract) = export_local_name(export)
+                .and_then(|local| local_target(module, local, &self.classes))
             else {
                 continue;
             };
@@ -1131,18 +1151,14 @@ impl<'a> Gate<'a> {
             line,
             col,
             reason,
+            evidence: None,
             value: value.map(values::Value::wire),
             optional: subject.optional,
             has_default: subject.has_default,
             condition_reads: subject.condition_reads,
             call_site_count: u32::try_from(calls.len()).unwrap_or(u32::MAX),
             inspected_call_sites: sites,
-            explanation: match (reason, subject.option_key) {
-                (ConstantParameterReason::NeverPassed, Some(_)) => NEVER_SET_EXPLANATION,
-                (ConstantParameterReason::NeverPassed, None) => NEVER_PASSED_EXPLANATION,
-                _ => IDENTICAL_EXPLANATION,
-            }
-            .to_string(),
+            explanation: constant_parameter_explanation(reason, subject.option_key.is_some(), None),
         }
     }
 }
@@ -1239,6 +1255,41 @@ fn export_local_name(export: &fallow_types::extract::ExportInfo) -> Option<&str>
     })
 }
 
+/// The class targets of each module, by the local name of the class: the
+/// index after the function contracts. Empty without type-aware mode.
+type ClassTargets<'a> = FxHashMap<FileId, FxHashMap<&'a str, u32>>;
+
+fn class_targets(modules: &[ModuleInfo]) -> ClassTargets<'_> {
+    let mut targets = ClassTargets::default();
+    for module in modules {
+        let offset = facts(module).map_or(0, |facts| facts.declarations.len());
+        let classes: FxHashMap<&str, u32> = candidates::method_classes(module)
+            .enumerate()
+            .filter_map(|(at, class)| Some((class.local, u32::try_from(offset + at).ok()?)))
+            .collect();
+        if !classes.is_empty() {
+            targets.insert(module.file_id, classes);
+        }
+    }
+    targets
+}
+
+/// The function contract that `local` names, or the class target.
+fn local_target(module: &ModuleInfo, local: &str, classes: &ClassTargets<'_>) -> Option<u32> {
+    local_contract(module, local).or_else(|| {
+        classes
+            .get(&module.file_id)
+            .and_then(|targets| targets.get(local).copied())
+    })
+}
+
+/// The count of targets of a module: its function contracts and its class
+/// targets.
+fn target_count(module: &ModuleInfo, classes: &ClassTargets<'_>) -> usize {
+    facts(module).map_or(0, |facts| facts.declarations.len())
+        + classes.get(&module.file_id).map_or(0, FxHashMap::len)
+}
+
 fn local_contract(module: &ModuleInfo, local: &str) -> Option<u32> {
     let index = facts(module)?
         .declarations
@@ -1247,14 +1298,18 @@ fn local_contract(module: &ModuleInfo, local: &str) -> Option<u32> {
     u32::try_from(index).ok()
 }
 
-/// Each exported contract of a module, with its export name.
-fn exported_contracts(module: &ModuleInfo) -> Vec<(u32, &str)> {
+/// Each exported contract of a module, with its export name. Each class
+/// target counts as a contract too.
+fn exported_contracts<'m>(
+    module: &'m ModuleInfo,
+    classes: &ClassTargets<'_>,
+) -> Vec<(u32, &'m str)> {
     module
         .exports
         .iter()
         .filter(|export| !export.is_type_only)
         .filter_map(|export| {
-            let contract = local_contract(module, export_local_name(export)?)?;
+            let contract = local_target(module, export_local_name(export)?, classes)?;
             let name = match &export.name {
                 ExportName::Named(name) => name.as_str(),
                 ExportName::Default => "default",
@@ -1372,6 +1427,7 @@ pub(super) fn populate(input: &mut super::PostDetectionInput<'_, '_>) {
         declared_deps: input.declared_deps,
         line_offsets_by_file: input.line_offsets_by_file,
         is_suppressed: &is_suppressed,
+        type_aware: config.type_aware.enabled,
     });
     #[cfg(test)]
     tests::record(
@@ -1381,6 +1437,7 @@ pub(super) fn populate(input: &mut super::PostDetectionInput<'_, '_>) {
         evaluation.stats.as_ref(),
     );
     log_stats(evaluation.stats.as_ref());
+    input.results.constant_parameter_candidates = evaluation.candidates;
     input.results.constant_parameters = evaluation
         .findings
         .into_iter()
@@ -1393,6 +1450,9 @@ mod specifiers;
 
 #[path = "constant_parameter_values.rs"]
 mod values;
+
+#[path = "constant_parameter_candidates.rs"]
+mod candidates;
 
 #[cfg(test)]
 #[path = "constant_parameter_tests.rs"]

@@ -126,6 +126,10 @@ pub enum ConstantParameterReason {
     /// The parameter is optional or has a default, and each call omits it.
     /// For an option key: no call sets the key.
     NeverPassed,
+    /// The parameter has a default, and each call passes a value whose type
+    /// excludes `undefined`, so the default never applies. Only type-aware
+    /// mode reports this reason.
+    UnusedDefault,
 }
 
 impl ConstantParameterReason {
@@ -135,6 +139,63 @@ impl ConstantParameterReason {
         match self {
             Self::IdenticalArgument => "identical-argument",
             Self::NeverPassed => "never-passed",
+            Self::UnusedDefault => "unused-default",
+        }
+    }
+}
+
+const IDENTICAL_EXPLANATION: &str = "Each visible call passes the same value for this parameter. Review whether the parameter is needed; static analysis does not prove that no caller outside the project exists.";
+const NEVER_SET_EXPLANATION: &str = "No visible call sets this option key, so it always has its default or is undefined. Review whether the option is needed; static analysis does not prove that no caller outside the project exists.";
+const NEVER_PASSED_EXPLANATION: &str = "No visible call passes this optional parameter, so its default always applies. Review whether the parameter is needed; static analysis does not prove that no caller outside the project exists.";
+const UNUSED_DEFAULT_EXPLANATION: &str = "Each visible call passes a value whose type excludes undefined, so the default value of this parameter never applies. Review whether the default is needed; static analysis does not prove that no caller outside the project exists.";
+const TYPE_EVIDENCE_CAVEAT: &str = " The TypeScript checker gave the evidence, and a type does not prove a run-time value: an any value, a cast, or data from outside the program can break it.";
+
+/// The explanation text of a [`ConstantParameter`] finding.
+#[must_use]
+pub fn constant_parameter_explanation(
+    reason: ConstantParameterReason,
+    option_key: bool,
+    evidence: Option<ConstantParameterEvidence>,
+) -> String {
+    let base = match (reason, option_key) {
+        (ConstantParameterReason::NeverPassed, true) => NEVER_SET_EXPLANATION,
+        (ConstantParameterReason::NeverPassed, false) => NEVER_PASSED_EXPLANATION,
+        (ConstantParameterReason::UnusedDefault, _) => UNUSED_DEFAULT_EXPLANATION,
+        (ConstantParameterReason::IdenticalArgument, _) => IDENTICAL_EXPLANATION,
+    };
+    match evidence {
+        Some(ConstantParameterEvidence::TypeAware) => format!("{base}{TYPE_EVIDENCE_CAVEAT}"),
+        None => base.to_string(),
+    }
+}
+
+/// The evidence that a [`ConstantParameter`] finding needs beyond the
+/// syntactic call facts.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum ConstantParameterEvidence {
+    /// The TypeScript checker gave the evidence: the calls of a class
+    /// method, or the argument types of an `unused-default` finding. A type
+    /// does not prove a run-time value: an `any` value, a cast, or data from
+    /// outside the program can break it.
+    TypeAware,
+}
+
+impl ConstantParameterEvidence {
+    /// The kebab-case wire token.
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::TypeAware => "type-aware",
+        }
+    }
+
+    /// The short tag that human and CI output add to a finding.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::TypeAware => "type evidence",
         }
     }
 }
@@ -281,7 +342,8 @@ pub struct ConstantParameter {
     /// Source path of the function.
     #[serde(serialize_with = "serde_path::serialize")]
     pub path: PathBuf,
-    /// The module-scope binding name of the function.
+    /// The module-scope binding name of the function. For a method of an
+    /// exported class, which only type-aware mode reports, `Class.method`.
     pub function_name: String,
     /// The parameter name. For an option key, the local binding of the key
     /// in the object pattern: `abort` for `{ signal: abort }`.
@@ -300,6 +362,10 @@ pub struct ConstantParameter {
     pub col: u32,
     /// Why the rule reports the parameter.
     pub reason: ConstantParameterReason,
+    /// The evidence that the finding needs beyond the syntactic call facts.
+    /// Absent for a finding that the call facts prove alone.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<ConstantParameterEvidence>,
     /// The value that each call passes. Present if and only if `reason` is
     /// `identical-argument`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -326,9 +392,18 @@ pub struct ConstantParameter {
 
 impl ConstantParameter {
     /// One clause that says how each call passes the parameter, for human
-    /// and CI output: `every call passes true`.
+    /// and CI output: `every call passes true`. A finding with type evidence
+    /// ends with the tag `(type evidence)`.
     #[must_use]
     pub fn summary(&self) -> String {
+        let summary = self.base_summary();
+        match self.evidence {
+            Some(evidence) => format!("{summary} ({})", evidence.label()),
+            None => summary,
+        }
+    }
+
+    fn base_summary(&self) -> String {
         match (&self.reason, &self.value) {
             (ConstantParameterReason::IdenticalArgument, Some(value)) => {
                 format!("every call passes {}", value.display())
@@ -348,6 +423,9 @@ impl ConstantParameter {
             }
             (ConstantParameterReason::IdenticalArgument, None) => {
                 "every call passes the same value".to_string()
+            }
+            (ConstantParameterReason::UnusedDefault, _) => {
+                "every call passes a value, so the default never applies".to_string()
             }
         }
     }
@@ -434,6 +512,89 @@ impl ConstantParameterFinding {
             effective_severity: None,
         }
     }
+}
+
+/// The candidates of the `constant-parameter` rule that need type evidence.
+/// The static gate selects them; the type-aware pass checks them. Not part of
+/// any output.
+#[derive(Debug, Clone, Default)]
+pub struct ConstantParameterCandidates {
+    /// Parameters with a default where each call passes an argument, and at
+    /// least one argument is not a literal.
+    pub defaults: Vec<UnusedDefaultCandidate>,
+    /// Exported classes whose module passes the closed-world gate.
+    pub classes: Vec<MethodClassCandidate>,
+    /// Each module of the project. The type-aware pass reads them to find a
+    /// reference to a method name outside the program of the class.
+    pub files: Vec<PathBuf>,
+}
+
+impl ConstantParameterCandidates {
+    /// `true` when no candidate needs type evidence.
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.defaults.is_empty() && self.classes.is_empty()
+    }
+
+    /// Add the candidates of another part of the same run.
+    pub fn extend(&mut self, other: Self) {
+        self.defaults.extend(other.defaults);
+        self.classes.extend(other.classes);
+        for file in other.files {
+            if !self.files.contains(&file) {
+                self.files.push(file);
+            }
+        }
+    }
+}
+
+/// A parameter whose default never applies when no argument of
+/// `arguments` can be `undefined`.
+#[derive(Debug, Clone)]
+pub struct UnusedDefaultCandidate {
+    /// The finding to report when the evidence holds, with the reason
+    /// `unused-default`.
+    pub finding: ConstantParameter,
+    /// The arguments that are not literals.
+    pub arguments: Vec<CandidateArgument>,
+}
+
+/// One argument of one call.
+#[derive(Debug, Clone)]
+pub struct CandidateArgument {
+    /// The file of the call.
+    pub path: PathBuf,
+    /// Start byte of the call expression.
+    pub call_start: u32,
+    /// 0-based index of the argument.
+    pub index: u32,
+}
+
+/// An exported class whose methods the type-aware pass reads.
+#[derive(Debug, Clone)]
+pub struct MethodClassCandidate {
+    /// The file that declares the class.
+    pub path: PathBuf,
+    /// The local name of the class in its module.
+    pub class_name: String,
+    /// The names of the methods without a decorator.
+    pub methods: Vec<String>,
+    /// The 1-based lines of the file where a `constant-parameter`
+    /// suppression applies.
+    pub suppressed_lines: Vec<u32>,
+}
+
+/// Sort findings by path, line, column and reason, so two findings of one
+/// parameter keep one order.
+pub fn sort_constant_parameters(findings: &mut [ConstantParameterFinding]) {
+    findings.sort_by(|a, b| {
+        a.parameter
+            .path
+            .cmp(&b.parameter.path)
+            .then(a.parameter.line.cmp(&b.parameter.line))
+            .then(a.parameter.col.cmp(&b.parameter.col))
+            .then(a.parameter.reason.as_str().cmp(b.parameter.reason.as_str()))
+    });
 }
 
 impl GatedFinding for ConstantParameterFinding {
@@ -540,6 +701,7 @@ mod tests {
         for reason in [
             ConstantParameterReason::IdenticalArgument,
             ConstantParameterReason::NeverPassed,
+            ConstantParameterReason::UnusedDefault,
         ] {
             let wire = serde_json::to_value(reason).expect("serialize");
             assert_eq!(wire, reason.as_str());

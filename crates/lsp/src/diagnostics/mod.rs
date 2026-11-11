@@ -607,6 +607,7 @@ mod severity_gate {
             unused_load_data_keys_global_abstain: _,
             semantic_reachable_files: _,
             semantic_framework_contracts: _,
+            constant_parameter_candidates: _,
             // No editor surface in v1: TypeScript already strikes deprecated
             // names through in the editor. The finding is for cleanup sweeps
             // and JSON consumers.

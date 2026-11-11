@@ -219,6 +219,7 @@ impl DeadCodeAuditLedger {
             react_component_intel: _react_component_intel,
             semantic_reachable_files: _,
             semantic_framework_contracts: _semantic_framework_contracts,
+            constant_parameter_candidates: _constant_parameter_candidates,
         } = results;
 
         macro_rules! annotate {
@@ -716,6 +717,7 @@ impl DeadCodeKeyCollector<'_> {
             react_component_intel: _react_component_intel,
             semantic_reachable_files: _,
             semantic_framework_contracts: _semantic_framework_contracts,
+            constant_parameter_candidates: _constant_parameter_candidates,
         } = results;
 
         self.add_items(AuditCollection::PropDrillingChains, prop_drilling_chains);
@@ -1604,6 +1606,7 @@ fn classify_introduced_dead_code_fields(results: &fallow_types::results::Analysi
         react_component_intel: _react_component_intel,
         semantic_reachable_files: _,
         semantic_framework_contracts: _semantic_framework_contracts,
+        constant_parameter_candidates: _constant_parameter_candidates,
     } = results;
 }
 

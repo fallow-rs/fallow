@@ -1936,6 +1936,7 @@ fn absent_component_prop_results(root: &Path) -> AnalysisResults {
             line: 1,
             col: 38,
             reason: ConstantParameterReason::IdenticalArgument,
+            evidence: None,
             value: Some(ConstantParameterValue {
                 kind: ConstantParameterValueKind::Boolean,
                 text: "true".into(),

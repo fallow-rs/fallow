@@ -43,9 +43,10 @@ pub use fallow_types::results::{
     UnusedServerAction, UnusedSvelteEvent,
 };
 pub use fallow_types::results::{
-    ConstantParameter, ConstantParameterCallSite, ConstantParameterFinding,
-    ConstantParameterReason, ConstantParameterValue, ConstantParameterValueKind,
-    MAX_INSPECTED_CALL_SITES,
+    CandidateArgument, ConstantParameter, ConstantParameterCallSite, ConstantParameterCandidates,
+    ConstantParameterEvidence, ConstantParameterFinding, ConstantParameterReason,
+    ConstantParameterValue, ConstantParameterValueKind, MAX_INSPECTED_CALL_SITES,
+    MethodClassCandidate, UnusedDefaultCandidate, constant_parameter_explanation,
 };
 pub use fallow_types::results::{DuplicateExportAlias, DuplicateExportAliasLocation};
 pub use fallow_types::results::{

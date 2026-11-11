@@ -30,6 +30,7 @@ import path from "node:path";
 
 import { ast, NodeFlags, projectCompilerOptions, sync, SyntaxKind } from "./backend.mjs";
 import { targetDirection } from "./accessor-direction.mjs";
+import { hasToken, isAmbient } from "./declaration-facts.mjs";
 import { declarationsForSymbol } from "./semantic-identity.mjs";
 
 const { TypeFlags, SymbolFlags } = sync;
@@ -143,25 +144,6 @@ const containsAssertion = (node) => {
 };
 
 const hasModifier = (node, kind) => node.modifiers?.some((modifier) => modifier.kind === kind);
-
-const hasToken = (node, kind) => {
-  let found = false;
-  node.forEachChild((child) => {
-    found = found || child.kind === kind;
-    return found ? true : undefined;
-  });
-  return found;
-};
-
-// True for a `declare` declaration, a member of one, or anything in a
-// declaration file: their types are claims that no code in the project checks.
-const isAmbient = (node) => {
-  for (let current = node; current; current = current.parent) {
-    if (current.isDeclarationFile === true) return true;
-    if (hasModifier(current, SyntaxKind.DeclareKeyword)) return true;
-  }
-  return false;
-};
 
 const typeAt = (project, declaration, symbol) =>
   project.checker.getTypeOfSymbolAtLocation(symbol, declaration);
