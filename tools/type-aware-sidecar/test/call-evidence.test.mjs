@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 
+import { BACKEND } from "../src/backend.mjs";
 import { collectCallEvidence } from "../src/call-evidence.mjs";
 import { parseRequest } from "../src/protocol.mjs";
 import { CALL_EVIDENCE_OPERATION, WIRE_PROTOCOL_VERSION } from "../src/generated-protocol.mjs";
@@ -80,6 +81,10 @@ const methodResults = (files, classes, compilerOptions = { strict: true }) =>
     (root) =>
       collectCallEvidence({ root, defaults: [], classes, files: Object.keys(files) }).methods,
   );
+
+// The experimental tsrs backend serves no signature usage, so it gives no
+// method evidence.
+const METHOD_TEST = { skip: BACKEND.family === "tsrs" && "the backend serves no signature usage" };
 
 const FUNCTION =
   "const fmt = (value: string, width: number = 2): string => value.padStart(width);\n";
@@ -156,58 +161,70 @@ const SERVICE = [
 
 const CLASSES = [{ id: 0, path: "src/svc.ts", class: "Service", methods: ["save", "load"] }];
 
-test("method calls through the class, a subclass and an interface are all visible", () => {
-  const use = [
-    'import { Service, Sub, type Saver } from "./svc";',
-    "const s = new Service();",
-    "const saver: Saver = s;",
-    's.save("a", 1); new Sub().save("b", 2); saver.save("c", 3);',
-    's.load("a"); s.load("b");',
-    "",
-  ].join("\n");
-  const [save, load] = methodResults({ "src/svc.ts": SERVICE, "src/use.ts": use }, CLASSES);
-  assert.equal(save.outcome, "complete");
-  assert.equal(save.calls.length, 3);
-  assert.ok(save.calls.every((call) => call.args[1].maybe_undefined === false));
-  assert.ok(save.calls.every((call) => !path.isAbsolute(call.path)));
-  assert.equal(load.outcome, "complete");
-  assert.ok(load.calls.every((call) => call.arg_count === 1));
-});
+test(
+  "method calls through the class, a subclass and an interface are all visible",
+  METHOD_TEST,
+  () => {
+    const use = [
+      'import { Service, Sub, type Saver } from "./svc";',
+      "const s = new Service();",
+      "const saver: Saver = s;",
+      's.save("a", 1); new Sub().save("b", 2); saver.save("c", 3);',
+      's.load("a"); s.load("b");',
+      "",
+    ].join("\n");
+    const [save, load] = methodResults({ "src/svc.ts": SERVICE, "src/use.ts": use }, CLASSES);
+    assert.equal(save.outcome, "complete");
+    assert.equal(save.calls.length, 3);
+    assert.ok(save.calls.every((call) => call.args[1].maybe_undefined === false));
+    assert.ok(save.calls.every((call) => !path.isAbsolute(call.path)));
+    assert.equal(load.outcome, "complete");
+    assert.ok(load.calls.every((call) => call.arg_count === 1));
+  },
+);
 
-test("a structurally compatible type that the class does not implement blocks the method", () => {
-  const use = [
-    'import { Service } from "./svc";',
-    "type Loader = { load(id: string, cache?: boolean): string };",
-    'const viaShape = (loader: Loader) => loader.load("x", true);',
-    'const s = new Service(); s.load("a"); s.load("b"); viaShape(s);',
-    "",
-  ].join("\n");
-  const [, load] = methodResults({ "src/svc.ts": SERVICE, "src/use.ts": use }, CLASSES);
-  assert.deepEqual([load.outcome, load.reason], ["abstained", "structural-alias"]);
-});
+test(
+  "a structurally compatible type that the class does not implement blocks the method",
+  METHOD_TEST,
+  () => {
+    const use = [
+      'import { Service } from "./svc";',
+      "type Loader = { load(id: string, cache?: boolean): string };",
+      'const viaShape = (loader: Loader) => loader.load("x", true);',
+      'const s = new Service(); s.load("a"); s.load("b"); viaShape(s);',
+      "",
+    ].join("\n");
+    const [, load] = methodResults({ "src/svc.ts": SERVICE, "src/use.ts": use }, CLASSES);
+    assert.deepEqual([load.outcome, load.reason], ["abstained", "structural-alias"]);
+  },
+);
 
-test("a value reference, an untyped receiver or a computed access blocks the method", () => {
-  const value =
-    'import { Service } from "./svc";\nconst s = new Service(); s.load("a"); s.load("b"); const f = s.load;\nvoid f;\n';
-  assert.equal(
-    methodResults({ "src/svc.ts": SERVICE, "src/use.ts": value }, CLASSES)[1].reason,
-    "value-reference",
-  );
-  const untyped =
-    'import { Service } from "./svc";\nconst s = new Service(); s.load("a"); s.load("b");\nexport const x = (o: any) => o.load("c", true);\n';
-  assert.equal(
-    methodResults({ "src/svc.ts": SERVICE, "src/use.ts": untyped }, CLASSES)[1].reason,
-    "unresolved-reference",
-  );
-  const computed =
-    'import { Service } from "./svc";\nconst s = new Service(); s.load("a"); s.load("b");\nexport const x = (k: "load" | "save") => s[k]("c");\n';
-  assert.equal(
-    methodResults({ "src/svc.ts": SERVICE, "src/use.ts": computed }, CLASSES)[1].reason,
-    "dynamic-member-access",
-  );
-});
+test(
+  "a value reference, an untyped receiver or a computed access blocks the method",
+  METHOD_TEST,
+  () => {
+    const value =
+      'import { Service } from "./svc";\nconst s = new Service(); s.load("a"); s.load("b"); const f = s.load;\nvoid f;\n';
+    assert.equal(
+      methodResults({ "src/svc.ts": SERVICE, "src/use.ts": value }, CLASSES)[1].reason,
+      "value-reference",
+    );
+    const untyped =
+      'import { Service } from "./svc";\nconst s = new Service(); s.load("a"); s.load("b");\nexport const x = (o: any) => o.load("c", true);\n';
+    assert.equal(
+      methodResults({ "src/svc.ts": SERVICE, "src/use.ts": untyped }, CLASSES)[1].reason,
+      "unresolved-reference",
+    );
+    const computed =
+      'import { Service } from "./svc";\nconst s = new Service(); s.load("a"); s.load("b");\nexport const x = (k: "load" | "save") => s[k]("c");\n';
+    assert.equal(
+      methodResults({ "src/svc.ts": SERVICE, "src/use.ts": computed }, CLASSES)[1].reason,
+      "dynamic-member-access",
+    );
+  },
+);
 
-test("a file outside the program that names the method blocks it", () => {
+test("a file outside the program that names the method blocks it", METHOD_TEST, () => {
   const use =
     'import { Service } from "./svc";\nconst s = new Service(); s.load("a"); s.load("b");\n';
   const [, load] = methodResults(
@@ -221,7 +238,7 @@ test("a file outside the program that names the method blocks it", () => {
   assert.deepEqual([load.outcome, load.reason], ["abstained", "outside-program"]);
 });
 
-test("a decorator or a member of an external base type blocks the method", () => {
+test("a decorator or a member of an external base type blocks the method", METHOD_TEST, () => {
   const decorated = SERVICE.replace(
     "export class Service",
     "const mark = (c: unknown, _: unknown) => c;\n@mark\nexport class Service",
@@ -380,7 +397,7 @@ const HIDDEN_CALLS = {
 };
 
 for (const [name, [files, reason]] of Object.entries(HIDDEN_CALLS)) {
-  test(`${name} blocks the method`, () => {
+  test(`${name} blocks the method`, METHOD_TEST, () => {
     const [result] = methodResults(
       { "src/svc.ts": STORE, "src/use.ts": STORE_USE, ...files },
       LOAD,
@@ -401,7 +418,7 @@ test("a method that the platform calls by name is not read", () => {
   assert.deepEqual([result.outcome, result.reason], ["abstained", "protocol-method"]);
 });
 
-test("a local class of the same name does not stand for the module class", () => {
+test("a local class of the same name does not stand for the module class", METHOD_TEST, () => {
   const local = [
     "function local() {",
     "  class Service {",
@@ -419,3 +436,12 @@ test("a local class of the same name does not stand for the module class", () =>
   assert.equal(result.outcome, "complete");
   assert.equal(result.calls.length, 2);
 });
+
+test(
+  "a backend without signature usage gives no method evidence",
+  { skip: BACKEND.family !== "tsrs" },
+  () => {
+    const [result] = methodResults({ "src/svc.ts": STORE, "src/use.ts": STORE_USE }, LOAD);
+    assert.deepEqual([result.outcome, result.reason], ["abstained", "backend-unsupported"]);
+  },
+);

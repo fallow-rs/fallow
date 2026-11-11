@@ -1178,6 +1178,8 @@ const scanRiskFile = (scan, risks, allNames, absolutePath, text) => {
   }
 };
 
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&");
+
 const DECLARATION_FILE = /\.d\.[cm]?ts$/u;
 const MAX_EXTERNAL_MEMBERS = 200;
 
@@ -1186,7 +1188,7 @@ const MAX_EXTERNAL_MEMBERS = 200;
 // member on a value of a class that matches the owner type.
 const recordExternalMembers = (entry, state, names) => {
   const pattern = new RegExp(
-    `(?:^|[\\s;{,(])(${[...names].map((name) => name.replace(/\$/gu, "\\$")).join("|")})\\s*\\??\\s*[(<:]`,
+    `(?:^|[\\s;{,(])(${[...names].map(escapeRegExp).join("|")})\\s*\\??\\s*[(<:]`,
     "gu",
   );
   for (const fileName of entry.files) {
@@ -1407,6 +1409,10 @@ const methodEvidence = (programs, root, classRequest, method, risks) => {
   const { classNode, declaration } = found;
   const { readsArguments, params } = methodParams(sourceFile, declaration);
   if (readsArguments) return abstained("arguments-read");
+  // The experimental tsrs backend does not serve signature usage, so it gives
+  // no method evidence.
+  if (typeof project.checker.getSignatureUsage !== "function")
+    return abstained("backend-unsupported");
   const usages = project.checker.getSignatureUsage(declaration);
   const alias = structuralAlias(
     project,

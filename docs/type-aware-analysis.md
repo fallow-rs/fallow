@@ -323,6 +323,10 @@ overrides an abstain reason of the static gate. Without type-aware mode, the
 output of the rule does not change. `_meta.type_aware.call_evidence` counts the
 candidates, the findings and each abstention reason.
 
+The experimental tsrs backend does not serve `getSignatureUsage`, so with that
+backend each method abstains with `backend-unsupported`, and only the
+`unused-default` findings of functions remain.
+
 The operation builds its own Programs, next to the Programs of the
 `semantic-queries` request of the same run, and a semantic session does not
 accept it. So an editor session reports only the findings of the rule that the
