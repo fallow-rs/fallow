@@ -1,0 +1,3 @@
+### Fixed
+
+- **A `fallow-ignore-next-line` or `fallow-ignore-file` marker in a JSDoc comment now takes effect.** Before this fix, fallow skipped the markers `/** fallow-ignore-next-line unused-export */` and `/** fallow-ignore-file */` with no warning. It also skipped a marker on a ` * ` line of a multi-line JSDoc comment. Now a block comment accepts a marker at the start of any of its lines. A next-line marker applies to the line after the closing `*/`. An unknown issue kind in a JSDoc marker gives the same unknown-kind warning as the other forms, and an unused JSDoc marker shows in the stale suppressions. The extraction cache and the duplication token cache get a new version, so a warm cache does not keep the old result.
