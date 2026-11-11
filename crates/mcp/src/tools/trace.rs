@@ -45,7 +45,7 @@ pub async fn run_trace_export_tool(
         run_trace_export(&options).and_then(serialize_trace_export_programmatic_json)
     })
     .await?;
-    if let Some(result) = typed_tool_result(result) {
+    if let Some(result) = typed_tool_result("trace_export", result) {
         return Ok(result);
     }
     match build_trace_export_args(&params) {
@@ -67,7 +67,7 @@ pub async fn run_trace_file_tool(params: TraceFileParams) -> Result<CallToolResu
     .await?
     .map_or_else(
         |err| CallToolResult::error(vec![ContentBlock::text(programmatic_error_body(&err))]),
-        |value| json_success(&value),
+        |value| json_success("trace_file", &value),
     );
     Ok(result)
 }
@@ -88,7 +88,7 @@ pub async fn run_trace_import_path_tool(
     .await?
     .map_or_else(
         |err| CallToolResult::error(vec![ContentBlock::text(programmatic_error_body(&err))]),
-        |value| json_success(&value),
+        |value| json_success("trace_import_path", &value),
     );
     Ok(result)
 }
@@ -103,7 +103,7 @@ pub async fn run_trace_error_tool(params: TraceErrorParams) -> Result<CallToolRe
     .await?
     .map_or_else(
         |err| CallToolResult::error(vec![ContentBlock::text(programmatic_error_body(&err))]),
-        |value| json_success(&value),
+        |value| json_success("trace_error", &value),
     );
     Ok(result)
 }
@@ -124,7 +124,7 @@ pub async fn run_trace_dependency_tool(
     .await?
     .map_or_else(
         |err| CallToolResult::error(vec![ContentBlock::text(programmatic_error_body(&err))]),
-        |value| json_success(&value),
+        |value| json_success("trace_dependency", &value),
     );
     Ok(result)
 }
@@ -142,7 +142,7 @@ pub async fn run_trace_clone_tool(params: TraceCloneParams) -> Result<CallToolRe
     .await?
     .map_or_else(
         |err| CallToolResult::error(vec![ContentBlock::text(programmatic_error_body(&err))]),
-        |value| json_success(&value),
+        |value| json_success("trace_clone", &value),
     );
     Ok(result)
 }

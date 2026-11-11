@@ -170,7 +170,7 @@ The hosted data is context. It never proves that code is dead: the delete rule o
 
 ## Shared params, JSON output, and next_steps
 
-Most tools accept `root`, `config`, `no_cache`, and `threads` params. Exceptions: `impact` takes only `root`; `code_execute` takes `code`, optional `root`, `timeout_ms`, and `max_output_bytes`. Similar-code file scope is named `paths` on both standalone MCP tools and forwards repeated CLI `--file` flags. MCP subprocesses default to 120 seconds, except similar-code discovery and inspection which default to 15 minutes for cold local inference. `FALLOW_TIMEOUT_SECS` overrides either default. Code Mode does not expose similar-code because its 30-second cap cannot satisfy that contract.
+Most tools accept `root`, `config`, `no_cache`, and `threads` params. Exceptions: `impact` takes only `root`; `code_execute` takes `code`, optional `root`, `timeout_ms`, and `max_output_bytes`. Similar-code file scope is named `paths` on both standalone MCP tools and forwards repeated CLI `--file` flags. MCP subprocesses default to 120 seconds, except similar-code discovery and inspection which default to 15 minutes for cold local inference. `FALLOW_TIMEOUT_SECS` overrides either default. A tool response over 1,000,000 bytes is refused with `isError: true` and `code: FALLOW_MCP_SUBPROCESS_OUTPUT_LIMIT`; call again with the parameters in its `narrow` list. `FALLOW_MCP_MAX_OUTPUT_BYTES` sets that cap for the server, up to 16 MiB. Code Mode does not expose similar-code because its 30-second cap cannot satisfy that contract.
 
 Every dead-code, health, and duplication finding in JSON responses includes a structured `actions` array for programmatic fixes or suppression.
 

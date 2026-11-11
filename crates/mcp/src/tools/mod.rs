@@ -25,6 +25,7 @@ mod impact;
 mod inspect_target;
 mod list_boundaries;
 mod mutation;
+mod narrow;
 mod project_info;
 mod recommend;
 #[cfg(test)]
@@ -119,7 +120,16 @@ use fallow_process::{
 
 /// Default subprocess timeout in seconds.
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
-const DEFAULT_MAX_OUTPUT_BYTES: usize = 16 * 1024 * 1024;
+/// Default response cap of one tool call. It is the default result cap of
+/// Code Mode too, so both surfaces refuse at the same size. A response over
+/// it does not fit the context window of a usual agent, and a host that cuts
+/// it gives the agent invalid JSON.
+const DEFAULT_MAX_OUTPUT_BYTES: usize = 1_000_000;
+/// The highest server cap that [`MAX_OUTPUT_BYTES_ENV`] can set. The server
+/// keeps the retained bytes in memory, so the cap also bounds memory.
+const MAX_OUTPUT_BYTES_CEILING: usize = 16 * 1024 * 1024;
+/// Environment variable that sets the server cap for every tool call.
+const MAX_OUTPUT_BYTES_ENV: &str = "FALLOW_MCP_MAX_OUTPUT_BYTES";
 const PIPE_READ_CHUNK_BYTES: usize = 8 * 1024;
 
 /// Push a `--flag VALUE` pair onto `args` only when `value` is `Some(s)` and
@@ -332,15 +342,36 @@ pub async fn run_tool(
     run_tool_with_limit(binary, tool, args, None).await
 }
 
-/// Resolve one call's response cap. A request may only lower the default:
-/// the 16 MiB ceiling is what keeps a runaway subprocess from filling the
-/// caller's context, so it is a bound, not a suggestion.
-fn output_limit(requested: Option<usize>) -> usize {
-    requested
+/// Parse the server cap from the value of [`MAX_OUTPUT_BYTES_ENV`]. A value
+/// that is not a positive integer gives the default. A value over the ceiling
+/// gives the ceiling.
+fn server_output_limit_from(value: Option<&str>) -> usize {
+    value
+        .and_then(|value| value.trim().parse::<usize>().ok())
         .filter(|bytes| *bytes > 0)
         .map_or(DEFAULT_MAX_OUTPUT_BYTES, |bytes| {
-            bytes.min(DEFAULT_MAX_OUTPUT_BYTES)
+            bytes.min(MAX_OUTPUT_BYTES_CEILING)
         })
+}
+
+/// The server cap for every tool call: [`MAX_OUTPUT_BYTES_ENV`] or the
+/// default.
+fn server_output_limit() -> usize {
+    let configured = std::env::var(MAX_OUTPUT_BYTES_ENV).ok();
+    server_output_limit_from(configured.as_deref())
+}
+
+/// Resolve one call's response cap. A request may only lower the server cap.
+/// The server cap keeps a large response out of the caller's context, so it
+/// is a bound, not a suggestion.
+fn output_limit_within(requested: Option<usize>, server_limit: usize) -> usize {
+    requested
+        .filter(|bytes| *bytes > 0)
+        .map_or(server_limit, |bytes| bytes.min(server_limit))
+}
+
+fn output_limit(requested: Option<usize>) -> usize {
+    output_limit_within(requested, server_output_limit())
 }
 
 /// Execute one named MCP tool with a caller-supplied response cap.
@@ -488,7 +519,7 @@ async fn spawn_fallow(
         timeout,
         request: cancellation::request_cancellation(),
     };
-    complete_fallow_process(binary, process, &stop, max_output_bytes).await
+    complete_fallow_process(binary, process, &stop, max_output_bytes, tool).await
 }
 
 /// The two ends of a subprocess call: its response deadline and the
@@ -542,6 +573,7 @@ async fn complete_fallow_process(
     process: RunningFallowProcess,
     stop: &ProcessStop,
     max_output_bytes: usize,
+    tool: &str,
 ) -> Result<CallToolResult, McpError> {
     let RunningFallowProcess {
         mut child,
@@ -643,6 +675,7 @@ async fn complete_fallow_process(
         &output,
         max_output_bytes,
         exit_one_is_error,
+        tool,
     ))
 }
 
@@ -672,9 +705,10 @@ fn captured_output_result(
     output: &CapturedOutput,
     max_output_bytes: usize,
     exit_one_is_error: bool,
+    tool: &str,
 ) -> CallToolResult {
     if output.stdout.exceeded || output.stderr.exceeded {
-        return output_limit_result(output, max_output_bytes);
+        return output_limit_result(output, max_output_bytes, tool);
     }
 
     let stdout = String::from_utf8_lossy(&output.stdout.bytes);
@@ -1023,7 +1057,11 @@ const OUTPUT_PREVIEW_BYTES: usize = 256;
 /// result-refusal field names so an agent parses one shape on both surfaces.
 /// Code Mode refuses the same class of response with `isError: true` too, so
 /// the two surfaces now answer that question the same way.
-fn output_limit_result(output: &CapturedOutput, max_output_bytes: usize) -> CallToolResult {
+fn output_limit_result(
+    output: &CapturedOutput,
+    max_output_bytes: usize,
+    tool: &str,
+) -> CallToolResult {
     let (stream, pipe) = if output.stdout.exceeded {
         ("stdout", &output.stdout)
     } else {
@@ -1031,6 +1069,7 @@ fn output_limit_result(output: &CapturedOutput, max_output_bytes: usize) -> Call
     };
     over_limit_result(
         &OverLimit {
+            tool,
             stream,
             context: "subprocess",
             captured: &String::from_utf8_lossy(&pipe.bytes),
@@ -1042,6 +1081,8 @@ fn output_limit_result(output: &CapturedOutput, max_output_bytes: usize) -> Call
 
 /// One response that went over the output cap.
 struct OverLimit<'a> {
+    /// The MCP tool that the caller called.
+    tool: &'a str,
     /// What produced the bytes: `stdout` or `stderr` of the CLI, or `result`
     /// for a typed-route envelope.
     stream: &'a str,
@@ -1055,31 +1096,40 @@ struct OverLimit<'a> {
 
 /// The recovery hint for an over-limit refusal. Only the CLI route takes
 /// `max_output_bytes`, so the typed-route hint does not name that parameter.
-fn over_limit_help(context: &str) -> &'static str {
-    if context == "subprocess" {
-        "Narrow the requested analysis (filters, a workspace scope, a smaller issue-type set). \
-         max_output_bytes only LOWERS the 16 MiB default, so raising it for this call cannot help."
+fn over_limit_help(context: &str, has_narrow: bool) -> String {
+    let narrow = if has_narrow {
+        "Call again with the parameters in `narrow` to request less output."
     } else {
-        "Narrow the requested analysis (filters, a workspace scope, a smaller issue-type set). \
-         The typed route has a fixed 16 MiB cap and no max_output_bytes parameter."
-    }
+        "Narrow the requested analysis (filters, a workspace scope, a smaller issue-type set)."
+    };
+    let cap = if context == "subprocess" {
+        "max_output_bytes only LOWERS the server cap, so raising it for this call cannot help."
+    } else {
+        "The typed route has no max_output_bytes parameter."
+    };
+    format!(
+        "{narrow} {cap} The server operator sets the server cap with {MAX_OUTPUT_BYTES_ENV} \
+         (default {DEFAULT_MAX_OUTPUT_BYTES} bytes, at most {MAX_OUTPUT_BYTES_CEILING} bytes)."
+    )
 }
 
 /// The over-limit refusal body, shared by the CLI route and the typed route
 /// so an agent parses one shape and one `code` on both.
 fn over_limit_result(over: &OverLimit<'_>, max_output_bytes: usize) -> CallToolResult {
     let OverLimit {
+        tool,
         stream,
         context,
         captured,
         total,
     } = *over;
+    let narrow = narrow::narrow_params(tool);
     let source = if context == "subprocess" {
         "fallow subprocess"
     } else {
         "fallow typed"
     };
-    let body = serde_json::json!({
+    let mut body = serde_json::json!({
         "error": true,
         "ok": false,
         "exit_code": 2,
@@ -1096,8 +1146,11 @@ fn over_limit_result(over: &OverLimit<'_>, max_output_bytes: usize) -> CallToolR
         "message": format!(
             "{source} {stream} produced {total} bytes, over the {max_output_bytes}-byte cap"
         ),
-        "help": over_limit_help(context),
+        "help": over_limit_help(context, narrow.is_some()),
     });
+    if let (Some(params), Some(fields)) = (narrow, body.as_object_mut()) {
+        fields.insert("narrow".to_string(), serde_json::json!(params));
+    }
     CallToolResult::error(vec![ContentBlock::text(body.to_string())])
 }
 
@@ -1137,6 +1190,52 @@ fn ensure_top_level_warnings(result: CallToolResult) -> CallToolResult {
 
     let text = serde_json::to_string(&value).unwrap_or_else(|_| text.text.clone());
     CallToolResult::success(vec![ContentBlock::text(text)])
+}
+
+#[cfg(test)]
+pub use narrow::all_narrow_params;
+
+#[cfg(test)]
+mod output_limit_tests {
+    use super::*;
+
+    #[test]
+    fn server_cap_defaults_to_one_megabyte() {
+        assert_eq!(server_output_limit_from(None), 1_000_000);
+    }
+
+    #[test]
+    fn server_cap_reads_a_positive_byte_count() {
+        assert_eq!(server_output_limit_from(Some("4000000")), 4_000_000);
+        assert_eq!(server_output_limit_from(Some(" 2048 ")), 2048);
+    }
+
+    #[test]
+    fn server_cap_ignores_a_value_that_is_not_a_positive_byte_count() {
+        for value in ["", "0", "-1", "1MB", "x"] {
+            assert_eq!(
+                server_output_limit_from(Some(value)),
+                DEFAULT_MAX_OUTPUT_BYTES,
+                "{value:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn server_cap_stays_at_or_below_the_ceiling() {
+        assert_eq!(
+            server_output_limit_from(Some("999999999999")),
+            16 * 1024 * 1024
+        );
+    }
+
+    #[test]
+    fn call_cap_only_lowers_the_server_cap() {
+        assert_eq!(output_limit_within(None, 4_000_000), 4_000_000);
+        assert_eq!(output_limit_within(Some(0), 4_000_000), 4_000_000);
+        assert_eq!(output_limit_within(Some(1024), 4_000_000), 1024);
+        assert_eq!(output_limit_within(Some(8_000_000), 4_000_000), 4_000_000);
+    }
 }
 
 #[cfg(test)]

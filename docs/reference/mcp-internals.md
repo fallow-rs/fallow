@@ -104,9 +104,19 @@ Contract rules:
     `cli_exit_body`. An exit 1 run that requires complete type-aware evidence
     and reports it incomplete is an error on both.
   - The subprocess route and the typed route (`api_runtime::json_success`)
-    share the 16 MiB cap and the over-limit body (`over_limit_result`, code
+    share the server cap and the over-limit body (`over_limit_result`, code
     `FALLOW_MCP_SUBPROCESS_OUTPUT_LIMIT`). The `context` field is
     `subprocess` or `typed`.
+  - The server cap is 1,000,000 bytes by default, the same as the default
+    result cap of Code Mode. `FALLOW_MCP_MAX_OUTPUT_BYTES` sets it for the
+    server, up to 16 MiB. A call's `max_output_bytes` can only lower it. The
+    default stays below the context window of a usual agent, so the agent
+    gets a valid refusal and not a result that its host cut.
+  - The over-limit body carries `narrow`: the parameters of the refused tool
+    that make its output smaller. `tools/narrow.rs` owns the table. A drift
+    test checks each name against the input schema of its tool. A tool
+    without a row omits `narrow`. Add a row when a new tool gets a filter,
+    `top`, or `limit` parameter.
   - Every spawned CLI reads stdin from the null device unless the tool sends
     bounded input. The server reads JSON-RPC frames from its own stdin, and a
     child must not consume them.

@@ -46,7 +46,7 @@ pub async fn run_find_dupes(
     .await?
     .map_or_else(
         |err| CallToolResult::error(vec![ContentBlock::text(programmatic_error_body(&err))]),
-        |value| json_success(&value),
+        |value| json_success("find_dupes", &value),
     );
     Ok(result)
 }
