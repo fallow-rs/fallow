@@ -89,12 +89,18 @@ pub(super) fn push_constant_parameter_sarif_results(
                 uri: relative_uri(&parameter.path, ctx.root),
                 region: Some((parameter.line, parameter.col + 1)),
                 source_path: Some(parameter.path.clone()),
-                properties: Some(serde_json::json!({
-                    "reason": parameter.reason.as_str(),
-                    "value": parameter.value.as_ref().map(|value| &value.text),
-                    "callSiteCount": parameter.call_site_count,
-                    "conditionReads": parameter.condition_reads,
-                })),
+                properties: Some({
+                    let mut properties = serde_json::json!({
+                        "reason": parameter.reason.as_str(),
+                        "value": parameter.value.as_ref().map(|value| &value.text),
+                        "callSiteCount": parameter.call_site_count,
+                        "conditionReads": parameter.condition_reads,
+                    });
+                    if let Some(evidence) = parameter.evidence {
+                        properties["evidence"] = serde_json::json!(evidence.as_str());
+                    }
+                    properties
+                }),
             }
         },
     );

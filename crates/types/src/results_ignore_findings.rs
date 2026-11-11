@@ -94,5 +94,6 @@ pub(super) fn classify_ignore_findings_fields(results: &AnalysisResults) {
         react_component_intel: _react_component_intel,
         semantic_reachable_files: _semantic_reachable_files,
         semantic_framework_contracts: _semantic_framework_contracts,
+        constant_parameter_candidates: _,
     } = results;
 }

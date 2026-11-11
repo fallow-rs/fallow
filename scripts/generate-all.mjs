@@ -185,6 +185,7 @@ export const generateTypeAwareProtocol = (stagingRoot) => {
     "analysis_operation",
     "status_operation",
     "mutant_typecheck_operation",
+    "call_evidence_operation",
     "query_operations",
     "session_envelope_types",
     "backend",
@@ -232,6 +233,7 @@ export const TYPE_AWARE_PROTOCOL = Object.freeze({\n\
   analysis_operation: ${string(manifest.analysis_operation)},\n\
   status_operation: ${string(manifest.status_operation)},\n\
   mutant_typecheck_operation: ${string(manifest.mutant_typecheck_operation)},\n\
+  call_evidence_operation: ${string(manifest.call_evidence_operation)},\n\
   query_operations: [${stringArray(manifest.query_operations)}],\n\
   session_envelope_types: [${stringArray(manifest.session_envelope_types)}],\n\
   backend: {\n\
@@ -259,6 +261,7 @@ export const SEMANTIC_SCHEMA_VERSION = TYPE_AWARE_PROTOCOL.semantic_schema_versi
 export const ANALYSIS_OPERATION = TYPE_AWARE_PROTOCOL.analysis_operation;\n\
 export const STATUS_OPERATION = TYPE_AWARE_PROTOCOL.status_operation;\n\
 export const MUTANT_TYPECHECK_OPERATION = TYPE_AWARE_PROTOCOL.mutant_typecheck_operation;\n\
+export const CALL_EVIDENCE_OPERATION = TYPE_AWARE_PROTOCOL.call_evidence_operation;\n\
 export const QUERY_OPERATIONS = Object.freeze(TYPE_AWARE_PROTOCOL.query_operations);\n\
 export const SESSION_ENVELOPE_TYPES = Object.freeze(TYPE_AWARE_PROTOCOL.session_envelope_types);\n\
 export const BACKEND_FAMILY = TYPE_AWARE_PROTOCOL.backend.family;\n\

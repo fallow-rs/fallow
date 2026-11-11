@@ -796,6 +796,7 @@ fn classify_changed_file_filter_fields(results: &AnalysisResults) {
         react_component_intel: _react_component_intel,
         semantic_reachable_files: _,
         semantic_framework_contracts: _semantic_framework_contracts,
+        constant_parameter_candidates: _,
     } = results;
 }
 

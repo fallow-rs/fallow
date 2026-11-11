@@ -93,6 +93,7 @@ mod tests {
             line: 1,
             col: 0,
             reason: ConstantParameterReason::IdenticalArgument,
+            evidence: None,
             value: None,
             optional: false,
             has_default: false,
