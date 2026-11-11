@@ -32,11 +32,12 @@ const fn productivity(operator: Operator) -> u8 {
         Operator::CallExpression => 14,
         Operator::ThrowStatement => 15,
         Operator::SwitchCase => 16,
-        Operator::RegexAssertion => 17,
-        Operator::RegexConstructor => 18,
-        Operator::ArrayLiteral => 19,
-        Operator::ObjectLiteral => 20,
-        Operator::BlockStatement => 21,
+        Operator::NullishFallback => 17,
+        Operator::RegexAssertion => 18,
+        Operator::RegexConstructor => 19,
+        Operator::ArrayLiteral => 20,
+        Operator::ObjectLiteral => 21,
+        Operator::BlockStatement => 22,
     }
 }
 

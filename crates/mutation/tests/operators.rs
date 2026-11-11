@@ -1269,6 +1269,7 @@ fn operator_names_are_kebab_case() {
             "throw-statement",
             "regex-constructor",
             "regex-assertion",
+            "nullish-fallback",
         ],
     );
     assert_eq!(

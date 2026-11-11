@@ -1646,6 +1646,88 @@ mod end_to_end {
         assert_eq!(judged["summary"]["counts"]["equivalent"], 1, "{judged}");
     }
 
+    /// `labelOf` reads `name ?? "anon"` where `name` is a `string`. No test
+    /// can tell the expression from `name`, so the opt-in `nullish-fallback`
+    /// mutant survives. The type check adds the advisory hint, and the
+    /// status and the score do not change. A run of the default operators
+    /// has no `nullish-fallback` mutant.
+    #[test]
+    fn a_typecheck_run_hints_a_nullish_fallback_on_a_non_nullable_receiver() {
+        let Some(package) = companion_package() else {
+            return;
+        };
+        if !type_aware_companion_installed() {
+            return;
+        }
+        let (_project, root) = vitest_project(
+            &package,
+            "\nexport function labelOf(name: string): string {\n  return name ?? \"anon\";\n}\n",
+        );
+        fs::write(
+            root.join("tsconfig.json"),
+            r#"{"compilerOptions":{"strict":true,"noUncheckedIndexedAccess":true,"noEmit":true},"include":["src"]}"#,
+        )
+        .expect("tsconfig");
+        fs::write(
+            root.join("test/label.test.ts"),
+            "import { expect, test } from \"vitest\";\nimport { labelOf } from \"../src/math\";\n\ntest(\"labels\", () => {\n  expect(labelOf(\"ada\")).toBe(\"ada\");\n});\n",
+        )
+        .expect("label test");
+        commit_all(&root, "label");
+
+        let fallback = |report: &serde_json::Value| -> Option<serde_json::Value> {
+            report["mutants"]
+                .as_array()
+                .expect("mutants")
+                .iter()
+                .find(|mutant| {
+                    mutant["function"] == "labelOf" && mutant["operator"] == "nullish-fallback"
+                })
+                .cloned()
+        };
+        let (default_output, default_run) =
+            json_mutation(&root, &["src/math.ts", "--concurrency", "1"]);
+        assert_eq!(default_output.code, 0, "{}", default_output.stderr);
+        assert!(fallback(&default_run).is_none(), "{default_run}");
+
+        let args = [
+            "src/math.ts",
+            "--concurrency",
+            "1",
+            "--operators",
+            "nullish-fallback",
+        ];
+        let (plain_output, plain) = json_mutation(&root, &args);
+        assert_eq!(plain_output.code, 0, "{}", plain_output.stderr);
+        let mutant = fallback(&plain).expect("a nullish-fallback mutant of labelOf");
+        assert_eq!(mutant["status"], "survived", "{plain}");
+        assert!(mutant.get("equivalence_hint").is_none(), "{plain}");
+
+        let mut command = std::process::Command::new(crate::common::fallow_bin());
+        command
+            .env("RUST_LOG", "")
+            .env("NO_COLOR", "1")
+            .args(["mutation", "--root"])
+            .arg(&root)
+            .args(args)
+            .args(["--typecheck", "--format", "json", "--quiet"]);
+        crate::common::configure_type_aware_sidecar(&mut command);
+        let output = command.output().expect("fallow runs");
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let checked: serde_json::Value =
+            serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("json");
+        let mutant = fallback(&checked).expect("a nullish-fallback mutant of labelOf");
+        assert_eq!(mutant["status"], "survived", "{checked}");
+        assert_eq!(mutant["equivalence_hint"], "type-non-nullish", "{checked}");
+        assert_eq!(checked["typecheck"]["hinted"], 1, "{checked}");
+        assert_hint_leaves_the_score(&checked, &plain);
+    }
+
     /// A component compiler in the shape of the Vue plugin: its `transform`
     /// hook keeps the script block of a `.vue` file.
     const COMPONENT_CONFIG: &str = r#"const componentPlugin = () => ({

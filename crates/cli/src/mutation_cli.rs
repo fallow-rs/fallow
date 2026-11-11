@@ -171,7 +171,8 @@ pub struct MutationArgs {
     /// The operators to use, comma-separated. Default: the default set. The
     /// opt-in operators (block-statement, array-literal, object-literal,
     /// method-expression, switch-case, call-expression, throw-statement,
-    /// regex-constructor, regex-assertion) run only when named here.
+    /// regex-constructor, regex-assertion, nullish-fallback) run only when
+    /// named here.
     #[arg(long, value_name = "NAMES", value_delimiter = ',')]
     pub operators: Vec<String>,
     /// A verdict document that marks mutants as equivalent. Equivalent
@@ -191,9 +192,10 @@ pub struct MutationArgs {
     pub runner_config: Option<PathBuf>,
     /// Type-check each survived mutant through the `--type-aware`
     /// companion. A survivor that does not type-check becomes
-    /// `compile_error` and leaves the score. An optional-chaining survivor on a
-    /// receiver whose type excludes `null` and `undefined` gets an advisory
-    /// `equivalence_hint`. Its status and the score do not change.
+    /// `compile_error` and leaves the score. An optional-chaining or
+    /// nullish-fallback survivor on a receiver whose type excludes `null` and
+    /// `undefined` gets an advisory `equivalence_hint`. Its status and the
+    /// score do not change.
     #[arg(long)]
     pub typecheck: bool,
     /// Continue an interrupted or partial run: reuse the killed and confirmed
