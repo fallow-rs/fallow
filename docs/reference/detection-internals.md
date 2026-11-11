@@ -1070,8 +1070,8 @@ each reason:
   TypeScript module, blocks its own contracts and each function that it
   imports. A side-effect import from such a file blocks each contract of the
   target, which covers a Vue `<script src>`. An HTML page with an inline
-  `<script type="module">` blocks each exported function of the project,
-  because extraction does not record the imports of that script.
+  script blocks each exported function of the project, because extraction
+  does not record the imports or the `import()` calls of that script.
 - `direct-eval`: the same, for a module with a direct `eval`.
 - `classic-script`: a module with no imports, no exports and no re-exports.
 - `auto-import`: a synthetic auto-import edge reaches the module.

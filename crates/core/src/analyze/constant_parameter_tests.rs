@@ -557,3 +557,15 @@ fn a_template_host_blocks_only_what_it_imports() {
     ));
     assert_eq!(project.findings("format").len(), 2);
 }
+
+#[test]
+fn an_inline_classic_script_with_a_dynamic_import_abstains() {
+    let html = "<!doctype html>\n<script>\n  import('./src/format.ts').then((m) => m.format(4, false));\n</script>\n";
+    let config = serde_json::json!({ "entry": ["src/main.ts", "index.html"] });
+    let project = analyze_with(
+        &private_package(),
+        &config,
+        &base_with(&[("index.html", html)], MAIN),
+    );
+    assert_abstains(&project, "src/format.ts", "format", "template-callers");
+}

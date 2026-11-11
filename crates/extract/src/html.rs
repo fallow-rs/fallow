@@ -38,25 +38,29 @@ static SCRIPT_PARTS_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     crate::static_regex(r#"(?si)<script\b((?:[^>"']|"[^"]*"|'[^']*')*)>(.*?)</script\s*>"#)
 });
 
-/// A `type="module"` attribute, with or without quotes.
-static MODULE_TYPE_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| crate::static_regex(r#"(?i)\btype\s*=\s*["']?module\b"#));
+/// A `type` attribute whose value is data, not script: JSON, an import map,
+/// or a template.
+static DATA_TYPE_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    crate::static_regex(
+        r#"(?i)\btype\s*=\s*["']?[^"'\s>]*(json|importmap|template|html|text/plain|shader)"#,
+    )
+});
 
 /// A `src` attribute.
 static SRC_ATTRIBUTE_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r"(?i)\bsrc\s*="));
 
-/// `true` when the page has an inline `<script type="module">` with a body.
-/// Such a script can import and call any module, and extraction does not
-/// record its imports or calls.
-fn has_inline_module_script(source: &str) -> bool {
+/// `true` when the page has an inline script with a body. A module script can
+/// import any module, and a classic script can call `import()`. Extraction
+/// does not record the imports or calls of such a script.
+fn has_inline_script(source: &str) -> bool {
     let without_comments = HTML_COMMENT_RE.replace_all(source, "");
     SCRIPT_PARTS_RE
         .captures_iter(&without_comments)
         .any(|parts| {
             let attributes = parts.get(1).map_or("", |m| m.as_str());
             let body = parts.get(2).map_or("", |m| m.as_str());
-            MODULE_TYPE_RE.is_match(attributes)
+            !DATA_TYPE_RE.is_match(attributes)
                 && !SRC_ATTRIBUTE_RE.is_match(attributes)
                 && !body.trim().is_empty()
         })
@@ -307,7 +311,7 @@ fn html_module_info(
         &[],
         &[],
     );
-    let function_contracts = has_inline_module_script(source).then(|| {
+    let function_contracts = has_inline_script(source).then(|| {
         Box::new(fallow_types::extract::FunctionContractFacts {
             template_callers: true,
             ..Default::default()
@@ -436,23 +440,25 @@ mod tests {
     }
 
     #[test]
-    fn an_inline_module_script_marks_template_callers() {
-        assert!(has_inline_module_script(
-            "<script type=\"module\">import { f } from './f.js'; f(2);</script>"
-        ));
-        assert!(has_inline_module_script(
-            "<SCRIPT type=module>\n  go();\n</SCRIPT>"
-        ));
-        assert!(!has_inline_module_script(
-            "<script type=\"module\" src=\"./main.js\"></script>"
-        ));
-        assert!(!has_inline_module_script("<script>go();</script>"));
-        assert!(!has_inline_module_script(
-            "<!-- <script type=\"module\">go();</script> -->"
-        ));
-        assert!(!has_inline_module_script(
-            "<script type=\"module\">  </script>"
-        ));
+    fn an_inline_script_marks_template_callers() {
+        for source in [
+            "<script type=\"module\">import { f } from './f.js'; f(2);</script>",
+            "<SCRIPT type=module>\n  go();\n</SCRIPT>",
+            "<script>import('./f.js').then((m) => m.f(2));</script>",
+            "<script type=\"text/javascript\">go();</script>",
+        ] {
+            assert!(has_inline_script(source), "{source}");
+        }
+        for source in [
+            "<script type=\"module\" src=\"./main.js\"></script>",
+            "<!-- <script type=\"module\">go();</script> -->",
+            "<script type=\"module\">  </script>",
+            "<script type=\"importmap\">{\"imports\":{}}</script>",
+            "<script type=\"application/ld+json\">{}</script>",
+            "<script type=\"text/x-template\"><p></p></script>",
+        ] {
+            assert!(!has_inline_script(source), "{source}");
+        }
     }
 
     #[test]
