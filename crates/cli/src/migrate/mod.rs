@@ -121,7 +121,14 @@ pub fn run_migrate(
     };
 
     if result.sources.is_empty() {
-        eprintln!("No knip, jscpd, or stylelint configuration found to migrate.");
+        // A skipped config (for example `knip.ts`) leaves a warning that
+        // tells the user what to convert. Without it the run looks empty.
+        if result.warnings.is_empty() {
+            eprintln!("No knip, jscpd, or stylelint configuration found to migrate.");
+        } else {
+            eprintln!("No knip, jscpd, or stylelint configuration could be migrated.");
+            report_warnings(&result.warnings);
+        }
         return exit_invalid_input();
     }
 
@@ -202,15 +209,7 @@ fn report_migration_outcome(result: &MigrationResult) {
         eprintln!("Migrated from: {}", source_head(source));
     }
 
-    if !result.warnings.is_empty() {
-        let count = result.warnings.len();
-        let header = if count == 1 { "Warning" } else { "Warnings" };
-        eprintln!();
-        eprintln!("{header} ({count}):");
-        for warning in &result.warnings {
-            eprintln!("  {warning}");
-        }
-    }
+    report_warnings(&result.warnings);
 
     if should_emit_glob_caveat(result) {
         eprintln!();
@@ -220,6 +219,20 @@ fn report_migration_outcome(result: &MigrationResult) {
     if knip_contributed(result) {
         eprintln!();
         eprintln!("{KNIP_IGNORE_SCOPE_NOTE}");
+    }
+}
+
+/// Print the migration warnings to stderr under a counted header.
+fn report_warnings(warnings: &[MigrationWarning]) {
+    if warnings.is_empty() {
+        return;
+    }
+    let count = warnings.len();
+    let header = if count == 1 { "Warning" } else { "Warnings" };
+    eprintln!();
+    eprintln!("{header} ({count}):");
+    for warning in warnings {
+        eprintln!("  {warning}");
     }
 }
 
