@@ -36993,7 +36993,7 @@
         {
           "type": "string",
           "const": "type-non-nullish",
-          "description": "The mutant removes an optional-chaining link (`?.`), and the declared\ntype of the receiver excludes `null` and `undefined`. If no run-time\nvalue can be nullish, the mutant is equivalent. A run-time value can\nstill be nullish, for example in a method that loses its `this`, or\nin a call whose declared return type hides a nullish value."
+          "description": "The mutant removes an optional-chaining link (`?.`) or a nullish\nfallback (`a ?? b` to `a`), and the declared type of the receiver\nexcludes `null` and `undefined`. If no run-time\nvalue can be nullish, the mutant is equivalent. A run-time value can\nstill be nullish, for example in a method that loses its `this`, or\nin a call whose declared return type hides a nullish value."
         }
       ],
       "description": "Why a survivor may be equivalent, as far as the type check can tell."

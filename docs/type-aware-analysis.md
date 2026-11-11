@@ -157,8 +157,8 @@ never forwards a compiler diagnostic as a Fallow issue.
 `fallow mutation --typecheck` uses the same companion with the one-shot
 `mutant-typecheck` operation. It compares the error diagnostics of a mutated
 file with the original file and returns only the diagnostic codes of new
-errors. For a mutant that removes an optional-chaining link, it adds the
-advisory hint `type-non-nullish` to a `compiles` result when the declared type
+errors. For a mutant that removes an optional-chaining link or a nullish
+fallback (`a ?? b` to `a`), it adds the advisory hint `type-non-nullish` to a `compiles` result when the declared type
 of the receiver is never nullish. The hint never changes the status. See
 [`mutation-testing.md`](mutation-testing.md).
 

@@ -1,9 +1,11 @@
-// Finds optional-chaining mutants that the types suggest are equivalent to the
-// original code. The result is an advisory hint, never a verdict: the mutant
-// keeps the status `survived`, because a type does not prove a run-time value.
+// Finds optional-chaining and nullish-fallback mutants that the types suggest
+// are equivalent to the original code. The result is an advisory hint, never a
+// verdict: the mutant keeps the status `survived`, because a type does not
+// prove a run-time value.
 //
-// The mutants `a?.b` -> `a.b`, `a?.()` -> `a()` and `a?.[k]` -> `a[k]` change
-// nothing when the receiver `a` is never `null` or `undefined` at run time.
+// The mutants `a?.b` -> `a.b`, `a?.()` -> `a()`, `a?.[k]` -> `a[k]` and
+// `a ?? b` -> `a` change nothing when the receiver `a` is never `null` or
+// `undefined` at run time.
 // The proof trusts declarations and never trusts flow analysis or assertions:
 //
 // - It reads the declared type of the root binding or property, not the type
@@ -62,6 +64,7 @@ const {
 export const NON_NULLISH_HINT = "type-non-nullish";
 
 const OPTIONAL_TOKEN = "?.";
+const COALESCE_TOKEN = "??";
 const TYPESCRIPT_EXTENSIONS = new Set([".ts", ".tsx", ".mts", ".cts"]);
 const MAX_UNION_DEPTH = 8;
 const MAX_BINDING_DEPTH = 8;
@@ -92,6 +95,39 @@ const neverNullish = (type, depth) => {
 
 const isParameter = (node) => node.kind === SyntaxKind.Parameter;
 const isPropertySignature = (node) => node.kind === SyntaxKind.PropertySignature;
+
+// True for an optional chain: `a?.b`, `a?.()`, `a?.[k]`, or a longer chain
+// after such a link, such as `a?.b.c()`. A chain gives `undefined` when a link
+// short-circuits, whatever the declared type of its last link. A later link
+// of the same chain is skipped too, so the receiver of an optional link can
+// be a chain. The left operand of `??` is a value outside the chain.
+const isOptionalChain = (node) => {
+  for (let current = node; current !== undefined; current = current.expression) {
+    const isLink =
+      isPropertyAccessExpression(current) ||
+      isElementAccessExpression(current) ||
+      isCallExpression(current) ||
+      isNonNullExpression(current);
+    if (!isLink) return false;
+    if (current.questionDotToken !== undefined) return true;
+  }
+  return false;
+};
+
+const withoutParentheses = (node) => {
+  let current = node;
+  while (isParenthesizedExpression(current) || isSatisfiesExpression(current)) {
+    current = current.expression;
+  }
+  return current;
+};
+
+// The declared type of a value outside its chain. An optional chain can give
+// `undefined` there, so it has no proven type.
+const settledType = (project, expression, context) =>
+  isOptionalChain(withoutParentheses(expression))
+    ? null
+    : declaredType(project, expression, context);
 
 const isAssertion = (node) =>
   isAsExpression(node) || isTypeAssertion(node) || isNonNullExpression(node);
@@ -348,37 +384,89 @@ const receiversByLinkEnd = (sourceFile) => {
   return receivers;
 };
 
+// Maps the UTF-16 start offset of each `??` token to its left operand and
+// the end of its right operand.
+const fallbacksByTokenStart = (sourceFile) => {
+  const fallbacks = new Map();
+  const visit = (node) => {
+    if (isBinaryExpression(node) && node.operatorToken.kind === SyntaxKind.QuestionQuestionToken) {
+      fallbacks.set(node.operatorToken.end - COALESCE_TOKEN.length, {
+        left: node.left,
+        rightEnd: node.right.end,
+      });
+    }
+    node.forEachChild((child) => {
+      visit(child);
+      return undefined;
+    });
+  };
+  visit(sourceFile);
+  return fallbacks;
+};
+
 const isOptionalLink = (original, mutant) =>
   original.subarray(mutant.start, mutant.end).toString("utf8") === OPTIONAL_TOKEN;
+
+// The `nullish-fallback` mutant removes the `??` token and the right operand.
+const isFallbackRemoval = (original, mutant) =>
+  mutant.replacement === "" &&
+  original.subarray(mutant.start, mutant.start + COALESCE_TOKEN.length).toString("utf8") ===
+    COALESCE_TOKEN;
 
 const utf16Offset = (original, byteOffset) =>
   original.subarray(0, byteOffset).toString("utf8").length;
 
+// `receiver.node` is the receiver expression. `receiver.settled` is true
+// when the value has left its chain, as the left operand of `??` has.
 const receiverIsNeverNullish = (project, receiver, writes) => {
-  if (containsAssertion(receiver)) return false;
+  if (containsAssertion(receiver.node)) return false;
   try {
-    const type = declaredType(project, receiver, { visited: new Set(), depth: 0, writes });
+    const type = receiver.settled
+      ? settledType(project, receiver.node, { visited: new Set(), depth: 0, writes })
+      : declaredType(project, receiver.node, { visited: new Set(), depth: 0, writes });
     return type !== null && neverNullish(type, 0);
   } catch {
     return false;
   }
 };
 
+// The receiver of a mutant whose equivalence depends on a never-nullish
+// value, or undefined when the mutant is not such a form.
+const receiverOf = (original, mutant, sites) => {
+  if (isOptionalLink(original, mutant)) {
+    const node = sites.receivers.get(utf16Offset(original, mutant.end));
+    return node === undefined ? undefined : { node, settled: false };
+  }
+  if (!isFallbackRemoval(original, mutant)) return undefined;
+  const fallback = sites.fallbacks.get(utf16Offset(original, mutant.start));
+  return fallback?.rightEnd === utf16Offset(original, mutant.end)
+    ? { node: fallback.left, settled: true }
+    : undefined;
+};
+
+const mayNeedProof = (original, mutant) =>
+  isOptionalLink(original, mutant) || isFallbackRemoval(original, mutant);
+
 /**
- * Returns the ids of the mutants of `file` that remove an optional link from
- * a receiver whose declarations prove it never nullish. `project` is the
- * project of the original file, before any mutant is applied.
+ * Returns the ids of the mutants of `file` whose change has no effect when a
+ * receiver is never nullish, and whose receiver the declarations prove never
+ * nullish: the removal of an optional link (`a?.b` to `a.b`) and the removal
+ * of a nullish fallback (`a ?? b` to `a`). `project` is the project of the
+ * original file, before any mutant is applied.
  */
-export const nonNullishLinks = (project, file, original) => {
-  const links = file.mutants.filter((mutant) => isOptionalLink(original, mutant));
-  if (links.length === 0 || !allowsTypeProof(project, file.absolutePath)) return new Set();
+export const nonNullishMutants = (project, file, original) => {
+  const candidates = file.mutants.filter((mutant) => mayNeedProof(original, mutant));
+  if (candidates.length === 0 || !allowsTypeProof(project, file.absolutePath)) return new Set();
   const sourceFile = project.program.getSourceFile(file.absolutePath);
   if (!sourceFile) return new Set();
   try {
-    const receivers = receiversByLinkEnd(sourceFile);
+    const sites = {
+      receivers: receiversByLinkEnd(sourceFile),
+      fallbacks: fallbacksByTokenStart(sourceFile),
+    };
     const writes = new Map();
-    const proven = links.filter((mutant) => {
-      const receiver = receivers.get(utf16Offset(original, mutant.end));
+    const proven = candidates.filter((mutant) => {
+      const receiver = receiverOf(original, mutant, sites);
       return receiver !== undefined && receiverIsNeverNullish(project, receiver, writes);
     });
     return new Set(proven.map((mutant) => mutant.id));

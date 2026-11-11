@@ -463,8 +463,9 @@ pub struct MutantResult {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum MutantEquivalenceHint {
-    /// The mutant removes an optional-chaining link (`?.`), and the declared
-    /// type of the receiver excludes `null` and `undefined`. If no run-time
+    /// The mutant removes an optional-chaining link (`?.`) or a nullish
+    /// fallback (`a ?? b` to `a`), and the declared type of the receiver
+    /// excludes `null` and `undefined`. If no run-time
     /// value can be nullish, the mutant is equivalent. A run-time value can
     /// still be nullish, for example in a method that loses its `this`, or
     /// in a call whose declared return type hides a nullish value.

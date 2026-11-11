@@ -164,6 +164,7 @@ Opt-in set:
 | `throw-statement` | `throw new X(...)` becomes `{}` |
 | `regex-constructor` | the `regex-literal` and `regex-assertion` changes of a `new RegExp("...")` pattern |
 | `regex-assertion` | a lookaround is negated, or `\b` and `\B` swap |
+| `nullish-fallback` | `a ?? b` becomes `a` |
 
 The opt-in operators follow the StrykerJS mutator set. They make many more
 mutants, and many of them are equivalent or killed by any test that runs the
@@ -203,6 +204,12 @@ code. The rules of each opt-in operator:
 - `throw-statement`: only a `throw` of a `new` expression is removed.
 - `regex-constructor`: the pattern must be a string literal, and the flags a
   string literal or absent. The callee is `RegExp`, with or without `new`.
+- `nullish-fallback`: the `??` token and the right operand are removed, so
+  `a ?? b` becomes `a`. The mutant survives when no test gives a `null` or
+  `undefined` left operand. `logical-operator` changes `??` to `&&`, which
+  does not remove the fallback. `a ??= b` gives no `nullish-fallback`
+  mutant. With `--typecheck`, a survivor can get the hint
+  `type-non-nullish`. See [Type check of survivors](#type-check-of-survivors).
 - `regex-assertion`: `\b` in a character class is a backspace, so it gives
   no mutant.
 
@@ -678,7 +685,8 @@ select nothing for it. `--function-scope` (config key
   `unary-operator`, `update-operator`, `return-value`, `removed-call`,
   `optional-chaining`, `boolean-literal`, `string-literal`, `regex-literal`
   and `removed-chain-link`, then the opt-in operators `method-expression`,
-  `call-expression`, `throw-statement`, `switch-case`, `regex-assertion`,
+  `call-expression`, `throw-statement`, `switch-case`, `nullish-fallback`,
+  `regex-assertion`,
   `regex-constructor`, `array-literal`, `object-literal` and
   `block-statement`.
 - Mutants of the same operator on one line keep the order of a SHA-256 hash
@@ -1910,10 +1918,11 @@ are not checked, so the cost grows with the number of survivors only.
   file, for example a caller of a function with an inferred return type,
   stays `survived`. The check also does not run Vitest type tests, so the
   `typecheck-not-run` note stays.
-- A survivor that removes an optional-chaining link can get an advisory
-  hint. The mutants `a?.b` to `a.b`, `a?.()` to `a()` and `a?.[k]` to `a[k]`
-  change nothing when `a` is never `null` or `undefined` at run time. The
-  companion reads the declared type of `a` in the original file. When the
+- A survivor that removes an optional-chaining link or a nullish fallback
+  can get an advisory hint. The mutants `a?.b` to `a.b`, `a?.()` to `a()`,
+  `a?.[k]` to `a[k]` and `a ?? b` to `a` (`nullish-fallback`) change nothing
+  when `a` is never `null` or `undefined` at run time. The companion reads
+  the declared type of `a` in the original file. When the
   type excludes `null` and `undefined`, and the mutated file type-checks, the
   survivor gets `equivalence_hint: "type-non-nullish"`. The status stays
   `survived`, and the mutant stays in the score. `typecheck.hinted` counts the
@@ -1946,6 +1955,9 @@ are not checked, so the cost grows with the number of survivors only.
   `<T>x`, `x!`) anywhere in the receiver, or in the initializer of a local
   binding that the receiver reads. It looks through parentheses and
   `satisfies`.
+- For `a ?? b`, the hint does not apply when `a` is an optional chain, for
+  example `o?.items.map(f) ?? []`. The chain gives `undefined` when a link
+  short-circuits, whatever the declared type of its last call.
 - The hint does not apply to a declaration that no code in the project
   checks: a `declare` variable, a variable in a `.d.ts` file, a binding
   without an initializer, a `for` or `catch` variable, a destructured
@@ -2044,7 +2056,8 @@ source text.
   function body or `case` clause, `<statement>` for a `throw` statement,
   `<array>` and `<object>` for a non-empty literal, and `<call>` for a
   replaced or removed call. A `method-expression` pair is the two method
-  names, for example `{"from": "startsWith", "to": "endsWith"}`.
+  names, for example `{"from": "startsWith", "to": "endsWith"}`. A
+  `nullish-fallback` change is `{"from": "?? <expression>", "to": ""}`.
 - A `regex-assertion` side is `(?=`, `(?!`, `(?<=`, `(?<!`, `\b` or `\B`.
 - A `regex-literal` quantifier side is `+`, `*` or `?`, and a shortened
   range is `{"from": "{n,m}", "to": "{n}"}`.

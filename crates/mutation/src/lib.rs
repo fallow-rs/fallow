@@ -186,6 +186,9 @@ impl MutantChange {
     const ARRAY: &'static str = "<array>";
     /// Placeholder for a non-empty object literal.
     const OBJECT: &'static str = "<object>";
+    /// The `??` token and the fallback operand that `nullish-fallback`
+    /// removes.
+    const FALLBACK: &'static str = "?? <expression>";
 
     /// A change from `from` to `to`.
     pub const fn new(from: &'static str, to: &'static str) -> Self {

@@ -492,3 +492,80 @@ test("a binding that no code assigns after its declaration is still proven", () 
   assert.deepEqual(results.keptLet, hinted("keptLet"));
   assert.deepEqual(results.shadowB, hinted("shadowB"));
 });
+
+const FALLBACK_SOURCE = [
+  "export const named = (name: string): string => name ?? 'anon';",
+  "export const maybe = (label: string | undefined): string => label ?? 'none';",
+  "export const cast = (value: unknown): string => (value as string) ?? 'x';",
+  "export const nested = (a: string, b?: string): string => (b ?? a) ?? 'z';",
+  "export const swapped = (count: number): number => count ?? 0;",
+  "export const chained = (o?: { xs: string[] }): string[] | undefined => o?.xs.map((x) => x) ?? [];",
+  "export const grouped = (o?: { xs: string[] }): string[] | undefined => (o?.xs.slice()) ?? [];",
+  "export const inChain = (o?: { f(): { b: number } }): number | undefined => o?.f()?.b;",
+  "",
+].join("\n");
+
+// A mutant that removes `token` and the operand after it. `anchor` is a text
+// just before the token, so that each search finds one place.
+const fallbackAfter = (source, id, anchor, removed, replacement = "") => {
+  const start = Buffer.byteLength(source.slice(0, source.indexOf(anchor) + anchor.length), "utf8");
+  return { id, start, end: start + Buffer.byteLength(removed, "utf8"), replacement };
+};
+
+const checkFallbacks = () => {
+  const root = makeProject(
+    { "src/fallback.ts": FALLBACK_SOURCE },
+    { noUncheckedIndexedAccess: true },
+  );
+  try {
+    const parsed = parseRequest(
+      request(root, [
+        {
+          path: "src/fallback.ts",
+          source_sha256: sha256(FALLBACK_SOURCE),
+          mutants: [
+            fallbackAfter(FALLBACK_SOURCE, "named", "=> name ", "?? 'anon'"),
+            fallbackAfter(FALLBACK_SOURCE, "maybe", "=> label ", "?? 'none'"),
+            fallbackAfter(FALLBACK_SOURCE, "cast", "string) ", "?? 'x'"),
+            fallbackAfter(FALLBACK_SOURCE, "inner", "(b ", "?? a"),
+            fallbackAfter(FALLBACK_SOURCE, "outer", "a) ", "?? 'z'"),
+            fallbackAfter(FALLBACK_SOURCE, "partial", "=> count ", "?? "),
+            fallbackAfter(FALLBACK_SOURCE, "logical", "=> count ", "??", "&&"),
+            fallbackAfter(FALLBACK_SOURCE, "swapped", "=> count ", "?? 0"),
+            fallbackAfter(FALLBACK_SOURCE, "chained", "=> x) ", "?? []"),
+            fallbackAfter(FALLBACK_SOURCE, "grouped", "slice()) ", "?? []"),
+            fallbackAfter(FALLBACK_SOURCE, "inChain", "=> o?.f()", "?.", "."),
+          ],
+        },
+      ]),
+    );
+    return Object.fromEntries(checkMutants(parsed).map((result) => [result.id, result]));
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+};
+
+test("a nullish fallback on a type that is never nullish gets the hint", () => {
+  const results = checkFallbacks();
+  assert.deepEqual(results.named, hinted("named"));
+  assert.deepEqual(results.swapped, hinted("swapped"));
+});
+
+test("an optional chain that a link inside the same chain follows still proves the link", () => {
+  assert.deepEqual(checkFallbacks().inChain, hinted("inChain"));
+});
+
+test("a nullish fallback after an optional chain is never proven", () => {
+  const results = checkFallbacks();
+  for (const id of ["chained", "grouped"]) {
+    assert.deepEqual(results[id], { id, outcome: "compiles" }, id);
+  }
+});
+
+test("a nullish fallback whose left operand may be nullish or is unsound gets no hint", () => {
+  const results = checkFallbacks();
+  assert.equal(results.maybe.outcome, "compile-error");
+  for (const id of ["cast", "inner", "outer", "partial", "logical"]) {
+    assert.equal(results[id].hint, undefined, id);
+  }
+});

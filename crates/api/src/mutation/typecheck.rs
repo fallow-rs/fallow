@@ -3,7 +3,8 @@
 //! The check runs after the tests and reads only the survivors. A survivor
 //! whose mutated file does not type-check becomes `compile_error`, which the
 //! score does not count. A survivor that removes an optional-chaining link
-//! from a receiver whose declared type excludes nullish values keeps the
+//! or a nullish fallback (`a ?? b` to `a`) from a receiver whose declared
+//! type excludes nullish values keeps the
 //! status `survived` and gets an advisory `equivalence_hint`. A survivor that
 //! the checker cannot check keeps the status `survived`.
 
