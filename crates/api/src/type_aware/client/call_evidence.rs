@@ -161,9 +161,29 @@ struct CallEvidenceRun {
     pub backend_version: String,
 }
 
-fn relative(root: &Path, path: &Path) -> Option<String> {
-    let relative = path.strip_prefix(root).ok()?;
-    Some(relative.to_string_lossy().replace('\\', "/"))
+/// The project root in the form of the module graph and in the canonical form
+/// that the companion reads. The two differ when the root is a symlink.
+struct Roots {
+    graph: PathBuf,
+    canonical: PathBuf,
+}
+
+impl Roots {
+    fn new(root: &Path) -> Self {
+        Self {
+            graph: root.to_path_buf(),
+            canonical: dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf()),
+        }
+    }
+
+    /// The root-relative path with forward slashes.
+    fn relative(&self, path: &Path) -> Option<String> {
+        let relative = path
+            .strip_prefix(&self.graph)
+            .or_else(|_| path.strip_prefix(&self.canonical))
+            .ok()?;
+        Some(relative.to_string_lossy().replace('\\', "/"))
+    }
 }
 
 /// The candidates that fit the request bounds, with paths below `root`.
@@ -173,7 +193,7 @@ struct Bounded {
     files: Vec<String>,
 }
 
-fn bounded(root: &Path, candidates: ConstantParameterCandidates) -> Bounded {
+fn bounded(roots: &Roots, candidates: ConstantParameterCandidates) -> Bounded {
     let ConstantParameterCandidates {
         mut defaults,
         mut classes,
@@ -183,7 +203,7 @@ fn bounded(root: &Path, candidates: ConstantParameterCandidates) -> Bounded {
         candidate
             .arguments
             .iter()
-            .all(|argument| argument.path.starts_with(root))
+            .all(|argument| roots.relative(&argument.path).is_some())
     });
     defaults.truncate(MAX_DEFAULT_CANDIDATES);
     let mut argument_count = 0;
@@ -193,12 +213,12 @@ fn bounded(root: &Path, candidates: ConstantParameterCandidates) -> Bounded {
     });
     let files: Vec<String> = files
         .iter()
-        .filter_map(|file| relative(root, file))
+        .filter_map(|file| roots.relative(file))
         .collect();
     if files.len() > MAX_PROJECT_FILES {
         classes.clear();
     }
-    classes.retain(|class| class.path.starts_with(root));
+    classes.retain(|class| roots.relative(&class.path).is_some());
     classes.truncate(MAX_CLASS_CANDIDATES);
     Bounded {
         defaults,
@@ -207,11 +227,11 @@ fn bounded(root: &Path, candidates: ConstantParameterCandidates) -> Bounded {
     }
 }
 
-fn request(root: &Path, bounded: &Bounded) -> Request {
+fn request(roots: &Roots, bounded: &Bounded) -> Request {
     Request {
         protocol_version: WIRE_PROTOCOL_VERSION,
         operation: CALL_EVIDENCE_OPERATION,
-        root: root.to_string_lossy().into_owned(),
+        root: roots.canonical.to_string_lossy().into_owned(),
         defaults: bounded
             .defaults
             .iter()
@@ -223,7 +243,7 @@ fn request(root: &Path, bounded: &Bounded) -> Request {
                     .iter()
                     .filter_map(|argument| {
                         Some(WireArgument {
-                            path: relative(root, &argument.path)?,
+                            path: roots.relative(&argument.path)?,
                             call_start: argument.call_start,
                             index: argument.index,
                         })
@@ -238,7 +258,7 @@ fn request(root: &Path, bounded: &Bounded) -> Request {
             .filter_map(|(id, class)| {
                 Some(WireClass {
                     id,
-                    path: relative(root, &class.path)?,
+                    path: roots.relative(&class.path)?,
                     class: class.class_name.clone(),
                     methods: class.methods.clone(),
                 })
@@ -259,7 +279,11 @@ fn proved_findings(
     let mut findings = Vec::new();
     for result in &response.defaults {
         match result.outcome {
-            DefaultOutcome::Defined => findings.push(bounded.defaults[result.id].finding.clone()),
+            DefaultOutcome::Defined => {
+                if let Some(candidate) = bounded.defaults.get(result.id) {
+                    findings.push(candidate.finding.clone());
+                }
+            }
             DefaultOutcome::MaybeUndefined => {}
             DefaultOutcome::Unchecked => {
                 count(&mut meta.abstention_reasons, result.reason.as_deref());
@@ -269,11 +293,10 @@ fn proved_findings(
     for result in &response.methods {
         match result.outcome {
             MethodOutcome::Complete => {
-                findings.extend(method_findings(
-                    root,
-                    &bounded.classes[result.class_id],
-                    result,
-                ));
+                let Some(class) = bounded.classes.get(result.class_id) else {
+                    continue;
+                };
+                findings.extend(method_findings(root, class, result));
             }
             MethodOutcome::Abstained => {
                 count(&mut meta.abstention_reasons, result.reason.as_deref());
@@ -299,12 +322,13 @@ fn refine_constant_parameters(
     if candidates.is_empty() {
         return Ok(None);
     }
-    let bounded = bounded(root, candidates);
+    let roots = Roots::new(root);
+    let bounded = bounded(&roots, candidates);
     if bounded.defaults.is_empty() && bounded.classes.is_empty() {
         return Ok(None);
     }
-    let request = request(root, &bounded);
-    let response: Response = run_semantic_request(root, &request)?;
+    let request = request(&roots, &bounded);
+    let response: Response = run_semantic_request(&roots.canonical, &request)?;
     validate(&request, &response)?;
     let mut meta = TypeAwareCallEvidenceMeta {
         default_candidates: bounded.defaults.len(),
@@ -343,8 +367,7 @@ pub(super) fn add_call_evidence(
     candidates: ConstantParameterCandidates,
     outcome: Option<SemanticDeadCodeOutcome>,
 ) -> Result<Option<SemanticDeadCodeOutcome>, TypeAwareError> {
-    let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
-    let Some(run) = refine_constant_parameters(&canonical_root, results, candidates)? else {
+    let Some(run) = refine_constant_parameters(root, results, candidates)? else {
         return Ok(outcome);
     };
     let mut outcome = match outcome {
@@ -579,7 +602,11 @@ fn validate(request: &Request, response: &Response) -> Result<(), TypeAwareError
             )));
         }
         let paths_ok = result.calls.iter().all(|call| {
-            !call.path.starts_with('/') && !call.path.split('/').any(|part| part == "..")
+            let path = Path::new(&call.path);
+            !path.is_absolute()
+                && !call.path.contains(['\\', ':'])
+                && !call.path.starts_with('/')
+                && !call.path.split('/').any(|part| part == "..")
         });
         if !paths_ok {
             return Err(mismatch("a call path outside the project root"));

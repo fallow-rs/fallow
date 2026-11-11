@@ -308,3 +308,114 @@ test("the executable answers a one-shot call-evidence request", () => {
     assert.deepEqual(response.methods, []);
   });
 });
+
+const UNSOUND_DEFAULTS = {
+  "the tail of an optional chain": `${FUNCTION}type B = { c: number };\ntype A = { b: B };\nexport const run = (a?: A) => [fmt("x", a?.b.c), fmt("y", 1)];\n`,
+  "an assertion one binding away": `${FUNCTION}export const run = (n: unknown) => {\n  const a = n as number;\n  const b = a;\n  return [fmt("x", b), fmt("y", 1)];\n};\n`,
+  "an index read one binding away": `${FUNCTION}export const run = (xs: number[]) => {\n  const a = xs[5];\n  const b = a;\n  return [fmt("x", b), fmt("y", 1)];\n};\n`,
+  "an index read in an object literal member": `${FUNCTION}export const run = (xs: number[]) => {\n  const o = { w: xs[5] };\n  return [fmt("x", o.w), fmt("y", 1)];\n};\n`,
+  "an index read in a helper": `${FUNCTION}const first = (xs: number[]) => xs[0];\nexport const run = (xs: number[]) => [fmt("x", first(xs)), fmt("y", 1)];\n`,
+  "a ts-expect-error comment": `${FUNCTION}// @ts-expect-error\nconst w: number = undefined;\nexport const run = () => [fmt("x", w), fmt("y", 1)];\n`,
+  "a ts-nocheck comment": `// @ts-nocheck\n${FUNCTION}const w: number = undefined;\nexport const run = () => [fmt("x", w), fmt("y", 1)];\n`,
+  "an any initializer": `${FUNCTION}const w: number = JSON.parse("null");\nexport const run = () => [fmt("x", w), fmt("y", 1)];\n`,
+  "a type predicate": `${FUNCTION}const isNum = (v: unknown): v is number => true;\nexport const run = (n?: number) => (isNum(n) ? [fmt("x", n), fmt("y", 1)] : []);\n`,
+  "a field read in the constructor": `${FUNCTION}export class Box {\n  w: number;\n  constructor() {\n    fmt("x", this.w);\n    fmt("y", 1);\n    this.w = 1;\n  }\n}\n`,
+};
+
+for (const [name, source] of Object.entries(UNSOUND_DEFAULTS)) {
+  test(`${name} is not evidence that a value is defined`, () => {
+    const result = defaultOutcome({ "src/a.ts": source }, undefined, "src/a.ts", "fmt", 1);
+    assert.notEqual(result.outcome, "defined");
+  });
+}
+
+const STORE =
+  "export class Service {\n  load(id: string, cache?: boolean): string { return cache ? id : id; }\n}\n";
+const STORE_USE =
+  'import { Service } from "./svc";\nexport const s = new Service();\ns.load("a");\ns.load("b");\n';
+const LOAD = [{ id: 0, path: "src/svc.ts", class: "Service", methods: ["load"] }];
+
+const HIDDEN_CALLS = {
+  "a computed read in a file without the name": [
+    {
+      "src/other.ts":
+        'import { s } from "./use";\nimport type { Service } from "./svc";\nexport const x = (k: keyof Service) => {\n  const f = s[k];\n  return f.call(s, "c", true);\n};\n',
+    },
+    "dynamic-member-access",
+  ],
+  "a computed call on a call result": [
+    {
+      "src/other.ts":
+        'import { s } from "./use";\nimport type { Service } from "./svc";\nconst get = () => s;\nexport const x = (k: keyof Service) => get()[k]("c", true);\n',
+    },
+    "dynamic-member-access",
+  ],
+  "a computed call on an asserted receiver": [
+    {
+      "src/other.ts":
+        'import type { Service } from "./svc";\nexport const x = (k: keyof Service, t: unknown) => (t as Service)[k]("c", true);\n',
+    },
+    "dynamic-member-access",
+  ],
+  "a loop over the prototype": [
+    {
+      "src/other.ts":
+        'import { s } from "./use";\nimport { Service } from "./svc";\nconst anyS: any = s;\nfor (const n of Object.getOwnPropertyNames(Service.prototype)) anyS[n]("c", true);\n',
+    },
+    "prototype-access",
+  ],
+  "a reflective read": [
+    { "src/other.ts": 'import { s } from "./use";\nReflect.get(s, "load").call(s, "c", true);\n' },
+    "name-in-string",
+  ],
+  "a dependency type of the same shape": [
+    {
+      "src/other.ts": 'import { register } from "lib";\nimport { s } from "./use";\nregister(s);\n',
+      "node_modules/lib/package.json": '{"name":"lib","types":"index.d.ts"}',
+      "node_modules/lib/index.d.ts":
+        "export declare function register(h: { load(id: string, cache?: boolean): string }): void;\n",
+    },
+    "external-structural",
+  ],
+};
+
+for (const [name, [files, reason]] of Object.entries(HIDDEN_CALLS)) {
+  test(`${name} blocks the method`, () => {
+    const [result] = methodResults(
+      { "src/svc.ts": STORE, "src/use.ts": STORE_USE, ...files },
+      LOAD,
+      { strict: true, module: "esnext", moduleResolution: "bundler" },
+    );
+    assert.deepEqual([result.outcome, result.reason], ["abstained", reason]);
+  });
+}
+
+test("a method that the platform calls by name is not read", () => {
+  const source =
+    "export class Service {\n  toString(radix: number = 10): string { return String(radix); }\n}\n";
+  const use =
+    'import { Service } from "./svc";\nconst s = new Service();\ns.toString(16);\ns.toString(2);\n';
+  const [result] = methodResults({ "src/svc.ts": source, "src/use.ts": use }, [
+    { id: 0, path: "src/svc.ts", class: "Service", methods: ["toString"] },
+  ]);
+  assert.deepEqual([result.outcome, result.reason], ["abstained", "protocol-method"]);
+});
+
+test("a local class of the same name does not stand for the module class", () => {
+  const local = [
+    "function local() {",
+    "  class Service {",
+    '    other(): string { return "q"; }',
+    "  }",
+    "  return new Service().other();",
+    "}",
+    "void local;",
+    "",
+  ].join("\n");
+  const [result] = methodResults(
+    { "src/svc.ts": `${local}${STORE}`, "src/use.ts": STORE_USE },
+    LOAD,
+  );
+  assert.equal(result.outcome, "complete");
+  assert.equal(result.calls.length, 2);
+});

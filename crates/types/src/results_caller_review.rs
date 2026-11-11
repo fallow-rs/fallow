@@ -538,10 +538,14 @@ impl ConstantParameterCandidates {
 
     /// Add the candidates of another part of the same run.
     pub fn extend(&mut self, other: Self) {
+        if other.files.is_empty() && other.is_empty() {
+            return;
+        }
         self.defaults.extend(other.defaults);
         self.classes.extend(other.classes);
+        let mut seen: rustc_hash::FxHashSet<PathBuf> = self.files.iter().cloned().collect();
         for file in other.files {
-            if !self.files.contains(&file) {
+            if seen.insert(file.clone()) {
                 self.files.push(file);
             }
         }

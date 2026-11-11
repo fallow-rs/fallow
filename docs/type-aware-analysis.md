@@ -272,13 +272,19 @@ a call:
   name, or a read of `arguments`,
 - a member of the same name that a base type or an interface from a dependency
   declares, because a framework can call it,
+- a member of the same name in a declaration file of a dependency whose owner
+  type the class matches, because code of the dependency can receive an
+  instance and call it,
+- a name that the platform calls, such as `then`, `toString`, `toJSON` or
+  `handleEvent`, and a read of `Class.prototype`,
 - a reference that is not a call, such as `this.save` as a value or `bind`,
 - a reference by name that does not resolve, such as a call on an `any`
   receiver,
 - a file outside the program of the class that names the method, such as
   another package of a monorepo or a component template,
-- a computed access on a receiver whose type has the method, or a computed
-  call on an untyped receiver when a string literal spells the name,
+- a computed access on a receiver whose type has the method, also on a call
+  result or an asserted receiver, or a computed call on an untyped receiver or
+  a `Reflect` call when a string literal spells the name,
 - a reference to another member of the same name whose owner type the class
   is assignable to. TypeScript types are structural, so code can pass an
   instance as a type that the class never `implements`.
@@ -289,17 +295,26 @@ An argument type is evidence only under these rules:
   `T`.
 - A JavaScript file without `checkJs` gives only the form of the argument,
   such as a literal, an object, a function or `new X()`.
-- An assertion (`as T`, `<T>x`, `x!`, not `as const`) removes the evidence,
-  also in the initializer of an identifier argument.
+- The check follows the bindings and the object literal members that an
+  argument reads, a few levels deep. An assertion (`as T`, `<T>x`, `x!`, not
+  `as const`), an `any` value, a `@ts-ignore`, `@ts-expect-error` or
+  `@ts-nocheck` comment, a definite assignment or an ambient declaration on
+  that path removes the evidence.
 - The checker keeps a narrowing across a call, also when a closure writes the
   binding. So a `let`, `var` or parameter that code writes after its
   declaration gives only its declared type, and a compound expression that
   reads such a binding or a member gives no evidence.
 - Without `noUncheckedIndexedAccess`, an index read has a type without
-  `undefined`. An index read, a destructured binding, and a binding whose
-  initializer reads an index give no evidence.
-- A bare member read uses the declared type of the member, and a class field
-  without an initializer is evidence only under `strictPropertyInitialization`.
+  `undefined`, also through the return type of a function. An index read, a
+  call result, a destructured binding, and a binding whose value comes from
+  one of these give no evidence.
+- A narrowing by a user-defined type guard (`x is T`) is a claim, so an
+  identifier that a type guard narrows gives no evidence. The tail of an
+  optional chain gives no evidence either.
+- A bare member read uses the declared type of the member. A class field
+  without an initializer is evidence only under `strictPropertyInitialization`,
+  and a read of `this.x` in a constructor or a field initializer gives no
+  evidence, because the field can still be unset there.
 
 A type does not prove a run-time value. Each such finding carries
 `evidence: "type-aware"`, and its explanation says that an `any` value, a cast,

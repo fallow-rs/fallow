@@ -136,6 +136,14 @@ impl Gate<'_> {
         if counted.len() < MIN_CALL_SITES {
             return None;
         }
+        // A parameter that each call passes the same value for already has the
+        // static `identical-argument` finding.
+        if matches!(
+            self.parameter_verdict(param, at, &counted),
+            Some((ConstantParameterReason::IdenticalArgument, _))
+        ) {
+            return None;
+        }
         let mut arguments = Vec::new();
         for call in &counted {
             match self.observe(*call, at) {
@@ -192,6 +200,8 @@ impl Gate<'_> {
 
     fn class_candidates(&self) -> Vec<MethodClassCandidate> {
         let mut out = Vec::new();
+        let mut suppressed: rustc_hash::FxHashMap<FileId, Vec<u32>> =
+            rustc_hash::FxHashMap::default();
         for module in self.input.modules {
             if !self.reachable(module.file_id) {
                 continue;
@@ -233,7 +243,10 @@ impl Gate<'_> {
                     path: self.path_of(module.file_id),
                     class_name: class.local.to_string(),
                     methods,
-                    suppressed_lines: self.suppressed_lines(module.file_id),
+                    suppressed_lines: suppressed
+                        .entry(module.file_id)
+                        .or_insert_with(|| self.suppressed_lines(module.file_id))
+                        .clone(),
                 });
             }
         }

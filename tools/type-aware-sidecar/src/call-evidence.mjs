@@ -34,7 +34,7 @@ import { targetDirection } from "./accessor-direction.mjs";
 import { hasToken, isAmbient } from "./declaration-facts.mjs";
 import { declarationsForSymbol } from "./semantic-identity.mjs";
 
-const { TypeFlags } = sync;
+const { SymbolFlags, TypeFlags } = sync;
 const {
   isArrowFunction,
   isAsExpression,
@@ -56,6 +56,7 @@ const {
   isPropertyAccessExpression,
   isSatisfiesExpression,
   isSpreadElement,
+  isStringLiteralLikeNode,
   isTypeAssertion,
   isVariableDeclaration,
   isWhileStatement,
@@ -242,10 +243,14 @@ const readsOf = (expression) => {
   const identifiers = [];
   let members = false;
   let indexes = false;
+  let calls = false;
+  let optional = false;
   const visit = (node) => {
     if (isFunctionLike(node)) return;
     if (isPropertyAccessExpression(node) || isElementAccessExpression(node)) members = true;
     if (isElementAccessExpression(node)) indexes = true;
+    if (isCallExpression(node)) calls = true;
+    if (node.questionDotToken !== undefined) optional = true;
     if (isIdentifier(node)) {
       const parent = node.parent;
       const isName =
@@ -256,7 +261,7 @@ const readsOf = (expression) => {
     node.forEachChild(visit);
   };
   visit(expression);
-  return { identifiers, members, indexes };
+  return { identifiers, members, indexes, calls, optional };
 };
 
 const uncheckedIndexes = (project) =>
@@ -271,75 +276,139 @@ const strictPropertyInitialization = (project) => {
   );
 };
 
-// Why the declared type of a binding is not evidence of its value, or null.
-// Without `noUncheckedIndexedAccess`, an index read has a type without
-// `undefined`, also through a destructuring pattern or an initializer. A
-// definite assignment (`let x!: T`) and an ambient declaration are claims
-// that no code checks.
-const bindingRisk = (project, declaration) => {
-  if (isAmbient(declaration)) return "ambient";
-  if (declaration.kind === SyntaxKind.BindingElement)
-    return uncheckedIndexes(project) ? "index-read" : null;
-  if (!isVariableDeclaration(declaration)) return null;
-  if (declaration.exclamationToken !== undefined) return "definite-assignment";
-  if (
-    declaration.initializer &&
-    uncheckedIndexes(project) &&
-    readsOf(declaration.initializer).indexes
-  ) {
-    return "index-read";
+const MAX_VALUE_DEPTH = 4;
+const TS_DIRECTIVE = /@ts-(?:ignore|expect-error|nocheck)\b/u;
+
+// A `@ts-ignore`, `@ts-expect-error` or `@ts-nocheck` comment lets a file
+// declare a type that its code does not satisfy.
+const hasTsDirective = (sourceFile, context) => {
+  const { fileName } = sourceFile;
+  if (!context.directives.has(fileName))
+    context.directives.set(fileName, TS_DIRECTIVE.test(sourceFile.text));
+  return context.directives.get(fileName);
+};
+
+/**
+ * Why the value of an expression can differ from its type, or null. The
+ * check follows the bindings that the expression reads, a few levels deep:
+ * an assertion, an `any` value, a `@ts-*` comment, a definite assignment, an
+ * ambient declaration, and, without `noUncheckedIndexedAccess`, an index read
+ * or a call result, whose type can drop `undefined`.
+ */
+const valueRisk = (project, expression, context, depth = 0) => {
+  if (depth > MAX_VALUE_DEPTH) return "deep-value";
+  if (containsAssertion(expression)) return "assertion";
+  if (hasTsDirective(expression.getSourceFile(), context)) return "ts-directive";
+  const reads = readsOf(expression);
+  if (uncheckedIndexes(project) && reads.indexes) return "index-read";
+  if (uncheckedIndexes(project) && reads.calls) return "call-result";
+  for (const identifier of reads.identifiers) {
+    const risk = identifierRisk(project, identifier, context, depth);
+    if (risk) return risk;
   }
   return null;
 };
 
+const symbolOfIdentifier = (project, identifier, context) => {
+  if (!context.symbols.has(identifier)) {
+    context.symbols.set(identifier, project.checker.getSymbolAtLocation(identifier) ?? null);
+  }
+  return context.symbols.get(identifier);
+};
+
+// The symbol that an import alias names, so the check reads the declaration
+// in the module that declares it.
+const resolvedSymbol = (project, symbol) => {
+  if ((symbol.flags & SymbolFlags.Alias) === 0) return symbol;
+  const target = project.checker.getAliasedSymbol(symbol);
+  return project.checker.isUnknownSymbol(target) ? null : target;
+};
+
+const identifierRisk = (project, identifier, context, depth) => {
+  const found = symbolOfIdentifier(project, identifier, context);
+  const symbol = found && resolvedSymbol(project, found);
+  if (!symbol) return identifier.text === "undefined" ? "undefined" : "no-symbol";
+  if (context.visited.has(symbol.id)) return null;
+  context.visited.add(symbol.id);
+  const declarations = declarationsForSymbol(project, symbol);
+  for (const declaration of declarations) {
+    const risk = declarationRisk(project, declaration, context, depth + 1);
+    if (risk) return risk;
+  }
+  return null;
+};
+
+// Why the declared type of a declaration is not evidence of its value, or
+// null. A destructured binding can read an index.
+const declarationRisk = (project, declaration, context, depth) => {
+  if (isAmbient(declaration)) return "ambient";
+  if (hasTsDirective(declaration.getSourceFile(), context)) return "ts-directive";
+  if (declaration.kind === SyntaxKind.BindingElement) {
+    return uncheckedIndexes(project) ? "index-read" : null;
+  }
+  if (!isVariableDeclaration(declaration)) return null;
+  if (declaration.exclamationToken !== undefined) return "definite-assignment";
+  if (!declaration.initializer) return null;
+  const type = project.checker.getTypeAtLocation(declaration.initializer);
+  if (!type || (type.flags & (TypeFlags.Any | TypeFlags.Unknown)) !== 0) return "any-value";
+  return valueRisk(project, declaration.initializer, context, depth);
+};
+
 const SET_MEMBER_KINDS = new Set([
   SyntaxKind.PropertySignature,
-  SyntaxKind.PropertyAssignment,
-  SyntaxKind.ShorthandPropertyAssignment,
   SyntaxKind.GetAccessor,
   SyntaxKind.MethodDeclaration,
   SyntaxKind.MethodSignature,
   SyntaxKind.Parameter,
 ]);
 
-// True when each declaration of a member holds a value of its declared type
-// once the object exists. A class field without an initializer is
-// `undefined` until code sets it, unless the checker enforces the set.
-const memberIsSet = (project, declarations) =>
-  declarations.length > 0 &&
-  declarations.every((declaration) => {
-    if (isAmbient(declaration)) return false;
-    if (SET_MEMBER_KINDS.has(declaration.kind)) return true;
-    if (declaration.kind !== SyntaxKind.PropertyDeclaration) return false;
-    if (hasToken(declaration, SyntaxKind.ExclamationToken)) return false;
-    return declaration.initializer !== undefined || strictPropertyInitialization(project);
-  });
+// Why a member declaration does not hold a value of its declared type, or
+// null. A class field without an initializer is `undefined` until code sets
+// it, unless the checker enforces the set, and an object literal property
+// holds the value of its initializer.
+const memberRisk = (project, declaration, context) => {
+  if (isAmbient(declaration)) return "ambient";
+  if (hasTsDirective(declaration.getSourceFile(), context)) return "ts-directive";
+  if (SET_MEMBER_KINDS.has(declaration.kind)) return null;
+  if (declaration.kind === SyntaxKind.PropertyAssignment) {
+    return valueRisk(project, declaration.initializer, context, 1);
+  }
+  if (declaration.kind === SyntaxKind.ShorthandPropertyAssignment) {
+    return valueRisk(project, declaration.name, context, 1);
+  }
+  if (declaration.kind !== SyntaxKind.PropertyDeclaration) return "member-not-set";
+  if (hasToken(declaration, SyntaxKind.ExclamationToken)) return "member-not-set";
+  if (declaration.initializer) return valueRisk(project, declaration.initializer, context, 1);
+  return strictPropertyInitialization(project) ? null : "member-not-set";
+};
+
+// True for `this.x` in a constructor or a field initializer, where a field
+// can still be unset.
+const readsUnsetThis = (expression) => {
+  if (expression.expression?.kind !== SyntaxKind.ThisKeyword) return false;
+  for (let node = expression.parent; node; node = node.parent) {
+    if (node.kind === SyntaxKind.Constructor || node.kind === SyntaxKind.PropertyDeclaration)
+      return true;
+    if (isFunctionLike(node) || node.kind === SyntaxKind.ClassDeclaration) return false;
+  }
+  return false;
+};
 
 const noEvidence = (reason) => ({ maybe_undefined: true, reason });
 
 // Why a binding gives no evidence at a call, `written` when only its declared
 // type is evidence, or null when the type at the call is evidence.
-const bindingReason = (project, symbol, writes) => {
-  const declarations = declarationsForSymbol(project, symbol);
-  const only = declarations.length === 1 ? declarations[0] : undefined;
-  if (
-    only &&
-    isVariableDeclaration(only) &&
-    only.initializer &&
-    containsAssertion(only.initializer)
-  ) {
-    return "assertion";
-  }
-  const risk = only ? bindingRisk(project, only) : null;
+const bindingReason = (project, identifier, context) => {
+  const risk = identifierRisk(project, identifier, context, 0);
   if (risk) return risk;
-  return isWrittenBinding(project, symbol, writes) ? "written" : null;
+  const symbol = symbolOfIdentifier(project, identifier, context);
+  return isWrittenBinding(project, symbol, context.writes) ? "written" : null;
 };
 
-const blockingRead = (project, plan, symbolOf, writes) => {
+const blockingRead = (project, plan, context) => {
   for (const identifier of plan.identifiers) {
-    const symbol = symbolOf.get(identifier);
-    if (!symbol) return "no-symbol";
-    const reason = bindingReason(project, symbol, writes);
+    context.visited = new Set();
+    const reason = bindingReason(project, identifier, context);
     if (reason === "written")
       return plan.expression === identifier ? "declared" : "written-binding";
     if (reason) return reason;
@@ -347,20 +416,60 @@ const blockingRead = (project, plan, symbolOf, writes) => {
   return null;
 };
 
+const memberEvidence = (project, expression, context) => {
+  if (readsOf(expression).optional) return { reason: "optional-chain" };
+  if (readsUnsetThis(expression)) return { reason: "member-not-set" };
+  const member = project.checker.getSymbolAtLocation(expression.name);
+  if (!member) return { reason: "no-symbol" };
+  context.visited = new Set();
+  const declarations = declarationsForSymbol(project, member);
+  if (declarations.length === 0) return { reason: "member-not-set" };
+  for (const declaration of declarations) {
+    const risk = memberRisk(project, declaration, context);
+    if (risk) return { reason: risk };
+  }
+  context.visited = new Set();
+  const receiver = valueRisk(project, expression.expression, context, 1);
+  return receiver ? { reason: receiver } : { declared: member };
+};
+
 // Where the evidence of one argument comes from: the type at the call, the
 // declared type of a symbol, or nowhere, with a reason.
-const planEvidence = (project, plan, symbolOf, writes) => {
+const planEvidence = (project, plan, context) => {
   const { expression } = plan;
-  if (isPropertyAccessExpression(expression) && expression.questionDotToken === undefined) {
-    const member = project.checker.getSymbolAtLocation(expression.name);
-    return member && memberIsSet(project, declarationsForSymbol(project, member))
-      ? { declared: member }
-      : { reason: "member-not-set" };
-  }
+  if (hasTsDirective(expression.getSourceFile(), context)) return { reason: "ts-directive" };
+  if (isPropertyAccessExpression(expression)) return memberEvidence(project, expression, context);
   if (plan.members) return { reason: "member-read" };
-  const blocked = blockingRead(project, plan, symbolOf, writes);
-  if (blocked === "declared") return { declared: symbolOf.get(expression) };
+  if (uncheckedIndexes(project) && plan.calls) return { reason: "call-result" };
+  const blocked = blockingRead(project, plan, context);
+  if (blocked === "declared") return { declared: symbolOfIdentifier(project, expression, context) };
   return blocked ? { reason: blocked } : { atCall: true };
+};
+
+// A user-defined type guard (`x is T`, `asserts x is T`) is a claim that no
+// code checks. True when a call in the function around `identifier` passes
+// the same name to such a guard.
+const guardedByPredicate = (project, identifier) => {
+  let scope = identifier.parent;
+  while (scope && !isFunctionLike(scope) && scope.kind !== SyntaxKind.SourceFile)
+    scope = scope.parent;
+  if (!scope) return false;
+  let guarded = false;
+  const visit = (node) => {
+    if (guarded) return;
+    if (
+      isCallExpression(node) &&
+      (node.arguments ?? []).some(
+        (argument) => isIdentifier(argument) && argument.text === identifier.text,
+      )
+    ) {
+      const signature = project.checker.getResolvedSignature(node);
+      if (signature && project.checker.getTypePredicateOfSignature(signature)) guarded = true;
+    }
+    node.forEachChild(visit);
+  };
+  visit(scope);
+  return guarded;
 };
 
 // The evidence for each argument of a list. A bare identifier of a binding
@@ -379,11 +488,15 @@ const typeArguments = (project, argumentNodes) => {
   });
   const identifiers = plans.flatMap((plan) => plan.identifiers);
   const symbols = identifiers.length === 0 ? [] : project.checker.getSymbolAtLocation(identifiers);
-  const symbolOf = new Map(identifiers.map((identifier, at) => [identifier, symbols[at]]));
-  const writes = new Map();
+  const context = {
+    symbols: new Map(identifiers.map((identifier, at) => [identifier, symbols[at] ?? null])),
+    writes: new Map(),
+    directives: new Map(),
+    visited: new Set(),
+  };
   const atCall = [];
   for (const plan of plans) {
-    const source = planEvidence(project, plan, symbolOf, writes);
+    const source = planEvidence(project, plan, context);
     if (source.atCall) atCall.push(plan);
     else if (source.declared) {
       results[plan.index] = typedArgument(
@@ -395,7 +508,12 @@ const typeArguments = (project, argumentNodes) => {
   if (atCall.length > 0) {
     const types = project.checker.getTypeAtLocation(atCall.map((plan) => plan.expression));
     atCall.forEach((plan, at) => {
-      results[plan.index] = typedArgument(project, types[at]);
+      const evidence = typedArgument(project, types[at]);
+      const narrowed = !evidence.maybe_undefined && isIdentifier(plan.expression);
+      results[plan.index] =
+        narrowed && guardedByPredicate(project, plan.expression)
+          ? noEvidence("type-predicate")
+          : evidence;
     });
   }
   return results;
@@ -757,19 +875,15 @@ const callEvidence = (project, method, call, name, pending) => {
   return evidence;
 };
 
+// The module-scope class of the name. An exported class is a statement of
+// the module, and a local class of the same name in a function is another
+// class.
 const declarationOfMethod = (sourceFile, className, methodName, start) => {
-  let classNode;
-  const visit = (node) => {
-    if (classNode) return true;
-    if (isClassDeclaration(node) && node.name?.text === className) {
-      classNode = node;
-      return true;
-    }
-    node.forEachChild(visit);
-    return classNode ? true : undefined;
-  };
-  visit(sourceFile);
-  if (!classNode) return { classNode: null, methods: [] };
+  const classes = sourceFile.statements.filter(
+    (statement) => isClassDeclaration(statement) && statement.name?.text === className,
+  );
+  if (classes.length !== 1) return { classNode: null, methods: [] };
+  const [classNode] = classes;
   const methods = classNode.members.filter(
     (member) =>
       isMethodDeclaration(member) &&
@@ -800,10 +914,14 @@ const inheritsExternalMember = (project, classNode, methodName) => {
 const tokensOf = (text) => new Set(text.match(IDENTIFIER_TOKENS) ?? []);
 
 const COMPUTED_CALL = /\]\s*(?:\?\.\s*)?\(/u;
+// A computed access with a key that is not a string or a number, or a
+// reflective read. Each can read a method that no reference names.
+const COMPUTED_ACCESS = /[\w$)\]!]\s*(?:\?\.\s*)?\[\s*[A-Za-z_$(]|\bReflect\./u;
+const REFLECT_CALL = /\bReflect\.(?:get|apply|construct)\s*\(/u;
 const MEMBER_NAME = /(?:\?\.|\.)\s*([A-Za-z_$][\w$]*)/gu;
 const STRING_KEY = /\[\s*(['"`])([A-Za-z_$][\w$]*)\1\s*\]/gu;
 const STRING_NAME = /(['"`])([A-Za-z_$][\w$]*)\1/gu;
-const OPEN_BRACKET = /([A-Za-z_$][\w$]*|[)\]])\s*(?:\?\.\s*)?\[/gu;
+const OPEN_BRACKET = /([A-Za-z_$][\w$]*|[)\]!])\s*(?:\?\.\s*)?\[/gu;
 const NOT_A_RECEIVER = new Set([
   "return",
   "case",
@@ -857,7 +975,7 @@ const computedAccesses = (text) => {
     if (next === undefined || next === "]" || /['"`\d]/u.test(next)) continue;
     const close = closingBracket(text, open);
     const called = close !== -1 && CALL_AFTER.test(text.slice(close, close + 40));
-    accesses.push({ position: /[)\]]/u.test(receiver) ? null : match.index, called });
+    accesses.push({ position: /[)\]!]/u.test(receiver) ? null : match.index, called });
   }
   return accesses;
 };
@@ -880,6 +998,8 @@ const isUntypedType = (type) =>
 /** The scan state of one program. */
 const programRisks = () => ({
   hard: new Map(),
+  externalMembers: new Map(),
+  prototypes: new Set(),
   strings: new Set(),
   untypedComputedCalls: 0,
   properties: new Map(),
@@ -918,32 +1038,79 @@ const scanProgramFile = (entry, risks, absolutePath, text, named, names) => {
           absolutePath,
           typed.map((access) => access.position),
         );
-  for (const untyped of accesses.filter((access) => access.position === null)) {
-    if (untyped.called) risks.untypedComputedCalls += 1;
+  typed.forEach((access, index) =>
+    recordComputedAccess(checker, risks, names, types[index], access.called),
+  );
+  if (accesses.some((access) => access.position === null)) {
+    recordComplexReceivers(entry.project, risks, names, absolutePath);
   }
-  typed.forEach((access, index) => {
-    const type = types[index];
-    if (isUntypedType(type)) {
-      if (access.called) risks.untypedComputedCalls += 1;
-      return;
+  if (REFLECT_CALL.test(text)) risks.untypedComputedCalls += 1;
+};
+
+// A computed access on a receiver that is not an identifier, such as
+// `get()[key]` or `(x as T)[key]`, needs the parse to find the receiver.
+const recordComplexReceivers = (project, risks, names, absolutePath) => {
+  const sourceFile = project.program.getSourceFile(absolutePath);
+  if (!sourceFile) return;
+  const accesses = [];
+  const visit = (node) => {
+    if (
+      isElementAccessExpression(node) &&
+      node.argumentExpression &&
+      !isStringLiteralLikeNode(node.argumentExpression) &&
+      node.argumentExpression.kind !== SyntaxKind.NumericLiteral &&
+      !isIdentifier(node.expression)
+    ) {
+      accesses.push(node);
     }
-    if (!risks.properties.has(type.id)) {
-      let properties = [];
-      try {
-        properties = checker.getPropertiesOfType(type).map((property) => property.name);
-      } catch {
-        properties = null;
-      }
-      risks.properties.set(type.id, properties);
-    }
-    const properties = risks.properties.get(type.id);
-    if (properties === null || properties.length === 0) {
-      if (access.called) risks.untypedComputedCalls += 1;
-      return;
-    }
-    for (const property of properties)
-      if (names.has(property)) addRisk(risks, property, "dynamic-member-access");
+    node.forEachChild(visit);
+  };
+  visit(sourceFile);
+  if (accesses.length === 0) return;
+  const types = project.checker.getTypeAtLocation(accesses.map((access) => access.expression));
+  accesses.forEach((access, index) => {
+    const called = isCalledAccess(access);
+    recordComputedAccess(project.checker, risks, names, types[index], called);
   });
+};
+
+const isCalledAccess = (access) => {
+  let current = access;
+  while (isParenthesizedExpression(current.parent)) current = current.parent;
+  const { parent } = current;
+  if (isCallExpression(parent) && parent.expression === current) return true;
+  return (
+    isPropertyAccessExpression(parent) &&
+    ["call", "apply", "bind"].includes(parent.name.text) &&
+    parent.expression === current
+  );
+};
+
+// A computed access on a typed receiver blocks each method of the type that
+// the access can read. A called access on an untyped receiver counts for the
+// string policy.
+const recordComputedAccess = (checker, risks, names, type, called) => {
+  if (isUntypedType(type)) {
+    if (called) risks.untypedComputedCalls += 1;
+    return;
+  }
+  if (!risks.properties.has(type.id)) {
+    let properties = [];
+    try {
+      properties = checker.getPropertiesOfType(type).map((property) => property.name);
+    } catch {
+      properties = null;
+    }
+    risks.properties.set(type.id, properties);
+  }
+  const properties = risks.properties.get(type.id);
+  if (properties === null || properties.length === 0) {
+    if (called) risks.untypedComputedCalls += 1;
+    return;
+  }
+  for (const property of properties) {
+    if (names.has(property)) addRisk(risks, property, "dynamic-member-access");
+  }
 };
 
 /**
@@ -956,13 +1123,25 @@ const scanProgramFile = (entry, risks, absolutePath, text, named, names) => {
  */
 const namesByProgram = (programs, root, classes) => {
   const namesByEntry = new Map();
+  const classNames = new Set();
   for (const request of classes) {
     const entry = programs.entry(path.resolve(root, request.path));
     if (!entry) continue;
     if (!namesByEntry.has(entry)) namesByEntry.set(entry, new Set());
     request.methods.forEach((method) => namesByEntry.get(entry).add(method.name));
+    classNames.add(request.class);
   }
-  return namesByEntry;
+  return { namesByEntry, classNames };
+};
+
+const PROTOTYPE_READ = /\b([A-Za-z_$][\w$]*)\s*\.\s*prototype\b/gu;
+
+// A read of `Class.prototype` can reach each method by reflection.
+const recordPrototypes = (risks, classNames, text) => {
+  for (const match of text.matchAll(PROTOTYPE_READ)) {
+    if (!classNames.has(match[1])) continue;
+    for (const state of risks.values()) state.prototypes.add(match[1]);
+  }
 };
 
 // The checks of one file for the program of one class candidate.
@@ -970,7 +1149,7 @@ const scanEntryFile = (entry, state, names, absolutePath, text, tokens) => {
   const named = [...names].filter((name) => tokens.has(name));
   if (!entry.files.has(absolutePath)) {
     named.forEach((name) => addRisk(state, name, "outside-program"));
-    if (COMPUTED_CALL.test(text)) state.untypedComputedCalls += 1;
+    if (COMPUTED_CALL.test(text) || REFLECT_CALL.test(text)) state.untypedComputedCalls += 1;
     return;
   }
   try {
@@ -988,25 +1167,73 @@ const recordStrings = (risks, allNames, text) => {
 };
 
 // The checks of one project file for each program of a class candidate.
-const scanRiskFile = (namesByEntry, risks, allNames, absolutePath, text) => {
+const scanRiskFile = (scan, risks, allNames, absolutePath, text) => {
+  const { namesByEntry, classNames } = scan;
   const tokens = tokensOf(text);
-  if (![...allNames].some((name) => tokens.has(name)) && !COMPUTED_CALL.test(text)) return;
+  if (![...allNames].some((name) => tokens.has(name)) && !COMPUTED_ACCESS.test(text)) return;
   recordStrings(risks, allNames, text);
+  recordPrototypes(risks, classNames, text);
   for (const [entry, names] of namesByEntry) {
     scanEntryFile(entry, risks.get(entry), names, absolutePath, text, tokens);
   }
 };
 
+const DECLARATION_FILE = /\.d\.[cm]?ts$/u;
+const MAX_EXTERNAL_MEMBERS = 200;
+
+// The member declarations of each method name in the declaration files of
+// a program, outside the TypeScript lib. Code of a dependency can call such a
+// member on a value of a class that matches the owner type.
+const recordExternalMembers = (entry, state, names) => {
+  const pattern = new RegExp(
+    `(?:^|[\\s;{,(])(${[...names].map((name) => name.replace(/\$/gu, "\\$")).join("|")})\\s*\\??\\s*[(<:]`,
+    "gu",
+  );
+  for (const fileName of entry.files) {
+    // The TypeScript lib files hold the platform types, whose callers the
+    // protocol names cover.
+    if (!DECLARATION_FILE.test(fileName) || /^lib\.[\w.]*\.d\.ts$/u.test(path.basename(fileName)))
+      continue;
+    const bytes = readBytes(fileName);
+    if (!bytes) continue;
+    const text = bytes.toString("utf8");
+    const positions = [...text.matchAll(pattern)].map((match) => [
+      match[1],
+      match.index + match[0].lastIndexOf(match[1]),
+    ]);
+    if (positions.length === 0) continue;
+    let symbols;
+    try {
+      symbols = entry.project.checker.getSymbolAtPosition(
+        fileName,
+        positions.map(([, position]) => position),
+      );
+    } catch {
+      positions.forEach(([name]) => addRisk(state, name, "external-structural"));
+      continue;
+    }
+    positions.forEach(([name], index) => {
+      if (!state.externalMembers.has(name)) state.externalMembers.set(name, new Map());
+      const members = state.externalMembers.get(name);
+      const symbol = symbols[index];
+      if (symbol) members.set(symbol.id, symbol);
+      if (members.size > MAX_EXTERNAL_MEMBERS) addRisk(state, name, "external-structural");
+    });
+  }
+};
+
 const nameRisks = (programs, root, files, classes) => {
-  const namesByEntry = namesByProgram(programs, root, classes);
+  const scan = namesByProgram(programs, root, classes);
+  const { namesByEntry } = scan;
   const risks = new Map([...namesByEntry.keys()].map((entry) => [entry, programRisks()]));
   if (risks.size === 0) return risks;
+  for (const [entry, names] of namesByEntry) recordExternalMembers(entry, risks.get(entry), names);
   const allNames = new Set([...namesByEntry.values()].flatMap((names) => [...names]));
   for (const file of files) {
     const absolutePath = path.resolve(root, file);
     if (/\.d\.[cm]?ts$/u.test(absolutePath)) continue;
     const bytes = readBytes(absolutePath);
-    if (bytes) scanRiskFile(namesByEntry, risks, allNames, absolutePath, bytes.toString("utf8"));
+    if (bytes) scanRiskFile(scan, risks, allNames, absolutePath, bytes.toString("utf8"));
   }
   return risks;
 };
@@ -1062,6 +1289,18 @@ const memberAlias = (project, symbol, declaration, classType) => {
   return null;
 };
 
+// A member of the same name in a dependency type that the class matches. A
+// dependency can receive an instance and call the method through that type.
+const externalStructural = (project, classNode, declaration, members) => {
+  if (!members || members.size === 0) return null;
+  const classType = classTypeOf(project, classNode, declaration);
+  if (!classType) return "unresolved-class";
+  for (const symbol of members.values()) {
+    if (memberAlias(project, symbol, declaration, classType)) return "external-structural";
+  }
+  return null;
+};
+
 /**
  * A reason when a reference by the method name names another member that a
  * value of the class can stand behind. TypeScript types are structural, so
@@ -1088,7 +1327,25 @@ const abstained = (reason) => ({ outcome: "abstained", reason });
 
 // The declaration of a method, or the reason that the method has no
 // closed set of calls by its form.
+// Methods that the language or the platform calls by name: a promise
+// `then`, a string or JSON conversion, an iterator step, an event listener.
+const PROTOCOL_METHODS = new Set([
+  "then",
+  "catch",
+  "finally",
+  "toString",
+  "toLocaleString",
+  "valueOf",
+  "toJSON",
+  "handleEvent",
+  "next",
+  "return",
+  "throw",
+  "constructor",
+]);
+
 const methodDeclaration = (project, sourceFile, classRequest, name) => {
+  if (PROTOCOL_METHODS.has(name)) return { reason: "protocol-method" };
   const { classNode, methods } = declarationOfMethod(sourceFile, classRequest.class, name);
   if (!classNode) return { reason: "class-not-found" };
   if (hasDecorators(classNode)) return { reason: "decorator" };
@@ -1142,6 +1399,7 @@ const methodEvidence = (programs, root, classRequest, method, risks) => {
   const state = risks.get(entry);
   const risk = nameRisk(state, method.name);
   if (risk) return abstained(risk);
+  if (state.prototypes.has(classRequest.class)) return abstained("prototype-access");
   const { project } = entry;
   const sourceFile = project.program.getSourceFile(absolutePath);
   const found = methodDeclaration(project, sourceFile, classRequest, method.name);
@@ -1158,6 +1416,13 @@ const methodEvidence = (programs, root, classRequest, method, risks) => {
     usages,
   );
   if (alias) return abstained(alias);
+  const external = externalStructural(
+    project,
+    classNode,
+    declaration,
+    state.externalMembers.get(method.name),
+  );
+  if (external) return abstained(external);
   const collected = methodCalls(project, sourceFile, declaration, usages);
   if (collected.reason) return abstained(collected.reason);
   return {
