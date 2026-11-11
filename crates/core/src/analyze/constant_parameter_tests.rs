@@ -544,10 +544,11 @@ fn a_required_parameter_that_no_call_passes_gives_no_finding() {
 }
 
 #[test]
-fn written_rest_and_pattern_parameters_give_no_finding() {
-    let main = "function pick(a, b, { c }, ...rest) { b = !b; return [a, b, c, rest]; }\npick(1, true, { c: 1 }, 1);\npick(2, true, { c: 1 }, 1);\npick(3, true, { c: 1 }, 1);\nexport const marker = 1;\n";
+fn written_rest_and_array_pattern_parameters_give_no_finding() {
+    let main = "function pick(a, b, [d], { c }, ...rest) { b = !b; return [a, b, c, d, rest]; }\npick(1, true, [1], { c: 1 }, 1);\npick(2, true, [1], { c: 1 }, 1);\npick(3, true, [1], { c: 1 }, 1);\nexport const marker = 1;\n";
     let project = analyze(&[("src/main.ts", main)]);
-    assert!(project.findings("pick").is_empty());
+    // Only the option key of the object pattern gets a finding.
+    assert_eq!(project.findings("pick"), vec![identical("c", "1")]);
 }
 
 #[test]
@@ -751,4 +752,226 @@ fn the_gate_stats_count_the_first_any_and_only_reason() {
             ],
         }
     );
+}
+
+fn identical(name: &str, text: &str) -> (String, ConstantParameterReason, Option<String>) {
+    (
+        name.to_string(),
+        ConstantParameterReason::IdenticalArgument,
+        Some(text.to_string()),
+    )
+}
+
+fn never_passed(name: &str) -> (String, ConstantParameterReason, Option<String>) {
+    (name.to_string(), ConstantParameterReason::NeverPassed, None)
+}
+
+const CONSTANTS: &str = "export const LIMIT = 10;\nexport const OTHER = 10;\nexport let MUTABLE = 10;\nexport const COMPUTED = Math.max(1, 2);\nexport enum Mode { Grid, List }\n";
+const LOAD: &str = "import { Mode } from './constants';\nexport function load(limit: number, mode: Mode) {\n  return [limit, mode];\n}\n";
+
+fn binding_project(main: &str) -> Project {
+    analyze(&[
+        ("src/constants.ts", CONSTANTS),
+        ("src/load.ts", LOAD),
+        ("src/barrel.ts", "export * from './constants';\n"),
+        ("src/main.ts", main),
+    ])
+}
+
+#[test]
+fn the_same_const_or_enum_member_is_an_identical_argument() {
+    let main = "import { load } from './load';\nimport { LIMIT, Mode } from './constants';\nimport * as barrel from './barrel';\nimport { LIMIT as Renamed } from './barrel';\nload(LIMIT, Mode.Grid);\nload(barrel.LIMIT, barrel.Mode.Grid);\nload(Renamed, Mode.Grid);\n";
+    let project = binding_project(main);
+    assert_eq!(
+        project.findings("load"),
+        vec![identical("limit", "LIMIT"), identical("mode", "Mode.Grid")]
+    );
+    let limit = &project.results.constant_parameters[0].parameter;
+    assert_eq!(
+        limit.value.as_ref().map(|value| value.kind),
+        Some(crate::results::ConstantParameterValueKind::Binding)
+    );
+    assert_eq!(limit.option_key, None);
+}
+
+#[test]
+fn a_local_const_is_an_identical_argument_in_its_own_module() {
+    let main = "const SIZE = 'large';\nfunction render(size: string) { return size; }\nrender(SIZE);\nrender(SIZE);\nexport const marker = 1;\n";
+    let project = analyze(&[("src/main.ts", main)]);
+    assert_eq!(project.findings("render"), vec![identical("size", "SIZE")]);
+}
+
+#[test]
+fn different_bindings_or_a_binding_and_its_literal_give_no_finding() {
+    // Two members of one enum.
+    let main = "import { load } from './load';\nimport { LIMIT, Mode } from './constants';\nload(LIMIT, Mode.Grid);\nload(LIMIT, Mode.List);\n";
+    assert_eq!(
+        binding_project(main).findings("load"),
+        vec![identical("limit", "LIMIT")]
+    );
+    for main in [
+        // Two constants with the same value are two bindings.
+        "import { load } from './load';\nimport { LIMIT, OTHER, Mode } from './constants';\nload(LIMIT, Mode.Grid);\nload(OTHER, Mode.Grid);\n",
+        // A binding and its literal value.
+        "import { load } from './load';\nimport { LIMIT, Mode } from './constants';\nload(LIMIT, Mode.Grid);\nload(10, Mode.Grid);\n",
+    ] {
+        assert_eq!(
+            binding_project(main).findings("load"),
+            vec![identical("mode", "Mode.Grid")],
+            "{main}"
+        );
+    }
+}
+
+#[test]
+fn a_mutable_or_computed_binding_or_a_folded_value_is_unknown() {
+    for main in [
+        "import { load } from './load';\nimport { MUTABLE } from './constants';\nload(MUTABLE, 0);\nload(MUTABLE, 0);\n",
+        "import { load } from './load';\nimport { COMPUTED } from './constants';\nload(COMPUTED, 0);\nload(COMPUTED, 0);\n",
+        "import { load } from './load';\nload(1 + 1, 0);\nload(1 + 1, 0);\n",
+        "import { load } from './load';\nload([1] as any, 0);\nload([1] as any, 0);\n",
+        "import { load } from './load';\nload({ a: 1 } as any, 0);\nload({ a: 1 } as any, 0);\n",
+        "import { load } from './load';\nconst local = { a: 1 };\nload(local as any, 0);\nload(local as any, 0);\n",
+    ] {
+        let project = binding_project(main);
+        assert_eq!(
+            project.findings("load"),
+            vec![identical("mode", "0")],
+            "{main}"
+        );
+    }
+}
+
+#[test]
+fn local_constants_of_two_modules_are_two_bindings() {
+    let first = "import { load } from './load';\nconst LIMIT = 10;\nload(LIMIT, 0);\n";
+    let second = "import { load } from './load';\nconst LIMIT = 10;\nload(LIMIT, 0);\n";
+    let main = "import './first';\nimport './second';\n";
+    let project = analyze(&[
+        ("src/constants.ts", CONSTANTS),
+        ("src/load.ts", LOAD),
+        ("src/first.ts", first),
+        ("src/second.ts", second),
+        ("src/main.ts", main),
+    ]);
+    assert_eq!(project.findings("load"), vec![identical("mode", "0")]);
+}
+
+#[test]
+fn an_accumulator_that_only_the_recursion_passes_gives_no_finding() {
+    let main = "function sum(xs: number[], total = 0): number {\n  return xs.length ? sum(xs.slice(1), total + xs[0]) : total;\n}\nsum([1]);\nsum([2]);\nsum([3]);\nfunction collect(node: number, seen: number[] = []): number[] {\n  seen.push(node);\n  return node > 0 ? collect(node - 1, seen) : seen;\n}\ncollect(1);\ncollect(2);\nexport const marker = 1;\n";
+    let project = analyze(&[("src/main.ts", main)]);
+    assert!(project.findings("sum").is_empty());
+    assert!(project.findings("collect").is_empty());
+}
+
+const REQUEST: &str = "export function request(url: string, { retries = 3, signal, mode, cache: store }: { retries?: number; signal?: AbortSignal; mode?: string; cache?: string } = {}) {\n  if (store) return url;\n  return [url, retries, signal, mode];\n}\n";
+
+fn request_project(main: &str) -> Project {
+    analyze(&[("src/request.ts", REQUEST), ("src/main.ts", main)])
+}
+
+#[test]
+fn an_option_key_that_no_call_sets_or_that_each_call_sets_alike_is_reported() {
+    let main = "import { request } from './request';\nimport { signal } from './signal';\nrequest('a', { mode: 'cors' });\nrequest('b', { mode: 'cors', signal });\nrequest('c', { mode: 'cors', cache: 'no-store' });\n";
+    let signal = "export const signal = new AbortController().signal;\n";
+    let project = analyze(&[
+        ("src/request.ts", REQUEST),
+        ("src/signal.ts", signal),
+        ("src/main.ts", main),
+    ]);
+    assert_eq!(
+        project.findings("request"),
+        vec![identical("mode", "cors"), never_passed("retries")]
+    );
+    let retries = project
+        .results
+        .constant_parameters
+        .iter()
+        .map(|finding| &finding.parameter)
+        .find(|parameter| parameter.parameter_name == "retries")
+        .expect("retries finding");
+    assert_eq!(retries.option_key.as_deref(), Some("retries"));
+    assert!(retries.has_default);
+    assert_eq!(retries.parameter_index, 1);
+    assert_eq!(retries.label(), "{ retries }");
+    assert_eq!(retries.line, 1);
+}
+
+#[test]
+fn an_omitted_options_object_with_an_empty_default_sets_no_key() {
+    let main = "import { request } from './request';\nrequest('a');\nrequest('b', undefined);\nrequest('c', {});\n";
+    let project = request_project(main);
+    assert_eq!(
+        project.findings("request"),
+        vec![
+            never_passed("mode"),
+            never_passed("retries"),
+            never_passed("signal"),
+            never_passed("store"),
+        ]
+    );
+    let store = project
+        .results
+        .constant_parameters
+        .iter()
+        .map(|finding| &finding.parameter)
+        .find(|parameter| parameter.parameter_name == "store")
+        .expect("store finding");
+    assert_eq!(store.label(), "{ cache: store }");
+    assert_eq!(store.condition_reads, 1);
+}
+
+#[test]
+fn an_options_object_that_the_facts_cannot_read_gives_no_key_finding() {
+    for main in [
+        "import { request } from './request';\nconst options = { mode: 'cors' };\nrequest('a', { mode: 'cors' });\nrequest('b', options);\n",
+        "import { request } from './request';\nconst extra = {};\nrequest('a', { mode: 'cors' });\nrequest('b', { mode: 'cors', ...extra });\n",
+        "import { request } from './request';\nconst key = 'retries';\nrequest('a', { mode: 'cors' });\nrequest('b', { mode: 'cors', [key]: 1 });\n",
+        "import { request } from './request';\nconst proto = { retries: 1 };\nrequest('a', { mode: 'cors' });\nrequest('b', { mode: 'cors', __proto__: proto });\n",
+    ] {
+        let project = request_project(main);
+        assert!(project.findings("request").is_empty(), "{main}");
+    }
+}
+
+#[test]
+fn a_default_object_with_keys_or_a_written_key_gives_no_key_finding() {
+    let request = "export function request(url: string, { retries }: { retries?: number } = { retries: 5 }) {\n  return [url, retries];\n}\nexport function write(url: string, { retries }: { retries?: number } = {}) {\n  retries = (retries ?? 0) + 1;\n  return [url, retries];\n}\nexport function required(url: string, { retries }: { retries?: number }) {\n  return [url, retries];\n}\n";
+    let main = "import { request, write, required } from './request';\nrequest('a');\nrequest('b');\nwrite('a');\nwrite('b');\nrequired('a', {});\nrequired('b', {});\nrequired('c' as any);\n";
+    let project = analyze(&[("src/request.ts", request), ("src/main.ts", main)]);
+    assert!(project.findings("request").is_empty());
+    assert!(project.findings("write").is_empty());
+    assert!(project.findings("required").is_empty());
+}
+
+#[test]
+fn a_self_call_that_passes_an_option_key_on_is_neutral() {
+    let main = "function walk(node: number, { depth = 0, seen }: { depth?: number; seen?: number[] } = {}): number {\n  return node > 0 ? walk(node - 1, { depth, seen }) : depth;\n}\nwalk(1, { depth: 1 });\nwalk(2, { depth: 1 });\nexport const marker = 1;\n";
+    let project = analyze(&[("src/main.ts", main)]);
+    assert_eq!(project.findings("walk"), vec![identical("depth", "1")]);
+}
+
+#[test]
+fn a_function_that_a_test_file_declares_is_not_a_candidate() {
+    let helper =
+        "export function makeUser(name: string, admin: boolean) {\n  return { name, admin };\n}\n";
+    let test = "import { makeUser } from './helpers';\nimport { format } from '../format';\nfunction build(flag: boolean) { return flag; }\nbuild(true);\nbuild(true);\nmakeUser('a', true);\nmakeUser('b', true);\nformat(4, true);\n";
+    let project = analyze(&base_with(
+        &[
+            ("src/__tests__/helpers.ts", helper),
+            ("src/__tests__/user.test.ts", test),
+        ],
+        MAIN,
+    ));
+    assert_abstains(
+        &project,
+        "src/__tests__/helpers.ts",
+        "makeUser",
+        "test-file",
+    );
+    assert_abstains(&project, "src/__tests__/user.test.ts", "build", "test-file");
+    // The test file stays a caller of the functions of other files.
+    let rows = project.findings("format");
+    assert!(rows.iter().any(|row| row.0 == "compact"), "{rows:?}");
 }

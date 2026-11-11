@@ -54,7 +54,7 @@ pub(super) fn check_sections_frameworks_and_hygiene() -> Vec<SectionSpec> {
                     markdown_table_code_span(&format!(
                         "{}({})",
                         s(it, "function_name"),
-                        s(it, "parameter_name")
+                        crate::report::github::constant_parameter_label(it)
                     )),
                     markdown_table_text(s(it, "reason")),
                     it.get("value")

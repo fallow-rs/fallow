@@ -20,7 +20,8 @@ pub(super) fn collect_component_findings(
             "constant-parameter",
             Some(format!(
                 "{}({})",
-                finding.parameter.function_name, finding.parameter.parameter_name
+                finding.parameter.function_name,
+                finding.parameter.label()
             )),
         );
     }

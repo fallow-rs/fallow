@@ -81,7 +81,7 @@ pub(super) fn push_constant_parameter_sarif_results(
                 level: finding_level(finding, ctx.rules.constant_parameters),
                 message: format!(
                     "Parameter '{}' of '{}': {}. {}",
-                    parameter.parameter_name,
+                    parameter.label(),
                     parameter.function_name,
                     parameter.summary(),
                     parameter.explanation

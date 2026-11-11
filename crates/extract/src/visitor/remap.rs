@@ -34,6 +34,9 @@ impl ModuleInfoExtractor {
             contract.span_start = remap_start(contract.span_start);
             for param in &mut contract.params {
                 param.span_start = remap_start(param.span_start);
+                for key in &mut param.keys {
+                    key.span_start = remap_start(key.span_start);
+                }
             }
         }
         for site in self

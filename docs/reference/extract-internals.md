@@ -338,7 +338,7 @@ A contract also holds these facts:
   also counts, because it can replace the value without a write reference.
   A written parameter can hold a value that no caller passes.
 
-An argument fact is `Literal`, `Param` or `Unknown`. `Param(i)` exists only
+An argument fact is `Literal`, `Param`, `Binding`, `Object` or `Unknown`. `Param(i)` exists only
 for a self-call: a call of a local function inside the body or a default
 value of that same function, at any depth, for example in an arrow callback.
 The argument must be the identifier of the formal identifier parameter at
@@ -349,6 +349,31 @@ the fact. A call of a different function that passes a parameter stores
 `Unknown`. `args` never holds a spread argument, because the list stops
 before the first spread. `-0` and `0` are different `Number` facts, because
 `Object.is` and `1 / x` tell them apart.
+
+Two more argument facts carry a value with a known identity:
+
+- `Binding` names an immutable binding. For a local root, the extractor
+  checks that the identifier resolves to a module-scope `const` with a
+  literal initializer (`Mode.Grid` for an enum, with a declared member). For
+  an admitted import root, it stores the import index and the static path:
+  one segment at most for a named or default import, one or two for a
+  namespace import. The analysis checks the origin. `literal_consts` lists
+  the exported literal constants of a module for that check.
+- `Object` is an object literal with no spread, no computed key, no numeric
+  key and no `__proto__` key, with at most `MAX_OBJECT_KEYS` keys. Each other
+  object literal is `Unknown`, because a dropped key would look absent. A key
+  value is `Literal`, `Binding`, `PassThrough` or `Unknown`; a method, a
+  getter and a setter are `Unknown`. `PassThrough` exists only for a
+  self-call, when the value is the unchanged binding of the same key of the
+  object-pattern parameter at the same position.
+
+`ParamFact.keys` holds the static keys of an object-pattern parameter whose
+value is a plain binding. A computed or numeric key, a nested pattern and a
+key of `Object.prototype` (`PROTOTYPE_KEYS`) are not recorded. A pattern with
+a default other than `{}` records no key, because that default can set a key
+that no caller passes. Each key has its own `written` and `condition_reads`.
+The SFC merge moves each `BindingRoot::Import` index past the imports of the
+earlier blocks, and the span remap moves the key spans.
 
 A read of `arguments` opens the contract also when a decorator, a parameter
 decorator of a method, an `extends` clause or a computed key of a class inside

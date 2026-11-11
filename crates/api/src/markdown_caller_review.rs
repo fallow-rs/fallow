@@ -73,7 +73,8 @@ pub(super) fn push_markdown_caller_review_sections(
                 "- {} in {}: {} ({} calls). Callers: {}",
                 markdown_code_span(&format!(
                     "{}({})",
-                    parameter.function_name, parameter.parameter_name
+                    parameter.function_name,
+                    parameter.label()
                 )),
                 markdown_code_span(&format!("{}:{}", rel(&parameter.path), parameter.line)),
                 summary,
@@ -102,6 +103,7 @@ mod tests {
                 path: "src/a.ts".into(),
                 function_name: "f".into(),
                 parameter_name: "p".into(),
+                option_key: None,
                 parameter_index: 0,
                 line: 1,
                 col: 11,

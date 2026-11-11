@@ -60,7 +60,7 @@ pub(super) fn push_constant_parameter_issues(
         ]);
         let description = format!(
             "Parameter '{}' of '{}': {}. {}",
-            parameter.parameter_name,
+            parameter.label(),
             parameter.function_name,
             parameter.summary(),
             parameter.explanation

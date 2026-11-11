@@ -78,7 +78,7 @@ pub fn constant_parameter_diagnostic(
         code_description: doc_link_for_code("constant-parameter"),
         message: format!(
             "Parameter '{}' of '{}': {} ({} calls). {}",
-            parameter.parameter_name,
+            parameter.label(),
             parameter.function_name,
             parameter.summary(),
             parameter.call_site_count,
@@ -103,6 +103,7 @@ pub(super) mod tests {
             path,
             function_name: "format".to_string(),
             parameter_name: "compact".to_string(),
+            option_key: None,
             parameter_index: 1,
             line: 1,
             col: 23,

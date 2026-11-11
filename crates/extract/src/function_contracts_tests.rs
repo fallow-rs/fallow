@@ -2,8 +2,9 @@ use std::path::Path;
 
 use fallow_types::discover::FileId;
 use fallow_types::extract::{
-    ArgFact, CallSite, CallTarget, ContractIncomplete, FunctionContract, FunctionContractFacts,
-    ImportBindingReferenceKind, LiteralValue, ModuleInfo, ParamKind,
+    ArgFact, BindingArg, BindingRoot, CallSite, CallTarget, ContractIncomplete, FunctionContract,
+    FunctionContractFacts, ImportBindingReferenceKind, KeyArg, KeyValue, LiteralValue, ModuleInfo,
+    ParamKind,
 };
 
 fn parse_at(path: &str, source: &str) -> ModuleInfo {
@@ -316,7 +317,14 @@ fn records_local_calls_with_literal_argument_facts() {
                 ArgFact::Literal(LiteralValue::String("en".into())),
             ],
             vec![number(2.0), ArgFact::Literal(LiteralValue::Undefined)],
-            vec![],
+            vec![
+                ArgFact::Unknown,
+                ArgFact::Object(vec![key(
+                    "a",
+                    KeyValue::Literal(LiteralValue::Number(1f64.to_bits()))
+                )]),
+                ArgFact::Unknown,
+            ],
         ]
     );
     let counts: Vec<_> = calls.iter().map(|call| call.arg_count).collect();
@@ -950,7 +958,10 @@ fn a_written_pattern_or_shadowed_parameter_is_not_pass_through() {
     );
     assert_eq!(
         args("pick"),
-        vec![vec![ArgFact::Unknown, ArgFact::Param(1)]]
+        vec![vec![
+            ArgFact::Object(vec![key("a", KeyValue::PassThrough)]),
+            ArgFact::Param(1)
+        ]]
     );
     assert_eq!(args("shadow"), vec![vec![]]);
 }
@@ -1028,5 +1039,237 @@ fn a_write_through_arguments_opens_the_contract() {
     assert_eq!(
         contract(&info, "sloppy").incomplete,
         Some(ContractIncomplete::ArgumentsRead)
+    );
+}
+
+fn import_call_args(info: &ModuleInfo) -> Vec<Vec<ArgFact>> {
+    facts(info)
+        .call_sites()
+        .filter(|(target, _, _)| matches!(target, CallTarget::Import(_)))
+        .map(|(_, _, site)| site.args.clone())
+        .collect()
+}
+
+fn local_binding(path: &str) -> ArgFact {
+    ArgFact::Binding(BindingArg {
+        root: BindingRoot::Local,
+        path: path.into(),
+    })
+}
+
+fn import_binding(index: u32, path: &str) -> ArgFact {
+    ArgFact::Binding(BindingArg {
+        root: BindingRoot::Import(index),
+        path: path.into(),
+    })
+}
+
+fn key(key: &str, value: KeyValue) -> KeyArg {
+    KeyArg {
+        key: key.into(),
+        value,
+    }
+}
+
+#[test]
+fn an_argument_that_names_an_immutable_binding_has_an_identity() {
+    let info = parse(
+        "import { LIMIT, Mode } from './constants';
+         import * as constants from './constants';
+         import fallback from './fallback';
+         const LOCAL = 'a';
+         const TYPED = 3 as const;
+         enum Kind { Grid, 'List' }
+         f(LOCAL, TYPED, Kind.Grid, Kind.List);
+         f(LIMIT, Mode.Grid, constants.LIMIT, constants.Mode.Grid, fallback);
+         function f(...args) {}",
+    );
+    let calls = local_calls(&info, "f");
+    assert_eq!(
+        calls[0].args,
+        vec![
+            local_binding("LOCAL"),
+            local_binding("TYPED"),
+            local_binding("Kind.Grid"),
+            local_binding("Kind.List"),
+        ]
+    );
+    assert_eq!(
+        calls[1].args,
+        vec![
+            import_binding(0, ""),
+            import_binding(1, "Grid"),
+            import_binding(2, "LIMIT"),
+            import_binding(2, "Mode.Grid"),
+            import_binding(3, ""),
+        ]
+    );
+}
+
+#[test]
+fn a_mutable_folded_or_shadowed_binding_is_unknown() {
+    let info = parse(
+        "import { Mode } from './constants';
+         import * as constants from './constants';
+         let MUTABLE = 1;
+         const FOLDED = 1 + 1;
+         const OBJECT = { a: 1 };
+         const LIST = [1];
+         const LOCAL = 'a';
+         enum Kind { Grid }
+         namespace Space { export const A = 1; }
+         f(MUTABLE, FOLDED, OBJECT, LIST, Kind.Missing, Space.A, Mode.Grid.value, constants, Kind?.Grid);
+         function g(LOCAL) { f(LOCAL); }
+         function f(...args) {}",
+    );
+    let calls = local_calls(&info, "f");
+    assert_eq!(calls[0].args, vec![]);
+    assert_eq!(calls[0].arg_count, 9);
+    assert_eq!(calls[1].args, vec![]);
+}
+
+#[test]
+fn only_exported_literal_constants_are_listed() {
+    let info = parse(
+        "export const A = 1;
+         const B = 'b';
+         const C = true;
+         const D = 1, E = compute();
+         export { B, C as Renamed };
+         export type { D };
+         export default D;
+         export let F = 1;",
+    );
+    let names: Vec<_> = facts(&info)
+        .literal_consts
+        .iter()
+        .map(|name| &**name)
+        .collect();
+    assert_eq!(names, vec!["A", "B", "C", "D"]);
+}
+
+#[test]
+fn an_object_pattern_records_its_static_keys() {
+    let info = parse(
+        "export function request(url, { retries = 3, signal: abort, 'quoted': q, [dynamic]: d, 1: n, toString, nested: { deep }, flag }: Options = {}) {
+           if (flag) {}
+           if (!abort) {}
+         }
+         export function written({ a, b }) { a = 2; }
+         export function defaulted({ a } = { a: 1 }) {}
+         export function rest(...{ a }) {}",
+    );
+    let request = contract(&info, "request");
+    let keys: Vec<_> = request.params[1]
+        .keys
+        .iter()
+        .map(|key| {
+            (
+                &*key.key,
+                &*key.binding,
+                key.has_default,
+                key.condition_reads,
+                key.written,
+            )
+        })
+        .collect();
+    assert_eq!(
+        keys,
+        vec![
+            ("retries", "retries", true, 0, false),
+            ("signal", "abort", false, 1, false),
+            ("quoted", "q", false, 0, false),
+            ("flag", "flag", false, 1, false),
+        ]
+    );
+    assert!(request.params[0].keys.is_empty());
+    let written: Vec<_> = contract(&info, "written").params[0]
+        .keys
+        .iter()
+        .map(|key| (&*key.key, key.written))
+        .collect();
+    assert_eq!(written, vec![("a", true), ("b", false)]);
+    assert!(contract(&info, "defaulted").params[0].keys.is_empty());
+    assert!(contract(&info, "rest").params[0].keys.is_empty());
+}
+
+#[test]
+fn an_object_literal_argument_records_its_keys() {
+    let info = parse(
+        "import { request } from './request';
+         import { LIMIT } from './constants';
+         const value = compute();
+         request({ retries: 1, signal: value, limit: LIMIT, 'quoted': null, run() {}, get lazy() { return 1; }, retries: 2 });
+         request({ ...value });
+         request({ [value]: 1 });
+         request({ 1: 'a' });
+         request({ __proto__: value });
+         request({});",
+    );
+    assert_eq!(
+        import_call_args(&info),
+        vec![
+            vec![ArgFact::Object(vec![
+                key(
+                    "retries",
+                    KeyValue::Literal(LiteralValue::Number(2f64.to_bits()))
+                ),
+                key("signal", KeyValue::Unknown),
+                key(
+                    "limit",
+                    KeyValue::Binding(BindingArg {
+                        root: BindingRoot::Import(1),
+                        path: "".into(),
+                    })
+                ),
+                key("quoted", KeyValue::Literal(LiteralValue::Null)),
+                key("run", KeyValue::Unknown),
+                key("lazy", KeyValue::Unknown),
+            ])],
+            vec![],
+            vec![],
+            vec![],
+            vec![],
+            vec![ArgFact::Object(vec![])],
+        ]
+    );
+}
+
+#[test]
+fn a_self_call_that_passes_an_option_key_on_marks_it() {
+    let info = parse(
+        "export function walk(node, { depth, seen = new Set(), moved }) {
+           walk(node.child, { depth, seen: seen, moved: depth, extra: depth });
+           moved = 1;
+           walk(node.child, { moved });
+         }
+         export function other({ depth }) { walk(null, { depth }); }",
+    );
+    let calls = local_calls(&info, "walk");
+    assert_eq!(
+        calls[0].args,
+        vec![
+            ArgFact::Unknown,
+            ArgFact::Object(vec![
+                key("depth", KeyValue::PassThrough),
+                key("seen", KeyValue::PassThrough),
+                key("moved", KeyValue::Unknown),
+                key("extra", KeyValue::Unknown),
+            ]),
+        ]
+    );
+    assert_eq!(
+        calls[1].args,
+        vec![
+            ArgFact::Unknown,
+            ArgFact::Object(vec![key("moved", KeyValue::Unknown)]),
+        ]
+    );
+    assert_eq!(
+        calls[2].args,
+        vec![
+            ArgFact::Literal(LiteralValue::Null),
+            ArgFact::Object(vec![key("depth", KeyValue::Unknown)]),
+        ]
     );
 }

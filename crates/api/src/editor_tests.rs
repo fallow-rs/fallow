@@ -1049,6 +1049,7 @@ pub fn merge_test_source_with_all_fields() -> EditorAnalysisResults {
                     path: "/format.ts".into(),
                     function_name: "format".to_string(),
                     parameter_name: "compact".to_string(),
+                    option_key: None,
                     parameter_index: 1,
                     line: 3,
                     col: 4,

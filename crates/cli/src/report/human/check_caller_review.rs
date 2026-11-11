@@ -121,7 +121,7 @@ fn format_constant_parameter(finding: &ConstantParameterFinding, root: &Path) ->
         ":{} {}({}): {} ({} calls{reads})\n    Callers: {}",
         parameter.line,
         parameter.function_name,
-        parameter.parameter_name,
+        parameter.label(),
         parameter.summary(),
         parameter.call_site_count,
         callers
