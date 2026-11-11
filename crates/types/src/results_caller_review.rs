@@ -194,6 +194,18 @@ impl ConstantParameterValue {
         };
         Self { kind, text }
     }
+
+    /// `true` when the value is truthy in JavaScript: `false`, `null`,
+    /// `undefined`, `0`, `-0`, `NaN` and `""` are falsy.
+    #[must_use]
+    pub fn is_truthy(&self) -> bool {
+        match self.kind {
+            ConstantParameterValueKind::Boolean => self.text == "true",
+            ConstantParameterValueKind::Null | ConstantParameterValueKind::Undefined => false,
+            ConstantParameterValueKind::Number => !matches!(self.text.as_str(), "0" | "-0" | "NaN"),
+            ConstantParameterValueKind::String => !self.text.is_empty(),
+        }
+    }
 }
 
 /// The JavaScript `Number#toString()` text of a number, with `-0` for
@@ -433,6 +445,24 @@ impl GatedFinding for ConstantParameterFinding {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn truthiness_follows_javascript() {
+        let value = |value: LiteralValue| ConstantParameterValue::from_literal(&value);
+        assert!(value(LiteralValue::Boolean(true)).is_truthy());
+        assert!(!value(LiteralValue::Boolean(false)).is_truthy());
+        assert!(!value(LiteralValue::Null).is_truthy());
+        assert!(!value(LiteralValue::Undefined).is_truthy());
+        for falsy in [0.0, -0.0, f64::NAN] {
+            assert!(
+                !value(LiteralValue::Number(falsy.to_bits())).is_truthy(),
+                "{falsy}"
+            );
+        }
+        assert!(value(LiteralValue::Number(1.5f64.to_bits())).is_truthy());
+        assert!(!value(LiteralValue::String("".into())).is_truthy());
+        assert!(value(LiteralValue::String("0".into())).is_truthy());
+    }
 
     #[test]
     fn number_text_follows_javascript() {

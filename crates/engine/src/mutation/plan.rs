@@ -111,6 +111,8 @@ struct Context<'a> {
     /// The reach facts of the tool config files. Empty when the plan has no
     /// framework config facts.
     build_tool: super::build_tool::BuildToolReach,
+    /// The parameters whose calls each pass the same literal.
+    constant_parameters: super::constant_condition::ConstantParameters<'a>,
 }
 
 /// The result for one file.
@@ -162,6 +164,9 @@ pub(super) fn build(
             .framework_config_exports
             .map(|exports| super::build_tool::build_tool_reach(graph, inputs.root, exports))
             .unwrap_or_default(),
+        constant_parameters: super::constant_condition::ConstantParameters::new(
+            &inputs.results.constant_parameters,
+        ),
     };
     let (candidates, unmatched_paths) = select_files(&context);
     let reachable: Vec<FileId> = candidates
@@ -408,6 +413,11 @@ fn plan_file(context: &Context<'_>, candidate: &Candidate<'_>) -> FileOutcome {
         && !context.runner_unreached.contains(&candidate.file_id);
     let facts = FileFacts::new(context, candidate, module, source, covered);
     let mut mutants = assign(candidate, &facts, covered, instrumented.mutants.clone());
+    if !matches!(candidate.layout, Layout::Component(_)) {
+        context
+            .constant_parameters
+            .mark(candidate.path, source, &mut mutants);
+    }
     attach_test_reach(context, candidate, source, covered, &mut mutants);
     let static_test_files = if covered {
         static_test_files(context, candidate.file_id)
@@ -698,6 +708,7 @@ fn assign(
                 file: candidate.rel.clone(),
                 rank: None,
                 test_reach: None,
+                constant_parameter: false,
                 mutant,
             },
         })

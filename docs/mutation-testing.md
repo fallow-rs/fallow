@@ -2002,6 +2002,52 @@ are not checked, so the cost grows with the number of survivors only.
   `crates/api/type-aware-protocol.json`. It is a one-shot request; a semantic
   session refuses it.
 
+## Constant parameter hint
+
+A `negate-condition` survivor can get the advisory hint
+`equivalence_hint: "constant-parameter"`. The hint needs no option and no
+companion.
+
+```ts
+export const load = (id: string, strict: boolean) => {
+  if (!strict) return fallback(); // each call passes `true`
+  return read(id);
+};
+```
+
+Each visible call passes `true` for `strict`, so `!strict` is always `false`.
+The mutant `if (false)` changes nothing for these calls, and no test can kill
+it through a real caller. The mutant `if (true)` changes the result, so it
+gets no hint.
+
+- The test of the condition must be a parameter `p`, `!p` or `!!p`: the test
+  of an `if`, a `?:` or a loop. A test that combines the parameter with other
+  values, such as `p && q`, gets no hint.
+- Each visible call must pass the same literal for the parameter. The hint
+  uses the call evidence and the closed-world gate of the `constant-parameter`
+  dead-code rule, also when the project sets the rule to `off`. A function
+  that the gate blocks gets no hint. For example, a value reference to the
+  function, an export of an entry point, a public API export, or fewer calls
+  than the rule needs blocks it. A module that only tests reach gets no hint,
+  because the rule reads runtime code only. A test call counts as a call.
+- An inline or file suppression of `constant-parameter` removes the hint for
+  that function too. A severity in `rules` or in `overrides` does not change
+  the hint, because the severity decides only what `fallow dead-code`
+  reports.
+- A run computes the call evidence only when it runs `negate-condition`.
+- The literal decides the value of the test as JavaScript does: `false`,
+  `null`, `undefined`, `0`, `-0`, `NaN` and `""` are falsy. When each call
+  passes `undefined` for a parameter with a default value, the default
+  applies, and the survivor gets no hint.
+- The hint is advisory. The status stays `survived`, and the score does not
+  change. A caller outside the project, for example a user of a published
+  package, can still pass another value. Read the callers before you write
+  a verdict. A verdict for a hinted survivor sets the status `equivalent` and
+  removes the hint.
+- `typecheck.hinted` counts only the `type-non-nullish` hints.
+- The human report and `fallow mutation tasks` show one line under a hinted
+  survivor.
+
 ## Verdicts for equivalent mutants
 
 A verdict document replaces an inline suppression comment:

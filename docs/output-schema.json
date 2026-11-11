@@ -34875,7 +34875,7 @@
         },
         "hinted": {
           "type": "integer",
-          "description": "The mutants of the final report that have an `equivalence_hint`. They\nkeep the status `survived`. A verdict that makes a mutant `equivalent`\nremoves its hint and lowers this count."
+          "description": "The mutants of the final report that have the `type-non-nullish`\nhint. They keep the status `survived`. A verdict that makes a mutant\n`equivalent` removes its hint and lowers this count."
         },
         "skipped": {
           "type": "array",
@@ -37010,9 +37010,14 @@
           "type": "string",
           "const": "type-non-nullish",
           "description": "The mutant removes an optional-chaining link (`?.`) or a nullish\nfallback (`a ?? b` to `a`), and the declared type of the receiver\nexcludes `null` and `undefined`. If no run-time\nvalue can be nullish, the mutant is equivalent. A run-time value can\nstill be nullish, for example in a method that loses its `this`, or\nin a call whose declared return type hides a nullish value."
+        },
+        {
+          "type": "string",
+          "const": "constant-parameter",
+          "description": "The mutant sets a branch or loop test to a constant. The test reads a\nparameter, each visible call of the function passes the same literal\nfor it, and the literal gives the test the same constant. The\ncall evidence and the closed-world gate of the `constant-parameter`\nrule prove the calls. A caller outside the project can still pass\nanother value."
         }
       ],
-      "description": "Why a survivor may be equivalent, as far as the type check can tell."
+      "description": "Why a survivor may be equivalent: a fact of the type check or of the\ncall evidence. The hint is advisory and never changes the status."
     },
     "SharedStateInventory": {
       "type": "object",

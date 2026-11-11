@@ -9,8 +9,8 @@
 use std::collections::BTreeSet;
 
 use fallow_output::{
-    MutantStatus, MutationReport, MutationStatusCounts, MutationSummary, MutationVerdictInput,
-    MutationVerdictJoin,
+    MutantEquivalenceHint, MutantStatus, MutationReport, MutationStatusCounts, MutationSummary,
+    MutationVerdictInput, MutationVerdictJoin,
 };
 use rustc_hash::FxHashSet;
 use std::fmt::Write as _;
@@ -199,7 +199,7 @@ pub fn apply_mutation_verdicts(
         typecheck.hinted = report
             .mutants
             .iter()
-            .filter(|mutant| mutant.equivalence_hint.is_some())
+            .filter(|mutant| mutant.equivalence_hint == Some(MutantEquivalenceHint::TypeNonNullish))
             .count();
     }
     report.verdicts = Some(MutationVerdictJoin {
@@ -374,6 +374,33 @@ mod tests {
         assert_eq!(typecheck.checked, 2);
         let value = serde_json::to_value(&report.mutants[1]).unwrap();
         assert!(value.get("equivalence_hint").is_none(), "{value}");
+    }
+
+    /// `typecheck.hinted` counts the type hints only. A `constant-parameter`
+    /// hint does not come from the type check.
+    #[test]
+    fn the_hinted_count_leaves_out_the_constant_parameter_hint() {
+        let mut typed = mutant("m1", MutantStatus::Survived);
+        typed.equivalence_hint = Some(MutantEquivalenceHint::TypeNonNullish);
+        let mut constant = mutant("m2", MutantStatus::Survived);
+        constant.equivalence_hint = Some(MutantEquivalenceHint::ConstantParameter);
+        let mut report = report(vec![typed, constant]);
+        report.typecheck = Some(MutationTypecheckOutput {
+            completed: true,
+            survivors: 2,
+            checked: 2,
+            compile_errors: 0,
+            hinted: 1,
+            skipped: Vec::new(),
+        });
+
+        apply_mutation_verdicts(&mut report, &document(&["unmatched"])).unwrap();
+
+        assert_eq!(report.typecheck.as_ref().unwrap().hinted, 1);
+        assert_eq!(
+            report.mutants[1].equivalence_hint,
+            Some(MutantEquivalenceHint::ConstantParameter)
+        );
     }
 
     #[test]

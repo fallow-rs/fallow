@@ -458,7 +458,8 @@ pub struct MutantResult {
     pub witness: Option<MutantWitness>,
 }
 
-/// Why a survivor may be equivalent, as far as the type check can tell.
+/// Why a survivor may be equivalent: a fact of the type check or of the
+/// call evidence. The hint is advisory and never changes the status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
@@ -470,6 +471,13 @@ pub enum MutantEquivalenceHint {
     /// still be nullish, for example in a method that loses its `this`, or
     /// in a call whose declared return type hides a nullish value.
     TypeNonNullish,
+    /// The mutant sets a branch or loop test to a constant. The test reads a
+    /// parameter, each visible call of the function passes the same literal
+    /// for it, and the literal gives the test the same constant. The
+    /// call evidence and the closed-world gate of the `constant-parameter`
+    /// rule prove the calls. A caller outside the project can still pass
+    /// another value.
+    ConstantParameter,
 }
 
 /// One run of a retried mutant.
@@ -825,9 +833,9 @@ pub struct MutationTypecheckOutput {
     /// The checked survivors that do not type-check. They have the status
     /// `compile_error`.
     pub compile_errors: usize,
-    /// The mutants of the final report that have an `equivalence_hint`. They
-    /// keep the status `survived`. A verdict that makes a mutant `equivalent`
-    /// removes its hint and lowers this count.
+    /// The mutants of the final report that have the `type-non-nullish`
+    /// hint. They keep the status `survived`. A verdict that makes a mutant
+    /// `equivalent` removes its hint and lowers this count.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub hinted: usize,
     /// The survivors that the checker did not check, by reason.

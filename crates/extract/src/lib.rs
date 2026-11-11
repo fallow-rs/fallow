@@ -126,6 +126,7 @@ pub use css_in_js::{
 };
 pub use css_metrics::{compute_css_analytics, parse_css_color_rgb};
 pub use dom_classes::{DomClassScan, scan_dom_class_values};
+pub use function_contracts::{ParameterCondition, parameter_conditions};
 pub use glimmer::{is_glimmer_file, strip_glimmer_templates};
 pub use js_text::JsText;
 pub use mdx::{extract_mdx_statements, extract_mdx_statements_mapped};

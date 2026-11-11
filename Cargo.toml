@@ -347,6 +347,7 @@ allow = [
     { path = "crates/extract/src/css_in_js/object.rs", max = 1, require = ["parse_bounded("] },
     { path = "crates/extract/src/css_metrics.rs", max = 1 },
     { path = "crates/extract/src/federation_runtime.rs", max = 1 },
+    { path = "crates/extract/src/function_contracts.rs", max = 1, require = ["parse_bounded("] },
     { path = "crates/extract/src/inventory.rs", max = 1, require = ["parse_bounded("] },
     { path = "crates/extract/src/mdx.rs", max = 1 },
     { path = "crates/extract/src/nesting.rs", max = 1, require = ["parse_bounded("] },
