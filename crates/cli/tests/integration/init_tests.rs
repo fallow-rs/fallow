@@ -475,7 +475,8 @@ fn lefthook_job_executes_project_local_fallow_outside_path() {
     write_test_executable(
         &local_fallow,
         &fixture.shell,
-        r#"printf '%s\n' "$@" > "$FALLOW_TEST_ARGS""#,
+        r#"if [ "$1" = --version ]; then echo 'fallow 9.0.0'; exit 0; fi
+printf '%s\n' "$@" > "$FALLOW_TEST_ARGS""#,
     );
 
     let lookup = Command::new(&fixture.shell)
@@ -501,7 +502,7 @@ fn lefthook_job_propagates_project_local_fallow_failure() {
     write_test_executable(
         &fixture.root.join("node_modules/.bin/fallow"),
         &fixture.shell,
-        "exit 23",
+        "if [ \"$1\" = --version ]; then echo 'fallow 9.0.0'; exit 0; fi\nexit 23",
     );
 
     assert_eq!(fixture.run(&[]).code(), Some(23));
@@ -517,12 +518,12 @@ fn lefthook_job_prefers_fallow_on_path() {
     write_test_executable(
         &fixture.root.join("node_modules/.bin/fallow"),
         &fixture.shell,
-        "printf '%s\\n' local > \"$FALLOW_TEST_SOURCE\"",
+        "if [ \"$1\" = --version ]; then echo 'fallow 9.0.0'; exit 0; fi\nprintf '%s\\n' local > \"$FALLOW_TEST_SOURCE\"",
     );
     write_test_executable(
         &fixture.restricted_bin.join("fallow"),
         &fixture.shell,
-        "printf '%s\\n' path > \"$FALLOW_TEST_SOURCE\"\nprintf '%s\\n' \"$@\" > \"$FALLOW_TEST_ARGS\"",
+        "if [ \"$1\" = --version ]; then echo 'fallow 9.0.0'; exit 0; fi\nprintf '%s\\n' path > \"$FALLOW_TEST_SOURCE\"\nprintf '%s\\n' \"$@\" > \"$FALLOW_TEST_ARGS\"",
     );
 
     assert!(
@@ -555,6 +556,7 @@ fn lefthook_job_uses_yarn_for_plug_and_play_dependency() {
 fi
 if [ "$1" = exec ] && [ "$2" = fallow ]; then
   shift 2
+  if [ "$1" = -- ] && [ "$2" = --version ]; then echo 'fallow 9.0.0'; exit 0; fi
   # Real yarn parses what follows the command name as its own flags and
   # forwards only what comes after the separator. Measured on yarn 1.22.22:
   # `yarn exec fallow audit --base HEAD` reaches the binary as `audit` alone,
@@ -641,5 +643,213 @@ exit 1"#,
     assert!(
         !source_file.exists(),
         "failed yarn bin lookup must not select yarn exec"
+    );
+}
+
+/// Installs the standalone Git pre-commit hook in a new repository and runs
+/// it with `PATH` reduced to `git`, the way a Git client without
+/// `node_modules/.bin` on `PATH` starts it.
+#[cfg(unix)]
+struct GitHookExecutionFixture {
+    _dir: tempfile::TempDir,
+    root: PathBuf,
+    shell: PathBuf,
+    restricted_bin: PathBuf,
+}
+
+#[cfg(unix)]
+impl GitHookExecutionFixture {
+    fn new() -> Self {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        fs::write(root.join("package.json"), r#"{"name":"git-hook-test"}"#).unwrap();
+        let git = executable_on_path("git");
+        let shell = executable_on_path("sh");
+        let status = Command::new(&git)
+            .args(["init", "-q"])
+            .current_dir(&root)
+            .env_clear()
+            .status()
+            .expect("initialize temporary Git repository");
+        assert!(status.success());
+
+        let output = run_fallow_raw(&[
+            "--root",
+            root.to_str().unwrap(),
+            "hooks",
+            "install",
+            "--target",
+            "git",
+            "--branch",
+            "develop",
+        ]);
+        assert_eq!(output.code, 0, "hooks install failed: {}", output.stderr);
+        assert!(root.join(".git/hooks/pre-commit").is_file());
+
+        let restricted_bin = root.join("restricted-bin");
+        fs::create_dir(&restricted_bin).unwrap();
+        symlink(git, restricted_bin.join("git")).unwrap();
+        Self {
+            _dir: dir,
+            root,
+            shell,
+            restricted_bin,
+        }
+    }
+
+    fn run(&self, environment: &[(&str, &Path)]) -> std::process::Output {
+        let mut command = Command::new(&self.shell);
+        command
+            .arg(self.root.join(".git/hooks/pre-commit"))
+            .current_dir(&self.root)
+            .env_clear()
+            .env("PATH", &self.restricted_bin);
+        for (name, value) in environment {
+            command.env(name, value);
+        }
+        command.output().expect("execute generated Git hook")
+    }
+}
+
+/// A Git client keeps its own `PATH`, so a project-local install is not on
+/// it. Without the `node_modules/.bin` arm the hook exits 0 and every commit
+/// passes without an audit.
+#[cfg(unix)]
+#[test]
+fn git_hook_runs_project_local_fallow_outside_path() {
+    let fixture = GitHookExecutionFixture::new();
+    let args_file = fixture.root.join("fallow-args");
+    write_test_executable(
+        &fixture.root.join("node_modules/.bin/fallow"),
+        &fixture.shell,
+        "if [ \"$1\" = --version ]; then echo 'fallow 9.0.0'; exit 0; fi\nprintf '%s\\n' \"$@\" > \"$FALLOW_TEST_ARGS\"\nexit 1",
+    );
+
+    let output = fixture.run(&[("FALLOW_TEST_ARGS", &args_file)]);
+
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "a failed audit must block the commit: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(args_file).expect("project-local fallow must be invoked"),
+        "audit\n--base\ndevelop\n--quiet\n--gate-marker\npre-commit\n"
+    );
+}
+
+/// When no install resolves, the hook keeps the commit, but it names the
+/// skip on stderr so that the missing audit is visible.
+#[cfg(unix)]
+#[test]
+fn git_hook_names_the_skip_when_no_fallow_resolves() {
+    let fixture = GitHookExecutionFixture::new();
+
+    let output = fixture.run(&[]);
+
+    assert_eq!(output.status.code(), Some(0));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("fallow not found") && stderr.contains("skipping the pre-commit audit"),
+        "the hook must name the skip: {stderr}"
+    );
+}
+
+/// `npx --no-install` finds an install that the other arms do not see. The
+/// hook selects it only when it prints a fallow version.
+#[cfg(unix)]
+#[test]
+fn git_hook_uses_npx_only_for_a_working_install() {
+    let fixture = GitHookExecutionFixture::new();
+    let args_file = fixture.root.join("fallow-args");
+    write_test_executable(
+        &fixture.restricted_bin.join("npx"),
+        &fixture.shell,
+        r#"if [ "$1" = --no-install ] && [ "$2" = fallow ]; then
+  shift 2
+  if [ "$1" = --version ]; then echo 'fallow 9.0.0'; exit 0; fi
+  printf '%s\n' "$@" > "$FALLOW_TEST_ARGS"
+  exit 1
+fi
+exit 1"#,
+    );
+
+    let output = fixture.run(&[("FALLOW_TEST_ARGS", &args_file)]);
+
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        fs::read_to_string(&args_file).expect("npx fallow must be invoked"),
+        "audit\n--base\ndevelop\n--quiet\n--gate-marker\npre-commit\n"
+    );
+
+    write_test_executable(
+        &fixture.restricted_bin.join("npx"),
+        &fixture.shell,
+        "echo 'npm ERR! could not determine executable to run'\nexit 1",
+    );
+    fs::remove_file(&args_file).unwrap();
+    let output = fixture.run(&[("FALLOW_TEST_ARGS", &args_file)]);
+    assert_eq!(output.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("fallow not found"));
+}
+
+/// pnpm often installs only a project-local launcher. When that launcher
+/// cannot run and no other install works, the hook must block the commit and
+/// name the launcher and its first error line, not skip the audit.
+#[cfg(unix)]
+#[test]
+fn git_hook_blocks_when_the_only_launcher_cannot_run() {
+    let fixture = GitHookExecutionFixture::new();
+    write_test_executable(
+        &fixture.root.join("node_modules/.bin/fallow"),
+        &fixture.shell,
+        "echo \"Error: Cannot find module '@fallow-cli/darwin-arm64'\" >&2\necho 'Require stack:' >&2\nexit 1",
+    );
+
+    let output = fixture.run(&[]);
+
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(
+            "./node_modules/.bin/fallow cannot print its fallow version (Error: Cannot find module '@fallow-cli/darwin-arm64')"
+        ),
+        "the hook must name the broken launcher: {stderr}"
+    );
+    assert!(!stderr.contains("Require stack"), "{stderr}");
+}
+
+/// A stale global shim on `PATH` must not hide a working local install. The
+/// hook and the agent gate then select the same install.
+#[cfg(unix)]
+#[test]
+fn git_hook_skips_a_path_launcher_that_cannot_run() {
+    let fixture = GitHookExecutionFixture::new();
+    let args_file = fixture.root.join("fallow-args");
+    write_test_executable(
+        &fixture.restricted_bin.join("fallow"),
+        &fixture.shell,
+        "echo \"Error: Cannot find module 'fallow'\" >&2\nexit 1",
+    );
+    write_test_executable(
+        &fixture.root.join("node_modules/.bin/fallow"),
+        &fixture.shell,
+        "if [ \"$1\" = --version ]; then echo 'fallow 9.0.0'; exit 0; fi\nprintf '%s\\n' \"$@\" > \"$FALLOW_TEST_ARGS\"\nexit 0",
+    );
+
+    let output = fixture.run(&[("FALLOW_TEST_ARGS", &args_file)]);
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(&args_file).expect("the local install must run the audit"),
+        "audit\n--base\ndevelop\n--quiet\n--gate-marker\npre-commit\n"
     );
 }
