@@ -8,7 +8,7 @@
 //! that can hide a caller makes the rule abstain for the function, with one
 //! [`Abstain`] reason.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use fallow_config::{ResolvedConfig, Severity};
 use fallow_types::extract::{
@@ -30,9 +30,11 @@ use crate::results::{
     MAX_INSPECTED_CALL_SITES,
 };
 
-/// The fewest calls that the rule reads for one parameter. With one or two
-/// calls, each literal argument is "constant", and the finding has no value.
-const MIN_CALL_SITES: usize = 3;
+/// The fewest calls that the rule reads for one parameter. With one call,
+/// each literal argument is "constant", and the finding has no value. A
+/// read of public projects found findings with two calls as useful as
+/// findings with more calls.
+const MIN_CALL_SITES: usize = 2;
 
 const IDENTICAL_EXPLANATION: &str = "Each visible call passes the same value for this parameter. Review whether the parameter is needed; static analysis does not prove that no caller outside the project exists.";
 const NEVER_PASSED_EXPLANATION: &str = "No visible call passes this optional parameter, so its default always applies. Review whether the parameter is needed; static analysis does not prove that no caller outside the project exists.";
@@ -75,6 +77,28 @@ pub(super) enum Abstain {
 }
 
 impl Abstain {
+    /// Each reason, in declaration order.
+    const ALL: [Self; 14] = [
+        Self::ParseIncomplete,
+        Self::OpenContract,
+        Self::PublicApi,
+        Self::EntryExport,
+        Self::DynamicImport,
+        Self::CommonJs,
+        Self::NamespaceEscape,
+        Self::ValueReference,
+        Self::UnresolvedTarget,
+        Self::TemplateCallers,
+        Self::DirectEval,
+        Self::ClassicScript,
+        Self::AutoImport,
+        Self::TooFewCalls,
+    ];
+
+    const fn bit(self) -> u16 {
+        1 << self as u16
+    }
+
     /// A stable kebab-case code for the reason.
     #[must_use]
     pub(super) const fn code(self) -> &'static str {
@@ -100,6 +124,53 @@ impl Abstain {
 /// A function contract: the module and the index of its declaration.
 type FnId = (FileId, u32);
 
+/// Each [`Abstain`] reason that applies to one function, one bit for each
+/// reason.
+#[derive(Debug, Clone, Copy, Default)]
+struct Reasons(u16);
+
+impl Reasons {
+    const fn insert(&mut self, reason: Abstain) {
+        self.0 |= reason.bit();
+    }
+
+    const fn contains(self, reason: Abstain) -> bool {
+        self.0 & reason.bit() != 0
+    }
+
+    const fn is_only(self, reason: Abstain) -> bool {
+        self.0 == reason.bit()
+    }
+}
+
+/// The counts of one reason over the functions in runtime-reachable modules.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub(super) struct ReasonCount {
+    /// Functions where the rule records this reason first.
+    pub first: usize,
+    /// Functions where this reason is one of the reasons.
+    pub any: usize,
+    /// Functions where this reason is the only reason. Each of them passes
+    /// the gate when the condition does not apply.
+    pub only: usize,
+}
+
+/// The counts of the gate for one run, for `RUST_LOG=fallow_core=debug`.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub(super) struct GateStats {
+    /// Function contracts in each module.
+    pub contracts: usize,
+    /// Function contracts in runtime-reachable modules. The other counts
+    /// cover only these.
+    pub reachable: usize,
+    /// Functions that pass the gate, with enough calls.
+    pub passed: usize,
+    /// Findings of the run.
+    pub findings: usize,
+    /// The counts of each reason that applies to at least one function.
+    pub reasons: Vec<(Abstain, ReasonCount)>,
+}
+
 /// Inputs of the rule.
 struct ConstantParameterInput<'a> {
     graph: &'a ModuleGraph,
@@ -108,6 +179,9 @@ struct ConstantParameterInput<'a> {
     public_api_entry_points: &'a FxHashSet<FileId>,
     /// Modules whose exports a plugin `used_exports` rule names.
     plugin_used_export_files: &'a FxHashSet<FileId>,
+    workspaces: &'a [fallow_config::WorkspaceInfo],
+    /// The dependency names of each `package.json` of the project.
+    declared_deps: &'a FxHashSet<String>,
     line_offsets_by_file: &'a LineOffsetsMap<'a>,
     /// `true` when a `constant-parameter` suppression covers the line.
     is_suppressed: &'a dyn Fn(FileId, u32) -> bool,
@@ -124,7 +198,10 @@ struct Call<'a> {
 /// the rule abstained for.
 struct Evaluation {
     findings: Vec<ConstantParameter>,
+    #[cfg(test)]
     abstained: FxHashMap<FnId, Abstain>,
+    /// Present when debug logging or a test reads it.
+    stats: Option<GateStats>,
 }
 
 struct Gate<'a> {
@@ -135,21 +212,28 @@ struct Gate<'a> {
     /// resolve to one export.
     by_export_name: FxHashMap<&'a str, Vec<FnId>>,
     blocked: FxHashMap<FnId, Abstain>,
+    reasons: FxHashMap<FnId, Reasons>,
     calls: FxHashMap<FnId, Vec<Call<'a>>>,
+    /// `true` when a framework convention imports a module with no import
+    /// statement somewhere in the project.
+    has_auto_imports: bool,
+    /// The module paths for specifier matching, built on first use.
+    module_index: Option<specifiers::ModuleIndex>,
+    /// The reasons for which each export is already blocked.
+    all_exports_blocked: Reasons,
 }
 
 /// Run the rule over the project.
 fn find_constant_parameters(input: &ConstantParameterInput<'_>) -> Evaluation {
     let mut gate = Gate::new(input);
-    if input
+    let broken: Vec<&ModuleInfo> = input
         .modules
         .iter()
-        .any(|module| module.parse_error_count > 0 || module.parse_panicked)
-    {
-        for id in gate.all_contracts() {
-            gate.block(id, Abstain::ParseIncomplete);
-        }
-        return gate.finish(Vec::new());
+        .filter(|module| module.parse_error_count > 0 || module.parse_panicked)
+        .collect();
+    log_broken_modules(input.graph, &broken);
+    for module in broken {
+        gate.block_broken_module(module.file_id);
     }
     gate.block_surfaces();
     for module in input.modules {
@@ -183,14 +267,67 @@ impl<'a> Gate<'a> {
             resolved,
             by_export_name,
             blocked: FxHashMap::default(),
+            reasons: FxHashMap::default(),
             calls: FxHashMap::default(),
+            has_auto_imports: input.resolved_modules.iter().any(|module| {
+                module
+                    .resolved_imports
+                    .iter()
+                    .any(|import| import.target.is_synthetic_auto_import())
+            }),
+            module_index: None,
+            all_exports_blocked: Reasons::default(),
         }
     }
 
     fn finish(self, findings: Vec<ConstantParameter>) -> Evaluation {
+        let stats = (cfg!(test) || tracing::enabled!(tracing::Level::DEBUG))
+            .then(|| self.stats(findings.len()));
         Evaluation {
             findings,
+            #[cfg(test)]
             abstained: self.blocked,
+            stats,
+        }
+    }
+
+    fn stats(&self, findings: usize) -> GateStats {
+        let contracts = self.all_contracts();
+        let reachable: Vec<FnId> = contracts
+            .iter()
+            .copied()
+            .filter(|(file, _)| {
+                self.input
+                    .graph
+                    .modules
+                    .get(file.0 as usize)
+                    .is_some_and(|node| node.is_runtime_reachable())
+            })
+            .collect();
+        let mut counts = [ReasonCount::default(); Abstain::ALL.len()];
+        let mut passed = 0;
+        for id in &reachable {
+            let Some(first) = self.blocked.get(id) else {
+                passed += 1;
+                continue;
+            };
+            let reasons = self.reasons.get(id).copied().unwrap_or_default();
+            for (count, reason) in counts.iter_mut().zip(Abstain::ALL) {
+                count.first += usize::from(*first == reason);
+                count.any += usize::from(reasons.contains(reason));
+                count.only += usize::from(reasons.is_only(reason));
+            }
+        }
+        GateStats {
+            contracts: contracts.len(),
+            reachable: reachable.len(),
+            passed,
+            findings,
+            reasons: Abstain::ALL
+                .into_iter()
+                .zip(counts)
+                .filter(|(_, count)| count.any > 0)
+                .collect(),
         }
     }
 
@@ -209,9 +346,11 @@ impl<'a> Gate<'a> {
             .collect()
     }
 
-    /// Record the first reason for a function.
+    /// Record a reason for a function. The first reason stays the reason
+    /// of the function.
     fn block(&mut self, id: FnId, reason: Abstain) {
         self.blocked.entry(id).or_insert(reason);
+        self.reasons.entry(id).or_default().insert(reason);
     }
 
     fn block_module(&mut self, file: FileId, reason: Abstain) {
@@ -228,6 +367,10 @@ impl<'a> Gate<'a> {
     }
 
     fn block_all_exports(&mut self, reason: Abstain) {
+        if self.all_exports_blocked.contains(reason) {
+            return;
+        }
+        self.all_exports_blocked.insert(reason);
         let ids: Vec<FnId> = self.by_export_name.values().flatten().copied().collect();
         for id in ids {
             self.block(id, reason);
@@ -238,6 +381,98 @@ impl<'a> Gate<'a> {
         let ids = self.by_export_name.get(name).cloned().unwrap_or_default();
         for id in ids {
             self.block(id, reason);
+        }
+    }
+
+    /// Block what a module with a parse error can call. Its facts can miss
+    /// each import and each call, so the rule reads its import specifiers
+    /// from the source text. A declaration file has no code that runs.
+    fn block_broken_module(&mut self, file: FileId) {
+        self.block_module(file, Abstain::ParseIncomplete);
+        let Some(node) = self.input.graph.modules.get(file.0 as usize) else {
+            self.block_all_exports(Abstain::ParseIncomplete);
+            return;
+        };
+        if is_declaration_path(&node.path) {
+            return;
+        }
+        // A framework auto-import, or a component template, can call a
+        // function with no import specifier in the text.
+        if self.has_auto_imports || !is_script_path(&node.path) {
+            self.block_all_exports(Abstain::ParseIncomplete);
+            return;
+        }
+        self.block_scanned_targets(file, Abstain::ParseIncomplete);
+    }
+
+    /// Block each function that an import specifier in the source text of
+    /// `file` can reach. A text that the rule cannot read, or a specifier
+    /// that can name any module, blocks each export.
+    fn block_scanned_targets(&mut self, file: FileId, reason: Abstain) {
+        let Some(node) = self.input.graph.modules.get(file.0 as usize) else {
+            self.block_all_exports(reason);
+            return;
+        };
+        let Ok(text) = std::fs::read_to_string(&node.path) else {
+            self.block_all_exports(reason);
+            return;
+        };
+        let specifiers::Scan::Specifiers(found) = specifiers::scan(&text) else {
+            self.block_all_exports(reason);
+            return;
+        };
+        let mut targets = Vec::new();
+        for specifier in &found {
+            let Some(files) = self.specifier_targets(&node.path, specifier) else {
+                self.block_all_exports(reason);
+                return;
+            };
+            targets.extend(files);
+        }
+        for target in targets {
+            self.block_surface(target, reason);
+        }
+    }
+
+    /// The modules that `specifier` in the module at `from` can name, or
+    /// `None` when it can name each module.
+    fn specifier_targets(&mut self, from: &Path, specifier: &str) -> Option<Vec<FileId>> {
+        let graph = self.input.graph;
+        let index = self.module_index.get_or_insert_with(|| {
+            specifiers::ModuleIndex::new(
+                graph
+                    .modules
+                    .iter()
+                    .map(|node| (node.file_id, node.path.as_path())),
+            )
+        });
+        match specifiers::target(from, specifier) {
+            specifiers::Target::External => Some(Vec::new()),
+            specifiers::Target::Unknown => None,
+            specifiers::Target::Path(path) => Some(index.under_path(&path)),
+            specifiers::Target::RootRelative(rooted) => Some(index.with_suffix(&rooted)),
+            specifiers::Target::Bare { specifier, package } => {
+                let workspaces = self.input.workspaces;
+                let roots: Vec<PathBuf> = workspaces
+                    .iter()
+                    .filter(|ws| ws.name == package)
+                    .map(|ws| ws.root.clone())
+                    .chain(linked_package_dir(from, &package))
+                    .collect();
+                if !roots.is_empty() {
+                    return Some(
+                        roots
+                            .iter()
+                            .flat_map(|root| index.under_path(root))
+                            .collect(),
+                    );
+                }
+                let external = self.input.declared_deps.contains(&package)
+                    || super::predicates::is_builtin_module(&package);
+                // A path alias or a `baseUrl` import can reuse the name of a
+                // dependency or a built-in module.
+                (external && index.with_suffix(&specifier).is_empty()).then(Vec::new)
+            }
         }
     }
 
@@ -344,9 +579,8 @@ impl<'a> Gate<'a> {
         }
         let html = node.is_some_and(|node| node.path.extension().is_some_and(|ext| ext == "html"));
         if html && facts.is_some_and(|facts| facts.template_callers) {
-            // An inline module script of an HTML page can import any module,
-            // and extraction records none of its imports.
-            self.block_all_exports(Abstain::TemplateCallers);
+            // Extraction records no import of an inline script.
+            self.block_scanned_targets(file, Abstain::TemplateCallers);
         }
         self.block_exports(module);
         self.block_import_references(module);
@@ -721,6 +955,12 @@ impl<'a> Gate<'a> {
             let Some((reason, value)) = parameter_verdict(param, index, &counted) else {
                 continue;
             };
+            // A self-call that passes the parameter on carries a value that
+            // the function made, such as a cycle cache, so the default is
+            // not the only value.
+            if reason == ConstantParameterReason::NeverPassed && counted.len() < calls.len() {
+                continue;
+            }
             if self.suppressed(module.file_id, param.span_start)
                 || self.suppressed(module.file_id, contract.span_start)
             {
@@ -803,6 +1043,33 @@ impl<'a> Gate<'a> {
 
 fn facts(module: &ModuleInfo) -> Option<&FunctionContractFacts> {
     module.function_contracts.as_deref()
+}
+
+/// The real directory of an installed package that is local source, such as
+/// a `link:` or `file:` dependency, from the nearest `node_modules` above
+/// `from`.
+fn linked_package_dir(from: &Path, package: &str) -> Option<PathBuf> {
+    let installed = from
+        .ancestors()
+        .skip(1)
+        .map(|dir| dir.join("node_modules").join(package))
+        .find(|candidate| candidate.exists())?;
+    let real = dunce::canonicalize(installed).ok()?;
+    let in_node_modules = real
+        .components()
+        .any(|component| component.as_os_str() == "node_modules");
+    (!in_node_modules).then_some(real)
+}
+
+/// `true` for a TypeScript declaration file, which holds no code that runs.
+fn is_declaration_path(path: &Path) -> bool {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            [".d.ts", ".d.mts", ".d.cts"]
+                .iter()
+                .any(|suffix| name.ends_with(suffix))
+        })
 }
 
 /// The reason that opens each contract of a module.
@@ -937,21 +1204,50 @@ pub fn release_resolution_payloads(modules: &mut [ModuleInfo], config: &Resolved
     }
 }
 
-/// Log the count of functions for each abstain reason, for `RUST_LOG=debug`.
-fn log_abstained(abstained: &FxHashMap<FnId, Abstain>) {
+/// The most modules with a parse error that the debug log names.
+const MAX_LOGGED_BROKEN_MODULES: usize = 20;
+
+/// Log the modules whose parse error blocks each function, for
+/// `RUST_LOG=fallow_core=debug`.
+fn log_broken_modules(graph: &ModuleGraph, broken: &[&ModuleInfo]) {
     if !tracing::enabled!(tracing::Level::DEBUG) {
         return;
     }
-    let mut counts: FxHashMap<Abstain, usize> = FxHashMap::default();
-    for reason in abstained.values() {
-        *counts.entry(*reason).or_default() += 1;
+    tracing::debug!(
+        modules = broken.len(),
+        "constant-parameter blocked by parse errors"
+    );
+    for module in broken.iter().take(MAX_LOGGED_BROKEN_MODULES) {
+        let Some(node) = graph.modules.get(module.file_id.0 as usize) else {
+            continue;
+        };
+        tracing::debug!(
+            path = %node.path.display(),
+            errors = module.parse_error_count,
+            panicked = module.parse_panicked,
+            "constant-parameter parse error"
+        );
     }
-    let mut counts: Vec<_> = counts.into_iter().collect();
-    counts.sort();
-    for (reason, count) in counts {
+}
+
+/// Log the counts of the gate, for `RUST_LOG=fallow_core=debug`.
+fn log_stats(stats: Option<&GateStats>) {
+    let Some(stats) = stats else {
+        return;
+    };
+    tracing::debug!(
+        contracts = stats.contracts,
+        reachable = stats.reachable,
+        passed = stats.passed,
+        findings = stats.findings,
+        "constant-parameter gate"
+    );
+    for (reason, count) in &stats.reasons {
         tracing::debug!(
             reason = reason.code(),
-            count,
+            first = count.first,
+            any = count.any,
+            only = count.only,
             "constant-parameter abstained"
         );
     }
@@ -989,18 +1285,28 @@ pub(super) fn populate(input: &mut super::PostDetectionInput<'_, '_>) {
         resolved_modules: input.resolved_modules,
         public_api_entry_points: input.public_api_entry_points,
         plugin_used_export_files: &plugin_used_export_files,
+        workspaces: input.workspaces,
+        declared_deps: input.declared_deps,
         line_offsets_by_file: input.line_offsets_by_file,
         is_suppressed: &is_suppressed,
     });
     #[cfg(test)]
-    tests::record(input.graph, input.modules, &evaluation.abstained);
-    log_abstained(&evaluation.abstained);
+    tests::record(
+        input.graph,
+        input.modules,
+        &evaluation.abstained,
+        evaluation.stats.as_ref(),
+    );
+    log_stats(evaluation.stats.as_ref());
     input.results.constant_parameters = evaluation
         .findings
         .into_iter()
         .map(crate::results::ConstantParameterFinding::with_actions)
         .collect();
 }
+
+#[path = "constant_parameter_specifiers.rs"]
+mod specifiers;
 
 #[cfg(test)]
 #[path = "constant_parameter_tests.rs"]
