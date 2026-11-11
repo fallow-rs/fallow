@@ -52,6 +52,7 @@ const VERSION_FILES = [
   { path: "fallow/.codex-plugin/plugin.json", count: 1 },
   { path: "fallow/.claude-plugin/plugin.json", count: 1 },
   { path: ".claude-plugin/marketplace.json", count: 2 },
+  { path: "fallow/.cursor-plugin/plugin.json", count: 1 },
 ];
 
 /**
