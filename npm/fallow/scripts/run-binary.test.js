@@ -24,11 +24,10 @@ function currentPlatformPackage() {
 
 // Install a fake platform package whose `fallow` binary is the given Node
 // script. Returns the scratch directory and the environment for the launcher.
-function installFakeBinary(t, script) {
+function installFakeBinary(t, script, pkg = currentPlatformPackage()) {
   const work = fs.mkdtempSync(path.join(os.tmpdir(), "fallow-launcher-"));
   t.after(() => fs.rmSync(work, { recursive: true, force: true }));
 
-  const pkg = currentPlatformPackage();
   assert.ok(pkg, "the test host must map to a supported platform package");
   const pkgDir = path.join(work, "node_modules", ...pkg.split("/"));
   fs.mkdirSync(pkgDir, { recursive: true });
@@ -62,6 +61,43 @@ function runLauncher(t, launcher, args) {
   assert.equal(result.status, 0, result.stderr);
   return JSON.parse(fs.readFileSync(argsFile, "utf8"));
 }
+
+// CI does not install the wrapper dependencies, so the launcher finds
+// `detect-libc` only through NODE_PATH. A stub there pins the host to glibc.
+// An installed real `detect-libc` takes precedence, so skip on a musl host.
+function glibcTestPackage() {
+  if (process.platform !== "linux") return null;
+  try {
+    if (require("detect-libc").familySync() !== "glibc") return null;
+  } catch {
+    // Not installed: the NODE_PATH stub decides.
+  }
+  const { getPlatformPackage } = require("./platform-package");
+  return getPlatformPackage("linux", process.arch, "glibc");
+}
+
+function writeGlibcStub(nodeModules) {
+  const dir = path.join(nodeModules, "detect-libc");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "index.js"), 'module.exports = { familySync: () => "glibc" };\n');
+}
+
+const GLIBC_PACKAGE = glibcTestPackage();
+
+test(
+  "launcher on a glibc host runs the musl package when the gnu package is missing",
+  { skip: GLIBC_PACKAGE === null && "needs a Linux glibc host" },
+  (t) => {
+    const musl = GLIBC_PACKAGE.replace(/-gnu$/, "-musl");
+    const { work, env } = installFakeBinary(t, "process.exit(0);\n", musl);
+    writeGlibcStub(path.join(work, "node_modules"));
+    const result = spawnSync(process.execPath, [path.join(BIN_DIR, "fallow"), "check"], {
+      encoding: "utf8",
+      env,
+    });
+    assert.equal(result.status, 0, result.stderr);
+  },
+);
 
 // The fake binary writes a large payload the way the Rust binary does: plain
 // write calls on fd 1, and it stops at the first write error but exits 0.
@@ -291,3 +327,15 @@ test(
     ]);
   },
 );
+
+test("missingPlatformPackageMessage names the detected libc and the reinstall flag", () => {
+  const { missingPlatformPackageMessage } = require(RUN_BINARY);
+  const message = missingPlatformPackageMessage("@fallow-cli/linux-x64-musl", "musl");
+  assert.match(message, /Could not find @fallow-cli\/linux-x64-musl\./);
+  assert.match(message, /This host uses musl\./);
+  assert.match(message, /--libc=musl/);
+  assert.doesNotMatch(
+    missingPlatformPackageMessage("@fallow-cli/darwin-arm64", undefined),
+    /--libc/,
+  );
+});

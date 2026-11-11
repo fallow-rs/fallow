@@ -20,16 +20,38 @@ const SIGNAL_EXIT_CODES = new Map([
   ["SIGTERM", 143],
 ]);
 
-const resolvePlatformPackage = () => {
-  if (process.platform !== "linux") {
-    return getPlatformPackage(process.platform, process.arch);
-  }
+const detectLibc = () => {
   try {
-    const { familySync } = require("detect-libc");
-    return getPlatformPackage(process.platform, process.arch, familySync());
+    return require("detect-libc").familySync();
   } catch {
-    return getPlatformPackage(process.platform, process.arch, "musl");
+    return null;
   }
+};
+
+const isInstalled = (packageName, resolve) => {
+  try {
+    resolve(`${packageName}/package.json`);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+// npm installs a Linux platform package only for the libc that it detects at
+// install time. The musl binaries are statically linked and also run on glibc,
+// so a glibc host accepts an installed musl package. A glibc binary does not
+// run on musl, so there is no fallback in that direction. An unknown libc
+// selects musl.
+const resolvePlatformPackage = ({
+  platform = process.platform,
+  arch = process.arch,
+  libc = platform === "linux" ? detectLibc() : undefined,
+  resolve = require.resolve,
+} = {}) => {
+  const primary = getPlatformPackage(platform, arch, libc);
+  if (!primary?.endsWith("-gnu") || isInstalled(primary, resolve)) return primary;
+  const musl = primary.replace(/-gnu$/, "-musl");
+  return isInstalled(musl, resolve) ? musl : primary;
 };
 
 const resolveBinaryArtifact = (

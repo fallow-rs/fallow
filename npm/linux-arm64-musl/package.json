@@ -13,6 +13,9 @@
   "cpu": [
     "arm64"
   ],
+  "libc": [
+    "musl"
+  ],
   "files": [
     "fallow",
     "fallow.sig",
