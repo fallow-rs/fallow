@@ -159,7 +159,10 @@ pub fn code_identifiers(src: &str) -> FxHashSet<String> {
 /// line text. So a base marker on a line that the change edits in another
 /// place (a callback that becomes `async`, a new title, a reformat) is not
 /// added. An added marker first matches a base marker with the same chain
-/// and title, then a base marker with the same chain only.
+/// and title, then a base marker with the same chain only. The chain-only
+/// match covers a renamed test. It does not apply to a base marker whose
+/// title is a plain test or suite call in the head: that skip moved to
+/// another test, so the added marker skips a test that ran before.
 #[must_use]
 pub fn skip_only_hits(base: &str, head: &str) -> Vec<LineHit> {
     let mut pool: FxHashMap<SkipMarker<'_>, usize> = FxHashMap::default();
@@ -182,6 +185,12 @@ pub fn skip_only_hits(base: &str, head: &str) -> Vec<LineHit> {
         .filter_map(|(line, text)| skip_marker(text).map(|marker| (line, marker)))
         .collect();
     candidates.retain(|(_, marker)| !take_marker(&mut pool, marker));
+    let plain_titles: FxHashSet<&str> = head.lines().filter_map(plain_title).collect();
+    pool.retain(|marker, _| {
+        marker
+            .title
+            .is_none_or(|title| !plain_titles.contains(title))
+    });
     candidates.retain(|(_, marker)| !take_chain(&mut pool, &marker.chain));
     candidates
         .into_iter()
@@ -209,6 +218,20 @@ fn skip_marker(line: &str) -> Option<SkipMarker<'_>> {
         chain: chain.join("."),
         title: first_string_literal(code),
     })
+}
+
+/// The title of a test or suite call without a skip or focus marker.
+fn plain_title(line: &str) -> Option<&str> {
+    if skip_marker(line).is_some() {
+        return None;
+    }
+    let code = code_part(line);
+    call_chains(code).into_iter().find(|chain| {
+        chain
+            .first()
+            .is_some_and(|root| TEST_CASE_ROOTS.contains(root) || SUITE_ROOTS.contains(root))
+    })?;
+    first_string_literal(code)
 }
 
 /// Removes one copy of `marker` from `pool`. Returns whether a copy was there.
@@ -774,6 +797,29 @@ mod tests {
             .map(|hit| (hit.line, hit.evidence.as_str()))
             .collect();
         assert_eq!(evidence, vec![(2, "it.skip")]);
+    }
+
+    #[test]
+    fn skip_that_moves_to_another_test_is_a_hit() {
+        // The base skips 'doubles'. The head runs 'doubles' again and skips
+        // 'keeps zero'. So 'keeps zero' no longer runs.
+        let base = "it.skip('doubles', () => {});\nit('keeps zero', () => {});\n";
+        let head = "it('doubles', () => {});\nit.skip('keeps zero', () => {});\n";
+        let hits = skip_only_hits(base, head);
+        let evidence: Vec<(u32, &str)> = hits
+            .iter()
+            .map(|hit| (hit.line, hit.evidence.as_str()))
+            .collect();
+        assert_eq!(evidence, vec![(2, "it.skip")]);
+    }
+
+    #[test]
+    fn suite_skip_that_moves_to_another_suite_is_a_hit() {
+        let base = "describe.skip('a', () => {});\ndescribe('b', () => {});\n";
+        let head = "describe('a', () => {});\ndescribe.skip('b', () => {});\n";
+        let hits = skip_only_hits(base, head);
+        assert_eq!(hits.len(), 1);
+        assert_eq!(hits[0].line, 2);
     }
 
     #[test]
