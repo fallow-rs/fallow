@@ -1075,20 +1075,47 @@ each reason:
 - `direct-eval`: the same, for a module with a direct `eval`.
 - `classic-script`: a module with no imports, no exports and no re-exports.
 - `auto-import`: a synthetic auto-import edge reaches the module.
-- `too-few-calls`: fewer than `MIN_CALL_SITES` (3) calls.
+- `test-file`: a test file declares the function. The path below the project
+  root matches the test subset of `PRODUCTION_EXCLUDE_PATTERNS`
+  (`is_test_or_spec_file`, which leaves out the tooling-config and dotfile
+  patterns). A test file stays a caller of the functions of other files.
+- `too-few-calls`: fewer than `MIN_CALL_SITES` (2) calls.
 
 The analysis also reads `import_binding_references`, which
 `release_resolution_payload` drops before analysis. While the rule is on,
 `analyze::release_resolution_payloads` keeps that one field.
 
-For one parameter, a written, rest or pattern parameter gives no finding. A
-self-call that passes the parameter on at the same position is neutral and
-does not count; `ArgFact::Param` at another position is unknown. Each other
-call must give `ArgAt::Fact(Literal)` with one value (`identical-argument`),
-or `ArgAt::Omitted` for an optional or defaulted parameter (`never-passed`).
-An omitted argument and a literal `undefined` are different. A
-`constant-parameter` suppression on the line of the parameter or of the
-function hides the finding. Calls from each module count, also from test
+For one parameter, a written, rest or array-pattern parameter gives no
+finding. A self-call that passes the parameter on at the same position is
+neutral and does not count; `ArgFact::Param` at another position is unknown.
+Each other call must give one value (`identical-argument`), or
+`ArgAt::Omitted` for an optional or defaulted parameter (`never-passed`). An
+omitted argument and a literal `undefined` are different. A `never-passed`
+subject with a neutral self-call gives no finding, because the recursion
+carries a value that the function made.
+
+`constant_parameter_values.rs` decides when two values are the same. A
+literal equals the same literal. An `ArgFact::Binding` resolves to a
+`(declaring module, local name, enum member)` key: a local binding as the
+extractor recorded it, an import through `resolve_export` and
+`export_binding_origin`. The origin must be in `literal_consts` of its module
+(a `const` with a literal initializer), or an export with an `EnumMember`
+member of that name. Two bindings with one value, or a binding and its
+literal, are different values. An object literal, an array literal and a
+folded expression are unknown.
+
+An object-pattern parameter gives one subject for each recorded key
+(`ParamFact.keys`) that the module does not write. The extractor records keys
+only for a pattern with no default or the default `{}`. For each call, an
+omitted argument or `undefined` sets no key when the parameter has that
+default, and is unknown when it has none. An `ArgFact::Object` gives the
+value of the key, or no key; each other argument is unknown. A
+`KeyValue::PassThrough` of the same key at the same position is a neutral
+self-call. The finding carries `option_key`, and `parameter_name`, `line` and
+`col` name the local binding of the key.
+
+A `constant-parameter` suppression on the line of the parameter, of the
+option key or of the function hides the finding. Calls from each module count, also from test
 files and unreachable files; `--production` drops test files at discovery.
 
 ## Framework and analysis regression boundaries

@@ -12,9 +12,8 @@ use std::path::{Path, PathBuf};
 
 use fallow_config::{ResolvedConfig, Severity};
 use fallow_types::extract::{
-    ArgAt, ArgFact, CallSite, CallTarget, ExportName, FunctionContract, FunctionContractFacts,
-    ImportBindingReferenceKind, ImportedName, LiteralValue, ModuleInfo, ParamFact, ParamKind,
-    VisibilityTag,
+    CallSite, CallTarget, ExportName, FunctionContract, FunctionContractFacts,
+    ImportBindingReferenceKind, ImportedName, ModuleInfo, ParamFact, ParamKind, VisibilityTag,
 };
 use fallow_types::suppress::IssueKind;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -26,8 +25,7 @@ use crate::graph::{
 };
 use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
 use crate::results::{
-    ConstantParameter, ConstantParameterCallSite, ConstantParameterReason, ConstantParameterValue,
-    MAX_INSPECTED_CALL_SITES,
+    ConstantParameter, ConstantParameterCallSite, ConstantParameterReason, MAX_INSPECTED_CALL_SITES,
 };
 
 /// The fewest calls that the rule reads for one parameter. With one call,
@@ -37,6 +35,7 @@ use crate::results::{
 const MIN_CALL_SITES: usize = 2;
 
 const IDENTICAL_EXPLANATION: &str = "Each visible call passes the same value for this parameter. Review whether the parameter is needed; static analysis does not prove that no caller outside the project exists.";
+const NEVER_SET_EXPLANATION: &str = "No visible call sets this option key, so it always has its default or is undefined. Review whether the option is needed; static analysis does not prove that no caller outside the project exists.";
 const NEVER_PASSED_EXPLANATION: &str = "No visible call passes this optional parameter, so its default always applies. Review whether the parameter is needed; static analysis does not prove that no caller outside the project exists.";
 
 /// Why the rule abstains for one function.
@@ -72,13 +71,17 @@ pub(super) enum Abstain {
     ClassicScript,
     /// A framework convention imports the module with no import statement.
     AutoImport,
+    /// A test file declares the function. A test helper exists to pass
+    /// fixed values, so a constant argument is its purpose. A test file
+    /// stays a caller of the functions of other files.
+    TestFile,
     /// The function has fewer than [`MIN_CALL_SITES`] calls.
     TooFewCalls,
 }
 
 impl Abstain {
     /// Each reason, in declaration order.
-    const ALL: [Self; 14] = [
+    const ALL: [Self; 15] = [
         Self::ParseIncomplete,
         Self::OpenContract,
         Self::PublicApi,
@@ -92,6 +95,7 @@ impl Abstain {
         Self::DirectEval,
         Self::ClassicScript,
         Self::AutoImport,
+        Self::TestFile,
         Self::TooFewCalls,
     ];
 
@@ -116,6 +120,7 @@ impl Abstain {
             Self::DirectEval => "direct-eval",
             Self::ClassicScript => "classic-script",
             Self::AutoImport => "auto-import",
+            Self::TestFile => "test-file",
             Self::TooFewCalls => "too-few-calls",
         }
     }
@@ -173,6 +178,8 @@ pub(super) struct GateStats {
 
 /// Inputs of the rule.
 struct ConstantParameterInput<'a> {
+    /// The project root. Test file patterns match the path below it.
+    root: &'a Path,
     graph: &'a ModuleGraph,
     modules: &'a [ModuleInfo],
     resolved_modules: &'a [ResolvedModule],
@@ -185,6 +192,20 @@ struct ConstantParameterInput<'a> {
     line_offsets_by_file: &'a LineOffsetsMap<'a>,
     /// `true` when a `constant-parameter` suppression covers the line.
     is_suppressed: &'a dyn Fn(FileId, u32) -> bool,
+}
+
+/// One parameter, or one option key of an object-pattern parameter, that
+/// the rule reads.
+struct Subject<'s> {
+    index: u32,
+    /// The parameter name, or the local binding of the key.
+    name: &'s str,
+    option_key: Option<&'s str>,
+    /// `true` when the parameter has the TypeScript `?` marker.
+    optional: bool,
+    span_start: u32,
+    has_default: bool,
+    condition_reads: u32,
 }
 
 /// One call of a function, with the module that holds it.
@@ -571,6 +592,9 @@ impl<'a> Gate<'a> {
         let has_cjs = node.is_some_and(|node| node.has_cjs_exports());
         let facts = facts(module);
         let script = node.is_none_or(|node| is_script_path(&node.path));
+        if node.is_some_and(|node| self.is_test_file(&node.path)) {
+            self.block_module(file, Abstain::TestFile);
+        }
         if let Some(reason) = module_reason(module, facts, has_cjs, script) {
             self.block_module(file, reason);
             if matches!(reason, Abstain::TemplateCallers | Abstain::DirectEval) {
@@ -600,6 +624,13 @@ impl<'a> Gate<'a> {
         }
         self.collect_calls(module, facts);
         self.block_unrecorded_imports(module, Some(facts));
+    }
+
+    /// `true` when `path` matches a test pattern of production mode, below
+    /// the project root.
+    fn is_test_file(&self, path: &Path) -> bool {
+        let relative = path.strip_prefix(self.input.root).unwrap_or(path);
+        super::predicates::is_test_or_spec_file(relative)
     }
 
     /// Block exports that a caller outside the import graph can use.
@@ -931,50 +962,98 @@ impl<'a> Gate<'a> {
         &self,
         module: &ModuleInfo,
         contract: &FunctionContract,
-        calls: &[Call<'_>],
+        calls: &[Call<'a>],
     ) -> Vec<ConstantParameter> {
         let mut findings = Vec::new();
         for (index, param) in contract.params.iter().enumerate() {
             let Ok(index) = u32::try_from(index) else {
                 break;
             };
-            let Some(name) = param.name.as_deref() else {
-                continue;
-            };
-            if param.written || param.is_rest || param.kind != ParamKind::Identifier {
+            if param.is_rest {
                 continue;
             }
-            let counted: Vec<Call<'_>> = calls
-                .iter()
-                .copied()
-                .filter(|call| !is_pass_through(call.site, index))
-                .collect();
-            if counted.len() < MIN_CALL_SITES {
-                continue;
+            match (param.kind, param.name.as_deref()) {
+                (ParamKind::Identifier, Some(name)) if !param.written => {
+                    let counted: Vec<Call<'a>> = calls
+                        .iter()
+                        .copied()
+                        .filter(|call| !values::is_pass_through(call.site, index))
+                        .collect();
+                    let verdict = self.parameter_verdict(param, index, &counted);
+                    let subject = Subject {
+                        index,
+                        name,
+                        option_key: None,
+                        optional: param.optional,
+                        span_start: param.span_start,
+                        has_default: param.has_default,
+                        condition_reads: param.condition_reads,
+                    };
+                    findings.extend(self.checked_finding(
+                        module, contract, param, &subject, verdict, &counted, calls,
+                    ));
+                }
+                (ParamKind::Object, _) => {
+                    for key in param.keys.iter().filter(|key| !key.written) {
+                        let counted: Vec<Call<'a>> = calls
+                            .iter()
+                            .copied()
+                            .filter(|call| !values::is_key_pass_through(call.site, index, &key.key))
+                            .collect();
+                        let verdict = self.key_verdict(param, key, index, &counted);
+                        let subject = Subject {
+                            index,
+                            name: &key.binding,
+                            option_key: Some(&key.key),
+                            optional: param.optional,
+                            span_start: key.span_start,
+                            has_default: key.has_default,
+                            condition_reads: key.condition_reads,
+                        };
+                        findings.extend(self.checked_finding(
+                            module, contract, param, &subject, verdict, &counted, calls,
+                        ));
+                    }
+                }
+                _ => {}
             }
-            let Some((reason, value)) = parameter_verdict(param, index, &counted) else {
-                continue;
-            };
-            // A self-call that passes the parameter on carries a value that
-            // the function made, such as a cycle cache, so the default is
-            // not the only value.
-            if reason == ConstantParameterReason::NeverPassed && counted.len() < calls.len() {
-                continue;
-            }
-            if self.suppressed(module.file_id, param.span_start)
-                || self.suppressed(module.file_id, contract.span_start)
-            {
-                continue;
-            }
-            findings.push(self.finding(
-                module,
-                contract,
-                (index, name, param),
-                (reason, value),
-                &counted,
-            ));
         }
         findings
+    }
+
+    /// The finding for one subject, unless too few calls count, a self-call
+    /// passes a never-passed subject on, or a suppression covers it.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the subject, its verdict and both call lists belong together"
+    )]
+    fn checked_finding(
+        &self,
+        module: &ModuleInfo,
+        contract: &FunctionContract,
+        param: &ParamFact,
+        subject: &Subject<'_>,
+        verdict: Option<(ConstantParameterReason, Option<values::Value<'a>>)>,
+        counted: &[Call<'a>],
+        calls: &[Call<'a>],
+    ) -> Option<ConstantParameter> {
+        if counted.len() < MIN_CALL_SITES {
+            return None;
+        }
+        let (reason, value) = verdict?;
+        // A self-call that passes the subject on carries a value that the
+        // function made, such as a cycle cache, so the default is not the
+        // only value.
+        if reason == ConstantParameterReason::NeverPassed && counted.len() < calls.len() {
+            return None;
+        }
+        if self.suppressed(module.file_id, subject.span_start)
+            || self.suppressed(module.file_id, param.span_start)
+            || self.suppressed(module.file_id, contract.span_start)
+        {
+            return None;
+        }
+        Some(self.finding(module, contract, subject, (reason, value), counted))
     }
 
     fn suppressed(&self, file: FileId, offset: u32) -> bool {
@@ -986,12 +1065,12 @@ impl<'a> Gate<'a> {
         &self,
         module: &ModuleInfo,
         contract: &FunctionContract,
-        (index, name, param): (u32, &str, &ParamFact),
-        (reason, value): (ConstantParameterReason, Option<&LiteralValue>),
+        subject: &Subject<'_>,
+        (reason, value): (ConstantParameterReason, Option<values::Value<'a>>),
         calls: &[Call<'_>],
     ) -> ConstantParameter {
         let offsets = self.input.line_offsets_by_file;
-        let (line, col) = byte_offset_to_line_col(offsets, module.file_id, param.span_start);
+        let (line, col) = byte_offset_to_line_col(offsets, module.file_id, subject.span_start);
         let mut sites: Vec<ConstantParameterCallSite> = calls
             .iter()
             .filter_map(|call| {
@@ -1021,19 +1100,21 @@ impl<'a> Gate<'a> {
         ConstantParameter {
             path,
             function_name: contract.binding_name.to_string(),
-            parameter_name: name.to_string(),
-            parameter_index: index,
+            parameter_name: subject.name.to_string(),
+            parameter_index: subject.index,
+            option_key: subject.option_key.map(str::to_string),
             line,
             col,
             reason,
-            value: value.map(ConstantParameterValue::from_literal),
-            optional: param.optional,
-            has_default: param.has_default,
-            condition_reads: param.condition_reads,
+            value: value.map(values::Value::wire),
+            optional: subject.optional,
+            has_default: subject.has_default,
+            condition_reads: subject.condition_reads,
             call_site_count: u32::try_from(calls.len()).unwrap_or(u32::MAX),
             inspected_call_sites: sites,
-            explanation: match reason {
-                ConstantParameterReason::NeverPassed => NEVER_PASSED_EXPLANATION,
+            explanation: match (reason, subject.option_key) {
+                (ConstantParameterReason::NeverPassed, Some(_)) => NEVER_SET_EXPLANATION,
+                (ConstantParameterReason::NeverPassed, None) => NEVER_PASSED_EXPLANATION,
                 _ => IDENTICAL_EXPLANATION,
             }
             .to_string(),
@@ -1150,32 +1231,6 @@ fn exported_contracts(module: &ModuleInfo) -> Vec<(u32, &str)> {
         .collect()
 }
 
-/// `true` when a self-call passes parameter `index` on unchanged.
-fn is_pass_through(site: &CallSite, index: u32) -> bool {
-    matches!(site.arg_at(index), ArgAt::Fact(ArgFact::Param(param)) if *param == index)
-}
-
-/// The reason and the value for one parameter, when each call passes it in
-/// one way.
-fn parameter_verdict<'a>(
-    param: &ParamFact,
-    index: u32,
-    calls: &[Call<'a>],
-) -> Option<(ConstantParameterReason, Option<&'a LiteralValue>)> {
-    let mut args = calls.iter().map(|call| call.site.arg_at(index));
-    match args.next()? {
-        ArgAt::Omitted => {
-            let optional = param.optional || param.has_default;
-            (optional && args.all(|arg| arg == ArgAt::Omitted))
-                .then_some((ConstantParameterReason::NeverPassed, None))
-        }
-        ArgAt::Fact(ArgFact::Literal(first)) => args
-            .all(|arg| matches!(arg, ArgAt::Fact(ArgFact::Literal(value)) if value == first))
-            .then_some((ConstantParameterReason::IdenticalArgument, Some(first))),
-        ArgAt::Fact(ArgFact::Param(_) | ArgFact::Unknown) | ArgAt::Unknown => None,
-    }
-}
-
 /// `true` when the rule is on for the project or for an override.
 fn rule_enabled(config: &ResolvedConfig) -> bool {
     config.rules.constant_parameters != Severity::Off
@@ -1280,6 +1335,7 @@ pub(super) fn populate(input: &mut super::PostDetectionInput<'_, '_>) {
         suppressions.is_suppressed(file, line, IssueKind::ConstantParameter)
     };
     let evaluation = find_constant_parameters(&ConstantParameterInput {
+        root: &config.root,
         graph: input.graph,
         modules: input.modules,
         resolved_modules: input.resolved_modules,
@@ -1307,6 +1363,9 @@ pub(super) fn populate(input: &mut super::PostDetectionInput<'_, '_>) {
 
 #[path = "constant_parameter_specifiers.rs"]
 mod specifiers;
+
+#[path = "constant_parameter_values.rs"]
+mod values;
 
 #[cfg(test)]
 #[path = "constant_parameter_tests.rs"]

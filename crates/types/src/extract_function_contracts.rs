@@ -29,6 +29,10 @@ pub struct FunctionContractFacts {
     /// module calls, as open. A contract whose own body or default values
     /// call `eval` also has [`ContractIncomplete::DirectEval`].
     pub direct_eval: bool,
+    /// The local names of the exported module-scope `const` bindings whose
+    /// initializer is a literal, in source order. A call argument that names
+    /// one of these bindings through an import has a known identity.
+    pub literal_consts: Vec<Box<str>>,
 }
 
 impl FunctionContractFacts {
@@ -50,6 +54,7 @@ impl FunctionContractFacts {
             && self.escapes.is_empty()
             && !self.template_callers
             && !self.direct_eval
+            && self.literal_consts.is_empty()
     }
 }
 
@@ -101,6 +106,34 @@ pub struct ParamFact {
     /// `var` or function declaration in the body that redeclares the
     /// parameter also counts as a write. A written parameter can hold a
     /// value that no caller passes.
+    pub written: bool,
+    /// The option keys of an object pattern, in source order. Empty for
+    /// each other parameter kind, and for an object pattern whose default is
+    /// not absent or an empty object literal, because such a default can
+    /// set a key that no caller passes.
+    pub keys: Vec<OptionKeyFact>,
+}
+
+/// One key of an object-pattern [`ParamFact`]: `retries` in
+/// `{ retries = 3, signal: abort }`.
+///
+/// Only a static key whose value is a plain binding, with or without a
+/// default, is recorded. A computed or numeric key, a nested pattern, and a
+/// key that `Object.prototype` holds, such as `toString`, are not recorded.
+#[derive(Debug, Clone, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+pub struct OptionKeyFact {
+    /// The property key.
+    pub key: Box<str>,
+    /// The local binding name: `abort` for `signal: abort`.
+    pub binding: Box<str>,
+    /// Start byte of the binding identifier.
+    pub span_start: u32,
+    /// `true` when the key has a default value.
+    pub has_default: bool,
+    /// The count of conditions whose test is the binding or its negation,
+    /// as [`ParamFact::condition_reads`] counts them.
+    pub condition_reads: u32,
+    /// `true` when the module writes the binding.
     pub written: bool,
 }
 
@@ -244,8 +277,71 @@ pub enum ArgFact {
     /// rest parameter never gets this fact, because the callee gets `[r]`
     /// for `f(r)`.
     Param(u32),
+    /// An immutable binding: a module-scope `const` with a literal
+    /// initializer, or an enum member.
+    Binding(BindingArg),
+    /// An object literal with no spread, no computed key, no numeric key,
+    /// and no `__proto__` key. Each key appears once, with the value of its
+    /// last property.
+    Object(Vec<KeyArg>),
     /// Each other expression. `args` never holds a spread argument, because
     /// the list stops before the first spread.
+    Unknown,
+}
+
+/// An argument that names an immutable binding.
+///
+/// The extractor checks a local binding. For an import, the analysis
+/// resolves the origin export and checks that it is a `const` with a literal
+/// initializer ([`FunctionContractFacts::literal_consts`]), or an enum with
+/// the member.
+#[derive(Debug, Clone, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+pub struct BindingArg {
+    /// Where the root identifier of the argument comes from.
+    pub root: BindingRoot,
+    /// The dot-separated static path.
+    ///
+    /// - For [`BindingRoot::Local`]: the binding name, then the enum member
+    ///   for an enum (`Mode.Grid`).
+    /// - For [`BindingRoot::Import`] of a named or default import: empty for
+    ///   a constant, else the enum member.
+    /// - For [`BindingRoot::Import`] of a namespace import: the export name,
+    ///   then the enum member.
+    pub path: Box<str>,
+}
+
+/// The root of a [`BindingArg`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+pub enum BindingRoot {
+    /// A module-scope `const` with a literal initializer, or a module-scope
+    /// enum with the member, of the module that holds the call.
+    Local,
+    /// Index into `ModuleInfo.imports` of an admitted runtime ESM import.
+    Import(u32),
+}
+
+/// One key of an [`ArgFact::Object`] argument.
+#[derive(Debug, Clone, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+pub struct KeyArg {
+    /// The property key.
+    pub key: Box<str>,
+    /// The value of the key.
+    pub value: KeyValue,
+}
+
+/// The value of one [`KeyArg`]. The same facts as [`ArgFact`], with no
+/// nested object.
+#[derive(Debug, Clone, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+pub enum KeyValue {
+    /// A literal value.
+    Literal(LiteralValue),
+    /// An immutable binding.
+    Binding(BindingArg),
+    /// A self-call passes the unchanged binding of the same key of the same
+    /// object-pattern parameter, at the same position:
+    /// `walk(node, { depth })` inside `walk(node, { depth })`.
+    PassThrough,
+    /// Each other value, a method, a getter or a setter.
     Unknown,
 }
 

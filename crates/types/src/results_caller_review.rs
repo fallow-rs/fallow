@@ -120,13 +120,12 @@ pub const MAX_INSPECTED_CALL_SITES: usize = 20;
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum ConstantParameterReason {
-    /// Each call passes the same literal value for the parameter.
+    /// Each call passes the same value for the parameter: the same literal,
+    /// or the same immutable binding.
     IdenticalArgument,
     /// The parameter is optional or has a default, and each call omits it.
+    /// For an option key: no call sets the key.
     NeverPassed,
-    /// Reserved for a later version: the calls pass only some values of a
-    /// closed set. Not emitted in this version.
-    UnreachedVariant,
 }
 
 impl ConstantParameterReason {
@@ -136,7 +135,6 @@ impl ConstantParameterReason {
         match self {
             Self::IdenticalArgument => "identical-argument",
             Self::NeverPassed => "never-passed",
-            Self::UnreachedVariant => "unreached-variant",
         }
     }
 }
@@ -156,9 +154,13 @@ pub enum ConstantParameterValueKind {
     Number,
     /// A string.
     String,
+    /// An immutable binding: a `const` with a literal initializer, or an
+    /// enum member. The text is the binding name in its declaring module,
+    /// with the member: `DEFAULT_LIMIT` or `Mode.Grid`.
+    Binding,
 }
 
-/// The literal value that each call passes.
+/// The value that each call passes: a literal, or an immutable binding.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct ConstantParameterValue {
@@ -166,7 +168,8 @@ pub struct ConstantParameterValue {
     pub kind: ConstantParameterValueKind,
     /// The value as text. A number uses the JavaScript `String(n)` form,
     /// except that negative zero is `-0`. A string is the raw value with no
-    /// quotes. `null`, `undefined`, `true` and `false` are the keyword.
+    /// quotes. `null`, `undefined`, `true` and `false` are the keyword. A
+    /// binding is its name.
     pub text: String,
 }
 
@@ -264,14 +267,20 @@ pub struct ConstantParameter {
     pub path: PathBuf,
     /// The module-scope binding name of the function.
     pub function_name: String,
-    /// The parameter name.
+    /// The parameter name. For an option key, the local binding of the key
+    /// in the object pattern: `abort` for `{ signal: abort }`.
     pub parameter_name: String,
     /// 0-based index of the parameter. A TypeScript `this` parameter does
     /// not count.
     pub parameter_index: u32,
-    /// 1-based line of the parameter.
+    /// The property key, when the finding is about one key of an
+    /// object-pattern parameter: `retries` in `{ retries = 3 }`. Absent for
+    /// a plain parameter.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub option_key: Option<String>,
+    /// 1-based line of the parameter, or of the key binding.
     pub line: u32,
-    /// 0-based byte column of the parameter.
+    /// 0-based byte column of the parameter, or of the key binding.
     pub col: u32,
     /// Why the rule reports the parameter.
     pub reason: ConstantParameterReason,
@@ -281,7 +290,7 @@ pub struct ConstantParameter {
     pub value: Option<ConstantParameterValue>,
     /// `true` when the parameter has the TypeScript `?` marker.
     pub optional: bool,
-    /// `true` when the parameter has a default value.
+    /// `true` when the parameter, or the option key, has a default value.
     pub has_default: bool,
     /// The count of conditional tests in the function whose test is the
     /// parameter, `!parameter` or `!!parameter`: the test of an `if`, a
@@ -308,13 +317,35 @@ impl ConstantParameter {
             (ConstantParameterReason::IdenticalArgument, Some(value)) => {
                 format!("every call passes {}", value.display())
             }
+            (ConstantParameterReason::NeverPassed, _) if self.option_key.is_some() => {
+                if self.has_default {
+                    "no call sets this option, so the default always applies".to_string()
+                } else {
+                    "no call sets this option, so it is always undefined".to_string()
+                }
+            }
             (ConstantParameterReason::NeverPassed, _) if self.has_default => {
                 "no call passes it, so the default always applies".to_string()
             }
             (ConstantParameterReason::NeverPassed, _) => {
                 "no call passes it, so it is always undefined".to_string()
             }
-            _ => "the calls pass only some of its values".to_string(),
+            (ConstantParameterReason::IdenticalArgument, None) => {
+                "every call passes the same value".to_string()
+            }
+        }
+    }
+}
+
+impl ConstantParameter {
+    /// The parameter as the source names it: `compact`, or the key in
+    /// pattern form, `{ retries }` or `{ signal: abort }`.
+    #[must_use]
+    pub fn label(&self) -> String {
+        match &self.option_key {
+            Some(key) if *key == self.parameter_name => format!("{{ {key} }}"),
+            Some(key) => format!("{{ {key}: {} }}", self.parameter_name),
+            None => self.parameter_name.clone(),
         }
     }
 }
@@ -465,7 +496,6 @@ mod tests {
         for reason in [
             ConstantParameterReason::IdenticalArgument,
             ConstantParameterReason::NeverPassed,
-            ConstantParameterReason::UnreachedVariant,
         ] {
             let wire = serde_json::to_value(reason).expect("serialize");
             assert_eq!(wire, reason.as_str());

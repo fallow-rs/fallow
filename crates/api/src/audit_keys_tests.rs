@@ -1931,6 +1931,7 @@ fn absent_component_prop_results(root: &Path) -> AnalysisResults {
             path: root.join("src/format.ts"),
             function_name: "format".into(),
             parameter_name: "compact".into(),
+            option_key: None,
             parameter_index: 1,
             line: 1,
             col: 38,

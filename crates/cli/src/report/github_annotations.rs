@@ -1032,7 +1032,7 @@ fn collect_constant_parameters(env: &Value, out: &mut Vec<Annotation>) {
         |it| {
             format!(
                 "Parameter '{}' of '{}' is passed in one way by each visible call ({}). {}",
-                s(it, "parameter_name"),
+                crate::report::github::constant_parameter_label(it),
                 s(it, "function_name"),
                 s(it, "reason"),
                 s(it, "explanation")

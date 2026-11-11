@@ -472,11 +472,11 @@ export type DependencyOverrideMisconfigReason = ("unparsable-key" | "empty-value
 /**
  * Why the rule reports a parameter.
  */
-export type ConstantParameterReason = ("identical-argument" | "never-passed" | "unreached-variant")
+export type ConstantParameterReason = ("identical-argument" | "never-passed")
 /**
  * The type of a [`ConstantParameterValue`].
  */
-export type ConstantParameterValueKind = ("boolean" | "null" | "undefined" | "number" | "string")
+export type ConstantParameterValueKind = ("boolean" | "null" | "undefined" | "number" | "string" | "binding")
 /**
  * Kind of an Effect layer definition.
  */
@@ -6829,7 +6829,8 @@ path: string
  */
 function_name: string
 /**
- * The parameter name.
+ * The parameter name. For an option key, the local binding of the key
+ * in the object pattern: `abort` for `{ signal: abort }`.
  */
 parameter_name: string
 /**
@@ -6838,11 +6839,17 @@ parameter_name: string
  */
 parameter_index: number
 /**
- * 1-based line of the parameter.
+ * The property key, when the finding is about one key of an
+ * object-pattern parameter: `retries` in `{ retries = 3 }`. Absent for
+ * a plain parameter.
+ */
+option_key?: (string | null)
+/**
+ * 1-based line of the parameter, or of the key binding.
  */
 line: number
 /**
- * 0-based byte column of the parameter.
+ * 0-based byte column of the parameter, or of the key binding.
  */
 col: number
 reason: ConstantParameterReason
@@ -6856,7 +6863,7 @@ value?: (ConstantParameterValue | null)
  */
 optional: boolean
 /**
- * `true` when the parameter has a default value.
+ * `true` when the parameter, or the option key, has a default value.
  */
 has_default: boolean
 /**
@@ -6906,14 +6913,15 @@ introduced?: (AuditIntroduced | null)
 effective_severity?: (EffectiveSeverity | null)
 }
 /**
- * The literal value that each call passes.
+ * The value that each call passes: a literal, or an immutable binding.
  */
 export interface ConstantParameterValue {
 kind: ConstantParameterValueKind
 /**
  * The value as text. A number uses the JavaScript `String(n)` form,
  * except that negative zero is `-0`. A string is the raw value with no
- * quotes. `null`, `undefined`, `true` and `false` are the keyword.
+ * quotes. `null`, `undefined`, `true` and `false` are the keyword. A
+ * binding is its name.
  */
 text: string
 }

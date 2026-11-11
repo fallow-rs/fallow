@@ -1822,7 +1822,7 @@ const AUDIT_COMPONENT_ROWS: &[AuditRowSpec] = &[
         markdown_table_code_span(&format!(
             "{}({})",
             s(it, "function_name"),
-            s(it, "parameter_name")
+            crate::report::github::constant_parameter_label(it)
         ))
     }),
     ("Unused component emit", "unused_component_emits", |it| {

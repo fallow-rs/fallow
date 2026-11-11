@@ -1818,7 +1818,7 @@
           "default": "off"
         },
         "constant-parameters": {
-          "description": "Parameters that each visible call passes in one way. Requires manual review; off by default.",
+          "description": "Parameters, and option keys of object-pattern parameters, that each\nvisible call passes in one way. Requires manual review; off by\ndefault. A `warn` finding does not change the CLI exit code unless\n`--fail-on-issues` is set. When the rule is on, the dead-code count\ngate of the GitHub Action counts it unless `fail-on-issues` is\n`false`.",
           "$ref": "#/$defs/Severity",
           "default": "off"
         },

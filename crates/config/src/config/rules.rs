@@ -170,7 +170,12 @@ pub struct RulesConfig {
     /// Used optional inputs absent from inspected callers. Requires manual review; off by default.
     #[serde(default = "Severity::default_off", alias = "absent-component-prop")]
     pub absent_component_props: Severity,
-    /// Parameters that each visible call passes in one way. Requires manual review; off by default.
+    /// Parameters, and option keys of object-pattern parameters, that each
+    /// visible call passes in one way. Requires manual review; off by
+    /// default. A `warn` finding does not change the CLI exit code unless
+    /// `--fail-on-issues` is set. When the rule is on, the dead-code count
+    /// gate of the GitHub Action counts it unless `fail-on-issues` is
+    /// `false`.
     #[serde(default = "Severity::default_off", alias = "constant-parameter")]
     pub constant_parameters: Severity,
     /// Vue `<script setup>` `defineEmits` declared event emitted nowhere inside

@@ -350,6 +350,17 @@ pub(crate) fn arr<'a>(value: &'a Value, key: &str) -> impl Iterator<Item = &'a V
         .iter()
 }
 
+/// The parameter of a `constant_parameters` entry as the source names it:
+/// `compact`, or an option key in pattern form, `{ retries }`.
+pub(crate) fn constant_parameter_label(value: &Value) -> String {
+    let name = s(value, "parameter_name");
+    match value.get("option_key").and_then(Value::as_str) {
+        Some(key) if key == name => format!("{{ {key} }}"),
+        Some(key) => format!("{{ {key}: {name} }}"),
+        None => name.to_string(),
+    }
+}
+
 /// String field, or `""` when missing or not a string.
 #[must_use]
 pub(crate) fn s<'a>(value: &'a Value, key: &str) -> &'a str {

@@ -61,7 +61,8 @@ pub fn build_suppress_constant_parameter_actions(
             Some(CodeActionOrCommand::CodeAction(CodeAction {
                 title: format!(
                     "Keep parameter '{}' of '{}' (suppress on this line)",
-                    parameter.parameter_name, parameter.function_name
+                    parameter.label(),
+                    parameter.function_name
                 ),
                 kind: Some(CodeActionKind::QUICKFIX),
                 diagnostics: Some(vec![diagnostic]),
@@ -87,6 +88,7 @@ mod tests {
             path,
             function_name: "format".to_string(),
             parameter_name: "compact".to_string(),
+            option_key: None,
             parameter_index: 0,
             line: 1,
             col: 0,

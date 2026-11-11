@@ -359,10 +359,11 @@ export interface ConstantParameterFinding {
   function_name: string;
   parameter_name: string;
   parameter_index: number;
+  option_key?: string;
   line: number;
   col: number;
-  reason: 'identical-argument' | 'never-passed' | 'unreached-variant';
-  value?: { kind: 'boolean' | 'null' | 'undefined' | 'number' | 'string'; text: string };
+  reason: 'identical-argument' | 'never-passed';
+  value?: { kind: 'boolean' | 'null' | 'undefined' | 'number' | 'string' | 'binding'; text: string };
   optional: boolean;
   has_default: boolean;
   condition_reads: number;
