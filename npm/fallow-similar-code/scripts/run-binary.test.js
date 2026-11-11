@@ -230,3 +230,25 @@ test(
     assert.equal(status, 143, stderr);
   },
 );
+
+test("a glibc host uses the static musl package when the gnu package is missing", () => {
+  const installedOnly = (name) => (request) => {
+    if (request !== `${name}/package.json`) throw new Error(`Cannot find module '${request}'`);
+    return `/nm/${request}`;
+  };
+  const gnu = "@fallow-cli/fallow-similar-code-linux-x64-gnu";
+  const musl = "@fallow-cli/fallow-similar-code-linux-x64-musl";
+  const host = { platform: "linux", arch: "x64", libc: "glibc" };
+  assert.equal(resolvePlatformPackage({ ...host, resolve: installedOnly(gnu) }), gnu);
+  assert.equal(resolvePlatformPackage({ ...host, resolve: installedOnly(musl) }), musl);
+  assert.equal(
+    resolvePlatformPackage({ ...host, libc: "musl", resolve: installedOnly(gnu) }),
+    musl,
+    "a musl host never falls back to a glibc binary",
+  );
+  assert.equal(
+    resolvePlatformPackage({ ...host, resolve: installedOnly("none") }),
+    gnu,
+    "the error names the package that matches the host",
+  );
+});
