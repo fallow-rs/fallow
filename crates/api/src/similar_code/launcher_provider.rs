@@ -77,7 +77,7 @@ pub(super) fn verified_provider(path: &Path, key: &[u8; 32]) -> Result<PathBuf, 
 }
 
 fn is_provider_name(name: &str) -> bool {
-    name == SIDECAR_BINARY || (cfg!(windows) && name == format!("{SIDECAR_BINARY}.exe"))
+    name.strip_suffix(".exe").unwrap_or(name) == SIDECAR_BINARY
 }
 
 fn signature_path(path: &Path) -> PathBuf {
@@ -122,11 +122,7 @@ mod tests {
     const TEST_SEED: [u8; 32] = [7; 32];
 
     fn provider_name() -> &'static str {
-        if cfg!(windows) {
-            "fallow-similar-code.exe"
-        } else {
-            "fallow-similar-code"
-        }
+        "fallow-similar-code"
     }
 
     fn signed_provider(dir: &Path, signer: &SigningKey) -> PathBuf {
