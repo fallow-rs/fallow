@@ -153,21 +153,100 @@ pub fn code_identifiers(src: &str) -> FxHashSet<String> {
 }
 
 /// Added lines of a test file that add a skip or focus marker.
+///
+/// A marker is the first skip or focus chain on a line, with the first string
+/// literal of that line as its title. Markers compare as a multiset, not as
+/// line text. So a base marker on a line that the change edits in another
+/// place (a callback that becomes `async`, a new title, a reformat) is not
+/// added. An added marker first matches a base marker with the same chain
+/// and title, then a base marker with the same chain only.
 #[must_use]
 pub fn skip_only_hits(base: &str, head: &str) -> Vec<LineHit> {
-    let mut hits = Vec::new();
-    for (line, text) in added_lines(base, head) {
-        for chain in call_chains(code_part(text)) {
-            if is_skip_or_focus(&chain) {
-                hits.push(LineHit {
-                    line,
-                    evidence: chain.join("."),
-                });
-                break;
-            }
+    let mut pool: FxHashMap<SkipMarker<'_>, usize> = FxHashMap::default();
+    for marker in base.lines().filter_map(skip_marker) {
+        *pool.entry(marker).or_default() += 1;
+    }
+    let added = added_lines(base, head);
+    let added_numbers: FxHashSet<u32> = added.iter().map(|(line, _)| *line).collect();
+    // A head line that the change kept holds a base marker already.
+    for (index, line) in head.lines().enumerate() {
+        if added_numbers.contains(&line_number(index)) {
+            continue;
+        }
+        if let Some(marker) = skip_marker(line) {
+            take_marker(&mut pool, &marker);
         }
     }
-    hits
+    let mut candidates: Vec<(u32, SkipMarker<'_>)> = added
+        .into_iter()
+        .filter_map(|(line, text)| skip_marker(text).map(|marker| (line, marker)))
+        .collect();
+    candidates.retain(|(_, marker)| !take_marker(&mut pool, marker));
+    candidates.retain(|(_, marker)| !take_chain(&mut pool, &marker.chain));
+    candidates
+        .into_iter()
+        .map(|(line, marker)| LineHit {
+            line,
+            evidence: marker.chain,
+        })
+        .collect()
+}
+
+/// A skip or focus marker on one line: the chain text (`it.skip`) and the
+/// first string literal of the line, when the line has one.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+struct SkipMarker<'a> {
+    chain: String,
+    title: Option<&'a str>,
+}
+
+fn skip_marker(line: &str) -> Option<SkipMarker<'_>> {
+    let code = code_part(line);
+    let chain = call_chains(code)
+        .into_iter()
+        .find(|chain| is_skip_or_focus(chain))?;
+    Some(SkipMarker {
+        chain: chain.join("."),
+        title: first_string_literal(code),
+    })
+}
+
+/// Removes one copy of `marker` from `pool`. Returns whether a copy was there.
+fn take_marker<'a>(pool: &mut FxHashMap<SkipMarker<'a>, usize>, marker: &SkipMarker<'a>) -> bool {
+    match pool.get_mut(marker) {
+        Some(count) if *count > 0 => {
+            *count -= 1;
+            true
+        }
+        _ => false,
+    }
+}
+
+/// Removes one copy of any marker with `chain` from `pool`. Returns whether a
+/// copy was there. The lowest title goes first, so the result is stable.
+fn take_chain(pool: &mut FxHashMap<SkipMarker<'_>, usize>, chain: &str) -> bool {
+    let key = pool
+        .iter()
+        .filter(|(marker, count)| marker.chain == chain && **count > 0)
+        .map(|(marker, _)| marker.clone())
+        .min_by(|a, b| a.title.cmp(&b.title));
+    key.is_some_and(|key| take_marker(pool, &key))
+}
+
+/// The content of the first single-line string literal in `code`.
+fn first_string_literal(code: &str) -> Option<&str> {
+    let (start, quote) = code
+        .char_indices()
+        .find(|(_, c)| matches!(c, '\'' | '"' | '`'))?;
+    let body = start + quote.len_utf8();
+    let mut escaped = false;
+    for (offset, c) in code[body..].char_indices() {
+        if c == quote && !escaped {
+            return Some(&code[body..body + offset]);
+        }
+        escaped = !escaped && c == '\\';
+    }
+    None
 }
 
 /// The number of test-case calls in a test file, comments excluded.
@@ -662,6 +741,53 @@ mod tests {
         let base = "it.skip('a', () => {});\n";
         let head = "// it.only('x')\nit.skip('a', () => {});\nconst profit = fit2(1);\n";
         assert!(skip_only_hits(base, head).is_empty());
+    }
+
+    #[test]
+    fn existing_skip_on_a_changed_line_is_not_a_hit() {
+        let base = "it.skip('pending', () => {\n  expect(1).toBe(1);\n});\n";
+        let head = "it.skip('pending', async () => {\n  expect(1).toBe(1);\n});\n";
+        assert!(skip_only_hits(base, head).is_empty());
+    }
+
+    #[test]
+    fn existing_skip_with_a_new_title_is_not_a_hit() {
+        let base = "it('a', f);\ntest.only('old title', () => {});\n";
+        let head = "it('a', f);\ntest.only('new title', () => {});\n";
+        assert!(skip_only_hits(base, head).is_empty());
+    }
+
+    #[test]
+    fn moved_and_changed_skip_is_not_a_hit() {
+        let base = "it.skip('a', () => {});\nit('b', f);\n";
+        let head = "it('b', f);\nit.skip('a', async () => {});\n";
+        assert!(skip_only_hits(base, head).is_empty());
+    }
+
+    #[test]
+    fn new_skip_next_to_a_changed_existing_skip_is_one_hit() {
+        let base = "it.skip('a', () => {});\nit('b', () => {});\n";
+        let head = "it.skip('a', async () => {});\nit.skip('b', () => {});\n";
+        let hits = skip_only_hits(base, head);
+        let evidence: Vec<(u32, &str)> = hits
+            .iter()
+            .map(|hit| (hit.line, hit.evidence.as_str()))
+            .collect();
+        assert_eq!(evidence, vec![(2, "it.skip")]);
+    }
+
+    #[test]
+    fn exact_title_match_wins_over_a_chain_match() {
+        // Base has one `it.skip('a')`. Head changes that line and adds a new
+        // `it.skip('c')` before it. The finding must go to the new title.
+        let base = "it.skip('a', () => {});\n";
+        let head = "it.skip('c', () => {});\nit.skip('a', async () => {});\n";
+        let hits = skip_only_hits(base, head);
+        let evidence: Vec<(u32, &str)> = hits
+            .iter()
+            .map(|hit| (hit.line, hit.evidence.as_str()))
+            .collect();
+        assert_eq!(evidence, vec![(1, "it.skip")]);
     }
 
     #[test]

@@ -360,6 +360,22 @@ fn sarif_carries_diff_risk_rule_ids() {
     );
 }
 
+#[test]
+fn existing_skip_on_a_line_that_becomes_async_is_not_a_finding() {
+    let tmp = skip_only_change();
+    let dir = tmp.path();
+    commit_all(dir, "skip in base");
+    fs::write(
+        dir.join("src/index.test.ts"),
+        "import { price } from './index';\n\nit.skip('doubles', async () => {\n  expect(price(1)).toBe(2);\n});\n\nit('keeps zero', () => {\n  expect(price(0)).toBe(0);\n});\n",
+    )
+    .unwrap();
+
+    let (code, json) = audit_json(dir, &[]);
+    assert_eq!(code, 0, "{json}");
+    assert_eq!(rule_lines(&json), vec![]);
+}
+
 /// A change whose only finding is a diff-risk `it.skip` marker.
 fn skip_only_change() -> TempDir {
     let tmp = fixture(None);
