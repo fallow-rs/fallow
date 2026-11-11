@@ -408,8 +408,10 @@ fn mutation_runner_check(root: &Path, configured: fallow_config::MutationRunner)
             runner_version_help(range)
         ),
         Some(remediation(
-            &project_package_manager(root)
-                .add_dev_command(&format!("{}@^{}", range.package, range.min_version)),
+            &fallow_config::PackageManager::suggested_add_dev_command(
+                Some(root),
+                &format!("{}@^{}", range.package, range.min_version),
+            ),
             true,
         )),
     )
@@ -685,10 +687,10 @@ where
                 required,
                 "Type-aware analysis is enabled, but no trusted companion is discoverable.",
                 Some(remediation(
-                    &project_package_manager(root).add_dev_command(&format!(
-                        "fallow-type-aware@{}",
-                        env!("CARGO_PKG_VERSION")
-                    )),
+                    &fallow_config::PackageManager::suggested_add_dev_command(
+                        Some(root),
+                        &format!("fallow-type-aware@{}", env!("CARGO_PKG_VERSION")),
+                    ),
                     true,
                 )),
             )
@@ -1060,6 +1062,47 @@ mod tests {
             Some(
                 format!(
                     "pnpm add -D fallow-type-aware@{}",
+                    env!("CARGO_PKG_VERSION")
+                )
+                .as_str()
+            )
+        );
+    }
+
+    /// Yarn 1 refuses `yarn add -D` at a workspace root without `-W`
+    /// (fallow-rs/fallow#4519).
+    #[test]
+    fn type_aware_remediation_adds_the_yarn_classic_workspace_root_flag() {
+        let root = tempfile::tempdir().expect("temp root");
+        std::fs::write(
+            root.path().join(".fallowrc.json"),
+            r#"{"typeAware":{"enabled":true}}"#,
+        )
+        .expect("write config");
+        std::fs::write(
+            root.path().join("package.json"),
+            r#"{"private":true,"workspaces":["packages/*"]}"#,
+        )
+        .expect("write package.json");
+        std::fs::write(root.path().join("yarn.lock"), "# yarn lockfile v1\n")
+            .expect("write lockfile");
+
+        let output = run_doctor_with_discovery(
+            &DoctorOptions {
+                root: root.path(),
+                config_path: None,
+            },
+            &|_| Err("missing companion".to_string()),
+        );
+
+        assert_eq!(
+            output.checks[4]
+                .remediation
+                .as_ref()
+                .map(|remediation| remediation.command.as_str()),
+            Some(
+                format!(
+                    "yarn add -D -W fallow-type-aware@{}",
                     env!("CARGO_PKG_VERSION")
                 )
                 .as_str()

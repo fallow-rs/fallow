@@ -560,6 +560,23 @@ mod tests {
             "{hint}"
         );
 
+        let yarn_classic_root = tempfile::tempdir().expect("temporary project directory");
+        std::fs::write(
+            yarn_classic_root.path().join("package.json"),
+            r#"{"private":true,"workspaces":["packages/*"]}"#,
+        )
+        .expect("write package.json");
+        std::fs::write(
+            yarn_classic_root.path().join("yarn.lock"),
+            "# yarn lockfile v1\n",
+        )
+        .expect("write lockfile");
+        let hint = discovery::missing_sidecar_install_hint(Some(yarn_classic_root.path()));
+        assert!(
+            hint.contains(&format!("`yarn add -D -W fallow-type-aware@{version}`")),
+            "{hint}"
+        );
+
         let plain = tempfile::tempdir().expect("temporary project directory");
         let hint = discovery::missing_sidecar_install_hint(Some(plain.path()));
         assert!(

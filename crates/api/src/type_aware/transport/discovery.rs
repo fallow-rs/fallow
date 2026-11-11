@@ -49,10 +49,10 @@ pub(super) fn discover_type_aware_sidecar_from(
 /// The project command uses the package manager of `project_root` (npm when
 /// no lockfile or `packageManager` field names one); the command is only shown.
 pub(super) fn missing_sidecar_install_hint(project_root: Option<&Path>) -> String {
-    let project_command = project_root
-        .and_then(fallow_config::PackageManager::detect_nearest)
-        .unwrap_or(fallow_config::PackageManager::Npm)
-        .add_dev_command(&format!("{SIDECAR_BINARY}@{}", env!("CARGO_PKG_VERSION")));
+    let project_command = fallow_config::PackageManager::suggested_add_dev_command(
+        project_root,
+        &format!("{SIDECAR_BINARY}@{}", env!("CARGO_PKG_VERSION")),
+    );
     format!(
         "For a project that has `fallow` as a devDependency, add the companion at the same version: `{project_command}`. For a global `fallow`, run `npm install --global {SIDECAR_BINARY}@{version}`. For npx, start both packages together: `npx -p fallow@{version} -p {SIDECAR_BINARY}@{version} fallow`, or set FALLOW_TYPE_AWARE_BIN to a trusted executable path.",
         version = env!("CARGO_PKG_VERSION")
