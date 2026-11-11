@@ -365,7 +365,8 @@ else
   # as tampering). Add the locate-the-knob context: which version was installed
   # and from where, since the Action ref is a different knob from the CLI
   # version. Neutral wording so it stays correct for both failure causes.
-  echo "::error::Verification ran against fallow ${installed_fallow_version}, installed from ${version_source}. The Action ref (${GITHUB_ACTION_REF:-see your workflow}) selects the Action code, not the CLI version. Apply the recommended fix in the verification error above."
+  # version_source can hold a catalog name from package.json, so escape it.
+  echo "::error::Verification ran against fallow $(escape_command_data "$installed_fallow_version"), installed from $(escape_command_data "$version_source"). The Action ref ($(escape_command_data "${GITHUB_ACTION_REF:-see your workflow}")) selects the Action code, not the CLI version. Apply the recommended fix in the verification error above."
   exit "$verify_status"
 fi
 
