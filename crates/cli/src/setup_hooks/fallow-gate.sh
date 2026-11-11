@@ -808,32 +808,40 @@ print_block_message() {
   } >&2
 }
 
+# Sets VERSION_RAW when the command prints a fallow version. A launcher that
+# cannot start (for example an npm shim whose package is gone) fails here, so
+# the caller tries the next install instead of running an audit that cannot
+# give a report.
+fallow_runs() {
+  VERSION_RAW="$("$@" --version 2>/dev/null)" && [[ "$VERSION_RAW" == fallow* ]]
+}
+
 run_audit() {
   # A real installed Git hook keeps its caller's PATH and does not add
   # node_modules/.bin, so a project-local install is invisible to `command -v`.
   # The arms below cover the layouts a project-local install can take, in the
-  # order they are cheapest to probe. Keep them in step with the Lefthook job
-  # `fallow init --hooks` prints: the two must resolve the same installs.
-  if command -v fallow >/dev/null 2>&1; then
+  # order they are cheapest to probe. Keep them in step with the Git hook and
+  # the Lefthook job `fallow hooks install --target git` writes: they must
+  # resolve the same installs.
+  if command -v fallow >/dev/null 2>&1 && fallow_runs fallow; then
     RUNNER=(fallow)
     BIN_DESC="$(command -v fallow)"
-  elif [ -x ./node_modules/.bin/fallow ]; then
+  elif [ -x ./node_modules/.bin/fallow ] && fallow_runs ./node_modules/.bin/fallow; then
     RUNNER=(./node_modules/.bin/fallow)
     BIN_DESC="./node_modules/.bin/fallow"
-  elif command -v yarn >/dev/null 2>&1 && YARN_BIN="$(yarn bin fallow 2>/dev/null)" && [ -n "$YARN_BIN" ]; then
+  elif command -v yarn >/dev/null 2>&1 && YARN_BIN="$(yarn bin fallow 2>/dev/null)" && [ -n "$YARN_BIN" ] && fallow_runs yarn exec fallow --; then
     # Yarn Plug'n'Play has no node_modules/.bin at all, so neither the launcher
     # check above nor npx can see the install.
     RUNNER=(yarn exec fallow --)
     BIN_DESC="yarn exec fallow"
-  elif command -v npx >/dev/null 2>&1 && VER_PROBE="$(npx --no-install fallow --version 2>/dev/null || true)" && [[ "$VER_PROBE" == fallow* ]]; then
+  elif command -v npx >/dev/null 2>&1 && fallow_runs npx --no-install fallow; then
     RUNNER=(npx --no-install fallow)
     BIN_DESC="npx --no-install fallow"
   else
-    echo "fallow-gate: fallow binary not found (tried PATH, node_modules/.bin, yarn and npx --no-install), skipping audit." >&2
+    echo "fallow-gate: fallow binary not found (tried PATH, node_modules/.bin, yarn and npx --no-install; a launcher that cannot print its version does not count), skipping audit." >&2
     exit 0
   fi
 
-  VERSION_RAW="$("${RUNNER[@]}" --version 2>/dev/null || true)"
   VERSION="${VERSION_RAW#fallow }"
   VERSION="${VERSION%% *}"
 

@@ -643,3 +643,153 @@ exit 1"#,
         "failed yarn bin lookup must not select yarn exec"
     );
 }
+
+/// Installs the standalone Git pre-commit hook in a new repository and runs
+/// it with `PATH` reduced to `git`, the way a Git client without
+/// `node_modules/.bin` on `PATH` starts it.
+#[cfg(unix)]
+struct GitHookExecutionFixture {
+    _dir: tempfile::TempDir,
+    root: PathBuf,
+    shell: PathBuf,
+    restricted_bin: PathBuf,
+}
+
+#[cfg(unix)]
+impl GitHookExecutionFixture {
+    fn new() -> Self {
+        use std::os::unix::fs::symlink;
+
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().to_path_buf();
+        fs::write(root.join("package.json"), r#"{"name":"git-hook-test"}"#).unwrap();
+        let git = executable_on_path("git");
+        let shell = executable_on_path("sh");
+        let status = Command::new(&git)
+            .args(["init", "-q"])
+            .current_dir(&root)
+            .env_clear()
+            .status()
+            .expect("initialize temporary Git repository");
+        assert!(status.success());
+
+        let output = run_fallow_raw(&[
+            "--root",
+            root.to_str().unwrap(),
+            "hooks",
+            "install",
+            "--target",
+            "git",
+            "--branch",
+            "develop",
+        ]);
+        assert_eq!(output.code, 0, "hooks install failed: {}", output.stderr);
+        assert!(root.join(".git/hooks/pre-commit").is_file());
+
+        let restricted_bin = root.join("restricted-bin");
+        fs::create_dir(&restricted_bin).unwrap();
+        symlink(git, restricted_bin.join("git")).unwrap();
+        Self {
+            _dir: dir,
+            root,
+            shell,
+            restricted_bin,
+        }
+    }
+
+    fn run(&self, environment: &[(&str, &Path)]) -> std::process::Output {
+        let mut command = Command::new(&self.shell);
+        command
+            .arg(self.root.join(".git/hooks/pre-commit"))
+            .current_dir(&self.root)
+            .env_clear()
+            .env("PATH", &self.restricted_bin);
+        for (name, value) in environment {
+            command.env(name, value);
+        }
+        command.output().expect("execute generated Git hook")
+    }
+}
+
+/// A Git client keeps its own `PATH`, so a project-local install is not on
+/// it. Without the `node_modules/.bin` arm the hook exits 0 and every commit
+/// passes without an audit.
+#[cfg(unix)]
+#[test]
+fn git_hook_runs_project_local_fallow_outside_path() {
+    let fixture = GitHookExecutionFixture::new();
+    let args_file = fixture.root.join("fallow-args");
+    write_test_executable(
+        &fixture.root.join("node_modules/.bin/fallow"),
+        &fixture.shell,
+        "printf '%s\\n' \"$@\" > \"$FALLOW_TEST_ARGS\"\nexit 1",
+    );
+
+    let output = fixture.run(&[("FALLOW_TEST_ARGS", &args_file)]);
+
+    assert_eq!(
+        output.status.code(),
+        Some(1),
+        "a failed audit must block the commit: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(args_file).expect("project-local fallow must be invoked"),
+        "audit\n--base\ndevelop\n--quiet\n--gate-marker\npre-commit\n"
+    );
+}
+
+/// When no install resolves, the hook keeps the commit, but it names the
+/// skip on stderr so that the missing audit is visible.
+#[cfg(unix)]
+#[test]
+fn git_hook_names_the_skip_when_no_fallow_resolves() {
+    let fixture = GitHookExecutionFixture::new();
+
+    let output = fixture.run(&[]);
+
+    assert_eq!(output.status.code(), Some(0));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("fallow not found") && stderr.contains("skipping the pre-commit audit"),
+        "the hook must name the skip: {stderr}"
+    );
+}
+
+/// `npx --no-install` finds an install that the other arms do not see. The
+/// hook selects it only when it prints a fallow version.
+#[cfg(unix)]
+#[test]
+fn git_hook_uses_npx_only_for_a_working_install() {
+    let fixture = GitHookExecutionFixture::new();
+    let args_file = fixture.root.join("fallow-args");
+    write_test_executable(
+        &fixture.restricted_bin.join("npx"),
+        &fixture.shell,
+        r#"if [ "$1" = --no-install ] && [ "$2" = fallow ]; then
+  shift 2
+  if [ "$1" = --version ]; then echo 'fallow 9.0.0'; exit 0; fi
+  printf '%s\n' "$@" > "$FALLOW_TEST_ARGS"
+  exit 1
+fi
+exit 1"#,
+    );
+
+    let output = fixture.run(&[("FALLOW_TEST_ARGS", &args_file)]);
+
+    assert_eq!(output.status.code(), Some(1));
+    assert_eq!(
+        fs::read_to_string(&args_file).expect("npx fallow must be invoked"),
+        "audit\n--base\ndevelop\n--quiet\n--gate-marker\npre-commit\n"
+    );
+
+    write_test_executable(
+        &fixture.restricted_bin.join("npx"),
+        &fixture.shell,
+        "echo 'npm ERR! could not determine executable to run'\nexit 1",
+    );
+    fs::remove_file(&args_file).unwrap();
+    let output = fixture.run(&[("FALLOW_TEST_ARGS", &args_file)]);
+    assert_eq!(output.status.code(), Some(0));
+    assert!(String::from_utf8_lossy(&output.stderr).contains("fallow not found"));
+}

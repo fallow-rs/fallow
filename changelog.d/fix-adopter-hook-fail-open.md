@@ -1,0 +1,5 @@
+### Fixed
+
+- **The Git pre-commit hook from `fallow hooks install --target git` now finds a project-local fallow.** A Git client does not add `node_modules/.bin` to `PATH`. Before, the hook found no `fallow` on `PATH` and let every commit through without an audit and without a message. The hook, the hint for an existing hook and the Lefthook job now use one shared lookup: `PATH`, then `./node_modules/.bin/fallow`, then `yarn exec fallow`, then `npx --no-install fallow`. When no install is found, the hook still lets the commit through, but it prints `fallow-hook: fallow not found (...), skipping the pre-commit audit.` on stderr. Run `fallow hooks install --target git --force` to update an installed hook.
+
+- **The agent gate no longer selects a `fallow` launcher that cannot run.** A global npm launcher whose package is gone exits with `MODULE_NOT_FOUND`. The gate selected it, read an empty report and skipped the audit, also when the project had a working install. The gate now uses an install only when `--version` prints a fallow version, so a working project-local install is used. Run `fallow hooks install --target agent --force` to update an installed gate.
