@@ -1538,7 +1538,7 @@ fn print_combined_sarif(
                     "informationUri": "https://github.com/fallow-rs/fallow",
                 }
             },
-            "automationDetails": { "id": "fallow/dupes" },
+            "automationDetails": { "id": fallow_output::SARIF_CATEGORY_DUPES },
             "results": result.report.clone_groups.iter().enumerate().map(|(i, g)| {
                 serde_json::json!({
                     "ruleId": "fallow/code-duplication",

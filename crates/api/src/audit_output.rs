@@ -443,7 +443,7 @@ fn build_audit_duplication_sarif_run(duplication: &DuplicationReport) -> serde_j
                 "informationUri": "https://github.com/fallow-rs/fallow",
             }
         },
-        "automationDetails": { "id": "fallow/audit/dupes" },
+        "automationDetails": { "id": fallow_output::SARIF_CATEGORY_AUDIT_DUPES },
         "results": duplication.clone_groups.iter().enumerate().map(|(i, group)| {
             serde_json::json!({
                 "ruleId": "fallow/code-duplication",
@@ -522,7 +522,7 @@ fn build_audit_diff_risk_sarif_run(report: &fallow_output::DiffRiskReport) -> se
                 "rules": rule_defs,
             }
         },
-        "automationDetails": { "id": "fallow/audit/diff-risk" },
+        "automationDetails": { "id": fallow_output::SARIF_CATEGORY_AUDIT_DIFF_RISK },
         "results": results,
     })
 }
@@ -705,7 +705,7 @@ mod tests {
         assert_eq!(value["runs"].as_array().expect("runs").len(), 3);
         assert_eq!(
             value["runs"][1]["automationDetails"]["id"],
-            "fallow/audit/dupes"
+            fallow_output::SARIF_CATEGORY_AUDIT_DUPES
         );
     }
 

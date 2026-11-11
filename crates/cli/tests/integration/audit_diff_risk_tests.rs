@@ -346,7 +346,7 @@ fn sarif_carries_diff_risk_rule_ids() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|run| run["automationDetails"]["id"] == "fallow/audit/diff-risk")
+        .find(|run| run["automationDetails"]["id"] == "fallow/audit/diff-risk/")
         .expect("diff-risk SARIF run");
     assert_eq!(run["results"][0]["ruleId"], "fallow/weakened-tests");
     assert_eq!(run["results"][0]["level"], "warning");

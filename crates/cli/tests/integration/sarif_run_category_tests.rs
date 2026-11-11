@@ -7,10 +7,11 @@
 //! Each run of a multi-analysis SARIF document has its own category.
 //!
 //! GitHub code scanning takes the category of a run from
-//! `automationDetails.id`. It rejects an upload with two runs that have the
-//! same tool and the same category. The bare command, `fallow audit` and
-//! `fallow report --from` all merge several analyses into one document, so
-//! every run must carry a distinct id.
+//! `automationDetails.id`: the category is the text before the last `/`, and
+//! the text after it is a run id. GitHub rejects an upload with two runs that
+//! have the same tool and the same category. The bare command, `fallow audit`
+//! and `fallow report --from` all merge several analyses into one document, so
+//! the ids of the runs must differ before the last `/`.
 
 use std::fmt::Write as _;
 use std::fs;
@@ -83,34 +84,50 @@ fn run_ok(args: &[&str]) -> CommandOutput {
     output
 }
 
-/// The `(tool, category)` pair of each run.
-fn run_keys(sarif: &Value) -> Vec<(String, Option<String>)> {
+/// The category that GitHub code scanning derives from an
+/// `automationDetails.id`: all text before the last `/`.
+fn github_category(id: &str) -> &str {
+    id.rsplit_once('/').map_or("", |(category, _)| category)
+}
+
+/// The `automationDetails.id` of each run, in order.
+fn run_ids(sarif: &Value) -> Vec<String> {
     sarif["runs"]
         .as_array()
         .expect("runs array")
         .iter()
         .map(|run| {
-            (
-                run["tool"]["driver"]["name"]
-                    .as_str()
-                    .unwrap_or_default()
-                    .to_owned(),
-                run["automationDetails"]["id"].as_str().map(str::to_owned),
-            )
+            assert_eq!(run["tool"]["driver"]["name"], "fallow", "{run}");
+            run["automationDetails"]["id"]
+                .as_str()
+                .expect("each run has an automationDetails.id")
+                .to_owned()
         })
         .collect()
 }
 
-/// Assert the category of each run, in order. The expected list has one
-/// entry per analysis, so it also asserts that each `(tool, category)` pair
-/// is unique.
+/// Assert the id of each run, in order, and assert that GitHub derives a
+/// different category for each run. All runs have the tool name `fallow`, so
+/// a unique category gives a unique `(tool, category)` pair.
 fn assert_distinct_categories(sarif: &Value, expected: &[&str]) {
-    let keys = run_keys(sarif);
-    let expected: Vec<(String, Option<String>)> = expected
-        .iter()
-        .map(|id| ("fallow".to_owned(), Some((*id).to_owned())))
-        .collect();
-    assert_eq!(keys, expected);
+    let ids = run_ids(sarif);
+    assert_eq!(ids, expected);
+    let mut categories: Vec<&str> = ids.iter().map(|id| github_category(id)).collect();
+    categories.sort_unstable();
+    let count = categories.len();
+    categories.dedup();
+    assert_eq!(
+        categories.len(),
+        count,
+        "two runs share a GitHub category: {ids:?}"
+    );
+}
+
+#[test]
+fn github_category_is_the_text_before_the_last_slash() {
+    assert_eq!(github_category("fallow/dead-code/"), "fallow/dead-code");
+    assert_eq!(github_category("fallow/dead-code"), "fallow");
+    assert_eq!(github_category("fallow"), "");
 }
 
 fn bare_args<'a>(root: &'a str, format: &'a str) -> Vec<&'a str> {
@@ -144,11 +161,11 @@ fn report_from(saved: &Path, root: &str) -> Value {
     parse_json(&output)
 }
 
-const BARE_CATEGORIES: [&str; 3] = ["fallow/dead-code", "fallow/dupes", "fallow/health"];
+const BARE_CATEGORIES: [&str; 3] = ["fallow/dead-code/", "fallow/dupes/", "fallow/health/"];
 const AUDIT_CATEGORIES: [&str; 3] = [
-    "fallow/audit/dead-code",
-    "fallow/audit/dupes",
-    "fallow/audit/health",
+    "fallow/audit/dead-code/",
+    "fallow/audit/dupes/",
+    "fallow/audit/health/",
 ];
 
 #[test]

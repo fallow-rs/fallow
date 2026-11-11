@@ -439,21 +439,33 @@ pub fn build_sarif_document(input: SarifDocumentInput<'_>) -> Value {
     })
 }
 
+// GitHub code scanning reads `automationDetails.id` as `category/run-id`: the
+// category is the text before the last `/`. Each id below ends with `/`, so
+// the full id is the category and the runs of one document do not share one.
+
 /// SARIF category of the dead-code run in the bare `fallow` document.
-pub const SARIF_CATEGORY_DEAD_CODE: &str = "fallow/dead-code";
+pub const SARIF_CATEGORY_DEAD_CODE: &str = "fallow/dead-code/";
+/// SARIF category of the duplication run in the bare `fallow` document.
+pub const SARIF_CATEGORY_DUPES: &str = "fallow/dupes/";
 /// SARIF category of the health run in the bare `fallow` document.
-pub const SARIF_CATEGORY_HEALTH: &str = "fallow/health";
+pub const SARIF_CATEGORY_HEALTH: &str = "fallow/health/";
 /// SARIF category of the dead-code run in the `fallow audit` document.
-pub const SARIF_CATEGORY_AUDIT_DEAD_CODE: &str = "fallow/audit/dead-code";
+pub const SARIF_CATEGORY_AUDIT_DEAD_CODE: &str = "fallow/audit/dead-code/";
+/// SARIF category of the duplication run in the `fallow audit` document.
+pub const SARIF_CATEGORY_AUDIT_DUPES: &str = "fallow/audit/dupes/";
 /// SARIF category of the health run in the `fallow audit` document.
-pub const SARIF_CATEGORY_AUDIT_HEALTH: &str = "fallow/audit/health";
+pub const SARIF_CATEGORY_AUDIT_HEALTH: &str = "fallow/audit/health/";
+/// SARIF category of the diff-risk run in the `fallow audit` document.
+pub const SARIF_CATEGORY_AUDIT_DIFF_RISK: &str = "fallow/audit/diff-risk/";
 
 /// Copy the runs of `sarif` into `runs` and give each copied run the SARIF
 /// category `category` (`automationDetails.id`).
 ///
 /// GitHub code scanning rejects a SARIF file with two runs that have the same
 /// tool and the same category. A multi-analysis document must therefore give
-/// each analysis its own category. A run that already has an id keeps it.
+/// each analysis its own category. Pass one of the `SARIF_CATEGORY_*`
+/// constants: each ends with `/`, because GitHub takes the category from the
+/// text before the last `/`. A run that already has an id keeps it.
 pub fn extend_sarif_runs_with_category(runs: &mut Vec<Value>, sarif: &Value, category: &str) {
     let Some(source_runs) = sarif.get("runs").and_then(Value::as_array) else {
         return;
@@ -487,11 +499,31 @@ mod tests {
             ]
         });
         let mut runs = Vec::new();
-        extend_sarif_runs_with_category(&mut runs, &sarif, "fallow/dead-code");
+        extend_sarif_runs_with_category(&mut runs, &sarif, SARIF_CATEGORY_DEAD_CODE);
 
         assert_eq!(runs.len(), 2);
-        assert_eq!(runs[0]["automationDetails"]["id"], "fallow/dead-code");
+        assert_eq!(runs[0]["automationDetails"]["id"], SARIF_CATEGORY_DEAD_CODE);
         assert_eq!(runs[1]["automationDetails"]["id"], "kept");
+    }
+
+    #[test]
+    fn sarif_categories_differ_before_the_last_slash() {
+        let ids = [
+            SARIF_CATEGORY_DEAD_CODE,
+            SARIF_CATEGORY_DUPES,
+            SARIF_CATEGORY_HEALTH,
+            SARIF_CATEGORY_AUDIT_DEAD_CODE,
+            SARIF_CATEGORY_AUDIT_DUPES,
+            SARIF_CATEGORY_AUDIT_HEALTH,
+            SARIF_CATEGORY_AUDIT_DIFF_RISK,
+        ];
+        let mut categories: Vec<&str> = ids
+            .iter()
+            .map(|id| id.rsplit_once('/').map_or("", |(category, _)| category))
+            .collect();
+        categories.sort_unstable();
+        categories.dedup();
+        assert_eq!(categories.len(), ids.len(), "{ids:?}");
     }
 
     #[test]

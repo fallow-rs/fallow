@@ -580,7 +580,7 @@ fn combined_duplication_sarif_run(report: &DuplicationReport) -> serde_json::Val
                 "informationUri": "https://github.com/fallow-rs/fallow",
             }
         },
-        "automationDetails": { "id": "fallow/dupes" },
+        "automationDetails": { "id": fallow_output::SARIF_CATEGORY_DUPES },
         "results": report.clone_groups.iter().enumerate().map(|(index, group)| {
             serde_json::json!({
                 "ruleId": "fallow/code-duplication",
@@ -1342,7 +1342,8 @@ mod tests {
         let runs = sarif["runs"].as_array().expect("SARIF runs");
         assert_eq!(runs.len(), 1, "only the dead-code run remains: {sarif}");
         assert_ne!(
-            runs[0]["automationDetails"]["id"], "fallow/audit/diff-risk",
+            runs[0]["automationDetails"]["id"],
+            fallow_output::SARIF_CATEGORY_AUDIT_DIFF_RISK,
             "{sarif}"
         );
     }
