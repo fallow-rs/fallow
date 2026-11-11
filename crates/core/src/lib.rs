@@ -109,14 +109,9 @@ pub struct AnalysisParseMetrics {
 }
 
 /// Update cache: write freshly parsed modules, refresh stale metadata entries,
-/// and upgrade entries a complexity-blind run wrote earlier.
-///
-/// An entry whose content hash still matches is rewritten only when its
-/// metadata fingerprint moved or when this run can add complexity the entry
-/// lacks. A run with `need_complexity == false` never rewrites the complexity
-/// an earlier `health` run stored: `module.complexity` is empty on such a run
-/// by design, so copying it over would silently strip the entry and make every
-/// later `health` run reparse the file.
+/// and upgrade entries that a run without complexity or call facts wrote
+/// earlier. [`cache::CacheStore::record_module`] keeps the complexity and the
+/// call facts that an earlier run stored and this run did not extract.
 ///
 /// `read_started_ns` is the time before the parse read the sources. A
 /// fingerprint that is not older than that time by the settle window is stored
@@ -129,39 +124,20 @@ fn update_cache(
     modules: &[extract::ModuleInfo],
     files: &[discover::DiscoveredFile],
     need_complexity: bool,
+    need_call_facts: bool,
     read_started_ns: u64,
 ) -> bool {
     let mut dirty = false;
     for module in modules {
         if let Some(file) = files.get(module.file_id.0 as usize) {
             let fingerprint = file_fingerprint(&file.path).for_content_read_at(read_started_ns);
-            if let Some(cached) = store.get_by_path_only(&file.path)
-                && cached.content_hash == module.content_hash
-            {
-                let stale_metadata = cached.source_fingerprint() != fingerprint;
-                let adds_complexity = need_complexity && !cached.complexity_extracted;
-                if stale_metadata && !adds_complexity {
-                    store.refresh_fingerprint(&file.path, fingerprint);
-                    dirty = true;
-                } else if adds_complexity {
-                    let preserved_complexity = (!need_complexity && cached.complexity_extracted)
-                        .then(|| cached.complexity.clone());
-                    let mut refreshed =
-                        cache::module_to_cached(module, fingerprint, need_complexity);
-                    if let Some(complexity) = preserved_complexity {
-                        refreshed.complexity = complexity;
-                        refreshed.complexity_extracted = true;
-                    }
-                    store.insert(&file.path, refreshed);
-                    dirty = true;
-                }
-                continue;
-            }
-            store.insert(
+            dirty |= store.record_module(
                 &file.path,
-                cache::module_to_cached(module, fingerprint, need_complexity),
+                module,
+                fingerprint,
+                need_complexity,
+                need_call_facts,
             );
-            dirty = true;
         }
     }
     let removed_stale_paths = store.retain_paths(files);
@@ -1534,12 +1510,16 @@ fn parse_analysis_modules(
     };
 
     let read_started_ns = fallow_types::source_fingerprint::now_ns();
-    let parse_result = extract::parse_all_files_cancellable(
+    let parse_result = extract::parse_all_files_with_mode(
         files,
         cache_store.as_ref(),
-        need_complexity,
+        extract::ParseNeeds {
+            complexity: need_complexity,
+            call_facts: config.reads_call_facts(),
+        },
         None,
         &config.flags.patterns(),
+        fallow_types::shared_state::ExtractionMode::Standard,
     );
     let _ = fallow_config::record_source_read_failures(&config.root, &parse_result.read_failures);
     let _ =
@@ -1614,13 +1594,18 @@ fn update_parse_cache_if_enabled(
     if !config.no_cache {
         let cache_max_size_bytes = resolve_cache_max_size_bytes(config);
         let store = cache_store.get_or_insert_with(|| cache::CacheStore::new(&config.root));
-        if update_cache(store, modules, files, need_complexity, read_started_ns)
-            && let Err(error) = store.save(
-                config.cache_target(),
-                config.cache_config_hash,
-                cache_max_size_bytes,
-            )
-        {
+        if update_cache(
+            store,
+            modules,
+            files,
+            need_complexity,
+            config.reads_call_facts(),
+            read_started_ns,
+        ) && let Err(error) = store.save(
+            config.cache_target(),
+            config.cache_config_hash,
+            cache_max_size_bytes,
+        ) {
             tracing::warn!("Failed to save cache: {error}");
         }
     }
@@ -3893,6 +3878,7 @@ mod tests {
             &first.modules,
             &discovered,
             false,
+            true,
             read_started_ns,
         );
 

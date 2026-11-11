@@ -219,3 +219,52 @@ fn production_mode_drops_test_callers() {
         "{production}"
     );
 }
+
+const CACHED_JSON_ARGS: &[&str] = &["--constant-parameters", "--format", "json", "--quiet"];
+
+fn cache_size(root: &std::path::Path) -> u64 {
+    std::fs::metadata(root.join(".fallow/cache.bin"))
+        .expect("the run writes the parse cache")
+        .len()
+}
+
+#[test]
+fn a_run_without_the_rule_stores_no_call_facts() {
+    let dir = copy_fixture("constant-parameter");
+    let plain = run_fallow_in_root("dead-code", dir.path(), &["--format", "json", "--quiet"]);
+    assert_eq!(plain.code, 0, "{}", plain.stderr);
+    let without_facts = cache_size(dir.path());
+
+    let with_rule = run_fallow_in_root("dead-code", dir.path(), CACHED_JSON_ARGS);
+    assert_eq!(with_rule.code, 0, "{}", with_rule.stderr);
+    assert!(
+        cache_size(dir.path()) > without_facts,
+        "the run with the rule adds the call facts that the run without it left out"
+    );
+}
+
+#[test]
+fn a_warm_cache_without_call_facts_gives_the_findings_of_a_cold_run() {
+    let dir = copy_fixture("constant-parameter");
+    let cold = parse_json(&run_fallow_in_root("dead-code", dir.path(), JSON_ARGS));
+
+    let plain = run_fallow_in_root("dead-code", dir.path(), &["--format", "json", "--quiet"]);
+    assert_eq!(plain.code, 0, "{}", plain.stderr);
+    let upgrade = parse_json(&run_fallow_in_root(
+        "dead-code",
+        dir.path(),
+        CACHED_JSON_ARGS,
+    ));
+    let warm = parse_json(&run_fallow_in_root(
+        "dead-code",
+        dir.path(),
+        CACHED_JSON_ARGS,
+    ));
+    assert_eq!(cold["summary"]["constant_parameters"], 2, "{cold}");
+    for report in [&upgrade, &warm] {
+        assert_eq!(
+            report["constant_parameters"], cold["constant_parameters"],
+            "{report}"
+        );
+    }
+}

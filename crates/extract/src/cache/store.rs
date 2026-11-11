@@ -11,6 +11,7 @@ use rustc_hash::FxHashMap;
 
 use bitcode::{Decode, Encode};
 
+use super::conversion::module_to_cached;
 use super::types::{
     CACHE_VERSION, CachedModule, DEFAULT_CACHE_MAX_SIZE, EVICTION_SIGNIFICANT_BPS,
     EVICTION_TARGET_BPS, EVICTION_TRIGGER_BPS,
@@ -449,6 +450,51 @@ impl CacheStore {
         entry.mtime_ns = fingerprint.mtime_ns;
         entry.ctime_ns = fingerprint.ctime_ns;
         entry.file_size = fingerprint.file_size;
+        true
+    }
+
+    /// Store the module of this run for `path`. Returns `true` when the store
+    /// changed.
+    ///
+    /// An entry whose content hash still matches is rewritten only when its
+    /// metadata fingerprint moved or when this run adds complexity or call
+    /// facts that the entry lacks. A rewrite keeps the complexity and the call
+    /// facts that an earlier run stored and this run did not extract: a
+    /// module of such a run has none of them by design, so a copy would strip
+    /// the entry and make each later run that reads them parse the file again.
+    pub fn record_module(
+        &mut self,
+        path: &Path,
+        module: &crate::ModuleInfo,
+        fingerprint: fallow_types::source_fingerprint::SourceFingerprint,
+        need_complexity: bool,
+        need_call_facts: bool,
+    ) -> bool {
+        let Some(cached) = self
+            .get_by_path_only(path)
+            .filter(|cached| cached.content_hash == module.content_hash)
+        else {
+            self.insert(
+                path,
+                module_to_cached(module, fingerprint, need_complexity, need_call_facts),
+            );
+            return true;
+        };
+        let adds_complexity = need_complexity && !cached.complexity_extracted;
+        let adds_call_facts = need_call_facts && cached.call_facts.is_none();
+        if !adds_complexity && !adds_call_facts {
+            return cached.source_fingerprint() != fingerprint
+                && self.refresh_fingerprint(path, fingerprint);
+        }
+        let mut refreshed = module_to_cached(module, fingerprint, need_complexity, need_call_facts);
+        if !need_complexity && cached.complexity_extracted {
+            refreshed.complexity.clone_from(&cached.complexity);
+            refreshed.complexity_extracted = true;
+        }
+        if !need_call_facts {
+            refreshed.call_facts.clone_from(&cached.call_facts);
+        }
+        self.insert(path, refreshed);
         true
     }
 

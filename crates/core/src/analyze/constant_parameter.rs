@@ -10,7 +10,7 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_config::{ResolvedConfig, Severity};
+use fallow_config::ResolvedConfig;
 use fallow_types::extract::{
     CallSite, CallTarget, ExportName, FunctionContract, FunctionContractFacts,
     ImportBindingReferenceKind, ImportedName, ModuleInfo, ParamFact, ParamKind, VisibilityTag,
@@ -1266,13 +1266,7 @@ fn exported_contracts(module: &ModuleInfo) -> Vec<(u32, &str)> {
 
 /// `true` when the rule is on for the project or for an override.
 fn rule_enabled(config: &ResolvedConfig) -> bool {
-    config.rules.constant_parameters != Severity::Off
-        || config.overrides.iter().any(|overrides| {
-            overrides
-                .rules
-                .constant_parameters
-                .is_some_and(|severity| severity != Severity::Off)
-        })
+    config.reads_call_facts()
 }
 
 /// Release the extraction payload that resolution copied, before analysis.

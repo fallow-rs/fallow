@@ -334,7 +334,7 @@ fn create_cache_fixture() -> CacheFixture {
             BASE_MTIME_NS + u64::try_from(index).expect("fixture index fits in u64"),
             u64::try_from(source.len()).expect("fixture source length fits in u64"),
         );
-        modules.push(module_to_cached(&module, fingerprint, false));
+        modules.push(module_to_cached(&module, fingerprint, false, false));
         paths.push(path);
     }
     CacheFixture {
@@ -452,6 +452,7 @@ fn component_cache_cached_to_module(c: &mut Criterion) {
                         cached,
                         FileId(u32::try_from(index).expect("fixture index fits in u32")),
                         true,
+                        false,
                     ));
                 }
                 modules

@@ -1110,7 +1110,8 @@ impl AnalysisSession {
         if !key.is_reusable() {
             return None;
         }
-        if let Some(parse) = store.get(&key, need_complexity) {
+        let need_call_facts = self.config.reads_call_facts();
+        if let Some(parse) = store.get(&key, need_complexity, need_call_facts) {
             // A parse records its read failures and parse degradations for the
             // project, and the session reads them back as workspace
             // diagnostics. Record the kept ones again, so the diagnostics of
@@ -1138,6 +1139,7 @@ impl AnalysisSession {
             store.put(
                 &key,
                 true,
+                need_call_facts,
                 WarmParse {
                     modules: Arc::clone(&modules),
                     read_failures: parsed.read_failures.clone().into(),
@@ -1251,7 +1253,10 @@ impl AnalysisSession {
         let parsed = crate::source::parse_all_files(
             &files,
             None,
-            cache.need_complexity,
+            fallow_extract::ParseNeeds {
+                complexity: cache.need_complexity,
+                call_facts: self.config.reads_call_facts(),
+            },
             cancellation,
             &self.config.flags.patterns(),
             self.config.extraction_mode,
@@ -1421,7 +1426,7 @@ fn write_parse_cache(
 
     let cache_max_size_bytes = crate::project_config::resolve_cache_max_size_bytes(config);
     let store = cache.get_or_insert_with(|| fallow_extract::cache::CacheStore::new(&config.root));
-    if update_parse_cache(store, write)
+    if update_parse_cache(store, write, config.reads_call_facts())
         && let Err(error) = store.save(
             config.cache_target(),
             config.cache_config_hash,
@@ -1432,13 +1437,13 @@ fn write_parse_cache(
     }
 }
 
-/// Mirror of `fallow_core`'s `update_cache` for session-owned parsing: rewrite
-/// an unchanged entry only when its metadata moved or when this run can add
-/// complexity the entry lacks, and never let a complexity-blind run strip the
-/// complexity a `health` run stored.
+/// Mirror of `fallow_core`'s `update_cache` for session-owned parsing. See
+/// [`fallow_extract::cache::CacheStore::record_module`] for the rules that keep
+/// the complexity and the call facts of an earlier run.
 fn update_parse_cache(
     store: &mut fallow_extract::cache::CacheStore,
     write: &ParseCacheWrite<'_>,
+    need_call_facts: bool,
 ) -> bool {
     let ParseCacheWrite {
         modules,
@@ -1449,37 +1454,13 @@ fn update_parse_cache(
     let mut dirty = false;
     for module in modules {
         if let Some(file) = files.get(module.file_id.0 as usize) {
-            let fingerprint = fingerprint_of(file);
-            if let Some(cached) = store.get_by_path_only(&file.path)
-                && cached.content_hash == module.content_hash
-            {
-                let stale_metadata = cached.source_fingerprint() != fingerprint;
-                let adds_complexity = need_complexity && !cached.complexity_extracted;
-                if stale_metadata && !adds_complexity {
-                    store.refresh_fingerprint(&file.path, fingerprint);
-                    dirty = true;
-                } else if adds_complexity {
-                    let preserved_complexity = (!need_complexity && cached.complexity_extracted)
-                        .then(|| cached.complexity.clone());
-                    let mut refreshed = fallow_extract::cache::module_to_cached(
-                        module,
-                        fingerprint,
-                        need_complexity,
-                    );
-                    if let Some(complexity) = preserved_complexity {
-                        refreshed.complexity = complexity;
-                        refreshed.complexity_extracted = true;
-                    }
-                    store.insert(&file.path, refreshed);
-                    dirty = true;
-                }
-                continue;
-            }
-            store.insert(
+            dirty |= store.record_module(
                 &file.path,
-                fallow_extract::cache::module_to_cached(module, fingerprint, need_complexity),
+                module,
+                fingerprint_of(file),
+                need_complexity,
+                need_call_facts,
             );
-            dirty = true;
         }
     }
     store.retain_paths(files) || dirty
@@ -3028,3 +3009,7 @@ wrapper();
 #[cfg(all(test, unix, not(miri)))]
 #[path = "session_shared_state_tests.rs"]
 mod shared_state_tests;
+
+#[cfg(all(test, unix, not(miri)))]
+#[path = "session_call_facts_tests.rs"]
+mod call_facts_tests;

@@ -327,6 +327,27 @@ calls of its template, of an inline script, or of another script block. The
 graph cache does not store these facts, so a change to them changes only
 `CACHE_VERSION`.
 
+Only the `constant-parameter` rule reads these facts, and the rule is off by
+default. `ResolvedConfig::reads_call_facts` is `true` when the rule is on,
+globally or in an override. Each opt-in (`--constant-parameters`, the
+`constant_parameters` filter of the API, and the `negate-condition` operator
+of `fallow mutation`) sets the rule before the session parses. When the value
+is `false`:
+
+- the parse drops the facts from each module, and a cache hit does not decode
+  them;
+- `CacheStore::record_module` stores no facts. `CachedModule.call_facts` is
+  `None`, and the entry records in this way that the facts are absent.
+
+`CachedModule.call_facts` holds the facts as a separate bitcode blob. A run
+that reads no facts copies the blob of an entry that a reader wrote, and does
+not decode it. A run that reads the facts treats an entry with `None`, or
+with a blob that does not decode, as a miss (`cached_hit_to_module`), and
+`record_module` then adds the facts. A rewrite of an entry keeps the
+complexity and the call facts that an earlier run stored and the current run
+did not extract. The warm parse store of a long-lived process records which
+parses have the facts, as it does for complexity.
+
 A contract also holds these facts:
 
 - `is_async` is `true` for an `async` function declaration, function
