@@ -790,6 +790,8 @@ mod textlint_plugin;
 mod type_only_namespace;
 #[path = "integration_test/typescript_content_mapper_plugin.rs"]
 mod typescript_content_mapper_plugin;
+#[path = "integration_test/vite_nested_config_entries.rs"]
+mod vite_nested_config_entries;
 #[path = "integration_test/vite_plus_plugin.rs"]
 mod vite_plus_plugin;
 #[path = "integration_test/vite_root_entries.rs"]
