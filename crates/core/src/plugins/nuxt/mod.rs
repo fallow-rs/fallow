@@ -27,6 +27,8 @@ use oxc_ast::ast::{Expression, ObjectExpression, ObjectPropertyKind, PropertyKey
 use super::{Plugin, PluginResult, config_parser, has_glob_syntax};
 
 mod dirs;
+mod layer_names;
+use layer_names::{add_root_layer_alias, layer_name};
 
 use dirs::{add_nuxt_dir_entries, add_src_dir_support, default_nuxt_src_dir, extract_nuxt_src_dir};
 
@@ -428,6 +430,9 @@ fn resolve_nuxt_main_config(
     {
         add_local_layer_support(result, root, layer, false);
     }
+    if config_path.parent() == Some(root) {
+        add_root_layer_alias(result, source, config_path);
+    }
 
     let layers: Vec<&str> = auto_registered
         .iter()
@@ -610,30 +615,6 @@ fn add_local_layer_support(
             .path_aliases
             .push((format!("#layers/{name}/"), layer.to_string()));
     }
-}
-
-/// The name a local layer is addressed by in `#layers/<name>/`: its
-/// `$meta.name`. Nuxt names an auto-registered `layers/<name>` directory by its
-/// directory name when `$meta.name` is absent, and gives an `extends` layer no
-/// name then.
-fn layer_name(root: &Path, layer: &str, auto_registered: bool) -> Option<String> {
-    let dir = root.join(layer);
-    let meta_name = LAYER_CONFIG_FILES.iter().find_map(|file| {
-        let path = dir.join(file);
-        let source = std::fs::read_to_string(&path).ok()?;
-        config_parser::extract_config_string(&source, &path, &["$meta", "name"])
-    });
-    meta_name
-        .or_else(|| {
-            if !auto_registered {
-                return None;
-            }
-            Path::new(layer)
-                .file_name()
-                .and_then(|name| name.to_str())
-                .map(str::to_string)
-        })
-        .filter(|name| !name.is_empty() && !name.contains(['/', '\\']))
 }
 
 /// The absolute roots of every local layer that `root` uses: each local

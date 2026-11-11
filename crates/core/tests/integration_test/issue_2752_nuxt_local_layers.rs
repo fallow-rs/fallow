@@ -144,3 +144,25 @@ fn layer_alias_follows_meta_name_and_auto_registered_directory_name() {
         "an extends layer without `$meta.name` gets no #layers/ alias, got: {unused:?}"
     );
 }
+
+/// The project root is a layer too. Nuxt points `#layers/<name>/` at the root
+/// when the root `nuxt.config` sets `$meta.name`.
+#[test]
+fn layer_alias_resolves_root_meta_name_to_project_root() {
+    let root = fixture_path("nuxt-root-layer-alias");
+    let config = create_config(root.clone());
+
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused = unused_file_paths(&results, &root);
+
+    for alive in ["shared/lib/branding.ts", "shared/lib/mark.ts"] {
+        assert!(
+            !unused.contains(&alive.to_string()),
+            "{alive} is imported through #layers/feedlog/ and must not report, got: {unused:?}"
+        );
+    }
+    assert!(
+        unused.contains(&"shared/lib/dead.ts".to_string()),
+        "a file that no import reaches must still report, got: {unused:?}"
+    );
+}

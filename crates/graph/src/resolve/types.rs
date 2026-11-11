@@ -290,10 +290,12 @@ pub struct ResolvedModule {
     /// and type-literal aliases. See `fallow_types::extract::TypeMemberTypeEntry`
     /// and issue #1785.
     pub type_member_types: Arc<[fallow_types::extract::TypeMemberTypeEntry]>,
-    /// Unresolved bare specifiers whose package `exports` entry names only
-    /// paths that do not exist, in specifier order. The resolver records the
-    /// paths so that the unresolved-import check can test them against the
-    /// ignore rules of the repository. No edge points at these paths.
+    /// Unresolved specifiers with known missing target paths, in specifier
+    /// order: a bare specifier whose package `exports` entry names only paths
+    /// that do not exist, or a specifier that a path alias substitutes. The
+    /// resolver records the paths so that the unresolved-import check can test
+    /// them against the ignore rules of the repository. No edge points at
+    /// these paths.
     pub missing_export_targets: Vec<MissingExportTarget>,
 }
 
