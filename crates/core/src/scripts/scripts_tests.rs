@@ -2839,3 +2839,46 @@ fn script_binaries_keep_a_script_named_x() {
         );
     }
 }
+
+#[test]
+fn node_modules_bin_path_credits_the_package_of_the_binary() {
+    let mut bin_map = FxHashMap::default();
+    bin_map.insert("kysely-codegen".to_string(), "kysely-codegen".to_string());
+    for script in [
+        "./node_modules/.bin/kysely-codegen --out-file x.ts",
+        "node_modules/.bin/kysely-codegen",
+        "../../node_modules/.bin/kysely-codegen",
+        "node ./node_modules/.bin/kysely-codegen",
+        "tsx node_modules/.bin/kysely-codegen",
+        "$(npm bin)/kysely-codegen",
+    ] {
+        let result = analyze_command(script, Path::new("/nonexistent"), &bin_map);
+        assert!(
+            result.used_packages.contains("kysely-codegen"),
+            "{script}: {:?}",
+            result.used_packages
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn node_modules_bin_path_follows_the_link_relative_to_the_given_path() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let workspace = dir.path().join("packages/app");
+    let bin_dir = dir.path().join("node_modules/.bin");
+    std::fs::create_dir_all(&workspace).expect("workspace dir");
+    std::fs::create_dir_all(&bin_dir).expect("bin dir");
+    std::os::unix::fs::symlink("../@scope/gen/cli.js", bin_dir.join("gen")).expect("bin link");
+
+    let result = analyze_command(
+        "../../node_modules/.bin/gen",
+        &workspace,
+        &FxHashMap::default(),
+    );
+    assert!(
+        result.used_packages.contains("@scope/gen"),
+        "{:?}",
+        result.used_packages
+    );
+}

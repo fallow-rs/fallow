@@ -204,6 +204,23 @@ pub fn split_shell_operators(script: &str) -> Vec<&str> {
     segments
 }
 
+/// Command substitutions that print the `node_modules/.bin` directory of the
+/// package (`npm bin`, removed in npm 9 but still in older scripts).
+const NPM_BIN_SUBSTITUTIONS: &[&str] = &["$(npm bin)/", "`npm bin`/"];
+
+/// Replace each `$(npm bin)/` prefix in `segment` with the literal
+/// `node_modules/.bin/` directory that it prints. Then `$(npm bin)/tool`
+/// is a static path to the binary and not a dynamic word.
+pub(super) fn expand_npm_bin(segment: &str) -> Cow<'_, str> {
+    let mut expanded = Cow::Borrowed(segment);
+    for substitution in NPM_BIN_SUBSTITUTIONS {
+        if expanded.contains(substitution) {
+            expanded = Cow::Owned(expanded.replace(substitution, "node_modules/.bin/"));
+        }
+    }
+    expanded
+}
+
 /// Return the bodies of the outermost `$(...)` and backtick command
 /// substitutions in `script`.
 ///

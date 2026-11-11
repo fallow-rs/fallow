@@ -1479,18 +1479,11 @@ fn accumulate_parsed_commands(
 
     for cmd in parsed {
         if !cmd.binary.is_empty() && !is_builtin_command(&cmd.binary) {
-            if NODE_RUNNERS.contains(&cmd.binary.as_str()) {
-                if cmd.binary != "node" && cmd.binary != "bun" {
-                    result.used_packages.extend(resolve_binary_to_packages(
-                        &cmd.binary,
-                        root,
-                        bin_map,
-                    ));
-                }
-            } else {
+            let runner = NODE_RUNNERS.contains(&cmd.binary.as_str());
+            for binary in resolve::credited_binaries(&cmd.binary, &cmd.file_args, runner) {
                 result
                     .used_packages
-                    .extend(resolve_binary_to_packages(&cmd.binary, root, bin_map));
+                    .extend(resolve_binary_to_packages(binary, root, bin_map));
             }
         }
 
@@ -2679,6 +2672,8 @@ fn parse_command_segment(
     catalog: &ScriptCatalog,
 ) -> Vec<SegmentOutcome> {
     let mut outcomes = Vec::new();
+    let expanded = shell::expand_npm_bin(segment);
+    let segment = expanded.as_ref();
     let words = shell::split_words(segment);
     let tokens: Vec<&str> = words.iter().map(|word| word.value.as_ref()).collect();
     let Some(mut idx) = shell::skip_initial_wrappers(&tokens, 0) else {
