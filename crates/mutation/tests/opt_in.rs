@@ -329,6 +329,14 @@ fn nullish_fallback_removes_the_fallback_operand() {
         mutated("const x = f(a?.b ?? 0);", Operator::NullishFallback),
         vec!["const x = f(a?.b );"]
     );
+    assert_eq!(
+        mutated("const x = a /* ?? */ ?? b;", Operator::NullishFallback),
+        vec!["const x = a /* ?? */ ;"]
+    );
+    assert_eq!(
+        mutated("const x = \"é€\" ?? b;", Operator::NullishFallback),
+        vec!["const x = \"é€\" ;"]
+    );
     assert_cases(
         Operator::NullishFallback,
         JS,

@@ -494,7 +494,7 @@ test("a binding that no code assigns after its declaration is still proven", () 
 });
 
 const FALLBACK_SOURCE = [
-  "export const named = (name: string): string => name ?? 'anon';",
+  "export const wide = 'é€😀'; export const named = (name: string): string => name ?? 'anon';",
   "export const maybe = (label: string | undefined): string => label ?? 'none';",
   "export const cast = (value: unknown): string => (value as string) ?? 'x';",
   "export const nested = (a: string, b?: string): string => (b ?? a) ?? 'z';",

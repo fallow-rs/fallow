@@ -166,7 +166,8 @@ Opt-in set:
 | `regex-assertion` | a lookaround is negated, or `\b` and `\B` swap |
 | `nullish-fallback` | `a ?? b` becomes `a` |
 
-The opt-in operators follow the StrykerJS mutator set. They make many more
+Most opt-in operators follow the StrykerJS mutator set. `nullish-fallback` is
+not in that set. The opt-in operators make many more
 mutants, and many of them are equivalent or killed by any test that runs the
 code. The rules of each opt-in operator:
 
