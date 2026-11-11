@@ -55,13 +55,16 @@ impl<'a> ConstantParameters<'a> {
             if parameter.has_default && value.kind == ConstantParameterValueKind::Undefined {
                 continue;
             }
+            let Some(truthy) = value.truthiness() else {
+                continue;
+            };
             by_file
                 .entry(parameter.path.as_path())
                 .or_default()
                 .push(ConstantArgument {
                     function: &parameter.function_name,
                     parameter_index: parameter.parameter_index,
-                    truthy: value.is_truthy(),
+                    truthy,
                 });
         }
         Self { by_file }
@@ -229,5 +232,14 @@ mod tests {
             false,
         );
         assert!(marked(&[other_function]).is_empty());
+        let mut key = identical(LiteralValue::Boolean(true));
+        key.parameter.option_key = Some("strict".to_owned());
+        assert!(marked(&[key]).is_empty());
+        let mut binding = identical(LiteralValue::Boolean(true));
+        binding.parameter.value = Some(ConstantParameterValue {
+            kind: ConstantParameterValueKind::Binding,
+            text: "STRICT".to_owned(),
+        });
+        assert!(marked(&[binding]).is_empty());
     }
 }

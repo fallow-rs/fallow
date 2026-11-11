@@ -205,6 +205,17 @@ fn parameter_conditions_give_the_span_and_the_negations_of_each_counted_test() {
 }
 
 #[test]
+fn parameter_conditions_leave_out_the_tests_of_an_option_key() {
+    let source = "export function load({ strict }, flag) { if (strict) {} if (flag) {} }";
+    let conditions = crate::parameter_conditions(Path::new("module.ts"), source);
+    let found: Vec<_> = conditions
+        .iter()
+        .map(|condition| (condition.parameter_index, condition.negations))
+        .collect();
+    assert_eq!(found, vec![(1, 0)]);
+}
+
+#[test]
 fn parameter_conditions_of_a_source_with_a_syntax_error_are_empty() {
     let source = "export function f(flag) { if (flag) {} ";
     assert!(crate::parameter_conditions(Path::new("module.ts"), source).is_empty());
