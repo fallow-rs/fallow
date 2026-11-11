@@ -17,7 +17,7 @@ use fallow_output::{
 };
 use fallow_types::envelope::ToolVersion;
 
-use crate::mutation_human::EQUIVALENCE_HINT_TEXT;
+use crate::mutation_human::equivalence_hint_text;
 use crate::mutation_inspect::{
     SavedMutant, SavedReport, SavedWitness, mutant_code, report_input_error, report_relative_path,
     sha256_hex,
@@ -348,8 +348,8 @@ fn item_body(task: &MutationTask) -> ItemBody {
         body.notes
             .push(format!("tests: {}", task.covering_test_files.join(", ")));
     }
-    if task.equivalence_hint.is_some() {
-        body.notes.push(EQUIVALENCE_HINT_TEXT.to_owned());
+    if let Some(hint) = task.equivalence_hint {
+        body.notes.push(equivalence_hint_text(hint).to_owned());
     }
     if let Some(witness) = &task.witness {
         body.notes.push(witness_note(witness));

@@ -194,6 +194,22 @@ impl ConstantParameterValue {
         };
         Self { kind, text }
     }
+
+    /// Whether a literal value is truthy in JavaScript: `false`, `null`,
+    /// `undefined`, `0`, `-0`, `NaN` and `""` are falsy. `None` for a
+    /// binding, because the text is its name, not its value.
+    #[must_use]
+    pub fn truthiness(&self) -> Option<bool> {
+        match self.kind {
+            ConstantParameterValueKind::Boolean => Some(self.text == "true"),
+            ConstantParameterValueKind::Null | ConstantParameterValueKind::Undefined => Some(false),
+            ConstantParameterValueKind::Number => {
+                Some(!matches!(self.text.as_str(), "0" | "-0" | "NaN"))
+            }
+            ConstantParameterValueKind::String => Some(!self.text.is_empty()),
+            ConstantParameterValueKind::Binding => None,
+        }
+    }
 }
 
 /// The JavaScript `Number#toString()` text of a number, with `-0` for
@@ -433,6 +449,34 @@ impl GatedFinding for ConstantParameterFinding {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn truthiness_follows_javascript() {
+        let truthiness =
+            |value: LiteralValue| ConstantParameterValue::from_literal(&value).truthiness();
+        assert_eq!(truthiness(LiteralValue::Boolean(true)), Some(true));
+        assert_eq!(truthiness(LiteralValue::Boolean(false)), Some(false));
+        assert_eq!(truthiness(LiteralValue::Null), Some(false));
+        assert_eq!(truthiness(LiteralValue::Undefined), Some(false));
+        for falsy in [0.0, -0.0, f64::NAN] {
+            assert_eq!(
+                truthiness(LiteralValue::Number(falsy.to_bits())),
+                Some(false),
+                "{falsy}"
+            );
+        }
+        assert_eq!(
+            truthiness(LiteralValue::Number(1.5f64.to_bits())),
+            Some(true)
+        );
+        assert_eq!(truthiness(LiteralValue::String("".into())), Some(false));
+        assert_eq!(truthiness(LiteralValue::String("0".into())), Some(true));
+        let binding = ConstantParameterValue {
+            kind: ConstantParameterValueKind::Binding,
+            text: "DEFAULT_LIMIT".to_owned(),
+        };
+        assert_eq!(binding.truthiness(), None);
+    }
 
     #[test]
     fn number_text_follows_javascript() {

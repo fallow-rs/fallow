@@ -6,10 +6,10 @@ use std::fmt::Write as _;
 use fallow_engine::module_graph::ExportTestReach;
 use fallow_engine::mutation::{MutantDisposition, MutationPlan, PlannedMutant, PruneReason};
 use fallow_output::{
-    MutantLocation, MutantResult, MutantStatus, MutantTestReach, MutationBaselineFailure,
-    MutationCompletion, MutationFunctionResult, MutationIncompleteReason, MutationPlanCountsOutput,
-    MutationPlanDisposition, MutationPlanFile, MutationPlanMutant, MutationReport,
-    MutationRunIssue, MutationSkippedFile, MutationStatusCounts, MutationSummary,
+    MutantEquivalenceHint, MutantLocation, MutantResult, MutantStatus, MutantTestReach,
+    MutationBaselineFailure, MutationCompletion, MutationFunctionResult, MutationIncompleteReason,
+    MutationPlanCountsOutput, MutationPlanDisposition, MutationPlanFile, MutationPlanMutant,
+    MutationReport, MutationRunIssue, MutationSkippedFile, MutationStatusCounts, MutationSummary,
     SAMPLED_OUT_REASON, SKIPPED_TESTS_CODE, TestReachClass,
 };
 use fallow_types::envelope::ToolVersion;
@@ -160,6 +160,9 @@ pub fn mutant_results(plan: &MutationPlan, outcome: Option<&ScheduleOutcome>) ->
             let mut result = mutant_result(mutant, outcome);
             if result.status == MutantStatus::NoCoverage {
                 result.test_reach = test_reach(mutant);
+            }
+            if result.status == MutantStatus::Survived && mutant.constant_parameter {
+                result.equivalence_hint = Some(MutantEquivalenceHint::ConstantParameter);
             }
             result
         })
@@ -575,6 +578,7 @@ mod tests {
             rank,
             disposition,
             function,
+            constant_parameter: false,
             test_reach: Some(fallow_engine::mutation::MutantTestReach {
                 reach: ExportTestReach::MockedOnly,
                 export_name: Some("add".to_owned()),

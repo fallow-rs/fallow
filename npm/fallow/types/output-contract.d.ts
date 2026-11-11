@@ -1851,9 +1851,10 @@ export type MutantStatus = ("killed" | "timeout" | "survived" | "no_coverage" | 
  */
 export type MutantFailureKind = ("assertion" | "error" | "timeout")
 /**
- * Why a survivor may be equivalent, as far as the type check can tell.
+ * Why a survivor may be equivalent: a fact of the type check or of the
+ * call evidence. The hint is advisory and never changes the status.
  */
-export type MutantEquivalenceHint = "type-non-nullish"
+export type MutantEquivalenceHint = ("type-non-nullish" | "constant-parameter")
 /**
  * The verdict of one replay. A replay never decides that a mutant is
  * equivalent: equal results on both sides give `no_witness_found`, which
@@ -21832,9 +21833,9 @@ checked: number
  */
 compile_errors: number
 /**
- * The mutants of the final report that have an `equivalence_hint`. They
- * keep the status `survived`. A verdict that makes a mutant `equivalent`
- * removes its hint and lowers this count.
+ * The mutants of the final report that have the `type-non-nullish`
+ * hint. They keep the status `survived`. A verdict that makes a mutant
+ * `equivalent` removes its hint and lowers this count.
  */
 hinted?: number
 /**

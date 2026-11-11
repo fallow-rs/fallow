@@ -18,6 +18,7 @@
 //! - `pruned`: a static rule removes the mutant (see [`PruneReason`](crate::mutation::PruneReason)).
 
 mod build_tool;
+mod constant_condition;
 mod database_write;
 mod function_scope;
 mod layout;
@@ -285,6 +286,11 @@ pub struct PlannedMutant {
     /// How tests reach the code of the mutant in the module graph. `None`
     /// for a pruned mutant.
     pub test_reach: Option<MutantTestReach>,
+    /// True for a `negate-condition` mutant that sets a parameter test to
+    /// the value that each visible call gives it. A survivor gets the
+    /// `constant-parameter` hint. The plan document does not hold it.
+    #[serde(skip)]
+    pub constant_parameter: bool,
 }
 
 /// How tests reach the code of one mutant, from the module graph.

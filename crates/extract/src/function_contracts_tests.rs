@@ -173,6 +173,55 @@ fn counts_condition_reads_of_each_parameter() {
 }
 
 #[test]
+fn parameter_conditions_give_the_span_and_the_negations_of_each_counted_test() {
+    let source = "export function format(value, compact) {
+           if (!compact) {}
+           const label = !!compact ? 'a' : 'b';
+           while (value) {}
+           if (compact && value) {}
+           function shadow(compact) { if (compact) {} }
+         }";
+    let conditions = crate::parameter_conditions(Path::new("module.ts"), source);
+    let found: Vec<_> = conditions
+        .iter()
+        .map(|condition| {
+            let (start, end) = condition.span;
+            (
+                &*condition.function,
+                condition.parameter_index,
+                &source[start as usize..end as usize],
+                condition.negations,
+            )
+        })
+        .collect();
+    assert_eq!(
+        found,
+        vec![
+            ("format", 1, "!compact", 1),
+            ("format", 1, "!!compact", 2),
+            ("format", 0, "value", 0),
+        ]
+    );
+}
+
+#[test]
+fn parameter_conditions_leave_out_the_tests_of_an_option_key() {
+    let source = "export function load({ strict }, flag) { if (strict) {} if (flag) {} }";
+    let conditions = crate::parameter_conditions(Path::new("module.ts"), source);
+    let found: Vec<_> = conditions
+        .iter()
+        .map(|condition| (condition.parameter_index, condition.negations))
+        .collect();
+    assert_eq!(found, vec![(1, 0)]);
+}
+
+#[test]
+fn parameter_conditions_of_a_source_with_a_syntax_error_are_empty() {
+    let source = "export function f(flag) { if (flag) {} ";
+    assert!(crate::parameter_conditions(Path::new("module.ts"), source).is_empty());
+}
+
+#[test]
 fn each_incomplete_reason_opens_the_contract() {
     assert_eq!(
         incomplete(

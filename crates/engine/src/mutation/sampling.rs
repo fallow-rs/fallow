@@ -113,6 +113,7 @@ mod tests {
                     disposition: MutantDisposition::Planned,
                     function: None,
                     test_reach: None,
+                    constant_parameter: false,
                 },
             })
             .collect()

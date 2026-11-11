@@ -121,6 +121,7 @@ pub fn apply_outcomes(
                 output.compile_errors += 1;
                 result.status = MutantStatus::CompileError;
                 result.type_error_codes = codes;
+                result.equivalence_hint = None;
             }
             TypecheckOutcome::Hinted(hint) => {
                 output.checked += 1;
@@ -261,6 +262,7 @@ mod tests {
                     disposition: MutantDisposition::Planned,
                     function: None,
                     test_reach: None,
+                    constant_parameter: false,
                 })
                 .collect(),
             test_files: Vec::new(),
@@ -343,6 +345,24 @@ mod tests {
         assert_eq!(after.counts.equivalent, 0);
         assert_eq!(after.counts.survived, before.counts.survived);
         assert_eq!(after.score, before.score);
+    }
+
+    /// A mutant that does not type-check is not a survivor, so it loses a
+    /// hint that the plan gave it.
+    #[test]
+    fn a_compile_error_removes_the_hint_of_the_survivor() {
+        let mut broken = result("broken", MutantStatus::Survived);
+        broken.equivalence_hint = Some(MutantEquivalenceHint::ConstantParameter);
+        let mut results = vec![broken];
+        apply_outcomes(
+            &mut results,
+            vec![(
+                "broken".to_owned(),
+                TypecheckOutcome::CompileError(vec![2322]),
+            )],
+        );
+        assert_eq!(results[0].status, MutantStatus::CompileError);
+        assert_eq!(results[0].equivalence_hint, None);
     }
 
     #[test]

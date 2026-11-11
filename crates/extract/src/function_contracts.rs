@@ -46,7 +46,12 @@ pub fn collect(
     program: &Program<'_>,
     imports: &[ImportInfo],
 ) -> FunctionContractFacts {
-    let (declarations, bindings, scopes) = collect_contracts(semantic, program);
+    let ModuleContracts {
+        declarations,
+        bindings,
+        scopes,
+        ..
+    } = collect_contracts(semantic, program);
     let (values, literal_consts) = values::value_scope(semantic, program, imports);
     let mut calls = Vec::new();
     let mut escapes = Vec::new();
@@ -90,18 +95,57 @@ fn calls_direct_eval(semantic: &Semantic<'_>) -> bool {
     })
 }
 
-/// The contracts of the module, each binding symbol with the index of its
-/// contract, and the self-call scope of each contract.
-fn collect_contracts(
-    semantic: &Semantic<'_>,
-    program: &Program<'_>,
-) -> (
-    Vec<FunctionContract>,
-    Vec<(SymbolId, u32)>,
-    Vec<SelfCallScope>,
-) {
+/// One condition whose test is a parameter of a module-scope function, or the
+/// negation of one: `p`, `!p` or `!!p` as the test of an `if`, a `?:` or a
+/// loop. This is the condition that [`ParamFact::condition_reads`] counts.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ParameterCondition {
+    /// The module-scope binding name of the function.
+    pub function: Box<str>,
+    /// The 0-based index of the parameter.
+    pub parameter_index: u32,
+    /// The byte span of the whole test.
+    pub span: (u32, u32),
+    /// The count of `!` operators that the test applies to the parameter.
+    pub negations: u32,
+}
+
+/// The conditions of `source` whose test is a parameter of a module-scope
+/// function. A source that does not parse without errors, or that nests
+/// deeper than the parse bound, gives none.
+#[must_use]
+pub fn parameter_conditions(path: &std::path::Path, source: &str) -> Vec<ParameterCondition> {
+    let source_type = oxc_span::SourceType::from_path(path).unwrap_or_default();
+    crate::parse_bounded(source, || {
+        let allocator = oxc_allocator::Allocator::default();
+        let parsed = oxc_parser::Parser::new(&allocator, source, source_type).parse();
+        if parsed.fatal_error || parsed.diagnostics.has_errors() {
+            return Vec::new();
+        }
+        let semantic = oxc_semantic::SemanticBuilder::new()
+            .with_build_nodes(true)
+            .build(&parsed.program)
+            .semantic;
+        collect_contracts(&semantic, &parsed.program).conditions
+    })
+    .unwrap_or_default()
+}
+
+/// The contracts of one module.
+struct ModuleContracts {
+    declarations: Vec<FunctionContract>,
+    /// Each binding symbol with the index of its contract.
+    bindings: Vec<(SymbolId, u32)>,
+    /// The self-call scope of each contract.
+    scopes: Vec<SelfCallScope>,
+    /// The parameter conditions of each contract.
+    conditions: Vec<ParameterCondition>,
+}
+
+fn collect_contracts(semantic: &Semantic<'_>, program: &Program<'_>) -> ModuleContracts {
     let mut contracts = Vec::new();
     let mut scopes = Vec::new();
+    let mut conditions = Vec::new();
     let mut seen: FxHashSet<SymbolId> = FxHashSet::default();
     let mut bindings = Vec::new();
     for candidate in module_functions(program) {
@@ -123,11 +167,22 @@ fn collect_contracts(
         {
             bindings.push((inner, index));
         }
-        let (contract, scope) = build_contract(semantic, &candidate, symbol);
+        let (contract, scope, tests) = build_contract(semantic, &candidate, symbol);
+        conditions.extend(tests.into_iter().map(|test| ParameterCondition {
+            function: contract.binding_name.clone(),
+            parameter_index: test.parameter_index,
+            span: (test.span.start, test.span.end),
+            negations: test.negations,
+        }));
         contracts.push(contract);
         scopes.push(scope);
     }
-    (contracts, bindings, scopes)
+    ModuleContracts {
+        declarations: contracts,
+        bindings,
+        scopes,
+        conditions,
+    }
 }
 
 /// The parameters that a self-call of one contract can pass through.
@@ -322,7 +377,7 @@ fn build_contract(
     semantic: &Semantic<'_>,
     candidate: &Candidate<'_, '_>,
     symbol: SymbolId,
-) -> (FunctionContract, SelfCallScope) {
+) -> (FunctionContract, SelfCallScope, Vec<ConditionTest>) {
     let scoping = semantic.scoping();
     let params = candidate.shape.params();
     let (mut facts, param_symbols) = param_facts(scoping, params);
@@ -343,6 +398,7 @@ fn build_contract(
         scoping,
         params: &tracked,
         condition_reads: vec![0; tracked.len()],
+        condition_tests: Vec::new(),
         returns_value: false,
         reads_arguments: false,
         calls_eval: false,
@@ -404,7 +460,17 @@ fn build_contract(
         is_async: candidate.shape.is_async(),
         incomplete,
     };
-    (contract, scope)
+    // A tracked index past the parameters is an option key. The tests of a
+    // key are not parameter conditions.
+    let parameter_count = contract.params.len();
+    let tests = scan
+        .condition_tests
+        .into_iter()
+        .filter(|test| {
+            usize::try_from(test.parameter_index).is_ok_and(|index| index < parameter_count)
+        })
+        .collect();
+    (contract, scope, tests)
 }
 
 /// One fact for each formal parameter, and the symbol of each identifier
@@ -613,11 +679,22 @@ fn incomplete_reason(
     }
 }
 
+/// A test that reads a tracked symbol, before the contract has a name.
+struct ConditionTest {
+    /// The index into the tracked symbols: each parameter, then each option
+    /// key.
+    parameter_index: u32,
+    span: Span,
+    negations: u32,
+}
+
 /// One walk over a function body.
 struct BodyScan<'s, 'p> {
     scoping: &'s Scoping,
     params: &'p [Option<SymbolId>],
     condition_reads: Vec<u32>,
+    /// Each test that `condition_reads` counts.
+    condition_tests: Vec<ConditionTest>,
     returns_value: bool,
     reads_arguments: bool,
     /// A direct `eval` can read `arguments` and assign a parameter at any
@@ -681,10 +758,12 @@ impl<'a> BodyScan<'_, '_> {
 impl BodyScan<'_, '_> {
     fn count_test(&mut self, test: &Expression<'_>) {
         let mut expr = unwrap_transparent(test);
+        let mut negations = 0;
         while let Expression::UnaryExpression(unary) = expr
             && unary.operator == oxc_syntax::operator::UnaryOperator::LogicalNot
         {
             expr = unwrap_transparent(&unary.argument);
+            negations += 1;
         }
         let Expression::Identifier(identifier) = expr else {
             return;
@@ -692,8 +771,16 @@ impl BodyScan<'_, '_> {
         let Some(symbol) = self.resolve(identifier) else {
             return;
         };
-        if let Some(index) = self.params.iter().position(|param| *param == Some(symbol)) {
-            self.condition_reads[index] += 1;
+        let Some(index) = self.params.iter().position(|param| *param == Some(symbol)) else {
+            return;
+        };
+        self.condition_reads[index] += 1;
+        if let Ok(parameter_index) = u32::try_from(index) {
+            self.condition_tests.push(ConditionTest {
+                parameter_index,
+                span: test.span(),
+                negations,
+            });
         }
     }
 

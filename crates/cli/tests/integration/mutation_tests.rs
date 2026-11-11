@@ -1646,6 +1646,79 @@ mod end_to_end {
         assert_eq!(judged["summary"]["counts"]["equivalent"], 1, "{judged}");
     }
 
+    /// Each call of `label`, from the entry point and from the test, passes
+    /// `true` for `strict`, so `!strict` is
+    /// always `false`. The `negate-condition` mutant `if (false)` survives
+    /// and gets the `constant-parameter` hint, from the call evidence of the
+    /// `constant-parameter` rule, which the project leaves off. `guarded`
+    /// gets the same calls, but a value reference to it can hide a caller, so
+    /// the closed-world gate blocks it and its survivor gets no hint. The
+    /// hint never changes the status or the score.
+    #[test]
+    fn a_negate_condition_survivor_on_a_constant_parameter_gets_the_hint() {
+        let Some(package) = companion_package() else {
+            return;
+        };
+        let (_project, root) = vitest_project(
+            &package,
+            "\nexport function label(name: string, strict: boolean): string {\n  if (!strict) return \"loose\";\n  return name;\n}\n\nexport function guarded(name: string, strict: boolean): string {\n  if (!strict) return \"loose\";\n  return name;\n}\n\nexport const handlers = [guarded];\n",
+        );
+        // The rule reads only runtime code, so an entry point must reach the
+        // module. The entry calls each function with the same literal.
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"fallow-mutation-runner-fixture","private":true,"type":"module","main":"src/index.ts"}"#,
+        )
+        .expect("package.json");
+        fs::write(
+            root.join("src/index.ts"),
+            "import { guarded, label } from \"./math\";\n\nexport const title = (): string => label(\"title\", true) + guarded(\"title\", true);\n",
+        )
+        .expect("entry");
+        fs::write(
+            root.join("test/label.test.ts"),
+            "import { expect, test } from \"vitest\";\nimport { guarded, label } from \"../src/math\";\n\ntest(\"labels\", () => {\n  expect(label(\"a\", true)).toBe(\"a\");\n  expect(label(\"b\", true)).toBe(\"b\");\n  expect(guarded(\"a\", true)).toBe(\"a\");\n  expect(guarded(\"b\", true)).toBe(\"b\");\n});\n",
+        )
+        .expect("label test");
+        commit_all(&root, "label");
+
+        let (output, report) = json_mutation(
+            &root,
+            &[
+                "src/math.ts",
+                "--concurrency",
+                "1",
+                "--operators",
+                "negate-condition",
+            ],
+        );
+        assert_eq!(output.code, 0, "{}", output.stderr);
+        let survivor = |function: &str| -> serde_json::Value {
+            report["mutants"]
+                .as_array()
+                .expect("mutants")
+                .iter()
+                .find(|mutant| {
+                    mutant["function"] == function
+                        && mutant["status"] == "survived"
+                        && mutant["change"]["to"] == "false"
+                })
+                .cloned()
+                .unwrap_or_else(|| panic!("a surviving `false` mutant of {function}: {report}"))
+        };
+        assert_eq!(
+            survivor("label")["equivalence_hint"],
+            "constant-parameter",
+            "{report}"
+        );
+        assert!(
+            survivor("guarded").get("equivalence_hint").is_none(),
+            "{report}"
+        );
+        assert_eq!(report["summary"]["counts"]["equivalent"], 0, "{report}");
+        assert!(report.get("typecheck").is_none(), "{report}");
+    }
+
     /// `labelOf` reads `name ?? "anon"` where `name` is a `string`. No test
     /// can tell the expression from `name`, so the opt-in `nullish-fallback`
     /// mutant survives. The type check adds the advisory hint, and the

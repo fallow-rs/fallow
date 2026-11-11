@@ -12,13 +12,14 @@ use std::fmt::Write as _;
 use colored::Colorize as _;
 use fallow_api::mutation::split_control_run_failure;
 use fallow_output::{
-    DUPLICATE_TEST_IDS_CODE, MutantResult, MutantStatus, MutationCompletionStatus,
-    MutationInspectOutput, MutationInspectStatus, MutationKillMatrix, MutationKillMatrixStatus,
-    MutationKillMatrixTargetStatus, MutationPlanDisposition, MutationPlanOutput,
-    MutationReplayCall, MutationReplayOutcome, MutationReplayOutput, MutationReplaySide,
-    MutationReplayVerdict, MutationReport, MutationResumeOutput, MutationScopeKind,
-    MutationScopeOutput, MutationSkippedFile, MutationStaleReason, MutationTargetOnlyKill,
-    MutationTestKillRow, MutationTypecheckOutput, SKIPPED_TESTS_CODE, TestReachClass,
+    DUPLICATE_TEST_IDS_CODE, MutantEquivalenceHint, MutantResult, MutantStatus,
+    MutationCompletionStatus, MutationInspectOutput, MutationInspectStatus, MutationKillMatrix,
+    MutationKillMatrixStatus, MutationKillMatrixTargetStatus, MutationPlanDisposition,
+    MutationPlanOutput, MutationReplayCall, MutationReplayOutcome, MutationReplayOutput,
+    MutationReplaySide, MutationReplayVerdict, MutationReport, MutationResumeOutput,
+    MutationScopeKind, MutationScopeOutput, MutationSkippedFile, MutationStaleReason,
+    MutationTargetOnlyKill, MutationTestKillRow, MutationTypecheckOutput, SKIPPED_TESTS_CODE,
+    TestReachClass,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -359,7 +360,16 @@ fn covered_by_line(tests: &[String]) -> Option<String> {
 }
 
 /// The note under a survivor with an `equivalence_hint`.
-pub const EQUIVALENCE_HINT_TEXT: &str = "hint: the type of the receiver excludes null and undefined. If no runtime value can be nullish, the mutant is equivalent; record it in a verdict file.";
+pub const fn equivalence_hint_text(hint: MutantEquivalenceHint) -> &'static str {
+    match hint {
+        MutantEquivalenceHint::TypeNonNullish => {
+            "hint: the type of the receiver excludes null and undefined. If no runtime value can be nullish, the mutant is equivalent; record it in a verdict file."
+        }
+        MutantEquivalenceHint::ConstantParameter => {
+            "hint: each visible call passes the same literal for the parameter that this test reads, so the test always has this value. If no caller outside the project exists, the mutant is equivalent; record it in a verdict file."
+        }
+    }
+}
 
 fn render_survivors(out: &mut String, report: &MutationReport, code: Option<&CodeLookup>) {
     let groups = grouped(report, MutantStatus::Survived, MAX_SURVIVORS_SHOWN);
@@ -393,8 +403,8 @@ fn render_survivors(out: &mut String, report: &MutationReport, code: Option<&Cod
             if let Some(line) = covered_by_line(&mutant.covering_tests) {
                 let _ = writeln!(out, "      {}", line.dimmed());
             }
-            if mutant.equivalence_hint.is_some() {
-                let _ = writeln!(out, "      {}", EQUIVALENCE_HINT_TEXT.dimmed());
+            if let Some(hint) = mutant.equivalence_hint {
+                let _ = writeln!(out, "      {}", equivalence_hint_text(hint).dimmed());
             }
         }
     }

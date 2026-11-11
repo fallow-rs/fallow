@@ -215,7 +215,12 @@ fn kill_matrix_mode<'a>(
     }
 }
 
-fn load_session(resolved: &ProgrammaticAnalysisContext) -> ProgrammaticResult<AnalysisSession> {
+/// Loads the analysis session of a mutation run. `operators` is the
+/// operator list of the options, `None` when the options name none.
+fn load_session(
+    resolved: &ProgrammaticAnalysisContext,
+    operators: Option<&[fallow_engine::mutation::Operator]>,
+) -> ProgrammaticResult<AnalysisSession> {
     let mut project = fallow_engine::project_config::config_for_project_with_load_options(
         resolved.root(),
         resolved.config_path().as_deref(),
@@ -230,6 +235,26 @@ fn load_session(resolved: &ProgrammaticAnalysisContext) -> ProgrammaticResult<An
     })?;
     project.config.no_cache = resolved.no_cache;
     project.config.threads = resolved.threads;
+    // The `constant-parameter` hint of a `negate-condition` survivor reads
+    // the findings of this rule, so the analysis of a mutation run computes
+    // them even when the project leaves the rule off. A mutation run reports
+    // no dead-code finding.
+    let negates = match operators {
+        Some(operators) => operators.contains(&fallow_engine::mutation::Operator::NegateCondition),
+        None => project
+            .config
+            .mutation
+            .operators
+            .as_ref()
+            .is_none_or(|names| {
+                names.iter().any(|name| {
+                    name.as_str() == fallow_engine::mutation::Operator::NegateCondition.as_str()
+                })
+            }),
+    };
+    if negates && project.config.rules.constant_parameters == fallow_config::Severity::Off {
+        project.config.rules.constant_parameters = fallow_config::Severity::Warn;
+    }
     Ok(AnalysisSession::from_config(project))
 }
 
@@ -433,7 +458,7 @@ pub(super) fn plan_with_wraps(
 ) -> ProgrammaticResult<Planned> {
     validate(options)?;
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
-    let session = load_session(&resolved)?;
+    let session = load_session(&resolved, options.operators.as_deref())?;
     let cache_dir = session.config().cache_dir.clone();
     let configured = session.config().mutation.runner;
     before_plan(resolved.root(), &cache_dir)?;
