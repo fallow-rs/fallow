@@ -42,6 +42,22 @@ impl PackageManager {
         root.ancestors().take(repo_depth + 1).find_map(Self::detect)
     }
 
+    /// The command that a hint shows to add `package` as a development
+    /// dependency of the project in `project_root`.
+    ///
+    /// The package manager comes from [`Self::detect_nearest`]. npm is the
+    /// default when no signal names one or when `project_root` is `None`.
+    /// Never run the result: files above `project_root` can select it.
+    #[must_use]
+    pub fn suggested_add_dev_command(project_root: Option<&Path>, package: &str) -> String {
+        let Some(root) = project_root else {
+            return Self::Npm.add_dev_command(Path::new(""), package);
+        };
+        Self::detect_nearest(root)
+            .unwrap_or(Self::Npm)
+            .add_dev_command(root, package)
+    }
+
     /// The executable name, which is also the `packageManager` field prefix.
     #[must_use]
     pub const fn name(self) -> &'static str {
@@ -59,14 +75,54 @@ impl PackageManager {
         format!("{} install", self.name())
     }
 
-    /// The command that adds `package` as a development dependency.
+    /// The command that adds `package` as a development dependency when the
+    /// user runs it in `dir`.
+    ///
+    /// At the root of a Yarn 1 workspace project, the command has `-W`.
+    /// Without it, Yarn 1 refuses to add a dependency to the workspace root.
     #[must_use]
-    pub fn add_dev_command(self, package: &str) -> String {
+    pub fn add_dev_command(self, dir: &Path, package: &str) -> String {
         match self {
             Self::Npm => format!("npm install --save-dev {package}"),
             Self::Pnpm => format!("pnpm add -D {package}"),
+            Self::Yarn if self.needs_workspace_root_flag(dir) => {
+                format!("yarn add -D -W {package}")
+            }
             Self::Yarn => format!("yarn add -D {package}"),
             Self::Bun => format!("bun add -d {package}"),
+        }
+    }
+
+    /// Whether `add` in `dir` needs the `-W` flag of Yarn 1.
+    ///
+    /// This is true only for Yarn 1 in a directory whose `package.json` has a
+    /// `workspaces` field. A `packageManager` field that names Yarn decides
+    /// the version: `yarn@1.` is Yarn 1, and each other version is not. With
+    /// no such field, a `yarn.lock` with the Yarn 1 header marks Yarn 1.
+    /// Yarn Berry rejects `-W`, so an unknown Yarn version gets no flag.
+    #[must_use]
+    pub fn needs_workspace_root_flag(self, dir: &Path) -> bool {
+        if self != Self::Yarn {
+            return false;
+        }
+        let manifest = std::fs::read_to_string(dir.join("package.json"))
+            .ok()
+            .and_then(|content| serde_json::from_str::<serde_json::Value>(&content).ok());
+        let Some(manifest) = manifest else {
+            return false;
+        };
+        if manifest
+            .get("workspaces")
+            .is_none_or(|workspaces| workspaces.is_null() || workspaces == false)
+        {
+            return false;
+        }
+        match manifest
+            .get("packageManager")
+            .and_then(serde_json::Value::as_str)
+        {
+            Some(field) if field.starts_with("yarn@") => field.starts_with("yarn@1."),
+            _ => has_yarn_classic_lockfile(dir),
         }
     }
 
@@ -97,6 +153,34 @@ impl PackageManager {
             .find(|(lockfile, _)| root.join(lockfile).exists())
             .map(|&(_, manager)| manager)
     }
+}
+
+/// Yarn 1 writes this header near the top of `yarn.lock`. A Yarn Berry
+/// lockfile is YAML with a `__metadata` entry instead.
+const YARN_CLASSIC_LOCKFILE_HEADER: &str = "# yarn lockfile v1";
+const LOCKFILE_HEADER_BYTES: u64 = 512;
+
+fn has_yarn_classic_lockfile(dir: &Path) -> bool {
+    use std::io::Read as _;
+    let lockfile = dir.join("yarn.lock");
+    // A FIFO named `yarn.lock` would block the read.
+    if !lockfile.is_file() {
+        return false;
+    }
+    let Ok(file) = std::fs::File::open(lockfile) else {
+        return false;
+    };
+    let mut head = Vec::new();
+    if file
+        .take(LOCKFILE_HEADER_BYTES)
+        .read_to_end(&mut head)
+        .is_err()
+    {
+        return false;
+    }
+    String::from_utf8_lossy(&head)
+        .lines()
+        .any(|line| line.trim_end() == YARN_CLASSIC_LOCKFILE_HEADER)
 }
 
 #[cfg(test)]
@@ -233,11 +317,155 @@ mod tests {
 
     #[test]
     fn commands_match_each_manager() {
+        let root = tempfile::tempdir().expect("temp root");
         assert_eq!(PackageManager::Yarn.install_command(), "yarn install");
         assert_eq!(
-            PackageManager::Npm.add_dev_command("x"),
+            PackageManager::Npm.add_dev_command(root.path(), "x"),
             "npm install --save-dev x"
         );
-        assert_eq!(PackageManager::Bun.add_dev_command("x"), "bun add -d x");
+        assert_eq!(
+            PackageManager::Bun.add_dev_command(root.path(), "x"),
+            "bun add -d x"
+        );
+        assert_eq!(
+            PackageManager::Yarn.add_dev_command(root.path(), "x"),
+            "yarn add -D x"
+        );
+    }
+
+    const YARN_CLASSIC_LOCKFILE: &str = "# THIS IS AN AUTOGENERATED FILE. DO NOT EDIT THIS FILE DIRECTLY.\n# yarn lockfile v1\n\n\n";
+    const YARN_BERRY_LOCKFILE: &str = "# This file is generated by running \"yarn install\" inside your project.\n\n__metadata:\n  version: 8\n";
+
+    fn yarn_root(manifest: &str, lockfile: Option<&str>) -> tempfile::TempDir {
+        let root = tempfile::tempdir().expect("temp root");
+        std::fs::write(root.path().join("package.json"), manifest).expect("write package.json");
+        if let Some(lockfile) = lockfile {
+            std::fs::write(root.path().join("yarn.lock"), lockfile).expect("write lockfile");
+        }
+        root
+    }
+
+    /// Yarn 1 refuses `yarn add -D` at a workspace root without `-W`
+    /// (fallow-rs/fallow#4519).
+    #[test]
+    fn yarn_classic_workspace_root_adds_the_root_flag() {
+        let root = yarn_root(
+            r#"{"private":true,"workspaces":["packages/*"]}"#,
+            Some(YARN_CLASSIC_LOCKFILE),
+        );
+        assert_eq!(
+            PackageManager::Yarn.add_dev_command(root.path(), "x"),
+            "yarn add -D -W x"
+        );
+    }
+
+    #[test]
+    fn yarn_classic_package_manager_field_marks_the_root() {
+        let root = yarn_root(
+            r#"{"packageManager":"yarn@1.22.22","workspaces":{"packages":["packages/*"]}}"#,
+            None,
+        );
+        assert!(PackageManager::Yarn.needs_workspace_root_flag(root.path()));
+    }
+
+    #[test]
+    fn yarn_berry_workspace_root_has_no_root_flag() {
+        let by_lockfile = yarn_root(
+            r#"{"workspaces":["packages/*"]}"#,
+            Some(YARN_BERRY_LOCKFILE),
+        );
+        assert!(!PackageManager::Yarn.needs_workspace_root_flag(by_lockfile.path()));
+        let by_field = yarn_root(
+            r#"{"packageManager":"yarn@4.5.0","workspaces":["packages/*"]}"#,
+            Some(YARN_CLASSIC_LOCKFILE),
+        );
+        assert!(!PackageManager::Yarn.needs_workspace_root_flag(by_field.path()));
+    }
+
+    #[test]
+    fn yarn_classic_without_workspaces_has_no_root_flag() {
+        let root = yarn_root(r#"{"name":"app"}"#, Some(YARN_CLASSIC_LOCKFILE));
+        assert!(!PackageManager::Yarn.needs_workspace_root_flag(root.path()));
+    }
+
+    #[test]
+    fn unknown_yarn_version_has_no_root_flag() {
+        let root = yarn_root(r#"{"workspaces":["packages/*"]}"#, None);
+        assert!(!PackageManager::Yarn.needs_workspace_root_flag(root.path()));
+    }
+
+    #[test]
+    fn package_manager_field_with_a_hash_marks_yarn_classic() {
+        let root = yarn_root(
+            r#"{"packageManager":"yarn@1.22.22+sha512.abc","workspaces":["packages/*"]}"#,
+            None,
+        );
+        assert!(PackageManager::Yarn.needs_workspace_root_flag(root.path()));
+    }
+
+    #[test]
+    fn crlf_lockfile_marks_yarn_classic() {
+        let root = yarn_root(
+            r#"{"workspaces":["packages/*"]}"#,
+            Some("# THIS IS AN AUTOGENERATED FILE.\r\n# yarn lockfile v1\r\n"),
+        );
+        assert!(PackageManager::Yarn.needs_workspace_root_flag(root.path()));
+    }
+
+    #[test]
+    fn null_or_false_workspaces_is_not_a_workspace_root() {
+        for workspaces in ["null", "false"] {
+            let root = yarn_root(
+                &format!(r#"{{"workspaces":{workspaces}}}"#),
+                Some(YARN_CLASSIC_LOCKFILE),
+            );
+            assert!(
+                !PackageManager::Yarn.needs_workspace_root_flag(root.path()),
+                "{workspaces}"
+            );
+        }
+    }
+
+    /// Yarn 1 needs `-W` only at the workspace root. A workspace package of
+    /// the same project gets the plain command.
+    #[test]
+    fn suggested_command_in_a_yarn_classic_workspace_package_has_no_root_flag() {
+        let root = yarn_root(
+            r#"{"private":true,"workspaces":["packages/*"]}"#,
+            Some(YARN_CLASSIC_LOCKFILE),
+        );
+        std::fs::create_dir(root.path().join(".git")).expect("create .git");
+        let package = root.path().join("packages").join("app");
+        std::fs::create_dir_all(&package).expect("create package");
+        std::fs::write(package.join("package.json"), r#"{"name":"app"}"#)
+            .expect("write package.json");
+        assert_eq!(
+            PackageManager::suggested_add_dev_command(Some(&package), "x"),
+            "yarn add -D x"
+        );
+        assert_eq!(
+            PackageManager::suggested_add_dev_command(Some(root.path()), "x"),
+            "yarn add -D -W x"
+        );
+    }
+
+    #[test]
+    fn suggested_command_without_a_root_is_npm() {
+        assert_eq!(
+            PackageManager::suggested_add_dev_command(None, "x"),
+            "npm install --save-dev x"
+        );
+    }
+
+    #[test]
+    fn only_yarn_takes_the_root_flag() {
+        let root = yarn_root(
+            r#"{"workspaces":["packages/*"]}"#,
+            Some(YARN_CLASSIC_LOCKFILE),
+        );
+        assert_eq!(
+            PackageManager::Pnpm.add_dev_command(root.path(), "x"),
+            "pnpm add -D x"
+        );
     }
 }

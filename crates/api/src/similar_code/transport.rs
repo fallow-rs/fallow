@@ -104,20 +104,11 @@ fn discover_provider_from(
     Err(format!(
         "Similar-code companion `{SIDECAR_BINARY}` was not found next to the active Fallow executable. For a project that has `fallow` as a devDependency, add the companion at the same version: `{project_command}`. For a global `fallow`, run `npm install --global fallow-similar-code@{version}`. For npx, start both packages together: `npx -p fallow@{version} -p fallow-similar-code@{version} fallow similar-code status`. The `fallow` npm launcher passes the signed companion binary to Fallow. Project-local executables and PATH are never searched.",
         version = env!("CARGO_PKG_VERSION"),
-        project_command = add_dev_command(
+        project_command = fallow_config::PackageManager::suggested_add_dev_command(
             project_root,
             &format!("{SIDECAR_BINARY}@{}", env!("CARGO_PKG_VERSION"))
         ),
     ))
-}
-
-/// The add command of the project's package manager, or npm when no
-/// lockfile or `packageManager` field names one. The command is only shown.
-fn add_dev_command(project_root: Option<&Path>, package: &str) -> String {
-    project_root
-        .and_then(fallow_config::PackageManager::detect_nearest)
-        .unwrap_or(fallow_config::PackageManager::Npm)
-        .add_dev_command(package)
 }
 
 fn binary_names(binary: &str) -> Vec<String> {
@@ -710,6 +701,30 @@ mod tests {
         assert!(
             error.contains(&format!(
                 "`bun add -d fallow-similar-code@{}`",
+                env!("CARGO_PKG_VERSION")
+            )),
+            "{error}"
+        );
+    }
+
+    /// Yarn 1 refuses `yarn add -D` at a workspace root without `-W`
+    /// (fallow-rs/fallow#4519).
+    #[test]
+    fn missing_provider_adds_the_yarn_classic_workspace_root_flag() {
+        let temp = tempfile::tempdir().unwrap();
+        let fallow = temp.path().join("fallow");
+        std::fs::write(&fallow, b"").unwrap();
+        let project = tempfile::tempdir().unwrap();
+        std::fs::write(
+            project.path().join("package.json"),
+            r#"{"private":true,"workspaces":["packages/*"]}"#,
+        )
+        .unwrap();
+        std::fs::write(project.path().join("yarn.lock"), "# yarn lockfile v1\n").unwrap();
+        let error = discover_provider_from(&fallow, Some(project.path())).unwrap_err();
+        assert!(
+            error.contains(&format!(
+                "`yarn add -D -W fallow-similar-code@{}`",
                 env!("CARGO_PKG_VERSION")
             )),
             "{error}"
