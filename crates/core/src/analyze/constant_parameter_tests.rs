@@ -6,7 +6,7 @@ use std::sync::Mutex;
 use fallow_config::{FallowConfig, OutputFormat};
 use rustc_hash::FxHashMap;
 
-use super::{Abstain, FnId};
+use super::{Abstain, FnId, GateStats, ReasonCount};
 use crate::extract::ModuleInfo;
 use crate::graph::ModuleGraph;
 use crate::results::{AnalysisResults, ConstantParameterReason};
@@ -15,11 +15,23 @@ use crate::results::{AnalysisResults, ConstantParameterReason};
 /// the module path.
 static ABSTAINED: Mutex<Vec<(PathBuf, String, &'static str)>> = Mutex::new(Vec::new());
 
+/// The gate counts of each analyzed project, with the module paths of the
+/// project.
+static STATS: Mutex<Vec<(Vec<PathBuf>, GateStats)>> = Mutex::new(Vec::new());
+
 pub(super) fn record(
     graph: &ModuleGraph,
     modules: &[ModuleInfo],
     abstained: &FxHashMap<FnId, Abstain>,
+    stats: Option<&GateStats>,
 ) {
+    if let Some(stats) = stats {
+        let paths = graph.modules.iter().map(|node| node.path.clone()).collect();
+        STATS
+            .lock()
+            .expect("recorder lock")
+            .push((paths, stats.clone()));
+    }
     let by_file: FxHashMap<_, _> = modules.iter().map(|m| (m.file_id, m)).collect();
     let mut rows = ABSTAINED.lock().expect("recorder lock");
     for (&(file, index), reason) in abstained {
@@ -84,6 +96,16 @@ impl Project {
 
     fn reason(&self, file: &str, function: &str) -> Option<&'static str> {
         reason_for(&self.root, file, function)
+    }
+
+    fn stats(&self) -> GateStats {
+        STATS
+            .lock()
+            .expect("recorder lock")
+            .iter()
+            .find(|(paths, _)| paths.iter().any(|path| path.starts_with(&self.root)))
+            .map(|(_, stats)| stats.clone())
+            .expect("gate stats of the project")
     }
 }
 
@@ -195,9 +217,65 @@ fn reports_an_identical_argument_and_a_parameter_that_no_call_passes() {
 }
 
 #[test]
-fn a_parse_error_anywhere_blocks_each_function() {
-    let project = analyze(&base_with(&[("src/broken.ts", "export const = ;")], MAIN));
+fn a_parse_error_blocks_each_function_that_the_broken_module_can_import() {
+    let broken = "import { format } from './format';\nformat(4, false);\nexport const = ;\n";
+    let main = "import { format } from './format';\nimport './broken';\nformat(1, true);\nformat(2, true);\nformat(3, true);\n";
+    let project = analyze(&base_with(&[("src/broken.ts", broken)], main));
     assert_abstains(&project, "src/format.ts", "format", "parse-incomplete");
+}
+
+#[test]
+fn a_parse_error_in_a_module_that_imports_no_project_module_keeps_the_findings() {
+    let package = serde_json::json!({
+        "name": "fixture",
+        "private": true,
+        "dependencies": { "react": "^18.0.0" }
+    });
+    let broken = "import React from 'react';\nimport { join } from 'node:path';\nconst url = new URL('https://example.com');\nexport const = ;\n";
+    let declaration = "declare function broken(: void;\n";
+    let project = analyze_with(
+        &package,
+        &entry_config(),
+        &base_with(
+            &[("src/broken.ts", broken), ("src/types.d.ts", declaration)],
+            MAIN,
+        ),
+    );
+    assert_eq!(project.findings("format").len(), 2);
+}
+
+#[test]
+fn a_dependency_name_that_a_project_path_reuses_blocks_that_path() {
+    let package = serde_json::json!({
+        "name": "fixture",
+        "private": true,
+        "dependencies": { "lib": "^1.0.0" }
+    });
+    let main = "import { format } from './lib/format';\nformat(1, true);\nformat(2, true);\nformat(3, true);\n";
+    let broken = "import { format } from 'lib/format';\nexport const = ;\n";
+    let project = analyze_with(
+        &package,
+        &entry_config(),
+        &[
+            ("src/lib/format.ts", FORMAT),
+            ("src/main.ts", main),
+            ("src/broken.ts", broken),
+        ],
+    );
+    assert_abstains(&project, "src/lib/format.ts", "format", "parse-incomplete");
+}
+
+#[test]
+fn a_parse_error_with_a_computed_or_unknown_import_blocks_each_export() {
+    for broken in [
+        "const m = await import('./form' + 'at');\nexport const = ;\n",
+        "const m = require(name);\nexport const = ;\n",
+        "const m = import(`./${name}`);\nexport const = ;\n",
+        "import { format } from '@/format';\nexport const = ;\n",
+    ] {
+        let project = analyze(&base_with(&[("src/broken.ts", broken)], MAIN));
+        assert_abstains(&project, "src/format.ts", "format", "parse-incomplete");
+    }
 }
 
 #[test]
@@ -338,8 +416,8 @@ fn a_classic_script_abstains() {
 }
 
 #[test]
-fn fewer_than_three_calls_abstain() {
-    let main = "import { format } from './format';\nformat(1, true);\nformat(2, true);\n";
+fn fewer_than_two_calls_abstain() {
+    let main = "import { format } from './format';\nformat(1, true);\n";
     let project = analyze(&base_with(&[], main));
     assert_abstains(&project, "src/format.ts", "format", "too-few-calls");
 }
@@ -432,6 +510,13 @@ fn a_self_call_that_passes_the_parameter_on_is_neutral() {
             Some("true".to_string())
         )]
     );
+}
+
+#[test]
+fn a_parameter_that_a_self_call_passes_on_is_not_never_passed() {
+    let main = "function walk(node: number, seen?: number[]): number {\n  const list = seen ?? [];\n  list.push(node);\n  return node > 0 ? walk(node - 1, seen) : list.length;\n}\nwalk(1);\nwalk(2);\nwalk(3);\nexport const marker = 1;\n";
+    let project = analyze(&[("src/main.ts", main)]);
+    assert!(project.findings("walk").is_empty());
 }
 
 #[test]
@@ -547,6 +632,18 @@ fn an_inline_module_script_in_html_abstains() {
 }
 
 #[test]
+fn an_inline_script_that_imports_no_module_keeps_the_findings() {
+    let html = "<!doctype html>\n<script type=\"module\">\n  const title = 'from the page';\n  document.title = title;\n</script>\n<script>\n  window.name = 'page';\n</script>\n";
+    let config = serde_json::json!({ "entry": ["src/main.ts", "index.html"] });
+    let project = analyze_with(
+        &private_package(),
+        &config,
+        &base_with(&[("index.html", html)], MAIN),
+    );
+    assert_eq!(project.findings("format").len(), 2);
+}
+
+#[test]
 fn a_template_host_blocks_only_what_it_imports() {
     let main = "import { format } from './format';\nimport './View.vue';\nformat(1, true);\nformat(2, true);\nformat(3, true);\n";
     let view = "<script setup lang=\"ts\">\nimport { other } from './other';\n</script>\n<template><p>{{ other() }}</p></template>\n";
@@ -568,4 +665,31 @@ fn an_inline_classic_script_with_a_dynamic_import_abstains() {
         &base_with(&[("index.html", html)], MAIN),
     );
     assert_abstains(&project, "src/format.ts", "format", "template-callers");
+}
+
+#[test]
+fn the_gate_stats_count_the_first_any_and_only_reason() {
+    let format = "export function format(value: number, compact: boolean, locale?: string) {\n  if (compact) return String(value);\n  return value.toLocaleString(locale);\n}\nexport function few(value: number) {\n  return value;\n}\n";
+    let main = "import { format, few } from './format';\nformat(1, true);\nformat(2, true);\nformat(3, true);\nfew(1);\nexport function both(value: number) {\n  return arguments.length + value;\n}\nexport function onlyEntry(value: number) {\n  return value;\n}\n";
+    let orphan = "export function orphan(value: number) {\n  return value;\n}\n";
+    let project = analyze(&[
+        ("src/format.ts", format),
+        ("src/main.ts", main),
+        ("src/orphan.ts", orphan),
+    ]);
+    let count = |first, any, only| ReasonCount { first, any, only };
+    assert_eq!(
+        project.stats(),
+        GateStats {
+            contracts: 5,
+            reachable: 4,
+            passed: 1,
+            findings: 2,
+            reasons: vec![
+                (Abstain::OpenContract, count(0, 1, 0)),
+                (Abstain::EntryExport, count(2, 2, 1)),
+                (Abstain::TooFewCalls, count(1, 1, 1)),
+            ],
+        }
+    );
 }

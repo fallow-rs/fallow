@@ -215,6 +215,13 @@ fallow dead-code --format json --quiet --production
 
 Excludes test/dev files (`*.test.*`, `*.spec.*`, `*.stories.*`) and only analyzes production scripts.
 
+### Review parameters that each call passes in one way
+```bash
+fallow dead-code --constant-parameters --production --format json --quiet
+```
+
+The opt-in rule reports a function parameter that each visible call passes the same literal (`identical-argument`), or an optional parameter that no call passes (`never-passed`). It reports only when it sees each caller. Start with findings where `condition_reads` is above 0: a condition tests the constant, so a branch cannot run. Read the `inspected_call_sites` and the intent before a change. Keep a deliberate option, a test seam, or a parameter that matches a sibling API. `--production` drops test callers and test helpers. There is no auto-fix.
+
 ### Analyze specific workspaces
 ```bash
 fallow dead-code --format json --quiet --workspace my-package                # single package (lists: web,admin)
