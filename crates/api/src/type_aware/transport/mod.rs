@@ -223,10 +223,7 @@ pub fn status(root: &Path) -> TypeAwareStatus {
             let remediation = if discovery_source == "environment-override" {
                 error
             } else {
-                format!(
-                    "Install the matching companion with: npm install --save-dev fallow-type-aware@{}",
-                    env!("CARGO_PKG_VERSION")
-                )
+                discovery::missing_sidecar_install_hint()
             };
             return TypeAwareStatus {
                 available: false,
@@ -537,7 +534,15 @@ mod tests {
             .expect_err("untrusted discovery locations must be ignored");
 
         assert!(error.contains("next to the active Fallow executable"));
-        assert!(error.contains("node_modules and PATH are intentionally not searched"));
+        assert!(error.contains("does not search project node_modules or PATH"));
+        let version = env!("CARGO_PKG_VERSION");
+        for command in [
+            format!("npm install --save-dev fallow-type-aware@{version}"),
+            format!("npm install --global fallow-type-aware@{version}"),
+            format!("npx -p fallow@{version} -p fallow-type-aware@{version} fallow"),
+        ] {
+            assert!(error.contains(&command), "{command}");
+        }
     }
 
     #[test]

@@ -143,6 +143,14 @@ assert_contains "$(cat /tmp/fallow-version-source)" "the latest release" "instal
 OUT=$(run_gitlab_install "$INSTALL_TMP/empty" "2.0.0 - 2.5.0")
 assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow@2.0.0 - 2.5.0" "install: supports npm hyphen ranges"
 
+# `fallow` does not depend on `fallow-type-aware`, so the template installs the
+# exact-version companion after `fallow` unless type-aware analysis is off.
+OUT=$(run_gitlab_install "$INSTALL_TMP/pinned" "")
+assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow-type-aware@<installed fallow version>" \
+  "install: installs the exact-version type-aware companion"
+OUT=$(FALLOW_TYPE_AWARE=false run_gitlab_install "$INSTALL_TMP/pinned" "")
+assert_not_contains "$OUT" "fallow-type-aware" "install: FALLOW_TYPE_AWARE=false skips the type-aware companion"
+
 OUT=$(run_gitlab_install "$INSTALL_TMP/empty" "file:../fallow")
 cmd_status=$?
 if [ "$cmd_status" -ne 0 ]; then

@@ -99,7 +99,6 @@
     "@fallow-cli/linux-x64-musl": "3.42.0",
     "@fallow-cli/linux-arm64-musl": "3.42.0",
     "@fallow-cli/win32-arm64-msvc": "3.42.0",
-    "@fallow-cli/win32-x64-msvc": "3.42.0",
-    "fallow-type-aware": "3.42.0"
+    "@fallow-cli/win32-x64-msvc": "3.42.0"
   }
 }

@@ -24,16 +24,33 @@ FALLOW_TYPE_AWARE_BIN="$PWD/tools/type-aware-sidecar/fallow-type-aware.mjs" \
   --format json --quiet
 ```
 
-Normal npm installations receive the exact matching optional companion package:
+The `fallow` package does not install the companion, because the companion
+brings TypeScript 7 (about 30 MB). A project that uses `--type-aware` installs
+it at the same version as `fallow`:
 
 ```bash
-npm install --save-dev fallow
+npm install --save-dev fallow fallow-type-aware@<fallow version>
 npx fallow dead-code --unused-class-members --type-aware --format json --quiet
 ```
 
-Install `fallow-type-aware` at the same version manually only when optional npm
-dependencies are disabled. The `fallow` launcher discovers an exact version
-match and passes its trusted executable path to the native binary.
+The `fallow` launcher looks for the companion next to the `fallow` package
+first (npm and Yarn hoist it there), then from the project root (pnpm links
+it only there). It accepts a companion from the project root only when it is in
+the same `node_modules` tree as the running `fallow` package, so a global
+`fallow` never runs a companion that a cloned project ships. It accepts only an
+exact version match and passes the trusted executable path to the native
+binary.
+
+A global `fallow` needs the companion in the same global install
+(`npm install --global fallow-type-aware@<fallow version>`). npx and other
+package runners install `fallow` in their own cache, so they never use the
+project companion. Start both packages together
+(`npx -p fallow@<version> -p fallow-type-aware@<version> fallow`), or set
+`FALLOW_TYPE_AWARE_BIN` to the companion executable. The GitHub Action and the
+GitLab template install the companion themselves, unless type-aware analysis is
+turned off. With `FALLOW_SKIP_INSTALL=true`, the GitLab job must install the
+companion together with `fallow`. Without the companion, `--type-aware`
+and `type-aware status` name the install command.
 
 The companion depends on `typescript@7.0.2`, accepts any TypeScript 7 release that a package manager override selects, and uses `typescript/unstable/sync`, which
 runs the native TypeScript-Go backend. The canonical protocol manifest at

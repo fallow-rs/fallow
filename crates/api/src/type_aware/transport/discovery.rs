@@ -38,8 +38,17 @@ pub(super) fn discover_type_aware_sidecar_from(
     }
 
     Err(format!(
-        "Type-aware sidecar `{SIDECAR_BINARY}` was not found next to the active Fallow executable. Install it in the same directory as Fallow or set FALLOW_TYPE_AWARE_BIN to a trusted executable path. Project-local node_modules and PATH are intentionally not searched. The normal command still works without --type-aware."
+        "Type-aware sidecar `{SIDECAR_BINARY}` was not found next to the active Fallow executable. {} The Fallow binary itself does not search project node_modules or PATH. The normal command still works without --type-aware.",
+        missing_sidecar_install_hint()
     ))
+}
+
+/// How to install the exact-version companion for each way to run Fallow.
+pub(super) fn missing_sidecar_install_hint() -> String {
+    format!(
+        "For a project that has `fallow` as a devDependency, add the companion at the same version: `npm install --save-dev {SIDECAR_BINARY}@{version}`. For a global `fallow`, run `npm install --global {SIDECAR_BINARY}@{version}`. For npx, start both packages together: `npx -p fallow@{version} -p {SIDECAR_BINARY}@{version} fallow`, or set FALLOW_TYPE_AWARE_BIN to a trusted executable path.",
+        version = env!("CARGO_PKG_VERSION")
+    )
 }
 
 pub(super) fn canonical_sidecar_path(path: &Path) -> Result<PathBuf, String> {

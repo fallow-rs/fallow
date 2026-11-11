@@ -276,8 +276,9 @@ and [federated app credentials](https://learn.microsoft.com/en-us/entra/workload
   dedicated lockfiles. Invoke them with `npx --no-install --prefix` so execution
   cannot fetch a missing CLI. Review lockfile changes before release.
 - Stage the `fallow` npm root, never publish it from the workflow. `fallow` pins
-  its platform packages and `fallow-type-aware` to the exact release version,
-  so those reach users only through a new root. The `fallow` trusted publisher
+  its platform packages to the exact release version, so those reach users
+  only through a new root. A project installs `fallow-type-aware` itself, and
+  the launcher accepts it only at the exact version of the approved root. The `fallow` trusted publisher
   grants stage publish only, and npm refuses a direct publish over OIDC with
   HTTP 403. The maintainer approves the stage with npm 2FA before the signed
   tag, after comparing `npm stage download` with the `20-cli-root` tarball in
