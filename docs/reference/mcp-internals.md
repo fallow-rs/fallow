@@ -109,9 +109,14 @@ Contract rules:
     `subprocess` or `typed`.
   - The server cap is 1,000,000 bytes by default, the same as the default
     result cap of Code Mode. `FALLOW_MCP_MAX_OUTPUT_BYTES` sets it for the
-    server, up to 16 MiB. A call's `max_output_bytes` can only lower it. The
-    default stays below the context window of a usual agent, so the agent
-    gets a valid refusal and not a result that its host cut.
+    server, up to 16 MiB. A call's `max_output_bytes` can only lower it.
+    The cap bounds the response and the memory of the server. It does not
+    make a response fit a context window: 1,000,000 bytes of JSON is more
+    than 200,000 tokens. A host applies its own limit to a result below the
+    cap. For example, Claude Code saves a text result over 50,000 characters
+    to a file, and the agent reads that file. A lower default refuses
+    results that such a host keeps intact, so the default stays at the Code
+    Mode value.
   - The over-limit body carries `narrow`: the parameters of the refused tool
     that make its output smaller. `tools/narrow.rs` owns the table. A drift
     test checks each name against the input schema of its tool. A tool

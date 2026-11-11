@@ -121,9 +121,11 @@ use fallow_process::{
 /// Default subprocess timeout in seconds.
 const DEFAULT_TIMEOUT_SECS: u64 = 120;
 /// Default response cap of one tool call. It is the default result cap of
-/// Code Mode too, so both surfaces refuse at the same size. A response over
-/// it does not fit the context window of a usual agent, and a host that cuts
-/// it gives the agent invalid JSON.
+/// Code Mode too, so both surfaces refuse at the same size. The cap does not
+/// make a response fit a context window: 1,000,000 bytes of JSON is more than
+/// 200,000 tokens. A host applies its own limit below the cap, and saves or
+/// cuts a large result. Over the cap, the caller gets a valid refusal that
+/// names the parameters that narrow the call.
 const DEFAULT_MAX_OUTPUT_BYTES: usize = 1_000_000;
 /// The highest server cap that [`MAX_OUTPUT_BYTES_ENV`] can set. The server
 /// keeps the retained bytes in memory, so the cap also bounds memory.

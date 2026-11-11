@@ -1205,12 +1205,12 @@ async fn run_fallow_output_limit_names_the_parameters_that_narrow_the_tool() {
     );
 }
 
-/// A call without `max_output_bytes` gets a cap that fits a context window.
-/// A response of a few MiB is refused with a valid JSON body, so a host does
-/// not cut it into invalid JSON.
+/// A call without `max_output_bytes` gets the default server cap of
+/// 1,000,000 bytes. A larger response gets a valid JSON refusal, so a host
+/// does not cut it into invalid JSON.
 #[cfg(unix)]
 #[tokio::test]
-async fn run_fallow_default_cap_refuses_a_response_that_no_context_window_holds() {
+async fn run_fallow_default_cap_refuses_a_response_over_one_million_bytes() {
     let script = r"head -c 1500000 /dev/zero | tr '\0' x";
     let result = run_tool_with_limit(
         "/bin/sh",
