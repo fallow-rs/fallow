@@ -498,3 +498,122 @@ fn history_window_keeps_older_commits_while_files_use_the_narrow_window() {
         "the commit list covers the one year history window"
     );
 }
+
+/// A shallow clone of an origin with `commits` commits to `src/index.ts`.
+/// The clone has depth 1, so a cold churn run sees only the HEAD commit.
+struct ShallowFixture {
+    _dir: tempfile::TempDir,
+    root: PathBuf,
+    cache: PathBuf,
+}
+
+impl ShallowFixture {
+    fn new(commits: u64) -> Self {
+        let dir = tempfile::tempdir().expect("shallow fixture tempdir");
+        let base = dir.path().canonicalize().expect("canonical fixture base");
+        let origin = base.join("origin");
+        std::fs::create_dir_all(&origin).expect("create origin");
+        init_repo(&origin);
+        for index in 0..commits {
+            commit_file(
+                &origin,
+                "src/index.ts",
+                &format!("export const value = {index};\n"),
+                BASE_EPOCH + index * SECS_PER_DAY,
+            );
+        }
+        let url = format!("file://{}", origin.display());
+        git(
+            &base,
+            &["clone", "--quiet", "--depth", "1", &url, "clone"],
+            None,
+        );
+        let root = base.join("clone");
+        git(&root, &["config", "user.name", "Churn Fixture"], None);
+        git(
+            &root,
+            &["config", "user.email", "fixture@example.com"],
+            None,
+        );
+        git(&root, &["config", "commit.gpgsign", "false"], None);
+        let cache = root.join(".fallow-cache");
+        Self {
+            _dir: dir,
+            root,
+            cache,
+        }
+    }
+
+    /// Run churn warm and cold, assert that both agree, and return the warm
+    /// result.
+    fn warm_matching_cold(&self) -> ChurnResult {
+        let (warm, _) = churn(&self.root, &self.cache, false);
+        let (cold, _) = churn(&self.root, &self.root.join(".fallow-cold-cache"), true);
+        assert_eq!(warm.shallow_clone, cold.shallow_clone);
+        assert_eq!(churn_rows(&warm, &self.root), churn_rows(&cold, &self.root));
+        assert_eq!(
+            commit_sets(&warm, &self.root),
+            commit_sets(&cold, &self.root)
+        );
+        warm
+    }
+
+    fn index_commits(&self, result: &ChurnResult) -> u32 {
+        churn_rows(result, &self.root)
+            .into_iter()
+            .find(|row| row.0 == "src/index.ts")
+            .expect("src/index.ts has churn")
+            .1
+    }
+}
+
+#[test]
+fn warm_cache_after_unshallow_at_the_same_head_matches_cold() {
+    let fixture = ShallowFixture::new(3);
+    let (shallow, _) = churn(&fixture.root, &fixture.cache, false);
+    assert!(shallow.shallow_clone);
+    assert_eq!(fixture.index_commits(&shallow), 1);
+    let (_, still_shallow_hit) = churn(&fixture.root, &fixture.cache, false);
+    assert!(
+        still_shallow_hit,
+        "an unchanged shallow clone reuses the cache"
+    );
+
+    git(&fixture.root, &["fetch", "--quiet", "--unshallow"], None);
+
+    let warm = fixture.warm_matching_cold();
+    assert!(!warm.shallow_clone);
+    assert_eq!(fixture.index_commits(&warm), 3);
+}
+
+#[test]
+fn warm_cache_after_unshallow_and_a_new_commit_matches_cold() {
+    let fixture = ShallowFixture::new(3);
+    let (shallow, _) = churn(&fixture.root, &fixture.cache, false);
+    assert!(shallow.shallow_clone);
+
+    git(&fixture.root, &["fetch", "--quiet", "--unshallow"], None);
+    commit_file(
+        &fixture.root,
+        "src/index.ts",
+        "export const value = 99;\n",
+        BASE_EPOCH + 10 * SECS_PER_DAY,
+    );
+
+    let warm = fixture.warm_matching_cold();
+    assert!(!warm.shallow_clone);
+    assert_eq!(fixture.index_commits(&warm), 4);
+}
+
+#[test]
+fn warm_cache_after_deepen_matches_cold() {
+    let fixture = ShallowFixture::new(4);
+    let (shallow, _) = churn(&fixture.root, &fixture.cache, false);
+    assert!(shallow.shallow_clone);
+
+    git(&fixture.root, &["fetch", "--quiet", "--deepen", "1"], None);
+
+    let warm = fixture.warm_matching_cold();
+    assert!(warm.shallow_clone, "a deepened clone is still shallow");
+    assert_eq!(fixture.index_commits(&warm), 2);
+}
