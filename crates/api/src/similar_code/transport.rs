@@ -98,8 +98,8 @@ fn discover_provider_from(current_exe: &Path) -> Result<PathBuf, String> {
         }
     }
     Err(format!(
-        "Similar-code companion `{SIDECAR_BINARY}` was not found next to the active Fallow executable. For an npm install, add the companion at the same version: `npm install --save-dev fallow-similar-code@{}`, then run `fallow similar-code status`. The `fallow` npm launcher passes its signed binary to Fallow. Project-local executables and PATH are never searched.",
-        env!("CARGO_PKG_VERSION")
+        "Similar-code companion `{SIDECAR_BINARY}` was not found next to the active Fallow executable. For a project that has `fallow` as a devDependency, add the companion at the same version: `npm install --save-dev fallow-similar-code@{version}`. For a global `fallow`, run `npm install --global fallow-similar-code@{version}`. For npx, start both packages together: `npx -p fallow@{version} -p fallow-similar-code@{version} fallow similar-code status`. The `fallow` npm launcher passes the signed companion binary to Fallow. Project-local executables and PATH are never searched.",
+        version = env!("CARGO_PKG_VERSION")
     ))
 }
 

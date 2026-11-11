@@ -23,6 +23,13 @@ npx fallow similar-code status
 npx fallow similar-code setup --local
 ```
 
+The launcher finds the companion with the same rules as the type-aware
+companion: next to the `fallow` package, or from the project root in the same
+`node_modules` tree. A global `fallow` needs a global companion. For npx,
+start both packages together with
+`npx -p fallow@<version> -p fallow-similar-code@<version> fallow similar-code`.
+An MCP client that starts `npx fallow-mcp` needs the same `-p` pair.
+
 For a non-interactive setup that the user has already approved, add `--yes`.
 Project config, MCP, Node API calls, and model output cannot authorize setup.
 
