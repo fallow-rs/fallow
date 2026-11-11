@@ -19,8 +19,9 @@ and parse-cache changes.
   `graphql.rs`: component and embedded-language extraction.
 - `crates/extract/src/sfc_template/`: template-visible usage for supported
   component formats.
-- `crates/extract/src/css.rs`, `css_metrics.rs`, `css_classes.rs`, and
-  `css_in_js/`: CSS, CSS-in-JS, token, and styling facts.
+- `crates/extract/src/css.rs`, `css_metrics.rs`, `css_classes.rs`,
+  `css_url.rs`, and `css_in_js/`: CSS, CSS-in-JS, token, and styling facts,
+  and the packages that stylesheet `url()` values name.
 - `crates/extract/src/source_map.rs`: source-map normalization and mapping.
 
 Shared extraction result types live in `crates/types/src/extract.rs`.

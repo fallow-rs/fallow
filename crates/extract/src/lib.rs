@@ -37,6 +37,7 @@ mod css_mask;
 mod css_masked_bytes;
 pub mod css_metrics;
 mod css_module_classes;
+mod css_url;
 pub mod dom_classes;
 pub mod effect_facts;
 mod effect_schema;

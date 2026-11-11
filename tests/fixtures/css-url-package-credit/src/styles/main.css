@@ -1,0 +1,23 @@
+@import url("./reset.css");
+
+@font-face {
+  font-family: "Sans";
+  src:
+    url("@acme/font-sans/files/sans-latin.woff2") format("woff2"),
+    url('@acme/font-mono/files/mono-latin.woff2') format("woff2"),
+    url("@acme/font-legacy/files/legacy.eot?#iefix") format("embedded-opentype"),
+    url(font-serif/files/serif-latin.woff2) format("woff2");
+}
+
+.hero {
+  background-image:
+    url(./hero.png),
+    url("fonts/local.woff2"),
+    url(/static/bg.png),
+    url(#shadow-filter),
+    url(data:image/png;base64,AAAA),
+    url(https://example.com/a.png),
+    url(//cdn.example.com/b.png),
+    url("@app/img/logo.png"),
+    url(@images/icons/arrow.svg);
+}

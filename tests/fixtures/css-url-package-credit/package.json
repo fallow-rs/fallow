@@ -1,0 +1,16 @@
+{
+  "name": "css-url-package-credit",
+  "version": "1.0.0",
+  "private": true,
+  "main": "src/main.ts",
+  "dependencies": {
+    "@acme/font-legacy": "1.0.0",
+    "@acme/font-mono": "1.0.0",
+    "@acme/font-sans": "1.0.0",
+    "@acme/font-svelte": "1.0.0",
+    "@acme/font-vue": "1.0.0",
+    "@acme/icons": "1.0.0",
+    "font-serif": "1.0.0",
+    "unused-control": "1.0.0"
+  }
+}
