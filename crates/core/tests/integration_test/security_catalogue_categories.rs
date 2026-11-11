@@ -1401,7 +1401,7 @@ fn llm_call_injection_langchain_invoke_does_not_fire() {
 
 // ── catalogue gaps: callee variants of existing categories ───────────────────
 
-const CATALOGUE_GAP_SINKS: [(&str, &str, u32); 31] = [
+const CATALOGUE_GAP_SINKS: [(&str, &str, u32); 32] = [
     ("src/esm-default-exec.ts", "command-injection", 78),
     ("src/esm-namespace-exec.ts", "command-injection", 78),
     ("src/esm-default-vm.ts", "code-injection", 94),
@@ -1425,6 +1425,7 @@ const CATALOGUE_GAP_SINKS: [(&str, &str, u32); 31] = [
     ("src/exec-file.ts", "command-injection", 78),
     ("src/spawn-request.ts", "command-injection", 78),
     ("src/spawn-shell.ts", "command-injection", 78),
+    ("src/spawn-shell-duplicate.js", "command-injection", 78),
     ("src/spawn-options-variable.ts", "command-injection", 78),
     ("src/shelljs.ts", "command-injection", 78),
     ("src/ssti-handlebars.ts", "ssti", 1336),

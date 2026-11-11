@@ -18476,6 +18476,15 @@ fn security_spawn_command_carries_options_metadata() {
         keys_of("spawn(cmd, [], { ...base });"),
         Some((Vec::new(), false))
     );
+    assert_eq!(
+        keys_of("spawn(cmd, [], { shell: false, shell: true });"),
+        Some((vec!["shell".to_string()], false)),
+        "the last duplicate key wins at runtime, so the options stay unknown"
+    );
+    assert_eq!(
+        keys_of("spawn(cmd, [], { shell: false, shell: useShell });"),
+        Some((vec!["shell".to_string()], false))
+    );
 
     let options =
         spawn_command_options("spawn(cmd, [], { shell: false });").expect("spawn options captured");

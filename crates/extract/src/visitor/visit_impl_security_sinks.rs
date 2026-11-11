@@ -446,7 +446,9 @@ fn is_spawn_callee(callee_path: &str) -> bool {
 /// The options object of a `spawn(command, args?, options?)` call. An object
 /// literal in the second position is the options object. A second argument
 /// that is not an array or an object literal can be either, so the options
-/// stay unknown when no third argument follows it.
+/// stay unknown when no third argument follows it. An options object with a
+/// duplicate key also stays unknown: the last property wins at runtime, and a
+/// non-literal value of a later duplicate leaves no literal property to read.
 fn spawn_call_options(arguments: &[Argument<'_>]) -> SinkCallOptions {
     let known = |expr: Option<&Expression<'_>>| match expr {
         None => SinkCallOptions {
@@ -459,7 +461,7 @@ fn spawn_call_options(arguments: &[Argument<'_>]) -> SinkCallOptions {
             SinkCallOptions {
                 properties: object_literal_properties(expr),
                 keys: keys.keys,
-                keys_complete: keys.complete,
+                keys_complete: keys.complete && !has_duplicate_static_key(expr),
             }
         }
     };
@@ -484,6 +486,22 @@ fn spawn_call_options(arguments: &[Argument<'_>]) -> SinkCallOptions {
         None if matches!(unwrap_static_expr(second), Expression::ArrayExpression(_)) => known(None),
         None => unknown(),
     }
+}
+
+/// Whether an object literal names one static key in more than one property.
+fn has_duplicate_static_key(expr: &Expression<'_>) -> bool {
+    let Expression::ObjectExpression(obj) = unwrap_static_expr(expr) else {
+        return false;
+    };
+    let mut seen = FxHashSet::default();
+    obj.properties.iter().any(|prop| {
+        let ObjectPropertyKind::ObjectProperty(prop) = prop else {
+            return false;
+        };
+        prop.key
+            .static_name()
+            .is_some_and(|key| !seen.insert(key.text().into_owned()))
+    })
 }
 
 fn should_capture_missing_jwt_verify_options(
