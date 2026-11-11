@@ -71,6 +71,10 @@ pub(super) enum Abstain {
     ClassicScript,
     /// A framework convention imports the module with no import statement.
     AutoImport,
+    /// An import with a query, such as `?raw` or `?url`, or with a webpack
+    /// inline loader reads the module as text or as a file. A copy of the
+    /// code can run with callers that the project does not hold.
+    AssetImport,
     /// A test file declares the function. A test helper exists to pass
     /// fixed values, so a constant argument is its purpose. A test file
     /// stays a caller of the functions of other files.
@@ -81,7 +85,7 @@ pub(super) enum Abstain {
 
 impl Abstain {
     /// Each reason, in declaration order.
-    const ALL: [Self; 15] = [
+    const ALL: [Self; 16] = [
         Self::ParseIncomplete,
         Self::OpenContract,
         Self::PublicApi,
@@ -95,6 +99,7 @@ impl Abstain {
         Self::DirectEval,
         Self::ClassicScript,
         Self::AutoImport,
+        Self::AssetImport,
         Self::TestFile,
         Self::TooFewCalls,
     ];
@@ -120,11 +125,15 @@ impl Abstain {
             Self::DirectEval => "direct-eval",
             Self::ClassicScript => "classic-script",
             Self::AutoImport => "auto-import",
+            Self::AssetImport => "asset-import",
             Self::TestFile => "test-file",
             Self::TooFewCalls => "too-few-calls",
         }
     }
 }
+
+// `Reasons` holds one bit for each reason.
+const _: () = assert!(Abstain::ALL.len() <= u16::BITS as usize);
 
 /// A function contract: the module and the index of its declaration.
 type FnId = (FileId, u32);
@@ -559,6 +568,22 @@ impl<'a> Gate<'a> {
     }
 
     fn block_hidden_imports(&mut self, resolved: &ResolvedModule) {
+        let imports = resolved
+            .resolved_imports
+            .iter()
+            .chain(&resolved.resolved_dynamic_imports)
+            .filter(|import| !import.info.is_type_only && reads_as_asset(&import.info.source))
+            .filter_map(|import| import.target.internal_file_id());
+        let re_exports = resolved
+            .re_exports
+            .iter()
+            .filter(|re_export| {
+                !re_export.info.is_type_only && reads_as_asset(&re_export.info.source)
+            })
+            .filter_map(|re_export| re_export.target.internal_file_id());
+        for target in imports.chain(re_exports) {
+            self.block_module(target, Abstain::AssetImport);
+        }
         for import in &resolved.resolved_dynamic_imports {
             if let Some(target) = import.target.internal_file_id() {
                 self.block_surface(target, Abstain::DynamicImport);
@@ -1120,6 +1145,14 @@ impl<'a> Gate<'a> {
             .to_string(),
         }
     }
+}
+
+/// `true` when an import specifier can read its module as text, as a file
+/// or through a loader: a query such as `./op.ts?raw`, or a webpack inline
+/// loader request such as `raw-loader!./op.ts`. A `!` can also be part of a
+/// plain file name, so the check can only hide a finding, never add one.
+fn reads_as_asset(specifier: &str) -> bool {
+    specifier.contains(['?', '!'])
 }
 
 fn facts(module: &ModuleInfo) -> Option<&FunctionContractFacts> {

@@ -1075,6 +1075,12 @@ each reason:
 - `direct-eval`: the same, for a module with a direct `eval`.
 - `classic-script`: a module with no imports, no exports and no re-exports.
 - `auto-import`: a synthetic auto-import edge reaches the module.
+- `asset-import`: an import, a dynamic import or a re-export with a query,
+  such as `./op.ts?raw` or `./op.ts?url`, or with a webpack inline loader,
+  such as `raw-loader!./op.ts`, reads the module as text or as a file. The
+  rule blocks each contract of the module, because a copy of the code can
+  run with callers that the project does not hold. A type-only import does
+  not block.
 - `test-file`: a test file declares the function. The path below the project
   root matches the test subset of `PRODUCTION_EXCLUDE_PATTERNS`
   (`is_test_or_spec_file`, which leaves out the tooling-config and dotfile
