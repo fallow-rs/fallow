@@ -272,7 +272,6 @@ fn push_block_markers<'a>(
     reason = "line count is bounded by file size"
 )]
 pub fn parse_suppressions_from_source(source: &str) -> ParsedSuppressions {
-    const BLOCK_END: &str = "*/";
     let mut parsed = ParsedSuppressions::default();
     let lines: Vec<&str> = source.lines().collect();
 
@@ -290,41 +289,61 @@ pub fn parse_suppressions_from_source(source: &str) -> ParsedSuppressions {
                 push_marker(&mut parsed, marker, comment_line, comment_line + 1);
             }
         } else if let Some(rest) = trimmed.strip_prefix("/*") {
-            if let Some(end) = rest.find(BLOCK_END) {
-                if end + BLOCK_END.len() == rest.len() {
-                    let content = std::iter::once(&rest[..end]);
-                    push_block_markers(&mut parsed, content, comment_line, comment_line + 1);
-                }
-            } else if opens_source_block(rest)
-                && let Some(close_idx) =
-                    (idx + 1..lines.len()).find(|&i| lines[i].contains(BLOCK_END))
-            {
-                // A `//` marker line inside the block still counts: the scan
-                // cannot tell a real block comment from text in a string.
-                for (inner_idx, line) in lines.iter().enumerate().take(close_idx).skip(idx + 1) {
-                    let inner_line = (inner_idx as u32) + 1;
-                    if let Some(marker) = line.trim().strip_prefix("//").and_then(match_line_marker)
-                    {
-                        push_marker(&mut parsed, marker, inner_line, inner_line + 1);
-                    }
-                }
-                let close_line = lines[close_idx];
-                let content = std::iter::once(rest)
-                    .chain(lines[idx + 1..close_idx].iter().copied())
-                    .chain(std::iter::once(
-                        &close_line[..close_line.find(BLOCK_END).unwrap_or(close_line.len())],
-                    ));
-                let suppressed_line = (close_idx as u32) + 2;
-                push_block_markers(&mut parsed, content, comment_line, suppressed_line);
-                idx = close_idx;
-            }
-            // An unclosed or unrecognized opener carries no markers. The scan
-            // goes on with the next line, so a later marker still counts.
+            idx = scan_source_block(&mut parsed, &lines, idx, rest);
         }
         idx += 1;
     }
 
     parsed
+}
+
+/// Record the markers of a `/*` comment that starts line `idx` of the source
+/// scan, and return the index of the last line of the comment.
+///
+/// An unclosed or unrecognized opener carries no markers and returns `idx`, so
+/// the scan goes on with the next line and a later marker still counts.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "line count is bounded by file size"
+)]
+fn scan_source_block(
+    parsed: &mut ParsedSuppressions,
+    lines: &[&str],
+    idx: usize,
+    rest: &str,
+) -> usize {
+    const BLOCK_END: &str = "*/";
+    let comment_line = (idx as u32) + 1;
+    if let Some(end) = rest.find(BLOCK_END) {
+        if end + BLOCK_END.len() == rest.len() {
+            let content = std::iter::once(&rest[..end]);
+            push_block_markers(parsed, content, comment_line, comment_line + 1);
+        }
+        return idx;
+    }
+    if !opens_source_block(rest) {
+        return idx;
+    }
+    let Some(close_idx) = (idx + 1..lines.len()).find(|&i| lines[i].contains(BLOCK_END)) else {
+        return idx;
+    };
+    // A `//` marker line inside the block still counts: the scan cannot tell a
+    // real block comment from text in a string.
+    for (inner_idx, line) in lines.iter().enumerate().take(close_idx).skip(idx + 1) {
+        let inner_line = (inner_idx as u32) + 1;
+        if let Some(marker) = line.trim().strip_prefix("//").and_then(match_line_marker) {
+            push_marker(parsed, marker, inner_line, inner_line + 1);
+        }
+    }
+    let close_line = lines[close_idx];
+    let content = std::iter::once(rest)
+        .chain(lines[idx + 1..close_idx].iter().copied())
+        .chain(std::iter::once(
+            &close_line[..close_line.find(BLOCK_END).unwrap_or(close_line.len())],
+        ));
+    let suppressed_line = (close_idx as u32) + 2;
+    push_block_markers(parsed, content, comment_line, suppressed_line);
+    close_idx
 }
 
 #[cfg(test)]
