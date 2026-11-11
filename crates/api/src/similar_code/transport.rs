@@ -45,11 +45,12 @@ const DOWNLOAD_ENV: &[&str] = &[
 /// The sibling of the active executable comes first (release archives ship
 /// it there). Otherwise the provider that the npm launcher passed in, after
 /// its signature check.
-pub(super) fn discover_provider() -> Result<PathBuf, String> {
+/// `project_root` only selects the package manager of the install hint.
+pub(super) fn discover_provider(project_root: Option<&Path>) -> Result<PathBuf, String> {
     let current_exe = std::env::current_exe()
         .map_err(|error| format!("failed to locate the active Fallow executable: {error}"))?;
     select_provider(
-        discover_provider_from(&current_exe),
+        discover_provider_from(&current_exe, project_root),
         super::launcher_provider::provider_from_env(),
     )
 }
@@ -69,7 +70,10 @@ fn select_provider(
     clippy::filetype_is_file,
     reason = "provider discovery accepts regular files only and rejects every special file type"
 )]
-fn discover_provider_from(current_exe: &Path) -> Result<PathBuf, String> {
+fn discover_provider_from(
+    current_exe: &Path,
+    project_root: Option<&Path>,
+) -> Result<PathBuf, String> {
     let current_exe = dunce::canonicalize(current_exe).map_err(|error| {
         format!(
             "failed to resolve the active Fallow executable {}: {error}",
@@ -98,9 +102,22 @@ fn discover_provider_from(current_exe: &Path) -> Result<PathBuf, String> {
         }
     }
     Err(format!(
-        "Similar-code companion `{SIDECAR_BINARY}` was not found next to the active Fallow executable. For a project that has `fallow` as a devDependency, add the companion at the same version: `npm install --save-dev fallow-similar-code@{version}`. For a global `fallow`, run `npm install --global fallow-similar-code@{version}`. For npx, start both packages together: `npx -p fallow@{version} -p fallow-similar-code@{version} fallow similar-code status`. The `fallow` npm launcher passes the signed companion binary to Fallow. Project-local executables and PATH are never searched.",
-        version = env!("CARGO_PKG_VERSION")
+        "Similar-code companion `{SIDECAR_BINARY}` was not found next to the active Fallow executable. For a project that has `fallow` as a devDependency, add the companion at the same version: `{project_command}`. For a global `fallow`, run `npm install --global fallow-similar-code@{version}`. For npx, start both packages together: `npx -p fallow@{version} -p fallow-similar-code@{version} fallow similar-code status`. The `fallow` npm launcher passes the signed companion binary to Fallow. Project-local executables and PATH are never searched.",
+        version = env!("CARGO_PKG_VERSION"),
+        project_command = add_dev_command(
+            project_root,
+            &format!("{SIDECAR_BINARY}@{}", env!("CARGO_PKG_VERSION"))
+        ),
     ))
+}
+
+/// The add command of the project's package manager, or npm when no
+/// lockfile or `packageManager` field names one. The command is only shown.
+fn add_dev_command(project_root: Option<&Path>, package: &str) -> String {
+    project_root
+        .and_then(fallow_config::PackageManager::detect_nearest)
+        .unwrap_or(fallow_config::PackageManager::Npm)
+        .add_dev_command(package)
 }
 
 fn binary_names(binary: &str) -> Vec<String> {
@@ -629,7 +646,7 @@ mod tests {
             "fallow"
         });
         std::fs::write(&fallow, b"").unwrap();
-        let error = discover_provider_from(&fallow).unwrap_err();
+        let error = discover_provider_from(&fallow, None).unwrap_err();
         assert!(error.contains("not found next to"));
 
         let sidecar = temp.path().join(if cfg!(windows) {
@@ -639,7 +656,7 @@ mod tests {
         });
         std::fs::write(&sidecar, b"").unwrap();
         assert_eq!(
-            discover_provider_from(&fallow).unwrap(),
+            discover_provider_from(&fallow, None).unwrap(),
             dunce::canonicalize(sidecar).unwrap()
         );
     }
@@ -675,11 +692,28 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let fallow = temp.path().join("fallow");
         std::fs::write(&fallow, b"").unwrap();
-        let error = discover_provider_from(&fallow).unwrap_err();
+        let error = discover_provider_from(&fallow, None).unwrap_err();
         assert!(error.contains(&format!(
             "npm install --save-dev fallow-similar-code@{}",
             env!("CARGO_PKG_VERSION")
         )));
+    }
+
+    #[test]
+    fn missing_provider_uses_the_package_manager_of_the_project() {
+        let temp = tempfile::tempdir().unwrap();
+        let fallow = temp.path().join("fallow");
+        std::fs::write(&fallow, b"").unwrap();
+        let project = tempfile::tempdir().unwrap();
+        std::fs::write(project.path().join("bun.lock"), "").unwrap();
+        let error = discover_provider_from(&fallow, Some(project.path())).unwrap_err();
+        assert!(
+            error.contains(&format!(
+                "`bun add -d fallow-similar-code@{}`",
+                env!("CARGO_PKG_VERSION")
+            )),
+            "{error}"
+        );
     }
 
     #[test]
