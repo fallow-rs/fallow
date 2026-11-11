@@ -90,7 +90,7 @@ assert_cached_type_size!(fallow_types::extract::CalleeUse, 56);
 assert_cached_type_size!(fallow_types::extract::ImportedCallSite, 80);
 assert_cached_type_size!(fallow_types::extract::ImportBindingReference, 64);
 assert_cached_type_size!(fallow_types::extract::MisplacedDirectiveSite, 8);
-assert_cached_type_size!(fallow_types::extract::SinkSite, 216);
+assert_cached_type_size!(fallow_types::extract::SinkSite, 224);
 assert_cached_type_size!(fallow_types::extract::FunctionComplexity, 104);
 assert_cached_type_size!(fallow_types::extract::ComplexityContribution, 16);
 assert_cached_type_size!(fallow_types::extract::FlagUse, 80);
