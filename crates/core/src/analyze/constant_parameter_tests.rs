@@ -975,3 +975,56 @@ fn a_function_that_a_test_file_declares_is_not_a_candidate() {
     let rows = project.findings("format");
     assert!(rows.iter().any(|row| row.0 == "compact"), "{rows:?}");
 }
+
+const RUNTIME_OP: &str = "export function op(kind: string, compact: boolean) {\n  return compact ? kind : kind + '!';\n}\nfunction inner(flag: boolean) {\n  return flag;\n}\nexport const run = () => {\n  op('a', true);\n  op('b', true);\n  inner(true);\n  inner(true);\n};\n";
+
+/// A project whose main module calls `run` and then has `extra`.
+fn runtime_project(extra: &str) -> Project {
+    let main = format!("import {{ run }} from './runtime/op';\nrun();\n{extra}");
+    let other = "export const other = 1;\n";
+    analyze(&[
+        ("src/runtime/op.ts", RUNTIME_OP),
+        ("src/runtime/other.ts", other),
+        ("src/main.ts", main.as_str()),
+    ])
+}
+
+#[test]
+fn a_module_that_an_asset_import_reads_abstains() {
+    // A `?raw` or `?url` import, or an inline loader, reads the module as
+    // text or as a file, so a copy of the code can have callers that the
+    // project does not hold.
+    for extra in [
+        "import source from './runtime/op.ts?raw';\nexport const text = source;\n",
+        "import href from './runtime/op.ts?url';\nexport const text = href;\n",
+        "import Worker from './runtime/op.ts?worker&inline';\nexport const text = Worker;\n",
+        "export { default as text } from './runtime/op.ts?raw';\n",
+        "export const load = () => import('./runtime/op.ts?raw');\n",
+        "import source from '!!raw-loader!./runtime/op.ts';\nexport const text = source;\n",
+    ] {
+        let project = runtime_project(extra);
+        assert_abstains(&project, "src/runtime/op.ts", "op", "asset-import");
+        assert_abstains(&project, "src/runtime/op.ts", "inner", "asset-import");
+    }
+}
+
+#[test]
+fn an_asset_import_of_another_module_or_a_type_keeps_the_findings() {
+    for extra in [
+        "",
+        "import source from './runtime/other.ts?raw';\nexport const text = source;\n",
+        "import type Source from './runtime/op.ts?raw';\nexport type Text = Source;\n",
+    ] {
+        let project = runtime_project(extra);
+        assert_eq!(
+            project.findings("op"),
+            vec![identical("compact", "true")],
+            "{extra}"
+        );
+        assert_eq!(
+            project.findings("inner"),
+            vec![identical("flag", "true")],
+            "{extra}"
+        );
+    }
+}
