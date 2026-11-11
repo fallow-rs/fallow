@@ -1976,6 +1976,7 @@ mod eslint;
 mod eve;
 mod expo;
 mod expo_router;
+mod extends_walk;
 mod firebase;
 mod fumadocs;
 mod gatsby;

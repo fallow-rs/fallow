@@ -1,4 +1,5 @@
-//! The state of one walk over the `extends` chain of an `ESLint` config.
+//! The state of one walk over the `extends` chain of an `ESLint` or
+//! Stylelint config, and the lookup of the workspace packages it names.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, LazyLock, Mutex, PoisonError};
@@ -6,19 +7,21 @@ use std::time::SystemTime;
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
+use super::eslint::{find_package_dir, resolve_package_entry};
+
 /// The configs already read, and the workspace packages of the project.
 ///
 /// A project without an install has no `node_modules` link for a workspace
 /// package, so an `extends` entry that names one is found by package name.
 /// The walk gets the workspace index once, when the first entry needs it.
-pub(super) struct ExtendsWalk<'a> {
-    pub(super) visited: FxHashSet<PathBuf>,
+pub(in crate::plugins) struct ExtendsWalk<'a> {
+    pub(in crate::plugins) visited: FxHashSet<PathBuf>,
     project_root: &'a Path,
     workspaces: Option<Arc<WorkspaceIndex>>,
 }
 
 impl<'a> ExtendsWalk<'a> {
-    pub(super) fn new(project_root: &'a Path) -> Self {
+    pub(in crate::plugins) fn new(project_root: &'a Path) -> Self {
         Self {
             visited: FxHashSet::default(),
             project_root,
@@ -26,9 +29,14 @@ impl<'a> ExtendsWalk<'a> {
         }
     }
 
+    /// The analysis root of the walk.
+    pub(in crate::plugins) fn project_root(&self) -> &'a Path {
+        self.project_root
+    }
+
     /// The directory of the workspace package `name`, if the project declares
     /// one with that name.
-    pub(super) fn workspace_package_dir(&mut self, name: &str) -> Option<PathBuf> {
+    pub(in crate::plugins) fn workspace_package_dir(&mut self, name: &str) -> Option<PathBuf> {
         let project_root = self.project_root;
         self.workspaces
             .get_or_insert_with(|| workspace_index(project_root))
@@ -94,8 +102,9 @@ fn modified(path: &Path) -> Option<SystemTime> {
 }
 
 /// Workspace discovery reads every workspace manifest, and a project can have
-/// one `ESLint` config per package. One index per project root, rebuilt when
-/// a stamp changes, keeps the cost to one discovery per analysis run.
+/// one `ESLint` or Stylelint config per package. One index per project root,
+/// rebuilt when a stamp changes, keeps the cost to one discovery per analysis
+/// run.
 static WORKSPACE_INDEXES: LazyLock<Mutex<FxHashMap<PathBuf, Arc<WorkspaceIndex>>>> =
     LazyLock::new(Mutex::default);
 
@@ -114,6 +123,54 @@ fn workspace_index(project_root: &Path) -> Arc<WorkspaceIndex> {
         .unwrap_or_else(PoisonError::into_inner)
         .insert(project_root.to_path_buf(), Arc::clone(&index));
     index
+}
+
+/// The directory of a package that a config names: the `node_modules` entry
+/// that Node finds from `config_dir`, or the workspace package of that name.
+pub(in crate::plugins) fn workspace_package_dir(
+    config_dir: &Path,
+    pkg_name: &str,
+    walk: &mut ExtendsWalk<'_>,
+) -> Option<PathBuf> {
+    find_package_dir(config_dir, pkg_name).or_else(|| walk.workspace_package_dir(pkg_name))
+}
+
+/// The file that `require` loads for `subpath` (empty or `/<path>`) of the
+/// package in `pkg_dir`, when that file is a project file. A file under
+/// `node_modules` gives `None`. The returned path uses the spelling of
+/// `root`, so it matches the discovered file.
+pub(in crate::plugins) fn workspace_package_file(
+    pkg_dir: &Path,
+    subpath: &str,
+    root: &Path,
+) -> Option<PathBuf> {
+    let pkg_json_str = std::fs::read_to_string(pkg_dir.join("package.json")).ok()?;
+    let pkg_json: serde_json::Value = serde_json::from_str(&pkg_json_str).ok()?;
+    let subpath_key = format!(".{subpath}");
+    let entry_rel = required_main_entry(&pkg_json, &subpath_key)
+        .or_else(|| resolve_package_entry(&pkg_json, &subpath_key, pkg_dir))?;
+    let entry = dunce::canonicalize(pkg_dir.join(entry_rel)).ok()?;
+    let (ancestor, rel) = root.ancestors().find_map(|ancestor| {
+        let canonical = dunce::canonicalize(ancestor).ok()?;
+        let rel = entry.strip_prefix(&canonical).ok()?.to_path_buf();
+        Some((ancestor, rel))
+    })?;
+    if rel
+        .components()
+        .any(|component| component.as_os_str() == "node_modules")
+    {
+        return None;
+    }
+    Some(ancestor.join(rel))
+}
+
+/// The `main` entry that `require` loads for a package without `exports`.
+/// The config loaders use `require`, so `module` does not apply.
+fn required_main_entry(pkg_json: &serde_json::Value, subpath_key: &str) -> Option<String> {
+    if subpath_key != "." || pkg_json.get("exports").is_some_and(|e| !e.is_null()) {
+        return None;
+    }
+    pkg_json.get("main")?.as_str().map(str::to_string)
 }
 
 #[cfg(test)]

@@ -1,0 +1,13 @@
+{
+  "name": "docs",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "devDependencies": {
+    "@acme/config-stylelint": "workspace:*",
+    "postcss-example-markdown": "^1.0.0",
+    "stylelint": "^16.0.0",
+    "unused-docs-control": "^1.0.0"
+  }
+}
