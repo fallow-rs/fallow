@@ -271,6 +271,70 @@ assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow" "instal
 OUT=$(INPUT_ROOT="$INSTALL_TMP/empty" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
 assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow" "install: no package spec falls back to latest"
 
+# A pnpm catalog spec installs the catalog entry, not the latest release.
+mkdir -p "$INSTALL_TMP/catalog-default" "$INSTALL_TMP/catalog-named/packages/app" "$INSTALL_TMP/catalog-missing"
+cat > "$INSTALL_TMP/catalog-default/package.json" <<'JSON'
+{"devDependencies":{"fallow":"catalog:"}}
+JSON
+cat > "$INSTALL_TMP/catalog-default/pnpm-workspace.yaml" <<'YAML'
+packages:
+  - "packages/*"
+catalog:
+  react: ^19.0.0
+  fallow: 3.31.0 # pinned for CI
+catalogs:
+  tools:
+    fallow: 2.0.0
+YAML
+cat > "$INSTALL_TMP/catalog-named/packages/app/package.json" <<'JSON'
+{"devDependencies":{"fallow":"catalog:tools"}}
+JSON
+cat > "$INSTALL_TMP/catalog-named/pnpm-workspace.yaml" <<'YAML'
+catalog:
+  fallow: 1.0.0
+catalogs:
+  tools:
+    "fallow": "^3.30.0"
+YAML
+cat > "$INSTALL_TMP/catalog-missing/package.json" <<'JSON'
+{"devDependencies":{"fallow":"catalog:tools"}}
+JSON
+cat > "$INSTALL_TMP/catalog-missing/pnpm-workspace.yaml" <<'YAML'
+catalog:
+  fallow: 3.31.0
+YAML
+
+mkdir -p "$INSTALL_TMP/catalog-bun/packages/app" "$INSTALL_TMP/catalog-bun-workspaces"
+cat > "$INSTALL_TMP/catalog-bun/package.json" <<'JSON'
+{"workspaces":["packages/*"],"catalog":{"fallow":"3.34.1"},"devDependencies":{"fallow":"catalog:"}}
+JSON
+cat > "$INSTALL_TMP/catalog-bun/packages/app/package.json" <<'JSON'
+{"devDependencies":{"fallow":"catalog:"}}
+JSON
+cat > "$INSTALL_TMP/catalog-bun-workspaces/package.json" <<'JSON'
+{"workspaces":{"packages":["packages/*"],"catalogs":{"tools":{"fallow":"~3.33.0"}}},"devDependencies":{"fallow":"catalog:tools"}}
+JSON
+
+OUT=$(INPUT_ROOT="$INSTALL_TMP/catalog-default" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "Using fallow version from catalog 'default': 3.31.0" "install: names the default pnpm catalog"
+assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow@3.31.0" "install: installs the default pnpm catalog entry"
+
+OUT=$(INPUT_ROOT="$INSTALL_TMP/catalog-named/packages/app" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow@^3.30.0" "install: installs a named pnpm catalog entry from the workspace root"
+
+OUT=$(INPUT_ROOT="$INSTALL_TMP/catalog-missing" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "from the catalog 'tools' in pnpm-workspace.yaml or the workspace root package.json. Set the action 'version' input" "install: warns on an unresolvable pnpm catalog"
+assert_not_contains "$OUT" "fallow@3.31.0" "install: an unresolvable named catalog does not read the default catalog"
+
+OUT=$(INPUT_ROOT="$INSTALL_TMP/catalog-bun/packages/app" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow@3.34.1" "install: installs a Bun catalog entry from the root package.json"
+
+OUT=$(INPUT_ROOT="$INSTALL_TMP/catalog-bun-workspaces" FALLOW_VERSION="" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow@~3.33.0" "install: installs a named Bun catalog entry under workspaces"
+
+OUT=$(INPUT_ROOT="$INSTALL_TMP/catalog-default" FALLOW_VERSION="3.40.0" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
+assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow@3.40.0" "install: the version input wins over a pnpm catalog"
+
 OUT=$(INPUT_ROOT="$INSTALL_TMP/empty" FALLOW_VERSION="file:../fallow" FALLOW_INSTALL_DRY_RUN=true bash "$DIR/../scripts/install.sh" 2>&1)
 cmd_status=$?
 if [ "$cmd_status" -ne 0 ]; then

@@ -64,6 +64,91 @@ for (const section of ["dependencies", "devDependencies", "optionalDependencies"
 NODE
 }
 
+# Print the fallow entry of the catalog that a `catalog:` or `catalog:<name>`
+# spec refers to. The script walks up from the action root to the first
+# directory with a catalog file: a pnpm-workspace.yaml (pnpm), or a
+# package.json with `catalog`, `catalogs` or `workspaces.catalog(s)` (Bun).
+# It prints nothing when the file, the catalog or the entry is missing. The
+# YAML parser reads only block mappings, which is the form that pnpm writes
+# and documents.
+catalog_fallow_spec() {
+  node - "$1" "$2" <<'NODE'
+const fs = require("node:fs");
+const path = require("node:path");
+const [start, catalog] = process.argv.slice(2);
+const unquote = (text) => text.trim().replace(/^(["'])(.*)\1$/, "$2");
+const stripComment = (text) => text.replace(/\s+#.*$/, "");
+// The default catalog is `catalog` or `catalogs.default`. A named catalog is
+// `catalogs.<name>`.
+const tables = catalog === "default" ? [["catalog"], ["catalogs", "default"]] : [["catalogs", catalog]];
+
+const fromYaml = (file) => {
+  const lines = fs.readFileSync(file, "utf8").split(/\r?\n/);
+  for (const table of tables) {
+    const want = [...table, "fallow"];
+    const stack = [];
+    for (const raw of lines) {
+      const line = stripComment(raw);
+      if (!line.trim() || line.trim().startsWith("#")) continue;
+      const match = /^(\s*)(?:"([^"]+)"|'([^']+)'|([^\s:][^:]*?))\s*:(?:\s+(.*))?$/.exec(line);
+      if (!match) continue;
+      const indent = match[1].length;
+      const key = match[2] ?? match[3] ?? match[4];
+      while (stack.length && stack[stack.length - 1].indent >= indent) stack.pop();
+      stack.push({ indent, key });
+      const value = match[5] === undefined ? "" : unquote(match[5]);
+      if (value && stack.length === want.length && stack.every((entry, index) => entry.key === want[index])) {
+        return value;
+      }
+    }
+  }
+  return "";
+};
+
+// Bun reads a catalog from the root package.json, at the top level or under
+// an object-form `workspaces`.
+const bunCatalogHolders = (pkg) =>
+  [pkg, pkg?.workspaces].filter(
+    (holder) => holder && typeof holder === "object" && !Array.isArray(holder) && (holder.catalog || holder.catalogs),
+  );
+
+const fromPackageJson = (holders) => {
+  for (const holder of holders) {
+    for (const table of tables) {
+      const entry = table.reduce((node, key) => node?.[key], holder)?.fallow;
+      if (typeof entry === "string" && entry.trim()) return entry.trim();
+    }
+  }
+  return "";
+};
+
+let dir = path.resolve(start);
+for (;;) {
+  const yaml = path.join(dir, "pnpm-workspace.yaml");
+  if (fs.existsSync(yaml)) {
+    console.log(fromYaml(yaml));
+    process.exit(0);
+  }
+  const manifest = path.join(dir, "package.json");
+  if (fs.existsSync(manifest)) {
+    let holders = [];
+    try {
+      holders = bunCatalogHolders(JSON.parse(fs.readFileSync(manifest, "utf8")));
+    } catch {
+      holders = [];
+    }
+    if (holders.length) {
+      console.log(fromPackageJson(holders));
+      process.exit(0);
+    }
+  }
+  const parent = path.dirname(dir);
+  if (parent === dir) process.exit(0);
+  dir = parent;
+}
+NODE
+}
+
 # True when the resolved fallow config enables type-aware analysis. Mirrors
 # the CLI's first-match-wins config discovery (.fallowrc.json > .fallowrc.jsonc
 # > fallow.toml > .fallow.toml) and respects an explicit config path. The
@@ -159,6 +244,22 @@ if [ -n "$requested_version" ]; then
   install_spec="$requested_version"
   version_source="the action 'version' input"
   echo "::notice::Using fallow version from action input: $(escape_command_data "$install_spec")"
+elif [[ "$project_spec" =~ ^catalog:(.*)$ ]]; then
+  # pnpm and Bun replace a catalog spec with the catalog entry, so the action
+  # installs that entry. A move to latest skips the pin and the release-age gate.
+  catalog_name="$(trim "${BASH_REMATCH[1]}")"
+  catalog_name="${catalog_name:-default}"
+  catalog_spec="$(catalog_fallow_spec "$root" "$catalog_name" 2>/dev/null || true)"
+  catalog_spec="$(trim "$catalog_spec")"
+  if [ -n "$catalog_spec" ] && is_safe_version_spec "$catalog_spec"; then
+    install_spec="$catalog_spec"
+    version_source="the fallow entry of the catalog '${catalog_name}'"
+    echo "::notice::Using fallow version from $(escape_command_data "catalog '${catalog_name}': ${install_spec}")"
+  else
+    echo "::warning::Cannot resolve the fallow package.json spec '$(escape_command_data "$project_spec")' from the catalog '$(escape_command_data "$catalog_name")' in pnpm-workspace.yaml or the workspace root package.json. Set the action 'version' input to pin fallow. The action installs the latest release."
+    install_spec="latest"
+    version_source="the latest published release"
+  fi
 elif [ -n "$project_spec" ]; then
   if is_safe_version_spec "$project_spec"; then
     install_spec="$project_spec"
@@ -264,7 +365,8 @@ else
   # as tampering). Add the locate-the-knob context: which version was installed
   # and from where, since the Action ref is a different knob from the CLI
   # version. Neutral wording so it stays correct for both failure causes.
-  echo "::error::Verification ran against fallow ${installed_fallow_version}, installed from ${version_source}. The Action ref (${GITHUB_ACTION_REF:-see your workflow}) selects the Action code, not the CLI version. Apply the recommended fix in the verification error above."
+  # version_source can hold a catalog name from package.json, so escape it.
+  echo "::error::Verification ran against fallow $(escape_command_data "$installed_fallow_version"), installed from $(escape_command_data "$version_source"). The Action ref ($(escape_command_data "${GITHUB_ACTION_REF:-see your workflow}")) selects the Action code, not the CLI version. Apply the recommended fix in the verification error above."
   exit "$verify_status"
 fi
 
