@@ -142,7 +142,7 @@ pub mod inventory {
 pub(crate) fn parse_all_files(
     files: &[DiscoveredFile],
     cache: Option<&CacheStore>,
-    need_complexity: bool,
+    needs: fallow_extract::ParseNeeds,
     cancellation: Option<&AtomicBool>,
     flag_patterns: &fallow_types::extract::FlagPatterns,
     mode: fallow_types::shared_state::ExtractionMode,
@@ -150,7 +150,7 @@ pub(crate) fn parse_all_files(
     fallow_extract::parse_all_files_with_mode(
         files,
         cache,
-        need_complexity,
+        needs,
         cancellation,
         flag_patterns,
         mode,

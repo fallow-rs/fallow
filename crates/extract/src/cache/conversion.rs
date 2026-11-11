@@ -36,13 +36,18 @@ use super::types::{
     IMPORT_KIND_SIDE_EFFECT,
 };
 
-/// Reconstruct a [`ModuleInfo`](crate::ModuleInfo) from a [`CachedModule`].
+/// Reconstruct a [`ModuleInfo`](crate::ModuleInfo) from a [`CachedModule`],
+/// with its complexity and its call facts.
+///
+/// An entry that holds no usable call facts gives `function_contracts: None`,
+/// the same as a module with no facts. A parse that must have the facts uses
+/// [`cached_hit_to_module`], which treats such an entry as a miss.
 #[must_use]
 pub fn cached_to_module(
     cached: &CachedModule,
     file_id: fallow_types::discover::FileId,
 ) -> crate::ModuleInfo {
-    cached_to_module_opts(cached, file_id, true)
+    cached_to_module_opts(cached, file_id, true, true)
 }
 
 fn cached_exports_to_module(exports: &[CachedExport]) -> Vec<crate::ExportInfo> {
@@ -484,6 +489,10 @@ fn cached_opt_to_arc<T: Clone>(cached: Option<&[T]>) -> Arc<[T]> {
 /// the per-function complexity vec when `need_complexity` is `false`. Avoids the
 /// `Vec<FunctionComplexity>` clone on warm runs of commands (e.g. `fallow dead-code`)
 /// that don't consume complexity, which adds up across tens of thousands of files.
+///
+/// The call facts are decoded only when `need_call_facts` is `true`. Otherwise
+/// `function_contracts` stays `None`, so a run that reads no call facts does
+/// not pay their decode.
 #[must_use]
 #[expect(
     clippy::too_many_lines,
@@ -493,6 +502,7 @@ pub fn cached_to_module_opts(
     cached: &CachedModule,
     file_id: fallow_types::discover::FileId,
     need_complexity: bool,
+    need_call_facts: bool,
 ) -> crate::ModuleInfo {
     crate::ModuleInfo {
         file_id,
@@ -573,7 +583,10 @@ pub fn cached_to_module_opts(
         component_props: cached.component_props.clone(),
         component_contracts: cached.component_contracts.clone(),
         effect_facts: cached.effect_facts.clone(),
-        function_contracts: cached.function_contracts.clone(),
+        function_contracts: match need_call_facts.then(|| cached_call_facts(cached)) {
+            Some(CachedCallFacts::Usable(facts)) => facts,
+            Some(CachedCallFacts::Unusable) | None => None,
+        },
         has_props_attrs_fallthrough: cached.has_props_attrs_fallthrough,
         has_define_expose: cached.has_define_expose,
         has_define_model: cached.has_define_model,
@@ -612,13 +625,21 @@ pub fn cached_to_module_opts(
 /// The [`SourceFingerprint`](fallow_types::source_fingerprint::SourceFingerprint)
 /// comes from `std::fs::metadata()` at parse time and enables fast cache
 /// validation on subsequent runs.
+///
+/// `call_facts_extracted` is `true` when the run parsed the module with its
+/// call facts. Only then does the entry store them. A run that reads no call
+/// facts passes `false`, so it does not pay their encode, and the entry
+/// records that the facts are absent.
 #[must_use]
 pub fn module_to_cached(
     module: &crate::ModuleInfo,
     fingerprint: fallow_types::source_fingerprint::SourceFingerprint,
     complexity_extracted: bool,
+    call_facts_extracted: bool,
 ) -> CachedModule {
     let mut cached = module_to_cached_payload(module);
+    cached.call_facts =
+        call_facts_extracted.then(|| encode_call_facts(module.function_contracts.as_deref()));
     cached.mtime_ns = fingerprint.mtime_ns;
     cached.ctime_ns = fingerprint.ctime_ns;
     cached.file_size = fingerprint.file_size;
@@ -710,7 +731,7 @@ fn module_to_cached_payload(module: &crate::ModuleInfo) -> CachedModule {
         component_props: module.component_props.clone(),
         component_contracts: module.component_contracts.clone(),
         effect_facts: module.effect_facts.clone(),
-        function_contracts: module.function_contracts.clone(),
+        call_facts: None,
         has_props_attrs_fallthrough: module.has_props_attrs_fallthrough,
         has_define_expose: module.has_define_expose,
         has_define_model: module.has_define_model,
@@ -755,7 +776,66 @@ pub fn module_to_cached_from_parts(
         module,
         fallow_types::source_fingerprint::SourceFingerprint::new(mtime_ns, file_size),
         !module.complexity.is_empty(),
+        true,
     )
+}
+
+/// Encode the call facts of a module as the blob of its cache entry. A module
+/// with no call facts gets an empty blob.
+fn encode_call_facts(facts: Option<&fallow_types::extract::FunctionContractFacts>) -> Box<[u8]> {
+    facts.map_or_else(Box::default, |facts| {
+        bitcode::encode(facts).into_boxed_slice()
+    })
+}
+
+/// Reconstruct a [`ModuleInfo`](crate::ModuleInfo) for a cache hit.
+///
+/// Returns `None` when `need_call_facts` is `true` and the entry cannot give
+/// the call facts: the run that wrote it did not record them, or the blob
+/// does not decode. The caller then parses the file again, so a run that
+/// reads call facts never sees a module whose facts are missing.
+#[must_use]
+pub fn cached_hit_to_module(
+    cached: &CachedModule,
+    file_id: fallow_types::discover::FileId,
+    need_complexity: bool,
+    need_call_facts: bool,
+) -> Option<crate::ModuleInfo> {
+    let facts = if need_call_facts {
+        match cached_call_facts(cached) {
+            CachedCallFacts::Usable(facts) => facts,
+            CachedCallFacts::Unusable => return None,
+        }
+    } else {
+        None
+    };
+    let mut module = cached_to_module_opts(cached, file_id, need_complexity, false);
+    module.function_contracts = facts;
+    Some(module)
+}
+
+/// The call facts of a cache entry.
+enum CachedCallFacts {
+    /// The facts of the module. `None` means that the module has none.
+    Usable(Option<Box<fallow_types::extract::FunctionContractFacts>>),
+    /// The writer did not record the facts, or the blob does not decode.
+    Unusable,
+}
+
+fn cached_call_facts(cached: &CachedModule) -> CachedCallFacts {
+    let Some(blob) = cached.call_facts.as_deref() else {
+        return CachedCallFacts::Unusable;
+    };
+    if blob.is_empty() {
+        return CachedCallFacts::Usable(None);
+    }
+    match bitcode::decode(blob) {
+        Ok(facts) => CachedCallFacts::Usable(Some(Box::new(facts))),
+        Err(_) => {
+            tracing::warn!("Cached call facts could not be decoded, parsing the file again");
+            CachedCallFacts::Unusable
+        }
+    }
 }
 
 fn cached_semantic_facts(

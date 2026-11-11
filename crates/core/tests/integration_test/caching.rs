@@ -66,6 +66,7 @@ fn warm_metadata_cache_reports_source_that_becomes_unreadable() {
             cold.modules.first().expect("cold parse produces module"),
             SourceFingerprint::from_metadata(&metadata),
             false,
+            true,
         ),
     );
 
@@ -158,6 +159,7 @@ fn warm_metadata_cache_misses_an_equal_length_rewrite_with_a_restored_mtime() {
             cold.modules.first().expect("cold parse produces module"),
             SourceFingerprint::from_metadata(&metadata),
             false,
+            true,
         ),
     );
 
@@ -266,7 +268,7 @@ fn cache_roundtrip() {
         component_props: Vec::new(),
         component_contracts: None,
         effect_facts: None,
-        function_contracts: None,
+        call_facts: Some(Box::default()),
         has_props_attrs_fallthrough: false,
         has_define_expose: false,
         has_define_model: false,
@@ -414,6 +416,7 @@ fn incremental_with_cache_all_hits() {
                     module,
                     fallow_types::source_fingerprint::SourceFingerprint::new(0, 0),
                     false,
+                    true,
                 ),
             );
         }
@@ -441,6 +444,7 @@ fn incremental_results_identical() {
                     module,
                     fallow_types::source_fingerprint::SourceFingerprint::new(0, 0),
                     false,
+                    true,
                 ),
             );
         }
@@ -555,7 +559,7 @@ fn incremental_cache_prune_stale_entries() {
         component_props: Vec::new(),
         component_contracts: None,
         effect_facts: None,
-        function_contracts: None,
+        call_facts: Some(Box::default()),
         has_props_attrs_fallthrough: false,
         has_define_expose: false,
         has_define_model: false,
@@ -710,6 +714,7 @@ fn retain_paths_keeps_entries_for_files_that_still_exist() {
                 &module,
                 fallow_types::source_fingerprint::SourceFingerprint::new(0, 0),
                 false,
+                true,
             ),
         );
     }
