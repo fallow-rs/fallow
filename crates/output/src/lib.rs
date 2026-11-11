@@ -420,11 +420,13 @@ pub use root_envelopes::{
     serialize_combined_json_output, serialize_json_root_output, serialize_named_json_output,
 };
 pub use sarif::{
-    GHAS_SARIF_FINGERPRINT_KEY, SARIF_FINDING_ID_KEY, SARIF_FINGERPRINT_KEY, SarifDocumentInput,
-    SarifFindingFields, SarifFindingInput, SarifResultInput, SarifRuleInput,
+    GHAS_SARIF_FINGERPRINT_KEY, SARIF_CATEGORY_AUDIT_DEAD_CODE, SARIF_CATEGORY_AUDIT_DIFF_RISK,
+    SARIF_CATEGORY_AUDIT_DUPES, SARIF_CATEGORY_AUDIT_HEALTH, SARIF_CATEGORY_DEAD_CODE,
+    SARIF_CATEGORY_DUPES, SARIF_CATEGORY_HEALTH, SARIF_FINDING_ID_KEY, SARIF_FINGERPRINT_KEY,
+    SarifDocumentInput, SarifFindingFields, SarifFindingInput, SarifResultInput, SarifRuleInput,
     SarifSourceSnippetCache, append_sarif_findings, build_sarif_document, build_sarif_result,
     build_sarif_result_with_snippet, build_sarif_rule, ensure_unique_result_fingerprints,
-    sarif_finding_fingerprint,
+    extend_sarif_runs_with_category, sarif_finding_fingerprint,
 };
 pub use saved_health::health_report_from_saved_value;
 pub use security::{

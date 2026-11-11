@@ -1522,9 +1522,11 @@ fn print_combined_sarif(
             report::api_sarif_document(&result.results, &result.config.root, &result.config.rules);
         report::sarif::annotate_type_aware_sarif(&mut sarif, result.type_aware_meta.as_ref());
         report::sarif::annotate_config_pattern_sarif(&mut sarif, &result.workspace_diagnostics);
-        if let Some(runs) = sarif.get("runs").and_then(|r| r.as_array()) {
-            all_runs.extend(runs.iter().cloned());
-        }
+        fallow_output::extend_sarif_runs_with_category(
+            &mut all_runs,
+            &sarif,
+            fallow_output::SARIF_CATEGORY_DEAD_CODE,
+        );
     }
 
     if let Some(result) = dupes.filter(|r| !r.report.clone_groups.is_empty()) {
@@ -1536,7 +1538,7 @@ fn print_combined_sarif(
                     "informationUri": "https://github.com/fallow-rs/fallow",
                 }
             },
-            "automationDetails": { "id": "fallow/dupes" },
+            "automationDetails": { "id": fallow_output::SARIF_CATEGORY_DUPES },
             "results": result.report.clone_groups.iter().enumerate().map(|(i, g)| {
                 serde_json::json!({
                     "ruleId": "fallow/code-duplication",
@@ -1550,9 +1552,11 @@ fn print_combined_sarif(
 
     if let Some(result) = health {
         let sarif = report::api_health_sarif_document(&result.report, &result.config.root);
-        if let Some(runs) = sarif.get("runs").and_then(|r| r.as_array()) {
-            all_runs.extend(runs.iter().cloned());
-        }
+        fallow_output::extend_sarif_runs_with_category(
+            &mut all_runs,
+            &sarif,
+            fallow_output::SARIF_CATEGORY_HEALTH,
+        );
     }
 
     let combined = serde_json::json!({
