@@ -192,13 +192,33 @@ fn render_pr_comment_with_mutation(
         mutation.map(|view| render_mutation_section(view, MutationHeading::Comment)),
         crate::report::config_pattern_text::markdown_section(status.config_patterns),
     );
-    let mut body =
-        render_pr_comment_body(command, provider, issues, conclusion, section.as_deref());
+    let heading = heading_conclusion(conclusion, status.gates);
+    let mut body = render_pr_comment_body(command, provider, issues, heading, section.as_deref());
     if let Some(message) = status.message {
         body.push_str("\n\n> ");
         body.push_str(message);
     }
     body
+}
+
+/// The conclusion that the comment heading states.
+///
+/// A gate row is `Failure` only when the run enforced that gate and it failed,
+/// so the CLI exited non-zero. The diff filter can drop every finding from the
+/// body of such a run. Without this fold, the heading then says "Quality gate
+/// passed" while the check of that run is red. Only the heading reads this
+/// value: the check-run conclusion stays the caller's.
+fn heading_conclusion(
+    conclusion: Option<PrDecisionConclusion>,
+    gates: &[PrDecisionGate],
+) -> Option<PrDecisionConclusion> {
+    if gates
+        .iter()
+        .any(|gate| gate.status == PrDecisionConclusion::Failure)
+    {
+        return Some(PrDecisionConclusion::Failure);
+    }
+    conclusion
 }
 
 /// Map a fallow rule id to its category for sticky-comment grouping.
@@ -785,6 +805,59 @@ mod tests {
         assert_eq!(decision.gates[0].id, "dead-code");
         assert_eq!(decision.gates[1].id, "stale-baseline");
         assert_eq!(decision.gates[1].scope, "this run");
+    }
+
+    fn gate_row(status: PrDecisionConclusion) -> PrDecisionGate {
+        PrDecisionGate {
+            id: "error-severity-findings".to_owned(),
+            label: "Error-severity findings".to_owned(),
+            status,
+            observed: "1".to_owned(),
+            threshold: None,
+            scope: "this run".to_owned(),
+        }
+    }
+
+    #[test]
+    fn a_failed_enforced_gate_sets_the_heading_without_a_surviving_finding() {
+        let issues: Vec<CiIssue> = Vec::new();
+        let gates = [gate_row(PrDecisionConclusion::Failure)];
+        let body = render_pr_comment_with_mutation(
+            "dead-code",
+            Provider::Github,
+            &issues,
+            Some(PrDecisionConclusion::Success),
+            PrCommentStatus {
+                message: None,
+                gates: &gates,
+                config_patterns: &[],
+            },
+            None,
+        );
+        assert!(body.contains("**Quality gate failed**"), "{body}");
+        assert!(
+            body.contains("No findings for this pull request."),
+            "{body}"
+        );
+    }
+
+    #[test]
+    fn an_unenforced_gate_failure_leaves_the_heading_alone() {
+        let issues: Vec<CiIssue> = Vec::new();
+        let gates = [gate_row(PrDecisionConclusion::Neutral)];
+        let body = render_pr_comment_with_mutation(
+            "dead-code",
+            Provider::Github,
+            &issues,
+            None,
+            PrCommentStatus {
+                message: None,
+                gates: &gates,
+                config_patterns: &[],
+            },
+            None,
+        );
+        assert!(body.contains("**Quality gate passed**"), "{body}");
     }
 
     #[test]
