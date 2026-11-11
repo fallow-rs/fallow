@@ -22,7 +22,8 @@ creates, moves, or publishes Git tags or GitHub Releases.
 | `publish-crates` | Publish prevalidated crates in dependency order | crates.io OIDC |
 | `npm-prep` | Install, assemble, and pack npm artifacts | Read only |
 | `npm-publish` | Publish downloaded tarballs and stage the `fallow` root | npm OIDC, stage-only for `fallow` |
-| `npm-root-approved` | Wait until the maintainer-approved `fallow` root is public with the staged bytes, for both VSIX publishers and `release-ready` | Read only |
+| `npm-root-approved` | Wait until the maintainer-approved `fallow` root is public with the staged bytes, for both VSIX publishers, `mcp-registry-publish`, and `release-ready` | Read only |
+| `mcp-registry-publish` | Publish `server.json` to the MCP Registry with the pinned `mcp-publisher` | MCP Registry GitHub OIDC |
 | `vscode-prep` | Build seven VSIX targets plus their inventory and checksums | Read only |
 | `vscode-host-smoke` | Run the exact prepared x64 target VSIX on Linux, Windows, and macOS with matching release binaries | Read only |
 | `vscode-publish-marketplace` | Check the approved `fallow` root again, then publish the closed VSIX set to Visual Studio Marketplace | VSCE PAT or Marketplace OIDC |
@@ -220,8 +221,8 @@ and [federated app credentials](https://learn.microsoft.com/en-us/entra/workload
 ## Invariants
 
 - Run every credential-bearing job in the `release` environment: `sign`
-  (binary signing key), `publish-crates`, `npm-publish`, and both VSIX
-  publisher jobs. Its deployment branch policy admits `main` only. The ref
+  (binary signing key), `publish-crates`, `npm-publish`, both VSIX
+  publisher jobs, and `mcp-registry-publish`. Its deployment branch policy admits `main` only. The ref
   check in `release-context` is part of the workflow file, so it stops a
   mistaken dispatch but not an edited copy of the workflow on another ref; the
   environment is enforced by GitHub outside the file.
@@ -350,6 +351,26 @@ and [federated app credentials](https://learn.microsoft.com/en-us/entra/workload
   Log at most one warning per pass naming the failed targets, emit the error
   annotation once per target that never landed and only after the last pass,
   and do not branch on registry error text.
+- Publish `server.json` to the MCP Registry only in `mcp-registry-publish`.
+  The registry reads the public npm package of the version and requires its
+  `mcpName` to match `server.json`, so the job needs `npm-root-approved`.
+  It checks out only `server.json` and installs no dependencies. It
+  downloads an exact `mcp-publisher` release and checks its sha256 before
+  extraction. Change `MCP_PUBLISHER_VERSION` and `MCP_PUBLISHER_SHA256`
+  together, from the `registry_<version>_checksums.txt` file of that release.
+- Log in to the MCP Registry with `mcp-publisher login github-oidc` only.
+  The job has `id-token: write` and no secret. The registry grants
+  `io.github.fallow-rs/*` to an OIDC token from any repository of the
+  `fallow-rs` owner. It does not check the workflow or the environment.
+  Thus the `release` environment protects this workflow, but not the
+  namespace against another repository of the owner.
+- Keep the MCP Registry publication safe to rerun. The registry refuses a
+  version that exists. The job reads the version entry before the login.
+  An entry with the `fallow` npm package at the release version is success.
+  After a failed publish, the job reads the entry again, so a parallel
+  publish of the same version also passes. Every other answer fails the job.
+- Gate `release-ready` on `mcp-registry-publish`, so a failed publication
+  stops the signed tag until a rerun lists the version.
 - Gate `release-ready` directly on `vscode-public-verify`. The verifier has no
   registry credentials. It waits for the exact version and target tuples with
   bounded retries, downloads each exact registry asset, and compares its

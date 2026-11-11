@@ -1067,7 +1067,7 @@ test("release publication waits for the aggregate verification gate", () => {
   assert.doesNotMatch(vscodePublicVerify, /secrets\.|_PAT|npm install|pnpm install/u);
   assert.match(
     releaseReady,
-    /needs: \[publish-crates, npm-publish, npm-root-approved, vscode-public-verify, release-assets\]/,
+    /needs: \[publish-crates, npm-publish, npm-root-approved, mcp-registry-publish, vscode-public-verify, release-assets\]/,
   );
   assert.match(releaseReady, /permissions:\n\s+contents: read/);
   assert.match(releaseReady, /Release tag .* appeared before the release workflow completed/u);
@@ -1218,6 +1218,64 @@ test("release publishes no VSIX before the approved fallow root is public", () =
   assert.match(procedure, /Do this right after\s+`release-ready` without other work in between/u);
 });
 
+test("release publishes server.json to the MCP Registry after the approved root", () => {
+  const workflow = readWorkflow(".github/workflows/release.yml");
+  const job = indentedBlock(workflow, "mcp-registry-publish", 2);
+  const card = JSON.parse(readFileSync("server.json", "utf8"));
+  const security = readFileSync("docs/development/release-security.md", "utf8");
+  const procedure = readFileSync("docs/development/release-procedure.md", "utf8");
+  const steps = job.split(/^ {6}- /mu).slice(1);
+  const install = steps.find((step) => step.startsWith("name: Install the pinned mcp-publisher"));
+  const publish = steps.find((step) =>
+    step.startsWith("name: Publish server.json to the MCP Registry"),
+  );
+
+  // The registry reads the public npm package and requires its mcpName, so
+  // the job must start only after the approved fallow root is public.
+  assert.match(job, /^ {4}needs: npm-root-approved$/mu);
+  assert.match(job, /^ {4}environment: release$/mu);
+  assert.match(
+    job,
+    /permissions:\n(?:\s+#[^\n]*\n)*\s+contents: read\n(?:\s+#[^\n]*\n)*\s+id-token: write\n {4}env:/u,
+  );
+  assert.doesNotMatch(job, /secrets\.|^\s+(?!id-token:)[a-z-]+: write$|npm ci|npm install/mu);
+  assert.match(job, new RegExp(`MCP_SERVER_NAME: ${card.name.replace(/[./]/gu, "\\$&")}$`, "mu"));
+
+  // Only server.json comes from the repository, without a persisted token.
+  assert.match(job, /persist-credentials: false/u);
+  assert.match(job, /sparse-checkout: server\.json\n\s+sparse-checkout-cone-mode: false/u);
+
+  // The publisher is an exact release, pinned by its sha256 before extraction.
+  assert.match(job, /^ {6}MCP_PUBLISHER_VERSION: v\d+\.\d+\.\d+$/mu);
+  assert.match(job, /^ {6}MCP_PUBLISHER_SHA256: [0-9a-f]{64}$/mu);
+  assert.ok(install, "the job must install the pinned publisher");
+  assert.doesNotMatch(install, /releases\/latest/u);
+  assert.match(install, /releases\/download\/\$\{MCP_PUBLISHER_VERSION\}\//u);
+  assert.match(
+    install,
+    /"\$MCP_PUBLISHER_SHA256" "\$archive" \| sha256sum --check --strict\n[\s\S]*tar -xzf "\$archive"/u,
+    "the checksum check must run before the archive is extracted",
+  );
+
+  // A rerun is safe: a listed version is success, other answers fail.
+  assert.ok(publish, "the job must publish server.json");
+  const firstLookup = publish.indexOf("lookup || state=$?");
+  assert.ok(firstLookup !== -1 && firstLookup < publish.indexOf("login github-oidc"));
+  assert.match(publish, /already in the MCP Registry, skipping/u);
+  assert.match(publish, /"\$MCP_PUBLISHER" login github-oidc\n/u);
+  assert.match(publish, /"\$MCP_PUBLISHER" publish \|\| publish_status=\$\?/u);
+  assert.ok(publish.lastIndexOf("lookup || state=$?") > publish.indexOf("publish_status=$?"));
+  assert.match(publish, /404\) return 1/u);
+  assert.match(publish, /HTTP \$\{status\}/u);
+  assert.match(publish, /Rerun the failed job/u);
+
+  const releaseReady = indentedBlock(workflow, "release-ready", 2);
+  assert.match(releaseReady, /needs: \[[^\]]*\bmcp-registry-publish\b[^\]]*\]/u);
+  assert.match(security, /\| `mcp-registry-publish` \|/u);
+  assert.match(security, /MCP Registry/u);
+  assert.match(procedure, /Publish to the MCP Registry/u);
+});
+
 test("release procedure dispatches the identity checks only when an input changed", () => {
   const workflow = readWorkflow(".github/workflows/release.yml");
   const procedure = readFileSync("docs/development/release-procedure.md", "utf8");
@@ -1246,6 +1304,7 @@ test("release credential jobs run in the main-only release environment", () => {
   const procedure = readFileSync("docs/development/release-procedure.md", "utf8");
   const security = readFileSync("docs/development/release-security.md", "utf8");
   const credentialJobs = [
+    "mcp-registry-publish",
     "npm-publish",
     "publish-crates",
     "publisher-auth-check",
