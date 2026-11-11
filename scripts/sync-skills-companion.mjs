@@ -214,13 +214,14 @@ const resolvePin = (git, repoRoot, requested) => {
 
 /**
  * Check out the skills of the pin in a temp clone. The clone shares the
- * objects of the fallow repository, so it is fast and needs no network.
+ * objects of the fallow repository, so it is fast and needs no network. Cone
+ * mode also checks out `npm/fallow/package.json`, which pins the launchers.
  */
 const checkoutPin = (git, repoRoot, pin) => {
   const dir = mkdtempSync(join(tmpdir(), `${PREFIX}-`));
   try {
     git(dir, "clone", "--quiet", "--shared", "--no-checkout", repoRoot, dir);
-    git(dir, "sparse-checkout", "set", SKILLS_PATH);
+    git(dir, "sparse-checkout", "set", "--cone", SKILLS_PATH);
     git(dir, "-c", `core.hooksPath=${devNull}`, "checkout", "--quiet", "--detach", pin);
     return dir;
   } catch (caught) {

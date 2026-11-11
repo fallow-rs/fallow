@@ -6,9 +6,10 @@
  * repository.
  * Public consumer: `<fallow-skills>/fallow/skills/<name>/`.
  *
- * The public plugin strips unsupported `metadata` frontmatter from SKILL.md
- * and may add host interface files outside the source contract. References and
- * all remaining skill content stay byte-identical.
+ * The public plugin strips unsupported `metadata` frontmatter from SKILL.md,
+ * pins each download-and-run form of the fallow package (`npx fallow`) to the
+ * version of `npm/fallow/package.json`, and may add host interface files
+ * outside the source contract. All remaining skill content stays byte-identical.
  *
  * Usage:
  *   node scripts/vendor-skills.mjs
@@ -99,9 +100,60 @@ export const stripUnsupportedMetadata = (content) => {
   return lines.join("\n");
 };
 
+/**
+ * A download-and-run form of the fallow package without a version. `--no` and
+ * `--no-install` forms run an installed copy and download nothing.
+ */
+const LAUNCHER = /\b(npx(?: --yes| -y)?|pnpm dlx|bunx|yarn dlx) fallow(?![@\w./-])/gu;
+/** The same form with an exact version, as the published copy writes it. */
+const PINNED_LAUNCHER = /\b(npx(?: --yes| -y)?|pnpm dlx|bunx|yarn dlx) fallow@\d+\.\d+\.\d+(?![\w.-])/gu;
+const EXACT_VERSION = /^\d+\.\d+\.\d+$/u;
+
+/**
+ * Pins each download-and-run form of the fallow package to `version`. The
+ * Claude plugin directory refuses a plugin whose skill text runs an unpinned
+ * package, because the downloaded code can change after review.
+ */
+export const pinLaunchers = (content, version) => {
+  if (!EXACT_VERSION.test(version)) {
+    throw new Error(`launcher pin needs an exact fallow version, got ${version}`);
+  }
+  return content.replace(LAUNCHER, `$1 fallow@${version}`);
+};
+
+/**
+ * The text with each pinned launcher written without its version. The check
+ * compares this form, so a release that raises the package version does not
+ * make the published copy drift. The sync then writes the new version.
+ */
+const unpinLaunchers = (content) => content.replace(PINNED_LAUNCHER, "$1 fallow");
+
+const hasUnpinnedLauncher = (content) => {
+  LAUNCHER.lastIndex = 0;
+  return LAUNCHER.test(content);
+};
+
+/** The version of the npm package that ships the skill in `root` (`npm/fallow/skills/<name>`). */
+const packageVersion = (root) => {
+  const manifest = join(root, "..", "..", "package.json");
+  if (!existsSync(manifest)) {
+    throw new Error(`skill text runs fallow through a launcher, but ${manifest} is missing`);
+  }
+  return JSON.parse(readFileSync(manifest, "utf8")).version;
+};
+
+/** The skill file as the published copy writes it. */
 const sourceContent = (root, path) => {
   const content = readFileSync(join(root, path), "utf8");
-  return path === "SKILL.md" ? stripUnsupportedMetadata(content) : content;
+  const stripped = path === "SKILL.md" ? stripUnsupportedMetadata(content) : content;
+  return hasUnpinnedLauncher(stripped) ? pinLaunchers(stripped, packageVersion(root)) : stripped;
+};
+
+/** True when `published` is the source file with every launcher pinned to some exact version. */
+const matchesSource = (root, path, published) => {
+  const content = readFileSync(join(root, path), "utf8");
+  const stripped = path === "SKILL.md" ? stripUnsupportedMetadata(content) : content;
+  return !hasUnpinnedLauncher(published) && unpinLaunchers(published) === unpinLaunchers(stripped);
 };
 
 export const diffTrees = (canonical, published) => {
@@ -112,7 +164,7 @@ export const diffTrees = (canonical, published) => {
   const changed = [...canonicalFiles].filter(
     (path) =>
       publishedFiles.has(path) &&
-      sourceContent(canonical, path) !== readFileSync(join(published, path), "utf8"),
+      !matchesSource(canonical, path, readFileSync(join(published, path), "utf8")),
   );
   return { missing, extra, changed };
 };
