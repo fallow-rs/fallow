@@ -28,6 +28,7 @@ const MANIFESTS = [
   "fallow/.codex-plugin/plugin.json",
   "fallow/.claude-plugin/plugin.json",
   ".claude-plugin/marketplace.json",
+  "fallow/.cursor-plugin/plugin.json",
 ];
 
 // The temp repositories must not read the global or system git config of the
@@ -87,17 +88,20 @@ const manifestFiles = (versions) => ({
   [MANIFESTS[2]]:
     `{\n  "name": "fallow",\n  "metadata": {\n    "version": "${versions[2]}"\n  },\n` +
     `  "plugins": [\n    {\n      "name": "fallow",\n      "version": "${versions[3]}"\n    }\n  ]\n}\n`,
+  [MANIFESTS[3]]: `{\n  "name": "fallow",\n  "version": "${versions[4] ?? versions[0]}"\n}\n`,
 });
 
 const versionsOf = (skills) => {
   const codex = JSON.parse(readFileSync(join(skills, MANIFESTS[0]), "utf8"));
   const claude = JSON.parse(readFileSync(join(skills, MANIFESTS[1]), "utf8"));
   const marketplace = JSON.parse(readFileSync(join(skills, MANIFESTS[2]), "utf8"));
+  const cursor = JSON.parse(readFileSync(join(skills, MANIFESTS[3]), "utf8"));
   return [
     codex.version,
     claude.version,
     marketplace.metadata.version,
     marketplace.plugins[0].version,
+    cursor.version,
   ];
 };
 
@@ -107,7 +111,9 @@ const versionsOf = (skills) => {
  * SSH key, so `git commit -S` works without the keys of the person who runs
  * the tests.
  */
-const makeFixture = (versions = [OLD_VERSION, OLD_VERSION, OLD_VERSION, OLD_VERSION]) => {
+const makeFixture = (
+  versions = [OLD_VERSION, OLD_VERSION, OLD_VERSION, OLD_VERSION, OLD_VERSION],
+) => {
   const root = realpathSync(mkdtempSync(join(tmpdir(), "sync-skills-companion-")));
   const fallow = join(root, "fallow");
   const skills = join(root, "fallow-skills");
@@ -327,7 +333,13 @@ test(
 
     const skills = fixture.skills;
     assert.equal(readFileSync(join(skills, PUBLISHED_CLI_REFERENCE), "utf8"), "three\n");
-    assert.deepEqual(versionsOf(skills), [NEW_VERSION, NEW_VERSION, NEW_VERSION, NEW_VERSION]);
+    assert.deepEqual(versionsOf(skills), [
+      NEW_VERSION,
+      NEW_VERSION,
+      NEW_VERSION,
+      NEW_VERSION,
+      NEW_VERSION,
+    ]);
     const lock = JSON.parse(readFileSync(join(skills, "source-lock.json"), "utf8"));
     assert.equal(lock.commit, pin);
     assert.equal(lock.skills[0].sourceRoot, "npm/fallow/skills/fallow");
