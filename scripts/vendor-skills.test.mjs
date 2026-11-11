@@ -104,8 +104,14 @@ test("the vendored skill pins launchers to the version of its npm package", () =
   const published = makeTree({});
   const canonical = join(repo, "npm", "fallow", "skills", "fallow");
   assert.equal(runVendor(canonical, published), 0);
-  assert.match(readFileSync(join(published, "SKILL.md"), "utf8"), /`npx fallow@3\.42\.0 dead-code`/u);
-  assert.equal(readFileSync(join(published, "references/ci.md"), "utf8"), "run: npx fallow@3.42.0 audit\n");
+  assert.match(
+    readFileSync(join(published, "SKILL.md"), "utf8"),
+    /`npx fallow@3\.42\.0 dead-code`/u,
+  );
+  assert.equal(
+    readFileSync(join(published, "references/ci.md"), "utf8"),
+    "run: npx fallow@3.42.0 audit\n",
+  );
   assert.equal(runCheck(canonical, published, { renderDiffs: false }), 0);
   rmSync(repo, { recursive: true });
   rmSync(published, { recursive: true });
@@ -114,14 +120,22 @@ test("the vendored skill pins launchers to the version of its npm package", () =
 test("a release does not make a pinned copy drift, but an unpinned copy always drifts", () => {
   const repo = makeTree({
     "npm/fallow/package.json": JSON.stringify({ name: "fallow", version: "3.43.0" }),
-    "npm/fallow/skills/fallow/SKILL.md": "---\nname: fallow\n---\nRun `npx fallow dead-code` or `node fallow.js`.\n",
+    "npm/fallow/skills/fallow/SKILL.md":
+      "---\nname: fallow\n---\nRun `npx fallow dead-code` or `node fallow.js`.\n",
   });
   const canonical = join(repo, "npm", "fallow", "skills", "fallow");
-  const pinned = makeTree({ "SKILL.md": "---\nname: fallow\n---\nRun `npx fallow@3.42.0 dead-code` or `node fallow.js`.\n" });
-  const unpinned = makeTree({ "SKILL.md": "---\nname: fallow\n---\nRun `npx fallow dead-code` or `node fallow.js`.\n" });
+  const pinned = makeTree({
+    "SKILL.md": "---\nname: fallow\n---\nRun `npx fallow@3.42.0 dead-code` or `node fallow.js`.\n",
+  });
+  const unpinned = makeTree({
+    "SKILL.md": "---\nname: fallow\n---\nRun `npx fallow dead-code` or `node fallow.js`.\n",
+  });
   assert.equal(runCheck(canonical, pinned, { renderDiffs: false }), 0);
   assert.equal(runCheck(canonical, unpinned, { renderDiffs: false }), 1);
-  assert.equal(pinLaunchers("npx fallow.js and npx fallow/x", "3.42.0"), "npx fallow.js and npx fallow/x");
+  assert.equal(
+    pinLaunchers("npx fallow.js and npx fallow/x", "3.42.0"),
+    "npx fallow.js and npx fallow/x",
+  );
   for (const dir of [repo, pinned, unpinned]) {
     rmSync(dir, { recursive: true });
   }

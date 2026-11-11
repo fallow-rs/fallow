@@ -504,7 +504,10 @@ test("the sync rebuilds each companion build folder that exists", () => {
       "import pathlib, sys\npathlib.Path('claude-directory/built').write_text(' '.join(sys.argv[1:]))\n",
     );
     assert.deepEqual(runCompanionBuilds(companion, process.env, log), ["claude-directory"]);
-    assert.equal(readFileSync(join(companion, "claude-directory", "built"), "utf8"), "directory-bundle");
+    assert.equal(
+      readFileSync(join(companion, "claude-directory", "built"), "utf8"),
+      "directory-bundle",
+    );
   } finally {
     rmSync(companion, { recursive: true, force: true });
   }

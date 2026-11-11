@@ -314,20 +314,27 @@ const checkPrerequisites = (env, skipChecks) => {
  * folder that exists after it writes the skills and the version.
  */
 export const COMPANION_BUILDS = [
-  { path: "claude-directory", command: ["python3", "scripts/plugin_release.py", "directory-bundle"] },
+  {
+    path: "claude-directory",
+    command: ["python3", "scripts/plugin_release.py", "directory-bundle"],
+  },
 ];
 
 /** Rebuilds each companion build folder that exists, and returns the folders to stage. */
 export const runCompanionBuilds = (companion, env, log) =>
-  COMPANION_BUILDS.filter(({ path }) => existsSync(join(companion, path))).map(({ path, command }) => {
-    const [program, ...args] = command;
-    log(`${PREFIX}: build: ${command.join(" ")}`);
-    const result = spawnSync(program, args, { cwd: companion, env, stdio: "inherit" });
-    if (result.status !== 0) {
-      throw new Refusal(`the companion build failed: ${command.join(" ")}. Fix the cause in ${companion}.`);
-    }
-    return path;
-  });
+  COMPANION_BUILDS.filter(({ path }) => existsSync(join(companion, path))).map(
+    ({ path, command }) => {
+      const [program, ...args] = command;
+      log(`${PREFIX}: build: ${command.join(" ")}`);
+      const result = spawnSync(program, args, { cwd: companion, env, stdio: "inherit" });
+      if (result.status !== 0) {
+        throw new Refusal(
+          `the companion build failed: ${command.join(" ")}. Fix the cause in ${companion}.`,
+        );
+      }
+      return path;
+    },
+  );
 
 const runChecks = (companion, source, oldVersion, env, log) => {
   for (const [command, ...args] of COMPANION_CHECKS) {

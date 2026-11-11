@@ -106,7 +106,8 @@ export const stripUnsupportedMetadata = (content) => {
  */
 const LAUNCHER = /\b(npx(?: --yes| -y)?|pnpm dlx|bunx|yarn dlx) fallow(?![@\w./-])/gu;
 /** The same form with an exact version, as the published copy writes it. */
-const PINNED_LAUNCHER = /\b(npx(?: --yes| -y)?|pnpm dlx|bunx|yarn dlx) fallow@\d+\.\d+\.\d+(?![\w.-])/gu;
+const PINNED_LAUNCHER =
+  /\b(npx(?: --yes| -y)?|pnpm dlx|bunx|yarn dlx) fallow@\d+\.\d+\.\d+(?![\w.-])/gu;
 const EXACT_VERSION = /^\d+\.\d+\.\d+$/u;
 
 /**
