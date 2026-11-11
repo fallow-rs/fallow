@@ -1273,3 +1273,25 @@ fn a_self_call_that_passes_an_option_key_on_marks_it() {
         ]
     );
 }
+
+#[test]
+fn a_local_binding_of_a_script_block_is_unknown_after_the_merge() {
+    // Two script blocks of one host can each declare a `const` with the same
+    // name and another value.
+    let source = "<script lang=\"ts\">\nimport { f } from './f';\nimport { LIMIT } from './limits';\nconst SIZE = 1;\nf(SIZE, LIMIT);\n</script>\n<script setup lang=\"ts\">\nimport { f } from './f';\nconst SIZE = 2;\nf(SIZE);\n</script>\n<template><p /></template>";
+    let info = parse_at("view.vue", source);
+    let limits = info
+        .imports
+        .iter()
+        .position(|import| import.local_name == "LIMIT")
+        .and_then(|index| u32::try_from(index).ok())
+        .expect("LIMIT import");
+    let args = import_call_args(&info);
+    assert_eq!(
+        args,
+        vec![
+            vec![ArgFact::Unknown, import_binding(limits, "")],
+            vec![ArgFact::Unknown],
+        ]
+    );
+}

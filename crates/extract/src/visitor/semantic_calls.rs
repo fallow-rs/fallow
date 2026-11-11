@@ -2,8 +2,7 @@
 //! merge the call evidence across the script blocks of one host file.
 
 use fallow_types::extract::{
-    ArgFact, BindingArg, BindingRoot, CallTarget, FunctionContractFacts, ImportBindingReference,
-    KeyValue,
+    ArgFact, BindingRoot, CallTarget, FunctionContractFacts, ImportBindingReference, KeyValue,
 };
 use oxc_span::Span;
 use rustc_hash::FxHashSet;
@@ -60,7 +59,7 @@ impl ModuleInfoExtractor {
                     CallTarget::Local(index) => CallTarget::Local(index.saturating_add(local_base)),
                 };
                 for site in &mut calls.sites {
-                    shift_binding_imports(&mut site.args, import_base);
+                    merge_binding_args(&mut site.args, import_base);
                 }
                 calls
             }));
@@ -80,20 +79,28 @@ impl ModuleInfoExtractor {
     }
 }
 
-/// Move each import index of a binding argument past `import_base`.
-fn shift_binding_imports(args: &mut [ArgFact], import_base: u32) {
-    let shift = |binding: &mut BindingArg| {
-        if let BindingRoot::Import(index) = &mut binding.root {
-            *index = index.saturating_add(import_base);
-        }
-    };
+/// Move each import index of a binding argument past `import_base`, and
+/// make each local binding argument unknown.
+///
+/// Two script blocks of one host can each declare a `const` with the same
+/// name and another value, so the name no longer identifies one binding
+/// after the merge.
+fn merge_binding_args(args: &mut [ArgFact], import_base: u32) {
     for arg in args {
         match arg {
-            ArgFact::Binding(binding) => shift(binding),
+            ArgFact::Binding(binding) => match &mut binding.root {
+                BindingRoot::Import(index) => *index = index.saturating_add(import_base),
+                BindingRoot::Local => *arg = ArgFact::Unknown,
+            },
             ArgFact::Object(keys) => {
                 for key in keys {
                     if let KeyValue::Binding(binding) = &mut key.value {
-                        shift(binding);
+                        match &mut binding.root {
+                            BindingRoot::Import(index) => {
+                                *index = index.saturating_add(import_base);
+                            }
+                            BindingRoot::Local => key.value = KeyValue::Unknown,
+                        }
                     }
                 }
             }

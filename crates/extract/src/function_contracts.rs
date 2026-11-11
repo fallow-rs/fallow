@@ -466,11 +466,11 @@ fn pattern_written(scoping: &Scoping, pattern: &BindingPattern<'_>) -> bool {
 
 /// The recorded option keys of an object-pattern parameter.
 fn option_keys(scoping: &Scoping, param: &FormalParameter<'_>) -> Vec<OptionKeyFact> {
-    let Some(pattern) = object_pattern(&param.pattern) else {
+    let Some((pattern, pattern_default)) = object_pattern(&param.pattern) else {
         return Vec::new();
     };
     // A default other than `{}` can set a key that no caller passes.
-    if let Some(default) = &param.initializer
+    if let Some(default) = param.initializer.as_deref().or(pattern_default)
         && !matches!(
             unwrap_transparent(default),
             Expression::ObjectExpression(object) if object.properties.is_empty()
@@ -519,10 +519,17 @@ fn option_keys(scoping: &Scoping, param: &FormalParameter<'_>) -> Vec<OptionKeyF
     keys
 }
 
-fn object_pattern<'b, 'a>(pattern: &'b BindingPattern<'a>) -> Option<&'b ObjectPattern<'a>> {
+/// The object pattern of a parameter, with the default that an assignment
+/// pattern around it holds.
+fn object_pattern<'b, 'a>(
+    pattern: &'b BindingPattern<'a>,
+) -> Option<(&'b ObjectPattern<'a>, Option<&'b Expression<'a>>)> {
     match pattern {
-        BindingPattern::ObjectPattern(object) => Some(object),
-        BindingPattern::AssignmentPattern(assignment) => object_pattern(&assignment.left),
+        BindingPattern::ObjectPattern(object) => Some((object, None)),
+        BindingPattern::AssignmentPattern(assignment) => match &assignment.left {
+            BindingPattern::ObjectPattern(object) => Some((object, Some(&assignment.right))),
+            _ => None,
+        },
         _ => None,
     }
 }
