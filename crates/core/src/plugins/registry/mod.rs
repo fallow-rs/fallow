@@ -861,10 +861,14 @@ impl PluginRegistry {
         });
 
         process_package_json_inline_configs(
-            &active,
-            &config_matchers,
-            &relative_files,
-            root,
+            &InlineConfigInput {
+                active: &active,
+                config_matchers: &config_matchers,
+                relative_files: &relative_files,
+                pkg,
+                root,
+                project_root: root,
+            },
             &mut result,
             &mut regex_errors,
         );
@@ -880,7 +884,6 @@ impl PluginRegistry {
     ///
     /// Reuses pre-compiled config matchers and pre-computed relative files from the root
     /// project run, avoiding repeated glob compilation and path computation per workspace.
-    /// Skips package.json inline config (workspace packages rarely have inline configs).
     #[cfg(test)]
     fn run_workspace_fast(&self, input: &WorkspacePluginRunInput<'_>) -> AggregatedPluginResult {
         self.try_run_workspace_fast(input)
@@ -891,7 +894,8 @@ impl PluginRegistry {
     ///
     /// Reuses pre-compiled config matchers and pre-computed relative files from the root
     /// project run, avoiding repeated glob compilation and path computation per workspace.
-    /// Skips package.json inline config (workspace packages rarely have inline configs).
+    /// Reads the inline tool config of the workspace `package.json` for each active
+    /// plugin with a [`Plugin::package_json_config_key`] and no config file in the workspace.
     pub(crate) fn try_run_workspace_fast(
         &self,
         input: &WorkspacePluginRunInput<'_>,
@@ -952,6 +956,21 @@ impl PluginRegistry {
             &mut result,
         );
         resolve_workspace_plugin_configs(&active, input, &mut result, &mut regex_errors);
+        // The root run reads the root manifest already.
+        if input.root != input.project_root {
+            process_package_json_inline_configs(
+                &InlineConfigInput {
+                    active: &active,
+                    config_matchers: input.precompiled_config_matchers,
+                    relative_files: input.relative_files,
+                    pkg: input.pkg,
+                    root: input.root,
+                    project_root: input.project_root,
+                },
+                &mut result,
+                &mut regex_errors,
+            );
+        }
 
         if regex_errors.is_empty() {
             Ok(result)
@@ -1646,38 +1665,43 @@ fn emit_plugin_diagnostics(findings: &[PluginDiagnostic]) {
     }
 }
 
-/// Phase 4 of `PluginRegistry::run_with_search_roots`: for any active plugin
-/// that supports inline package.json configuration via
-/// [`Plugin::package_json_config_key`], read the root `package.json`, extract
-/// the relevant key, and feed the result through `resolve_config`.
+/// Phase 4 of `PluginRegistry::run_with_search_roots`, and the last phase of
+/// the workspace run: for any active plugin that supports inline package.json
+/// configuration via [`Plugin::package_json_config_key`] and has no config
+/// file in `relative_files`, take the value of that key from `pkg`, the
+/// manifest of `root`, and resolve it like a config file in `root`.
+///
+/// A package that the root manifest names counts as used in every package.
+/// A package that a workspace manifest names counts as used only for the
+/// workspace manifest and the root manifest, the two manifests that the tool
+/// resolves the package from, so a sibling workspace that declares the same
+/// package gets no credit.
 fn process_package_json_inline_configs(
-    active: &[&dyn Plugin],
-    config_matchers: &[(&dyn Plugin, Vec<globset::GlobMatcher>)],
-    relative_files: &[(PathBuf, String)],
-    root: &Path,
+    input: &InlineConfigInput<'_>,
     result: &mut AggregatedPluginResult,
     regex_errors: &mut Vec<PluginRegexValidationError>,
 ) {
-    for plugin in active {
+    let pkg_path = input.root.join("package.json");
+    let root_pkg_path =
+        (input.root != input.project_root).then(|| input.project_root.join("package.json"));
+    for plugin in input.active {
         let Some(key) = plugin.package_json_config_key() else {
             continue;
         };
-        if check_has_config_file(*plugin, config_matchers, relative_files) {
+        let Some(config_value) = input.pkg.inline_tool_config(key) else {
+            continue;
+        };
+        if check_has_config_file(*plugin, input.config_matchers, input.relative_files) {
             continue;
         }
-        let pkg_path = root.join("package.json");
-        let Ok(content) = std::fs::read_to_string(&pkg_path) else {
-            continue;
-        };
-        let Ok(json) = serde_json::from_str::<serde_json::Value>(&content) else {
-            continue;
-        };
-        let Some(config_value) = json.get(key) else {
-            continue;
-        };
         let config_json = serde_json::to_string(config_value).unwrap_or_default();
-        let fake_path = root.join(format!("{key}.config.json"));
-        let plugin_result = plugin.resolve_config(&fake_path, &config_json, root);
+        let fake_path = input.root.join(format!("{key}.config.json"));
+        let mut plugin_result = plugin.resolve_config_in_project(
+            &fake_path,
+            &config_json,
+            input.root,
+            input.project_root,
+        );
         if plugin_result.is_empty() {
             continue;
         }
@@ -1686,12 +1710,32 @@ fn process_package_json_inline_configs(
             key = key,
             "resolved inline package.json config"
         );
+        if let Some(root_pkg_path) = &root_pkg_path {
+            for dep in std::mem::take(&mut plugin_result.referenced_dependencies) {
+                plugin_result
+                    .package_referenced_dependencies
+                    .push((root_pkg_path.clone(), dep.clone()));
+                plugin_result
+                    .package_referenced_dependencies
+                    .push((pkg_path.clone(), dep));
+            }
+        }
         if let Err(mut errors) =
             process_config_result(plugin.name(), plugin_result, result, Some(&pkg_path))
         {
             regex_errors.append(&mut errors);
         }
     }
+}
+
+/// The inputs of [`process_package_json_inline_configs`] for one manifest.
+struct InlineConfigInput<'a> {
+    active: &'a [&'a dyn Plugin],
+    config_matchers: &'a [(&'a dyn Plugin, Vec<globset::GlobMatcher>)],
+    relative_files: &'a [(PathBuf, String)],
+    pkg: &'a PackageJson,
+    root: &'a Path,
+    project_root: &'a Path,
 }
 
 /// A missing meta-framework prerequisite: the per-process dedupe key and the

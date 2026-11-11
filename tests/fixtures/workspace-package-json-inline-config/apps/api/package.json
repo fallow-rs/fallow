@@ -1,0 +1,13 @@
+{
+  "name": "api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "jest": {
+    "setupFiles": ["./setup.js"]
+  },
+  "devDependencies": {
+    "jest": "^29.0.0"
+  }
+}

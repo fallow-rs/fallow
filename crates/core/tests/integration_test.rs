@@ -265,6 +265,8 @@ mod vitest_jsx_import_source;
 mod vitest_jsx_project_scopes;
 #[path = "integration_test/waku.rs"]
 mod waku;
+#[path = "integration_test/workspace_package_json_inline_config.rs"]
+mod workspace_package_json_inline_config;
 #[path = "integration_test/workspaces.rs"]
 mod workspaces;
 

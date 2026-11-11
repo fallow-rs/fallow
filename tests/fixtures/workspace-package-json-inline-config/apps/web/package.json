@@ -1,0 +1,15 @@
+{
+  "name": "web",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "prettier": "@acme/config-prettier",
+  "scripts": {
+    "format": "prettier --write src"
+  },
+  "devDependencies": {
+    "@acme/config-prettier": "workspace:*",
+    "unused-web-control": "^1.0.0"
+  }
+}
