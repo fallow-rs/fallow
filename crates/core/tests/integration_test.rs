@@ -29,6 +29,8 @@ mod astro_unused_component_prop;
 mod barrel_exports;
 #[path = "integration_test/basic_analysis.rs"]
 mod basic_analysis;
+#[path = "integration_test/biome_extends_packages.rs"]
+mod biome_extends_packages;
 #[path = "integration_test/bundler_entry_object_map.rs"]
 mod bundler_entry_object_map;
 #[path = "integration_test/bundler_nested_config_entry.rs"]
