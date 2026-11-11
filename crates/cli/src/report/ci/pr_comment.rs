@@ -206,8 +206,13 @@ fn render_pr_comment_with_mutation(
 /// A gate row is `Failure` only when the run enforced that gate and it failed,
 /// so the CLI exited non-zero. The diff filter can drop every finding from the
 /// body of such a run. Without this fold, the heading then says "Quality gate
-/// passed" while the check of that run is red. Only the heading reads this
+/// passed" while the CLI exit fails the job. Only the heading reads this
 /// value: the check-run conclusion stays the caller's.
+///
+/// The heading follows the CLI exit only. A CI wrapper can apply its own
+/// policy on top of that exit, for example the count gate and the
+/// `fail-on-issues` input of the GitHub Action. This renderer cannot see that
+/// policy, so the job result of such a wrapper can differ from the heading.
 fn heading_conclusion(
     conclusion: Option<PrDecisionConclusion>,
     gates: &[PrDecisionGate],
