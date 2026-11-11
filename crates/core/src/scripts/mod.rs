@@ -1479,7 +1479,7 @@ fn accumulate_parsed_commands(
 
     for cmd in parsed {
         if !cmd.binary.is_empty() && !is_builtin_command(&cmd.binary) {
-            let runner = NODE_RUNNERS.contains(&cmd.binary.as_str());
+            let runner = NODE_RUNNERS.contains(&resolve::binary_name(&cmd.binary));
             for binary in resolve::credited_binaries(&cmd.binary, &cmd.file_args, runner) {
                 result
                     .used_packages

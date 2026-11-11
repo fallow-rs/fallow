@@ -213,23 +213,31 @@ impl<'a> NodeModulesBinPath<'a> {
     }
 }
 
+/// The name of `binary` without a `node_modules/.bin/` directory, so
+/// `./node_modules/.bin/tsx` and `tsx` give the same name.
+pub(super) fn binary_name(binary: &str) -> &str {
+    NodeModulesBinPath::parse(binary).map_or(binary, |bin_path| bin_path.name)
+}
+
 /// The binaries of a script command whose packages the command uses.
 ///
 /// A command credits its own binary. The `node` and `bun` runtimes are not
 /// packages, so they credit nothing. A Node.js runner (`is_node_runner`) also
-/// credits the binary of a `node_modules/.bin` path that it runs as its
-/// program, for example `node ./node_modules/.bin/tool`.
+/// credits each `node_modules/.bin` path in its file arguments, for example
+/// `node ./node_modules/.bin/tool`. A preload file such as
+/// `node -r ./setup.js node_modules/.bin/tool` can come before the program,
+/// so the first file argument is not always the program.
 pub(super) fn credited_binaries<'a>(
     binary: &'a str,
     file_args: &'a [String],
     is_node_runner: bool,
 ) -> impl Iterator<Item = &'a str> {
     let runtime = is_node_runner && matches!(binary, "node" | "bun");
-    let program = file_args
-        .first()
+    let programs = file_args
+        .iter()
         .map(String::as_str)
-        .filter(|program| is_node_runner && NodeModulesBinPath::parse(program).is_some());
-    (!runtime).then_some(binary).into_iter().chain(program)
+        .filter(move |arg| is_node_runner && NodeModulesBinPath::parse(arg).is_some());
+    (!runtime).then_some(binary).into_iter().chain(programs)
 }
 
 fn resolve_binary_name(

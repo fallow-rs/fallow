@@ -2851,6 +2851,9 @@ fn node_modules_bin_path_credits_the_package_of_the_binary() {
         "node ./node_modules/.bin/kysely-codegen",
         "tsx node_modules/.bin/kysely-codegen",
         "$(npm bin)/kysely-codegen",
+        "node --require ./setup.js ./node_modules/.bin/kysely-codegen",
+        "node -r ./a.js node_modules/.bin/kysely-codegen",
+        "./node_modules/.bin/tsx node_modules/.bin/kysely-codegen",
     ] {
         let result = analyze_command(script, Path::new("/nonexistent"), &bin_map);
         assert!(
