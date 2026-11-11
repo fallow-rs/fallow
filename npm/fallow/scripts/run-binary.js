@@ -143,13 +143,26 @@ function readResolvedVersion(manifestPath) {
   }
 }
 
+// `fallow` does not depend on `fallow-type-aware`: the project installs it at
+// the same version when it uses `--type-aware`. npm and Yarn hoist it next to
+// `fallow`. pnpm links it only into the project node_modules, so a second
+// lookup starts at the project root. Only an exact version match is accepted.
 function resolveTypeAwareCompanion(
   fallowVersion,
   resolvePackage = require.resolve,
   readFile = fs.readFileSync,
+  projectRoot = process.cwd(),
 ) {
+  for (const options of [undefined, { paths: [projectRoot] }]) {
+    const companion = matchingTypeAwareCompanion(fallowVersion, resolvePackage, readFile, options);
+    if (companion !== undefined) return companion;
+  }
+  return undefined;
+}
+
+function matchingTypeAwareCompanion(fallowVersion, resolvePackage, readFile, options) {
   try {
-    const manifestPath = resolvePackage("fallow-type-aware/package.json");
+    const manifestPath = resolvePackage("fallow-type-aware/package.json", options);
     const manifest = JSON.parse(readFile(manifestPath, "utf8"));
     if (manifest.version !== fallowVersion) return undefined;
     const companion = path.join(path.dirname(manifestPath), "fallow-type-aware.mjs");

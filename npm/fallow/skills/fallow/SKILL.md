@@ -362,7 +362,9 @@ fallow dead-code --type-aware --symbol-impact src/api.ts:Client --format json --
 fallow health --type-aware --type-coupling --format json --quiet
 ```
 
-The optional companion must match the installed Fallow version. Semantic
+The `fallow-type-aware` companion is an install on demand
+(`npm install --save-dev fallow-type-aware@<fallow version>`), and it must
+match the installed Fallow version. Semantic
 results expose completeness, per-candidate decisions, and omissions.
 `confirmed-used` and `contract-preserved` remove syntactic false positives.
 `confirmed-no-static-references` retains the finding and only enables a guarded

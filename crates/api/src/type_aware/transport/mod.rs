@@ -537,7 +537,11 @@ mod tests {
             .expect_err("untrusted discovery locations must be ignored");
 
         assert!(error.contains("next to the active Fallow executable"));
-        assert!(error.contains("node_modules and PATH are intentionally not searched"));
+        assert!(error.contains("does not search project node_modules or PATH"));
+        assert!(error.contains(&format!(
+            "npm install --save-dev fallow-type-aware@{}",
+            env!("CARGO_PKG_VERSION")
+        )));
     }
 
     #[test]

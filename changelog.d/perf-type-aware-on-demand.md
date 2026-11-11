@@ -1,0 +1,3 @@
+### Changed
+
+- **`npm install fallow` no longer installs the type-aware companion and TypeScript 7.** This makes the install about 30 MB smaller on every platform. Default analysis does not use the companion. A project that uses `--type-aware` or `mutation --typecheck` adds it at the same version as `fallow`: `npm install --save-dev fallow-type-aware@<fallow version>`. The `fallow` launcher now also finds the companion from the project root, so pnpm projects work too. Without the companion, `--type-aware` keeps the syntactic findings, and its warning and `fallow type-aware status` name the install command.

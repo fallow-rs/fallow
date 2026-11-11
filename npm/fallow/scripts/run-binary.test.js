@@ -254,6 +254,33 @@ test("resolveTypeAwareCompanion accepts only an exact matching package", (t) => 
   assert.equal(resolveTypeAwareCompanion("3.8.0", resolvePackage), undefined);
 });
 
+// `fallow` does not depend on `fallow-type-aware`. pnpm links a project
+// devDependency only into the project node_modules, where the wrapper package
+// cannot resolve it, so the launcher also resolves from the project root.
+test("resolveTypeAwareCompanion finds an exact-version companion in the project node_modules", (t) => {
+  const { resolveTypeAwareCompanion } = require(RUN_BINARY);
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), "fallow-type-aware-project-"));
+  t.after(() => fs.rmSync(project, { recursive: true, force: true }));
+  const packageDir = path.join(project, "node_modules", "fallow-type-aware");
+  fs.mkdirSync(packageDir, { recursive: true });
+  const companionPath = path.join(packageDir, "fallow-type-aware.mjs");
+  fs.writeFileSync(companionPath, "#!/usr/bin/env node\n");
+  const writeVersion = (version) =>
+    fs.writeFileSync(
+      path.join(packageDir, "package.json"),
+      JSON.stringify({ name: "fallow-type-aware", version }),
+    );
+
+  writeVersion("3.8.0");
+  assert.equal(
+    fs.realpathSync(resolveTypeAwareCompanion("3.8.0", undefined, undefined, project)),
+    fs.realpathSync(companionPath),
+  );
+
+  writeVersion("3.7.0");
+  assert.equal(resolveTypeAwareCompanion("3.8.0", undefined, undefined, project), undefined);
+});
+
 test("childEnvironment marks launcher-wired companions as npm-wrapper", (t) => {
   const { childEnvironment } = require(RUN_BINARY);
   const previousBin = process.env.FALLOW_TYPE_AWARE_BIN;
