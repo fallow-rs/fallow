@@ -808,12 +808,23 @@ print_block_message() {
   } >&2
 }
 
-# Sets VERSION_RAW when the command prints a fallow version. A launcher that
-# cannot start (for example an npm shim whose package is gone) fails here, so
-# the caller tries the next install instead of running an audit that cannot
-# give a report.
+# Sets VERSION_RAW when the command after the description prints a fallow
+# version. A launcher that cannot start (for example an npm shim whose package
+# is gone) fails here, so the caller tries the next install. The first failed
+# launcher and its first error line stay in BROKEN_DESC and BROKEN_ERR.
+BROKEN_DESC=""
+BROKEN_ERR=""
 fallow_runs() {
-  VERSION_RAW="$("$@" --version 2>/dev/null)" && [[ "$VERSION_RAW" == fallow* ]]
+  local desc="$1"
+  shift
+  if VERSION_RAW="$("$@" --version 2>/dev/null)" && [[ "$VERSION_RAW" == fallow* ]]; then
+    return 0
+  fi
+  if [ -z "$BROKEN_DESC" ]; then
+    BROKEN_DESC="$desc"
+    BROKEN_ERR="$({ "$@" --version 2>&1 >/dev/null || true; } | { IFS= read -r line || true; printf '%s' "$line"; })"
+  fi
+  return 1
 }
 
 run_audit() {
@@ -823,22 +834,30 @@ run_audit() {
   # order they are cheapest to probe. Keep them in step with the Git hook and
   # the Lefthook job `fallow hooks install --target git` writes: they must
   # resolve the same installs.
-  if command -v fallow >/dev/null 2>&1 && fallow_runs fallow; then
+  if command -v fallow >/dev/null 2>&1 && fallow_runs "$(command -v fallow)" fallow; then
     RUNNER=(fallow)
     BIN_DESC="$(command -v fallow)"
-  elif [ -x ./node_modules/.bin/fallow ] && fallow_runs ./node_modules/.bin/fallow; then
+  elif [ -x ./node_modules/.bin/fallow ] && fallow_runs ./node_modules/.bin/fallow ./node_modules/.bin/fallow; then
     RUNNER=(./node_modules/.bin/fallow)
     BIN_DESC="./node_modules/.bin/fallow"
-  elif command -v yarn >/dev/null 2>&1 && YARN_BIN="$(yarn bin fallow 2>/dev/null)" && [ -n "$YARN_BIN" ] && fallow_runs yarn exec fallow --; then
+  elif command -v yarn >/dev/null 2>&1 && YARN_BIN="$(yarn bin fallow 2>/dev/null)" && [ -n "$YARN_BIN" ] && fallow_runs "yarn exec fallow" yarn exec fallow --; then
     # Yarn Plug'n'Play has no node_modules/.bin at all, so neither the launcher
     # check above nor npx can see the install.
     RUNNER=(yarn exec fallow --)
     BIN_DESC="yarn exec fallow"
-  elif command -v npx >/dev/null 2>&1 && fallow_runs npx --no-install fallow; then
+  elif command -v npx >/dev/null 2>&1 && VERSION_RAW="$(npx --no-install fallow --version 2>/dev/null || true)" && [[ "$VERSION_RAW" == fallow* ]]; then
+    # npx also fails when no install exists, so a failed probe here does not
+    # count as a broken launcher.
     RUNNER=(npx --no-install fallow)
     BIN_DESC="npx --no-install fallow"
+  elif [ -n "$BROKEN_DESC" ]; then
+    {
+      echo "fallow-gate: blocked: $BROKEN_DESC cannot print its fallow version (${BROKEN_ERR:-no error output})."
+      echo "fallow-gate: the audit cannot run. Reinstall fallow, for example with the install command of the project package manager."
+    } >&2
+    exit 2
   else
-    echo "fallow-gate: fallow binary not found (tried PATH, node_modules/.bin, yarn and npx --no-install; a launcher that cannot print its version does not count), skipping audit." >&2
+    echo "fallow-gate: fallow binary not found (tried PATH, node_modules/.bin, yarn and npx --no-install), skipping audit." >&2
     exit 0
   fi
 

@@ -475,7 +475,8 @@ fn lefthook_job_executes_project_local_fallow_outside_path() {
     write_test_executable(
         &local_fallow,
         &fixture.shell,
-        r#"printf '%s\n' "$@" > "$FALLOW_TEST_ARGS""#,
+        r#"if [ "$1" = --version ]; then echo 'fallow 9.0.0'; exit 0; fi
+printf '%s\n' "$@" > "$FALLOW_TEST_ARGS""#,
     );
 
     let lookup = Command::new(&fixture.shell)
@@ -501,7 +502,7 @@ fn lefthook_job_propagates_project_local_fallow_failure() {
     write_test_executable(
         &fixture.root.join("node_modules/.bin/fallow"),
         &fixture.shell,
-        "exit 23",
+        "if [ \"$1\" = --version ]; then echo 'fallow 9.0.0'; exit 0; fi\nexit 23",
     );
 
     assert_eq!(fixture.run(&[]).code(), Some(23));
@@ -517,12 +518,12 @@ fn lefthook_job_prefers_fallow_on_path() {
     write_test_executable(
         &fixture.root.join("node_modules/.bin/fallow"),
         &fixture.shell,
-        "printf '%s\\n' local > \"$FALLOW_TEST_SOURCE\"",
+        "if [ \"$1\" = --version ]; then echo 'fallow 9.0.0'; exit 0; fi\nprintf '%s\\n' local > \"$FALLOW_TEST_SOURCE\"",
     );
     write_test_executable(
         &fixture.restricted_bin.join("fallow"),
         &fixture.shell,
-        "printf '%s\\n' path > \"$FALLOW_TEST_SOURCE\"\nprintf '%s\\n' \"$@\" > \"$FALLOW_TEST_ARGS\"",
+        "if [ \"$1\" = --version ]; then echo 'fallow 9.0.0'; exit 0; fi\nprintf '%s\\n' path > \"$FALLOW_TEST_SOURCE\"\nprintf '%s\\n' \"$@\" > \"$FALLOW_TEST_ARGS\"",
     );
 
     assert!(
@@ -555,6 +556,7 @@ fn lefthook_job_uses_yarn_for_plug_and_play_dependency() {
 fi
 if [ "$1" = exec ] && [ "$2" = fallow ]; then
   shift 2
+  if [ "$1" = -- ] && [ "$2" = --version ]; then echo 'fallow 9.0.0'; exit 0; fi
   # Real yarn parses what follows the command name as its own flags and
   # forwards only what comes after the separator. Measured on yarn 1.22.22:
   # `yarn exec fallow audit --base HEAD` reaches the binary as `audit` alone,
@@ -722,7 +724,7 @@ fn git_hook_runs_project_local_fallow_outside_path() {
     write_test_executable(
         &fixture.root.join("node_modules/.bin/fallow"),
         &fixture.shell,
-        "printf '%s\\n' \"$@\" > \"$FALLOW_TEST_ARGS\"\nexit 1",
+        "if [ \"$1\" = --version ]; then echo 'fallow 9.0.0'; exit 0; fi\nprintf '%s\\n' \"$@\" > \"$FALLOW_TEST_ARGS\"\nexit 1",
     );
 
     let output = fixture.run(&[("FALLOW_TEST_ARGS", &args_file)]);
@@ -792,4 +794,62 @@ exit 1"#,
     let output = fixture.run(&[("FALLOW_TEST_ARGS", &args_file)]);
     assert_eq!(output.status.code(), Some(0));
     assert!(String::from_utf8_lossy(&output.stderr).contains("fallow not found"));
+}
+
+/// pnpm often installs only a project-local launcher. When that launcher
+/// cannot run and no other install works, the hook must block the commit and
+/// name the launcher and its first error line, not skip the audit.
+#[cfg(unix)]
+#[test]
+fn git_hook_blocks_when_the_only_launcher_cannot_run() {
+    let fixture = GitHookExecutionFixture::new();
+    write_test_executable(
+        &fixture.root.join("node_modules/.bin/fallow"),
+        &fixture.shell,
+        "echo \"Error: Cannot find module '@fallow-cli/darwin-arm64'\" >&2\necho 'Require stack:' >&2\nexit 1",
+    );
+
+    let output = fixture.run(&[]);
+
+    assert_eq!(output.status.code(), Some(1));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains(
+            "./node_modules/.bin/fallow cannot print its fallow version (Error: Cannot find module '@fallow-cli/darwin-arm64')"
+        ),
+        "the hook must name the broken launcher: {stderr}"
+    );
+    assert!(!stderr.contains("Require stack"), "{stderr}");
+}
+
+/// A stale global shim on `PATH` must not hide a working local install. The
+/// hook and the agent gate then select the same install.
+#[cfg(unix)]
+#[test]
+fn git_hook_skips_a_path_launcher_that_cannot_run() {
+    let fixture = GitHookExecutionFixture::new();
+    let args_file = fixture.root.join("fallow-args");
+    write_test_executable(
+        &fixture.restricted_bin.join("fallow"),
+        &fixture.shell,
+        "echo \"Error: Cannot find module 'fallow'\" >&2\nexit 1",
+    );
+    write_test_executable(
+        &fixture.root.join("node_modules/.bin/fallow"),
+        &fixture.shell,
+        "if [ \"$1\" = --version ]; then echo 'fallow 9.0.0'; exit 0; fi\nprintf '%s\\n' \"$@\" > \"$FALLOW_TEST_ARGS\"\nexit 0",
+    );
+
+    let output = fixture.run(&[("FALLOW_TEST_ARGS", &args_file)]);
+
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(
+        fs::read_to_string(&args_file).expect("the local install must run the audit"),
+        "audit\n--base\ndevelop\n--quiet\n--gate-marker\npre-commit\n"
+    );
 }

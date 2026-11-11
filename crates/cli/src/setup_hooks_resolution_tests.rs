@@ -140,15 +140,65 @@ fn gate_skips_a_path_launcher_that_cannot_run() {
     );
 }
 
-/// When the only launcher on PATH cannot run, the gate names the skip.
+/// pnpm often installs only a project-local launcher. When that launcher
+/// exits with `MODULE_NOT_FOUND` and no other install works, the gate must
+/// block and name the launcher and its error. Before, the gate printed
+/// "binary not found", exited 0 and let the commit pass without an audit.
 #[test]
-fn gate_names_the_skip_when_the_only_launcher_cannot_run() {
+fn gate_blocks_when_the_only_launcher_cannot_run() {
+    let tmp = tempdir().unwrap();
+    let project = tmp.path();
+    write_stale_fallow(
+        &project.join("node_modules/.bin/fallow"),
+        "#!/bin/sh\necho \"Error: Cannot find module '@fallow-cli/darwin-arm64'\" >&2\necho 'Require stack:' >&2\nexit 1\n",
+    );
+    std::fs::create_dir_all(project.join("empty-bin")).unwrap();
+
+    let output = probe_gate_resolution(project, &project.join("empty-bin"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert_eq!(output.status.code(), Some(2), "{stderr}");
+    assert!(
+        stderr.contains(
+            "./node_modules/.bin/fallow cannot print its fallow version (Error: Cannot find module '@fallow-cli/darwin-arm64')"
+        ),
+        "the gate must name the broken launcher and its first error line: {stderr}"
+    );
+    assert!(!stderr.contains("Require stack"), "{stderr}");
+    assert!(!stderr.contains("binary not found"), "{stderr}");
+}
+
+/// The gate reports the first launcher that failed, not a later one.
+#[test]
+fn gate_names_the_first_broken_launcher() {
     let tmp = tempdir().unwrap();
     let project = tmp.path();
     let bin = project.join("bin");
-    write_stale_fallow(&bin.join("fallow"), "#!/bin/sh\nexit 1\n");
+    write_stale_fallow(
+        &bin.join("fallow"),
+        "#!/bin/sh\necho 'path shim broken' >&2\nexit 1\n",
+    );
+    write_stale_fallow(
+        &project.join("node_modules/.bin/fallow"),
+        "#!/bin/sh\necho 'local launcher broken' >&2\nexit 1\n",
+    );
 
     let output = probe_gate_resolution(project, &bin);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert_eq!(output.status.code(), Some(2), "{stderr}");
+    assert!(stderr.contains("(path shim broken)"), "{stderr}");
+    assert!(stderr.contains("bin/fallow cannot print"), "{stderr}");
+}
+
+/// With no launcher at all, the gate keeps the commit and names the skip.
+#[test]
+fn gate_names_the_skip_when_no_launcher_exists() {
+    let tmp = tempdir().unwrap();
+    let project = tmp.path();
+    std::fs::create_dir_all(project.join("empty-bin")).unwrap();
+
+    let output = probe_gate_resolution(project, &project.join("empty-bin"));
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     assert_eq!(output.status.code(), Some(0), "{stderr}");
