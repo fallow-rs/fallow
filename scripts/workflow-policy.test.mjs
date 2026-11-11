@@ -1239,7 +1239,7 @@ test("release publishes server.json to the MCP Registry after the approved root"
     /permissions:\n(?:\s+#[^\n]*\n)*\s+contents: read\n(?:\s+#[^\n]*\n)*\s+id-token: write\n {4}env:/u,
   );
   assert.doesNotMatch(job, /secrets\.|^\s+(?!id-token:)[a-z-]+: write$|npm ci|npm install/mu);
-  assert.match(job, new RegExp(`MCP_SERVER_NAME: ${card.name.replace(/[./]/gu, "\\$&")}$`, "mu"));
+  assert.ok(job.split("\n").some((line) => line.trim() === `MCP_SERVER_NAME: ${card.name}`));
 
   // Only server.json comes from the repository, without a persisted token.
   assert.match(job, /persist-credentials: false/u);
