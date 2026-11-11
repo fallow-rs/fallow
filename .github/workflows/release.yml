@@ -1936,8 +1936,9 @@ jobs:
             "@fallow-cli/fallow-node"
           )
           # `fallow` pins its platform packages to the exact release version,
-          # so those reach users only through a new root. Adding a name here needs a stage-only trusted publisher for
-          # it and costs one more maintainer approval per release.
+          # so those reach users only through a new root. Adding a name here
+          # needs a stage-only trusted publisher for it and costs one more
+          # maintainer approval per release.
           STAGED_NAMES=("fallow")
           is_staged_name() {
             local candidate

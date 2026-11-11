@@ -171,7 +171,7 @@ function resolveTypeAwareCompanion(
 function installTree(file) {
   let real;
   try {
-    real = fs.realpathSync(file);
+    real = fs.realpathSync.native(file);
   } catch {
     return null;
   }

@@ -39,7 +39,15 @@ it only there). It accepts a companion from the project root only when it is in
 the same `node_modules` tree as the running `fallow` package, so a global
 `fallow` never runs a companion that a cloned project ships. It accepts only an
 exact version match and passes the trusted executable path to the native
-binary. Without the companion, `--type-aware`
+binary.
+
+A global `fallow` needs the companion in the same global install
+(`npm install --global fallow-type-aware@<fallow version>`). npx and other
+package runners install `fallow` in their own cache, so they never use the
+project companion: set `FALLOW_TYPE_AWARE_BIN` to its executable instead. The
+GitHub Action and the GitLab template install the companion themselves, unless
+type-aware analysis is turned off. A GitLab job with `FALLOW_SKIP_INSTALL=true`
+installs it together with `fallow`. Without the companion, `--type-aware`
 and `type-aware status` name the install command.
 
 The companion depends on `typescript@7.0.2`, accepts any TypeScript 7 release that a package manager override selects, and uses `typescript/unstable/sync`, which

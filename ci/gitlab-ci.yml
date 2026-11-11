@@ -378,6 +378,17 @@ variables:
           echo "WARNING: Installed fallow ${installed_semver}, but ${root}/package.json pins ${project_spec}. Set FALLOW_VERSION or align package.json to keep local and CI results comparable."
         fi
       fi
+
+      # `fallow` does not depend on `fallow-type-aware`, so the template
+      # installs the exact-version companion next to the global `fallow`,
+      # where the launcher finds it. FALLOW_TYPE_AWARE=false skips it.
+      if [ "$(trim "${FALLOW_TYPE_AWARE:-}")" != "false" ]; then
+        companion_version="$(printf '%s\n' "$installed_version" | grep -Eo '[0-9]+\.[0-9]+\.[0-9]+([-.][a-zA-Z0-9.]+)?' | head -n 1 || true)"
+        if [ -n "$companion_version" ]; then
+          npm install -g --ignore-scripts "fallow-type-aware@${companion_version}" \
+            || echo "WARNING: Failed to install fallow-type-aware@${companion_version}; type-aware analysis is unavailable in this job."
+        fi
+      fi
       FALLOW_INSTALL_EOF
     # Prepare bash scripts for MR integration
     - |
