@@ -141,7 +141,7 @@ struct EmbeddingPlan {
 /// Returns a structured message when the trusted sibling is missing, cannot be
 /// executed, or reports incompatible provenance.
 pub fn status() -> Result<SimilarCodeProviderStatus, String> {
-    let sidecar = transport::discover_provider()?;
+    let sidecar = transport::discover_provider(std::env::current_dir().ok().as_deref())?;
     let status = transport::provider_status(&sidecar)?;
     validate_status(&status)?;
     Ok(status)
@@ -157,7 +157,7 @@ pub fn status() -> Result<SimilarCodeProviderStatus, String> {
 ///
 /// Returns a structured message when setup fails or provenance is invalid.
 pub fn setup_local() -> Result<SimilarCodeProviderStatus, String> {
-    let sidecar = transport::discover_provider()?;
+    let sidecar = transport::discover_provider(std::env::current_dir().ok().as_deref())?;
     let status = transport::setup_provider(&sidecar)?;
     validate_status(&status)?;
     if !status.model_ready {
@@ -187,8 +187,11 @@ pub fn model_download_bytes() -> u64 {
 }
 
 /// Resolve and validate the exact local companion before reading project source.
-pub(crate) fn ready_provider() -> Result<ReadyProvider, ProviderError> {
-    let path = transport::discover_provider().map_err(ProviderError::NotReady)?;
+///
+/// `project_root` is the analysis root. It only selects the package manager
+/// that the install hint names when the companion is missing.
+pub(crate) fn ready_provider(project_root: &Path) -> Result<ReadyProvider, ProviderError> {
+    let path = transport::discover_provider(Some(project_root)).map_err(ProviderError::NotReady)?;
     let status = transport::provider_status(&path).map_err(ProviderError::Failed)?;
     validate_status(&status).map_err(ProviderError::Failed)?;
     if !status.model_ready {
@@ -515,6 +518,27 @@ fn validate_status(status: &SimilarCodeProviderStatus) -> Result<(), String> {
 )]
 mod tests {
     use super::*;
+
+    #[test]
+    fn missing_provider_names_the_package_manager_of_the_analysis_root() {
+        if std::env::var_os("FALLOW_SIMILAR_CODE_PROVIDER").is_some() {
+            return;
+        }
+        let project = tempfile::tempdir().unwrap();
+        // The fallow repository uses pnpm, so Bun proves that the analysis
+        // root decides and not the working directory of the test.
+        std::fs::write(project.path().join("bun.lock"), "").unwrap();
+        let Err(ProviderError::NotReady(message)) = ready_provider(project.path()) else {
+            panic!("the test binary has no sibling provider");
+        };
+        assert!(
+            message.contains(&format!(
+                "`bun add -d fallow-similar-code@{}`",
+                env!("CARGO_PKG_VERSION")
+            )),
+            "{message}"
+        );
+    }
 
     #[test]
     fn duplicate_digest_is_inferred_once_and_warm_truncation_is_occurrence_aware() {

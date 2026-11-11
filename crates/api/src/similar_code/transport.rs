@@ -45,14 +45,12 @@ const DOWNLOAD_ENV: &[&str] = &[
 /// The sibling of the active executable comes first (release archives ship
 /// it there). Otherwise the provider that the npm launcher passed in, after
 /// its signature check.
-pub(super) fn discover_provider() -> Result<PathBuf, String> {
+/// `project_root` only selects the package manager of the install hint.
+pub(super) fn discover_provider(project_root: Option<&Path>) -> Result<PathBuf, String> {
     let current_exe = std::env::current_exe()
         .map_err(|error| format!("failed to locate the active Fallow executable: {error}"))?;
-    // `similar-code` takes no `--root`, so the working directory names the
-    // project whose package manager the install hint uses.
-    let project_root = std::env::current_dir().ok();
     select_provider(
-        discover_provider_from(&current_exe, project_root.as_deref()),
+        discover_provider_from(&current_exe, project_root),
         super::launcher_provider::provider_from_env(),
     )
 }
