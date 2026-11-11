@@ -293,7 +293,7 @@ export type IssueAction = (FixAction | SuppressLineAction | SuppressFileAction |
  * Discriminant string for [`FixAction`]. Kebab-case per the JSON output
  * contract.
  */
-export type FixActionType = ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "move-to-prod" | "refactor-cycle" | "refactor-re-export-cycle" | "refactor-boundary" | "export-type" | "migrate-deprecated-export" | "remove-catalog-entry" | "remove-empty-catalog-group" | "update-catalog-reference" | "add-catalog-entry" | "remove-catalog-reference" | "remove-dependency-override" | "fix-dependency-override" | "resolve-policy-violation" | "move-to-server-module" | "split-mixed-barrel" | "hoist-directive" | "wire-server-action" | "provide-inject" | "use-load-data" | "render-component" | "use-component-prop" | "review-component-prop" | "emit-component-event" | "wire-svelte-event" | "compose-effect-layer" | "fail-tagged-error" | "remove-catch-tag-handler" | "resolve-route-collision" | "resolve-dynamic-segment-name-conflict" | "add-suppression-reason" | "remove-stale-suppression")
+export type FixActionType = ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "move-to-prod" | "refactor-cycle" | "refactor-re-export-cycle" | "refactor-boundary" | "export-type" | "migrate-deprecated-export" | "remove-catalog-entry" | "remove-empty-catalog-group" | "update-catalog-reference" | "add-catalog-entry" | "remove-catalog-reference" | "remove-dependency-override" | "fix-dependency-override" | "resolve-policy-violation" | "move-to-server-module" | "split-mixed-barrel" | "hoist-directive" | "wire-server-action" | "provide-inject" | "use-load-data" | "render-component" | "use-component-prop" | "review-component-prop" | "review-constant-parameter" | "emit-component-event" | "wire-svelte-event" | "compose-effect-layer" | "fail-tagged-error" | "remove-catch-tag-handler" | "resolve-route-collision" | "resolve-dynamic-segment-name-conflict" | "add-suppression-reason" | "remove-stale-suppression")
 /**
  * Singleton discriminant for [`SuppressLineAction`].
  */
@@ -469,6 +469,14 @@ export type DependencyOverrideSource = ("pnpm-workspace.yaml" | "package.json")
  * surfacing them statically catches the issue first.
  */
 export type DependencyOverrideMisconfigReason = ("unparsable-key" | "empty-value")
+/**
+ * Why the rule reports a parameter.
+ */
+export type ConstantParameterReason = ("identical-argument" | "never-passed" | "unreached-variant")
+/**
+ * The type of a [`ConstantParameterValue`].
+ */
+export type ConstantParameterValueKind = ("boolean" | "null" | "undefined" | "number" | "string")
 /**
  * Kind of an Effect layer definition.
  */
@@ -3401,6 +3409,10 @@ unused_component_props?: UnusedComponentPropFinding[]
  */
 absent_component_props?: AbsentComponentPropFinding[]
 /**
+ * Parameters that each visible call passes in one way. Off by default.
+ */
+constant_parameters?: ConstantParameterFinding[]
+/**
  * Vue `<script setup>` `defineEmits` events emitted nowhere in their own SFC
  * (no `emit('<name>')` call). Wrapped in [`UnusedComponentEmitFinding`] so
  * each entry carries a typed `actions` array natively. Default severity is
@@ -3726,6 +3738,11 @@ unused_component_props?: number
  * Optional consumed props omitted by known reachable callers, for manual review.
  */
 absent_component_props?: number
+/**
+ * Parameters that each visible call passes in one way, for manual review.
+ * Absent while zero, so a run with the opt-in rule off keeps its shape.
+ */
+constant_parameters?: number
 /**
  * Vue `<script setup>` emits emitted nowhere inside their own SFC.
  */
@@ -6793,6 +6810,127 @@ path: string
 line: number
 /**
  * 0-based original-source byte column.
+ */
+col: number
+}
+/**
+ * Wire-shape envelope for a [`ConstantParameter`] finding. No action is
+ * auto-fixable: a change of the function and each call is a refactor that
+ * needs the tests, and a default that differs from the constant can change
+ * behavior.
+ */
+export interface ConstantParameterFinding {
+/**
+ * Source path of the function.
+ */
+path: string
+/**
+ * The module-scope binding name of the function.
+ */
+function_name: string
+/**
+ * The parameter name.
+ */
+parameter_name: string
+/**
+ * 0-based index of the parameter. A TypeScript `this` parameter does
+ * not count.
+ */
+parameter_index: number
+/**
+ * 1-based line of the parameter.
+ */
+line: number
+/**
+ * 0-based byte column of the parameter.
+ */
+col: number
+reason: ConstantParameterReason
+/**
+ * The value that each call passes. Present if and only if `reason` is
+ * `identical-argument`.
+ */
+value?: (ConstantParameterValue | null)
+/**
+ * `true` when the parameter has the TypeScript `?` marker.
+ */
+optional: boolean
+/**
+ * `true` when the parameter has a default value.
+ */
+has_default: boolean
+/**
+ * The count of conditional tests in the function whose test is the
+ * parameter, `!parameter` or `!!parameter`: the test of an `if`, a
+ * `?:`, a `while`, a `do` or a `for`. Nested functions count. A
+ * comparison such as `parameter === true` and an operand of `&&` or
+ * `||` do not count.
+ */
+condition_reads: number
+/**
+ * The count of calls that the rule read for this parameter. A
+ * recursive call that passes the parameter on unchanged does not count.
+ */
+call_site_count: number
+/**
+ * The first calls in source order, at most 20. The list is never longer
+ * than `call_site_count`.
+ */
+inspected_call_sites: ConstantParameterCallSite[]
+/**
+ * What the finding means and what static analysis does not prove.
+ */
+explanation: string
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file, the function or the
+ * parameter gives a new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
+ * Suggested next steps. Always emitted.
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. Not part of the finding identity, baseline keys
+ * or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
+}
+/**
+ * The literal value that each call passes.
+ */
+export interface ConstantParameterValue {
+kind: ConstantParameterValueKind
+/**
+ * The value as text. A number uses the JavaScript `String(n)` form,
+ * except that negative zero is `-0`. A string is the raw value with no
+ * quotes. `null`, `undefined`, `true` and `false` are the keyword.
+ */
+text: string
+}
+/**
+ * One inspected call of the reported function.
+ */
+export interface ConstantParameterCallSite {
+/**
+ * Caller source path.
+ */
+path: string
+/**
+ * 1-based line of the call.
+ */
+line: number
+/**
+ * 0-based byte column of the call.
  */
 col: number
 }
@@ -15833,6 +15971,10 @@ unused_component_props?: UnusedComponentPropFinding[]
  */
 absent_component_props?: AbsentComponentPropFinding[]
 /**
+ * Parameters that each visible call passes in one way. Off by default.
+ */
+constant_parameters?: ConstantParameterFinding[]
+/**
  * Vue `<script setup>` `defineEmits` events emitted nowhere in their own SFC
  * (no `emit('<name>')` call). Wrapped in [`UnusedComponentEmitFinding`] so
  * each entry carries a typed `actions` array natively. Default severity is
@@ -17582,6 +17724,10 @@ unused_component_props?: UnusedComponentPropFinding[]
  * Used optional component inputs absent from inspected reachable callers. Off by default.
  */
 absent_component_props?: AbsentComponentPropFinding[]
+/**
+ * Parameters that each visible call passes in one way. Off by default.
+ */
+constant_parameters?: ConstantParameterFinding[]
 /**
  * Vue `<script setup>` `defineEmits` events emitted nowhere in their own SFC
  * (no `emit('<name>')` call). Wrapped in [`UnusedComponentEmitFinding`] so

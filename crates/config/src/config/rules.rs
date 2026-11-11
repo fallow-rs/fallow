@@ -170,6 +170,9 @@ pub struct RulesConfig {
     /// Used optional inputs absent from inspected callers. Requires manual review; off by default.
     #[serde(default = "Severity::default_off", alias = "absent-component-prop")]
     pub absent_component_props: Severity,
+    /// Parameters that each visible call passes in one way. Requires manual review; off by default.
+    #[serde(default = "Severity::default_off", alias = "constant-parameter")]
+    pub constant_parameters: Severity,
     /// Vue `<script setup>` `defineEmits` declared event emitted nowhere inside
     /// its own single-file component (no `emit('<name>')` call). The
     /// single-file dead-input direction. Defaults to `warn`, not `error`: an
@@ -529,6 +532,7 @@ impl Default for RulesConfig {
             unrendered_components: Severity::Warn,
             unused_component_props: Severity::Warn,
             absent_component_props: Severity::Off,
+            constant_parameters: Severity::Off,
             unused_component_emits: Severity::Warn,
             unused_component_inputs: Severity::Warn,
             unused_component_outputs: Severity::Warn,
@@ -657,6 +661,7 @@ impl RulesConfig {
             IssueKind::UnrenderedComponent => self.unrendered_components,
             IssueKind::UnusedComponentProp => self.unused_component_props,
             IssueKind::AbsentComponentProp => self.absent_component_props,
+            IssueKind::ConstantParameter => self.constant_parameters,
             IssueKind::UnusedComponentEmit => self.unused_component_emits,
             IssueKind::UnusedComponentInput => self.unused_component_inputs,
             IssueKind::UnusedComponentOutput => self.unused_component_outputs,
@@ -734,6 +739,7 @@ impl RulesConfig {
                 unrendered_components,
                 unused_component_props,
                 absent_component_props,
+                constant_parameters,
                 unused_component_emits,
                 unused_component_inputs,
                 unused_component_outputs,
@@ -945,6 +951,13 @@ pub struct PartialRulesConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub absent_component_props: Option<Severity>,
+    /// Optional override for constant parameters.
+    #[serde(
+        default,
+        alias = "constant-parameter",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub constant_parameters: Option<Severity>,
     /// Optional override for [`RulesConfig::unused_component_emits`].
     #[serde(
         default,
@@ -1337,6 +1350,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unrendered-components",
     "unused-component-props",
     "absent-component-props",
+    "constant-parameters",
     "unused-component-emits",
     "unused-component-inputs",
     "unused-component-outputs",
@@ -1405,6 +1419,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unrendered-component",
     "unused-component-prop",
     "absent-component-prop",
+    "constant-parameter",
     "unused-component-emit",
     "unused-component-input",
     "unused-component-output",

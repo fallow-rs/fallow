@@ -39,6 +39,7 @@
   "route_collisions": {"path": "/app/(a)/about/page.tsx", "url": "/about", "conflicting_paths": ["/app/(b)/about/page.tsx"], "line": 1, "col": 0, "actions": []},
   "dynamic_segment_name_conflicts": {"path": "/app/shop/[id]/page.tsx", "position": "/shop", "conflicting_segments": ["[id]", "[slug]"], "conflicting_paths": ["/app/shop/[slug]/edit/page.tsx"], "line": 1, "col": 0, "actions": []},
   "unused_component_props": {"path": "/Widget.vue", "component_name": "Widget", "prop_name": "size", "line": 27, "col": 0, "actions": []},
+  "constant_parameters": {"path": "/format.ts", "function_name": "format", "parameter_name": "compact", "parameter_index": 1, "line": 1, "col": 38, "reason": "identical-argument", "value": {"kind": "boolean", "text": "true"}, "optional": false, "has_default": false, "condition_reads": 1, "call_site_count": 3, "inspected_call_sites": [], "explanation": "Review the parameter", "actions": []},
   "absent_component_props": {"path": "/Widget.vue", "component_name": "Widget", "framework": "vue", "prop_name": "highlight", "line": 27, "col": 0, "has_default": true, "inspected_call_sites": [{"path": "/main.vue", "line": 1, "col": 0}], "explanation": "Review optional prop contract", "actions": []},
   "unused_component_emits": {"path": "/Widget.vue", "component_name": "Widget", "emit_name": "change", "line": 28, "col": 0, "actions": []},
   "unused_component_inputs": {"path": "/widget.component.ts", "component_name": "WidgetComponent", "input_name": "size", "line": 29, "col": 0, "actions": []},

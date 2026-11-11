@@ -830,6 +830,7 @@ fn diagnostic_issue_types_keep_user_order_and_labels() {
             "unrendered-component",
             "unused-component-prop",
             "absent-component-prop",
+            "constant-parameter",
             "unused-component-emit",
             "unused-component-input",
             "unused-component-output",

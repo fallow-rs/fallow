@@ -808,6 +808,12 @@
     },
     {
       "section": "flags:dead-code-filters",
+      "row": "--constant-parameters",
+      "column": "Issue Type",
+      "seed": "Each visible call passes a function parameter in the same way"
+    },
+    {
+      "section": "flags:dead-code-filters",
       "row": "--deprecated-exports-in-use",
       "column": "Issue Type",
       "seed": "Export marked @deprecated is still referenced"
@@ -2185,6 +2191,12 @@
       "row": "code-duplication",
       "column": "Description",
       "seed": "Duplicated code block; Reported by fallow dupes (and bare fallow / fallow audit)"
+    },
+    {
+      "section": "issue-types",
+      "row": "constant-parameter",
+      "column": "Description",
+      "seed": "Each visible call passes a function parameter in the same way; Opt-in manual review candidate; defaults to off. Inspect the calls and the intent of the parameter before changing the function. No automatic fix."
     },
     {
       "section": "issue-types",

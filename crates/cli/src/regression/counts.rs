@@ -43,6 +43,14 @@ pub const REGRESSION_SCHEMA_VERSION: u32 = 2;
 
 /// Per-type issue counts for dead code analysis.
 ///
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde skip_serializing_if requires a reference"
+)]
+const fn is_zero(count: &usize) -> bool {
+    *count == 0
+}
+
 /// All fields use `#[serde(default)]` for forward compatibility: when fallow adds a new
 /// issue type, old baselines will deserialize with the new field defaulting to zero
 /// instead of failing.
@@ -78,6 +86,9 @@ pub struct CheckCounts {
     pub unused_component_props: usize,
     #[serde(default)]
     pub absent_component_props: usize,
+    /// Absent while zero, so a baseline without the opt-in rule keeps its shape.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub constant_parameters: usize,
     #[serde(default)]
     pub unused_component_emits: usize,
     #[serde(default)]
@@ -147,6 +158,7 @@ impl CheckCounts {
             unrendered_components: results.unrendered_components.len(),
             unused_component_props: results.unused_component_props.len(),
             absent_component_props: results.absent_component_props.len(),
+            constant_parameters: results.constant_parameters.len(),
             unused_component_emits: results.unused_component_emits.len(),
             unused_component_inputs: results.unused_component_inputs.len(),
             unused_component_outputs: results.unused_component_outputs.len(),
@@ -201,6 +213,7 @@ impl CheckCounts {
             // field; default to 0 until the config baseline schema gains one.
             unused_component_props: 0,
             absent_component_props: b.absent_component_props,
+            constant_parameters: b.constant_parameters,
             // `fallow_config::RegressionBaseline` has no `unused_component_emits`
             // field; default to 0 until the config baseline schema gains one.
             unused_component_emits: 0,
@@ -255,6 +268,7 @@ impl CheckCounts {
             analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::syntactic(),
             total_issues: self.total_issues,
             absent_component_props: self.absent_component_props,
+            constant_parameters: self.constant_parameters,
             unused_files: self.unused_files,
             unused_exports: self.unused_exports,
             unused_types: self.unused_types,
@@ -303,6 +317,7 @@ impl CheckCounts {
         push_delta!(unrendered_components);
         push_delta!(unused_component_props);
         push_delta!(absent_component_props);
+        push_delta!(constant_parameters);
         push_delta!(unused_component_emits);
         push_delta!(unused_component_inputs);
         push_delta!(unused_component_outputs);
@@ -475,6 +490,7 @@ mod tests {
             unrendered_components: 0,
             unused_component_props: 0,
             absent_component_props: 0,
+            constant_parameters: 0,
             unused_component_emits: 0,
             unused_component_inputs: 0,
             unused_component_outputs: 0,
@@ -536,6 +552,7 @@ mod tests {
                 unrendered_components: 0,
                 unused_component_props: 0,
                 absent_component_props: 0,
+                constant_parameters: 0,
                 unused_component_emits: 0,
                 unused_component_inputs: 0,
                 unused_component_outputs: 0,
@@ -593,6 +610,7 @@ mod tests {
             unrendered_components: 0,
             unused_component_props: 0,
             absent_component_props: 0,
+            constant_parameters: 0,
             unused_component_emits: 0,
             unused_component_inputs: 0,
             unused_component_outputs: 0,
@@ -655,6 +673,7 @@ mod tests {
             unrendered_components: 0,
             unused_component_props: 0,
             absent_component_props: 0,
+            constant_parameters: 0,
             unused_component_emits: 0,
             unused_component_inputs: 0,
             unused_component_outputs: 0,
@@ -704,6 +723,7 @@ mod tests {
             unrendered_components: 0,
             unused_component_props: 0,
             absent_component_props: 0,
+            constant_parameters: 0,
             unused_component_emits: 0,
             unused_component_inputs: 0,
             unused_component_outputs: 0,
@@ -751,6 +771,7 @@ mod tests {
             unrendered_components: 0,
             unused_component_props: 0,
             absent_component_props: 0,
+            constant_parameters: 0,
             unused_component_emits: 0,
             unused_component_inputs: 0,
             unused_component_outputs: 0,
@@ -792,6 +813,7 @@ mod tests {
             unrendered_components: 1,
             unused_component_props: 0,
             absent_component_props: 0,
+            constant_parameters: 0,
             unused_component_emits: 0,
             unused_component_inputs: 0,
             unused_component_outputs: 0,
@@ -842,6 +864,7 @@ mod tests {
             unrendered_components: 0,
             unused_component_props: 0,
             absent_component_props: 0,
+            constant_parameters: 0,
             unused_component_emits: 0,
             unused_component_inputs: 0,
             unused_component_outputs: 0,

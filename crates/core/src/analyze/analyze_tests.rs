@@ -176,6 +176,7 @@ mod orchestration {
         unrendered_components: Severity::Off,
         unused_component_props: Severity::Off,
         absent_component_props: Severity::Off,
+        constant_parameters: Severity::Off,
         unused_component_emits: Severity::Off,
         unused_component_inputs: Severity::Off,
         unused_component_outputs: Severity::Off,

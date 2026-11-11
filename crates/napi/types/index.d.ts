@@ -41,6 +41,8 @@ export interface DeadCodeOptions extends TypeAwareAnalysisOptions {
   unusedClassMembers?: boolean;
   /** Review locally read optional props absent from inspected callers. Defaults to off. */
   absentComponentProps?: boolean;
+  /** Review parameters that each visible call passes in one way. Defaults to off. */
+  constantParameters?: boolean;
   unresolvedImports?: boolean;
   unlistedDeps?: boolean;
   duplicateExports?: boolean;
@@ -163,6 +165,7 @@ export interface AnalysisAction {
 
 export interface DeadCodeSummary {
   absent_component_props: number;
+  constant_parameters?: number;
   total_issues: number;
   unused_files: number;
   unused_exports: number;
@@ -350,6 +353,27 @@ export interface AbsentComponentPropFinding {
   effective_severity?: 'warn' | 'error';
 }
 
+/** A parameter that each visible call passes in one way. Static call evidence does not prove that no caller outside the project exists. */
+export interface ConstantParameterFinding {
+  path: string;
+  function_name: string;
+  parameter_name: string;
+  parameter_index: number;
+  line: number;
+  col: number;
+  reason: 'identical-argument' | 'never-passed' | 'unreached-variant';
+  value?: { kind: 'boolean' | 'null' | 'undefined' | 'number' | 'string'; text: string };
+  optional: boolean;
+  has_default: boolean;
+  condition_reads: number;
+  call_site_count: number;
+  inspected_call_sites: Array<{ path: string; line: number; col: number }>;
+  explanation: string;
+  finding_id?: string;
+  actions: AnalysisAction[];
+  effective_severity?: 'warn' | 'error';
+}
+
 export interface DeadCodeReport {
   schema_version: number;
   version: string;
@@ -357,6 +381,7 @@ export interface DeadCodeReport {
   total_issues: number;
   summary: DeadCodeSummary;
   absent_component_props?: AbsentComponentPropFinding[];
+  constant_parameters?: ConstantParameterFinding[];
   entry_points?: EntryPointSummary;
   unused_files: UnusedFileFinding[];
   unused_exports: UnusedExportFinding[];

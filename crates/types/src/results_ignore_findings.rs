@@ -34,6 +34,7 @@ pub(super) fn classify_ignore_findings_fields(results: &AnalysisResults) {
         unrendered_components: _unrendered_components,
         unused_component_props: _unused_component_props,
         absent_component_props: _absent_component_props,
+        constant_parameters: _constant_parameters,
         unused_component_emits: _unused_component_emits,
         unused_component_inputs: _unused_component_inputs,
         unused_component_outputs: _unused_component_outputs,

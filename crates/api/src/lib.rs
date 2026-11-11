@@ -484,6 +484,8 @@ pub struct DeadCodeFilters {
     pub unused_component_props: bool,
     /// Review optional props omitted by known reachable callers.
     pub absent_component_props: bool,
+    /// Review parameters that each visible call passes in one way.
+    pub constant_parameters: bool,
     /// Declared component emits never used.
     pub unused_component_emits: bool,
     /// Declared component inputs never bound.
@@ -560,6 +562,7 @@ impl DeadCodeFilters {
             || self.unrendered_components
             || self.unused_component_props
             || self.absent_component_props
+            || self.constant_parameters
             || self.unused_component_emits
             || self.unused_component_inputs
             || self.unused_component_outputs
@@ -628,6 +631,7 @@ impl DeadCodeFilters {
             "--unrendered-components" => self.unrendered_components = true,
             "--unused-component-props" => self.unused_component_props = true,
             "--absent-component-props" => self.absent_component_props = true,
+            "--constant-parameters" => self.constant_parameters = true,
             "--unused-component-emits" => self.unused_component_emits = true,
             "--unused-component-inputs" => self.unused_component_inputs = true,
             "--unused-component-outputs" => self.unused_component_outputs = true,

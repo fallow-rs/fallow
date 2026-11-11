@@ -650,6 +650,7 @@ mod tests {
             IssueKind::UnrenderedComponent,
             IssueKind::UnusedComponentProp,
             IssueKind::AbsentComponentProp,
+            IssueKind::ConstantParameter,
             IssueKind::UnusedComponentEmit,
             IssueKind::UnusedComponentInput,
             IssueKind::UnusedComponentOutput,

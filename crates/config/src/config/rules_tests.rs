@@ -394,6 +394,7 @@ fn apply_partial_all_fields_set() {
         unrendered_components: Some(Severity::Off),
         unused_component_props: Some(Severity::Off),
         absent_component_props: Some(Severity::Off),
+        constant_parameters: Some(Severity::Off),
         unused_component_emits: Some(Severity::Off),
         unused_component_inputs: Some(Severity::Off),
         unused_component_outputs: Some(Severity::Off),
@@ -542,7 +543,7 @@ fn severity_from_str_invalid_returns_error() {
 /// more. See the note on [`KNOWN_RULE_NAMES`].
 #[test]
 fn known_rule_names_list_length_is_pinned() {
-    assert_eq!(KNOWN_RULE_NAMES.len(), 129);
+    assert_eq!(KNOWN_RULE_NAMES.len(), 131);
 }
 
 /// The reverse of `known_rule_names_covers_every_struct_field`. That one
@@ -610,8 +611,8 @@ fn known_rule_names_covers_every_serde_alias_in_source() {
 
     assert_eq!(
         aliases_found.len(),
-        132,
-        "expected 132 source-level alias attrs (66 per struct); got {}: {:?}",
+        134,
+        "expected 134 source-level alias attrs (67 per struct); got {}: {:?}",
         aliases_found.len(),
         aliases_found
     );

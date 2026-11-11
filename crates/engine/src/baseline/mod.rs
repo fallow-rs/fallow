@@ -78,6 +78,7 @@ macro_rules! with_baseline_fields {
             unrendered_components,
             unused_component_props,
             absent_component_props,
+            constant_parameters,
             unused_component_emits,
             unused_component_inputs,
             unused_component_outputs,
@@ -121,8 +122,10 @@ mod finding_counts;
 mod install_state;
 
 use finding_counts::{baseline_finding_count, cascade_hidden_matches};
+mod caller_review_keys;
 #[cfg(test)]
 mod legacy_key_builders;
+use caller_review_keys::{absent_component_prop_baseline_keys, constant_parameter_baseline_keys};
 mod prune;
 mod saved_scope;
 #[cfg(test)]
@@ -626,6 +629,9 @@ pub struct BaselineData {
     unused_component_props: Vec<String>,
     #[serde(default)]
     absent_component_props: Vec<String>,
+    /// Constant parameters, keyed by `file:function:parameter`.
+    #[serde(default)]
+    constant_parameters: Vec<String>,
     /// Unused component emits, keyed by `file:emit_name`.
     #[serde(default)]
     unused_component_emits: Vec<String>,
@@ -824,6 +830,7 @@ impl BaselineData {
             unrendered_components: member_imports.unrendered_components,
             unused_component_props: member_imports.unused_component_props,
             absent_component_props: member_imports.absent_component_props,
+            constant_parameters: member_imports.constant_parameters,
             unused_component_emits: member_imports.unused_component_emits,
             unused_component_inputs: member_imports.unused_component_inputs,
             unused_component_outputs: member_imports.unused_component_outputs,
@@ -889,6 +896,7 @@ impl BaselineData {
             + self.unrendered_components.len()
             + self.unused_component_props.len()
             + self.absent_component_props.len()
+            + self.constant_parameters.len()
             + self.unused_component_emits.len()
             + self.unused_component_inputs.len()
             + self.unused_component_outputs.len()
@@ -951,6 +959,7 @@ struct BaselineMemberImportKeys {
     unrendered_components: Vec<String>,
     unused_component_props: Vec<String>,
     absent_component_props: Vec<String>,
+    constant_parameters: Vec<String>,
     unused_component_emits: Vec<String>,
     unused_component_inputs: Vec<String>,
     unused_component_outputs: Vec<String>,
@@ -1008,23 +1017,6 @@ fn component_baseline_keys(
                 "{}:{}",
                 relative_path(&c.component.path, root),
                 c.component.component_name
-            )
-        })
-        .collect()
-}
-
-fn absent_component_prop_baseline_keys(
-    items: &[crate::results::AbsentComponentPropFinding],
-    root: &Path,
-) -> Vec<String> {
-    items
-        .iter()
-        .map(|finding| {
-            format!(
-                "{}:{}:{}",
-                relative_path(&finding.prop.path, root),
-                finding.prop.component_name,
-                finding.prop.prop_name
             )
         })
         .collect()
@@ -1390,6 +1382,12 @@ impl BaselineFilterContext<'_> {
             &self.baseline.absent_component_props,
             self.root,
             absent_component_prop_baseline_keys,
+        );
+        retain_new_by_keys(
+            &mut results.constant_parameters,
+            &self.baseline.constant_parameters,
+            self.root,
+            constant_parameter_baseline_keys,
         );
         retain_new_by_keys(
             &mut results.unused_component_emits,

@@ -1,3 +1,5 @@
+#[path = "markdown_caller_review.rs"]
+mod caller_review;
 #[path = "markdown_runtime_summary.rs"]
 mod runtime_summary;
 
@@ -570,33 +572,7 @@ fn push_markdown_component_sections(
         "Unrendered components",
         |c| format_markdown_unrendered_component(c, rel),
     );
-    markdown_section(
-        out,
-        &results.absent_component_props,
-        "Absent optional component props",
-        |finding| {
-            let prop = &finding.prop;
-            let callers = prop
-                .inspected_call_sites
-                .iter()
-                .map(|site| markdown_code_span(&format!("{}:{}", rel(&site.path), site.line)))
-                .collect::<Vec<_>>()
-                .join(", ");
-            vec![format!(
-                "- {} in {} ({}; default: {}). {} Inspected callers: {}",
-                markdown_code_span(&format!("{}.{}", prop.component_name, prop.prop_name)),
-                markdown_code_span(&format!("{}:{}", rel(&prop.path), prop.line)),
-                prop.framework,
-                if prop.has_default {
-                    "present"
-                } else {
-                    "absent"
-                },
-                prop.explanation,
-                callers
-            )]
-        },
-    );
+    caller_review::push_markdown_caller_review_sections(out, results, rel);
     markdown_section(
         out,
         &results.unused_component_props,

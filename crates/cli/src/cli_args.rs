@@ -734,6 +734,10 @@ pub enum Command {
         #[arg(long)]
         absent_component_props: bool,
 
+        /// Review parameters that each visible call passes in one way (enables this rule)
+        #[arg(long)]
+        constant_parameters: bool,
+
         /// Only report unused component emits
         #[arg(long)]
         unused_component_emits: bool,
@@ -2826,15 +2830,6 @@ pub enum BaselineModeArg {
     Identity,
 }
 
-impl From<BaselineModeArg> for fallow_engine::baseline::HealthBaselineMode {
-    fn from(value: BaselineModeArg) -> Self {
-        match value {
-            BaselineModeArg::Count => Self::Count,
-            BaselineModeArg::Identity => Self::Identity,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
 pub enum CiProviderArg {
     Github,
@@ -2850,15 +2845,8 @@ pub enum TypeAwareRequireArg {
     Complete,
 }
 
-impl From<TypeAwareRequireArg> for fallow_config::TypeAwareRequire {
-    fn from(value: TypeAwareRequireArg) -> Self {
-        match value {
-            TypeAwareRequireArg::BestEffort => Self::BestEffort,
-            TypeAwareRequireArg::Complete => Self::Complete,
-        }
-    }
-}
-
+#[path = "cli_args_conversions.rs"]
+mod conversions;
 #[path = "cli_args_health.rs"]
 mod health_args;
 pub use health_args::*;

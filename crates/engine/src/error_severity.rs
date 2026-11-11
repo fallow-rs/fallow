@@ -70,6 +70,7 @@ pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
         &mut rules.unrendered_components,
         &mut rules.unused_component_props,
         &mut rules.absent_component_props,
+        &mut rules.constant_parameters,
         &mut rules.unused_component_emits,
         &mut rules.unused_component_inputs,
         &mut rules.unused_component_outputs,

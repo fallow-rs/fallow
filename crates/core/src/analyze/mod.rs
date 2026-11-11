@@ -1,4 +1,6 @@
 mod absent_component_prop;
+mod constant_parameter;
+pub(crate) use constant_parameter::release_resolution_payloads;
 mod boundary;
 mod boundary_calls;
 mod boundary_coverage;
@@ -800,6 +802,7 @@ pub(crate) fn find_dead_code_full(
         suppressions: &run_context.suppressions,
         line_offsets_by_file: &run_context.line_offsets_by_file,
         class_member_rules: &class_member_rules,
+        plugin_result,
         collect_usages,
         results: &mut results,
     });
@@ -950,6 +953,7 @@ struct PostDetectionInput<'a, 'm> {
     suppressions: &'a SuppressionContext<'m>,
     line_offsets_by_file: &'a LineOffsetsMap<'m>,
     class_member_rules: &'a ClassMemberRules,
+    plugin_result: Option<&'a crate::plugins::AggregatedPluginResult>,
     /// Whether the editor/LSP usages path is active; gates in-process-only
     /// intel (`react_component_intel`) off the bare `fallow` / `audit` hot path.
     collect_usages: bool,
@@ -1025,6 +1029,7 @@ fn populate_package_and_framework_findings(input: &mut PostDetectionInput<'_, '_
         collect_usages: input.collect_usages,
         results: input.results,
     });
+    constant_parameter::populate(input);
 }
 
 /// Append stale-suppression and missing-reason findings, then record the
@@ -1082,7 +1087,7 @@ fn populate_component_contract_findings(input: &mut FrameworkSpecificFindingsInp
     populate_unprovided_inject_findings(input);
     populate_unrendered_component_findings(input);
     populate_unused_component_prop_findings(input);
-    populate_absent_component_prop_findings(input);
+    absent_component_prop::populate(input);
     populate_unused_component_emit_findings(input);
     populate_unused_component_input_findings(input);
     populate_unused_component_output_findings(input);
@@ -1342,36 +1347,6 @@ fn populate_unused_component_prop_findings(input: &mut FrameworkSpecificFindings
     input.results.unused_component_props =
         retain_unsuppressed(input, findings, IssueKind::UnusedComponentProp, |f| {
             Some((f.prop.path.as_path(), f.prop.line))
-        });
-}
-
-fn populate_absent_component_prop_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
-    if input.config.rules.absent_component_props == Severity::Off
-        && !input.config.overrides.iter().any(|overrides| {
-            overrides
-                .rules
-                .absent_component_props
-                .is_some_and(|severity| severity != Severity::Off)
-        })
-    {
-        return;
-    }
-    let findings = absent_component_prop::find_absent_component_props(
-        &absent_component_prop::AbsentPropInput {
-            graph: input.graph,
-            modules: input.modules,
-            resolved_modules: input.resolved_modules,
-            declared_deps: input.declared_deps,
-            public_api_entry_points: input.public_api_entry_points,
-            line_offsets_by_file: input.line_offsets_by_file,
-        },
-    )
-    .into_iter()
-    .map(crate::results::AbsentComponentPropFinding::with_actions)
-    .collect();
-    input.results.absent_component_props =
-        retain_unsuppressed(input, findings, IssueKind::AbsentComponentProp, |finding| {
-            Some((finding.prop.path.as_path(), finding.prop.line))
         });
 }
 

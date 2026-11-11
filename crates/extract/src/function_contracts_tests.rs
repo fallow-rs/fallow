@@ -119,6 +119,26 @@ fn contract_span_points_at_the_binding_identifier() {
 }
 
 #[test]
+fn parameter_span_points_at_the_parameter() {
+    let source = "function pick(first, second?: number, { x } = {}, ...rest) {}";
+    let info = parse(source);
+    let starts: Vec<_> = contract(&info, "pick")
+        .params
+        .iter()
+        .map(|param| param.span_start as usize)
+        .collect();
+    assert_eq!(
+        starts,
+        vec![
+            source.find("first").unwrap(),
+            source.find("second").unwrap(),
+            source.find("{ x }").unwrap(),
+            source.find("...rest").unwrap(),
+        ]
+    );
+}
+
+#[test]
 fn returns_value_ignores_returns_of_nested_functions() {
     let info = parse(
         "function outer() { const inner = () => { return 1; }; function deep() { return 2; } return; }
@@ -616,6 +636,11 @@ fn embedded_scripts_remap_offsets_and_mark_template_callers() {
         assert_eq!(
             local.span_start as usize,
             source.find("local(a)").unwrap(),
+            "{path}"
+        );
+        assert_eq!(
+            local.params[0].span_start as usize,
+            source.find("local(a)").unwrap() + "local(".len(),
             "{path}"
         );
         let calls: Vec<_> = facts

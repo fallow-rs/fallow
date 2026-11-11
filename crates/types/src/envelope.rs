@@ -157,6 +157,10 @@ pub struct CheckSummary {
     /// Optional consumed props omitted by known reachable callers, for manual review.
     #[serde(default)]
     pub absent_component_props: usize,
+    /// Parameters that each visible call passes in one way, for manual review.
+    /// Absent while zero, so a run with the opt-in rule off keeps its shape.
+    #[serde(default, skip_serializing_if = "zero_count")]
+    pub constant_parameters: usize,
     /// Vue `<script setup>` emits emitted nowhere inside their own SFC.
     #[serde(default)]
     pub unused_component_emits: usize,

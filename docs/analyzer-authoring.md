@@ -108,6 +108,7 @@ Recommended fixture row format for docs, tests, or review notes:
 | `unused-namespace-member` | `tests/fixtures/unused-namespace-members`, `tests/fixtures/namespace-issue-types` | Reports unread namespace members while qualified reads, nested chains, escapes, body references, merges, declaration files and augmentations stay silent. |
 | `unused-load-data-key` | `tests/fixtures/sveltekit-*`, `tests/fixtures/react-router-loader-data`, `tests/fixtures/remix-loader-data`, `tests/fixtures/route-loader-data-no-dep` | Reports unused SvelteKit, React Router, and Remix loader data keys while keeping visible data reads live. |
 | `invalid-client-export` | `tests/fixtures/invalid-client-export-no-next` | Abstains outside Next.js. |
+| `constant-parameter` | `crates/core/src/analyze/constant_parameter_tests.rs` | One control project reports both reasons. Each abstain reason has a variant of that project that records exactly that reason, so the test fails when the condition is removed. |
 | `security-sink` | `tests/fixtures/security-*` | Keeps security categories gated by configured matcher and category rules. |
 
 Keep synthetic fixtures small, but include at least one distilled framework

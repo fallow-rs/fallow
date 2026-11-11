@@ -42,6 +42,11 @@ pub use fallow_types::results::{
     UnusedDependencyOverride, UnusedExport, UnusedFile, UnusedLoadDataKey, UnusedMember,
     UnusedServerAction, UnusedSvelteEvent,
 };
+pub use fallow_types::results::{
+    ConstantParameter, ConstantParameterCallSite, ConstantParameterFinding,
+    ConstantParameterReason, ConstantParameterValue, ConstantParameterValueKind,
+    MAX_INSPECTED_CALL_SITES,
+};
 pub use fallow_types::results::{DuplicateExportAlias, DuplicateExportAliasLocation};
 pub use fallow_types::results::{
     EffectCatchSite, EffectLayerKind, UnproducedCatchTag, UnusedEffectLayer, UnusedTaggedError,

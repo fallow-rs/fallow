@@ -1,0 +1,571 @@
+#![expect(deprecated, reason = "the rule tests run the full in-crate pipeline")]
+
+use std::path::{Path, PathBuf};
+use std::sync::Mutex;
+
+use fallow_config::{FallowConfig, OutputFormat};
+use rustc_hash::FxHashMap;
+
+use super::{Abstain, FnId};
+use crate::extract::ModuleInfo;
+use crate::graph::ModuleGraph;
+use crate::results::{AnalysisResults, ConstantParameterReason};
+
+/// The abstain reason of each function in each analyzed project, keyed by
+/// the module path.
+static ABSTAINED: Mutex<Vec<(PathBuf, String, &'static str)>> = Mutex::new(Vec::new());
+
+pub(super) fn record(
+    graph: &ModuleGraph,
+    modules: &[ModuleInfo],
+    abstained: &FxHashMap<FnId, Abstain>,
+) {
+    let by_file: FxHashMap<_, _> = modules.iter().map(|m| (m.file_id, m)).collect();
+    let mut rows = ABSTAINED.lock().expect("recorder lock");
+    for (&(file, index), reason) in abstained {
+        let Some(node) = graph.modules.get(file.0 as usize) else {
+            continue;
+        };
+        let Some(name) = by_file
+            .get(&file)
+            .and_then(|module| module.function_contracts.as_deref())
+            .and_then(|facts| facts.declarations.get(index as usize))
+            .map(|contract| contract.binding_name.to_string())
+        else {
+            continue;
+        };
+        rows.push((node.path.clone(), name, reason.code()));
+    }
+}
+
+fn reason_for(root: &Path, file: &str, function: &str) -> Option<&'static str> {
+    let path = root.join(file);
+    ABSTAINED
+        .lock()
+        .expect("recorder lock")
+        .iter()
+        .find(|(module, name, _)| {
+            name == function
+                && (module == &path || dunce::canonicalize(module).ok().as_ref() == Some(&path))
+        })
+        .map(|(_, _, reason)| *reason)
+}
+
+struct Project {
+    _directory: tempfile::TempDir,
+    root: PathBuf,
+    results: AnalysisResults,
+}
+
+type Row = (String, ConstantParameterReason, Option<String>);
+
+impl Project {
+    fn findings(&self, function: &str) -> Vec<Row> {
+        let mut rows: Vec<Row> = self
+            .results
+            .constant_parameters
+            .iter()
+            .filter(|finding| finding.parameter.function_name == function)
+            .map(|finding| {
+                (
+                    finding.parameter.parameter_name.clone(),
+                    finding.parameter.reason,
+                    finding
+                        .parameter
+                        .value
+                        .as_ref()
+                        .map(|value| value.text.clone()),
+                )
+            })
+            .collect();
+        rows.sort_by(|a, b| a.0.cmp(&b.0));
+        rows
+    }
+
+    fn reason(&self, file: &str, function: &str) -> Option<&'static str> {
+        reason_for(&self.root, file, function)
+    }
+}
+
+fn write_project(
+    package: &serde_json::Value,
+    files: &[(&str, &str)],
+) -> (tempfile::TempDir, PathBuf) {
+    let directory = tempfile::tempdir().expect("temporary project");
+    let root = dunce::canonicalize(directory.path()).expect("canonical root");
+    std::fs::write(root.join("package.json"), package.to_string()).expect("package.json");
+    for (path, source) in files {
+        let path = root.join(path);
+        std::fs::create_dir_all(path.parent().expect("parent")).expect("directory");
+        std::fs::write(path, source).expect("source");
+    }
+    (directory, root)
+}
+
+fn analyze_with(
+    package: &serde_json::Value,
+    config: &serde_json::Value,
+    files: &[(&str, &str)],
+) -> Project {
+    let (directory, root) = write_project(package, files);
+    let mut config = config.clone();
+    config["rules"] = serde_json::json!({ "constant-parameters": "warn" });
+    let config: FallowConfig = serde_json::from_value(config).expect("valid config");
+    let config = config.resolve(root.clone(), OutputFormat::Human, 2, true, true, None);
+    let results = crate::analyze(&config).expect("analysis succeeds");
+    Project {
+        _directory: directory,
+        root,
+        results,
+    }
+}
+
+fn private_package() -> serde_json::Value {
+    serde_json::json!({ "name": "fixture", "private": true })
+}
+
+fn entry_config() -> serde_json::Value {
+    serde_json::json!({ "entry": ["src/main.ts"] })
+}
+
+fn analyze(files: &[(&str, &str)]) -> Project {
+    analyze_with(&private_package(), &entry_config(), files)
+}
+
+const FORMAT: &str = "export function format(value: number, compact: boolean, locale?: string) {\n  if (compact) return String(value);\n  return value.toLocaleString(locale);\n}\n";
+const MAIN: &str =
+    "import { format } from './format';\nformat(1, true);\nformat(2, true);\nformat(3, true);\n";
+
+fn base_with<'a>(extra: &[(&'a str, &'a str)], main: &'a str) -> Vec<(&'a str, &'a str)> {
+    let mut files = vec![("src/format.ts", FORMAT), ("src/main.ts", main)];
+    files.extend_from_slice(extra);
+    files
+}
+
+fn never_passed_locale() -> Vec<Row> {
+    vec![(
+        "locale".to_string(),
+        ConstantParameterReason::NeverPassed,
+        None,
+    )]
+}
+
+fn assert_abstains(project: &Project, file: &str, function: &str, reason: &str) {
+    assert!(
+        project.findings(function).is_empty(),
+        "{reason}: unexpected findings {:?}",
+        project.findings(function)
+    );
+    assert_eq!(project.reason(file, function), Some(reason));
+}
+
+/// The control project reports both parameters, so each variant below
+/// proves that its own condition stops the finding.
+#[test]
+fn reports_an_identical_argument_and_a_parameter_that_no_call_passes() {
+    let project = analyze(&base_with(&[], MAIN));
+    assert_eq!(
+        project.findings("format"),
+        vec![
+            (
+                "compact".to_string(),
+                ConstantParameterReason::IdenticalArgument,
+                Some("true".to_string())
+            ),
+            (
+                "locale".to_string(),
+                ConstantParameterReason::NeverPassed,
+                None
+            ),
+        ]
+    );
+    let compact = project
+        .results
+        .constant_parameters
+        .iter()
+        .find(|finding| finding.parameter.parameter_name == "compact")
+        .expect("compact finding");
+    assert_eq!(compact.parameter.condition_reads, 1);
+    assert_eq!(compact.parameter.call_site_count, 3);
+    assert_eq!(compact.parameter.parameter_index, 1);
+    assert_eq!(compact.parameter.line, 1);
+    assert_eq!(compact.parameter.col, 38);
+    assert_eq!(compact.parameter.inspected_call_sites.len(), 3);
+    assert_eq!(compact.parameter.inspected_call_sites[0].line, 2);
+}
+
+#[test]
+fn a_parse_error_anywhere_blocks_each_function() {
+    let project = analyze(&base_with(&[("src/broken.ts", "export const = ;")], MAIN));
+    assert_abstains(&project, "src/format.ts", "format", "parse-incomplete");
+}
+
+#[test]
+fn an_open_contract_abstains() {
+    let format = "export function format(value: number, compact: boolean) {\n  if (compact) return arguments.length;\n  return value;\n}\n";
+    let project = analyze(&[("src/format.ts", format), ("src/main.ts", MAIN)]);
+    assert_abstains(&project, "src/format.ts", "format", "open-contract");
+}
+
+#[test]
+fn a_public_api_export_abstains() {
+    let package = serde_json::json!({
+        "name": "fixture",
+        "version": "1.0.0",
+        "exports": { "./format": "./src/format.ts" }
+    });
+    let project = analyze_with(&package, &entry_config(), &base_with(&[], MAIN));
+    assert_abstains(&project, "src/format.ts", "format", "public-api");
+}
+
+#[test]
+fn a_public_visibility_tag_abstains() {
+    let format = "/** @public */\nexport function format(value: number, compact: boolean) {\n  return compact ? value : 0;\n}\n";
+    let project = analyze(&[("src/format.ts", format), ("src/main.ts", MAIN)]);
+    assert_abstains(&project, "src/format.ts", "format", "public-api");
+}
+
+#[test]
+fn an_entry_point_export_abstains() {
+    let config = serde_json::json!({ "entry": ["src/main.ts", "src/format.ts"] });
+    let project = analyze_with(&private_package(), &config, &base_with(&[], MAIN));
+    assert_abstains(&project, "src/format.ts", "format", "entry-export");
+}
+
+#[test]
+fn a_dynamically_loaded_module_abstains() {
+    let config = serde_json::json!({
+        "entry": ["src/main.ts"],
+        "dynamicallyLoaded": ["src/format.ts"]
+    });
+    let project = analyze_with(&private_package(), &config, &base_with(&[], MAIN));
+    assert_abstains(&project, "src/format.ts", "format", "entry-export");
+}
+
+#[test]
+fn a_dynamic_import_abstains() {
+    let main = "import { format } from './format';\nformat(1, true);\nformat(2, true);\nformat(3, true);\nexport const later = () => import('./format');\n";
+    let project = analyze(&base_with(&[], main));
+    assert_abstains(&project, "src/format.ts", "format", "dynamic-import");
+}
+
+#[test]
+fn a_require_of_the_module_abstains() {
+    let main = "import { format } from './format';\nimport './legacy';\nformat(1, true);\nformat(2, true);\nformat(3, true);\n";
+    let legacy = "const { format } = require('./format');\nformat(1, false);\n";
+    let project = analyze(&base_with(&[("src/legacy.js", legacy)], main));
+    assert_abstains(&project, "src/format.ts", "format", "commonjs");
+}
+
+#[test]
+fn commonjs_exports_abstain() {
+    let main =
+        "import { scale } from './scale';\nscale(1, true);\nscale(2, true);\nscale(3, true);\n";
+    let scale =
+        "export function scale(n, flag) { return flag ? n : 0; }\nmodule.exports.extra = 1;\n";
+    let project = analyze(&[("src/main.ts", main), ("src/scale.js", scale)]);
+    assert_abstains(&project, "src/scale.js", "scale", "commonjs");
+}
+
+#[test]
+fn a_namespace_that_escapes_abstains() {
+    let main = "import * as fmt from './format';\nfmt.format(1, true);\nfmt.format(2, true);\nfmt.format(3, true);\nexport const all = [fmt];\n";
+    let project = analyze(&base_with(&[], main));
+    assert_abstains(&project, "src/format.ts", "format", "namespace-escape");
+}
+
+#[test]
+fn namespace_calls_count_as_calls() {
+    let main = "import * as fmt from './format';\nfmt.format(1, true);\nfmt.format(2, true);\nfmt.format(3, true);\n";
+    let project = analyze(&base_with(&[], main));
+    assert_eq!(project.findings("format").len(), 2);
+}
+
+#[test]
+fn a_value_reference_of_an_import_abstains() {
+    let main = "import { format } from './format';\nformat(1, true);\nformat(2, true);\nformat(3, true);\nexport const mapped = [1].map(format);\n";
+    let project = analyze(&base_with(&[], main));
+    assert_abstains(&project, "src/format.ts", "format", "value-reference");
+}
+
+#[test]
+fn a_call_through_a_member_path_abstains() {
+    let main = "import { format } from './format';\nformat(1, true);\nformat(2, true);\nformat(3, true);\nformat.call(null, 4, false);\n";
+    let project = analyze(&base_with(&[], main));
+    assert_abstains(&project, "src/format.ts", "format", "value-reference");
+}
+
+#[test]
+fn a_local_escape_abstains() {
+    let main = "function pick(a: number, b: boolean) { return b ? a : 0; }\npick(1, true);\npick(2, true);\npick(3, true);\nexport const later = [pick];\n";
+    let project = analyze(&[("src/main.ts", main)]);
+    assert_abstains(&project, "src/main.ts", "pick", "value-reference");
+}
+
+#[test]
+fn an_unresolved_call_target_with_the_same_name_abstains() {
+    let main = "import { format } from './format';\nimport './other';\nformat(1, true);\nformat(2, true);\nformat(3, true);\n";
+    let other = "import { format } from './missing';\nformat(1, false);\nexport {};\n";
+    let project = analyze(&base_with(&[("src/other.ts", other)], main));
+    assert_abstains(&project, "src/format.ts", "format", "unresolved-target");
+}
+
+#[test]
+fn a_template_host_that_imports_the_function_abstains() {
+    let main = "import { format } from './format';\nimport './View.vue';\nformat(1, true);\nformat(2, true);\nformat(3, true);\n";
+    let view = "<script setup lang=\"ts\">\nimport { format } from './format';\n</script>\n<template><p>{{ format(1, false) }}</p></template>\n";
+    let project = analyze(&base_with(&[("src/View.vue", view)], main));
+    assert_abstains(&project, "src/format.ts", "format", "template-callers");
+}
+
+#[test]
+fn a_direct_eval_in_a_caller_abstains() {
+    let main = "import { format } from './format';\nformat(1, true);\nformat(2, true);\nformat(3, true);\neval('format(4, false)');\n";
+    let project = analyze(&base_with(&[], main));
+    assert_abstains(&project, "src/format.ts", "format", "direct-eval");
+}
+
+#[test]
+fn a_classic_script_abstains() {
+    let script = "function greet(name, loud) { return loud ? name : ''; }\ngreet('a', true);\ngreet('b', true);\ngreet('c', true);\n";
+    let config = serde_json::json!({ "entry": ["src/legacy.js"] });
+    let project = analyze_with(&private_package(), &config, &[("src/legacy.js", script)]);
+    assert_abstains(&project, "src/legacy.js", "greet", "classic-script");
+
+    let module = format!("{script}export const marker = 1;\n");
+    let project = analyze_with(&private_package(), &config, &[("src/legacy.js", &module)]);
+    assert_eq!(project.findings("greet").len(), 1);
+}
+
+#[test]
+fn fewer_than_three_calls_abstain() {
+    let main = "import { format } from './format';\nformat(1, true);\nformat(2, true);\n";
+    let project = analyze(&base_with(&[], main));
+    assert_abstains(&project, "src/format.ts", "format", "too-few-calls");
+}
+
+#[test]
+fn calls_through_a_re_export_chain_reach_the_origin() {
+    let main = "import { format } from './barrel';\nformat(1, true);\nformat(2, true);\nformat(3, true);\n";
+    let barrel = "export { format } from './inner';\n";
+    let inner = "export * from './format';\n";
+    let project = analyze(&base_with(
+        &[("src/barrel.ts", barrel), ("src/inner.ts", inner)],
+        main,
+    ));
+    assert_eq!(project.findings("format").len(), 2);
+}
+
+#[test]
+fn two_imports_of_one_function_merge_their_calls() {
+    let main = "import { format } from './format';\nimport { format as again } from './barrel';\nformat(1, true);\nformat(2, true);\nagain(3, false);\n";
+    let barrel = "export { format } from './format';\n";
+    let project = analyze(&base_with(&[("src/barrel.ts", barrel)], main));
+    assert_eq!(project.findings("format"), never_passed_locale());
+}
+
+#[test]
+fn a_varied_value_gives_no_finding() {
+    let main = "import { format } from './format';\nformat(1, true);\nformat(2, true);\nformat(3, false, 'nl');\n";
+    let project = analyze(&base_with(&[], main));
+    assert!(project.findings("format").is_empty());
+}
+
+#[test]
+fn negative_zero_and_zero_are_different_values() {
+    let main = "function scale(n: number, by: number) { return n * by; }\nscale(1, 0);\nscale(2, 0);\nscale(3, -0);\nexport {};\n";
+    let project = analyze(&[("src/main.ts", main)]);
+    assert!(project.findings("scale").is_empty());
+}
+
+#[test]
+fn an_omitted_argument_and_undefined_are_different() {
+    let main = "function pick(a: number, b?: number) { return b ?? a; }\npick(1);\npick(2);\npick(3, undefined);\nexport {};\n";
+    let project = analyze(&[("src/main.ts", main)]);
+    assert!(project.findings("pick").is_empty());
+}
+
+#[test]
+fn each_call_passing_undefined_is_an_identical_argument() {
+    let main = "function pick(a: number, b?: number) { return b ?? a; }\npick(1, undefined);\npick(2, undefined);\npick(3, undefined);\nexport const marker = 1;\n";
+    let project = analyze(&[("src/main.ts", main)]);
+    assert_eq!(
+        project.findings("pick"),
+        vec![(
+            "b".to_string(),
+            ConstantParameterReason::IdenticalArgument,
+            Some("undefined".to_string())
+        )]
+    );
+}
+
+#[test]
+fn a_required_parameter_that_no_call_passes_gives_no_finding() {
+    let main = "function pick(a, b) { return b ?? a; }\npick(1);\npick(2);\npick(3);\nexport const marker = 1;\n";
+    let project = analyze(&[("src/main.ts", main)]);
+    assert!(project.findings("pick").is_empty());
+}
+
+#[test]
+fn written_rest_and_pattern_parameters_give_no_finding() {
+    let main = "function pick(a, b, { c }, ...rest) { b = !b; return [a, b, c, rest]; }\npick(1, true, { c: 1 }, 1);\npick(2, true, { c: 1 }, 1);\npick(3, true, { c: 1 }, 1);\nexport const marker = 1;\n";
+    let project = analyze(&[("src/main.ts", main)]);
+    assert!(project.findings("pick").is_empty());
+}
+
+#[test]
+fn a_spread_argument_hides_the_later_positions() {
+    let main = "function pick(a: number, b: boolean) { return b ? a : 0; }\npick(1, true);\npick(2, true);\npick(...([3, false] as [number, boolean]));\nexport const marker = 1;\n";
+    let project = analyze(&[("src/main.ts", main)]);
+    assert!(project.findings("pick").is_empty());
+}
+
+#[test]
+fn a_self_call_that_passes_the_parameter_on_is_neutral() {
+    let main = "function walk(node: number, deep: boolean): number {\n  return deep && node > 0 ? walk(node - 1, deep) : node;\n}\nwalk(1, true);\nwalk(2, true);\nwalk(3, true);\nexport const marker = 1;\n";
+    let project = analyze(&[("src/main.ts", main)]);
+    assert_eq!(
+        project.findings("walk"),
+        vec![(
+            "deep".to_string(),
+            ConstantParameterReason::IdenticalArgument,
+            Some("true".to_string())
+        )]
+    );
+}
+
+#[test]
+fn a_self_call_that_moves_a_parameter_is_unknown() {
+    let main = "function swap(a: boolean, b: boolean): boolean {\n  return a ? swap(b, a) : b;\n}\nswap(true, true);\nswap(true, true);\nswap(true, true);\nexport const marker = 1;\n";
+    let project = analyze(&[("src/main.ts", main)]);
+    assert!(project.findings("swap").is_empty());
+}
+
+#[test]
+fn a_suppression_on_the_function_or_the_parameter_hides_the_finding() {
+    let above_function = format!("// fallow-ignore-next-line constant-parameter\n{FORMAT}");
+    let project = analyze(&[("src/format.ts", &above_function), ("src/main.ts", MAIN)]);
+    assert!(project.findings("format").is_empty());
+    assert!(project.results.stale_suppressions.is_empty());
+
+    let above_parameter = "export function format(\n  value: number,\n  // fallow-ignore-next-line constant-parameter\n  compact: boolean,\n  locale?: string,\n) {\n  if (compact) return String(value);\n  return value.toLocaleString(locale);\n}\n";
+    let project = analyze(&[("src/format.ts", above_parameter), ("src/main.ts", MAIN)]);
+    assert_eq!(project.findings("format"), never_passed_locale());
+}
+
+#[test]
+fn a_test_caller_counts_in_the_default_mode() {
+    let test = "import { format } from './format';\ntest('x', () => format(4, false));\n";
+    let project = analyze(&base_with(&[("src/format.test.ts", test)], MAIN));
+    assert_eq!(project.findings("format"), never_passed_locale());
+}
+
+#[test]
+fn the_rule_is_off_by_default() {
+    let (_directory, root) = write_project(
+        &private_package(),
+        &[("src/format.ts", FORMAT), ("src/main.ts", MAIN)],
+    );
+    let config: FallowConfig = serde_json::from_value(entry_config()).expect("config");
+    let config = config.resolve(root, OutputFormat::Human, 2, true, true, None);
+    let results = crate::analyze(&config).expect("analysis succeeds");
+    assert!(results.constant_parameters.is_empty());
+}
+
+#[test]
+fn a_framework_auto_import_abstains() {
+    let package = serde_json::json!({
+        "name": "fixture",
+        "private": true,
+        "dependencies": { "nuxt": "*" }
+    });
+    let composable = "export function useFlag(n: number, on: boolean) {\n  return on ? n : 0;\n}\n";
+    let plugin = "export default defineNuxtPlugin(() => {\n  useFlag(1, true);\n  useFlag(2, true);\n  useFlag(3, true);\n});\n";
+    let project = analyze_with(
+        &package,
+        &serde_json::json!({ "autoImports": true }),
+        &[
+            ("nuxt.config.ts", "export default defineNuxtConfig({});\n"),
+            ("composables/useFlag.ts", composable),
+            ("plugins/flag.ts", plugin),
+        ],
+    );
+    assert!(project.findings("useFlag").is_empty());
+    let reason = project.reason("composables/useFlag.ts", "useFlag");
+    assert!(reason == Some("auto-import"), "{reason:?}");
+}
+
+#[test]
+fn a_value_reference_in_a_module_without_functions_abstains() {
+    let main = "import { format } from './format';\nimport './use';\nformat(1, true);\nformat(2, true);\nformat(3, true);\n";
+    for user in [
+        "import { format } from './format';\nexport const mapped = [1].map(format);\n",
+        "import { format } from './format';\n[1].map(format);\nexport {};\n",
+    ] {
+        let project = analyze(&base_with(&[("src/use.ts", user)], main));
+        assert_abstains(&project, "src/format.ts", "format", "value-reference");
+    }
+}
+
+#[test]
+fn a_jsx_use_in_a_module_without_functions_abstains() {
+    let card = "export function Card(props: { a: number }) {\n  return props.a;\n}\n";
+    let main = "import { Card } from './Card';\nimport './view';\nCard({ a: 1 });\nCard({ a: 1 });\nCard({ a: 1 });\n";
+    let view = "import { Card } from './Card';\nexport const element = <Card a={2} />;\n";
+    let config = serde_json::json!({ "entry": ["src/main.tsx"] });
+    let project = analyze_with(
+        &private_package(),
+        &config,
+        &[
+            ("src/Card.tsx", card),
+            ("src/main.tsx", main),
+            ("src/view.tsx", view),
+        ],
+    );
+    assert_abstains(&project, "src/Card.tsx", "Card", "value-reference");
+}
+
+#[test]
+fn an_inline_module_script_in_html_abstains() {
+    let html = "<!doctype html>\n<script type=\"module\">\n  import { format } from './src/format.ts';\n  format(4, false);\n</script>\n";
+    let config = serde_json::json!({ "entry": ["src/main.ts", "index.html"] });
+    let project = analyze_with(
+        &private_package(),
+        &config,
+        &base_with(&[("index.html", html)], MAIN),
+    );
+    assert_abstains(&project, "src/format.ts", "format", "template-callers");
+
+    let html_with_src =
+        "<!doctype html>\n<script type=\"module\" src=\"./src/main.ts\"></script>\n";
+    let project = analyze_with(
+        &private_package(),
+        &config,
+        &base_with(&[("index.html", html_with_src)], MAIN),
+    );
+    assert_eq!(project.findings("format").len(), 2);
+}
+
+#[test]
+fn a_template_host_blocks_only_what_it_imports() {
+    let main = "import { format } from './format';\nimport './View.vue';\nformat(1, true);\nformat(2, true);\nformat(3, true);\n";
+    let view = "<script setup lang=\"ts\">\nimport { other } from './other';\n</script>\n<template><p>{{ other() }}</p></template>\n";
+    let other = "export function other() {\n  return 1;\n}\n";
+    let project = analyze(&base_with(
+        &[("src/View.vue", view), ("src/other.ts", other)],
+        main,
+    ));
+    assert_eq!(project.findings("format").len(), 2);
+}
+
+#[test]
+fn an_inline_classic_script_with_a_dynamic_import_abstains() {
+    let html = "<!doctype html>\n<script>\n  import('./src/format.ts').then((m) => m.format(4, false));\n</script>\n";
+    let config = serde_json::json!({ "entry": ["src/main.ts", "index.html"] });
+    let project = analyze_with(
+        &private_package(),
+        &config,
+        &base_with(&[("index.html", html)], MAIN),
+    );
+    assert_abstains(&project, "src/format.ts", "format", "template-callers");
+}

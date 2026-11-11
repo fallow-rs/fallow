@@ -42,6 +42,7 @@ export const ISSUE_TYPE_DEFAULTS = {
   "unrendered-components": true,
   "unused-component-props": true,
   "absent-component-props": true,
+  "constant-parameters": true,
   "unused-component-emits": true,
   "unused-component-inputs": true,
   "unused-component-outputs": true,
@@ -77,6 +78,7 @@ export const ISSUE_TYPE_ALIASES: Readonly<Record<string, IssueTypeKey>> = {
   "boundary-coverage-violations": "boundary-violation",
   "catalog": "unused-catalog-entries",
   "circular-dependency": "circular-dependencies",
+  "constant-parameter": "constant-parameters",
   "dev-dependency-in-production": "dev-dependencies-in-production",
   "duplicate-export": "duplicate-exports",
   "duplicate-export-alias": "duplicate-export-aliases",
@@ -269,6 +271,10 @@ export const DIAGNOSTIC_CATEGORIES: ReadonlyArray<DiagnosticCategory> = [
   {
     "code": "absent-component-prop",
     "label": "Absent Optional Component Props"
+  },
+  {
+    "code": "constant-parameter",
+    "label": "Constant Parameters"
   },
   {
     "code": "unused-component-emit",

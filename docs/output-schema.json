@@ -884,6 +884,13 @@
           },
           "description": "Used optional component inputs absent from inspected reachable callers. Off by default."
         },
+        "constant_parameters": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ConstantParameterFinding"
+          },
+          "description": "Parameters that each visible call passes in one way. Off by default."
+        },
         "unused_component_emits": {
           "type": "array",
           "items": {
@@ -1561,6 +1568,13 @@
             "$ref": "#/definitions/AbsentComponentPropFinding"
           },
           "description": "Used optional component inputs absent from inspected reachable callers. Off by default."
+        },
+        "constant_parameters": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ConstantParameterFinding"
+          },
+          "description": "Parameters that each visible call passes in one way. Off by default."
         },
         "unused_component_emits": {
           "type": "array",
@@ -6365,6 +6379,10 @@
           "type": "integer",
           "description": "Optional consumed props omitted by known reachable callers, for manual review."
         },
+        "constant_parameters": {
+          "type": "integer",
+          "description": "Parameters that each visible call passes in one way, for manual review.\nAbsent while zero, so a run with the opt-in rule off keeps its shape."
+        },
         "unused_component_emits": {
           "type": "integer",
           "description": "Vue `<script setup>` emits emitted nowhere inside their own SFC."
@@ -7407,6 +7425,13 @@
           },
           "description": "Used optional component inputs absent from inspected reachable callers. Off by default."
         },
+        "constant_parameters": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ConstantParameterFinding"
+          },
+          "description": "Parameters that each visible call passes in one way. Off by default."
+        },
         "unused_component_emits": {
           "type": "array",
           "items": {
@@ -8032,6 +8057,11 @@
           "type": "string",
           "const": "review-component-prop",
           "description": "Review caller evidence, defaults and component API intent manually."
+        },
+        {
+          "type": "string",
+          "const": "review-constant-parameter",
+          "description": "Review the calls, the default and the intent of a parameter that each\ncall passes in one way (manual; used by constant-parameter findings)."
         },
         {
           "type": "string",
@@ -31384,6 +31414,13 @@
           },
           "description": "Used optional component inputs absent from inspected reachable callers. Off by default."
         },
+        "constant_parameters": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ConstantParameterFinding"
+          },
+          "description": "Parameters that each visible call passes in one way. Off by default."
+        },
         "unused_component_emits": {
           "type": "array",
           "items": {
@@ -37731,6 +37768,221 @@
         "text"
       ],
       "description": "The result of one side of a witness."
+    },
+    "ConstantParameterFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Source path of the function."
+        },
+        "function_name": {
+          "type": "string",
+          "description": "The module-scope binding name of the function."
+        },
+        "parameter_name": {
+          "type": "string",
+          "description": "The parameter name."
+        },
+        "parameter_index": {
+          "type": "integer",
+          "description": "0-based index of the parameter. A TypeScript `this` parameter does\nnot count."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the parameter."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column of the parameter."
+        },
+        "reason": {
+          "description": "Why the rule reports the parameter.",
+          "$ref": "#/definitions/ConstantParameterReason"
+        },
+        "value": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConstantParameterValue"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The value that each call passes. Present if and only if `reason` is\n`identical-argument`."
+        },
+        "optional": {
+          "type": "boolean",
+          "description": "`true` when the parameter has the TypeScript `?` marker."
+        },
+        "has_default": {
+          "type": "boolean",
+          "description": "`true` when the parameter has a default value."
+        },
+        "condition_reads": {
+          "type": "integer",
+          "description": "The count of conditional tests in the function whose test is the\nparameter, `!parameter` or `!!parameter`: the test of an `if`, a\n`?:`, a `while`, a `do` or a `for`. Nested functions count. A\ncomparison such as `parameter === true` and an operand of `&&` or\n`||` do not count."
+        },
+        "call_site_count": {
+          "type": "integer",
+          "description": "The count of calls that the rule read for this parameter. A\nrecursive call that passes the parameter on unchanged does not count."
+        },
+        "inspected_call_sites": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ConstantParameterCallSite"
+          },
+          "description": "The first calls in source order, at most 20. The list is never longer\nthan `call_site_count`."
+        },
+        "explanation": {
+          "type": "string",
+          "description": "What the finding means and what static analysis does not prove."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file, the function or the\nparameter gives a new id. Absent in output from older versions."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        },
+        "effective_severity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EffectiveSeverity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Gate severity of this finding after `rules` and `overrides[].rules`\nresolve for its path. Not part of the finding identity, baseline keys\nor fingerprints."
+        }
+      },
+      "required": [
+        "path",
+        "function_name",
+        "parameter_name",
+        "parameter_index",
+        "line",
+        "col",
+        "reason",
+        "optional",
+        "has_default",
+        "condition_reads",
+        "call_site_count",
+        "inspected_call_sites",
+        "explanation",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for a [`ConstantParameter`] finding. No action is\nauto-fixable: a change of the function and each call is a refactor that\nneeds the tests, and a default that differs from the constant can change\nbehavior."
+    },
+    "ConstantParameterReason": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "identical-argument",
+          "description": "Each call passes the same literal value for the parameter."
+        },
+        {
+          "type": "string",
+          "const": "never-passed",
+          "description": "The parameter is optional or has a default, and each call omits it."
+        },
+        {
+          "type": "string",
+          "const": "unreached-variant",
+          "description": "Reserved for a later version: the calls pass only some values of a\nclosed set. Not emitted in this version."
+        }
+      ],
+      "description": "Why the rule reports a parameter."
+    },
+    "ConstantParameterValue": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "description": "The type of the value.",
+          "$ref": "#/definitions/ConstantParameterValueKind"
+        },
+        "text": {
+          "type": "string",
+          "description": "The value as text. A number uses the JavaScript `String(n)` form,\nexcept that negative zero is `-0`. A string is the raw value with no\nquotes. `null`, `undefined`, `true` and `false` are the keyword."
+        }
+      },
+      "required": [
+        "kind",
+        "text"
+      ],
+      "description": "The literal value that each call passes."
+    },
+    "ConstantParameterValueKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "boolean",
+          "description": "`true` or `false`."
+        },
+        {
+          "type": "string",
+          "const": "null",
+          "description": "`null`."
+        },
+        {
+          "type": "string",
+          "const": "undefined",
+          "description": "`undefined`."
+        },
+        {
+          "type": "string",
+          "const": "number",
+          "description": "A number."
+        },
+        {
+          "type": "string",
+          "const": "string",
+          "description": "A string."
+        }
+      ],
+      "description": "The type of a [`ConstantParameterValue`]."
+    },
+    "ConstantParameterCallSite": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Caller source path."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the call."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column of the call."
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "col"
+      ],
+      "description": "One inspected call of the reported function."
     }
   }
 }
