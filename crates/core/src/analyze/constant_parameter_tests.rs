@@ -244,6 +244,65 @@ fn a_parse_error_in_a_module_that_imports_no_project_module_keeps_the_findings()
     assert_eq!(project.findings("format").len(), 2);
 }
 
+fn workspace_files(broken: &str) -> Vec<(&str, &str)> {
+    vec![
+        (
+            "packages/ui/package.json",
+            r#"{ "name": "@acme/ui", "private": true }"#,
+        ),
+        ("packages/ui/src/format.ts", FORMAT),
+        (
+            "packages/app/package.json",
+            r#"{ "name": "app", "private": true, "dependencies": { "@acme/ui": "workspace:*" } }"#,
+        ),
+        (
+            "packages/app/src/main.ts",
+            "import { format } from '@acme/ui/src/format';\nimport './broken';\nformat(1, true);\nformat(2, true);\nformat(3, true);\n",
+        ),
+        ("packages/app/src/broken.ts", broken),
+    ]
+}
+
+#[test]
+fn a_parse_error_blocks_the_workspace_package_that_it_imports() {
+    let package = serde_json::json!({
+        "name": "root",
+        "private": true,
+        "workspaces": ["packages/*"]
+    });
+    let config = serde_json::json!({ "entry": ["packages/app/src/main.ts"] });
+    let control = analyze_with(
+        &package,
+        &config,
+        &workspace_files("export const value = 1;\n"),
+    );
+    assert_eq!(control.findings("format").len(), 2);
+
+    let project = analyze_with(
+        &package,
+        &config,
+        &workspace_files("import { format } from '@acme/ui/src/format';\nexport const = ;\n"),
+    );
+    assert_abstains(
+        &project,
+        "packages/ui/src/format.ts",
+        "format",
+        "parse-incomplete",
+    );
+}
+
+#[test]
+fn an_inline_script_with_a_root_relative_import_abstains() {
+    let html = "<!doctype html>\n<script type=\"module\">\n  import { format } from '/src/format.ts';\n  format(4, false);\n</script>\n";
+    let config = serde_json::json!({ "entry": ["src/main.ts", "index.html"] });
+    let project = analyze_with(
+        &private_package(),
+        &config,
+        &base_with(&[("index.html", html)], MAIN),
+    );
+    assert_abstains(&project, "src/format.ts", "format", "template-callers");
+}
+
 #[test]
 fn a_dependency_name_that_a_project_path_reuses_blocks_that_path() {
     let package = serde_json::json!({
