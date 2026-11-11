@@ -4,9 +4,9 @@
 //! run: husky and Vite+ hook scripts, lefthook configs, simple-git-hooks and
 //! lint-staged configs (in package.json or in their own files), and the
 //! `staged` block of a Vite+ config. It also reads the agent hook commands of
-//! `.claude/settings.json`, `.claude/settings.local.json` and
-//! `.codex/hooks.json`. A hook command that runs the agent gate that Fallow
-//! generates credits the `fallow` package. A package these
+//! the shared `.claude/settings.json` and `.codex/hooks.json`. A hook command
+//! that runs the agent gate that Fallow generates credits the `fallow`
+//! package. A package these
 //! commands invoke is used, the same way a package.json script or a CI
 //! workflow step makes it used.
 //!
@@ -62,10 +62,27 @@ const MANIFEST_COMMAND_KEYS: &[&str] = &["simple-git-hooks", "lint-staged"];
 
 /// The agent hook configs, as pairs of the config file and its harness
 /// directory. Each config holds `hooks.<Event>[].hooks[].command` entries.
+/// The personal `.claude/settings.local.json` is not read: Claude Code keeps
+/// it out of git, so a local run and a CI run would credit different
+/// packages.
 const AGENT_HOOK_FILES: &[(&str, &str)] = &[
     (".claude/settings.json", ".claude"),
-    (".claude/settings.local.json", ".claude"),
     (".codex/hooks.json", ".codex"),
+];
+
+/// The project directory prefixes of an agent hook command, in the order
+/// that they are removed. Claude Code sets `CLAUDE_PROJECT_DIR` to the project
+/// root and runs hooks from it, so a removed prefix leaves a path relative to
+/// the root that the command scanner can follow.
+const PROJECT_DIR_PREFIXES: &[&str] = &[
+    "\"$CLAUDE_PROJECT_DIR\"/",
+    "\"${CLAUDE_PROJECT_DIR}\"/",
+    "$CLAUDE_PROJECT_DIR/",
+    "${CLAUDE_PROJECT_DIR}/",
+    "\"$PWD\"/",
+    "\"${PWD}\"/",
+    "$PWD/",
+    "${PWD}/",
 ];
 
 /// The agent gate that `fallow agent install` and `fallow setup-hooks` write,
@@ -133,11 +150,21 @@ fn collect_agent_hook_commands(root: &Path) -> Vec<(&'static str, String)> {
             .flatten();
         for entry in entries {
             if let Some(command) = entry.get("command").and_then(serde_json::Value::as_str) {
-                commands.push((*harness, command.to_string()));
+                commands.push((*harness, strip_project_dir(command)));
             }
         }
     }
     commands
+}
+
+/// Remove each project directory prefix from an agent hook command, so
+/// `"$CLAUDE_PROJECT_DIR"/.claude/hooks/a.sh` becomes `.claude/hooks/a.sh`.
+fn strip_project_dir(command: &str) -> String {
+    PROJECT_DIR_PREFIXES
+        .iter()
+        .fold(command.to_string(), |command, prefix| {
+            command.replace(prefix, "")
+        })
 }
 
 /// Whether an agent hook command runs the generated gate of its harness.
@@ -485,12 +512,7 @@ mod tests {
         write(
             root,
             ".claude/settings.json",
-            r#"{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"npx audit-tool audit"}]}]},"env":{"X":"not-run-tool"}}"#,
-        );
-        write(
-            root,
-            ".claude/settings.local.json",
-            r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":".claude/hooks/a.sh"}]}]}}"#,
+            r#"{"hooks":{"PreToolUse":[{"matcher":"Bash","hooks":[{"type":"command","command":"npx audit-tool audit"}]}],"Stop":[{"hooks":[{"type":"command","command":".claude/hooks/a.sh"}]}]},"env":{"X":"not-run-tool"}}"#,
         );
         write(
             root,
@@ -513,6 +535,44 @@ mod tests {
                 "lint-tool".to_string()
             ]
         );
+    }
+
+    #[test]
+    fn project_dir_prefixed_hook_scripts_credit_invoked_tools() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        write(
+            root,
+            ".claude/settings.json",
+            r#"{"hooks":{"Stop":[{"hooks":[
+              {"type":"command","command":"\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/a.sh"},
+              {"type":"command","command":"bash ${CLAUDE_PROJECT_DIR}/.claude/hooks/b.sh"},
+              {"type":"command","command":"$PWD/.claude/hooks/c.sh --flag"}
+            ]}]}}"#,
+        );
+        write(root, ".claude/hooks/a.sh", "#!/bin/sh\nnpx tool-a\n");
+        write(root, ".claude/hooks/b.sh", "#!/bin/sh\nnpx tool-b\n");
+        write(root, ".claude/hooks/c.sh", "#!/bin/sh\nnpx tool-c\n");
+        assert_eq!(
+            used(root, &["tool-a", "tool-b", "tool-c", "tool-d"]),
+            vec![
+                "tool-a".to_string(),
+                "tool-b".to_string(),
+                "tool-c".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn local_claude_settings_credit_nothing() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        write(
+            root,
+            ".claude/settings.local.json",
+            r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"npx local-tool"}]}]}}"#,
+        );
+        assert!(used(root, &["local-tool"]).is_empty());
     }
 
     #[test]
