@@ -37,7 +37,11 @@ pub(super) fn provider_from_env() -> Option<Result<PathBuf, String>> {
     let value = std::env::var_os(PROVIDER_ENV)?;
     Some(
         verified_provider(Path::new(&value), &RELEASE_BINARY_SIGNING_KEY)
-            .map_err(|error| format!("{PROVIDER_ENV} was rejected: {error}")),
+            .map_err(|error| {
+                format!(
+                    "{PROVIDER_ENV} was rejected: {error}. Reinstall `fallow-similar-code` at the same version as Fallow, or unset {PROVIDER_ENV}."
+                )
+            }),
     )
 }
 
@@ -239,7 +243,7 @@ mod tests {
         let (signer, key) = test_key();
         let path = signed_provider(dir.path(), &signer);
         let file = std::fs::File::create(signature_path(&path)).unwrap();
-        file.set_len(1024 * 1024 * 1024).unwrap();
+        file.set_len(SIGNATURE_BYTES as u64 + 1).unwrap();
         assert!(
             verified_provider(&path, &key)
                 .unwrap_err()
