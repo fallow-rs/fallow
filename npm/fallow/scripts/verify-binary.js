@@ -299,16 +299,10 @@ function binaryTargetsForPlatform(platformId) {
   // and tests can synthesize a Windows verify without running on Windows.
   const isWindows = typeof platformId === "string" && platformId.startsWith("win32");
   const ext = isWindows ? ".exe" : "";
-  // The platform package ships the multicall CLI plus the local-only
-  // similar-code provider. Both are signed and digest-pinned. Verifying them
-  // together keeps the Rust sibling lookup free of project or PATH overrides.
-  return [
-    { binary: `fallow${ext}`, asset: `fallow-${platformId}${ext}` },
-    {
-      binary: `fallow-similar-code${ext}`,
-      asset: `fallow-similar-code-${platformId}${ext}`,
-    },
-  ];
+  // The platform package ships only the multicall CLI. The similar-code
+  // provider ships in the `fallow-similar-code` package, whose own verifier
+  // checks it.
+  return [{ binary: `fallow${ext}`, asset: `fallow-${platformId}${ext}` }];
 }
 
 function isSkipRequested(env = process.env) {

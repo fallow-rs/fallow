@@ -15,8 +15,6 @@
   ],
   "files": [
     "fallow",
-    "fallow.sig",
-    "fallow-similar-code",
-    "fallow-similar-code.sig"
+    "fallow.sig"
   ]
 }

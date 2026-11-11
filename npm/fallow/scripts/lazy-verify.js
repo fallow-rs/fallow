@@ -32,10 +32,11 @@ const {
 } = require("./verify-binary");
 
 // Bumped to 2 when SHA-256 + platformPkgDir binding landed (closes the
-// cross-install reuse gap in the shared $XDG fallback cache), and to 3 when
-// the sentinel started tracking fallow-similar-code alongside the multicall
-// CLI. Sentinels written under an older schema are invalidated automatically.
-const SENTINEL_SCHEMA_VERSION = 3;
+// cross-install reuse gap in the shared $XDG fallback cache), to 3 when the
+// sentinel tracked fallow-similar-code alongside the multicall CLI, and to 4
+// when the platform package went back to the multicall CLI alone. Sentinels
+// written under an older schema are invalidated automatically.
+const SENTINEL_SCHEMA_VERSION = 4;
 const VERIFY_LOG_ENV = "FALLOW_VERIFY_LOG";
 
 // One-shot warning state: each warning class fires once per process,

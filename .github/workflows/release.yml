@@ -1587,17 +1587,23 @@ jobs:
           for dir in npm-artifacts/npm-*; do
             platform="$(basename "$dir" | sed 's/^npm-//')"
             target="npm/$platform"
-            mkdir -p "$target"
-            cp "$dir"/* "$target"/
             sidecar_target="npm/fallow-similar-code-$platform"
-            mkdir -p "$sidecar_target"
-            cp "$dir"/fallow-similar-code* "$sidecar_target"/
+            mkdir -p "$target" "$sidecar_target"
+            # The main platform package ships only the multicall binary. The
+            # similar-code provider ships in its own platform package.
+            for file in "$dir"/*; do
+              case "$(basename "$file")" in
+                fallow-similar-code*) cp "$file" "$sidecar_target"/ ;;
+                *) cp "$file" "$target"/ ;;
+              esac
+            done
           done
 
       - name: Set binary permissions
         run: |
-          # Platform packages ship the multicall `fallow` binary and the local
-          # similar-code provider. Windows executables need no +x bit.
+          # The main platform packages ship the multicall `fallow` binary and
+          # the similar-code platform packages ship the local provider.
+          # Windows executables need no +x bit.
           for bin in npm/*/fallow npm/*/fallow-similar-code; do
             [ -f "$bin" ] && chmod +x "$bin"
           done

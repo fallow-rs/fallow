@@ -8,6 +8,7 @@ use fallow_engine::source::similar_code::SimilarCodeSourceDigest;
 use rustc_hash::FxHashMap;
 
 mod cache;
+mod launcher_provider;
 mod protocol;
 mod transport;
 

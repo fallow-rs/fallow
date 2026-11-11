@@ -27,7 +27,7 @@ function packageNameForPlatform(platform) {
 
 function binaryNames(platform) {
   const ext = platform === "win32" ? ".exe" : "";
-  return [`fallow${ext}`, `fallow-similar-code${ext}`];
+  return [`fallow${ext}`];
 }
 
 function computeDigestsForDir(dir, platform) {
@@ -120,7 +120,7 @@ test("ensureVerified verifies on cache miss and writes the sentinel", (t) => {
   assert.equal(sentinel.schemaVersion, SENTINEL_SCHEMA_VERSION);
   assert.equal(sentinel.packageVersion, "2.81.0");
   assert.equal(sentinel.packageName, "@fallow-cli/test-platform");
-  assert.equal(Object.keys(sentinel.binaries).length, 2);
+  assert.equal(Object.keys(sentinel.binaries).length, 1);
 });
 
 test("ensureVerified verifies and caches a win32 executable on any host", (t) => {
@@ -136,7 +136,7 @@ test("ensureVerified verifies and caches a win32 executable on any host", (t) =>
   assert.equal(verified.ok, true);
   assert.equal(verified.cached, false);
   const sentinel = JSON.parse(fs.readFileSync(verified.sentinelPath, "utf8"));
-  assert.deepEqual(Object.keys(sentinel.binaries), ["fallow.exe", "fallow-similar-code.exe"]);
+  assert.deepEqual(Object.keys(sentinel.binaries), ["fallow.exe"]);
 
   const cached = ensureVerified({
     ...input,

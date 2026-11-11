@@ -71,3 +71,19 @@ test("resolveInstalledPlatformPackage returns the first installed candidate", ()
   installed.clear();
   assert.equal(resolveInstalledPlatformPackage(candidates, resolve), null);
 });
+
+test("main platform packages ship only the fallow binary and its signature", () => {
+  const path = require("node:path");
+  const npmRoot = path.join(__dirname, "..", "..");
+  const { optionalDependencies } = require("../package.json");
+  const platformPackages = Object.keys(optionalDependencies).filter((name) =>
+    name.startsWith("@fallow-cli/"),
+  );
+  assert.ok(platformPackages.length > 0);
+  for (const name of platformPackages) {
+    const dir = name.slice("@fallow-cli/".length);
+    const manifest = require(path.join(npmRoot, dir, "package.json"));
+    const ext = dir.startsWith("win32-") ? ".exe" : "";
+    assert.deepEqual(manifest.files, [`fallow${ext}`, `fallow${ext}.sig`], name);
+  }
+});

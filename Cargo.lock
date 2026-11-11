@@ -1093,6 +1093,7 @@ name = "fallow-api"
 version = "3.42.0"
 dependencies = [
  "dunce",
+ "ed25519-dalek",
  "fallow-config",
  "fallow-engine",
  "fallow-mutation",
