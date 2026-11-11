@@ -44,10 +44,12 @@ binary.
 A global `fallow` needs the companion in the same global install
 (`npm install --global fallow-type-aware@<fallow version>`). npx and other
 package runners install `fallow` in their own cache, so they never use the
-project companion: set `FALLOW_TYPE_AWARE_BIN` to its executable instead. The
-GitHub Action and the GitLab template install the companion themselves, unless
-type-aware analysis is turned off. A GitLab job with `FALLOW_SKIP_INSTALL=true`
-installs it together with `fallow`. Without the companion, `--type-aware`
+project companion. Start both packages together
+(`npx -p fallow@<version> -p fallow-type-aware@<version> fallow`), or set
+`FALLOW_TYPE_AWARE_BIN` to the companion executable. The GitHub Action and the
+GitLab template install the companion themselves, unless type-aware analysis is
+turned off. With `FALLOW_SKIP_INSTALL=true`, the GitLab job must install the
+companion together with `fallow`. Without the companion, `--type-aware`
 and `type-aware status` name the install command.
 
 The companion depends on `typescript@7.0.2`, accepts any TypeScript 7 release that a package manager override selects, and uses `typescript/unstable/sync`, which

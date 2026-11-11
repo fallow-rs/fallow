@@ -87,7 +87,7 @@ variables:
 
   # Core
   FALLOW_VERSION: ""             # Empty reads package.json fallow dependency, then falls back to latest
-  FALLOW_SKIP_INSTALL: ""        # "true" skips `npm install -g fallow` and uses the fallow already on PATH (e.g. a pnpm-catalog pin installed by a prior `pnpm install`). Fails fast if no fallow is found.
+  FALLOW_SKIP_INSTALL: ""        # "true" skips `npm install -g fallow` and uses the fallow already on PATH (e.g. a pnpm-catalog pin installed by a prior `pnpm install`). Fails fast if no fallow is found. Type-aware analysis then needs `fallow-type-aware` at the same version in that install.
   FALLOW_COMMAND: ""            # dead-code, architecture, dupes, health, audit, security, fix, or empty (runs all)
   FALLOW_ROOT: "."
   FALLOW_CONFIG: ""             # Path to .fallowrc.json, .fallowrc.jsonc, fallow.toml, or .fallow.toml
@@ -364,6 +364,9 @@ variables:
       # exercise this block without invoking npm. Not a documented user knob.
       if [ "${FALLOW_INSTALL_DRY_RUN:-}" = "true" ]; then
         echo "DRY RUN: npm install -g --ignore-scripts ${install_arg}"
+        if [ "$(trim "${FALLOW_TYPE_AWARE:-}")" != "false" ]; then
+          echo "DRY RUN: npm install -g --ignore-scripts fallow-type-aware@<installed fallow version>"
+        fi
         exit 0
       fi
 
