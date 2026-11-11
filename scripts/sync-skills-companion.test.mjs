@@ -15,7 +15,7 @@ import { fileURLToPath } from "node:url";
 import { test } from "node:test";
 
 import { GIT_LOCATION_VARIABLES } from "./vendor-skills.mjs";
-import { commitMessage, prNumbers, run } from "./sync-skills-companion.mjs";
+import { commitMessage, prNumbers, run, runCompanionBuilds } from "./sync-skills-companion.mjs";
 
 const SCRIPT = join(dirname(fileURLToPath(import.meta.url)), "sync-skills-companion.mjs");
 const OLD_VERSION = "1.2.3";
@@ -491,3 +491,24 @@ test(
     assert.deepEqual(companionState(fixture.skills), before);
   }),
 );
+
+test("the sync rebuilds each companion build folder that exists", () => {
+  const companion = mkdtempSync(join(tmpdir(), "sync-builds-"));
+  const log = () => {};
+  try {
+    assert.deepEqual(runCompanionBuilds(companion, process.env, log), []);
+    mkdirSync(join(companion, "claude-directory"));
+    mkdirSync(join(companion, "scripts"));
+    writeFileSync(
+      join(companion, "scripts", "plugin_release.py"),
+      "import pathlib, sys\npathlib.Path('claude-directory/built').write_text(' '.join(sys.argv[1:]))\n",
+    );
+    assert.deepEqual(runCompanionBuilds(companion, process.env, log), ["claude-directory"]);
+    assert.equal(
+      readFileSync(join(companion, "claude-directory", "built"), "utf8"),
+      "directory-bundle",
+    );
+  } finally {
+    rmSync(companion, { recursive: true, force: true });
+  }
+});

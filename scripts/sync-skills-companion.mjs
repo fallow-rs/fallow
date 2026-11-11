@@ -214,13 +214,14 @@ const resolvePin = (git, repoRoot, requested) => {
 
 /**
  * Check out the skills of the pin in a temp clone. The clone shares the
- * objects of the fallow repository, so it is fast and needs no network.
+ * objects of the fallow repository, so it is fast and needs no network. Cone
+ * mode also checks out `npm/fallow/package.json`, which pins the launchers.
  */
 const checkoutPin = (git, repoRoot, pin) => {
   const dir = mkdtempSync(join(tmpdir(), `${PREFIX}-`));
   try {
     git(dir, "clone", "--quiet", "--shared", "--no-checkout", repoRoot, dir);
-    git(dir, "sparse-checkout", "set", SKILLS_PATH);
+    git(dir, "sparse-checkout", "set", "--cone", SKILLS_PATH);
     git(dir, "-c", `core.hooksPath=${devNull}`, "checkout", "--quiet", "--detach", pin);
     return dir;
   } catch (caught) {
@@ -305,6 +306,35 @@ const checkPrerequisites = (env, skipChecks) => {
     }
   }
 };
+
+/**
+ * The folders that the companion builds from its plugin. `claude-directory/`
+ * holds the skills-only copy that the Claude plugin directory lists, and the
+ * companion CI fails when it differs from the plugin. The sync rebuilds each
+ * folder that exists after it writes the skills and the version.
+ */
+export const COMPANION_BUILDS = [
+  {
+    path: "claude-directory",
+    command: ["python3", "scripts/plugin_release.py", "directory-bundle"],
+  },
+];
+
+/** Rebuilds each companion build folder that exists, and returns the folders to stage. */
+export const runCompanionBuilds = (companion, env, log) =>
+  COMPANION_BUILDS.filter(({ path }) => existsSync(join(companion, path))).map(
+    ({ path, command }) => {
+      const [program, ...args] = command;
+      log(`${PREFIX}: build: ${command.join(" ")}`);
+      const result = spawnSync(program, args, { cwd: companion, env, stdio: "inherit" });
+      if (result.status !== 0) {
+        throw new Refusal(
+          `the companion build failed: ${command.join(" ")}. Fix the cause in ${companion}.`,
+        );
+      }
+      return path;
+    },
+  );
 
 const runChecks = (companion, source, oldVersion, env, log) => {
   for (const [command, ...args] of COMPANION_CHECKS) {
@@ -411,6 +441,7 @@ const syncCompanion = ({ options, repoRoot, env, skipChecks, log, git }) => {
       replaceValue(join(companion, path), "version", version.old, version.next, count);
     }
     replaceValue(lockFile, "commit", oldPin, pin, 1);
+    const builds = runCompanionBuilds(companion, env, log);
 
     // Stage before the checks: the private-data guard of the companion reads
     // `git ls-files`, so it does not see a new file that is still untracked.
@@ -418,6 +449,7 @@ const syncCompanion = ({ options, repoRoot, env, skipChecks, log, git }) => {
       ...pairs.map(({ published }) => relative(companion, published)),
       ...VERSION_FILES.map(({ path }) => path),
       SOURCE_LOCK,
+      ...builds,
     ];
     git(companion, "add", "-A", "--", ...paths);
     if (!skipChecks) {
