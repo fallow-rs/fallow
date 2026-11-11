@@ -145,6 +145,7 @@ fn durable_object_stub_credits_member() {
             "DailyQuota.viaGetByName",
             "DailyQuota.viaIdLocal",
             "DailyQuota.viaAnnotatedStub",
+            "DailyQuota.idFromString",
             "Repo.get",
         ],
         "DailyQuota.unused",
@@ -153,4 +154,17 @@ fn durable_object_stub_credits_member() {
         unused.contains(&"Repo.unusedOnRepo".to_string()),
         "Repo.unusedOnRepo is read on the result of `Repo.get`, found: {unused:?}"
     );
+    // `env.QUOTA.get(...)`, `env.QUOTA.getByName(...)` and
+    // `env.QUOTA.idFromName(...)` call the namespace API. They do not call
+    // the methods of the same name on the Durable Object class.
+    for member in [
+        "DailyQuota.get",
+        "DailyQuota.getByName",
+        "DailyQuota.idFromName",
+    ] {
+        assert!(
+            unused.contains(&member.to_string()),
+            "{member} is called only on the namespace, found: {unused:?}"
+        );
+    }
 }

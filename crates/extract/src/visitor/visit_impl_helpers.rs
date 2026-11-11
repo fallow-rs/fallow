@@ -85,16 +85,16 @@ impl<'a> Visit<'a> for SignatureTypeCollector {
 #[path = "visit_impl_durable_objects.rs"]
 mod durable_objects;
 
+use durable_objects::{DurableObjectCalls, ReceiverAlias, ResolvedReceiver};
+
 pub(super) struct StructuralParamMemberCollector {
     target_params: FxHashSet<String>,
     shadowed_stack: Vec<FxHashSet<String>>,
-    alias_stack: Vec<FxHashMap<String, (String, String)>>,
+    alias_stack: Vec<FxHashMap<String, ReceiverAlias>>,
     /// The element alias of an iteration callback, keyed by the callback
     /// start. The callback scope takes it when the walk enters the callback.
     pending_element_aliases: FxHashMap<u32, (String, (String, String))>,
-    /// Locals that hold a Durable Object id, mapped to the parameter and the
-    /// namespace path that made the id.
-    durable_object_ids: FxHashMap<String, (String, String)>,
+    durable_objects: DurableObjectCalls,
     pub(super) members: FxHashMap<String, FxHashSet<String>>,
     pub(super) property_members: FxHashMap<String, FxHashSet<(String, String)>>,
 }
@@ -106,7 +106,7 @@ impl StructuralParamMemberCollector {
             shadowed_stack: Vec::new(),
             alias_stack: Vec::new(),
             pending_element_aliases: FxHashMap::default(),
-            durable_object_ids: FxHashMap::default(),
+            durable_objects: DurableObjectCalls::default(),
             members: FxHashMap::default(),
             property_members: FxHashMap::default(),
         }
@@ -118,6 +118,7 @@ impl StructuralParamMemberCollector {
         body.visit(self);
         self.alias_stack.pop();
         self.shadowed_stack.pop();
+        self.commit_namespace_method_accesses();
     }
 
     fn tracks_receiver_name(&self, name: &str) -> bool {
@@ -159,6 +160,17 @@ impl StructuralParamMemberCollector {
         object: &Expression<'_>,
         allow_call_arguments: bool,
     ) -> Option<(String, String)> {
+        self.resolve_receiver(object, allow_call_arguments)
+            .map(|receiver| (receiver.param, receiver.path))
+    }
+
+    /// [`Self::resolve_receiver_path`], and whether the path goes through a
+    /// Durable Object stub local.
+    fn resolve_receiver(
+        &self,
+        object: &Expression<'_>,
+        allow_call_arguments: bool,
+    ) -> Option<ResolvedReceiver> {
         let object_path = if allow_call_arguments {
             call_receiver_name(object)?
         } else {
@@ -168,21 +180,28 @@ impl StructuralParamMemberCollector {
             .split_once('.')
             .map_or((object_path.as_str(), ""), |(root, suffix)| (root, suffix));
         for (aliases, shadowed) in self.alias_stack.iter().zip(&self.shadowed_stack).rev() {
-            if let Some((param, alias_path)) = aliases.get(root) {
+            if let Some(alias) = aliases.get(root) {
+                let (param, alias_path) = &alias.target;
                 let path = match (alias_path.is_empty(), suffix.is_empty()) {
                     (true, _) => suffix.to_string(),
                     (_, true) => alias_path.clone(),
                     (false, false) => format!("{alias_path}.{suffix}"),
                 };
-                return Some((param.clone(), path));
+                return Some(ResolvedReceiver {
+                    param: param.clone(),
+                    path,
+                    via_stub: alias.stub,
+                });
             }
             if shadowed.contains(root) {
                 return None;
             }
         }
-        self.target_params
-            .contains(root)
-            .then(|| (root.to_string(), suffix.to_string()))
+        self.target_params.contains(root).then(|| ResolvedReceiver {
+            param: root.to_string(),
+            path: suffix.to_string(),
+            via_stub: false,
+        })
     }
 
     /// The parameter and the element path of an array that a property path of
@@ -197,7 +216,7 @@ impl StructuralParamMemberCollector {
         if let Some((local, target)) = self.pending_element_aliases.remove(&start)
             && let Some(scope) = self.alias_stack.last_mut()
         {
-            scope.insert(local, target);
+            scope.insert(local, ReceiverAlias::plain(target));
         }
     }
 
@@ -233,37 +252,17 @@ impl<'a> Visit<'a> for StructuralParamMemberCollector {
         // `local.rotate(1).translate(1, 1)` reads `translate` on the
         // `rotate()` path of `local`, as the call without arguments does
         // (issue #4311).
-        if let Some((param, property_path)) = self.resolve_receiver_path(&expr.object, true) {
-            if property_path.is_empty() {
-                self.members
-                    .entry(param)
-                    .or_default()
-                    .insert(expr.property.name.to_string());
-            } else {
-                self.property_members
-                    .entry(param)
-                    .or_default()
-                    .insert((property_path, expr.property.name.to_string()));
-            }
+        if let Some(receiver) = self.resolve_receiver(&expr.object, true) {
+            self.record_member_access(receiver, expr.property.name.to_string());
         }
         walk::walk_static_member_expression(self, expr);
     }
 
     fn visit_computed_member_expression(&mut self, expr: &ComputedMemberExpression<'a>) {
         if let Expression::StringLiteral(property) = &expr.expression
-            && let Some((param, property_path)) = self.resolve_receiver_path(&expr.object, true)
+            && let Some(receiver) = self.resolve_receiver(&expr.object, true)
         {
-            if property_path.is_empty() {
-                self.members
-                    .entry(param)
-                    .or_default()
-                    .insert(property.value.text().into_owned());
-            } else {
-                self.property_members
-                    .entry(param)
-                    .or_default()
-                    .insert((property_path, property.value.text().into_owned()));
-            }
+            self.record_member_access(receiver, property.value.text().into_owned());
         }
         walk::walk_computed_member_expression(self, expr);
     }
@@ -271,6 +270,7 @@ impl<'a> Visit<'a> for StructuralParamMemberCollector {
     /// `m.days.some((day) => day.flag)` reads `flag` on an element of
     /// `m.days`, so the callback parameter is an alias of the element path.
     fn visit_call_expression(&mut self, call: &CallExpression<'a>) {
+        self.record_durable_object_namespace(call);
         if let Expression::StaticMemberExpression(callee) = &call.callee
             && ITERABLE_ELEMENT_CALLBACK_METHODS.contains(&callee.property.name.as_str())
             && let Some(target) = self.element_receiver_path(&callee.object)
@@ -312,7 +312,7 @@ impl<'a> Visit<'a> for StructuralParamMemberCollector {
         if let Some((local, target)) = alias
             && let Some(scope) = self.alias_stack.last_mut()
         {
-            scope.insert(local, target);
+            scope.insert(local, ReceiverAlias::plain(target));
         }
         self.visit_statement(&stmt.body);
         self.alias_stack.pop();
@@ -352,6 +352,7 @@ impl<'a> Visit<'a> for StructuralParamMemberCollector {
             .declarations
             .iter()
             .flat_map(|declarator| self.destructured_receiver_aliases(declarator))
+            .map(|(local, target)| (local, ReceiverAlias::plain(target)))
             .collect::<Vec<_>>();
         for declarator in &decl.declarations {
             aliases.extend(self.durable_object_stub_alias(declarator));

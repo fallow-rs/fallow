@@ -23,6 +23,7 @@ export default {
       await byName.viaGetByName(2),
       await viaId.viaIdLocal(3),
       await annotated.viaAnnotatedStub(3),
+      await stub.idFromString(),
       item.unusedOnRepo(),
     ];
     return new Response(String(results.every(Boolean)));
