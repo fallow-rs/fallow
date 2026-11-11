@@ -108,3 +108,49 @@ fn imported_array_factory_element_credits_member() {
         "Single.viaLoop is read on an element of a single instance, found: {unused:?}"
     );
 }
+
+#[test]
+fn utility_type_receiver_credits_member() {
+    // A value typed `Pick<Coordinator, ...>`, `Partial<Coordinator>` or
+    // `Readonly<Omit<Coordinator, ...>>` holds a `Coordinator`. No position
+    // (parameter property, field, constructor parameter, interface field,
+    // arrow parameter) gets a `new Coordinator()` argument at the call site.
+    let unused = unused_class_members("class-member-utility-type-receivers");
+    assert_credited(
+        &unused,
+        &[
+            "Coordinator.viaParamProperty",
+            "Coordinator.viaField",
+            "Coordinator.viaCtorParam",
+            "Coordinator.viaInterfaceField",
+            "Coordinator.viaArrowParam",
+            "Coordinator.viaPartial",
+            "Coordinator.viaReadonlyOmit",
+        ],
+        "Coordinator.unused",
+    );
+}
+
+#[test]
+fn durable_object_stub_credits_member() {
+    // `env.QUOTA` is a `DurableObjectNamespace<DailyQuota>`. The result of
+    // `get()` and `getByName()` on it is an RPC stub of `DailyQuota`, as is a
+    // value typed `DurableObjectStub<DailyQuota>`. The `get()` on the class
+    // `Repo` takes no Durable Object id, so its result is not a `Repo`.
+    let unused = unused_class_members("class-member-durable-object-stub");
+    assert_credited(
+        &unused,
+        &[
+            "DailyQuota.viaGet",
+            "DailyQuota.viaGetByName",
+            "DailyQuota.viaIdLocal",
+            "DailyQuota.viaAnnotatedStub",
+            "Repo.get",
+        ],
+        "DailyQuota.unused",
+    );
+    assert!(
+        unused.contains(&"Repo.unusedOnRepo".to_string()),
+        "Repo.unusedOnRepo is read on the result of `Repo.get`, found: {unused:?}"
+    );
+}

@@ -82,6 +82,9 @@ impl<'a> Visit<'a> for SignatureTypeCollector {
     }
 }
 
+#[path = "visit_impl_durable_objects.rs"]
+mod durable_objects;
+
 pub(super) struct StructuralParamMemberCollector {
     target_params: FxHashSet<String>,
     shadowed_stack: Vec<FxHashSet<String>>,
@@ -89,6 +92,9 @@ pub(super) struct StructuralParamMemberCollector {
     /// The element alias of an iteration callback, keyed by the callback
     /// start. The callback scope takes it when the walk enters the callback.
     pending_element_aliases: FxHashMap<u32, (String, (String, String))>,
+    /// Locals that hold a Durable Object id, mapped to the parameter and the
+    /// namespace path that made the id.
+    durable_object_ids: FxHashMap<String, (String, String)>,
     pub(super) members: FxHashMap<String, FxHashSet<String>>,
     pub(super) property_members: FxHashMap<String, FxHashSet<(String, String)>>,
 }
@@ -100,6 +106,7 @@ impl StructuralParamMemberCollector {
             shadowed_stack: Vec::new(),
             alias_stack: Vec::new(),
             pending_element_aliases: FxHashMap::default(),
+            durable_object_ids: FxHashMap::default(),
             members: FxHashMap::default(),
             property_members: FxHashMap::default(),
         }
@@ -341,11 +348,14 @@ impl<'a> Visit<'a> for StructuralParamMemberCollector {
     }
 
     fn visit_variable_declaration(&mut self, decl: &VariableDeclaration<'a>) {
-        let aliases = decl
+        let mut aliases = decl
             .declarations
             .iter()
             .flat_map(|declarator| self.destructured_receiver_aliases(declarator))
             .collect::<Vec<_>>();
+        for declarator in &decl.declarations {
+            aliases.extend(self.durable_object_stub_alias(declarator));
+        }
         if matches!(
             decl.kind,
             VariableDeclarationKind::Const | VariableDeclarationKind::Let
