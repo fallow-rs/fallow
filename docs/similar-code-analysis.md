@@ -206,8 +206,10 @@ Otherwise it accepts the path that the `fallow` npm launcher passes in
 `FALLOW_SIMILAR_CODE_PROVIDER`: the binary of the exact-version
 `fallow-similar-code` package. The launcher verifies that package first, and
 the Rust code verifies the detached Ed25519 signature of the binary against the
-compiled-in release key again, so a process that sets the variable can select
-only a binary that a Fallow release signed. The Node adapter accepts only an
+compiled-in release key again. This check rejects a stale, damaged or unsigned
+path. It does not defend against a process that controls the environment or
+the install directory of Fallow: such a process can swap the file after the
+check, or start other code directly. The Node adapter accepts only an
 exact-version package path that its loader verified first. Project config,
 `PATH`, project-local executables, remote providers, and provider-returned paths
 are outside the trust boundary.

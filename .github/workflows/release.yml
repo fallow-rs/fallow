@@ -1229,8 +1229,10 @@ jobs:
             node .github/scripts/verify-binary.mjs "unsigned-binaries/$bin" "unsigned-binaries/${bin}.sig"
           done
 
-      # npm ships the multicall binary as fallow, plus the exact-version
-      # similar-code provider. Preserve their existing signature siblings.
+      # The npm payload carries the multicall binary as fallow and the
+      # exact-version similar-code provider. "Organize binaries into npm
+      # directories" puts the provider into its own platform package. Preserve
+      # their existing signature siblings.
       - name: Stage npm platform payload (multicall binary as fallow)
         shell: bash
         env:

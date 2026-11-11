@@ -4,7 +4,10 @@
 //! companion. A project installs the exact-version `fallow-similar-code`
 //! package, and the launcher passes the path of its native binary. Anything
 //! that starts `fallow` can set the variable, so the path is accepted only
-//! when its detached Ed25519 signature verifies against the release key.
+//! when its detached Ed25519 signature verifies against the release key. The
+//! check rejects a stale, damaged or unsigned path. It is not a defense
+//! against a process that controls the environment or the files of Fallow:
+//! such a process can swap the file after the check, or run other code.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
@@ -76,8 +79,11 @@ pub(super) fn verified_provider(path: &Path, key: &[u8; 32]) -> Result<PathBuf, 
     dunce::canonicalize(path).map_err(|error| format!("cannot resolve {}: {error}", path.display()))
 }
 
+// Only the exact executable name of this platform. On Windows, the standard
+// library starts `<path>.exe` for a path without an extension, so an
+// extensionless name would let Fallow check one file and run another.
 fn is_provider_name(name: &str) -> bool {
-    name.strip_suffix(".exe").unwrap_or(name) == SIDECAR_BINARY
+    name.strip_suffix(std::env::consts::EXE_SUFFIX) == Some(SIDECAR_BINARY)
 }
 
 fn signature_path(path: &Path) -> PathBuf {
@@ -96,6 +102,13 @@ fn read_signature(path: &Path) -> Result<Signature, String> {
         .map_err(|error| format!("missing signature {}: {error}", path.display()))?;
     if !metadata.file_type().is_file() {
         return Err(format!("{} is not a regular file", path.display()));
+    }
+    if metadata.len() != SIGNATURE_BYTES as u64 {
+        return Err(format!(
+            "{} has {} bytes, expected {SIGNATURE_BYTES}",
+            path.display(),
+            metadata.len()
+        ));
     }
     let bytes =
         std::fs::read(path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
@@ -121,8 +134,8 @@ mod tests {
 
     const TEST_SEED: [u8; 32] = [7; 32];
 
-    fn provider_name() -> &'static str {
-        "fallow-similar-code"
+    fn provider_name() -> String {
+        format!("{SIDECAR_BINARY}{}", std::env::consts::EXE_SUFFIX)
     }
 
     fn signed_provider(dir: &Path, signer: &SigningKey) -> PathBuf {
@@ -195,7 +208,8 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let (signer, key) = test_key();
         let path = signed_provider(dir.path(), &signer);
-        let relative = Path::new(provider_name());
+        let name = provider_name();
+        let relative = Path::new(&name);
         assert!(
             verified_provider(relative, &key)
                 .unwrap_err()
@@ -205,6 +219,48 @@ mod tests {
         std::fs::copy(&path, &other).unwrap();
         std::fs::copy(signature_path(&path), signature_path(&other)).unwrap();
         assert!(verified_provider(&other, &key).is_err());
+    }
+
+    #[test]
+    fn accepts_only_the_executable_name_of_this_platform() {
+        let exact = format!("{SIDECAR_BINARY}{}", std::env::consts::EXE_SUFFIX);
+        assert!(is_provider_name(&exact));
+        let other = if std::env::consts::EXE_SUFFIX.is_empty() {
+            format!("{SIDECAR_BINARY}.exe")
+        } else {
+            SIDECAR_BINARY.to_owned()
+        };
+        assert!(!is_provider_name(&other), "{other}");
+    }
+
+    #[test]
+    fn rejects_an_oversized_signature_before_it_reads_it() {
+        let dir = tempfile::tempdir().unwrap();
+        let (signer, key) = test_key();
+        let path = signed_provider(dir.path(), &signer);
+        let file = std::fs::File::create(signature_path(&path)).unwrap();
+        file.set_len(1024 * 1024 * 1024).unwrap();
+        assert!(
+            verified_provider(&path, &key)
+                .unwrap_err()
+                .contains("expected 64")
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn rejects_a_symlinked_signature() {
+        let dir = tempfile::tempdir().unwrap();
+        let (signer, key) = test_key();
+        let path = signed_provider(dir.path(), &signer);
+        let real = dir.path().join("real.sig");
+        std::fs::rename(signature_path(&path), &real).unwrap();
+        std::os::unix::fs::symlink(&real, signature_path(&path)).unwrap();
+        assert!(
+            verified_provider(&path, &key)
+                .unwrap_err()
+                .contains("regular file")
+        );
     }
 
     #[cfg(unix)]

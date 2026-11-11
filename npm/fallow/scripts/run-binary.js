@@ -217,6 +217,7 @@ function resolveTypeAwareCompanion(
 // resolver and verifier accept it (the Node API loader uses the same pair).
 // The Rust code checks the signature again before it runs the binary.
 function resolveSimilarCodeProvider(fallowVersion, options = {}) {
+  const { report = reportToStderr } = options;
   const manifestPath = resolveCompanionManifest("fallow-similar-code", fallowVersion, options);
   if (manifestPath === undefined) return undefined;
   const scripts = path.join(path.dirname(manifestPath), "scripts");
@@ -226,9 +227,22 @@ function resolveSimilarCodeProvider(fallowVersion, options = {}) {
     );
     const { verifyBinary } = require(path.join(scripts, "verify-binary.js"));
     const artifact = resolveBinaryArtifact(resolvePlatformPackage());
-    return verifyBinary(artifact).ok ? artifact.binaryPath : undefined;
+    const verification = verifyBinary(artifact);
+    if (verification.ok) return artifact.binaryPath;
+    report(`fallow: the similar-code companion failed verification: ${verification.message}\n`);
+  } catch (error) {
+    report(`fallow: the similar-code companion failed verification: ${error.message}\n`);
+  }
+  return undefined;
+}
+
+// Write to fd 2 directly: under Bun, `process.stderr` makes the pipes that the
+// child inherits non-blocking (issue #3276). A failed write is ignored.
+function reportToStderr(message) {
+  try {
+    fs.writeSync(2, message);
   } catch {
-    return undefined;
+    // Best effort.
   }
 }
 

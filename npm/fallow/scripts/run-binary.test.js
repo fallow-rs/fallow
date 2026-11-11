@@ -459,7 +459,16 @@ test("resolveSimilarCodeProvider returns the verified binary of an exact-version
   assert.equal(resolveSimilarCodeProvider("3.9.0", options(good)), undefined, "another version");
 
   const unverified = writeSimilarCodeCompanion(t, { version: "3.8.0", verified: false });
-  assert.equal(resolveSimilarCodeProvider("3.8.0", options(unverified)), undefined);
+  const reports = [];
+  assert.equal(
+    resolveSimilarCodeProvider("3.8.0", {
+      ...options(unverified),
+      report: (message) => reports.push(message),
+    }),
+    undefined,
+  );
+  assert.equal(reports.length, 1);
+  assert.match(reports[0], /similar-code companion failed verification: stand-in/);
 });
 
 test("resolveSimilarCodeProvider ignores a project companion for a fallow from another install", (t) => {
