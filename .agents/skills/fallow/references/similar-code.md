@@ -2,7 +2,7 @@
 
 Similar-code is an opt-in, local semantic discovery workflow. It complements deterministic `fallow dupes`; it does not replace clone detection, tests, or human judgment.
 
-1. Check readiness with `fallow similar-code status --format json --quiet`. If the pinned model is missing, ask the user to run `fallow similar-code setup --local`. Agents must not authorize setup or run it on the user's behalf.
+1. Check readiness with `fallow similar-code status --format json --quiet`. If the companion is missing, ask the user to install `fallow-similar-code` at the same version as `fallow`. If the pinned model is missing, ask the user to run `fallow similar-code setup --local`. Agents must not authorize setup or run it on the user's behalf.
 2. Run discovery once. Preserve its independent JSON envelope so inspection and review use the exact candidate set:
 
    ```bash

@@ -661,7 +661,7 @@ test("verifyInstalled falls back to the provider when the embedded digest is mis
     },
   });
   assert.equal(result.ok, true);
-  assert.equal(providerCalls, 2);
+  assert.equal(providerCalls, 1);
 });
 
 test("verifyInstalled falls back to the provider when fallowDigests is partial / malformed", async (t) => {
@@ -685,8 +685,8 @@ test("verifyInstalled falls back to the provider when fallowDigests is partial /
     },
   });
   assert.equal(result.ok, true);
-  // Both shipped binaries fall back because their embedded entries are absent or malformed.
-  assert.equal(providerCalls, 2);
+  // The shipped binary falls back because its embedded entry is absent or malformed.
+  assert.equal(providerCalls, 1);
 });
 
 test("verifyInstalled returns digest-mismatch when the embedded digest disagrees with the binary", async (t) => {

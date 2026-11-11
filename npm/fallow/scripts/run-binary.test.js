@@ -403,3 +403,105 @@ test("missingPlatformPackageMessage names the detected libc and the reinstall fl
     /--libc/,
   );
 });
+
+// A pnpm-style project with a stand-in `fallow-similar-code` package. Its
+// scripts follow the exports of npm/fallow-similar-code/scripts and report the
+// given verification result.
+function writeSimilarCodeCompanion(t, { version, verified }) {
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), "fallow-similar-code-project-"));
+  t.after(() => fs.rmSync(project, { recursive: true, force: true }));
+  const nodeModules = path.join(project, "node_modules");
+  const packageDir = path.join(
+    nodeModules,
+    ".pnpm",
+    "fsc@x",
+    "node_modules",
+    "fallow-similar-code",
+  );
+  fs.mkdirSync(path.join(packageDir, "scripts"), { recursive: true });
+  fs.symlinkSync(packageDir, path.join(nodeModules, "fallow-similar-code"), "dir");
+  fs.writeFileSync(
+    path.join(packageDir, "package.json"),
+    JSON.stringify({ name: "fallow-similar-code", version }),
+  );
+  const binaryPath = path.join(packageDir, "native", "fallow-similar-code");
+  fs.writeFileSync(
+    path.join(packageDir, "scripts", "run-binary.js"),
+    `module.exports = {
+  resolvePlatformPackage: () => "@fallow-cli/fallow-similar-code-test",
+  resolveBinaryArtifact: () => ({ binaryPath: ${JSON.stringify(binaryPath)} }),
+};\n`,
+  );
+  fs.writeFileSync(
+    path.join(packageDir, "scripts", "verify-binary.js"),
+    `module.exports = { verifyBinary: () => ({ ok: ${verified}, message: "stand-in" }) };\n`,
+  );
+  const fallowScripts = path.join(
+    nodeModules,
+    ".pnpm",
+    "fallow@x",
+    "node_modules",
+    "fallow",
+    "scripts",
+  );
+  fs.mkdirSync(fallowScripts, { recursive: true });
+  return { project, binaryPath, fallowScripts };
+}
+
+test("resolveSimilarCodeProvider returns the verified binary of an exact-version companion", (t) => {
+  const { resolveSimilarCodeProvider } = require(RUN_BINARY);
+  const good = writeSimilarCodeCompanion(t, { version: "3.8.0", verified: true });
+  const options = (fixture) => ({
+    projectRoot: fixture.project,
+    launcherDir: fixture.fallowScripts,
+  });
+  assert.equal(resolveSimilarCodeProvider("3.8.0", options(good)), good.binaryPath);
+  assert.equal(resolveSimilarCodeProvider("3.9.0", options(good)), undefined, "another version");
+
+  const unverified = writeSimilarCodeCompanion(t, { version: "3.8.0", verified: false });
+  const reports = [];
+  assert.equal(
+    resolveSimilarCodeProvider("3.8.0", {
+      ...options(unverified),
+      report: (message) => reports.push(message),
+    }),
+    undefined,
+  );
+  assert.equal(reports.length, 1);
+  assert.match(reports[0], /similar-code companion failed verification: stand-in/);
+});
+
+test("resolveSimilarCodeProvider ignores a project companion for a fallow from another install", (t) => {
+  const { resolveSimilarCodeProvider } = require(RUN_BINARY);
+  const { project } = writeSimilarCodeCompanion(t, { version: "3.8.0", verified: true });
+  const globalInstall = fs.mkdtempSync(path.join(os.tmpdir(), "fallow-global-"));
+  t.after(() => fs.rmSync(globalInstall, { recursive: true, force: true }));
+  const launcherDir = path.join(globalInstall, "lib", "node_modules", "fallow", "scripts");
+  fs.mkdirSync(launcherDir, { recursive: true });
+  assert.equal(
+    resolveSimilarCodeProvider("3.8.0", { projectRoot: project, launcherDir }),
+    undefined,
+  );
+});
+
+test("childEnvironment passes the similar-code provider only to commands that use it", (t) => {
+  const { childEnvironment } = require(RUN_BINARY);
+  const previous = process.env.FALLOW_SIMILAR_CODE_PROVIDER;
+  delete process.env.FALLOW_SIMILAR_CODE_PROVIDER;
+  t.after(() => {
+    if (previous === undefined) delete process.env.FALLOW_SIMILAR_CODE_PROVIDER;
+    else process.env.FALLOW_SIMILAR_CODE_PROVIDER = previous;
+  });
+  const noTypeAware = () => undefined;
+  const resolveProvider = () => "/verified/fallow-similar-code";
+  const env = (args) =>
+    childEnvironment("3.8.0", noTypeAware, undefined, { args, resolveProvider })
+      .FALLOW_SIMILAR_CODE_PROVIDER;
+
+  assert.equal(env(["similar-code", "status"]), "/verified/fallow-similar-code");
+  assert.equal(env(["mcp-server"]), "/verified/fallow-similar-code");
+  assert.equal(env(["dead-code"]), undefined);
+
+  process.env.FALLOW_SIMILAR_CODE_PROVIDER = "/user/choice";
+  assert.equal(env(["similar-code"]), "/user/choice");
+});
