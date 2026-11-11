@@ -563,11 +563,19 @@ fn saved_only_joins_have_no_live_render_and_a_covering_test() {
             test_body(source, test).is_some_and(|body| body.contains(flag)),
             "{flag}: the test `{test}` does not exist or does not pass the flag"
         );
-        for command in ["dead-code", "dupes", "audit"] {
+        // `fallow audit --brief` reads `--mutation-report` for the `mutation`
+        // component of its focus score, which is not the survivor join of
+        // `fallow report`.
+        let live_commands: &[&str] = if *flag == "--mutation-report" {
+            &["dead-code", "dupes"]
+        } else {
+            &["dead-code", "dupes", "audit"]
+        };
+        for command in live_commands {
             let live = run(
                 &root,
                 &[
-                    command.to_owned(),
+                    (*command).to_owned(),
                     "--root".to_owned(),
                     root.display().to_string(),
                     (*flag).to_owned(),

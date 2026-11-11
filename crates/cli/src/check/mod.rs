@@ -40,7 +40,7 @@ use baseline_compare::load_and_compare_baseline;
 mod benchmark;
 mod configuration;
 pub use benchmark::benchmark_dead_code_json;
-use configuration::prepare_check_config;
+use configuration::{parse_type_aware_bool, parse_type_aware_require, prepare_check_config};
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct IssueFilters {
     pub shared_state: bool,
@@ -643,6 +643,8 @@ pub struct CheckResult {
     /// the reviewer routing. `None` outside the brief path and without a
     /// commit history.
     pub brief_churn: Option<fallow_engine::churn::ChurnResult>,
+    /// `--mutation-report` survivors on added lines; `None`: not measured.
+    pub brief_mutation_survivors: Option<Vec<crate::audit_focus::FocusFileCount>>,
     /// Exports-aware public-export key set for the review brief: the
     /// `<rel_path>::<name>` keys reachable through `package.json` `exports` +
     /// re-export reachability. Computed from the retained graph on the brief
@@ -900,31 +902,6 @@ pub fn apply_type_aware_overrides_from(
         config.type_aware.require
     };
     Ok(())
-}
-
-fn parse_type_aware_bool(value: &str, output: OutputFormat) -> Result<bool, ExitCode> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "1" | "true" | "yes" | "on" => Ok(true),
-        "0" | "false" | "no" | "off" => Ok(false),
-        _ => Err(emit_input_error(
-            "FALLOW_TYPE_AWARE must be one of true, false, 1, 0, yes, no, on, or off",
-            output,
-        )),
-    }
-}
-
-fn parse_type_aware_require(
-    value: &str,
-    output: OutputFormat,
-) -> Result<fallow_config::TypeAwareRequire, ExitCode> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "best-effort" => Ok(fallow_config::TypeAwareRequire::BestEffort),
-        "complete" => Ok(fallow_config::TypeAwareRequire::Complete),
-        _ => Err(emit_input_error(
-            "FALLOW_TYPE_AWARE_REQUIRE must be best-effort or complete",
-            output,
-        )),
-    }
 }
 
 fn handle_trace_side_effects(
@@ -1244,6 +1221,7 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         impact_closure: None,
         co_change_gaps: Vec::new(),
         brief_churn: None,
+        brief_mutation_survivors: None,
         public_api_keys: None,
         partition_order: None,
         focus_facts: None,
