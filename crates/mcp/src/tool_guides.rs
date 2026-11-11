@@ -37,6 +37,14 @@ pub struct ToolGuide {
 /// self-describing.
 pub const TOOL_GUIDE_NOTE: &str = "This guide explains parameters and output for one tool. Read only the guide for the tool you are about to call.";
 
+/// The over-limit refusal is the same on every tool, so the guides of the
+/// tools with the largest output share one section.
+const OUTPUT_LIMIT_SECTION: ToolGuideSection = ToolGuideSection {
+    topic: "narrow",
+    summary: "What to do when a response is over the output cap.",
+    detail: "The server refuses a response over its cap (1000000 bytes by default) with `isError: true`, `exit_code: 2` and `code: FALLOW_MCP_SUBPROCESS_OUTPUT_LIMIT`. The body has `result_bytes`, `limit_bytes` and a short `result_preview`, but no analysis. `narrow` lists the parameters of this tool that make the output smaller, the most effective first. Call again with one or more of them, for example a smaller `issue_types` set, a `file` list, a `workspace`, a `changed_since` ref or a `top` value. `max_output_bytes` only lowers the cap. The server operator sets the cap with `FALLOW_MCP_MAX_OUTPUT_BYTES`, up to 16 MiB.",
+};
+
 const CHECK_HEALTH_SECTIONS: &[ToolGuideSection] = &[
     ToolGuideSection {
         topic: "group_by",
@@ -123,6 +131,7 @@ A baselined run also carries `baseline_staleness`. Read `gate_trips` for the `--
 
 The MCP server converts the CLI's exit 1 into a successful result so the findings reach you. Read `gate_outcomes` and `baseline_staleness` for the verdict. Every entry that reported `fail` or `warn`, and a baseline that matched less than it was saved with, is also restated as a plain sentence in the result's root `warnings` array.",
     },
+    OUTPUT_LIMIT_SECTION,
 ];
 
 const ANALYZE_SECTIONS: &[ToolGuideSection] = &[
@@ -151,6 +160,7 @@ const ANALYZE_SECTIONS: &[ToolGuideSection] = &[
         summary: "How to dispatch the follow-up commands a response suggests.",
         detail: r"Responses also include a top-level `next_steps[]` array of read-only follow-up commands (`{id, command, reason}`) computed from the findings. The stable `id` (e.g. `trace-unused-export`, `trace-clone`, `complexity-breakdown`) maps to a sibling tool or `code_execute` host call (`traceExport`, `traceClone`, `checkHealth({complexity_breakdown:true})`), so dispatch on `id` rather than running the CLI `command` string verbatim.",
     },
+    OUTPUT_LIMIT_SECTION,
 ];
 
 const GET_CLOUD_RUNTIME_CONTEXT_SECTIONS: &[ToolGuideSection] = &[
@@ -300,6 +310,7 @@ For PR review, `runtime_coverage.verdict` puts `hot-path-touched` before `cold-c
 
 Dependency-level findings (unused, misplaced, type-only, or test-only dependencies, overrides, and catalog entries) are in audit scope only when the changed set holds the package manifest that declares them, workspace manifests included. Unlisted dependencies follow imports. Use `analyze` to see every dependency finding.",
     },
+    OUTPUT_LIMIT_SECTION,
 ];
 
 const MUTATION_TASKS_SECTIONS: &[ToolGuideSection] = &[ToolGuideSection {

@@ -1145,7 +1145,7 @@ async fn run_fallow_output_limit_refuses_and_reports_truncation_with_a_preview()
 }
 
 /// The over-limit help must not advise an action that cannot work:
-/// `max_output_bytes` only ever LOWERS the 16 MiB default, so a caller who
+/// `max_output_bytes` only ever LOWERS the server cap, so a caller who
 /// never set it has nothing to raise.
 #[cfg(unix)]
 #[tokio::test]
@@ -1171,6 +1171,62 @@ async fn run_fallow_output_limit_help_never_advises_raising_the_cap() {
         help.contains("only LOWERS"),
         "help must state the cap is a bound, not a suggestion: {help}"
     );
+}
+
+/// A refusal must tell the caller how to get a result that fits. The body
+/// names the parameters of the refused tool that make its output smaller.
+#[cfg(unix)]
+#[tokio::test]
+async fn run_fallow_output_limit_names_the_parameters_that_narrow_the_tool() {
+    let script = r#"i=0; while [ "$i" -lt 2048 ]; do printf x; i=$((i + 1)); done"#;
+    let result = run_tool_with_limit(
+        "/bin/sh",
+        "analyze",
+        &["-c".to_string(), script.to_string()],
+        Some(1024),
+    )
+    .await
+    .expect("output limit should stay a tool result");
+
+    let body: serde_json::Value =
+        serde_json::from_str(extract_text(&result)).expect("output-limit body is JSON");
+    let narrow: Vec<&str> = body["narrow"]
+        .as_array()
+        .expect("narrow is an array of parameter names")
+        .iter()
+        .filter_map(serde_json::Value::as_str)
+        .collect();
+    assert!(narrow.contains(&"issue_types"), "{narrow:?}");
+    assert!(narrow.contains(&"workspace"), "{narrow:?}");
+    let help = body["help"].as_str().expect("help string");
+    assert!(
+        help.contains("narrow"),
+        "help must point at the field: {help}"
+    );
+}
+
+/// A call without `max_output_bytes` gets the default server cap of
+/// 1,000,000 bytes. A larger response gets a valid JSON refusal, so a host
+/// does not cut it into invalid JSON.
+#[cfg(unix)]
+#[tokio::test]
+async fn run_fallow_default_cap_refuses_a_response_over_one_million_bytes() {
+    let script = r"head -c 1500000 /dev/zero | tr '\0' x";
+    let result = run_tool_with_limit(
+        "/bin/sh",
+        "analyze",
+        &["-c".to_string(), script.to_string()],
+        None,
+    )
+    .await
+    .expect("output limit should stay a tool result");
+
+    assert_eq!(result.is_error, Some(true));
+    let body: serde_json::Value =
+        serde_json::from_str(extract_text(&result)).expect("output-limit body is JSON");
+    assert_eq!(body["code"], "FALLOW_MCP_SUBPROCESS_OUTPUT_LIMIT");
+    assert_eq!(body["limit_bytes"], 1_000_000);
+    assert_eq!(body["result_bytes"], 1_500_000);
 }
 
 #[cfg(unix)]

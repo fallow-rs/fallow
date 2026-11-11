@@ -47,7 +47,7 @@ pub async fn run_analyze(binary: &str, params: AnalyzeParams) -> Result<CallTool
             }
         })
         .await?;
-        if let Some(result) = typed_tool_result(result) {
+        if let Some(result) = typed_tool_result("analyze", result) {
             return Ok(result);
         }
     }
