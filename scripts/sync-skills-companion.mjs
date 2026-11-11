@@ -439,7 +439,9 @@ const syncCompanion = ({ options, repoRoot, env, skipChecks, log, git }) => {
     log(
       `After the merge: git -C ${companion} fetch origin && git -C ${companion} reset --hard ${ORIGIN_MAIN}`,
     );
-    log('Then run the failed "Public skills contract" job on fallow main again.');
+    log(
+      'Then run the failed "Public skills contract" job on fallow main again: wait until the CI run of the pin is complete, because GitHub refuses a job rerun while its run is in progress, then run gh run rerun <run-id> --failed.',
+    );
     return 0;
   } finally {
     rmSync(source, { recursive: true, force: true });
