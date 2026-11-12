@@ -20,6 +20,7 @@
 
 mod base_files;
 mod base_ref;
+mod clone_containment;
 mod outcome;
 mod own_config;
 mod scope;
@@ -42,8 +43,8 @@ pub use base_ref::{
     AuditBaseError, AuditBaseOrigin, parse_audit_base_override, resolve_audit_base,
 };
 pub use outcome::{
-    DupeDemotionDiffSource, SharedDiff, compare, demote_preexisting_dupe_introductions, outcome,
-    realign_styling_introductions, styling_finding_gates, styling_rule_severity,
+    DupeBase, DupeDemotionDiffSource, SharedDiff, compare, demote_preexisting_dupe_introductions,
+    outcome, realign_styling_introductions, styling_finding_gates, styling_rule_severity,
 };
 pub use own_config::{config_path_under_root, own_config_unused_code_keys};
 pub use scope::{
@@ -562,6 +563,14 @@ pub fn attribute<A: AuditAnalyses>(
             root,
             base_ref,
             shared_diff,
+            DupeBase {
+                // A skipped base reuses the head keys, so no group is introduced.
+                groups: base_snapshot
+                    .as_ref()
+                    .filter(|_| !skipped)
+                    .map_or(&[][..], |snapshot| snapshot.dupe_groups.as_slice()),
+                renames,
+            },
         );
         realign_styling_introductions(
             &mut comparison,

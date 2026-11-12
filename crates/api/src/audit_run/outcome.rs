@@ -4,6 +4,9 @@ use std::path::Path;
 
 use fallow_config::{AuditGate, AuditWorsened, RulesConfig, Severity};
 
+use fallow_engine::changed_files::RenamedFile;
+
+use super::clone_containment::base_contained_dupe_group_keys;
 use super::{AuditAnalysesView, AuditKeySnapshot};
 use crate::audit_keys::{
     AuditComparison, AuditDomainLedger, DeadCodeAuditLedger,
@@ -11,6 +14,7 @@ use crate::audit_keys::{
     dupe_group_key, preexisting_dupe_group_keys, styling_ledger_keys,
     styling_ledger_keys_with_diff,
 };
+use crate::diff_risk::clones::BaseCloneGroup;
 use crate::{AuditAttribution, AuditSummary, AuditVerdict};
 
 /// Which diff decided the new-only duplication demotion, so output can name
@@ -136,20 +140,39 @@ pub fn compare(
     }
 }
 
-/// Demote introduced clone groups that hold no added line of the run's diff.
+/// The base data that the clone group reclassification compares with.
+#[derive(Clone, Copy)]
+pub struct DupeBase<'a> {
+    /// Instance locations of the base clone groups, at base paths.
+    pub groups: &'a [BaseCloneGroup],
+    /// The renamed files of the change.
+    pub renames: &'a [RenamedFile],
+}
+
+/// Reclassify introduced clone groups that the change did not write.
 ///
-/// No instance range holds an added line, so the changeset did not write the
-/// duplicated text. Only the attribution key of the group changed, because the
-/// changeset removed code in another place. Without this step, a clone-removal
-/// refactor fails the new-only gate on duplication that it did not write
-/// (issue #2164). The opt-in shared diff decides when it is present; the
-/// merge-base worktree diff decides in the other cases.
+/// Two rules use the run's diff, in this order:
+///
+/// 1. A group that holds no added line is demoted. Only the attribution key
+///    of the group changed, because the changeset removed code in another
+///    place. Without this rule, a clone-removal refactor fails the new-only
+///    gate on duplication that it did not write (issue #2164).
+/// 2. A group where each instance lies inside a different instance of one
+///    base clone group, and one instance holds no added line, is inherited.
+///    An edit inside one copy of a base clone splits the base group into
+///    smaller groups with new keys, and the
+///    change did not write their duplication. This rule records no
+///    demotion, because the group matches a base group.
+///
+/// The opt-in shared diff decides when it is present; the merge-base worktree
+/// diff decides in the other cases.
 pub fn demote_preexisting_dupe_introductions(
     comparison: &mut AuditComparison,
     view: &AuditAnalysesView<'_>,
     root: &Path,
     base_ref: &str,
     shared: Option<SharedDiff<'_>>,
+    base: DupeBase<'_>,
 ) -> Option<DupeDemotionDiffSource> {
     if comparison.dupes.introduced_count() == 0 {
         return None;
@@ -173,6 +196,21 @@ pub fn demote_preexisting_dupe_introductions(
         index,
     );
     comparison.dupes.demote_introductions(&demote);
+    // Only an introduced group can become inherited. The filter keeps the
+    // containment check, which compares each group with every base group,
+    // away from the groups that already match a base key.
+    let inherit = base_contained_dupe_group_keys(
+        duplication.clone_groups.iter().copied().filter(|group| {
+            comparison
+                .dupes
+                .is_introduced(&dupe_group_key(group, duplication.root))
+        }),
+        duplication.root,
+        index,
+        base.groups,
+        base.renames,
+    );
+    comparison.dupes.inherit_introductions(&inherit);
     Some(source)
 }
 

@@ -2735,18 +2735,18 @@ fn audit_demotion_shared_diff_source_takes_precedence_over_worktree_diff() {
     assert_eq!(control_json["attribution"]["duplication_demoted"], 1);
     assert_eq!(control_json["attribution"]["duplication_introduced"], 0);
 
-    // A shared diff claiming an added line INSIDE the scaffolding clone
-    // instance (src/a.ts spans lines 2-12 after the refactor). The worktree
-    // diff sees no added line there, so any behavior change below is the
-    // shared source deciding.
+    // A shared diff that adds src/a.ts as a new file (no base lines, so no
+    // containing base clone group), with an added line INSIDE the scaffolding
+    // clone instance (lines 2-12 after the refactor). The worktree diff sees
+    // no added line there, so the shared source decides any change below.
     let diff_dir = TempDir::new().expect("diff dir should be created");
     let diff_path = diff_dir.path().join("touch-instance.diff");
     fs::write(
         &diff_path,
         "diff --git a/src/a.ts b/src/a.ts\n\
-         --- a/src/a.ts\n\
+         --- /dev/null\n\
          +++ b/src/a.ts\n\
-         @@ -4,0 +5,1 @@\n\
+         @@ -0,0 +5,1 @@\n\
          +  const injected = 'x';\n",
     )
     .unwrap();
