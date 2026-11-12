@@ -141,6 +141,11 @@ pub(crate) fn parse_suppressions(comments: &[Comment], source: &str) -> ParsedSu
         let content_span = comment.content_span();
         let text = &source
             [content_span.start as usize..content_span.end.min(source.len() as u32) as usize];
+        // Most comments hold no marker. Skip them before the line lookup,
+        // which scans the source from its start.
+        if !text.contains(MARKER_PREFIX) {
+            continue;
+        }
 
         let first_line = byte_offset_to_line(source, comment.span.start);
         if comment.is_block() {
@@ -155,6 +160,9 @@ pub(crate) fn parse_suppressions(comments: &[Comment], source: &str) -> ParsedSu
 
     parsed
 }
+
+/// The text that each suppression marker starts with.
+const MARKER_PREFIX: &str = "fallow-ignore-";
 
 /// A `fallow-ignore-*` marker and the rest of its line (the targets).
 #[derive(Clone, Copy)]
