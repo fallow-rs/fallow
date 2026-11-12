@@ -25,8 +25,11 @@ pub(in crate::resolve) fn alias_match_remainder<'a>(
         .then_some(remainder)
 }
 
-/// Return the plugin path aliases that apply to `specifier` in `from_file`, in
-/// declaration order.
+/// Return the plugin path aliases that apply to `specifier` in `from_file`,
+/// the longest prefix first and otherwise in declaration order.
+///
+/// The longest prefix wins, as for TypeScript `paths` patterns. Nuxt points `#layers/<name>/` at a named layer, so that alias must win over the
+/// static `#layers/` fallback that points at the `layers/` directory.
 ///
 /// A workspace alias applies only to files inside its workspace. The deepest
 /// workspace that contains `from_file` and declares a matching prefix owns the
@@ -48,7 +51,7 @@ pub(in crate::resolve) fn applicable_path_aliases<'c>(
         })
         .map(|alias| alias.scope.as_str())
         .max_by_key(|scope| Path::new(scope).components().count());
-    match owner {
+    let mut aliases: Vec<(&str, &str)> = match owner {
         Some(owner) => ctx
             .scoped_path_aliases
             .iter()
@@ -60,7 +63,9 @@ pub(in crate::resolve) fn applicable_path_aliases<'c>(
             .iter()
             .map(|(prefix, replacement)| (prefix.as_str(), replacement.as_str()))
             .collect(),
-    }
+    };
+    aliases.sort_by_key(|(prefix, _)| std::cmp::Reverse(prefix.len()));
+    aliases
 }
 
 /// Whether a plugin path alias that applies to `from_file` matches `specifier`.
