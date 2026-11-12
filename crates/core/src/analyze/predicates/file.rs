@@ -127,6 +127,32 @@ const CONFIG_FILE_PREFIXES: &[&str] = &[
     "vite-env.d.",
 ];
 
+/// File name prefixes of the config and setup files that a test runner loads.
+const TEST_RUNNER_CONFIG_PREFIXES: &[&str] = &[
+    "jest.config.",
+    "jest.setup.",
+    "vitest.config.",
+    "vitest.ci.config.",
+    "vitest.setup.",
+    "vitest.workspace.",
+    "playwright.config.",
+    "cypress.config.",
+    "karma.conf.",
+    ".mocharc.",
+    "ava.config.",
+    "wdio.conf.",
+    "nightwatch.conf.",
+];
+
+/// Check if a file is a config or setup file that only a test runner loads
+/// (`vitest.config.ts`, `jest.setup.js`, `playwright.config.ts`).
+pub(in crate::analyze) fn is_test_runner_config_file(path: &std::path::Path) -> bool {
+    let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+    TEST_RUNNER_CONFIG_PREFIXES
+        .iter()
+        .any(|p| name.starts_with(p))
+}
+
 /// Check if a file is a configuration file consumed by tooling, not via imports.
 ///
 /// These files should never be reported as unused because they are loaded by
