@@ -6,7 +6,7 @@ expression: redacted
   Cyclomatic units: functions 2, module scopes 0, templates 0
 
 ● High complexity functions (1)
-  CRAP scores are estimated from export references; run `fallow health --coverage <coverage-final.json>` for exact scores.
+  No coverage file found, so CRAP scores are a static estimate. Pass `--coverage <coverage-final.json>` for measured scores, or raise `health.maxCrap`.
   src/complex.ts
     :1 classify CRITICAL
           13 ! cyclomatic   13   cognitive   15 lines
