@@ -1159,6 +1159,40 @@ fn audit_pass_verdict_when_no_changes() {
         Some(0),
         "should report 0 changed files"
     );
+    // A pass verdict over no changed file checked nothing. A CI job that
+    // reads only the verdict must see that on stderr, also under --quiet.
+    assert!(
+        output
+            .stderr
+            .contains("Note: the audit compared no changed files against HEAD"),
+        "an empty audit must say that it compared nothing: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn audit_with_changed_files_prints_no_empty_scope_note() {
+    let dir = create_audit_fixture("withchanges");
+    fs::write(
+        dir.path().join("src/utils.ts"),
+        "export const used = () => 43;\nexport const unused = () => 0;\n",
+    )
+    .unwrap();
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.path().to_str().unwrap(),
+        "--base",
+        "HEAD",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert!(
+        !output.stderr.contains("compared no changed files"),
+        "an audit with changed files must not warn about an empty scope: {}",
+        output.stderr
+    );
 }
 
 #[test]
