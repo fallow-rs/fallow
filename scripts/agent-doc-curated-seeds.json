@@ -712,6 +712,12 @@
     },
     {
       "section": "flags:audit",
+      "row": "--staged",
+      "column": "Description",
+      "seed": "Audit the staged index instead of the working tree. The changed files are the staged changes against HEAD (`git diff --cached`), and the analysis reads every file from the index, so unstaged edits and untracked files do not affect the verdict. A file that is staged and then deleted from the working tree is still audited. The base is HEAD, so `--base` and `--changed-since` are rejected. The generated pre-commit hook uses this flag"
+    },
+    {
+      "section": "flags:audit",
       "row": "--walkthrough",
       "column": "Description",
       "seed": "Render the existing walkthrough guide as a staged HUMAN terminal tour (Stage 1 load-bearing / Stage 2 mechanical), or markdown with `--format markdown`. Implies the brief; always exits 0. `--format json --walkthrough` emits the same agent-contract JSON as `--walkthrough-guide`"
@@ -1974,7 +1980,7 @@
       "section": "flags:init",
       "row": "--branch",
       "column": "Description",
-      "seed": "Fallback base branch/ref for the pre-commit hook when no upstream is set"
+      "seed": "Has no effect. The pre-commit hook runs `fallow audit --staged`, which compares the staged changes with HEAD. Kept so that existing install scripts still run"
     },
     {
       "section": "flags:init",

@@ -1092,7 +1092,7 @@ fn cli_does_not_own_git_ref_or_root_detection() {
         );
         assert!(
             !source.contains("\"refs/remotes/origin/HEAD\""),
-            "{source_path} probes the remote default branch; use fallow_engine::repo_refs::detect_remote_default_ref"
+            "{source_path} probes the remote default branch; use a fallow_engine::repo_refs function such as default_workspace_ref"
         );
         assert!(
             !source.contains("fn remap_cache_dir_for_base_worktree"),

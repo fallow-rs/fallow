@@ -255,6 +255,9 @@ impl AuditTypeAwareOptions<'_> {
     }
 }
 
+#[path = "audit_staged.rs"]
+pub mod staged;
+
 #[path = "audit_base_ref.rs"]
 mod base_ref;
 #[path = "audit_cache.rs"]
@@ -498,6 +501,10 @@ impl BaseCheckout for BaseWorktree {
 /// the reusable base worktree and the base-snapshot cache.
 struct CliAuditBackend<'a> {
     opts: &'a AuditOptions<'a>,
+    /// The checkout that owns the base worktree and its reusable cache. It
+    /// differs from `opts.root` for `--staged`, which analyzes a temporary
+    /// worktree.
+    host_root: &'a Path,
     type_aware: AuditTypeAwareOptions<'a>,
     base_ref: &'a str,
     /// Loaded on first use, so an audit without changes reads no config.
@@ -523,9 +530,9 @@ impl AuditBackend for CliAuditBackend<'_> {
         // never creates or reuses a base worktree, so the no-change path stays
         // free of worktree-listing IO.
         sweep_old_reusable_caches(
-            self.opts.root,
+            self.host_root,
             crate::base_worktree::resolve_cache_max_age_with_options(
-                self.opts.root,
+                self.host_root,
                 self.opts.config_path.as_ref(),
                 self.opts.allow_remote_extends,
             ),
@@ -548,7 +555,7 @@ impl AuditBackend for CliAuditBackend<'_> {
         base_sha: Option<&str>,
     ) -> Result<BaseWorktree, ExitCode> {
         BaseWorktree::create(
-            self.opts.root,
+            self.host_root,
             base_ref,
             base_sha,
             self.workspace_patterns(),
@@ -569,7 +576,15 @@ impl AuditBackend for CliAuditBackend<'_> {
         base_root: &Path,
         focus: Option<&FxHashSet<PathBuf>>,
     ) -> Result<HeadAnalyses, ExitCode> {
-        run_audit_base_analyses(self.opts, self.type_aware, base_root, focus)
+        run_audit_base_analyses(
+            self.opts,
+            self.type_aware,
+            BaseAnalysisRoots {
+                host: self.host_root,
+                base: base_root,
+            },
+            focus,
+        )
     }
 
     fn base_cache_key(
@@ -613,17 +628,30 @@ fn shared_diff() -> Option<SharedDiff<'static>> {
     })
 }
 
-/// Run the base analyses in `base_root`, the base worktree. `focus` scopes
-/// dead code and duplication to the changed files and the pre-rename paths;
-/// without it, the results stay unscoped.
+/// The roots of one base pass.
+#[derive(Clone, Copy)]
+struct BaseAnalysisRoots<'a> {
+    /// The checkout whose cache directory the base pass mirrors. It is
+    /// `opts.root`, except for `--staged`.
+    host: &'a Path,
+    /// The analysis root inside the base worktree.
+    base: &'a Path,
+}
+
+/// Run the base analyses in the base worktree. `focus` scopes dead code and
+/// duplication to the changed files and the pre-rename paths; without it, the
+/// results stay unscoped.
 fn run_audit_base_analyses(
     opts: &AuditOptions<'_>,
     type_aware: AuditTypeAwareOptions<'_>,
-    base_root: &Path,
+    roots: BaseAnalysisRoots<'_>,
     focus: Option<&FxHashSet<PathBuf>>,
 ) -> Result<HeadAnalyses, ExitCode> {
+    let base_root = roots.base;
+    // The head and base passes run at the same time, so the base pass gets
+    // its own cache directory inside the base worktree.
     let base_cache_dir = fallow_engine::repo_refs::remap_cache_dir_for_base_worktree(
-        opts.root,
+        roots.host,
         base_root,
         opts.cache_dir,
     );
@@ -1243,6 +1271,17 @@ pub fn execute_audit_with_type_aware(
     opts: &AuditOptions<'_>,
     type_aware: AuditTypeAwareOptions<'_>,
 ) -> Result<AuditResult, ExitCode> {
+    execute_audit_for_host(opts, type_aware, opts.root)
+}
+
+/// Run the audit of `opts.root`. `host_root` is the checkout that owns the
+/// base worktree. It is not `opts.root` when `opts.root` is the temporary
+/// worktree of `--staged`.
+fn execute_audit_for_host(
+    opts: &AuditOptions<'_>,
+    type_aware: AuditTypeAwareOptions<'_>,
+    host_root: &Path,
+) -> Result<AuditResult, ExitCode> {
     let start = Instant::now();
 
     let fallow_engine::repo_refs::ResolvedAuditBase {
@@ -1264,6 +1303,7 @@ pub fn execute_audit_with_type_aware(
 
     let backend = CliAuditBackend {
         opts,
+        host_root,
         type_aware,
         base_ref: &base_ref,
         workspace_patterns: OnceLock::new(),
@@ -1584,7 +1624,10 @@ pub fn benchmark_audit_analyses(
             run_audit_base_analyses(
                 &opts,
                 AuditTypeAwareOptions::default(),
-                base_root,
+                BaseAnalysisRoots {
+                    host: opts.root,
+                    base: base_root,
+                },
                 base_focus.as_ref(),
             )
         },
@@ -2730,8 +2773,11 @@ fn build_audit_health_options<'a>(
     }
 }
 
+#[path = "audit_impact_record.rs"]
+mod impact_record;
 #[path = "audit_output.rs"]
 mod output;
+use impact_record::record_audit_impact;
 
 pub use output::audit_json_header_input;
 pub use output::{
@@ -2739,11 +2785,15 @@ pub use output::{
     print_audit_findings, print_audit_result, print_audit_result_with_style,
 };
 
+/// Run and print one audit. `host_root` is the checkout of `--staged` when
+/// `opts.root` is its temporary worktree, otherwise `None`.
 pub fn run_audit_with_type_aware(
     opts: &AuditOptions<'_>,
     gate_marker: Option<&str>,
     type_aware: AuditTypeAwareOptions<'_>,
+    host_root: Option<&Path>,
 ) -> ExitCode {
+    let host_root = host_root.unwrap_or(opts.root);
     if let Err(e) = fallow_engine::health::validate_coverage_root_absolute(opts.coverage_root) {
         return crate::error::emit_input_error_with_style(&e, opts.output, opts.json_style);
     }
@@ -2759,9 +2809,9 @@ pub fn run_audit_with_type_aware(
         scope: opts.scope.clone(),
         ..*opts
     };
-    match execute_audit_with_type_aware(&resolved_opts, type_aware) {
+    match execute_audit_for_host(&resolved_opts, type_aware, host_root) {
         Ok(result) => {
-            let _ = record_audit_impact(opts, gate_marker, &result);
+            let _ = record_audit_impact(opts, host_root, gate_marker, &result);
             let report_exit = print_audit_command_result(opts, &result, opts.json_style);
             notes::print_run_notes(opts, type_aware, &result);
             if report_exit != ExitCode::SUCCESS {
@@ -2789,61 +2839,6 @@ fn type_aware_meta_completeness_failed(
     meta: Option<&fallow_types::envelope::TypeAwareMeta>,
 ) -> bool {
     crate::report::ci::required_type_aware_incomplete(meta)
-}
-
-fn record_audit_impact(
-    opts: &AuditOptions<'_>,
-    gate_marker: Option<&str>,
-    result: &AuditResult,
-) -> Result<(), String> {
-    // A skipped sub-analysis reports no findings, which Impact would credit as
-    // resolved. Like the bare run, only a full selection writes Impact.
-    if opts.analyses != AuditAnalysisSelection::ALL {
-        return Ok(());
-    }
-    let mut findings = result
-        .check
-        .as_ref()
-        .map(|c| crate::impact::collect_dead_code_findings(&c.results))
-        .unwrap_or_default();
-    if let Some(health) = result.health.as_ref() {
-        findings.extend(crate::impact::collect_complexity_findings(&health.report));
-    }
-    let clones = result
-        .dupes
-        .as_ref()
-        .map(|d| crate::impact::collect_clone_findings(&d.report))
-        .unwrap_or_default();
-    let empty_supps: Vec<fallow_types::results::ActiveSuppression> = Vec::new();
-    let suppressions = result.check.as_ref().map_or(empty_supps.as_slice(), |c| {
-        c.results.active_suppressions.as_slice()
-    });
-    let attribution = crate::impact::AttributionInput {
-        root: opts.root,
-        scope: crate::impact::Scope::ChangedFiles(&result.changed_files),
-        findings,
-        clones,
-        suppressions,
-    };
-    let analysis_identity = result
-        .check
-        .as_ref()
-        .and_then(|check| check.type_aware_meta.as_ref())
-        .and_then(|meta| meta.identity.clone())
-        .unwrap_or_default();
-    crate::impact::record_audit_run(
-        opts.root,
-        &result.summary,
-        &crate::impact::AuditRunRecord {
-            verdict: result.verdict,
-            gate_source: gate_marker.map(crate::impact::GateSource::from_marker),
-            git_sha: result.head_sha.as_deref(),
-            version: env!("CARGO_PKG_VERSION"),
-            timestamp: &crate::vital_signs::chrono_timestamp(),
-            attribution: Some(&attribution),
-            analysis_identity: &analysis_identity,
-        },
-    )
 }
 
 fn print_audit_command_result(

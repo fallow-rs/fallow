@@ -3,6 +3,7 @@
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use fallow_types::{
     output_dead_code::{
@@ -121,6 +122,22 @@ fn augment_git_failed(stderr: &str) -> String {
     } else {
         stderr.to_owned()
     }
+}
+
+static EXCLUDE_UNTRACKED: AtomicBool = AtomicBool::new(false);
+
+/// Leave untracked files out of every changed-file set and changed diff of
+/// this process.
+///
+/// `fallow audit --staged` sets this switch. It audits a temporary worktree
+/// that holds the staged index. The only untracked entries in that worktree
+/// are the dependency links that the audit adds, and they are not changes.
+pub fn exclude_untracked_files() {
+    EXCLUDE_UNTRACKED.store(true, Ordering::Relaxed);
+}
+
+fn untracked_files_excluded() -> bool {
+    EXCLUDE_UNTRACKED.load(Ordering::Relaxed)
 }
 
 /// Install a spawn-hook for changed-file git subprocesses.
@@ -351,6 +368,9 @@ fn working_tree_changed_files(
     toplevel: &Path,
 ) -> Result<FxHashSet<PathBuf>, ChangedFilesError> {
     let mut files = collect_git_paths(cwd, toplevel, &["diff", "--name-only", "-z", "HEAD"])?;
+    if untracked_files_excluded() {
+        return Ok(files);
+    }
     files.extend(collect_git_paths(
         cwd,
         toplevel,
@@ -525,6 +545,9 @@ fn append_untracked_diffs(
     toplevel: &Path,
     diff: &mut String,
 ) -> Result<(), ChangedFilesError> {
+    if untracked_files_excluded() {
+        return Ok(());
+    }
     let canonical_root = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let mut untracked: Vec<PathBuf> = collect_git_paths(
         root,
