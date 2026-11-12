@@ -611,9 +611,7 @@ fn add_local_layer_support(
     add_prefixed_default_used_exports(result, prefix, DEFAULT_EXPORT_ENTRY_PATTERNS);
 
     if let Some(name) = layer_name(root, layer, auto_registered) {
-        result
-            .path_aliases
-            .push((format!("#layers/{name}/"), layer.to_string()));
+        result.push_checked_path_alias(format!("#layers/{name}/"), layer.to_string());
     }
 }
 

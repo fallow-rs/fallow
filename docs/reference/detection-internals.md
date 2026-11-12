@@ -1002,6 +1002,12 @@ specifier resolves back to workspace source. Package `imports` aliases are
 owned by the nearest package manifest; do not turn unmatched hash specifiers
 into global aliases. Per-file tsconfig failure may degrade to ordinary relative
 or package resolution, with diagnostics, without inventing missing path aliases.
+Plugin path aliases apply the longest prefix first, so a Nuxt
+`#layers/<name>/` alias wins over the static `#layers/` fallback. A plugin
+marks an alias to a directory that its config names as checked
+(`PluginResult::push_checked_path_alias`). An unresolved import under a checked
+prefix reports, also when a virtual module prefix such as the Nuxt `#` covers
+it.
 A bare specifier that a `paths` pattern of the nearest tsconfig matches is an
 alias, also when its scope is lowercase or a real package has the same name.
 When it resolves into `node_modules`, the package of the resolved file gets the

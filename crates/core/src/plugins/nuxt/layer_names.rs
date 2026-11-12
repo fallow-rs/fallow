@@ -12,9 +12,7 @@ pub(super) fn add_root_layer_alias(result: &mut PluginResult, source: &str, conf
     else {
         return;
     };
-    result
-        .path_aliases
-        .push((format!("#layers/{name}/"), String::new()));
+    result.push_checked_path_alias(format!("#layers/{name}/"), String::new());
 }
 
 /// The name a local layer is addressed by in `#layers/<name>/`: its
