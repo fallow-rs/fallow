@@ -40,8 +40,8 @@ fn pair(path: &str, specifier: &str) -> (String, String) {
     (path.to_owned(), specifier.to_owned())
 }
 
-/// Every relative import in the fixture, as the analysis reports it when no
-/// gitignore rule applies.
+/// Every relative and tsconfig alias import in the fixture, as the analysis
+/// reports it when no gitignore rule applies.
 fn all_fixture_imports() -> Vec<(String, String)> {
     vec![
         pair("lib/helper.ts", "./generated/client"),
@@ -49,6 +49,17 @@ fn all_fixture_imports() -> Vec<(String, String)> {
         pair("src/index.ts", "../dist/out.js"),
         pair("src/index.ts", "../lib/generated/client"),
         pair("src/index.ts", "./missing"),
+        pair("src/routes.ts", "@/.next/types/routes"),
+        pair("src/routes.ts", "@/src/missing-alias"),
+    ]
+}
+
+/// The findings of the fixture when its gitignore rules apply: only the
+/// missing targets that no rule ignores.
+fn not_ignored_fixture_imports() -> Vec<(String, String)> {
+    vec![
+        pair("src/index.ts", "./missing"),
+        pair("src/routes.ts", "@/src/missing-alias"),
     ]
 }
 
@@ -59,9 +70,42 @@ fn relative_import_of_missing_gitignored_path_is_not_unresolved() {
 
     assert_eq!(
         unresolved_imports(dir.path()),
-        vec![pair("src/index.ts", "./missing")],
+        not_ignored_fixture_imports(),
         "a missing target below a gitignored directory is build output, \
          but a missing target that no rule ignores stays unresolved"
+    );
+}
+
+#[test]
+fn alias_import_of_missing_gitignored_path_is_not_unresolved() {
+    let dir = copy_fixture(FIXTURE);
+    git(dir.path(), &["init", "-q"]);
+
+    let unresolved = unresolved_imports(dir.path());
+    assert!(
+        !unresolved.contains(&pair("src/routes.ts", "@/.next/types/routes")),
+        "the `@/*` alias target `.next/types/routes` is gitignored build output, \
+         got: {unresolved:?}"
+    );
+    assert!(
+        unresolved.contains(&pair("src/routes.ts", "@/src/missing-alias")),
+        "an alias target that no rule ignores stays unresolved, got: {unresolved:?}"
+    );
+}
+
+#[test]
+fn alias_import_of_missing_gitignored_path_stays_silent_on_a_cache_hit() {
+    let dir = copy_fixture(FIXTURE);
+    git(dir.path(), &["init", "-q"]);
+
+    assert_eq!(
+        unresolved_imports_with(dir.path(), &[]),
+        not_ignored_fixture_imports()
+    );
+    assert_eq!(
+        unresolved_imports_with(dir.path(), &[]),
+        not_ignored_fixture_imports(),
+        "the second run restores the resolved graph from the cache"
     );
 }
 

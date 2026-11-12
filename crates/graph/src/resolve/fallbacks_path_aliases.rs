@@ -1,7 +1,7 @@
 //! Plugin path alias lookups: the alias prefix match, the workspace scope of
 //! an alias, and the alias fallback of the resolver.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::super::types::{ResolveContext, ResolveResult};
 use super::{
@@ -110,6 +110,29 @@ pub(in crate::resolve) fn try_path_alias_fallback(
             .ok()?;
             classify_alias_target(ctx, resolved.path())
         })
+}
+
+/// The paths that the applicable plugin path aliases substitute for an
+/// unresolved `specifier`, in alias order, or `None` when no alias matches.
+///
+/// An alias can point at generated code that does not exist before the
+/// build. The unresolved-import check tests these paths against the ignore
+/// rules of the repository, the same as the target of a relative import.
+pub(in crate::resolve) fn missing_path_alias_targets(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+) -> Option<Vec<PathBuf>> {
+    let paths: Vec<PathBuf> = applicable_path_aliases(ctx, from_file, specifier)
+        .into_iter()
+        .filter_map(|(prefix, replacement)| {
+            let remainder = alias_match_remainder(specifier, prefix)?;
+            let remainder = remainder.trim_start_matches('/');
+            let path = ctx.root.join(replacement).join(remainder);
+            Some(super::normalize_path_lexically(&path))
+        })
+        .collect();
+    (!paths.is_empty()).then_some(paths)
 }
 
 /// Map the file that an alias substitution resolved to onto a resolve result.
