@@ -430,6 +430,19 @@ impl AuditDomainLedger {
             }
         }
     }
+
+    /// Mark introduced findings whose keys are in `inherit` as inherited.
+    /// Unlike [`Self::demote_introductions`], this records no demotion: the
+    /// finding matches a base finding, only its key changed.
+    pub fn inherit_introductions(&mut self, inherit: &FxHashSet<String>) {
+        for (key, introduced) in &mut self.records {
+            if *introduced && inherit.contains(key) {
+                *introduced = false;
+                self.introduced_keys.remove(key);
+                self.inherited_keys.insert(key.clone());
+            }
+        }
+    }
 }
 
 /// One-pass audit comparison shared by attribution, verdict, and annotations.

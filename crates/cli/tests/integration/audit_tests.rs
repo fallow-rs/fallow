@@ -2701,18 +2701,19 @@ fn audit_demotion_shared_diff_source_takes_precedence_over_worktree_diff() {
     assert_eq!(control_json["attribution"]["duplication_demoted"], 1);
     assert_eq!(control_json["attribution"]["duplication_introduced"], 0);
 
-    // A shared diff claiming an added line INSIDE the scaffolding clone
-    // instance (src/a.ts spans lines 2-12 after the refactor). The worktree
-    // diff sees no added line there, so any behavior change below is the
-    // shared source deciding.
+    // A shared diff that adds src/a.ts as a new file, with an added line
+    // INSIDE the scaffolding clone instance (src/a.ts spans lines 2-12 after
+    // the refactor). The worktree diff sees no added line there, so any
+    // behavior change below is the shared source deciding. A new file has no
+    // base lines, so the group also does not lie inside a base clone group.
     let diff_dir = TempDir::new().expect("diff dir should be created");
     let diff_path = diff_dir.path().join("touch-instance.diff");
     fs::write(
         &diff_path,
         "diff --git a/src/a.ts b/src/a.ts\n\
-         --- a/src/a.ts\n\
+         --- /dev/null\n\
          +++ b/src/a.ts\n\
-         @@ -4,0 +5,1 @@\n\
+         @@ -0,0 +5,1 @@\n\
          +  const injected = 'x';\n",
     )
     .unwrap();
@@ -2752,6 +2753,118 @@ fn audit_demotion_shared_diff_source_takes_precedence_over_worktree_diff() {
         groups[0].get("demotion_reason").is_none(),
         "a non-demoted group must not carry the marker: {}",
         groups[0]
+    );
+}
+
+const SUBSPAN_CLONE: &str = "export function NAME(items, opts) {\n  const out = [];\n  for (const item of items) {\n    if (item.kind === 'alpha' && opts.includeAlpha) {\n      out.push({ id: item.id, label: item.name.toUpperCase(), score: item.score * 2 });\n    } else if (item.kind === 'beta' && opts.includeBeta) {\n      out.push({ id: item.id, label: item.name.toLowerCase(), score: item.score + 10 });\n    } else if (item.kind === 'gamma') {\n      out.push({ id: item.id, label: item.name.trim(), score: Math.max(0, item.score - 5) });\n    } else {\n      out.push({ id: item.id, label: String(item.name), score: 0 });\n    }\n  }\n  const total = out.reduce((sum, row) => sum + row.score, 0);\n  const sorted = out.sort((x, y) => y.score - x.score);\n  return { total, rows: sorted, count: sorted.length, empty: sorted.length === 0 };\n}\n";
+
+/// Repo with one committed clone group across `src/a.js` and `src/b.js`. The
+/// `edit` callback changes the working tree, and the function returns the
+/// JSON of a new-only audit against the commit.
+fn audit_after_clone_edit(edit: impl FnOnce(&Path)) -> serde_json::Value {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name":"audit-clone-subspan","type":"module","main":"src/index.js"}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/index.js"),
+        "import { a } from './a.js';\nimport { b } from './b.js';\nconsole.log(a, b);\n",
+    )
+    .unwrap();
+    fs::write(dir.join("src/a.js"), SUBSPAN_CLONE.replace("NAME", "a")).unwrap();
+    fs::write(dir.join("src/b.js"), SUBSPAN_CLONE.replace("NAME", "b")).unwrap();
+    git(dir, &["init", "-b", "main"]);
+    git(dir, &["config", "core.autocrlf", "false"]);
+    commit_all(dir, "initial");
+    edit(dir);
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.to_str().unwrap(),
+        "--base",
+        "HEAD",
+        "--gate",
+        "new-only",
+        "--no-cache",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        output.code, 0,
+        "audit should run. stdout: {}\nstderr: {}",
+        output.stdout, output.stderr
+    );
+    parse_json(&output)
+}
+
+fn edit_file(dir: &Path, rel: &str, from: &str, to: &str) {
+    let path = dir.join(rel);
+    let text = fs::read_to_string(&path).unwrap();
+    assert!(text.contains(from), "{rel} must contain {from}");
+    fs::write(&path, text.replace(from, to)).unwrap();
+}
+
+fn assert_all_clone_groups_inherited(json: &serde_json::Value) {
+    let groups = json["duplication"]["clone_groups"]
+        .as_array()
+        .expect("clone groups array");
+    assert!(!groups.is_empty(), "expected a clone group: {json}");
+    assert!(
+        groups.iter().all(|group| group["introduced"] == false),
+        "every clone group inside a base clone group must be inherited: {json}"
+    );
+    assert_eq!(json["attribution"]["duplication_introduced"], 0);
+    assert_eq!(json["attribution"]["duplication_demoted"], 0);
+}
+
+/// A one-line edit inside one copy of a base clone splits the group into
+/// smaller groups. Each smaller group lies inside the base group, so the
+/// change did not write the duplication, even where a group holds the edited
+/// line.
+#[test]
+fn audit_one_line_edit_inside_base_clone_is_inherited() {
+    let json = audit_after_clone_edit(|dir| {
+        edit_file(dir, "src/a.js", "item.score + 10", "item.score + 11");
+    });
+    assert_all_clone_groups_inherited(&json);
+}
+
+/// A parameter rename in one copy of a base clone shrinks the group to the
+/// lines that do not name the parameter. The smaller group is inherited.
+#[test]
+fn audit_parameter_rename_inside_base_clone_is_inherited() {
+    let json = audit_after_clone_edit(|dir| {
+        let path = dir.join("src/a.js");
+        let text = fs::read_to_string(&path).unwrap();
+        fs::write(&path, text.replace("opts", "options")).unwrap();
+    });
+    assert_all_clone_groups_inherited(&json);
+}
+
+/// A new copy of a base clone in a new file has no containing base instance,
+/// so its clone group stays introduced.
+#[test]
+fn audit_new_copy_of_base_clone_stays_introduced() {
+    let json = audit_after_clone_edit(|dir| {
+        fs::write(dir.join("src/c.js"), SUBSPAN_CLONE.replace("NAME", "c")).unwrap();
+        fs::write(
+            dir.join("src/index.js"),
+            "import { a } from './a.js';\nimport { b } from './b.js';\nimport { c } from './c.js';\nconsole.log(a, b, c);\n",
+        )
+        .unwrap();
+    });
+    let groups = json["duplication"]["clone_groups"]
+        .as_array()
+        .expect("clone groups array");
+    assert!(
+        groups.iter().any(|group| group["introduced"] == true),
+        "a new copy must keep an introduced clone group: {json}"
     );
 }
 

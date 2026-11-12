@@ -502,6 +502,19 @@ line states exit code 0.
   as inherited and are also reported through
   `attribution.duplication_demoted` and a per-group `demotion_reason` field;
   human output names the deciding diff source in the demotion note.
+- Clone groups inside a base clone group: after the demotion, the same
+  function marks an introduced clone group as inherited when each instance
+  lies inside a different instance of one base clone group
+  (`crates/api/src/audit_run/clone_containment.rs`). The check maps each head
+  instance to its base path through the rename list and the diff renames,
+  and to its base lines through the line changes of the diff
+  (`DiffIndex::base_line_range`). An edit inside one copy of a base clone
+  splits the base group into smaller groups with new keys, and this rule
+  keeps them inherited. The rule records no demotion, because the group
+  matches a base group. A file that the diff adds has no base lines, so a
+  pasted copy stays introduced. At least one instance must hold no added
+  line: when every copy holds an added line, the change wrote the same text
+  into each copy, and the group stays introduced.
 - Audit diff-risk rules: `crates/api/src/diff_risk/` computes `weakened-tests`,
   `added-suppression`, `test-only-branch`, `diverged-clone-sibling` and
   `added-dependency` inside `audit_run::run`, so the CLI, the MCP `audit` tool
