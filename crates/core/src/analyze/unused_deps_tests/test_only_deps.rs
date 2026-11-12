@@ -568,3 +568,43 @@ fn test_only_dep_from_config_in_test_directory() {
     );
     assert_eq!(names, vec!["astro".to_string()]);
 }
+
+/// Test runners also load config files with a variant name, for example a
+/// second Vitest project or the Playwright component testing config. The
+/// dependencies that only these files import stay test-only.
+#[test]
+fn test_only_dep_from_variant_test_runner_config() {
+    for config_file in [
+        "/project/vitest.unit.config.ts",
+        "/project/vitest.browser.config.mts",
+        "/project/packages/app/vitest.e2e.config.ts",
+        "/project/playwright-ct.config.ts",
+        "/project/playwright.ct.config.ts",
+        "/project/jest.integration.config.js",
+        "/project/cypress.component.config.ts",
+    ] {
+        let names = test_only_names(&[(config_file, &["pkg-a"])], &["pkg-a"]);
+        assert_eq!(
+            names,
+            vec!["pkg-a".to_string()],
+            "config file: {config_file}"
+        );
+    }
+}
+
+/// A file name that only starts with a test runner name is not a test runner
+/// config file, so its dependencies are production use.
+#[test]
+fn not_test_only_when_imported_from_runner_named_source() {
+    for source_file in [
+        "/project/src/vitest-utils.ts",
+        "/project/src/playwrightHelpers.ts",
+        "/project/src/jest.ts",
+    ] {
+        let names = test_only_names(&[(source_file, &["pkg-a"])], &["pkg-a"]);
+        assert!(
+            names.is_empty(),
+            "source file: {source_file}, found: {names:?}"
+        );
+    }
+}

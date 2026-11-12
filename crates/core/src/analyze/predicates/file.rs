@@ -144,13 +144,41 @@ const TEST_RUNNER_CONFIG_PREFIXES: &[&str] = &[
     "nightwatch.conf.",
 ];
 
+/// Test runner names that also start a variant config file name, such as
+/// `vitest.unit.config.ts` or `playwright-ct.config.ts`.
+const TEST_RUNNER_NAMES: &[&str] = &[
+    "jest",
+    "vitest",
+    "playwright",
+    "cypress",
+    "karma",
+    "ava",
+    "wdio",
+    "nightwatch",
+];
+
+/// Name segments that mark a file as a config file.
+const CONFIG_NAME_SEGMENTS: &[&str] = &[".config.", ".conf."];
+
 /// Check if a file is a config or setup file that only a test runner loads
 /// (`vitest.config.ts`, `jest.setup.js`, `playwright.config.ts`).
+///
+/// Variant names count too: a test runner name, then `.` or `-`, and a
+/// `.config.` or `.conf.` segment (`vitest.unit.config.ts`,
+/// `playwright-ct.config.ts`).
 pub(in crate::analyze) fn is_test_runner_config_file(path: &std::path::Path) -> bool {
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
-    TEST_RUNNER_CONFIG_PREFIXES
+    if TEST_RUNNER_CONFIG_PREFIXES
         .iter()
         .any(|p| name.starts_with(p))
+    {
+        return true;
+    }
+    let starts_with_runner = TEST_RUNNER_NAMES.iter().any(|runner| {
+        name.strip_prefix(runner)
+            .is_some_and(|rest| rest.starts_with(['.', '-']))
+    });
+    starts_with_runner && CONFIG_NAME_SEGMENTS.iter().any(|s| name.contains(s))
 }
 
 /// Check if a file is a configuration file consumed by tooling, not via imports.
