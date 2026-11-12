@@ -1064,8 +1064,13 @@ each reason:
   relative static prefix, which blocks only the files that it matches.
 - `opaque-dynamic-import`: a module of the analysis has an `import()` or a
   `require` call whose source does not give a file or a pattern, such as
-  `import(name)`, `` import(`${name}`) `` or `require(name)`. Extraction
-  records this as `FunctionContractFacts::opaque_module_load`. The rule
+  `import(name)`, `` import(`${name}`) `` or `require(name)`. A conditional
+  or logical source counts when one branch has no static specifier, as in
+  `import(flag ? './a' : name)`. `module.require(name)`,
+  `globalThis.require(name)` and a module-level `const r = require` also
+  count. A local binding named `require`, such as a parameter, does not
+  count. Extraction records this as
+  `FunctionContractFacts::opaque_module_load`. The rule
   blocks each exported function of the project and, in type-aware mode, each
   exported class with methods. A function that no export exposes stays a
   candidate. A file outside the analysis, such as a test file or a

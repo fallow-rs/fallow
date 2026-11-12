@@ -848,6 +848,17 @@ fn a_load_with_an_unknown_source_marks_the_module() {
         "const name = process.argv[2];\nconst mod = require(name);\nmod.pad('z', 2);",
         "export const load = (x: string) => require(`./views/${x}`);",
         "export const load = (x: string) => import(x).then((m) => m.run());",
+        "export const load = (c: boolean, x: string) => import(c ? './a' : x);",
+        "export const load = (c: boolean, x: string) => import(c ? x : './a');",
+        "export const load = (x: string) => import(x || './a');",
+        "export const load = (x: string) => import(x ?? './a');",
+        "export const load = (c: boolean, x: string) => import(c ? './a' : `${x}`);",
+        "const name = process.argv[2];\nconst m = await import(name ? './a' : name);\nm.pad('z', 2);",
+        "const name = process.argv[2];\nconst mod = module.require(name);\nmod.pad('z', 2);",
+        "const name = process.argv[2];\nconst mod = globalThis.require(name);\nmod.pad('z', 2);",
+        "const r = require;\nconst mod = r(process.env.X);\nmod.pad('z', 2);",
+        "import { createRequire } from 'node:module';\nconst require = createRequire(import.meta.url);\nconst mod = require(process.env.X);",
+        "export const load = (x: string) => import((x as string));",
     ] {
         assert!(has_opaque_load(source), "{source}");
     }
@@ -863,9 +874,32 @@ fn a_load_with_a_known_source_or_pattern_does_not_mark_the_module() {
         "const path = './a';\nexport const load = () => import(path);",
         "const mod = require('./a');\nmod.run();",
         "const text = require.resolve('./a');",
+        "export const load = () => import(new URL('./a.ts', import.meta.url).href);",
+        "export const load = () => import(new URL('./a.ts', import.meta.url));",
+        "export function run(require: (s: string) => unknown, name: string) {\n  return require(name);\n}",
+        "function require(body: Record<string, string>, key: string): string {\n  return body[key];\n}\nexport const read = (body: Record<string, string>) => require(body, 'code');",
     ] {
         assert!(!has_opaque_load(source), "{source}");
     }
+}
+
+#[test]
+fn a_pattern_branch_of_a_conditional_load_gives_a_pattern() {
+    let info = parse(
+        "export const load = (c: boolean, x: string) => import(c ? './a' : `./views/${x}.ts`);",
+    );
+    assert!(
+        info.function_contracts
+            .as_deref()
+            .is_none_or(|facts| !facts.opaque_module_load)
+    );
+    assert!(
+        info.dynamic_import_patterns
+            .iter()
+            .any(|pattern| pattern.prefix == "./views/"),
+        "{:?}",
+        info.dynamic_import_patterns
+    );
 }
 
 #[test]

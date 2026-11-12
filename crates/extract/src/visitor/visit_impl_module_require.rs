@@ -139,6 +139,11 @@ impl ModuleInfoExtractor {
                 continue;
             };
             for declarator in &var.declarations {
+                // A call through another name of `require` is not visible.
+                if matches!(declarator.init.as_ref().map(Expression::get_inner_expression), Some(Expression::Identifier(init)) if init.name == REQUIRE)
+                {
+                    self.mark_opaque_module_load();
+                }
                 if let Some(alias) = required_create_require_alias(declarator) {
                     self.create_require_aliases.insert(alias.to_string());
                 }
@@ -201,6 +206,28 @@ impl ModuleInfoExtractor {
             || self.is_this_file_require(callee)
     }
 
+    /// Whether `callee` loads a module for a source that is not a string
+    /// literal. A local binding named `require`, such as a parameter or a
+    /// helper function, is not the module loader.
+    fn is_unknown_source_load_callee(&self, callee: &Expression<'_>) -> bool {
+        match callee.get_inner_expression() {
+            Expression::Identifier(ident) if ident.name == REQUIRE => {
+                self.is_this_file_require(callee)
+                    || !(self.nested_scope_shadows(REQUIRE)
+                        || self.local_declaration_names.contains(REQUIRE))
+            }
+            Expression::StaticMemberExpression(member) => {
+                member.property.name == REQUIRE
+                    && matches!(
+                        member.object.get_inner_expression(),
+                        Expression::Identifier(object)
+                            if matches!(object.name.as_str(), "module" | "globalThis" | "global")
+                    )
+            }
+            _ => self.is_this_file_require(callee),
+        }
+    }
+
     /// The call and the specifier when `init` is a load with a string literal.
     pub(super) fn try_extract_require<'a, 'b>(
         &self,
@@ -223,7 +250,7 @@ impl ModuleInfoExtractor {
         let Argument::StringLiteral(lit) = first else {
             // A `require` call gives no edge and no pattern for a source that
             // is not a string literal, so the call can load any module.
-            if self.is_require_load_callee(&expr.callee) {
+            if self.is_unknown_source_load_callee(&expr.callee) {
                 self.mark_opaque_module_load();
             }
             return;

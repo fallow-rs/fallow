@@ -857,11 +857,42 @@ impl<'a> ModuleInfoExtractor {
         })
     }
 
+    /// Record the pattern of each branch of a conditional or logical
+    /// `import()` source that has no static specifier, such as `name` in
+    /// `import(flag ? './a' : name)`. The static branches give the edges.
+    pub(super) fn record_dynamic_import_branch_patterns(
+        &mut self,
+        source: &Expression<'a>,
+        span: Span,
+    ) {
+        match source.get_inner_expression() {
+            Expression::ConditionalExpression(cond) => {
+                self.record_dynamic_import_branch_patterns(&cond.consequent, span);
+                self.record_dynamic_import_branch_patterns(&cond.alternate, span);
+            }
+            Expression::LogicalExpression(logical) => {
+                self.record_dynamic_import_branch_patterns(&logical.left, span);
+                self.record_dynamic_import_branch_patterns(&logical.right, span);
+            }
+            Expression::StringLiteral(_) => {}
+            Expression::TemplateLiteral(tpl) if tpl.expressions.is_empty() => {}
+            Expression::Identifier(ident)
+                if self.const_specifier(ident.name.as_str()).is_some() => {}
+            branch => self.record_dynamic_import_pattern(branch, span),
+        }
+    }
+
     /// Record the pattern of an `import()` source that has no static
     /// specifier: a substitution template or a `'./x/' + y` concatenation.
-    /// Any other source can name any module, so it marks the module.
+    /// Any other source can name any module, so it marks the module. A
+    /// `new URL('./x', import.meta.url)` source has its own edge.
     pub(super) fn record_dynamic_import_pattern(&mut self, source: &Expression<'a>, span: Span) {
-        match source {
+        match source.get_inner_expression() {
+            Expression::NewExpression(new_expr) if new_url_import_source(new_expr).is_some() => {}
+            Expression::StaticMemberExpression(member)
+                if member.property.name == "href"
+                    && matches!(member.object.get_inner_expression(), Expression::NewExpression(new_expr) if new_url_import_source(new_expr).is_some()) =>
+                {}
             Expression::TemplateLiteral(tpl)
                 if !tpl.quasis.is_empty() && !tpl.expressions.is_empty() =>
             {

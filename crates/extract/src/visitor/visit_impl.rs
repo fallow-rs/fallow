@@ -4264,17 +4264,16 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_import_expression(&mut self, expr: &ImportExpression<'a>) {
+        let mut sources = Vec::new();
+        self.collect_dynamic_import_specifiers(&expr.source, &mut sources);
+        if !sources.is_empty() {
+            self.record_dynamic_import_branch_patterns(&expr.source, expr.span);
+        }
         if self.handled_import_spans.contains(&expr.span) {
             walk::walk_import_expression(self, expr);
             return;
         }
-
-        // Static specifiers first (string literals, no-substitution templates,
-        // and every statically-resolvable conditional/logical/parenthesized
-        // branch); only when none resolve, fall back to the pattern shapes
-        // (substitution templates and `'./x/' + y` concatenations).
-        let mut sources = Vec::new();
-        self.collect_dynamic_import_specifiers(&expr.source, &mut sources);
+        // Without a static specifier, fall back to the pattern shapes.
         if sources.is_empty() {
             self.record_dynamic_import_pattern(&expr.source, expr.span);
         } else {
