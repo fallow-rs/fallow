@@ -362,11 +362,12 @@ line states exit code 0.
   make a finding introduced, and a base finding without a CRAP score is not
   growth. `--gate all` keeps the rule severity.
 - Audit unused code outside the changed files: under `--gate new-only`, the
-  head and base dead-code passes of the CLI keep every unused file and unused
-  export
-  (`filter_results_by_changed_files_keeping_unused_code` in
-  `crates/engine/src/changed_files.rs`). The head pass then runs without
-  `changed_since`, because the check change scope would drop them first.
+  head and base dead-code passes keep every unused file and unused export.
+  They pass `ChangeScopeOwner::CallerKeepingUnusedCode`
+  (`crates/engine/src/change_scope.rs`), so the change scope keeps these
+  findings and the run still counts as change-scoped for a baseline. The CLI
+  then calls `filter_results_by_changed_files_keeping_unused_code` in
+  `crates/engine/src/changed_files.rs`.
   `audit_run::attribute` calls `scope_unchanged_unused_code`
   (`crates/api/src/audit_run/scope.rs`): such a finding outside the changed
   files stays only when the base snapshot does not report its key. The base
@@ -379,8 +380,9 @@ line states exit code 0.
   this set lacks from the base keys. The set is `None` when the base config
   does not load or turns `unused-files` or `unused-exports` off, so a rule
   that the change turns on does not gate old findings. The programmatic
-  backend (`crates/api/src/runtime/audit.rs`) still scopes its passes to the
-  changed files, so `fallow_api::run_audit` does not report this code yet.
+  backend gives the same verdict: its audit sections use the same change
+  scope owner, and its base pass runs the same second pass with the base
+  config (`crates/api/src/runtime/audit_own_config.rs`).
 - Audit test-file complexity: under every gate, `audit_run::attribute` calls
   `exempt_test_file_gates` (`crates/api/src/audit_complexity.rs`) before the
   comparison. It reuses `fallow_engine::test_paths::is_test_path` on the path

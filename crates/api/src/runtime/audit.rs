@@ -184,6 +184,7 @@ impl<'a> AuditBackend for ProgrammaticAuditBackend<'a> {
         Ok(ProgrammaticAuditAnalyses {
             subanalyses,
             config: self.config,
+            own_config_unused_code: None,
         })
     }
 
@@ -234,9 +235,20 @@ impl<'a> AuditBackend for ProgrammaticAuditBackend<'a> {
             ..self.options.clone()
         };
         let subanalyses = run_audit_subanalyses(&base_options, &base_analysis, focus, true)?;
+        let own_config_unused_code = subanalyses.dead_code.as_ref().and_then(|_| {
+            own_config::base_own_config_unused_code(&own_config::BaseOwnConfigInput {
+                options: self.options,
+                base_analysis: &base_analysis,
+                head_root,
+                head_config_path: base_analysis.config_path.as_deref(),
+                base_root,
+                focus,
+            })
+        });
         Ok(ProgrammaticAuditAnalyses {
             subanalyses,
             config: self.config,
+            own_config_unused_code,
         })
     }
 }
@@ -246,6 +258,8 @@ impl<'a> AuditBackend for ProgrammaticAuditBackend<'a> {
 struct ProgrammaticAuditAnalyses<'a> {
     subanalyses: AuditSubanalyses,
     config: &'a ResolvedConfig,
+    /// Unused-code keys of a base side under the config of the base commit.
+    own_config_unused_code: Option<FxHashSet<String>>,
 }
 
 impl AuditAnalyses for ProgrammaticAuditAnalyses<'_> {
@@ -267,7 +281,7 @@ impl AuditAnalyses for ProgrammaticAuditAnalyses<'_> {
                     .and_then(|meta| meta.type_aware.as_ref()),
                 syntactic_keys: None,
                 public_api: None,
-                own_config_unused_code: None,
+                own_config_unused_code: self.own_config_unused_code.as_ref(),
             }),
             duplication: duplication.as_ref().map(|duplication| DuplicationView {
                 clone_groups: duplication
@@ -597,7 +611,7 @@ fn audit_section_context(
     analysis: &AnalysisOptions,
 ) -> ProgrammaticResult<ProgrammaticAnalysisContext> {
     Ok(resolve_programmatic_analysis_context(analysis)?
-        .with_change_scope_owner(ChangeScopeOwner::Caller))
+        .with_change_scope_owner(ChangeScopeOwner::CallerKeepingUnusedCode))
 }
 
 fn run_audit_subanalyses(
@@ -957,6 +971,13 @@ fn audit_next_steps(
     );
     build_audit_next_steps(&input)
 }
+
+#[path = "audit_own_config.rs"]
+mod own_config;
+
+#[cfg(test)]
+#[path = "audit_orphaned_tests.rs"]
+mod orphaned_tests;
 
 #[cfg(test)]
 mod tests {

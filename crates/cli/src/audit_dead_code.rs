@@ -62,12 +62,15 @@ pub(super) fn run_audit_check<'a>(
         allow_remote_extends: opts.allow_remote_extends,
         fail_on_issues: false,
         filters: &filters,
-        // The changed-file filter below scopes the findings. A check that
-        // scoped them itself would drop the unused code that the change made
-        // unused outside the changed files.
-        changed_since: changed_since.filter(|_| !keep_unused_code),
-        // Audit compares head and base against its own changed files.
-        change_scope_owner: fallow_engine::change_scope::ChangeScopeOwner::Caller,
+        changed_since,
+        // Audit compares head and base against its own changed files. The
+        // scope keeps the unused code that the change made unused outside the
+        // changed files.
+        change_scope_owner: if keep_unused_code {
+            fallow_engine::change_scope::ChangeScopeOwner::CallerKeepingUnusedCode
+        } else {
+            fallow_engine::change_scope::ChangeScopeOwner::Caller
+        },
         no_package_baselines: false,
         diff_index: None,
         use_shared_diff_index: true,
@@ -131,7 +134,8 @@ pub(super) fn run_audit_check<'a>(
 /// With `keep_unused_code`, every unused file and unused export stays, also
 /// outside `changed_files`. The attribution then keeps such a finding only
 /// when the base does not report it, because the change made that code unused.
-/// A `--scope` path still bounds these findings.
+/// A `--scope` path still bounds these findings, and the `--walkthrough-file`
+/// response never counts as one.
 fn scope_audit_dead_code(
     opts: &AuditOptions<'_>,
     results: &mut fallow_types::results::AnalysisResults,
@@ -146,14 +150,24 @@ fn scope_audit_dead_code(
         results,
         changed_files,
     );
-    if let Some(scope) = opts.scope.as_deref() {
-        results
-            .unused_files
-            .retain(|finding| crate::scope_path::scope_covers(scope, &finding.file.path));
-        results
-            .unused_exports
-            .retain(|finding| crate::scope_path::scope_covers(scope, &finding.export.path));
-    }
+    // The `--walkthrough-file` response is command input, not project code,
+    // so its file is never orphaned code.
+    let walkthrough_file = opts
+        .walkthrough_file
+        .and_then(|path| dunce::canonicalize(path).ok());
+    let in_report = |path: &Path| {
+        walkthrough_file.as_deref() != Some(path)
+            && opts
+                .scope
+                .as_deref()
+                .is_none_or(|scope| crate::scope_path::scope_covers(scope, path))
+    };
+    results
+        .unused_files
+        .retain(|finding| in_report(&finding.file.path));
+    results
+        .unused_exports
+        .retain(|finding| in_report(&finding.export.path));
 }
 
 pub(super) struct BaseOwnConfigInput<'a> {

@@ -692,9 +692,19 @@ pub fn filter_results_by_changed_files_keeping_unused_code(
     results: &mut AnalysisResults,
     changed_files: &FxHashSet<PathBuf>,
 ) {
+    keeping_unused_code(results, |results| {
+        filter_results_by_changed_files(results, changed_files);
+    });
+}
+
+/// Run `filter` over `results`, but keep every unused file and unused export.
+pub(crate) fn keeping_unused_code(
+    results: &mut AnalysisResults,
+    filter: impl FnOnce(&mut AnalysisResults),
+) {
     let unused_files = std::mem::take(&mut results.unused_files);
     let unused_exports = std::mem::take(&mut results.unused_exports);
-    filter_results_by_changed_files(results, changed_files);
+    filter(results);
     results.unused_files = unused_files;
     results.unused_exports = unused_exports;
 }
