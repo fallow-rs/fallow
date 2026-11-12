@@ -36,7 +36,7 @@ impl StagedTree {
             .map_err(|error| format!("--staged needs a git repository: {}", error.describe()))?;
         let relative_root = relative_root(host_root, &host_toplevel)?;
         require_head_commit(&host_toplevel)?;
-        let index_file = ambient_index_file();
+        let index_file = ambient_index_file(&host_toplevel);
         let staged_tree =
             fallow_engine::repo_refs::write_index_tree(&host_toplevel, index_file.as_deref())
                 .map_err(|error| error.to_string())?;
@@ -103,15 +103,13 @@ fn require_head_commit(toplevel: &Path) -> Result<(), String> {
 }
 
 /// The index file that Git gave this process (`GIT_INDEX_FILE`, for example
-/// for `git commit -a` or `git commit <path>`), as an absolute path. Git can
-/// set a relative path, which is relative to the directory of the hook.
-fn ambient_index_file() -> Option<PathBuf> {
+/// for `git commit -a` or `git commit <path>`), as an absolute path. A plain
+/// `git commit` sets the relative value `.git/index`. Git resolves a relative
+/// value against the top level of the work tree, not against the current
+/// directory, so a hook that runs from a subdirectory still finds the index.
+fn ambient_index_file(toplevel: &Path) -> Option<PathBuf> {
     let value: OsString = std::env::var_os(INDEX_FILE_ENV).filter(|value| !value.is_empty())?;
-    let path = PathBuf::from(value);
-    if path.is_absolute() {
-        return Some(path);
-    }
-    std::env::current_dir().ok().map(|cwd| cwd.join(path))
+    Some(toplevel.join(value))
 }
 
 /// A unique temporary path. The `fallow-audit-base-<pid>-` prefix lets the

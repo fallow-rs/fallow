@@ -50,18 +50,28 @@ fn fixture() -> TempDir {
 /// `GIT_INDEX_FILE` of the run. Without it, the run gets no
 /// `GIT_INDEX_FILE`, also when the test suite runs inside a Git hook.
 fn audit_staged_with_index(dir: &Path, extra: &[&str], index_file: Option<&Path>) -> CommandOutput {
+    let mut command = audit_staged_command(dir, extra);
+    if let Some(index_file) = index_file {
+        command.env("GIT_INDEX_FILE", index_file);
+    }
+    run(&mut command)
+}
+
+/// A `fallow audit --staged` command for `dir` with no `GIT_INDEX_FILE`.
+fn audit_staged_command(dir: &Path, extra: &[&str]) -> Command {
     let mut command = Command::new(fallow_bin());
     command.env("RUST_LOG", "").env("NO_COLOR", "1");
     scrub_analysis_env(&mut command);
     command.env_remove("GIT_INDEX_FILE");
-    if let Some(index_file) = index_file {
-        command.env("GIT_INDEX_FILE", index_file);
-    }
     command
         .args(["audit", "--root"])
         .arg(dir)
         .args(["--staged", "--format", "json", "--quiet"])
         .args(extra);
+    command
+}
+
+fn run(command: &mut Command) -> CommandOutput {
     let output = command.output().expect("failed to run fallow binary");
     CommandOutput {
         stdout: String::from_utf8_lossy(&output.stdout).to_string(),
@@ -154,6 +164,29 @@ fn the_index_file_that_git_gives_the_hook_is_audited() {
 
     let output = audit_staged_with_index(dir, &[], Some(&index_file));
     let json = parse_json(&output);
+    assert_eq!(output.code, 1, "stderr: {}\njson: {json}", output.stderr);
+    assert_eq!(
+        unused_file_paths(&json),
+        vec!["src/staged-orphan.ts".to_owned()],
+        "{json}"
+    );
+}
+
+/// A plain `git commit` gives the hook the relative value `.git/index`. Git
+/// resolves it against the top level of the work tree, also when the hook
+/// runs `fallow` from a subdirectory.
+#[test]
+fn a_relative_index_file_resolves_against_the_top_level() {
+    let tmp = fixture();
+    let dir = tmp.path();
+    fs::write(dir.join("src/staged-orphan.ts"), "export const q = 9;\n").unwrap();
+    git(dir, &["add", "src/staged-orphan.ts"]);
+
+    let output = run(audit_staged_command(dir, &[])
+        .current_dir(dir.join("src"))
+        .env("GIT_INDEX_FILE", ".git/index"));
+    let json = parse_json(&output);
+
     assert_eq!(output.code, 1, "stderr: {}\njson: {json}", output.stderr);
     assert_eq!(
         unused_file_paths(&json),
