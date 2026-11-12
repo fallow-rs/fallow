@@ -2502,6 +2502,10 @@ fn branching_totals(
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "test fixture; one field per snapshot key set, length tracks the field count"
+)]
 fn audit_base_snapshot_cache_payload_roundtrips_sets() {
     let key = AuditBaseSnapshotCacheKey {
         hash: 42,
@@ -2552,6 +2556,14 @@ fn audit_base_snapshot_cache_payload_roundtrips_sets() {
             ],
         }],
         inherited_health: Vec::new(),
+        own_config_unused_code: Some(
+            [
+                "unused-file:scripts/b.ts".to_string(),
+                "unused-file:scripts/a.ts".to_string(),
+            ]
+            .into_iter()
+            .collect(),
+        ),
     };
 
     let cached = cached_from_snapshot(&key, &snapshot).expect("snapshot should serialize");
@@ -2597,6 +2609,10 @@ fn audit_base_snapshot_cache_payload_roundtrips_sets() {
     assert_eq!(decoded.boundary_edges, snapshot.boundary_edges);
     assert_eq!(decoded.cycles, snapshot.cycles);
     assert_eq!(decoded.public_api, snapshot.public_api);
+    assert_eq!(
+        decoded.own_config_unused_code,
+        snapshot.own_config_unused_code
+    );
 }
 
 #[test]
@@ -2957,6 +2973,7 @@ fn audit_base_snapshot_cache_roundtrips_from_disk() {
         public_api: FxHashSet::default(),
         dupe_groups: Vec::new(),
         inherited_health: Vec::new(),
+        own_config_unused_code: None,
     };
 
     save_cached_base_snapshot(&opts, &key, &snapshot);
@@ -3049,6 +3066,7 @@ fn audit_base_snapshot_cache_rejects_mismatched_key() {
         boundary_edges: vec![],
         cycles: vec![],
         public_api: vec![],
+        own_config_unused_code: None,
     };
     let cache_dir = audit_base_snapshot_cache_dir(&cache_root);
     ensure_audit_base_snapshot_cache_dir(&cache_dir).expect("cache dir should be created");

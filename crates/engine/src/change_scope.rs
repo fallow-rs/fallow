@@ -51,6 +51,11 @@ pub enum ChangeScopeOwner {
     /// refs in a base snapshot and never hides a finding that the comparison
     /// needs.
     Caller,
+    /// Like [`ChangeScopeOwner::Caller`], but the change scope keeps every
+    /// unused file and unused export. `audit --gate new-only` compares them
+    /// with the base, because a change can make code unused outside the
+    /// changed files.
+    CallerKeepingUnusedCode,
 }
 
 /// The change-scope inputs of one run.
@@ -204,6 +209,8 @@ pub struct ChangeScope {
     kind: ChangeScopeKind,
     global_ref: bool,
     outcome: Option<RequestOutcome>,
+    /// The owner is [`ChangeScopeOwner::CallerKeepingUnusedCode`].
+    keeps_unused_code: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -232,12 +239,17 @@ impl ChangeScope {
         workspaces: &[WorkspaceInfo],
     ) -> Result<Self, PackageBaselineError> {
         let global_ref = request.global_ref || request.files.is_some();
+        let keeps_unused_code = request.owner == ChangeScopeOwner::CallerKeepingUnusedCode;
         if let Some(files) = request.files {
-            return Ok(Self::changed_files(files));
+            return Ok(Self {
+                keeps_unused_code,
+                ..Self::changed_files(files)
+            });
         }
         if !request.reads_package_baselines(config) {
             return Ok(Self {
                 global_ref,
+                keeps_unused_code,
                 ..Self::default()
             });
         }
@@ -251,6 +263,7 @@ impl ChangeScope {
                 .map_or(ChangeScopeKind::Full, ChangeScopeKind::Packages),
             global_ref,
             outcome: Some(resolved.outcome),
+            keeps_unused_code,
         })
     }
 
@@ -261,6 +274,7 @@ impl ChangeScope {
             kind: ChangeScopeKind::Files(NormalizedChangedFiles::new(files)),
             global_ref: true,
             outcome: None,
+            keeps_unused_code: false,
         }
     }
 
@@ -325,7 +339,7 @@ impl ChangeScope {
 
     /// Keep the dead-code findings in scope.
     pub(crate) fn retain_dead_code(&self, results: &mut AnalysisResults) {
-        match &self.kind {
+        let retain = |results: &mut AnalysisResults| match &self.kind {
             ChangeScopeKind::Full => {}
             ChangeScopeKind::Files(files) => {
                 crate::changed_files::filter_results_by_path_scope(results, files);
@@ -333,6 +347,11 @@ impl ChangeScope {
             ChangeScopeKind::Packages(packages) => {
                 crate::changed_files::filter_results_by_path_scope(results, packages);
             }
+        };
+        if self.keeps_unused_code {
+            crate::changed_files::keeping_unused_code(results, retain);
+        } else {
+            retain(results);
         }
     }
 

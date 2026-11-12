@@ -700,6 +700,38 @@ pub fn filter_results_by_changed_files(
     filter_results_by_path_scope(results, &NormalizedChangedFiles::new(changed_files));
 }
 
+/// Scope dead-code results like [`filter_results_by_changed_files`], but keep
+/// every unused file and every unused export.
+///
+/// A change can make a file or an export unused without a change to it: the
+/// change removes its last import, or a config change removes an entry point.
+/// `fallow audit --gate new-only` keeps these findings, compares them with the
+/// base, and reports only the ones that the base did not report.
+#[expect(
+    clippy::implicit_hasher,
+    reason = "fallow standardizes on FxHashSet across the workspace"
+)]
+pub fn filter_results_by_changed_files_keeping_unused_code(
+    results: &mut AnalysisResults,
+    changed_files: &FxHashSet<PathBuf>,
+) {
+    keeping_unused_code(results, |results| {
+        filter_results_by_changed_files(results, changed_files);
+    });
+}
+
+/// Run `filter` over `results`, but keep every unused file and unused export.
+pub(crate) fn keeping_unused_code(
+    results: &mut AnalysisResults,
+    filter: impl FnOnce(&mut AnalysisResults),
+) {
+    let unused_files = std::mem::take(&mut results.unused_files);
+    let unused_exports = std::mem::take(&mut results.unused_exports);
+    filter(results);
+    results.unused_files = unused_files;
+    results.unused_exports = unused_exports;
+}
+
 /// Path membership for one resolved result scope. Implementations own path
 /// normalization so source and manifest findings use the same policy.
 pub(crate) trait ChangedPathScope {

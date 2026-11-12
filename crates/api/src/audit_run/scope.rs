@@ -6,6 +6,8 @@ use fallow_engine::changed_files::RenamedFile;
 use fallow_types::results::AnalysisResults;
 use rustc_hash::FxHashSet;
 
+use super::AuditKeySnapshot;
+
 /// Keep a dependency-level finding only when its manifest is in `changed_files`.
 ///
 /// A dependency finding (unused, type-only, test-only or misplaced
@@ -25,22 +27,8 @@ pub fn scope_dependency_findings(
     root: &Path,
     changed_files: &FxHashSet<PathBuf>,
 ) {
-    let changed: FxHashSet<PathBuf> = changed_files
-        .iter()
-        .map(|path| dunce::simplified(path).to_path_buf())
-        .collect();
-    // Git reports changed files under the canonical top level, while a root
-    // can be spelled through a symbolic link, so the canonical form of an
-    // anchor is tried as well.
-    let declared_in_change = |path: &Path| {
-        let anchored = if path.is_absolute() {
-            path.to_path_buf()
-        } else {
-            root.join(path)
-        };
-        changed.contains(dunce::simplified(&anchored))
-            || dunce::canonicalize(&anchored).is_ok_and(|canonical| changed.contains(&canonical))
-    };
+    let changed = ChangedPaths::new(changed_files);
+    let declared_in_change = |path: &Path| changed.contains(root, path);
     results
         .unused_dependencies
         .retain(|finding| declared_in_change(&finding.dep.path));
@@ -62,6 +50,73 @@ pub fn scope_dependency_findings(
     results
         .unused_catalog_entries
         .retain(|finding| declared_in_change(&finding.entry.path));
+}
+
+/// The changed files of one audit, for a membership test of finding paths.
+struct ChangedPaths(FxHashSet<PathBuf>);
+
+impl ChangedPaths {
+    fn new(changed_files: &FxHashSet<PathBuf>) -> Self {
+        Self(
+            changed_files
+                .iter()
+                .map(|path| dunce::simplified(path).to_path_buf())
+                .collect(),
+        )
+    }
+
+    /// Whether `path` is a changed file. A relative `path` is relative to
+    /// `root`. Git reports changed files under the canonical top level, while
+    /// a root can be spelled through a symbolic link, so the canonical form is
+    /// tried as well.
+    fn contains(&self, root: &Path, path: &Path) -> bool {
+        let anchored = if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            root.join(path)
+        };
+        self.0.contains(dunce::simplified(&anchored))
+            || dunce::canonicalize(&anchored).is_ok_and(|canonical| self.0.contains(&canonical))
+    }
+}
+
+/// Keep an unused file or unused export outside `changed_files` only when the
+/// base does not report it.
+///
+/// The surface keeps these findings outside the changed files, because a
+/// change can make code unused without a change to that code: it removes the
+/// last import, or a config change removes an entry point. A finding that the
+/// base also reports did not come from the change, so it leaves the report.
+/// Without a base (`--gate all`), every such finding leaves the report.
+/// `base` must already use head paths.
+#[expect(
+    clippy::implicit_hasher,
+    reason = "fallow standardizes on FxHashSet across the workspace"
+)]
+pub fn scope_unchanged_unused_code(
+    results: &mut AnalysisResults,
+    root: &Path,
+    changed_files: &FxHashSet<PathBuf>,
+    base: Option<&AuditKeySnapshot>,
+) {
+    let changed = ChangedPaths::new(changed_files);
+    let keep = |path: &Path, key: &String| {
+        changed.contains(root, path) || base.is_some_and(|base| !base.reports_dead_code(key))
+    };
+    let file_keys = crate::audit_keys::collection_keys(&results.unused_files, root);
+    let mut file_keys = file_keys.iter();
+    results.unused_files.retain(|finding| {
+        file_keys
+            .next()
+            .is_some_and(|key| keep(&finding.file.path, key))
+    });
+    let export_keys = crate::audit_keys::collection_keys(&results.unused_exports, root);
+    let mut export_keys = export_keys.iter();
+    results.unused_exports.retain(|finding| {
+        export_keys
+            .next()
+            .is_some_and(|key| keep(&finding.export.path, key))
+    });
 }
 
 /// Detect base..head renames for rename-aware attribution.
