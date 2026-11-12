@@ -2417,7 +2417,7 @@ for prop_command in dead-code ""; do
       prop_envelope=$(gitlab_gate_envelope '' '')
       jq --arg level "$prop_severity" --argjson count "$prop_total" '.total_issues = $count | .summary.total_issues = $count | .prop_drilling_chains = [{prop:"user",depth:3,hops:[{file:"src/Page.tsx",line:4,component:"Page"}],effective_severity:$level}]' "$prop_envelope" > "$GATE_WORK/prop-envelope.json"
     else
-      jq --arg level "$prop_severity" --argjson count "$prop_total" '.check.total_issues = $count | .check.prop_drilling_chains = [{prop:"user",depth:3,hops:[{file:"src/Page.tsx",line:4,component:"Page"}],effective_severity:$level}]' "$FIXTURES/combined-health-baselined.json" > "$GATE_WORK/prop-envelope.json"
+      jq --arg level "$prop_severity" --argjson count "$prop_total" '.check.total_issues = $count | .gate_outcomes["error-severity-findings"].observed = $count | .check.prop_drilling_chains = [{prop:"user",depth:3,hops:[{file:"src/Page.tsx",line:4,component:"Page"}],effective_severity:$level}]' "$FIXTURES/combined-health-baselined.json" > "$GATE_WORK/prop-envelope.json"
     fi
     PROP_EXIT=0
     OUT=$(run_generated_gitlab_fixture "$GATE_WORK" MOCK_GATE_ENVELOPE="$GATE_WORK/prop-envelope.json" FALLOW_COMMAND="$prop_command" FALLOW_HEALTH_BASELINE=h.json FALLOW_FAIL_ON_ISSUES=true 2>&1) || PROP_EXIT=$?
@@ -2429,6 +2429,83 @@ for prop_command in dead-code ""; do
     fi
   done
 done
+
+# The count gate follows rule severity, the same as the CLI exit code. A
+# finding whose rule is `warn` stays in the count line, but it does not fail
+# the pipeline. The CLI publishes the error count as
+# `gate_outcomes["error-severity-findings"].observed`.
+SEVERITY_WARN_ONLY='{"error-severity-findings":{"status":"pass","enforced":true,"observed":0.0,"threshold_label":"error"}}'
+for severity_command in dead-code check architecture; do
+  jq '.total_issues = 2 | .summary.total_issues = 2' "$(gitlab_gate_envelope "$SEVERITY_WARN_ONLY")" > "$GATE_WORK/severity-warn.json"
+  SEVERITY_EXIT=0
+  OUT=$(run_generated_gitlab_fixture "$GATE_WORK" MOCK_GATE_ENVELOPE="$GATE_WORK/severity-warn.json" \
+    FALLOW_COMMAND="$severity_command" FALLOW_FAIL_ON_ISSUES=true 2>&1) || SEVERITY_EXIT=$?
+  assert_contains "$OUT" "Found 2 issues" "severity count: $severity_command keeps warn findings in the count"
+  [ "$SEVERITY_EXIT" -eq 0 ] && pass "severity count: $severity_command with warn-only findings passes" \
+    || fail "severity count: $severity_command with warn-only findings passes" "exit $SEVERITY_EXIT: $OUT"
+done
+jq '.total_issues = 3 | .summary.total_issues = 3' \
+  "$(gitlab_gate_envelope '{"error-severity-findings":{"status":"fail","enforced":true,"observed":1.0,"threshold_label":"error"}}')" \
+  > "$GATE_WORK/severity-error.json"
+SEVERITY_EXIT=0
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" MOCK_GATE_ENVELOPE="$GATE_WORK/severity-error.json" \
+  FALLOW_COMMAND=dead-code FALLOW_FAIL_ON_ISSUES=true 2>&1) || SEVERITY_EXIT=$?
+assert_contains "$OUT" "Fallow found 1 unused code issues at error severity (3 in total)" \
+  "severity count: the failure counts only the findings at error severity"
+[ "$SEVERITY_EXIT" -eq 1 ] && pass "severity count: an error finding fails the pipeline" \
+  || fail "severity count: an error finding fails the pipeline" "exit $SEVERITY_EXIT: $OUT"
+jq --argjson gates "$SEVERITY_WARN_ONLY" '.check.total_issues = 4 | .gate_outcomes += $gates' \
+  "$FIXTURES/combined-health-baselined.json" > "$GATE_WORK/severity-bare.json"
+SEVERITY_EXIT=0
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" MOCK_GATE_ENVELOPE="$GATE_WORK/severity-bare.json" \
+  FALLOW_COMMAND= FALLOW_HEALTH_BASELINE=h.json FALLOW_FAIL_ON_ISSUES=true 2>&1) || SEVERITY_EXIT=$?
+assert_contains "$OUT" "Found 4 issues" "severity count: the bare run keeps warn findings in the count"
+[ "$SEVERITY_EXIT" -eq 0 ] && pass "severity count: a bare run with warn-only dead code passes" \
+  || fail "severity count: a bare run with warn-only dead code passes" "exit $SEVERITY_EXIT: $OUT"
+# A fallow older than 3.27.0 publishes no gate_outcomes: the full count gates.
+jq '.total_issues = 2 | .summary.total_issues = 2' "$(gitlab_gate_envelope '')" > "$GATE_WORK/severity-old.json"
+SEVERITY_EXIT=0
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" MOCK_GATE_ENVELOPE="$GATE_WORK/severity-old.json" \
+  FALLOW_COMMAND=dead-code FALLOW_FAIL_ON_ISSUES=true 2>&1) || SEVERITY_EXIT=$?
+[ "$SEVERITY_EXIT" -eq 1 ] && pass "severity count: without gate_outcomes the full count gates" \
+  || fail "severity count: without gate_outcomes the full count gates" "exit $SEVERITY_EXIT: $OUT"
+
+# An audit that compared no changed file has a pass verdict that checked
+# nothing. A pipeline outside a merge request has no base to compare with.
+printf '%s\n' '{"command":"audit","verdict":"pass","changed_files_count":0,"base_ref":"main","attribution":{"gate":"new-only"},"summary":{"dead_code_issues":0,"complexity_findings":0,"duplication_clone_groups":0}}' \
+  > "$GATE_WORK/audit-empty.json"
+EMPTY_AUDIT_EXIT=0
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" MOCK_GATE_ENVELOPE="$GATE_WORK/audit-empty.json" \
+  FALLOW_COMMAND=audit FALLOW_FAIL_ON_ISSUES=true 2>&1) || EMPTY_AUDIT_EXIT=$?
+assert_contains "$OUT" "WARNING: Fallow audit compared no changed files against main, so its pass verdict checked nothing." \
+  "empty audit: a run with no changed files warns"
+assert_contains "$OUT" "This pipeline has no merge request base." \
+  "empty audit: a pipeline with no merge request base says so"
+[ "$EMPTY_AUDIT_EXIT" -eq 0 ] && pass "empty audit: the warning does not fail the pipeline" \
+  || fail "empty audit: the warning does not fail the pipeline" "exit $EMPTY_AUDIT_EXIT: $OUT"
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" MOCK_GATE_ENVELOPE="$GATE_WORK/audit-empty.json" \
+  FALLOW_COMMAND=audit FALLOW_CHANGED_SINCE=abc123 2>&1) || true
+assert_contains "$OUT" "WARNING: Fallow audit compared no changed files against main" \
+  "empty audit: a run with a base and no changes still warns"
+assert_not_contains "$OUT" "This pipeline has no merge request base." \
+  "empty audit: a run with a base does not blame a missing base"
+printf '%s\n' '{"command":"audit","verdict":"pass","changed_files_count":0,"base_ref":"a\r\nINJECTED","attribution":{"gate":"new-only"},"summary":{"dead_code_issues":0,"complexity_findings":0,"duplication_clone_groups":0}}' \
+  > "$GATE_WORK/audit-empty-hostile.json"
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" MOCK_GATE_ENVELOPE="$GATE_WORK/audit-empty-hostile.json" \
+  FALLOW_COMMAND=audit 2>&1) || true
+assert_contains "$OUT" "against a  INJECTED, so" \
+  "empty audit: a hostile base ref stays on the warning line"
+if grep -q '^INJECTED' <<< "$OUT"; then
+  fail "empty audit: a hostile base ref starts no line of its own" "$OUT"
+else
+  pass "empty audit: a hostile base ref starts no line of its own"
+fi
+printf '%s\n' '{"command":"audit","verdict":"pass","changed_files_count":2,"base_ref":"main","attribution":{"gate":"new-only"},"summary":{"dead_code_issues":0,"complexity_findings":0,"duplication_clone_groups":0}}' \
+  > "$GATE_WORK/audit-changed.json"
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" MOCK_GATE_ENVELOPE="$GATE_WORK/audit-changed.json" \
+  FALLOW_COMMAND=audit 2>&1) || true
+assert_not_contains "$OUT" "compared no changed files" \
+  "empty audit: a run with changed files does not warn"
 
 # A gate the variable asked for fails the pipeline even with
 # FALLOW_FAIL_ON_ISSUES false, which is the whole point of every issue here.

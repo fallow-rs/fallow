@@ -5194,6 +5194,91 @@ run_gate_analyze "$(gate_envelope '')" INPUT_COMMAND="dead-code" INPUT_FAIL_ON_I
 assert_not_contains "$GATE_STDOUT" "::warning::Fallow found" \
   "count: a failing count gate still prints the fact once"
 
+# The count gate follows rule severity, the same as the CLI exit code. A
+# finding whose rule is `warn` stays in `issues` and in the advisory line, but
+# it does not fail the job. The CLI publishes the error count as
+# `gate_outcomes["error-severity-findings"].observed`.
+SEVERITY_WARN_ONLY='{"error-severity-findings":{"status":"pass","enforced":true,"observed":0.0,"threshold_label":"error"}}'
+SEVERITY_ONE_ERROR='{"error-severity-findings":{"status":"fail","enforced":true,"observed":1.0,"threshold_label":"error"}}'
+for severity_command in dead-code check architecture; do
+  run_gate_analyze "$(gate_envelope "$SEVERITY_WARN_ONLY" | jq -c '.total_issues = 2 | .summary.total_issues = 2')" \
+    INPUT_COMMAND="$severity_command" INPUT_FAIL_ON_ISSUES="true"
+  if [ "$GATE_EXIT" = "0" ]; then
+    pass "severity count: $severity_command with warn-only findings passes fail-on-issues"
+  else
+    fail "severity count: $severity_command with warn-only findings passes fail-on-issues" "exit ${GATE_EXIT}: ${GATE_STDOUT}"
+  fi
+  assert_contains "$GATE_OUTPUTS" "issues=2" \
+    "severity count: $severity_command keeps warn findings in the issues output"
+  assert_contains "$GATE_STDOUT" "::warning::Fallow found 2 " \
+    "severity count: $severity_command reports warn findings as an advisory"
+done
+run_gate_analyze "$(gate_envelope "$SEVERITY_ONE_ERROR" | jq -c '.total_issues = 3 | .summary.total_issues = 3')" \
+  INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="true"
+assert_contains "$GATE_STDOUT" "::error::Fallow found 1 unused code issues at error severity (3 in total)." \
+  "severity count: the failure counts only the findings at error severity"
+if [ "$GATE_EXIT" = "1" ]; then
+  pass "severity count: an error finding fails the job"
+else
+  fail "severity count: an error finding fails the job" "exit ${GATE_EXIT}: ${GATE_STDOUT}"
+fi
+# The bare run publishes the same entry for its dead-code section.
+run_gate_analyze "$(jq -c --argjson gates "$SEVERITY_WARN_ONLY" '.check.total_issues = 4 | .gate_outcomes += $gates' "$FIXTURES/combined-health-baselined.json")" \
+  INPUT_COMMAND="" INPUT_HEALTH_BASELINE="h.json" INPUT_FAIL_ON_ISSUES="true"
+if [ "$GATE_EXIT" = "0" ]; then
+  pass "severity count: a bare run with warn-only dead code passes fail-on-issues"
+else
+  fail "severity count: a bare run with warn-only dead code passes fail-on-issues" "exit ${GATE_EXIT}: ${GATE_STDOUT}"
+fi
+assert_contains "$GATE_OUTPUTS" "issues=4" \
+  "severity count: the bare run keeps warn findings in the issues output"
+# A fallow older than 3.27.0 publishes no gate_outcomes. The count gate then
+# falls back to the full count.
+run_gate_analyze "$(gate_envelope '' | jq -c '.total_issues = 2 | .summary.total_issues = 2')" \
+  INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="true"
+assert_contains "$GATE_STDOUT" "::error::Fallow found 2 unused code issues." \
+  "severity count: without gate_outcomes the full count gates"
+if [ "$GATE_EXIT" = "1" ]; then
+  pass "severity count: without gate_outcomes the job fails on findings"
+else
+  fail "severity count: without gate_outcomes the job fails on findings" "exit ${GATE_EXIT}: ${GATE_STDOUT}"
+fi
+
+# An audit that compared no changed file has a pass verdict that checked
+# nothing. On a push to the default branch the base is HEAD itself.
+EMPTY_AUDIT_EXTRA='"verdict":"pass","changed_files_count":0,"base_ref":"main","attribution":{"gate":"new-only"}'
+run_gate_analyze "$(gate_envelope '{"audit-verdict":{"status":"pass","enforced":true}}' "$EMPTY_AUDIT_EXTRA")" \
+  INPUT_COMMAND="audit" INPUT_FAIL_ON_ISSUES="true"
+assert_contains "$GATE_STDOUT" "::warning::Fallow audit compared no changed files against main, so its pass verdict checked nothing." \
+  "empty audit: a run with no changed files warns"
+assert_contains "$GATE_STDOUT" "This run has no pull request base." \
+  "empty audit: a run with no pull request base says so"
+if [ "$GATE_EXIT" = "0" ]; then
+  pass "empty audit: the warning does not fail the job"
+else
+  fail "empty audit: the warning does not fail the job" "exit ${GATE_EXIT}: ${GATE_STDOUT}"
+fi
+run_gate_analyze "$(gate_envelope '{"audit-verdict":{"status":"pass","enforced":true}}' "$EMPTY_AUDIT_EXTRA")" \
+  INPUT_COMMAND="audit" INPUT_CHANGED_SINCE="abc123"
+assert_contains "$GATE_STDOUT" "::warning::Fallow audit compared no changed files against main" \
+  "empty audit: a run with a base and no changes still warns"
+assert_not_contains "$GATE_STDOUT" "This run has no pull request base." \
+  "empty audit: a run with a base does not blame a missing base"
+run_gate_analyze "$(gate_envelope '{"audit-verdict":{"status":"pass","enforced":true}}' '"verdict":"pass","changed_files_count":2,"base_ref":"main","attribution":{"gate":"new-only"}')" \
+  INPUT_COMMAND="audit"
+assert_not_contains "$GATE_STDOUT" "compared no changed files" \
+  "empty audit: a run with changed files does not warn"
+# The base ref comes from the repository, so it is escaped.
+run_gate_analyze "$(gate_envelope '{"audit-verdict":{"status":"pass","enforced":true}}' '"verdict":"pass","changed_files_count":0,"base_ref":"a%\r\n::error title=pwned::x","attribution":{"gate":"new-only"}')" \
+  INPUT_COMMAND="audit"
+assert_contains "$GATE_STDOUT" "against a%25%0D%0A::error title=pwned::x, so" \
+  "empty audit: a hostile base ref is escaped"
+if grep -q '^::error title=pwned' <<< "$GATE_STDOUT"; then
+  fail "empty audit: a hostile base ref starts no workflow command" "$GATE_STDOUT"
+else
+  pass "empty audit: a hostile base ref starts no workflow command"
+fi
+
 # T1: the #2674 unscoped re-read must not inherit the health gate flags.
 # `--min-score` is a section selector, so a score-only envelope may carry no
 # baseline_staleness at all and the gate would go silent with no message.
@@ -5262,7 +5347,7 @@ for prop_command in dead-code ""; do
       prop_envelope=$(gate_envelope '' '')
       prop_envelope=$(jq -c --arg level "$prop_severity" --argjson count "$prop_total" '.total_issues = $count | .summary.total_issues = $count | .prop_drilling_chains = [{prop:"user",depth:3,hops:[{file:"src/Page.tsx",line:4,component:"Page"}],effective_severity:$level}]' <<< "$prop_envelope")
     else
-      prop_envelope=$(jq -c --arg level "$prop_severity" --argjson count "$prop_total" '.check.total_issues = $count | .check.prop_drilling_chains = [{prop:"user",depth:3,hops:[{file:"src/Page.tsx",line:4,component:"Page"}],effective_severity:$level}]' "$FIXTURES/combined-health-baselined.json")
+      prop_envelope=$(jq -c --arg level "$prop_severity" --argjson count "$prop_total" '.check.total_issues = $count | .gate_outcomes["error-severity-findings"].observed = $count | .check.prop_drilling_chains = [{prop:"user",depth:3,hops:[{file:"src/Page.tsx",line:4,component:"Page"}],effective_severity:$level}]' "$FIXTURES/combined-health-baselined.json")
     fi
     run_gate_analyze "$prop_envelope" INPUT_COMMAND="$prop_command" INPUT_HEALTH_BASELINE=h.json INPUT_FAIL_ON_ISSUES=true
     assert_contains "$GATE_OUTPUTS" "issues=$prop_total" "prop gating: $prop_command $prop_severity preserves issue accounting"

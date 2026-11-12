@@ -125,7 +125,7 @@ pub struct AuditOptions<'a> {
     /// against its base ref, so every sub-pass is change-scoped and a
     /// whole-project baseline would look stale for reasons that are not rot.
     /// Audit reads the flag only to say so once, in
-    /// [`note_stale_baseline_gate_inert`], instead of accepting it silently.
+    /// `notes::note_stale_baseline_gate_inert`, instead of accepting it silently.
     pub fail_on_stale_baseline: bool,
     /// Maximum CRAP score threshold (overrides `health.maxCrap` from config).
     /// Functions meeting or exceeding this score cause audit to fail.
@@ -259,6 +259,8 @@ impl AuditTypeAwareOptions<'_> {
 mod base_ref;
 #[path = "audit_cache.rs"]
 mod cache;
+#[path = "audit_notes.rs"]
+mod notes;
 
 use base_ref::resolve_base_ref;
 pub use cache::sweep_base_snapshot_cache;
@@ -2761,8 +2763,7 @@ pub fn run_audit_with_type_aware(
         Ok(result) => {
             let _ = record_audit_impact(opts, gate_marker, &result);
             let report_exit = print_audit_command_result(opts, &result, opts.json_style);
-            note_stale_baseline_gate_inert(opts);
-            note_type_aware_require_inert(opts, type_aware);
+            notes::print_run_notes(opts, type_aware, &result);
             if report_exit != ExitCode::SUCCESS {
                 return report_exit;
             }
@@ -2773,44 +2774,6 @@ pub fn run_audit_with_type_aware(
         }
         Err(code) => code,
     }
-}
-
-/// Say once that `--fail-on-stale-baseline` cannot fire on `fallow audit`.
-///
-/// Audit always narrows every sub-pass to the files that changed against its
-/// base ref, so a whole-project baseline matches less of the run for reasons
-/// that are not rot; gating on that would fail every review job that loads a
-/// baseline. Accepting the flag in silence is the worse option, because a job
-/// that believes it gates would stay green forever, so the run names the
-/// reason. It is printed here rather than forwarded into the three sub-passes
-/// so that an audit with three baselines says it once, not three times.
-fn note_stale_baseline_gate_inert(opts: &AuditOptions<'_>) {
-    if !opts.fail_on_stale_baseline {
-        return;
-    }
-    if opts.dead_code_baseline.is_none()
-        && opts.health_baseline.is_none()
-        && opts.dupes_baseline.is_none()
-    {
-        return;
-    }
-    eprintln!(
-        "Note: --fail-on-stale-baseline did not run: `fallow audit` analyzes only the files that \
-         changed against its base, which cannot judge a whole-project baseline. Run the gate on \
-         `fallow dead-code`, `fallow dupes` or `fallow health` instead."
-    );
-}
-
-/// Type-aware analysis feeds only the dead-code pass, so a skipped pass leaves
-/// `--type-aware-require` nothing to judge. Say so instead of passing silently.
-fn note_type_aware_require_inert(opts: &AuditOptions<'_>, type_aware: AuditTypeAwareOptions<'_>) {
-    if opts.analyses.dead_code || type_aware.require.is_none() {
-        return;
-    }
-    eprintln!(
-        "Note: --type-aware-require did not run: this audit skips the dead-code sub-analysis \
-         (--only, --skip or the audit config), which is the only one that uses type-aware analysis."
-    );
 }
 
 fn audit_type_aware_completeness_failed(result: &AuditResult) -> bool {

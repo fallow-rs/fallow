@@ -95,6 +95,10 @@ variables:
   FALLOW_PRODUCTION_DEAD_CODE: ""      # Combined/audit mode: "true"/"false" overrides FALLOW_PRODUCTION for dead-code. Empty defers to it.
   FALLOW_PRODUCTION_HEALTH: ""         # Combined/audit mode: "true"/"false" overrides FALLOW_PRODUCTION for health. Empty defers to it.
   FALLOW_PRODUCTION_DUPES: ""          # Combined/audit mode: "true"/"false" overrides FALLOW_PRODUCTION for duplication. Empty defers to it.
+  # Fail the pipeline on findings. For dead-code, check, architecture and the
+  # dead-code part of the bare run, only findings whose rule is 'error' count,
+  # the same as the CLI exit code. A 'warn' finding is reported and does not
+  # fail. Audit gates on its verdict.
   FALLOW_FAIL_ON_ISSUES: "true"
   # health command only: fail when a complexity finding reaches this severity
   # ('moderate'|'high'|'critical'). FALLOW_FAIL_ON_ISSUES is a separate count
@@ -1483,6 +1487,21 @@ variables:
         AUDIT_GATE=$(jq -r '.attribution.gate // ""' fallow-results.json)
       fi
 
+      # An audit with no changed file judges nothing, so its pass verdict is
+      # no evidence. A pipeline outside a merge request causes this: without a
+      # base, the CLI compares HEAD with the default branch, which can be HEAD
+      # itself. The base ref comes from the repository, so a line break in it
+      # becomes a space and cannot start a log line of its own.
+      if [ "$FALLOW_COMMAND" = "audit" ] \
+        && [ "$(jq -r '.changed_files_count | numbers | tostring' fallow-results.json 2> /dev/null)" = "0" ]; then
+        AUDIT_BASE_REF=$(jq -r '.base_ref // "its base" | tostring | gsub("[\r\n]"; " ")' fallow-results.json)
+        AUDIT_EMPTY_HINT="The merge request base and HEAD have no file difference."
+        if [ -z "$FALLOW_CHANGED_SINCE" ]; then
+          AUDIT_EMPTY_HINT="This pipeline has no merge request base. Run the audit in merge request pipelines, or set FALLOW_CHANGED_SINCE to the ref to compare with."
+        fi
+        echo "WARNING: Fallow audit compared no changed files against ${AUDIT_BASE_REF}, so its ${VERDICT:-pass} verdict checked nothing. ${AUDIT_EMPTY_HINT}"
+      fi
+
       # A loaded health baseline filters the findings, but
       # summary.functions_above_threshold still counts the functions it
       # accepts. remaining_findings is the count after the baseline and
@@ -1501,6 +1520,34 @@ variables:
         echo "ERROR: Unexpected issue count: ${ISSUES}"; exit 2
       fi
       echo "Found ${ISSUES} issues"
+
+      # The count that FALLOW_FAIL_ON_ISSUES gates on follows rule severity,
+      # the same as the CLI exit code. For dead code, the CLI publishes the
+      # number of findings whose rule is `error` as
+      # gate_outcomes["error-severity-findings"].observed. A finding whose
+      # rule is `warn` stays in the count above and does not fail the
+      # pipeline. A fallow older than 3.27.0 publishes no such entry, so the
+      # full count gates there. The other commands gate on the count above.
+      ERROR_SEVERITY_OBSERVED='.gate_outcomes | objects | .["error-severity-findings"] | objects | .observed | numbers | floor'
+      case "$FALLOW_COMMAND" in
+        dead-code|check|architecture)
+          GATE_ISSUES=$(jq -r "(${ERROR_SEVERITY_OBSERVED}) // .total_issues // 0" fallow-results.json) ;;
+        "")
+          # Only the dead-code part of the bare run changes. Clone groups and
+          # health findings keep their count.
+          GATE_ISSUES=$(jq -r --argjson issues "$ISSUES" \
+            "\$issues - (.check.total_issues // 0) + ((${ERROR_SEVERITY_OBSERVED}) // .check.total_issues // 0)" \
+            fallow-results.json) ;;
+        *) GATE_ISSUES=$ISSUES ;;
+      esac
+      if ! echo "$GATE_ISSUES" | grep -qE '^[0-9]+$'; then
+        echo "ERROR: Unexpected issue count at error severity: ${GATE_ISSUES}"; exit 2
+      fi
+      # Name the error count in the failure when warn findings are also present.
+      GATE_ISSUES_LABEL=""
+      if [ "$GATE_ISSUES" != "$ISSUES" ]; then
+        GATE_ISSUES_LABEL=" at error severity (${ISSUES} in total)"
+      fi
 
       # ── GitLab Code Quality report (CodeClimate format) ──────────────
       # Re-renders the saved JSON envelope for inline MR annotations.
@@ -1781,10 +1828,10 @@ variables:
               # health-findings and audit-verdict are default exit rules, so
               # every envelope carries them. duplication-findings is not a
               # default rule: only --fail-on-issues or --ci in FALLOW_ARGS arms it.
-              # The two findings rules are the CLI's, which the count gate
-              # deliberately does not follow. The count gate below already
-              # applies the audit verdict and already counts clone groups for
-              # duplication-findings. An audit pipeline with
+              # The count gate below owns all four. It reads the error count
+              # of error-severity-findings, applies the audit verdict, counts
+              # clone groups for duplication-findings, and stands down when
+              # health-findings is skipped. An audit pipeline with
               # FALLOW_FAIL_ON_ISSUES false is a deliberate reporting
               # configuration. All four reach dotenv and never the log.
               :
@@ -1990,18 +2037,18 @@ variables:
           if [ "$VERDICT" = "fail" ]; then
             GATE_FAILURES+=("Fallow audit failed (gate: ${AUDIT_GATE:-new-only}, ${ISSUES} finding(s) at error severity in changed files)")
           fi
-        elif [ "$ISSUES" -gt 0 ] && [ "$(read_gate_member health-findings status)" != "skipped" ]; then
+        elif [ "$GATE_ISSUES" -gt 0 ] && [ "$(read_gate_member health-findings status)" != "skipped" ]; then
           # FALLOW_MIN_SCORE turns the CLI's findings rule off, and the envelope
           # says so with `health-findings: skipped`. Counting them here would
           # fail a run the CLI deliberately passed.
           case "$FALLOW_COMMAND" in
-            dead-code|check) GATE_FAILURES+=("Fallow found ${ISSUES} unused code issues") ;;
-            architecture)    GATE_FAILURES+=("Fallow found ${ISSUES} architecture issues") ;;
+            dead-code|check) GATE_FAILURES+=("Fallow found ${GATE_ISSUES} unused code issues${GATE_ISSUES_LABEL}") ;;
+            architecture)    GATE_FAILURES+=("Fallow found ${GATE_ISSUES} architecture issues${GATE_ISSUES_LABEL}") ;;
             dupes)           GATE_FAILURES+=("Fallow found ${ISSUES} clone groups") ;;
             health)          GATE_FAILURES+=("Fallow found ${ISSUES} health findings") ;;
             security)        GATE_FAILURES+=("Fallow found ${ISSUES} security candidates") ;;
             fix)             GATE_FAILURES+=("Fallow found ${ISSUES} fixable issues") ;;
-            "")              GATE_FAILURES+=("Fallow found ${ISSUES} issues") ;;
+            "")              GATE_FAILURES+=("Fallow found ${GATE_ISSUES} issues${GATE_ISSUES_LABEL}") ;;
           esac
         fi
       fi

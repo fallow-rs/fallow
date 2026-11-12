@@ -5,6 +5,8 @@ set +e -o pipefail
 
 # shellcheck source=artifacts.sh
 source "$(dirname -- "${BASH_SOURCE[0]}")/artifacts.sh"
+# shellcheck source=workflow-command.sh
+source "$(dirname -- "${BASH_SOURCE[0]}")/workflow-command.sh"
 
 # Run fallow analysis with CLI argument construction (deduped)
 # Env contract: provided by the composite action. action.yml is the
@@ -1458,10 +1460,10 @@ classify_gate() {
         # and `audit-verdict` are default exit rules, so every envelope
         # carries them. `duplication-findings` is not a default rule: only
         # `--fail-on-issues` or `--ci` in `args:` arms it.
-        # `error-severity-findings` and `health-findings` are the CLI's own
-        # findings rules, which the action's count gate deliberately does not
-        # follow. The count gate below already applies `audit-verdict` and
-        # already counts clone groups for `duplication-findings`. An audit job
+        # The count gate below owns all four. It reads the error count of
+        # `error-severity-findings`, applies `audit-verdict`, counts clone
+        # groups for `duplication-findings`, and stands down when
+        # `health-findings` is skipped. An audit job
         # with fail-on-issues: false is a deliberate reporting configuration.
         # All four are reported in the outputs and never in the log.
         :
@@ -1792,6 +1794,19 @@ elif [ "$INPUT_COMMAND" = "security" ]; then
   GATE=$(jq -r '.gate.mode // ""' "$RESULTS_FILE")
 fi
 
+# An audit with no changed file judges nothing, so its pass verdict is no
+# evidence. A push to the default branch causes this: without a pull request
+# base, the CLI compares HEAD with the default branch, which is HEAD itself.
+if [ "$INPUT_COMMAND" = "audit" ] \
+  && [ "$(jq_debug -r '.changed_files_count | numbers | tostring' "$RESULTS_FILE")" = "0" ]; then
+  AUDIT_BASE_REF=$(jq_debug -r '.base_ref // "its base" | tostring' "$RESULTS_FILE")
+  AUDIT_EMPTY_HINT="The pull request base and HEAD have no file difference."
+  if [ -z "${INPUT_CHANGED_SINCE:-}" ]; then
+    AUDIT_EMPTY_HINT="This run has no pull request base. Run the audit on pull_request events, or set changed-since to the ref to compare with."
+  fi
+  echo "::warning::Fallow audit compared no changed files against $(escape_command_data "$AUDIT_BASE_REF"), so its $(escape_command_data "${VERDICT:-pass}") verdict checked nothing. ${AUDIT_EMPTY_HINT}"
+fi
+
 # A loaded health baseline filters the findings, but
 # summary.functions_above_threshold still counts the functions it accepts.
 # remaining_findings is the count after the baseline and before --top, so
@@ -1809,6 +1824,34 @@ esac
 if ! [[ "$ISSUES" =~ ^[0-9]+$ ]]; then
   echo "::error::Unexpected issue count: ${ISSUES}"
   exit 2
+fi
+
+# The count that fail-on-issues gates on follows rule severity, the same as the
+# CLI exit code. For dead code, the CLI publishes the number of findings whose
+# rule is `error` as `gate_outcomes["error-severity-findings"].observed`. A
+# finding whose rule is `warn` stays in `issues` and in the advisory line, and
+# does not fail the job. A fallow older than 3.27.0 publishes no such entry, so
+# the full count gates there. The other commands keep `issues` as the count.
+ERROR_SEVERITY_OBSERVED='.gate_outcomes | objects | .["error-severity-findings"] | objects | .observed | numbers | floor'
+case "$INPUT_COMMAND" in
+  dead-code|check|architecture)
+    GATE_ISSUES=$(jq_debug -r "(${ERROR_SEVERITY_OBSERVED}) // .total_issues" "$RESULTS_FILE") ;;
+  "")
+    # Only the dead-code part of the bare run changes. Clone groups and
+    # health findings keep their count.
+    GATE_ISSUES=$(jq_debug -r --argjson issues "$ISSUES" \
+      "\$issues - (.check.total_issues // 0) + ((${ERROR_SEVERITY_OBSERVED}) // .check.total_issues // 0)" \
+      "$RESULTS_FILE") ;;
+  *) GATE_ISSUES=$ISSUES ;;
+esac
+if ! [[ "$GATE_ISSUES" =~ ^[0-9]+$ ]]; then
+  echo "::error::Unexpected issue count at error severity: ${GATE_ISSUES}"
+  exit 2
+fi
+# Name the error count in the failure when warn findings are also present.
+GATE_ISSUES_LABEL=""
+if [ "$GATE_ISSUES" != "$ISSUES" ]; then
+  GATE_ISSUES_LABEL=" at error severity (${ISSUES} in total)"
 fi
 
 {
@@ -1859,19 +1902,19 @@ if [ "${INPUT_FAIL_ON_ISSUES:-}" = "true" ]; then
     if [ "$VERDICT" = "fail" ]; then
       GATE_FAILURES+=("Fallow audit failed (gate: ${INPUT_GATE:-new-only}, ${ISSUES} finding(s) at error severity in changed files).")
     fi
-  elif [ "$ISSUES" -gt 0 ] && [ "$(read_gate_member health-findings status)" != "skipped" ]; then
+  elif [ "$GATE_ISSUES" -gt 0 ] && [ "$(read_gate_member health-findings status)" != "skipped" ]; then
     # `--min-score` turns the CLI's findings rule off ("complexity findings
     # become informational"), and the envelope says so with
     # `health-findings: skipped`. Counting them here would fail a run the CLI
     # deliberately passed, which is the inversion issue #2682 describes.
     case "$INPUT_COMMAND" in
-      dead-code|check) GATE_FAILURES+=("Fallow found ${ISSUES} unused code issues.") ;;
-      architecture)    GATE_FAILURES+=("Fallow found ${ISSUES} architecture issues.") ;;
+      dead-code|check) GATE_FAILURES+=("Fallow found ${GATE_ISSUES} unused code issues${GATE_ISSUES_LABEL}.") ;;
+      architecture)    GATE_FAILURES+=("Fallow found ${GATE_ISSUES} architecture issues${GATE_ISSUES_LABEL}.") ;;
       dupes)           GATE_FAILURES+=("Fallow found ${ISSUES} clone groups.") ;;
       health)          GATE_FAILURES+=("Fallow found ${ISSUES} health findings.") ;;
       security)        GATE_FAILURES+=("Fallow found ${ISSUES} security candidates.") ;;
       fix)             GATE_FAILURES+=("Fallow found ${ISSUES} fixable issues.") ;;
-      "")              GATE_FAILURES+=("Fallow found ${ISSUES} issues.") ;;
+      "")              GATE_FAILURES+=("Fallow found ${GATE_ISSUES} issues${GATE_ISSUES_LABEL}.") ;;
     esac
   fi
 fi

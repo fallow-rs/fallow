@@ -63,6 +63,20 @@ the issue count and nothing else. `command: audit` is the exception and still
 gates on its verdict through `fail-on-issues`, so an audit job with
 `fail-on-issues: false` stays a reporting configuration.
 
+For dead code, the count follows rule severity, the same as the CLI exit code.
+On `dead-code`, `check`, `architecture` and the dead-code part of the combined
+run, the action counts only the findings whose rule is `error`. It reads that
+number from `gate_outcomes["error-severity-findings"].observed`. A finding
+whose rule is `warn` stays in the `issues` output and in a `::warning::`, and
+does not fail the job. A fallow older than 3.27.0 publishes no such entry, so
+there every finding counts.
+
+An audit that compared no changed file prints a `::warning::`, because its
+`pass` verdict checked nothing. This occurs on a push to the default branch:
+the run has no pull request base, and the CLI compares HEAD with itself. Run
+the audit on `pull_request` events, or set `changed-since` to the ref to
+compare with.
+
 A gate that concluded `fail` without its input being set produces a
 `::warning::` and never fails the job, so a flag passed through `args:` cannot
 override `fail-on-issues: false`. A gate that stood down without judging the run
