@@ -2,6 +2,7 @@ pub(super) mod check;
 mod cross_ref;
 pub(super) mod dupes;
 pub(super) mod health;
+mod health_crap_notes;
 mod health_hotspots;
 mod health_runtime;
 mod health_targets;

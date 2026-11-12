@@ -6,6 +6,10 @@ use std::time::Duration;
 
 use colored::Colorize;
 
+use super::health_crap_notes::{
+    STATIC_CRAP_ESTIMATE_EXPLAIN, STATIC_CRAP_ESTIMATE_NOTE, crap_coverage_note,
+    file_scores_crap_note,
+};
 use super::health_hotspots::{render_change_coupling, render_hotspots};
 use super::health_runtime::render_runtime_coverage;
 use super::health_targets::render_refactoring_targets;
@@ -1156,6 +1160,9 @@ fn health_explain_for_header(line: &str) -> Option<String> {
             "Hotspots combine recent churn with complexity so frequently changed risky files surface before quieter debt."
                 .to_string(),
         );
+    }
+    if line.contains(STATIC_CRAP_ESTIMATE_NOTE) {
+        return Some(STATIC_CRAP_ESTIMATE_EXPLAIN.to_string());
     }
     if line.contains("Refactoring targets (") {
         return rule_full("fallow/refactoring-target");
@@ -2476,49 +2483,6 @@ fn coverage_join_warning(report: &fallow_output::HealthReport) -> Option<String>
     ))
 }
 
-fn crap_coverage_note(report: &fallow_output::HealthReport) -> Option<String> {
-    if !report.findings.iter().any(|finding| finding.crap.is_some()) {
-        return None;
-    }
-
-    let istanbul_counts = (
-        report.summary.istanbul_matched,
-        report.summary.istanbul_total,
-    );
-    let has_istanbul_counts = matches!(istanbul_counts, (Some(_), Some(total)) if total > 0);
-
-    if matches!(
-        report.summary.coverage_model,
-        Some(fallow_output::CoverageModel::Istanbul)
-    ) || has_istanbul_counts
-    {
-        let match_info = match (
-            report.summary.istanbul_matched,
-            report.summary.istanbul_total,
-        ) {
-            (Some(matched), Some(total)) if total > 0 && matched < total => {
-                return Some(format!(
-                    "CRAP scores use {} coverage where matched ({matched}/{total} functions); the rest fall back to the static estimate.",
-                    measured_coverage_label(report)
-                ));
-            }
-            (Some(matched), Some(total)) if total > 0 => {
-                format!(" ({matched}/{total} functions matched)")
-            }
-            _ => String::new(),
-        };
-        return Some(format!(
-            "CRAP scores use {} coverage data{match_info}.",
-            measured_coverage_label(report)
-        ));
-    }
-
-    Some(
-        "CRAP scores are estimated from export references; run `fallow health --coverage <coverage-final.json>` for exact scores."
-            .to_string(),
-    )
-}
-
 /// Detect likely generated code based on function name patterns.
 fn is_likely_generated(name: &str, cyclomatic: u16) -> bool {
     if name.starts_with("validate")
@@ -2741,35 +2705,6 @@ fn push_file_scores_overflow(lines: &mut Vec<String>, score_count: usize) {
         .dimmed()
     ));
     lines.push(String::new());
-}
-
-/// Name of the coverage input behind measured CRAP scores.
-fn measured_coverage_label(report: &fallow_output::HealthReport) -> &'static str {
-    match report.summary.coverage_input_format {
-        Some(fallow_output::CoverageInputFormat::V8) => "V8",
-        _ => "Istanbul",
-    }
-}
-
-fn file_scores_crap_note(report: &fallow_output::HealthReport) -> String {
-    if matches!(
-        report.summary.coverage_model,
-        Some(fallow_output::CoverageModel::Istanbul)
-    ) {
-        let match_info = match (
-            report.summary.istanbul_matched,
-            report.summary.istanbul_total,
-        ) {
-            (Some(m), Some(t)) if t > 0 => format!(" ({m}/{t} functions matched)"),
-            _ => String::new(),
-        };
-        format!(
-            "CRAP from {} coverage data{match_info}.",
-            measured_coverage_label(report)
-        )
-    } else {
-        "CRAP estimated from export references (85% direct, 40% indirect, 0% untested). Run `fallow health --coverage <coverage-final.json>` for exact scores.".to_string()
-    }
 }
 
 fn render_coverage_gaps(
