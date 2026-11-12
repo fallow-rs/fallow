@@ -1526,9 +1526,12 @@ variables:
       # number of findings whose rule is `error` as
       # gate_outcomes["error-severity-findings"].observed. A finding whose
       # rule is `warn` stays in the count above and does not fail the
-      # pipeline. A fallow older than 3.27.0 publishes no such entry, so the
-      # full count gates there. The other commands gate on the count above.
-      ERROR_SEVERITY_OBSERVED='.gate_outcomes | objects | .["error-severity-findings"] | objects | .observed | numbers | floor'
+      # pipeline. Fallow 3.29.0 to 3.31.x publish the entry without
+      # `observed`: a `pass` status there means 0 findings at error severity.
+      # A `fail` status without `observed`, or a fallow older than 3.29.0 with
+      # no such entry, gates on the full count. The other commands gate on the
+      # count above.
+      ERROR_SEVERITY_OBSERVED='.gate_outcomes | objects | .["error-severity-findings"] | objects | ((.observed | numbers | floor) // (select(.status == "pass") | 0))'
       case "$FALLOW_COMMAND" in
         dead-code|check|architecture)
           GATE_ISSUES=$(jq -r "(${ERROR_SEVERITY_OBSERVED}) // .total_issues // 0" fallow-results.json) ;;

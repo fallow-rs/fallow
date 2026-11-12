@@ -1830,9 +1830,11 @@ fi
 # CLI exit code. For dead code, the CLI publishes the number of findings whose
 # rule is `error` as `gate_outcomes["error-severity-findings"].observed`. A
 # finding whose rule is `warn` stays in `issues` and in the advisory line, and
-# does not fail the job. A fallow older than 3.27.0 publishes no such entry, so
-# the full count gates there. The other commands keep `issues` as the count.
-ERROR_SEVERITY_OBSERVED='.gate_outcomes | objects | .["error-severity-findings"] | objects | .observed | numbers | floor'
+# does not fail the job. Fallow 3.29.0 to 3.31.x publish the entry without
+# `observed`: a `pass` status there means 0 findings at error severity. A
+# `fail` status without `observed`, or a fallow older than 3.29.0 with no such
+# entry, gates on the full count. The other commands keep `issues` as the count.
+ERROR_SEVERITY_OBSERVED='.gate_outcomes | objects | .["error-severity-findings"] | objects | ((.observed | numbers | floor) // (select(.status == "pass") | 0))'
 case "$INPUT_COMMAND" in
   dead-code|check|architecture)
     GATE_ISSUES=$(jq_debug -r "(${ERROR_SEVERITY_OBSERVED}) // .total_issues" "$RESULTS_FILE") ;;

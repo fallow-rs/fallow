@@ -68,8 +68,10 @@ On `dead-code`, `check`, `architecture` and the dead-code part of the combined
 run, the action counts only the findings whose rule is `error`. It reads that
 number from `gate_outcomes["error-severity-findings"].observed`. A finding
 whose rule is `warn` stays in the `issues` output and in a `::warning::`, and
-does not fail the job. A fallow older than 3.27.0 publishes no such entry, so
-there every finding counts.
+does not fail the job. Fallow 3.29.0 to 3.31.x publish the entry without
+`observed`. There a `pass` status counts as 0, and a `fail` status lets every
+finding count. A fallow older than 3.29.0 publishes no such entry, so there
+every finding counts.
 
 An audit that compared no changed file prints a `::warning::`, because its
 `pass` verdict checked nothing. This occurs on a push to the default branch:

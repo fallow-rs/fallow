@@ -5232,7 +5232,28 @@ else
 fi
 assert_contains "$GATE_OUTPUTS" "issues=4" \
   "severity count: the bare run keeps warn findings in the issues output"
-# A fallow older than 3.27.0 publishes no gate_outcomes. The count gate then
+# Fallow 3.29.0 to 3.31.x publish the entry without `observed`. A `pass`
+# status then means no finding at error severity.
+run_gate_analyze "$(gate_envelope '{"error-severity-findings":{"status":"pass","enforced":true}}' | jq -c '.total_issues = 2 | .summary.total_issues = 2')" \
+  INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="true"
+if [ "$GATE_EXIT" = "0" ]; then
+  pass "severity count: a pass entry without observed passes fail-on-issues"
+else
+  fail "severity count: a pass entry without observed passes fail-on-issues" "exit ${GATE_EXIT}: ${GATE_STDOUT}"
+fi
+run_gate_analyze "$(jq -c '.check.total_issues = 4 | .gate_outcomes += {"error-severity-findings":{"status":"pass","enforced":true}}' "$FIXTURES/combined-health-baselined.json")" \
+  INPUT_COMMAND="" INPUT_HEALTH_BASELINE="h.json" INPUT_FAIL_ON_ISSUES="true"
+if [ "$GATE_EXIT" = "0" ]; then
+  pass "severity count: a bare run with a pass entry without observed passes"
+else
+  fail "severity count: a bare run with a pass entry without observed passes" "exit ${GATE_EXIT}: ${GATE_STDOUT}"
+fi
+# A `fail` status without `observed` gives no error count, so the full count gates.
+run_gate_analyze "$(gate_envelope '{"error-severity-findings":{"status":"fail","enforced":true}}' | jq -c '.total_issues = 2 | .summary.total_issues = 2')" \
+  INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="true"
+assert_contains "$GATE_STDOUT" "::error::Fallow found 2 unused code issues." \
+  "severity count: a fail entry without observed gates on the full count"
+# A fallow older than 3.29.0 publishes no gate_outcomes. The count gate then
 # falls back to the full count.
 run_gate_analyze "$(gate_envelope '' | jq -c '.total_issues = 2 | .summary.total_issues = 2')" \
   INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="true"

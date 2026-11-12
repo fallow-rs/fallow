@@ -2462,7 +2462,33 @@ OUT=$(run_generated_gitlab_fixture "$GATE_WORK" MOCK_GATE_ENVELOPE="$GATE_WORK/s
 assert_contains "$OUT" "Found 4 issues" "severity count: the bare run keeps warn findings in the count"
 [ "$SEVERITY_EXIT" -eq 0 ] && pass "severity count: a bare run with warn-only dead code passes" \
   || fail "severity count: a bare run with warn-only dead code passes" "exit $SEVERITY_EXIT: $OUT"
-# A fallow older than 3.27.0 publishes no gate_outcomes: the full count gates.
+# Fallow 3.29.0 to 3.31.x publish the entry without `observed`. A `pass`
+# status then means no finding at error severity.
+jq '.total_issues = 2 | .summary.total_issues = 2' \
+  "$(gitlab_gate_envelope '{"error-severity-findings":{"status":"pass","enforced":true}}')" \
+  > "$GATE_WORK/severity-no-observed.json"
+SEVERITY_EXIT=0
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" MOCK_GATE_ENVELOPE="$GATE_WORK/severity-no-observed.json" \
+  FALLOW_COMMAND=dead-code FALLOW_FAIL_ON_ISSUES=true 2>&1) || SEVERITY_EXIT=$?
+[ "$SEVERITY_EXIT" -eq 0 ] && pass "severity count: a pass entry without observed passes" \
+  || fail "severity count: a pass entry without observed passes" "exit $SEVERITY_EXIT: $OUT"
+jq '.check.total_issues = 4 | .gate_outcomes += {"error-severity-findings":{"status":"pass","enforced":true}}' \
+  "$FIXTURES/combined-health-baselined.json" > "$GATE_WORK/severity-bare-no-observed.json"
+SEVERITY_EXIT=0
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" MOCK_GATE_ENVELOPE="$GATE_WORK/severity-bare-no-observed.json" \
+  FALLOW_COMMAND= FALLOW_HEALTH_BASELINE=h.json FALLOW_FAIL_ON_ISSUES=true 2>&1) || SEVERITY_EXIT=$?
+[ "$SEVERITY_EXIT" -eq 0 ] && pass "severity count: a bare run with a pass entry without observed passes" \
+  || fail "severity count: a bare run with a pass entry without observed passes" "exit $SEVERITY_EXIT: $OUT"
+# A `fail` status without `observed` gives no error count, so the full count gates.
+jq '.total_issues = 2 | .summary.total_issues = 2' \
+  "$(gitlab_gate_envelope '{"error-severity-findings":{"status":"fail","enforced":true}}')" \
+  > "$GATE_WORK/severity-fail-no-observed.json"
+SEVERITY_EXIT=0
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" MOCK_GATE_ENVELOPE="$GATE_WORK/severity-fail-no-observed.json" \
+  FALLOW_COMMAND=dead-code FALLOW_FAIL_ON_ISSUES=true 2>&1) || SEVERITY_EXIT=$?
+[ "$SEVERITY_EXIT" -eq 1 ] && pass "severity count: a fail entry without observed gates on the full count" \
+  || fail "severity count: a fail entry without observed gates on the full count" "exit $SEVERITY_EXIT: $OUT"
+# A fallow older than 3.29.0 publishes no gate_outcomes: the full count gates.
 jq '.total_issues = 2 | .summary.total_issues = 2' "$(gitlab_gate_envelope '')" > "$GATE_WORK/severity-old.json"
 SEVERITY_EXIT=0
 OUT=$(run_generated_gitlab_fixture "$GATE_WORK" MOCK_GATE_ENVELOPE="$GATE_WORK/severity-old.json" \
