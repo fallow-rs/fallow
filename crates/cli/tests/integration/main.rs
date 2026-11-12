@@ -28,6 +28,7 @@ mod audit_complexity_attribution_tests;
 mod audit_diff_risk_tests;
 mod audit_focus_components_tests;
 mod audit_review_attribution_tests;
+mod audit_staged_tests;
 mod audit_test_file_gate_tests;
 mod audit_test_reach_tests;
 mod audit_tests;

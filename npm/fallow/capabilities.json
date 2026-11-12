@@ -1686,7 +1686,7 @@
           "name": "--branch",
           "type": "string",
           "required": false,
-          "description": "Fallback base branch/ref for the pre-commit hook when no upstream is set"
+          "description": "Has no effect. The pre-commit hook runs `fallow audit --staged`, which compares the staged changes with HEAD. Kept so that existing install scripts still run"
         },
         {
           "name": "--decline",
@@ -2548,6 +2548,16 @@
           "type": "string",
           "required": false,
           "description": "Internal marker identifying a gate run (e.g. `pre-commit`), set by the generated git hook so Fallow Impact can record a containment event when the gate blocks then clears. Hidden; never changes the verdict, exit code, or output"
+        },
+        {
+          "name": "--staged",
+          "type": "bool",
+          "required": false,
+          "description": "Audit the staged index instead of the working tree. The changed files are the staged changes against HEAD (`git diff --cached`), and the analysis reads every file from the index, so unstaged edits and untracked files do not affect the verdict. A file that is staged and then deleted from the working tree is still audited. The base is HEAD, so `--base` and `--changed-since` are rejected. The generated pre-commit hook uses this flag",
+          "possible_values": [
+            "true",
+            "false"
+          ]
         },
         {
           "name": "--brief",

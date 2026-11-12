@@ -462,8 +462,8 @@ Creates a config file in the project root.
 |---|---|---|---|
 | `--toml` | `bool` | `false` | Create `fallow.toml` instead of `.fallowrc.json` |
 | `--agents` | `bool` | `false` | Scaffold a starter `AGENTS.md` guide for coding agents. Prefills Install (from the `packageManager` field, or pnpm via `pnpm-workspace.yaml`), Test (only when exactly one of Vitest / Jest / Playwright is present), Typecheck (`tsc --noEmit` when `tsconfig.json` exists), and monorepo module-boundary lines; everything ambiguous stays blank (no lockfile sniffing). Prefilled command lines carry an HTML provenance comment. Refuses to overwrite an existing `AGENTS.md` |
-| `--hooks` | `bool` | `false` | Scaffold a pre-commit git hook that runs `fallow audit --base <ref> --quiet --gate-marker pre-commit`. Alias for `fallow hooks install --target git` |
-| `--branch` | `string` | - | Fallback base branch for the pre-commit hook when no upstream is set (default: `main`). Only used with `--hooks` |
+| `--hooks` | `bool` | `false` | Scaffold a pre-commit git hook that runs `fallow audit --staged --quiet --gate-marker pre-commit`. Alias for `fallow hooks install --target git` |
+| `--branch` | `string` | - | Has no effect. The pre-commit hook audits the staged changes against HEAD. Kept so that existing install scripts still run. Only used with `--hooks` |
 | `--decline` | `bool` | `false` | Record that this project deliberately stays unconfigured: persists a decline so the first-contact setup hint and the `setup` next-step stop appearing here. Writes no config file; idempotent |
 
 Common global flags for this command: [`--root`](#global-flags), [`--config`](#global-flags).
@@ -474,8 +474,7 @@ Common global flags for this command: [`--root`](#global-flags), [`--config`](#g
 fallow init              # creates .fallowrc.json with $schema
 fallow init --toml       # creates fallow.toml
 fallow init --agents     # scaffolds a starter AGENTS.md prefilled from detected project info (never overwrites)
-fallow hooks install --target git
-fallow hooks install --target git --branch develop  # fallback base branch when no upstream is set
+fallow hooks install --target git   # pre-commit hook: fallow audit --staged
 ```
 
 ## `hooks`: Managed Hook Status And Installation
@@ -487,6 +486,8 @@ fallow hooks install --target agent
 fallow hooks uninstall --target git
 fallow hooks uninstall --target agent
 ```
+
+The Git pre-commit hook runs `fallow audit --staged`. It audits the staged changes against HEAD and reads each file from the index, so unstaged edits and untracked files do not change the verdict. Before the first commit of a repository, the hook skips the audit and prints one line on stderr.
 
 `hooks status` is read-only and reports `git`, `claude`, `codex` (the `AGENTS.md` routing block), and `codex_gate` (the `.codex/hooks.json` gate) surfaces. Each surface includes `installed`, `managed_block_present`, `user_edited`, and `path`; generated agent scripts also include `script_version` and `min_version_floor`. Use it before mutating setup so agents can distinguish fallow-managed artifacts from user-owned hooks or partial managed blocks.
 
@@ -1123,6 +1124,7 @@ Audits changed files for dead code, complexity, duplication, and styling. Return
 | `--min-invocations-hot` | `string` | `100` | Threshold for hot-path classification, forwarded to the sidecar when `--runtime-coverage` is set |
 | `--mutation-report` | `string` | - | Saved `fallow mutation --format json` report (for example `.fallow/mutation/last-report.json`). The review brief counts the surviving mutants on the added lines of each changed file in the `mutation` component of the focus score. A file whose source changed since the run adds nothing. Reads the file only; it runs no test. Only the review brief reads it |
 | `--gate-marker` | `string` | - | Internal marker identifying a gate run (e.g. `pre-commit`), set by the generated git hook so Fallow Impact can record a containment event when the gate blocks then clears. Hidden; never changes the verdict, exit code, or output |
+| `--staged` | `bool` | `false` | Audit the staged index instead of the working tree. The changed files are the staged changes against HEAD (`git diff --cached`), and the analysis reads every file from the index, so unstaged edits and untracked files do not affect the verdict. A file that is staged and then deleted from the working tree is still audited. The base is HEAD, so `--base` and `--changed-since` are rejected. The generated pre-commit hook uses this flag |
 | `--brief` | `bool` | `false` | Render the deterministic review brief instead of the gating audit report. The brief answers "where do I look?" rather than "will CI block this?", runs the same analysis, and ALWAYS exits 0 (the verdict is carried informationally). Implied by `fallow review`. Orthogonal to `--format` |
 | `--max-decisions` | `string` | `4` | Cap on the number of consequential structural decisions surfaced in the review brief's decision surface (the working-memory limit). Default 4; clamped to the 3-5 band (4 plus or minus 1). Only consulted on the brief path |
 | `--walkthrough-guide` | `bool` | `false` | Emit the agent-contract WALKTHROUGH GUIDE: the current digest (brief + decision surface), the review direction, the JSON schema the agent must return, and a deterministic graph-snapshot hash pinned into the digest. The digest is built from the graph only (PR prose is never folded in, so it is injection-resistant). Implies the brief; always exits 0. A thin agent skill calls this to fetch the current guide, produces judgment JSON, then reopens with `--walkthrough-file` |

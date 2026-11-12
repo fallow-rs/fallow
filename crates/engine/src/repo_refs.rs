@@ -557,26 +557,12 @@ pub fn create_detached_base_worktree(
     Ok(())
 }
 
-#[cfg(unix)]
-fn make_worktree_root_private(destination: &Path) -> EngineResult<()> {
-    use std::os::unix::fs::PermissionsExt as _;
-
-    fs::set_permissions(destination, fs::Permissions::from_mode(0o700)).map_err(|error| {
-        EngineError::new(format!(
-            "could not make base worktree private at `{}`: {error}",
-            destination.display()
-        ))
-    })
-}
-
-#[cfg(not(unix))]
-#[expect(
-    clippy::unnecessary_wraps,
-    reason = "shared cross-platform signature; Unix applies privacy permissions"
-)]
-fn make_worktree_root_private(_destination: &Path) -> EngineResult<()> {
-    Ok(())
-}
+#[path = "repo_refs_linked_worktree.rs"]
+mod linked_worktree;
+use linked_worktree::make_worktree_root_private;
+pub use linked_worktree::{
+    create_staged_index_worktree, remove_staged_index_worktree, write_index_tree,
+};
 
 /// Return whether a linked worktree was completely materialized by the raw
 /// object path used by [`create_detached_base_worktree`].
