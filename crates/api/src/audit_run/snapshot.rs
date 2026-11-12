@@ -69,9 +69,10 @@ pub struct AuditKeySnapshot {
     /// the config of the base commit. The other key sets come from a base pass
     /// with the head config, so a rule that the change turns on does not make
     /// old findings look new. That pass cannot see a file that a config change
-    /// made unreachable, for example a removed entry point. `None` when the
-    /// change did not touch the config, or when the base config turns either
-    /// rule off and so cannot prove that code was in use.
+    /// made unreachable, for example a removed entry point. The set also holds
+    /// the unused code of the base that the base config ignores, because that
+    /// config cannot prove that such code was in use. `None` when the change
+    /// did not touch the config, or when the base config turns either rule off.
     pub own_config_unused_code: Option<FxHashSet<String>>,
 }
 

@@ -7,7 +7,7 @@ use fallow_config::ProductionAnalysis;
 use rustc_hash::FxHashSet;
 
 use super::{
-    AuditOptions, AuditTypeAwareOptions, audit_production_flags, build_base_audit_options, keys,
+    AuditOptions, AuditTypeAwareOptions, audit_production_flags, build_base_audit_options,
 };
 use crate::check::{CheckOptions, CheckResult, IssueFilters, TraceOptions};
 
@@ -178,6 +178,8 @@ pub(super) struct BaseOwnConfigInput<'a> {
     pub(super) base_cache_dir: &'a Path,
     pub(super) base_coverage: &'a fallow_api::audit_run::BaseCoverageInputs,
     pub(super) focus: Option<&'a FxHashSet<PathBuf>>,
+    /// The dead-code pass of the base under the head config.
+    pub(super) base_check: Option<&'a CheckResult>,
 }
 
 /// The keys of the unused files and unused exports of the base under the
@@ -188,7 +190,9 @@ pub(super) struct BaseOwnConfigInput<'a> {
 /// file of the head run. It returns `None` when the change did not touch it,
 /// when the base config does not load, and when the base config turns the
 /// `unused-files` or `unused-exports` rule off. Then the base pass with the
-/// head config is the only evidence.
+/// head config is the only evidence. A finding of that pass in code that the
+/// base config ignores also counts as unused under the base config (see
+/// `fallow_api::audit_run::own_config_unused_code_keys`).
 pub(super) fn base_own_config_unused_code(
     input: &BaseOwnConfigInput<'_>,
 ) -> Option<FxHashSet<String>> {
@@ -199,9 +203,10 @@ pub(super) fn base_own_config_unused_code(
         base_cache_dir,
         base_coverage,
         focus,
+        base_check,
     } = *input;
-    let focus = focus?;
-    let relative = current_config_path?.strip_prefix(opts.root).ok()?;
+    let (focus, base_check) = (focus?, base_check?);
+    let relative = fallow_api::audit_run::config_path_under_root(current_config_path?, opts.root)?;
     if !focus.contains(&base_root.join(relative)) {
         return None;
     }
@@ -240,8 +245,10 @@ pub(super) fn base_own_config_unused_code(
     {
         return None;
     }
-    let root = check.config.root.as_path();
-    let mut keys = keys::collection_keys(&check.results.unused_files, root);
-    keys.extend(keys::collection_keys(&check.results.unused_exports, root));
-    Some(keys.into_iter().collect())
+    Some(fallow_api::audit_run::own_config_unused_code_keys(
+        &check.results,
+        &check.config,
+        &base_check.results,
+        &check.config.root,
+    ))
 }

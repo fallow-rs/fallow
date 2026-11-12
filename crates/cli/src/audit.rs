@@ -685,7 +685,7 @@ fn run_audit_base_analyses(
     if let Some(check) = check.as_mut() {
         check.shared_parse = None;
     }
-    let own_config_unused_code = check.as_ref().and_then(|_| {
+    let own_config_unused_code =
         dead_code::base_own_config_unused_code(&dead_code::BaseOwnConfigInput {
             opts,
             current_config_path: current_config_path.as_deref(),
@@ -693,8 +693,8 @@ fn run_audit_base_analyses(
             base_cache_dir: &base_cache_dir,
             base_coverage: &base_coverage,
             focus,
-        })
-    });
+            base_check: check.as_ref(),
+        });
     Ok(HeadAnalyses {
         check,
         dupes,

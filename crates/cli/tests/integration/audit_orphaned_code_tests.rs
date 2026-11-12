@@ -18,7 +18,7 @@ use std::path::Path;
 
 use tempfile::TempDir;
 
-use crate::common::{commit_all, git, parse_json, run_fallow_raw};
+use crate::common::{commit_all, git, parse_json, run_fallow_raw_in_dir};
 
 const BASE_INDEX: &str = "import { used, helper } from \"./lib\";\nimport { keyVault } from \"./keyvault\";\nconsole.log(used(), helper(), keyVault());\n";
 const HEAD_INDEX: &str = "import { used } from \"./lib\";\nconsole.log(used());\n";
@@ -75,19 +75,16 @@ struct Audit {
 }
 
 fn audit(dir: &Path, extra: &[&str]) -> Audit {
+    audit_with_root(dir, dir.to_str().unwrap(), extra)
+}
+
+/// Run the audit in the working directory `dir` with `--root root`.
+fn audit_with_root(dir: &Path, root: &str, extra: &[&str]) -> Audit {
     let mut args = vec![
-        "audit",
-        "--root",
-        dir.to_str().unwrap(),
-        "--base",
-        "main",
-        "--format",
-        "json",
-        "--quiet",
-        "--no-css",
+        "audit", "--root", root, "--base", "main", "--format", "json", "--quiet", "--no-css",
     ];
     args.extend_from_slice(extra);
-    let output = run_fallow_raw(&args);
+    let output = run_fallow_raw_in_dir(dir, &args);
     assert!(
         output.code == 0 || output.code == 1,
         "audit failed. stdout: {}\nstderr: {}",
@@ -265,4 +262,127 @@ fn the_all_gate_keeps_the_report_to_the_changed_files() {
 
     assert!(result.files.is_empty(), "{:?}", result.files);
     assert!(result.exports.is_empty(), "{:?}", result.exports);
+}
+
+#[test]
+fn a_relative_config_path_still_reports_the_file_a_config_change_made_unreachable() {
+    let tmp = fixture(ENTRY_INDEX_AND_EXTRA);
+    fs::write(tmp.path().join(".fallowrc.json"), ENTRY_INDEX).unwrap();
+    commit_all(tmp.path(), "drop an entry");
+
+    let result = audit_with_root(tmp.path(), ".", &["--no-cache", "-c", ".fallowrc.json"]);
+
+    assert_eq!(result.files, owned(&[("scripts/extra.ts", true)]));
+    assert_eq!(result.verdict, "fail");
+}
+
+#[test]
+fn a_config_path_through_a_symlink_still_reports_the_file_a_config_change_made_unreachable() {
+    let tmp = fixture(ENTRY_INDEX_AND_EXTRA);
+    fs::write(tmp.path().join(".fallowrc.json"), ENTRY_INDEX).unwrap();
+    commit_all(tmp.path(), "drop an entry");
+    let link_parent = TempDir::new().expect("failed to create temp dir");
+    let link = link_parent.path().join("project");
+    #[cfg(unix)]
+    std::os::unix::fs::symlink(tmp.path(), &link).unwrap();
+    #[cfg(windows)]
+    std::os::windows::fs::symlink_dir(tmp.path(), &link).unwrap();
+    let config = link.join(".fallowrc.json");
+
+    let result = audit_with_root(
+        tmp.path(),
+        link.to_str().unwrap(),
+        &["--no-cache", "-c", config.to_str().unwrap()],
+    );
+
+    assert_eq!(result.files, owned(&[("scripts/extra.ts", true)]));
+    assert_eq!(result.verdict, "fail");
+}
+
+/// A config change that only stops ignoring code shows unused code that the
+/// base already had, so the audit does not count it as introduced.
+#[test]
+fn a_config_change_that_stops_ignoring_code_does_not_gate_old_findings() {
+    let base_configs = [
+        r#"{"entry": ["src/index.ts", "scripts/extra.ts"], "ignorePatterns": ["src/old.ts"]}"#,
+        r#"{"entry": ["src/index.ts", "scripts/extra.ts"], "ignoreFindings": ["src/old.ts", "src/lib.ts"]}"#,
+        r#"{"entry": ["src/index.ts", "scripts/extra.ts"], "ignoreExports": [{"file": "src/lib.ts", "exports": ["stale"]}], "overrides": [{"files": ["src/old.ts"], "rules": {"unused-files": "off"}}]}"#,
+    ];
+    for base_config in base_configs {
+        let tmp = fixture(base_config);
+        fs::write(tmp.path().join(".fallowrc.json"), ENTRY_INDEX_AND_EXTRA).unwrap();
+        commit_all(tmp.path(), "stop ignoring code");
+
+        let result = audit(tmp.path(), &["--no-cache"]);
+
+        let introduced = |items: &[(String, bool)]| items.iter().any(|(_, new)| *new);
+        assert!(
+            !introduced(&result.files),
+            "{base_config}: {:?}",
+            result.files
+        );
+        assert!(
+            !introduced(&result.exports),
+            "{base_config}: {:?}",
+            result.exports
+        );
+        assert_eq!(result.verdict, "pass", "{base_config}");
+    }
+}
+
+#[test]
+fn a_config_change_that_stops_ignoring_code_and_drops_an_entry_reports_only_the_entry() {
+    let tmp = fixture(
+        r#"{"entry": ["src/index.ts", "scripts/extra.ts"], "ignorePatterns": ["src/old.ts"]}"#,
+    );
+    fs::write(tmp.path().join(".fallowrc.json"), ENTRY_INDEX).unwrap();
+    commit_all(tmp.path(), "drop an entry and stop ignoring code");
+
+    let result = audit(tmp.path(), &["--no-cache"]);
+
+    let introduced: Vec<&str> = result
+        .files
+        .iter()
+        .filter(|(_, new)| *new)
+        .map(|(path, _)| path.as_str())
+        .collect();
+    assert_eq!(introduced, ["scripts/extra.ts"]);
+    assert_eq!(result.verdict, "fail");
+}
+
+/// A base config that ignores the only importer of `src/legacy.ts` leaves
+/// that file unreachable. When the change stops ignoring the importer, the
+/// unused export of `src/legacy.ts` shows, but that code was dead at the base.
+#[test]
+fn a_config_change_that_makes_an_old_unused_file_reachable_does_not_gate_its_exports() {
+    let tmp = fixture(
+        r#"{"entry": ["src/index.ts", "scripts/extra.ts", "scripts/tool.ts"], "ignorePatterns": ["scripts/tool.ts"]}"#,
+    );
+    let dir = tmp.path();
+    git(dir, &["checkout", "main"]);
+    fs::write(
+        dir.join("src/legacy.ts"),
+        "export const one = (): number => 1;\nexport const two = (): number => 2;\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("scripts/tool.ts"),
+        "import { one } from \"../src/legacy\";\nconsole.log(one());\n",
+    )
+    .unwrap();
+    commit_all(dir, "add a tool");
+    git(dir, &["checkout", "-B", "head", "main"]);
+    fs::write(
+        dir.join(".fallowrc.json"),
+        r#"{"entry": ["src/index.ts", "scripts/extra.ts", "scripts/tool.ts"]}"#,
+    )
+    .unwrap();
+    commit_all(dir, "stop ignoring the tool");
+
+    let result = audit(dir, &["--no-cache"]);
+
+    let introduced = |items: &[(String, bool)]| items.iter().any(|(_, new)| *new);
+    assert!(!introduced(&result.files), "{:?}", result.files);
+    assert!(!introduced(&result.exports), "{:?}", result.exports);
+    assert_eq!(result.verdict, "pass");
 }

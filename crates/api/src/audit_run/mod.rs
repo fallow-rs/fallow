@@ -21,6 +21,7 @@
 mod base_files;
 mod base_ref;
 mod outcome;
+mod own_config;
 mod scope;
 mod snapshot;
 #[cfg(test)]
@@ -44,6 +45,7 @@ pub use outcome::{
     DupeDemotionDiffSource, SharedDiff, compare, demote_preexisting_dupe_introductions, outcome,
     realign_styling_introductions, styling_finding_gates, styling_rule_severity,
 };
+pub use own_config::{config_path_under_root, own_config_unused_code_keys};
 pub use scope::{
     BaseCoverageInputs, base_coverage_inputs, base_focus_files, remap_focus_files, renamed_files,
     scope_dependency_findings, scope_unchanged_unused_code,

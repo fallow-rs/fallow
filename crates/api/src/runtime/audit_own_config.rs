@@ -2,9 +2,10 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_config::{ProductionAnalysis, Severity};
+use fallow_config::{ProductionAnalysis, ResolvedConfig, Severity};
 use fallow_engine::project_config::ProjectConfigOptions;
 use fallow_types::output_format::OutputFormat;
+use fallow_types::results::AnalysisResults;
 use rustc_hash::FxHashSet;
 
 use crate::{AnalysisOptions, AuditOptions, TypeAwareOptions};
@@ -20,6 +21,8 @@ pub(super) struct BaseOwnConfigInput<'a> {
     pub(super) base_root: &'a Path,
     /// The changed files, spelled under `base_root`.
     pub(super) focus: Option<&'a FxHashSet<PathBuf>>,
+    /// The dead-code results of the base pass with the head config.
+    pub(super) base_results: &'a AnalysisResults,
 }
 
 /// The keys of the unused files and unused exports of the base under the
@@ -31,19 +34,20 @@ pub(super) struct BaseOwnConfigInput<'a> {
 /// change did not touch it, when the base config does not load or the pass
 /// fails, and when the base config turns the `unused-files` or
 /// `unused-exports` rule off. Then the base pass with the head config is the
-/// only evidence.
+/// only evidence. A finding of that pass in code that the base config ignores
+/// also counts as unused under the base config (see
+/// [`crate::audit_run::own_config_unused_code_keys`]).
 pub(super) fn base_own_config_unused_code(
     input: &BaseOwnConfigInput<'_>,
 ) -> Option<FxHashSet<String>> {
     let focus = input.focus?;
-    let relative = input.head_config_path?.strip_prefix(input.head_root).ok()?;
+    let relative =
+        crate::audit_run::config_path_under_root(input.head_config_path?, input.head_root)?;
     if !focus.contains(&input.base_root.join(relative)) {
         return None;
     }
     let base_config_path = fallow_config::FallowConfig::find_config_path(input.base_root);
-    if !base_rules_report_unused_code(input, base_config_path.as_deref())? {
-        return None;
-    }
+    let own_config = base_config_reporting_unused_code(input, base_config_path.as_deref())?;
     let analysis = AnalysisOptions {
         config_path: base_config_path,
         // A syntactic pass reports at least the unused code of a type-aware
@@ -65,21 +69,19 @@ pub(super) fn base_own_config_unused_code(
     };
     let subanalyses = super::run_audit_subanalyses(&options, &analysis, Some(focus), true).ok()?;
     let dead_code = subanalyses.dead_code?;
-    let results = &dead_code.output.results;
-    let mut keys = crate::audit_keys::collection_keys(&results.unused_files, &dead_code.root);
-    keys.extend(crate::audit_keys::collection_keys(
-        &results.unused_exports,
+    Some(crate::audit_run::own_config_unused_code_keys(
+        &dead_code.output.results,
+        &own_config,
+        input.base_results,
         &dead_code.root,
-    ));
-    Some(keys.into_iter().collect())
+    ))
 }
 
-/// Whether the base config loads and keeps both unused-code rules on.
-/// `None` when the base config does not load.
-fn base_rules_report_unused_code(
+/// The base config, when it loads and keeps both unused-code rules on.
+fn base_config_reporting_unused_code(
     input: &BaseOwnConfigInput<'_>,
     base_config_path: Option<&Path>,
-) -> Option<bool> {
+) -> Option<ResolvedConfig> {
     let analysis = input.base_analysis;
     let project = fallow_engine::project_config::config_for_project_analysis(
         input.base_root,
@@ -96,5 +98,6 @@ fn base_rules_report_unused_code(
     )
     .ok()?;
     let rules = &project.config.rules;
-    Some(rules.unused_files != Severity::Off && rules.unused_exports != Severity::Off)
+    (rules.unused_files != Severity::Off && rules.unused_exports != Severity::Off)
+        .then_some(project.config)
 }

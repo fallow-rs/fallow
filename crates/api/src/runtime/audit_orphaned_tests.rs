@@ -215,3 +215,59 @@ fn new_only_keeps_old_unused_code_out_when_the_change_turns_a_rule_on() {
     assert_eq!(output.verdict, AuditVerdict::Pass);
     assert_eq!(output.attribution.dead_code_introduced, 0);
 }
+
+#[test]
+fn new_only_keeps_old_unused_code_out_when_the_change_stops_ignoring_it() {
+    let project = orphan_fixture();
+    let root = project.path();
+    write(
+        root,
+        ".fallowrc.json",
+        r#"{"entry":["src/index.ts"],"ignorePatterns":["legacy/**"]}"#,
+    );
+    write(root, "legacy/old.ts", "export const legacy = 1;\n");
+    commit(root);
+    write(root, ".fallowrc.json", r#"{"entry":["src/index.ts"]}"#);
+
+    let output = audit(root, AuditGate::NewOnly);
+
+    assert_eq!(output.verdict, AuditVerdict::Pass);
+    assert_eq!(output.attribution.dead_code_introduced, 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn new_only_reports_an_unreachable_file_for_a_config_path_through_a_symlink() {
+    let project = orphan_fixture();
+    let root = project.path();
+    write(
+        root,
+        ".fallowrc.json",
+        r#"{"entry":["src/index.ts","scripts/extra.ts"]}"#,
+    );
+    write(root, "scripts/extra.ts", "console.log('extra');\n");
+    commit(root);
+    write(root, ".fallowrc.json", r#"{"entry":["src/index.ts"]}"#);
+    let link_parent = tempfile::tempdir().expect("link parent");
+    let link = link_parent.path().join("project");
+    std::os::unix::fs::symlink(root, &link).expect("symlink");
+
+    let output = run_audit(&AuditOptions {
+        analysis: AnalysisOptions {
+            root: Some(root.to_path_buf()),
+            config_path: Some(link.join(".fallowrc.json")),
+            no_cache: true,
+            ..AnalysisOptions::default()
+        },
+        base: Some("HEAD".to_string()),
+        gate: Some(AuditGate::NewOnly),
+        dead_code: Some(true),
+        health: Some(false),
+        duplication: Some(false),
+        ..AuditOptions::default()
+    })
+    .expect("audit output");
+
+    assert_eq!(output.verdict, AuditVerdict::Fail);
+    assert_eq!(unused_file_paths(&output), ["scripts/extra.ts"]);
+}

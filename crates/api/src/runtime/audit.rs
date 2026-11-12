@@ -235,7 +235,7 @@ impl<'a> AuditBackend for ProgrammaticAuditBackend<'a> {
             ..self.options.clone()
         };
         let subanalyses = run_audit_subanalyses(&base_options, &base_analysis, focus, true)?;
-        let own_config_unused_code = subanalyses.dead_code.as_ref().and_then(|_| {
+        let own_config_unused_code = subanalyses.dead_code.as_ref().and_then(|dead_code| {
             own_config::base_own_config_unused_code(&own_config::BaseOwnConfigInput {
                 options: self.options,
                 base_analysis: &base_analysis,
@@ -243,6 +243,7 @@ impl<'a> AuditBackend for ProgrammaticAuditBackend<'a> {
                 head_config_path: base_analysis.config_path.as_deref(),
                 base_root,
                 focus,
+                base_results: &dead_code.output.results,
             })
         });
         Ok(ProgrammaticAuditAnalyses {

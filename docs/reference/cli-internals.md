@@ -376,6 +376,14 @@ line states exit code 0.
   `base_own_config_unused_code` (`crates/cli/src/audit_dead_code.rs`) runs
   one more syntactic dead-code pass with the config of the base commit and
   stores its unused-code keys in `AuditKeySnapshot::own_config_unused_code`.
+  `own_config_unused_code_keys` (`crates/api/src/audit_run/own_config.rs`)
+  also adds each unused file or unused export of the base pass with the head
+  config that the base config ignores (`ignorePatterns`, `ignoreFindings`,
+  `ignoreExports`, or an override that turns the rule off), and each unused
+  export in a file that the base config reports as an unused file. The base
+  config cannot prove that such code was in use. `config_path_under_root`
+  canonicalizes the config path and the root, so a relative `-c` path or a
+  path through a symlink still starts the pass.
   `forget_unused_code_used_under_own_config` then removes each head key that
   this set lacks from the base keys. The set is `None` when the base config
   does not load or turns `unused-files` or `unused-exports` off, so a rule
