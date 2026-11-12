@@ -927,7 +927,7 @@ impl<'a> ModuleInfoExtractor {
     /// becomes a `DynamicImportPattern`; multiple interpolations widen the
     /// prefix with a recursive `**/` segment. Returns `false` when the first
     /// quasi is not relative and the template gives no pattern.
-    pub(super) fn record_dynamic_import_template_pattern(
+    fn record_dynamic_import_template_pattern(
         &mut self,
         tpl: &TemplateLiteral<'a>,
         span: Span,

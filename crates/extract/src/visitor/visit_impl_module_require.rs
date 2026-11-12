@@ -108,11 +108,44 @@ fn required_create_require_alias<'b>(declarator: &'b VariableDeclarator<'_>) -> 
     })
 }
 
+/// `true` when `declarator` binds the `require` function itself, as in
+/// `const r = require`. A call through the other name is not visible.
+fn binds_require_value(declarator: &VariableDeclarator<'_>) -> bool {
+    matches!(
+        declarator.init.as_ref().map(Expression::get_inner_expression),
+        Some(Expression::Identifier(init)) if init.name == REQUIRE
+    )
+}
+
 impl ModuleInfoExtractor {
     /// Record the module-level names of `createRequire` and of the `require`
     /// functions of this file. A function body above the declaration reads
     /// them, so a walk in source order is too late.
     pub(super) fn record_program_module_require_names(&mut self, program: &Program<'_>) {
+        self.record_imported_create_require_names(program);
+        for statement in &program.body {
+            let declaration = match statement {
+                Statement::ExportDeclaration(export) => Some(&export.declaration),
+                _ => statement.as_declaration(),
+            };
+            let Some(Declaration::VariableDeclaration(var)) = declaration else {
+                continue;
+            };
+            for declarator in &var.declarations {
+                if binds_require_value(declarator) {
+                    self.mark_opaque_load_escape();
+                }
+                if let Some(alias) = required_create_require_alias(declarator) {
+                    self.create_require_aliases.insert(alias.to_string());
+                }
+                if let Some(name) = self.this_file_require_binding(declarator) {
+                    self.module_require_aliases.insert(name.to_string());
+                }
+            }
+        }
+    }
+
+    fn record_imported_create_require_names(&mut self, program: &Program<'_>) {
         for statement in &program.body {
             let Statement::ImportDeclaration(decl) = statement else {
                 continue;
@@ -127,28 +160,6 @@ impl ModuleInfoExtractor {
                 {
                     self.create_require_aliases
                         .insert(named.local.name.to_string());
-                }
-            }
-        }
-        for statement in &program.body {
-            let declaration = match statement {
-                Statement::ExportDeclaration(export) => Some(&export.declaration),
-                _ => statement.as_declaration(),
-            };
-            let Some(Declaration::VariableDeclaration(var)) = declaration else {
-                continue;
-            };
-            for declarator in &var.declarations {
-                // A call through another name of `require` is not visible.
-                if matches!(declarator.init.as_ref().map(Expression::get_inner_expression), Some(Expression::Identifier(init)) if init.name == REQUIRE)
-                {
-                    self.mark_opaque_load_escape();
-                }
-                if let Some(alias) = required_create_require_alias(declarator) {
-                    self.create_require_aliases.insert(alias.to_string());
-                }
-                if let Some(name) = self.this_file_require_binding(declarator) {
-                    self.module_require_aliases.insert(name.to_string());
                 }
             }
         }
