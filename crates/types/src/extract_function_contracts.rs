@@ -29,6 +29,11 @@ pub struct FunctionContractFacts {
     /// module calls, as open. A contract whose own body or default values
     /// call `eval` also has [`ContractIncomplete::DirectEval`].
     pub direct_eval: bool,
+    /// `true` when the module has an `import()` or a `require` call whose
+    /// source is not a string and not a relative pattern, such as
+    /// `import(name)`. The call can load any module and call its exports, so
+    /// a consumer must treat each exported contract of the project as open.
+    pub opaque_module_load: bool,
     /// The local names of the exported module-scope `const` bindings whose
     /// initializer is a literal, in source order. A call argument that names
     /// one of these bindings through an import has a known identity.
@@ -54,6 +59,7 @@ impl FunctionContractFacts {
             && self.escapes.is_empty()
             && !self.template_callers
             && !self.direct_eval
+            && !self.opaque_module_load
             && self.literal_consts.is_empty()
     }
 }

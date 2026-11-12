@@ -4276,29 +4276,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         let mut sources = Vec::new();
         self.collect_dynamic_import_specifiers(&expr.source, &mut sources);
         if sources.is_empty() {
-            match &expr.source {
-                Expression::TemplateLiteral(tpl)
-                    if !tpl.quasis.is_empty() && !tpl.expressions.is_empty() =>
-                {
-                    self.record_dynamic_import_template_pattern(tpl, expr.span);
-                }
-                Expression::BinaryExpression(bin)
-                    if bin.operator == oxc_ast::ast::BinaryOperator::Addition =>
-                {
-                    if let Some((prefix, suffix)) = extract_concat_parts(bin)
-                        && (prefix.starts_with("./") || prefix.starts_with("../"))
-                    {
-                        self.dynamic_import_patterns.push(DynamicImportPattern {
-                            prefix,
-                            suffix,
-                            span: expr.span,
-                            mechanism: ModuleLoadMechanism::EsModule,
-                            excludes: Vec::new(),
-                        });
-                    }
-                }
-                _ => {}
-            }
+            self.record_dynamic_import_pattern(&expr.source, expr.span);
         } else {
             self.push_unbound_dynamic_import_branches(&sources, expr.span);
         }

@@ -222,6 +222,26 @@ fn production_mode_drops_test_callers() {
 
 const CACHED_JSON_ARGS: &[&str] = &["--constant-parameters", "--format", "json", "--quiet"];
 
+#[test]
+fn an_import_with_an_unknown_source_blocks_the_exports_also_from_the_cache() {
+    let dir = copy_fixture("constant-parameter");
+    let main = dir.path().join("src/main.ts");
+    let mut source = std::fs::read_to_string(&main).unwrap();
+    source.push_str(
+        "const name = process.argv[2];\nconst mod = await import(name);\nmod.format(9, false);\n",
+    );
+    std::fs::write(&main, source).unwrap();
+    for run in ["cold", "warm"] {
+        let output = run_fallow_in_root("dead-code", dir.path(), CACHED_JSON_ARGS);
+        assert_eq!(output.code, 0, "{run}: {}", output.stderr);
+        let report = parse_json(&output);
+        assert!(
+            report.get("constant_parameters").is_none(),
+            "{run}: {report}"
+        );
+    }
+}
+
 fn cache_size(root: &std::path::Path) -> u64 {
     std::fs::metadata(root.join(".fallow/cache.bin"))
         .expect("the run writes the parse cache")

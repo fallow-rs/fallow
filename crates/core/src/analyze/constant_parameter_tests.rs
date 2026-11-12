@@ -386,6 +386,117 @@ fn a_dynamic_import_abstains() {
     assert_abstains(&project, "src/format.ts", "format", "dynamic-import");
 }
 
+const OPAQUE: &str = "const name = process.argv[2];\n";
+
+fn main_with(load: &str) -> String {
+    format!("{MAIN}{OPAQUE}{load}")
+}
+
+#[test]
+fn a_dynamic_import_of_an_unknown_source_abstains() {
+    for load in [
+        "export const later = () => import(name);\n",
+        "const mod = await import(name);\nmod.format(4, false);\n",
+        "export const later = () => import(`${name}`);\n",
+        "export const later = () => require(name);\n",
+    ] {
+        let main = main_with(load);
+        let project = analyze(&base_with(&[], &main));
+        assert_abstains(&project, "src/format.ts", "format", "opaque-dynamic-import");
+    }
+}
+
+#[test]
+fn a_require_of_an_unknown_source_in_another_module_abstains() {
+    let main = format!("import './legacy';\n{MAIN}");
+    let legacy = "const mod = require(process.env.TARGET);\nmod.format(4, false);\n";
+    let project = analyze(&base_with(&[("src/legacy.js", legacy)], &main));
+    assert_abstains(&project, "src/format.ts", "format", "opaque-dynamic-import");
+    let stats = project.stats();
+    let opaque = stats
+        .reasons
+        .iter()
+        .find(|(reason, _)| reason.code() == "opaque-dynamic-import")
+        .map(|(_, count)| *count);
+    assert_eq!(
+        opaque,
+        Some(ReasonCount {
+            first: 1,
+            any: 1,
+            only: 1
+        })
+    );
+}
+
+#[test]
+fn a_dynamic_import_pattern_blocks_only_the_files_it_matches() {
+    let plugin = "export function boot(level: number) { return level; }\n";
+    let load = "export const later = () => import(`./plugins/${name}.ts`);\n";
+    let main = main_with(load);
+    let project = analyze(&base_with(&[("src/plugins/boot.ts", plugin)], &main));
+    assert_eq!(project.findings("format").len(), 2);
+    assert_eq!(project.reason("src/format.ts", "format"), None);
+    assert_eq!(
+        project.reason("src/plugins/boot.ts", "boot"),
+        Some("dynamic-import")
+    );
+}
+
+#[test]
+fn a_function_that_no_export_exposes_stays_a_candidate() {
+    let local = "function scale(n: number, flag: boolean) { return flag ? n : 0; }\nscale(1, true);\nscale(2, true);\n";
+    let main = main_with(&format!(
+        "{local}export const later = () => import(name);\n"
+    ));
+    let project = analyze(&base_with(&[], &main));
+    assert_eq!(
+        project.findings("scale"),
+        vec![(
+            "flag".to_string(),
+            ConstantParameterReason::IdenticalArgument,
+            Some("true".to_string())
+        )]
+    );
+    assert_abstains(&project, "src/format.ts", "format", "opaque-dynamic-import");
+}
+
+#[test]
+fn an_opaque_import_in_a_test_file_counts_only_when_the_file_is_analyzed() {
+    let test = "const name = process.argv[2];\ntest('x', async () => { await import(name); });\n";
+    let files = base_with(&[("src/format.test.ts", test)], MAIN);
+    let default = analyze(&files);
+    assert_abstains(&default, "src/format.ts", "format", "opaque-dynamic-import");
+    let production = analyze_with(
+        &private_package(),
+        &serde_json::json!({ "entry": ["src/main.ts"], "production": true }),
+        &files,
+    );
+    assert_eq!(production.findings("format").len(), 2);
+}
+
+#[test]
+fn an_opaque_import_blocks_the_type_aware_class_candidates() {
+    let store = "export class Store {\n  save(id: string, retries: number): string { return id + retries; }\n}\n";
+    let main = "import { Store } from './store';\nconst store = new Store();\nstore.save('a', 1);\nstore.save('b', 1);\n";
+    let config = serde_json::json!({ "entry": ["src/main.ts"], "typeAware": { "enabled": true } });
+    let classes = |main: &str| -> Vec<String> {
+        analyze_with(
+            &private_package(),
+            &config,
+            &[("src/store.ts", store), ("src/main.ts", main)],
+        )
+        .results
+        .constant_parameter_candidates
+        .classes
+        .iter()
+        .map(|class| class.class_name.clone())
+        .collect()
+    };
+    assert_eq!(classes(main), vec!["Store".to_string()]);
+    let opaque = format!("{main}{OPAQUE}export const later = () => import(name);\n");
+    assert!(classes(&opaque).is_empty());
+}
+
 #[test]
 fn a_require_of_the_module_abstains() {
     let main = "import { format } from './format';\nimport './legacy';\nformat(1, true);\nformat(2, true);\nformat(3, true);\n";

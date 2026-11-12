@@ -1060,7 +1060,16 @@ each reason:
   `dynamicallyLoaded`), an export that a plugin `used_exports` rule matches,
   or a side-effect registration.
 - `dynamic-import`: a dynamic import or a dynamic import pattern reaches the
-  module.
+  module. This covers a source that resolves to a file, and a pattern with a
+  relative static prefix, which blocks only the files that it matches.
+- `opaque-dynamic-import`: a module of the analysis has an `import()` or a
+  `require` call whose source does not give a file or a pattern, such as
+  `import(name)`, `` import(`${name}`) `` or `require(name)`. Extraction
+  records this as `FunctionContractFacts::opaque_module_load`. The rule
+  blocks each exported function of the project and, in type-aware mode, each
+  exported class with methods. A function that no export exposes stays a
+  candidate. A file outside the analysis, such as a test file or a
+  support-only file under `--production`, does not count.
 - `commonjs`: the module has CommonJS exports, or a `require` reads it.
 - `namespace-escape`: a namespace import of the module is read as a value, or
   a named import resolves to a namespace re-export.

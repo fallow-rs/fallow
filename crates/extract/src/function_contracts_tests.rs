@@ -829,6 +829,45 @@ fn a_module_with_only_a_direct_eval_stores_the_flag() {
     assert!(facts(&info).direct_eval);
 }
 
+fn has_opaque_load(source: &str) -> bool {
+    parse(source)
+        .function_contracts
+        .as_deref()
+        .is_some_and(|facts| facts.opaque_module_load)
+}
+
+#[test]
+fn a_load_with_an_unknown_source_marks_the_module() {
+    for source in [
+        "export const load = (name: string) => import(name);",
+        "const name = process.argv[2];\nconst mod = await import(name);\nmod.pad('z', 2);",
+        "export const load = (x: string) => import(`${x}`);",
+        "export const load = (x: string) => import(`@/views/${x}`);",
+        "export const load = (x: string) => import('pkg/' + x);",
+        "const name = process.argv[2];\nrequire(name);",
+        "const name = process.argv[2];\nconst mod = require(name);\nmod.pad('z', 2);",
+        "export const load = (x: string) => require(`./views/${x}`);",
+        "export const load = (x: string) => import(x).then((m) => m.run());",
+    ] {
+        assert!(has_opaque_load(source), "{source}");
+    }
+}
+
+#[test]
+fn a_load_with_a_known_source_or_pattern_does_not_mark_the_module() {
+    for source in [
+        "export const load = () => import('./a');",
+        "export const load = (x: boolean) => import(x ? './a' : './b');",
+        "export const load = (x: string) => import(`./views/${x}.ts`);",
+        "export const load = (x: string) => import('./views/' + x);",
+        "const path = './a';\nexport const load = () => import(path);",
+        "const mod = require('./a');\nmod.run();",
+        "const text = require.resolve('./a');",
+    ] {
+        assert!(!has_opaque_load(source), "{source}");
+    }
+}
+
 #[test]
 fn argument_facts_stop_at_the_first_spread() {
     let info = parse("function f(a, b, c) {}\nf(true, ...rest, 1);");

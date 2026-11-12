@@ -71,6 +71,7 @@ pub fn collect(
         escapes,
         template_callers: false,
         direct_eval: calls_direct_eval(semantic),
+        opaque_module_load: false,
         literal_consts,
     }
 }

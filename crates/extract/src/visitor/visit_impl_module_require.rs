@@ -217,8 +217,18 @@ impl ModuleInfoExtractor {
     }
 
     pub(super) fn record_bare_require_call(&mut self, expr: &CallExpression<'_>) {
-        if let Some(Argument::StringLiteral(lit)) = expr.arguments.first()
-            && !self.handled_require_spans.contains(&expr.span)
+        let Some(first) = expr.arguments.first() else {
+            return;
+        };
+        let Argument::StringLiteral(lit) = first else {
+            // A `require` call gives no edge and no pattern for a source that
+            // is not a string literal, so the call can load any module.
+            if self.is_require_load_callee(&expr.callee) {
+                self.mark_opaque_module_load();
+            }
+            return;
+        };
+        if !self.handled_require_spans.contains(&expr.span)
             && self.is_require_load_callee(&expr.callee)
         {
             self.require_calls.push(RequireCallInfo {

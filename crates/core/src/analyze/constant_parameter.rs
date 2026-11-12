@@ -50,6 +50,10 @@ pub(super) enum Abstain {
     EntryExport,
     /// A dynamic import or a dynamic import pattern reaches the module.
     DynamicImport,
+    /// A module of the analysis has a dynamic import or a `require` call
+    /// whose source does not resolve to a file or a pattern. The call can
+    /// load each module and call each export.
+    OpaqueDynamicImport,
     /// The module has CommonJS exports, or a `require` reads it.
     CommonJs,
     /// A namespace import of the module escapes as a value.
@@ -82,12 +86,13 @@ pub(super) enum Abstain {
 
 impl Abstain {
     /// Each reason, in declaration order.
-    const ALL: [Self; 16] = [
+    const ALL: [Self; 17] = [
         Self::ParseIncomplete,
         Self::OpenContract,
         Self::PublicApi,
         Self::EntryExport,
         Self::DynamicImport,
+        Self::OpaqueDynamicImport,
         Self::CommonJs,
         Self::NamespaceEscape,
         Self::ValueReference,
@@ -101,8 +106,8 @@ impl Abstain {
         Self::TooFewCalls,
     ];
 
-    const fn bit(self) -> u16 {
-        1 << self as u16
+    const fn bit(self) -> u32 {
+        1 << self as u32
     }
 
     /// A stable kebab-case code for the reason.
@@ -114,6 +119,7 @@ impl Abstain {
             Self::PublicApi => "public-api",
             Self::EntryExport => "entry-export",
             Self::DynamicImport => "dynamic-import",
+            Self::OpaqueDynamicImport => "opaque-dynamic-import",
             Self::CommonJs => "commonjs",
             Self::NamespaceEscape => "namespace-escape",
             Self::ValueReference => "value-reference",
@@ -130,7 +136,7 @@ impl Abstain {
 }
 
 // `Reasons` holds one bit for each reason.
-const _: () = assert!(Abstain::ALL.len() <= u16::BITS as usize);
+const _: () = assert!(Abstain::ALL.len() <= u32::BITS as usize);
 
 /// A function contract: the module and the index of its declaration.
 type FnId = (FileId, u32);
@@ -138,7 +144,7 @@ type FnId = (FileId, u32);
 /// Each [`Abstain`] reason that applies to one function, one bit for each
 /// reason.
 #[derive(Debug, Clone, Copy, Default)]
-struct Reasons(u16);
+struct Reasons(u32);
 
 impl Reasons {
     const fn insert(&mut self, reason: Abstain) {
@@ -198,6 +204,8 @@ struct ConstantParameterInput<'a> {
     line_offsets_by_file: &'a LineOffsetsMap<'a>,
     /// `true` when a `constant-parameter` suppression covers the line.
     is_suppressed: &'a dyn Fn(FileId, u32) -> bool,
+    /// The files that take no part in the analysis in production mode.
+    excluded: &'a FxHashSet<FileId>,
     /// `true` when the run has type-aware mode on. The gate then also reads
     /// exported classes, and the rule collects the candidates that need
     /// type evidence.
@@ -650,6 +658,11 @@ impl<'a> Gate<'a> {
         if html && facts.is_some_and(|facts| facts.template_callers) {
             // Extraction records no import of an inline script.
             self.block_scanned_targets(file, Abstain::TemplateCallers);
+        }
+        if facts.is_some_and(|facts| facts.opaque_module_load)
+            && !self.input.excluded.contains(&file)
+        {
+            self.block_all_exports(Abstain::OpaqueDynamicImport);
         }
         self.block_exports(module);
         self.block_import_references(module);
@@ -1427,6 +1440,7 @@ pub(super) fn populate(input: &mut super::PostDetectionInput<'_, '_>) {
         declared_deps: input.declared_deps,
         line_offsets_by_file: input.line_offsets_by_file,
         is_suppressed: &is_suppressed,
+        excluded: input.excluded,
         type_aware: config.type_aware.enabled,
     });
     #[cfg(test)]

@@ -33,8 +33,18 @@ impl ModuleInfoExtractor {
         self.import_binding_references = references;
     }
 
+    /// Store the facts of the semantic pass. The walk can set
+    /// `opaque_module_load` before this call, so the flag stays.
     pub(crate) fn set_function_contracts(&mut self, facts: FunctionContractFacts) {
+        let opaque = self.function_contracts.opaque_module_load;
         self.function_contracts = facts;
+        self.function_contracts.opaque_module_load |= opaque;
+    }
+
+    /// Mark an `import()` or a `require` call whose source gives no edge and
+    /// no pattern. The call can load any module.
+    pub(super) const fn mark_opaque_module_load(&mut self) {
+        self.function_contracts.opaque_module_load = true;
     }
 
     /// Append the facts of this script block to `info`. Each index moves past
@@ -72,6 +82,7 @@ impl ModuleInfoExtractor {
             }));
         facts.template_callers |= incoming.template_callers;
         facts.direct_eval |= incoming.direct_eval;
+        facts.opaque_module_load |= incoming.opaque_module_load;
         facts
             .calls
             .sort_by_key(|calls| calls.sites.first().map_or(0, |site| site.span_start));

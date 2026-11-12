@@ -857,18 +857,50 @@ impl<'a> ModuleInfoExtractor {
         })
     }
 
+    /// Record the pattern of an `import()` source that has no static
+    /// specifier: a substitution template or a `'./x/' + y` concatenation.
+    /// Any other source can name any module, so it marks the module.
+    pub(super) fn record_dynamic_import_pattern(&mut self, source: &Expression<'a>, span: Span) {
+        match source {
+            Expression::TemplateLiteral(tpl)
+                if !tpl.quasis.is_empty() && !tpl.expressions.is_empty() =>
+            {
+                if !self.record_dynamic_import_template_pattern(tpl, span) {
+                    self.mark_opaque_module_load();
+                }
+            }
+            Expression::BinaryExpression(bin) if bin.operator == BinaryOperator::Addition => {
+                if let Some((prefix, suffix)) = extract_concat_parts(bin)
+                    && (prefix.starts_with("./") || prefix.starts_with("../"))
+                {
+                    self.dynamic_import_patterns.push(DynamicImportPattern {
+                        prefix,
+                        suffix,
+                        span,
+                        mechanism: ModuleLoadMechanism::EsModule,
+                        excludes: Vec::new(),
+                    });
+                } else {
+                    self.mark_opaque_module_load();
+                }
+            }
+            _ => self.mark_opaque_module_load(),
+        }
+    }
+
     /// Record a dynamic-import glob pattern from an interpolated template
     /// literal (`import(\`./views/${name}.js\`)`): a relative-prefixed quasi
     /// becomes a `DynamicImportPattern`; multiple interpolations widen the
-    /// prefix with a recursive `**/` segment.
+    /// prefix with a recursive `**/` segment. Returns `false` when the first
+    /// quasi is not relative and the template gives no pattern.
     pub(super) fn record_dynamic_import_template_pattern(
         &mut self,
         tpl: &TemplateLiteral<'a>,
         span: Span,
-    ) {
+    ) -> bool {
         let first_quasi = escape_glob_literal(&tpl.quasis[0].value.raw);
         if !(first_quasi.starts_with("./") || first_quasi.starts_with("../")) {
-            return;
+            return false;
         }
         let prefix = if tpl.expressions.len() > 1 {
             format!("{first_quasi}**/")
@@ -889,6 +921,7 @@ impl<'a> ModuleInfoExtractor {
             mechanism: ModuleLoadMechanism::EsModule,
             excludes: Vec::new(),
         });
+        true
     }
 }
 
