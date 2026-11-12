@@ -51,9 +51,10 @@ pub(super) enum Abstain {
     /// A dynamic import or a dynamic import pattern reaches the module.
     DynamicImport,
     /// A module of the analysis has a dynamic import or a `require` call
-    /// whose source does not resolve to a file or a pattern. The call can
-    /// load each module and call each export.
-    OpaqueDynamicImport,
+    /// whose source does not resolve to a file or a pattern. The code reads
+    /// the export name of the function on the loaded value, or the value
+    /// escapes, so the load can call the function.
+    OpaqueModuleLoad,
     /// The module has CommonJS exports, or a `require` reads it.
     CommonJs,
     /// A namespace import of the module escapes as a value.
@@ -92,7 +93,7 @@ impl Abstain {
         Self::PublicApi,
         Self::EntryExport,
         Self::DynamicImport,
-        Self::OpaqueDynamicImport,
+        Self::OpaqueModuleLoad,
         Self::CommonJs,
         Self::NamespaceEscape,
         Self::ValueReference,
@@ -119,7 +120,7 @@ impl Abstain {
             Self::PublicApi => "public-api",
             Self::EntryExport => "entry-export",
             Self::DynamicImport => "dynamic-import",
-            Self::OpaqueDynamicImport => "opaque-dynamic-import",
+            Self::OpaqueModuleLoad => "opaque-module-load",
             Self::CommonJs => "commonjs",
             Self::NamespaceEscape => "namespace-escape",
             Self::ValueReference => "value-reference",
@@ -279,6 +280,7 @@ fn find_constant_parameters(input: &ConstantParameterInput<'_>) -> Evaluation {
         gate.block_broken_module(module.file_id);
     }
     gate.block_surfaces();
+    gate.block_opaque_loads();
     for module in input.modules {
         gate.scan_module(module);
     }
@@ -595,6 +597,55 @@ impl<'a> Gate<'a> {
         }
     }
 
+    /// Block each function that a load with an unknown source in a module
+    /// of the analysis can call. A name that the code reads on the loaded
+    /// value blocks each export of that name, also through a re-export. A
+    /// value that escapes blocks each export.
+    fn block_opaque_loads(&mut self) {
+        let reason = Abstain::OpaqueModuleLoad;
+        let graph = self.input.graph;
+        let mut names: FxHashSet<&str> = FxHashSet::default();
+        for module in self.input.modules {
+            let Some(loads) = facts(module).map(|facts| &facts.opaque_loads) else {
+                continue;
+            };
+            if loads.is_empty() || self.input.excluded.contains(&module.file_id) {
+                continue;
+            }
+            if loads.escapes {
+                if let Some(node) = graph.modules.get(module.file_id.0 as usize) {
+                    tracing::debug!(
+                        path = %node.path.display(),
+                        "constant-parameter: the value of an unknown-source load escapes"
+                    );
+                }
+                self.block_all_exports(reason);
+            }
+            names.extend(loads.names.iter().map(String::as_str));
+        }
+        if names.is_empty() || self.all_exports_blocked.contains(reason) {
+            return;
+        }
+        let mut names: Vec<&str> = names.into_iter().collect();
+        names.sort_unstable();
+        let files: Vec<FileId> = graph.modules.iter().map(|node| node.file_id).collect();
+        for name in names {
+            for &file in &files {
+                match graph.resolve_export(file, name, ExportNamespace::Value) {
+                    EffectiveExportResolution::Unique(binding) => {
+                        if let Some(source) = binding.namespace_source() {
+                            self.block_surface(source, reason);
+                        } else if let Some(id) = self.binding_contract(binding) {
+                            self.block(id, reason);
+                        }
+                    }
+                    EffectiveExportResolution::Ambiguous => self.block_name(name, reason),
+                    EffectiveExportResolution::Missing => {}
+                }
+            }
+        }
+    }
+
     fn block_hidden_imports(&mut self, resolved: &ResolvedModule) {
         let imports = resolved
             .resolved_imports
@@ -658,11 +709,6 @@ impl<'a> Gate<'a> {
         if html && facts.is_some_and(|facts| facts.template_callers) {
             // Extraction records no import of an inline script.
             self.block_scanned_targets(file, Abstain::TemplateCallers);
-        }
-        if facts.is_some_and(|facts| facts.opaque_module_load)
-            && !self.input.excluded.contains(&file)
-        {
-            self.block_all_exports(Abstain::OpaqueDynamicImport);
         }
         self.block_exports(module);
         self.block_import_references(module);

@@ -1310,7 +1310,7 @@ impl ModuleInfoExtractor {
             Declaration::VariableDeclaration(var) => {
                 for declarator in &var.declarations {
                     for id in declarator.id.get_binding_identifiers() {
-                        self.record_local_declaration_name(&id.name);
+                        self.record_declaration_name(&id.name, var.declare);
                     }
                 }
             }
@@ -1440,7 +1440,7 @@ impl ModuleInfoExtractor {
 
     fn record_top_level_function_declaration(&mut self, function: &Function<'_>) {
         if let Some(id) = function.id.as_ref() {
-            self.record_local_declaration_name(&id.name);
+            self.record_declaration_name(&id.name, function.declare);
             self.record_sanitizer_binding(id.name.as_str(), None);
             self.record_literal_allowlist_binding(id.name.as_str(), false);
             self.record_risky_regex_binding(id.name.as_str(), None);

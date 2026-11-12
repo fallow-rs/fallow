@@ -4,7 +4,7 @@ use fallow_types::discover::FileId;
 use fallow_types::extract::{
     ArgFact, BindingArg, BindingRoot, CallSite, CallTarget, ContractIncomplete, FunctionContract,
     FunctionContractFacts, ImportBindingReferenceKind, KeyArg, KeyValue, LiteralValue, ModuleInfo,
-    ParamKind,
+    OpaqueLoads, ParamKind,
 };
 
 fn parse_at(path: &str, source: &str) -> ModuleInfo {
@@ -829,43 +829,193 @@ fn a_module_with_only_a_direct_eval_stores_the_flag() {
     assert!(facts(&info).direct_eval);
 }
 
-fn has_opaque_load(source: &str) -> bool {
+fn opaque_loads(source: &str) -> OpaqueLoads {
     parse(source)
         .function_contracts
-        .as_deref()
-        .is_some_and(|facts| facts.opaque_module_load)
+        .map(|facts| facts.opaque_loads)
+        .unwrap_or_default()
 }
 
+fn opaque_loads_at(path: &str, source: &str) -> OpaqueLoads {
+    parse_at(path, source)
+        .function_contracts
+        .map(|facts| facts.opaque_loads)
+        .unwrap_or_default()
+}
+
+fn read_names(names: &[&str]) -> OpaqueLoads {
+    OpaqueLoads {
+        names: names.iter().map(ToString::to_string).collect(),
+        escapes: false,
+    }
+}
+
+const ESCAPE: OpaqueLoads = OpaqueLoads {
+    names: Vec::new(),
+    escapes: true,
+};
+
 #[test]
-fn a_load_with_an_unknown_source_marks_the_module() {
-    for source in [
-        "export const load = (name: string) => import(name);",
-        "const name = process.argv[2];\nconst mod = await import(name);\nmod.pad('z', 2);",
-        "export const load = (x: string) => import(`${x}`);",
-        "export const load = (x: string) => import(`@/views/${x}`);",
-        "export const load = (x: string) => import('pkg/' + x);",
-        "const name = process.argv[2];\nrequire(name);",
-        "const name = process.argv[2];\nconst mod = require(name);\nmod.pad('z', 2);",
-        "export const load = (x: string) => require(`./views/${x}`);",
-        "export const load = (x: string) => import(x).then((m) => m.run());",
-        "export const load = (c: boolean, x: string) => import(c ? './a' : x);",
-        "export const load = (c: boolean, x: string) => import(c ? x : './a');",
-        "export const load = (x: string) => import(x || './a');",
-        "export const load = (x: string) => import(x ?? './a');",
-        "export const load = (c: boolean, x: string) => import(c ? './a' : `${x}`);",
-        "const name = process.argv[2];\nconst m = await import(name ? './a' : name);\nm.pad('z', 2);",
-        "const name = process.argv[2];\nconst mod = module.require(name);\nmod.pad('z', 2);",
-        "const name = process.argv[2];\nconst mod = globalThis.require(name);\nmod.pad('z', 2);",
-        "const r = require;\nconst mod = r(process.env.X);\nmod.pad('z', 2);",
-        "import { createRequire } from 'node:module';\nconst require = createRequire(import.meta.url);\nconst mod = require(process.env.X);",
-        "export const load = (x: string) => import((x as string));",
+fn a_load_with_an_unknown_source_records_the_names_that_the_code_reads() {
+    for (source, names) in [
+        (
+            "const mod = await import(name);\nmod.pad('z', 2);",
+            &["pad"][..],
+        ),
+        (
+            "const mod = await import(name);\nmod?.pad?.('z', 2);",
+            &["pad"],
+        ),
+        (
+            "const mod = await import(name);\nmod['pad']('z', 2);",
+            &["pad"],
+        ),
+        (
+            "const { pad, default: h } = await import(name);",
+            &["default", "pad"],
+        ),
+        ("const { pad: p = noop } = await import(name);", &["pad"]),
+        (
+            "const mod = await import(name);\nif ('pad' in mod) mod.run();",
+            &["pad", "run"],
+        ),
+        ("import(name).then((m) => m.pad());", &["pad"]),
+        ("import(name).then(({ pad }) => pad());", &["pad"]),
+        ("import(name).then(function (m) { m.pad(); });", &["pad"]),
+        ("require(name).pad('z', 2);", &["pad"]),
+        (
+            "const mod = require(name);\nmod.pad('z', 2);\nmod.trim('z');",
+            &["pad", "trim"],
+        ),
+        ("(await import(name)).default('z');", &["default"]),
+        (
+            "const mod = await import(name);\nmod.ns.pad('z', 2);",
+            &["ns"],
+        ),
+        ("const mod = await import(name);\nmod.pad = 1;", &["pad"]),
+        (
+            "const mod = await import(name);\nif (!mod || typeof mod === 'object') mod.pad();",
+            &["pad"],
+        ),
+        (
+            "export function run(x: string) { return import(x).then((m) => m.pad()); }",
+            &["pad"],
+        ),
+        (
+            "const mod = module.require(name);\nmod.pad('z', 2);",
+            &["pad"],
+        ),
+        (
+            "const mod = globalThis.require(name);\nmod.pad('z', 2);",
+            &["pad"],
+        ),
+        (
+            "const m = await import(flag ? './a' : name);\nm.pad('z', 2);",
+            &["pad"],
+        ),
+        (
+            "import { createRequire } from 'node:module';\nconst require = createRequire(import.meta.url);\nrequire(process.env.X).pad();",
+            &["pad"],
+        ),
+        (
+            "declare function require(id: string): any;\nrequire(name).pad('z', 2);",
+            &["pad"],
+        ),
+        (
+            "declare var require: any;\nrequire(name).pad('z', 2);",
+            &["pad"],
+        ),
+        (
+            "const m = await import(name).catch(() => null);\nm.pad();",
+            &["pad"],
+        ),
+        (
+            "import(name).finally(() => {}).then((m) => m.pad());",
+            &["pad"],
+        ),
     ] {
-        assert!(has_opaque_load(source), "{source}");
+        assert_eq!(opaque_loads(source), read_names(names), "{source}");
     }
 }
 
 #[test]
-fn a_load_with_a_known_source_or_pattern_does_not_mark_the_module() {
+fn a_jsx_member_tag_of_a_loaded_value_records_the_name() {
+    let source = "const mod = await import(name);\nexport const View = () => <mod.Pad />;";
+    assert_eq!(
+        opaque_loads_at("src/view.tsx", source),
+        read_names(&["Pad"])
+    );
+}
+
+#[test]
+fn a_loaded_value_that_escapes_records_an_escape() {
+    for source in [
+        "export const load = (name: string) => import(name);",
+        "export async function get(name: string) { return await import(name); }",
+        "const mod = await import(name);\nconst alias = mod;",
+        "let mod;\nmod = await import(name);\nmod.pad();",
+        "console.log(await import(name));",
+        "await Promise.all([import(name)]);",
+        "const box = { mod: await import(name) };",
+        "const list = [await import(name)];",
+        "const mod = await import(name);\nexport { mod };",
+        "const mod = await import(name);\nexport default mod;",
+        "const copy = { ...(await import(name)) };",
+        "Object.assign({}, await import(name));",
+        "const mod = await import(name);\nfor (const key in mod) console.log(key);",
+        "const mod = await import(name);\nObject.keys(mod);",
+        "const mod = await import(name);\nmod[key]();",
+        "const mod = await import(name);\nif (key in mod) mod.pad();",
+        "require(name)();",
+        "new (require(name))();",
+        "const { pad, ...rest } = await import(name);",
+        "const { [key]: value } = await import(name);",
+        "const [first] = await import(name);",
+        "import(name).then(console.log);",
+        "import(name).then((m) => m);",
+        "import(name).then((...args) => args);",
+        "const promise = import(name);",
+        "export const load = (x: string) => import(`${x}`);",
+        "export const load = (x: string) => import(`@/views/${x}`);",
+        "export const load = (x: string) => import('pkg/' + x);",
+        "export const load = (x: string) => require(`./views/${x}`);",
+        "export const load = (x: string) => import((x as string));",
+        "const r = require;\nconst mod = r(process.env.X);\nmod.pad('z', 2);",
+        "export const mod = await import(name);",
+        "export let mod = await import(name);",
+        "export const mod = require(name);",
+        "console.log(require.call(null, name));",
+        "const load = require.bind(null);\nload(name).pad();",
+        "require.apply(null, [name]);",
+        "[name].map(require);",
+        "import(name).then(function () { arguments[0].pad('z', 2); });",
+        "import(name).then(function (m) { const [x] = arguments; x.pad(); });",
+    ] {
+        assert!(opaque_loads(source).escapes, "{source}");
+    }
+}
+
+#[test]
+fn a_discarded_load_records_nothing() {
+    for source in [
+        "await import(name);",
+        "require(name);",
+        "void import(name);",
+        "import(name);",
+        "import(name).catch(() => {});",
+        "import(name).then(() => ready());",
+        "import(name).then();",
+        "const mod = await import(name);",
+        "await import(name).catch(() => null);",
+        "await import(name).finally(() => {});",
+        "const text = require.resolve(name);",
+    ] {
+        assert_eq!(opaque_loads(source), OpaqueLoads::default(), "{source}");
+    }
+}
+
+#[test]
+fn a_load_with_a_known_source_or_pattern_records_nothing() {
     for source in [
         "export const load = () => import('./a');",
         "export const load = (x: boolean) => import(x ? './a' : './b');",
@@ -878,8 +1028,23 @@ fn a_load_with_a_known_source_or_pattern_does_not_mark_the_module() {
         "export const load = () => import(new URL('./a.ts', import.meta.url));",
         "export function run(require: (s: string) => unknown, name: string) {\n  return require(name);\n}",
         "function require(body: Record<string, string>, key: string): string {\n  return body[key];\n}\nexport const read = (body: Record<string, string>) => require(body, 'code');",
+        "export const load = (x: string) => import(`@/locales/${x}.json`);",
+        "export const load = (x: string) => import(`${x}.CSS`);",
+        "export const load = (x: string) => require('@/styles/' + x + '.scss');",
+        "export const load = (x: string) => require(`${x}.yaml`);",
+        "export const load = (x: string) => import(`${x}.json?raw`);",
     ] {
-        assert!(!has_opaque_load(source), "{source}");
+        assert_eq!(opaque_loads(source), OpaqueLoads::default(), "{source}");
+    }
+}
+
+#[test]
+fn an_imports_map_prefix_keeps_a_data_suffix_opaque() {
+    for source in [
+        "export const load = (x: string) => import(`#i18n/${x}.json`);",
+        "export const load = (x: string) => require('#styles/' + x + '.css');",
+    ] {
+        assert_eq!(opaque_loads(source), ESCAPE, "{source}");
     }
 }
 
@@ -891,7 +1056,7 @@ fn a_pattern_branch_of_a_conditional_load_gives_a_pattern() {
     assert!(
         info.function_contracts
             .as_deref()
-            .is_none_or(|facts| !facts.opaque_module_load)
+            .is_none_or(|facts| facts.opaque_loads.is_empty())
     );
     assert!(
         info.dynamic_import_patterns
@@ -899,6 +1064,61 @@ fn a_pattern_branch_of_a_conditional_load_gives_a_pattern() {
             .any(|pattern| pattern.prefix == "./views/"),
         "{:?}",
         info.dynamic_import_patterns
+    );
+}
+
+#[test]
+fn a_mixed_conditional_or_logical_source_counts_as_unknown() {
+    for source in [
+        "export const load = (c: boolean, x: string) => import(c ? './a' : x).then((m) => m.pad());",
+        "export const load = (c: boolean, x: string) => import(c ? x : './a').then((m) => m.pad());",
+        "export const load = (x: string) => import(x || './a').then((m) => m.pad());",
+        "export const load = (x: string) => import(x ?? './a').then((m) => m.pad());",
+        "export const load = (c: boolean, x: string) => import(c ? './a' : `${x}`).then((m) => m.pad());",
+    ] {
+        assert_eq!(opaque_loads(source), read_names(&["pad"]), "{source}");
+    }
+}
+
+#[test]
+fn the_names_of_each_script_block_merge_in_a_host_file() {
+    let source = "<script>\nconst a = await import(name);\na.pad();\n</script>\n<script setup>\nconst { trim, pad } = await import(other);\n</script>\n";
+    assert_eq!(
+        opaque_loads_at("src/View.vue", source),
+        read_names(&["pad", "trim"])
+    );
+}
+
+#[test]
+fn a_template_visible_binding_of_a_loaded_value_records_an_escape() {
+    for (path, source) in [
+        (
+            "src/View.vue",
+            "<script setup lang=\"ts\">\nconst mod: any = await import(name);\n</script>\n<template>{{ mod.pad('z', 2) }}</template>\n",
+        ),
+        (
+            "src/View.svelte",
+            "<script>\nconst mod = await import(name);\n</script>\n<p>{mod.pad('z', 2)}</p>\n",
+        ),
+        (
+            "src/View.svelte",
+            "<script context=\"module\">\nconst mod = await import(name);\n</script>\n<p>{mod.pad('z', 2)}</p>\n",
+        ),
+        (
+            "src/View.astro",
+            "---\nconst mod = await import(name);\n---\n<p>{mod.pad('z', 2)}</p>\n",
+        ),
+    ] {
+        assert!(opaque_loads_at(path, source).escapes, "{path}: {source}");
+    }
+}
+
+#[test]
+fn a_nested_binding_of_a_loaded_value_in_a_component_script_records_the_names() {
+    let source = "<script setup>\nasync function run() {\n  const m = await import(name);\n  m.pad();\n}\n</script>\n";
+    assert_eq!(
+        opaque_loads_at("src/View.vue", source),
+        read_names(&["pad"])
     );
 }
 

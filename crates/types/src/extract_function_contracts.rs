@@ -29,11 +29,10 @@ pub struct FunctionContractFacts {
     /// module calls, as open. A contract whose own body or default values
     /// call `eval` also has [`ContractIncomplete::DirectEval`].
     pub direct_eval: bool,
-    /// `true` when the module has an `import()` or a `require` call whose
-    /// source is not a string and not a relative pattern, such as
-    /// `import(name)`. The call can load any module and call its exports, so
-    /// a consumer must treat each exported contract of the project as open.
-    pub opaque_module_load: bool,
+    /// The uses of each `import()` or `require` call whose source gives no
+    /// file and no pattern, such as `import(name)`. Such a call can load each
+    /// module of the project.
+    pub opaque_loads: OpaqueLoads,
     /// The local names of the exported module-scope `const` bindings whose
     /// initializer is a literal, in source order. A call argument that names
     /// one of these bindings through an import has a known identity.
@@ -51,6 +50,13 @@ impl FunctionContractFacts {
         })
     }
 
+    /// These facts with the uses of the loads with an unknown source.
+    #[must_use]
+    pub fn with_opaque_loads(mut self, opaque_loads: OpaqueLoads) -> Self {
+        self.opaque_loads = opaque_loads;
+        self
+    }
+
     /// `true` when the module has no call evidence to store.
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -59,8 +65,38 @@ impl FunctionContractFacts {
             && self.escapes.is_empty()
             && !self.template_callers
             && !self.direct_eval
-            && !self.opaque_module_load
+            && self.opaque_loads.is_empty()
             && self.literal_consts.is_empty()
+    }
+}
+
+/// How the code of one module uses the values of its loads with an unknown
+/// source. A consumer must treat each exported contract of the project with
+/// one of `names` as its export name as open. When `escapes` is `true`, the
+/// consumer must treat each exported contract of the project as open.
+#[derive(Debug, Clone, Default, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+pub struct OpaqueLoads {
+    /// The export names that the code reads on a loaded value, sorted and
+    /// without repeats. `default` names the default export.
+    pub names: Vec<String>,
+    /// `true` when a loaded value goes to code that the facts do not follow,
+    /// for example an alias, a call argument, a return value or a spread.
+    pub escapes: bool,
+}
+
+impl OpaqueLoads {
+    /// `true` when no load reads a name and no loaded value escapes.
+    #[must_use]
+    pub const fn is_empty(&self) -> bool {
+        self.names.is_empty() && !self.escapes
+    }
+
+    /// Add the names and the escape of `other`.
+    pub fn merge(&mut self, other: Self) {
+        self.names.extend(other.names);
+        self.names.sort_unstable();
+        self.names.dedup();
+        self.escapes |= other.escapes;
     }
 }
 

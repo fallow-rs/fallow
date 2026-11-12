@@ -9,6 +9,21 @@ use rustc_hash::FxHashSet;
 
 use super::{ModuleInfo, ModuleInfoExtractor};
 
+/// The working state of the loads with an unknown source in one program.
+#[derive(Default)]
+pub(super) struct OpaqueLoadState {
+    /// The span of each `import()` or `require` call whose uses the
+    /// semantic pass reads.
+    spans: FxHashSet<Span>,
+    /// True when a template outside the program can read each top-level
+    /// binding: a Vue `<script setup>` block, a Svelte script, an Astro
+    /// frontmatter or a Glimmer file.
+    template_reads_root: bool,
+    /// True when the program has an ambient `declare` of `require`, which
+    /// has no runtime binding and does not hide the module loader.
+    pub(super) ambient_require: bool,
+}
+
 impl ModuleInfoExtractor {
     pub(crate) fn imported_call_reference_candidates(&self) -> FxHashSet<Span> {
         self.pending_imported_call_sites
@@ -33,18 +48,47 @@ impl ModuleInfoExtractor {
         self.import_binding_references = references;
     }
 
-    /// Store the facts of the semantic pass. The walk can set
-    /// `opaque_module_load` before this call, so the flag stays.
+    /// Store the facts of the semantic pass, which reads the value of each
+    /// load with an unknown source.
     pub(crate) fn set_function_contracts(&mut self, facts: FunctionContractFacts) {
-        let opaque = self.function_contracts.opaque_module_load;
         self.function_contracts = facts;
-        self.function_contracts.opaque_module_load |= opaque;
+        self.opaque_loads.spans.clear();
     }
 
-    /// Mark an `import()` or a `require` call whose source gives no edge and
-    /// no pattern. The call can load any module.
-    pub(super) const fn mark_opaque_module_load(&mut self) {
-        self.function_contracts.opaque_module_load = true;
+    pub(crate) const fn set_template_reads_root(&mut self, value: bool) {
+        self.opaque_loads.template_reads_root = value;
+    }
+
+    pub(crate) const fn template_reads_root(&self) -> bool {
+        self.opaque_loads.template_reads_root
+    }
+
+    /// Record a declared name. An ambient `declare` of `require` adds no
+    /// runtime binding, so the global loader stays visible.
+    pub(super) fn record_declaration_name(&mut self, name: &str, ambient: bool) {
+        self.opaque_loads.ambient_require |= ambient && name == "require";
+        self.record_local_declaration_name(name);
+    }
+
+    /// The span of each `import()` or `require` call with an unknown source,
+    /// for the semantic pass.
+    pub(crate) fn opaque_load_candidates(&self) -> FxHashSet<Span> {
+        self.opaque_loads.spans.clone()
+    }
+
+    /// Record an `import()` or a `require` call whose source gives no edge
+    /// and no pattern. The call can load any module. Until the semantic pass
+    /// reads the uses of the value, the value counts as an escape.
+    pub(super) fn mark_opaque_module_load(&mut self, span: Span) {
+        self.opaque_loads.spans.insert(span);
+        self.function_contracts.opaque_loads.escapes = true;
+    }
+
+    /// Record a value that can load any module, such as `const r = require`,
+    /// whose uses the facts do not follow. No node has the empty span, so
+    /// the semantic pass cannot read this load and records an escape.
+    pub(super) fn mark_opaque_load_escape(&mut self) {
+        self.mark_opaque_module_load(Span::default());
     }
 
     /// Append the facts of this script block to `info`. Each index moves past
@@ -82,7 +126,7 @@ impl ModuleInfoExtractor {
             }));
         facts.template_callers |= incoming.template_callers;
         facts.direct_eval |= incoming.direct_eval;
-        facts.opaque_module_load |= incoming.opaque_module_load;
+        facts.opaque_loads.merge(incoming.opaque_loads);
         facts
             .calls
             .sort_by_key(|calls| calls.sites.first().map_or(0, |site| site.span_start));

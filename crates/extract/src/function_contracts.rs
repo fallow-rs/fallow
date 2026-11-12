@@ -9,8 +9,8 @@
 
 use fallow_types::extract::{
     ArgFact, CallSite, CallTarget, ContractIncomplete, FunctionCalls, FunctionContract,
-    FunctionContractFacts, ImportInfo, LiteralValue, LocalFunctionEscape, OptionKeyFact, ParamFact,
-    ParamKind,
+    FunctionContractFacts, ImportInfo, LiteralValue, LocalFunctionEscape, OpaqueLoads,
+    OptionKeyFact, ParamFact, ParamKind,
 };
 use oxc_ast::AstKind;
 use oxc_ast::ast::{
@@ -71,7 +71,7 @@ pub fn collect(
         escapes,
         template_callers: false,
         direct_eval: calls_direct_eval(semantic),
-        opaque_module_load: false,
+        opaque_loads: OpaqueLoads::default(),
         literal_consts,
     }
 }

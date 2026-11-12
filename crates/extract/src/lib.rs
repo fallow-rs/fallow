@@ -60,6 +60,7 @@ mod module_parse;
 mod namespace_member_uses;
 mod nesting;
 pub mod og_image;
+mod opaque_loads;
 mod parse;
 mod parse_degradation;
 pub mod sfc;

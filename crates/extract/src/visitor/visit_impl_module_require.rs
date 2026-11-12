@@ -142,7 +142,7 @@ impl ModuleInfoExtractor {
                 // A call through another name of `require` is not visible.
                 if matches!(declarator.init.as_ref().map(Expression::get_inner_expression), Some(Expression::Identifier(init)) if init.name == REQUIRE)
                 {
-                    self.mark_opaque_module_load();
+                    self.mark_opaque_load_escape();
                 }
                 if let Some(alias) = required_create_require_alias(declarator) {
                     self.create_require_aliases.insert(alias.to_string());
@@ -214,7 +214,8 @@ impl ModuleInfoExtractor {
             Expression::Identifier(ident) if ident.name == REQUIRE => {
                 self.is_this_file_require(callee)
                     || !(self.nested_scope_shadows(REQUIRE)
-                        || self.local_declaration_names.contains(REQUIRE))
+                        || (self.local_declaration_names.contains(REQUIRE)
+                            && !self.opaque_loads.ambient_require))
             }
             Expression::StaticMemberExpression(member) => {
                 member.property.name == REQUIRE
@@ -250,8 +251,11 @@ impl ModuleInfoExtractor {
         let Argument::StringLiteral(lit) = first else {
             // A `require` call gives no edge and no pattern for a source that
             // is not a string literal, so the call can load any module.
-            if self.is_unknown_source_load_callee(&expr.callee) {
-                self.mark_opaque_module_load();
+            let data = first
+                .as_expression()
+                .is_some_and(super::visit_dynamic_imports::loads_data_file);
+            if !data && self.is_unknown_source_load_callee(&expr.callee) {
+                self.mark_opaque_module_load(expr.span);
             }
             return;
         };

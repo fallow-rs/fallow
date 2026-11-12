@@ -885,7 +885,8 @@ impl<'a> ModuleInfoExtractor {
     /// Record the pattern of an `import()` source that has no static
     /// specifier: a substitution template or a `'./x/' + y` concatenation.
     /// Any other source can name any module, so it marks the module. A
-    /// `new URL('./x', import.meta.url)` source has its own edge.
+    /// `new URL('./x', import.meta.url)` source has its own edge, and a data
+    /// file cannot hold a function.
     pub(super) fn record_dynamic_import_pattern(&mut self, source: &Expression<'a>, span: Span) {
         match source.get_inner_expression() {
             Expression::NewExpression(new_expr) if new_url_import_source(new_expr).is_some() => {}
@@ -896,8 +897,10 @@ impl<'a> ModuleInfoExtractor {
             Expression::TemplateLiteral(tpl)
                 if !tpl.quasis.is_empty() && !tpl.expressions.is_empty() =>
             {
-                if !self.record_dynamic_import_template_pattern(tpl, span) {
-                    self.mark_opaque_module_load();
+                if !self.record_dynamic_import_template_pattern(tpl, span)
+                    && !loads_data_file(source)
+                {
+                    self.mark_opaque_module_load(span);
                 }
             }
             Expression::BinaryExpression(bin) if bin.operator == BinaryOperator::Addition => {
@@ -911,11 +914,11 @@ impl<'a> ModuleInfoExtractor {
                         mechanism: ModuleLoadMechanism::EsModule,
                         excludes: Vec::new(),
                     });
-                } else {
-                    self.mark_opaque_module_load();
+                } else if !loads_data_file(source) {
+                    self.mark_opaque_module_load(span);
                 }
             }
-            _ => self.mark_opaque_module_load(),
+            _ => self.mark_opaque_module_load(span),
         }
     }
 
@@ -954,6 +957,50 @@ impl<'a> ModuleInfoExtractor {
         });
         true
     }
+}
+
+/// The file extensions of data that a load returns as a value with no
+/// function, such as a JSON document or a style sheet.
+const DATA_EXTENSIONS: &[&str] = &[
+    ".json", ".css", ".scss", ".sass", ".less", ".svg", ".png", ".jpg", ".jpeg", ".gif", ".webp",
+    ".txt", ".md", ".yaml", ".yml", ".html",
+];
+
+/// Whether a template or concatenation source ends in a data extension, as
+/// in `` `@/locales/${lang}.json` ``. A `#` prefix names a package `imports`
+/// map, which can map the specifier to a module of another extension.
+pub(super) fn loads_data_file(source: &Expression<'_>) -> bool {
+    let (prefix, suffix) = match source.get_inner_expression() {
+        Expression::TemplateLiteral(tpl) if !tpl.expressions.is_empty() => {
+            let (Some(first), Some(last)) = (tpl.quasis.first(), tpl.quasis.last()) else {
+                return false;
+            };
+            (first.value.raw.to_string(), last.value.raw.to_string())
+        }
+        Expression::BinaryExpression(bin) if bin.operator == BinaryOperator::Addition => {
+            let Expression::StringLiteral(last) = bin.right.get_inner_expression() else {
+                return false;
+            };
+            let mut left = &bin.left;
+            while let Expression::BinaryExpression(inner) = left.get_inner_expression()
+                && inner.operator == BinaryOperator::Addition
+            {
+                left = &inner.left;
+            }
+            let prefix = match left.get_inner_expression() {
+                Expression::StringLiteral(first) => first.value.text().into_owned(),
+                _ => String::new(),
+            };
+            (prefix, last.value.text().into_owned())
+        }
+        _ => return false,
+    };
+    // A bundler query such as `?raw` or `?url` keeps the file a data file.
+    let path = suffix
+        .split_once('?')
+        .map_or(suffix.as_str(), |(path, _)| path);
+    let path = path.to_ascii_lowercase();
+    !prefix.starts_with('#') && DATA_EXTENSIONS.iter().any(|ext| path.ends_with(ext))
 }
 
 /// The exclude globs of an `import.meta.glob` array: each negative entry
