@@ -1532,7 +1532,7 @@ fn git_merge_base(root: &Path, a: &str, b: &str) -> Option<String> {
 /// `git remote set-head origin -d`), so `origin/main` and then `origin/master`
 /// follow. Returns `None` when none of the three exists.
 #[must_use]
-pub fn detect_remote_default_ref(root: &Path) -> Option<String> {
+fn detect_remote_default_ref(root: &Path) -> Option<String> {
     if let Some(full_ref) = run_git(root, &["symbolic-ref", "refs/remotes/origin/HEAD"])
         && let Some(branch) = full_ref.strip_prefix("refs/remotes/origin/")
     {
