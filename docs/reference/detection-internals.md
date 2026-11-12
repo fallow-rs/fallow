@@ -1070,8 +1070,8 @@ each reason:
   `globalThis.require(name)` and a module-level `const r = require` also
   count. A local binding named `require`, such as a parameter, does not
   count. A template or concatenation source whose last static part ends in
-  a data extension (a query such as `?raw` after it is allowed), such as `` import(`@/locales/${lang}.json`) ``, does not
-  count. A source that starts with `#` still counts, because a package
+  a data extension, such as `` import(`@/locales/${lang}.json`) ``, does not
+  count. A query such as `?raw` after the extension is allowed. A source that starts with `#` still counts, because a package
   `imports` map can change the extension.
   Extraction records `FunctionContractFacts::opaque_loads`. The semantic
   pass in `crates/extract/src/opaque_loads.rs` reads the uses of each loaded
@@ -1096,8 +1096,9 @@ each reason:
     template can read it. A read of the global `require` as a value, such
     as `require.call(null, x)` or `[x].map(require)`, is also an escape. An
     ambient `declare` of `require` does not hide the global loader.
-    `.catch()` and `.finally()` on the load keep the loaded value. The rule then blocks each exported function of the project
-    and, in type-aware mode, each exported class with methods. A debug log
+    `.catch()` and `.finally()` on the load keep the loaded value. On an
+    escape, the rule blocks each exported function of the project and, in
+    type-aware mode, each exported class with methods. A debug log
     line names each module with such an escape.
   - A discarded value (`await import(x);`, `require(x);`) blocks nothing.
     When the loaded file is part of the analysis, its callers are visible.
