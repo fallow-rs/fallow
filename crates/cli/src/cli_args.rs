@@ -1793,19 +1793,19 @@ pub enum Command {
     /// Combines dead-code + complexity + duplication + styling scoped to
     /// changed files and returns a verdict (pass/warn/fail).
     ///
-    /// `fallow audit` answers "will CI block this?": it gates (exit 1 on a
-    /// fail verdict). The `review` alias plus `--brief` answer "where do I
-    /// look?": the same analysis rendered as a deterministic orientation brief
-    /// that ALWAYS exits 0, so a reviewer or agent can read it regardless of
-    /// the verdict. `--format` is orthogonal to `--brief`.
-    /// When `--changed-since`/`--base` is unset, the base is the git merge-base
-    /// against the branch's upstream or the remote default (`origin/HEAD`,
-    /// `origin/main`, `origin/master`); set `FALLOW_AUDIT_BASE` to pin it.
-    /// By default, only findings introduced by the changeset affect the verdict;
-    /// inherited findings are reported with new-vs-inherited attribution and
-    /// individual JSON findings include `introduced: true/false`. Use
-    /// `--gate all` or `[audit] gate = "all"` to fail on every finding in
-    /// changed files without running the extra base-snapshot attribution pass.
+    /// `fallow audit` answers "will CI block this?": it gates (exit 1 on a fail verdict). The
+    /// `review` alias plus `--brief` answer "where do I look?": the same analysis rendered as a
+    /// deterministic orientation brief that ALWAYS exits 0, so a reviewer or agent can read it
+    /// regardless of the verdict. `--format` is orthogonal to `--brief`. When
+    /// `--changed-since`/`--base` is unset, the base is the git merge-base against the branch's
+    /// upstream or the remote default (`origin/HEAD`, `origin/main`, `origin/master`); set
+    /// `FALLOW_AUDIT_BASE` to pin it. By default, only findings introduced by the changeset
+    /// affect the verdict; inherited findings are reported with new-vs-inherited attribution
+    /// and individual JSON findings include `introduced: true/false`. The default gate also
+    /// reports an unused file or unused export outside the changed files that the base does not
+    /// report: the change removed its last use, or a config change made it unreachable. Use
+    /// `--gate all` or `[audit] gate = "all"` to fail on every finding in changed files without
+    /// running the extra base-snapshot attribution pass.
     ///
     /// The global --baseline / --save-baseline flags are rejected on audit.
     /// Use --dead-code-baseline, --health-baseline, and --dupes-baseline

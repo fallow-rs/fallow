@@ -9,9 +9,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use super::{AuditAnalysesView, DeadCodeView};
 use crate::AuditProgrammaticKeySnapshot;
 use crate::audit_keys::{
-    ComplexityBaseline, complexity_baseline, complexity_baseline_keys, dead_code_audit_ledger,
-    dead_code_keys, relative_key_path, remap_complexity_baseline_for_renames,
-    remap_keys_for_renames, styling_keys,
+    ComplexityBaseline, collection_keys, complexity_baseline, complexity_baseline_keys,
+    dead_code_audit_ledger, dead_code_keys, relative_key_path,
+    remap_complexity_baseline_for_renames, remap_keys_for_renames, styling_keys,
 };
 use crate::review_deltas::{boundary_edge_keys, cycle_keys};
 
@@ -65,6 +65,14 @@ pub struct AuditKeySnapshot {
     /// [`AuditKeySnapshot::absorb_inherited`]). A head finding is introduced
     /// only when it is introduced against `health` and against each of these.
     pub inherited_health: Vec<ComplexityBaseline>,
+    /// Keys of the unused files and unused exports that the base reports under
+    /// the config of the base commit. The other key sets come from a base pass
+    /// with the head config, so a rule that the change turns on does not make
+    /// old findings look new. That pass cannot see a file that a config change
+    /// made unreachable, for example a removed entry point. `None` when the
+    /// change did not touch the config, or when the base config turns either
+    /// rule off and so cannot prove that code was in use.
+    pub own_config_unused_code: Option<FxHashSet<String>>,
 }
 
 impl AuditKeySnapshot {
@@ -88,6 +96,7 @@ impl AuditKeySnapshot {
             snapshot.boundary_edges = boundary_edge_keys(&dead_code.results.boundary_violations);
             snapshot.cycles = cycle_keys(&dead_code.results.circular_dependencies, dead_code.root);
             snapshot.public_api = dead_code.public_api.cloned().unwrap_or_default();
+            snapshot.own_config_unused_code = dead_code.own_config_unused_code.cloned();
         }
         if let Some(health) = view.health.as_ref() {
             snapshot.health = complexity_baseline(health.report, health.root);
@@ -113,6 +122,37 @@ impl AuditKeySnapshot {
         snapshot
     }
 
+    /// Whether this side reports the dead-code finding with `key`, in the
+    /// refined or in the syntactic key set.
+    #[must_use]
+    pub fn reports_dead_code(&self, key: &str) -> bool {
+        self.dead_code.contains(key)
+            || self
+                .syntactic_dead_code
+                .as_ref()
+                .is_some_and(|syntactic| syntactic.contains(key))
+    }
+
+    /// Remove the key of each head unused file and unused export that this
+    /// side does not report under the config of the base commit.
+    ///
+    /// The change touched the config, and the old config used that code (for
+    /// example as an entry point), so the head finding is introduced.
+    pub fn forget_unused_code_used_under_own_config(&mut self, head: &DeadCodeView<'_>) {
+        let Some(own) = self.own_config_unused_code.as_ref() else {
+            return;
+        };
+        let head_keys = collection_keys(&head.results.unused_files, head.root)
+            .into_iter()
+            .chain(collection_keys(&head.results.unused_exports, head.root));
+        for key in head_keys.filter(|key| !own.contains(key)) {
+            self.dead_code.remove(&key);
+            if let Some(syntactic) = self.syntactic_dead_code.as_mut() {
+                syntactic.remove(&key);
+            }
+        }
+    }
+
     /// Treat the findings of an inherited base as inherited too.
     ///
     /// An inherited base is a commit of the default branch that the change
@@ -129,6 +169,15 @@ impl AuditKeySnapshot {
             .unwrap_or_else(|| inherited.dead_code.clone());
         if let Some(syntactic) = self.syntactic_dead_code.as_mut() {
             syntactic.extend(inherited_syntactic);
+        }
+        // Without its own config keys, the inherited base used the head config
+        // as its own, so its dead-code keys are the evidence.
+        if let Some(own) = self.own_config_unused_code.as_mut() {
+            own.extend(
+                inherited
+                    .own_config_unused_code
+                    .unwrap_or_else(|| inherited.dead_code.clone()),
+            );
         }
         // Refined keys of another semantic identity do not compare with the
         // keys of this side, so they could hide a real finding.
@@ -194,6 +243,9 @@ impl AuditKeySnapshot {
             return;
         }
         self.dead_code = remap_keys_for_renames(&self.dead_code, &rename_map);
+        if let Some(own) = self.own_config_unused_code.as_mut() {
+            *own = remap_keys_for_renames(own, &rename_map);
+        }
         self.health =
             remap_complexity_baseline_for_renames(std::mem::take(&mut self.health), &rename_map);
         self.styling = remap_keys_for_renames(&self.styling, &rename_map);

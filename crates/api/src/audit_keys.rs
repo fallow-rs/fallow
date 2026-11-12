@@ -532,7 +532,7 @@ pub use fallow_engine::module_graph::relative_key_path;
 /// [`fallow_types::identity`]), so a line shift does not change it. A repeated
 /// key gets an occurrence suffix, so the base and the head compare by count:
 /// a new second finding with an inherited key is introduced.
-fn collection_keys<T: IdentifiedFinding>(items: &[T], root: &Path) -> Vec<String> {
+pub fn collection_keys<T: IdentifiedFinding>(items: &[T], root: &Path) -> Vec<String> {
     dead_code_occurrence_keys(items, &IdentityPaths::new(root))
 }
 

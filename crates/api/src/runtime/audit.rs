@@ -267,6 +267,7 @@ impl AuditAnalyses for ProgrammaticAuditAnalyses<'_> {
                     .and_then(|meta| meta.type_aware.as_ref()),
                 syntactic_keys: None,
                 public_api: None,
+                own_config_unused_code: None,
             }),
             duplication: duplication.as_ref().map(|duplication| DuplicationView {
                 clone_groups: duplication

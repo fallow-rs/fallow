@@ -13,7 +13,7 @@ pub use fallow_api::{AuditAttribution, AuditSummary, AuditVerdict};
 #[cfg(test)]
 use crate::base_worktree::git_rev_parse;
 use crate::base_worktree::{BaseWorktree, git_toplevel, sweep_old_reusable_caches};
-use crate::check::{CheckOptions, CheckResult, IssueFilters, TraceOptions};
+use crate::check::CheckResult;
 use crate::dupes::{DupesMode, DupesOptions, DupesOverrides, DupesResult};
 use crate::error::emit_input_error;
 use crate::exit_codes::exit_invalid_input;
@@ -410,6 +410,10 @@ pub mod weakening;
 mod security_scan;
 use security_scan::compute_security_step_signals;
 
+#[path = "audit_dead_code.rs"]
+mod dead_code;
+use dead_code::run_audit_check;
+
 #[path = "audit_routing.rs"]
 pub mod routing;
 
@@ -425,15 +429,21 @@ struct HeadAnalyses {
     /// The diff evidence that the brief pass read on the HEAD side. The brief
     /// data reuses it, so the run reads the diff one time.
     brief_diff_evidence: Option<BriefDiffEvidence>,
+    /// Unused-code keys of a base side under the config of the base commit.
+    own_config_unused_code: Option<FxHashSet<String>>,
 }
 
 impl AuditAnalyses for HeadAnalyses {
     fn view(&self) -> AuditAnalysesView<'_> {
-        analyses_view(
+        let mut view = analyses_view(
             self.check.as_ref(),
             self.dupes.as_ref(),
             self.health.as_ref(),
-        )
+        );
+        if let Some(dead_code) = view.dead_code.as_mut() {
+            dead_code.own_config_unused_code = self.own_config_unused_code.as_ref();
+        }
+        view
     }
 
     fn dead_code_results_mut(&mut self) -> Option<&mut fallow_types::results::AnalysisResults> {
@@ -469,6 +479,7 @@ fn analyses_view<'a>(
             type_aware: check.type_aware_meta.as_ref(),
             syntactic_keys: check.syntactic_dead_code_keys.as_ref(),
             public_api: check.public_api_keys.as_ref(),
+            own_config_unused_code: None,
         }),
         duplication: dupes.map(|dupes| DuplicationView {
             clone_groups: dupes.report.clone_groups.iter().collect(),
@@ -674,11 +685,22 @@ fn run_audit_base_analyses(
     if let Some(check) = check.as_mut() {
         check.shared_parse = None;
     }
+    let own_config_unused_code = check.as_ref().and_then(|_| {
+        dead_code::base_own_config_unused_code(&dead_code::BaseOwnConfigInput {
+            opts,
+            current_config_path: current_config_path.as_deref(),
+            base_root,
+            base_cache_dir: &base_cache_dir,
+            base_coverage: &base_coverage,
+            focus,
+        })
+    });
     Ok(HeadAnalyses {
         check,
         dupes,
         health,
         brief_diff_evidence: None,
+        own_config_unused_code,
     })
 }
 
@@ -873,6 +895,7 @@ fn run_audit_head_analyses(
         dupes,
         health,
         brief_diff_evidence,
+        own_config_unused_code: None,
     })
 }
 
@@ -1355,6 +1378,7 @@ fn finish_audit_result(
         dupes,
         health,
         brief_diff_evidence,
+        own_config_unused_code: _,
     } = analyses;
     let brief = build_brief(AuditBriefDataInput {
         opts,
@@ -1649,6 +1673,7 @@ fn attribute_preloaded_run(
                 inherited: Vec::new(),
             },
             renames: &[],
+            changed_files: &changed_files,
             shared_diff: shared_diff(),
         },
     );
@@ -1752,6 +1777,7 @@ fn benchmark_audit_review_brief_started_at(
             dupes: result.dupes.take(),
             health: result.health.take(),
             brief_diff_evidence: None,
+            own_config_unused_code: None,
         },
         base_snapshot: result.base_snapshot.take().ok_or_else(exit_invalid_input)?,
         changed_files,
@@ -2382,113 +2408,6 @@ fn empty_audit_result(
         graph_snapshot_hash,
         change_anchors: Vec::new(),
         diff_index: None,
-    }
-}
-
-/// Run dead code analysis for the audit pipeline.
-/// `changed_files` is `None` when the caller could not express a focus set for
-/// this analysis root; results are then left unfiltered rather than filtered
-/// against an empty set, which would drop every finding.
-fn run_audit_check<'a>(
-    opts: &'a AuditOptions<'a>,
-    type_aware: AuditTypeAwareOptions<'a>,
-    changed_since: Option<&'a str>,
-    changed_files: Option<&FxHashSet<PathBuf>>,
-    retain_modules_for_health: bool,
-    analysis_snapshot: fallow_config::AnalysisSnapshot,
-) -> Result<Option<CheckResult>, ExitCode> {
-    if !opts.analyses.dead_code {
-        return Ok(None);
-    }
-    let filters = IssueFilters {
-        architecture_selection: opts.analyses.architecture,
-        ..IssueFilters::default()
-    };
-    // The review brief needs the module graph for the impact closure, which
-    // rides the retained-modules path. Force retention on the brief path even
-    // when health does not share the dead-code parse (mismatched production
-    // modes), so the graph is available before health consumes the shared parse.
-    let retain_modules_for_health = retain_modules_for_health || opts.brief;
-    let trace_opts = TraceOptions {
-        trace_export: None,
-        trace_file: None,
-        trace_dependency: None,
-        impact_closure: None,
-        symbol_impact: None,
-        performance: opts.performance,
-    };
-    match crate::check::execute_check(&CheckOptions {
-        root: opts.root,
-        config_path: opts.config_path,
-        output: opts.output,
-        json_style: opts.json_style,
-        no_cache: opts.no_cache,
-        threads: opts.threads,
-        quiet: opts.quiet,
-        allow_remote_extends: opts.allow_remote_extends,
-        fail_on_issues: false,
-        filters: &filters,
-        changed_since,
-        // Audit compares head and base against its own changed files.
-        change_scope_owner: fallow_engine::change_scope::ChangeScopeOwner::Caller,
-        no_package_baselines: false,
-        diff_index: None,
-        use_shared_diff_index: true,
-        baseline: opts.dead_code_baseline,
-        baseline_flag: "--dead-code-baseline",
-        bare_run: false,
-        save_baseline: None,
-        // The gate is answered once by `note_stale_baseline_gate_inert`;
-        // this sub-pass is change-scoped and could only stand down again.
-        fail_on_stale_baseline: false,
-        sarif_file: None,
-        production: audit_production_flags(opts).mode(ProductionAnalysis::DeadCode),
-        production_override: opts.production_dead_code,
-        workspace: opts.workspace,
-        changed_workspaces: opts.changed_workspaces,
-        group_by: opts.group_by,
-        include_dupes: false,
-        type_aware: type_aware.enabled,
-        type_aware_config_override: type_aware.config_default,
-        type_aware_projects: type_aware.projects,
-        type_aware_require: type_aware.require,
-        trace_opts: &trace_opts,
-        explain: opts.explain,
-        top: None,
-        file: &[],
-        // Scope travels with the changed set (already intersected at the
-        // audit prelude); the sub-passes stay unscoped.
-        scope: None,
-        finding_ids: None,
-        include_entry_exports: opts.include_entry_exports,
-        show_cascade: opts.show_cascade,
-        fail_on_parse_error: opts.fail_on_parse_error,
-        summary: false,
-        regression_opts: crate::regression::RegressionOpts {
-            fail_on_regression: false,
-            tolerance: crate::regression::Tolerance::Absolute(0),
-            regression_baseline_file: None,
-            save_target: crate::regression::SaveRegressionTarget::None,
-            scoped: true,
-            quiet: opts.quiet,
-            output: opts.output,
-        },
-        retain_modules_for_health,
-        defer_performance: false,
-        analysis_snapshot,
-        explain_skipped: opts.explain_skipped,
-        surface: crate::check::CheckSurface::DeadCode,
-    }) {
-        Ok(mut result) => {
-            if let Some(changed_files) = changed_files {
-                fallow_engine::changed_files::filter_results_by_changed_files(
-                    &mut result.results,
-                    changed_files,
-                );
-            }
-            Ok(Some(result))
-        }
-        Err(code) => Err(code),
     }
 }
 
