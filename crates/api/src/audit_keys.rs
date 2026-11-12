@@ -431,6 +431,12 @@ impl AuditDomainLedger {
         }
     }
 
+    /// Whether the finding with `key` is introduced.
+    #[must_use]
+    pub fn is_introduced(&self, key: &str) -> bool {
+        self.introduced_keys.contains(key)
+    }
+
     /// Mark introduced findings whose keys are in `inherit` as inherited.
     /// Unlike [`Self::demote_introductions`], this records no demotion: the
     /// finding matches a base finding, only its key changed.

@@ -158,8 +158,9 @@ pub struct DupeBase<'a> {
 ///    place. Without this rule, a clone-removal refactor fails the new-only
 ///    gate on duplication that it did not write (issue #2164).
 /// 2. A group where each instance lies inside a different instance of one
-///    base clone group, and one instance holds no added line, is inherited. An edit inside one copy of a base clone
-///    splits the base group into smaller groups with new keys, and the
+///    base clone group, and one instance holds no added line, is inherited.
+///    An edit inside one copy of a base clone splits the base group into
+///    smaller groups with new keys, and the
 ///    change did not write their duplication. This rule records no
 ///    demotion, because the group matches a base group.
 ///
@@ -195,8 +196,15 @@ pub fn demote_preexisting_dupe_introductions(
         index,
     );
     comparison.dupes.demote_introductions(&demote);
+    // Only an introduced group can become inherited. The filter keeps the
+    // containment check, which compares each group with every base group,
+    // away from the groups that already match a base key.
     let inherit = base_contained_dupe_group_keys(
-        duplication.clone_groups.iter().copied(),
+        duplication.clone_groups.iter().copied().filter(|group| {
+            comparison
+                .dupes
+                .is_introduced(&dupe_group_key(group, duplication.root))
+        }),
         duplication.root,
         index,
         base.groups,
