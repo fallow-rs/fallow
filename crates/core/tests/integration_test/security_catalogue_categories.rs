@@ -1401,7 +1401,7 @@ fn llm_call_injection_langchain_invoke_does_not_fire() {
 
 // ── catalogue gaps: callee variants of existing categories ───────────────────
 
-const CATALOGUE_GAP_SINKS: [(&str, &str, u32); 28] = [
+const CATALOGUE_GAP_SINKS: [(&str, &str, u32); 32] = [
     ("src/esm-default-exec.ts", "command-injection", 78),
     ("src/esm-namespace-exec.ts", "command-injection", 78),
     ("src/esm-default-vm.ts", "code-injection", 94),
@@ -1423,6 +1423,10 @@ const CATALOGUE_GAP_SINKS: [(&str, &str, u32); 28] = [
         732,
     ),
     ("src/exec-file.ts", "command-injection", 78),
+    ("src/spawn-request.ts", "command-injection", 78),
+    ("src/spawn-shell.ts", "command-injection", 78),
+    ("src/spawn-shell-duplicate.js", "command-injection", 78),
+    ("src/spawn-options-variable.ts", "command-injection", 78),
     ("src/shelljs.ts", "command-injection", 78),
     ("src/ssti-handlebars.ts", "ssti", 1336),
     ("src/ssti-lodash.ts", "ssti", 1336),
@@ -1488,6 +1492,18 @@ fn catalogue_gap_lookalikes_do_not_fire() {
         (
             "src/exec-file-tooling.ts",
             "execFile of a computed binary without untrusted input is not a candidate",
+        ),
+        (
+            "src/spawn-tooling-bin.ts",
+            "spawn of a repository binary without a shell is not a candidate",
+        ),
+        (
+            "src/spawn-tooling-env.ts",
+            "spawnSync of a configured CLI path without a shell is not a candidate",
+        ),
+        (
+            "src/spawn-shell-false.ts",
+            "spawn with shell: false of a computed binary is not a candidate",
         ),
         (
             "src/exec-local-shadow.ts",

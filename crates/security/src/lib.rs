@@ -15,10 +15,11 @@
 //! User documentation is on [`fallow security`](https://fallow.tools/docs/cli/security/).
 
 use fallow_config::EffectKind;
-use fallow_types::extract::{SinkArgKind, SinkLiteralValue, SinkObjectProperty, SinkShape};
+use fallow_types::extract::{SinkArgKind, SinkLiteralValue, SinkShape};
 use rustc_hash::FxHashSet;
 
 mod identity;
+mod predicates;
 mod provenance;
 mod rules;
 mod severity;
@@ -131,6 +132,11 @@ struct RawMatcher {
     /// incomplete object shapes.
     #[serde(default)]
     object_missing: Option<Vec<String>>,
+    /// Optional call options that must be able to hold a value other than
+    /// `false`. The row matches unless the extractor proved that each listed
+    /// option is absent or `false`.
+    #[serde(default)]
+    options_may_enable: Option<Vec<String>>,
     /// Optional context-name keywords for zero-arg sinks like `Math.random()`.
     #[serde(default)]
     context_keywords: Option<Vec<String>>,
@@ -376,6 +382,9 @@ pub struct Matcher {
     pub object_missing_or_false: Vec<String>,
     /// Object keys whose absence makes the row match.
     pub object_missing: Vec<String>,
+    /// Call options that make the row match when they can hold a value other
+    /// than `false`.
+    pub options_may_enable: Vec<String>,
     /// Context-name keywords admitted by this row.
     pub context_keywords: Vec<String>,
 }
@@ -490,90 +499,6 @@ impl Matcher {
                     .iter()
                     .any(|kind| matches!(kind, SinkArgKind::Literal | SinkArgKind::NoArg))
             })
-    }
-
-    /// Whether captured literal metadata satisfies this row's literal gates.
-    #[must_use]
-    pub fn literal_value_satisfied(&self, literal: Option<&SinkLiteralValue>) -> bool {
-        if self.literal_values.is_empty()
-            && self.literal_contains.is_empty()
-            && self.literal_integers.is_empty()
-        {
-            return true;
-        }
-        let string_satisfied = (self.literal_values.is_empty() && self.literal_contains.is_empty())
-            || match literal {
-                Some(SinkLiteralValue::String(value)) => {
-                    let lower = value.to_ascii_lowercase();
-                    (self.literal_values.is_empty()
-                        || self
-                            .literal_values
-                            .iter()
-                            .any(|expected| lower == expected.to_ascii_lowercase()))
-                        && (self.literal_contains.is_empty()
-                            || self
-                                .literal_contains
-                                .iter()
-                                .any(|needle| lower.contains(&needle.to_ascii_lowercase())))
-                }
-                _ => false,
-            };
-        let integer_satisfied = self.literal_integers.is_empty()
-            || match literal {
-                Some(SinkLiteralValue::Integer(value)) => self.literal_integers.contains(value),
-                _ => false,
-            };
-        string_satisfied && integer_satisfied
-    }
-
-    /// Whether captured object-literal metadata satisfies this row's object
-    /// property gates.
-    #[must_use]
-    pub fn object_properties_satisfied(&self, properties: &[SinkObjectProperty]) -> bool {
-        if self.object_properties.is_empty() && self.object_missing_or_false.is_empty() {
-            return true;
-        }
-        for predicate in &self.object_properties {
-            let Some(property) = properties.iter().find(|p| p.key == predicate.key) else {
-                return false;
-            };
-            if !predicate.value.matches(&property.value) {
-                return false;
-            }
-        }
-        if self.object_missing_or_false.is_empty() {
-            return true;
-        }
-        self.object_missing_or_false.iter().any(|key| {
-            properties
-                .iter()
-                .find(|p| p.key == *key)
-                .is_none_or(|property| matches!(property.value, SinkLiteralValue::Boolean(false)))
-        })
-    }
-
-    /// Whether missing-key predicates are satisfied by complete static object
-    /// key metadata.
-    #[must_use]
-    pub fn object_missing_satisfied(&self, keys: &[String], keys_complete: bool) -> bool {
-        if self.object_missing.is_empty() {
-            return true;
-        }
-        keys_complete && self.object_missing.iter().any(|key| !keys.contains(key))
-    }
-
-    /// Whether captured context names satisfy this row's context keyword gate.
-    #[must_use]
-    pub fn context_satisfied(&self, context_names: &[String]) -> bool {
-        if self.context_keywords.is_empty() {
-            return true;
-        }
-        context_names.iter().any(|name| {
-            let lower = name.to_ascii_lowercase();
-            self.context_keywords
-                .iter()
-                .any(|keyword| lower.contains(&keyword.to_ascii_lowercase()))
-        })
     }
 
     /// Whether this matcher's framework enabler is satisfied by the project's
@@ -859,6 +784,7 @@ fn parse_matcher_entry(entry: RawMatcher) -> Result<Matcher, String> {
         object_properties,
         object_missing_or_false: entry.object_missing_or_false.unwrap_or_default(),
         object_missing: entry.object_missing.unwrap_or_default(),
+        options_may_enable: entry.options_may_enable.unwrap_or_default(),
         context_keywords: entry.context_keywords.unwrap_or_default(),
     })
 }
@@ -1034,6 +960,7 @@ pub fn catalogue() -> &'static Catalogue {
 )]
 mod tests {
     use super::*;
+    use fallow_types::extract::SinkObjectProperty;
     use rustc_hash::FxHashSet;
 
     /// Source lookup through the production method, with no extra request
@@ -1159,12 +1086,16 @@ mod tests {
                 .object_missing
                 .as_ref()
                 .map_or_else(String::new, |keys| keys.join("|"));
+            let options_may_enable = m
+                .options_may_enable
+                .as_ref()
+                .map_or_else(String::new, |keys| keys.join("|"));
             let context_keywords = m
                 .context_keywords
                 .as_ref()
                 .map_or_else(String::new, |keywords| keywords.join("|"));
             let key = format!(
-                "{}::{}::{pats}::{enabler}::{import_provenance}::{}::{arg_kinds}::{literal_values}::{literal_contains}::{literal_integers}::{object_properties}::{object_missing_or_false}::{object_missing}::{context_keywords}",
+                "{}::{}::{pats}::{enabler}::{import_provenance}::{}::{arg_kinds}::{literal_values}::{literal_contains}::{literal_integers}::{object_properties}::{object_missing_or_false}::{object_missing}::{options_may_enable}::{context_keywords}",
                 m.id, m.sink_shape, m.requires_source
             );
             assert!(seen.insert(key.clone()), "duplicate matcher row: {key}");
