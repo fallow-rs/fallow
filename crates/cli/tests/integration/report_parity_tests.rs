@@ -1251,7 +1251,11 @@ fn malformed_current_security_report_fails_closed_for_saved_renderers() {
 /// Build a one-commit-old git project so a `--base HEAD~1` command has a real
 /// comparison point.
 fn changed_project(label: &str) -> tempfile::TempDir {
-    let dir = tempfile::tempdir().expect("rerun fixture tempdir");
+    changed_project_in(tempfile::tempdir().expect("rerun fixture tempdir"), label)
+}
+
+/// Build the project of [`changed_project`] in `dir`.
+fn changed_project_in(dir: tempfile::TempDir, label: &str) -> tempfile::TempDir {
     let root = dir.path();
 
     std::fs::create_dir_all(root.join("src/core")).expect("create core directory");
@@ -1429,7 +1433,13 @@ fn decision_surface_rerun_is_byte_identical() {
 
 #[test]
 fn impact_rerun_is_byte_identical() {
-    let project = changed_project("impact");
+    // Impact does not record for a project in a system temp folder, so the
+    // project lives in the cargo target folder.
+    let dir = tempfile::Builder::new()
+        .prefix("impact-rerun-")
+        .tempdir_in(env!("CARGO_TARGET_TMPDIR"))
+        .expect("impact project dir");
+    let project = changed_project_in(dir, "impact");
     let root = project.path();
 
     // Impact history lives in the user config dir, never in the repo, so the
