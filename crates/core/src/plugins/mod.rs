@@ -707,7 +707,7 @@ impl PluginResult {
     /// Add a path alias to a directory that the config names. A missing target
     /// under the alias is an unresolved import, also when a virtual module
     /// prefix of the plugin matches the specifier.
-    pub(crate) fn push_checked_path_alias(&mut self, prefix: String, replacement: String) {
+    fn push_checked_path_alias(&mut self, prefix: String, replacement: String) {
         self.checked_alias_prefixes.push(prefix.clone());
         self.path_aliases.push((prefix, replacement));
     }
