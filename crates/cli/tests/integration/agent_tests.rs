@@ -65,6 +65,51 @@ fn run_agent(root: &Path, home: &Path, args: &[&str]) -> crate::common::CommandO
     )
 }
 
+/// The hooks that `fallow agent install` writes run the local `fallow`
+/// package. Without a fallow config, those hooks are the only use of the
+/// `fallow` devDependency, so dead-code must not report it as unused.
+#[test]
+fn installed_agent_hooks_credit_the_fallow_dev_dependency() {
+    let dir = agent_temp_dir("hook-credit");
+    let home = dir.join("home");
+    fs::create_dir_all(&home).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name": "agent-test", "main": "index.js", "devDependencies": {"fallow": "3.40.0", "other-tool": "1.0.0"}}"#,
+    )
+    .unwrap();
+    fs::write(dir.join("index.js"), "export const a = 1;\n").unwrap();
+    let install = run_agent(
+        &dir,
+        &home,
+        &[
+            "install",
+            "--approve",
+            "--harness",
+            "claude",
+            "--harness",
+            "codex",
+            "--without",
+            "mcp",
+        ],
+    );
+    assert_eq!(install.code, 0, "stderr: {}", install.stderr);
+    assert!(dir.join(".claude/settings.json").is_file());
+    assert!(dir.join(".codex/hooks.json").is_file());
+
+    let output =
+        crate::common::run_fallow_in_root("dead-code", &dir, &["--format", "json", "--quiet"]);
+    let json = crate::common::parse_json(&output);
+    let unused: Vec<&str> = json["unused_dev_dependencies"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|dep| dep["package_name"].as_str())
+        .collect();
+    assert_eq!(unused, vec!["other-tool"]);
+    let _ = fs::remove_dir_all(&dir);
+}
+
 fn tree(root: &Path) -> Vec<String> {
     let mut paths: Vec<String> = Vec::new();
     fn walk(base: &Path, dir: &Path, out: &mut Vec<String>) {

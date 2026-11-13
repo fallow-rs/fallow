@@ -383,6 +383,26 @@ impl PluginToolingDependencies {
     }
 }
 
+/// An alias prefix that points at a directory that a config names.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CheckedAliasPrefix {
+    /// The workspace root that the alias applies to, relative to the project
+    /// root. It is empty for an alias of the project root, which applies to
+    /// every file.
+    pub scope: String,
+    /// The import prefix, for example `#layers/base/`.
+    pub prefix: String,
+}
+
+impl CheckedAliasPrefix {
+    /// Whether `specifier` in `from_file` is under this alias.
+    #[must_use]
+    pub fn covers(&self, root: &Path, from_file: &Path, specifier: &str) -> bool {
+        specifier.starts_with(&self.prefix)
+            && (self.scope.is_empty() || from_file.starts_with(root.join(&self.scope)))
+    }
+}
+
 /// Aggregated results from all active plugins for a project.
 #[derive(Debug, Clone, Default)]
 pub struct AggregatedPluginResult {
@@ -468,6 +488,10 @@ pub struct AggregatedPluginResult {
     /// map the same prefix (SvelteKit `$lib`, Nuxt `~/`) to their own
     /// directories.
     pub scoped_path_aliases: Vec<fallow_graph::resolve::ScopedPathAlias>,
+    /// Alias prefixes that point at a directory that a config names. An
+    /// unresolved import under one of them reports, also when a virtual module
+    /// prefix matches it.
+    pub checked_alias_prefixes: Vec<CheckedAliasPrefix>,
     /// Convention-based auto-import rules from active plugins (Nuxt components).
     /// The resolver matches each file's captured `auto_import_candidates` against
     /// these and synthesizes a graph edge to the rule's source. See issue #704.
@@ -598,6 +622,9 @@ impl AggregatedPluginResult {
             *source = source.prefixed(ws_prefix);
         }
         if !ws_prefix.is_empty() {
+            for checked in &mut self.checked_alias_prefixes {
+                checked.scope = ws_prefix.to_string();
+            }
             self.scoped_path_aliases
                 .extend(self.path_aliases.drain(..).map(|(prefix, replacement)| {
                     fallow_graph::resolve::ScopedPathAlias {
@@ -651,6 +678,7 @@ impl AggregatedPluginResult {
             generated_type_import_prefixes,
             path_aliases,
             scoped_path_aliases,
+            checked_alias_prefixes,
             auto_imports,
             active_plugins,
             fixture_patterns,
@@ -701,6 +729,7 @@ impl AggregatedPluginResult {
         );
         self.path_aliases.extend(path_aliases);
         self.scoped_path_aliases.extend(scoped_path_aliases);
+        push_missing(&mut self.checked_alias_prefixes, checked_alias_prefixes);
         self.auto_imports.extend(auto_imports);
         extend_unique(&mut self.active_plugins, active_plugins);
         self.fixture_patterns.extend(fixture_patterns);

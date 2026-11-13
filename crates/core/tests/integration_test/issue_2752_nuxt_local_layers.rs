@@ -144,3 +144,68 @@ fn layer_alias_follows_meta_name_and_auto_registered_directory_name() {
         "an extends layer without `$meta.name` gets no #layers/ alias, got: {unused:?}"
     );
 }
+
+/// The project root is a layer too. Nuxt points `#layers/<name>/` at the root
+/// when the root `nuxt.config` sets `$meta.name`.
+#[test]
+fn layer_alias_resolves_root_meta_name_to_project_root() {
+    let root = fixture_path("nuxt-root-layer-alias");
+    let config = create_config(root.clone());
+
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused = unused_file_paths(&results, &root);
+
+    for alive in ["shared/lib/branding.ts", "shared/lib/mark.ts"] {
+        assert!(
+            !unused.contains(&alive.to_string()),
+            "{alive} is imported through #layers/feedlog/ and must not report, got: {unused:?}"
+        );
+    }
+    assert!(
+        unused.contains(&"shared/lib/dead.ts".to_string()),
+        "a file that no import reaches must still report, got: {unused:?}"
+    );
+}
+
+/// Nuxt picks the most specific alias. `#layers/feedlog/` points at the root,
+/// so a `layers/feedlog` directory without a Nuxt config does not take the
+/// import through the `#layers/` fallback.
+#[test]
+fn root_layer_alias_wins_over_layers_directory_fallback() {
+    let root = fixture_path("nuxt-root-layer-alias");
+    let config = create_config(root.clone());
+
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unused = unused_file_paths(&results, &root);
+
+    assert!(
+        !unused.contains(&"shared/lib/mark.ts".to_string()),
+        "#layers/feedlog/ must resolve to the project root first, got: {unused:?}"
+    );
+    assert!(
+        unused.contains(&"layers/feedlog/shared/lib/mark.ts".to_string()),
+        "the layers/feedlog copy is not the alias target, got: {unused:?}"
+    );
+}
+
+/// A named layer alias points at a known directory, so a missing target is a
+/// broken import. The `#layers/` fallback can address a layer that fallow does
+/// not model, so a missing target there stays silent.
+#[test]
+fn missing_target_through_named_layer_alias_is_unresolved() {
+    let root = fixture_path("nuxt-root-layer-alias");
+    let config = create_config(root);
+
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let unresolved: Vec<&str> = results
+        .unresolved_imports
+        .iter()
+        .map(|finding| finding.import.specifier.as_str())
+        .collect();
+
+    assert_eq!(
+        unresolved,
+        vec!["#layers/feedlog/shared/lib/missing"],
+        "only the named alias import reports as unresolved"
+    );
+}

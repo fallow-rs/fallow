@@ -852,6 +852,7 @@ fn sink_site_span_reconstructs_from_offsets() {
         span_end: 15,
         url_arg_literal: None,
         url_shape: None,
+        call_options: None,
     };
     let s = site.span();
     assert_eq!(s.start, 5);

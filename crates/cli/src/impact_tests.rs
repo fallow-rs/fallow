@@ -3198,3 +3198,63 @@ fn identity_paths_use_the_single_probes_after_a_git_error() {
     let canonical = dunce::canonicalize(root.path()).unwrap();
     assert_eq!(paths, (common, canonical));
 }
+
+#[test]
+fn is_inside_any_matches_a_temp_base_and_its_children() {
+    let temp = tempfile::tempdir().unwrap();
+    let child = temp.path().join("repo");
+    std::fs::create_dir_all(&child).unwrap();
+    let bases = vec![temp.path().to_path_buf()];
+
+    assert!(record_gate::is_inside_any(temp.path(), &bases));
+    assert!(record_gate::is_inside_any(&child, &bases));
+    assert!(record_gate::is_inside_any(
+        &child.join("not-created"),
+        &bases
+    ));
+}
+
+#[test]
+fn is_inside_any_rejects_a_sibling_with_a_shared_prefix() {
+    let parent = tempfile::tempdir().unwrap();
+    let base = parent.path().join("tmp");
+    let sibling = parent.path().join("tmp-project");
+    std::fs::create_dir_all(&base).unwrap();
+    std::fs::create_dir_all(&sibling).unwrap();
+
+    assert!(!record_gate::is_inside_any(&sibling, &[base]));
+    assert!(!record_gate::is_inside_any(parent.path(), &[]));
+}
+
+#[cfg(unix)]
+#[test]
+fn is_inside_any_follows_a_symlinked_base() {
+    let parent = tempfile::tempdir().unwrap();
+    let real = parent.path().join("real");
+    let link = parent.path().join("link");
+    std::fs::create_dir_all(real.join("repo")).unwrap();
+    std::os::unix::fs::symlink(&real, &link).unwrap();
+
+    assert!(record_gate::is_inside_any(
+        &real.join("repo"),
+        std::slice::from_ref(&link)
+    ));
+    assert!(record_gate::is_inside_any(&link.join("repo"), &[real]));
+}
+
+#[test]
+fn usable_temp_bases_drops_a_root_and_the_home_folder() {
+    let home = tempfile::tempdir().unwrap();
+    let home_parent = home.path().parent().unwrap().to_path_buf();
+    let other = tempfile::tempdir().unwrap();
+    let candidates = vec![
+        PathBuf::from(std::path::MAIN_SEPARATOR_STR),
+        home.path().to_path_buf(),
+        home_parent.clone(),
+        other.path().to_path_buf(),
+    ];
+
+    let bases = record_gate::usable_temp_bases(candidates, Some(home.path()));
+
+    assert_eq!(bases, vec![home_parent, other.path().to_path_buf()]);
+}

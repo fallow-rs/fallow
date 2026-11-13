@@ -384,7 +384,7 @@ Auto-detects `knip.json`, `knip.jsonc`, `.knip.json`, `.knip.jsonc`, `.jscpd.jso
 ```bash
 fallow init              # creates .fallowrc.json, adds .fallow/ to .gitignore (--toml for fallow.toml)
 fallow init --agents     # scaffolds a starter AGENTS.md prefilled from detected project info (never overwrites)
-fallow hooks install --target git   # pre-commit gate; --branch <ref> sets the fallback base branch
+fallow hooks install --target git   # pre-commit gate: audits the staged index (fallow audit --staged)
 ```
 
 ## Exit Codes

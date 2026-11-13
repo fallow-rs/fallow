@@ -13,7 +13,7 @@ pub use fallow_api::{AuditAttribution, AuditSummary, AuditVerdict};
 #[cfg(test)]
 use crate::base_worktree::git_rev_parse;
 use crate::base_worktree::{BaseWorktree, git_toplevel, sweep_old_reusable_caches};
-use crate::check::{CheckOptions, CheckResult, IssueFilters, TraceOptions};
+use crate::check::CheckResult;
 use crate::dupes::{DupesMode, DupesOptions, DupesOverrides, DupesResult};
 use crate::error::emit_input_error;
 use crate::exit_codes::exit_invalid_input;
@@ -125,7 +125,7 @@ pub struct AuditOptions<'a> {
     /// against its base ref, so every sub-pass is change-scoped and a
     /// whole-project baseline would look stale for reasons that are not rot.
     /// Audit reads the flag only to say so once, in
-    /// [`note_stale_baseline_gate_inert`], instead of accepting it silently.
+    /// `notes::note_stale_baseline_gate_inert`, instead of accepting it silently.
     pub fail_on_stale_baseline: bool,
     /// Maximum CRAP score threshold (overrides `health.maxCrap` from config).
     /// Functions meeting or exceeding this score cause audit to fail.
@@ -255,10 +255,15 @@ impl AuditTypeAwareOptions<'_> {
     }
 }
 
+#[path = "audit_staged.rs"]
+pub mod staged;
+
 #[path = "audit_base_ref.rs"]
 mod base_ref;
 #[path = "audit_cache.rs"]
 mod cache;
+#[path = "audit_notes.rs"]
+mod notes;
 
 use base_ref::resolve_base_ref;
 pub use cache::sweep_base_snapshot_cache;
@@ -410,6 +415,10 @@ pub mod weakening;
 mod security_scan;
 use security_scan::compute_security_step_signals;
 
+#[path = "audit_dead_code.rs"]
+mod dead_code;
+use dead_code::run_audit_check;
+
 #[path = "audit_routing.rs"]
 pub mod routing;
 
@@ -425,15 +434,21 @@ struct HeadAnalyses {
     /// The diff evidence that the brief pass read on the HEAD side. The brief
     /// data reuses it, so the run reads the diff one time.
     brief_diff_evidence: Option<BriefDiffEvidence>,
+    /// Unused-code keys of a base side under the config of the base commit.
+    own_config_unused_code: Option<FxHashSet<String>>,
 }
 
 impl AuditAnalyses for HeadAnalyses {
     fn view(&self) -> AuditAnalysesView<'_> {
-        analyses_view(
+        let mut view = analyses_view(
             self.check.as_ref(),
             self.dupes.as_ref(),
             self.health.as_ref(),
-        )
+        );
+        if let Some(dead_code) = view.dead_code.as_mut() {
+            dead_code.own_config_unused_code = self.own_config_unused_code.as_ref();
+        }
+        view
     }
 
     fn dead_code_results_mut(&mut self) -> Option<&mut fallow_types::results::AnalysisResults> {
@@ -469,6 +484,7 @@ fn analyses_view<'a>(
             type_aware: check.type_aware_meta.as_ref(),
             syntactic_keys: check.syntactic_dead_code_keys.as_ref(),
             public_api: check.public_api_keys.as_ref(),
+            own_config_unused_code: None,
         }),
         duplication: dupes.map(|dupes| DuplicationView {
             clone_groups: dupes.report.clone_groups.iter().collect(),
@@ -496,6 +512,10 @@ impl BaseCheckout for BaseWorktree {
 /// the reusable base worktree and the base-snapshot cache.
 struct CliAuditBackend<'a> {
     opts: &'a AuditOptions<'a>,
+    /// The checkout that owns the base worktree and its reusable cache. It
+    /// differs from `opts.root` for `--staged`, which analyzes a temporary
+    /// worktree.
+    host_root: &'a Path,
     type_aware: AuditTypeAwareOptions<'a>,
     base_ref: &'a str,
     /// Loaded on first use, so an audit without changes reads no config.
@@ -521,9 +541,9 @@ impl AuditBackend for CliAuditBackend<'_> {
         // never creates or reuses a base worktree, so the no-change path stays
         // free of worktree-listing IO.
         sweep_old_reusable_caches(
-            self.opts.root,
+            self.host_root,
             crate::base_worktree::resolve_cache_max_age_with_options(
-                self.opts.root,
+                self.host_root,
                 self.opts.config_path.as_ref(),
                 self.opts.allow_remote_extends,
             ),
@@ -546,7 +566,7 @@ impl AuditBackend for CliAuditBackend<'_> {
         base_sha: Option<&str>,
     ) -> Result<BaseWorktree, ExitCode> {
         BaseWorktree::create(
-            self.opts.root,
+            self.host_root,
             base_ref,
             base_sha,
             self.workspace_patterns(),
@@ -567,7 +587,15 @@ impl AuditBackend for CliAuditBackend<'_> {
         base_root: &Path,
         focus: Option<&FxHashSet<PathBuf>>,
     ) -> Result<HeadAnalyses, ExitCode> {
-        run_audit_base_analyses(self.opts, self.type_aware, base_root, focus)
+        run_audit_base_analyses(
+            self.opts,
+            self.type_aware,
+            BaseAnalysisRoots {
+                host: self.host_root,
+                base: base_root,
+            },
+            focus,
+        )
     }
 
     fn base_cache_key(
@@ -611,17 +639,30 @@ fn shared_diff() -> Option<SharedDiff<'static>> {
     })
 }
 
-/// Run the base analyses in `base_root`, the base worktree. `focus` scopes
-/// dead code and duplication to the changed files and the pre-rename paths;
-/// without it, the results stay unscoped.
+/// The roots of one base pass.
+#[derive(Clone, Copy)]
+struct BaseAnalysisRoots<'a> {
+    /// The checkout whose cache directory the base pass mirrors. It is
+    /// `opts.root`, except for `--staged`.
+    host: &'a Path,
+    /// The analysis root inside the base worktree.
+    base: &'a Path,
+}
+
+/// Run the base analyses in the base worktree. `focus` scopes dead code and
+/// duplication to the changed files and the pre-rename paths; without it, the
+/// results stay unscoped.
 fn run_audit_base_analyses(
     opts: &AuditOptions<'_>,
     type_aware: AuditTypeAwareOptions<'_>,
-    base_root: &Path,
+    roots: BaseAnalysisRoots<'_>,
     focus: Option<&FxHashSet<PathBuf>>,
 ) -> Result<HeadAnalyses, ExitCode> {
+    let base_root = roots.base;
+    // The head and base passes run at the same time, so the base pass gets
+    // its own cache directory inside the base worktree.
     let base_cache_dir = fallow_engine::repo_refs::remap_cache_dir_for_base_worktree(
-        opts.root,
+        roots.host,
         base_root,
         opts.cache_dir,
     );
@@ -674,11 +715,22 @@ fn run_audit_base_analyses(
     if let Some(check) = check.as_mut() {
         check.shared_parse = None;
     }
+    let own_config_unused_code =
+        dead_code::base_own_config_unused_code(&dead_code::BaseOwnConfigInput {
+            opts,
+            current_config_path: current_config_path.as_deref(),
+            base_root,
+            base_cache_dir: &base_cache_dir,
+            base_coverage: &base_coverage,
+            focus,
+            base_check: check.as_ref(),
+        });
     Ok(HeadAnalyses {
         check,
         dupes,
         health,
         brief_diff_evidence: None,
+        own_config_unused_code,
     })
 }
 
@@ -873,6 +925,7 @@ fn run_audit_head_analyses(
         dupes,
         health,
         brief_diff_evidence,
+        own_config_unused_code: None,
     })
 }
 
@@ -1241,6 +1294,17 @@ pub fn execute_audit_with_type_aware(
     opts: &AuditOptions<'_>,
     type_aware: AuditTypeAwareOptions<'_>,
 ) -> Result<AuditResult, ExitCode> {
+    execute_audit_for_host(opts, type_aware, opts.root)
+}
+
+/// Run the audit of `opts.root`. `host_root` is the checkout that owns the
+/// base worktree. It is not `opts.root` when `opts.root` is the temporary
+/// worktree of `--staged`.
+fn execute_audit_for_host(
+    opts: &AuditOptions<'_>,
+    type_aware: AuditTypeAwareOptions<'_>,
+    host_root: &Path,
+) -> Result<AuditResult, ExitCode> {
     let start = Instant::now();
 
     let fallow_engine::repo_refs::ResolvedAuditBase {
@@ -1262,6 +1326,7 @@ pub fn execute_audit_with_type_aware(
 
     let backend = CliAuditBackend {
         opts,
+        host_root,
         type_aware,
         base_ref: &base_ref,
         workspace_patterns: OnceLock::new(),
@@ -1355,6 +1420,7 @@ fn finish_audit_result(
         dupes,
         health,
         brief_diff_evidence,
+        own_config_unused_code: _,
     } = analyses;
     let brief = build_brief(AuditBriefDataInput {
         opts,
@@ -1582,7 +1648,10 @@ pub fn benchmark_audit_analyses(
             run_audit_base_analyses(
                 &opts,
                 AuditTypeAwareOptions::default(),
-                base_root,
+                BaseAnalysisRoots {
+                    host: opts.root,
+                    base: base_root,
+                },
                 base_focus.as_ref(),
             )
         },
@@ -1649,6 +1718,7 @@ fn attribute_preloaded_run(
                 inherited: Vec::new(),
             },
             renames: &[],
+            changed_files: &changed_files,
             shared_diff: shared_diff(),
         },
     );
@@ -1752,6 +1822,7 @@ fn benchmark_audit_review_brief_started_at(
             dupes: result.dupes.take(),
             health: result.health.take(),
             brief_diff_evidence: None,
+            own_config_unused_code: None,
         },
         base_snapshot: result.base_snapshot.take().ok_or_else(exit_invalid_input)?,
         changed_files,
@@ -2385,113 +2456,6 @@ fn empty_audit_result(
     }
 }
 
-/// Run dead code analysis for the audit pipeline.
-/// `changed_files` is `None` when the caller could not express a focus set for
-/// this analysis root; results are then left unfiltered rather than filtered
-/// against an empty set, which would drop every finding.
-fn run_audit_check<'a>(
-    opts: &'a AuditOptions<'a>,
-    type_aware: AuditTypeAwareOptions<'a>,
-    changed_since: Option<&'a str>,
-    changed_files: Option<&FxHashSet<PathBuf>>,
-    retain_modules_for_health: bool,
-    analysis_snapshot: fallow_config::AnalysisSnapshot,
-) -> Result<Option<CheckResult>, ExitCode> {
-    if !opts.analyses.dead_code {
-        return Ok(None);
-    }
-    let filters = IssueFilters {
-        architecture_selection: opts.analyses.architecture,
-        ..IssueFilters::default()
-    };
-    // The review brief needs the module graph for the impact closure, which
-    // rides the retained-modules path. Force retention on the brief path even
-    // when health does not share the dead-code parse (mismatched production
-    // modes), so the graph is available before health consumes the shared parse.
-    let retain_modules_for_health = retain_modules_for_health || opts.brief;
-    let trace_opts = TraceOptions {
-        trace_export: None,
-        trace_file: None,
-        trace_dependency: None,
-        impact_closure: None,
-        symbol_impact: None,
-        performance: opts.performance,
-    };
-    match crate::check::execute_check(&CheckOptions {
-        root: opts.root,
-        config_path: opts.config_path,
-        output: opts.output,
-        json_style: opts.json_style,
-        no_cache: opts.no_cache,
-        threads: opts.threads,
-        quiet: opts.quiet,
-        allow_remote_extends: opts.allow_remote_extends,
-        fail_on_issues: false,
-        filters: &filters,
-        changed_since,
-        // Audit compares head and base against its own changed files.
-        change_scope_owner: fallow_engine::change_scope::ChangeScopeOwner::Caller,
-        no_package_baselines: false,
-        diff_index: None,
-        use_shared_diff_index: true,
-        baseline: opts.dead_code_baseline,
-        baseline_flag: "--dead-code-baseline",
-        bare_run: false,
-        save_baseline: None,
-        // The gate is answered once by `note_stale_baseline_gate_inert`;
-        // this sub-pass is change-scoped and could only stand down again.
-        fail_on_stale_baseline: false,
-        sarif_file: None,
-        production: audit_production_flags(opts).mode(ProductionAnalysis::DeadCode),
-        production_override: opts.production_dead_code,
-        workspace: opts.workspace,
-        changed_workspaces: opts.changed_workspaces,
-        group_by: opts.group_by,
-        include_dupes: false,
-        type_aware: type_aware.enabled,
-        type_aware_config_override: type_aware.config_default,
-        type_aware_projects: type_aware.projects,
-        type_aware_require: type_aware.require,
-        trace_opts: &trace_opts,
-        explain: opts.explain,
-        top: None,
-        file: &[],
-        // Scope travels with the changed set (already intersected at the
-        // audit prelude); the sub-passes stay unscoped.
-        scope: None,
-        finding_ids: None,
-        include_entry_exports: opts.include_entry_exports,
-        show_cascade: opts.show_cascade,
-        fail_on_parse_error: opts.fail_on_parse_error,
-        summary: false,
-        regression_opts: crate::regression::RegressionOpts {
-            fail_on_regression: false,
-            tolerance: crate::regression::Tolerance::Absolute(0),
-            regression_baseline_file: None,
-            save_target: crate::regression::SaveRegressionTarget::None,
-            scoped: true,
-            quiet: opts.quiet,
-            output: opts.output,
-        },
-        retain_modules_for_health,
-        defer_performance: false,
-        analysis_snapshot,
-        explain_skipped: opts.explain_skipped,
-        surface: crate::check::CheckSurface::DeadCode,
-    }) {
-        Ok(mut result) => {
-            if let Some(changed_files) = changed_files {
-                fallow_engine::changed_files::filter_results_by_changed_files(
-                    &mut result.results,
-                    changed_files,
-                );
-            }
-            Ok(Some(result))
-        }
-        Err(code) => Err(code),
-    }
-}
-
 /// Run duplication analysis for the audit pipeline.
 ///
 /// Reads duplication settings from the project config file so that user
@@ -2728,8 +2692,11 @@ fn build_audit_health_options<'a>(
     }
 }
 
+#[path = "audit_impact_record.rs"]
+mod impact_record;
 #[path = "audit_output.rs"]
 mod output;
+use impact_record::record_audit_impact;
 
 pub use output::audit_json_header_input;
 pub use output::{
@@ -2737,11 +2704,15 @@ pub use output::{
     print_audit_findings, print_audit_result, print_audit_result_with_style,
 };
 
+/// Run and print one audit. `host_root` is the checkout of `--staged` when
+/// `opts.root` is its temporary worktree, otherwise `None`.
 pub fn run_audit_with_type_aware(
     opts: &AuditOptions<'_>,
     gate_marker: Option<&str>,
     type_aware: AuditTypeAwareOptions<'_>,
+    host_root: Option<&Path>,
 ) -> ExitCode {
+    let host_root = host_root.unwrap_or(opts.root);
     if let Err(e) = fallow_engine::health::validate_coverage_root_absolute(opts.coverage_root) {
         return crate::error::emit_input_error_with_style(&e, opts.output, opts.json_style);
     }
@@ -2757,12 +2728,11 @@ pub fn run_audit_with_type_aware(
         scope: opts.scope.clone(),
         ..*opts
     };
-    match execute_audit_with_type_aware(&resolved_opts, type_aware) {
+    match execute_audit_for_host(&resolved_opts, type_aware, host_root) {
         Ok(result) => {
-            let _ = record_audit_impact(opts, gate_marker, &result);
+            let _ = record_audit_impact(opts, host_root, gate_marker, &result);
             let report_exit = print_audit_command_result(opts, &result, opts.json_style);
-            note_stale_baseline_gate_inert(opts);
-            note_type_aware_require_inert(opts, type_aware);
+            notes::print_run_notes(opts, type_aware, &result);
             if report_exit != ExitCode::SUCCESS {
                 return report_exit;
             }
@@ -2773,44 +2743,6 @@ pub fn run_audit_with_type_aware(
         }
         Err(code) => code,
     }
-}
-
-/// Say once that `--fail-on-stale-baseline` cannot fire on `fallow audit`.
-///
-/// Audit always narrows every sub-pass to the files that changed against its
-/// base ref, so a whole-project baseline matches less of the run for reasons
-/// that are not rot; gating on that would fail every review job that loads a
-/// baseline. Accepting the flag in silence is the worse option, because a job
-/// that believes it gates would stay green forever, so the run names the
-/// reason. It is printed here rather than forwarded into the three sub-passes
-/// so that an audit with three baselines says it once, not three times.
-fn note_stale_baseline_gate_inert(opts: &AuditOptions<'_>) {
-    if !opts.fail_on_stale_baseline {
-        return;
-    }
-    if opts.dead_code_baseline.is_none()
-        && opts.health_baseline.is_none()
-        && opts.dupes_baseline.is_none()
-    {
-        return;
-    }
-    eprintln!(
-        "Note: --fail-on-stale-baseline did not run: `fallow audit` analyzes only the files that \
-         changed against its base, which cannot judge a whole-project baseline. Run the gate on \
-         `fallow dead-code`, `fallow dupes` or `fallow health` instead."
-    );
-}
-
-/// Type-aware analysis feeds only the dead-code pass, so a skipped pass leaves
-/// `--type-aware-require` nothing to judge. Say so instead of passing silently.
-fn note_type_aware_require_inert(opts: &AuditOptions<'_>, type_aware: AuditTypeAwareOptions<'_>) {
-    if opts.analyses.dead_code || type_aware.require.is_none() {
-        return;
-    }
-    eprintln!(
-        "Note: --type-aware-require did not run: this audit skips the dead-code sub-analysis \
-         (--only, --skip or the audit config), which is the only one that uses type-aware analysis."
-    );
 }
 
 fn audit_type_aware_completeness_failed(result: &AuditResult) -> bool {
@@ -2826,61 +2758,6 @@ fn type_aware_meta_completeness_failed(
     meta: Option<&fallow_types::envelope::TypeAwareMeta>,
 ) -> bool {
     crate::report::ci::required_type_aware_incomplete(meta)
-}
-
-fn record_audit_impact(
-    opts: &AuditOptions<'_>,
-    gate_marker: Option<&str>,
-    result: &AuditResult,
-) -> Result<(), String> {
-    // A skipped sub-analysis reports no findings, which Impact would credit as
-    // resolved. Like the bare run, only a full selection writes Impact.
-    if opts.analyses != AuditAnalysisSelection::ALL {
-        return Ok(());
-    }
-    let mut findings = result
-        .check
-        .as_ref()
-        .map(|c| crate::impact::collect_dead_code_findings(&c.results))
-        .unwrap_or_default();
-    if let Some(health) = result.health.as_ref() {
-        findings.extend(crate::impact::collect_complexity_findings(&health.report));
-    }
-    let clones = result
-        .dupes
-        .as_ref()
-        .map(|d| crate::impact::collect_clone_findings(&d.report))
-        .unwrap_or_default();
-    let empty_supps: Vec<fallow_types::results::ActiveSuppression> = Vec::new();
-    let suppressions = result.check.as_ref().map_or(empty_supps.as_slice(), |c| {
-        c.results.active_suppressions.as_slice()
-    });
-    let attribution = crate::impact::AttributionInput {
-        root: opts.root,
-        scope: crate::impact::Scope::ChangedFiles(&result.changed_files),
-        findings,
-        clones,
-        suppressions,
-    };
-    let analysis_identity = result
-        .check
-        .as_ref()
-        .and_then(|check| check.type_aware_meta.as_ref())
-        .and_then(|meta| meta.identity.clone())
-        .unwrap_or_default();
-    crate::impact::record_audit_run(
-        opts.root,
-        &result.summary,
-        &crate::impact::AuditRunRecord {
-            verdict: result.verdict,
-            gate_source: gate_marker.map(crate::impact::GateSource::from_marker),
-            git_sha: result.head_sha.as_deref(),
-            version: env!("CARGO_PKG_VERSION"),
-            timestamp: &crate::vital_signs::chrono_timestamp(),
-            attribution: Some(&attribution),
-            analysis_identity: &analysis_identity,
-        },
-    )
 }
 
 fn print_audit_command_result(

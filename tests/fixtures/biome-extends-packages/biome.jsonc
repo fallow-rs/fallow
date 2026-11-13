@@ -1,0 +1,5 @@
+// Biome reads shared configs from the `extends` packages.
+{
+  /* A subpath export names one config of a package. */
+  "extends": ["biome-config-shared", "@acme/biome-config/strict", "./biome.base.json"],
+}

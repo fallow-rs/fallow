@@ -317,6 +317,7 @@ fn template_dom_sink(
         span_end: u32::try_from(span_end).ok()?,
         url_arg_literal: None,
         url_shape: None,
+        call_options: None,
     })
 }
 

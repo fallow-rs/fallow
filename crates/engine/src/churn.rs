@@ -13,6 +13,7 @@ use fallow_types::path_guard::CacheTarget;
 use serde::Deserialize;
 
 use crate::changed_files::git_path_from_bytes;
+use crate::churn_shallow::{RepoSnapshot, ShallowState};
 
 pub use fallow_types::churn::ChurnTrend;
 
@@ -551,20 +552,6 @@ fn validate_churn_event_timestamp(
     ))
 }
 
-/// Check if the repository is a shallow clone.
-#[must_use]
-fn is_shallow_clone(root: &Path) -> bool {
-    let mut command = git_command(root);
-    command
-        .args(["rev-parse", "--is-shallow-repository"])
-        .current_dir(root);
-    command.output().is_ok_and(|o| {
-        String::from_utf8_lossy(&o.stdout)
-            .trim()
-            .eq_ignore_ascii_case("true")
-    })
-}
-
 /// Check if the directory is inside a git repository.
 #[must_use]
 pub fn is_git_repo(root: &Path) -> bool {
@@ -587,7 +574,9 @@ const MAX_CHURN_CACHE_SIZE: usize = 64 * 1024 * 1024;
 /// subdirectory root with toplevel-relative paths are rejected.
 /// Version 8 stores the commit id of each event, so change coupling can
 /// rebuild the file set of each commit from the cache.
-const CHURN_CACHE_VERSION: u8 = 8;
+/// Version 9 stores a hash of the shallow boundary, so an entry built before
+/// `git fetch --unshallow` or `git fetch --deepen` is rejected.
+const CHURN_CACHE_VERSION: u8 = 9;
 
 /// Serializable per-commit event for the disk cache.
 #[derive(Clone, bitcode::Encode, bitcode::Decode)]
@@ -622,6 +611,8 @@ struct ChurnCache {
     window_token: String,
     files: Vec<CachedFileChurn>,
     shallow_clone: bool,
+    /// [`ShallowState::boundary`] of the repository when this entry was built.
+    shallow_boundary: u64,
     /// Author email pool referenced by [`CachedCommitEvent::author_idx`].
     author_pool: Vec<String>,
     /// Commit id pool referenced by [`CachedCommitEvent::commit_idx`].
@@ -716,7 +707,7 @@ fn save_churn_cache(
     last_indexed_sha: &str,
     window_token: &str,
     state: &ChurnEventState,
-    shallow_clone: bool,
+    shallow: ShallowState,
 ) {
     let files: Vec<CachedFileChurn> = state
         .files
@@ -731,7 +722,8 @@ fn save_churn_cache(
         last_indexed_sha: last_indexed_sha.to_string(),
         window_token: window_token.to_string(),
         files,
-        shallow_clone,
+        shallow_clone: shallow.shallow,
+        shallow_boundary: shallow.boundary,
         author_pool: state.author_pool.clone(),
         commit_pool: state.commit_pool.clone(),
     };
@@ -777,21 +769,22 @@ pub fn analyze_churn_cached_with_history(
         since
     };
     let files_cutoff = since.window.cutoff_secs(&clock);
+    let repo = RepoSnapshot {
+        head_sha: &head_sha,
+        shallow: ShallowState::read(root),
+    };
 
-    if !no_cache
-        && let Some((state, shallow_clone)) =
-            try_reuse_churn_cache(root, history, cache_dir, &head_sha, &clock)
+    if !no_cache && let Some(state) = try_reuse_churn_cache(root, history, cache_dir, repo, &clock)
     {
         return Some((
-            build_windowed_churn_result(state, files_cutoff, shallow_clone, clock),
+            build_windowed_churn_result(state, files_cutoff, repo.shallow.shallow, clock),
             true,
         ));
     }
 
-    let (state, shallow_clone) =
-        analyze_fresh_churn(root, history, cache_dir, no_cache, &head_sha, &clock)?;
+    let state = analyze_fresh_churn(root, history, cache_dir, no_cache, repo, &clock)?;
     Some((
-        build_windowed_churn_result(state, files_cutoff, shallow_clone, clock),
+        build_windowed_churn_result(state, files_cutoff, repo.shallow.shallow, clock),
         false,
     ))
 }
@@ -800,14 +793,20 @@ fn try_reuse_churn_cache(
     root: &Path,
     since: &SinceDuration,
     cache_dir: &Path,
-    head_sha: &str,
+    repo: RepoSnapshot<'_>,
     clock: &crate::clock::AnalysisClock,
-) -> Option<(ChurnEventState, bool)> {
+) -> Option<ChurnEventState> {
+    let RepoSnapshot { head_sha, shallow } = repo;
     let (cache, cached_since) = load_covering_churn_cache(cache_dir, &since.window, clock)?;
+    // A fetch that unshallows or deepens the clone adds history below the
+    // cached commits. An extend scan never reaches that history, so only a
+    // full walk gives the same events as a cold run.
+    if cache.shallow_clone != shallow.shallow || cache.shallow_boundary != shallow.boundary {
+        return None;
+    }
     let cutoff = since.window.cutoff_secs(clock);
     if cache.last_indexed_sha == head_sha {
-        let shallow_clone = cache.shallow_clone;
-        return Some((cache.into_event_state(cutoff), shallow_clone));
+        return Some(cache.into_event_state(cutoff));
     }
 
     if !is_ancestor(root, &cache.last_indexed_sha, head_sha) {
@@ -816,33 +815,31 @@ fn try_reuse_churn_cache(
 
     // Extend the entry over its own window, so a narrower request does not
     // shrink the entry that a wider request saved.
-    let (mut state, shallow_clone) =
-        extend_churn_cache(root, &cached_since, cache_dir, head_sha, cache, clock)?;
+    let mut state = extend_churn_cache(root, &cached_since, cache_dir, repo, cache, clock)?;
     state.retain_window(cutoff);
-    Some((state, shallow_clone))
+    Some(state)
 }
 
 fn extend_churn_cache(
     root: &Path,
     since: &SinceDuration,
     cache_dir: &Path,
-    head_sha: &str,
+    repo: RepoSnapshot<'_>,
     cache: ChurnCache,
     clock: &crate::clock::AnalysisClock,
-) -> Option<(ChurnEventState, bool)> {
-    let shallow_clone = is_shallow_clone(root);
+) -> Option<ChurnEventState> {
     let range = format!("{}..HEAD", cache.last_indexed_sha);
     let delta = analyze_churn_events(root, since, Some(&range), clock)?;
     let mut state = cache.into_event_state(since.window.cutoff_secs(clock));
     merge_churn_states(&mut state, delta);
     save_churn_cache(
         CacheTarget::new(root, cache_dir),
-        head_sha,
+        repo.head_sha,
         &since.window.cache_token(),
         &state,
-        shallow_clone,
+        repo.shallow,
     );
-    Some((state, shallow_clone))
+    Some(state)
 }
 
 fn analyze_fresh_churn(
@@ -850,22 +847,21 @@ fn analyze_fresh_churn(
     since: &SinceDuration,
     cache_dir: &Path,
     no_cache: bool,
-    head_sha: &str,
+    repo: RepoSnapshot<'_>,
     clock: &crate::clock::AnalysisClock,
-) -> Option<(ChurnEventState, bool)> {
-    let shallow_clone = is_shallow_clone(root);
+) -> Option<ChurnEventState> {
     let state = analyze_churn_events(root, since, None, clock)?;
     if !no_cache {
         save_churn_cache(
             CacheTarget::new(root, cache_dir),
-            head_sha,
+            repo.head_sha,
             &since.window.cache_token(),
             &state,
-            shallow_clone,
+            repo.shallow,
         );
     }
 
-    Some((state, shallow_clone))
+    Some(state)
 }
 
 impl ChurnCache {
@@ -1456,7 +1452,7 @@ mod tests {
     #[cfg(unix)]
     fn analyze_churn(root: &Path, since: &SinceDuration) -> Option<ChurnResult> {
         let clock = crate::clock::AnalysisClock::for_repo(root);
-        let shallow = is_shallow_clone(root);
+        let shallow = ShallowState::read(root).shallow;
         let state = analyze_churn_events(root, since, None, &clock)?;
         Some(build_churn_result(state, shallow, clock))
     }
@@ -1900,7 +1896,7 @@ mod tests {
         };
         let cache_dir = tempfile::tempdir().expect("cache directory");
         let target = CacheTarget::inside(cache_dir.path());
-        save_churn_cache(target, "abc123", "1y", &state, false);
+        save_churn_cache(target, "abc123", "1y", &state, ShallowState::default());
         let warm = load_churn_cache(cache_dir.path(), "1y")
             .expect("warm churn cache")
             .into_event_state(None);
@@ -1920,6 +1916,7 @@ mod tests {
                 events: Vec::new(),
             }],
             shallow_clone: false,
+            shallow_boundary: 0,
             author_pool: Vec::new(),
             commit_pool: Vec::new(),
         };
@@ -1938,6 +1935,7 @@ mod tests {
             window_token: "1y".to_string(),
             files: Vec::new(),
             shallow_clone: false,
+            shallow_boundary: 0,
             author_pool: Vec::new(),
             commit_pool: Vec::new(),
         };

@@ -29,6 +29,8 @@ mod astro_unused_component_prop;
 mod barrel_exports;
 #[path = "integration_test/basic_analysis.rs"]
 mod basic_analysis;
+#[path = "integration_test/biome_extends_packages.rs"]
+mod biome_extends_packages;
 #[path = "integration_test/bundler_entry_object_map.rs"]
 mod bundler_entry_object_map;
 #[path = "integration_test/bundler_nested_config_entry.rs"]
@@ -59,6 +61,8 @@ mod css_in_js_styled;
 mod css_modules;
 #[path = "integration_test/cycles_ignore_lazy_imports.rs"]
 mod cycles_ignore_lazy_imports;
+#[path = "integration_test/declaration_runtime_sibling.rs"]
+mod declaration_runtime_sibling;
 #[path = "integration_test/deno_workspace.rs"]
 mod deno_workspace;
 #[path = "integration_test/dependencies.rs"]
@@ -790,6 +794,8 @@ mod textlint_plugin;
 mod type_only_namespace;
 #[path = "integration_test/typescript_content_mapper_plugin.rs"]
 mod typescript_content_mapper_plugin;
+#[path = "integration_test/vite_nested_config_entries.rs"]
+mod vite_nested_config_entries;
 #[path = "integration_test/vite_plus_plugin.rs"]
 mod vite_plus_plugin;
 #[path = "integration_test/vite_root_entries.rs"]

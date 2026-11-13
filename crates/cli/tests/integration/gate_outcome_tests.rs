@@ -2726,3 +2726,91 @@ fn a_human_combined_run_states_the_regression_outcome_once() {
         output.stderr
     );
 }
+
+/// A cycle anchored at `src/a.ts:1`, and a pull-request diff that changes only
+/// line 3 of that file. The added-line filter drops the cycle from the comment.
+fn cycle_project_with_diff() -> (TempDir, std::path::PathBuf) {
+    let project = TempDir::new().expect("temp dir");
+    let root = project.path();
+    std::fs::create_dir_all(root.join("src")).expect("src dir");
+    let files = [
+        ("package.json", r#"{"name":"cycle","main":"src/index.ts"}"#),
+        (
+            "src/index.ts",
+            "import { a, x } from \"./a\";\nconsole.log(a, x);\n",
+        ),
+        (
+            "src/a.ts",
+            "import { b } from \"./b\";\nexport const a = () => b();\nexport const x = 2;\n",
+        ),
+        (
+            "src/b.ts",
+            "import { a } from \"./a\";\nexport const b = () => a;\n",
+        ),
+        (
+            "pr.diff",
+            "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -3 +3 @@\n-export const x = 1;\n+export const x = 2;\n",
+        ),
+    ];
+    for (path, contents) in files {
+        std::fs::write(root.join(path), contents).expect("write fixture file");
+    }
+    let diff = root.join("pr.diff");
+    (project, diff)
+}
+
+/// The added-line diff filter can drop every finding from the comment while
+/// the producing run failed an enforced gate on them. The comment heading must
+/// then say that the gate failed, because the check that the run drives is red.
+#[test]
+fn a_comment_whose_findings_the_diff_filter_drops_still_says_the_gate_failed() {
+    let (project, diff) = cycle_project_with_diff();
+    let root = project.path();
+    let produced = run(&[
+        "dead-code",
+        "--root",
+        root.to_str().expect("utf8"),
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        produced.code, 1,
+        "the cycle fails the run: {}",
+        produced.stderr
+    );
+    let envelope = parse_json(&produced);
+    assert_eq!(gate(&envelope, "error-severity-findings")["status"], "fail");
+    let saved = root.join("results.json");
+    std::fs::write(&saved, &produced.stdout).expect("save the envelope");
+
+    for format in ["pr-comment-github", "pr-comment-gitlab"] {
+        let rendered = crate::common::run_fallow_raw_with_env(
+            &[
+                "report",
+                "--from",
+                saved.to_str().expect("utf8"),
+                "--root",
+                root.to_str().expect("utf8"),
+                "--quiet",
+                "--format",
+                format,
+            ],
+            &[
+                ("FALLOW_DIFF_FILE", diff.to_str().expect("utf8")),
+                ("FALLOW_DIFF_FILTER", "added"),
+            ],
+        );
+        assert_eq!(rendered.code, 0, "the render exits 0: {}", rendered.stderr);
+        assert!(
+            rendered.stdout.contains("No findings for this"),
+            "{format}: the diff filter drops the cycle: {}",
+            rendered.stdout
+        );
+        assert!(
+            rendered.stdout.contains("**Quality gate failed**"),
+            "{format} must not say the gate passed: {}",
+            rendered.stdout
+        );
+    }
+}

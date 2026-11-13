@@ -20,7 +20,9 @@
 
 mod base_files;
 mod base_ref;
+mod clone_containment;
 mod outcome;
+mod own_config;
 mod scope;
 mod snapshot;
 #[cfg(test)]
@@ -41,12 +43,13 @@ pub use base_ref::{
     AuditBaseError, AuditBaseOrigin, parse_audit_base_override, resolve_audit_base,
 };
 pub use outcome::{
-    DupeDemotionDiffSource, SharedDiff, compare, demote_preexisting_dupe_introductions, outcome,
-    realign_styling_introductions, styling_finding_gates, styling_rule_severity,
+    DupeBase, DupeDemotionDiffSource, SharedDiff, compare, demote_preexisting_dupe_introductions,
+    outcome, realign_styling_introductions, styling_finding_gates, styling_rule_severity,
 };
+pub use own_config::{config_path_under_root, own_config_unused_code_keys};
 pub use scope::{
     BaseCoverageInputs, base_coverage_inputs, base_focus_files, remap_focus_files, renamed_files,
-    scope_dependency_findings,
+    scope_dependency_findings, scope_unchanged_unused_code,
 };
 pub use snapshot::{
     AuditKeySnapshot, branching_keys, type_aware_attribution_degrade_reason,
@@ -71,6 +74,10 @@ pub struct DeadCodeView<'a> {
     pub syntactic_keys: Option<&'a FxHashSet<String>>,
     /// Exports-aware public-export keys, when the surface computed them.
     pub public_api: Option<&'a FxHashSet<String>>,
+    /// Keys of the unused files and unused exports that a base side reports
+    /// under the config of the base commit, when the change touched the config
+    /// (see [`AuditKeySnapshot::own_config_unused_code`]).
+    pub own_config_unused_code: Option<&'a FxHashSet<String>>,
 }
 
 /// The duplication analysis of one audit side, as the audit reads it.
@@ -265,6 +272,9 @@ pub struct AuditAttributionInput<'a> {
     pub base: AuditBase,
     /// Renames between base and head.
     pub renames: &'a [RenamedFile],
+    /// Changed files of the run. An unused file or unused export outside them
+    /// stays only when the base does not report it.
+    pub changed_files: &'a FxHashSet<PathBuf>,
     /// The opt-in shared diff of the run.
     pub shared_diff: Option<SharedDiff<'a>>,
 }
@@ -436,6 +446,7 @@ pub fn run<B: AuditBackend>(
             base_ref,
             base,
             renames: &renames,
+            changed_files: &changed_files,
             shared_diff: backend.shared_diff(),
         },
     );
@@ -498,6 +509,7 @@ pub fn attribute<A: AuditAnalyses>(
         base_ref,
         base,
         renames,
+        changed_files,
         shared_diff,
     } = input;
     let AuditBase {
@@ -520,9 +532,11 @@ pub fn attribute<A: AuditAnalyses>(
             snapshot.absorb_inherited(inherited);
         }
         if let Some(dead_code) = analyses.view().dead_code.as_ref() {
+            snapshot.forget_unused_code_used_under_own_config(dead_code);
             snapshot.inherit_unprovable_dead_code(dead_code);
         }
     }
+    scope_unchanged_unused_code_of(analyses, changed_files, base_snapshot.as_ref());
     let degrade_reason = {
         let view = analyses.view();
         type_aware_attribution_degrade_reason(
@@ -549,6 +563,14 @@ pub fn attribute<A: AuditAnalyses>(
             root,
             base_ref,
             shared_diff,
+            DupeBase {
+                // A skipped base reuses the head keys, so no group is introduced.
+                groups: base_snapshot
+                    .as_ref()
+                    .filter(|_| !skipped)
+                    .map_or(&[][..], |snapshot| snapshot.dupe_groups.as_slice()),
+                renames,
+            },
         );
         realign_styling_introductions(
             &mut comparison,
@@ -706,6 +728,25 @@ fn base_snapshot<B: AuditBackend>(
     let snapshot = AuditKeySnapshot::from_view(&base.view());
     drop(checkout);
     Ok(snapshot)
+}
+
+/// Apply [`scope_unchanged_unused_code`] to the dead-code findings of the
+/// head.
+fn scope_unchanged_unused_code_of<A: AuditAnalyses>(
+    analyses: &mut A,
+    changed_files: &FxHashSet<PathBuf>,
+    base: Option<&AuditKeySnapshot>,
+) {
+    let Some(root) = analyses
+        .view()
+        .dead_code
+        .map(|dead_code| dead_code.root.to_path_buf())
+    else {
+        return;
+    };
+    if let Some(results) = analyses.dead_code_results_mut() {
+        scope_unchanged_unused_code(results, &root, changed_files, base);
+    }
 }
 
 /// Apply [`scope_dependency_findings`] to the dead-code findings of one side.

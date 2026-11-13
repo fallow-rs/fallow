@@ -1,0 +1,3 @@
+### Changed
+
+- **The human `fallow health` output now says clearly when CRAP scores are a static estimate.** When fallow finds no coverage file, one note above the complexity findings says that no coverage file was found and that CRAP scores are a static estimate. The note tells you to pass `--coverage <coverage-final.json>` for measured scores, or to raise `health.maxCrap`. With `--explain`, the note also shows the estimate tiers (85%, 40% and 0%) and the formula for an untested function, `cc^2 + cc`. The CRAP formula and the JSON output do not change. JSON consumers can read `summary.coverage_model: "static_estimated"` for the same fact.

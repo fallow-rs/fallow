@@ -152,7 +152,9 @@ Options:
                           The maximum time of failed reads in a row
                           (default: ${READ_ERROR_WINDOW_SECONDS}). After each failed read, the
                           delay to the next read doubles, from --interval
-                          up to ${READ_RETRY_MAX_MS / MINUTE} minutes.
+                          up to ${READ_RETRY_MAX_MS / MINUTE} minutes. A read that GitHub
+                          refuses because of the API rate limit waits
+                          until the limit resets, and does not count.
   -h, --help              Show this help.
 
 With --pr, the wait stops when the pull request conflicts with its base
@@ -258,6 +260,37 @@ const completedStatus = (checks, unchangedMs, options) => {
 };
 
 /**
+ * Plan the next read after a failed read. A rate-limited read (with
+ * `retryAtMs`) waits for the reset and does not count as a failed read. Any
+ * other failed read backs off and counts against the error window. Returns
+ * `{ delayMs, readErrors, stop, counts }`, where `counts` tells whether the
+ * delay counts against the error window.
+ */
+const failedRead = (
+  read,
+  { readErrors, errorMs, intervalMs, errorWindowMs, deadline, now, warn },
+) => {
+  if (read.retryAtMs !== undefined) {
+    const delayMs = Math.max(read.retryAtMs - now(), intervalMs);
+    warn(
+      now() + delayMs <= deadline
+        ? `Read of the checks failed: ${read.error}. Next read in ${formatSeconds(delayMs)}, after the rate limit resets.`
+        : `Read of the checks failed: ${read.error}. The rate limit resets after the end of the wait.`,
+    );
+    return { delayMs, readErrors, stop: false, counts: false };
+  }
+  const errors = readErrors + 1;
+  const windowLeftMs = errorWindowMs - errorMs;
+  const delayMs = Math.min(intervalMs * 2 ** (errors - 1), READ_RETRY_MAX_MS, windowLeftMs);
+  if (windowLeftMs <= 0 || now() + delayMs > deadline) {
+    warn(`Read of the checks failed: ${read.error}`);
+    return { delayMs, readErrors: errors, stop: true, counts: true };
+  }
+  warn(`Read of the checks failed: ${read.error}. Next read in ${formatSeconds(delayMs)}.`);
+  return { delayMs, readErrors: errors, stop: false, counts: true };
+};
+
+/**
  * Read the checks until at least `minChecks` exist and none is pending.
  *
  * `readChecks()` returns `{ ok: true, checks }` or `{ ok: false, error }`.
@@ -304,6 +337,8 @@ export const waitForChecks = async ({
   let changedAt = now();
   for (;;) {
     let delayMs = intervalMs;
+    // The part of the delay that counts against the error window.
+    let errorDelayMs = 0;
     const read = readChecks();
     if (read.ok) {
       readErrors = 0;
@@ -324,14 +359,21 @@ export const waitForChecks = async ({
         return { status, checks };
       }
     } else {
-      readErrors += 1;
-      const windowLeftMs = errorWindowMs - errorMs;
-      delayMs = Math.min(intervalMs * 2 ** (readErrors - 1), READ_RETRY_MAX_MS, windowLeftMs);
-      if (windowLeftMs <= 0 || now() + delayMs > deadline) {
-        warn(`Read of the checks failed: ${read.error}`);
-        return { status: "error", checks, readErrors, errorMs };
+      const failed = failedRead(read, {
+        readErrors,
+        errorMs,
+        intervalMs,
+        errorWindowMs,
+        deadline,
+        now,
+        warn,
+      });
+      if (failed.stop) {
+        return { status: "error", checks, readErrors: failed.readErrors, errorMs };
       }
-      warn(`Read of the checks failed: ${read.error}. Next read in ${formatSeconds(delayMs)}.`);
+      readErrors = failed.readErrors;
+      delayMs = failed.delayMs;
+      errorDelayMs = failed.counts ? delayMs : 0;
     }
     if (readMergeable !== null) {
       const state = readMergeable();
@@ -345,9 +387,7 @@ export const waitForChecks = async ({
       return { status: "timeout", checks };
     }
     await sleep(delayMs);
-    if (readErrors > 0) {
-      errorMs += delayMs;
-    }
+    errorMs += errorDelayMs;
   }
 };
 
@@ -478,9 +518,18 @@ export const parseGitAncestor = ({ error, status, stderr }) => {
 
 const runGit = (args) => spawnSync("git", args, { encoding: "utf8" });
 
-/** Fetch the base branch, then read its newest commit. */
-const gitHeadReader = (git) => () => {
-  const fetched = git(["fetch", "--quiet", FOLLOW_REMOTE, FOLLOW_BRANCH]);
+const REF_LOCK_ERROR = "cannot lock ref";
+
+/**
+ * Fetch the base branch, then read its newest commit. Another fetch in the
+ * same clone can hold the ref lock, so a lock error gets one more fetch.
+ */
+export const gitHeadReader = (git) => () => {
+  const fetch = () => git(["fetch", "--quiet", FOLLOW_REMOTE, FOLLOW_BRANCH]);
+  let fetched = fetch();
+  if (fetched.status !== 0 && fetched.stderr?.includes(REF_LOCK_ERROR)) {
+    fetched = fetch();
+  }
   if (fetched.error) {
     return { ok: false, error: fetched.error.message };
   }
@@ -1193,6 +1242,36 @@ const parseGhCheckRuns = (result, name) => {
   return { ok: true, checks };
 };
 
+const RATE_LIMIT_ERROR = /API rate limit (?:already )?exceeded/i;
+
+/**
+ * Wrap a checks reader. When GitHub refuses a read because of the API rate
+ * limit, add `retryAtMs`, the time of the reset, so that the wait sleeps until
+ * then and does not stop after its error window.
+ */
+export const withRateLimitWait = (readChecks, readReset) => () => {
+  const read = readChecks();
+  if (read.ok || !RATE_LIMIT_ERROR.test(read.error)) {
+    return read;
+  }
+  const reset = readReset();
+  return reset.ok ? { ...read, retryAtMs: reset.resetMs } : read;
+};
+
+/**
+ * Make a reader of the reset time of one rate limit: `core` for REST reads,
+ * `graphql` for `gh pr` reads. This read does not count against the limit.
+ */
+const ghRateLimitReset = (resource) => () => {
+  const query = `.resources.${resource}.reset`;
+  const result = spawnSync("gh", ["api", "rate_limit", "--jq", query], { encoding: "utf8" });
+  const seconds = Number(result.stdout?.trim());
+  if (result.status !== 0 || !Number.isInteger(seconds)) {
+    return { ok: false, error: result.stderr?.trim() || "no reset time" };
+  }
+  return { ok: true, resetMs: seconds * SECOND };
+};
+
 const ghApi = (endpoint) => spawnSync("gh", ["api", endpoint], { encoding: "utf8" });
 
 /**
@@ -1530,7 +1609,10 @@ const main = async () => {
         waitForCommitRuns({
           ...options,
           timeoutMs,
-          readChecks: ghRunsReader({ commit: sha, repo: options.repo }),
+          readChecks: withRateLimitWait(
+            ghRunsReader({ commit: sha, repo: options.repo }),
+            ghRateLimitReset("core"),
+          ),
         }),
       readHead: gitHeadReader(runGit),
       isAncestor: gitAncestorChecker(runGit),
@@ -1544,7 +1626,10 @@ const main = async () => {
     return code;
   }
   if (options.commit !== null) {
-    const result = await waitForCommitRuns({ ...options, readChecks: ghRunsReader(options) });
+    const result = await waitForCommitRuns({
+      ...options,
+      readChecks: withRateLimitWait(ghRunsReader(options), ghRateLimitReset("core")),
+    });
     const code = reportChecks(compareWithMain(result, ghMainReaders(options)), {
       ...options,
       settleMs: COMMIT_SETTLE_MS,
@@ -1557,7 +1642,7 @@ const main = async () => {
   }
   const result = await waitForPullRequestChecks({
     ...options,
-    readChecks: ghChecksReader(options),
+    readChecks: withRateLimitWait(ghChecksReader(options), ghRateLimitReset("graphql")),
     readMergeable: ghMergeableReader(options),
   });
   const code = reportChecks(compareWithMain(result, ghMainReaders(options)), options);

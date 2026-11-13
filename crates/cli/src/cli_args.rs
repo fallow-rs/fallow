@@ -1241,8 +1241,10 @@ pub enum Command {
         #[arg(long)]
         hooks: bool,
 
-        /// Fallback base branch/ref for the pre-commit hook when no upstream is set
-        #[arg(long, requires = "hooks")]
+        /// Has no effect. The pre-commit hook runs `fallow audit --staged`,
+        /// which compares the staged changes with HEAD. Kept so that existing
+        /// install scripts still run.
+        #[arg(long, requires = "hooks", hide = true)]
         branch: Option<String>,
 
         /// Record that this project deliberately stays unconfigured: persists a
@@ -1793,19 +1795,19 @@ pub enum Command {
     /// Combines dead-code + complexity + duplication + styling scoped to
     /// changed files and returns a verdict (pass/warn/fail).
     ///
-    /// `fallow audit` answers "will CI block this?": it gates (exit 1 on a
-    /// fail verdict). The `review` alias plus `--brief` answer "where do I
-    /// look?": the same analysis rendered as a deterministic orientation brief
-    /// that ALWAYS exits 0, so a reviewer or agent can read it regardless of
-    /// the verdict. `--format` is orthogonal to `--brief`.
-    /// When `--changed-since`/`--base` is unset, the base is the git merge-base
-    /// against the branch's upstream or the remote default (`origin/HEAD`,
-    /// `origin/main`, `origin/master`); set `FALLOW_AUDIT_BASE` to pin it.
-    /// By default, only findings introduced by the changeset affect the verdict;
-    /// inherited findings are reported with new-vs-inherited attribution and
-    /// individual JSON findings include `introduced: true/false`. Use
-    /// `--gate all` or `[audit] gate = "all"` to fail on every finding in
-    /// changed files without running the extra base-snapshot attribution pass.
+    /// `fallow audit` answers "will CI block this?": it gates (exit 1 on a fail verdict). The
+    /// `review` alias plus `--brief` answer "where do I look?": the same analysis rendered as a
+    /// deterministic orientation brief that ALWAYS exits 0, so a reviewer or agent can read it
+    /// regardless of the verdict. `--format` is orthogonal to `--brief`. When
+    /// `--changed-since`/`--base` is unset, the base is the git merge-base against the branch's
+    /// upstream or the remote default (`origin/HEAD`, `origin/main`, `origin/master`); set
+    /// `FALLOW_AUDIT_BASE` to pin it. By default, only findings introduced by the changeset
+    /// affect the verdict; inherited findings are reported with new-vs-inherited attribution
+    /// and individual JSON findings include `introduced: true/false`. The default gate also
+    /// reports an unused file or unused export outside the changed files that the base does not
+    /// report: the change removed its last use, or a config change made it unreachable. Use
+    /// `--gate all` or `[audit] gate = "all"` to fail on every finding in changed files without
+    /// running the extra base-snapshot attribution pass.
     ///
     /// The global --baseline / --save-baseline flags are rejected on audit.
     /// Use --dead-code-baseline, --health-baseline, and --dupes-baseline
@@ -1934,12 +1936,8 @@ pub enum Command {
         #[arg(long, value_name = "FILE")]
         mutation_report: Option<PathBuf>,
 
-        /// Internal marker identifying a gate run (e.g. `pre-commit`), set by
-        /// the generated git hook so Fallow Impact can record a containment
-        /// event when the gate blocks then clears. Hidden; never changes the
-        /// verdict, exit code, or output.
-        #[arg(long, value_name = "MARKER", hide = true)]
-        gate_marker: Option<String>,
+        #[command(flatten)]
+        gate_run: AuditGateRunArgs,
 
         /// Render the deterministic review brief instead of the gating audit
         /// report. The brief answers "where do I look?" rather than "will CI

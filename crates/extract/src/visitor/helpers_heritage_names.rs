@@ -1,4 +1,5 @@
-//! Dotted names of class heritage and type references.
+//! Dotted names of class heritage and type references, and the type that
+//! holds the members of a wrapper type reference.
 
 use oxc_ast::ast::*;
 
@@ -33,6 +34,56 @@ pub(super) fn extract_type_name(name: &TSTypeName<'_>) -> Option<String> {
     Some(join_member_path(ident.name.as_str(), &properties))
 }
 
+/// Generic wrappers whose value exposes members of the first type argument.
+///
+/// - `Pick`, `Omit`, `Partial`, `Required`, `Readonly` and `NonNullable` keep
+///   a subset of the members of `T`, or all of them. TypeScript rejects a
+///   member access that `T` does not declare, so an access on the wrapper is
+///   an access on `T`.
+/// - `DurableObjectNamespace`, `DurableObjectStub` and `Rpc.Stub` are the
+///   Cloudflare Workers types of a Durable Object binding and of its RPC stub.
+///   A method call on the stub runs the method of the class `T`.
+const MEMBER_PRESERVING_WRAPPERS: &[&str] = &[
+    "Pick",
+    "Omit",
+    "Partial",
+    "Required",
+    "Readonly",
+    "NonNullable",
+    "DurableObjectNamespace",
+    "DurableObjectStub",
+    "Rpc.Stub",
+];
+
+/// The type that holds the members of `ty`: the first type argument of each
+/// wrapper in [`MEMBER_PRESERVING_WRAPPERS`], also through parentheses and
+/// nested wrappers. Any other type comes back unchanged.
+pub(super) fn unwrap_member_preserving_type<'t, 'a>(ty: &'t TSType<'a>) -> &'t TSType<'a> {
+    let mut ty = ty;
+    loop {
+        crate::cost::walk_step();
+        match ty {
+            TSType::TSParenthesizedType(paren) => ty = &paren.type_annotation,
+            TSType::TSTypeReference(reference) => {
+                let Some(first) = reference
+                    .type_arguments
+                    .as_deref()
+                    .and_then(|arguments| arguments.params.first())
+                else {
+                    return ty;
+                };
+                let is_wrapper = extract_type_name(&reference.type_name)
+                    .is_some_and(|name| MEMBER_PRESERVING_WRAPPERS.contains(&name.as_str()));
+                if !is_wrapper {
+                    return ty;
+                }
+                ty = first;
+            }
+            _ => return ty,
+        }
+    }
+}
+
 #[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
@@ -58,5 +109,39 @@ mod tests {
             extract_type_name(&implemented.expression),
             Some(format!("T{links}"))
         );
+    }
+
+    fn alias_type_reference_name(alias_type: &str) -> Option<String> {
+        let source = format!("type Probe = {alias_type};");
+        let allocator = oxc_allocator::Allocator::default();
+        let parsed =
+            oxc_parser::Parser::new(&allocator, &source, oxc_span::SourceType::ts()).parse();
+        let Some(Statement::TSTypeAliasDeclaration(alias)) = parsed.program.body.first() else {
+            panic!("expected a type alias");
+        };
+        super::super::extract_type_reference_name(&alias.type_annotation)
+    }
+
+    #[test]
+    fn member_preserving_wrappers_resolve_to_their_first_type_argument() {
+        for (alias_type, expected) in [
+            ("Pick<Coordinator, 'run'>", Some("Coordinator")),
+            ("Omit<Coordinator, 'run'>", Some("Coordinator")),
+            ("Readonly<Partial<Coordinator>>", Some("Coordinator")),
+            ("(Required<Coordinator>)", Some("Coordinator")),
+            ("NonNullable<Coordinator | null>", Some("Coordinator")),
+            ("DurableObjectNamespace<Quota>", Some("Quota")),
+            ("DurableObjectStub<Quota>", Some("Quota")),
+            ("Rpc.Stub<Quota>", Some("Quota")),
+            ("Promise<Coordinator>", Some("Promise")),
+            ("Readonly<Coordinator[]>", None),
+            ("Partial", Some("Partial")),
+        ] {
+            assert_eq!(
+                alias_type_reference_name(alias_type).as_deref(),
+                expected,
+                "type: {alias_type}"
+            );
+        }
     }
 }

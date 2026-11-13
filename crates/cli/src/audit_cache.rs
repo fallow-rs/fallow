@@ -53,7 +53,11 @@ use crate::error::emit_input_error;
 /// Version 21 leaves `\r` out of the fragment hash of a clone-group key. A
 /// version-20 snapshot of a CRLF checkout holds keys with `\r`, so its clone
 /// groups would not match the head keys.
-pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 21;
+/// Version 22 keeps the keys of every unused file and unused export of the
+/// base, also outside the changed files. A version-21 snapshot holds only the
+/// keys in the changed files, so an old unused file outside them would look
+/// introduced.
+pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 22;
 const MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE: usize = 16 * 1024 * 1024;
 /// Most snapshot files that one cache version directory keeps. Each key folds
 /// in the base SHA and the changed files, so every new commit or edit adds a
@@ -102,6 +106,8 @@ pub(super) struct CachedAuditKeySnapshot {
     pub(super) branching: Vec<CachedFileBranching>,
     /// Instance locations of each base clone group, in snapshot order.
     pub(super) dupe_groups: Vec<Vec<CachedCloneSpan>>,
+    /// Unused-code keys of the base under its own config, sorted.
+    pub(super) own_config_unused_code: Option<Vec<String>>,
 }
 
 /// One clone instance location in the cached snapshot.
@@ -187,6 +193,9 @@ pub(super) fn snapshot_from_cached(cached: CachedAuditKeySnapshot) -> Option<Aud
             })
             .collect(),
         inherited_health: Vec::new(),
+        own_config_unused_code: cached
+            .own_config_unused_code
+            .map(|keys| keys.into_iter().collect()),
     })
 }
 
@@ -234,6 +243,7 @@ pub(super) fn cached_from_snapshot(
                     .collect()
             })
             .collect(),
+        own_config_unused_code: snapshot.own_config_unused_code.as_ref().map(sorted_keys),
     })
 }
 
