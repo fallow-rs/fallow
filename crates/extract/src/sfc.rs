@@ -907,12 +907,12 @@ fn merge_style_into_module(style: &SfcStyle, combined: &mut ModuleInfo) {
 
     let lang = style.lang.as_deref();
     let is_scss = style_lang_is_scss(lang);
-    let is_css_like = style_lang_is_css_like(lang);
-    if !is_scss && !is_css_like {
+    if !is_scss && !style_lang_is_css_like(lang) {
         return;
     }
 
-    for source in crate::css::extract_css_import_sources(&style.body, is_scss) {
+    let masked = crate::css_url::mask_style_block(&style.body, is_scss, combined);
+    for source in crate::css::import_sources_from_masked(&masked, is_scss) {
         let source_span = Span::new(
             style.byte_offset as u32 + source.span.start,
             style.byte_offset as u32 + source.span.end,
