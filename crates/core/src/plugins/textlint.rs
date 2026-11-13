@@ -17,7 +17,7 @@ use fallow_extract::JsText;
 use oxc_ast::ast::{ArrayExpressionElement, Expression, ObjectExpression, ObjectPropertyKind};
 use rustc_hash::FxHashSet;
 
-use super::{Plugin, PluginResult, config_parser};
+use super::{Plugin, PluginResult, config_parser, module_request};
 
 const ENABLERS: &[&str] = &["textlint"];
 
@@ -92,8 +92,10 @@ impl Plugin for TextlintPlugin {
             .chain(config.plugins.iter().map(|key| (ModuleKind::Plugin, key)));
         for (kind, key) in modules {
             match key {
-                ModuleKey::Name(name) if is_local(name) => {
-                    result.setup_files.push(resolve_local(config_dir, name));
+                ModuleKey::Name(name) if module_request::is_local_module_specifier(name) => {
+                    result
+                        .setup_files
+                        .push(module_request::resolve_local_module(config_dir, name));
                 }
                 ModuleKey::Name(name) => {
                     result
@@ -101,7 +103,9 @@ impl Plugin for TextlintPlugin {
                         .push(package_name(kind, name, &declared));
                 }
                 ModuleKey::Path(path) => {
-                    result.setup_files.push(resolve_local(config_dir, path));
+                    result
+                        .setup_files
+                        .push(module_request::resolve_local_module(config_dir, path));
                 }
             }
         }
@@ -252,33 +256,6 @@ fn is_falsy(expr: &Expression<'_>) -> bool {
         Expression::Identifier(id) => id.name == "undefined",
         _ => false,
     }
-}
-
-fn is_local(name: &str) -> bool {
-    name.starts_with('.') || Path::new(name).is_absolute()
-}
-
-/// Resolve a local module the way Node resolves a request: the file itself,
-/// the file with a source extension, then the index file of a directory.
-fn resolve_local(config_dir: &Path, value: &str) -> PathBuf {
-    let base = config_parser::lexical_normalize(&config_dir.join(value));
-    if base.is_file() {
-        return base;
-    }
-    let mut candidates = crate::discover::SOURCE_EXTENSIONS
-        .iter()
-        .map(|ext| {
-            let mut with_ext = base.clone().into_os_string();
-            with_ext.push(".");
-            with_ext.push(ext);
-            PathBuf::from(with_ext)
-        })
-        .chain(
-            crate::discover::SOURCE_EXTENSIONS
-                .iter()
-                .map(|ext| base.join(format!("index.{ext}"))),
-        );
-    candidates.find(|path| path.is_file()).unwrap_or(base)
 }
 
 /// The packages that the nearest `package.json` at or above the config

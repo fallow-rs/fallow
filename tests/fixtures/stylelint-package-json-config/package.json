@@ -1,0 +1,16 @@
+{
+  "name": "stylelint-package-json-config",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "devDependencies": {
+    "@acme/config-stylelint": "^1.0.0",
+    "stylelint": "^16.0.0",
+    "unused-control": "^1.0.0"
+  },
+  "stylelint": {
+    "extends": "@acme/config-stylelint",
+    "plugins": ["./local-plugin.js"]
+  }
+}

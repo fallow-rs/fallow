@@ -1,0 +1,2 @@
+extends: "@acme/config-stylelint"
+customSyntax: postcss-example-markdown

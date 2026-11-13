@@ -1,0 +1,17 @@
+{
+  "name": "@acme/config-stylelint",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "stylelint.config.js",
+  "dependencies": {
+    "stylelint": "^16.0.0",
+    "stylelint-config-example": "^1.0.0",
+    "stylelint-config-example-order": "^1.0.0",
+    "stylelint-plugin-example": "^1.0.0",
+    "@acme/stylelint-plugin-tokens": "^1.0.0",
+    "postcss-example-html": "^1.0.0",
+    "postcss-example-base": "^1.0.0",
+    "unused-control": "^1.0.0"
+  }
+}

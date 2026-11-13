@@ -243,6 +243,8 @@ mod skipped_file_reachability_caveat;
 mod solid_start;
 #[path = "integration_test/ssr_load_module.rs"]
 mod ssr_load_module;
+#[path = "integration_test/stylelint_config_strings.rs"]
+mod stylelint_config_strings;
 #[path = "integration_test/svelte_dead_event.rs"]
 mod svelte_dead_event;
 #[path = "integration_test/symlink_root_containment.rs"]

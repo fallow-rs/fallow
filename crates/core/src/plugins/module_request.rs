@@ -1,6 +1,6 @@
 //! Config values that name a module request instead of project files.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::config_parser;
 
@@ -65,4 +65,34 @@ pub(super) fn has_source_extension(value: &str) -> bool {
         .is_some_and(|ext| {
             crate::discover::SOURCE_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str())
         })
+}
+
+/// Whether a module specifier from a config value names a local module: a
+/// relative or absolute path, such as `./plugin.js`.
+pub(super) fn is_local_module_specifier(specifier: &str) -> bool {
+    specifier.starts_with('.') || Path::new(specifier).is_absolute()
+}
+
+/// Resolve a local module the way Node resolves a request: the file itself,
+/// the file with a source extension, then the index file of a directory.
+/// Without a match, the joined path is returned.
+pub(super) fn resolve_local_module(config_dir: &Path, specifier: &str) -> PathBuf {
+    let base = config_parser::lexical_normalize(&config_dir.join(specifier));
+    if base.is_file() {
+        return base;
+    }
+    let mut candidates = crate::discover::SOURCE_EXTENSIONS
+        .iter()
+        .map(|ext| {
+            let mut with_ext = base.clone().into_os_string();
+            with_ext.push(".");
+            with_ext.push(ext);
+            PathBuf::from(with_ext)
+        })
+        .chain(
+            crate::discover::SOURCE_EXTENSIONS
+                .iter()
+                .map(|ext| base.join(format!("index.{ext}"))),
+        );
+    candidates.find(|path| path.is_file()).unwrap_or(base)
 }
