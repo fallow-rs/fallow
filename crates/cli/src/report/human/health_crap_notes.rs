@@ -72,6 +72,6 @@ pub(super) fn file_scores_crap_note(report: &fallow_output::HealthReport) -> Str
             measured_coverage_label(report)
         )
     } else {
-        "CRAP estimated from export references (85% direct, 40% indirect, 0% untested). Run `fallow health --coverage <coverage-final.json>` for exact scores.".to_string()
+        "CRAP scores are a static estimate from export references (85% direct, 40% indirect, 0% untested). Pass `--coverage <coverage-final.json>` for measured scores.".to_string()
     }
 }

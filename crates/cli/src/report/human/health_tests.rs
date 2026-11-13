@@ -786,6 +786,23 @@ fn crap_notes_name_v8_coverage_input() {
     );
 }
 
+/// The file-scores footer and the static estimate note use the same terms,
+/// so a reader sees one name for one coverage model.
+#[test]
+fn file_scores_footer_uses_static_estimate_terms() {
+    let report = fallow_output::HealthReport {
+        summary: fallow_output::HealthSummary {
+            coverage_model: Some(fallow_output::CoverageModel::StaticEstimated),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let note = file_scores_crap_note(&report);
+    assert!(note.contains("static estimate"), "{note}");
+    assert!(note.contains("for measured scores"), "{note}");
+    assert!(!note.contains("exact scores"), "{note}");
+}
+
 #[test]
 fn health_findings_explain_istanbul_counts_without_summary_model() {
     let root = PathBuf::from("/project");

@@ -1,0 +1,3 @@
+### Changed
+
+- **The `--file-scores` footer of `fallow health` and the `--coverage` help text now use the same terms as the static estimate note.** Without a coverage file, the footer now says that CRAP scores are a static estimate from export references, and that `--coverage <coverage-final.json>` gives measured scores. Before, the footer said "estimated" and "exact scores", while the note above the findings said "static estimate" and "measured scores". The `--coverage` help of `fallow` and `fallow health` now says "measured" in place of "exact". The estimate tiers and the JSON output do not change.
