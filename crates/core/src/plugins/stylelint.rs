@@ -19,10 +19,10 @@ use std::path::{Path, PathBuf};
 
 use oxc_ast::ast::{ArrayExpressionElement, Expression, ObjectExpression};
 
-use super::config_parser;
 use super::eslint::push_setup_file_once;
 use super::extends_walk::{ExtendsWalk, workspace_package_dir, workspace_package_file};
 use super::{Plugin, PluginResult};
+use super::{config_parser, module_request};
 
 const ENABLERS: &[&str] = &["stylelint"];
 
@@ -114,7 +114,7 @@ fn credit_config(
 
     let config_dir = config_path.parent().unwrap_or(root);
     for ConfigModule { key, specifier } in modules {
-        if config_parser::is_local_module_specifier(&specifier) {
+        if module_request::is_local_module_specifier(&specifier) {
             if key == EXTENDS {
                 let path = resolve_extends_path(config_dir, &specifier);
                 if config_parser::is_inside_root(&path, walk.project_root()) {
@@ -122,7 +122,7 @@ fn credit_config(
                     follow_extends(result, &path, root, walk, depth);
                 }
             } else {
-                let path = config_parser::resolve_local_module(config_dir, &specifier);
+                let path = module_request::resolve_local_module(config_dir, &specifier);
                 push_setup_file_once(result, path);
             }
         } else if let Some(package) = config_parser::config_string_package_name(&specifier) {

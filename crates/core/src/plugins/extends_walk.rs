@@ -36,7 +36,7 @@ impl<'a> ExtendsWalk<'a> {
 
     /// The directory of the workspace package `name`, if the project declares
     /// one with that name.
-    pub(in crate::plugins) fn workspace_package_dir(&mut self, name: &str) -> Option<PathBuf> {
+    fn workspace_package_dir(&mut self, name: &str) -> Option<PathBuf> {
         let project_root = self.project_root;
         self.workspaces
             .get_or_insert_with(|| workspace_index(project_root))

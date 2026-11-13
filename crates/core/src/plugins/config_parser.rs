@@ -2619,36 +2619,6 @@ pub(crate) fn lexical_normalize(path: &Path) -> PathBuf {
     normalized
 }
 
-/// Whether a module specifier from a config value names a local module: a
-/// relative or absolute path, such as `./plugin.js`.
-pub(crate) fn is_local_module_specifier(specifier: &str) -> bool {
-    specifier.starts_with('.') || Path::new(specifier).is_absolute()
-}
-
-/// Resolve a local module the way Node resolves a request: the file itself,
-/// the file with a source extension, then the index file of a directory.
-/// Without a match, the joined path is returned.
-pub(crate) fn resolve_local_module(config_dir: &Path, specifier: &str) -> PathBuf {
-    let base = lexical_normalize(&config_dir.join(specifier));
-    if base.is_file() {
-        return base;
-    }
-    let mut candidates = crate::discover::SOURCE_EXTENSIONS
-        .iter()
-        .map(|ext| {
-            let mut with_ext = base.clone().into_os_string();
-            with_ext.push(".");
-            with_ext.push(ext);
-            PathBuf::from(with_ext)
-        })
-        .chain(
-            crate::discover::SOURCE_EXTENSIONS
-                .iter()
-                .map(|ext| base.join(format!("index.{ext}"))),
-        );
-    candidates.find(|path| path.is_file()).unwrap_or(base)
-}
-
 /// Whether an existing `path` resolves inside `root`.
 ///
 /// The check resolves `..` segments and symlinks, so a glob match such as

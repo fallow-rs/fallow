@@ -17,7 +17,7 @@ use fallow_extract::JsText;
 use oxc_ast::ast::{ArrayExpressionElement, Expression, ObjectExpression, ObjectPropertyKind};
 use rustc_hash::FxHashSet;
 
-use super::{Plugin, PluginResult, config_parser};
+use super::{Plugin, PluginResult, config_parser, module_request};
 
 const ENABLERS: &[&str] = &["textlint"];
 
@@ -92,10 +92,10 @@ impl Plugin for TextlintPlugin {
             .chain(config.plugins.iter().map(|key| (ModuleKind::Plugin, key)));
         for (kind, key) in modules {
             match key {
-                ModuleKey::Name(name) if config_parser::is_local_module_specifier(name) => {
+                ModuleKey::Name(name) if module_request::is_local_module_specifier(name) => {
                     result
                         .setup_files
-                        .push(config_parser::resolve_local_module(config_dir, name));
+                        .push(module_request::resolve_local_module(config_dir, name));
                 }
                 ModuleKey::Name(name) => {
                     result
@@ -105,7 +105,7 @@ impl Plugin for TextlintPlugin {
                 ModuleKey::Path(path) => {
                     result
                         .setup_files
-                        .push(config_parser::resolve_local_module(config_dir, path));
+                        .push(module_request::resolve_local_module(config_dir, path));
                 }
             }
         }
