@@ -2565,9 +2565,9 @@ change of the tests weakens the detection of mutants: a mutant that a test
 killed before and that survives now.
 
 ```bash
-fallow mutation src/utils.ts --format json > before.json   # save a report
+fallow mutation src/utils.ts --format json -o .fallow/before.json   # save a report
 # change, move or remove tests, then commit
-fallow mutation src/utils.ts --compare before.json
+fallow mutation src/utils.ts --compare .fallow/before.json
 ```
 
 - The saved report is a `fallow mutation --format json` report, for example
