@@ -2031,6 +2031,31 @@ fn run_workspace_fast_credits_inline_config_to_own_and_root_manifest() {
 }
 
 #[test]
+fn run_workspace_fast_credits_inline_config_to_each_manifest_up_to_the_root() {
+    let (result, ws_manifest, root_manifest) =
+        run_workspace_fast_with_manifest(&prettier_string_manifest(), &[]);
+    let project_root = root_manifest.parent().unwrap();
+    let mut credited: Vec<&PathBuf> = result
+        .package_referenced_dependencies
+        .iter()
+        .filter(|(_, dep)| dep == "@acme/config-prettier")
+        .map(|(manifest, _)| manifest)
+        .collect();
+    credited.sort();
+    let mut expected = [
+        root_manifest.clone(),
+        project_root.join("apps/package.json"),
+        ws_manifest,
+    ];
+    expected.sort();
+    assert_eq!(
+        credited,
+        expected.iter().collect::<Vec<_>>(),
+        "the tool resolves the package from apps/web, apps and the project root, and from no directory above the project"
+    );
+}
+
+#[test]
 fn run_workspace_fast_skips_inline_config_when_workspace_has_config_file() {
     // A config file that the plugin matches in the workspace files skips the
     // inline key, as in the root run.

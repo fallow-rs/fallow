@@ -114,9 +114,9 @@ like a config file, so its entries, setup files and entry pattern
 replacements apply to that package.
 
 A package that the root manifest's key names counts as used in every package.
-A package that a workspace manifest's key names counts as used only in that
-workspace manifest and in the root manifest, the two manifests that the tool
-resolves the package from in the usual layout. A sibling workspace that
+A package that a workspace manifest's key names counts as used only in the
+manifests that the tool resolves the package from: that workspace manifest and
+each manifest above it, up to the root manifest. A sibling workspace that
 declares the same package gets no credit.
 
 ## Packages that a config needs installed

@@ -1702,17 +1702,25 @@ fn emit_plugin_diagnostics(findings: &[PluginDiagnostic]) {
 ///
 /// A package that the root manifest names counts as used in every package.
 /// A package that a workspace manifest names counts as used only for the
-/// workspace manifest and the root manifest, the two manifests that the tool
-/// resolves the package from, so a sibling workspace that declares the same
-/// package gets no credit.
+/// manifests that the tool resolves the package from: the workspace manifest
+/// and each manifest above it, up to the root manifest. A sibling workspace
+/// that declares the same package gets no credit.
 fn process_package_json_inline_configs(
     input: &InlineConfigInput<'_>,
     result: &mut AggregatedPluginResult,
     regex_errors: &mut Vec<PluginRegexValidationError>,
 ) {
     let pkg_path = input.root.join("package.json");
-    let root_pkg_path =
-        (input.root != input.project_root).then(|| input.project_root.join("package.json"));
+    let credited_manifests: Vec<PathBuf> = if input.root == input.project_root {
+        Vec::new()
+    } else {
+        input
+            .root
+            .ancestors()
+            .take_while(|dir| dir.starts_with(input.project_root))
+            .map(|dir| dir.join("package.json"))
+            .collect()
+    };
     for plugin in input.active {
         let Some(key) = plugin.package_json_config_key() else {
             continue;
@@ -1739,14 +1747,13 @@ fn process_package_json_inline_configs(
             key = key,
             "resolved inline package.json config"
         );
-        if let Some(root_pkg_path) = &root_pkg_path {
+        if !credited_manifests.is_empty() {
             for dep in std::mem::take(&mut plugin_result.referenced_dependencies) {
-                plugin_result
-                    .package_referenced_dependencies
-                    .push((root_pkg_path.clone(), dep.clone()));
-                plugin_result
-                    .package_referenced_dependencies
-                    .push((pkg_path.clone(), dep));
+                plugin_result.package_referenced_dependencies.extend(
+                    credited_manifests
+                        .iter()
+                        .map(|manifest| (manifest.clone(), dep.clone())),
+                );
             }
         }
         if let Err(mut errors) =
