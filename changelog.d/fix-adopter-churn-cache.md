@@ -1,3 +1,0 @@
-### Fixed
-
-- **The churn cache no longer keeps a truncated history after `git fetch --unshallow` or `git fetch --deepen`.** Before, a run on a shallow clone saved the shallow history in the cache. After the fetch, the next run used that cache. With the same HEAD, hotspots and change coupling still showed the shallow history. After a new commit, the run added only the new commit and reported `shallow_clone: false`, so the truncated history had no warning. The cache now stores the shallow state and a hash of the shallow boundary of the clone. A change of either one makes the next run read the full history again.

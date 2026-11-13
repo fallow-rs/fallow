@@ -1,7 +1,0 @@
-### Changed
-
-- **The `fail-on-issues` count of the GitHub Action and `FALLOW_FAIL_ON_ISSUES` of the GitLab template now follow rule severity for dead code.** On `dead-code`, `check`, `architecture` and the dead-code part of the combined run, only the findings whose rule is `error` fail the job. This is the same rule as the CLI exit code. Before, a finding whose rule is `warn` also failed the job, so the check could be red while the comment and the CLI said the run passed. The count comes from `gate_outcomes["error-severity-findings"].observed`. A `warn` finding stays in the `issues` output and in the advisory warning. Fallow 3.29.0 to 3.31.x publish the entry without `observed`. There a `pass` status counts as 0, and a `fail` status lets every finding count. A fallow older than 3.29.0 publishes no such entry, so there every finding still counts. Duplication, health and security counts do not change.
-
-### Added
-
-- **An audit that compared no changed file now says so.** `fallow audit` prints a note on stderr, also under `--quiet`, when its scope has no changed file, because its verdict then checked nothing. The GitHub Action prints the same fact as a `::warning::`, and the GitLab template as a `WARNING:` line. A push to the default branch causes this: the run has no pull request base, and the base that the CLI finds is HEAD itself. The warning names the base ref and tells how to give a base. The job result does not change.
