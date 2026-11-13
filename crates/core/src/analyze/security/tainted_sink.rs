@@ -328,6 +328,7 @@ fn matcher_admits_sink(matcher: &Matcher, sink: &SinkSite, source: Option<(&str,
             &sink.object_property_keys,
             sink.object_property_keys_complete,
         )
+        && matcher.options_may_enable_satisfied(sink.call_options.as_deref())
         && matcher.context_satisfied(&sink.arg_idents)
         && (!matcher.requires_source || source.is_some())
         // Source-KIND gate (#890): when set, the matched source's id must be one
@@ -916,6 +917,7 @@ mod tests {
             span_end: 1,
             url_arg_literal: None,
             url_shape: None,
+            call_options: None,
         }
     }
 

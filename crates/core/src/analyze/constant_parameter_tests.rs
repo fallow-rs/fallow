@@ -386,6 +386,230 @@ fn a_dynamic_import_abstains() {
     assert_abstains(&project, "src/format.ts", "format", "dynamic-import");
 }
 
+const OPAQUE: &str = "const name = process.argv[2];\n";
+const OPAQUE_REASON: &str = "opaque-module-load";
+
+fn main_with(load: &str) -> String {
+    format!("{MAIN}{OPAQUE}{load}")
+}
+
+fn analyze_load(extra: &[(&str, &str)], load: &str) -> Project {
+    let main = main_with(load);
+    analyze(&base_with(extra, &main))
+}
+
+#[test]
+fn a_load_with_an_unknown_source_that_reads_the_export_name_abstains() {
+    for load in [
+        "const mod = await import(name);\nmod.format(4, false);\n",
+        "const mod = await import(name);\nmod?.format?.(4, false);\n",
+        "const mod = await import(name);\nmod['format'](4, false);\n",
+        "const { format: f, default: h } = await import(name);\nf(4, false);\n",
+        "const mod = await import(name);\nif ('format' in mod) console.log(1);\n",
+        "import(name).then((m) => m.format(4, false));\n",
+        "import(name).then(({ format }) => format(4, false));\n",
+        "require(name).format(4, false);\n",
+        "const mod = require(name);\nmod.format(4, false);\n",
+        "(await import(name)).format(4, false);\n",
+    ] {
+        let project = analyze_load(&[], load);
+        assert_abstains(&project, "src/format.ts", "format", OPAQUE_REASON);
+    }
+}
+
+#[test]
+fn a_load_with_an_unknown_source_that_reads_another_name_keeps_the_finding() {
+    for load in [
+        "const mod = await import(name);\nmod.other(4, false);\n",
+        "const { other } = await import(name);\nother();\n",
+        "import(name).then((m) => m.other());\n",
+        "require(name).other();\n",
+    ] {
+        let project = analyze_load(&[], load);
+        assert_eq!(project.findings("format").len(), 2, "{load}");
+        assert_eq!(project.reason("src/format.ts", "format"), None, "{load}");
+    }
+}
+
+#[test]
+fn a_discarded_load_with_an_unknown_source_blocks_nothing() {
+    for load in [
+        "await import(name);\n",
+        "require(name);\n",
+        "void import(name);\n",
+        "import(name).catch(() => {});\n",
+        "import(name).then(() => console.log('loaded'));\n",
+    ] {
+        let project = analyze_load(&[], load);
+        assert_eq!(project.findings("format").len(), 2, "{load}");
+    }
+}
+
+#[test]
+fn a_load_with_an_unknown_source_whose_value_escapes_blocks_each_export() {
+    for load in [
+        "export const later = () => import(name);\n",
+        "export async function get() { return await import(name); }\n",
+        "const mod = await import(name);\nconst alias = mod;\nalias.other();\n",
+        "let mod;\nmod = await import(name);\nmod.other();\n",
+        "console.log(await import(name));\n",
+        "await Promise.all([import(name)]);\n",
+        "export const box = { mod: await import(name) };\n",
+        "export const list = [await import(name)];\n",
+        "const mod = await import(name);\nexport { mod };\n",
+        "export const copy = { ...(await import(name)) };\n",
+        "Object.assign({}, await import(name));\n",
+        "const mod = await import(name);\nfor (const key in mod) console.log(key);\n",
+        "const mod = await import(name);\nObject.values(mod);\n",
+        "const mod = await import(name);\nmod[process.argv[3]](4, false);\n",
+        "require(name)();\n",
+        "new (require(name))();\n",
+        "const { other, ...rest } = await import(name);\n",
+        "import(name).then(console.log);\n",
+        "export const later = () => import(`${name}`);\n",
+        "export const later = () => require(name);\n",
+        "const r = require;\nr(name);\n",
+    ] {
+        let project = analyze_load(&[], load);
+        assert_abstains(&project, "src/format.ts", "format", OPAQUE_REASON);
+    }
+}
+
+#[test]
+fn a_default_read_blocks_only_the_default_export() {
+    let pad = "export default function pad(s: string, n: number) { return s + n; }\n";
+    let load = "import pad from './pad';\npad('a', 1);\npad('b', 1);\n(await import(name)).default('c', 2);\n";
+    let project = analyze_load(&[("src/pad.ts", pad)], load);
+    assert_eq!(project.findings("format").len(), 2);
+    assert_abstains(&project, "src/pad.ts", "pad", OPAQUE_REASON);
+}
+
+#[test]
+fn a_read_through_a_re_export_blocks_the_origin_function() {
+    for (barrel, load) in [
+        (
+            "export { format as leftPad } from './format';\n",
+            "import './barrel';\nconst mod = await import(name);\nmod.leftPad(4, false);\n",
+        ),
+        (
+            "export * as ns from './format';\n",
+            "import './barrel';\nconst mod = await import(name);\nmod.ns.format(4, false);\n",
+        ),
+    ] {
+        let project = analyze_load(&[("src/barrel.ts", barrel)], load);
+        assert_abstains(&project, "src/format.ts", "format", OPAQUE_REASON);
+    }
+}
+
+#[test]
+fn a_data_file_suffix_is_not_an_unknown_source() {
+    let data = "console.log(await import(`@/locales/${name}.json`));\n";
+    assert_eq!(analyze_load(&[], data).findings("format").len(), 2);
+    let relative = "console.log(await import(`./locales/${name}.json`));\n";
+    assert_eq!(analyze_load(&[], relative).findings("format").len(), 2);
+    let required = "console.log(require('@/styles/' + name + '.css'));\n";
+    assert_eq!(analyze_load(&[], required).findings("format").len(), 2);
+    let mapped = "console.log(await import(`#i18n/${name}.json`));\n";
+    let project = analyze_load(&[], mapped);
+    assert_abstains(&project, "src/format.ts", "format", OPAQUE_REASON);
+}
+
+#[test]
+fn a_require_of_an_unknown_source_in_another_module_abstains() {
+    let main = format!("import './legacy';\n{MAIN}");
+    let legacy = "const mod = require(process.env.TARGET);\nmod.format(4, false);\n";
+    let project = analyze(&base_with(&[("src/legacy.js", legacy)], &main));
+    assert_abstains(&project, "src/format.ts", "format", OPAQUE_REASON);
+    let stats = project.stats();
+    let opaque = stats
+        .reasons
+        .iter()
+        .find(|(reason, _)| reason.code() == OPAQUE_REASON)
+        .map(|(_, count)| *count);
+    assert_eq!(
+        opaque,
+        Some(ReasonCount {
+            first: 1,
+            any: 1,
+            only: 1
+        })
+    );
+}
+
+#[test]
+fn a_dynamic_import_pattern_blocks_only_the_files_it_matches() {
+    let plugin = "export function boot(level: number) { return level; }\n";
+    let load = "export const later = () => import(`./plugins/${name}.ts`);\n";
+    let project = analyze_load(&[("src/plugins/boot.ts", plugin)], load);
+    assert_eq!(project.findings("format").len(), 2);
+    assert_eq!(project.reason("src/format.ts", "format"), None);
+    assert_eq!(
+        project.reason("src/plugins/boot.ts", "boot"),
+        Some("dynamic-import")
+    );
+}
+
+#[test]
+fn a_function_that_no_export_exposes_stays_a_candidate() {
+    let local = "function scale(n: number, flag: boolean) { return flag ? n : 0; }\nscale(1, true);\nscale(2, true);\n";
+    let project = analyze_load(
+        &[],
+        &format!(
+            "{local}const mod = await import(name);\nmod.scale(4, false);\nconsole.log(mod);\n"
+        ),
+    );
+    assert_eq!(
+        project.findings("scale"),
+        vec![(
+            "flag".to_string(),
+            ConstantParameterReason::IdenticalArgument,
+            Some("true".to_string())
+        )]
+    );
+    assert_abstains(&project, "src/format.ts", "format", OPAQUE_REASON);
+}
+
+#[test]
+fn an_opaque_load_in_a_test_file_counts_only_when_the_file_is_analyzed() {
+    let test = "const name = process.argv[2];\ntest('x', async () => {\n  const mod = await import(name);\n  mod.format(4, false);\n});\n";
+    let files = base_with(&[("src/format.test.ts", test)], MAIN);
+    let default = analyze(&files);
+    assert_abstains(&default, "src/format.ts", "format", OPAQUE_REASON);
+    let production = analyze_with(
+        &private_package(),
+        &serde_json::json!({ "entry": ["src/main.ts"], "production": true }),
+        &files,
+    );
+    assert_eq!(production.findings("format").len(), 2);
+}
+
+#[test]
+fn an_opaque_load_blocks_the_type_aware_class_candidates() {
+    let store = "export class Store {\n  save(id: string, retries: number): string { return id + retries; }\n}\n";
+    let main = "import { Store } from './store';\nconst store = new Store();\nstore.save('a', 1);\nstore.save('b', 1);\n";
+    let config = serde_json::json!({ "entry": ["src/main.ts"], "typeAware": { "enabled": true } });
+    let classes = |main: &str| -> Vec<String> {
+        analyze_with(
+            &private_package(),
+            &config,
+            &[("src/store.ts", store), ("src/main.ts", main)],
+        )
+        .results
+        .constant_parameter_candidates
+        .classes
+        .iter()
+        .map(|class| class.class_name.clone())
+        .collect()
+    };
+    assert_eq!(classes(main), vec!["Store".to_string()]);
+    let other = format!("{main}{OPAQUE}const mod = await import(name);\nmod.Other;\n");
+    assert_eq!(classes(&other), vec!["Store".to_string()]);
+    let read = format!("{main}{OPAQUE}const mod = await import(name);\nnew mod.Store();\n");
+    assert!(classes(&read).is_empty());
+    let escape = format!("{main}{OPAQUE}export const later = () => import(name);\n");
+    assert!(classes(&escape).is_empty());
+}
+
 #[test]
 fn a_require_of_the_module_abstains() {
     let main = "import { format } from './format';\nimport './legacy';\nformat(1, true);\nformat(2, true);\nformat(3, true);\n";

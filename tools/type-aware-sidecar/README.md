@@ -8,6 +8,12 @@ The wire protocol accepts a bounded set of tagged `symbol-use`, `symbol-trace`,
 TypeScript project creates one Program. Symbol use, trace, and impact queries
 share one indexed source traversal per Program.
 
+The one-shot `call-evidence` operation serves the opt-in `constant-parameter`
+rule of Fallow. For each candidate parameter with a default, it reports whether
+an argument of a call can be `undefined`. For each method of an exported class,
+it lists the calls that the checker resolves, or a stable reason why a call can
+be invisible. A semantic session does not accept this operation.
+
 Symbol identities include the canonical project-relative path, value or type
 namespace, declaration kind, exported and local name, one-based line,
 zero-based UTF-8 byte column, and optional owner. Results keep their semantic

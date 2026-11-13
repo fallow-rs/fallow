@@ -222,6 +222,46 @@ fn production_mode_drops_test_callers() {
 
 const CACHED_JSON_ARGS: &[&str] = &["--constant-parameters", "--format", "json", "--quiet"];
 
+/// The count of `format` findings on each run, cold and then warm, after
+/// `load` is appended to `src/main.ts`.
+fn format_findings_with_load(load: &str) -> Vec<usize> {
+    let dir = copy_fixture("constant-parameter");
+    let main = dir.path().join("src/main.ts");
+    let mut source = std::fs::read_to_string(&main).unwrap();
+    source.push_str("const name = process.argv[2];\n");
+    source.push_str(load);
+    std::fs::write(&main, source).unwrap();
+    ["cold", "warm"]
+        .into_iter()
+        .map(|run| {
+            let output = run_fallow_in_root("dead-code", dir.path(), CACHED_JSON_ARGS);
+            assert_eq!(output.code, 0, "{run}: {}", output.stderr);
+            let report = parse_json(&output);
+            report
+                .get("constant_parameters")
+                .and_then(serde_json::Value::as_array)
+                .map_or(0, |findings| {
+                    findings
+                        .iter()
+                        .filter(|finding| finding["function_name"] == "format")
+                        .count()
+                })
+        })
+        .collect()
+}
+
+#[test]
+fn a_load_with_an_unknown_source_blocks_the_names_it_reads_also_from_the_cache() {
+    let read = "const mod = await import(name);\nmod.format(9, false);\n";
+    assert_eq!(format_findings_with_load(read), [0, 0]);
+    let other = "const mod = await import(name);\nmod.other();\n";
+    let control = format_findings_with_load("");
+    assert!(control[0] > 0, "{control:?}");
+    assert_eq!(format_findings_with_load(other), control);
+    let escape = "console.log(await import(name));\n";
+    assert_eq!(format_findings_with_load(escape), [0, 0]);
+}
+
 fn cache_size(root: &std::path::Path) -> u64 {
     std::fs::metadata(root.join(".fallow/cache.bin"))
         .expect("the run writes the parse cache")

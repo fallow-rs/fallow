@@ -400,7 +400,11 @@ pub fn build_audit_sarif(input: AuditSarifOutputInput<'_>) -> serde_json::Value 
     let mut all_runs = Vec::new();
 
     if let Some(sarif) = input.dead_code {
-        extend_sarif_runs(&mut all_runs, sarif);
+        fallow_output::extend_sarif_runs_with_category(
+            &mut all_runs,
+            sarif,
+            fallow_output::SARIF_CATEGORY_AUDIT_DEAD_CODE,
+        );
     }
 
     if let Some(duplication) = input.duplication
@@ -410,7 +414,11 @@ pub fn build_audit_sarif(input: AuditSarifOutputInput<'_>) -> serde_json::Value 
     }
 
     if let Some(sarif) = input.health {
-        extend_sarif_runs(&mut all_runs, sarif);
+        fallow_output::extend_sarif_runs_with_category(
+            &mut all_runs,
+            sarif,
+            fallow_output::SARIF_CATEGORY_AUDIT_HEALTH,
+        );
     }
 
     if let Some(diff_risk) = input.diff_risk
@@ -426,12 +434,6 @@ pub fn build_audit_sarif(input: AuditSarifOutputInput<'_>) -> serde_json::Value 
     })
 }
 
-fn extend_sarif_runs(all_runs: &mut Vec<serde_json::Value>, sarif: &serde_json::Value) {
-    if let Some(runs) = sarif.get("runs").and_then(|runs| runs.as_array()) {
-        all_runs.extend(runs.iter().cloned());
-    }
-}
-
 fn build_audit_duplication_sarif_run(duplication: &DuplicationReport) -> serde_json::Value {
     serde_json::json!({
         "tool": {
@@ -441,7 +443,7 @@ fn build_audit_duplication_sarif_run(duplication: &DuplicationReport) -> serde_j
                 "informationUri": "https://github.com/fallow-rs/fallow",
             }
         },
-        "automationDetails": { "id": "fallow/audit/dupes" },
+        "automationDetails": { "id": fallow_output::SARIF_CATEGORY_AUDIT_DUPES },
         "results": duplication.clone_groups.iter().enumerate().map(|(i, group)| {
             serde_json::json!({
                 "ruleId": "fallow/code-duplication",
@@ -520,7 +522,7 @@ fn build_audit_diff_risk_sarif_run(report: &fallow_output::DiffRiskReport) -> se
                 "rules": rule_defs,
             }
         },
-        "automationDetails": { "id": "fallow/audit/diff-risk" },
+        "automationDetails": { "id": fallow_output::SARIF_CATEGORY_AUDIT_DIFF_RISK },
         "results": results,
     })
 }
@@ -703,7 +705,7 @@ mod tests {
         assert_eq!(value["runs"].as_array().expect("runs").len(), 3);
         assert_eq!(
             value["runs"][1]["automationDetails"]["id"],
-            "fallow/audit/dupes"
+            fallow_output::SARIF_CATEGORY_AUDIT_DUPES
         );
     }
 

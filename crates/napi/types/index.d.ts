@@ -362,7 +362,8 @@ export interface ConstantParameterFinding {
   option_key?: string;
   line: number;
   col: number;
-  reason: 'identical-argument' | 'never-passed';
+  reason: 'identical-argument' | 'never-passed' | 'unused-default';
+  evidence?: 'type-aware';
   value?: { kind: 'boolean' | 'null' | 'undefined' | 'number' | 'string' | 'binding'; text: string };
   optional: boolean;
   has_default: boolean;

@@ -1310,7 +1310,7 @@ impl ModuleInfoExtractor {
             Declaration::VariableDeclaration(var) => {
                 for declarator in &var.declarations {
                     for id in declarator.id.get_binding_identifiers() {
-                        self.record_local_declaration_name(&id.name);
+                        self.record_declaration_name(&id.name, var.declare);
                     }
                 }
             }
@@ -1440,7 +1440,7 @@ impl ModuleInfoExtractor {
 
     fn record_top_level_function_declaration(&mut self, function: &Function<'_>) {
         if let Some(id) = function.id.as_ref() {
-            self.record_local_declaration_name(&id.name);
+            self.record_declaration_name(&id.name, function.declare);
             self.record_sanitizer_binding(id.name.as_str(), None);
             self.record_literal_allowlist_binding(id.name.as_str(), false);
             self.record_risky_regex_binding(id.name.as_str(), None);
@@ -4264,41 +4264,18 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     }
 
     fn visit_import_expression(&mut self, expr: &ImportExpression<'a>) {
+        let mut sources = Vec::new();
+        self.collect_dynamic_import_specifiers(&expr.source, &mut sources);
+        if !sources.is_empty() {
+            self.record_dynamic_import_branch_patterns(&expr.source, expr.span);
+        }
         if self.handled_import_spans.contains(&expr.span) {
             walk::walk_import_expression(self, expr);
             return;
         }
-
-        // Static specifiers first (string literals, no-substitution templates,
-        // and every statically-resolvable conditional/logical/parenthesized
-        // branch); only when none resolve, fall back to the pattern shapes
-        // (substitution templates and `'./x/' + y` concatenations).
-        let mut sources = Vec::new();
-        self.collect_dynamic_import_specifiers(&expr.source, &mut sources);
+        // Without a static specifier, fall back to the pattern shapes.
         if sources.is_empty() {
-            match &expr.source {
-                Expression::TemplateLiteral(tpl)
-                    if !tpl.quasis.is_empty() && !tpl.expressions.is_empty() =>
-                {
-                    self.record_dynamic_import_template_pattern(tpl, expr.span);
-                }
-                Expression::BinaryExpression(bin)
-                    if bin.operator == oxc_ast::ast::BinaryOperator::Addition =>
-                {
-                    if let Some((prefix, suffix)) = extract_concat_parts(bin)
-                        && (prefix.starts_with("./") || prefix.starts_with("../"))
-                    {
-                        self.dynamic_import_patterns.push(DynamicImportPattern {
-                            prefix,
-                            suffix,
-                            span: expr.span,
-                            mechanism: ModuleLoadMechanism::EsModule,
-                            excludes: Vec::new(),
-                        });
-                    }
-                }
-                _ => {}
-            }
+            self.record_dynamic_import_pattern(&expr.source, expr.span);
         } else {
             self.push_unbound_dynamic_import_branches(&sources, expr.span);
         }

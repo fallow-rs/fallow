@@ -108,6 +108,7 @@ mod tests {
                 line: 1,
                 col: 11,
                 reason: ConstantParameterReason::IdenticalArgument,
+                evidence: None,
                 value: Some(ConstantParameterValue {
                     kind: ConstantParameterValueKind::String,
                     text: "<img src=x> `tick`".into(),

@@ -68,8 +68,10 @@ pub use fallow_types::results::{
     UnusedSvelteEvent,
 };
 pub use fallow_types::results::{
-    ConstantParameter, ConstantParameterCallSite, ConstantParameterFinding,
-    ConstantParameterReason, ConstantParameterValue, ConstantParameterValueKind,
+    CandidateArgument, ConstantParameter, ConstantParameterCallSite, ConstantParameterCandidates,
+    ConstantParameterEvidence, ConstantParameterFinding, ConstantParameterReason,
+    ConstantParameterValue, ConstantParameterValueKind, MethodClassCandidate,
+    UnusedDefaultCandidate, constant_parameter_explanation,
 };
 pub use fallow_types::results::{
     EffectCatchSite, EffectLayerKind, UnproducedCatchTag, UnusedEffectLayer, UnusedTaggedError,

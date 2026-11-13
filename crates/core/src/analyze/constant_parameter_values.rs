@@ -52,7 +52,7 @@ impl Value<'_> {
 
 /// What one call passes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Observed<'a> {
+pub(super) enum Observed<'a> {
     Omitted,
     Value(Value<'a>),
     Unknown,
@@ -100,14 +100,19 @@ impl<'a> Gate<'a> {
         let optional = param.optional || param.has_default;
         verdict(
             optional,
-            calls.iter().map(|call| match call.site.arg_at(index) {
-                ArgAt::Omitted => Observed::Omitted,
-                ArgAt::Fact(ArgFact::Literal(literal)) => Observed::Value(Value::Literal(literal)),
-                ArgAt::Fact(ArgFact::Binding(binding)) => self.binding_value(call.file, binding),
-                ArgAt::Fact(ArgFact::Param(_) | ArgFact::Object(_) | ArgFact::Unknown)
-                | ArgAt::Unknown => Observed::Unknown,
-            }),
+            calls.iter().map(|call| self.observe(*call, index)),
         )
+    }
+
+    /// What `call` passes for the identifier parameter at `index`.
+    pub(super) fn observe(&self, call: Call<'a>, index: u32) -> Observed<'a> {
+        match call.site.arg_at(index) {
+            ArgAt::Omitted => Observed::Omitted,
+            ArgAt::Fact(ArgFact::Literal(literal)) => Observed::Value(Value::Literal(literal)),
+            ArgAt::Fact(ArgFact::Binding(binding)) => self.binding_value(call.file, binding),
+            ArgAt::Fact(ArgFact::Param(_) | ArgFact::Object(_) | ArgFact::Unknown)
+            | ArgAt::Unknown => Observed::Unknown,
+        }
     }
 
     /// The verdict for one option key of an object-pattern parameter.

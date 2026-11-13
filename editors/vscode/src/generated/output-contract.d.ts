@@ -472,7 +472,12 @@ export type DependencyOverrideMisconfigReason = ("unparsable-key" | "empty-value
 /**
  * Why the rule reports a parameter.
  */
-export type ConstantParameterReason = ("identical-argument" | "never-passed")
+export type ConstantParameterReason = ("identical-argument" | "never-passed" | "unused-default")
+/**
+ * The evidence that a [`ConstantParameter`] finding needs beyond the
+ * syntactic call facts.
+ */
+export type ConstantParameterEvidence = "type-aware"
 /**
  * The type of a [`ConstantParameterValue`].
  */
@@ -2266,6 +2271,11 @@ symbol_impacts?: SemanticSymbolImpact[]
  */
 type_coupling?: (TypeCouplingReport | null)
 /**
+ * The call evidence of the `constant-parameter` rule. Present when the
+ * rule sent candidates to the companion.
+ */
+call_evidence?: (TypeAwareCallEvidenceMeta | null)
+/**
  * Whether the semantic companion executed at least one query.
  */
 executed: boolean
@@ -2934,6 +2944,36 @@ export interface TypeCouplingCycle {
  * Ordered project-root-relative files, ending at the start file.
  */
 files: string[]
+}
+/**
+ * The call evidence that the `constant-parameter` rule asked the companion
+ * for.
+ */
+export interface TypeAwareCallEvidenceMeta {
+/**
+ * Parameters with a default whose arguments the companion typed.
+ */
+default_candidates: number
+/**
+ * Methods of exported classes whose calls the companion read.
+ */
+method_candidates: number
+/**
+ * Findings that the evidence proved.
+ */
+findings: number
+/**
+ * The count of each reason that a candidate got no evidence, such as
+ * `outside-program` or `decorator`. An open set: a later version can
+ * add a reason.
+ */
+abstention_reasons?: {
+[k: string]: number
+}
+/**
+ * Duration of the request as reported by the companion.
+ */
+elapsed_ms: number
 }
 /**
  * Closed abstention reason counts for stable machine consumption.
@@ -6826,7 +6866,8 @@ export interface ConstantParameterFinding {
  */
 path: string
 /**
- * The module-scope binding name of the function.
+ * The module-scope binding name of the function. For a method of an
+ * exported class, which only type-aware mode reports, `Class.method`.
  */
 function_name: string
 /**
@@ -6854,6 +6895,11 @@ line: number
  */
 col: number
 reason: ConstantParameterReason
+/**
+ * The evidence that the finding needs beyond the syntactic call facts.
+ * Absent for a finding that the call facts prove alone.
+ */
+evidence?: (ConstantParameterEvidence | null)
 /**
  * The value that each call passes. Present if and only if `reason` is
  * `identical-argument`.

@@ -38,6 +38,7 @@ pub mod change_coupling;
 pub mod change_scope;
 pub mod changed_files;
 pub mod churn;
+mod churn_shallow;
 /// Continuous integration detection shared by the API runtime and the CLI.
 pub mod ci_env;
 pub mod clock;

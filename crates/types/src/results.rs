@@ -664,6 +664,10 @@ pub struct AnalysisResults {
     #[serde(skip)]
     #[cfg_attr(feature = "schema", schemars(skip))]
     pub semantic_framework_contracts: Vec<crate::semantic::SemanticFrameworkContract>,
+    /// `constant-parameter` candidates for the optional semantic pass.
+    #[serde(skip)]
+    #[cfg_attr(feature = "schema", schemars(skip))]
+    pub constant_parameter_candidates: ConstantParameterCandidates,
 }
 
 #[expect(
@@ -842,6 +846,7 @@ struct AnalysisResultsMetadataMergeParts {
     react_component_intel: Vec<ReactComponentIntel>,
     semantic_reachable_files: rustc_hash::FxHashSet<PathBuf>,
     semantic_framework_contracts: Vec<crate::semantic::SemanticFrameworkContract>,
+    constant_parameter_candidates: ConstantParameterCandidates,
 }
 
 macro_rules! counted_analysis_result_fields {
@@ -1531,13 +1536,7 @@ impl AnalysisResults {
     }
 
     fn sort_core_component_prop_and_emit_findings(&mut self) {
-        self.constant_parameters.sort_by(|a, b| {
-            a.parameter
-                .path
-                .cmp(&b.parameter.path)
-                .then(a.parameter.line.cmp(&b.parameter.line))
-                .then(a.parameter.col.cmp(&b.parameter.col))
-        });
+        sort_constant_parameters(&mut self.constant_parameters);
         self.absent_component_props.sort_by(|a, b| {
             a.prop
                 .path

@@ -2134,6 +2134,8 @@ fn cache_roundtrip_preserves_each_function_contract_fact_variant() {
         format.call(null, 2);\n\
         function reads() { return arguments; }\n\
         let mutable = () => {};\n\
+        export const load = (name) => import(name);\n\
+        require(process.env.X).pad();\n\
         eval(code);";
     let module = parse_from_content(FileId(0), Path::new("src/local.ts"), source);
     let facts = module
@@ -2177,6 +2179,8 @@ fn cache_roundtrip_preserves_each_function_contract_fact_variant() {
     assert!(reasons.contains(&ContractIncomplete::ArgumentsRead));
     assert!(reasons.contains(&ContractIncomplete::MutableBinding));
     assert!(facts.direct_eval);
+    assert!(facts.opaque_loads.escapes);
+    assert_eq!(facts.opaque_loads.names, ["pad"]);
     let cached = module_to_cached_from_parts(&module, 10, 20);
     let decoded: CachedModule =
         bitcode::decode(&bitcode::encode(&cached)).expect("decode cached module");

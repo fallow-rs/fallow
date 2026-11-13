@@ -167,8 +167,80 @@ fn add_workspace_binaries<'a>(
 /// can also ship a binary with a well-known name. When the table has more than
 /// one candidate, the installed package selects one of them. Without a table
 /// entry, `node_modules` decides, and the binary name is the fallback.
+///
+/// A path into a `node_modules/.bin` directory (`./node_modules/.bin/tool`,
+/// `../../node_modules/.bin/tool`) resolves the same as the bare binary name.
+/// The `.bin` link of that directory wins.
 #[must_use]
 pub fn resolve_binary_to_packages(
+    binary: &str,
+    root: &Path,
+    bin_map: &FxHashMap<String, String>,
+) -> Vec<String> {
+    if let Some(bin_path) = NodeModulesBinPath::parse(binary) {
+        if let Some(pkg_name) = bin_path.linked_package(root) {
+            return vec![pkg_name];
+        }
+        return resolve_binary_name(bin_path.name, root, bin_map);
+    }
+    resolve_binary_name(binary, root, bin_map)
+}
+
+/// A command path that names a binary in a `node_modules/.bin` directory.
+struct NodeModulesBinPath<'a> {
+    /// The directory that holds `node_modules`, relative to the script root.
+    base: &'a str,
+    /// The binary name.
+    name: &'a str,
+}
+
+/// The `.bin` directory segment of a command path.
+const BIN_DIR_SEGMENT: &str = "node_modules/.bin/";
+
+impl<'a> NodeModulesBinPath<'a> {
+    /// Parse `path`, or return `None` when it does not name a `.bin` entry.
+    fn parse(path: &'a str) -> Option<Self> {
+        let (base, name) = path.rsplit_once(BIN_DIR_SEGMENT)?;
+        let whole_segment = base.is_empty() || base.ends_with('/');
+        (whole_segment && !name.is_empty() && !name.contains('/')).then_some(Self { base, name })
+    }
+
+    /// The package that the `.bin` link of this exact directory points to.
+    fn linked_package(&self, root: &Path) -> Option<String> {
+        let link = root.join(self.base).join(BIN_DIR_SEGMENT).join(self.name);
+        let target = std::fs::read_link(link).ok()?;
+        extract_package_from_bin_path(&target)
+    }
+}
+
+/// The name of `binary` without a `node_modules/.bin/` directory, so
+/// `./node_modules/.bin/tsx` and `tsx` give the same name.
+pub(super) fn binary_name(binary: &str) -> &str {
+    NodeModulesBinPath::parse(binary).map_or(binary, |bin_path| bin_path.name)
+}
+
+/// The binaries of a script command whose packages the command uses.
+///
+/// A command credits its own binary. The `node` and `bun` runtimes are not
+/// packages, so they credit nothing. A Node.js runner (`is_node_runner`) also
+/// credits each `node_modules/.bin` path in its file arguments, for example
+/// `node ./node_modules/.bin/tool`. A preload file such as
+/// `node -r ./setup.js node_modules/.bin/tool` can come before the program,
+/// so the first file argument is not always the program.
+pub(super) fn credited_binaries<'a>(
+    binary: &'a str,
+    file_args: &'a [String],
+    is_node_runner: bool,
+) -> impl Iterator<Item = &'a str> {
+    let runtime = is_node_runner && matches!(binary, "node" | "bun");
+    let programs = file_args
+        .iter()
+        .map(String::as_str)
+        .filter(move |arg| is_node_runner && NodeModulesBinPath::parse(arg).is_some());
+    (!runtime).then_some(binary).into_iter().chain(programs)
+}
+
+fn resolve_binary_name(
     binary: &str,
     root: &Path,
     bin_map: &FxHashMap<String, String>,

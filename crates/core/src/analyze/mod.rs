@@ -804,6 +804,7 @@ pub(crate) fn find_dead_code_full(
         class_member_rules: &class_member_rules,
         plugin_result,
         collect_usages,
+        excluded,
         results: &mut results,
     });
 
@@ -940,8 +941,7 @@ fn collect_federation_runtime_remotes(
     remotes.rules
 }
 
-/// Shared context for the post-detector populate sequence in
-/// `find_dead_code_full`.
+/// Shared context for the post-detector populate sequence of `find_dead_code_full`.
 struct PostDetectionInput<'a, 'm> {
     graph: &'a ModuleGraph,
     modules: &'a [ModuleInfo],
@@ -957,13 +957,13 @@ struct PostDetectionInput<'a, 'm> {
     /// Whether the editor/LSP usages path is active; gates in-process-only
     /// intel (`react_component_intel`) off the bare `fallow` / `audit` hot path.
     collect_usages: bool,
+    excluded: &'a FxHashSet<FileId>,
     results: &'a mut AnalysisResults,
 }
 
 /// Run the post-detector populate/reclassify phases: server-action
 /// reclassification, security, catalog/override, framework-convention findings,
-/// and stale-suppression accounting. Extracted from `find_dead_code_full` so
-/// that orchestrator reads as setup -> detect -> populate.
+/// and stale-suppression accounting.
 fn populate_post_detection_findings(input: &mut PostDetectionInput<'_, '_>) {
     filter_public_workspace_results(input.config, input.workspaces, input.results);
 
@@ -2399,37 +2399,6 @@ fn populate_unused_store_member_findings(
         .into_iter()
         .map(UnusedStoreMemberFinding::with_actions)
         .collect();
-}
-
-#[derive(Clone, Copy)]
-struct UnresolvedImportDetectorInput<'a> {
-    resolved_modules: &'a [ResolvedModule],
-    config: &'a ResolvedConfig,
-    suppressions: &'a crate::suppress::SuppressionContext<'a>,
-    virtual_prefixes: &'a [&'a str],
-    generated_patterns: &'a [&'a str],
-    generated_type_prefixes: &'a [&'a str],
-    line_offsets_by_file: &'a LineOffsetsMap<'a>,
-}
-
-fn run_unresolved_import_detector(
-    input: UnresolvedImportDetectorInput<'_>,
-) -> Vec<UnresolvedImportFinding> {
-    if input.config.rules.unresolved_imports == Severity::Off || input.resolved_modules.is_empty() {
-        return Vec::new();
-    }
-    find_unresolved_imports(
-        input.resolved_modules,
-        input.config,
-        input.suppressions,
-        input.virtual_prefixes,
-        input.generated_patterns,
-        input.generated_type_prefixes,
-        input.line_offsets_by_file,
-    )
-    .into_iter()
-    .map(UnresolvedImportFinding::with_actions)
-    .collect()
 }
 
 #[cfg(test)]

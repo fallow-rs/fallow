@@ -8954,7 +8954,7 @@
         {
           "type": "string",
           "const": "new-only",
-          "description": "Fail only on findings the current changeset introduced, determined by\na base-snapshot attribution pass. The default."
+          "description": "Fail only on findings the current changeset introduced, determined by\na base-snapshot attribution pass. An unused file or unused export\noutside the changed files counts when the base does not report it.\nThe default."
         },
         {
           "type": "string",
@@ -23592,6 +23592,17 @@
           ],
           "description": "Advisory project-local public-signature coupling."
         },
+        "call_evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TypeAwareCallEvidenceMeta"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The call evidence of the `constant-parameter` rule. Present when the\nrule sent candidates to the companion."
+        },
         "executed": {
           "type": "boolean",
           "description": "Whether the semantic companion executed at least one query."
@@ -37799,7 +37810,7 @@
         },
         "function_name": {
           "type": "string",
-          "description": "The module-scope binding name of the function."
+          "description": "The module-scope binding name of the function. For a method of an\nexported class, which only type-aware mode reports, `Class.method`."
         },
         "parameter_name": {
           "type": "string",
@@ -37827,6 +37838,17 @@
         "reason": {
           "description": "Why the rule reports the parameter.",
           "$ref": "#/definitions/ConstantParameterReason"
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConstantParameterEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The evidence that the finding needs beyond the syntactic call facts.\nAbsent for a finding that the call facts prove alone."
         },
         "value": {
           "anyOf": [
@@ -37932,6 +37954,11 @@
           "type": "string",
           "const": "never-passed",
           "description": "The parameter is optional or has a default, and each call omits it.\nFor an option key: no call sets the key."
+        },
+        {
+          "type": "string",
+          "const": "unused-default",
+          "description": "The parameter has a default, and each call passes a value whose type\nexcludes `undefined`, so the default never applies. Only type-aware\nmode reports this reason."
         }
       ],
       "description": "Why the rule reports a parameter."
@@ -38011,6 +38038,51 @@
         "col"
       ],
       "description": "One inspected call of the reported function."
+    },
+    "ConstantParameterEvidence": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "type-aware",
+          "description": "The TypeScript checker gave the evidence: the calls of a class\nmethod, or the argument types of an `unused-default` finding. A type\ndoes not prove a run-time value: an `any` value, a cast, or data from\noutside the program can break it."
+        }
+      ],
+      "description": "The evidence that a [`ConstantParameter`] finding needs beyond the\nsyntactic call facts."
+    },
+    "TypeAwareCallEvidenceMeta": {
+      "type": "object",
+      "properties": {
+        "default_candidates": {
+          "type": "integer",
+          "description": "Parameters with a default whose arguments the companion typed."
+        },
+        "method_candidates": {
+          "type": "integer",
+          "description": "Methods of exported classes whose calls the companion read."
+        },
+        "findings": {
+          "type": "integer",
+          "description": "Findings that the evidence proved."
+        },
+        "abstention_reasons": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "The count of each reason that a candidate got no evidence, such as\n`outside-program` or `decorator`. An open set: a later version can\nadd a reason."
+        },
+        "elapsed_ms": {
+          "type": "integer",
+          "description": "Duration of the request as reported by the companion."
+        }
+      },
+      "required": [
+        "default_candidates",
+        "method_candidates",
+        "findings",
+        "elapsed_ms"
+      ],
+      "description": "The call evidence that the `constant-parameter` rule asked the companion\nfor."
     }
   }
 }

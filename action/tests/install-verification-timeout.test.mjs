@@ -90,12 +90,13 @@ const killProcessGroup = (child) => {
   }
 };
 
-const runInstall = (harness, verifyTimeoutMs = NORMAL_VERIFY_TIMEOUT_MS) =>
+const runInstall = (harness, verifyTimeoutMs = NORMAL_VERIFY_TIMEOUT_MS, extraEnv = {}) =>
   new Promise((resolveRun, rejectRun) => {
     const child = spawn("bash", [INSTALL_SCRIPT], {
       detached: true,
       env: {
         ...process.env,
+        ...extraEnv,
         FALLOW_ACTION_VERIFY_TIMEOUT_MS: String(verifyTimeoutMs),
         FALLOW_VERSION: MOCK_VERSION,
         GITHUB_ACTION_PATH: harness.actionRoot,
@@ -218,4 +219,26 @@ module.exports = { SKIP_ENV, verifyInstalled };
     /::error::fallow binary verification failed \/tmp\/fallow \(sig-invalid\): test signature mismatch/,
   );
   assert.match(result.stdout, /Verification ran against fallow 9\.9\.9/);
+});
+
+test("install.sh escapes the verification failure context", async (context) => {
+  const harness = await createHarness(`
+const SKIP_ENV = "FALLOW_SKIP_BINARY_VERIFY";
+const verifyInstalled = async () => ({
+  binary: "/tmp/fallow",
+  code: "sig-invalid",
+  message: "test signature mismatch",
+  ok: false,
+});
+module.exports = { SKIP_ENV, verifyInstalled };
+`);
+  context.after(() => rm(harness.root, { force: true, recursive: true }));
+
+  const result = await runInstall(harness, NORMAL_VERIFY_TIMEOUT_MS, {
+    GITHUB_ACTION_REF: "v3%\r\n::error::injected",
+  });
+  assertWatchdogDidNotFire(result);
+  assert.equal(result.code, 1, `${result.stdout}\n${result.stderr}`);
+  assert.match(result.stdout, /The Action ref \(v3%25%0D%0A::error::injected\)/);
+  assert.doesNotMatch(result.stdout, /^::error::injected/m);
 });

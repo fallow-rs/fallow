@@ -140,6 +140,14 @@ pub fn run_fallow_raw(args: &[&str]) -> CommandOutput {
     run_fallow_raw_with_env(args, &[])
 }
 
+/// Run fallow with raw args (no --root injection) in the working directory
+/// `dir`, so that a relative path argument resolves against `dir`.
+pub fn run_fallow_raw_in_dir(dir: &Path, args: &[&str]) -> CommandOutput {
+    let mut cmd = fallow_command();
+    cmd.current_dir(dir).args(args);
+    execute(cmd)
+}
+
 /// Run fallow with raw args and string environment variables.
 pub fn run_fallow_raw_with_env(args: &[&str], env: &[(&str, &str)]) -> CommandOutput {
     let mut cmd = fallow_command();

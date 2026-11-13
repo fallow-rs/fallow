@@ -863,46 +863,9 @@ pub enum SecurityUrlShape {
     DynamicOrigin,
 }
 
-/// Literal values attached to literal-aware security sink captures.
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    bitcode::Encode,
-    bitcode::Decode,
-)]
-pub enum SinkLiteralValue {
-    /// A string literal value.
-    String(String),
-    /// An integer numeric literal value.
-    Integer(i64),
-    /// A boolean literal value.
-    Boolean(bool),
-    /// A null literal value.
-    Null,
-}
-
-/// Static object-literal property metadata attached to a captured sink
-/// argument. Nested object paths are flattened with dot-separated keys.
-#[derive(
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    bitcode::Encode,
-    bitcode::Decode,
-)]
-pub struct SinkObjectProperty {
-    /// Static property name. Nested object properties use dot-separated paths.
-    pub key: String,
-    /// Literal property value when statically knowable.
-    pub value: SinkLiteralValue,
-}
+#[path = "extract_sink_values.rs"]
+mod sink_values;
+pub use sink_values::{SinkCallOptions, SinkLiteralValue, SinkObjectProperty};
 
 /// A captured sink site. The visitor records every existing non-literal call /
 /// member-assign / member-call / tagged-template / jsx-attr sink site, and a
@@ -966,6 +929,10 @@ pub struct SinkSite {
     /// classify it syntactically. `None` for non-URL sinks and URL expressions
     /// whose shape is not visible at the sink.
     pub url_shape: Option<SecurityUrlShape>,
+    /// Options-object metadata of the call, on the command argument of a call
+    /// whose options position the extractor knows. `None` for every other
+    /// sink, which means that the options are unknown.
+    pub call_options: Option<Box<SinkCallOptions>>,
 }
 
 impl SinkSite {
@@ -3639,7 +3606,7 @@ const _: () = assert!(std::mem::size_of::<MemberAccess>() == 48);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SemanticFact>() == 80);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<SinkSite>() == 216);
+const _: () = assert!(std::mem::size_of::<SinkSite>() == 224);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1504);
 #[cfg(target_pointer_width = "64")]

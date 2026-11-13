@@ -1225,10 +1225,6 @@ export function untouched(input: string): string {
 
     #[test]
     fn file_wide_suppression_excludes_file() {
-        let dir = tempfile::tempdir().expect("create temp dir");
-        let src_dir = dir.path().join("src");
-        std::fs::create_dir_all(&src_dir).expect("create src dir");
-
         let code = r#"
 export function processData(input: string): string {
     const trimmed = input.trim();
@@ -1241,37 +1237,46 @@ export function processData(input: string): string {
     return mapped.join(", ");
 }
 "#;
-        let suppressed_code = format!("// fallow-ignore-file code-duplication\n{code}");
+        for header in [
+            "// fallow-ignore-file code-duplication\n",
+            "/**\n * fallow-ignore-file code-duplication\n */\n",
+        ] {
+            let dir = tempfile::tempdir().expect("create temp dir");
+            let src_dir = dir.path().join("src");
+            std::fs::create_dir_all(&src_dir).expect("create src dir");
+            let suppressed_code = format!("{header}{code}");
 
-        std::fs::write(src_dir.join("original.ts"), code).expect("write original");
-        std::fs::write(src_dir.join("suppressed.ts"), &suppressed_code).expect("write suppressed");
-        std::fs::write(dir.path().join("package.json"), r#"{"name": "test"}"#)
-            .expect("write package.json");
+            std::fs::write(src_dir.join("original.ts"), code).expect("write original");
+            std::fs::write(src_dir.join("suppressed.ts"), &suppressed_code)
+                .expect("write suppressed");
+            std::fs::write(dir.path().join("package.json"), r#"{"name": "test"}"#)
+                .expect("write package.json");
 
-        let files = vec![
-            DiscoveredFile {
-                id: FileId(0),
-                path: src_dir.join("original.ts"),
-                size_bytes: code.len() as u64,
-            },
-            DiscoveredFile {
-                id: FileId(1),
-                path: src_dir.join("suppressed.ts"),
-                size_bytes: suppressed_code.len() as u64,
-            },
-        ];
+            let files = vec![
+                DiscoveredFile {
+                    id: FileId(0),
+                    path: src_dir.join("original.ts"),
+                    size_bytes: code.len() as u64,
+                },
+                DiscoveredFile {
+                    id: FileId(1),
+                    path: src_dir.join("suppressed.ts"),
+                    size_bytes: suppressed_code.len() as u64,
+                },
+            ];
 
-        let config = DuplicatesConfig {
-            min_tokens: 10,
-            min_lines: 2,
-            ..DuplicatesConfig::default()
-        };
+            let config = DuplicatesConfig {
+                min_tokens: 10,
+                min_lines: 2,
+                ..DuplicatesConfig::default()
+            };
 
-        let report = find_duplicates(dir.path(), &files, &config);
-        assert!(
-            report.clone_groups.is_empty(),
-            "File-wide suppression should exclude file from duplication analysis"
-        );
+            let report = find_duplicates(dir.path(), &files, &config);
+            assert!(
+                report.clone_groups.is_empty(),
+                "file-wide suppression {header:?} should exclude the file from duplication analysis"
+            );
+        }
     }
 
     #[test]

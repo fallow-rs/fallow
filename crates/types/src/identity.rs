@@ -520,6 +520,7 @@ fn visit_families<V: FamilyVisitor>(results: &mut AnalysisResults, visitor: &mut
         react_component_intel: _,
         semantic_reachable_files: _,
         semantic_framework_contracts: _,
+        constant_parameter_candidates: _,
     } = results;
 
     visitor.visit(unused_files);

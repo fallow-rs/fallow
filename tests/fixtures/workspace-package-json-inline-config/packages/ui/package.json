@@ -1,0 +1,15 @@
+{
+  "name": "@acme/ui",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "prettier": {
+    "plugins": ["prettier-plugin-example", "prettier-plugin-hoisted"]
+  },
+  "devDependencies": {
+    "prettier": "^3.0.0",
+    "prettier-plugin-example": "^1.0.0",
+    "unused-ui-control": "^1.0.0"
+  }
+}

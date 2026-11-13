@@ -361,6 +361,36 @@ line states exit code 0.
   `exceeded_metric_increased`, a CRAP score from estimated coverage does not
   make a finding introduced, and a base finding without a CRAP score is not
   growth. `--gate all` keeps the rule severity.
+- Audit unused code outside the changed files: under `--gate new-only`, the
+  head and base dead-code passes keep every unused file and unused export.
+  They pass `ChangeScopeOwner::CallerKeepingUnusedCode`
+  (`crates/engine/src/change_scope.rs`), so the change scope keeps these
+  findings and the run still counts as change-scoped for a baseline. The CLI
+  then calls `filter_results_by_changed_files_keeping_unused_code` in
+  `crates/engine/src/changed_files.rs`.
+  `audit_run::attribute` calls `scope_unchanged_unused_code`
+  (`crates/api/src/audit_run/scope.rs`): such a finding outside the changed
+  files stays only when the base snapshot does not report its key. The base
+  pass uses the head config, so a removed entry point is not visible there.
+  When the change touches the config file of the head run,
+  `base_own_config_unused_code` (`crates/cli/src/audit_dead_code.rs`) runs
+  one more syntactic dead-code pass with the config of the base commit and
+  stores its unused-code keys in `AuditKeySnapshot::own_config_unused_code`.
+  `own_config_unused_code_keys` (`crates/api/src/audit_run/own_config.rs`)
+  also adds each unused file or unused export of the base pass with the head
+  config that the base config ignores (`ignorePatterns`, `ignoreFindings`,
+  `ignoreExports`, or an override that turns the rule off), and each unused
+  export in a file that the base config reports as an unused file. The base
+  config cannot prove that such code was in use. `config_path_under_root`
+  canonicalizes the config path and the root, so a relative `-c` path or a
+  path through a symlink still starts the pass.
+  `forget_unused_code_used_under_own_config` then removes each head key that
+  this set lacks from the base keys. The set is `None` when the base config
+  does not load or turns `unused-files` or `unused-exports` off, so a rule
+  that the change turns on does not gate old findings. The programmatic
+  backend gives the same verdict: its audit sections use the same change
+  scope owner, and its base pass runs the same second pass with the base
+  config (`crates/api/src/runtime/audit_own_config.rs`).
 - Audit test-file complexity: under every gate, `audit_run::attribute` calls
   `exempt_test_file_gates` (`crates/api/src/audit_complexity.rs`) before the
   comparison. It reuses `fallow_engine::test_paths::is_test_path` on the path
@@ -502,6 +532,19 @@ line states exit code 0.
   as inherited and are also reported through
   `attribution.duplication_demoted` and a per-group `demotion_reason` field;
   human output names the deciding diff source in the demotion note.
+- Clone groups inside a base clone group: after the demotion, the same
+  function marks an introduced clone group as inherited when each instance
+  lies inside a different instance of one base clone group
+  (`crates/api/src/audit_run/clone_containment.rs`). The check maps each head
+  instance to its base path through the rename list and the diff renames,
+  and to its base lines through the line changes of the diff
+  (`DiffIndex::base_line_range`). An edit inside one copy of a base clone
+  splits the base group into smaller groups with new keys, and this rule
+  keeps them inherited. The rule records no demotion, because the group
+  matches a base group. A file that the diff adds has no base lines, so a
+  pasted copy stays introduced. At least one instance must hold no added
+  line: when every copy holds an added line, the change wrote the same text
+  into each copy, and the group stays introduced.
 - Audit diff-risk rules: `crates/api/src/diff_risk/` computes `weakened-tests`,
   `added-suppression`, `test-only-branch`, `diverged-clone-sibling` and
   `added-dependency` inside `audit_run::run`, so the CLI, the MCP `audit` tool

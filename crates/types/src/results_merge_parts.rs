@@ -96,6 +96,7 @@ pub(super) fn split_merge_parts(
         react_component_intel,
         semantic_reachable_files,
         semantic_framework_contracts,
+        constant_parameter_candidates,
     } = other;
 
     (
@@ -182,6 +183,7 @@ pub(super) fn split_merge_parts(
             react_component_intel,
             semantic_reachable_files,
             semantic_framework_contracts,
+            constant_parameter_candidates,
         },
     )
 }

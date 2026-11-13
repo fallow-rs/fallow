@@ -39,8 +39,10 @@ use baseline_compare::load_and_compare_baseline;
 
 mod benchmark;
 mod configuration;
+mod type_aware_summary;
 pub use benchmark::benchmark_dead_code_json;
 use configuration::{parse_type_aware_bool, parse_type_aware_require, prepare_check_config};
+use type_aware_summary::format_type_aware_summary;
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct IssueFilters {
     pub shared_state: bool,
@@ -1799,41 +1801,6 @@ fn print_type_aware_summary(result: &CheckResult) {
             )
         );
     }
-}
-
-fn format_type_aware_summary(meta: &fallow_types::envelope::TypeAwareMeta) -> String {
-    let candidates = count_noun(meta.candidate_count, "candidate", "candidates");
-    let confirmed = count_noun(meta.confirmed_used_count, "confirmed use", "confirmed uses");
-    let contracts = count_noun(
-        meta.contract_preserved_count,
-        "preserved contract",
-        "preserved contracts",
-    );
-    let no_static_references = count_noun(
-        meta.no_static_references_count,
-        "candidate without static references",
-        "candidates without static references",
-    );
-    let fixable = count_noun(meta.fix_eligible_count, "guarded fix", "guarded fixes");
-    let unresolved = count_noun(
-        meta.unresolved_count,
-        "unresolved finding",
-        "unresolved findings",
-    );
-    let abstained = count_noun(
-        meta.abstained_count,
-        "abstained finding",
-        "abstained findings",
-    );
-    format!(
-        "Type-aware refinement: {candidates}, {confirmed}, {contracts}, \
-         {no_static_references} ({fixable}), {unresolved}, {abstained}"
-    )
-}
-
-fn count_noun(count: usize, singular: &str, plural: &str) -> String {
-    let noun = if count == 1 { singular } else { plural };
-    format!("{count} {noun}")
 }
 
 fn print_type_aware_warnings(result: &CheckResult, quiet: bool) {

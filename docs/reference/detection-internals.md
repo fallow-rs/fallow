@@ -1002,6 +1002,12 @@ specifier resolves back to workspace source. Package `imports` aliases are
 owned by the nearest package manifest; do not turn unmatched hash specifiers
 into global aliases. Per-file tsconfig failure may degrade to ordinary relative
 or package resolution, with diagnostics, without inventing missing path aliases.
+Plugin path aliases apply the longest prefix first, so a Nuxt
+`#layers/<name>/` alias wins over the static `#layers/` fallback. A plugin
+marks an alias to a directory that its config names as checked
+(`PluginResult::push_checked_path_alias`). An unresolved import under a checked
+prefix reports, also when a virtual module prefix such as the Nuxt `#` covers
+it.
 A bare specifier that a `paths` pattern of the nearest tsconfig matches is an
 alias, also when its scope is lowercase or a real package has the same name.
 When it resolves into `node_modules`, the package of the resolved file gets the
@@ -1054,7 +1060,51 @@ each reason:
   `dynamicallyLoaded`), an export that a plugin `used_exports` rule matches,
   or a side-effect registration.
 - `dynamic-import`: a dynamic import or a dynamic import pattern reaches the
-  module.
+  module. This covers a source that resolves to a file, and a pattern with a
+  relative static prefix, which blocks only the files that it matches.
+- `opaque-module-load`: a module of the analysis has an `import()` or a
+  `require` call whose source does not give a file or a pattern, such as
+  `import(name)`, `` import(`${name}`) `` or `require(name)`. A conditional
+  or logical source counts when one branch has no static specifier, as in
+  `import(flag ? './a' : name)`. `module.require(name)`,
+  `globalThis.require(name)` and a module-level `const r = require` also
+  count. A local binding named `require`, such as a parameter, does not
+  count. A template or concatenation source whose last static part ends in
+  a data extension, such as `` import(`@/locales/${lang}.json`) ``, does not
+  count. A query such as `?raw` after the extension is allowed. A source that starts with `#` still counts, because a package
+  `imports` map can change the extension.
+  Extraction records `FunctionContractFacts::opaque_loads`. The semantic
+  pass in `crates/extract/src/opaque_loads.rs` reads the uses of each loaded
+  value:
+  - `names` holds each export name that the code reads on the value: a
+    member (`mod.pad`, `mod?.pad?.()`, `mod['pad']`), a destructured key, an
+    `in` test (`'pad' in mod`), a parameter of an inline `.then` callback,
+    `(await import(x)).default`, `require(x).pad` and a JSX member tag
+    (`<mod.Pad />`). The rule blocks the function that each module exports
+    with that name, also through a re-export. An alias re-export
+    (`export { pad as leftPad }`) blocks the origin function. A name that
+    resolves to a namespace re-export (`export * as ns`) blocks the surface
+    of its source. `default` names the default export.
+  - `escapes` is `true` when the value goes to code that the pass does not
+    follow: an alias, a later assignment, a return, a call argument
+    (`Promise.all([import(x)])` too), an object or array element, an export,
+    a spread, an iteration, a computed key that is not a literal, a direct
+    call, a rest element, a `.then` callback that is not an inline
+    function, or a `.then` callback that reads `arguments`. A top-level
+    binding of the value in a Vue `<script setup>` block, a Svelte script,
+    an Astro frontmatter or a Glimmer file is also an escape, because the
+    template can read it. A read of the global `require` as a value, such
+    as `require.call(null, x)` or `[x].map(require)`, is also an escape. An
+    ambient `declare` of `require` does not hide the global loader.
+    `.catch()` and `.finally()` on the load keep the loaded value. On an
+    escape, the rule blocks each exported function of the project and, in
+    type-aware mode, each exported class with methods. A debug log
+    line names each module with such an escape.
+  - A discarded value (`await import(x);`, `require(x);`) blocks nothing.
+    When the loaded file is part of the analysis, its callers are visible.
+  A function that no export exposes stays a candidate. A file outside the
+  analysis, such as a test file or a support-only file under `--production`,
+  does not count.
 - `commonjs`: the module has CommonJS exports, or a `require` reads it.
 - `namespace-escape`: a namespace import of the module is read as a value, or
   a named import resolves to a namespace re-export.

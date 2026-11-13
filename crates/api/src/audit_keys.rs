@@ -219,6 +219,7 @@ impl DeadCodeAuditLedger {
             react_component_intel: _react_component_intel,
             semantic_reachable_files: _,
             semantic_framework_contracts: _semantic_framework_contracts,
+            constant_parameter_candidates: _constant_parameter_candidates,
         } = results;
 
         macro_rules! annotate {
@@ -429,6 +430,25 @@ impl AuditDomainLedger {
             }
         }
     }
+
+    /// Whether the finding with `key` is introduced.
+    #[must_use]
+    pub fn is_introduced(&self, key: &str) -> bool {
+        self.introduced_keys.contains(key)
+    }
+
+    /// Mark introduced findings whose keys are in `inherit` as inherited.
+    /// Unlike [`Self::demote_introductions`], this records no demotion: the
+    /// finding matches a base finding, only its key changed.
+    pub fn inherit_introductions(&mut self, inherit: &FxHashSet<String>) {
+        for (key, introduced) in &mut self.records {
+            if *introduced && inherit.contains(key) {
+                *introduced = false;
+                self.introduced_keys.remove(key);
+                self.inherited_keys.insert(key.clone());
+            }
+        }
+    }
 }
 
 /// One-pass audit comparison shared by attribution, verdict, and annotations.
@@ -531,7 +551,7 @@ pub use fallow_engine::module_graph::relative_key_path;
 /// [`fallow_types::identity`]), so a line shift does not change it. A repeated
 /// key gets an occurrence suffix, so the base and the head compare by count:
 /// a new second finding with an inherited key is introduced.
-fn collection_keys<T: IdentifiedFinding>(items: &[T], root: &Path) -> Vec<String> {
+pub fn collection_keys<T: IdentifiedFinding>(items: &[T], root: &Path) -> Vec<String> {
     dead_code_occurrence_keys(items, &IdentityPaths::new(root))
 }
 
@@ -716,6 +736,7 @@ impl DeadCodeKeyCollector<'_> {
             react_component_intel: _react_component_intel,
             semantic_reachable_files: _,
             semantic_framework_contracts: _semantic_framework_contracts,
+            constant_parameter_candidates: _constant_parameter_candidates,
         } = results;
 
         self.add_items(AuditCollection::PropDrillingChains, prop_drilling_chains);
@@ -1604,6 +1625,7 @@ fn classify_introduced_dead_code_fields(results: &fallow_types::results::Analysi
         react_component_intel: _react_component_intel,
         semantic_reachable_files: _,
         semantic_framework_contracts: _semantic_framework_contracts,
+        constant_parameter_candidates: _constant_parameter_candidates,
     } = results;
 }
 

@@ -131,6 +131,7 @@ mod tests {
         has_default: bool,
     ) -> ConstantParameterFinding {
         ConstantParameterFinding::with_actions(ConstantParameter {
+            evidence: None,
             path: PathBuf::from(PATH),
             function_name: function.to_owned(),
             parameter_name: "strict".to_owned(),

@@ -108,6 +108,7 @@ pub(super) mod tests {
             line: 1,
             col: 23,
             reason: ConstantParameterReason::IdenticalArgument,
+            evidence: None,
             value: Some(ConstantParameterValue {
                 kind: ConstantParameterValueKind::Boolean,
                 text: "true".to_string(),

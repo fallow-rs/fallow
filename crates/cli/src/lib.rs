@@ -107,7 +107,6 @@ mod trace_error;
 mod trace_path;
 mod type_aware_degrade;
 mod update_check;
-use fallow_engine::validate;
 use fallow_engine::vital_signs;
 mod cli_telemetry;
 mod viz;

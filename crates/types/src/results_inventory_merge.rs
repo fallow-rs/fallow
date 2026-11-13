@@ -31,6 +31,8 @@ impl AnalysisResults {
         }
         self.react_component_intel
             .extend(parts.react_component_intel);
+        self.constant_parameter_candidates
+            .extend(parts.constant_parameter_candidates);
         for contract in parts.semantic_framework_contracts {
             if !self.semantic_framework_contracts.contains(&contract) {
                 self.semantic_framework_contracts.push(contract);

@@ -712,6 +712,12 @@
     },
     {
       "section": "flags:audit",
+      "row": "--staged",
+      "column": "Description",
+      "seed": "Audit the staged index instead of the working tree. The changed files are the staged changes against HEAD (`git diff --cached`), and the analysis reads every file from the index, so unstaged edits and untracked files do not affect the verdict. A file that is staged and then deleted from the working tree is still audited. The base is HEAD, so `--base` and `--changed-since` are rejected. The generated pre-commit hook uses this flag"
+    },
+    {
+      "section": "flags:audit",
       "row": "--walkthrough",
       "column": "Description",
       "seed": "Render the existing walkthrough guide as a staged HUMAN terminal tour (Stage 1 load-bearing / Stage 2 mechanical), or markdown with `--format markdown`. Implies the brief; always exits 0. `--format json --walkthrough` emits the same agent-contract JSON as `--walkthrough-guide`"
@@ -1134,7 +1140,7 @@
       "section": "flags:fallow-combined",
       "row": "--coverage",
       "column": "Description",
-      "seed": "Path to Istanbul or raw V8 coverage data for exact CRAP scores in combined mode. Also settable via `FALLOW_COVERAGE` or `health.coverage`"
+      "seed": "Path to Istanbul or raw V8 coverage data for measured CRAP scores in combined mode. Also settable via `FALLOW_COVERAGE` or `health.coverage`"
     },
     {
       "section": "flags:fallow-combined",
@@ -1374,7 +1380,7 @@
       "section": "flags:global",
       "row": "--coverage",
       "column": "Description",
-      "seed": "Path to Istanbul or raw V8 coverage data for exact CRAP scores in combined mode. Also settable via `FALLOW_COVERAGE` or `health.coverage`"
+      "seed": "Path to Istanbul or raw V8 coverage data for measured CRAP scores in combined mode. Also settable via `FALLOW_COVERAGE` or `health.coverage`"
     },
     {
       "section": "flags:global",
@@ -1782,7 +1788,7 @@
       "section": "flags:health",
       "row": "--coverage",
       "column": "Description",
-      "seed": "Path to coverage data for exact per-function CRAP scores. Accepts an Istanbul coverage map JSON file (coverage-final.json, from `jest --coverage`, `vitest run --coverage`, c8 or nyc), a directory containing coverage-final.json, a raw V8 coverage directory (`NODE_V8_COVERAGE=<dir> node --test`), or a single V8 coverage JSON file. Transpiled V8 scripts (tsx, bundles) map back to their source files through the source map that Node records in the dump. A script that differs from the file on disk and has no source map keeps the estimate. Use --coverage-root when the data was generated in a different environment (CI runner, Docker). Affects CRAP scores only, not --coverage-gaps. Also configurable via FALLOW_COVERAGE env var"
+      "seed": "Path to coverage data for measured per-function CRAP scores. Accepts an Istanbul coverage map JSON file (coverage-final.json, from `jest --coverage`, `vitest run --coverage`, c8 or nyc), a directory containing coverage-final.json, a raw V8 coverage directory (`NODE_V8_COVERAGE=<dir> node --test`), or a single V8 coverage JSON file. Transpiled V8 scripts (tsx, bundles) map back to their source files through the source map that Node records in the dump. A script that differs from the file on disk and has no source map keeps the estimate. Use --coverage-root when the data was generated in a different environment (CI runner, Docker). Affects CRAP scores only, not --coverage-gaps. Also configurable via FALLOW_COVERAGE env var"
     },
     {
       "section": "flags:health",
@@ -1974,7 +1980,7 @@
       "section": "flags:init",
       "row": "--branch",
       "column": "Description",
-      "seed": "Fallback base branch/ref for the pre-commit hook when no upstream is set"
+      "seed": "Has no effect. The pre-commit hook runs `fallow audit --staged`, which compares the staged changes with HEAD. Kept so that existing install scripts still run"
     },
     {
       "section": "flags:init",

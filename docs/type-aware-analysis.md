@@ -239,6 +239,102 @@ fallow fix --type-aware --dry-run --format json --quiet
 fallow fix --type-aware --yes --format json --quiet
 ```
 
+### Call evidence for `constant-parameter`
+
+The opt-in `constant-parameter` rule uses the one-shot `call-evidence`
+operation when the run has type-aware mode on:
+
+```bash
+fallow dead-code --constant-parameters --type-aware --format json --quiet
+```
+
+The static closed-world gate selects the candidates first. The companion never
+reads each function of a project. It answers two questions and returns
+evidence only. Fallow computes each verdict.
+
+- For a parameter with a default where each call passes an argument: can an
+  argument that is not a literal be `undefined`? When no argument can, the
+  default never applies (reason `unused-default`).
+- For a method of an exported class whose module passes the gate: which calls
+  does `getSignatureUsage` resolve, and can each argument be `undefined`? The
+  verdicts are `never-passed` and `unused-default`. The finding names the
+  method as `Class.method`.
+
+`getSignatureUsage` follows the class and interface hierarchy, so the list of
+calls can hold a call that dispatches to an override or to another
+implementer. A larger set is safe for both claims: when each call of the
+larger set omits a parameter, or passes a value that cannot be `undefined`,
+each call of the real set does too. A missing call is not safe. The companion
+abstains for a method, with a stable reason, when one of these shapes can hide
+a call:
+
+- a decorator on the class or the method, an overload, a generator, a computed
+  name, or a read of `arguments`,
+- a member of the same name that a base type or an interface from a dependency
+  declares, because a framework can call it,
+- a member of the same name in a declaration file of a dependency whose owner
+  type the class matches, because code of the dependency can receive an
+  instance and call it,
+- a name that the platform calls, such as `then`, `toString`, `toJSON` or
+  `handleEvent`, and a read of `Class.prototype`,
+- a reference that is not a call, such as `this.save` as a value or `bind`,
+- a reference by name that does not resolve, such as a call on an `any`
+  receiver,
+- a file outside the program of the class that names the method, such as
+  another package of a monorepo or a component template,
+- a computed access on a receiver whose type has the method, also on a call
+  result or an asserted receiver, or a computed call on an untyped receiver or
+  a `Reflect` call when a string literal spells the name,
+- a reference to another member of the same name whose owner type the class
+  is assignable to. TypeScript types are structural, so code can pass an
+  instance as a type that the class never `implements`.
+
+An argument type is evidence only under these rules:
+
+- The project has `strictNullChecks`. Without it, `T | undefined` reads as
+  `T`.
+- A JavaScript file without `checkJs` gives only the form of the argument,
+  such as a literal, an object, a function or `new X()`.
+- The check follows the bindings and the object literal members that an
+  argument reads, a few levels deep. An assertion (`as T`, `<T>x`, `x!`, not
+  `as const`), an `any` value, a `@ts-ignore`, `@ts-expect-error` or
+  `@ts-nocheck` comment, a definite assignment or an ambient declaration on
+  that path removes the evidence.
+- The checker keeps a narrowing across a call, also when a closure writes the
+  binding. So a `let`, `var` or parameter that code writes after its
+  declaration gives only its declared type, and a compound expression that
+  reads such a binding or a member gives no evidence.
+- Without `noUncheckedIndexedAccess`, an index read has a type without
+  `undefined`, also through the return type of a function. An index read, a
+  call result, a destructured binding, and a binding whose value comes from
+  one of these give no evidence.
+- A narrowing by a user-defined type guard (`x is T`) is a claim, so an
+  identifier that a type guard narrows gives no evidence. The tail of an
+  optional chain gives no evidence either.
+- A bare member read uses the declared type of the member. A class field
+  without an initializer is evidence only under `strictPropertyInitialization`,
+  and a read of `this.x` in a constructor or a field initializer gives no
+  evidence, because the field can still be unset there.
+
+A type does not prove a run-time value. Each such finding carries
+`evidence: "type-aware"`, and its explanation says that an `any` value, a cast,
+or data from outside the program can break the claim. Type evidence never
+overrides an abstain reason of the static gate. Without type-aware mode, the
+output of the rule does not change. `_meta.type_aware.call_evidence` counts the
+candidates, the findings and each abstention reason.
+
+The experimental tsrs backend does not serve `getSignatureUsage`, so with that
+backend each method abstains with `backend-unsupported`, and only the
+`unused-default` findings of functions remain.
+
+The operation builds its own Programs, next to the Programs of the
+`semantic-queries` request of the same run, and a semantic session does not
+accept it. So an editor session reports only the findings of the rule that the
+call facts prove. On the pinned corpus of the release gate, the marginal CPU
+time of the operation stays below the runtime gate. On a large monorepo with
+many TypeScript projects, it costs about as much as the class-member
+refinement.
+
 ## Fail-closed behavior
 
 Every candidate has one of five outcomes:
