@@ -16,15 +16,21 @@
 
 use std::sync::LazyLock;
 
-/// A `url(...)` value: double-quoted, single-quoted, or unquoted.
-static CSS_URL_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| crate::static_regex(r#"url\(\s*(?:"([^"]*)"|'([^']*)'|([^\s"'()]+))\s*\)"#));
+/// A `url(...)` value: double-quoted, single-quoted, or unquoted. CSS function
+/// names are case-insensitive.
+static CSS_URL_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    crate::static_regex(r#"(?i:url)\(\s*(?:"([^"]*)"|'([^']*)'|([^\s"'()]+))\s*\)"#)
+});
 
 /// The package names of the `url()` values in `stripped`, a stylesheet with
 /// its comments masked, each name once.
 pub fn package_url_references(stripped: &str) -> Vec<String> {
     let mut packages: Vec<String> = Vec::new();
-    if !stripped.contains("url(") {
+    let has_url = stripped
+        .as_bytes()
+        .windows(4)
+        .any(|window| window.eq_ignore_ascii_case(b"url("));
+    if !has_url {
         return packages;
     }
     for cap in CSS_URL_RE.captures_iter(stripped) {
@@ -80,6 +86,15 @@ fn is_plain_path(path: &str) -> bool {
 #[cfg(all(test, not(miri)))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn credits_a_url_function_in_any_letter_case() {
+        let css = r#"@font-face { src: URL("@acme/font-sans/a.woff2"), Url(font-serif/b.woff2); }"#;
+        assert_eq!(
+            package_url_references(css),
+            vec!["@acme/font-sans", "font-serif"]
+        );
+    }
 
     #[test]
     fn credits_scoped_unscoped_and_tilde_package_urls() {
