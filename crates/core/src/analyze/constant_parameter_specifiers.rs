@@ -415,10 +415,13 @@ mod tests {
 
     #[test]
     fn classifies_each_specifier_kind() {
-        let from = Path::new("/p/src/pages/home.ts");
+        let dir = tempfile::tempdir().expect("temporary project");
+        let root = dunce::canonicalize(dir.path()).expect("canonical project root");
+        let from = root.join("src").join("pages").join("home.ts");
+        let from = from.as_path();
         assert_eq!(
             target(from, "../lib/format.js"),
-            Target::Path(PathBuf::from("/p/src/lib/format.js"))
+            Target::Path(root.join("src").join("lib").join("format.js"))
         );
         assert_eq!(
             target(from, "/src/main.tsx"),
