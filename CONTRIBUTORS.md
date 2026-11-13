@@ -64,6 +64,7 @@ This list includes commit contributors and authors of open and closed issues and
 - [Elia97](https://github.com/Elia97)
 - [eojoel](https://github.com/eojoel)
 - [Ericlm](https://github.com/Ericlm)
+- [ethan-huo](https://github.com/ethan-huo)
 - [EvanAgee](https://github.com/EvanAgee)
 - [filiabel](https://github.com/filiabel)
 - [filipw01](https://github.com/filipw01)
