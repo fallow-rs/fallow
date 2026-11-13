@@ -1,6 +1,6 @@
 ---
 name: fallow
-description: Codebase intelligence for TypeScript and JavaScript. Static analysis reports changed-code risk, cleanup opportunities, duplication, circular dependencies, complexity hotspots, architecture boundaries, design-system drift, feature flags, and opt-in security candidates. Optional local similar-code discovery finds functions that may implement the same intent despite different syntax. Runtime coverage can merge production execution data. Use when asked to audit PR risk, find unused code or dependencies, compare semantically similar functions, detect duplicates, inspect architecture boundaries, merge runtime coverage, auto-fix supported issues, or run fallow.
+description: Codebase intelligence for TypeScript and JavaScript. Static analysis reports changed-code risk, cleanup opportunities, duplication, circular dependencies, complexity hotspots, architecture boundaries, design-system drift, feature flags, and opt-in security candidates. Opt-in mutation testing reports the code changes that no test detects. Optional local similar-code discovery finds functions that may implement the same intent despite different syntax. Runtime coverage can merge production execution data. Use when asked to audit PR risk, find unused code or dependencies, compare semantically similar functions, detect duplicates, inspect architecture boundaries, merge runtime coverage, improve or check the tests of a change, auto-fix supported issues, or run fallow.
 license: MIT
 ---
 
@@ -19,6 +19,7 @@ Fallow analyzes code and styles for changed-code risk, cleanup opportunities, ci
 - Investigate why a specific export, dependency, file, or issue type was reported.
 - Surface local security candidates for an agent to verify (`fallow security`).
 - Find untested but runtime-reachable code (`fallow health --coverage-gaps`).
+- Improve or check the tests of a change: find the small code changes (mutants) that no test detects (`fallow mutation`, opt-in, because a run executes the project tests).
 - Rank complexity hotspots, owners, and refactoring targets (`fallow health --hotspots --ownership --targets`).
 - Review what fallow has surfaced over time (`fallow impact`).
 - Confirm exact TypeScript symbol use, affected tests, API leaks, or public type coupling when syntactic evidence is insufficient (`--type-aware`).
@@ -92,6 +93,7 @@ Route by intent before reaching for the big analysis commands. Same matrix as `f
 | prioritize refactoring | `fallow health --hotspots --targets` |
 | ask who owns code | `fallow health --ownership` |
 | check untested-but-reachable code | `fallow health --coverage-gaps` |
+| improve or check the tests of a change | `fallow mutation --plan --base <ref>`; The plan runs no code. Without `--plan`, the command runs the project tests against each mutant, so ask the user first. |
 | consolidate duplication | `fallow dupes --trace dup:<fingerprint>` |
 | find feature flags | `fallow flags` |
 | check which architecture rules apply to a file before changing it | `fallow guard <files>` |
@@ -182,6 +184,17 @@ Step 3 is your review. Read `digest.decisions[]` and `change_anchors[]` in the g
 ```
 
 Fallow validates the judgment against the live graph. It rejects an id that it did not emit. It refuses the whole file as `stale` when the hash no longer matches. Report only the `accepted` judgments. Keep the guide outside the project: a new file in the tree changes the hash. Do not create `.fallow/` for it, because a folder that you create has no ignore file. On `stale: true`, fetch the guide again.
+
+### Improve the tests of a change
+```bash
+fallow mutation --plan --base main --format json --quiet   # the plan: runs no code
+fallow mutation --base main --format json --quiet          # the run: executes the project tests
+fallow mutation tasks --format json --quiet                # the open mutants: runs no code
+fallow mutation inspect <mutant_id> --format json --quiet  # one mutant: runs no code
+fallow mutation --recheck --format json --quiet            # after new tests: runs only the open mutants
+```
+
+Start the run when the user asks for better tests or for mutation testing. In each other task, show the plan and ask. A run exits 2 on uncommitted files: pass `--allow-dirty`, and do not commit for the user. A `survived` mutant is a code change that no test detects. Write a behavior test for each one that a caller can observe, then recheck. Do not write a test that only pins an implementation detail, and do not pass `--allow-side-effects` unless the user asks. The runners are Vitest, `node:test` and `bun test`. The Fallow plugin has a `fallow-mutation` skill with the full method.
 
 ### Find code duplication
 ```bash

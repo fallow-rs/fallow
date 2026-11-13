@@ -8937,6 +8937,11 @@
       "note": null
     },
     {
+      "task": "improve or check the tests of a change",
+      "command": "fallow mutation --plan --base <ref>",
+      "note": "The plan runs no code. Without `--plan`, the command runs the project tests against each mutant, so ask the user first."
+    },
+    {
       "task": "consolidate duplication",
       "command": "fallow dupes --trace dup:<fingerprint>",
       "note": null
