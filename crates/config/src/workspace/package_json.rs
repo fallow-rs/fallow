@@ -79,6 +79,7 @@ pub const INLINE_TOOL_CONFIG_KEYS: &[&str] = &[
     "nodemonConfig",
     "prettier",
     "release-it",
+    "stylelint",
     "textlint",
     "tsd",
     "tsdown",

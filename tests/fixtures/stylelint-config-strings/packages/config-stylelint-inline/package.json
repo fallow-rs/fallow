@@ -1,0 +1,10 @@
+{
+  "name": "@acme/config-stylelint-inline",
+  "version": "1.0.0",
+  "private": true,
+  "main": "index.js",
+  "dependencies": {
+    "@acme/stylelint-plugin-inline": "^1.0.0",
+    "unused-inline-config-control": "^1.0.0"
+  }
+}

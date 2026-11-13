@@ -131,7 +131,9 @@ fn credit_config(
                     workspace_shared_config_file(config_dir, &specifier, &package, root, walk)
             {
                 push_setup_file_once(result, shared.clone());
+                let first_shared_dep = result.referenced_dependencies.len();
                 follow_extends(result, &shared, root, walk, depth);
+                credit_shared_config_manifest(result, &shared, first_shared_dep);
             }
             result.referenced_dependencies.push(package);
         }
@@ -150,6 +152,25 @@ fn follow_extends(
     if let Ok(source) = std::fs::read_to_string(path) {
         credit_config(result, path, &source, root, walk, depth + 1);
     }
+}
+
+/// Credit the packages that a workspace shared config names, the entries of
+/// `referenced_dependencies` from `first_dep`, to the manifest of the shared
+/// config package. The shared config package declares them, and the inline
+/// `package.json` key of another workspace gives no project-wide credit.
+fn credit_shared_config_manifest(result: &mut PluginResult, shared: &Path, first_dep: usize) {
+    let Some(manifest) = shared
+        .ancestors()
+        .skip(1)
+        .map(|dir| dir.join("package.json"))
+        .find(|manifest| manifest.is_file())
+    else {
+        return;
+    };
+    let deps = &result.referenced_dependencies[first_dep..];
+    result
+        .package_referenced_dependencies
+        .extend(deps.iter().map(|dep| (manifest.clone(), dep.clone())));
 }
 
 fn visit_key(path: &Path) -> PathBuf {

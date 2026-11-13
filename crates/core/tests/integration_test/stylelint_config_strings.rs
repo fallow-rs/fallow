@@ -135,6 +135,48 @@ fn config_files_credit_named_packages_and_keep_local_modules() {
 }
 
 #[test]
+fn workspace_package_json_key_credits_named_packages_and_keeps_local_modules() {
+    let findings = analyze("stylelint-config-strings");
+    let unused = &findings.unused_deps;
+
+    for credited in [
+        dep("@acme/config-stylelint-inline", "apps/inline/package.json"),
+        dep("postcss-example-inline", "apps/inline/package.json"),
+        // The shared config names this plugin, and only the inline key of
+        // apps/inline extends the shared config.
+        dep(
+            "@acme/stylelint-plugin-inline",
+            "packages/config-stylelint-inline/package.json",
+        ),
+    ] {
+        assert!(
+            !unused.contains(&credited),
+            "{credited:?} is named through apps/inline/package.json#stylelint, got {unused:?}"
+        );
+    }
+    for control in [
+        dep("unused-inline-control", "apps/inline/package.json"),
+        dep(
+            "unused-inline-config-control",
+            "packages/config-stylelint-inline/package.json",
+        ),
+    ] {
+        assert!(
+            unused.contains(&control),
+            "{control:?} should still be reported, got {unused:?}"
+        );
+    }
+
+    let files = &findings.unused_files;
+    assert!(
+        !files
+            .iter()
+            .any(|file| file == "apps/inline/rules/inline-rule.js"),
+        "inline-rule.js is a plugin of apps/inline/package.json#stylelint, got {files:?}"
+    );
+}
+
+#[test]
 fn package_json_key_credits_named_packages_and_keeps_local_modules() {
     let findings = analyze("stylelint-package-json-config");
     let unused = &findings.unused_deps;
