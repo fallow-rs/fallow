@@ -97,6 +97,28 @@ Metro maps the key to a folder, which is often generated output. The plugin
 reads the object as a `extraNodeModules` property value or as the right side
 of a `config.resolver.extraNodeModules = {...}` assignment.
 
+## Inline config in package.json
+
+A plugin with a `package_json_config_key`, such as `prettier` or `jest`, also
+reads its config from that key of a `package.json`. `PackageJson` keeps the
+raw value of each key in `INLINE_TOOL_CONFIG_KEYS`
+(`PackageJson::inline_tool_config`), so the plugin run reads it from the
+loaded manifest. A repeated key keeps its last value, as `JSON.parse` does,
+and no value of these keys fails manifest parsing. A new key goes in that
+list; a registry test fails for a built-in key that the list does not have.
+
+The root run reads the root manifest, and each workspace run reads the
+workspace manifest. Each run skips the key when the plugin matches a config
+file among its files. The value goes through `resolve_config_in_project`
+like a config file, so its entries, setup files and entry pattern
+replacements apply to that package.
+
+A package that the root manifest's key names counts as used in every package.
+A package that a workspace manifest's key names counts as used only in the
+manifests that the tool resolves the package from: that workspace manifest and
+each manifest above it, up to the root manifest. A sibling workspace that
+declares the same package gets no credit.
+
 ## Packages that a config needs installed
 
 A plugin may push a `RequiredDependency` when a config needs a package that no

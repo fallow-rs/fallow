@@ -1527,10 +1527,10 @@ pub trait Plugin: Send + Sync {
         &[]
     }
 
-    /// The key name in package.json that holds inline configuration for this tool.
-    /// When set (e.g., `"jest"` for the `"jest"` key in package.json), the plugin
-    /// system will extract that key's value and call `resolve_config` with its
-    /// JSON content if no standalone config file was found.
+    /// The package.json key that holds the inline config of this tool, such as
+    /// `"jest"`. When a root or workspace package has no config file of the
+    /// tool, `resolve_config_in_project` gets the JSON value of the key. A new
+    /// key must also go in [`fallow_config::INLINE_TOOL_CONFIG_KEYS`].
     fn package_json_config_key(&self) -> Option<&'static str> {
         None
     }

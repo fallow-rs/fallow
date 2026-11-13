@@ -1,0 +1,13 @@
+{
+  "name": "@acme/docs",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "format": "prettier --write src"
+  },
+  "devDependencies": {
+    "prettier-plugin-example": "^1.0.0"
+  }
+}

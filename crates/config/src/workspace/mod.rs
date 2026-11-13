@@ -39,7 +39,7 @@ pub use missing_pattern_dirs::{has_missing_workspace_pattern_dirs, nested_member
 pub use nested_project::{ManifestPatternMatcher, is_independent_pnpm_project};
 use nested_project::{NestedProjectScan, collect_nested_project_workspaces};
 pub use npm_overrides::{parse_bun_package_json_resolutions, parse_npm_package_json_overrides};
-pub use package_json::{NapiConfig, PackageJson};
+pub use package_json::{INLINE_TOOL_CONFIG_KEYS, NapiConfig, PackageJson};
 pub use parsers::parse_tsconfig_root_dir;
 use parsers::{
     expand_workspace_glob_with_diagnostics, parse_pnpm_workspace_yaml,
