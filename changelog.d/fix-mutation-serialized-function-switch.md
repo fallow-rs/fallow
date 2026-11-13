@@ -1,3 +1,0 @@
-### Fixed
-
-- **`fallow mutation` no longer fails the dry run of a test that runs a source function in another realm.** A test can serialize a function with `toString` and run it in a `node:vm` context or in a browser page, for example through a mock of Playwright `page.evaluate`. The mutant switch in that function called a prelude function that does not exist in the other realm, so the test failed with `ReferenceError: __fallow_m_a is not defined`. Fallow then reported a `baseline-failure`, and with `--kill-matrix-for` each target was `incomplete`. Each switch call now has a `typeof` guard, so the function runs its original code in the other realm. (Closes [#4438](https://github.com/fallow-rs/fallow/issues/4438))

@@ -1,3 +1,0 @@
-### Fixed
-
-- **`--type-aware` no longer gives up on a project because of a strict-mode name error that `@ts-ignore` suppresses.** The semantic pass treated each binding diagnostic as blocking, also one under a `// @ts-ignore` or `// @ts-expect-error` comment, which the compiler drops. For example, Svelte declares `export const arguments: never;` under `// @ts-ignore` in an ambient file, so the whole program got no type evidence. The semantic pass now applies these comments, as the compiler does, to strict-mode name errors such as an invalid use of `arguments`. Other binding errors, such as a duplicate declaration, and syntax, program and configuration errors stay blocking.

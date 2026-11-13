@@ -1,3 +1,0 @@
-### Added
-
-- **`fallow mutation --record-args values` records the arguments of the changed exported functions.** `fallow mutation inspect <id> --replay` without `--args` then replays up to 3 recorded inputs and stops at the first witness. Recording is off by default, and it runs as a separate pass after the mutant runs, so it never changes a result of the run. The inputs stay in the gitignored cache directory for 7 days, an input with a secret (by key name or by entropy) is not kept, and `--record-args shapes` keeps the argument types only. The report gets a `recording` summary with counts and the reasons of the calls that cannot be replayed, never the values.

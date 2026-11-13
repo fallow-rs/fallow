@@ -1,3 +1,0 @@
-### Fixed
-
-- **`fallow audit` no longer reports a clone as introduced after an edit inside an existing clone.** A one-line edit or a parameter rename in one copy of a clone splits the clone group into smaller groups with new attribution keys. The new-only gate then counted these groups as introduced, also where a group held the edited line. Now a clone group where each instance lies inside a different instance of one base clone group is inherited. The rule maps paths through renames and lines through the diff. A pasted copy in a new file stays introduced, and so does a group where every copy holds an added line. `attribution.duplication_demoted` does not count these groups, because they match a base clone group.
