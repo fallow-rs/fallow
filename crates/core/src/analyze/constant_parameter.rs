@@ -50,6 +50,11 @@ pub(super) enum Abstain {
     EntryExport,
     /// A dynamic import or a dynamic import pattern reaches the module.
     DynamicImport,
+    /// A module of the analysis has a dynamic import or a `require` call
+    /// whose source does not resolve to a file or a pattern. The code reads
+    /// the export name of the function on the loaded value, or the value
+    /// escapes, so the load can call the function.
+    OpaqueModuleLoad,
     /// The module has CommonJS exports, or a `require` reads it.
     CommonJs,
     /// A namespace import of the module escapes as a value.
@@ -82,12 +87,13 @@ pub(super) enum Abstain {
 
 impl Abstain {
     /// Each reason, in declaration order.
-    const ALL: [Self; 16] = [
+    const ALL: [Self; 17] = [
         Self::ParseIncomplete,
         Self::OpenContract,
         Self::PublicApi,
         Self::EntryExport,
         Self::DynamicImport,
+        Self::OpaqueModuleLoad,
         Self::CommonJs,
         Self::NamespaceEscape,
         Self::ValueReference,
@@ -101,8 +107,8 @@ impl Abstain {
         Self::TooFewCalls,
     ];
 
-    const fn bit(self) -> u16 {
-        1 << self as u16
+    const fn bit(self) -> u32 {
+        1 << self as u32
     }
 
     /// A stable kebab-case code for the reason.
@@ -114,6 +120,7 @@ impl Abstain {
             Self::PublicApi => "public-api",
             Self::EntryExport => "entry-export",
             Self::DynamicImport => "dynamic-import",
+            Self::OpaqueModuleLoad => "opaque-module-load",
             Self::CommonJs => "commonjs",
             Self::NamespaceEscape => "namespace-escape",
             Self::ValueReference => "value-reference",
@@ -130,7 +137,7 @@ impl Abstain {
 }
 
 // `Reasons` holds one bit for each reason.
-const _: () = assert!(Abstain::ALL.len() <= u16::BITS as usize);
+const _: () = assert!(Abstain::ALL.len() <= u32::BITS as usize);
 
 /// A function contract: the module and the index of its declaration.
 type FnId = (FileId, u32);
@@ -138,7 +145,7 @@ type FnId = (FileId, u32);
 /// Each [`Abstain`] reason that applies to one function, one bit for each
 /// reason.
 #[derive(Debug, Clone, Copy, Default)]
-struct Reasons(u16);
+struct Reasons(u32);
 
 impl Reasons {
     const fn insert(&mut self, reason: Abstain) {
@@ -198,6 +205,8 @@ struct ConstantParameterInput<'a> {
     line_offsets_by_file: &'a LineOffsetsMap<'a>,
     /// `true` when a `constant-parameter` suppression covers the line.
     is_suppressed: &'a dyn Fn(FileId, u32) -> bool,
+    /// The files that take no part in the analysis in production mode.
+    excluded: &'a FxHashSet<FileId>,
     /// `true` when the run has type-aware mode on. The gate then also reads
     /// exported classes, and the rule collects the candidates that need
     /// type evidence.
@@ -271,6 +280,7 @@ fn find_constant_parameters(input: &ConstantParameterInput<'_>) -> Evaluation {
         gate.block_broken_module(module.file_id);
     }
     gate.block_surfaces();
+    gate.block_opaque_loads();
     for module in input.modules {
         gate.scan_module(module);
     }
@@ -584,6 +594,55 @@ impl<'a> Gate<'a> {
         }
         for resolved in self.input.resolved_modules {
             self.block_hidden_imports(resolved);
+        }
+    }
+
+    /// Block each function that a load with an unknown source in a module
+    /// of the analysis can call. A name that the code reads on the loaded
+    /// value blocks each export of that name, also through a re-export. A
+    /// value that escapes blocks each export.
+    fn block_opaque_loads(&mut self) {
+        let reason = Abstain::OpaqueModuleLoad;
+        let graph = self.input.graph;
+        let mut names: FxHashSet<&str> = FxHashSet::default();
+        for module in self.input.modules {
+            let Some(loads) = facts(module).map(|facts| &facts.opaque_loads) else {
+                continue;
+            };
+            if loads.is_empty() || self.input.excluded.contains(&module.file_id) {
+                continue;
+            }
+            if loads.escapes {
+                if let Some(node) = graph.modules.get(module.file_id.0 as usize) {
+                    tracing::debug!(
+                        path = %node.path.display(),
+                        "constant-parameter: the value of an unknown-source load escapes"
+                    );
+                }
+                self.block_all_exports(reason);
+            }
+            names.extend(loads.names.iter().map(String::as_str));
+        }
+        if names.is_empty() || self.all_exports_blocked.contains(reason) {
+            return;
+        }
+        let mut names: Vec<&str> = names.into_iter().collect();
+        names.sort_unstable();
+        let files: Vec<FileId> = graph.modules.iter().map(|node| node.file_id).collect();
+        for name in names {
+            for &file in &files {
+                match graph.resolve_export(file, name, ExportNamespace::Value) {
+                    EffectiveExportResolution::Unique(binding) => {
+                        if let Some(source) = binding.namespace_source() {
+                            self.block_surface(source, reason);
+                        } else if let Some(id) = self.binding_contract(binding) {
+                            self.block(id, reason);
+                        }
+                    }
+                    EffectiveExportResolution::Ambiguous => self.block_name(name, reason),
+                    EffectiveExportResolution::Missing => {}
+                }
+            }
         }
     }
 
@@ -1427,6 +1486,7 @@ pub(super) fn populate(input: &mut super::PostDetectionInput<'_, '_>) {
         declared_deps: input.declared_deps,
         line_offsets_by_file: input.line_offsets_by_file,
         is_suppressed: &is_suppressed,
+        excluded: input.excluded,
         type_aware: config.type_aware.enabled,
     });
     #[cfg(test)]

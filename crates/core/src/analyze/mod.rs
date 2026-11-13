@@ -804,6 +804,7 @@ pub(crate) fn find_dead_code_full(
         class_member_rules: &class_member_rules,
         plugin_result,
         collect_usages,
+        excluded,
         results: &mut results,
     });
 
@@ -940,8 +941,7 @@ fn collect_federation_runtime_remotes(
     remotes.rules
 }
 
-/// Shared context for the post-detector populate sequence in
-/// `find_dead_code_full`.
+/// Shared context for the post-detector populate sequence of `find_dead_code_full`.
 struct PostDetectionInput<'a, 'm> {
     graph: &'a ModuleGraph,
     modules: &'a [ModuleInfo],
@@ -957,13 +957,13 @@ struct PostDetectionInput<'a, 'm> {
     /// Whether the editor/LSP usages path is active; gates in-process-only
     /// intel (`react_component_intel`) off the bare `fallow` / `audit` hot path.
     collect_usages: bool,
+    excluded: &'a FxHashSet<FileId>,
     results: &'a mut AnalysisResults,
 }
 
 /// Run the post-detector populate/reclassify phases: server-action
 /// reclassification, security, catalog/override, framework-convention findings,
-/// and stale-suppression accounting. Extracted from `find_dead_code_full` so
-/// that orchestrator reads as setup -> detect -> populate.
+/// and stale-suppression accounting.
 fn populate_post_detection_findings(input: &mut PostDetectionInput<'_, '_>) {
     filter_public_workspace_results(input.config, input.workspaces, input.results);
 

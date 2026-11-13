@@ -108,11 +108,44 @@ fn required_create_require_alias<'b>(declarator: &'b VariableDeclarator<'_>) -> 
     })
 }
 
+/// `true` when `declarator` binds the `require` function itself, as in
+/// `const r = require`. A call through the other name is not visible.
+fn binds_require_value(declarator: &VariableDeclarator<'_>) -> bool {
+    matches!(
+        declarator.init.as_ref().map(Expression::get_inner_expression),
+        Some(Expression::Identifier(init)) if init.name == REQUIRE
+    )
+}
+
 impl ModuleInfoExtractor {
     /// Record the module-level names of `createRequire` and of the `require`
     /// functions of this file. A function body above the declaration reads
     /// them, so a walk in source order is too late.
     pub(super) fn record_program_module_require_names(&mut self, program: &Program<'_>) {
+        self.record_imported_create_require_names(program);
+        for statement in &program.body {
+            let declaration = match statement {
+                Statement::ExportDeclaration(export) => Some(&export.declaration),
+                _ => statement.as_declaration(),
+            };
+            let Some(Declaration::VariableDeclaration(var)) = declaration else {
+                continue;
+            };
+            for declarator in &var.declarations {
+                if binds_require_value(declarator) {
+                    self.mark_opaque_load_escape();
+                }
+                if let Some(alias) = required_create_require_alias(declarator) {
+                    self.create_require_aliases.insert(alias.to_string());
+                }
+                if let Some(name) = self.this_file_require_binding(declarator) {
+                    self.module_require_aliases.insert(name.to_string());
+                }
+            }
+        }
+    }
+
+    fn record_imported_create_require_names(&mut self, program: &Program<'_>) {
         for statement in &program.body {
             let Statement::ImportDeclaration(decl) = statement else {
                 continue;
@@ -127,23 +160,6 @@ impl ModuleInfoExtractor {
                 {
                     self.create_require_aliases
                         .insert(named.local.name.to_string());
-                }
-            }
-        }
-        for statement in &program.body {
-            let declaration = match statement {
-                Statement::ExportDeclaration(export) => Some(&export.declaration),
-                _ => statement.as_declaration(),
-            };
-            let Some(Declaration::VariableDeclaration(var)) = declaration else {
-                continue;
-            };
-            for declarator in &var.declarations {
-                if let Some(alias) = required_create_require_alias(declarator) {
-                    self.create_require_aliases.insert(alias.to_string());
-                }
-                if let Some(name) = self.this_file_require_binding(declarator) {
-                    self.module_require_aliases.insert(name.to_string());
                 }
             }
         }
@@ -201,6 +217,29 @@ impl ModuleInfoExtractor {
             || self.is_this_file_require(callee)
     }
 
+    /// Whether `callee` loads a module for a source that is not a string
+    /// literal. A local binding named `require`, such as a parameter or a
+    /// helper function, is not the module loader.
+    fn is_unknown_source_load_callee(&self, callee: &Expression<'_>) -> bool {
+        match callee.get_inner_expression() {
+            Expression::Identifier(ident) if ident.name == REQUIRE => {
+                self.is_this_file_require(callee)
+                    || !(self.nested_scope_shadows(REQUIRE)
+                        || (self.local_declaration_names.contains(REQUIRE)
+                            && !self.opaque_loads.ambient_require))
+            }
+            Expression::StaticMemberExpression(member) => {
+                member.property.name == REQUIRE
+                    && matches!(
+                        member.object.get_inner_expression(),
+                        Expression::Identifier(object)
+                            if matches!(object.name.as_str(), "module" | "globalThis" | "global")
+                    )
+            }
+            _ => self.is_this_file_require(callee),
+        }
+    }
+
     /// The call and the specifier when `init` is a load with a string literal.
     pub(super) fn try_extract_require<'a, 'b>(
         &self,
@@ -217,8 +256,21 @@ impl ModuleInfoExtractor {
     }
 
     pub(super) fn record_bare_require_call(&mut self, expr: &CallExpression<'_>) {
-        if let Some(Argument::StringLiteral(lit)) = expr.arguments.first()
-            && !self.handled_require_spans.contains(&expr.span)
+        let Some(first) = expr.arguments.first() else {
+            return;
+        };
+        let Argument::StringLiteral(lit) = first else {
+            // A `require` call gives no edge and no pattern for a source that
+            // is not a string literal, so the call can load any module.
+            let data = first
+                .as_expression()
+                .is_some_and(super::visit_dynamic_imports::loads_data_file);
+            if !data && self.is_unknown_source_load_callee(&expr.callee) {
+                self.mark_opaque_module_load(expr.span);
+            }
+            return;
+        };
+        if !self.handled_require_spans.contains(&expr.span)
             && self.is_require_load_callee(&expr.callee)
         {
             self.require_calls.push(RequireCallInfo {
