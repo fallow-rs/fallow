@@ -46,6 +46,27 @@ pub fn package_url_references(stripped: &str) -> Vec<String> {
     packages
 }
 
+/// Mask the comments of an SFC `<style>` block and add the packages that its
+/// `url()` values name to `info`. Returns the masked block.
+pub fn mask_style_block(
+    body: &str,
+    is_scss: bool,
+    info: &mut fallow_types::extract::ModuleInfo,
+) -> String {
+    let masked = crate::css::mask_css_comments(body, is_scss);
+    let packages = package_url_references(&masked);
+    if !packages.is_empty() {
+        let mut references = std::mem::take(&mut info.package_path_references).into_vec();
+        for package in packages {
+            if !references.contains(&package) {
+                references.push(package);
+            }
+        }
+        info.package_path_references = references.into_boxed_slice();
+    }
+    masked
+}
+
 /// The package name of `name/<path>` or `@scope/name/<path>`, with an optional
 /// `~` prefix and `?query` or `#fragment` suffix. The path must not be empty.
 fn package_of_url(value: &str) -> Option<&str> {
@@ -166,5 +187,49 @@ mod tests {
         let css = r#"@import url("@acme/theme/base.css");
             .a { background: url("@acme/theme/files/bg.png"); }"#;
         assert_eq!(package_url_references(css), vec!["@acme/theme"]);
+    }
+
+    fn parse_sfc(path: &str, source: &str) -> fallow_types::extract::ModuleInfo {
+        crate::sfc::parse_sfc_to_module_with_mode(
+            fallow_types::discover::FileId(0),
+            std::path::Path::new(path),
+            source,
+            0,
+            false,
+            fallow_types::shared_state::ExtractionMode::Standard,
+        )
+    }
+
+    #[test]
+    fn sfc_style_blocks_credit_packages_named_in_urls() {
+        for (path, source) in [
+            (
+                "Font.vue",
+                r#"<template/><style>
+/* url("@acme/commented/files/c.woff2") */
+@font-face { src: url("@acme/font-vue/files/v.woff2"); }
+</style><style lang="scss">.a { background: url(icons-sprite/sprite.svg#arrow); }</style>"#,
+            ),
+            (
+                "Font.svelte",
+                r#"<style>
+/* url("@acme/commented/files/c.woff2") */
+@font-face { src: url("@acme/font-vue/files/v.woff2"); }
+</style><style lang="scss">.a { background: url(icons-sprite/sprite.svg#arrow); }</style>"#,
+            ),
+        ] {
+            let info = parse_sfc(path, source);
+            assert_eq!(
+                info.package_path_references.to_vec(),
+                vec!["@acme/font-vue".to_string(), "icons-sprite".to_string()],
+                "{path}"
+            );
+        }
+
+        let less = parse_sfc(
+            "Less.vue",
+            r#"<style lang="less">.a { background: url("@acme/font-vue/files/v.woff2"); }</style>"#,
+        );
+        assert!(less.package_path_references.is_empty());
     }
 }
