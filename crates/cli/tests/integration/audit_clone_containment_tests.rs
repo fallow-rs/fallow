@@ -19,30 +19,45 @@ const SUBSPAN_CLONE: &str = "export function NAME(items, opts) {\n  const out = 
 /// `edit` callback changes the working tree, and the function returns the
 /// JSON of a new-only audit against the commit.
 fn audit_after_clone_edit(edit: impl FnOnce(&Path)) -> serde_json::Value {
+    audit_after_clone_edit_in("", &["a", "b"], edit)
+}
+
+/// Repo with one committed clone group: one copy of the clone per name in
+/// `copies`, at `<project>/src/<name>.js`. The project is the repo
+/// subdirectory `project_dir` (empty for the repo root). The `edit` callback
+/// gets the project directory. The function returns the
+/// JSON of a new-only audit of the project against the commit.
+fn audit_after_clone_edit_in(
+    project_dir: &str,
+    copies: &[&str],
+    edit: impl FnOnce(&Path),
+) -> serde_json::Value {
     let tmp = TempDir::new().expect("failed to create temp dir");
-    let dir = tmp.path();
-    fs::create_dir_all(dir.join("src")).unwrap();
+    let repo = tmp.path();
+    let project = repo.join(project_dir);
+    fs::create_dir_all(project.join("src")).unwrap();
     fs::write(
-        dir.join("package.json"),
+        project.join("package.json"),
         r#"{"name":"audit-clone-subspan","type":"module","main":"src/index.js"}"#,
     )
     .unwrap();
-    fs::write(
-        dir.join("src/index.js"),
-        "import { a } from './a.js';\nimport { b } from './b.js';\nconsole.log(a, b);\n",
-    )
-    .unwrap();
-    fs::write(dir.join("src/a.js"), SUBSPAN_CLONE.replace("NAME", "a")).unwrap();
-    fs::write(dir.join("src/b.js"), SUBSPAN_CLONE.replace("NAME", "b")).unwrap();
-    git(dir, &["init", "-b", "main"]);
-    git(dir, &["config", "core.autocrlf", "false"]);
-    commit_all(dir, "initial");
-    edit(dir);
+    write_index(&project, copies.iter().map(|name| (*name, *name)));
+    for name in copies {
+        fs::write(
+            project.join(format!("src/{name}.js")),
+            SUBSPAN_CLONE.replace("NAME", name),
+        )
+        .unwrap();
+    }
+    git(repo, &["init", "-b", "main"]);
+    git(repo, &["config", "core.autocrlf", "false"]);
+    commit_all(repo, "initial");
+    edit(&project);
 
     let output = run_fallow_raw(&[
         "audit",
         "--root",
-        dir.to_str().unwrap(),
+        project.to_str().unwrap(),
         "--base",
         "HEAD",
         "--gate",
@@ -58,6 +73,17 @@ fn audit_after_clone_edit(edit: impl FnOnce(&Path)) -> serde_json::Value {
         output.stdout, output.stderr
     );
     parse_json(&output)
+}
+
+/// Writes `src/index.js`, which imports each `(name, module)` pair as
+/// `import { name } from './module.js'`.
+fn write_index<'a>(project: &Path, imports: impl IntoIterator<Item = (&'a str, &'a str)>) {
+    let (names, lines): (Vec<&str>, Vec<String>) = imports
+        .into_iter()
+        .map(|(name, module)| (name, format!("import {{ {name} }} from './{module}.js';\n")))
+        .unzip();
+    let text = format!("{}console.log({});\n", lines.concat(), names.join(", "));
+    fs::write(project.join("src/index.js"), text).unwrap();
 }
 
 fn edit_file(dir: &Path, rel: &str, from: &str, to: &str) {
@@ -123,4 +149,44 @@ fn audit_new_copy_of_base_clone_stays_introduced() {
         groups.iter().any(|group| group["introduced"] == true),
         "a new copy must keep an introduced clone group: {json}"
     );
+}
+
+/// A one-line edit in one copy of a base clone group with three instances
+/// splits the group. Each smaller group lies inside the base group, so each
+/// is inherited.
+#[test]
+fn audit_one_line_edit_inside_three_instance_base_clone_is_inherited() {
+    let json = audit_after_clone_edit_in("", &["a", "b", "c"], |project| {
+        edit_file(project, "src/a.js", "item.score + 10", "item.score + 11");
+    });
+    assert_all_clone_groups_inherited(&json);
+}
+
+/// A copy that the change renames with `git mv` and also edits still lies
+/// inside its base instance, because the check maps the path through the
+/// rename.
+#[test]
+fn audit_renamed_and_edited_copy_inside_base_clone_is_inherited() {
+    let json = audit_after_clone_edit(|dir| {
+        git(dir, &["mv", "src/a.js", "src/renamed.js"]);
+        edit_file(dir, "src/renamed.js", "item.score + 10", "item.score + 11");
+        write_index(dir, [("a", "renamed"), ("b", "b")]);
+    });
+    assert_all_clone_groups_inherited(&json);
+}
+
+/// A project in a subdirectory of the repo gets the same result. The added
+/// lines move the head clone below the end of its base instance. The head
+/// span maps back inside the base instance only when the diff paths are
+/// relative to the project directory, not to the repo root.
+#[test]
+fn audit_shifted_edit_inside_base_clone_in_subdirectory_root_is_inherited() {
+    let json = audit_after_clone_edit_in("packages/app", &["a", "b"], |project| {
+        let path = project.join("src/a.js");
+        let text = fs::read_to_string(&path).unwrap();
+        let shift = "// Scores the items.\n".repeat(SUBSPAN_CLONE.lines().count());
+        fs::write(&path, format!("{shift}{text}")).unwrap();
+        edit_file(project, "src/a.js", "item.score + 10", "item.score + 11");
+    });
+    assert_all_clone_groups_inherited(&json);
 }
