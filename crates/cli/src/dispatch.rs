@@ -53,6 +53,11 @@ use ci_dispatch::map_ci_subcommand;
 #[path = "dispatch_audit_inputs.rs"]
 mod audit_inputs;
 use audit_inputs::resolve_audit_inputs;
+#[path = "dispatch_audit_command.rs"]
+mod audit_command;
+use audit_command::dispatch_audit_command;
+#[path = "dispatch_audit_staged.rs"]
+mod audit_staged;
 
 fn dispatch_mutation_command(
     dispatch: &DispatchContext<'_>,
@@ -1173,88 +1178,6 @@ fn dispatch_setup_hooks_command(command: &Command, dispatch: &DispatchContext<'_
     })
 }
 
-fn dispatch_audit_command(command: Command, dispatch: &DispatchContext<'_>) -> ExitCode {
-    let Command::Audit {
-        production_dead_code,
-        production_health,
-        production_dupes,
-        dead_code_baseline,
-        health_baseline,
-        dupes_baseline,
-        max_crap,
-        coverage,
-        coverage_root,
-        only,
-        skip,
-        no_css,
-        css_deep,
-        no_css_deep,
-        gate,
-        worsened,
-        runtime_coverage,
-        min_invocations_hot,
-        mutation_report,
-        gate_marker,
-        brief,
-        max_decisions,
-        walkthrough_guide,
-        walkthrough_file,
-        walkthrough,
-        mark_viewed,
-        show_cleared,
-        show_deprioritized,
-        path,
-    } = command
-    else {
-        unreachable!("audit dispatcher only handles audit commands");
-    };
-
-    // The walkthrough flags imply the brief path (the guide digest + the
-    // graph-snapshot pin are brief-path data).
-    let brief = brief || walkthrough_guide || walkthrough || walkthrough_file.is_some();
-
-    let scope = match crate::scope_path::resolve_command_scope(dispatch.root, dispatch.output, path)
-    {
-        Ok(scope) => scope.map(|resolved| resolved.absolute),
-        Err(code) => return code,
-    };
-
-    dispatch_audit(
-        dispatch,
-        &AuditDispatchArgs {
-            production_dead_code,
-            production_health,
-            production_dupes,
-            dead_code_baseline,
-            health_baseline,
-            dupes_baseline,
-            max_crap,
-            coverage,
-            coverage_root,
-            only,
-            skip,
-            no_css,
-            css_deep,
-            no_css_deep,
-            gate,
-            worsened,
-            runtime_coverage,
-            min_invocations_hot,
-            mutation_report,
-            gate_marker,
-            brief,
-            max_decisions,
-            walkthrough_guide,
-            walkthrough_file,
-            walkthrough,
-            mark_viewed,
-            show_cleared,
-            show_deprioritized,
-            scope,
-        },
-    )
-}
-
 fn dispatch_audit_cache_command(
     dispatch: &DispatchContext<'_>,
     subcommand: &AuditCacheCli,
@@ -1997,6 +1920,9 @@ struct AuditDispatchArgs {
     /// Expand the de-prioritized units in the human focus map.
     show_deprioritized: bool,
     scope: Option<PathBuf>,
+    /// The checkout of `--staged`. The dispatch root is then the temporary
+    /// worktree that holds the staged index.
+    staged_host: Option<PathBuf>,
 }
 
 struct ResolvedAuditInputs {
@@ -2026,10 +1952,19 @@ fn dispatch_audit(dispatch: &DispatchContext<'_>, args: &AuditDispatchArgs) -> E
         );
     }
 
-    let inputs = match resolve_audit_inputs(dispatch, args) {
+    let mut inputs = match resolve_audit_inputs(dispatch, args) {
         Ok(inputs) => inputs,
         Err(code) => return code,
     };
+    if let Some(host) = args.staged_host.as_deref() {
+        // The temporary worktree is removed after the run, so the caches of
+        // a staged audit stay in the checkout.
+        inputs.cache_dir = fallow_engine::repo_refs::remap_cache_dir_for_base_worktree(
+            dispatch.root,
+            host,
+            &inputs.cache_dir,
+        );
+    }
     if (!args.only.is_empty() || !args.skip.is_empty()) && audit_renders_brief(args) {
         eprintln!(
             "Note: --only and --skip have no effect on the review brief, which keeps every \
@@ -2173,7 +2108,11 @@ fn run_resolved_audit(
             threads: dispatch.threads,
             quiet: dispatch.quiet,
             allow_remote_extends: cli.allow_remote_extends,
-            changed_since: cli.changed_since.as_deref(),
+            changed_since: if args.staged_host.is_some() {
+                Some("HEAD")
+            } else {
+                cli.changed_since.as_deref()
+            },
             production: cli.production,
             production_dead_code: Some(inputs.production.dead_code),
             production_health: Some(inputs.production.health),
@@ -2224,6 +2163,7 @@ fn run_resolved_audit(
             projects: &cli.type_aware_project,
             require: cli.type_aware_require.map(Into::into),
         },
+        args.staged_host.as_deref(),
     )
 }
 

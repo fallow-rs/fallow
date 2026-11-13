@@ -43,7 +43,7 @@ inputs:
     required: false
     default: 'false'
   fail-on-issues:
-    description: 'Exit with code 1 if issues are found. This gates on the issue count only. Every other gate fails the job independently of it, through the input that owns it: fail-on-regression, threshold, min-severity, min-score, security-gate, fail-on-stale-baseline, type-aware-require and fail-on-empty-analysis. Audit is the exception: command: audit gates on its verdict through this input, so audit with fail-on-issues: false stays a reporting configuration.'
+    description: 'Exit with code 1 if issues are found. This gates on the issue count only. For dead-code, check, architecture and the dead-code part of the combined run, only findings whose rule is error count, the same as the CLI exit code. A finding whose rule is warn stays in the issues output and in a warning, and does not fail the job. Every other gate fails the job independently of it, through the input that owns it: fail-on-regression, threshold, min-severity, min-score, security-gate, fail-on-stale-baseline, type-aware-require and fail-on-empty-analysis. Audit is the exception: command: audit gates on its verdict through this input, so audit with fail-on-issues: false stays a reporting configuration.'
     required: false
     default: 'true'
   changed-since:

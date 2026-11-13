@@ -19,6 +19,9 @@ pub(super) fn merge_script_into_module(input: &mut SfcScriptMergeInput<'_>) {
         .apply_to(input.combined);
     let mut extractor = ModuleInfoExtractor::new();
     extractor.set_top_level_is_component_body(is_template_visible_script(input.kind, input.script));
+    extractor.set_template_reads_root(
+        input.kind == SfcKind::Svelte || is_template_visible_script(input.kind, input.script),
+    );
     extractor.visit_program(&parser_return.program);
     let empty_template_used = FxHashSet::default();
     let mut semantic_usage = crate::parse::compute_semantic_usage_for_extractor_with_mode(

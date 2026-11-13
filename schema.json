@@ -3777,7 +3777,7 @@
       "description": "Value of `audit.gate`: which findings drive the `fallow audit` verdict.",
       "oneOf": [
         {
-          "description": "Fail only on findings the current changeset introduced, determined by\na base-snapshot attribution pass. The default.",
+          "description": "Fail only on findings the current changeset introduced, determined by\na base-snapshot attribution pass. An unused file or unused export\noutside the changed files counts when the base does not report it.\nThe default.",
           "type": "string",
           "const": "new-only"
         },

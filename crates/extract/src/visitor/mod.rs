@@ -1109,6 +1109,7 @@ pub(crate) struct ModuleInfoExtractor {
     /// Call evidence of plain functions, set by the semantic pass.
     /// `CallTarget::Import` points into `imports`.
     function_contracts: fallow_types::extract::FunctionContractFacts,
+    opaque_loads: semantic_calls::OpaqueLoadState,
     /// Index into `callee_uses` of the entry for each callee path and form.
     /// The second key element is the `is_new` form. Working state only: not
     /// persisted and not merged across SFC script blocks, so each block has
@@ -3598,9 +3599,8 @@ impl ModuleInfoExtractor {
             load_return_keys: self.load_return_keys,
             has_unharvestable_load: self.has_unharvestable_load,
             has_load_data_whole_use: self.has_load_data_whole_use,
-            // Derived in `release_resolution_payload` from `whole_object_uses`.
+            // Both derived in `release_resolution_payload` from `whole_object_uses`.
             has_page_data_store_whole_use: false,
-            // Derived in `release_resolution_payload` from `whole_object_uses`.
             has_route_loader_data_whole_use: false,
             component_functions: self.component_functions,
             react_props: self.react_props,

@@ -462,8 +462,8 @@ Creates a config file in the project root.
 |---|---|---|---|
 | `--toml` | `bool` | `false` | Create `fallow.toml` instead of `.fallowrc.json` |
 | `--agents` | `bool` | `false` | Scaffold a starter `AGENTS.md` guide for coding agents. Prefills Install (from the `packageManager` field, or pnpm via `pnpm-workspace.yaml`), Test (only when exactly one of Vitest / Jest / Playwright is present), Typecheck (`tsc --noEmit` when `tsconfig.json` exists), and monorepo module-boundary lines; everything ambiguous stays blank (no lockfile sniffing). Prefilled command lines carry an HTML provenance comment. Refuses to overwrite an existing `AGENTS.md` |
-| `--hooks` | `bool` | `false` | Scaffold a pre-commit git hook that runs `fallow audit --base <ref> --quiet --gate-marker pre-commit`. Alias for `fallow hooks install --target git` |
-| `--branch` | `string` | - | Fallback base branch for the pre-commit hook when no upstream is set (default: `main`). Only used with `--hooks` |
+| `--hooks` | `bool` | `false` | Scaffold a pre-commit git hook that runs `fallow audit --staged --quiet --gate-marker pre-commit`. Alias for `fallow hooks install --target git` |
+| `--branch` | `string` | - | Has no effect. The pre-commit hook audits the staged changes against HEAD. Kept so that existing install scripts still run. Only used with `--hooks` |
 | `--decline` | `bool` | `false` | Record that this project deliberately stays unconfigured: persists a decline so the first-contact setup hint and the `setup` next-step stop appearing here. Writes no config file; idempotent |
 
 Common global flags for this command: [`--root`](#global-flags), [`--config`](#global-flags).
@@ -474,8 +474,7 @@ Common global flags for this command: [`--root`](#global-flags), [`--config`](#g
 fallow init              # creates .fallowrc.json with $schema
 fallow init --toml       # creates fallow.toml
 fallow init --agents     # scaffolds a starter AGENTS.md prefilled from detected project info (never overwrites)
-fallow hooks install --target git
-fallow hooks install --target git --branch develop  # fallback base branch when no upstream is set
+fallow hooks install --target git   # pre-commit hook: fallow audit --staged
 ```
 
 ## `hooks`: Managed Hook Status And Installation
@@ -487,6 +486,8 @@ fallow hooks install --target agent
 fallow hooks uninstall --target git
 fallow hooks uninstall --target agent
 ```
+
+The Git pre-commit hook runs `fallow audit --staged`. It audits the staged changes against HEAD and reads each file from the index, so unstaged edits and untracked files do not change the verdict. Before the first commit of a repository, the hook skips the audit and prints one line on stderr.
 
 `hooks status` is read-only and reports `git`, `claude`, `codex` (the `AGENTS.md` routing block), and `codex_gate` (the `.codex/hooks.json` gate) surfaces. Each surface includes `installed`, `managed_block_present`, `user_edited`, and `path`; generated agent scripts also include `script_version` and `min_version_floor`. Use it before mutating setup so agents can distinguish fallow-managed artifacts from user-owned hooks or partial managed blocks.
 
@@ -817,7 +818,7 @@ With `--file-scores`, the JSON output also includes `file_scores` array and `sum
 
 The `file_scores` array is sorted by risk-aware triage concern: the larger of low-MI concern and CRAP risk. This keeps files with very high untested complexity near the top even when their Maintainability Index is not the lowest.
 
-The `crap_max` field is the highest CRAP (Change Risk Anti-Patterns) score among functions in the file, using the canonical formula `CC^2 * (1 - cov/100)^3 + CC`. It is always the raw measured value. The default model (`static_estimated`) estimates per-function coverage from export references: directly test-referenced = 85%, indirectly test-reachable = 40%, untested = 0%. Provide `--coverage <path>` with an Istanbul `coverage-final.json` or raw V8 coverage for exact scores (`istanbul` model; `summary.coverage_input_format` is `istanbul` or `v8`). The `crap_above_threshold` field counts functions whose rounded CRAP meets or exceeds their effective ceiling, resolved from `health.thresholdOverrides` over the global `maxCrap` / `--max-crap` value (default 30); it is 0 when CRAP enforcement is disabled (`maxCrap: 0`). Rows whose breaches were let through by configuration carry two additional fields: `crap_exempted` (functions at or above the canonical 30 baseline but below their effective ceiling; omitted when 0) and `crap_effective_threshold` (the lowest effective ceiling among the file's functions, present only when it differs from `summary.max_crap_threshold`). When `--file-scores` is active, `summary.coverage_model` indicates the model used (`"static_estimated"` or `"istanbul"`). When CRAP findings carry `coverage_source`, `summary.coverage_source_consistency` is `uniform` or `mixed`; grouped health JSON mirrors this as `groups[].coverage_source_consistency`.
+The `crap_max` field is the highest CRAP (Change Risk Anti-Patterns) score among functions in the file, using the canonical formula `CC^2 * (1 - cov/100)^3 + CC`. It is always the raw measured value. The default model (`static_estimated`) estimates per-function coverage from export references: directly test-referenced = 85%, indirectly test-reachable = 40%, untested = 0%. Provide `--coverage <path>` with an Istanbul `coverage-final.json` or raw V8 coverage for measured scores (`istanbul` model; `summary.coverage_input_format` is `istanbul` or `v8`). When CRAP findings use the static estimate, the human output prints one note above the findings that says no coverage file was found; `--explain` adds the estimate tiers to that note. The `crap_above_threshold` field counts functions whose rounded CRAP meets or exceeds their effective ceiling, resolved from `health.thresholdOverrides` over the global `maxCrap` / `--max-crap` value (default 30); it is 0 when CRAP enforcement is disabled (`maxCrap: 0`). Rows whose breaches were let through by configuration carry two additional fields: `crap_exempted` (functions at or above the canonical 30 baseline but below their effective ceiling; omitted when 0) and `crap_effective_threshold` (the lowest effective ceiling among the file's functions, present only when it differs from `summary.max_crap_threshold`). When `--file-scores` is active, `summary.coverage_model` indicates the model used (`"static_estimated"` or `"istanbul"`). When CRAP findings carry `coverage_source`, `summary.coverage_source_consistency` is `uniform` or `mixed`; grouped health JSON mirrors this as `groups[].coverage_source_consistency`.
 
 Maintainability index formula: `100 - (complexity_density × 30) - (dead_code_ratio × 20) - min(ln(fan_out+1) × 4, 15)`, clamped to 0–100. Higher is better. Type-only exports are excluded from dead_code_ratio. Zero-function files (barrels) are excluded by default.
 
@@ -1096,7 +1097,7 @@ The snapshot `snapshot_schema_version` is independent of the report `schema_vers
 
 ## `audit`: Changed-File Quality Gate
 
-Audits changed files for dead code, complexity, duplication, and styling. Returns a verdict (pass/warn/fail). Purpose-built for PR quality gates and reviewing AI-generated code. When `--base` is not set, the base is the `git merge-base` against the branch's upstream or the remote default (`origin/HEAD`, `origin/main`, `origin/master`); set `FALLOW_AUDIT_BASE` to pin it without a flag. Defaults to `--gate new-only`, which fails only on findings introduced by the current changeset and reports inherited findings as context.
+Audits changed files for dead code, complexity, duplication, and styling. Returns a verdict (pass/warn/fail). Purpose-built for PR quality gates and reviewing AI-generated code. When `--base` is not set, the base is the `git merge-base` against the branch's upstream or the remote default (`origin/HEAD`, `origin/main`, `origin/master`); set `FALLOW_AUDIT_BASE` to pin it without a flag. Defaults to `--gate new-only`, which fails only on findings introduced by the current changeset and reports inherited findings as context. Under `new-only`, the audit also reports an unused file or unused export outside the changed files when the base does not report it. Such a finding is introduced: the change removed the last use of that code, or a config change (for example a removed entry point) made it unreachable. An unused file or unused export outside the changed files that the base also reports stays out of the report.
 
 ### Flags
 
@@ -1117,12 +1118,13 @@ Audits changed files for dead code, complexity, duplication, and styling. Return
 | `--no-css` | `bool` | `false` | Disable styling analytics in audit |
 | `--css-deep` | `bool` | `false` | Enable deep CSS analysis for audit explicitly: project-wide styling reachability, narrowed back to changed anchors. Deep CSS is on by default; use this to override `audit.cssDeep = false` |
 | `--no-css-deep` | `bool` | `false` | Disable deep CSS analysis while keeping local styling analytics on |
-| `--gate` | `new-only\|all` | - | Which findings affect the verdict. `new-only` gates only introduced findings; `all` gates every finding in changed files and skips the extra base-snapshot attribution pass. |
+| `--gate` | `new-only\|all` | - | Which findings affect the verdict. `new-only` gates only introduced findings, including unused files and exports outside the changed files that the base does not report; `all` gates every finding in changed files and skips the extra base-snapshot attribution pass. |
 | `--worsened` | `warn\|error\|off` | - | How a worsened complexity finding affects the verdict under `new-only`. A worsened finding was already in the base, and a measured value is higher now. The line count must grow by at least 5 lines, and it includes comments and blank lines. `warn` (default) gives at least a `warn` verdict. `error` counts the finding like an introduced finding. `off` reports no worsened finding. A grown exceeded metric stays introduced in both modes. |
 | `--runtime-coverage` | `string` | - | Runtime coverage input. Accepts a V8 directory, a single V8 JSON file, or an Istanbul coverage map JSON. Runs the `fallow-cov` sidecar inside the audit, so the `hot-path-touched` verdict shows next to the dead-code and complexity findings without a second `fallow health` run in CI. The verdict is informational and does not change the exit code. A single local capture is free. Continuous or multi-capture monitoring needs a license (see `fallow license`) |
 | `--min-invocations-hot` | `string` | `100` | Threshold for hot-path classification, forwarded to the sidecar when `--runtime-coverage` is set |
 | `--mutation-report` | `string` | - | Saved `fallow mutation --format json` report (for example `.fallow/mutation/last-report.json`). The review brief counts the surviving mutants on the added lines of each changed file in the `mutation` component of the focus score. A file whose source changed since the run adds nothing. Reads the file only; it runs no test. Only the review brief reads it |
 | `--gate-marker` | `string` | - | Internal marker identifying a gate run (e.g. `pre-commit`), set by the generated git hook so Fallow Impact can record a containment event when the gate blocks then clears. Hidden; never changes the verdict, exit code, or output |
+| `--staged` | `bool` | `false` | Audit the staged index instead of the working tree. The changed files are the staged changes against HEAD (`git diff --cached`), and the analysis reads every file from the index, so unstaged edits and untracked files do not affect the verdict. A file that is staged and then deleted from the working tree is still audited. The base is HEAD, so `--base` and `--changed-since` are rejected. The generated pre-commit hook uses this flag |
 | `--brief` | `bool` | `false` | Render the deterministic review brief instead of the gating audit report. The brief answers "where do I look?" rather than "will CI block this?", runs the same analysis, and ALWAYS exits 0 (the verdict is carried informationally). Implied by `fallow review`. Orthogonal to `--format` |
 | `--max-decisions` | `string` | `4` | Cap on the number of consequential structural decisions surfaced in the review brief's decision surface (the working-memory limit). Default 4; clamped to the 3-5 band (4 plus or minus 1). Only consulted on the brief path |
 | `--walkthrough-guide` | `bool` | `false` | Emit the agent-contract WALKTHROUGH GUIDE: the current digest (brief + decision surface), the review direction, the JSON schema the agent must return, and a deterministic graph-snapshot hash pinned into the digest. The digest is built from the graph only (PR prose is never folded in, so it is injection-resistant). Implies the brief; always exits 0. A thin agent skill calls this to fetch the current guide, produces judgment JSON, then reopens with `--walkthrough-file` |
@@ -1259,7 +1261,7 @@ fallow audit \
 }
 ```
 
-The `verdict` field is always present and is the primary decision signal. With the default `new-only` gate, the `attribution` object counts introduced vs inherited findings across dead code, complexity, duplication, and styling, and audit sub-results annotate individual findings with `introduced: true/false`. With `gate=all`, audit skips that extra base-snapshot attribution pass, so introduced/inherited counts stay `0` and per-finding `introduced` fields are omitted. Dead code, complexity, and duplication sections follow their respective schemas from the individual commands. Thresholds for complexity are inherited from `fallow health` config (defaults: cyclomatic 20, cognitive 15).
+The `verdict` field is always present and is the primary decision signal. With the default `new-only` gate, the `attribution` object counts introduced vs inherited findings across dead code, complexity, duplication, and styling, and audit sub-results annotate individual findings with `introduced: true/false`. With `gate=all`, audit skips that extra base-snapshot attribution pass, so introduced/inherited counts stay `0` and per-finding `introduced` fields are omitted. A clone group where each instance lies inside a different instance of one base clone group is inherited: an edit inside one copy of a base clone (a changed line, a renamed parameter) splits the base group into smaller groups, and the change did not write that duplication. A pasted copy in a new file has no base lines, so its clone group stays introduced. A group stays introduced also when every copy holds an added line, because the change then wrote the same text into each copy. Dead code, complexity, and duplication sections follow their respective schemas from the individual commands. Thresholds for complexity are inherited from `fallow health` config (defaults: cyclomatic 20, cognitive 15).
 
 Audit creates a temporary git worktree to compare against the base ref. When the current checkout has `node_modules`, audit links it into the base worktree so tsconfig `extends` chains into installed packages and path aliases resolve like the working tree. The worktree is removed on normal exit. If the process is force-killed, run `git worktree prune` to clean up stale `.git/worktrees/fallow-audit-base-*` entries.
 
@@ -2110,7 +2112,7 @@ Available on all commands:
 | `--trend` | `bool` | `false` | Compare current health metrics against saved snapshot. Implies `--score`. Shows per-metric deltas with directional indicators. Requires at least one saved snapshot in `.fallow/snapshots/` |
 | `--trend-from` | `string` | - | Compare current health metrics against this snapshot file in combined mode. Implies --trend and --score |
 | `--save-snapshot` | `string` | - | Save vital signs snapshot for trend tracking. Default path: `.fallow/snapshots/<timestamp>.json`. Forces file-scores + hotspot computation |
-| `--coverage` | `string` | - | Path to Istanbul or raw V8 coverage data for exact CRAP scores in combined mode. Also settable via `FALLOW_COVERAGE` or `health.coverage` |
+| `--coverage` | `string` | - | Path to Istanbul or raw V8 coverage data for measured CRAP scores in combined mode. Also settable via `FALLOW_COVERAGE` or `health.coverage` |
 | `--coverage-root` | `string` | - | Absolute prefix to strip from Istanbul file paths in combined mode. Also settable via `FALLOW_COVERAGE_ROOT` or `health.coverageRoot` |
 | `--dupes-baseline` | `string` | - | Compare duplication clone groups against a saved baseline in combined mode (produced by `fallow dupes --save-baseline`) |
 | `--health-baseline` | `string` | - | Compare health findings against a saved baseline in combined mode (produced by `fallow health --save-baseline`) |
@@ -2154,7 +2156,7 @@ guarded edits.
 | `--score` | `bool` | `false` | Compute health score in combined mode |
 | `--trend` | `bool` | `false` | Compare current health metrics against the most recent saved snapshot |
 | `--save-snapshot` | `string` | - | Save a vital signs snapshot for trend tracking in combined mode. Provide a path or omit for the default `.fallow/snapshots/` location |
-| `--coverage` | `string` | - | Path to Istanbul or raw V8 coverage data for exact CRAP scores in combined mode. Also settable via `FALLOW_COVERAGE` or `health.coverage` |
+| `--coverage` | `string` | - | Path to Istanbul or raw V8 coverage data for measured CRAP scores in combined mode. Also settable via `FALLOW_COVERAGE` or `health.coverage` |
 | `--coverage-root` | `string` | - | Absolute prefix to strip from Istanbul file paths in combined mode. Also settable via `FALLOW_COVERAGE_ROOT` or `health.coverageRoot` |
 
 These are global flags with behavior specific to bare `fallow` combined mode.
@@ -2182,7 +2184,7 @@ These are global flags with behavior specific to bare `fallow` combined mode.
 | `FALLOW_CLAUDE_CODE_HINT` | Set to `off`, `0`, `false`, `no`, or `disabled` to suppress the one-line Claude Code plugin hint. Fallow writes the hint to stderr only inside a Claude Code session, for human output without `--quiet`, outside CI, and when the project has no Fallow plugin or skill. |
 | `FALLOW_SUGGESTIONS` | Set to `off`, `0`, `false`, `no`, or `disabled` to suppress the top-level `next_steps[]` array of read-only follow-up commands in JSON output (and the human `Next:` line on bare `fallow`). Default on. Inherited by the MCP-spawned CLI, so it disables `next_steps` on MCP responses too. Useful for CI consumers that snapshot-diff raw `--format json`. |
 | `FALLOW_COMMAND` | GitLab CI: command to run (default: `dead-code`). |
-| `FALLOW_FAIL_ON_ISSUES` | GitLab CI: set to `true` to exit 1 if issues found. |
+| `FALLOW_FAIL_ON_ISSUES` | GitLab CI: set to `true` to exit 1 if issues found. For dead-code, check, architecture and the dead-code part of the bare run, only findings whose rule is `error` count, the same as the CLI exit code. |
 | `FALLOW_CHANGED_SINCE` | GitLab CI: git ref for incremental analysis. Auto-detected in MR pipelines. |
 | `FALLOW_COMMENT` | GitLab CI: set to `true` to post MR summary comments. |
 | `FALLOW_REVIEW` | GitLab CI: set to `true` to post inline code review comments on MR diffs. |
@@ -2316,7 +2318,7 @@ The HTTP layer mirrors the bash `gh_api_retry` / `curl_retry` helpers: `FALLOW_A
 
 ## CI Integration
 
-- **GitHub Actions**: `uses: fallow-rs/fallow@v3` - supports SARIF upload to Code Scanning, inline PR annotations (`annotations: true`), PR comments, all commands. Annotations use workflow commands (no Advanced Security required); limit with `max-annotations` (default 50). Set `score: true` to compute health score and enable the health delta header in PR comments
+- **GitHub Actions**: `uses: fallow-rs/fallow@v3` - supports SARIF upload to Code Scanning, inline PR annotations (`annotations: true`), PR comments, all commands. `fail-on-issues` counts dead-code findings only when their rule is `error`, the same as the CLI exit code. An audit that compared no changed file (no pull request base) prints a `::warning::`. Annotations use workflow commands (no Advanced Security required); limit with `max-annotations` (default 50). Set `score: true` to compute health score and enable the health delta header in PR comments
 - **GitLab CI**: include `ci/gitlab-ci.yml` template and extend `.fallow` - generates Code Quality reports via `--format codeclimate` / `--format gitlab-codequality` (inline MR annotations), rich MR comments, code review comments, all commands. Use `fallow ci-template gitlab --vendor` when runners cannot reach `raw.githubusercontent.com`; commit the generated `ci/` and `action/` files and use GitLab's local include syntax. Variables use `FALLOW_` prefix (e.g., `FALLOW_COMMAND`, `FALLOW_FAIL_ON_ISSUES`). Set `FALLOW_SCORE: "true"` to compute health score; `FALLOW_TREND: "true"` to compare against saved snapshots
 - **Any CI**: `npx fallow --ci` - equivalent to `--format sarif --fail-on-issues --quiet`
 
@@ -2325,7 +2327,7 @@ The HTTP layer mirrors the bash `gh_api_retry` / `curl_retry` helpers: `FALLOW_A
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `FALLOW_COMMAND` | `dead-code` | Command to run (`dead-code`, `dupes`, `health`, or default combined) |
-| `FALLOW_FAIL_ON_ISSUES` | `false` | Exit 1 if issues found |
+| `FALLOW_FAIL_ON_ISSUES` | `true` | Exit 1 if issues found. Dead-code findings count only when their rule is `error`. An audit with no changed file prints a warning. |
 | `FALLOW_CHANGED_SINCE` | auto | Git ref for incremental analysis. Auto-detected in MR pipelines (`origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME`) |
 | `FALLOW_COMMENT` | `false` | Post a summary comment on the MR with findings |
 | `FALLOW_REVIEW` | `false` | Post inline code review comments on MR diff lines where issues were found |
@@ -2791,6 +2793,8 @@ preset = "bulletproof"
 | `// fallow-ignore-next-line unused-export` | Suppress specific issue type |
 | `// fallow-ignore-file` | Suppress all issues in a file |
 | `// fallow-ignore-file unused-export` | Suppress specific issue type file-wide |
+
+The `/* */` and JSDoc `/** */` block forms work the same way. In a multi-line JSDoc comment, the marker can start any ` * ` line. A next-line marker in a block comment applies to the line after the closing `*/`. In a block comment, a line that starts with the marker word is a marker only when each target before an optional `-- reason` is an issue kind or looks like one (lowercase words joined by `-`). A wrapped prose line such as ` * fallow-ignore-next-line is how you hide a finding.` is not a marker. A block comment must start its line, and a single-line block comment must end its line. For `fallow dupes` and for Vue, Svelte, Astro, MDX, HTML and CSS files, a multi-line block comment must open with `/*` or `/**` alone on its line, or with the marker on that line. Markup files also accept `<!-- fallow-ignore-next-line -->` on one line.
 
 ### Valid Issue Type Tokens
 

@@ -89,6 +89,7 @@ pub(super) fn decision_surface_audit_args(max_decisions: usize) -> AuditDispatch
         min_invocations_hot: 0,
         mutation_report: None,
         gate_marker: None,
+        staged_host: None,
         brief: true,
         max_decisions,
         walkthrough_guide: false,

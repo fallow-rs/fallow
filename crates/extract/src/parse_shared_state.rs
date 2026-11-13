@@ -12,6 +12,7 @@ pub fn compute_semantic_usage_for_extractor_with_mode(
     let callback_candidates = extractor.callback_capture_reference_candidates();
     let imported_call_candidates = extractor.imported_call_reference_candidates();
     let require_namespace_bindings = extractor.require_namespace_bindings();
+    let opaque_loads = extractor.opaque_load_candidates();
     let mut semantic_usage = compute_semantic_usage_with_candidates(
         program,
         &extractor.imports,
@@ -24,6 +25,8 @@ pub fn compute_semantic_usage_for_extractor_with_mode(
             subclass_bindings: &subclass_candidates,
             callback_captures: &callback_candidates,
             imported_calls: &imported_call_candidates,
+            opaque_loads: &opaque_loads,
+            template_reads_root: extractor.template_reads_root(),
         },
     );
     extractor.resolve_computed_enum_key_uses(&semantic_usage.module_binding_reference_spans);

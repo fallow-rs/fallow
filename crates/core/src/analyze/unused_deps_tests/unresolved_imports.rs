@@ -64,6 +64,7 @@ fn unresolved_import_detected() {
         &[],
         &[],
         &[],
+        &[],
         &line_offsets,
     );
 
@@ -118,6 +119,7 @@ fn ignore_unresolved_imports_filters_raw_specifier_globs() {
         &resolved_modules,
         &config,
         &suppressions,
+        &[],
         &[],
         &[],
         &[],
@@ -191,6 +193,7 @@ fn ignore_unresolved_imports_matches_leading_dot_slash_specifiers() {
         &[],
         &[],
         &[],
+        &[],
         &line_offsets,
     );
     let specifiers: Vec<&str> = unresolved
@@ -251,6 +254,7 @@ fn multi_binding_re_export_reports_one_unresolved_finding_per_specifier() {
         &resolved_modules,
         &config,
         &suppressions,
+        &[],
         &[],
         &[],
         &[],
@@ -325,6 +329,7 @@ fn multi_line_re_export_anchors_on_the_specifier_line() {
         &[],
         &[],
         &[],
+        &[],
         &line_offsets,
     );
 
@@ -359,6 +364,7 @@ fn one_suppression_above_the_statement_covers_the_multi_line_re_export() {
         &resolved_modules,
         &config,
         &suppressions,
+        &[],
         &[],
         &[],
         &[],
@@ -409,6 +415,7 @@ fn suppressed_anchor_statement_retires_the_specifier_for_the_module() {
         &[],
         &[],
         &[],
+        &[],
         &line_offsets,
     );
 
@@ -449,6 +456,7 @@ fn single_line_re_export_keeps_the_statement_line_anchor() {
         &resolved_modules,
         &config,
         &suppressions,
+        &[],
         &[],
         &[],
         &[],
@@ -514,6 +522,7 @@ fn unresolved_dynamic_import_detected_with_real_location() {
         &resolved_modules,
         &config,
         &suppressions,
+        &[],
         &[],
         &[],
         &[],
@@ -592,6 +601,7 @@ fn unresolved_platform_builtins_not_reported() {
         &[],
         &[],
         &[],
+        &[],
         &line_offsets,
     );
     let unresolved_specifiers: Vec<&str> = unresolved
@@ -653,6 +663,7 @@ fn unresolved_virtual_module_not_reported() {
         &[],
         &[],
         &[],
+        &[],
         &line_offsets,
     );
 
@@ -708,6 +719,7 @@ fn unresolved_import_with_virtual_prefix_not_reported() {
         &config,
         &suppressions,
         &["#"], // Nuxt-style virtual prefix
+        &[],
         &[],
         &[],
         &line_offsets,
@@ -775,6 +787,7 @@ fn unresolved_tanstack_start_virtual_imports_not_reported() {
             "tanstack-start-manifest:",
             "tanstack-start-injected-head-scripts:",
         ],
+        &[],
         &[],
         &[],
         &line_offsets,
@@ -862,6 +875,7 @@ fn unresolved_import_suppressed_by_generated_import_pattern() {
         &[],
         &["/$types"], // SvelteKit-style generated import
         &[],
+        &[],
         &line_offsets,
     );
 
@@ -947,6 +961,7 @@ fn unresolved_import_suppressed_by_generated_type_import_prefix() {
         &[],
         &[],
         &["./+types/"],
+        &[],
         &line_offsets,
     );
 
@@ -1010,6 +1025,7 @@ fn generated_type_import_prefix_is_plugin_gated() {
         &[],
         &[],
         &[],
+        &[],
         &line_offsets,
     );
 
@@ -1069,6 +1085,7 @@ fn unresolved_import_suppressed_by_inline_comment() {
         &resolved_modules,
         &config,
         &suppressions,
+        &[],
         &[],
         &[],
         &[],
@@ -1138,6 +1155,7 @@ fn unresolved_dynamic_import_suppressed_by_inline_comment() {
         &[],
         &[],
         &[],
+        &[],
         &line_offsets,
     );
 
@@ -1199,6 +1217,7 @@ fn unresolved_import_file_level_suppression() {
         &resolved_modules,
         &config,
         &suppressions,
+        &[],
         &[],
         &[],
         &[],
@@ -1274,6 +1293,7 @@ fn resolved_import_not_reported_as_unresolved() {
         &[],
         &[],
         &[],
+        &[],
         &line_offsets,
     );
 
@@ -1294,6 +1314,7 @@ fn no_resolved_modules_produces_no_unresolved() {
         &resolved_modules,
         &config,
         &suppressions,
+        &[],
         &[],
         &[],
         &[],
@@ -1357,6 +1378,7 @@ fn unresolved_import_not_suppressed_by_wrong_kind() {
         &[],
         &[],
         &[],
+        &[],
         &line_offsets,
     );
 
@@ -1364,6 +1386,45 @@ fn unresolved_import_not_suppressed_by_wrong_kind() {
         unresolved.len(),
         1,
         "suppression with wrong issue kind should not suppress unresolved import"
+    );
+}
+
+/// A checked alias points at a known directory, so a missing target under it
+/// reports although the Nuxt `#` virtual prefix matches. A workspace alias
+/// counts only for the files of its workspace.
+#[test]
+fn checked_alias_prefix_overrides_virtual_prefix_in_its_scope() {
+    let root = PathBuf::from("/project");
+    let spec = "#layers/base/lib/missing";
+    let resolved_modules = vec![
+        module_with_unresolved(root.join("apps/web/pages/index.vue"), &[spec, "#imports"]),
+        module_with_unresolved(root.join("apps/admin/pages/index.vue"), &[spec]),
+    ];
+    let checked = [crate::plugins::CheckedAliasPrefix {
+        scope: "apps/web".to_string(),
+        prefix: "#layers/base/".to_string(),
+    }];
+    let config = test_config(root.clone());
+    let suppressions = SuppressionContext::empty();
+    let line_offsets: LineOffsetsMap<'_> = FxHashMap::default();
+
+    let unresolved: Vec<(PathBuf, String)> = find_unresolved_imports(
+        &resolved_modules,
+        &config,
+        &suppressions,
+        &["#"],
+        &[],
+        &[],
+        &checked,
+        &line_offsets,
+    )
+    .into_iter()
+    .map(|import| (import.path, import.specifier))
+    .collect();
+
+    assert_eq!(
+        unresolved,
+        vec![(root.join("apps/web/pages/index.vue"), spec.to_string())]
     );
 }
 
@@ -1409,6 +1470,7 @@ fn unresolved_specifiers(root: &Path, importer: &str, specifiers: &[&str]) -> Ve
         &resolved_modules,
         &config,
         &suppressions,
+        &[],
         &[],
         &[],
         &[],

@@ -86,3 +86,25 @@ pub enum AuditCacheCli {
         max_age_days: Option<u32>,
     },
 }
+
+/// The `fallow audit` flags that a gate run, such as the generated
+/// pre-commit hook, sets.
+#[derive(Clone, Debug, Default, clap::Args)]
+pub struct AuditGateRunArgs {
+    /// Internal marker identifying a gate run (e.g. `pre-commit`), set by
+    /// the generated git hook so Fallow Impact can record a containment
+    /// event when the gate blocks then clears. Hidden; never changes the
+    /// verdict, exit code, or output.
+    #[arg(long, value_name = "MARKER", hide = true)]
+    pub gate_marker: Option<String>,
+
+    /// Audit the staged index instead of the working tree. The changed
+    /// files are the staged changes against HEAD (`git diff --cached`),
+    /// and the analysis reads every file from the index, so unstaged
+    /// edits and untracked files do not affect the verdict. A file that
+    /// is staged and then deleted from the working tree is still audited.
+    /// The base is HEAD, so `--base` and `--changed-since` are rejected.
+    /// The generated pre-commit hook uses this flag.
+    #[arg(long)]
+    pub staged: bool,
+}

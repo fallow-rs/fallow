@@ -825,6 +825,7 @@ impl AuditAnalyses for StubAnalyses {
                 type_aware: None,
                 syntactic_keys: None,
                 public_api: None,
+                own_config_unused_code: None,
             }),
             ..AuditAnalysesView::default()
         }

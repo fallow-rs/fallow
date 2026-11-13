@@ -869,7 +869,9 @@ impl AuditConfig {
 #[serde(rename_all = "kebab-case")]
 pub enum AuditGate {
     /// Fail only on findings the current changeset introduced, determined by
-    /// a base-snapshot attribution pass. The default.
+    /// a base-snapshot attribution pass. An unused file or unused export
+    /// outside the changed files counts when the base does not report it.
+    /// The default.
     #[default]
     NewOnly,
     /// Fail on every finding in changed files, skipping the attribution pass.
