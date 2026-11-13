@@ -610,7 +610,7 @@ pub struct Cli {
     #[arg(hide_short_help = true, long, value_name = "PATH", num_args = 0..=1, default_missing_value = "")]
     pub save_snapshot: Option<Option<String>>,
 
-    /// Path to Istanbul or raw V8 coverage data for exact CRAP scores in combined mode.
+    /// Path to Istanbul or raw V8 coverage data for measured CRAP scores in combined mode.
     /// Also settable via `FALLOW_COVERAGE` or `health.coverage`.
     #[arg(hide_short_help = true, long, value_name = "PATH")]
     pub coverage: Option<PathBuf>,
@@ -1643,7 +1643,7 @@ pub enum Command {
         #[arg(long, value_name = "PATH")]
         trend_from: Option<PathBuf>,
 
-        /// Path to coverage data for exact per-function CRAP scores. Accepts an
+        /// Path to coverage data for measured per-function CRAP scores. Accepts an
         /// Istanbul coverage map JSON file (coverage-final.json, from
         /// `jest --coverage`, `vitest run --coverage`, c8 or nyc), a directory
         /// containing coverage-final.json, a raw V8 coverage directory
