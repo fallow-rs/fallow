@@ -24,29 +24,11 @@ const TOP_LEVEL_HELP_TEMPLATE: &str =
     "{about-with-newline}\n{usage-heading} {usage}{after-help}\n\nOptions:\n{options}";
 
 // Macros instead of consts so `concat!` can assemble the short (`-h`) and
-// long (`--help`) after-help surfaces from the same source fragments.
+// long (`--help`) after-help surfaces from the same source fragments. The
+// cheat sheet file ends with a newline, so one `\n` follows it below.
 macro_rules! top_level_task_cheat_sheet {
     () => {
-        "\
-When the agent is about to...
-  delete an \"unused\" export or file        fallow dead-code --trace <file>:<export>
-  prove exact TypeScript symbol consumers  fallow dead-code --type-aware --symbol-impact <file>:<export-or-class.method>
-  find how one module reaches another      fallow trace --path <from> <to>
-  delete an \"unused\" dependency            fallow dead-code --trace-dependency <name>
-  migrate a dependency                     fallow trace --dependency <name> --sites
-  commit or open a PR                      fallow audit --base <ref>
-  read a diff before approving it          fallow review --base <ref> --brief
-  prioritize refactoring                   fallow health --hotspots --targets
-  ask who owns code                        fallow health --ownership
-  check untested-but-reachable code        fallow health --coverage-gaps
-  consolidate duplication                  fallow dupes --trace dup:<fingerprint>
-  find feature flags                       fallow flags
-  check architecture rules before editing  fallow guard <files>
-  check cycles and boundaries after edits  fallow architecture
-  surface security candidates              fallow security
-  inspect a target before editing          fallow inspect --file <path>
-  understand a finding                     fallow explain <issue-type>
-  scope a monorepo                         --workspace <glob> / --changed-workspaces <ref>"
+        include_str!("cli_task_cheat_sheet.txt")
     };
 }
 
@@ -123,14 +105,14 @@ Reference:
 
 const TOP_LEVEL_AFTER_HELP: &str = concat!(
     top_level_task_cheat_sheet!(),
-    "\n\n",
+    "\n",
     top_level_core_command_groups!(),
     "\n\nRun fallow --help for the complete command list."
 );
 
 pub const TOP_LEVEL_AFTER_LONG_HELP: &str = concat!(
     top_level_task_cheat_sheet!(),
-    "\n\n",
+    "\n",
     top_level_core_command_groups!(),
     "\n\n",
     top_level_extended_command_groups!(),

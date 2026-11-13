@@ -1,0 +1,3 @@
+### Added
+
+- **The agent task matrix and the `fallow` skill now name `fallow mutation`.** The matrix has the row "improve or check the tests of a change" with `fallow mutation --plan --base <ref>`. The row is in `fallow --help`, in `fallow schema` (`task_matrix`), in the `fallow://task-matrix` MCP resource, in the `AGENTS.md` block of `fallow init --agents` and `fallow hooks install --target agent`, and in the cheat sheet of the skill. The description of the skill names mutation testing, and the skill has a short workflow for the tests of a change. Before, an agent with the task to improve tests did not learn that the command exists.
