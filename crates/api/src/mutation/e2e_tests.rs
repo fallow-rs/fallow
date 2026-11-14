@@ -884,7 +884,7 @@ mod end_to_end {
 
         let runner = report.runner.as_ref().expect("a runner ran");
         assert_eq!(runner.name, "vitest");
-        assert_eq!(runner.version, "5.0.5");
+        assert_eq!(runner.version, "5.1.0");
         assert_eq!(runner.runtime.name, "node");
         assert_eq!(
             report.completion.status,
