@@ -1,3 +1,0 @@
-### Fixed
-
-- **`unlisted-binaries` no longer reports shell reserved words or subshell parentheses as binaries.** A `package.json` script such as `for app in lib/*/; do if grep -q x "$app"; then tool; fi; done` gave the findings `for`, `do`, `then`, `fi` and `done`. A script such as `([ -n "$CI" ] || (tool install))` gave the finding `(tool`. The script parser now skips the reserved words that start or end a compound command, and it reads a subshell `( ... )` as a separate command. It also finds the command after a `case` pattern (`build) tsc;;`) and in a function body. Other script checks see these commands too. A `cd` in a subshell of a shell helper no longer moves the commands after the subshell. (Closes [#4566](https://github.com/fallow-rs/fallow/issues/4566))

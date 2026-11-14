@@ -7,6 +7,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.43.1] - 2026-11-14
+
+### Changed
+
+- **The `fallow` skill says what to do when the installed CLI is older than the skill.** A plugin can deliver a newer skill than the installed CLI, and the skill can then name a flag, a value or a subcommand that this CLI rejects. Agent rule 17 tells the reader that an `unexpected argument` error, an `invalid value` error, or an unknown subcommand means a version difference: report the version, tell the user to update, and continue without the argument. (Closes [fallow-skills#235](https://github.com/fallow-rs/fallow-skills/issues/235))
+
+### Fixed
+
+- **The GitHub Action no longer fails its install step on a glibc Linux runner.**
+  Since 3.43.0, npm installs only the platform package for the libc of the
+  host. The Action runs the binary verifier from the Action checkout, where
+  `detect-libc` is not installed, so the verifier treated a glibc host as musl
+  and stopped with `platform package @fallow-cli/linux-x64-musl not installed`.
+  The verifier now also looks for `detect-libc` in the installed `fallow`
+  package. (Closes [#4591](https://github.com/fallow-rs/fallow/issues/4591))
+
+- **`includeEntryExports` no longer reports the React Router and Remix `entry.server` exports as unused.** The server runtime reads `default`, `handleDataRequest`, `handleError` and `streamTimeout` from `entry.server`, so these exports now count as used. For React Router, `instrumentations` and `unstable_instrumentations` also count as used. A custom `appDirectory` gets the same rule. Other exports of `entry.server` stay reported.
+  (Closes [#4583](https://github.com/fallow-rs/fallow/issues/4583))
+
+- **Entry-point named re-exports through `export *` barrels credit the underlying declaration.** `fallow dead-code` and `fallow dead-code --trace` dropped entry-point credit when a configured entry file re-exported a type or value by name from an intermediate `export *` barrel, reporting the source declaration as unused. An entry-point named re-export now also credits each namespace (type and value) on its own. When an in-graph consumer reads only one namespace of a merged declaration, the other namespace is no longer reported as unused, also for a re-export from a direct source. (Closes [#4579](https://github.com/fallow-rs/fallow/issues/4579))
+
+- **`fallow audit` no longer reports an old clone group as introduced when the change rewrites the lines above one copy.**
+  The audit maps each head copy of a clone back to its base lines. When the
+  first or last line of a copy was a rewritten line that replaced several base
+  lines, the mapped range grew to the far end of the replaced lines and fell
+  outside the base clone. A rename of the other copy, together with fewer
+  import lines above this copy, could then fail `--gate new-only` on
+  duplication that the change did not write. The rewritten edge line now maps
+  to the replaced base line next to the unchanged lines of the copy.
+  (Closes [#4580](https://github.com/fallow-rs/fallow/issues/4580))
+
+- **VS Code: the "enable" links in the Security Candidates and Health views no longer freeze Settings in Cursor.** The links opened the Settings editor with the `fallow` search query. In Cursor, that call can make the Settings editor stop responding. The links now run the new `Fallow: Enable Security Candidates` and `Fallow: Enable Health View` commands. These commands set `fallow.security.enabled` or `fallow.health.enabled` to `true` in workspace settings, or in user settings when no folder is open, and show a message. The Settings editor does not open. (Closes [#4553](https://github.com/fallow-rs/fallow/issues/4553))
+
+- **`fallow migrate` keeps the production markers of a migrated config visible.** An `ignoreDependencies` or `ignoreBinaries` name with the production marker, such as `left-pad!`, now migrates as `left-pad`, with a warning that fallow ignores it in every mode. Before, the migration copied `left-pad!`, which matches no package. A `project` exclusion with the production marker, such as `!scripts/**!`, now gets a warning that names each exclusion, says that `--production` reports unused files and exports in these paths, and gives an `overrides` entry that hides them. A plugin section whose `config` names files that the fallow plugin does not find by file name, such as `"playwright": {"config": ["e2e/pw.ts"]}`, now gets a warning that names these files and says how to keep the files that they name. Before, the migration told you to remove the section. (Closes [#4585](https://github.com/fallow-rs/fallow/issues/4585))
+- **The Playwright plugin reads configs with other names.** A config named `playwright.<name>.config.<ext>`, such as `playwright.e2e.config.ts`, is now a Playwright config, and so is a config that a package.json script passes with `playwright test --config <file>` or `-c <file>`. The test files under its `testDir` and `testMatch`, and its `globalSetup`, `globalTeardown` and reporter files, are no longer reported as unused. The plugin now also reads `.mts`, `.mjs`, `.cts` and `.cjs` configs. A script that runs a tool by its path, such as `node_modules/.bin/playwright test --config <file>`, now also gives its config file to the plugin. This also applies to the other plugins that read a `--config` file from a script, such as Vitest and Jest. (Closes [#4586](https://github.com/fallow-rs/fallow/issues/4586))
+
+- **`unlisted-binaries` no longer reports shell reserved words or subshell parentheses as binaries.** A `package.json` script such as `for app in lib/*/; do if grep -q x "$app"; then tool; fi; done` gave the findings `for`, `do`, `then`, `fi` and `done`. A script such as `([ -n "$CI" ] || (tool install))` gave the finding `(tool`. The script parser now skips the reserved words that start or end a compound command, and it reads a subshell `( ... )` as a separate command. It also finds the command after a `case` pattern (`build) tsc;;`) and in a function body. Other script checks see these commands too. A `cd` in a subshell of a shell helper no longer moves the commands after the subshell. (Closes [#4566](https://github.com/fallow-rs/fallow/issues/4566))
+
+- **A JSDoc visibility tag on a re-export now stops the unused report.** Fallow read `@public`, `@internal`, `@beta`, `@alpha` and `@expected-unused` only on local exports. A tag on `export { a, b } from './impl'`, on `export * as ns from './impl'`, or on `export { a, b }` that forwards imported bindings had no effect. Fallow reported the re-exported names as `unused-re-export` and their source exports as `unused-export`. Fallow now reads the tag on the re-export statement. A re-export with `@public`, `@internal`, `@beta` or `@alpha` is public API: fallow does not report it, and it counts as a use of its source export, the same as an export of an entry point. `@expected-unused` on a re-export keeps its reason text, so `requireSuppressionReason` accepts `@expected-unused -- reason`. The parse cache and the graph cache store the tag, so their versions change and the first run after the update parses every file again. `export * from` does not take a tag, because it exports no name of its own. (Closes [#4584](https://github.com/fallow-rs/fallow/issues/4584))
+
+- **`--constant-parameters` follows a loader helper that returns a value loaded from an unknown source.** A module-scope function such as `export const load = (path) => import(path)` is now a loader, not an escape. The rule reads the result of each call of the loader with the rules of a direct load: members, destructured keys, `in` tests and inline `.then` callbacks. So `const mod = await load(name); mod.migrate()` skips only the exported functions named `migrate`, and the rule keeps its other findings. A loader result that escapes, or a loader with a caller that the analysis cannot see, still skips each exported function. The extraction cache version changes, so the first run after the update parses each file again. (Closes [#4567](https://github.com/fallow-rs/fallow/issues/4567))
+
+- **`fallow dead-code` credits a member on a local that holds a method call result.** In `const rotated = local.rotate(angle); rotated.translate(1, 1);`, where `rotate(angle: number): Point`, fallow now credits `Point.translate`, as it does for the chain `local.rotate(angle).translate(1, 1)`. The receiver can be a typed parameter or a `new Point(...)` local, and the call can be optional (`local?.rotate(angle)`). A conditional init such as `const rotated = angle ? local.rotate(angle) : local` credits the member on each branch. Thanks @Smrtnyk for the report.
+  (Closes [#4552](https://github.com/fallow-rs/fallow/issues/4552))
+
 ## [3.43.0] - 2026-11-13
 
 ### Added
@@ -17270,7 +17315,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.43.0...HEAD
+[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.43.1...HEAD
+[3.43.1]: https://github.com/fallow-rs/fallow/compare/v3.43.0...v3.43.1
 [3.43.0]: https://github.com/fallow-rs/fallow/compare/v3.42.0...v3.43.0
 [3.42.0]: https://github.com/fallow-rs/fallow/compare/v3.41.0...v3.42.0
 [3.41.0]: https://github.com/fallow-rs/fallow/compare/v3.40.0...v3.41.0
