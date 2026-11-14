@@ -1,0 +1,7 @@
+{
+  "name": "issue-4578-enum-member-alias",
+  "private": true,
+  "dependencies": {
+    "@angular/core": "^20.0.0"
+  }
+}

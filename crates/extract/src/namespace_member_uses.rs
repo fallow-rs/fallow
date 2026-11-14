@@ -5,13 +5,17 @@
 //! scope resolution of the semantic model to record three more uses:
 //!
 //! - a nested chain: the value `N.Inner.x` and the type `N.Inner.T`;
-//! - a value that leaves its chain: `use(N)`, `const M = N.Inner`, `[N.Inner]`.
+//! - a value that leaves its chain: `use(N)`, `[N.Inner]`, `{ ref: N }`.
 //!   Every member below the chain then counts as used;
 //! - a reference inside the namespace body: `export const b = a`.
 //!
+//! The pass follows a `const` alias (`const M = N.Inner; M.x`) and records
+//! its reads as reads of the root.
+//!
 //! The analysis does not know at extraction time which binding is a
-//! namespace, so the pass records these uses for every import binding.
-//! Analysis reads them only for namespace members.
+//! namespace or an enum, so the pass records these uses for every import
+//! binding. Analysis reads them for namespace members, and reads the
+//! escape of a whole enum (`use(E)`) for enum members.
 
 use fallow_types::extract::{
     ExportInfo, ImportInfo, ImportedName, MemberKind, NamespaceMemberUseFact,
@@ -19,6 +23,7 @@ use fallow_types::extract::{
 use oxc_ast::AstKind;
 use oxc_ast::ast::{
     BinaryOperator, BindingPattern, Expression, PropertyKey, TSImportTypeQualifier,
+    VariableDeclarationKind,
 };
 use oxc_semantic::{AstNodes, NodeId, ScopeId, Scoping, Semantic, SymbolId};
 use oxc_span::{GetSpan, Span};
@@ -52,7 +57,7 @@ pub fn collect(
     let scoping = semantic.scoping();
     let nodes = semantic.nodes();
     let root_scope = scoping.root_scope_id();
-    let mut uses: FxHashSet<(String, String, bool)> = FxHashSet::default();
+    let mut uses = Uses::default();
     let mut seen_roots: FxHashSet<SymbolId> = FxHashSet::default();
 
     for import in imports {
@@ -71,9 +76,11 @@ pub fn collect(
             let root = Root {
                 symbol,
                 object: &import.local_name,
+                prefix: String::new(),
                 re_export_escapes,
+                is_alias: false,
             };
-            record_root_references(scoping, nodes, &root, &mut uses);
+            record_root_references(scoping, nodes, &root, &mut uses, &mut seen_roots);
         }
     }
 
@@ -81,15 +88,21 @@ pub fn collect(
         .iter()
         .any(|import| import.local_name.is_empty() && import.is_type_only)
     {
-        record_import_type_uses(nodes, &mut uses);
+        record_import_type_uses(nodes, &mut uses.chains);
     }
 
     for export in exports {
-        if !export
+        let is_namespace = export
             .members
             .iter()
-            .any(|member| member.kind == MemberKind::NamespaceMember)
-        {
+            .any(|member| member.kind == MemberKind::NamespaceMember);
+        // An enum that the module declares can escape in the same module
+        // (`takesEnum(Shape)`), as an imported enum can.
+        let is_enum = export
+            .members
+            .iter()
+            .any(|member| member.kind == MemberKind::EnumMember);
+        if !is_namespace && !is_enum {
             continue;
         }
         let Some(local) = export.local_name.as_deref() else {
@@ -102,47 +115,85 @@ pub fn collect(
             let root = Root {
                 symbol,
                 object: local,
+                prefix: String::new(),
                 re_export_escapes: false,
+                is_alias: false,
             };
-            record_root_references(scoping, nodes, &root, &mut uses);
+            record_root_references(scoping, nodes, &root, &mut uses, &mut seen_roots);
         }
-        record_body_references(semantic, symbol, local, export, &mut uses);
+        if is_namespace {
+            record_body_references(semantic, symbol, local, export, &mut uses.chains);
+        }
     }
 
+    let class_field_facts =
+        uses.class_fields
+            .into_iter()
+            .map(|(object, path)| NamespaceMemberUseFact {
+                object,
+                path,
+                whole: true,
+                class_field: true,
+            });
     let mut facts: Vec<NamespaceMemberUseFact> = uses
+        .chains
         .into_iter()
         .map(|(object, path, whole)| NamespaceMemberUseFact {
             object,
             path,
             whole,
+            class_field: false,
         })
+        .chain(class_field_facts)
         .collect();
     facts.sort_unstable_by(|a, b| {
-        (a.object.as_str(), a.path.as_str(), a.whole).cmp(&(
+        (a.object.as_str(), a.path.as_str(), a.whole, a.class_field).cmp(&(
             b.object.as_str(),
             b.path.as_str(),
             b.whole,
+            b.class_field,
         ))
     });
     facts
 }
 
-/// A module-level binding whose references the pass records.
+/// The uses that the pass collects before it makes them facts.
+#[derive(Default)]
+struct Uses {
+    /// `(object, path, whole)` of each chain use.
+    chains: FxHashSet<(String, String, bool)>,
+    /// `(object, path)` of each value that goes into a class field.
+    class_fields: FxHashSet<(String, String)>,
+}
+
+/// A binding whose references the pass records: a module-level root, or a
+/// `const` alias of a root.
 struct Root<'a> {
     symbol: SymbolId,
     object: &'a str,
+    /// The member path that the binding holds under `object`: empty for the
+    /// root itself and for `const A = N`, `Inner` for `const I = N.Inner`.
+    prefix: String,
     /// A local re-export (`export { X }`) of the binding is an escape.
     re_export_escapes: bool,
+    /// The binding is a `const` alias. The visitor does not always record a
+    /// one-step read of an alias, so the pass records it.
+    is_alias: bool,
 }
 
-/// Record the uses of a module-level root binding. A one-step chain `N.a` is
-/// already a member access of the visitor, so only a longer chain and an
-/// escape are recorded here.
+/// Record the uses of a binding. A one-step chain `N.a` on a root is already
+/// a member access of the visitor, so only a longer chain and an escape are
+/// recorded for a root.
+///
+/// The pass follows a `const` alias (`const A = N; A.a`) and records the
+/// reads of the alias as reads of the root, so the alias itself is not an
+/// escape. An exported alias is an escape: other modules read it.
 fn record_root_references(
     scoping: &Scoping,
     nodes: &AstNodes<'_>,
     root: &Root<'_>,
-    uses: &mut FxHashSet<(String, String, bool)>,
+    uses: &mut Uses,
+    seen: &mut FxHashSet<SymbolId>,
 ) {
     let object = root.object;
     for reference in scoping.get_resolved_references(root.symbol) {
@@ -151,7 +202,20 @@ fn record_root_references(
             continue;
         };
         let chain = member_chain(nodes, node_id, identifier.span);
-        let path = chain.segments.join(".");
+        let path = join_path(&root.prefix, &chain.segments.join("."));
+        if let Some(alias) = const_alias_symbol(nodes, &chain) {
+            if seen.insert(alias) {
+                let alias_root = Root {
+                    symbol: alias,
+                    object,
+                    prefix: path,
+                    re_export_escapes: true,
+                    is_alias: true,
+                };
+                record_root_references(scoping, nodes, &alias_root, uses, seen);
+            }
+            continue;
+        }
         let chain_use = if root.re_export_escapes && is_export_specifier(nodes, &chain) {
             ChainUse::Escape
         } else {
@@ -159,20 +223,68 @@ fn record_root_references(
         };
         match chain_use {
             ChainUse::Access => {
-                if chain.segments.len() > 1 {
-                    uses.insert((object.to_string(), path, false));
+                if chain.segments.len() > 1 || (root.is_alias && !path.is_empty()) {
+                    uses.chains.insert((object.to_string(), path, false));
                 }
             }
+            ChainUse::Escape if is_class_field_value(nodes, &chain) => {
+                uses.class_fields.insert((object.to_string(), path));
+            }
             ChainUse::Escape => {
-                uses.insert((object.to_string(), path, true));
+                uses.chains.insert((object.to_string(), path, true));
             }
             ChainUse::Destructure(keys) => {
                 for key in keys {
-                    uses.insert((object.to_string(), join_path(&path, &key), false));
+                    uses.chains
+                        .insert((object.to_string(), join_path(&path, &key), false));
                 }
             }
         }
     }
+}
+
+/// The symbol of the `const` alias that `chain` initializes:
+/// `const A = N` or `const I = N.Inner`. An exported declaration is not an
+/// alias that the pass can follow, because other modules read it.
+fn const_alias_symbol(nodes: &AstNodes<'_>, chain: &Chain) -> Option<SymbolId> {
+    let (outer, outer_span) = unwrap_upward(nodes, chain.node, chain.span);
+    let declarator_id = nodes.parent_id(outer);
+    let AstKind::VariableDeclarator(declarator) = nodes.kind(declarator_id) else {
+        return None;
+    };
+    if declarator.init.as_ref().map(GetSpan::span) != Some(outer_span) {
+        return None;
+    }
+    let BindingPattern::BindingIdentifier(id) = &declarator.id else {
+        return None;
+    };
+    let declaration_id = nodes.parent_id(declarator_id);
+    let AstKind::VariableDeclaration(declaration) = nodes.kind(declaration_id) else {
+        return None;
+    };
+    if declaration.kind != VariableDeclarationKind::Const
+        || matches!(
+            nodes.parent_kind(declaration_id),
+            AstKind::ExportNamedDeclaration(_) | AstKind::ExportDeclaration(_)
+        )
+    {
+        return None;
+    }
+    id.symbol_id.get()
+}
+
+/// Whether the value at the end of `chain` initializes an instance field
+/// with a static name (`levels = Level`). The visitor follows the reads of
+/// such a field through `this.levels` and through the component template.
+fn is_class_field_value(nodes: &AstNodes<'_>, chain: &Chain) -> bool {
+    let (outer, outer_span) = unwrap_upward(nodes, chain.node, chain.span);
+    matches!(
+        nodes.parent_kind(outer),
+        AstKind::PropertyDefinition(property)
+            if !property.r#static
+                && !property.computed
+                && property.value.as_ref().map(GetSpan::span) == Some(outer_span)
+    )
 }
 
 /// Record the qualifier of each inline import type as a use under the key of
@@ -446,8 +558,15 @@ mod tests {
             .iter()
             .filter_map(|fact| match fact {
                 SemanticFact::NamespaceMemberUse(namespace_use) => Some(format!(
-                    "{}|{}|{}",
-                    namespace_use.object, namespace_use.path, namespace_use.whole
+                    "{}|{}|{}{}",
+                    namespace_use.object,
+                    namespace_use.path,
+                    namespace_use.whole,
+                    if namespace_use.class_field {
+                        "|field"
+                    } else {
+                        ""
+                    }
                 )),
                 _ => None,
             })
@@ -476,6 +595,85 @@ mod tests {
         assert_eq!(
             uses("import * as X from './ns';\nexport { X };\n"),
             ["X||true"]
+        );
+    }
+
+    #[test]
+    fn whole_binding_escapes_are_recorded() {
+        assert_eq!(
+            uses(
+                "import { Shape, Size } from './e';\n\
+                 declare function takesEnum(value: object): void;\n\
+                 takesEnum(Shape);\n\
+                 console.log({ ref: Size });\n"
+            ),
+            ["Shape||true", "Size||true"]
+        );
+    }
+
+    #[test]
+    fn const_alias_reads_are_reads_of_the_root() {
+        assert_eq!(
+            uses(
+                "import { Color, Hue } from './e';\n\
+                 const Alias = Color;\n\
+                 if (Alias.Red === 'red') {}\n\
+                 function f() { const local = Hue; return local.Dark; }\n"
+            ),
+            ["Color|Red|false", "Hue|Dark|true"]
+        );
+    }
+
+    #[test]
+    fn escape_of_a_const_alias_is_an_escape_of_the_root() {
+        assert_eq!(
+            uses(
+                "import { Color } from './e';\n\
+                 const Alias = Color;\n\
+                 console.log([Alias]);\n"
+            ),
+            ["Color||true"]
+        );
+    }
+
+    #[test]
+    fn exported_alias_is_an_escape() {
+        for source in [
+            "import { Color } from './e';\nexport const Alias = Color;\n",
+            "import { Color } from './e';\nconst Alias = Color;\nexport { Alias };\n",
+        ] {
+            assert_eq!(uses(source), ["Color||true"], "{source}");
+        }
+    }
+
+    #[test]
+    fn reassignable_alias_is_an_escape() {
+        assert_eq!(
+            uses("import { Color } from './e';\nlet Alias = Color;\nAlias.Red;\n"),
+            ["Color||true"]
+        );
+    }
+
+    #[test]
+    fn class_field_alias_is_marked() {
+        assert_eq!(
+            uses(
+                "import { Level, Kind } from './e';\n\
+                 class C { levels = Level; static kinds = Kind; }\n"
+            ),
+            ["Kind||true", "Level||true|field"]
+        );
+    }
+
+    #[test]
+    fn local_enum_escape_is_recorded() {
+        assert_eq!(
+            uses(
+                "export enum Dir { Up = 'up', Down = 'down' }\n\
+                 export const registered: object[] = [];\n\
+                 registered.push(Dir);\n"
+            ),
+            ["Dir||true"]
         );
     }
 }

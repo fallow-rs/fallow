@@ -13,6 +13,8 @@ mod heritage_names;
 mod heritage_root;
 #[path = "helpers_return_bindings.rs"]
 mod return_bindings;
+pub(super) use super::visit_impl::visit_value_alias::is_builtin_constructor;
+use super::visit_impl::visit_value_alias::value_alias_source;
 use crate::js_text::JsText;
 use crate::{MemberInfo, MemberKind};
 use fallow_types::extract::{AngularInputMember, AngularOutputMember};
@@ -1553,7 +1555,8 @@ fn collect_constructor_param_bindings(
 }
 
 /// Push an instance binding for a non-private property: typed annotation first,
-/// then a `new Class()` initializer, then an Angular `inject()` initializer.
+/// then a `new Class()` initializer, then an Angular `inject()` initializer,
+/// then a value alias (`levels = Level`).
 fn collect_property_binding<F>(
     prop: &oxc_ast::ast::PropertyDefinition<'_>,
     resolve: &impl Fn(String) -> Option<String>,
@@ -1590,6 +1593,10 @@ fn collect_property_binding<F>(
         && let Some(type_name) = extract_angular_inject_target(call, is_named_import_from)
     {
         bindings.push((name.text().into_owned(), type_name));
+        return;
+    }
+    if let Some(source) = prop.value.as_ref().and_then(value_alias_source) {
+        bindings.push((name.text().into_owned(), source.to_string()));
     }
 }
 
@@ -1896,70 +1903,6 @@ fn extract_new_class_from_return_body(stmts: &[Statement<'_>]) -> Option<(String
         }
     }
     None
-}
-
-pub(super) fn is_builtin_constructor(name: &str) -> bool {
-    matches!(
-        name,
-        "Array"
-            | "ArrayBuffer"
-            | "Blob"
-            | "Boolean"
-            | "DataView"
-            | "Date"
-            | "Error"
-            | "EvalError"
-            | "Event"
-            | "Float32Array"
-            | "Float64Array"
-            | "FormData"
-            | "Headers"
-            | "Int8Array"
-            | "Int16Array"
-            | "Int32Array"
-            | "Map"
-            | "Number"
-            | "Object"
-            | "Promise"
-            | "Proxy"
-            | "RangeError"
-            | "ReferenceError"
-            | "RegExp"
-            | "Request"
-            | "Response"
-            | "Set"
-            | "SharedArrayBuffer"
-            | "String"
-            | "SyntaxError"
-            | "TypeError"
-            | "URIError"
-            | "URL"
-            | "URLSearchParams"
-            | "Uint8Array"
-            | "Uint8ClampedArray"
-            | "Uint16Array"
-            | "Uint32Array"
-            | "WeakMap"
-            | "WeakRef"
-            | "WeakSet"
-            | "Worker"
-            | "AbortController"
-            | "ReadableStream"
-            | "WritableStream"
-            | "TransformStream"
-            | "TextEncoder"
-            | "TextDecoder"
-            | "MutationObserver"
-            | "IntersectionObserver"
-            | "ResizeObserver"
-            | "PerformanceObserver"
-            | "MessageChannel"
-            | "BroadcastChannel"
-            | "WebSocket"
-            | "XMLHttpRequest"
-            | "EventEmitter"
-            | "Buffer"
-    )
 }
 
 #[cfg(all(test, not(miri)))]

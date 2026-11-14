@@ -54,7 +54,8 @@ pub(super) fn namespace_member_credited(accessed: &FxHashSet<String>, name: &str
 const NAMESPACE_WHOLE_USE: &str = "*";
 
 /// Credit the namespace member uses of the semantic pass: a nested chain, a
-/// whole use, and a reference inside the namespace body.
+/// whole use, and a reference inside the namespace body. Also mark the
+/// escape of a whole enum.
 pub(super) fn credit_namespace_member_uses(
     graph: &ModuleGraph,
     resolved: &ResolvedModule,
@@ -98,8 +99,23 @@ pub(super) fn credit_namespace_member_uses(
         for (key, path) in targets {
             let credited = accessed_members.entry(key).or_default();
             credit_namespace_path(credited, path, namespace_use.whole);
+            if namespace_use.whole && path.is_empty() && !namespace_use.class_field {
+                credited.insert(ENUM_ESCAPE_USE.to_string());
+            }
         }
     }
+}
+
+/// The marker that `accessed_members` holds when a whole enum leaves its
+/// chain (`takesEnum(Shape)`, `{ ref: Size }`). Code can then read any
+/// member, as with `Object.values(Shape)`. A class field alias
+/// (`levels = Level`) does not set it: the visitor follows the reads of the
+/// field, so only those members count as used. No member has this name.
+const ENUM_ESCAPE_USE: &str = "(escape)";
+
+/// Whether the enum member `name` counts as used.
+pub(super) fn enum_member_credited(accessed: &FxHashSet<String>, name: &str) -> bool {
+    accessed.contains(name) || accessed.contains(ENUM_ESCAPE_USE)
 }
 
 /// Project files that an inline import type `import("./x").N.a` names. The

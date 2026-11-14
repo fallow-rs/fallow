@@ -18643,3 +18643,127 @@ fn local_of_unbound_call_result_records_no_class_path() {
         );
     }
 }
+
+/// Issue #4578: a member read through a value alias of an imported binding is
+/// also a member read of that binding.
+#[test]
+fn value_alias_member_read_credits_source_binding() {
+    let has = |source: &str, object: &str, member: &str| {
+        parse(source)
+            .member_accesses
+            .iter()
+            .any(|access| access.object == object && access.member == member)
+    };
+    assert!(has(
+        "import { Color } from './e';\nconst Alias = Color;\nAlias.Red;",
+        "Color",
+        "Red"
+    ));
+    assert!(has(
+        "import { Kind } from './e';\nclass C { kind = Kind; m() { return this.kind.Two; } }",
+        "Kind",
+        "Two"
+    ));
+    assert!(
+        has(
+            "import { Strategy, fallback } from './s';\nclass C { s: Strategy = fallback; m() { this.s.attach(); } }",
+            "Strategy",
+            "attach"
+        ),
+        "a typed field keeps its type binding"
+    );
+    assert!(
+        has(
+            "import { Strategy, fallback } from './s';\nconst s: Strategy = fallback;\ns.attach();",
+            "Strategy",
+            "attach"
+        ),
+        "a typed `const` keeps its type binding"
+    );
+    assert!(
+        !has(
+            "import { Color } from './e';\nlet Alias = Color;\nAlias = other;\nAlias.Green;",
+            "Color",
+            "Green"
+        ),
+        "a reassignable `let` alias does not credit the binding it first named"
+    );
+    assert!(
+        !has("const Alias = undefined;\nAlias.Red;", "undefined", "Red"),
+        "`undefined` holds no members"
+    );
+    assert!(
+        has(
+            "import { Level } from './e';\nclass C { levels: typeof Level = Level; m() { return this.levels.High; } }",
+            "Level",
+            "High"
+        ),
+        "a `typeof` annotation binds no class, so the alias still applies"
+    );
+}
+
+/// A parameter or a nested `const` with the name of a module-scope alias
+/// holds another value, so a member read of it does not credit the enum.
+#[test]
+fn shadowed_value_alias_does_not_credit_source_binding() {
+    for source in [
+        "import { C } from './e';\nfunction h(Alias: { Two: number }) { return Alias.Two; }\nconst Alias = C;\nconsole.log(Alias.One);",
+        "import { C } from './e';\nexport function h(x: { Two: number }) { const Alias = x; return Alias.Two; }\nconst Alias = C;\nconsole.log(Alias.One);",
+        "import { C } from './e';\nconst Alias = C;\nfunction h(Alias) { return Alias.Two; }\nconsole.log(Alias.One, h);",
+        // A second class makes the module-flat binding ambiguous, so the read
+        // in `h` resolves through the walk-order binding.
+        "import { C } from './e';\nimport { Foo } from './f';\nconst Alias = C;\nfunction h(Alias) { return Alias.Two; }\nconsole.log(Alias.One, h);\nexport function k() { const Alias = new Foo(); return Alias; }",
+    ] {
+        let info = parse(source);
+        let reads = |member: &str| {
+            info.member_accesses
+                .iter()
+                .any(|access| access.object == "C" && access.member == member)
+        };
+        assert!(reads("One"), "{source}: {:?}", info.member_accesses);
+        assert!(!reads("Two"), "{source}: {:?}", info.member_accesses);
+    }
+}
+
+/// A nested `const` alias with the name of an outer class binding does not
+/// take over the reads of the outer binding, whichever comes first.
+#[test]
+fn nested_value_alias_keeps_outer_class_binding() {
+    for source in [
+        "import { Service } from './s';\nconst cfg = {};\nconst svc = new Service();\nfunction f() { const svc = cfg; return svc; }\nsvc.run();",
+        "import { Service } from './s';\nconst cfg = {};\nfunction f() { const svc = cfg; return svc; }\nconst svc = new Service();\nsvc.run();",
+    ] {
+        let info = parse(source);
+        assert!(
+            info.member_accesses
+                .iter()
+                .any(|access| access.object == "Service" && access.member == "run"),
+            "{source}: {:?}",
+            info.member_accesses
+        );
+    }
+}
+
+/// An object-literal getter has its own `this`, so `return this.svc` in it is
+/// not the `svc` field of the enclosing class.
+#[test]
+fn object_literal_getter_this_is_not_the_class_instance() {
+    let info = parse(
+        "import { Service } from './s';\n\
+         class Owner {\n\
+           svc = new Service();\n\
+           read() {\n\
+             const { svc: { dead } } = { get svc() { return this.svc; } };\n\
+             dead();\n\
+           }\n\
+         }",
+    );
+    assert!(
+        !info
+            .member_accesses
+            .iter()
+            .any(|access| access.object == "Service" && access.member == "dead"),
+        "the getter `this` is the object literal: {:?}",
+        info.member_accesses
+    );
+}
