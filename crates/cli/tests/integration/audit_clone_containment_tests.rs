@@ -175,6 +175,72 @@ fn audit_renamed_and_edited_copy_inside_base_clone_is_inherited() {
     assert_all_clone_groups_inherited(&json);
 }
 
+/// The change renames one copy and rewrites the lines above the other copy.
+/// Two import lines become one, so that copy moves up by one line, and its
+/// clone starts on a rewritten line. The rewritten line replaces several base
+/// lines, and the clone text on it matches only the last of them. The head
+/// group thus lies inside the base group (issue #4580).
+#[test]
+fn audit_renamed_copy_and_rewritten_lines_above_other_copy_is_inherited() {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let repo = tmp.path();
+    fs::create_dir_all(repo.join("src")).unwrap();
+    fs::write(
+        repo.join("package.json"),
+        r#"{"name":"audit-clone-rename-shift","type":"module","main":"src/index.js"}"#,
+    )
+    .unwrap();
+    let clone = SUBSPAN_CLONE.replace("NAME", "compute");
+    fs::write(
+        repo.join("src/a.js"),
+        format!("export const a0 = 1;\n{clone}"),
+    )
+    .unwrap();
+    fs::write(repo.join("src/c.js"), "export const c0 = 2;\n").unwrap();
+    fs::write(
+        repo.join("src/b.js"),
+        format!(
+            "import {{ a0 }} from './a.js';\nimport {{ c0 }} from './c.js';\nexport const b0 = a0 + c0;\n{clone}"
+        ),
+    )
+    .unwrap();
+    fs::write(
+        repo.join("src/index.js"),
+        "import { b0 } from './b.js';\nimport { compute } from './a.js';\nconsole.log(b0, compute);\n",
+    )
+    .unwrap();
+    git(repo, &["init", "-b", "main"]);
+    git(repo, &["config", "core.autocrlf", "false"]);
+    commit_all(repo, "initial");
+
+    git(repo, &["mv", "src/a.js", "src/r.js"]);
+    git(repo, &["rm", "-q", "src/c.js"]);
+    fs::write(
+        repo.join("src/b.js"),
+        format!("import {{ a0 }} from './r.js';\nexport const b0 = a0;\n{clone}"),
+    )
+    .unwrap();
+    edit_file(repo, "src/index.js", "'./a.js'", "'./r.js'");
+    commit_all(repo, "rename and rewrite");
+
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        repo.to_str().unwrap(),
+        "--base",
+        "HEAD~1",
+        "--gate",
+        "new-only",
+        "--no-cache",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    let json = parse_json(&output);
+    assert_all_clone_groups_inherited(&json);
+    assert_eq!(json["attribution"]["duplication_inherited"], 1);
+}
+
 /// A project in a subdirectory of the repo gets the same result. The added
 /// lines move the head clone below the end of its base instance. The head
 /// span maps back inside the base instance only when the diff paths are
