@@ -11,6 +11,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 mod heritage_names;
 #[path = "helpers_heritage_root.rs"]
 mod heritage_root;
+#[path = "helpers_host_refs.rs"]
+mod host_refs;
 #[path = "helpers_return_bindings.rs"]
 mod return_bindings;
 use crate::js_text::JsText;
@@ -19,6 +21,9 @@ use fallow_types::extract::{AngularInputMember, AngularOutputMember};
 use heritage_names::{extract_static_expression_name, extract_type_name};
 use heritage_root::heritage_root_name;
 pub(super) use heritage_root::is_object_literal_initializer;
+use host_refs::extract_host_member_refs;
+#[cfg(test)]
+use host_refs::{extract_identifiers_from_host_expr, is_valid_member_identifier};
 use return_bindings::{
     collect_getter_binding, collect_method_return_binding, is_self_returning_instance_method,
     push_array_element_binding, returns_named_class_type,
@@ -201,17 +206,6 @@ fn apply_inline_template(
     }
 }
 
-fn extract_host_member_refs(host_obj: &oxc_ast::ast::ObjectExpression<'_>, refs: &mut Vec<String>) {
-    for prop in &host_obj.properties {
-        let ObjectPropertyKind::ObjectProperty(p) = prop else {
-            continue;
-        };
-        if let Expression::StringLiteral(lit) = &p.value {
-            extract_identifiers_from_host_expr(&lit.value.text(), refs);
-        }
-    }
-}
-
 fn extract_query_members(value: &Expression<'_>, members: &mut Vec<String>) {
     let Expression::ObjectExpression(obj) = value else {
         return;
@@ -243,95 +237,6 @@ fn extract_input_output_members(value: &Expression<'_>, members: &mut Vec<String
             members.push(member.to_string());
         }
     }
-}
-
-/// Extract every member-identifier referenced anywhere in a host-binding
-/// expression. Scans the whole string (not just the leading token), so a complex
-/// expression such as `'"mat-" + (color || "primary")'` credits `color`, and a
-/// member tail in `'foo.bar'` credits only the root `foo` (segments after `.` are
-/// skipped). String-literal contents are skipped so `"mat-"` / `"primary"` are
-/// not mistaken for identifiers. Over-credits by design (a host ref is a use), so
-/// scanning more of the expression can only reduce false positives.
-fn extract_identifiers_from_host_expr(expr: &str, refs: &mut Vec<String>) {
-    let bytes = expr.as_bytes();
-    let mut i = 0;
-    let mut in_string: Option<u8> = None;
-    let mut prev_significant: Option<u8> = None;
-    while i < bytes.len() {
-        let c = bytes[i];
-        // Skip string-literal bodies (single, double, backtick).
-        if let Some(quote) = in_string {
-            if c == quote {
-                in_string = None;
-            }
-            i += 1;
-            continue;
-        }
-        if c == b'"' || c == b'\'' || c == b'`' {
-            in_string = Some(c);
-            prev_significant = Some(c);
-            i += 1;
-            continue;
-        }
-        let is_ident_start = c.is_ascii_alphabetic() || c == b'_' || c == b'$';
-        if is_ident_start {
-            let start = i;
-            while i < bytes.len() {
-                let cc = bytes[i];
-                if cc.is_ascii_alphanumeric() || cc == b'_' || cc == b'$' {
-                    i += 1;
-                } else {
-                    break;
-                }
-            }
-            // A member tail (`foo.bar` -> skip `bar`) is not a component member.
-            let is_member_tail = prev_significant == Some(b'.');
-            let ident = &expr[start..i];
-            if !is_member_tail
-                && is_valid_member_identifier(ident)
-                && !refs.iter().any(|r| r == ident)
-            {
-                refs.push(ident.to_string());
-            }
-            prev_significant = Some(b'a'); // any non-`.` significant byte
-            continue;
-        }
-        if !c.is_ascii_whitespace() {
-            prev_significant = Some(c);
-        }
-        i += 1;
-    }
-}
-
-fn is_valid_member_identifier(ident: &str) -> bool {
-    !ident.is_empty()
-        && ident
-            .chars()
-            .next()
-            .is_some_and(|c| c.is_ascii_alphabetic() || c == '_' || c == '$')
-        && !matches!(
-            ident,
-            "true"
-                | "false"
-                | "null"
-                | "undefined"
-                | "this"
-                | "event"
-                | "window"
-                | "document"
-                | "console"
-                | "Math"
-                | "JSON"
-                | "Object"
-                | "Array"
-                | "String"
-                | "Number"
-                | "Boolean"
-                | "Date"
-                | "RegExp"
-                | "Error"
-                | "Promise"
-        )
 }
 
 pub fn has_angular_class_decorator(class: &Class<'_>) -> bool {

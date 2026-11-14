@@ -23,7 +23,10 @@
 //!   credits a template-handler emit such as `(click)="bar.emit(...)"` (Angular
 //!   templates emit outputs directly off the bare name, with no `this.` prefix);
 //! - the same template member evidence in the linked external `templateUrl`
-//!   `.html` module, reached via the `SideEffect` import edge.
+//!   `.html` module, reached via the `SideEffect` import edge;
+//! - any of the evidence above in a module that declares a subclass of the
+//!   component class, directly or through an intermediate class, in another
+//!   file.
 //!
 //! Whole-component ABSTAIN (skip ALL outputs for the component) when the
 //! component class declares an `extends` heritage clause: a base class in another
@@ -39,6 +42,7 @@ use crate::graph::{ModuleGraph, ModuleNode};
 use crate::results::UnusedComponentOutput;
 
 use super::predicates::component_name_for;
+use super::unused_component_input::angular_subclasses::AngularSubclassIndex;
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
 /// Find Angular component/directive outputs emitted nowhere in their own
@@ -56,6 +60,13 @@ pub fn find_unused_component_outputs(
 
     let modules_by_id: FxHashMap<FileId, &ModuleInfo> =
         modules.iter().map(|m| (m.file_id, m)).collect();
+    let subclasses = AngularSubclassIndex::build(graph, modules);
+    let ctx = OutputScanContext {
+        graph,
+        modules_by_id: &modules_by_id,
+        subclasses: &subclasses,
+        line_offsets_by_file,
+    };
 
     let mut findings = Vec::new();
     for node in &graph.modules {
@@ -65,14 +76,7 @@ pub fn find_unused_component_outputs(
         let Some(module) = modules_by_id.get(&node.file_id) else {
             continue;
         };
-        collect_module_unused_component_outputs(
-            node,
-            module,
-            graph,
-            &modules_by_id,
-            line_offsets_by_file,
-            &mut findings,
-        );
+        collect_module_unused_component_outputs(&ctx, node, module, &mut findings);
     }
 
     findings.sort_by(|a, b| {
@@ -84,12 +88,17 @@ pub fn find_unused_component_outputs(
     findings
 }
 
+struct OutputScanContext<'a> {
+    graph: &'a ModuleGraph,
+    modules_by_id: &'a FxHashMap<FileId, &'a ModuleInfo>,
+    subclasses: &'a AngularSubclassIndex,
+    line_offsets_by_file: &'a LineOffsetsMap<'a>,
+}
+
 fn collect_module_unused_component_outputs(
+    ctx: &OutputScanContext<'_>,
     node: &ModuleNode,
     module: &ModuleInfo,
-    graph: &ModuleGraph,
-    modules_by_id: &FxHashMap<FileId, &ModuleInfo>,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
     findings: &mut Vec<UnusedComponentOutput>,
 ) {
     if module.angular_outputs.is_empty() || component_abstains_outputs(module) {
@@ -98,19 +107,33 @@ fn collect_module_unused_component_outputs(
 
     // Linked external `templateUrl` module(s): a `(click)="bar.emit()"`
     // handler in the `.html` file emits the output too.
-    let external_templates = external_template_modules(graph, modules_by_id, node.file_id);
-    let template_emitted = template_emitted_outputs(module, &external_templates);
+    let external_templates = external_template_modules(ctx.graph, ctx.modules_by_id, node.file_id);
+    let mut template_emitted = template_emitted_outputs(module, &external_templates);
+    // A subclass in another file emits an inherited output through
+    // `this.bar.emit()` or its own template.
+    let mut emitting_modules: Vec<&ModuleInfo> = vec![module];
+    for descendant in ctx.subclasses.descendants(node.file_id) {
+        let Some(subclass) = ctx.modules_by_id.get(&descendant) else {
+            continue;
+        };
+        let subclass_templates =
+            external_template_modules(ctx.graph, ctx.modules_by_id, descendant);
+        template_emitted.extend(template_emitted_outputs(subclass, &subclass_templates));
+        emitting_modules.push(subclass);
+    }
 
     let component_name = component_name_for(&node.path);
     for output in &module.angular_outputs {
-        if output_is_emitted(module, &output.name)
+        if emitting_modules
+            .iter()
+            .any(|emitter| output_is_emitted(emitter, &output.name))
             || template_emitted.contains(output.name.as_str())
             || super::unused_component_input::is_js_reserved_word(&output.name)
         {
             continue;
         }
         let (line, col) =
-            byte_offset_to_line_col(line_offsets_by_file, node.file_id, output.span_start);
+            byte_offset_to_line_col(ctx.line_offsets_by_file, node.file_id, output.span_start);
         findings.push(UnusedComponentOutput {
             path: node.path.clone(),
             component_name: component_name.clone(),
