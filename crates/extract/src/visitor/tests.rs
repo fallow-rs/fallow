@@ -12054,6 +12054,28 @@ fn angular_host_bindings_emit_typed_member_facts() {
 }
 
 #[test]
+fn angular_host_binding_template_literal_value_emits_member_fact() {
+    let info = parse(
+        r"
+        import { Component, Input } from '@angular/core';
+
+        @Component({
+            selector: 'app-root',
+            template: '<p>test</p>',
+            host: {
+                '[class.is-block]': `isBlock`,
+            },
+        })
+        export class App {
+            @Input() isBlock = false;
+        }
+        ",
+    );
+    let fact_refs = angular_template_fact_members(&info);
+    assert!(fact_refs.contains(&"isBlock"), "found: {fact_refs:?}");
+}
+
+#[test]
 fn angular_host_binding_skips_keywords() {
     let info = parse(
         r"

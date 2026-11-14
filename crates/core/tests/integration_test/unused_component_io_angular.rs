@@ -94,3 +94,45 @@ fn flags_dead_inputs_outputs_and_holds_every_abstain() {
         "exactly two outputs flagged, no duplicates: {outputs:?}"
     );
 }
+
+fn flagged_names(fixture: &str) -> (Vec<String>, Vec<String>) {
+    let config = create_config(fixture_path(fixture));
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    let mut inputs: Vec<String> = results
+        .unused_component_inputs
+        .iter()
+        .map(|f| f.input.input_name.clone())
+        .collect();
+    let mut outputs: Vec<String> = results
+        .unused_component_outputs
+        .iter()
+        .map(|f| f.output.output_name.clone())
+        .collect();
+    inputs.sort();
+    outputs.sort();
+    (inputs, outputs)
+}
+
+/// Issue #4576: reads and emits in pipe arguments, attribute interpolation,
+/// keyed microsyntax, `@else if` aliases, `%` style units, explicit `this.`,
+/// and after an ICU case that opens into an interpolation are all credited.
+#[test]
+fn template_syntax_forms_credit_inputs_and_outputs() {
+    let (inputs, outputs) = flagged_names("angular-component-io-template-syntax");
+    assert_eq!(inputs, ["neverRead"], "inputs: {inputs:?}");
+    assert_eq!(outputs, ["neverEmitted"], "outputs: {outputs:?}");
+}
+
+/// Issue #4577: a subclass in another file, direct or through an intermediate
+/// class behind a barrel, credits the inputs and outputs of its base class.
+/// A class that does not extend the base credits nothing.
+#[test]
+fn subclass_in_another_file_credits_base_inputs_and_outputs() {
+    let (inputs, outputs) = flagged_names("angular-component-io-inherited");
+    assert_eq!(
+        inputs,
+        ["neverRead", "readOnlyByUnrelated"],
+        "inputs: {inputs:?}"
+    );
+    assert_eq!(outputs, ["neverEmitted"], "outputs: {outputs:?}");
+}

@@ -1,0 +1,7 @@
+{
+  "name": "angular-component-io-template-syntax",
+  "private": true,
+  "dependencies": {
+    "@angular/core": "20.0.0"
+  }
+}
