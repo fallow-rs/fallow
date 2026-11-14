@@ -381,7 +381,19 @@ On push to `main`, and on a pull request only with the `ci:perf` label:
 
 Add the `ci:perf` label to a pull request that changes a hot path. The label event starts the run. A pull request
 without the label starts these workflows, but every job skips and uses no
-runner.
+runner, except one.
+
+The `Perf label for cache formats` job of `Benchmarks` runs on each pull
+request event that the workflow paths match, also on a label event. It fails when the branch bumps
+`CACHE_VERSION` or `DUPES_CACHE_VERSION` (`crates/extract/src/cache/types.rs`)
+or `GRAPH_CACHE_VERSION` (`crates/graph/src/cache/mod.rs`) and the pull
+request has no `ci:perf` label. The benchmarks load and save these caches,
+so a format change can change the time of each warm run. Add the label to
+fix the failure. The label event starts a new run, and the job passes.
+
+```bash
+node scripts/check-perf-label.mjs --base origin/main --labels-json '[]'
+```
 
 `CI` uses no macOS runner. The `VS Code target host` job runs the Linux and
 Windows legs. The darwin-x64 leg runs in `Release Validation`: every week, in
@@ -803,7 +815,7 @@ Pre-push parity:
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets -- -D warnings
 RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --document-private-items
-cargo fallow check --baseline cargo-fallow-baseline.json --fail-on-issues --quiet
+sh scripts/hook-cargo-fallow.sh origin/main upstream/main
 sh scripts/hook-file-length.sh origin/main upstream/main
 ```
 
@@ -811,10 +823,13 @@ The `cargo doc` step is the same command as the required `Documentation` CI
 job. A broken intra-doc link passes fmt and clippy, so the hook catches it
 before the push. With no change the step takes under 1 s.
 
-The `cargo fallow check` step is the same command as the required
-`Rust Structure` CI job. See [Rust structure](#rust-structure). When
-`cargo-fallow` is not installed, the hook skips the step and prints a hint
-with the version in `mise.toml`.
+The `cargo-fallow` step runs the command of the required `Rust Structure` CI
+job. See [Rust structure](#rust-structure). Like the CI job, it passes
+`--base` with the first base ref that exists, so it also enforces the
+file-growth gate for `.rs` files. A rebase commits resolved conflicts without
+the pre-commit hook, so this step sees a long file that the rebase made grow
+before the push. When `cargo-fallow` is not installed, the hook
+skips the step and prints a hint with the version in `mise.toml`.
 
 Recommended full local verification before review:
 
@@ -888,6 +903,10 @@ pre-push step and `npm run verify:fast` run the same command:
 ```bash
 cargo fallow check --baseline cargo-fallow-baseline.json --fail-on-issues
 ```
+
+The CI job and the pre-push step also pass `--base` with the base branch, so
+they enforce the file-growth gate. `npm run verify:fast` checks file growth
+in its separate `Large file growth` step.
 
 The required CI job stays present on every pull request. Its
 `scripts/rust-structure-inputs.mjs` detector reads the complete merge-base

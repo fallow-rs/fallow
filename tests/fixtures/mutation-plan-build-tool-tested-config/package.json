@@ -1,0 +1,9 @@
+{
+  "name": "mutation-plan-build-tool-tested-config",
+  "private": true,
+  "type": "module",
+  "devDependencies": {
+    "vite": "^8.2.2",
+    "vitest": "^5.1.0"
+  }
+}

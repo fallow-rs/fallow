@@ -18,12 +18,13 @@ const NEEDS_DIFF_SOURCE: &str = "fallow security --gate requires a diff source: 
 pub(super) enum GateNewDiff {
     /// The process-wide diff of `--diff-file` or `--diff-stdin`.
     Shared(&'static DiffIndex),
-    /// The diff of `--changed-since`, computed for this run.
-    Owned(DiffIndex),
+    /// The diff of `--changed-since`, computed for this run. Boxed, because
+    /// the index is much larger than the reference of `Shared`.
+    Owned(Box<DiffIndex>),
 }
 
 impl GateNewDiff {
-    const fn index(&self) -> &DiffIndex {
+    fn index(&self) -> &DiffIndex {
         match self {
             Self::Shared(index) => index,
             Self::Owned(index) => index,
@@ -50,8 +51,8 @@ pub(super) fn resolve(opts: &SecurityOptions<'_>) -> Result<Option<GateNewDiff>,
         return Err(emit_input_error(NEEDS_DIFF_SOURCE, opts.output));
     };
     match fallow_engine::changed_files::try_get_changed_diff(opts.root, git_ref) {
-        Ok(text) => Ok(Some(GateNewDiff::Owned(DiffIndex::from_unified_diff(
-            &text,
+        Ok(text) => Ok(Some(GateNewDiff::Owned(Box::new(
+            DiffIndex::from_unified_diff(&text),
         )))),
         Err(err) => Err(emit_input_error(
             &format!(

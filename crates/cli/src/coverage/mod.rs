@@ -174,26 +174,38 @@ impl PackageManager {
         }
     }
 
-    fn add_runtime_package_command(self, package: &str) -> String {
+    /// The command that adds a runtime dependency when the user runs it in
+    /// `root`. At the root of a Yarn 1 workspace project, Yarn 1 refuses
+    /// `add` without `-W`.
+    fn add_runtime_package_command(self, root: &Path, package: &str) -> String {
         match self {
             Self::Npm => format!("npm install {package}"),
             Self::Pnpm => format!("pnpm add {package}"),
+            Self::Yarn if fallow_config::PackageManager::Yarn.needs_workspace_root_flag(root) => {
+                format!("yarn add -W {package}")
+            }
             Self::Yarn => format!("yarn add {package}"),
             Self::Bun => format!("bun add {package}"),
         }
     }
 
-    const fn install_args(self) -> (&'static str, &'static [&'static str]) {
+    /// The sidecar install command that runs in `root`. At the root of a
+    /// Yarn 1 workspace project, Yarn 1 refuses `add` without `-W`.
+    fn install_args(self, root: &Path) -> (&'static str, Vec<&'static str>) {
+        const SIDECAR: &str = "@fallow-cli/fallow-cov";
         match self {
-            Self::Npm => ("npm", &["install", "--save-dev", "@fallow-cli/fallow-cov"]),
-            Self::Pnpm => ("pnpm", &["add", "-D", "@fallow-cli/fallow-cov"]),
-            Self::Yarn => ("yarn", &["add", "-D", "@fallow-cli/fallow-cov"]),
-            Self::Bun => ("bun", &["add", "-d", "@fallow-cli/fallow-cov"]),
+            Self::Npm => ("npm", vec!["install", "--save-dev", SIDECAR]),
+            Self::Pnpm => ("pnpm", vec!["add", "-D", SIDECAR]),
+            Self::Yarn if fallow_config::PackageManager::Yarn.needs_workspace_root_flag(root) => {
+                ("yarn", vec!["add", "-D", "-W", SIDECAR])
+            }
+            Self::Yarn => ("yarn", vec!["add", "-D", SIDECAR]),
+            Self::Bun => ("bun", vec!["add", "-d", SIDECAR]),
         }
     }
 
-    fn install_command(self) -> String {
-        let (program, args) = self.install_args();
+    fn install_command(self, root: &Path) -> String {
+        let (program, args) = self.install_args(root);
         format!("{program} {}", args.join(" "))
     }
 
@@ -862,8 +874,8 @@ fn build_setup_envelope(
         members: member_values,
         config_written: None,
         commands: vec![
-            package_manager.add_runtime_package_command("@fallow-cli/beacon"),
-            package_manager.install_command(),
+            package_manager.add_runtime_package_command(root, "@fallow-cli/beacon"),
+            package_manager.install_command(root),
         ],
         files_to_edit,
         snippets: snippet_values,
@@ -1291,7 +1303,7 @@ fn handle_sidecar_step(
             println!("  -> {message}");
             let install_command = package_manager.map_or_else(
                 || "npm install -g @fallow-cli/fallow-cov".to_owned(),
-                PackageManager::install_command,
+                |package_manager| package_manager.install_command(root),
             );
             let prompt = if let Some(package_manager) = package_manager {
                 format!(
@@ -1463,12 +1475,12 @@ fn install_sidecar(
 ) -> Result<PathBuf, String> {
     let (program, args, current_dir, display_command) =
         if let Some(package_manager) = package_manager {
-            let (program, args) = package_manager.install_args();
-            (program, args, root, package_manager.install_command())
+            let (program, args) = package_manager.install_args(root);
+            (program, args, root, package_manager.install_command(root))
         } else {
             (
                 "npm",
-                &["install", "-g", "@fallow-cli/fallow-cov"][..],
+                vec!["install", "-g", "@fallow-cli/fallow-cov"],
                 root,
                 "npm install -g @fallow-cli/fallow-cov".to_owned(),
             )

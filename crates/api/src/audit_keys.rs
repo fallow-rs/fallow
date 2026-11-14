@@ -186,6 +186,7 @@ impl DeadCodeAuditLedger {
             unrendered_components,
             unused_component_props,
             absent_component_props,
+            constant_parameters,
             unused_component_emits,
             unused_component_inputs,
             unused_component_outputs,
@@ -205,6 +206,7 @@ impl DeadCodeAuditLedger {
             active_suppressions: _active_suppressions,
             feature_flags: _feature_flags,
             security_findings: _security_findings,
+            suppressed_security_findings: _suppressed_security_findings,
             security_unresolved_edge_files: _security_unresolved_edge_files,
             security_unresolved_callee_sites: _security_unresolved_callee_sites,
             security_unresolved_callee_diagnostics: _security_unresolved_callee_diagnostics,
@@ -217,6 +219,7 @@ impl DeadCodeAuditLedger {
             react_component_intel: _react_component_intel,
             semantic_reachable_files: _,
             semantic_framework_contracts: _semantic_framework_contracts,
+            constant_parameter_candidates: _constant_parameter_candidates,
         } = results;
 
         macro_rules! annotate {
@@ -288,6 +291,7 @@ impl DeadCodeAuditLedger {
         );
         annotate!(unused_component_props, "unused_component_props");
         annotate!(absent_component_props, "absent_component_props");
+        annotate!(constant_parameters, "constant_parameters");
         annotate!(unused_component_emits, "unused_component_emits");
         annotate!(unused_component_inputs, "unused_component_inputs");
         annotate!(unused_component_outputs, "unused_component_outputs");
@@ -426,6 +430,25 @@ impl AuditDomainLedger {
             }
         }
     }
+
+    /// Whether the finding with `key` is introduced.
+    #[must_use]
+    pub fn is_introduced(&self, key: &str) -> bool {
+        self.introduced_keys.contains(key)
+    }
+
+    /// Mark introduced findings whose keys are in `inherit` as inherited.
+    /// Unlike [`Self::demote_introductions`], this records no demotion: the
+    /// finding matches a base finding, only its key changed.
+    pub fn inherit_introductions(&mut self, inherit: &FxHashSet<String>) {
+        for (key, introduced) in &mut self.records {
+            if *introduced && inherit.contains(key) {
+                *introduced = false;
+                self.introduced_keys.remove(key);
+                self.inherited_keys.insert(key.clone());
+            }
+        }
+    }
 }
 
 /// One-pass audit comparison shared by attribution, verdict, and annotations.
@@ -528,7 +551,7 @@ pub use fallow_engine::module_graph::relative_key_path;
 /// [`fallow_types::identity`]), so a line shift does not change it. A repeated
 /// key gets an occurrence suffix, so the base and the head compare by count:
 /// a new second finding with an inherited key is introduced.
-fn collection_keys<T: IdentifiedFinding>(items: &[T], root: &Path) -> Vec<String> {
+pub fn collection_keys<T: IdentifiedFinding>(items: &[T], root: &Path) -> Vec<String> {
     dead_code_occurrence_keys(items, &IdentityPaths::new(root))
 }
 
@@ -578,6 +601,7 @@ struct FrameworkFindingSlices<'a> {
 struct ComponentContractFindingSlices<'a> {
     unused_component_props: &'a [fallow_types::output_dead_code::UnusedComponentPropFinding],
     absent_component_props: &'a [fallow_types::output_dead_code::AbsentComponentPropFinding],
+    constant_parameters: &'a [fallow_types::results::ConstantParameterFinding],
     unused_component_emits: &'a [fallow_types::output_dead_code::UnusedComponentEmitFinding],
     unused_component_inputs: &'a [fallow_types::output_dead_code::UnusedComponentInputFinding],
     unused_component_outputs: &'a [fallow_types::output_dead_code::UnusedComponentOutputFinding],
@@ -670,6 +694,7 @@ impl DeadCodeKeyCollector<'_> {
             unrendered_components,
             unused_component_props,
             absent_component_props,
+            constant_parameters,
             unused_component_emits,
             unused_component_inputs,
             unused_component_outputs,
@@ -692,6 +717,7 @@ impl DeadCodeKeyCollector<'_> {
             // Security findings are emitted via `fallow security`, not the audit
             // dead-code gate; they have no dead-code key representation today.
             security_findings: _security_findings,
+            suppressed_security_findings: _suppressed_security_findings,
             security_unresolved_edge_files: _security_unresolved_edge_files,
             security_unresolved_callee_sites: _security_unresolved_callee_sites,
             security_unresolved_callee_diagnostics: _security_unresolved_callee_diagnostics,
@@ -710,6 +736,7 @@ impl DeadCodeKeyCollector<'_> {
             react_component_intel: _react_component_intel,
             semantic_reachable_files: _,
             semantic_framework_contracts: _semantic_framework_contracts,
+            constant_parameter_candidates: _constant_parameter_candidates,
         } = results;
 
         self.add_items(AuditCollection::PropDrillingChains, prop_drilling_chains);
@@ -750,6 +777,7 @@ impl DeadCodeKeyCollector<'_> {
         self.add_component_contract_findings(&ComponentContractFindingSlices {
             unused_component_props,
             absent_component_props,
+            constant_parameters,
             unused_component_emits,
             unused_component_inputs,
             unused_component_outputs,
@@ -979,6 +1007,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
         let ComponentContractFindingSlices {
             unused_component_props,
             absent_component_props,
+            constant_parameters,
             unused_component_emits,
             unused_component_inputs,
             unused_component_outputs,
@@ -992,6 +1021,7 @@ impl<'a> DeadCodeKeyCollector<'a> {
             AuditCollection::AbsentComponentProps,
             absent_component_props,
         );
+        self.add_items(AuditCollection::ConstantParameters, constant_parameters);
         self.add_unused_component_emits(unused_component_emits);
         self.add_unused_component_inputs(unused_component_inputs);
         self.add_unused_component_outputs(unused_component_outputs);
@@ -1481,6 +1511,7 @@ pub fn retain_introduced_dead_code(
         unrendered_components,
         unused_component_props,
         absent_component_props,
+        constant_parameters,
         unused_component_emits,
         unused_component_inputs,
         unused_component_outputs,
@@ -1548,6 +1579,7 @@ fn classify_introduced_dead_code_fields(results: &fallow_types::results::Analysi
         unrendered_components: _unrendered_components,
         unused_component_props: _unused_component_props,
         absent_component_props: _absent_component_props,
+        constant_parameters: _constant_parameters,
         unused_component_emits: _unused_component_emits,
         unused_component_inputs: _unused_component_inputs,
         unused_component_outputs: _unused_component_outputs,
@@ -1572,6 +1604,7 @@ fn classify_introduced_dead_code_fields(results: &fallow_types::results::Analysi
         // dead-code gate; they have no key representation and are not filtered
         // here.
         security_findings: _security_findings,
+        suppressed_security_findings: _suppressed_security_findings,
         security_unresolved_edge_files: _security_unresolved_edge_files,
         security_unresolved_callee_sites: _security_unresolved_callee_sites,
         security_unresolved_callee_diagnostics: _security_unresolved_callee_diagnostics,
@@ -1592,6 +1625,7 @@ fn classify_introduced_dead_code_fields(results: &fallow_types::results::Analysi
         react_component_intel: _react_component_intel,
         semantic_reachable_files: _,
         semantic_framework_contracts: _semantic_framework_contracts,
+        constant_parameter_candidates: _constant_parameter_candidates,
     } = results;
 }
 
@@ -1691,6 +1725,7 @@ pub fn annotate_dead_code_json(
         unrendered_components,
         unused_component_props,
         absent_component_props,
+        constant_parameters,
         unused_component_emits,
         unused_component_inputs,
         unused_component_outputs,

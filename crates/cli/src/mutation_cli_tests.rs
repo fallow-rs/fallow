@@ -190,89 +190,6 @@ fn mutation_kill_matrix_for_targets_reach_the_run_options_and_exclude_the_full_m
 }
 
 #[test]
-fn mutation_kill_matrix_for_human_report_names_targets_and_shared_kills() {
-    use fallow_output::{
-        MutationKillMatrixTarget, MutationKillMatrixTargetStatus, MutationTargetOnlyKill,
-    };
-
-    let mut measured = report(
-        vec![mutant("m1", "src/math.ts", 1, MutantStatus::Killed)],
-        Vec::new(),
-    );
-    let mut matrix = kill_matrix_fixture();
-    matrix.tests.truncate(2);
-    matrix.coverage_without_kills.clear();
-    matrix.targets = Some(vec![MutationKillMatrixTarget {
-        target: "test/a.test.ts".to_owned(),
-        test_ids: vec!["test/a.test.ts::adds".to_owned()],
-        status: MutationKillMatrixTargetStatus::Complete,
-        reasons: Vec::new(),
-    }]);
-    matrix.tests[0].subsuming_tests.clear();
-    matrix.tests[0].notes = vec!["subsumers-not-computed".to_owned()];
-    matrix.tests[0].target_only_kills = Some(vec![MutationTargetOnlyKill {
-        mutant_id: "m1".to_owned(),
-        targets: vec!["test/b.test.ts::adds".to_owned()],
-    }]);
-    matrix.tests[1].target_only_kills = Some(Vec::new());
-    measured.kill_matrix = matrix;
-    let text = run_text(&measured, &OPTIONS);
-    for expected in [
-        "Target test/a.test.ts: 1 test, complete\n",
-        "Kills shared only with other targets:\n      m1 (also: test/b.test.ts::adds)",
-        "Kills shared only with other targets: none",
-        "Subsumers are not computed: the other tests stop at the first failure.",
-    ] {
-        assert!(text.contains(expected), "missing {expected:?}: {text}");
-    }
-    assert!(!text.contains("Individual subsumers"), "{text}");
-}
-
-#[test]
-fn mutation_kill_matrix_for_human_report_shows_candidates_of_complete_targets() {
-    use fallow_output::{
-        MutationKillMatrixStatus, MutationKillMatrixTarget, MutationKillMatrixTargetStatus,
-    };
-
-    let mut measured = report(
-        vec![mutant("m1", "src/math.ts", 1, MutantStatus::Killed)],
-        Vec::new(),
-    );
-    let mut matrix = kill_matrix_fixture();
-    matrix.status = MutationKillMatrixStatus::Incomplete;
-    matrix.reasons = vec!["incomplete-mutant-results".to_owned()];
-    matrix.targets = Some(vec![
-        MutationKillMatrixTarget {
-            target: "test/a.test.ts".to_owned(),
-            test_ids: vec!["test/a.test.ts::adds".to_owned()],
-            status: MutationKillMatrixTargetStatus::Complete,
-            reasons: Vec::new(),
-        },
-        MutationKillMatrixTarget {
-            target: "test/c.test.ts".to_owned(),
-            test_ids: vec!["test/c.test.ts::loads".to_owned()],
-            status: MutationKillMatrixTargetStatus::Incomplete,
-            reasons: vec!["incomplete-mutant-results".to_owned()],
-        },
-    ]);
-    measured.kill_matrix = matrix;
-    let text = run_text(&measured, &OPTIONS);
-    for expected in [
-        "Test kill evidence: incomplete",
-        "Target test/a.test.ts: 1 test, complete\n",
-        "Target test/c.test.ts: 1 test, incomplete (incomplete-mutant-results)\n",
-        "Only the tests of complete targets can be candidates.",
-        "Redundant-test candidates for review (1)",
-    ] {
-        assert!(text.contains(expected), "missing {expected:?}: {text}");
-    }
-    assert!(
-        !text.contains("Candidates are unavailable because the kill matrix is incomplete."),
-        "{text}"
-    );
-}
-
-#[test]
 fn mutation_plan_rejects_a_kill_matrix_before_analysis() {
     let args = MutationArgs {
         plan: true,
@@ -512,8 +429,10 @@ fn mutant(id: &str, file: &str, rank: u32, status: MutantStatus) -> MutantResult
         attempts: Vec::new(),
         cached: false,
         resumed: false,
+        carried: false,
         type_error_codes: Vec::new(),
         equivalence_hint: None,
+        witness: None,
     }
 }
 
@@ -557,6 +476,7 @@ fn report(mutants: Vec<MutantResult>, reasons: Vec<MutationIncompleteReason>) ->
         recheck: None,
         compare: None,
         gate_outcomes: None,
+        recording: None,
     }
 }
 
@@ -1044,9 +964,9 @@ fn the_summary_line_names_the_sampled_out_mutants() {
     );
 }
 
-#[test]
-fn the_plan_line_names_the_sampled_out_mutants() {
-    let plan = MutationPlanOutput {
+/// A plan with no mutant, of a project with a supported Vitest.
+fn empty_plan() -> MutationPlanOutput {
+    MutationPlanOutput {
         schema_version: MutationPlanSchemaVersion::V1,
         version: ToolVersion("0.0.0".to_owned()),
         elapsed_ms: ElapsedMs(0),
@@ -1054,13 +974,7 @@ fn the_plan_line_names_the_sampled_out_mutants() {
             kind: MutationScopeKind::All,
             base_ref: None,
         },
-        counts: MutationPlanCountsOutput {
-            total: 4,
-            planned: 1,
-            pending: 3,
-            sampled_out: 2,
-            ..MutationPlanCountsOutput::default()
-        },
+        counts: MutationPlanCountsOutput::default(),
         mutants: Vec::new(),
         files: Vec::new(),
         test_files: Vec::new(),
@@ -1068,6 +982,29 @@ fn the_plan_line_names_the_sampled_out_mutants() {
         framework_config_checked: true,
         skipped_files: Vec::new(),
         unmatched_paths: Vec::new(),
+        runner: fallow_output::MutationPlanRunner {
+            name: "vitest".to_owned(),
+            package: "vitest".to_owned(),
+            installed_version: Some("4.1.5".to_owned()),
+            supported_range: ">=4.1.0 <6.0.0".to_owned(),
+            supported: Some(true),
+            message: None,
+            help: None,
+        },
+    }
+}
+
+#[test]
+fn the_plan_line_names_the_sampled_out_mutants() {
+    let plan = MutationPlanOutput {
+        counts: MutationPlanCountsOutput {
+            total: 4,
+            planned: 1,
+            pending: 3,
+            sampled_out: 2,
+            ..MutationPlanCountsOutput::default()
+        },
+        ..empty_plan()
     };
     let text = plain(&render_plan(&plan));
     assert!(
@@ -1440,6 +1377,7 @@ fn inspect_marks_each_line_of_a_multi_line_mutant() {
         killed_by: None,
         killing_tests: Vec::new(),
         kill_matrix_complete: false,
+        replay: None,
     };
     let text = plain(&render_inspect(&packet));
     let diff: Vec<&str> = text.lines().skip(2).take(5).collect();
@@ -1511,13 +1449,6 @@ fn human_plan_counts_the_no_coverage_mutants_by_test_reach() {
         }),
     };
     let plan = MutationPlanOutput {
-        schema_version: MutationPlanSchemaVersion::V1,
-        version: ToolVersion("0.0.0".to_owned()),
-        elapsed_ms: ElapsedMs(0),
-        scope: MutationScopeOutput {
-            kind: MutationScopeKind::All,
-            base_ref: None,
-        },
         counts: MutationPlanCountsOutput {
             total: 3,
             no_coverage: 3,
@@ -1528,12 +1459,7 @@ fn human_plan_counts_the_no_coverage_mutants_by_test_reach() {
             entry("m2", Some(TestReachClass::MockedOnly)),
             entry("m3", Some(TestReachClass::MockedOnly)),
         ],
-        files: Vec::new(),
-        test_files: Vec::new(),
-        no_test_files: false,
-        framework_config_checked: true,
-        skipped_files: Vec::new(),
-        unmatched_paths: Vec::new(),
+        ..empty_plan()
     };
     let text = plain(&render_plan(&plan));
     assert!(
@@ -1552,13 +1478,6 @@ fn human_plan_lists_planned_mutants_and_prune_reasons() {
         test_reach: None,
     };
     let plan = MutationPlanOutput {
-        schema_version: MutationPlanSchemaVersion::V1,
-        version: ToolVersion("0.0.0".to_owned()),
-        elapsed_ms: ElapsedMs(0),
-        scope: MutationScopeOutput {
-            kind: MutationScopeKind::All,
-            base_ref: None,
-        },
         counts: MutationPlanCountsOutput {
             total: 4,
             planned: 2,
@@ -1585,10 +1504,7 @@ fn human_plan_lists_planned_mutants_and_prune_reasons() {
             static_test_files: vec!["test/a.test.ts".to_owned()],
         }],
         test_files: vec!["test/a.test.ts".to_owned()],
-        no_test_files: false,
-        framework_config_checked: true,
-        skipped_files: Vec::new(),
-        unmatched_paths: Vec::new(),
+        ..empty_plan()
     };
     insta::assert_snapshot!(render_plan(&plan));
 }
@@ -1612,7 +1528,125 @@ fn inspect_packet(
         killed_by: None,
         killing_tests: Vec::new(),
         kill_matrix_complete: false,
+        replay: None,
     }
+}
+
+fn replay_call(
+    side: fallow_output::MutationReplaySide,
+    index: u32,
+    outcome: fallow_output::MutationReplayOutcome,
+    text: &str,
+) -> fallow_output::MutationReplayCall {
+    fallow_output::MutationReplayCall {
+        side,
+        index,
+        outcome,
+        value: serde_json::Value::Null,
+        text: text.to_owned(),
+    }
+}
+
+fn replay_output(
+    verdict: fallow_output::MutationReplayVerdict,
+    reason: Option<&str>,
+    mutant: (fallow_output::MutationReplayOutcome, &str),
+) -> fallow_output::MutationReplayOutput {
+    use fallow_output::{MutationReplayOutcome, MutationReplaySide};
+    let calls = (1..=3)
+        .flat_map(|index| {
+            [
+                replay_call(
+                    MutationReplaySide::Original,
+                    index,
+                    MutationReplayOutcome::Returned,
+                    "5",
+                ),
+                replay_call(MutationReplaySide::Mutant, index, mutant.0, mutant.1),
+            ]
+        })
+        .collect();
+    fallow_output::MutationReplayOutput {
+        contract_version: 1,
+        verdict,
+        reason: reason.map(str::to_owned),
+        export: Some("add".to_owned()),
+        inputs_checked: 1,
+        input: fallow_output::MutationReplayInput {
+            source: fallow_output::MutationReplayInputSource::Argument,
+            input_id: None,
+            args: vec![serde_json::json!(2), serde_json::json!(3)],
+        },
+        calls_per_side: 3,
+        call_timeout_ms: 5000,
+        clock_ms: 1_767_225_600_000,
+        seed: 1,
+        calls,
+        duration_ms: 10,
+    }
+}
+
+#[test]
+fn an_inspect_replay_shows_both_sides_side_by_side_and_the_verdict() {
+    use fallow_output::{MutationReplayOutcome, MutationReplayVerdict};
+    let mut packet = inspect_packet(fallow_output::MutationInspectStatus::Fresh, None);
+    packet.replay = Some(replay_output(
+        MutationReplayVerdict::Witness,
+        None,
+        (MutationReplayOutcome::Threw, "RangeError: too big"),
+    ));
+    let text = plain(&render_inspect(&packet));
+    assert!(text.contains("Replay  add(2, 3)\n"), "{text}");
+    assert!(text.contains("  call  original  mutant\n"), "{text}");
+    assert!(
+        text.contains("  1     5         threw RangeError: too big\n"),
+        "{text}"
+    );
+    assert!(
+        text.contains("Witness: each side gave the same result"),
+        "{text}"
+    );
+    assert!(text.contains("Replay contract 1:"), "{text}");
+
+    for (verdict, reason, expected) in [
+        (
+            MutationReplayVerdict::NoWitnessFound,
+            Some("no witness found (1 input, --args, 3 calls of each side)"),
+            "No witness found (1 input, --args, 3 calls of each side). Another input can still show a difference.",
+        ),
+        (
+            MutationReplayVerdict::Unstable,
+            Some("the calls differ"),
+            "Unstable: the calls differ. A difference that does not repeat is not a witness.",
+        ),
+        (
+            MutationReplayVerdict::Timeout,
+            Some("a call did not end"),
+            "Timeout: a call did not end.",
+        ),
+        (
+            MutationReplayVerdict::NotReplayable,
+            Some("no export holds it"),
+            "Not replayable: no export holds it.",
+        ),
+    ] {
+        packet.replay = Some(replay_output(
+            verdict,
+            reason,
+            (MutationReplayOutcome::Returned, "5"),
+        ));
+        let text = plain(&render_inspect(&packet));
+        assert!(text.contains(expected), "{verdict:?}: {text}");
+        assert!(!text.contains("equivalent"), "{verdict:?}: {text}");
+    }
+    let mut empty = replay_output(
+        MutationReplayVerdict::NotReplayable,
+        Some("x"),
+        (MutationReplayOutcome::Returned, "5"),
+    );
+    empty.calls.clear();
+    packet.replay = Some(empty);
+    assert!(!plain(&render_inspect(&packet)).contains("call  original"));
 }
 
 #[test]
@@ -2009,13 +2043,6 @@ fn a_relative_output_file_resolves_against_the_process_directory() {
 #[test]
 fn the_plan_list_shows_twenty_mutants_and_one_more_line() {
     let plan = MutationPlanOutput {
-        schema_version: MutationPlanSchemaVersion::V1,
-        version: ToolVersion("0.0.0".to_owned()),
-        elapsed_ms: ElapsedMs(0),
-        scope: MutationScopeOutput {
-            kind: MutationScopeKind::All,
-            base_ref: None,
-        },
         counts: MutationPlanCountsOutput {
             total: 21,
             planned: 21,
@@ -2031,12 +2058,8 @@ fn the_plan_list_shows_twenty_mutants_and_one_more_line() {
                 test_reach: None,
             })
             .collect(),
-        files: Vec::new(),
         test_files: vec!["test/a.test.ts".to_owned()],
-        no_test_files: false,
-        framework_config_checked: true,
-        skipped_files: Vec::new(),
-        unmatched_paths: Vec::new(),
+        ..empty_plan()
     };
     let text = plain(&render_plan(&plan));
     assert!(text.contains("  p20\n"), "{text}");
@@ -2072,21 +2095,8 @@ fn skipped_files_get_one_line_with_the_count_of_each_reason() {
     );
 
     let mut plan = MutationPlanOutput {
-        schema_version: MutationPlanSchemaVersion::V1,
-        version: ToolVersion("0.0.0".to_owned()),
-        elapsed_ms: ElapsedMs(0),
-        scope: MutationScopeOutput {
-            kind: MutationScopeKind::All,
-            base_ref: None,
-        },
-        counts: MutationPlanCountsOutput::default(),
-        mutants: Vec::new(),
-        files: Vec::new(),
-        test_files: Vec::new(),
-        no_test_files: false,
-        framework_config_checked: true,
         skipped_files: vec![skipped("src/A.vue", "runner-cannot-load")],
-        unmatched_paths: Vec::new(),
+        ..empty_plan()
     };
     let text = plain(&render_plan(&plan));
     assert!(
@@ -2402,3 +2412,6 @@ fn a_hinted_survivor_shows_the_advisory_note() {
     let without = run_text(&report(vec![plain], Vec::new()), &OPTIONS);
     assert!(!without.contains("hint: the type"), "{without}");
 }
+
+#[path = "mutation_cli_kill_matrix_tests.rs"]
+mod kill_matrix_targets;

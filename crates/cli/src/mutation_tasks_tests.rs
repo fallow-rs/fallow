@@ -83,7 +83,7 @@ fn only_survived_and_uncovered_mutants_become_tasks_in_source_order() {
     );
     let dir = project(SOURCE);
 
-    let batch = tasks(&report, dir.path()).unwrap();
+    let batch = tasks(&report, dir.path(), &|_, _| None).unwrap();
 
     assert_eq!(
         batch
@@ -121,7 +121,7 @@ fn a_changed_file_gives_stale_tasks_without_code() {
     let report = report(&[entry(&plus, "add", "survived", &[])], "complete");
     let dir = project(&SOURCE.replace("a + b", "b + a"));
 
-    let batch = tasks(&report, dir.path()).unwrap();
+    let batch = tasks(&report, dir.path(), &|_, _| None).unwrap();
 
     let task = &batch.tasks[0];
     assert_eq!(task.stale_reason, Some(MutationStaleReason::SourceChanged));
@@ -143,7 +143,7 @@ fn a_plan_document_and_an_escaping_path_are_refused() {
     let plan: SavedReport =
         serde_json::from_value(serde_json::json!({"kind": "mutation-plan", "mutants": []}))
             .unwrap();
-    let error = tasks(&plan, Path::new("/")).unwrap_err();
+    let error = tasks(&plan, Path::new("/"), &|_, _| None).unwrap_err();
     assert!(error.message.contains("mutation plan"), "{}", error.message);
 
     let escaping: SavedReport = serde_json::from_value(serde_json::json!({
@@ -152,7 +152,7 @@ fn a_plan_document_and_an_escaping_path_are_refused() {
                      "span": [0, 1], "operator": "x", "status": "survived"}],
     }))
     .unwrap();
-    let error = tasks(&escaping, Path::new("/tmp")).unwrap_err();
+    let error = tasks(&escaping, Path::new("/tmp"), &|_, _| None).unwrap_err();
     assert!(
         error.message.contains("not inside the project root"),
         "{}",
@@ -193,7 +193,7 @@ fn the_text_batch_has_a_header_and_one_dedented_item_per_task() {
         "partial",
     );
     let dir = project(SOURCE);
-    let batch = tasks(&report, dir.path()).unwrap();
+    let batch = tasks(&report, dir.path(), &|_, _| None).unwrap();
 
     let text = render_text(&batch);
 
@@ -233,7 +233,7 @@ fn the_markdown_batch_fences_the_code_longer_than_its_backticks() {
     });
     let report: SavedReport = serde_json::from_value(value).unwrap();
     let dir = project(source);
-    let batch = tasks(&report, dir.path()).unwrap();
+    let batch = tasks(&report, dir.path(), &|_, _| None).unwrap();
 
     let markdown = render_markdown(&batch);
 
@@ -254,7 +254,7 @@ fn the_markdown_batch_fences_the_code_longer_than_its_backticks() {
 
 #[test]
 fn an_empty_batch_says_so() {
-    let batch = tasks(&report(&[], "complete"), Path::new("/")).unwrap();
+    let batch = tasks(&report(&[], "complete"), Path::new("/"), &|_, _| None).unwrap();
     assert_eq!(batch.summary.tasks, 0);
     assert_eq!(
         render_text(&batch),
@@ -270,7 +270,12 @@ fn a_task_carries_the_equivalence_hint_of_its_survivor() {
     hinted["equivalence_hint"] = serde_json::json!("type-non-nullish");
     let plain = entry(&greater, "isPositive", "survived", &[]);
     let dir = project(SOURCE);
-    let output = tasks(&report(&[hinted, plain], "complete"), dir.path()).unwrap();
+    let output = tasks(
+        &report(&[hinted, plain], "complete"),
+        dir.path(),
+        &|_, _| None,
+    )
+    .unwrap();
     let hints: Vec<_> = output
         .tasks
         .iter()
@@ -295,4 +300,12 @@ fn a_task_carries_the_equivalence_hint_of_its_survivor() {
         .filter(|task| task["equivalence_hint"] == "type-non-nullish")
         .count();
     assert_eq!(json_hints, 1, "{json}");
+}
+
+#[test]
+fn a_witness_with_a_verdict_of_a_later_version_reads_as_absent() {
+    let json = r#"{"kind":"mutation","mutants":[{"mutant_id":"m1","file":"src/a.ts","line":1,"column":0,"span":[0,1],"operator":"arithmetic-operator","status":"survived","witness":{"verdict":"a_later_verdict","inputs_checked":1}}],"files":[]}"#;
+    let report =
+        crate::mutation_inspect::parse_saved_report(json.as_bytes()).expect("the report reads");
+    assert!(report.mutants[0].witness.is_none());
 }

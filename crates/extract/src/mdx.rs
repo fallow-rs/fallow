@@ -687,6 +687,7 @@ pub(crate) fn parse_mdx_to_module_with_mode(
     let statement_whole_object_uses = collect_unexplained_statement_mentions(&scan, &info);
     extend_whole_object_uses(&mut info, statement_whole_object_uses);
     info.line_offsets = line_offsets;
+    crate::visitor::mark_template_callers(&mut info);
     info
 }
 

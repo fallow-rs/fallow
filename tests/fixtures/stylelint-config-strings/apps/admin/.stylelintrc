@@ -1,0 +1,4 @@
+{
+  "extends": ["@acme/config-stylelint", "@acme/config-stylelint-main"],
+  "plugins": ["./rules/admin-rule.js"]
+}

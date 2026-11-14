@@ -830,6 +830,7 @@ fn diagnostic_issue_types_keep_user_order_and_labels() {
             "unrendered-component",
             "unused-component-prop",
             "absent-component-prop",
+            "constant-parameter",
             "unused-component-emit",
             "unused-component-input",
             "unused-component-output",
@@ -3361,6 +3362,8 @@ async fn security_diagnostics_push_when_client_never_pulls() {
 
     let finding = fallow_api::editor_results::SecurityFinding {
         finding_id: String::new(),
+        stable_finding_id: None,
+        stable_id_input: None,
         candidate: fallow_api::editor_results::SecurityCandidate::default(),
         taint_flow: None,
         attack_surface: None,

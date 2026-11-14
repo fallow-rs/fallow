@@ -1620,7 +1620,7 @@ fn cache_round_trip(c: &mut Criterion) {
         bencher.iter_batched_ref(
             create_cache_round_trip_input,
             |module| {
-                let cached = module_to_cached(module, SourceFingerprint::new(0, 0), false);
+                let cached = module_to_cached(module, SourceFingerprint::new(0, 0), false, false);
                 std::hint::black_box(cached_to_module(&cached, FileId(0)))
             },
             BatchSize::LargeInput,

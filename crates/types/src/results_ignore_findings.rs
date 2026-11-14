@@ -34,6 +34,7 @@ pub(super) fn classify_ignore_findings_fields(results: &AnalysisResults) {
         unrendered_components: _unrendered_components,
         unused_component_props: _unused_component_props,
         absent_component_props: _absent_component_props,
+        constant_parameters: _constant_parameters,
         unused_component_emits: _unused_component_emits,
         unused_component_inputs: _unused_component_inputs,
         unused_component_outputs: _unused_component_outputs,
@@ -75,6 +76,7 @@ pub(super) fn classify_ignore_findings_fields(results: &AnalysisResults) {
         // path glob must never silence a leak candidate or turn an unresolved
         // blind spot into a clean bill.
         security_findings: _security_findings,
+        suppressed_security_findings: _suppressed_security_findings,
         security_unresolved_edge_files: _security_unresolved_edge_files,
         security_unresolved_callee_sites: _security_unresolved_callee_sites,
         security_unresolved_callee_diagnostics: _security_unresolved_callee_diagnostics,
@@ -92,5 +94,6 @@ pub(super) fn classify_ignore_findings_fields(results: &AnalysisResults) {
         react_component_intel: _react_component_intel,
         semantic_reachable_files: _semantic_reachable_files,
         semantic_framework_contracts: _semantic_framework_contracts,
+        constant_parameter_candidates: _,
     } = results;
 }

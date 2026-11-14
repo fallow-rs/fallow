@@ -431,6 +431,11 @@ fn apply_dead_code_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) {
 
 fn apply_source_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
     match bare_id {
+        "constant-parameter" => {
+            m.note = Some(
+                "Opt-in manual review candidate; defaults to off. Inspect the calls and the intent of the parameter before changing the function. No automatic fix.",
+            );
+        }
         "absent-component-prop" => {
             m.note = Some(
                 "Opt-in manual review candidate; defaults to off. Inspect caller evidence and defaults before changing the component. No automatic fix.",

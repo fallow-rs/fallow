@@ -1361,6 +1361,8 @@ fn finding_ignore_retains_security_findings_and_blind_spot_diagnostics() {
     let mut results = AnalysisResults {
         security_findings: vec![SecurityFinding {
             finding_id: "id".to_string(),
+            stable_finding_id: None,
+            stable_id_input: None,
             kind: SecurityFindingKind::TaintedSink,
             category: Some("dangerous-html".to_string()),
             cwe: Some(79),

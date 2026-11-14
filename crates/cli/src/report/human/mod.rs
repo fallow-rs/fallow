@@ -2,6 +2,7 @@ pub(super) mod check;
 mod cross_ref;
 pub(super) mod dupes;
 pub(super) mod health;
+mod health_crap_notes;
 mod health_hotspots;
 mod health_runtime;
 mod health_targets;
@@ -236,6 +237,10 @@ fn section_component_footer_text(title: &str) -> Option<(&'static str, &'static 
         "Unrendered components" => Some((
             "A Vue / Svelte component reachable through a barrel but rendered nowhere in the project (render it somewhere or remove it)",
             "https://fallow.tools/docs/explanations/dead-code/#unrendered-components",
+        )),
+        "Constant parameters" => Some((
+            "Each visible call passes this parameter in one way; review the parameter and its callers manually",
+            "https://fallow.tools/docs/explanations/dead-code/#constant-parameters",
         )),
         "Absent optional component props" => Some((
             "Known reachable callers omit this used optional prop; review defaults and API intent manually",

@@ -376,6 +376,32 @@ fn all_tools_have_input_schema() {
     }
 }
 
+/// The `narrow` field of an over-limit refusal names parameters that the
+/// agent passes on the next call. Each name must be a registered tool and a
+/// top-level property of its input schema, or the retry fails validation.
+#[test]
+fn narrow_params_exist_in_the_input_schema_of_their_tool() {
+    let server = FallowMcp::new();
+    let tools = server.tool_router.list_all();
+    for (tool_name, params) in crate::tools::all_narrow_params() {
+        let tool = tools
+            .iter()
+            .find(|tool| tool.name == *tool_name)
+            .unwrap_or_else(|| panic!("narrow table names unknown tool '{tool_name}'"));
+        let properties = tool
+            .input_schema
+            .get("properties")
+            .and_then(serde_json::Value::as_object)
+            .unwrap_or_else(|| panic!("tool '{tool_name}' has no schema properties"));
+        for param in *params {
+            assert!(
+                properties.contains_key(*param),
+                "narrow table names '{param}', which is not a parameter of '{tool_name}'"
+            );
+        }
+    }
+}
+
 /// One row per tool: the top-level `properties` keys the tool must expose and
 /// the fields its schema must mark as required.
 const TOOL_SCHEMA_EXPECTATIONS: &[(&str, &[&str], &[&str])] = &[

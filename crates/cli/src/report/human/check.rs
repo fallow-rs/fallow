@@ -37,6 +37,8 @@ use crate::report::{
 mod config_quality;
 use config_quality::emit_config_quality_signal;
 
+#[path = "check_caller_review.rs"]
+mod caller_review;
 #[path = "check_dependency_override_sections.rs"]
 mod dependency_override_sections;
 #[path = "check_framework_key_sections.rs"]
@@ -1887,6 +1889,7 @@ fn build_policy_section(lines: &mut Vec<String>, input: &SectionInput<'_>) {
         && results.unrendered_components.is_empty()
         && results.unused_component_props.is_empty()
         && results.absent_component_props.is_empty()
+        && results.constant_parameters.is_empty()
         && results.unused_component_emits.is_empty()
         && results.unused_component_inputs.is_empty()
         && results.unused_component_outputs.is_empty()
@@ -2024,45 +2027,7 @@ fn push_component_io_sections(
     root: &Path,
     rules: &RulesConfig,
 ) {
-    build_human_grouped_section(GroupedSectionInput {
-        lines,
-        items: &results.absent_component_props,
-        title: "Absent optional component props",
-        level: if results
-            .absent_component_props
-            .iter()
-            .any(|finding| finding.effective_severity == Some(EffectiveSeverity::Error))
-        {
-            crate::report::Level::Error
-        } else {
-            crate::report::Level::Warn
-        },
-        root,
-        max_files: MAX_FLAT_ITEMS,
-        get_path: |finding: &AbsentComponentPropFinding| finding.prop.path.as_path(),
-        format_detail: &|finding: &AbsentComponentPropFinding| {
-            let prop = &finding.prop;
-            let callers = prop
-                .inspected_call_sites
-                .iter()
-                .map(|site| format!("{}:{}", format_display_path(&site.path, root), site.line))
-                .collect::<Vec<_>>()
-                .join(", ");
-            format!(
-                ":{} {}.{} (default: {})\n    {}\n    Inspected callers: {}",
-                prop.line,
-                prop.component_name,
-                prop.prop_name,
-                if prop.has_default {
-                    "present"
-                } else {
-                    "absent"
-                },
-                prop.explanation,
-                callers
-            )
-        },
-    });
+    caller_review::push_caller_review_sections(lines, results, root);
     build_human_grouped_section(GroupedSectionInput {
         lines,
         items: &results.unused_component_props,
@@ -3439,6 +3404,9 @@ fn collect_dead_code_rules(
     for m in &results.unused_namespace_members {
         insert_matching_rule(rules, &m.member.path, root, resolver);
     }
+    for p in &results.constant_parameters {
+        insert_matching_rule(rules, &p.parameter.path, root, resolver);
+    }
 }
 
 fn collect_graph_rules(
@@ -4226,6 +4194,11 @@ fn check_summary_framework_categories(
             "Absent optional component props",
             results.absent_component_props.len(),
             severity_to_level(rules.absent_component_props),
+        ),
+        (
+            "Constant parameters",
+            results.constant_parameters.len(),
+            severity_to_level(rules.constant_parameters),
         ),
         (
             "Unused component emits",

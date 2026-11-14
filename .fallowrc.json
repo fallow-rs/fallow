@@ -16,6 +16,7 @@
     "tests/coverage-producer-corpus/**",
     "tests/semantic-clone-corpus/**"
   ],
+  "ignoreBinaries": ["getconf"],
   "ignoreDependencies": [
     "@fallow-cli/fallow-node-*",
     "@types/trusted-types",
@@ -26,6 +27,10 @@
     {
       "file": "tools/mutation-runner/src/adapters/{bun-test,node-test,vitest}.mjs",
       "exports": ["createAdapter"]
+    },
+    {
+      "file": "tools/mutation-runner/src/runtime/overlay-hook.mjs",
+      "exports": ["registerOverlayHook"]
     }
   ],
   "ignoreUnresolvedImports": [

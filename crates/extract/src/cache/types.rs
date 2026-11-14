@@ -10,12 +10,12 @@ use crate::MemberKind;
 /// extraction semantics change, and give the reason in the commit message and
 /// the CHANGELOG. A stale version serves old extraction results from a warm
 /// cache. The `assert_cached_type_size!` guards below catch shape changes.
-pub(super) const CACHE_VERSION: u32 = 430;
+pub(super) const CACHE_VERSION: u32 = 442;
 
 /// Duplication token cache version. Bump it when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes, and give the
 /// reason in the commit message and the CHANGELOG.
-pub const DUPES_CACHE_VERSION: u32 = 21;
+pub const DUPES_CACHE_VERSION: u32 = 22;
 
 /// Default maximum cache size (256 MB). Overridable per-project via
 /// `cache.maxSizeMb` in the config file or `FALLOW_CACHE_MAX_SIZE` env var.
@@ -56,8 +56,23 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 1528);
+assert_cached_type_size!(CachedModule, 1544);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
+// The call facts blob of `CachedModule` encodes these types. A blob that an
+// older shape wrote does not decode, and the entry then parses again on each
+// run that reads call facts, so a shape change needs a `CACHE_VERSION` bump.
+assert_cached_type_size!(fallow_types::extract::FunctionContractFacts, 136);
+assert_cached_type_size!(fallow_types::extract::FunctionContract, 48);
+assert_cached_type_size!(fallow_types::extract::ParamFact, 56);
+assert_cached_type_size!(fallow_types::extract::OptionKeyFact, 48);
+assert_cached_type_size!(fallow_types::extract::FunctionCalls, 48);
+assert_cached_type_size!(fallow_types::extract::CallSite, 48);
+assert_cached_type_size!(fallow_types::extract::ArgFact, 32);
+assert_cached_type_size!(fallow_types::extract::BindingArg, 24);
+assert_cached_type_size!(fallow_types::extract::KeyArg, 48);
+assert_cached_type_size!(fallow_types::extract::KeyValue, 32);
+assert_cached_type_size!(fallow_types::extract::LiteralValue, 24);
+assert_cached_type_size!(fallow_types::extract::LocalFunctionEscape, 8);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 64);
 assert_cached_type_size!(CachedSuppression, 88);
@@ -75,7 +90,7 @@ assert_cached_type_size!(fallow_types::extract::CalleeUse, 56);
 assert_cached_type_size!(fallow_types::extract::ImportedCallSite, 80);
 assert_cached_type_size!(fallow_types::extract::ImportBindingReference, 64);
 assert_cached_type_size!(fallow_types::extract::MisplacedDirectiveSite, 8);
-assert_cached_type_size!(fallow_types::extract::SinkSite, 216);
+assert_cached_type_size!(fallow_types::extract::SinkSite, 224);
 assert_cached_type_size!(fallow_types::extract::FunctionComplexity, 104);
 assert_cached_type_size!(fallow_types::extract::ComplexityContribution, 16);
 assert_cached_type_size!(fallow_types::extract::FlagUse, 80);
@@ -283,6 +298,15 @@ pub struct CachedModule {
     pub component_contracts: Option<Box<fallow_types::extract::ComponentContractFacts>>,
     /// Effect layer, tagged error and `catchTag` facts.
     pub effect_facts: Option<Box<fallow_types::extract::EffectFacts>>,
+    /// Function parameter contracts, admitted calls and local escapes, as a
+    /// separately bitcode-encoded `FunctionContractFacts` blob.
+    ///
+    /// Only a run that reads call facts decodes the blob, so a run that
+    /// reads none pays one byte copy on load and save instead of the decode
+    /// and the conversion of the facts. `None` means that the run that wrote
+    /// the entry did not record call facts, and a run that reads them parses
+    /// the file again. An empty blob means that the module has no call facts.
+    pub call_facts: Option<Box<[u8]>>,
     /// Whether the template spreads `$attrs`/`$props`/`props` or the
     /// `defineProps` return is rest-destructured. Round-trips for the abstain.
     pub has_props_attrs_fallthrough: bool,

@@ -12,10 +12,9 @@ description: Land completed Fallow work after review, run pre-push parity, monit
    `main` do not require an up-to-date branch, so a rebase is only
    necessary when a squash merge is not safe as it is. With
    `--if-needed`, the script rebases only when the merge into `main`
-   conflicts, when the branch changes `CHANGELOG.md`, when the branch and
-   `main` both change a generated file, or when the merge loses a version
-   bump of the branch. Otherwise it prints the merge command for the
-   current head, and no new CI run is necessary. The checks of the pull
+   conflicts, when the branch and `main` both change a generated file, or
+   when the merge loses a version bump of the branch. Otherwise it prints
+   the merge command for the current head, and no new CI run is necessary. The checks of the pull
    request then ran against an older `main`. A change on `main` that
    breaks the branch without a text conflict shows only in steps 6 and 7.
    After a rebase, the
@@ -114,10 +113,8 @@ running.
 ## Serial merge of many pull requests
 
 A pull request adds its changelog entries as a file in `changelog.d/`, so
-merges do not conflict in the changelog. A branch from before `changelog.d/`
-still edits `CHANGELOG.md`. Move its entries to a fragment
-(`changelog.d/README.md`), because the `Changelog fragments` CI step fails it.
-Use these scripts for each pull request, one at a time:
+merges do not conflict in the changelog. Use these scripts for each pull
+request, one at a time:
 
 1. Rebase the branch when necessary:
    `node scripts/ship-rebase.mjs --pr <number> --if-needed --push`. When
@@ -125,7 +122,6 @@ Use these scripts for each pull request, one at a time:
    and then step 3. Otherwise the
    script resolves the conflicts that have one mechanical answer and
    stops on any other conflict:
-   - `CHANGELOG.md`: it keeps both sides.
    - A `*CACHE_VERSION` constant: it takes the value of `main`. After the
      rebase, a new commit sets each cache bump of the branch that the
      rebase lost to the value of `main` + 1.
@@ -134,38 +130,12 @@ Use these scripts for each pull request, one at a time:
 
    Git rerere is off for the rebase. The script pushes only when these
    checks pass:
-   - Outside `CHANGELOG.md`, the result is the same as a merge of the
-     branch into `main`. A rebase drops the changes that a merge commit of
-     the branch made, so this check finds them. At a path where the merge
-     itself conflicts, the check has no reference. That path fails the
-     check only when the branch has merge commits. Then compare the path
-     by hand. The failure does not always mean a lost change.
-   - The branch adds the same `CHANGELOG.md` lines as before the rebase,
-     and the rebase removes no line of `main`.
-   - Each entry that the branch adds to the first release section is still
-     in that section. A release on `main` puts a version heading under
-     `## [Unreleased]`, and an entry of the branch can land under it.
-     Then the check fails and lists the entries. The kept temporary
-     worktree holds the rebased branch. A fix on the old branch does not
-     help, because the next run rebases it again and moves the entries
-     again. After a push of the result, the next run compares the pushed
-     result with itself, so it cannot find a problem of the first rebase
-     or of the manual fix. When other checks also fail, the script prints
-     no push command: fix the other problems first. When the moved entries
-     are the only problem, the script prints these steps. Do them in the
-     kept worktree:
-     1. Move the entries to the first release section of `CHANGELOG.md`
-        and commit the change. Make sure that the printed
-        `git -C <worktree> diff <rebased tip> HEAD` command shows only the
-        moved entries. This is the only check of the manual fix.
-     2. Push with the lease command that the script prints, for example
-        `git -C <worktree> push --force-with-lease=refs/heads/<branch>:<old tip> origin HEAD:refs/heads/<branch>`.
-     3. Remove the worktree with the printed
-        `git -C <checkout> worktree remove --force <worktree>` command.
-     4. Run the script again. It confirms that the branch is on `main`.
-        It cannot check the first rebase again.
-   - The rebase adds no second `###` subsection with the same name to the
-     first release section.
+   - The result is the same as a merge of the branch into `main`. A
+     rebase drops the changes that a merge commit of the branch made, so
+     this check finds them. At a path where the merge itself conflicts,
+     the check has no reference. That path fails the check only when the
+     branch has merge commits. Then compare the path by hand. The failure
+     does not always mean a lost change.
    - Each version bump of the branch is still a change against `main`.
      This covers each `*SCHEMA_VERSION` constant, for example
      `CHECK_SCHEMA_VERSION`, and each `*CACHE_VERSION` constant that the
@@ -192,12 +162,12 @@ Use these scripts for each pull request, one at a time:
    - The hunk check compares the hunks of `<old parent tip>..<old tip>`
      with the hunks of `main..<new tip>`, without context lines. A lost
      or changed hunk fails the check, also when the merge comparison
-     passes. The check leaves out `CHANGELOG.md`, the generated files that
-     took the side of `main`, and the cache version lines. A failure
-     prints the `git range-diff` command that compares the commits.
-   - The `CHANGELOG.md` check and the version checks use the old parent
-     tip as the old base. The cache version handling is the same: a lost
-     cache bump gets the value of `main` + 1.
+     passes. The check leaves out the generated files that took the side of
+     `main` and the cache version lines. A failure prints the
+     `git range-diff` command that compares the commits.
+   - The version checks use the old parent tip as the old base. The cache
+     version handling is the same: a lost cache bump gets the value of
+     `main` + 1.
 
    The option needs Git 2.40 or later.
 2. Wait for CI. The rebase script prints the wait command after the push.

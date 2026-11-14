@@ -104,6 +104,8 @@ pub mod pipeline_spans;
 pub mod results;
 /// Security sink names shared by the extractor and the sink catalogue.
 pub mod security_sinks;
+/// The line-free input of the stable id of a security finding.
+pub mod security_stable_id;
 /// Shared TypeScript semantic identity, provenance, API surface, impact, and
 /// public-signature coupling contracts.
 pub mod semantic;

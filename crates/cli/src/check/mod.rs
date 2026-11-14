@@ -37,8 +37,12 @@ use baseline_save::save_baseline_file;
 mod baseline_compare;
 use baseline_compare::load_and_compare_baseline;
 
+mod benchmark;
 mod configuration;
-use configuration::prepare_check_config;
+mod type_aware_summary;
+pub use benchmark::benchmark_dead_code_json;
+use configuration::{parse_type_aware_bool, parse_type_aware_require, prepare_check_config};
+use type_aware_summary::format_type_aware_summary;
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct IssueFilters {
     pub shared_state: bool,
@@ -56,6 +60,7 @@ pub struct IssueFilters {
     pub unrendered_components: bool,
     pub unused_component_props: bool,
     pub absent_component_props: bool,
+    pub constant_parameters: bool,
     pub unused_component_emits: bool,
     pub unused_component_inputs: bool,
     pub unused_component_outputs: bool,
@@ -152,6 +157,7 @@ impl IssueFilters {
             "--unrendered-components" => self.unrendered_components = true,
             "--unused-component-props" => self.unused_component_props = true,
             "--absent-component-props" => self.absent_component_props = true,
+            "--constant-parameters" => self.constant_parameters = true,
             "--unused-component-emits" => self.unused_component_emits = true,
             "--unused-component-inputs" => self.unused_component_inputs = true,
             "--unused-component-outputs" => self.unused_component_outputs = true,
@@ -200,6 +206,7 @@ impl IssueFilters {
             || self.unrendered_components
             || self.unused_component_props
             || self.absent_component_props
+            || self.constant_parameters
             || self.unused_component_emits
             || self.unused_component_inputs
             || self.unused_component_outputs
@@ -248,6 +255,9 @@ impl IssueFilters {
         if self.absent_component_props && rules.absent_component_props == Severity::Off {
             rules.absent_component_props = Severity::Warn;
         }
+        if self.constant_parameters && rules.constant_parameters == Severity::Off {
+            rules.constant_parameters = Severity::Warn;
+        }
         if self.private_type_leaks && rules.private_type_leaks == Severity::Off {
             rules.private_type_leaks = Severity::Warn;
         }
@@ -266,6 +276,9 @@ impl IssueFilters {
         self.apply_graph_filters(results);
         self.apply_policy_filters(results);
         self.apply_catalog_filters(results);
+        if !self.constant_parameters {
+            results.constant_parameters.clear();
+        }
     }
 
     fn apply_core_filters(&self, results: &mut fallow_types::results::AnalysisResults) {
@@ -632,6 +645,8 @@ pub struct CheckResult {
     /// the reviewer routing. `None` outside the brief path and without a
     /// commit history.
     pub brief_churn: Option<fallow_engine::churn::ChurnResult>,
+    /// `--mutation-report` survivors on added lines; `None`: not measured.
+    pub brief_mutation_survivors: Option<Vec<crate::audit_focus::FocusFileCount>>,
     /// Exports-aware public-export key set for the review brief: the
     /// `<rel_path>::<name>` keys reachable through `package.json` `exports` +
     /// re-export reachability. Computed from the retained graph on the brief
@@ -889,31 +904,6 @@ pub fn apply_type_aware_overrides_from(
         config.type_aware.require
     };
     Ok(())
-}
-
-fn parse_type_aware_bool(value: &str, output: OutputFormat) -> Result<bool, ExitCode> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "1" | "true" | "yes" | "on" => Ok(true),
-        "0" | "false" | "no" | "off" => Ok(false),
-        _ => Err(emit_input_error(
-            "FALLOW_TYPE_AWARE must be one of true, false, 1, 0, yes, no, on, or off",
-            output,
-        )),
-    }
-}
-
-fn parse_type_aware_require(
-    value: &str,
-    output: OutputFormat,
-) -> Result<fallow_config::TypeAwareRequire, ExitCode> {
-    match value.trim().to_ascii_lowercase().as_str() {
-        "best-effort" => Ok(fallow_config::TypeAwareRequire::BestEffort),
-        "complete" => Ok(fallow_config::TypeAwareRequire::Complete),
-        _ => Err(emit_input_error(
-            "FALLOW_TYPE_AWARE_REQUIRE must be best-effort or complete",
-            output,
-        )),
-    }
 }
 
 fn handle_trace_side_effects(
@@ -1233,6 +1223,7 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         impact_closure: None,
         co_change_gaps: Vec::new(),
         brief_churn: None,
+        brief_mutation_survivors: None,
         public_api_keys: None,
         partition_order: None,
         focus_facts: None,
@@ -1536,95 +1527,6 @@ fn finding_id_run_reasons(
     reasons
 }
 
-pub fn benchmark_dead_code_json(
-    root: &std::path::Path,
-    threads: usize,
-) -> Result<(usize, usize), ExitCode> {
-    let config_path = None;
-    let filters = IssueFilters::default();
-    let trace_opts = TraceOptions {
-        trace_export: None,
-        trace_file: None,
-        trace_dependency: None,
-        impact_closure: None,
-        symbol_impact: None,
-        performance: false,
-    };
-    let result = execute_check(&CheckOptions {
-        root,
-        config_path: &config_path,
-        output: OutputFormat::Json,
-        json_style: crate::json_style::JsonStyle::Compact,
-        no_cache: true,
-        threads,
-        quiet: true,
-        allow_remote_extends: false,
-        fail_on_issues: false,
-        filters: &filters,
-        changed_since: None,
-        change_scope_owner: fallow_engine::change_scope::ChangeScopeOwner::Run,
-        no_package_baselines: false,
-        diff_index: None,
-        use_shared_diff_index: true,
-        baseline: None,
-        baseline_flag: "--baseline",
-        bare_run: false,
-        save_baseline: None,
-        fail_on_stale_baseline: false,
-        sarif_file: None,
-        production: false,
-        production_override: Some(false),
-        workspace: None,
-        changed_workspaces: None,
-        group_by: None,
-        include_dupes: false,
-        type_aware: None,
-        type_aware_config_override: None,
-        type_aware_projects: &[],
-        type_aware_require: None,
-        trace_opts: &trace_opts,
-        explain: false,
-        top: None,
-        file: &[],
-        scope: None,
-        finding_ids: None,
-        include_entry_exports: false,
-        show_cascade: false,
-        fail_on_parse_error: false,
-        summary: false,
-        regression_opts: RegressionOpts {
-            fail_on_regression: false,
-            tolerance: crate::regression::Tolerance::Absolute(0),
-            regression_baseline_file: None,
-            save_target: crate::regression::SaveRegressionTarget::None,
-            scoped: false,
-            quiet: true,
-            output: OutputFormat::Json,
-        },
-        retain_modules_for_health: false,
-        defer_performance: false,
-        analysis_snapshot: fallow_config::AnalysisSnapshot::Current,
-        explain_skipped: false,
-        surface: CheckSurface::DeadCode,
-    })?;
-    let rendered = report::render_check_json(&report::CheckJsonRenderInput {
-        package_baselines: &result.package_baselines,
-        results: &result.results,
-        root: &result.config.root,
-        elapsed: result.elapsed,
-        type_aware: result.type_aware_meta.as_ref(),
-        regression: result.regression.as_ref(),
-        baseline_matched: result.baseline_matched,
-        baseline_staleness: envelope_baseline_staleness(&result),
-        gate_outcomes: None,
-        config_fixable: result.config_fixable,
-        workspace_diagnostics: &result.workspace_diagnostics,
-        json_style: crate::json_style::JsonStyle::Compact,
-    })
-    .map_err(|_| exit_invalid_input())?;
-    Ok((result.results.total_issues(), rendered.len()))
-}
-
 fn validate_effective_type_aware_output(
     output: fallow_config::OutputFormat,
     enabled: bool,
@@ -1899,41 +1801,6 @@ fn print_type_aware_summary(result: &CheckResult) {
             )
         );
     }
-}
-
-fn format_type_aware_summary(meta: &fallow_types::envelope::TypeAwareMeta) -> String {
-    let candidates = count_noun(meta.candidate_count, "candidate", "candidates");
-    let confirmed = count_noun(meta.confirmed_used_count, "confirmed use", "confirmed uses");
-    let contracts = count_noun(
-        meta.contract_preserved_count,
-        "preserved contract",
-        "preserved contracts",
-    );
-    let no_static_references = count_noun(
-        meta.no_static_references_count,
-        "candidate without static references",
-        "candidates without static references",
-    );
-    let fixable = count_noun(meta.fix_eligible_count, "guarded fix", "guarded fixes");
-    let unresolved = count_noun(
-        meta.unresolved_count,
-        "unresolved finding",
-        "unresolved findings",
-    );
-    let abstained = count_noun(
-        meta.abstained_count,
-        "abstained finding",
-        "abstained findings",
-    );
-    format!(
-        "Type-aware refinement: {candidates}, {confirmed}, {contracts}, \
-         {no_static_references} ({fixable}), {unresolved}, {abstained}"
-    )
-}
-
-fn count_noun(count: usize, singular: &str, plural: &str) -> String {
-    let noun = if count == 1 { singular } else { plural };
-    format!("{count} {noun}")
 }
 
 fn print_type_aware_warnings(result: &CheckResult, quiet: bool) {

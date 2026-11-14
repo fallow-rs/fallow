@@ -28,7 +28,7 @@ pub async fn run_decision_surface(
     .await?
     .map_or_else(
         |err| CallToolResult::error(vec![ContentBlock::text(programmatic_error_body(&err))]),
-        |value| json_success(&value),
+        |value| json_success("decision_surface", &value),
     );
     Ok(result)
 }

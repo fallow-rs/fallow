@@ -14,6 +14,7 @@ struct ProtocolManifest {
     analysis_operation: String,
     status_operation: String,
     mutant_typecheck_operation: String,
+    call_evidence_operation: String,
     query_operations: Vec<String>,
     session_envelope_types: Vec<String>,
     backend: Backend,
@@ -216,6 +217,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
          pub(super) const ANALYSIS_OPERATION: &str = {};\n\
          pub(super) const STATUS_OPERATION: &str = {};\n\
          pub(super) const MUTANT_TYPECHECK_OPERATION: &str = {};\n\
+         pub(super) const CALL_EVIDENCE_OPERATION: &str = {};\n\
          pub(super) const QUERY_OPERATIONS: &[&str] = &[{}];\n\
          pub(super) const SESSION_ENVELOPE_TYPES: &[&str] = &[{}];\n\
          pub(super) const BACKEND_FAMILY: &str = {};\n\
@@ -227,6 +229,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         rust_string(&manifest.analysis_operation),
         rust_string(&manifest.status_operation),
         rust_string(&manifest.mutant_typecheck_operation),
+        rust_string(&manifest.call_evidence_operation),
         rust_string_slice(&manifest.query_operations),
         rust_string_slice(&manifest.session_envelope_types),
         rust_string(&manifest.backend.family),

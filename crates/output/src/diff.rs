@@ -29,6 +29,39 @@ pub struct DiffIndex {
     rename_pairs: FxHashMap<String, String>,
     base: Option<PathBuf>,
     root_offset: String,
+    base_lines: Box<BaseLineMap>,
+}
+
+/// The data that maps head lines back to base lines. It is boxed, so the
+/// index stays small in the enums that hold it.
+#[derive(Debug, Default, Clone)]
+struct BaseLineMap {
+    change_blocks: FxHashMap<String, Vec<ChangeBlock>>,
+    new_files: FxHashSet<String>,
+    lines_capped: bool,
+}
+
+/// One run of removed and added lines with no unchanged line in it.
+#[derive(Debug, Clone, Copy)]
+struct ChangeBlock {
+    /// First head line of the run. When the run adds no line, the head line
+    /// after it.
+    new_start: u64,
+    /// Number of added lines.
+    new_len: u64,
+    /// First base line of the run. When the run removes no line, the base
+    /// line after it.
+    old_start: u64,
+    /// Number of removed lines.
+    old_len: u64,
+}
+
+/// Where one head line sits relative to the change blocks of its file.
+enum HeadLinePlace {
+    /// An unchanged line, at this base line.
+    Unchanged(u64),
+    /// An added line of this block.
+    Added(ChangeBlock),
 }
 
 /// Mutable cursor state threaded through unified-diff parsing.
@@ -36,8 +69,10 @@ pub struct DiffIndex {
 struct DiffParseState {
     current_file: Option<String>,
     new_line: u64,
+    old_line: u64,
     pending_old_path: Option<String>,
     pending_rename_from: Option<String>,
+    pending_new_file: bool,
 }
 
 impl DiffIndex {
@@ -63,6 +98,7 @@ impl DiffIndex {
     fn handle_diff_header_line(&mut self, line: &str, state: &mut DiffParseState) -> bool {
         if line.starts_with("diff --git ") {
             state.current_file = None;
+            state.pending_new_file = false;
             state.pending_old_path = None;
             state.pending_rename_from = None;
             return true;
@@ -85,10 +121,14 @@ impl DiffIndex {
         }
         if line.starts_with("--- /dev/null") {
             state.pending_old_path = None;
+            state.pending_new_file = true;
             return true;
         }
         if let Some(path) = line.strip_prefix("+++ b/") {
             state.pending_old_path = None;
+            if std::mem::take(&mut state.pending_new_file) {
+                self.base_lines.new_files.insert(path.to_string());
+            }
             state.current_file = Some(path.to_string());
             self.changed_paths.insert(path.to_string());
             self.touched_files.insert(path.to_string());
@@ -103,7 +143,8 @@ impl DiffIndex {
         }
         if let Some(header) = line.strip_prefix("@@ ") {
             if let Some(start) = parse_new_hunk_start(header) {
-                state.new_line = start;
+                state.old_line = hunk_next_line(header, '-').unwrap_or(start);
+                state.new_line = hunk_next_line(header, '+').unwrap_or(start);
                 self.hunk_count += 1;
             }
             return true;
@@ -123,13 +164,79 @@ impl DiffIndex {
                     .or_default()
                     .insert(state.new_line);
                 self.added_line_count += 1;
+                self.record_change_line(state, true);
+            } else {
+                self.base_lines.lines_capped = true;
             }
             state.new_line += 1;
         } else if line.starts_with('-') {
             self.total_removed_lines += 1;
-        } else {
+            self.record_change_line(state, false);
+            state.old_line += 1;
+        } else if !line.starts_with('\\') {
+            // A `\ No newline at end of file` marker is not a file line.
             state.new_line += 1;
+            state.old_line += 1;
         }
+    }
+
+    /// Add one removed or added line to the change block that ends at the
+    /// cursor, or open a new block there.
+    fn record_change_line(&mut self, state: &DiffParseState, added: bool) {
+        let Some(path) = state.current_file.as_ref() else {
+            return;
+        };
+        let blocks = self
+            .base_lines
+            .change_blocks
+            .entry(path.clone())
+            .or_default();
+        let continues = blocks.last().is_some_and(|block| {
+            block.new_start + block.new_len == state.new_line
+                && block.old_start + block.old_len == state.old_line
+        });
+        if !continues {
+            blocks.push(ChangeBlock {
+                new_start: state.new_line,
+                new_len: 0,
+                old_start: state.old_line,
+                old_len: 0,
+            });
+        }
+        if let Some(block) = blocks.last_mut() {
+            if added {
+                block.new_len += 1;
+            } else {
+                block.old_len += 1;
+            }
+        }
+    }
+
+    /// Map an inclusive head line range of `path` to the base tree. `path`
+    /// is a key of this diff.
+    ///
+    /// Unchanged lines map exactly. An added line at the start of the range
+    /// maps to the first base line that its block removed. An added line at
+    /// the end maps to the last one. A file that the diff does not name maps
+    /// unchanged. `None` when the range holds no base line, when the diff
+    /// adds `path` as a new file, or when the index stopped at
+    /// [`MAX_ADDED_LINES`].
+    #[must_use]
+    pub fn base_line_range(&self, path: &str, start: u64, end: u64) -> Option<(u64, u64)> {
+        let map = &self.base_lines;
+        if map.lines_capped || start > end || map.new_files.contains(path) {
+            return None;
+        }
+        let blocks = map.change_blocks.get(path).map_or(&[][..], Vec::as_slice);
+        let base_start = match head_line_place(blocks, start) {
+            HeadLinePlace::Unchanged(line) => line,
+            HeadLinePlace::Added(block) => block.old_start,
+        };
+        let base_end = match head_line_place(blocks, end) {
+            HeadLinePlace::Unchanged(line) => line,
+            HeadLinePlace::Added(block) => (block.old_start + block.old_len).checked_sub(1)?,
+        };
+        (base_start <= base_end).then_some((base_start, base_end))
     }
 
     /// Pre-rename path for `head_path`, in the diff's key namespace, when the
@@ -327,6 +434,35 @@ pub fn strip_path_component_prefix<'a>(path: &'a str, prefix: &str) -> Option<&'
     path.strip_prefix(prefix)?.strip_prefix('/')
 }
 
+/// Place one head line among the change blocks of its file, in head order.
+fn head_line_place(blocks: &[ChangeBlock], line: u64) -> HeadLinePlace {
+    let mut shift: i128 = 0;
+    for block in blocks {
+        if line < block.new_start {
+            break;
+        }
+        if line < block.new_start + block.new_len {
+            return HeadLinePlace::Added(*block);
+        }
+        shift += i128::from(block.old_len) - i128::from(block.new_len);
+    }
+    HeadLinePlace::Unchanged(u64::try_from(i128::from(line) + shift).unwrap_or(0))
+}
+
+/// The first line of one side of a `@@ -a,b +c,d @@` hunk. `side` is `-` for
+/// the base and `+` for the head. A side with no line (`b` or `d` is 0) names
+/// the line before the hunk, so its first line is the next one.
+fn hunk_next_line(header: &str, side: char) -> Option<u64> {
+    let range = header
+        .split_whitespace()
+        .find_map(|part| part.strip_prefix(side))?;
+    let (start, len) = match range.split_once(',') {
+        Some((start, len)) => (start.parse::<u64>().ok()?, len.parse::<u64>().ok()?),
+        None => (range.parse::<u64>().ok()?, 1),
+    };
+    Some(if len == 0 { start + 1 } else { start })
+}
+
 /// Parse the new-file start line out of a `@@ -a,b +c,d @@` hunk header.
 pub fn parse_new_hunk_start(header: &str) -> Option<u64> {
     let plus = header.find('+')?;
@@ -340,6 +476,53 @@ pub fn parse_new_hunk_start(header: &str) -> Option<u64> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const EDIT_DIFF: &str = "diff --git a/a.js b/a.js\n--- a/a.js\n+++ b/a.js\n@@ -7 +7 @@\n-old seven\n+new seven\n@@ -10,0 +11,2 @@\n+added eleven\n+added twelve\n@@ -20,2 +21,0 @@\n-gone twenty\n-gone twenty-one\n";
+
+    #[test]
+    fn base_line_range_maps_unchanged_lines_across_blocks() {
+        let index = DiffIndex::from_unified_diff(EDIT_DIFF);
+        assert_eq!(index.base_line_range("a.js", 1, 6), Some((1, 6)));
+        // Lines after the two-line insertion move up by two.
+        assert_eq!(index.base_line_range("a.js", 13, 21), Some((11, 19)));
+        // Lines after the two-line removal move back down by two.
+        assert_eq!(index.base_line_range("a.js", 22, 25), Some((22, 25)));
+    }
+
+    #[test]
+    fn base_line_range_maps_a_replaced_line_to_its_removed_line() {
+        let index = DiffIndex::from_unified_diff(EDIT_DIFF);
+        assert_eq!(index.base_line_range("a.js", 7, 7), Some((7, 7)));
+        assert_eq!(index.base_line_range("a.js", 1, 12), Some((1, 10)));
+    }
+
+    #[test]
+    fn base_line_range_has_no_base_line_for_pure_additions() {
+        let index = DiffIndex::from_unified_diff(EDIT_DIFF);
+        assert_eq!(index.base_line_range("a.js", 11, 12), None);
+        let new_file = DiffIndex::from_unified_diff(
+            "diff --git a/n.js b/n.js\n--- /dev/null\n+++ b/n.js\n@@ -0,0 +1,2 @@\n+one\n+two\n",
+        );
+        assert_eq!(new_file.base_line_range("n.js", 1, 2), None);
+        // A new file has no base line, also outside its added lines.
+        assert_eq!(new_file.base_line_range("n.js", 3, 4), None);
+    }
+
+    #[test]
+    fn base_line_range_keeps_files_outside_the_diff() {
+        let index = DiffIndex::from_unified_diff(EDIT_DIFF);
+        assert_eq!(index.base_line_range("other.js", 3, 9), Some((3, 9)));
+    }
+
+    #[test]
+    fn no_newline_marker_does_not_move_the_line_cursor() {
+        let index = DiffIndex::from_unified_diff(
+            "diff --git a/a.js b/a.js\n--- a/a.js\n+++ b/a.js\n@@ -3 +3,2 @@\n-last\n\\ No newline at end of file\n+last\n+more\n",
+        );
+        assert!(index.line_is_added("a.js", 3));
+        assert!(index.line_is_added("a.js", 4));
+        assert!(!index.line_is_added("a.js", 5));
+    }
 
     #[test]
     fn from_unified_diff_caps_added_lines_at_threshold() {

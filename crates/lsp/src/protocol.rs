@@ -61,6 +61,8 @@ pub struct AnalysisCompleteParams {
     pub unused_component_props: usize,
     #[serde(default)]
     pub absent_component_props: usize,
+    #[serde(default)]
+    pub constant_parameters: usize,
     pub unused_component_emits: usize,
     pub unused_component_inputs: usize,
     pub unused_component_outputs: usize,
@@ -159,6 +161,7 @@ pub fn analysis_complete_params(input: AnalysisCompleteInput<'_>) -> AnalysisCom
         unrendered_components: results.unrendered_components.len(),
         unused_component_props: results.unused_component_props.len(),
         absent_component_props: results.absent_component_props.len(),
+        constant_parameters: results.constant_parameters.len(),
         unused_component_emits: results.unused_component_emits.len(),
         unused_component_inputs: results.unused_component_inputs.len(),
         unused_component_outputs: results.unused_component_outputs.len(),

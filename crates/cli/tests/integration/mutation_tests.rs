@@ -849,7 +849,12 @@ fn recheck_reruns_the_open_tasks_and_refuses_a_changed_source() {
         .iter()
         .filter(|mutant| mutant["prune_reason"] == "not-selected")
         .count();
-    assert_eq!(not_selected, open.len() - 1);
+    assert_eq!(
+        not_selected, 0,
+        "each other mutant keeps its result from the saved report"
+    );
+    assert_eq!(single["recheck"]["carried"], open.len() - 1);
+    assert_eq!(single["summary"]["counts"]["no_coverage"], open.len());
     let (_, tasks) = json_mutation(project.path(), &["tasks"]);
     assert_eq!(
         tasks["summary"]["tasks"],
@@ -885,6 +890,256 @@ fn recheck_reruns_the_open_tasks_and_refuses_a_changed_source() {
     let (changed, error) = json_mutation(project.path(), &["--recheck"]);
     assert_eq!(changed.code, 2);
     assert_eq!(error["code"], "FALLOW_MUTATION_SOURCE_CHANGED", "{error}");
+}
+
+/// A source file whose mutants the recheck fixture marks as killed, so no
+/// recheck selects them.
+const EXTRA: &str = "export function double(n: number): number {\n  return n * 2;\n}\n";
+
+/// The untested project with a second source file, and a saved report of
+/// `--all` in a directory outside the project. The saved report marks the
+/// first mutant of `src/math.ts` and each mutant of `src/extra.ts` as
+/// killed, the result of an earlier run with tests. Returns the project, the
+/// directory of the report, the report path and the ids of the killed
+/// mutants, the one of `src/math.ts` first.
+fn recheck_fixture() -> (
+    tempfile::TempDir,
+    tempfile::TempDir,
+    std::path::PathBuf,
+    Vec<String>,
+) {
+    let project = untested_project();
+    fs::write(project.path().join("src/extra.ts"), EXTRA).expect("extra.ts");
+    commit_all(project.path(), "extra");
+    let (output, mut report) = json_mutation(project.path(), &["--all"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let mut killed = Vec::new();
+    let mut math_killed = false;
+    for mutant in report["mutants"].as_array_mut().unwrap() {
+        let in_math = mutant["file"] == "src/math.ts";
+        if in_math && math_killed {
+            continue;
+        }
+        math_killed |= in_math;
+        mutant["status"] = "killed".into();
+        mutant["killed_by"] = "test/math.test.ts > adds".into();
+        mutant["covering_tests"] = serde_json::json!(["test/math.test.ts > adds"]);
+        let fields = mutant.as_object_mut().unwrap();
+        fields.remove("test_reach");
+        fields.remove("prune_reason");
+        let id = mutant["mutant_id"].as_str().unwrap().to_owned();
+        if in_math {
+            killed.insert(0, id);
+        } else {
+            killed.push(id);
+        }
+    }
+    let dir = tempfile::tempdir().expect("report dir");
+    let path = dir.path().join("saved.json");
+    fs::write(&path, serde_json::to_string(&report).unwrap()).expect("saved report");
+    (project, dir, path, killed)
+}
+
+fn mutant<'a>(report: &'a serde_json::Value, id: &str) -> Option<&'a serde_json::Value> {
+    report["mutants"]
+        .as_array()?
+        .iter()
+        .find(|mutant| mutant["mutant_id"] == id)
+}
+
+#[test]
+fn recheck_replaces_the_named_report_and_keeps_the_earlier_kills() {
+    let (project, _dir, path, killed) = recheck_fixture();
+    let report = path.to_str().unwrap();
+    let (output, recheck) = json_mutation(project.path(), &["--recheck", "--report", report]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+
+    let saved: serde_json::Value =
+        serde_json::from_slice(&fs::read(&path).expect("saved report")).unwrap();
+    assert_eq!(saved, recheck, "the recheck replaces the named report");
+    let last: serde_json::Value = serde_json::from_slice(
+        &fs::read(project.path().join(".fallow/mutation/last-report.json")).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(last, recheck, "the last report stays in step");
+
+    let counts = &recheck["summary"]["counts"];
+    let total = recheck["mutants"].as_array().unwrap().len();
+    assert_eq!(counts["killed"], killed.len(), "{counts}");
+    assert_eq!(counts["pruned"], 0, "{counts}");
+    assert_eq!(counts["no_coverage"], total - killed.len(), "{counts}");
+    assert_eq!(recheck["recheck"]["carried"], killed.len());
+    for id in &killed {
+        let carried = mutant(&recheck, id).expect("each earlier mutant stays in the report");
+        assert_eq!(carried["status"], "killed", "{carried}");
+        assert_eq!(carried["carried"], true, "{carried}");
+        assert_eq!(carried["killed_by"], "test/math.test.ts > adds");
+    }
+    let rechecked = recheck["recheck"]["mutants"][0]["mutant_id"]
+        .as_str()
+        .unwrap();
+    assert!(
+        mutant(&recheck, rechecked)
+            .unwrap()
+            .get("carried")
+            .is_none(),
+        "a rechecked mutant has the result of this run"
+    );
+    let extra = recheck["functions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|function| function["file"] == "src/extra.ts")
+        .expect("the function of the file that no mutant of the recheck is in");
+    assert_eq!(extra["score"], 1.0);
+    let pruned: u64 = recheck["functions"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|function| function["counts"]["pruned"].as_u64().unwrap())
+        .sum();
+    assert_eq!(pruned, 0, "the function results count the merged mutants");
+
+    let (_, tasks) = json_mutation(project.path(), &["tasks", "--report", report]);
+    assert_eq!(tasks["summary"]["tasks"], total - killed.len());
+}
+
+#[test]
+fn recheck_does_not_keep_the_earlier_kills_of_a_changed_source() {
+    let (project, _dir, path, killed) = recheck_fixture();
+    fs::write(
+        project.path().join("src/extra.ts"),
+        EXTRA.replace("n * 2", "n * 3"),
+    )
+    .expect("edit extra.ts");
+    commit_all(project.path(), "edit extra");
+    let report = path.to_str().unwrap();
+    let (output, recheck) = json_mutation(project.path(), &["--recheck", "--report", report]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+
+    assert!(
+        recheck["mutants"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|mutant| mutant["file"] != "src/extra.ts"),
+        "the earlier results of a changed file do not apply"
+    );
+    assert_eq!(
+        recheck["recheck"]["stale_files"],
+        serde_json::json!(["src/extra.ts"])
+    );
+    assert_eq!(recheck["recheck"]["carried"], 1);
+    assert_eq!(recheck["summary"]["counts"]["killed"], 1);
+    assert_eq!(mutant(&recheck, &killed[0]).unwrap()["status"], "killed");
+}
+
+#[test]
+fn recheck_does_not_keep_a_kill_of_a_test_file_that_is_gone() {
+    let (project, _dir, path, killed) = recheck_fixture();
+    fs::create_dir_all(project.path().join("fixtures")).expect("fixtures");
+    fs::write(project.path().join("fixtures/kept.js"), "export {};\n").expect("kept.js");
+    commit_all(project.path(), "kept test file");
+    set_killing_test(&path, "src/math.ts", "test/gone.test.ts::adds");
+    set_killing_test(&path, "src/extra.ts", "fixtures/kept.js::doubles");
+    let report = path.to_str().unwrap();
+    let (output, recheck) = json_mutation(project.path(), &["--recheck", "--report", report]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+
+    let gone = mutant(&recheck, &killed[0]).expect("the mutant of a run file stays");
+    assert_eq!(gone["status"], "pruned", "{gone}");
+    assert_eq!(gone["prune_reason"], "not-selected", "{gone}");
+    assert_eq!(recheck["recheck"]["carried"], killed.len() - 1);
+    for id in &killed[1..] {
+        assert_eq!(mutant(&recheck, id).unwrap()["carried"], true);
+    }
+
+    set_killing_test(&path, "src/extra.ts", "test/gone.test.ts::doubles");
+    let (output, recheck) = json_mutation(project.path(), &["--recheck", "--report", report]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert_eq!(
+        recheck["recheck"]["stale_files"],
+        serde_json::json!(["src/extra.ts"])
+    );
+    assert_eq!(recheck["recheck"]["carried"], 0);
+}
+
+#[cfg(unix)]
+#[test]
+fn recheck_replaces_the_target_of_a_report_symlink_and_keeps_its_mode() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (project, dir, path, _) = recheck_fixture();
+    fs::set_permissions(&path, fs::Permissions::from_mode(0o640)).expect("mode");
+    let link = dir.path().join("link.json");
+    std::os::unix::fs::symlink(&path, &link).expect("symlink");
+    let (output, recheck) = json_mutation(
+        project.path(),
+        &["--recheck", "--report", link.to_str().unwrap()],
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+
+    assert!(
+        fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    let saved: serde_json::Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    assert_eq!(
+        saved, recheck,
+        "the recheck replaces the target of the link"
+    );
+    let mode = fs::metadata(&path).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o640);
+}
+
+/// Sets the killing test of each killed mutant of `file` in the saved report
+/// at `path` to `test`.
+fn set_killing_test(path: &Path, file: &str, test: &str) {
+    let mut saved: serde_json::Value =
+        serde_json::from_slice(&fs::read(path).expect("saved report")).unwrap();
+    for mutant in saved["mutants"].as_array_mut().unwrap() {
+        if mutant["status"] == "killed" && mutant["file"] == file {
+            mutant["killed_by"] = test.into();
+            mutant["killing_tests"] = serde_json::json!([test]);
+        }
+    }
+    fs::write(path, serde_json::to_string(&saved).unwrap()).expect("saved report");
+}
+
+#[test]
+fn recheck_leaves_out_a_file_with_an_earlier_entry_that_does_not_parse() {
+    let (project, _dir, path, _) = recheck_fixture();
+    let mut saved: serde_json::Value =
+        serde_json::from_slice(&fs::read(&path).expect("saved report")).unwrap();
+    let extra = saved["mutants"]
+        .as_array_mut()
+        .unwrap()
+        .iter_mut()
+        .find(|mutant| mutant["file"] == "src/extra.ts")
+        .expect("a mutant of src/extra.ts");
+    // A report of a version before the kill matrix has no such field.
+    extra
+        .as_object_mut()
+        .unwrap()
+        .remove("kill_matrix_complete");
+    fs::write(&path, serde_json::to_string(&saved).unwrap()).expect("saved report");
+    let report = path.to_str().unwrap();
+    let (output, recheck) = json_mutation(project.path(), &["--recheck", "--report", report]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert_eq!(
+        recheck["recheck"]["stale_files"],
+        serde_json::json!(["src/extra.ts"])
+    );
+    assert!(
+        recheck["mutants"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|mutant| mutant["file"] != "src/extra.ts"),
+        "the report shows no part of the file"
+    );
 }
 
 #[test]
@@ -1389,6 +1644,161 @@ mod end_to_end {
             checked["typecheck"]["checked"]
         );
         assert_eq!(judged["summary"]["counts"]["equivalent"], 1, "{judged}");
+    }
+
+    /// Each call of `label`, from the entry point and from the test, passes
+    /// `true` for `strict`, so `!strict` is
+    /// always `false`. The `negate-condition` mutant `if (false)` survives
+    /// and gets the `constant-parameter` hint, from the call evidence of the
+    /// `constant-parameter` rule, which the project leaves off. `guarded`
+    /// gets the same calls, but a value reference to it can hide a caller, so
+    /// the closed-world gate blocks it and its survivor gets no hint. The
+    /// hint never changes the status or the score.
+    #[test]
+    fn a_negate_condition_survivor_on_a_constant_parameter_gets_the_hint() {
+        let Some(package) = companion_package() else {
+            return;
+        };
+        let (_project, root) = vitest_project(
+            &package,
+            "\nexport function label(name: string, strict: boolean): string {\n  if (!strict) return \"loose\";\n  return name;\n}\n\nexport function guarded(name: string, strict: boolean): string {\n  if (!strict) return \"loose\";\n  return name;\n}\n\nexport const handlers = [guarded];\n",
+        );
+        // The rule reads only runtime code, so an entry point must reach the
+        // module. The entry calls each function with the same literal.
+        fs::write(
+            root.join("package.json"),
+            r#"{"name":"fallow-mutation-runner-fixture","private":true,"type":"module","main":"src/index.ts"}"#,
+        )
+        .expect("package.json");
+        fs::write(
+            root.join("src/index.ts"),
+            "import { guarded, label } from \"./math\";\n\nexport const title = (): string => label(\"title\", true) + guarded(\"title\", true);\n",
+        )
+        .expect("entry");
+        fs::write(
+            root.join("test/label.test.ts"),
+            "import { expect, test } from \"vitest\";\nimport { guarded, label } from \"../src/math\";\n\ntest(\"labels\", () => {\n  expect(label(\"a\", true)).toBe(\"a\");\n  expect(label(\"b\", true)).toBe(\"b\");\n  expect(guarded(\"a\", true)).toBe(\"a\");\n  expect(guarded(\"b\", true)).toBe(\"b\");\n});\n",
+        )
+        .expect("label test");
+        commit_all(&root, "label");
+
+        let (output, report) = json_mutation(
+            &root,
+            &[
+                "src/math.ts",
+                "--concurrency",
+                "1",
+                "--operators",
+                "negate-condition",
+            ],
+        );
+        assert_eq!(output.code, 0, "{}", output.stderr);
+        let survivor = |function: &str| -> serde_json::Value {
+            report["mutants"]
+                .as_array()
+                .expect("mutants")
+                .iter()
+                .find(|mutant| {
+                    mutant["function"] == function
+                        && mutant["status"] == "survived"
+                        && mutant["change"]["to"] == "false"
+                })
+                .cloned()
+                .unwrap_or_else(|| panic!("a surviving `false` mutant of {function}: {report}"))
+        };
+        assert_eq!(
+            survivor("label")["equivalence_hint"],
+            "constant-parameter",
+            "{report}"
+        );
+        assert!(
+            survivor("guarded").get("equivalence_hint").is_none(),
+            "{report}"
+        );
+        assert_eq!(report["summary"]["counts"]["equivalent"], 0, "{report}");
+        assert!(report.get("typecheck").is_none(), "{report}");
+    }
+
+    /// `labelOf` reads `name ?? "anon"` where `name` is a `string`. No test
+    /// can tell the expression from `name`, so the opt-in `nullish-fallback`
+    /// mutant survives. The type check adds the advisory hint, and the
+    /// status and the score do not change. A run of the default operators
+    /// has no `nullish-fallback` mutant.
+    #[test]
+    fn a_typecheck_run_hints_a_nullish_fallback_on_a_non_nullable_receiver() {
+        let Some(package) = companion_package() else {
+            return;
+        };
+        if !type_aware_companion_installed() {
+            return;
+        }
+        let (_project, root) = vitest_project(
+            &package,
+            "\nexport function labelOf(name: string): string {\n  return name ?? \"anon\";\n}\n",
+        );
+        fs::write(
+            root.join("tsconfig.json"),
+            r#"{"compilerOptions":{"strict":true,"noUncheckedIndexedAccess":true,"noEmit":true},"include":["src"]}"#,
+        )
+        .expect("tsconfig");
+        fs::write(
+            root.join("test/label.test.ts"),
+            "import { expect, test } from \"vitest\";\nimport { labelOf } from \"../src/math\";\n\ntest(\"labels\", () => {\n  expect(labelOf(\"ada\")).toBe(\"ada\");\n});\n",
+        )
+        .expect("label test");
+        commit_all(&root, "label");
+
+        let fallback = |report: &serde_json::Value| -> Option<serde_json::Value> {
+            report["mutants"]
+                .as_array()
+                .expect("mutants")
+                .iter()
+                .find(|mutant| {
+                    mutant["function"] == "labelOf" && mutant["operator"] == "nullish-fallback"
+                })
+                .cloned()
+        };
+        let (default_output, default_run) =
+            json_mutation(&root, &["src/math.ts", "--concurrency", "1"]);
+        assert_eq!(default_output.code, 0, "{}", default_output.stderr);
+        assert!(fallback(&default_run).is_none(), "{default_run}");
+
+        let args = [
+            "src/math.ts",
+            "--concurrency",
+            "1",
+            "--operators",
+            "nullish-fallback",
+        ];
+        let (plain_output, plain) = json_mutation(&root, &args);
+        assert_eq!(plain_output.code, 0, "{}", plain_output.stderr);
+        let mutant = fallback(&plain).expect("a nullish-fallback mutant of labelOf");
+        assert_eq!(mutant["status"], "survived", "{plain}");
+        assert!(mutant.get("equivalence_hint").is_none(), "{plain}");
+
+        let mut command = std::process::Command::new(crate::common::fallow_bin());
+        command
+            .env("RUST_LOG", "")
+            .env("NO_COLOR", "1")
+            .args(["mutation", "--root"])
+            .arg(&root)
+            .args(args)
+            .args(["--typecheck", "--format", "json", "--quiet"]);
+        crate::common::configure_type_aware_sidecar(&mut command);
+        let output = command.output().expect("fallow runs");
+        assert_eq!(
+            output.status.code(),
+            Some(0),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let checked: serde_json::Value =
+            serde_json::from_str(&String::from_utf8_lossy(&output.stdout)).expect("json");
+        let mutant = fallback(&checked).expect("a nullish-fallback mutant of labelOf");
+        assert_eq!(mutant["status"], "survived", "{checked}");
+        assert_eq!(mutant["equivalence_hint"], "type-non-nullish", "{checked}");
+        assert_eq!(checked["typecheck"]["hinted"], 1, "{checked}");
+        assert_hint_leaves_the_score(&checked, &plain);
     }
 
     /// A component compiler in the shape of the Vue plugin: its `transform`
@@ -2203,3 +2613,508 @@ mod compare {
 
 #[path = "mutation_copy_scope_tests.rs"]
 mod copy_scope;
+
+/// A `node:test` project for `inspect --replay`. `add` is exported, `hidden`
+/// is not, and `useHidden` calls it. The replay needs only `node`.
+fn replay_project() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"replay-fixture","private":true,"type":"module","scripts":{"test":"node --test"}}"#,
+    )
+    .expect("package.json");
+    fs::create_dir_all(root.join("src")).expect("src");
+    fs::create_dir_all(root.join("test")).expect("test");
+    fs::write(
+        root.join("src/math.js"),
+        "export const add = (a, b) => a + b;\nconst hidden = (n) => n * 2;\nexport const useHidden = (n) => hidden(n);\n",
+    )
+    .expect("math.js");
+    fs::write(
+        root.join("test/math.test.js"),
+        "import assert from \"node:assert/strict\";\nimport { test } from \"node:test\";\nimport { add, useHidden } from \"../src/math.js\";\ntest(\"add\", () => { add(1, 2); useHidden(1); assert.ok(true); });\n",
+    )
+    .expect("math.test.js");
+    fs::write(root.join(".gitignore"), ".fallow\nplan.json\n").expect(".gitignore");
+    git(root, &["init", "-q"]);
+    commit_all(root, "init");
+    dir
+}
+
+/// The plan of the replay project and the id of the mutant that turns
+/// `original` into `replacement`.
+fn replay_plan(root: &Path, original: &str, replacement: &str) -> (String, String) {
+    let plan = root.join("plan.json");
+    let plan_path = plan.to_str().expect("utf-8 path").to_owned();
+    let output = mutation(
+        root,
+        &[
+            "--plan", "--all", "--format", "json", "--quiet", "-o", &plan_path,
+        ],
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let saved: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(&plan).expect("plan")).expect("plan json");
+    let mutant = saved["mutants"]
+        .as_array()
+        .expect("mutants")
+        .iter()
+        .find(|mutant| {
+            mutant["change"]["from"] == original && mutant["change"]["to"] == replacement
+        })
+        .unwrap_or_else(|| panic!("no {original} to {replacement} mutant: {saved}"));
+    (
+        mutant["mutant_id"].as_str().expect("id").to_owned(),
+        plan_path,
+    )
+}
+
+#[test]
+fn inspect_replay_shows_a_witness_for_an_exported_function() {
+    let project = replay_project();
+    let root = project.path();
+    let (id, plan) = replay_plan(root, "+", "-");
+    let (output, packet) = json_mutation(
+        root,
+        &[
+            "inspect", &id, "--report", &plan, "--replay", "--args", "[2, 3]",
+        ],
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let replay = &packet["replay"];
+    assert_eq!(replay["verdict"], "witness", "{packet}");
+    assert_eq!(replay["export"], "add");
+    assert_eq!(replay["input"]["args"], serde_json::json!([2, 3]));
+    assert_eq!(replay["contract_version"], 1);
+    let values = |side: &str| -> Vec<serde_json::Value> {
+        replay["calls"]
+            .as_array()
+            .expect("calls")
+            .iter()
+            .filter(|call| call["side"] == side)
+            .map(|call| call["value"].clone())
+            .collect()
+    };
+    assert_eq!(values("original"), vec![serde_json::json!(5); 3]);
+    assert_eq!(values("mutant"), vec![serde_json::json!(-1); 3]);
+
+    let human = mutation(
+        root,
+        &[
+            "inspect", &id, "--report", &plan, "--replay", "--args", "[2, 3]",
+        ],
+    );
+    assert_eq!(human.code, 0, "{}", human.stderr);
+    assert!(
+        human.stdout.contains("Replay  add(2, 3)"),
+        "{}",
+        human.stdout
+    );
+    assert!(human.stdout.contains("Witness"), "{}", human.stdout);
+}
+
+#[test]
+fn inspect_replay_of_a_function_without_export_names_the_export_flag() {
+    let project = replay_project();
+    let root = project.path();
+    let (id, plan) = replay_plan(root, "*", "/");
+    let (output, packet) = json_mutation(
+        root,
+        &[
+            "inspect", &id, "--report", &plan, "--replay", "--args", "[3]",
+        ],
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert_eq!(packet["replay"]["verdict"], "not_replayable", "{packet}");
+    let reason = packet["replay"]["reason"].as_str().expect("reason");
+    assert!(
+        reason.contains("`hidden`") && reason.contains("--export"),
+        "{reason}"
+    );
+
+    let (output, packet) = json_mutation(
+        root,
+        &[
+            "inspect",
+            &id,
+            "--report",
+            &plan,
+            "--replay",
+            "--args",
+            "[3]",
+            "--export",
+            "useHidden",
+        ],
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert_eq!(packet["replay"]["verdict"], "witness", "{packet}");
+}
+
+#[test]
+fn inspect_replay_refuses_bad_args_a_stale_file_and_args_without_replay() {
+    let project = replay_project();
+    let root = project.path();
+    let (id, plan) = replay_plan(root, "+", "-");
+    let (output, envelope) = json_mutation(
+        root,
+        &[
+            "inspect",
+            &id,
+            "--report",
+            &plan,
+            "--replay",
+            "--args",
+            "{\"a\":1}",
+        ],
+    );
+    assert_eq!(output.code, 2, "{}", output.stderr);
+    assert_eq!(
+        envelope["code"], "FALLOW_INVALID_MUTATION_OPTIONS",
+        "{envelope}"
+    );
+
+    let without = mutation(root, &["inspect", &id, "--report", &plan, "--args", "[1]"]);
+    assert_eq!(without.code, 2, "{}", without.stderr);
+
+    for limit in ["0s", "11m", "soon"] {
+        let (output, envelope) = json_mutation(
+            root,
+            &[
+                "inspect",
+                &id,
+                "--report",
+                &plan,
+                "--replay",
+                "--call-timeout",
+                limit,
+            ],
+        );
+        assert_eq!(output.code, 2, "{limit}: {}", output.stderr);
+        assert_eq!(
+            envelope["code"], "FALLOW_INVALID_MUTATION_OPTIONS",
+            "{limit}: {envelope}"
+        );
+    }
+
+    fs::write(
+        root.join("src/math.js"),
+        "export const add = (a, b) => b + a;\n",
+    )
+    .expect("edit");
+    let (output, envelope) = json_mutation(
+        root,
+        &[
+            "inspect", &id, "--report", &plan, "--replay", "--args", "[1, 2]",
+        ],
+    );
+    assert_eq!(output.code, 2, "{}", output.stderr);
+    assert_eq!(
+        envelope["code"], "FALLOW_MUTATION_REPLAY_STALE",
+        "{envelope}"
+    );
+}
+
+/// A `node:test` project whose test calls `greet` with a marker string and
+/// `apply` with a callback, which is not replayable.
+fn recording_project() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"record-fixture","private":true,"type":"module","scripts":{"test":"node --test"}}"#,
+    )
+    .expect("package.json");
+    fs::create_dir_all(root.join("src")).expect("src");
+    fs::create_dir_all(root.join("test")).expect("test");
+    fs::write(
+        root.join("src/greet.js"),
+        "export function greet(name) {\n  return name.length > 3 ? `hello ${name}` : \"hi\";\n}\nexport const apply = (fn, n) => fn(n) + 1;\n",
+    )
+    .expect("greet.js");
+    fs::write(
+        root.join("test/greet.test.js"),
+        "import assert from \"node:assert/strict\";\nimport { test } from \"node:test\";\nimport { apply, greet } from \"../src/greet.js\";\ntest(\"greet\", () => { assert.ok(greet(\"zq-marker\").length > 0); });\ntest(\"apply\", () => { assert.ok(apply((n) => n, 1) > 0); });\ntest(\"source\", () => { assert.match(greet.toString(), /name\\.length/); });\ntest(\"name\", () => { assert.equal(apply.name, \"apply\"); });\n",
+    )
+    .expect("greet.test.js");
+    fs::write(root.join(".gitignore"), ".fallow\n").expect(".gitignore");
+    git(root, &["init", "-q"]);
+    commit_all(root, "init");
+    dir
+}
+
+#[test]
+fn a_recording_run_feeds_the_replay_and_keeps_values_out_of_the_report() {
+    let project = recording_project();
+    let root = project.path();
+    let (output, report) = json_mutation(root, &["--all", "--no-cache", "--record-args", "values"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert!(
+        !output.stdout.contains("zq-marker"),
+        "the report holds a recorded value: {}",
+        output.stdout
+    );
+    let recording = &report["recording"];
+    assert_eq!(recording["mode"], "values", "{report}");
+    assert_eq!(recording["saved"], true);
+    let functions = recording["functions"].as_array().expect("functions");
+    let greet = functions
+        .iter()
+        .find(|function| function["export"] == "greet")
+        .expect("greet");
+    assert_eq!(greet["input_count"], 1);
+    let apply = functions
+        .iter()
+        .find(|function| function["export"] == "apply")
+        .expect("apply");
+    assert_eq!(apply["input_count"], 0);
+    assert_eq!(apply["not_replayable"][0]["reason"], "a function");
+    // Only the record pass sees the wraps, so a test of a function name or of
+    // the source text is no baseline failure of the run.
+    assert_eq!(
+        report["baseline_failures"],
+        serde_json::json!([]),
+        "{}",
+        report["baseline_failures"]
+    );
+    let saved =
+        fs::read_to_string(root.join(".fallow/mutation/recorded-args.json")).expect("store");
+    assert!(saved.contains("zq-marker"), "{saved}");
+
+    let survivor = report["mutants"]
+        .as_array()
+        .expect("mutants")
+        .iter()
+        .find(|mutant| mutant["function"] == "greet" && mutant["status"] == "survived")
+        .unwrap_or_else(|| panic!("a greet survivor: {report}"));
+    let id = survivor["mutant_id"].as_str().expect("id");
+    let (output, packet) = json_mutation(root, &["inspect", id, "--replay"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let replay = &packet["replay"];
+    assert_eq!(replay["input"]["source"], "recorded", "{packet}");
+    assert_eq!(replay["input"]["args"], serde_json::json!(["zq-marker"]));
+    assert_eq!(replay["inputs_checked"], 1);
+    assert_ne!(replay["verdict"], "equivalent");
+
+    let (output, packet) = json_mutation(
+        root,
+        &["inspect", &first_mutant_of(&report, "apply"), "--replay"],
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert_eq!(packet["replay"]["verdict"], "not_replayable", "{packet}");
+    let reason = packet["replay"]["reason"].as_str().expect("reason");
+    assert!(reason.contains("a function (1)"), "{reason}");
+}
+
+fn first_mutant_of(report: &serde_json::Value, function: &str) -> String {
+    report["mutants"]
+        .as_array()
+        .expect("mutants")
+        .iter()
+        .find(|mutant| mutant["function"] == function)
+        .and_then(|mutant| mutant["mutant_id"].as_str())
+        .unwrap_or_else(|| panic!("a mutant of {function}"))
+        .to_owned()
+}
+
+#[test]
+fn a_run_without_recording_has_no_recording_and_writes_no_store() {
+    let project = recording_project();
+    let root = project.path();
+    let (output, report) = json_mutation(root, &["--all", "--no-cache"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert!(report.get("recording").is_none(), "{report}");
+    assert!(!root.join(".fallow/mutation/recorded-args.json").exists());
+    let id = first_mutant_of(&report, "greet");
+    let (output, packet) = json_mutation(root, &["inspect", &id, "--replay"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert_eq!(packet["replay"]["verdict"], "not_replayable");
+    let reason = packet["replay"]["reason"].as_str().expect("reason");
+    assert!(reason.contains("--record-args values"), "{reason}");
+}
+
+/// A `node:test` project whose test calls `shout` but asserts nothing, so a
+/// mutant of `shout` survives and its recorded input is a witness.
+fn witness_project() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"witness-fixture","private":true,"type":"module","scripts":{"test":"node --test"}}"#,
+    )
+    .expect("package.json");
+    fs::create_dir_all(root.join("src")).expect("src");
+    fs::create_dir_all(root.join("test")).expect("test");
+    fs::write(
+        root.join("src/shout.js"),
+        "export function shout(text) {\n  return text.toUpperCase() + \"!\";\n}\n",
+    )
+    .expect("shout.js");
+    fs::write(
+        root.join("test/shout.test.js"),
+        "import { test } from \"node:test\";\nimport { shout } from \"../src/shout.js\";\ntest(\"shout\", () => { shout(\"qv-marker\"); });\n",
+    )
+    .expect("shout.test.js");
+    fs::write(root.join(".gitignore"), ".fallow\n").expect(".gitignore");
+    git(root, &["init", "-q"]);
+    commit_all(root, "init");
+    dir
+}
+
+#[test]
+fn a_recording_run_gives_survivors_a_witness_and_tasks_give_the_ready_input() {
+    let project = witness_project();
+    let root = project.path();
+    let (output, report) = json_mutation(root, &["--all", "--no-cache", "--record-args", "values"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert!(
+        !output.stdout.contains("qv-marker") && !output.stdout.contains("QV-MARKER"),
+        "the report holds a recorded value: {}",
+        output.stdout
+    );
+    let survivor = report["mutants"]
+        .as_array()
+        .expect("mutants")
+        .iter()
+        .find(|mutant| mutant["status"] == "survived" && mutant["change"]["to"] == "\"\"")
+        .unwrap_or_else(|| panic!("a string-literal survivor: {report}"));
+    let witness = &survivor["witness"];
+    assert_eq!(witness["verdict"], "witness", "{survivor}");
+    assert_eq!(witness["inputs_checked"], 1);
+    assert!(witness["input_id"].is_string(), "{witness}");
+    assert_ne!(witness["verdict"], "equivalent");
+
+    let (output, tasks) = json_mutation(root, &["tasks"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let id = survivor["mutant_id"].as_str().expect("id");
+    let task = tasks["tasks"]
+        .as_array()
+        .expect("tasks")
+        .iter()
+        .find(|task| task["mutant_id"] == id)
+        .expect("the task");
+    let witness = &task["witness"];
+    assert_eq!(witness["verdict"], "witness", "{task}");
+    assert_eq!(witness["args"], serde_json::json!(["qv-marker"]));
+    assert_eq!(witness["original"]["outcome"], "returned");
+    assert_eq!(witness["original"]["value"], "QV-MARKER!");
+    assert_eq!(witness["mutant"]["value"], "QV-MARKER");
+    assert_eq!(
+        witness["replay_command"],
+        format!("fallow mutation inspect {id} --replay")
+    );
+
+    let markdown = mutation(root, &["tasks", "--format", "markdown"]);
+    assert_eq!(markdown.code, 0, "{}", markdown.stderr);
+    assert!(markdown.stdout.contains("witness"), "{}", markdown.stdout);
+    assert!(
+        !markdown.stdout.contains("qv-marker"),
+        "markdown can go into a PR comment, so it holds no value: {}",
+        markdown.stdout
+    );
+    let human = mutation(root, &["tasks"]);
+    assert!(human.stdout.contains("\"qv-marker\""), "{}", human.stdout);
+}
+
+#[test]
+fn tasks_without_the_witness_cache_keep_the_reference_and_the_command() {
+    let project = witness_project();
+    let root = project.path();
+    let (output, _) = json_mutation(root, &["--all", "--no-cache", "--record-args", "values"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    fs::remove_file(root.join(".fallow/mutation/witnesses.json")).expect("remove");
+    let (output, tasks) = json_mutation(root, &["tasks"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let witness = tasks["tasks"]
+        .as_array()
+        .expect("tasks")
+        .iter()
+        .find_map(|task| {
+            task.get("witness")
+                .filter(|witness| witness["verdict"] == "witness")
+        })
+        .expect("a witness reference");
+    assert!(witness.get("args").is_none(), "{witness}");
+    assert!(
+        witness["replay_command"]
+            .as_str()
+            .expect("command")
+            .contains("--replay")
+    );
+}
+
+#[test]
+fn a_stale_task_keeps_the_witness_reference_but_shows_no_value() {
+    let project = witness_project();
+    let root = project.path();
+    let (output, _) = json_mutation(root, &["--all", "--no-cache", "--record-args", "values"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    fs::write(
+        root.join("src/shout.js"),
+        "export function shout(text) {\n  return text.toUpperCase() + \"?\";\n}\n",
+    )
+    .expect("edit");
+    let (output, tasks) = json_mutation(root, &["tasks"]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    for task in tasks["tasks"].as_array().expect("tasks") {
+        assert!(task["stale_reason"].is_string(), "{task}");
+        if let Some(witness) = task.get("witness") {
+            assert!(
+                witness.get("args").is_none(),
+                "a stale task shows a value: {witness}"
+            );
+            assert!(witness["replay_command"].is_string());
+        }
+    }
+}
+
+#[test]
+fn a_file_that_a_witness_replay_writes_shows_as_a_changed_worktree() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dir.path();
+    fs::write(
+        root.join("package.json"),
+        r#"{"name":"stamp-fixture","private":true,"type":"module","scripts":{"test":"node --test"}}"#,
+    )
+    .expect("package.json");
+    fs::create_dir_all(root.join("src")).expect("src");
+    fs::create_dir_all(root.join("test")).expect("test");
+    // The replay clock starts at 2026-01-01, so only a replay writes the
+    // file. The write is in an unmutated helper, so no mutant run writes it.
+    fs::create_dir_all(root.join("lib")).expect("lib");
+    fs::write(
+        root.join("lib/note.js"),
+        "import { writeFileSync } from \"node:fs\";\nexport function note(tag) {\n  const now = new Date();\n  if (now.getFullYear() === 2026 && now.getMonth() === 0 && now.getDate() === 1) writeFileSync(\"replay-stamp.txt\", tag);\n}\n",
+    )
+    .expect("note.js");
+    fs::write(
+        root.join("src/stamp.js"),
+        "import { note } from \"../lib/note.js\";\nexport function stamp(tag) {\n  note(tag);\n  return tag + \"!\";\n}\n",
+    )
+    .expect("stamp.js");
+    fs::write(
+        root.join("test/stamp.test.js"),
+        "import { test } from \"node:test\";\nimport { stamp } from \"../src/stamp.js\";\ntest(\"stamp\", () => { stamp(\"a\"); });\n",
+    )
+    .expect("stamp.test.js");
+    fs::write(root.join(".gitignore"), ".fallow\n").expect(".gitignore");
+    git(root, &["init", "-q"]);
+    commit_all(root, "init");
+    let (output, report) = json_mutation(
+        root,
+        &[
+            "src/stamp.js",
+            "--no-cache",
+            "--allow-side-effects",
+            "--record-args",
+            "values",
+        ],
+    );
+    assert!(output.code == 0 || output.code == 2, "{}", output.stderr);
+    assert!(
+        root.join("replay-stamp.txt").exists(),
+        "the replay ran no call"
+    );
+    let changed = report["worktree"]["changed_paths"].to_string();
+    assert!(changed.contains("replay-stamp.txt"), "{report}");
+}

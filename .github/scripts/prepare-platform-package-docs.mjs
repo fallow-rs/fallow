@@ -38,7 +38,7 @@ export const platformLabel = (pkg) => {
   if (os === "darwin") {
     return `${osLabel} ${cpuLabel} (${cpu === "arm64" ? "Apple Silicon" : "Intel"})`;
   }
-  // The CLI platform manifests have no `libc` field, so the name suffix decides.
+  // The `libc` field decides. The name suffix covers a manifest without it.
   const libc =
     pkg.libc?.[0] ??
     (pkg.name.endsWith("-musl") ? "musl" : pkg.name.endsWith("-gnu") ? "glibc" : undefined);

@@ -616,6 +616,7 @@ pub(crate) fn parse_astro_to_module_with_mode(
 
     let mut info = extractor.into_module_info(file_id, content_hash, parsed_suppressions);
     degradation.apply_to(&mut info);
+    crate::visitor::mark_template_callers(&mut info);
     crate::component_contracts::merge(
         &mut info.component_contracts,
         std::mem::take(&mut semantic_usage.component_contracts),
@@ -717,6 +718,7 @@ fn analyze_astro_frontmatter(
     let parser_return = Parser::new(&allocator, &script.body, source_type).parse();
     let mut extractor = ModuleInfoExtractor::new();
     extractor.set_top_level_is_component_body(true);
+    extractor.set_template_reads_root(true);
     extractor.visit_program(&parser_return.program);
     let semantic_usage = crate::parse::compute_semantic_usage_for_extractor_with_mode(
         &parser_return.program,

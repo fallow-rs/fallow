@@ -13,20 +13,23 @@ const path = require("node:path");
 const fs = require("node:fs");
 const os = require("node:os");
 
-const { getPlatformPackage } = require("./platform-package");
+const {
+  getPlatformPackageCandidates,
+  resolveInstalledPlatformPackage,
+} = require("./platform-package");
 const { ensureVerified } = require("./lazy-verify");
 const { isPreSigningVersion } = require("./verify-binary");
 
-function resolvePlatformPackageName() {
-  if (process.platform !== "linux") {
-    return getPlatformPackage(process.platform, process.arch);
-  }
+const SIMILAR_CODE_PROVIDER_ENV = "FALLOW_SIMILAR_CODE_PROVIDER";
+
+function detectLibcFamily() {
+  if (process.platform !== "linux") return undefined;
   try {
-    const { familySync } = require("detect-libc");
-    return getPlatformPackage(process.platform, process.arch, familySync());
+    return require("detect-libc").familySync();
   } catch {
-    // musl binaries are statically linked and work on both glibc and musl
-    return getPlatformPackage(process.platform, process.arch, "musl");
+    // Unknown libc selects the musl package: musl binaries are statically
+    // linked and work on both glibc and musl.
+    return null;
   }
 }
 
@@ -77,20 +80,28 @@ function describeVerifiedStatus(result) {
 // Resolve the platform package directory + manifest path, or print an
 // actionable error and exit. Keeps `runBinary` a flat top-level sequence.
 function resolvePlatformPaths() {
-  const pkg = resolvePlatformPackageName();
-  if (!pkg) {
+  const libcFamily = detectLibcFamily();
+  const candidates = getPlatformPackageCandidates(process.platform, process.arch, libcFamily);
+  if (candidates.length === 0) {
     process.stderr.write(`Unsupported platform: ${process.platform}-${process.arch}\n`);
     process.exit(1);
   }
-  try {
-    const manifestPath = require.resolve(`${pkg}/package.json`);
-    return { pkg, manifestPath, platformPkgDir: path.dirname(manifestPath) };
-  } catch {
-    process.stderr.write(
-      `Could not find ${pkg}. Run 'npm install' to install the platform-specific binary.\n`,
-    );
+  const resolved = resolveInstalledPlatformPackage(candidates);
+  if (resolved === null) {
+    process.stderr.write(missingPlatformPackageMessage(candidates[0], libcFamily));
     process.exit(1);
   }
+  return { ...resolved, platformPkgDir: path.dirname(resolved.manifestPath) };
+}
+
+// npm installs a Linux platform package only for the libc that it detects at
+// install time, so a tree installed for another libc, or from macOS or
+// Windows without `--libc`, has no matching binary.
+function missingPlatformPackageMessage(pkg, libcFamily) {
+  const hint = libcFamily
+    ? ` This host uses ${libcFamily}. When node_modules was installed on another libc or OS, reinstall with \`npm install --os=linux --cpu=${process.arch} --libc=${libcFamily}\`.`
+    : "";
+  return `Could not find ${pkg}. Run 'npm install' to install the platform-specific binary.${hint}\n`;
 }
 
 function printVerifyError(verifyResult) {
@@ -134,20 +145,111 @@ function readResolvedVersion(manifestPath) {
   }
 }
 
+// `fallow` does not depend on its companions (`fallow-type-aware`,
+// `fallow-similar-code`): a project installs one at the same version when it
+// uses it. npm and Yarn hoist it next to `fallow`. pnpm links it only into the
+// project node_modules, so a second lookup starts at the project root. That
+// lookup accepts a companion only when it is in the same node_modules tree as
+// the running `fallow` package, so a global `fallow` never runs a companion
+// that a cloned project ships. Only an exact version match is accepted.
+function resolveCompanionManifest(
+  packageName,
+  fallowVersion,
+  {
+    resolvePackage = require.resolve,
+    readFile = fs.readFileSync,
+    projectRoot = process.cwd(),
+    launcherDir = __dirname,
+  } = {},
+) {
+  const local = matchingManifest(packageName, fallowVersion, resolvePackage, readFile, undefined);
+  if (local !== undefined) return local;
+  const project = matchingManifest(packageName, fallowVersion, resolvePackage, readFile, {
+    paths: [projectRoot],
+  });
+  if (project === undefined) return undefined;
+  const tree = installTree(launcherDir);
+  return tree !== null && tree === installTree(project) ? project : undefined;
+}
+
+function matchingManifest(packageName, fallowVersion, resolvePackage, readFile, options) {
+  try {
+    const manifestPath = resolvePackage(`${packageName}/package.json`, options);
+    const manifest = JSON.parse(readFile(manifestPath, "utf8"));
+    return manifest.version === fallowVersion ? manifestPath : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+// The outermost node_modules directory of a real path, or null outside one.
+function installTree(file) {
+  let real;
+  try {
+    real = fs.realpathSync.native(file);
+  } catch {
+    return null;
+  }
+  const parts = real.split(path.sep);
+  const index = parts.indexOf("node_modules");
+  return index === -1 ? null : parts.slice(0, index + 1).join(path.sep);
+}
+
 function resolveTypeAwareCompanion(
   fallowVersion,
   resolvePackage = require.resolve,
   readFile = fs.readFileSync,
+  projectRoot = process.cwd(),
+  launcherDir = __dirname,
 ) {
+  const manifestPath = resolveCompanionManifest("fallow-type-aware", fallowVersion, {
+    resolvePackage,
+    readFile,
+    projectRoot,
+    launcherDir,
+  });
+  if (manifestPath === undefined) return undefined;
+  const companion = path.join(path.dirname(manifestPath), "fallow-type-aware.mjs");
+  return fs.existsSync(companion) ? companion : undefined;
+}
+
+// The binary of the exact-version `fallow-similar-code` package, after its own
+// resolver and verifier accept it (the Node API loader uses the same pair).
+// The Rust code checks the signature again before it runs the binary.
+function resolveSimilarCodeProvider(fallowVersion, options = {}) {
+  const { report = reportToStderr } = options;
+  const manifestPath = resolveCompanionManifest("fallow-similar-code", fallowVersion, options);
+  if (manifestPath === undefined) return undefined;
+  const scripts = path.join(path.dirname(manifestPath), "scripts");
   try {
-    const manifestPath = resolvePackage("fallow-type-aware/package.json");
-    const manifest = JSON.parse(readFile(manifestPath, "utf8"));
-    if (manifest.version !== fallowVersion) return undefined;
-    const companion = path.join(path.dirname(manifestPath), "fallow-type-aware.mjs");
-    return fs.existsSync(companion) ? companion : undefined;
-  } catch {
-    return undefined;
+    const { resolveBinaryArtifact, resolvePlatformPackage } = require(
+      path.join(scripts, "run-binary.js"),
+    );
+    const { verifyBinary } = require(path.join(scripts, "verify-binary.js"));
+    const artifact = resolveBinaryArtifact(resolvePlatformPackage());
+    const verification = verifyBinary(artifact);
+    if (verification.ok) return artifact.binaryPath;
+    report(`fallow: the similar-code companion failed verification: ${verification.message}\n`);
+  } catch (error) {
+    report(`fallow: the similar-code companion failed verification: ${error.message}\n`);
   }
+  return undefined;
+}
+
+// Write to fd 2 directly: under Bun, `process.stderr` makes the pipes that the
+// child inherits non-blocking (issue #3276). A failed write is ignored.
+function reportToStderr(message) {
+  try {
+    fs.writeSync(2, message);
+  } catch {
+    // Best effort.
+  }
+}
+
+// Only these commands start the similar-code provider, so other runs skip the
+// lookup and its digest check.
+function usesSimilarCode(args) {
+  return args.includes("similar-code") || args.includes("mcp-server");
 }
 
 function typeAwareCommand(
@@ -163,14 +265,27 @@ function childEnvironment(
   resolvedVersion,
   resolveCompanion = resolveTypeAwareCompanion,
   commandOptions,
+  { args = [], resolveProvider = resolveSimilarCodeProvider } = {},
 ) {
-  if (process.env.FALLOW_TYPE_AWARE_BIN) return process.env;
-  const companion = resolveCompanion(resolvedVersion);
-  if (companion === undefined) return process.env;
+  let environment = process.env;
+  if (!process.env.FALLOW_TYPE_AWARE_BIN) {
+    const companion = resolveCompanion(resolvedVersion);
+    if (companion !== undefined) {
+      environment = typeAwareEnvironment(environment, typeAwareCommand(companion, commandOptions));
+    }
+  }
+  if (!process.env[SIMILAR_CODE_PROVIDER_ENV] && usesSimilarCode(args)) {
+    const provider = resolveProvider(resolvedVersion);
+    if (provider !== undefined) {
+      environment = { ...environment, [SIMILAR_CODE_PROVIDER_ENV]: provider };
+    }
+  }
+  return environment;
+}
 
-  const command = typeAwareCommand(companion, commandOptions);
+function typeAwareEnvironment(base, command) {
   const environment = {
-    ...process.env,
+    ...base,
     FALLOW_TYPE_AWARE_BIN: command.binary,
     // Marks the wiring as launcher-provided node_modules resolution so
     // `type-aware status` does not report it as a user-set override.
@@ -232,7 +347,9 @@ function runBinary(binaryBaseName, options = {}) {
   try {
     execFileSync(binaryPath, [...prependArgs, ...process.argv.slice(2)], {
       stdio: "inherit",
-      env: childEnvironment(resolvedVersion),
+      env: childEnvironment(resolvedVersion, undefined, undefined, {
+        args: [...prependArgs, ...process.argv.slice(2)],
+      }),
     });
   } catch (e) {
     if (e.status === undefined) throw e;
@@ -254,6 +371,8 @@ module.exports = {
   isVersionQuery, // test-only
   guardBrokenStdout, // test-only
   exitCodeForChildFailure, // test-only
+  missingPlatformPackageMessage, // test-only
   resolveTypeAwareCompanion, // test-only
+  resolveSimilarCodeProvider, // test-only
   childEnvironment, // test-only
 };

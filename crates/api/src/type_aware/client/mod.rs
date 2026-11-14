@@ -1,5 +1,6 @@
 //! Typed client for the batched type-aware semantic protocol.
 
+mod call_evidence;
 mod empty;
 mod queries;
 mod reconcile;
@@ -564,6 +565,7 @@ pub fn refine_dead_code_results(
     include_private_type_leaks: bool,
     include_type_coupling: bool,
 ) -> Result<Option<SemanticDeadCodeOutcome>, TypeAwareError> {
+    let candidates = std::mem::take(&mut results.constant_parameter_candidates);
     let outcome = refine_dead_code_results_with_transport(
         root,
         results,
@@ -574,10 +576,8 @@ pub fn refine_dead_code_results(
         include_type_coupling,
         SemanticRequestTransport::OneShot,
     );
-    if outcome.is_err() {
-        discard_unverified_semantic_candidates(results);
-    }
-    outcome
+    let outcome = outcome.inspect_err(|_| discard_unverified_semantic_candidates(results))?;
+    call_evidence::add_call_evidence(root, results, candidates, outcome)
 }
 
 /// Refine dead-code results through an explicitly owned persistent sidecar.
@@ -596,6 +596,7 @@ pub fn refine_dead_code_results_in_session(
     include_private_type_leaks: bool,
     include_type_coupling: bool,
 ) -> Result<Option<SemanticDeadCodeOutcome>, TypeAwareError> {
+    call_evidence::drop_candidates(results);
     let outcome = refine_dead_code_results_with_transport(
         root,
         results,
@@ -606,10 +607,7 @@ pub fn refine_dead_code_results_in_session(
         include_type_coupling,
         SemanticRequestTransport::Session(session, changes),
     );
-    if outcome.is_err() {
-        discard_unverified_semantic_candidates(results);
-    }
-    outcome
+    outcome.inspect_err(|_| discard_unverified_semantic_candidates(results))
 }
 
 /// Drop findings that only exist pending semantic verification, so a failed
@@ -1052,7 +1050,6 @@ fn inspect_type_aware_outcome(
     TypeAwareOutcome {
         meta: TypeAwareMeta {
             identity: Some(identity),
-            required_completeness: None,
             queries: response.results.iter().map(query_summary).collect(),
             candidate_decisions: Vec::new(),
             symbol_traces: vec![trace.clone()],
@@ -1082,6 +1079,7 @@ fn inspect_type_aware_outcome(
                 diagnostics: response.phase_timings_ms.diagnostics,
                 symbol_scan: response.phase_timings_ms.semantic_queries,
             },
+            ..TypeAwareMeta::default()
         },
         warnings,
     }
@@ -1265,7 +1263,6 @@ fn build_coupling_outcome(
     let type_aware = TypeAwareOutcome {
         meta: TypeAwareMeta {
             identity: Some(report.identity.clone()),
-            required_completeness: None,
             queries: vec![query],
             candidate_decisions: Vec::new(),
             symbol_traces: Vec::new(),
@@ -1295,6 +1292,7 @@ fn build_coupling_outcome(
                 diagnostics: response.phase_timings_ms.diagnostics,
                 symbol_scan: response.phase_timings_ms.semantic_queries,
             },
+            ..TypeAwareMeta::default()
         },
         warnings,
     };

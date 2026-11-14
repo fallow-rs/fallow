@@ -60,7 +60,7 @@ fn run_doctor_with_cache_dir_and_discovery<F>(
 where
     F: Fn(&Path) -> Result<(), String>,
 {
-    let mut checks = Vec::with_capacity(7);
+    let mut checks = Vec::with_capacity(9);
     let root = match fallow_engine::validate::validate_root(options.root) {
         Ok(root) => {
             checks.push(check(
@@ -205,6 +205,7 @@ fn push_ready_project_checks<F>(
     checks.push(dependencies_check(root));
     checks.push(cache_check(&project.config));
     checks.push(graph_cache_check(&project.config));
+    checks.push(mutation_runner_check(root, project.config.mutation.runner));
 }
 
 /// Report whether the project has an installed dependency tree.
@@ -330,6 +331,90 @@ fn graph_cache_check(config: &fallow_config::ResolvedConfig) -> DoctorCheck {
             Some(remediation("fallow dead-code --quiet", false)),
         ),
     }
+}
+
+/// Report whether a mutation run can start the Vitest of the project.
+///
+/// Advisory, never required, and never a `fail`, because mutation testing is
+/// opt-in. The check reads the `package.json` of the installed package, the
+/// same file that the companion reads before it loads Vitest, so it runs no
+/// project code. The check is skipped when `mutation.runner` does not select
+/// Vitest, the root `package.json` declares no Vitest, and the root
+/// `node_modules` holds no Vitest. A workspace package can declare a Vitest
+/// that the package manager installs at the root, so the root install counts.
+/// The `node-test` and `bun-test` runners skip the check too: their range
+/// applies to the runtime that a run selects.
+fn mutation_runner_check(root: &Path, configured: fallow_config::MutationRunner) -> DoctorCheck {
+    use crate::mutation::runner_select::{Runner, declares_vitest, select_runner};
+    use crate::mutation::runner_version::{
+        check_runner_version, runner_range, runner_version_help, supported_range,
+        unsupported_message,
+    };
+
+    let runner = select_runner(configured, root, &[]);
+    if runner != Runner::Vitest {
+        return skipped(
+            DoctorCheckId::MutationRunner,
+            DoctorCheckCategory::Companion,
+            "The mutation runner checks the version of its runtime when a run starts.",
+        );
+    }
+    if configured == fallow_config::MutationRunner::Auto
+        && !declares_vitest(root)
+        && !root.join("node_modules/vitest/package.json").is_file()
+    {
+        return skipped(
+            DoctorCheckId::MutationRunner,
+            DoctorCheckCategory::Companion,
+            "The project declares no mutation test runner.",
+        );
+    }
+    let range = match runner_range(runner) {
+        Ok(range) => range,
+        Err(message) => {
+            return check(
+                DoctorCheckId::MutationRunner,
+                DoctorCheckCategory::Companion,
+                DoctorCheckStatus::Warn,
+                false,
+                message,
+                None,
+            );
+        }
+    };
+    let version = check_runner_version(runner, range, root);
+    if let (Some(installed), Some(true)) = (&version.installed_version, version.supported) {
+        return check(
+            DoctorCheckId::MutationRunner,
+            DoctorCheckCategory::Companion,
+            DoctorCheckStatus::Pass,
+            false,
+            format!(
+                "{} {installed} is in the supported mutation runner range {}.",
+                range.package,
+                supported_range(range)
+            ),
+            None,
+        );
+    }
+    check(
+        DoctorCheckId::MutationRunner,
+        DoctorCheckCategory::Companion,
+        DoctorCheckStatus::Warn,
+        false,
+        format!(
+            "{}. A mutation run stops before the first mutant. Fix: {}.",
+            unsupported_message(range, version.installed_version.as_deref()),
+            runner_version_help(range)
+        ),
+        Some(remediation(
+            &fallow_config::PackageManager::suggested_add_dev_command(
+                Some(root),
+                &format!("{}@^{}", range.package, range.min_version),
+            ),
+            true,
+        )),
+    )
 }
 
 /// Render a byte count at a unit that shows it.
@@ -544,6 +629,11 @@ fn push_project_failure_checks(
         DoctorCheckCategory::Cache,
         "Configuration readiness did not establish which cache this project uses.",
     ));
+    checks.push(skipped(
+        DoctorCheckId::MutationRunner,
+        DoctorCheckCategory::Companion,
+        "Configuration readiness did not establish which mutation runner this project uses.",
+    ));
 }
 
 fn type_aware_check<F>(
@@ -597,10 +687,10 @@ where
                 required,
                 "Type-aware analysis is enabled, but no trusted companion is discoverable.",
                 Some(remediation(
-                    &project_package_manager(root).add_dev_command(&format!(
-                        "fallow-type-aware@{}",
-                        env!("CARGO_PKG_VERSION")
-                    )),
+                    &fallow_config::PackageManager::suggested_add_dev_command(
+                        Some(root),
+                        &format!("fallow-type-aware@{}", env!("CARGO_PKG_VERSION")),
+                    ),
                     true,
                 )),
             )
@@ -720,6 +810,10 @@ fn push_prerequisite_skips(checks: &mut Vec<DoctorCheck>, message: &str) {
         (DoctorCheckId::Dependencies, DoctorCheckCategory::Project),
         (DoctorCheckId::Cache, DoctorCheckCategory::Cache),
         (DoctorCheckId::GraphCache, DoctorCheckCategory::Cache),
+        (
+            DoctorCheckId::MutationRunner,
+            DoctorCheckCategory::Companion,
+        ),
     ] {
         checks.push(skipped(id, category, message));
     }
@@ -829,6 +923,7 @@ mod tests {
                 DoctorCheckId::Dependencies,
                 DoctorCheckId::Cache,
                 DoctorCheckId::GraphCache,
+                DoctorCheckId::MutationRunner,
             ]
         );
         assert_eq!(
@@ -967,6 +1062,47 @@ mod tests {
             Some(
                 format!(
                     "pnpm add -D fallow-type-aware@{}",
+                    env!("CARGO_PKG_VERSION")
+                )
+                .as_str()
+            )
+        );
+    }
+
+    /// Yarn 1 refuses `yarn add -D` at a workspace root without `-W`
+    /// (fallow-rs/fallow#4519).
+    #[test]
+    fn type_aware_remediation_adds_the_yarn_classic_workspace_root_flag() {
+        let root = tempfile::tempdir().expect("temp root");
+        std::fs::write(
+            root.path().join(".fallowrc.json"),
+            r#"{"typeAware":{"enabled":true}}"#,
+        )
+        .expect("write config");
+        std::fs::write(
+            root.path().join("package.json"),
+            r#"{"private":true,"workspaces":["packages/*"]}"#,
+        )
+        .expect("write package.json");
+        std::fs::write(root.path().join("yarn.lock"), "# yarn lockfile v1\n")
+            .expect("write lockfile");
+
+        let output = run_doctor_with_discovery(
+            &DoctorOptions {
+                root: root.path(),
+                config_path: None,
+            },
+            &|_| Err("missing companion".to_string()),
+        );
+
+        assert_eq!(
+            output.checks[4]
+                .remediation
+                .as_ref()
+                .map(|remediation| remediation.command.as_str()),
+            Some(
+                format!(
+                    "yarn add -D -W fallow-type-aware@{}",
                     env!("CARGO_PKG_VERSION")
                 )
                 .as_str()
@@ -1210,7 +1346,7 @@ mod tests {
         assert_eq!(output.status, DoctorStatus::Fail);
         assert_eq!(
             output.checks.len(),
-            8,
+            9,
             "a failing config must not truncate the report"
         );
         assert_eq!(check(DoctorCheckId::Config).status, DoctorCheckStatus::Fail);

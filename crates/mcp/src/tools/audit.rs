@@ -37,7 +37,7 @@ pub async fn run_audit(binary: &str, params: AuditParams) -> Result<CallToolResu
             audit_typed_value(options, None)
         })
         .await?;
-        if let Some(result) = typed_tool_result(result) {
+        if let Some(result) = typed_tool_result("audit", result) {
             return Ok(result);
         }
     }

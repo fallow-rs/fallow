@@ -788,6 +788,35 @@ fn merge_entry_patterns(
     );
 }
 
+/// Merge the path aliases of one plugin result. An alias replaces an earlier
+/// alias with the same prefix, and it also decides whether that prefix is
+/// checked.
+fn merge_path_aliases(
+    path_aliases: Vec<(String, String)>,
+    checked_alias_prefixes: Vec<String>,
+    result: &mut AggregatedPluginResult,
+) {
+    for (prefix, replacement) in path_aliases {
+        result
+            .path_aliases
+            .retain(|(existing_prefix, _)| existing_prefix != &prefix);
+        result
+            .checked_alias_prefixes
+            .retain(|checked| checked.prefix != prefix);
+        result.path_aliases.push((prefix, replacement));
+    }
+    result
+        .checked_alias_prefixes
+        .extend(
+            checked_alias_prefixes
+                .into_iter()
+                .map(|prefix| super::CheckedAliasPrefix {
+                    scope: String::new(),
+                    prefix,
+                }),
+        );
+}
+
 /// Merge a validated `PluginResult`'s payload fields into the aggregate, applying
 /// the per-plugin `replace_*` semantics for entry patterns, used-export rules,
 /// and path aliases.
@@ -831,12 +860,11 @@ fn merge_plugin_result_fields(
             .into_iter()
             .map(|p| (p, pname.to_string())),
     );
-    for (prefix, replacement) in plugin_result.path_aliases {
-        result
-            .path_aliases
-            .retain(|(existing_prefix, _)| existing_prefix != &prefix);
-        result.path_aliases.push((prefix, replacement));
-    }
+    merge_path_aliases(
+        plugin_result.path_aliases,
+        plugin_result.checked_alias_prefixes,
+        result,
+    );
     result.setup_files.extend(
         plugin_result
             .setup_files

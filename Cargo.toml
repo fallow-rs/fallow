@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "3.42.0"
+version = "3.43.0"
 edition = "2024"
 rust-version = "1.97"
 license = "MIT"
@@ -14,18 +14,18 @@ keywords = ["typescript", "javascript", "lint", "static-analysis", "code-quality
 categories = ["command-line-utilities", "development-tools"]
 
 [workspace.dependencies]
-fallow-api = { version = "3.42.0", path = "crates/api" }
-fallow-core = { version = "3.42.0", path = "crates/core" }
-fallow-config = { version = "3.42.0", path = "crates/config" }
-fallow-extract = { version = "3.42.0", path = "crates/extract" }
-fallow-engine = { version = "3.42.0", path = "crates/engine" }
-fallow-graph = { version = "3.42.0", path = "crates/graph" }
-fallow-mutation = { version = "3.42.0", path = "crates/mutation" }
-fallow-output = { version = "3.42.0", path = "crates/output" }
-fallow-process = { version = "3.42.0", path = "crates/process" }
-fallow-report-protocol = { version = "3.42.0", path = "crates/report-protocol" }
-fallow-security = { version = "3.42.0", path = "crates/security" }
-fallow-types = { version = "3.42.0", path = "crates/types" }
+fallow-api = { version = "3.43.0", path = "crates/api" }
+fallow-core = { version = "3.43.0", path = "crates/core" }
+fallow-config = { version = "3.43.0", path = "crates/config" }
+fallow-extract = { version = "3.43.0", path = "crates/extract" }
+fallow-engine = { version = "3.43.0", path = "crates/engine" }
+fallow-graph = { version = "3.43.0", path = "crates/graph" }
+fallow-mutation = { version = "3.43.0", path = "crates/mutation" }
+fallow-output = { version = "3.43.0", path = "crates/output" }
+fallow-process = { version = "3.43.0", path = "crates/process" }
+fallow-report-protocol = { version = "3.43.0", path = "crates/report-protocol" }
+fallow-security = { version = "3.43.0", path = "crates/security" }
+fallow-types = { version = "3.43.0", path = "crates/types" }
 
 # Parsing & analysis
 oxc_allocator = "0.157"
@@ -347,6 +347,7 @@ allow = [
     { path = "crates/extract/src/css_in_js/object.rs", max = 1, require = ["parse_bounded("] },
     { path = "crates/extract/src/css_metrics.rs", max = 1 },
     { path = "crates/extract/src/federation_runtime.rs", max = 1 },
+    { path = "crates/extract/src/function_contracts.rs", max = 1, require = ["parse_bounded("] },
     { path = "crates/extract/src/inventory.rs", max = 1, require = ["parse_bounded("] },
     { path = "crates/extract/src/mdx.rs", max = 1 },
     { path = "crates/extract/src/nesting.rs", max = 1, require = ["parse_bounded("] },
@@ -355,10 +356,12 @@ allow = [
     { path = "crates/extract/src/sfc_script_merge.rs", max = 1 },
     { path = "crates/extract/src/sfc_template/component_contracts.rs", max = 1 },
     { path = "crates/extract/src/similar_code.rs", max = 1, require = ["parse_bounded("] },
+    { path = "crates/extract/src/sink_identity.rs", max = 1, require = ["parse_bounded("] },
     { path = "crates/extract/src/template_usage.rs", max = 3 },
     # fallow-mutation has no fallow dependencies. The engine calls it only
     # inside parse_bounded (crates/engine/src/mutation/layout.rs). regex.rs
     # parses one mutated regular expression literal to check its syntax.
+    { path = "crates/mutation/src/exports.rs", max = 1 },
     { path = "crates/mutation/src/lib.rs", max = 1 },
     { path = "crates/mutation/src/regex.rs", max = 1 },
 ]

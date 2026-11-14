@@ -116,3 +116,54 @@ pub fn save_last_mutation_report(
         })?;
     Ok(path)
 }
+
+/// The cached witnesses of a project, read once for a `tasks` batch.
+pub struct MutationWitnessStore {
+    witnesses: super::recorded_args::witnesses::WitnessMap,
+    now: u64,
+}
+
+impl MutationWitnessStore {
+    /// The arguments and the result of each side of the witness of
+    /// `mutant_id` with the input `input_id`. `None` when the cache no
+    /// longer has them (7 days).
+    pub fn values(
+        &self,
+        mutant_id: &str,
+        input_id: &str,
+    ) -> Option<(
+        Vec<serde_json::Value>,
+        fallow_output::MutationWitnessSide,
+        fallow_output::MutationWitnessSide,
+    )> {
+        let stored = super::recorded_args::witnesses::fresh_witness(
+            &self.witnesses,
+            mutant_id,
+            input_id,
+            self.now,
+        )?;
+        let side = |side: &super::recorded_args::witnesses::StoredSide| {
+            Some(fallow_output::MutationWitnessSide {
+                outcome: serde_json::from_value(serde_json::Value::String(side.outcome.clone()))
+                    .ok()?,
+                value: side.value.clone(),
+                text: side.text.clone(),
+            })
+        };
+        Some((
+            stored.args.clone(),
+            side(&stored.original)?,
+            side(&stored.mutant)?,
+        ))
+    }
+}
+
+/// The cached witnesses of the project of `analysis`. `None` when the config
+/// cannot load.
+pub fn mutation_witness_store(analysis: &AnalysisOptions) -> Option<MutationWitnessStore> {
+    let cache_dir = cache_dir(analysis).ok()?;
+    Some(MutationWitnessStore {
+        witnesses: super::recorded_args::witnesses::read_witnesses(&cache_dir),
+        now: super::recorded_args::now_secs(),
+    })
+}

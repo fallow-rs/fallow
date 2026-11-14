@@ -108,6 +108,36 @@ fn file_level_suppression_hides_all_exports() {
 }
 
 #[test]
+fn jsdoc_suppression_markers_hide_unused_exports() {
+    let root = fixture_path("suppression-comments");
+    let config = create_config(root);
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    let unused_export_names: Vec<&str> = results
+        .unused_exports
+        .iter()
+        .map(|e| e.export.export_name.as_str())
+        .collect();
+
+    for suppressed in [
+        "jsdocSingle",
+        "jsdocMulti",
+        "jsdocMultiProse",
+        "jsdocFileA",
+        "jsdocFileB",
+    ] {
+        assert!(
+            !unused_export_names.contains(&suppressed),
+            "{suppressed} should be suppressed via a JSDoc marker, found: {unused_export_names:?}"
+        );
+    }
+    assert!(
+        unused_export_names.contains(&"jsdocUnsuppressed"),
+        "a JSDoc comment without a marker must not suppress, found: {unused_export_names:?}"
+    );
+}
+
+#[test]
 fn enum_member_suppression() {
     let root = fixture_path("suppression-comments");
     let config = create_config(root);

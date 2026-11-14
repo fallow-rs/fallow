@@ -207,6 +207,42 @@ fn migrate_existing_fallowrc_jsonc_blocks_run() {
     cleanup(&dir);
 }
 
+#[test]
+fn migrate_typescript_knip_config_only_reports_conversion_hint() {
+    for name in ["knip.ts", "knip.config.ts"] {
+        let suffix = format!("ts-only-{}", name.replace('.', "-"));
+        let dir = migrate_temp_dir(
+            &suffix,
+            name,
+            "export default { entry: ['src/index.ts'] };\n",
+        );
+        let output = run_fallow_raw(&[
+            "migrate",
+            "--dry-run",
+            "--root",
+            dir.to_str().unwrap(),
+            "--quiet",
+        ]);
+        assert_eq!(output.code, 2, "stderr: {}", output.stderr);
+        assert!(
+            output.stderr.contains(name),
+            "stderr must name {name}, got: {}",
+            output.stderr
+        );
+        assert!(
+            output.stderr.contains("Convert to knip.json first"),
+            "stderr must contain the conversion hint, got: {}",
+            output.stderr
+        );
+        assert!(
+            output.stdout.trim().is_empty(),
+            "dry-run must print no config, got: {}",
+            output.stdout
+        );
+        cleanup(&dir);
+    }
+}
+
 /// Build a fixture where a plugin-owned entry imports one source file while a
 /// second source file is unused and ignored only at reporting time.
 fn graph_preserving_fixture(suffix: &str) -> std::path::PathBuf {

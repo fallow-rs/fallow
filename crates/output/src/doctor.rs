@@ -80,6 +80,8 @@ pub enum DoctorCheckId {
     /// while the graph is discarded on every run, and the graph is the larger
     /// of the two on a real project.
     GraphCache,
+    /// The installed version of the mutation test runner.
+    MutationRunner,
 }
 
 /// Stable category for a doctor check.

@@ -5,6 +5,7 @@ mod independent_this;
 mod local_class_heritage;
 mod remap;
 mod requirements;
+mod semantic_calls;
 mod shared_state;
 mod ssr_load_module;
 mod this_scope;
@@ -13,6 +14,7 @@ use requirements::{BindingRequirements, RequirementArena};
 use std::cell::{Cell, RefCell};
 pub(crate) mod react;
 mod visit_impl;
+pub(crate) use semantic_calls::mark_template_callers;
 pub(crate) use ssr_load_module::{ssr_load_module_call, ssr_load_module_source};
 pub(crate) use visit_impl::push_member_tag_accesses;
 
@@ -1104,6 +1106,10 @@ pub(crate) struct ModuleInfoExtractor {
     /// Value references to runtime ESM import bindings, set by the semantic
     /// pass. `import_index` points into `imports`.
     import_binding_references: Vec<ImportBindingReference>,
+    /// Call evidence of plain functions, set by the semantic pass.
+    /// `CallTarget::Import` points into `imports`.
+    function_contracts: fallow_types::extract::FunctionContractFacts,
+    opaque_loads: semantic_calls::OpaqueLoadState,
     /// Index into `callee_uses` of the entry for each callee path and form.
     /// The second key element is the `is_new` form. Working state only: not
     /// persisted and not merged across SFC script blocks, so each block has
@@ -1539,22 +1545,6 @@ impl ModuleInfoExtractor {
         self.subclass_binding_writes = binding_writes;
     }
 
-    pub(crate) fn imported_call_reference_candidates(&self) -> FxHashSet<Span> {
-        self.pending_imported_call_sites
-            .iter()
-            .map(|(span, _)| *span)
-            .collect()
-    }
-
-    pub(crate) fn resolve_imported_call_sites(&mut self, references: &FxHashSet<Span>) {
-        self.imported_call_sites.extend(
-            self.pending_imported_call_sites
-                .drain(..)
-                .filter(|(span, _)| references.contains(span))
-                .map(|(_, call)| call),
-        );
-    }
-
     /// Store the import binding references that the semantic pass found.
     pub(crate) fn push_namespace_member_uses(
         &mut self,
@@ -1562,13 +1552,6 @@ impl ModuleInfoExtractor {
     ) {
         self.semantic_facts
             .extend(uses.into_iter().map(SemanticFact::NamespaceMemberUse));
-    }
-
-    pub(crate) fn set_import_binding_references(
-        &mut self,
-        references: Vec<ImportBindingReference>,
-    ) {
-        self.import_binding_references = references;
     }
 
     /// Record the template that a `defineOgImage('Name')` or
@@ -3591,6 +3574,8 @@ impl ModuleInfoExtractor {
             component_props: Vec::new(),
             component_contracts: None,
             effect_facts: None,
+            function_contracts: (!self.function_contracts.is_empty())
+                .then(|| Box::new(self.function_contracts)),
             has_props_attrs_fallthrough: false,
             has_define_expose: false,
             has_define_model: false,
@@ -3614,9 +3599,8 @@ impl ModuleInfoExtractor {
             load_return_keys: self.load_return_keys,
             has_unharvestable_load: self.has_unharvestable_load,
             has_load_data_whole_use: self.has_load_data_whole_use,
-            // Derived in `release_resolution_payload` from `whole_object_uses`.
+            // Both derived in `release_resolution_payload` from `whole_object_uses`.
             has_page_data_store_whole_use: false,
-            // Derived in `release_resolution_payload` from `whole_object_uses`.
             has_route_loader_data_whole_use: false,
             component_functions: self.component_functions,
             react_props: self.react_props,
@@ -3658,6 +3642,7 @@ impl ModuleInfoExtractor {
         let mut type_member_types = self.collect_type_member_types();
         self.rebase_shared_state(info.imports.len() as u32);
         self.merge_import_binding_references(info);
+        self.merge_function_contracts(info);
         info.imports.append(&mut self.imports);
         let mut exports = std::mem::take(&mut info.exports).to_vec();
         exports.append(&mut self.exports);

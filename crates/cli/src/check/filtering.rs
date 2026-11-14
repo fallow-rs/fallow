@@ -1342,6 +1342,34 @@ mod tests {
         );
     }
 
+    /// A low-severity security finding with empty optional fields. Tests set
+    /// the fields they check and take the rest from here.
+    fn sample_security_finding() -> SecurityFinding {
+        SecurityFinding {
+            finding_id: String::new(),
+            stable_finding_id: None,
+            stable_id_input: None,
+            kind: SecurityFindingKind::TaintedSink,
+            category: None,
+            cwe: None,
+            path: PathBuf::new(),
+            line: 1,
+            col: 0,
+            evidence: "candidate".into(),
+            source_backed: false,
+            source_read: None,
+            severity: SecuritySeverity::Low,
+            trace: Vec::new(),
+            actions: Vec::new(),
+            dead_code: None,
+            reachability: None,
+            candidate: SecurityCandidate::default(),
+            taint_flow: None,
+            runtime: None,
+            attack_surface: None,
+        }
+    }
+
     fn build_diff(text: &str) -> crate::report::ci::diff_filter::DiffIndex {
         crate::report::ci::diff_filter::DiffIndex::from_unified_diff(text)
     }
@@ -1478,20 +1506,12 @@ mod tests {
         let root = Path::new("/project");
         let mut results = AnalysisResults::default();
         results.security_findings.push(SecurityFinding {
-            finding_id: String::new(),
-            candidate: fallow_types::results::SecurityCandidate::default(),
-            taint_flow: None,
-            attack_surface: None,
             kind: SecurityFindingKind::ClientServerLeak,
             category: None,
             cwe: None,
             path: PathBuf::from("/project/src/client.tsx"),
             line: 2,
             col: 0,
-            evidence: "candidate".into(),
-            source_backed: false,
-            source_read: None,
-            severity: SecuritySeverity::Low,
             trace: vec![
                 TraceHop {
                     path: PathBuf::from("/project/src/client.tsx"),
@@ -1506,10 +1526,7 @@ mod tests {
                     role: TraceHopRole::SecretSource,
                 },
             ],
-            actions: Vec::new(),
-            dead_code: None,
-            reachability: None,
-            runtime: None,
+            ..sample_security_finding()
         });
 
         filter_results_by_diff(&mut results, &diff, root);
@@ -1529,23 +1546,12 @@ mod tests {
         let root = Path::new("/project");
         let mut results = AnalysisResults::default();
         results.security_findings.push(SecurityFinding {
-            finding_id: String::new(),
-            candidate: fallow_types::results::SecurityCandidate::default(),
-            taint_flow: None,
-            attack_surface: None,
             kind: SecurityFindingKind::TaintedSink,
             category: Some("command-injection".into()),
             cwe: Some(78),
             path: PathBuf::from("/project/src/runner.ts"),
             line: 10,
             col: 0,
-            evidence: "candidate".into(),
-            source_backed: false,
-            source_read: None,
-            severity: SecuritySeverity::Low,
-            trace: vec![],
-            actions: Vec::new(),
-            dead_code: None,
             reachability: Some(SecurityReachability {
                 reachable_from_entry: false,
                 reachable_from_untrusted_source: true,
@@ -1568,7 +1574,7 @@ mod tests {
                 blast_radius: 0,
                 crosses_boundary: false,
             }),
-            runtime: None,
+            ..sample_security_finding()
         });
 
         filter_results_by_diff(&mut results, &diff, root);
@@ -1588,25 +1594,13 @@ mod tests {
         let root = Path::new("/project");
         let mut results = AnalysisResults::default();
         results.security_findings.push(SecurityFinding {
-            finding_id: String::new(),
-            candidate: fallow_types::results::SecurityCandidate::default(),
-            taint_flow: None,
-            attack_surface: None,
             kind: SecurityFindingKind::TaintedSink,
             category: Some("dangerous-html".into()),
             cwe: Some(79),
             path: PathBuf::from("/project/src/render.ts"),
             line: 12,
             col: 0,
-            evidence: "candidate".into(),
-            source_backed: false,
-            source_read: None,
-            severity: SecuritySeverity::Low,
-            trace: vec![],
-            actions: Vec::new(),
-            dead_code: None,
-            reachability: None,
-            runtime: None,
+            ..sample_security_finding()
         });
 
         retain_gate_new(&mut results, &diff, root);
@@ -1656,20 +1650,12 @@ mod tests {
         let root = Path::new("/project");
         let mut results = AnalysisResults::default();
         results.security_findings.push(SecurityFinding {
-            finding_id: String::new(),
-            candidate: fallow_types::results::SecurityCandidate::default(),
-            taint_flow: None,
-            attack_surface: None,
             kind: SecurityFindingKind::ClientServerLeak,
             category: None,
             cwe: None,
             path: PathBuf::from("/project/src/client.tsx"),
             line: 2,
             col: 0,
-            evidence: "candidate".into(),
-            source_backed: false,
-            source_read: None,
-            severity: SecuritySeverity::Low,
             trace: vec![
                 TraceHop {
                     path: PathBuf::from("/project/src/client.tsx"),
@@ -1684,10 +1670,7 @@ mod tests {
                     role: TraceHopRole::SecretSource,
                 },
             ],
-            actions: Vec::new(),
-            dead_code: None,
-            reachability: None,
-            runtime: None,
+            ..sample_security_finding()
         });
 
         // Advisory keeps it; the gate drops it.
@@ -1713,23 +1696,12 @@ mod tests {
         let root = Path::new("/project");
         let mut results = AnalysisResults::default();
         results.security_findings.push(SecurityFinding {
-            finding_id: String::new(),
-            candidate: fallow_types::results::SecurityCandidate::default(),
-            taint_flow: None,
-            attack_surface: None,
             kind: SecurityFindingKind::TaintedSink,
             category: Some("command-injection".into()),
             cwe: Some(78),
             path: PathBuf::from("/project/src/runner.ts"),
             line: 10,
             col: 0,
-            evidence: "candidate".into(),
-            source_backed: false,
-            source_read: None,
-            severity: SecuritySeverity::Low,
-            trace: vec![],
-            actions: Vec::new(),
-            dead_code: None,
             reachability: Some(SecurityReachability {
                 reachable_from_entry: false,
                 reachable_from_untrusted_source: true,
@@ -1744,7 +1716,7 @@ mod tests {
                 blast_radius: 0,
                 crosses_boundary: false,
             }),
-            runtime: None,
+            ..sample_security_finding()
         });
 
         retain_gate_new(&mut results, &diff, root);
@@ -1767,30 +1739,19 @@ mod tests {
         let root = Path::new("/project");
         let mut results = AnalysisResults::default();
         results.security_findings.push(SecurityFinding {
-            finding_id: String::new(),
-            candidate: fallow_types::results::SecurityCandidate::default(),
-            taint_flow: None,
-            attack_surface: None,
             kind: SecurityFindingKind::TaintedSink,
             category: Some("dangerous-html".into()),
             cwe: Some(79),
             path: PathBuf::from("/project/src/sink.ts"),
             line: 20,
             col: 0,
-            evidence: "candidate".into(),
-            source_backed: false,
-            source_read: None,
-            severity: SecuritySeverity::Low,
             trace: vec![TraceHop {
                 path: PathBuf::from("/project/src/transit.ts"),
                 line: 4,
                 col: 0,
                 role: TraceHopRole::Intermediate,
             }],
-            actions: Vec::new(),
-            dead_code: None,
-            reachability: None,
-            runtime: None,
+            ..sample_security_finding()
         });
 
         retain_gate_new(&mut results, &diff, root);

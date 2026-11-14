@@ -20,7 +20,8 @@ fn at(dir: &std::path::Path) -> fallow_types::path_guard::CacheTarget<'_> {
 #[cfg(test)]
 pub(crate) use conversion::module_to_cached_from_parts;
 pub use conversion::{
-    cached_to_module, cached_to_module_opts, current_unix_seconds, module_to_cached,
+    cached_hit_to_module, cached_to_module, cached_to_module_opts, current_unix_seconds,
+    module_to_cached,
 };
 pub use store::CacheStore;
 pub use types::{

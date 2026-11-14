@@ -34,7 +34,7 @@ pub async fn run_feature_flags(
     .await?
     .map_or_else(
         |err| CallToolResult::error(vec![ContentBlock::text(programmatic_error_body(&err))]),
-        |value| json_success(&value),
+        |value| json_success("feature_flags", &value),
     );
     Ok(result)
 }

@@ -37,3 +37,28 @@ pub(super) fn prepare_check_config(opts: &CheckOptions<'_>) -> Result<ResolvedCo
     apply_type_aware_private_leak_default(&mut config, opts.filters.any_active());
     Ok(config)
 }
+
+pub(super) fn parse_type_aware_bool(value: &str, output: OutputFormat) -> Result<bool, ExitCode> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "1" | "true" | "yes" | "on" => Ok(true),
+        "0" | "false" | "no" | "off" => Ok(false),
+        _ => Err(emit_input_error(
+            "FALLOW_TYPE_AWARE must be one of true, false, 1, 0, yes, no, on, or off",
+            output,
+        )),
+    }
+}
+
+pub(super) fn parse_type_aware_require(
+    value: &str,
+    output: OutputFormat,
+) -> Result<fallow_config::TypeAwareRequire, ExitCode> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "best-effort" => Ok(fallow_config::TypeAwareRequire::BestEffort),
+        "complete" => Ok(fallow_config::TypeAwareRequire::Complete),
+        _ => Err(emit_input_error(
+            "FALLOW_TYPE_AWARE_REQUIRE must be best-effort or complete",
+            output,
+        )),
+    }
+}

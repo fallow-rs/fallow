@@ -41,7 +41,9 @@ pub enum TestReachMasking {
 ///
 /// Treat this as an open set: a later version can add a class. A consumer
 /// must read an unknown value as "needs attention".
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize, serde::Deserialize,
+)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum TestReachClass {

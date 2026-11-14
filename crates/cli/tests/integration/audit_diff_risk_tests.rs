@@ -346,7 +346,7 @@ fn sarif_carries_diff_risk_rule_ids() {
         .as_array()
         .unwrap()
         .iter()
-        .find(|run| run["automationDetails"]["id"] == "fallow/audit/diff-risk")
+        .find(|run| run["automationDetails"]["id"] == "fallow/audit/diff-risk/")
         .expect("diff-risk SARIF run");
     assert_eq!(run["results"][0]["ruleId"], "fallow/weakened-tests");
     assert_eq!(run["results"][0]["level"], "warning");
@@ -357,6 +357,46 @@ fn sarif_carries_diff_risk_rule_ids() {
     assert_eq!(
         run["tool"]["driver"]["rules"][0]["id"],
         "fallow/weakened-tests"
+    );
+}
+
+#[test]
+fn existing_skip_on_a_line_that_becomes_async_is_not_a_finding() {
+    let tmp = skip_only_change();
+    let dir = tmp.path();
+    commit_all(dir, "skip in base");
+    fs::write(
+        dir.join("src/index.test.ts"),
+        "import { price } from './index';\n\nit.skip('doubles', async () => {\n  expect(price(1)).toBe(2);\n});\n\nit('keeps zero', () => {\n  expect(price(0)).toBe(0);\n});\n",
+    )
+    .unwrap();
+
+    let (code, json) = audit_json(dir, &[]);
+    assert_eq!(code, 0, "{json}");
+    assert_eq!(rule_lines(&json), vec![]);
+}
+
+#[test]
+fn skip_that_moves_to_another_test_is_a_finding() {
+    let tmp = skip_only_change();
+    let dir = tmp.path();
+    commit_all(dir, "skip in base");
+    fs::write(
+        dir.join("src/index.test.ts"),
+        "import { price } from './index';\n\nit('doubles', () => {\n  expect(price(1)).toBe(2);\n});\n\nit.skip('keeps zero', () => {\n  expect(price(0)).toBe(0);\n});\n",
+    )
+    .unwrap();
+
+    let (code, json) = audit_json(dir, &[]);
+    assert_eq!(code, 0, "warn findings keep exit 0: {json}");
+    assert_eq!(
+        rule_lines(&json),
+        vec![rule(
+            "weakened-tests",
+            Some("skip-only"),
+            "src/index.test.ts",
+            Some(7)
+        )]
     );
 }
 

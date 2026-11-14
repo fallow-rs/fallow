@@ -1588,6 +1588,9 @@ fn audit_control_model(change_manifest: bool) -> ProjectModel {
     }
 }
 
+/// The finding kinds that the `new-only` audit keeps outside the changed files.
+const KEPT_OUTSIDE_CHANGED_FILES: [&str; 2] = ["unused_files", "unused_exports"];
+
 /// The split that I4 expects, built without the audit code: the head
 /// findings of the standalone commands in scope, each one introduced when no
 /// finding with the same identity exists at the base commit.
@@ -1595,7 +1598,10 @@ fn audit_control_model(change_manifest: bool) -> ProjectModel {
 /// - In scope: a key with a path in a changed file. A dependency finding has
 ///   its manifest as its path, so it is in scope only when the manifest
 ///   changed. A key over several files (a clone group) is in scope when one
-///   of them changed.
+///   of them changed. Outside the changed files, an unused file or an unused
+///   export is in scope only when the base does not have it. The default
+///   `new-only` gate counts unused code that a change creates there, and
+///   leaves out unused code that was already there.
 /// - Identity: the kind, the paths, and the symbol, without line numbers. The
 ///   base paths follow the renames of the head commit first. The renames come
 ///   from git, not from the model: a rename counts only when git detects it.
@@ -1642,12 +1648,17 @@ fn expected_audit_split(project: &Project) -> AuditKeys {
         let seen = head_seen.entry(key_identity.clone()).or_default();
         let occurrence = *seen;
         *seen += 1;
-        if !key.path.split(" -> ").any(|path| changed.contains(path)) {
+        let in_changed_file = key.path.split(" -> ").any(|path| changed.contains(path));
+        if !in_changed_file && !KEPT_OUTSIDE_CHANGED_FILES.contains(&key.kind.as_str()) {
+            continue;
+        }
+        let in_base = occurrence < base_counts.get(&key_identity).copied().unwrap_or(0);
+        if !in_changed_file && in_base {
             continue;
         }
         let untouched_clone =
             key.kind == keys::DUPLICATION_KIND && !clone_holds_added_line(&key.symbol, &added);
-        if untouched_clone || occurrence < base_counts.get(&key_identity).copied().unwrap_or(0) {
+        if untouched_clone || in_base {
             expected.inherited.insert(key);
         } else {
             expected.introduced.insert(key);

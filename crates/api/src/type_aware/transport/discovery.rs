@@ -11,17 +11,19 @@ pub(super) fn canonicalize_root(root: &Path) -> Result<PathBuf, TypeAwareError> 
     })
 }
 
-pub(super) fn discover_type_aware_sidecar(_root: &Path) -> Result<PathBuf, String> {
+pub(super) fn discover_type_aware_sidecar(root: &Path) -> Result<PathBuf, String> {
     let current_exe = std::env::current_exe().ok();
     discover_type_aware_sidecar_from(
         non_empty_env("FALLOW_TYPE_AWARE_BIN").as_deref(),
         current_exe.as_deref(),
+        Some(root),
     )
 }
 
 pub(super) fn discover_type_aware_sidecar_from(
     override_value: Option<&str>,
     current_exe: Option<&Path>,
+    project_root: Option<&Path>,
 ) -> Result<PathBuf, String> {
     if let Some(value) = override_value {
         let path = PathBuf::from(value);
@@ -38,8 +40,23 @@ pub(super) fn discover_type_aware_sidecar_from(
     }
 
     Err(format!(
-        "Type-aware sidecar `{SIDECAR_BINARY}` was not found next to the active Fallow executable. Install it in the same directory as Fallow or set FALLOW_TYPE_AWARE_BIN to a trusted executable path. Project-local node_modules and PATH are intentionally not searched. The normal command still works without --type-aware."
+        "Type-aware sidecar `{SIDECAR_BINARY}` was not found next to the active Fallow executable. {} The Fallow binary itself does not search project node_modules or PATH. The normal command still works without --type-aware.",
+        missing_sidecar_install_hint(project_root)
     ))
+}
+
+/// How to install the exact-version companion for each way to run Fallow.
+/// The project command uses the package manager of `project_root` (npm when
+/// no lockfile or `packageManager` field names one); the command is only shown.
+pub(super) fn missing_sidecar_install_hint(project_root: Option<&Path>) -> String {
+    let project_command = fallow_config::PackageManager::suggested_add_dev_command(
+        project_root,
+        &format!("{SIDECAR_BINARY}@{}", env!("CARGO_PKG_VERSION")),
+    );
+    format!(
+        "For a project that has `fallow` as a devDependency, add the companion at the same version: `{project_command}`. For a global `fallow`, run `npm install --global {SIDECAR_BINARY}@{version}`. For npx, start both packages together: `npx -p fallow@{version} -p {SIDECAR_BINARY}@{version} fallow`, or set FALLOW_TYPE_AWARE_BIN to a trusted executable path.",
+        version = env!("CARGO_PKG_VERSION")
+    )
 }
 
 pub(super) fn canonical_sidecar_path(path: &Path) -> Result<PathBuf, String> {

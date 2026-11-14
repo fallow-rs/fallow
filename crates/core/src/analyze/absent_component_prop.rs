@@ -7,6 +7,8 @@ use crate::graph::{
 };
 use crate::resolve::{ResolvedImport, ResolvedModule};
 use crate::results::{AbsentComponentProp, ComponentPropCallSite};
+use crate::suppress::IssueKind;
+use fallow_config::Severity;
 use fallow_types::extract::{
     ComponentFramework, ComponentPropDeclaration, ComponentReference, ExportName, ImportedName,
     ModuleInfo, angular_template_member_names,
@@ -31,13 +33,13 @@ struct Consumer<'a> {
 }
 
 /// Inputs to shared optional-input analysis.
-pub(super) struct AbsentPropInput<'a> {
-    pub graph: &'a ModuleGraph,
-    pub modules: &'a [ModuleInfo],
-    pub resolved_modules: &'a [ResolvedModule],
-    pub declared_deps: &'a FxHashSet<String>,
-    pub public_api_entry_points: &'a FxHashSet<FileId>,
-    pub line_offsets_by_file: &'a LineOffsetsMap<'a>,
+struct AbsentPropInput<'a> {
+    graph: &'a ModuleGraph,
+    modules: &'a [ModuleInfo],
+    resolved_modules: &'a [ResolvedModule],
+    declared_deps: &'a FxHashSet<String>,
+    public_api_entry_points: &'a FxHashSet<FileId>,
+    line_offsets_by_file: &'a LineOffsetsMap<'a>,
 }
 
 struct ContractIndex<'a> {
@@ -492,7 +494,7 @@ impl<'a> ContractIndex<'a> {
 }
 
 /// Find optional inputs with a closed, known set of reachable static callers.
-pub(super) fn find_absent_component_props(input: &AbsentPropInput<'_>) -> Vec<AbsentComponentProp> {
+fn find_absent_component_props(input: &AbsentPropInput<'_>) -> Vec<AbsentComponentProp> {
     let index = ContractIndex::new(input);
     let mut blocked = FxHashSet::default();
     let mut consumers: FxHashMap<ComponentId, Vec<Consumer<'_>>> = FxHashMap::default();
@@ -755,4 +757,33 @@ fn framework_name(framework: ComponentFramework) -> &'static str {
         ComponentFramework::Lit => "lit",
         ComponentFramework::Ember => "ember",
     }
+}
+
+/// Run the rule when it is on for any path, and store the findings.
+pub(super) fn populate(input: &mut super::FrameworkSpecificFindingsInput<'_>) {
+    if input.config.rules.absent_component_props == Severity::Off
+        && !input.config.overrides.iter().any(|overrides| {
+            overrides
+                .rules
+                .absent_component_props
+                .is_some_and(|severity| severity != Severity::Off)
+        })
+    {
+        return;
+    }
+    let findings = find_absent_component_props(&AbsentPropInput {
+        graph: input.graph,
+        modules: input.modules,
+        resolved_modules: input.resolved_modules,
+        declared_deps: input.declared_deps,
+        public_api_entry_points: input.public_api_entry_points,
+        line_offsets_by_file: input.line_offsets_by_file,
+    })
+    .into_iter()
+    .map(crate::results::AbsentComponentPropFinding::with_actions)
+    .collect();
+    input.results.absent_component_props =
+        super::retain_unsuppressed(input, findings, IssueKind::AbsentComponentProp, |finding| {
+            Some((finding.prop.path.as_path(), finding.prop.line))
+        });
 }

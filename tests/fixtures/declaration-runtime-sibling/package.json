@@ -1,0 +1,6 @@
+{
+  "name": "declaration-runtime-sibling",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts"
+}

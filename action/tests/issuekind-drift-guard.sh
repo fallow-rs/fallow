@@ -196,6 +196,7 @@ issuekind_json_key_fallback() {
     unrendered-component) echo "unrendered_components" ;;
     unused-component-prop) echo "unused_component_props" ;;
     absent-component-prop) echo "absent_component_props" ;;
+    constant-parameter) echo "constant_parameters" ;;
     unused-component-emit) echo "unused_component_emits" ;;
     unused-component-input) echo "unused_component_inputs" ;;
     unused-component-output) echo "unused_component_outputs" ;;

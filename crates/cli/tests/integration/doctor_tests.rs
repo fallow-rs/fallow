@@ -212,7 +212,8 @@ fn zero_config_json_is_stable_and_path_free() {
             "type-aware",
             "dependencies",
             "cache",
-            "graph-cache"
+            "graph-cache",
+            "mutation-runner"
         ]
     );
 }
@@ -237,7 +238,7 @@ fn invalid_config_returns_complete_failed_json_report() {
     let json = parse_json(&output);
     assert_eq!(json["kind"], "doctor");
     assert_eq!(json["status"], "fail");
-    assert_eq!(json["checks"].as_array().map(Vec::len), Some(8));
+    assert_eq!(json["checks"].as_array().map(Vec::len), Some(9));
     assert_eq!(json["checks"][1]["id"], "config");
     assert_eq!(json["checks"][1]["status"], "fail");
 }

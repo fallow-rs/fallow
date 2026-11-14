@@ -1,6 +1,7 @@
 import {
   detectDeadCode,
   type AbsentComponentPropFinding,
+  type ConstantParameterFinding,
   type DeadCodeOptions,
 } from "../../types/index.js";
 
@@ -18,3 +19,20 @@ const consume = async (): Promise<void> => {
   }
 };
 void consume;
+
+const constantOptions: DeadCodeOptions = { root: ".", constantParameters: true };
+const consumeConstantParameters = async (): Promise<void> => {
+  const report = await detectDeadCode(constantOptions);
+  const candidates: ConstantParameterFinding[] = report.constant_parameters ?? [];
+  const total: number | undefined = report.summary.constant_parameters;
+  void total;
+  for (const candidate of candidates) {
+    const reason: string = candidate.reason;
+    const text: string | undefined = candidate.value?.text;
+    const callers: string[] = candidate.inspected_call_sites.map((caller) => caller.path);
+    void reason;
+    void text;
+    void callers;
+  }
+};
+void consumeConstantParameters;

@@ -31,7 +31,7 @@ mod workspace_package_asset;
 pub(super) use package_map::{PackageMapTarget, package_map_target};
 pub(super) use path_aliases::{
     alias_match_remainder, applicable_path_aliases, matches_plugin_path_alias,
-    try_path_alias_fallback,
+    missing_path_alias_targets, try_path_alias_fallback,
 };
 pub(super) use relative_package_root::try_relative_package_root_source_fallback;
 use scss_paths::{find_scss_through_path_alias, lookup_scss_path};
