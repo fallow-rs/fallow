@@ -50,6 +50,17 @@ fn git(root: &Path, args: &[&str], epoch: Option<u64>) {
     assert!(status.success(), "git {args:?} failed");
 }
 
+/// The `file://` URL of a local repository. A Windows path has no leading
+/// slash, and git refuses its backslashes in a URL.
+fn file_url(path: &Path) -> String {
+    let path = path.to_string_lossy().replace('\\', "/");
+    if path.starts_with('/') {
+        format!("file://{path}")
+    } else {
+        format!("file:///{path}")
+    }
+}
+
 fn init_repo(root: &Path) {
     git(root, &["init", "--quiet", "--initial-branch=main"], None);
     git(root, &["config", "user.name", "Churn Fixture"], None);
@@ -510,7 +521,7 @@ struct ShallowFixture {
 impl ShallowFixture {
     fn new(commits: u64) -> Self {
         let dir = tempfile::tempdir().expect("shallow fixture tempdir");
-        let base = dir.path().canonicalize().expect("canonical fixture base");
+        let base = dunce::canonicalize(dir.path()).expect("canonical fixture base");
         let origin = base.join("origin");
         std::fs::create_dir_all(&origin).expect("create origin");
         init_repo(&origin);
@@ -522,7 +533,7 @@ impl ShallowFixture {
                 BASE_EPOCH + index * SECS_PER_DAY,
             );
         }
-        let url = format!("file://{}", origin.display());
+        let url = file_url(&origin);
         git(
             &base,
             &["clone", "--quiet", "--depth", "1", &url, "clone"],

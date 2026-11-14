@@ -1,3 +1,0 @@
-### Fixed
-
-- **The opt-in `constant-parameter` rule no longer reports a function behind a wrapped default export.** For `export default pad as Fn` (also `satisfies`, `!` and parentheses), the rule did not connect the calls of an importer to the function. It then reported a parameter as constant from the calls in the declaring file alone, and it did not apply the public API and entry-point conditions to that export. The rule now treats the wrapped export as a use of the function as a value, and skips the function. The first run after the upgrade parses each file again, because the cached facts changed.

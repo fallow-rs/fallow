@@ -32,6 +32,7 @@ import {
 } from "./backend.mjs";
 import { targetDirection } from "./accessor-direction.mjs";
 import { hasToken, isAmbient } from "./declaration-facts.mjs";
+import { canonicalFileIdentity } from "./file-identity.mjs";
 import { declarationsForSymbol } from "./semantic-identity.mjs";
 
 const { SymbolFlags, TypeFlags } = sync;
@@ -534,6 +535,13 @@ const callsByStart = (sourceFile, starts) => {
   return found;
 };
 
+// The checker gives file names with forward slashes, and a request path has
+// the separators of the platform. The identities make both forms comparable.
+const programEntry = (project) => {
+  const files = new Set(project.program.getSourceFileNames());
+  return { project, files, identities: new Set([...files].map(canonicalFileIdentity)) };
+};
+
 // The programs of the request. A project object belongs to the snapshot that
 // made it, so each snapshot stays open until the request ends.
 class Programs {
@@ -563,10 +571,7 @@ class Programs {
       const started = performance.now();
       const snapshot = this.track(this.api.updateSnapshot({ openProjects: [config] }));
       const project = snapshot.getProject(config) ?? null;
-      this.projects.set(
-        config,
-        project && { project, files: new Set(project.program.getSourceFileNames()) },
-      );
+      this.projects.set(config, project && programEntry(project));
       this.openMs = (this.openMs ?? 0) + (performance.now() - started);
     }
     return this.projects.get(config);
@@ -579,7 +584,7 @@ class Programs {
     // The checker parses only script files. It fails on a component file.
     if (SCRIPT_EXTENSIONS.has(path.extname(absolutePath).toLowerCase())) {
       for (const entry of this.projects.values()) {
-        if (entry?.files.has(absolutePath)) {
+        if (entry?.identities.has(canonicalFileIdentity(absolutePath))) {
           found = entry;
           break;
         }
@@ -587,7 +592,7 @@ class Programs {
       if (found === null) {
         const config = this.defaultConfig(absolutePath);
         const entry = config === null ? null : this.open(config);
-        found = entry?.files.has(absolutePath) ? entry : null;
+        found = entry?.identities.has(canonicalFileIdentity(absolutePath)) ? entry : null;
       }
     }
     this.byFile.set(absolutePath, found);
@@ -1147,7 +1152,7 @@ const recordPrototypes = (risks, classNames, text) => {
 // The checks of one file for the program of one class candidate.
 const scanEntryFile = (entry, state, names, absolutePath, text, tokens) => {
   const named = [...names].filter((name) => tokens.has(name));
-  if (!entry.files.has(absolutePath)) {
+  if (!entry.identities.has(canonicalFileIdentity(absolutePath))) {
     named.forEach((name) => addRisk(state, name, "outside-program"));
     if (COMPUTED_CALL.test(text) || REFLECT_CALL.test(text)) state.untypedComputedCalls += 1;
     return;
@@ -1262,7 +1267,9 @@ const usagePositions = (project, usages) => {
   const known = new Set();
   for (const usage of usages) {
     const name = usage.name.resolve(project);
-    if (name) known.add(`${name.getSourceFile().fileName}\u0000${name.getStart()}`);
+    if (name) {
+      known.add(`${canonicalFileIdentity(name.getSourceFile().fileName)}\u0000${name.getStart()}`);
+    }
   }
   return known;
 };
@@ -1316,7 +1323,7 @@ const structuralAlias = (project, classNode, declaration, references, usages) =>
   if (!classType) return "unresolved-class";
   const checked = new Map();
   for (const reference of references) {
-    if (known.has(`${reference.file}\u0000${reference.position}`)) continue;
+    if (known.has(`${canonicalFileIdentity(reference.file)}\u0000${reference.position}`)) continue;
     const { id } = reference.symbol;
     if (!checked.has(id))
       checked.set(id, memberAlias(project, reference.symbol, declaration, classType));

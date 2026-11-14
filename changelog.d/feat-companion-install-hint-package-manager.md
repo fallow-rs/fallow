@@ -1,3 +1,0 @@
-### Changed
-
-- **The install hint for a missing companion uses the package manager of the project.** When `fallow-type-aware` or `fallow-similar-code` is missing, the hint of `--type-aware`, `mutation --typecheck`, `fallow type-aware status`, `fallow similar-code` and `fallow similar-code status` now shows `pnpm add -D`, `yarn add -D` or `bun add -d` for a project that uses pnpm, Yarn or Bun, the same as `fallow doctor`. Fallow looks in the analysis root (the working directory for `similar-code status` and `setup`) and then in each parent directory up to the repository root. In the first directory with a signal, the `packageManager` field of `package.json` decides before a lockfile. Without a signal, the hint stays `npm install --save-dev`.

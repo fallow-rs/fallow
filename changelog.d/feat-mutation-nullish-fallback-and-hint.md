@@ -1,6 +1,0 @@
-### Added
-
-- **New opt-in mutation operator `nullish-fallback` removes the fallback of `a ?? b`.** The mutant is `a`. A survivor shows that no test gives a nullish left operand. Name the operator in `--operators` or `mutation.operators`; a run that does not name it gives the same plan and the same mutant ids as before. With `--typecheck`, a survivor gets the advisory hint `type-non-nullish` when the declared type of `a` excludes `null` and `undefined`. A left operand that is an optional chain gets no hint.
-  (Part of [#4502](https://github.com/fallow-rs/fallow/issues/4502))
-- **A `negate-condition` survivor can now carry the advisory hint `equivalence_hint: "constant-parameter"`.** The hint is present when the test is a parameter `p`, `!p` or `!!p`, each visible call passes the same literal for `p`, and the mutant sets the test to the value that the literal gives it. The hint uses the evidence of the `constant-parameter` rule, so a mutation run that includes `negate-condition` computes that rule also when the project leaves it off. A function whose callers are not all visible gets no hint, and a suppression of the rule removes the hint. The status stays `survived`, and the score does not change.
-  (Closes [#4502](https://github.com/fallow-rs/fallow/issues/4502))
