@@ -162,6 +162,9 @@ impl ModuleInfoExtractor {
         if self.this_result_local_is_shadowed(root) {
             return true;
         }
+        if self.shadowed_reads.is_module_alias(root) && self.nested_scope_shadows(root) {
+            return true;
+        }
         self.nested_declaration_stack
             .iter()
             .rposition(|scope| scope.contains(root))
@@ -212,7 +215,18 @@ impl ModuleInfoExtractor {
         member: String,
     ) {
         if self.class_binding_root_is_shadowed(&object) {
-            self.shadowed_member_access_indices
+            self.shadowed_reads
+                .class_roots
+                .insert(self.member_accesses.len());
+        }
+        // A module alias can follow the function that shadows its name, so
+        // the finalize pass decides once it knows every module alias.
+        let root = object
+            .split_once('.')
+            .map_or(object.as_str(), |(root, _)| root);
+        if self.nested_scope_shadows(root) {
+            self.shadowed_reads
+                .nested_roots
                 .insert(self.member_accesses.len());
         }
         self.member_accesses

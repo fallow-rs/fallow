@@ -756,6 +756,8 @@ mod issue_4351_nested_function_this_member;
 mod issue_4352_for_of_element_binding_scope;
 #[path = "integration_test/issue_4552_method_call_result_local.rs"]
 mod issue_4552_method_call_result_local;
+#[path = "integration_test/issue_4578_enum_member_alias.rs"]
+mod issue_4578_enum_member_alias;
 #[path = "integration_test/issue_609_velite.rs"]
 mod issue_609_velite;
 #[path = "integration_test/issue_704_auto_import_components.rs"]

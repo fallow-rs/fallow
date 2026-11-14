@@ -2113,19 +2113,7 @@ pub struct DefaultImportWholeObjectUseFact {
 mod semantic;
 pub use semantic::SemanticFact;
 
-/// A use of a namespace member, found by the semantic pass.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct NamespaceMemberUseFact {
-    /// The local name of the root binding: an import binding, or a namespace
-    /// that the module declares, or the key of an inline import type.
-    pub object: String,
-    /// The dotted member path after the root. Empty for a bare root.
-    pub path: String,
-    /// The code hands the value at `path` on (an argument, an alias, a
-    /// spread). Every member below `path` then counts as used.
-    pub whole: bool,
-}
+pub use crate::extract_namespace_member_uses::NamespaceMemberUseFact;
 
 /// A static member name that a runtime probe checks on an untyped value.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
