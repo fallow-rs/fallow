@@ -1,0 +1,7 @@
+{
+  "name": "angular-component-io-inherited",
+  "private": true,
+  "dependencies": {
+    "@angular/core": "20.0.0"
+  }
+}

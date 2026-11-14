@@ -21,7 +21,11 @@
 //! - ANY `member_access` in this module with `member == foo` regardless of
 //!   object (credits `this.foo`, `changes.foo` / `changes['foo']` in
 //!   `ngOnChanges`, destructured reads); broad on purpose, to kill the
-//!   ngOnChanges-by-name false positive without a blanket abstain.
+//!   ngOnChanges-by-name false positive without a blanket abstain;
+//! - any of the evidence above in a module that declares a subclass of the
+//!   component class, directly or through an intermediate class, in another
+//!   file. A base `@Directive()` often declares inputs that only its
+//!   subclasses read.
 //!
 //! Whole-component ABSTAIN (skip ALL inputs for the component) when the
 //! component class declares an `extends` heritage clause: a base class in
@@ -44,6 +48,11 @@ use crate::results::UnusedComponentInput;
 use super::predicates::component_name_for;
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
+/// Shared with the output detector, which reads the same subclass evidence.
+#[path = "angular_subclasses.rs"]
+pub(super) mod angular_subclasses;
+use angular_subclasses::AngularSubclassIndex;
+
 /// Find Angular component/directive inputs read nowhere in their own component.
 /// Returns empty unless the project declares `@angular/core`.
 #[must_use]
@@ -59,6 +68,13 @@ pub fn find_unused_component_inputs(
 
     let modules_by_id: FxHashMap<FileId, &ModuleInfo> =
         modules.iter().map(|m| (m.file_id, m)).collect();
+    let subclasses = AngularSubclassIndex::build(graph, modules);
+    let ctx = InputScanContext {
+        graph,
+        modules_by_id: &modules_by_id,
+        subclasses: &subclasses,
+        line_offsets_by_file,
+    };
 
     let mut findings = Vec::new();
     for node in &graph.modules {
@@ -68,14 +84,7 @@ pub fn find_unused_component_inputs(
         let Some(module) = modules_by_id.get(&node.file_id) else {
             continue;
         };
-        collect_module_unused_component_inputs(
-            node,
-            module,
-            graph,
-            &modules_by_id,
-            line_offsets_by_file,
-            &mut findings,
-        );
+        collect_module_unused_component_inputs(&ctx, node, module, &mut findings);
     }
 
     findings.sort_by(|a, b| {
@@ -87,12 +96,17 @@ pub fn find_unused_component_inputs(
     findings
 }
 
+struct InputScanContext<'a> {
+    graph: &'a ModuleGraph,
+    modules_by_id: &'a FxHashMap<FileId, &'a ModuleInfo>,
+    subclasses: &'a AngularSubclassIndex,
+    line_offsets_by_file: &'a LineOffsetsMap<'a>,
+}
+
 fn collect_module_unused_component_inputs(
+    ctx: &InputScanContext<'_>,
     node: &ModuleNode,
     module: &ModuleInfo,
-    graph: &ModuleGraph,
-    modules_by_id: &FxHashMap<FileId, &ModuleInfo>,
-    line_offsets_by_file: &LineOffsetsMap<'_>,
     findings: &mut Vec<UnusedComponentInput>,
 ) {
     if module.angular_inputs.is_empty() || component_abstains_inputs(module) {
@@ -101,8 +115,18 @@ fn collect_module_unused_component_inputs(
 
     // Collect linked external `templateUrl` module(s) so template evidence in
     // the `.html` file credits the input too.
-    let external_templates = external_template_modules(graph, modules_by_id, node.file_id);
-    let used = input_usage_set(module, &external_templates);
+    let external_templates = external_template_modules(ctx.graph, ctx.modules_by_id, node.file_id);
+    let mut used = input_usage_set(module, &external_templates);
+    // A subclass in another file reads an inherited input through `this.foo`
+    // or its own template.
+    for descendant in ctx.subclasses.descendants(node.file_id) {
+        let Some(subclass) = ctx.modules_by_id.get(&descendant) else {
+            continue;
+        };
+        let subclass_templates =
+            external_template_modules(ctx.graph, ctx.modules_by_id, descendant);
+        used.extend(input_usage_set(subclass, &subclass_templates));
+    }
 
     let component_name = component_name_for(&node.path);
     for input in &module.angular_inputs {
@@ -110,7 +134,7 @@ fn collect_module_unused_component_inputs(
             continue;
         }
         let (line, col) =
-            byte_offset_to_line_col(line_offsets_by_file, node.file_id, input.span_start);
+            byte_offset_to_line_col(ctx.line_offsets_by_file, node.file_id, input.span_start);
         findings.push(UnusedComponentInput {
             path: node.path.clone(),
             component_name: component_name.clone(),

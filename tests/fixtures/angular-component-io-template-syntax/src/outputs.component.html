@@ -1,0 +1,4 @@
+<button (click)="beforeIcu.emit()">before</button>
+<p>{n, plural, =1 {one} other {{{n}} many} }</p>
+<button (click)="afterIcu.emit()">after</button>
+<button (click)="this.viaThis.emit()">this</button>
