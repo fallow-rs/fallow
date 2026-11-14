@@ -62,14 +62,7 @@ fn cached_exports_to_module(exports: &[CachedExport]) -> Vec<crate::ExportInfo> 
             local_name: export.local_name.clone(),
             is_type_only: export.is_type_only,
             is_side_effect_used: export.is_side_effect_used,
-            visibility: match export.visibility {
-                1 => VisibilityTag::Public,
-                2 => VisibilityTag::Internal,
-                3 => VisibilityTag::Beta,
-                4 => VisibilityTag::Alpha,
-                5 => VisibilityTag::ExpectedUnused,
-                _ => VisibilityTag::None,
-            },
+            visibility: visibility_from_cached(export.visibility),
             expected_unused_reason: export.expected_unused_reason.clone(),
             deprecated: export.deprecated,
             deprecated_reason: export.deprecated_reason.clone(),
@@ -125,8 +118,22 @@ fn cached_re_exports_to_module(re_exports: &[CachedReExport]) -> Vec<crate::ReEx
             span: Span::new(re_export.span_start, re_export.span_end),
             statement_span: Span::new(re_export.statement_span_start, re_export.statement_span_end),
             source_span: Span::new(re_export.source_span_start, re_export.source_span_end),
+            visibility: visibility_from_cached(re_export.visibility),
+            expected_unused_reason: re_export.expected_unused_reason.clone(),
         })
         .collect()
+}
+
+/// Decode the `u8` that `VisibilityTag as u8` wrote into the cache.
+const fn visibility_from_cached(raw: u8) -> VisibilityTag {
+    match raw {
+        1 => VisibilityTag::Public,
+        2 => VisibilityTag::Internal,
+        3 => VisibilityTag::Beta,
+        4 => VisibilityTag::Alpha,
+        5 => VisibilityTag::ExpectedUnused,
+        _ => VisibilityTag::None,
+    }
 }
 
 fn cached_dynamic_imports_to_module(
@@ -340,6 +347,8 @@ fn module_re_exports_to_cached(re_exports: &[crate::ReExportInfo]) -> Vec<Cached
             statement_span_end: re_export.statement_span.end,
             source_span_start: re_export.source_span.start,
             source_span_end: re_export.source_span.end,
+            visibility: re_export.visibility as u8,
+            expected_unused_reason: re_export.expected_unused_reason.clone(),
         })
         .collect()
 }

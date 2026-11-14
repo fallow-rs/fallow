@@ -277,6 +277,8 @@ mod tests {
                 span: oxc_span::Span::default(),
                 statement_span: oxc_span::Span::default(),
                 source_span: oxc_span::Span::default(),
+                visibility: VisibilityTag::None,
+                expected_unused_reason: None,
             },
             target: ResolveResult::InternalModule(FileId(target)),
         }
@@ -298,6 +300,8 @@ mod tests {
                 span: oxc_span::Span::default(),
                 statement_span: oxc_span::Span::default(),
                 source_span: oxc_span::Span::default(),
+                visibility: VisibilityTag::None,
+                expected_unused_reason: None,
             },
             target: ResolveResult::InternalModule(FileId(target)),
         }
@@ -497,6 +501,8 @@ mod tests {
                 span: oxc_span::Span::default(),
                 statement_span: oxc_span::Span::default(),
                 source_span: oxc_span::Span::default(),
+                visibility: VisibilityTag::None,
+                expected_unused_reason: None,
             },
             target: ResolveResult::InternalModule(FileId(0)),
         };

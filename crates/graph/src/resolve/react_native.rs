@@ -585,6 +585,8 @@ mod tests {
                 span: oxc_span::Span::default(),
                 statement_span: oxc_span::Span::default(),
                 source_span: oxc_span::Span::default(),
+                visibility: fallow_types::extract::VisibilityTag::None,
+                expected_unused_reason: None,
             },
             target: ResolveResult::InternalModule(FileId(0)),
         };

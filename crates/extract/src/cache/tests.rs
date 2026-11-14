@@ -48,6 +48,31 @@ fn cache_roundtrip_preserves_top_level_runtime_statement_facts() {
 }
 
 #[test]
+fn cache_roundtrip_preserves_re_export_visibility_tags() {
+    let source = "/** @public */\nexport { a } from './a';\n/** @expected-unused -- kept for v2 */\nexport { b } from './b';\nexport { c } from './c';";
+    let module = parse_from_content(FileId(0), Path::new("src/module.ts"), source);
+    let cached = module_to_cached_from_parts(&module, 10, 20);
+    let encoded = bitcode::encode(&cached);
+    let decoded: CachedModule = bitcode::decode(&encoded).expect("decode cached module");
+    let restored = cached_to_module(&decoded, FileId(0));
+    let tags: Vec<VisibilityTag> = restored.re_exports.iter().map(|re| re.visibility).collect();
+    assert_eq!(
+        tags,
+        vec![
+            VisibilityTag::Public,
+            VisibilityTag::ExpectedUnused,
+            VisibilityTag::None
+        ]
+    );
+    let reasons: Vec<Option<&str>> = restored
+        .re_exports
+        .iter()
+        .map(|re| re.expected_unused_reason.as_deref())
+        .collect();
+    assert_eq!(reasons, vec![None, Some("kept for v2"), None]);
+}
+
+#[test]
 fn cache_store_new_is_empty() {
     let store = CacheStore::new(Path::new(""));
     assert!(store.is_empty());
@@ -617,6 +642,8 @@ fn module_to_cached_roundtrip_re_exports() {
             span: oxc_span::Span::default(),
             statement_span: oxc_span::Span::new(0, 0),
             source_span: oxc_span::Span::new(0, 0),
+            visibility: fallow_types::extract::VisibilityTag::None,
+            expected_unused_reason: None,
         }],
         ..ModuleInfo::empty(FileId(0))
     };

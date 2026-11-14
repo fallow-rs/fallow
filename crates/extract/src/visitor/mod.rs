@@ -3,6 +3,7 @@ mod declarations;
 mod helpers;
 mod independent_this;
 mod local_class_heritage;
+mod re_export_records;
 mod remap;
 mod requirements;
 mod semantic_calls;
@@ -2113,8 +2114,7 @@ impl ModuleInfoExtractor {
             exported_name,
             is_type_only: is_type_only || import.is_type_only,
             span,
-            statement_span: Span::new(0, 0),
-            source_span: Span::new(0, 0),
+            ..Default::default()
         });
     }
 

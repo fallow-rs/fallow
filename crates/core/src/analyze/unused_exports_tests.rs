@@ -536,6 +536,8 @@ fn duplicate_exports_follow_type_only_star_routes_for_value_backed_exports() {
             span: Span::new(10, 20),
             statement_span: Span::new(10, 30),
             source_span: Span::new(24, 29),
+            visibility: VisibilityTag::None,
+            expected_unused_reason: None,
         },
         target: ResolveResult::InternalModule(FileId(target)),
     };
@@ -665,6 +667,8 @@ fn duplicate_exports_preserves_local_export_with_unrelated_re_export() {
                     span: Span::new(40, 43),
                     statement_span: Span::new(35, 44),
                     source_span: Span::new(35, 39),
+                    visibility: VisibilityTag::None,
+                    expected_unused_reason: None,
                 },
                 target: ResolveResult::InternalModule(FileId(1)),
             }],

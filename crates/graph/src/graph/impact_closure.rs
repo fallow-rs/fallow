@@ -386,6 +386,8 @@ mod tests {
                         span: oxc_span::Span::new(0, 10),
                         statement_span: oxc_span::Span::new(0, 0),
                         source_span: oxc_span::Span::new(0, 0),
+                        visibility: VisibilityTag::None,
+                        expected_unused_reason: None,
                     },
                     target: ResolveResult::InternalModule(FileId(0)),
                 }],

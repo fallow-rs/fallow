@@ -216,6 +216,8 @@ mod tests {
                 span: oxc_span::Span::default(),
                 statement_span: oxc_span::Span::new(0, 0),
                 source_span: oxc_span::Span::new(0, 0),
+                visibility: fallow_types::extract::VisibilityTag::None,
+                expected_unused_reason: None,
             },
             target,
         }

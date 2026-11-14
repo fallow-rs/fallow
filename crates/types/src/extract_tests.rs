@@ -365,6 +365,8 @@ fn release_resolution_payload_drops_copied_vectors_only() {
             span: span(),
             statement_span: span(),
             source_span: span(),
+            visibility: crate::extract::VisibilityTag::None,
+            expected_unused_reason: None,
         }],
         dynamic_imports: vec![DynamicImportInfo {
             source: "./dynamic".to_string(),

@@ -10,7 +10,7 @@ use crate::MemberKind;
 /// extraction semantics change, and give the reason in the commit message and
 /// the CHANGELOG. A stale version serves old extraction results from a warm
 /// cache. The `assert_cached_type_size!` guards below catch shape changes.
-pub(super) const CACHE_VERSION: u32 = 442;
+pub(super) const CACHE_VERSION: u32 = 443;
 
 /// Duplication token cache version. Bump it when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes, and give the
@@ -81,7 +81,7 @@ assert_cached_type_size!(CachedExport, 152);
 assert_cached_type_size!(CachedImport, 96);
 assert_cached_type_size!(CachedDynamicImport, 88);
 assert_cached_type_size!(CachedRequireCall, 120);
-assert_cached_type_size!(CachedReExport, 104);
+assert_cached_type_size!(CachedReExport, 128);
 assert_cached_type_size!(CachedMember, 88);
 assert_cached_type_size!(CachedDynamicImportPattern, 88);
 assert_cached_type_size!(crate::MemberAccess, 48);
@@ -596,6 +596,10 @@ pub struct CachedReExport {
     pub(crate) source_span_start: u32,
     /// Byte offset of the source string-literal span end.
     pub(crate) source_span_end: u32,
+    /// Visibility tag (same encoding as `CachedExport::visibility`).
+    pub(crate) visibility: u8,
+    /// Reason text of an `@expected-unused` tag on the re-export.
+    pub(crate) expected_unused_reason: Option<String>,
 }
 
 /// Cached enum or class member data.

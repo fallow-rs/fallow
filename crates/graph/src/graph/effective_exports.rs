@@ -1284,6 +1284,8 @@ mod tests {
                 span: oxc_span::Span::default(),
                 statement_span: oxc_span::Span::default(),
                 source_span: oxc_span::Span::default(),
+                visibility: VisibilityTag::None,
+                expected_unused_reason: None,
             },
             target: ResolveResult::InternalModule(source),
         }
@@ -1321,6 +1323,8 @@ mod tests {
                 span: oxc_span::Span::default(),
                 statement_span: oxc_span::Span::default(),
                 source_span: oxc_span::Span::default(),
+                visibility: VisibilityTag::None,
+                expected_unused_reason: None,
             },
             target: ResolveResult::NpmPackage("node:path".to_string()),
         }

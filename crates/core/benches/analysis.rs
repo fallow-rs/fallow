@@ -301,6 +301,8 @@ fn create_named_re_export_stub_input(re_export_count: u32) -> ReExportInput {
                 span: oxc_span::Span::default(),
                 statement_span: oxc_span::Span::new(0, 0),
                 source_span: oxc_span::Span::new(0, 0),
+                visibility: fallow_core::extract::VisibilityTag::None,
+                expected_unused_reason: None,
             },
             target: ResolveResult::Unresolvable("./unresolved-source".to_string()),
         })
@@ -492,6 +494,8 @@ fn create_namespace_re_export_input() -> ReExportInput {
                 span: oxc_span::Span::default(),
                 statement_span: oxc_span::Span::new(0, 0),
                 source_span: oxc_span::Span::new(0, 0),
+                visibility: VisibilityTag::None,
+                expected_unused_reason: None,
             },
             target: ResolveResult::InternalModule(FileId(target)),
         });
@@ -511,6 +515,8 @@ fn create_namespace_re_export_input() -> ReExportInput {
                 span: oxc_span::Span::default(),
                 statement_span: oxc_span::Span::new(0, 0),
                 source_span: oxc_span::Span::new(0, 0),
+                visibility: VisibilityTag::None,
+                expected_unused_reason: None,
             },
             target: ResolveResult::InternalModule(FileId(barrel_start + target)),
         });
@@ -607,6 +613,8 @@ fn star_re_export(source: fallow_core::discover::FileId) -> fallow_core::resolve
             span: oxc_span::Span::default(),
             statement_span: oxc_span::Span::default(),
             source_span: oxc_span::Span::default(),
+            visibility: fallow_core::extract::VisibilityTag::None,
+            expected_unused_reason: None,
         },
         target: ResolveResult::InternalModule(source),
     }
@@ -824,6 +832,8 @@ fn create_namespace_object_alias_input() -> ReExportInput {
                 span: oxc_span::Span::default(),
                 statement_span: oxc_span::Span::new(0, 0),
                 source_span: oxc_span::Span::new(0, 0),
+                visibility: VisibilityTag::None,
+                expected_unused_reason: None,
             },
             target: ResolveResult::InternalModule(FileId(alias_start + target)),
         });
@@ -980,6 +990,8 @@ fn create_re_export_input() -> ReExportInput {
                         span: oxc_span::Span::default(),
                         statement_span: oxc_span::Span::new(0, 0),
                         source_span: oxc_span::Span::new(0, 0),
+                        visibility: VisibilityTag::None,
+                        expected_unused_reason: None,
                     },
                     target: ResolveResult::InternalModule(chained_id),
                 });
@@ -1000,6 +1012,8 @@ fn create_re_export_input() -> ReExportInput {
                         span: oxc_span::Span::default(),
                         statement_span: oxc_span::Span::new(0, 0),
                         source_span: oxc_span::Span::new(0, 0),
+                        visibility: VisibilityTag::None,
+                        expected_unused_reason: None,
                     },
                     target: ResolveResult::InternalModule(src_a_id),
                 });
@@ -1012,6 +1026,8 @@ fn create_re_export_input() -> ReExportInput {
                         span: oxc_span::Span::default(),
                         statement_span: oxc_span::Span::new(0, 0),
                         source_span: oxc_span::Span::new(0, 0),
+                        visibility: VisibilityTag::None,
+                        expected_unused_reason: None,
                     },
                     target: ResolveResult::InternalModule(src_b_id),
                 });
@@ -1185,6 +1201,8 @@ fn create_reverse_re_export_chain_input(chain_length: u32) -> ReExportInput {
                 span: oxc_span::Span::default(),
                 statement_span: oxc_span::Span::new(0, 0),
                 source_span: oxc_span::Span::new(0, 0),
+                visibility: VisibilityTag::None,
+                expected_unused_reason: None,
             },
             target: ResolveResult::InternalModule(FileId(idx - 1)),
         });
@@ -1558,6 +1576,8 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
                 span: oxc_span::Span::default(),
                 statement_span: oxc_span::Span::new(0, 0),
                 source_span: oxc_span::Span::new(0, 0),
+                visibility: VisibilityTag::None,
+                expected_unused_reason: None,
             },
             ReExportInfo {
                 source: "./helpers".to_string(),
@@ -1567,6 +1587,8 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
                 span: oxc_span::Span::default(),
                 statement_span: oxc_span::Span::new(0, 0),
                 source_span: oxc_span::Span::new(0, 0),
+                visibility: VisibilityTag::None,
+                expected_unused_reason: None,
             },
         ],
         dynamic_imports: vec![DynamicImportInfo {

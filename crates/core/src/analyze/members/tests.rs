@@ -130,6 +130,8 @@ impl TestGraphFixture {
                     span: re_export.span,
                     statement_span: Span::new(0, 0),
                     source_span: Span::new(0, 0),
+                    visibility: VisibilityTag::None,
+                    expected_unused_reason: None,
                 },
                 target: ResolveResult::InternalModule(re_export.source_file),
             })

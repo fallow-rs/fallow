@@ -80,6 +80,8 @@ pub(super) fn re_export(target: impl Target, imported: &str, exported: &str) -> 
             span: Span::default(),
             statement_span: Span::default(),
             source_span: Span::default(),
+            visibility: VisibilityTag::None,
+            expected_unused_reason: None,
         },
         target: ResolveResult::InternalModule(target),
     }

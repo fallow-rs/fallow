@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 
 use fallow_types::cache_rejection::CacheRejection;
 use fallow_types::discover::{DiscoveredFile, FileId, StableFileKey};
-use fallow_types::extract::{ImportInfo, ReExportInfo};
+use fallow_types::extract::{ImportInfo, ReExportInfo, VisibilityTag};
 use oxc_span::Span;
 
 use crate::resolve::{
@@ -40,7 +40,7 @@ pub use store::{GRAPH_CACHE_FILE, GraphCacheStore};
 /// Never reuse a version number that a published build wrote, even from a
 /// development commit. Git history and the CHANGELOG record the reason for
 /// each bump.
-pub const GRAPH_CACHE_VERSION: u32 = 113;
+pub const GRAPH_CACHE_VERSION: u32 = 114;
 
 /// Cached form of a resolved target.
 ///
@@ -283,6 +283,10 @@ pub struct CachedReExportInfo {
     statement_span: [u32; 2],
     /// Span of the source string literal.
     source_span: [u32; 2],
+    /// JSDoc visibility tag on the re-export statement.
+    visibility: VisibilityTag,
+    /// Reason text of an `@expected-unused` tag on the re-export statement.
+    expected_unused_reason: Option<String>,
 }
 
 impl From<&ReExportInfo> for CachedReExportInfo {
@@ -295,6 +299,8 @@ impl From<&ReExportInfo> for CachedReExportInfo {
             span: span_to_pair(info.span),
             statement_span: span_to_pair(info.statement_span),
             source_span: span_to_pair(info.source_span),
+            visibility: info.visibility,
+            expected_unused_reason: info.expected_unused_reason.clone(),
         }
     }
 }
@@ -309,6 +315,8 @@ impl From<CachedReExportInfo> for ReExportInfo {
             span: pair_to_span(info.span),
             statement_span: pair_to_span(info.statement_span),
             source_span: pair_to_span(info.source_span),
+            visibility: info.visibility,
+            expected_unused_reason: info.expected_unused_reason,
         }
     }
 }
@@ -1001,6 +1009,27 @@ mod tests {
         };
 
         let restored = ImportInfo::from(CachedImportInfo::from(&original));
+
+        assert_eq!(format!("{restored:?}"), format!("{original:?}"));
+    }
+
+    #[test]
+    fn cached_re_export_info_round_trip_keeps_every_field() {
+        // A dropped field changes analysis behaviour only behind a cache hit,
+        // so compare the debug rendering of every field.
+        let original = ReExportInfo {
+            source: "./impl".to_string(),
+            imported_name: "a".to_string(),
+            exported_name: "b".to_string(),
+            is_type_only: true,
+            span: Span::new(3, 41),
+            statement_span: Span::new(0, 42),
+            source_span: Span::new(30, 38),
+            visibility: VisibilityTag::ExpectedUnused,
+            expected_unused_reason: Some("kept for the next major".to_string()),
+        };
+
+        let restored = ReExportInfo::from(CachedReExportInfo::from(&original));
 
         assert_eq!(format!("{restored:?}"), format!("{original:?}"));
     }

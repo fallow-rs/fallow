@@ -761,6 +761,8 @@ fn banned_import_covers_re_exports() {
         span: oxc_span::Span::new(0, 10),
         statement_span: oxc_span::Span::new(0, 0),
         source_span: oxc_span::Span::new(0, 0),
+        visibility: VisibilityTag::None,
+        expected_unused_reason: None,
     });
     let suppressions = SuppressionContext::empty();
     let line_offsets = FxHashMap::default();
@@ -785,6 +787,8 @@ fn re_export(imported: &str, exported: &str) -> ReExportInfo {
         span: oxc_span::Span::new(0, 10),
         statement_span: oxc_span::Span::new(0, 0),
         source_span: oxc_span::Span::new(0, 0),
+        visibility: VisibilityTag::None,
+        expected_unused_reason: None,
     }
 }
 

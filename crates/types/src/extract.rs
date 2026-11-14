@@ -3614,30 +3614,9 @@ const _: () = assert!(std::mem::size_of::<ImportBindingReference>() == 64);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<TypeMemberTypeEntry>() == 72);
 
-/// A re-export declaration.
-#[derive(Debug, Clone)]
-pub struct ReExportInfo {
-    /// The module being re-exported from.
-    pub source: String,
-    /// The name imported from the source module (or `*` for star re-exports).
-    pub imported_name: String,
-    /// The name exported from this module.
-    pub exported_name: String,
-    /// Whether this is a type-only re-export.
-    pub is_type_only: bool,
-    /// Source span of the re-export declaration on this module.
-    pub span: oxc_span::Span,
-    /// Span of the whole re-export statement. A multi-binding statement
-    /// yields one `ReExportInfo` per binding, each with a per-binding
-    /// `span`; this field lets consumers reason about the enclosing
-    /// statement (e.g. suppression coverage). Empty (`start == end`) for
-    /// synthesized re-exports that have no single owning statement.
-    pub statement_span: oxc_span::Span,
-    /// Span of the source string literal (the specifier in quotes), used to
-    /// anchor unresolved-import findings on the specifier. Empty
-    /// (`start == end`) when no literal exists in the statement.
-    pub source_span: oxc_span::Span,
-}
+#[path = "extract_re_export.rs"]
+mod re_export;
+pub use re_export::ReExportInfo;
 
 /// A dynamic `import()` call.
 #[derive(Debug, Clone)]

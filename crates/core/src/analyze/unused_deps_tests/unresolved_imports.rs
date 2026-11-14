@@ -219,6 +219,8 @@ fn multi_binding_re_export_reports_one_unresolved_finding_per_specifier() {
             span: oxc_span::Span::new(span_start, span_start + 1),
             statement_span: oxc_span::Span::new(0, 0),
             source_span: oxc_span::Span::new(0, 0),
+            visibility: fallow_types::extract::VisibilityTag::None,
+            expected_unused_reason: None,
         },
         target: ResolveResult::Unresolvable("./missing.js".to_string()),
     };
@@ -296,6 +298,8 @@ fn multi_line_re_export(imported: &str, span_start: u32) -> ResolvedReExport {
             span: oxc_span::Span::new(span_start, span_start + 5),
             statement_span: oxc_span::Span::new(0, 62),
             source_span: oxc_span::Span::new(47, 61),
+            visibility: fallow_types::extract::VisibilityTag::None,
+            expected_unused_reason: None,
         },
         target: ResolveResult::Unresolvable("./missing.js".to_string()),
     }
@@ -391,6 +395,8 @@ fn suppressed_anchor_statement_retires_the_specifier_for_the_module() {
             span: oxc_span::Span::new(72, 76),
             statement_span: oxc_span::Span::new(63, 100),
             source_span: oxc_span::Span::new(84, 98),
+            visibility: fallow_types::extract::VisibilityTag::None,
+            expected_unused_reason: None,
         },
         target: ResolveResult::Unresolvable("./missing.js".to_string()),
     });
@@ -441,6 +447,8 @@ fn single_line_re_export_keeps_the_statement_line_anchor() {
                 span: oxc_span::Span::new(9, 10),
                 statement_span: oxc_span::Span::new(0, 34),
                 source_span: oxc_span::Span::new(19, 33),
+                visibility: fallow_types::extract::VisibilityTag::None,
+                expected_unused_reason: None,
             },
             target: ResolveResult::Unresolvable("./missing.js".to_string()),
         }],

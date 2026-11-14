@@ -901,3 +901,44 @@ fn jsdoc_on_a_decorated_export_does_not_reach_the_next_export() {
     assert_eq!(visibility_of(source, "First"), VisibilityTag::Public);
     assert_eq!(visibility_of(source, "Second"), VisibilityTag::None);
 }
+
+fn re_export_tags(source: &str) -> Vec<(String, VisibilityTag)> {
+    parse_source(source)
+        .re_exports
+        .iter()
+        .map(|re| (re.exported_name.clone(), re.visibility))
+        .collect()
+}
+
+#[test]
+fn jsdoc_public_on_re_export_specifier_list() {
+    let tags =
+        re_export_tags("/** @public */\nexport { a, b } from './impl';\nexport { c } from './c';");
+    assert_eq!(
+        tags,
+        vec![
+            ("a".to_string(), VisibilityTag::Public),
+            ("b".to_string(), VisibilityTag::Public),
+            ("c".to_string(), VisibilityTag::None),
+        ]
+    );
+}
+
+#[test]
+fn jsdoc_tag_on_re_export_not_leaked_without_semicolons() {
+    let tags =
+        re_export_tags("/** @beta */\nexport { a } from './impl'\nexport { e } from './e'\n");
+    assert_eq!(
+        tags,
+        vec![
+            ("a".to_string(), VisibilityTag::Beta),
+            ("e".to_string(), VisibilityTag::None),
+        ]
+    );
+}
+
+#[test]
+fn jsdoc_tag_on_forwarded_import_export() {
+    let tags = re_export_tags("import { a } from './impl';\n/** @internal */\nexport { a };");
+    assert_eq!(tags, vec![("a".to_string(), VisibilityTag::Internal)]);
+}

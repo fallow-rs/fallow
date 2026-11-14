@@ -1,0 +1,6 @@
+{
+  "name": "visibility-tags-re-export",
+  "private": true,
+  "type": "module",
+  "main": "src/index.mjs"
+}
