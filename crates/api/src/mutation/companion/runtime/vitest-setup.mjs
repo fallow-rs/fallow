@@ -2,6 +2,7 @@
 import { afterEach, beforeEach, inject, vi } from "vitest";
 
 import { installFallowMutation } from "./global.mjs";
+import { RECORD_LIMIT, encodeArgs } from "./replay-value.mjs";
 import { setSubprocessPreload } from "./subprocess-options.mjs";
 import { captureWorkerState, workerStateChanged } from "./worker-state.mjs";
 
@@ -11,6 +12,7 @@ const OVERLAY_KEY = "fallowOverlay";
 const SUBPROCESS_PRELOAD_KEY = "fallowSubprocessPreload";
 const REQUIRE_HOOK = Symbol.for("fallow.mutation.vitestRequireHook");
 const FRESH_MODULES_KEY = "fallowFreshModules";
+const RECORD_ARGS_KEY = "fallowRecordArgs";
 
 const activeMutant = () => {
   const value = inject(ACTIVE_MUTANT_KEY);
@@ -167,6 +169,12 @@ if (freshModules) {
 const mutation = installFallowMutation();
 mutation.startFile();
 mutation.setActive(activeMutant());
+// The recorder starts before the test file imports a source module, so each
+// exported function gets its wrap. Other runs leave the functions as they
+// are.
+const recordArgs = inject(RECORD_ARGS_KEY) === true;
+if (recordArgs) mutation.startRecording(encodeArgs, RECORD_LIMIT);
+else mutation.stopRecording();
 const requireHook = await installRequireHook();
 shareWithChildProcesses(requireHook.hooksReady, activeMutant(), null);
 const childCoverage = await loadChildCoverage(requireHook.hooksReady);
@@ -193,5 +201,6 @@ afterEach(({ task }) => {
   task.meta.fallowHits = [...new Set([...hits, ...children.hits])];
   task.meta.fallowStaticHits = staticHits;
   task.meta.fallowLoaded = [...new Set([...requireHook.loaded, ...children.loaded])];
+  if (recordArgs) task.meta.fallowArgs = mutation.takeRecords();
   if (freshModules) task.meta.fallowPolluted = pollutedAtStart || workerPolluted();
 });

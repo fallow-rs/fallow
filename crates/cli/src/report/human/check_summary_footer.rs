@@ -213,6 +213,11 @@ fn push_summary_framework_parts(parts: &mut Vec<String>, results: &AnalysisResul
     );
     push_summary_part(
         parts,
+        results.constant_parameters.len(),
+        "constant parameter review candidates",
+    );
+    push_summary_part(
+        parts,
         results.unused_component_emits.len(),
         "unused component emits",
     );

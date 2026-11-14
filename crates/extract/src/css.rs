@@ -182,7 +182,7 @@ fn note_line_lookup_bytes(bytes: usize) {
     LINE_LOOKUP_BYTES.with(|read| read.set(read.get() + bytes));
 }
 
-fn mask_css_comments(source: &str, is_scss: bool) -> String {
+pub(crate) fn mask_css_comments(source: &str, is_scss: bool) -> String {
     #[cfg(test)]
     COMMENT_MASK_PASSES.with(|passes| passes.set(passes.get() + 1));
     crate::css_masked_bytes::add(source.len() as u64);
@@ -218,7 +218,7 @@ pub fn extract_css_import_sources(source: &str, is_scss: bool) -> Vec<CssImportS
 
 /// [`extract_css_import_sources`] on a source whose comments are already
 /// masked by [`mask_css_comments`].
-fn import_sources_from_masked(stripped: &str, is_scss: bool) -> Vec<CssImportSource> {
+pub(crate) fn import_sources_from_masked(stripped: &str, is_scss: bool) -> Vec<CssImportSource> {
     let mut out = Vec::new();
 
     for cap in CSS_IMPORT_RE.captures_iter(stripped) {
@@ -1059,7 +1059,9 @@ fn build_css_imports(stripped: &str, is_scss: bool) -> Vec<ImportInfo> {
     imports
 }
 
-/// Parse a CSS/SCSS file, extracting @import, @use, @forward, @plugin, @apply, and @tailwind directives.
+/// Parse a CSS, SCSS, Sass or Less file: the `@import`, `@use`, `@forward`,
+/// `@plugin`, `@apply` and `@tailwind` directives, and the packages that its
+/// `url()` values name.
 pub(crate) fn parse_css_to_module(
     file_id: FileId,
     path: &Path,
@@ -1081,35 +1083,19 @@ pub(crate) fn parse_css_to_module(
         Vec::new()
     };
 
-    css_module_info(
-        file_id,
-        content_hash,
-        source,
-        parsed_suppressions,
-        imports,
-        exports,
-    )
-}
-
-/// Assemble the `ModuleInfo` for a CSS/SCSS file: the import/export edges plus
-/// the line offsets and suppressions; all AST-derived fields stay empty since
-/// CSS carries no JS-level structure. Pure plumbing struct literal.
-fn css_module_info(
-    file_id: FileId,
-    content_hash: u64,
-    source: &str,
-    parsed_suppressions: crate::suppress::ParsedSuppressions,
-    imports: Vec<ImportInfo>,
-    exports: Vec<ExportInfo>,
-) -> ModuleInfo {
-    crate::module_info::non_js_module_info(crate::module_info::NonJsModuleInfoInput {
-        file_id,
-        content_hash,
-        source,
-        parsed_suppressions,
-        imports,
-        exports,
-    })
+    // CSS has no JS-level structure, so the AST-derived fields stay empty.
+    let mut info =
+        crate::module_info::non_js_module_info(crate::module_info::NonJsModuleInfoInput {
+            file_id,
+            content_hash,
+            source,
+            parsed_suppressions,
+            imports,
+            exports,
+        });
+    info.package_path_references =
+        crate::css_url::package_url_references(&stripped).into_boxed_slice();
+    info
 }
 
 #[cfg(all(test, not(miri)))]

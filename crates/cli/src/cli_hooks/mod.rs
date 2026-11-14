@@ -33,8 +33,10 @@ pub enum HooksCli {
         #[arg(long, value_enum)]
         target: HooksTargetArg,
 
-        /// Fallback base branch/ref for Git pre-commit hooks when no upstream is set.
-        #[arg(long)]
+        /// Has no effect. The Git pre-commit hook runs `fallow audit
+        /// --staged`, which compares the staged changes with HEAD. Kept so
+        /// that existing install scripts still run.
+        #[arg(long, hide = true)]
         branch: Option<String>,
 
         /// Target a specific agent surface when --target agent is used.

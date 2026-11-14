@@ -538,13 +538,21 @@ fn saved_combined_sarif(
             &mut sarif,
             &super::config_pattern_text::envelope_diagnostics(envelope),
         );
-        extend_sarif_runs(&mut runs, &sarif);
+        fallow_output::extend_sarif_runs_with_category(
+            &mut runs,
+            &sarif,
+            fallow_output::SARIF_CATEGORY_DEAD_CODE,
+        );
     }
     if let Some(report) = duplication.filter(|report| !report.clone_groups.is_empty()) {
         runs.push(combined_duplication_sarif_run(&report));
     }
     if let Some(report) = health {
-        extend_sarif_runs(&mut runs, &api_health_sarif_document(&report, root));
+        fallow_output::extend_sarif_runs_with_category(
+            &mut runs,
+            &api_health_sarif_document(&report, root),
+            fallow_output::SARIF_CATEGORY_HEALTH,
+        );
     }
     Some(serde_json::json!({
         "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
@@ -563,12 +571,6 @@ fn parse_optional_section<T: serde::de::DeserializeOwned>(
     T::deserialize(value).map(Some)
 }
 
-fn extend_sarif_runs(runs: &mut Vec<serde_json::Value>, sarif: &serde_json::Value) {
-    if let Some(source_runs) = sarif.get("runs").and_then(serde_json::Value::as_array) {
-        runs.extend(source_runs.iter().cloned());
-    }
-}
-
 fn combined_duplication_sarif_run(report: &DuplicationReport) -> serde_json::Value {
     serde_json::json!({
         "tool": {
@@ -578,7 +580,7 @@ fn combined_duplication_sarif_run(report: &DuplicationReport) -> serde_json::Val
                 "informationUri": "https://github.com/fallow-rs/fallow",
             }
         },
-        "automationDetails": { "id": "fallow/dupes" },
+        "automationDetails": { "id": fallow_output::SARIF_CATEGORY_DUPES },
         "results": report.clone_groups.iter().enumerate().map(|(index, group)| {
             serde_json::json!({
                 "ruleId": "fallow/code-duplication",
@@ -1340,7 +1342,8 @@ mod tests {
         let runs = sarif["runs"].as_array().expect("SARIF runs");
         assert_eq!(runs.len(), 1, "only the dead-code run remains: {sarif}");
         assert_ne!(
-            runs[0]["automationDetails"]["id"], "fallow/audit/diff-risk",
+            runs[0]["automationDetails"]["id"],
+            fallow_output::SARIF_CATEGORY_AUDIT_DIFF_RISK,
             "{sarif}"
         );
     }

@@ -71,6 +71,12 @@ Public examples must be generic or come from an explicitly public fixture.
 The public docs archive records a complete content digest and source commit.
 Private consumers pin both values. The portable skill repository records the
 exact Fallow source commit, source root, target root, and declared transform.
+The vendor step also pins each download-and-run form of the fallow package,
+such as `npx fallow`, to the version in `npm/fallow/package.json` of the source
+commit. The Claude plugin directory refuses skill text that runs an unpinned
+package, so the source text stays unpinned and only the published copy carries
+a version. Both checks ignore the pinned version and refuse an unpinned
+launcher, so a release does not make the published copy drift.
 After a skill change lands on `main`, `node scripts/sync-skills-companion.mjs`
 prepares the signed companion commit. The companion `main` branch is
 protected, so the maintainer publishes the commit through a fallow-skills pull

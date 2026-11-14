@@ -13,13 +13,22 @@ LSP diagnostics, VS Code diagnostics, or auto-fix.
 
 ## User flow
 
-The exact-version `fallow-similar-code` companion ships with the npm platform
-package. The first model download requires an explicit human decision:
+The `fallow` npm package does not install the companion. A project that uses
+similar-code discovery installs `fallow-similar-code` at the same version as
+`fallow`. The first model download then requires an explicit human decision:
 
 ```bash
+npm install --save-dev fallow-similar-code@<fallow version>
 npx fallow similar-code status
 npx fallow similar-code setup --local
 ```
+
+The launcher finds the companion with the same rules as the type-aware
+companion: next to the `fallow` package, or from the project root in the same
+`node_modules` tree. A global `fallow` needs a global companion. For npx,
+start both packages together with
+`npx -p fallow@<version> -p fallow-similar-code@<version> fallow similar-code`.
+An MCP client that starts `npx fallow-mcp` needs the same `-p` pair.
 
 For a non-interactive setup that the user has already approved, add `--yes`.
 Project config, MCP, Node API calls, and model output cannot authorize setup.
@@ -192,7 +201,15 @@ offline marker set. Source fragments are sent only to the local companion over
 bounded stdio and are not persisted. The persistent cache contains vectors
 keyed by full source digest plus model, extraction, and parameter provenance.
 
-The CLI accepts only a sibling companion file. The Node adapter accepts only an
+The CLI accepts a sibling companion file first, as in the release archives.
+Otherwise it accepts the path that the `fallow` npm launcher passes in
+`FALLOW_SIMILAR_CODE_PROVIDER`: the binary of the exact-version
+`fallow-similar-code` package. The launcher verifies that package first, and
+the Rust code verifies the detached Ed25519 signature of the binary against the
+compiled-in release key again. This check rejects a stale, damaged or unsigned
+path. It does not defend against a process that controls the environment or
+the install directory of Fallow: such a process can swap the file after the
+check, or start other code directly. The Node adapter accepts only an
 exact-version package path that its loader verified first. Project config,
 `PATH`, project-local executables, remote providers, and provider-returned paths
 are outside the trust boundary.
@@ -223,9 +240,9 @@ Ownership is split as follows:
 - CLI, MCP, and NAPI remain thin adapters over the shared API.
 
 The release workflow must publish the companion platform packages and root
-package before consumers that declare the optional dependency. Main platform
-packages also carry the signed sidecar beside the multicall binary, and their
-verification sentinel covers both executables.
+package before consumers that declare the optional dependency. The main
+platform packages carry only the multicall binary. The release archives on
+GitHub still carry the sidecar beside the CLI binaries.
 
 ## Version 1 boundaries
 

@@ -1,5 +1,6 @@
 pub mod absent_props;
 mod component_health;
+pub mod constant_parameters;
 mod quality;
 pub mod security;
 mod structural;
@@ -111,6 +112,7 @@ pub fn build_diagnostics(input: DiagnosticInput<'_>) -> FxHashMap<Uri, Vec<Diagn
     unused::push_dep_diagnostics(&mut map, results, package_json_uri.as_ref(), root);
     unused::push_member_diagnostics(&mut map, results, &mut mapper);
     absent_props::push_absent_prop_diagnostics(&mut map, results, &mut mapper);
+    constant_parameters::push_constant_parameter_diagnostics(&mut map, results, &mut mapper);
     quality::push_duplicate_export_diagnostics(&mut map, results, &mut mapper);
     quality::push_duplicate_export_alias_diagnostics(&mut map, results, &mut mapper);
     quality::push_duplication_diagnostics(&mut map, duplication, &mut mapper);
@@ -360,6 +362,8 @@ mod tests {
             .security_findings
             .push(fallow_api::editor_results::SecurityFinding {
                 finding_id: String::new(),
+                stable_finding_id: None,
+                stable_id_input: None,
                 candidate: fallow_api::editor_results::SecurityCandidate::default(),
                 taint_flow: None,
                 attack_surface: None,
@@ -554,6 +558,7 @@ mod severity_gate {
             unrendered_components: _,
             unused_component_props: _,
             absent_component_props: _,
+            constant_parameters: _,
             unused_component_emits: _,
             unused_component_inputs: _,
             unused_component_outputs: _,
@@ -574,6 +579,7 @@ mod severity_gate {
             // from rule severity, so they are intentionally outside the
             // dead-code severity table.
             security_findings: _,
+            suppressed_security_findings: _,
             security_unresolved_edge_files: _,
             security_unresolved_callee_sites: _,
             security_unresolved_callee_diagnostics: _,
@@ -601,6 +607,7 @@ mod severity_gate {
             unused_load_data_keys_global_abstain: _,
             semantic_reachable_files: _,
             semantic_framework_contracts: _,
+            constant_parameter_candidates: _,
             // No editor surface in v1: TypeScript already strikes deprecated
             // names through in the editor. The finding is for cleanup sweeps
             // and JSON consumers.
@@ -1400,6 +1407,17 @@ mod severity_gate {
                 Box::new(|root, r| {
                     r.absent_component_props.push(
                         crate::diagnostics::absent_props::tests::candidate(root.join("Card.tsx")),
+                    );
+                }),
+            ),
+            (
+                "constant-parameter",
+                S::WARNING,
+                Box::new(|root, r| {
+                    r.constant_parameters.push(
+                        crate::diagnostics::constant_parameters::tests::candidate(
+                            root.join("format.ts"),
+                        ),
                     );
                 }),
             ),

@@ -107,6 +107,9 @@ def filter_check:
   (if .absent_component_props then
     .absent_component_props |= map(select(.path | in_changed))
   else . end) |
+  (if .constant_parameters then
+    .constant_parameters |= map(select(.path | in_changed))
+  else . end) |
   (if .unused_component_emits then
     .unused_component_emits |= map(select(.path | in_changed))
   else . end) |
@@ -181,6 +184,7 @@ def filter_check:
       (.unrendered_components // [] | length) +
       (.unused_component_props // [] | length) +
       (.absent_component_props // [] | length) +
+      (.constant_parameters // [] | length) +
       (.unused_component_emits // [] | length) +
       (.unused_component_inputs // [] | length) +
       (.unused_component_outputs // [] | length) +

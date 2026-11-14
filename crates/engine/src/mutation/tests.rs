@@ -6,6 +6,9 @@ use sha2::{Digest, Sha256};
 use super::*;
 use crate::session::AnalysisSession;
 
+#[path = "build_tool_tests.rs"]
+mod build_tool;
+
 const PLANNED: MutantDisposition = MutantDisposition::Planned;
 const NO_COVERAGE: MutantDisposition = MutantDisposition::NoCoverage;
 
@@ -264,7 +267,7 @@ fn an_always_used_config_file_of_a_plugin_is_pruned() {
 }
 
 #[test]
-fn the_config_object_of_a_tool_config_file_is_pruned_but_functions_stay() {
+fn each_mutant_of_a_tool_config_file_is_pruned() {
     let root = fixture("mutation-plan-tool-config");
     let plan = plan_mutations_for_session(
         &session(&root),
@@ -278,9 +281,9 @@ fn the_config_object_of_a_tool_config_file_is_pruned_but_functions_stay() {
         vite,
         BTreeMap::from([
             ("<top-level>".to_owned(), config),
-            ("transform".to_owned(), NO_COVERAGE),
+            ("transform".to_owned(), config),
         ]),
-        "only the inline plugin function keeps its mutants"
+        "no test reaches the config file, so the inline plugin function is pruned too"
     );
     assert_eq!(pruned_count(&plan, "vite.config.ts"), VITE_CONFIG_PRUNED);
 
@@ -319,8 +322,8 @@ fn the_config_object_of_a_tool_config_file_is_pruned_but_functions_stay() {
 }
 
 /// The string mutants of the plugin name and the include glob in the root
-/// `vite.config.ts`. The mutants of the inline plugin function stay.
-const VITE_CONFIG_PRUNED: usize = 2;
+/// `vite.config.ts`, and the mutants of the inline plugin function.
+const VITE_CONFIG_PRUNED: usize = 7;
 /// The string mutant of `"a"` in `defineConfig({ test: { include: ["a"] } })`.
 const NESTED_CONFIG_PRUNED: usize = 1;
 

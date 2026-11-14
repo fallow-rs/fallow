@@ -47,7 +47,7 @@ pub async fn run_analyze(binary: &str, params: AnalyzeParams) -> Result<CallTool
             }
         })
         .await?;
-        if let Some(result) = typed_tool_result(result) {
+        if let Some(result) = typed_tool_result("analyze", result) {
             return Ok(result);
         }
     }
@@ -277,6 +277,23 @@ mod tests {
     use rmcp::model::ContentBlock;
 
     use super::*;
+
+    #[test]
+    fn constant_parameter_selection_matches_typed_and_fallback_paths() {
+        let params = AnalyzeParams {
+            issue_types: Some(vec!["constant-parameters".to_string()]),
+            ..AnalyzeParams::default()
+        };
+        let options = dead_code_options_from_params(&params, None).expect("options");
+        assert!(options.filters.constant_parameters);
+        assert!(!options.filters.absent_component_props);
+        let fallback_params = AnalyzeParams {
+            group_by: Some("directory".to_string()),
+            ..params
+        };
+        let args = build_analyze_args(&fallback_params).expect("args");
+        assert!(args.iter().any(|arg| arg == "--constant-parameters"));
+    }
 
     #[test]
     fn absent_component_prop_selection_matches_typed_and_fallback_paths() {

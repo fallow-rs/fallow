@@ -204,6 +204,7 @@ pub fn create_warm_hash_workspace_project() -> ExtractCacheInput {
             &module,
             fallow_types::source_fingerprint::SourceFingerprint::new(1, 1),
             false,
+            false,
         );
         cache.insert(&file.path, cached);
     }

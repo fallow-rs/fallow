@@ -230,6 +230,34 @@ fn build_search_gap_facts(
     })
 }
 
+/// The test reach class of one changed export.
+fn classify_test_reach(
+    check: &crate::check::CheckResult,
+    has_tests: bool,
+    export: &fallow_engine::module_graph::ExportTestReachPaths,
+) -> fallow_output::TestReachClass {
+    use fallow_engine::module_graph::ExportTestReach;
+    use fallow_output::TestReachClass;
+
+    if !has_tests {
+        return TestReachClass::NoneFile;
+    }
+    if export.literal_value
+        && check
+            .trace_provenance
+            .is_config_export(std::path::Path::new(&export.file), &export.export_name)
+    {
+        return TestReachClass::Framework;
+    }
+    match export.reach {
+        ExportTestReach::Direct => TestReachClass::Direct,
+        ExportTestReach::Transitive => TestReachClass::Transitive,
+        ExportTestReach::MockedOnly => TestReachClass::MockedOnly,
+        ExportTestReach::None => TestReachClass::None,
+        ExportTestReach::NoneFile => TestReachClass::NoneFile,
+    }
+}
+
 /// Build the test reach facts: how tests reach each value export whose
 /// declaration statement overlaps an added diff line. Returns `None` when no
 /// diff is known or the diff changes no value export.
@@ -237,7 +265,7 @@ fn build_test_reach_facts(
     result: &AuditResult,
     diff_index: Option<&fallow_output::DiffIndex>,
 ) -> Option<fallow_output::TestReachFacts> {
-    use fallow_engine::module_graph::{ExportTestReach, TestMaskingState};
+    use fallow_engine::module_graph::TestMaskingState;
     use fallow_output::{
         ExportTestReachFact, TEST_REACH_EXPORT_CAP, TEST_REACH_FILE_CAP, TestReachClass,
         TestReachCounts, TestReachFacts, TestReachMasking, TestReachStatus,
@@ -256,23 +284,7 @@ fn build_test_reach_facts(
             continue;
         }
         total += 1;
-        let class = if !reach.has_tests {
-            TestReachClass::NoneFile
-        } else if export.literal_value
-            && check
-                .trace_provenance
-                .is_config_export(std::path::Path::new(&export.file), &export.export_name)
-        {
-            TestReachClass::Framework
-        } else {
-            match export.reach {
-                ExportTestReach::Direct => TestReachClass::Direct,
-                ExportTestReach::Transitive => TestReachClass::Transitive,
-                ExportTestReach::MockedOnly => TestReachClass::MockedOnly,
-                ExportTestReach::None => TestReachClass::None,
-                ExportTestReach::NoneFile => TestReachClass::NoneFile,
-            }
-        };
+        let class = classify_test_reach(check, reach.has_tests, export);
         counts.add(class);
         if !reach.has_tests || matches!(class, TestReachClass::Direct | TestReachClass::Framework) {
             continue;
@@ -400,207 +412,11 @@ fn build_partition_facts(result: &AuditResult) -> PartitionFacts {
     }
 }
 
-/// Build the Stage 4 weighted focus map from the audit result's retained
-/// per-file graph facts plus the deltas / coordination signals. Returns an
-/// empty focus map when no graph facts were retained (off the brief path or no
-/// changed file mapped to a module).
-///
-/// The boundary risk-zone signal reuses the `from_path` of boundary violations
-/// whose introduced edge is in `deltas.boundary_introduced` (the same surface
-/// the decision surface reads). The security taint signal is wired as an EMPTY
-/// slice today: the brief path runs the bare dead-code analysis, not the opt-in
-/// `fallow security` taint engine, so `results.security_findings` is empty. The
-/// seam lights up the moment a security pass is threaded onto the brief, with no
-/// focus-map code change.
-#[must_use]
-fn build_focus_map(result: &AuditResult, deltas: &ReviewDeltas) -> crate::audit_focus::FocusMap {
-    use crate::audit_focus::{BoundaryZoneFile, FocusInputs, build_focus_map};
-
-    let Some(check) = result.check.as_ref() else {
-        return crate::audit_focus::FocusMap::default();
-    };
-    let Some(graph_facts) = check.focus_facts.as_ref() else {
-        return crate::audit_focus::FocusMap::default();
-    };
-    let root = &check.config.root;
-
-    // Boundary risk-zone files: the importing `from_path` of each boundary
-    // violation whose introduced zone-pair edge is in the delta set, deduped.
-    let mut seen_pairs: FxHashSet<String> = FxHashSet::default();
-    let mut boundary_files: Vec<BoundaryZoneFile> = Vec::new();
-    for finding in &check.results.boundary_violations {
-        let key = crate::audit::review_deltas::boundary_edge_key(finding);
-        if !deltas.boundary_introduced.contains(&key) || !seen_pairs.insert(key) {
-            continue;
-        }
-        boundary_files.push(BoundaryZoneFile {
-            from_file: crate::audit::keys::relative_key_path(&finding.violation.from_path, root),
-        });
-    }
-
-    // Coordination-gap changed files (the signature-change change-shape proxy):
-    // the changed files whose contract is consumed outside the diff.
-    let coordination_changed_files: Vec<String> = check
-        .impact_closure
-        .as_ref()
-        .map(|c| {
-            let mut files: Vec<String> = c
-                .coordination_gap
-                .iter()
-                .map(|gap| gap.changed_file.clone())
-                .collect();
-            files.sort_unstable();
-            files.dedup();
-            files
-        })
-        .unwrap_or_default();
-
-    // Security taint touch: the brief path carries no security findings (the taint
-    // engine is the opt-in `fallow security` command), so this is empty today. The
-    // seam is a pure function of this slice; it lights up when a security pass is
-    // threaded onto the brief.
-    let taint_touched_files = taint_touched_files(result.check.as_ref());
-
-    // Runtime evidence (paid): `Some` only on the `--runtime-coverage` path.
-    // It weights hot files and enables safe-skip; `None` in free mode, where the
-    // focus map degrades to the deterministic no-runtime baseline byte-for-byte.
-    let runtime_focus = build_runtime_focus(result, root);
-
-    build_focus_map(&FocusInputs {
-        graph_facts,
-        boundary_files: &boundary_files,
-        public_api_added: &deltas.public_api_added,
-        coordination_changed_files: &coordination_changed_files,
-        taint_touched_files: &taint_touched_files,
-        runtime: runtime_focus.as_ref(),
-    })
-}
-
-/// Build the per-file [`crate::audit_focus::RuntimeFocus`] from the
-/// runtime-coverage health report, or `None` when the run carried no
-/// `--runtime-coverage` data (free mode, where the focus map stays byte-identical
-/// to the no-runtime baseline).
-///
-/// Hot files come from the report's `hot_paths` (peak invocation per file). Cold
-/// files are the runtime-proven-unused ones: a file with at least one
-/// `safe_to_delete` finding, NO finding of any other verdict, and no hot path.
-///
-/// Honest boundary: the report's `findings` omit `active` functions, so a file
-/// can carry a live, executed function this signal never sees. `hot_paths` only
-/// surfaces functions at/above the configured hot threshold (`min_invocations_hot`,
-/// default 100, raisable via `--min-invocations-hot`), so an `active` function in
-/// the `[low_traffic .. hot)` band shows up in NEITHER list:
-/// such a file, if its only retained finding is `safe_to_delete`, is classified
-/// cold here despite having run. This is why the cold signal is never trusted on
-/// its own: the safe-skip label additionally requires zero static risk and no
-/// confidence flag, applies only to a file already in the diff, and is always
-/// advisory (the skip stays in the escape-hatch list, never hidden). Paths are
-/// normalized to the brief's root-relative forward-slashed space so the
-/// focus-map joins are byte-exact.
-fn build_runtime_focus(
-    result: &AuditResult,
-    root: &std::path::Path,
-) -> Option<crate::audit_focus::RuntimeFocus> {
-    let report = result.health.as_ref()?.report.runtime_coverage.as_ref()?;
-
-    let hot_pairs: Vec<(String, u64)> = report
-        .hot_paths
-        .iter()
-        .map(|hot| {
-            (
-                crate::audit::keys::relative_key_path(&hot.path, root),
-                hot.invocations,
-            )
-        })
-        .collect();
-
-    // Partition findings into safe_to_delete (cold candidate) vs any other verdict
-    // (the disqualifier that keeps a mixed-verdict file out of the cold set).
-    let mut safe_to_delete: FxHashSet<String> = FxHashSet::default();
-    let mut other_verdict: FxHashSet<String> = FxHashSet::default();
-    for finding in &report.findings {
-        let file = crate::audit::keys::relative_key_path(&finding.path, root);
-        if matches!(
-            finding.verdict,
-            fallow_output::RuntimeCoverageVerdict::SafeToDelete
-        ) {
-            safe_to_delete.insert(file);
-        } else {
-            other_verdict.insert(file);
-        }
-    }
-
-    reconcile_runtime_focus(hot_pairs, &safe_to_delete, &other_verdict)
-}
-
-/// Reconcile the projected runtime signals into a [`crate::audit_focus::RuntimeFocus`]:
-/// peak-aggregate hot invocations per file, and keep a file cold only when it has
-/// a `safe_to_delete` finding, no other-verdict finding, and no hot path (so the
-/// hot and cold lists are disjoint by construction). Returns `None` when both
-/// lists are empty. Pure (no I/O), so the mixed-verdict exclusion, the
-/// hot-excludes-cold filter, and the peak aggregation are unit-tested without
-/// constructing a full health report.
-fn reconcile_runtime_focus(
-    hot_pairs: Vec<(String, u64)>,
-    safe_to_delete: &FxHashSet<String>,
-    other_verdict: &FxHashSet<String>,
-) -> Option<crate::audit_focus::RuntimeFocus> {
-    use crate::audit_focus::{RuntimeFocus, RuntimeHotFile};
-
-    // Peak invocation per hot file (max across the file's hot functions).
-    let mut hot_by_file: rustc_hash::FxHashMap<String, u64> = rustc_hash::FxHashMap::default();
-    for (file, invocations) in hot_pairs {
-        let entry = hot_by_file.entry(file).or_insert(0);
-        *entry = (*entry).max(invocations);
-    }
-
-    let mut hot_files: Vec<RuntimeHotFile> = hot_by_file
-        .into_iter()
-        .map(|(file, invocations)| RuntimeHotFile { file, invocations })
-        .collect();
-    hot_files.sort_by(|a, b| a.file.cmp(&b.file));
-    let hot_set: FxHashSet<&str> = hot_files.iter().map(|hot| hot.file.as_str()).collect();
-
-    let mut cold_files: Vec<String> = safe_to_delete
-        .iter()
-        .filter(|file| !other_verdict.contains(*file) && !hot_set.contains(file.as_str()))
-        .cloned()
-        .collect();
-    cold_files.sort();
-
-    if hot_files.is_empty() && cold_files.is_empty() {
-        return None;
-    }
-    Some(RuntimeFocus {
-        hot_files,
-        cold_files,
-    })
-}
-
-/// Collect the root-relative file paths a security source -> sink taint trace
-/// touches, from any retained `security_findings` (anchor + every trace hop).
-///
-/// Today the brief path runs the bare dead-code analysis, so `security_findings`
-/// is empty and this returns an empty Vec (the security-taint seam contributes
-/// 0). The function is a pure projection over the findings slice, so the moment a
-/// future epic threads a security pass onto the brief, the focus map's taint
-/// signal lights up with no focus-map code change.
-fn taint_touched_files(check: Option<&crate::check::CheckResult>) -> Vec<String> {
-    let Some(check) = check else {
-        return Vec::new();
-    };
-    let root = &check.config.root;
-    let mut touched: FxHashSet<String> = FxHashSet::default();
-    for finding in &check.results.security_findings {
-        touched.insert(crate::audit::keys::relative_key_path(&finding.path, root));
-        for hop in &finding.trace {
-            touched.insert(crate::audit::keys::relative_key_path(&hop.path, root));
-        }
-    }
-    let mut files: Vec<String> = touched.into_iter().collect();
-    files.sort();
-    files
-}
+#[path = "audit_brief_focus.rs"]
+mod focus;
+use focus::build_focus_map;
+#[cfg(test)]
+use focus::reconcile_runtime_focus;
 
 /// Assemble the structured [`ReviewBriefOutput`] for an audit result. Pure: no
 /// timestamps, no randomness, so two runs over the same tree serialize
@@ -635,7 +451,7 @@ pub fn build_brief_output_with_diff(
     graph_facts.api_width_delta = i64::try_from(added).unwrap_or(i64::MAX);
     let partition = build_partition_facts(result);
     let impact_closure = build_impact_closure_facts(result, diff_index);
-    let focus = build_focus_map(result, &deltas);
+    let focus = build_focus_map(result, &deltas, diff_index);
     ReviewBriefOutput {
         branching: build_branching_report(result),
         test_reach: build_test_reach_facts(result, diff_index),
@@ -3094,6 +2910,7 @@ mod tests {
                 change_shape: 0,
                 runtime: 0,
                 total: 1,
+                ..FocusScore::default()
             },
             label,
             reason: reason.to_string(),

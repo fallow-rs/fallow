@@ -293,7 +293,7 @@ export type IssueAction = (FixAction | SuppressLineAction | SuppressFileAction |
  * Discriminant string for [`FixAction`]. Kebab-case per the JSON output
  * contract.
  */
-export type FixActionType = ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "move-to-prod" | "refactor-cycle" | "refactor-re-export-cycle" | "refactor-boundary" | "export-type" | "migrate-deprecated-export" | "remove-catalog-entry" | "remove-empty-catalog-group" | "update-catalog-reference" | "add-catalog-entry" | "remove-catalog-reference" | "remove-dependency-override" | "fix-dependency-override" | "resolve-policy-violation" | "move-to-server-module" | "split-mixed-barrel" | "hoist-directive" | "wire-server-action" | "provide-inject" | "use-load-data" | "render-component" | "use-component-prop" | "review-component-prop" | "emit-component-event" | "wire-svelte-event" | "compose-effect-layer" | "fail-tagged-error" | "remove-catch-tag-handler" | "resolve-route-collision" | "resolve-dynamic-segment-name-conflict" | "add-suppression-reason" | "remove-stale-suppression")
+export type FixActionType = ("remove-export" | "delete-file" | "remove-dependency" | "move-dependency" | "remove-enum-member" | "remove-class-member" | "resolve-import" | "install-dependency" | "remove-duplicate" | "move-to-dev" | "move-to-prod" | "refactor-cycle" | "refactor-re-export-cycle" | "refactor-boundary" | "export-type" | "migrate-deprecated-export" | "remove-catalog-entry" | "remove-empty-catalog-group" | "update-catalog-reference" | "add-catalog-entry" | "remove-catalog-reference" | "remove-dependency-override" | "fix-dependency-override" | "resolve-policy-violation" | "move-to-server-module" | "split-mixed-barrel" | "hoist-directive" | "wire-server-action" | "provide-inject" | "use-load-data" | "render-component" | "use-component-prop" | "review-component-prop" | "review-constant-parameter" | "emit-component-event" | "wire-svelte-event" | "compose-effect-layer" | "fail-tagged-error" | "remove-catch-tag-handler" | "resolve-route-collision" | "resolve-dynamic-segment-name-conflict" | "add-suppression-reason" | "remove-stale-suppression")
 /**
  * Singleton discriminant for [`SuppressLineAction`].
  */
@@ -469,6 +469,19 @@ export type DependencyOverrideSource = ("pnpm-workspace.yaml" | "package.json")
  * surfacing them statically catches the issue first.
  */
 export type DependencyOverrideMisconfigReason = ("unparsable-key" | "empty-value")
+/**
+ * Why the rule reports a parameter.
+ */
+export type ConstantParameterReason = ("identical-argument" | "never-passed" | "unused-default")
+/**
+ * The evidence that a [`ConstantParameter`] finding needs beyond the
+ * syntactic call facts.
+ */
+export type ConstantParameterEvidence = "type-aware"
+/**
+ * The type of a [`ConstantParameterValue`].
+ */
+export type ConstantParameterValueKind = ("boolean" | "null" | "undefined" | "number" | "string" | "binding")
 /**
  * Kind of an Effect layer definition.
  */
@@ -673,6 +686,8 @@ kind: "node-modules-missing"
 kind: "boundaries-not-configured"
 } | {
 kind: "rule-packs-not-configured"
+} | {
+kind: "client-server-leak-no-client-roots"
 } | {
 kind: "excluded-by-default-ignore"
 /**
@@ -1723,7 +1738,7 @@ export type DoctorStatus = ("pass" | "warn" | "fail")
 /**
  * Stable identifier for a doctor check. Declaration order is output order.
  */
-export type DoctorCheckId = ("root" | "config" | "workspaces" | "plugins" | "type-aware" | "dependencies" | "cache" | "graph-cache")
+export type DoctorCheckId = ("root" | "config" | "workspaces" | "plugins" | "type-aware" | "dependencies" | "cache" | "graph-cache" | "mutation-runner")
 /**
  * Stable category for a doctor check.
  */
@@ -1841,9 +1856,16 @@ export type MutantStatus = ("killed" | "timeout" | "survived" | "no_coverage" | 
  */
 export type MutantFailureKind = ("assertion" | "error" | "timeout")
 /**
- * Why a survivor may be equivalent, as far as the type check can tell.
+ * Why a survivor may be equivalent: a fact of the type check or of the
+ * call evidence. The hint is advisory and never changes the status.
  */
-export type MutantEquivalenceHint = "type-non-nullish"
+export type MutantEquivalenceHint = ("type-non-nullish" | "constant-parameter")
+/**
+ * The verdict of one replay. A replay never decides that a mutant is
+ * equivalent: equal results on both sides give `no_witness_found`, which
+ * says only that this input shows no difference.
+ */
+export type MutationReplayVerdict = ("witness" | "no_witness_found" | "unstable" | "timeout" | "not_callable" | "not_replayable")
 /**
  * Why the type check did not check a survivor.
  */
@@ -1856,6 +1878,10 @@ export type MutationRecheckOutcome = ("killed" | "survived" | "no_coverage" | "t
  * How one mutant of a compare differs from the saved report.
  */
 export type MutationCompareChange = ("regressed" | "inconclusive" | "added" | "removed")
+/**
+ * What a record pass keeps of the arguments.
+ */
+export type MutationRecordMode = ("shapes" | "values")
 /**
  * Version singleton for a mutation plan.
  */
@@ -1876,6 +1902,18 @@ export type MutationInspectStatus = ("fresh" | "stale")
  * Why an inspect packet is stale.
  */
 export type MutationStaleReason = ("file-missing" | "no-digest" | "source-changed" | "mutant-not-reproduced")
+/**
+ * Where the arguments of a replay come from.
+ */
+export type MutationReplayInputSource = ("argument" | "recorded")
+/**
+ * The side of one replay call.
+ */
+export type MutationReplaySide = ("original" | "mutant")
+/**
+ * The outcome of one replay call.
+ */
+export type MutationReplayOutcome = ("returned" | "threw" | "timed_out" | "not_callable")
 /**
  * Version singleton for the open tasks of a mutation report.
  */
@@ -2232,6 +2270,11 @@ symbol_impacts?: SemanticSymbolImpact[]
  * Advisory project-local public-signature coupling.
  */
 type_coupling?: (TypeCouplingReport | null)
+/**
+ * The call evidence of the `constant-parameter` rule. Present when the
+ * rule sent candidates to the companion.
+ */
+call_evidence?: (TypeAwareCallEvidenceMeta | null)
 /**
  * Whether the semantic companion executed at least one query.
  */
@@ -2903,6 +2946,36 @@ export interface TypeCouplingCycle {
 files: string[]
 }
 /**
+ * The call evidence that the `constant-parameter` rule asked the companion
+ * for.
+ */
+export interface TypeAwareCallEvidenceMeta {
+/**
+ * Parameters with a default whose arguments the companion typed.
+ */
+default_candidates: number
+/**
+ * Methods of exported classes whose calls the companion read.
+ */
+method_candidates: number
+/**
+ * Findings that the evidence proved.
+ */
+findings: number
+/**
+ * The count of each reason that a candidate got no evidence, such as
+ * `outside-program` or `decorator`. An open set: a later version can
+ * add a reason.
+ */
+abstention_reasons?: {
+[k: string]: number
+}
+/**
+ * Duration of the request as reported by the companion.
+ */
+elapsed_ms: number
+}
+/**
  * Closed abstention reason counts for stable machine consumption.
  */
 export interface TypeAwareAbstentionCounts {
@@ -3377,6 +3450,10 @@ unused_component_props?: UnusedComponentPropFinding[]
  */
 absent_component_props?: AbsentComponentPropFinding[]
 /**
+ * Parameters that each visible call passes in one way. Off by default.
+ */
+constant_parameters?: ConstantParameterFinding[]
+/**
  * Vue `<script setup>` `defineEmits` events emitted nowhere in their own SFC
  * (no `emit('<name>')` call). Wrapped in [`UnusedComponentEmitFinding`] so
  * each entry carries a typed `actions` array natively. Default severity is
@@ -3702,6 +3779,11 @@ unused_component_props?: number
  * Optional consumed props omitted by known reachable callers, for manual review.
  */
 absent_component_props?: number
+/**
+ * Parameters that each visible call passes in one way, for manual review.
+ * Absent while zero, so a run with the opt-in rule off keeps its shape.
+ */
+constant_parameters?: number
 /**
  * Vue `<script setup>` emits emitted nowhere inside their own SFC.
  */
@@ -6769,6 +6851,141 @@ path: string
 line: number
 /**
  * 0-based original-source byte column.
+ */
+col: number
+}
+/**
+ * Wire-shape envelope for a [`ConstantParameter`] finding. No action is
+ * auto-fixable: a change of the function and each call is a refactor that
+ * needs the tests, and a default that differs from the constant can change
+ * behavior.
+ */
+export interface ConstantParameterFinding {
+/**
+ * Source path of the function.
+ */
+path: string
+/**
+ * The module-scope binding name of the function. For a method of an
+ * exported class, which only type-aware mode reports, `Class.method`.
+ */
+function_name: string
+/**
+ * The parameter name. For an option key, the local binding of the key
+ * in the object pattern: `abort` for `{ signal: abort }`.
+ */
+parameter_name: string
+/**
+ * 0-based index of the parameter. A TypeScript `this` parameter does
+ * not count.
+ */
+parameter_index: number
+/**
+ * The property key, when the finding is about one key of an
+ * object-pattern parameter: `retries` in `{ retries = 3 }`. Absent for
+ * a plain parameter.
+ */
+option_key?: (string | null)
+/**
+ * 1-based line of the parameter, or of the key binding.
+ */
+line: number
+/**
+ * 0-based byte column of the parameter, or of the key binding.
+ */
+col: number
+reason: ConstantParameterReason
+/**
+ * The evidence that the finding needs beyond the syntactic call facts.
+ * Absent for a finding that the call facts prove alone.
+ */
+evidence?: (ConstantParameterEvidence | null)
+/**
+ * The value that each call passes. Present if and only if `reason` is
+ * `identical-argument`.
+ */
+value?: (ConstantParameterValue | null)
+/**
+ * `true` when the parameter has the TypeScript `?` marker.
+ */
+optional: boolean
+/**
+ * `true` when the parameter, or the option key, has a default value.
+ */
+has_default: boolean
+/**
+ * The count of conditional tests in the function whose test is the
+ * parameter, `!parameter` or `!!parameter`: the test of an `if`, a
+ * `?:`, a `while`, a `do` or a `for`. Nested functions count. A
+ * comparison such as `parameter === true` and an operand of `&&` or
+ * `||` do not count.
+ */
+condition_reads: number
+/**
+ * The count of calls that the rule read for this parameter. A
+ * recursive call that passes the parameter on unchanged does not count.
+ */
+call_site_count: number
+/**
+ * The first calls in source order, at most 20. The list is never longer
+ * than `call_site_count`.
+ */
+inspected_call_sites: ConstantParameterCallSite[]
+/**
+ * What the finding means and what static analysis does not prove.
+ */
+explanation: string
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file, the function or the
+ * parameter gives a new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
+ * Suggested next steps. Always emitted.
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. Not part of the finding identity, baseline keys
+ * or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
+}
+/**
+ * The value that each call passes: a literal, or an immutable binding.
+ */
+export interface ConstantParameterValue {
+kind: ConstantParameterValueKind
+/**
+ * The value as text. A number uses the JavaScript `String(n)` form,
+ * except that negative zero is `-0`. A string is the raw value with no
+ * quotes. `null`, `undefined`, `true` and `false` are the keyword. A
+ * binding is its name.
+ */
+text: string
+}
+/**
+ * One inspected call of the reported function.
+ */
+export interface ConstantParameterCallSite {
+/**
+ * Caller source path.
+ */
+path: string
+/**
+ * 1-based line of the call.
+ */
+line: number
+/**
+ * 0-based byte column of the call.
  */
 col: number
 }
@@ -15809,6 +16026,10 @@ unused_component_props?: UnusedComponentPropFinding[]
  */
 absent_component_props?: AbsentComponentPropFinding[]
 /**
+ * Parameters that each visible call passes in one way. Off by default.
+ */
+constant_parameters?: ConstantParameterFinding[]
+/**
  * Vue `<script setup>` `defineEmits` events emitted nowhere in their own SFC
  * (no `emit('<name>')` call). Wrapped in [`UnusedComponentEmitFinding`] so
  * each entry carries a typed `actions` array natively. Default severity is
@@ -16422,13 +16643,13 @@ new_count: number
  */
 export interface SecurityFinding {
 /**
- * Stable per-finding correlation id, identical across runs for the same
- * rule + anchor path + line + column. An autonomous agent that triaged this
- * candidate on a prior run uses it to correlate the candidate after a
- * rebase. Equal to the SARIF `partialFingerprints["fallowSecurity/v2"]`
- * value for the same finding (one shared helper computes both).
+ * Location id (rule, path, line, column), equal to SARIF `fallowSecurity/v2`; edits move it.
  */
 finding_id: string
+/**
+ * Line-independent id (`sec1:<hash>`, `~k` for repeats); a verdict may use it.
+ */
+stable_finding_id?: (string | null)
 kind: SecurityFindingKind
 /**
  * The catalogue category id (e.g. `"dangerous-html"`). `Some` for
@@ -16511,9 +16732,8 @@ taint_flow?: (SecurityTaintFlow | null)
  */
 runtime?: (SecurityRuntimeContext | null)
 /**
- * Internal projection used by `fallow security --surface`. The CLI strips
- * this from per-finding JSON and promotes it to the top-level
- * `attack_surface` field only when requested.
+ * Internal projection used by `fallow security --surface`. The CLI strips this from
+ * per-finding JSON and promotes it to the top-level `attack_surface` field only when requested.
  */
 attack_surface?: (SecurityAttackSurfaceEntry | null)
 }
@@ -17112,7 +17332,8 @@ elapsed_ms: ElapsedMs
 workspace_diagnostics?: WorkspaceDiagnostic[]
 summary: SecuritySurvivorsSummary
 /**
- * Verifier-retained candidates keyed by finding id.
+ * Verifier-retained candidates keyed by the candidate `finding_id`, also
+ * when the verdict names the candidate by its `stable_finding_id`.
  */
 survivors: {
 [k: string]: SecuritySurvivor
@@ -17558,6 +17779,10 @@ unused_component_props?: UnusedComponentPropFinding[]
  * Used optional component inputs absent from inspected reachable callers. Off by default.
  */
 absent_component_props?: AbsentComponentPropFinding[]
+/**
+ * Parameters that each visible call passes in one way. Off by default.
+ */
+constant_parameters?: ConstantParameterFinding[]
 /**
  * Vue `<script setup>` `defineEmits` events emitted nowhere in their own SFC
  * (no `emit('<name>')` call). Wrapped in [`UnusedComponentEmitFinding`] so
@@ -19018,14 +19243,39 @@ change_shape: number
 /**
  * Runtime-weight component (paid): a hot path (runtime evidence of high
  * invocation) adds an invocation-bucketed weight so it amplifies the blast
- * and outranks an otherwise-equal cold unit. `0` in free mode (no runtime
- * input), so the free-tier total stays the four deterministic components and
- * is byte-identical to the no-runtime baseline.
+ * and outranks an otherwise-equal cold unit. `0` and omitted in free mode
+ * (no runtime input).
  */
 runtime?: number
 /**
- * The summed total of every present component (the four deterministic ones
- * plus the runtime weight).
+ * Churn component: the recency-weighted commit count of the file in the
+ * churn window (90-day half-life), in capped bands. Omitted while it is
+ * zero, which includes a test file and a run without a git history or on a
+ * shallow clone.
+ */
+churn?: number
+/**
+ * Worsened component: the functions of the file whose complexity metrics
+ * grew against the matched base finding (`worsened_metrics`), capped.
+ * Omitted while it is zero, which includes a run without a base.
+ */
+worsened?: number
+/**
+ * Test-reach component: the changed exports of the file that no test
+ * runs for real (`mocked-only`, `none`, or `none-file` in a project with
+ * tests), capped. Omitted while it is zero.
+ */
+test_reach?: number
+/**
+ * Mutation component: the surviving mutants on the added lines of the
+ * file, from the `--mutation-report` file, capped. Omitted while it is
+ * zero. Without `--mutation-report` the component is not measured, which
+ * does not mean that no mutant survives.
+ */
+mutation?: number
+/**
+ * The sum of every component, also of the components that the wire
+ * omits because they are zero.
  */
 total: number
 }
@@ -20886,6 +21136,11 @@ compare?: (MutationCompare | null)
  * the run is not a recheck. The exit code of the run reads this entry.
  */
 gate_outcomes?: (GateOutcomes | null)
+/**
+ * The argument recording of the dry run. Present only with
+ * `--record-args`. It holds counts and reasons, never argument values.
+ */
+recording?: (MutationRecordingOutput | null)
 }
 /**
  * The completion status of a run.
@@ -20991,12 +21246,22 @@ target: string
 test_ids: string[]
 status: MutationKillMatrixTargetStatus
 /**
- * Why the evidence of this target is incomplete, sorted. The run-wide
- * reasons `partial-mutation-run`, `baseline-failure`, and
- * `missing-test-file-metadata` apply to each target.
+ * Why the evidence of this target is incomplete, sorted.
+ * `baseline-failure` means that a test failed with no active mutant, and
+ * that the failure can affect this target: the failing test is a test
+ * of the target or is in a test file of the target, or it covers, kills,
+ * or ran without a mutant that a test of the target covers or kills.
+ * `partial-mutation-run` means that the run is partial. When baseline
+ * failures are the only cause of a partial run, only the targets with
+ * `baseline-failure` get it. Each other cause applies to each target,
+ * and so does `missing-test-file-metadata`.
  * `incomplete-mutant-results` means that a test of this target covers a
  * mutant with incomplete evidence. `unmatched-target` means that the
- * target selects no test.
+ * target selects no test. With it, `not-a-test-file` means that the
+ * runner does not list the file of the target as a test file, and
+ * `no-planned-code` means that the file reaches no planned code, so
+ * the dry run does not run it. A run stops only when no target selects
+ * a test.
  */
 reasons: string[]
 }
@@ -21255,6 +21520,14 @@ cached?: boolean
  */
 resumed?: boolean
 /**
+ * True when the status and its evidence come from the earlier report
+ * of a `--recheck` run: the recheck did not select the mutant, its file
+ * has the digest of that report, and each test file of its killing
+ * tests exists. The mutant did not run in this run, and the kill matrix
+ * of this run has no evidence of it.
+ */
+carried?: boolean
+/**
  * The TypeScript diagnostic codes of the new errors of a
  * `compile_error` mutant, sorted, at most 8.
  */
@@ -21266,6 +21539,12 @@ type_error_codes?: number[]
  * a verdict file. The hint can be wrong.
  */
 equivalence_hint?: (MutantEquivalenceHint | null)
+/**
+ * The replay of a recorded input. Present only after a `--record-args
+ * values` run, for a survived or uncovered mutant with a recorded input
+ * of its export.
+ */
+witness?: (MutantWitness | null)
 }
 /**
  * The edit of a mutant, without project text.
@@ -21348,6 +21627,28 @@ failure_kind?: (MutantFailureKind | null)
  * The first line of the reason of a `runtime_error` run.
  */
 detail?: (string | null)
+}
+/**
+ * The replay of a recorded input against a survived or uncovered mutant,
+ * after a `fallow mutation --record-args values` run. It holds no argument
+ * value: the values stay in the gitignored cache directory.
+ */
+export interface MutantWitness {
+verdict: MutationReplayVerdict
+/**
+ * The recorded input of the verdict. `fallow mutation tasks` joins its
+ * values from the cache.
+ */
+input_id?: (string | null)
+/**
+ * The recorded inputs that the replay ran.
+ */
+inputs_checked: number
+/**
+ * Why the replay gave no witness, for example `no witness found (2
+ * inputs, recorded, 3 calls of each side)`. Absent for a witness.
+ */
+reason?: (string | null)
 }
 /**
  * The results of the mutants of one function.
@@ -21578,9 +21879,9 @@ checked: number
  */
 compile_errors: number
 /**
- * The mutants of the final report that have an `equivalence_hint`. They
- * keep the status `survived`. A verdict that makes a mutant `equivalent`
- * removes its hint and lowers this count.
+ * The mutants of the final report that have the `type-non-nullish`
+ * hint. They keep the status `survived`. A verdict that makes a mutant
+ * `equivalent` removes its hint and lowers this count.
  */
 hinted?: number
 /**
@@ -21630,6 +21931,22 @@ unsettled: number
  * The rechecked mutants, sorted by file, line and mutant id.
  */
 mutants: MutationRecheckMutant[]
+/**
+ * The mutants of the report that keep their result from the earlier
+ * report (`carried`), because the recheck did not select them. The
+ * summary counts them. The recheck does not run them again, so a test
+ * that became weaker does not change their result.
+ */
+carried?: number
+/**
+ * The files of the earlier report outside this run whose earlier
+ * results do not apply, sorted: the source changed after the report,
+ * the test file of a killing test is gone, or the report has no digest
+ * or no readable entry for the file. The report leaves out their
+ * mutants. Run `fallow mutation` on them for new
+ * results.
+ */
+stale_files?: string[]
 }
 /**
  * One rechecked mutant.
@@ -21718,6 +22035,66 @@ status?: (MutantStatus | null)
 previous_killing_tests: string[]
 }
 /**
+ * The argument recording of a run.
+ */
+export interface MutationRecordingOutput {
+mode: MutationRecordMode
+/**
+ * True when the inputs are in the cache file
+ * `<cache dir>/mutation/recorded-args.json`.
+ */
+saved: boolean
+/**
+ * Why the run recorded nothing or saved nothing, for example a runner
+ * that records no arguments. Absent when the inputs are saved.
+ */
+error?: (string | null)
+/**
+ * The recorded exported functions, sorted by file and export.
+ */
+functions: MutationRecordedFunction[]
+}
+/**
+ * The recorded arguments of one exported function.
+ */
+export interface MutationRecordedFunction {
+/**
+ * The project-root-relative path of the file.
+ */
+file: string
+/**
+ * The export name. `fallow mutation inspect --replay` calls it.
+ */
+export: string
+/**
+ * The number of distinct inputs that the cache keeps.
+ */
+input_count: number
+/**
+ * The calls whose arguments the cache does not keep, by reason.
+ */
+not_replayable: MutationNotReplayable[]
+}
+/**
+ * The calls of one reason whose arguments a recording did not keep.
+ */
+export interface MutationNotReplayable {
+/**
+ * Why the arguments cannot be replayed. One of a fixed set: `a
+ * function`, `a symbol`, `a proxy`, `a cyclic value`, `a class
+ * instance`, `a value that is too large`, `an accessor property`, `an
+ * object with a symbol key`, `an object that this runtime cannot check
+ * for a proxy`, `a value that cannot be read`, `a value under a secret
+ * key name` or `a string that looks like a secret`. It never holds text
+ * of the code or of a value.
+ */
+reason: string
+/**
+ * The number of calls.
+ */
+count: number
+}
+/**
  * The envelope of `fallow mutation --plan`. It runs no user code.
  */
 export interface MutationPlanOutput {
@@ -21743,7 +22120,8 @@ test_files: string[]
  */
 no_test_files: boolean
 /**
- * True when the plan applied the `framework-config` prune rule.
+ * True when the plan applied the `framework-config` and
+ * `build-tool-only` prune rules.
  */
 framework_config_checked: boolean
 /**
@@ -21754,6 +22132,7 @@ skipped_files: MutationSkippedFile[]
  * The paths of a `paths` scope that select no file.
  */
 unmatched_paths: string[]
+runner: MutationPlanRunner
 }
 /**
  * The totals of a plan.
@@ -21795,6 +22174,10 @@ pruned_side_effect_sink: number
  * Mutants in framework config exports.
  */
 pruned_framework_config: number
+/**
+ * Mutants in files that only tool config files reach. Absent when 0.
+ */
+pruned_build_tool_only?: number
 }
 /**
  * One mutant of a plan.
@@ -21863,7 +22246,50 @@ pending_reason?: (string | null)
 test_reach?: (MutantTestReach | null)
 }
 /**
- * The envelope of `fallow mutation inspect`. It runs no user code.
+ * The test runner of a plan. The plan reads the `package.json` of the
+ * installed runner package and runs no code. A run that starts the runner
+ * stops when `supported` is false: with `FALLOW_MUTATION_RUNNER_UNSUPPORTED`
+ * for a version outside the range, and with the companion error
+ * `runner-not-found` for a runner that is not installed. A run of a plan
+ * with no test file or no mutant starts no runner.
+ */
+export interface MutationPlanRunner {
+/**
+ * The runner: `vitest`, `node-test` or `bun-test`.
+ */
+name: string
+/**
+ * The package or runtime that the supported range applies to.
+ */
+package: string
+/**
+ * The installed version of the package. `null` when the package is not
+ * installed, or when `supported` is `null`.
+ */
+installed_version?: (string | null)
+/**
+ * The supported range, for example `>=4.1.0 <6.0.0`.
+ */
+supported_range: string
+/**
+ * True when the installed version is in the range. False when it is
+ * outside the range or when the package is not installed. `null` for
+ * `node-test` and `bun-test`: their range applies to the runtime, and a
+ * run selects the runtime when it starts.
+ */
+supported?: (boolean | null)
+/**
+ * The problem when `supported` is false, else `null`.
+ */
+message?: (string | null)
+/**
+ * The install step when `supported` is false, else `null`.
+ */
+help?: (string | null)
+}
+/**
+ * The envelope of `fallow mutation inspect`. It runs no user code, except
+ * with `--replay`.
  */
 export interface MutationInspectOutput {
 schema_version: MutationInspectSchemaVersion
@@ -21955,6 +22381,10 @@ killing_tests: string[]
  * True only for exact requested membership with terminal pass or fail results.
  */
 kill_matrix_complete: boolean
+/**
+ * The replay of the mutant. Present only with `--replay`.
+ */
+replay?: (MutationReplayOutput | null)
 }
 /**
  * The code of one mutant, from the current file.
@@ -21976,6 +22406,95 @@ original_lines: string
  * The same lines with the replacement applied.
  */
 mutated_lines: string
+}
+/**
+ * The replay of one export on the original and on one mutant (replay
+ * contract 1).
+ */
+export interface MutationReplayOutput {
+/**
+ * The version of the replay contract of the runner companion.
+ */
+contract_version: number
+verdict: MutationReplayVerdict
+/**
+ * Why the replay did not run or did not end. Absent otherwise.
+ */
+reason?: (string | null)
+/**
+ * The export that the replay called. `null` when no export holds the
+ * mutant.
+ */
+export?: (string | null)
+input: MutationReplayInput
+/**
+ * The inputs that the replay ran, in order, up to the first witness.
+ */
+inputs_checked: number
+/**
+ * The calls of each side. The sides take turns.
+ */
+calls_per_side: number
+/**
+ * The time limit of one call, in milliseconds.
+ */
+call_timeout_ms: number
+/**
+ * The fixed value of `Date.now()` in each call.
+ */
+clock_ms: number
+/**
+ * The seed of `Math.random` in each call.
+ */
+seed: number
+/**
+ * Each call, in call order.
+ */
+calls: MutationReplayCall[]
+/**
+ * The wall time of the replay request, in milliseconds. It differs
+ * between two replays of the same input.
+ */
+duration_ms: number
+}
+/**
+ * The input of a replay.
+ */
+export interface MutationReplayInput {
+source: MutationReplayInputSource
+/**
+ * The id of a recorded input. Absent for `--args`.
+ */
+input_id?: (string | null)
+/**
+ * The arguments in the replay encoding: JSON values, and objects with a
+ * `$replay` tag for `undefined`, special numbers, bigints, dates,
+ * regular expressions, maps, sets and typed arrays.
+ */
+args: unknown[]
+}
+/**
+ * One call of a replay.
+ */
+export interface MutationReplayCall {
+side: MutationReplaySide
+/**
+ * The 1-based number of the call on its side.
+ */
+index: number
+outcome: MutationReplayOutcome
+/**
+ * The returned or thrown value in the replay encoding. An error is
+ * `{"$replay": "error", "name", "message"}`. `null` for a call that
+ * timed out.
+ */
+value: (null | boolean | number | string | unknown[] | {
+
+})
+/**
+ * A short text of the value for people, at most 200 characters.
+ */
+text: string
 }
 /**
  * The envelope of `fallow mutation tasks`: the open tasks of one saved
@@ -22074,6 +22593,71 @@ stale_reason?: (MutationStaleReason | null)
  * test ids and the static test files of one mutant.
  */
 covering_test_files: string[]
+/**
+ * The witness of the task: a recorded input that shows a difference, with
+ * the results of both sides. Present only after a `--record-args
+ * values` run.
+ */
+witness?: (MutationTaskWitness | null)
+}
+/**
+ * The witness of a task: the reference of the report, and the values from
+ * the local cache when the cache still has them. Only the verdict
+ * `witness` can have `args`, `original` and `mutant`.
+ */
+export interface MutationTaskWitness {
+verdict: MutationReplayVerdict
+/**
+ * The recorded input of the verdict.
+ */
+input_id?: (string | null)
+/**
+ * The recorded inputs that the replay ran.
+ */
+inputs_checked: number
+/**
+ * Why the replay gave no witness. Absent for a witness.
+ */
+reason?: (string | null)
+/**
+ * The command that replays the mutant again and shows both sides.
+ */
+replay_command: string
+/**
+ * The arguments of the input in the replay encoding: JSON, and objects
+ * with a `$replay` tag for other values (`{"$replay": "undefined"}`,
+ * `{"$replay": "bigint", "value": "12"}`, and `date`, `regexp`, `map`,
+ * `set` and `bytes`). Absent for another verdict, for a stale task, when
+ * the cache no longer has the input (7 days), and in the markdown
+ * output.
+ */
+args?: (unknown[] | null)
+/**
+ * The result on the original code: the value that a new test asserts.
+ * The replay ran with a fixed clock and seed, so run the new test on the
+ * current code to confirm it.
+ */
+original?: (MutationWitnessSide | null)
+/**
+ * The result on the mutant.
+ */
+mutant?: (MutationWitnessSide | null)
+}
+/**
+ * The result of one side of a witness.
+ */
+export interface MutationWitnessSide {
+outcome: MutationReplayOutcome
+/**
+ * The returned or thrown value in the replay encoding.
+ */
+value: (null | boolean | number | string | unknown[] | {
+
+})
+/**
+ * A short text of the value for people.
+ */
+text: string
 }
 /**
  * Single CodeClimate-compatible issue inside [`CodeClimateOutput`].

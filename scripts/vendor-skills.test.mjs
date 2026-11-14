@@ -21,6 +21,7 @@ import {
   diffTrees,
   listFiles,
   main,
+  pinLaunchers,
   releasedSkillPairs,
   runCheck,
   runVendor,
@@ -69,6 +70,75 @@ test("metadata transform preserves the rest of SKILL.md", () => {
     stripUnsupportedMetadata(source),
     ["---", "name: fallow", "license: MIT", "---", "# Fallow"].join("\n"),
   );
+});
+
+test("launcher transform pins each download-and-run form of the fallow package", () => {
+  const source = [
+    "npx fallow dead-code",
+    "Run `npx fallow recommend` or `pnpm dlx fallow recommend`.",
+    "bunx fallow audit; yarn dlx fallow audit; npx --yes fallow health",
+    "npx --no-install fallow --version",
+    "codex mcp add fallow -- npx --no fallow-mcp",
+    "npx fallow@3.1.0 dead-code",
+  ].join("\n");
+  assert.equal(
+    pinLaunchers(source, "3.42.0"),
+    [
+      "npx fallow@3.42.0 dead-code",
+      "Run `npx fallow@3.42.0 recommend` or `pnpm dlx fallow@3.42.0 recommend`.",
+      "bunx fallow@3.42.0 audit; yarn dlx fallow@3.42.0 audit; npx --yes fallow@3.42.0 health",
+      "npx --no-install fallow --version",
+      "codex mcp add fallow -- npx --no fallow-mcp",
+      "npx fallow@3.1.0 dead-code",
+    ].join("\n"),
+  );
+  assert.throws(() => pinLaunchers(source, "3"), /exact/u);
+});
+
+test("the vendored skill pins launchers to the version of its npm package", () => {
+  const repo = makeTree({
+    "npm/fallow/package.json": JSON.stringify({ name: "fallow", version: "3.42.0" }),
+    "npm/fallow/skills/fallow/SKILL.md": "---\nname: fallow\n---\nRun `npx fallow dead-code`.\n",
+    "npm/fallow/skills/fallow/references/ci.md": "run: npx fallow audit\n",
+  });
+  const published = makeTree({});
+  const canonical = join(repo, "npm", "fallow", "skills", "fallow");
+  assert.equal(runVendor(canonical, published), 0);
+  assert.match(
+    readFileSync(join(published, "SKILL.md"), "utf8"),
+    /`npx fallow@3\.42\.0 dead-code`/u,
+  );
+  assert.equal(
+    readFileSync(join(published, "references/ci.md"), "utf8"),
+    "run: npx fallow@3.42.0 audit\n",
+  );
+  assert.equal(runCheck(canonical, published, { renderDiffs: false }), 0);
+  rmSync(repo, { recursive: true });
+  rmSync(published, { recursive: true });
+});
+
+test("a release does not make a pinned copy drift, but an unpinned copy always drifts", () => {
+  const repo = makeTree({
+    "npm/fallow/package.json": JSON.stringify({ name: "fallow", version: "3.43.0" }),
+    "npm/fallow/skills/fallow/SKILL.md":
+      "---\nname: fallow\n---\nRun `npx fallow dead-code` or `node fallow.js`.\n",
+  });
+  const canonical = join(repo, "npm", "fallow", "skills", "fallow");
+  const pinned = makeTree({
+    "SKILL.md": "---\nname: fallow\n---\nRun `npx fallow@3.42.0 dead-code` or `node fallow.js`.\n",
+  });
+  const unpinned = makeTree({
+    "SKILL.md": "---\nname: fallow\n---\nRun `npx fallow dead-code` or `node fallow.js`.\n",
+  });
+  assert.equal(runCheck(canonical, pinned, { renderDiffs: false }), 0);
+  assert.equal(runCheck(canonical, unpinned, { renderDiffs: false }), 1);
+  assert.equal(
+    pinLaunchers("npx fallow.js and npx fallow/x", "3.42.0"),
+    "npx fallow.js and npx fallow/x",
+  );
+  for (const dir of [repo, pinned, unpinned]) {
+    rmSync(dir, { recursive: true });
+  }
 });
 
 test("diffTrees ignores host adapters but reports contract drift", () => {

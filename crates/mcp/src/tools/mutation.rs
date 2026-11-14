@@ -58,7 +58,7 @@ pub async fn run_mutation_plan(
     .await?
     .map_or_else(
         |error| CallToolResult::error(vec![ContentBlock::text(programmatic_error_body(&error))]),
-        |value| json_success(&value),
+        |value| json_success("mutation_plan", &value),
     );
     Ok(result)
 }

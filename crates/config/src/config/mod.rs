@@ -869,7 +869,9 @@ impl AuditConfig {
 #[serde(rename_all = "kebab-case")]
 pub enum AuditGate {
     /// Fail only on findings the current changeset introduced, determined by
-    /// a base-snapshot attribution pass. The default.
+    /// a base-snapshot attribution pass. An unused file or unused export
+    /// outside the changed files counts when the base does not report it.
+    /// The default.
     #[default]
     NewOnly,
     /// Fail on every finding in changed files, skipping the attribution pass.
@@ -919,6 +921,14 @@ pub struct RegressionConfig {
     pub baseline: Option<RegressionBaseline>,
 }
 
+#[expect(
+    clippy::trivially_copy_pass_by_ref,
+    reason = "serde skip_serializing_if requires a reference"
+)]
+const fn is_zero_count(count: &usize) -> bool {
+    *count == 0
+}
+
 /// Saved per-issue-type counts written by `--save-baseline` and compared by
 /// `--fail-on-regression`. Every count defaults to `0` when its key is missing,
 /// so hand-trimmed baselines stay loadable.
@@ -928,6 +938,11 @@ pub struct RegressionBaseline {
     /// Baseline count of optional component prop review candidates.
     #[serde(default)]
     pub absent_component_props: usize,
+
+    /// Baseline count of constant parameter review candidates. Absent while
+    /// zero, so a baseline without the opt-in rule keeps its shape.
+    #[serde(default, skip_serializing_if = "is_zero_count")]
+    pub constant_parameters: usize,
 
     /// Compatibility identity for the analysis that produced these counts.
     /// Missing values in existing configs are treated as syntactic.

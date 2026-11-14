@@ -352,6 +352,7 @@ fn build_type_aware_outcome(
     let projects = project_metadata(response.projects);
     TypeAwareOutcome {
         meta: TypeAwareMeta {
+            call_evidence: None,
             identity: Some(identity),
             required_completeness: None,
             queries: query_summaries,

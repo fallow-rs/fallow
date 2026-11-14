@@ -200,6 +200,16 @@ const CONFIG_PATTERNS: &[&str] = &[
     "vite.config.*.{ts,js,mts,mjs}",
 ];
 
+/// Vite config files in any directory. A workspace package can keep its own
+/// config while only the root manifest lists `vite`. When no script of that
+/// package calls `vite`, the workspace run does not activate this plugin. These
+/// patterns make the nested config an entry point, so its local imports stay
+/// reachable.
+const ALWAYS_USED: &[&str] = &[
+    "**/vite.config.{ts,js,mts,mjs}",
+    "**/vite.config.*.{ts,js,mts,mjs}",
+];
+
 /// The dependency lists of a Vite config, as key paths below the config root.
 const DEPENDENCY_LIST_KEYS: &[&[&str]] = &[
     &["optimizeDeps", "include"],
@@ -239,7 +249,7 @@ define_plugin!(
     enablers: &["vite", "rolldown-vite"],
     entry_patterns: ROOT_ENTRY_PATTERNS,
     config_patterns: CONFIG_PATTERNS,
-    always_used: CONFIG_PATTERNS,
+    always_used: ALWAYS_USED,
     tooling_dependencies: &["vite", "@vitejs/plugin-react", "@vitejs/plugin-vue"],
     virtual_module_prefixes: &["virtual:"],
     used_exports: [

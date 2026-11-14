@@ -11,6 +11,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::audit_test_reach::TestReachClass;
 use crate::gate_outcomes::GateOutcomes;
+pub use crate::mutation_plan_runner::MutationPlanRunner;
+use crate::mutation_replay::{
+    MutantWitness, MutationRecordingOutput, MutationReplayOutput, MutationTaskWitness,
+};
 use crate::root_envelopes::serialize_named_json_output;
 
 /// Current mutation report schema version.
@@ -313,7 +317,7 @@ pub struct MutationRunnerOutput {
 }
 
 /// The source position of a mutant. No source text.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MutantLocation {
     /// The stable mutant id.
@@ -362,7 +366,7 @@ pub struct MutantChange {
 }
 
 /// One mutant of a run.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MutantResult {
     /// The mutant and its position.
@@ -430,6 +434,13 @@ pub struct MutantResult {
     /// (`--resume`). The mutant did not run in this run.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub resumed: bool,
+    /// True when the status and its evidence come from the earlier report
+    /// of a `--recheck` run: the recheck did not select the mutant, its file
+    /// has the digest of that report, and each test file of its killing
+    /// tests exists. The mutant did not run in this run, and the kill matrix
+    /// of this run has no evidence of it.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub carried: bool,
     /// The TypeScript diagnostic codes of the new errors of a
     /// `compile_error` mutant, sorted, at most 8.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -440,23 +451,37 @@ pub struct MutantResult {
     /// a verdict file. The hint can be wrong.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub equivalence_hint: Option<MutantEquivalenceHint>,
+    /// The replay of a recorded input. Present only after a `--record-args
+    /// values` run, for a survived or uncovered mutant with a recorded input
+    /// of its export.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub witness: Option<MutantWitness>,
 }
 
-/// Why a survivor may be equivalent, as far as the type check can tell.
+/// Why a survivor may be equivalent: a fact of the type check or of the
+/// call evidence. The hint is advisory and never changes the status.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum MutantEquivalenceHint {
-    /// The mutant removes an optional-chaining link (`?.`), and the declared
-    /// type of the receiver excludes `null` and `undefined`. If no run-time
+    /// The mutant removes an optional-chaining link (`?.`) or a nullish
+    /// fallback (`a ?? b` to `a`), and the declared type of the receiver
+    /// excludes `null` and `undefined`. If no run-time
     /// value can be nullish, the mutant is equivalent. A run-time value can
     /// still be nullish, for example in a method that loses its `this`, or
     /// in a call whose declared return type hides a nullish value.
     TypeNonNullish,
+    /// The mutant sets a branch or loop test to a constant. The test reads a
+    /// parameter, each visible call of the function passes the same literal
+    /// for it, and the literal gives the test the same constant. The
+    /// call evidence and the closed-world gate of the `constant-parameter`
+    /// rule prove the calls. A caller outside the project can still pass
+    /// another value.
+    ConstantParameter,
 }
 
 /// One run of a retried mutant.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MutantAttempt {
     /// The status of this run alone.
@@ -483,7 +508,7 @@ pub struct MutantAttempt {
 }
 
 /// How a run detected a mutant.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum MutantFailureKind {
@@ -517,7 +542,7 @@ impl MutantFailureKind {
 /// of its file: `none-file` when no test loads the file, `mocked-only` when no
 /// test loads the file and a mock explains an export of the file, and `none`
 /// when a test loads the file.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MutantTestReach {
     /// The reach class. The same open set as the test reach of `audit`.
@@ -576,7 +601,7 @@ pub struct MutationResumeOutput {
 }
 
 /// The results of the mutants of one function.
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MutationFunctionResult {
     /// The root-relative path, with forward slashes.
@@ -808,9 +833,9 @@ pub struct MutationTypecheckOutput {
     /// The checked survivors that do not type-check. They have the status
     /// `compile_error`.
     pub compile_errors: usize,
-    /// The mutants of the final report that have an `equivalence_hint`. They
-    /// keep the status `survived`. A verdict that makes a mutant `equivalent`
-    /// removes its hint and lowers this count.
+    /// The mutants of the final report that have the `type-non-nullish`
+    /// hint. They keep the status `survived`. A verdict that makes a mutant
+    /// `equivalent` removes its hint and lowers this count.
     #[serde(default, skip_serializing_if = "is_zero")]
     pub hinted: usize,
     /// The survivors that the checker did not check, by reason.
@@ -897,13 +922,30 @@ pub struct MutationKillMatrixTarget {
     /// `complete` or `incomplete`. Only the tests of a complete target can
     /// be candidates.
     pub status: MutationKillMatrixTargetStatus,
-    /// Why the evidence of this target is incomplete, sorted. The run-wide
-    /// reasons `partial-mutation-run`, `baseline-failure`, and
-    /// `missing-test-file-metadata` apply to each target.
+    /// Why the evidence of this target is incomplete, sorted.
+    /// `baseline-failure` means that a test failed with no active mutant, and
+    /// that the failure can affect this target: the failing test is a test
+    /// of the target or is in a test file of the target, or it covers, kills,
+    /// or ran without a mutant that a test of the target covers or kills.
+    /// `partial-mutation-run` means that the run is partial. When baseline
+    /// failures are the only cause of a partial run, only the targets with
+    /// `baseline-failure` get it. Each other cause applies to each target,
+    /// and so does `missing-test-file-metadata`.
     /// `incomplete-mutant-results` means that a test of this target covers a
     /// mutant with incomplete evidence. `unmatched-target` means that the
-    /// target selects no test.
+    /// target selects no test. With it, `not-a-test-file` means that the
+    /// runner does not list the file of the target as a test file, and
+    /// `no-planned-code` means that the file reaches no planned code, so
+    /// the dry run does not run it. A run stops only when no target selects
+    /// a test.
     pub reasons: Vec<String>,
+    /// The baseline failures that give this target `baseline-failure`,
+    /// sorted: the test id, or the test file for an error outside a test.
+    /// Never serialized: the human output names them, and the JSON consumer
+    /// reads `baseline_failures` of the report.
+    #[serde(skip)]
+    #[cfg_attr(feature = "schema", schemars(skip))]
+    pub baseline_failures: Vec<String>,
 }
 
 /// Redundancy signals over the observed mutants. Candidates need review.
@@ -1016,6 +1058,10 @@ pub struct MutationReport {
     /// the run is not a recheck. The exit code of the run reads this entry.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub gate_outcomes: Option<GateOutcomes>,
+    /// The argument recording of the dry run. Present only with
+    /// `--record-args`. It holds counts and reasons, never argument values.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recording: Option<MutationRecordingOutput>,
 }
 
 /// How one mutant of a compare differs from the saved report.
@@ -1136,6 +1182,20 @@ pub struct MutationRecheck {
     pub unsettled: usize,
     /// The rechecked mutants, sorted by file, line and mutant id.
     pub mutants: Vec<MutationRecheckMutant>,
+    /// The mutants of the report that keep their result from the earlier
+    /// report (`carried`), because the recheck did not select them. The
+    /// summary counts them. The recheck does not run them again, so a test
+    /// that became weaker does not change their result.
+    #[serde(default)]
+    pub carried: usize,
+    /// The files of the earlier report outside this run whose earlier
+    /// results do not apply, sorted: the source changed after the report,
+    /// the test file of a killing test is gone, or the report has no digest
+    /// or no readable entry for the file. The report leaves out their
+    /// mutants. Run `fallow mutation` on them for new
+    /// results.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub stale_files: Vec<String>,
 }
 
 /// Version singleton for a mutation verdict document.
@@ -1248,7 +1308,7 @@ pub struct MutationPlanMutant {
 }
 
 /// One instrumented file of a plan.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MutationPlanFile {
     /// The root-relative path, with forward slashes.
@@ -1281,6 +1341,9 @@ pub struct MutationPlanCountsOutput {
     pub pruned_side_effect_sink: usize,
     /// Mutants in framework config exports.
     pub pruned_framework_config: usize,
+    /// Mutants in files that only tool config files reach. Absent when 0.
+    #[serde(default, skip_serializing_if = "is_zero")]
+    pub pruned_build_tool_only: usize,
 }
 
 /// The envelope of `fallow mutation --plan`. It runs no user code.
@@ -1305,12 +1368,15 @@ pub struct MutationPlanOutput {
     pub test_files: Vec<String>,
     /// True when the project has no test files.
     pub no_test_files: bool,
-    /// True when the plan applied the `framework-config` prune rule.
+    /// True when the plan applied the `framework-config` and
+    /// `build-tool-only` prune rules.
     pub framework_config_checked: bool,
     /// The selected files that the plan did not instrument.
     pub skipped_files: Vec<MutationSkippedFile>,
     /// The paths of a `paths` scope that select no file.
     pub unmatched_paths: Vec<String>,
+    /// The selected test runner and the verdict on its installed version.
+    pub runner: MutationPlanRunner,
 }
 
 /// Version singleton for a mutation inspect packet.
@@ -1364,7 +1430,8 @@ pub struct MutationInspectCode {
     pub mutated_lines: String,
 }
 
-/// The envelope of `fallow mutation inspect`. It runs no user code.
+/// The envelope of `fallow mutation inspect`. It runs no user code, except
+/// with `--replay`.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MutationInspectOutput {
@@ -1401,6 +1468,9 @@ pub struct MutationInspectOutput {
     pub killing_tests: Vec<String>,
     /// True only for exact requested membership with terminal pass or fail results.
     pub kill_matrix_complete: bool,
+    /// The replay of the mutant. Present only with `--replay`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub replay: Option<MutationReplayOutput>,
 }
 
 /// Version singleton for the open tasks of a mutation report.
@@ -1452,6 +1522,11 @@ pub struct MutationTask {
     /// sorted. Empty for `no_coverage`. `fallow mutation inspect` gives the
     /// test ids and the static test files of one mutant.
     pub covering_test_files: Vec<String>,
+    /// The witness of the task: a recorded input that shows a difference, with
+    /// the results of both sides. Present only after a `--record-args
+    /// values` run.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub witness: Option<MutationTaskWitness>,
 }
 
 /// The number of tasks for each status.
@@ -1600,8 +1675,10 @@ mod tests {
             attempts: Vec::new(),
             cached: false,
             resumed: false,
+            carried: false,
             type_error_codes: Vec::new(),
             equivalence_hint: None,
+            witness: None,
         }
     }
 
@@ -1743,8 +1820,10 @@ mod tests {
             attempts: Vec::new(),
             cached: false,
             resumed: false,
+            carried: false,
             type_error_codes: Vec::new(),
             equivalence_hint: None,
+            witness: None,
         };
         let value = serde_json::to_value(&result).expect("serializes");
         assert_eq!(
@@ -1810,8 +1889,10 @@ mod tests {
             ],
             cached: false,
             resumed: false,
+            carried: false,
             type_error_codes: Vec::new(),
             equivalence_hint: None,
+            witness: None,
         };
         let value = serde_json::to_value(&result).expect("serializes");
         assert_eq!(

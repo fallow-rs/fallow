@@ -146,6 +146,8 @@ const VITEST_CAPS: Capabilities = Capabilities {
     bail: true,
     fresh_modules_per_run: true,
     batch_mutants: false,
+    replay: true,
+    record: true,
 };
 
 fn ready(caps: Capabilities, version: &str) -> Response {
@@ -239,7 +241,9 @@ fn script(
         Request::Reload => Ok(Response::Reloaded(Reloaded {
             method: ReloadMethod::Noop,
         })),
-        Request::Shutdown => Err(LinkFault::Protocol("no response".to_owned())),
+        Request::Shutdown | Request::Replay(_) | Request::Record { .. } => {
+            Err(LinkFault::Protocol("no response".to_owned()))
+        }
     }
 }
 
@@ -366,7 +370,7 @@ fn killed_survived_and_no_coverage_follow_the_dry_run_hits() {
             .expect("log")
             .iter()
             .find_map(|(_, request)| match request {
-                Request::DryRun { test_files } => Some(test_files.clone()),
+                Request::DryRun { test_files, .. } => Some(test_files.clone()),
                 _ => None,
             });
     assert_eq!(
@@ -1247,7 +1251,9 @@ fn static_mutants_run_last_with_a_reload_around_each_when_modules_stay_loaded() 
                 ReloadMethod::Invalidate
             },
         })),
-        Request::Shutdown => Err(LinkFault::Protocol("no response".to_owned())),
+        Request::Shutdown | Request::Replay(_) | Request::Record { .. } => {
+            Err(LinkFault::Protocol("no response".to_owned()))
+        }
     });
     let outcome = run_schedule(&spawner, &plan(&["m0", "m1"]), &config(1)).expect("run");
     let runs = spawner.runs();
@@ -1668,7 +1674,9 @@ fn without_a_test_filter_a_mutant_runs_each_passing_test_of_its_covering_files()
         Request::Reload => Ok(Response::Reloaded(Reloaded {
             method: ReloadMethod::Noop,
         })),
-        Request::Shutdown => Err(LinkFault::Protocol("no response".to_owned())),
+        Request::Shutdown | Request::Replay(_) | Request::Record { .. } => {
+            Err(LinkFault::Protocol("no response".to_owned()))
+        }
     });
     let outcome = run_schedule(&spawner, &plan(&["m1"]), &config(1)).expect("run");
     assert_eq!(
@@ -2982,7 +2990,7 @@ fn dry_runs_of(spawner: &FakeSpawner) -> Vec<(usize, Vec<String>)> {
         .expect("log")
         .iter()
         .filter_map(|(index, request)| match request {
-            Request::DryRun { test_files } => Some((*index, test_files.clone())),
+            Request::DryRun { test_files, .. } => Some((*index, test_files.clone())),
             _ => None,
         })
         .collect()
@@ -3001,7 +3009,9 @@ fn a_companion_restarted_for_a_static_mutant_dry_runs_only_the_files_of_the_muta
         Request::Reload => Ok(Response::Reloaded(Reloaded {
             method: ReloadMethod::RestartRequired,
         })),
-        Request::Shutdown => Err(LinkFault::Protocol("no response".to_owned())),
+        Request::Shutdown | Request::Replay(_) | Request::Record { .. } => {
+            Err(LinkFault::Protocol("no response".to_owned()))
+        }
     });
     let plan = two_file_plan(&[("m1", "src/a.ts"), ("m_a", "src/a.ts")]);
     let outcome = run_schedule(&spawner, &plan, &config(1)).expect("run");
@@ -3037,7 +3047,9 @@ fn a_kept_companion_with_a_narrow_dry_run_restarts_for_tests_outside_it() {
                 ReloadMethod::Invalidate
             },
         })),
-        Request::Shutdown => Err(LinkFault::Protocol("no response".to_owned())),
+        Request::Shutdown | Request::Replay(_) | Request::Record { .. } => {
+            Err(LinkFault::Protocol("no response".to_owned()))
+        }
     });
     let plan = two_file_plan(&[("m1", "src/a.ts"), ("m_a", "src/a.ts"), ("m_b", "src/b.ts")]);
     let outcome = run_schedule(&spawner, &plan, &config(1)).expect("run");

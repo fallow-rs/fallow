@@ -1,8 +1,7 @@
 // Generated from tools/mutation-runner/src/runtime/node-subprocess-preload.mjs. Do not edit.
 import { reportChildHitsAtExit } from "./child-coverage.mjs";
-import { readOverlay, recordOverlayError } from "./child.mjs";
 import { installFallowMutation } from "./global.mjs";
-import { registerOverlayHook } from "./overlay-hook.mjs";
+import { serveOverlay } from "./overlay-hook.mjs";
 
 // The node:test preload and the Vitest setup file add `--import` of this file
 // to NODE_OPTIONS, so each Node process that a test starts loads it. The URL
@@ -16,12 +15,7 @@ const params = new URL(import.meta.url).searchParams;
 const mutation = installFallowMutation();
 mutation.setActive(params.get("active"));
 const overlayPath = params.get("overlay");
-const loaded = new Set();
-registerOverlayHook(
-  readOverlay(overlayPath),
-  (entry) => loaded.add(entry.source),
-  (message) => recordOverlayError(overlayPath, message),
-);
+const loaded = serveOverlay(overlayPath);
 reportChildHitsAtExit(overlayPath, params.get("test"), () => {
   const { hits, staticHits } = mutation.finishTest();
   return { hits: [...new Set([...hits, ...staticHits])], loaded: [...loaded] };

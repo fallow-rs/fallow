@@ -43,6 +43,7 @@ fn action_type(action: &IssueAction) -> &'static str {
             FixActionType::RenderComponent => "render-component",
             FixActionType::UseComponentProp => "use-component-prop",
             FixActionType::ReviewComponentProp => "review-component-prop",
+            FixActionType::ReviewConstantParameter => "review-constant-parameter",
             FixActionType::EmitComponentEvent => "emit-component-event",
             FixActionType::WireSvelteEvent => "wire-svelte-event",
             FixActionType::ComposeEffectLayer => "compose-effect-layer",

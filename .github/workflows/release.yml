@@ -1229,8 +1229,10 @@ jobs:
             node .github/scripts/verify-binary.mjs "unsigned-binaries/$bin" "unsigned-binaries/${bin}.sig"
           done
 
-      # npm ships the multicall binary as fallow, plus the exact-version
-      # similar-code provider. Preserve their existing signature siblings.
+      # The npm payload carries the multicall binary as fallow and the
+      # exact-version similar-code provider. "Organize binaries into npm
+      # directories" puts the provider into its own platform package. Preserve
+      # their existing signature siblings.
       - name: Stage npm platform payload (multicall binary as fallow)
         shell: bash
         env:
@@ -1587,17 +1589,23 @@ jobs:
           for dir in npm-artifacts/npm-*; do
             platform="$(basename "$dir" | sed 's/^npm-//')"
             target="npm/$platform"
-            mkdir -p "$target"
-            cp "$dir"/* "$target"/
             sidecar_target="npm/fallow-similar-code-$platform"
-            mkdir -p "$sidecar_target"
-            cp "$dir"/fallow-similar-code* "$sidecar_target"/
+            mkdir -p "$target" "$sidecar_target"
+            # The main platform package ships only the multicall binary. The
+            # similar-code provider ships in its own platform package.
+            for file in "$dir"/*; do
+              case "$(basename "$file")" in
+                fallow-similar-code*) cp "$file" "$sidecar_target"/ ;;
+                *) cp "$file" "$target"/ ;;
+              esac
+            done
           done
 
       - name: Set binary permissions
         run: |
-          # Platform packages ship the multicall `fallow` binary and the local
-          # similar-code provider. Windows executables need no +x bit.
+          # The main platform packages ship the multicall `fallow` binary and
+          # the similar-code platform packages ship the local provider.
+          # Windows executables need no +x bit.
           for bin in npm/*/fallow npm/*/fallow-similar-code; do
             [ -f "$bin" ] && chmod +x "$bin"
           done
@@ -1935,10 +1943,10 @@ jobs:
             "@fallow-cli/fallow-node-win32-arm64-msvc"
             "@fallow-cli/fallow-node"
           )
-          # `fallow` pins its platform packages and `fallow-type-aware` to the
-          # exact release version, so those reach users only through a new
-          # root. Adding a name here needs a stage-only trusted publisher for
-          # it and costs one more maintainer approval per release.
+          # `fallow` pins its platform packages to the exact release version,
+          # so those reach users only through a new root. Adding a name here
+          # needs a stage-only trusted publisher for it and costs one more
+          # maintainer approval per release.
           STAGED_NAMES=("fallow")
           is_staged_name() {
             local candidate
@@ -2877,10 +2885,134 @@ jobs:
       - name: Verify exact public registry payloads
         run: node scripts/vscode-public-verify.mjs --artifact-dir vscode-targets
 
+  # Publish `server.json` to the MCP Registry. The registry reads the public npm
+  # package of each version and requires its `mcpName` to match, so this job
+  # starts only after the approved `fallow` root is public. The job checks out
+  # only `server.json` and runs only the pinned, checksum-verified publisher.
+  # The registry refuses a version that exists, so the job reads the registry
+  # first and after a failed publish: a listed version is success on a rerun.
+  mcp-registry-publish:
+    name: Publish to the MCP Registry
+    if: ${{ !inputs.auth_check }}
+    needs: npm-root-approved
+    environment: release
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      # Exchange the GitHub OIDC token for an MCP Registry token.
+      id-token: write
+    env:
+      MCP_REGISTRY_URL: https://registry.modelcontextprotocol.io
+      MCP_SERVER_NAME: io.github.fallow-rs/fallow
+      MCP_PUBLISHER_VERSION: v1.8.6
+      MCP_PUBLISHER_SHA256: 1fbe93fc0783c2394d8012c8d6e50a59e98cb2cc2d216264cc69f405d0e21340
+    steps:
+      - name: Checkout reviewed server.json
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+          sparse-checkout: server.json
+          sparse-checkout-cone-mode: false
+
+      - name: Verify the server.json name and release version
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          if ! jq -e --arg name "$MCP_SERVER_NAME" --arg v "$VERSION" '
+              .name == $name and .version == $v and
+              ([.packages[] | select(.registryType == "npm" and .identifier == "fallow" and .version == $v)] | length) == 1
+            ' server.json >/dev/null; then
+            echo "::error::server.json must name ${MCP_SERVER_NAME} at version ${VERSION} with the fallow npm package at the same version"
+            exit 1
+          fi
+
+      - name: Install the pinned mcp-publisher
+        shell: bash
+        run: |
+          set -euo pipefail
+          install_root="${RUNNER_TEMP}/mcp-publisher"
+          archive="${install_root}/mcp-publisher_linux_amd64.tar.gz"
+          mkdir -p "$install_root"
+          curl --proto '=https' --tlsv1.2 --fail --location --silent --show-error \
+            --retry 5 --retry-connrefused --retry-delay 2 \
+            --output "$archive" \
+            "https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz"
+          printf '%s *%s\n' "$MCP_PUBLISHER_SHA256" "$archive" | sha256sum --check --strict
+          tar -xzf "$archive" -C "$install_root" mcp-publisher
+          rm -f "$archive"
+          echo "MCP_PUBLISHER=${install_root}/mcp-publisher" >> "$GITHUB_ENV"
+
+      - name: Publish server.json to the MCP Registry
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${RELEASE_TAG#v}"
+          entry_url="${MCP_REGISTRY_URL}/v0.1/servers/${MCP_SERVER_NAME//\//%2F}/versions/${VERSION}"
+          # 0: listed with the fallow package at this version. 1: not listed.
+          # 2: the registry did not answer, or it lists other packages.
+          lookup() {
+            local status
+            if ! status=$(curl --proto '=https' --tlsv1.2 --silent --show-error \
+                --output registry-entry.json --write-out '%{http_code}' \
+                -H 'Cache-Control: no-cache' "$entry_url"); then
+              echo "::error::The MCP Registry did not answer for ${MCP_SERVER_NAME}@${VERSION}"
+              return 2
+            fi
+            case "$status" in
+              200)
+                if jq -e --arg v "$VERSION" '
+                    .server.version == $v and
+                    ([.server.packages[]? | select(.registryType == "npm" and .identifier == "fallow" and .version == $v)] | length) == 1
+                  ' registry-entry.json >/dev/null; then
+                  return 0
+                fi
+                echo "::error::The MCP Registry lists ${MCP_SERVER_NAME}@${VERSION} without the fallow npm package at that version"
+                return 2
+                ;;
+              404) return 1 ;;
+              *)
+                echo "::error::The MCP Registry answered HTTP ${status} for ${MCP_SERVER_NAME}@${VERSION}"
+                return 2
+                ;;
+            esac
+          }
+          state=0
+          lookup || state=$?
+          if [ "$state" -eq 0 ]; then
+            echo "${MCP_SERVER_NAME}@${VERSION} is already in the MCP Registry, skipping"
+            echo "- \`${MCP_SERVER_NAME}@${VERSION}\` was already in the MCP Registry." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+          if [ "$state" -ne 1 ]; then
+            exit 1
+          fi
+          "$MCP_PUBLISHER" login github-oidc
+          publish_status=0
+          "$MCP_PUBLISHER" publish || publish_status=$?
+          # A publish that failed because a parallel attempt listed the version
+          # first is success. Any other failure leaves the version unlisted.
+          for _ in 1 2 3 4 5 6; do
+            state=0
+            lookup || state=$?
+            if [ "$state" -eq 0 ]; then
+              echo "- \`${MCP_SERVER_NAME}@${VERSION}\` is in the MCP Registry." >> "$GITHUB_STEP_SUMMARY"
+              exit 0
+            fi
+            if [ "$state" -ne 1 ] || [ "$publish_status" -ne 0 ]; then
+              break
+            fi
+            sleep 10
+          done
+          echo "::error::${MCP_SERVER_NAME}@${VERSION} is not in the MCP Registry (publish exit ${publish_status}). Rerun the failed job: a listed version passes at once."
+          exit 1
+
   release-ready:
     name: Release ready for signed tag
     if: ${{ !inputs.auth_check }}
-    needs: [publish-crates, npm-publish, npm-root-approved, vscode-public-verify, release-assets]
+    needs: [publish-crates, npm-publish, npm-root-approved, mcp-registry-publish, vscode-public-verify, release-assets]
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions:

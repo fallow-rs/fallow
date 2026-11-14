@@ -4,6 +4,7 @@ import path from "node:path";
 import { BACKEND } from "./backend.mjs";
 import {
   ANALYSIS_OPERATION,
+  CALL_EVIDENCE_OPERATION,
   MUTANT_TYPECHECK_OPERATION,
   QUERY_OPERATIONS as MANIFEST_QUERY_OPERATIONS,
   WIRE_PROTOCOL_VERSION,
@@ -457,6 +458,94 @@ const parseMutantTypecheckRequest = (value) => {
   return { operation: MUTANT_TYPECHECK_OPERATION, root, files };
 };
 
+const CALL_EVIDENCE_REQUEST_KEYS = new Set([
+  "protocol_version",
+  "operation",
+  "root",
+  "defaults",
+  "classes",
+  "files",
+]);
+const DEFAULT_CANDIDATE_KEYS = new Set(["id", "arguments"]);
+const ARGUMENT_KEYS = new Set(["path", "call_start", "index"]);
+const CLASS_CANDIDATE_KEYS = new Set(["id", "path", "class", "methods"]);
+const MAX_DEFAULT_CANDIDATES = 50_000;
+const MAX_CANDIDATE_ARGUMENTS = 200_000;
+const MAX_CLASS_CANDIDATES = 20_000;
+const MAX_CLASS_METHODS = 2_000;
+const MAX_PROJECT_FILES = 100_000;
+
+const parseArgument = (value, field, root) => {
+  requireObject(value, field);
+  requireExactKeys(value, ARGUMENT_KEYS, field);
+  const { candidatePath } = parseCandidatePath(value.path, `${field}.path`, root);
+  return {
+    path: candidatePath,
+    call_start: requireInteger(value.call_start, `${field}.call_start`, 0),
+    index: requireInteger(value.index, `${field}.index`, 0),
+  };
+};
+
+const requireUniqueId = (ids, id, field) => {
+  if (ids.has(id)) throw new Error(`duplicate ${field} id ${id}`);
+  ids.add(id);
+  return id;
+};
+
+const parseCallEvidenceRequest = (value) => {
+  requireExactKeys(value, CALL_EVIDENCE_REQUEST_KEYS, "request");
+  const root = parseRoot(value.root);
+  const defaultIds = new Set();
+  let argumentCount = 0;
+  const defaults = requireBoundedArray(value.defaults, "defaults", MAX_DEFAULT_CANDIDATES).map(
+    (candidate, index) => {
+      const field = `defaults[${index}]`;
+      requireObject(candidate, field);
+      requireExactKeys(candidate, DEFAULT_CANDIDATE_KEYS, field);
+      const args = requireBoundedArray(
+        candidate.arguments,
+        `${field}.arguments`,
+        MAX_CANDIDATE_ARGUMENTS,
+      );
+      argumentCount += args.length;
+      if (argumentCount > MAX_CANDIDATE_ARGUMENTS) {
+        throw new Error(`arguments exceed the ${MAX_CANDIDATE_ARGUMENTS} item limit`);
+      }
+      return {
+        id: requireUniqueId(defaultIds, requireInteger(candidate.id, `${field}.id`, 0), "default"),
+        arguments: args.map((argument, at) =>
+          parseArgument(argument, `${field}.arguments[${at}]`, root),
+        ),
+      };
+    },
+  );
+  const classIds = new Set();
+  const classes = requireBoundedArray(value.classes, "classes", MAX_CLASS_CANDIDATES).map(
+    (candidate, index) => {
+      const field = `classes[${index}]`;
+      requireObject(candidate, field);
+      requireExactKeys(candidate, CLASS_CANDIDATE_KEYS, field);
+      const { candidatePath } = parseCandidatePath(candidate.path, `${field}.path`, root);
+      return {
+        id: requireUniqueId(classIds, requireInteger(candidate.id, `${field}.id`, 0), "class"),
+        path: candidatePath,
+        class: requireString(candidate.class, `${field}.class`),
+        methods: [
+          ...new Set(
+            requireBoundedArray(candidate.methods, `${field}.methods`, MAX_CLASS_METHODS).map(
+              (method, at) => requireString(method, `${field}.methods[${at}]`),
+            ),
+          ),
+        ],
+      };
+    },
+  );
+  const files = requireBoundedArray(value.files, "files", MAX_PROJECT_FILES).map(
+    (file, index) => parseCandidatePath(file, `files[${index}]`, root).candidatePath,
+  );
+  return { operation: CALL_EVIDENCE_OPERATION, root, defaults, classes, files };
+};
+
 export const parseRequest = (value) => {
   requireObject(value, "request");
   if (
@@ -464,6 +553,12 @@ export const parseRequest = (value) => {
     value.operation === MUTANT_TYPECHECK_OPERATION
   ) {
     return parseMutantTypecheckRequest(value);
+  }
+  if (
+    value.protocol_version === WIRE_PROTOCOL_VERSION &&
+    value.operation === CALL_EVIDENCE_OPERATION
+  ) {
+    return parseCallEvidenceRequest(value);
   }
   if (value.protocol_version === WIRE_PROTOCOL_VERSION) {
     return parseBatchRequest(value);
@@ -491,6 +586,17 @@ export const createSemanticResponse = ({
     .toSorted((left, right) => left.query_id - right.query_id),
   phase_timings_ms: normalizePhaseTimings(phaseTimings),
   warnings: normalizeWarnings(warnings),
+  elapsed_ms: Math.max(0, Math.round(elapsedMs)),
+});
+
+export const createCallEvidenceResponse = ({ defaults, methods, elapsedMs }) => ({
+  protocol_version: WIRE_PROTOCOL_VERSION,
+  operation: CALL_EVIDENCE_OPERATION,
+  sidecar_version: SIDECAR_VERSION,
+  backend: BACKEND.family,
+  backend_version: BACKEND.version,
+  defaults,
+  methods,
   elapsed_ms: Math.max(0, Math.round(elapsedMs)),
 });
 

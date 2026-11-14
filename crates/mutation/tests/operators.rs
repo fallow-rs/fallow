@@ -1234,6 +1234,7 @@ fn operator_filter_keeps_only_allowed_operators() {
     let options = fallow_mutation::MutationOptions {
         operators: vec![Operator::BooleanLiteral],
         ranges: None,
+        record_exports: false,
     };
     let result = common::run_with("x = a + b; y = true;", JS, &options);
     let operators: Vec<_> = result.mutants.iter().map(|m| m.operator).collect();
@@ -1268,6 +1269,7 @@ fn operator_names_are_kebab_case() {
             "throw-statement",
             "regex-constructor",
             "regex-assertion",
+            "nullish-fallback",
         ],
     );
     assert_eq!(
@@ -1338,6 +1340,7 @@ fn one_mutant_per_replacement_text_at_a_span() {
         &fallow_mutation::MutationOptions {
             operators: vec![Operator::NegateCondition],
             ranges: None,
+            record_exports: false,
         },
     );
     assert_eq!(

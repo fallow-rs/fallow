@@ -223,10 +223,7 @@ pub fn status(root: &Path) -> TypeAwareStatus {
             let remediation = if discovery_source == "environment-override" {
                 error
             } else {
-                format!(
-                    "Install the matching companion with: npm install --save-dev fallow-type-aware@{}",
-                    env!("CARGO_PKG_VERSION")
-                )
+                discovery::missing_sidecar_install_hint(Some(root))
             };
             return TypeAwareStatus {
                 available: false,
@@ -452,9 +449,12 @@ mod tests {
         std::fs::write(&sibling, []).expect("write sibling sidecar fixture");
         std::fs::write(&override_sidecar, []).expect("write override sidecar fixture");
 
-        let discovered =
-            discover_type_aware_sidecar_from(override_sidecar.to_str(), Some(executable.as_path()))
-                .expect("explicit override should be discovered");
+        let discovered = discover_type_aware_sidecar_from(
+            override_sidecar.to_str(),
+            Some(executable.as_path()),
+            None,
+        )
+        .expect("explicit override should be discovered");
 
         assert_eq!(
             discovered,
@@ -471,8 +471,9 @@ mod tests {
         std::fs::write(&sibling, []).expect("write sibling sidecar fixture");
         let missing = install.path().join("missing-sidecar");
 
-        let error = discover_type_aware_sidecar_from(missing.to_str(), Some(executable.as_path()))
-            .expect_err("invalid explicit override must not fall back");
+        let error =
+            discover_type_aware_sidecar_from(missing.to_str(), Some(executable.as_path()), None)
+                .expect_err("invalid explicit override must not fall back");
 
         assert!(error.contains("FALLOW_TYPE_AWARE_BIN is set"));
         assert!(error.contains("Point it at a trusted fallow-type-aware executable"));
@@ -486,7 +487,7 @@ mod tests {
         std::fs::write(&executable, []).expect("write fallow executable fixture");
         std::fs::write(&sibling, []).expect("write sibling sidecar fixture");
 
-        let discovered = discover_type_aware_sidecar_from(None, Some(executable.as_path()))
+        let discovered = discover_type_aware_sidecar_from(None, Some(executable.as_path()), None)
             .expect("installed sibling should be discovered");
 
         assert_eq!(
@@ -533,11 +534,57 @@ mod tests {
         std::fs::write(path_dir.path().join(SIDECAR_BINARY), [])
             .expect("write PATH sidecar fixture");
 
-        let error = discover_type_aware_sidecar_from(None, Some(executable.as_path()))
+        let error = discover_type_aware_sidecar_from(None, Some(executable.as_path()), None)
             .expect_err("untrusted discovery locations must be ignored");
 
         assert!(error.contains("next to the active Fallow executable"));
-        assert!(error.contains("node_modules and PATH are intentionally not searched"));
+        assert!(error.contains("does not search project node_modules or PATH"));
+        let version = env!("CARGO_PKG_VERSION");
+        for command in [
+            format!("npm install --save-dev fallow-type-aware@{version}"),
+            format!("npm install --global fallow-type-aware@{version}"),
+            format!("npx -p fallow@{version} -p fallow-type-aware@{version} fallow"),
+        ] {
+            assert!(error.contains(&command), "{command}");
+        }
+    }
+
+    #[test]
+    fn install_hint_uses_the_package_manager_of_the_project() {
+        let version = env!("CARGO_PKG_VERSION");
+        let project = tempfile::tempdir().expect("temporary project directory");
+        std::fs::write(project.path().join("pnpm-lock.yaml"), "").expect("write lockfile");
+        let hint = discovery::missing_sidecar_install_hint(Some(project.path()));
+        assert!(
+            hint.contains(&format!("`pnpm add -D fallow-type-aware@{version}`")),
+            "{hint}"
+        );
+
+        let yarn_classic_root = tempfile::tempdir().expect("temporary project directory");
+        std::fs::write(
+            yarn_classic_root.path().join("package.json"),
+            r#"{"private":true,"workspaces":["packages/*"]}"#,
+        )
+        .expect("write package.json");
+        std::fs::write(
+            yarn_classic_root.path().join("yarn.lock"),
+            "# yarn lockfile v1\n",
+        )
+        .expect("write lockfile");
+        let hint = discovery::missing_sidecar_install_hint(Some(yarn_classic_root.path()));
+        assert!(
+            hint.contains(&format!("`yarn add -D -W fallow-type-aware@{version}`")),
+            "{hint}"
+        );
+
+        let plain = tempfile::tempdir().expect("temporary project directory");
+        let hint = discovery::missing_sidecar_install_hint(Some(plain.path()));
+        assert!(
+            hint.contains(&format!(
+                "`npm install --save-dev fallow-type-aware@{version}`"
+            )),
+            "{hint}"
+        );
     }
 
     #[test]

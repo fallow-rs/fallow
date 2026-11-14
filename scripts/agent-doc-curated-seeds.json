@@ -646,6 +646,12 @@
     },
     {
       "section": "flags:audit",
+      "row": "--mutation-report",
+      "column": "Description",
+      "seed": "Saved `fallow mutation --format json` report (for example `.fallow/mutation/last-report.json`). The review brief counts the surviving mutants on the added lines of each changed file in the `mutation` component of the focus score. A file whose source changed since the run adds nothing. Reads the file only; it runs no test. Only the review brief reads it"
+    },
+    {
+      "section": "flags:audit",
       "row": "--no-css",
       "column": "Description",
       "seed": "Disable styling analytics in audit"
@@ -703,6 +709,12 @@
       "row": "--skip",
       "column": "Description",
       "seed": "Skip these sub-analyses (comma-separated: dead-code, architecture, dupes, health), with the same values as bare `fallow --skip`, on top of the `audit.*` selection"
+    },
+    {
+      "section": "flags:audit",
+      "row": "--staged",
+      "column": "Description",
+      "seed": "Audit the staged index instead of the working tree. The changed files are the staged changes against HEAD (`git diff --cached`), and the analysis reads every file from the index, so unstaged edits and untracked files do not affect the verdict. A file that is staged and then deleted from the working tree is still audited. The base is HEAD, so `--base` and `--changed-since` are rejected. The generated pre-commit hook uses this flag"
     },
     {
       "section": "flags:audit",
@@ -805,6 +817,12 @@
       "row": "--circular-deps",
       "column": "Issue Type",
       "seed": "Circular dependency chain detected"
+    },
+    {
+      "section": "flags:dead-code-filters",
+      "row": "--constant-parameters",
+      "column": "Issue Type",
+      "seed": "Each visible call passes a function parameter in the same way"
     },
     {
       "section": "flags:dead-code-filters",
@@ -1122,7 +1140,7 @@
       "section": "flags:fallow-combined",
       "row": "--coverage",
       "column": "Description",
-      "seed": "Path to Istanbul or raw V8 coverage data for exact CRAP scores in combined mode. Also settable via `FALLOW_COVERAGE` or `health.coverage`"
+      "seed": "Path to Istanbul or raw V8 coverage data for measured CRAP scores in combined mode. Also settable via `FALLOW_COVERAGE` or `health.coverage`"
     },
     {
       "section": "flags:fallow-combined",
@@ -1362,7 +1380,7 @@
       "section": "flags:global",
       "row": "--coverage",
       "column": "Description",
-      "seed": "Path to Istanbul or raw V8 coverage data for exact CRAP scores in combined mode. Also settable via `FALLOW_COVERAGE` or `health.coverage`"
+      "seed": "Path to Istanbul or raw V8 coverage data for measured CRAP scores in combined mode. Also settable via `FALLOW_COVERAGE` or `health.coverage`"
     },
     {
       "section": "flags:global",
@@ -1770,7 +1788,7 @@
       "section": "flags:health",
       "row": "--coverage",
       "column": "Description",
-      "seed": "Path to coverage data for exact per-function CRAP scores. Accepts an Istanbul coverage map JSON file (coverage-final.json, from `jest --coverage`, `vitest run --coverage`, c8 or nyc), a directory containing coverage-final.json, a raw V8 coverage directory (`NODE_V8_COVERAGE=<dir> node --test`), or a single V8 coverage JSON file. Transpiled V8 scripts (tsx, bundles) map back to their source files through the source map that Node records in the dump. A script that differs from the file on disk and has no source map keeps the estimate. Use --coverage-root when the data was generated in a different environment (CI runner, Docker). Affects CRAP scores only, not --coverage-gaps. Also configurable via FALLOW_COVERAGE env var"
+      "seed": "Path to coverage data for measured per-function CRAP scores. Accepts an Istanbul coverage map JSON file (coverage-final.json, from `jest --coverage`, `vitest run --coverage`, c8 or nyc), a directory containing coverage-final.json, a raw V8 coverage directory (`NODE_V8_COVERAGE=<dir> node --test`), or a single V8 coverage JSON file. Transpiled V8 scripts (tsx, bundles) map back to their source files through the source map that Node records in the dump. A script that differs from the file on disk and has no source map keeps the estimate. Use --coverage-root when the data was generated in a different environment (CI runner, Docker). Affects CRAP scores only, not --coverage-gaps. Also configurable via FALLOW_COVERAGE env var"
     },
     {
       "section": "flags:health",
@@ -1962,7 +1980,7 @@
       "section": "flags:init",
       "row": "--branch",
       "column": "Description",
-      "seed": "Fallback base branch/ref for the pre-commit hook when no upstream is set"
+      "seed": "Has no effect. The pre-commit hook runs `fallow audit --staged`, which compares the staged changes with HEAD. Kept so that existing install scripts still run"
     },
     {
       "section": "flags:init",
@@ -2185,6 +2203,12 @@
       "row": "code-duplication",
       "column": "Description",
       "seed": "Duplicated code block; Reported by fallow dupes (and bare fallow / fallow audit)"
+    },
+    {
+      "section": "issue-types",
+      "row": "constant-parameter",
+      "column": "Description",
+      "seed": "Each visible call passes a function parameter in the same way; Opt-in manual review candidate; defaults to off. Inspect the calls and the intent of the parameter before changing the function. No automatic fix."
     },
     {
       "section": "issue-types",

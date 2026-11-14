@@ -203,6 +203,8 @@ mod tests {
     fn sink(path: PathBuf, line: u32) -> SecurityFinding {
         SecurityFinding {
             finding_id: String::new(),
+            stable_finding_id: None,
+            stable_id_input: None,
             candidate: fallow_api::editor_results::SecurityCandidate::default(),
             taint_flow: None,
             attack_surface: None,
@@ -227,6 +229,8 @@ mod tests {
     fn leak(path: PathBuf, line: u32) -> SecurityFinding {
         SecurityFinding {
             finding_id: String::new(),
+            stable_finding_id: None,
+            stable_id_input: None,
             candidate: fallow_api::editor_results::SecurityCandidate::default(),
             taint_flow: None,
             attack_surface: None,

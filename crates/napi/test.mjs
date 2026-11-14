@@ -934,4 +934,41 @@ try {
   rmSync(absentRoot, { recursive: true, force: true });
 }
 
+const constantRoot = mkdtempSync(join(tmpdir(), "fallow-node-constant-"));
+try {
+  writeFileSync(
+    join(constantRoot, "package.json"),
+    JSON.stringify({ name: "constant-parameter-fixture", private: true }),
+  );
+  writeFileSync(join(constantRoot, ".fallowrc.json"), JSON.stringify({ entry: ["main.ts"] }));
+  writeFileSync(
+    join(constantRoot, "format.ts"),
+    "export function format(value: number, compact: boolean) { return compact ? String(value) : value.toFixed(2); }\n",
+  );
+  writeFileSync(
+    join(constantRoot, "main.ts"),
+    "import { format } from './format';\nformat(1, true);\nformat(2, true);\nformat(3, true);\n",
+  );
+  const defaults = await detectDeadCode({ root: constantRoot, noCache: true });
+  assert.equal(defaults.constant_parameters?.length ?? 0, 0);
+  const enabled = await detectDeadCode({
+    root: constantRoot,
+    noCache: true,
+    constantParameters: true,
+  });
+  assert.equal(enabled.constant_parameters.length, 1);
+  const finding = enabled.constant_parameters[0];
+  assert.equal(finding.parameter_name, "compact");
+  assert.equal(finding.reason, "identical-argument");
+  assert.equal(finding.value.text, "true");
+  assert.equal(finding.call_site_count, 3);
+  assert.equal(finding.path, "format.ts");
+  assert.ok(finding.finding_id.includes("constant-parameter"));
+  assert.ok(finding.actions.every((action) => action.auto_fixable === false));
+  assert.equal(enabled.summary.constant_parameters, 1);
+  console.log("  [PASS] constant parameter native selection");
+} finally {
+  rmSync(constantRoot, { recursive: true, force: true });
+}
+
 console.log("\nAll tests passed.");

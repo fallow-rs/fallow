@@ -612,6 +612,8 @@ The `type-only-dependencies` rule defaults to `warn`. Suppress with `"type-only-
 
 Fallow detects production dependencies that are only imported from test files (`*.test.*`, `*.spec.*`, `__tests__/**`). Since these packages are never used in production code, they should be in `devDependencies` instead.
 
+A test runner config or setup file (`vitest.config.*`, `vitest.unit.config.ts`, `jest.setup.*`, `playwright-ct.config.ts`) counts as a test file. Other config files (`astro.config.mjs`, `vite.config.ts`, `next.config.js`) count as production use, so a package that only they import is not reported as test-only.
+
 ```typescript
 // If "msw" is in dependencies (not devDependencies):
 // src/handlers.test.ts

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 
 // Rebase one pull request branch on the base branch during a serial merge.
-// A branch from before changelog.d/ adds its entries to CHANGELOG.md, so each
-// merge makes such a branch conflict there. This script keeps both sides of
-// those conflicts, stops on any other conflict, and then checks that the
-// rebase kept every change, every entry and every version bump of the branch.
+// The script resolves the conflicts that have one mechanical answer (cache
+// version constants and generated contract files), stops on any other
+// conflict, and then checks that the rebase kept every change and every
+// version bump of the branch.
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -30,13 +30,10 @@ import {
   versionKeys,
 } from "./version-constants.mjs";
 
-const CHANGELOG = "CHANGELOG.md";
-
 const USAGE = `Usage: node scripts/ship-rebase.mjs (--pr <number> | --branch <name>) [options]
 
 Rebase a pull request branch on the base branch. Resolve the conflicts
 that have one mechanical answer, and stop on any other conflict:
-  - CHANGELOG.md: keep both sides.
   - A cache version constant (*CACHE_VERSION): take the base value. After
     the rebase, a new commit sets each cache bump of the branch that the
     rebase lost to the base value + 1.
@@ -61,12 +58,11 @@ Options:
                     when all checks pass.
   --if-needed       Rebase only when a squash merge of the branch is not
                     safe as it is. The rebase runs when the merge into the
-                    base conflicts, when the branch changes CHANGELOG.md,
-                    when the branch and the base both change a generated
-                    file, or when the merge loses a version bump of the
-                    branch. Otherwise the script prints the merge command
-                    for the current head and exits with 0. It has no effect
-                    with --upstream.
+                    base conflicts, when the branch and the base both change
+                    a generated file, or when the merge loses a version bump
+                    of the branch. Otherwise the script prints the merge
+                    command for the current head and exits with 0. It has
+                    no effect with --upstream.
   -h, --help        Show this help.
 
 The rebase, the checks and the push run in a temporary worktree with a
@@ -78,25 +74,10 @@ failed check, the script keeps the worktree and prints its path and the
 next commands.
 
 After the rebase, the script runs these checks:
-  - Outside CHANGELOG.md, the result is the same as a merge of the branch
-    into the base. A rebase drops the changes of a merge commit. A path
-    where the merge itself conflicts fails the check only when the branch
-    has merge commits. Then compare that path by hand.
-  - The branch adds and removes the same CHANGELOG lines as before.
-  - Each entry that the branch adds to the first release section is still
-    in that section. A release on the base can move an entry of the branch
-    into the released version. A fix on the old branch does not help,
-    because the rebase moves the entry again. When the moved entries are
-    the only problem, the check prints the steps that fix the rebased
-    branch in the kept worktree: move the entry back, commit, check the
-    printed git diff, push with the printed lease command, and run the
-    script again. After the push, the next run compares the pushed
-    result with itself. It cannot check the first rebase or the manual
-    fix again, so the git diff is the only check of the fix. When other
-    checks also fail, the script prints no push command. Fix the other
-    problems first.
-  - The rebase adds no second subsection with the same name to the first
-    release section.
+  - The result is the same as a merge of the branch into the base. A
+    rebase drops the changes of a merge commit. A path where the merge
+    itself conflicts fails the check only when the branch has merge
+    commits. Then compare that path by hand.
   - Each cache version or schema version constant that the branch changed
     still changes.
 The merge comparison needs Git 2.38 or later.
@@ -107,81 +88,14 @@ With --upstream, the checks compare only the commits after that commit:
   - The hunk check compares the hunks of <commit>..<old tip> with the hunks
     of <base>..<new tip>, without context lines. A hunk that the rebase lost
     or changed fails the check, also when the merge has the same result.
-    The check leaves out CHANGELOG.md, the generated files that took the
-    base side, and the cache version lines. A failure prints the
-    git range-diff command that compares the commits.
-  - The CHANGELOG check and the version checks use that commit as the old
-    base of the branch.
+    The check leaves out the generated files that took the base side and
+    the cache version lines. A failure prints the git range-diff command
+    that compares the commits.
+  - The version checks use that commit as the old base of the branch.
 The merge comparison with --upstream needs Git 2.40 or later.
 
 Exit codes: 0 when the rebase and the checks pass, 1 when the rebase stops
 or a check fails, 2 for invalid input or a failed command.`;
-
-const MARKER = {
-  ours: /^<{7}(?: |\r?\n|$)/u,
-  base: /^\|{7}(?: |\r?\n|$)/u,
-  theirs: /^={7}(?:\r?\n|$)/u,
-  end: /^>{7}(?: |\r?\n|$)/u,
-};
-
-/**
- * Replace each conflict block in `text` with the lines of both sides: first
- * the side of the base branch, then the side of the rebased commit. Returns
- * `{ text, conflicts }`. Throws when a block is not complete.
- */
-export const keepBothSides = (text) => {
-  const lines = text.split(/(?<=\n)/u);
-  const output = [];
-  let state = "outside";
-  let ours = [];
-  let theirs = [];
-  let conflicts = 0;
-  for (const line of lines) {
-    if (state === "outside" && MARKER.ours.test(line)) {
-      state = "ours";
-      ours = [];
-      theirs = [];
-    } else if (state === "ours" && MARKER.base.test(line)) {
-      state = "base";
-    } else if ((state === "ours" || state === "base") && MARKER.theirs.test(line)) {
-      state = "theirs";
-    } else if (state === "theirs" && MARKER.end.test(line)) {
-      output.push(...ours, ...theirs);
-      conflicts += 1;
-      state = "outside";
-    } else if (state === "ours") {
-      ours.push(line);
-    } else if (state === "theirs") {
-      theirs.push(line);
-    } else if (state === "outside") {
-      output.push(line);
-    }
-  }
-  if (state !== "outside") {
-    throw new Error("A conflict block has no end marker.");
-  }
-  return { text: output.join(""), conflicts };
-};
-
-const resolveChangelog = (cwd) => {
-  const file = join(cwd, CHANGELOG);
-  if (!existsSync(file)) {
-    return { ok: false, reason: `${CHANGELOG} was deleted on one side.` };
-  }
-  let resolved;
-  try {
-    resolved = keepBothSides(readFileSync(file, "utf8"));
-  } catch (error) {
-    return { ok: false, reason: `${CHANGELOG}: ${error.message}` };
-  }
-  const { text, conflicts } = resolved;
-  if (conflicts === 0) {
-    return { ok: false, reason: `${CHANGELOG} is unmerged but has no conflict markers.` };
-  }
-  writeFileSync(file, text);
-  git(cwd, ["add", "--", CHANGELOG]);
-  return { ok: true };
-};
 
 /** Generated contract files. A rebase takes the base side; a regeneration fixes them. */
 const GENERATED = new Set(contractSurfacePaths());
@@ -230,228 +144,37 @@ const cacheResolution = (cwd, path) => {
 };
 
 const resolvePath = (cwd, path, state) => {
-  if (path === CHANGELOG) {
-    return resolveChangelog(cwd);
-  }
   if (GENERATED.has(path)) {
     // During a rebase, "ours" is the base side.
     git(cwd, ["checkout", "--ours", "--", path]);
     git(cwd, ["add", "--", path]);
     state.generated.add(path);
-    return { ok: true };
+    return;
   }
   writeFileSync(join(cwd, path), cacheResolution(cwd, path));
   git(cwd, ["add", "--", path]);
   state.cacheFiles.add(path);
-  return { ok: true };
 };
 
 /**
- * Resolve the conflicts that have one mechanical answer: CHANGELOG.md (keep
- * both sides), generated contract files (take the base side) and cache
- * version constants (take the base side). Stop on any other conflict.
+ * Resolve the conflicts that have one mechanical answer: generated contract
+ * files (take the base side) and cache version constants (take the base
+ * side). Stop on any other conflict.
  */
 const resolveMechanical = (cwd, state) => (paths) => {
   const others = paths.filter(
-    (path) => path !== CHANGELOG && !GENERATED.has(path) && cacheResolution(cwd, path) === null,
+    (path) => !GENERATED.has(path) && cacheResolution(cwd, path) === null,
   );
   if (others.length > 0) {
     return {
       ok: false,
-      reason: `Conflicts outside ${CHANGELOG}, generated files and cache versions: ${others.join(", ")}`,
+      reason: `Conflicts outside generated files and cache versions: ${others.join(", ")}`,
     };
   }
   for (const path of paths) {
-    const result = resolvePath(cwd, path, state);
-    if (!result.ok) {
-      return result;
-    }
+    resolvePath(cwd, path, state);
   }
   return { ok: true };
-};
-
-const isEntryLine = (line) => line.trim() !== "" && !/^###\s/u.test(line);
-
-/**
- * The CHANGELOG lines that `to` adds and removes against `from`. Blank lines
- * and `###` subsection headings are left out, because a correct resolution
- * can merge or move them.
- */
-const changelogLineChanges = (cwd, from, to) => {
-  const diff = git(cwd, ["diff", "--no-color", "--no-ext-diff", "-U0", from, to, "--", CHANGELOG]);
-  const added = [];
-  const removed = [];
-  let inHunk = false;
-  for (const line of diff.split("\n")) {
-    if (line.startsWith("@@")) {
-      inHunk = true;
-    } else if (inHunk && line.startsWith("+") && isEntryLine(line.slice(1))) {
-      added.push(line.slice(1));
-    } else if (inHunk && line.startsWith("-") && isEntryLine(line.slice(1))) {
-      removed.push(line.slice(1));
-    }
-  }
-  return { added: added.toSorted(), removed: removed.toSorted() };
-};
-
-const multisetDifference = (left, right) => {
-  const remaining = new Map();
-  for (const line of right) {
-    remaining.set(line, (remaining.get(line) ?? 0) + 1);
-  }
-  const extra = [];
-  for (const line of left) {
-    const count = remaining.get(line) ?? 0;
-    if (count > 0) {
-      remaining.set(line, count - 1);
-    } else {
-      extra.push(line);
-    }
-  }
-  return extra;
-};
-
-/** The lines of the first `## ` section of `text`, without its heading. */
-const firstSectionLines = (text) => {
-  const lines = text.split("\n");
-  const start = lines.findIndex((line) => line.startsWith("## "));
-  if (start === -1) {
-    return [];
-  }
-  const body = lines.slice(start + 1);
-  const end = body.findIndex((line) => line.startsWith("## "));
-  return end === -1 ? body : body.slice(0, end);
-};
-
-/** The count of each `###` heading in the first `## ` section of `text`. */
-const subsectionCounts = (text) => {
-  const counts = new Map();
-  for (const line of firstSectionLines(text)) {
-    if (/^###\s/u.test(line)) {
-      const heading = line.trim();
-      counts.set(heading, (counts.get(heading) ?? 0) + 1);
-    }
-  }
-  return counts;
-};
-
-/**
- * The `###` headings that occur more than one time in the first `## `
- * section of `text`, and more often than in `baseText`. A keep-both
- * resolution can add a second `### Fixed` when both sides started the same
- * subsection. A duplicate that the base already has is not a result of the
- * rebase, so it is left out.
- */
-export const duplicateSubsections = (text, baseText) => {
-  const counts = subsectionCounts(text);
-  const baseCounts = subsectionCounts(baseText);
-  return [...counts.entries()]
-    .filter(([heading, count]) => count > Math.max(1, baseCounts.get(heading) ?? 0))
-    .map(([heading]) => heading);
-};
-
-/**
- * The entry lines that the branch adds to the first `## ` section and that
- * the rebase put in another section. `added` is the list of lines that the
- * branch adds before the rebase. A release on the base puts a version
- * heading under `## [Unreleased]`, and an entry of the branch can then land
- * under that version, with a clean rebase or with a keep-both resolution.
- * The line check does not see this, because the line itself does not change.
- * The result keeps the line order of the branch, so a wrapped entry stays
- * readable.
- */
-export const movedEntries = ({ added, oldTipText, baseText, newTipText }) => {
-  const oldFirst = firstSectionLines(oldTipText).filter(isEntryLine);
-  const expected = multisetDifference(oldFirst, multisetDifference(oldFirst, added));
-  const addedToFirst = multisetDifference(
-    firstSectionLines(newTipText).filter(isEntryLine),
-    firstSectionLines(baseText).filter(isEntryLine),
-  );
-  return multisetDifference(expected, addedToFirst);
-};
-
-/**
- * The steps that fix a moved entry. The next run fetches the remote branch
- * and rebases it again, so a fix helps only after it is pushed. After the
- * push, the branch is on the base, and the next run compares the pushed
- * result with itself. That run cannot find a problem of the first rebase or
- * of the manual fix, so step 2 is the only check of the fix.
- */
-const moveBackSteps = ({ remote, branch, oldTip, newTip, base, worktree }) =>
-  [
-    `The temporary worktree ${worktree} holds the rebased branch. To fix it, work in that worktree:`,
-    "  1. Move these entries to the first release section of CHANGELOG.md and commit the change.",
-    "     Make sure that this command shows only the moved entries:",
-    `       ${worktreeCommand(worktree, ["diff", newTip, "HEAD"])}`,
-    "     The next run cannot check the manual fix, so this step is its only check.",
-    "  2. Push the worktree HEAD with a lease on the old branch tip:",
-    `       ${worktreeCommand(worktree, leasePushArgs({ remote, branch, oldTip }))}`,
-    "  3. Remove the worktree with the command below.",
-    `  4. Run the script again. It confirms that the branch is on ${base}.`,
-    "     It cannot check the first rebase again.",
-  ].join("\n  ");
-
-// A push of the result makes the next run compare the pushed result with
-// itself, so the other problems must be fixed before the push.
-const OTHER_PROBLEMS_FIRST =
-  "Fix the other problems first. After a push of the result, the next run cannot find them, because it compares the pushed result with itself.";
-
-const formatProblem = (label, lines) =>
-  `${label}:\n${lines.map((line) => `    ${line}`).join("\n")}`;
-
-/**
- * The problem for the entries in `moved`. The recovery steps push HEAD, so
- * they are printed only when `alone` is true: when the moved entries are
- * the only problem of the run.
- */
-const movedProblem = (moved, alone, target) => {
-  const label = "Entries of the branch that moved out of the first release section";
-  const advice = alone ? moveBackSteps(target) : OTHER_PROBLEMS_FIRST;
-  return `${CHANGELOG}: ${formatProblem(label, moved)}\n  ${advice}`;
-};
-
-/**
- * Compare the CHANGELOG line changes of the branch before the rebase with
- * the changes after it. Each side is `{ added, removed }`. Returns a list of
- * problems. An empty list means the rebase kept every line the branch adds,
- * added no other line, and removed only the lines the branch removed before.
- */
-export const changelogProblems = (before, after) =>
-  [
-    ["Lines that the branch added and the rebase lost", before.added, after.added],
-    ["Lines that the rebase added and the branch did not add", after.added, before.added],
-    ["Base lines that the rebase removed", after.removed, before.removed],
-    ["Lines that the branch removed and the rebase kept", before.removed, after.removed],
-  ]
-    .map(([label, left, right]) => [label, multisetDifference(left, right)])
-    .filter(([, lines]) => lines.length > 0)
-    .map(([label, lines]) => formatProblem(label, lines));
-
-/**
- * Check the CHANGELOG changes of the branch before the rebase
- * (`oldBase..oldTip`) against the changes after it (`baseTip..newTip`).
- * Then check the subsections of the first release section. Returns
- * `{ problems, moved }`, where `moved` is the list of new entries of the
- * branch that are no longer in the first release section.
- */
-const checkChangelog = (cwd, { oldBase, oldTip, baseTip, newTip }) => {
-  const before = changelogLineChanges(cwd, oldBase, oldTip);
-  const problems = changelogProblems(before, changelogLineChanges(cwd, baseTip, newTip));
-  const newTipText = git(cwd, ["show", `${newTip}:${CHANGELOG}`]);
-  const baseText = git(cwd, ["show", `${baseTip}:${CHANGELOG}`]);
-  const moved = movedEntries({
-    added: before.added,
-    oldTipText: git(cwd, ["show", `${oldTip}:${CHANGELOG}`]),
-    baseText,
-    newTipText,
-  });
-  const duplicates = duplicateSubsections(newTipText, baseText);
-  if (duplicates.length > 0) {
-    problems.push(
-      formatProblem("Subsections that occur two times in the first release section", duplicates),
-    );
-  }
-  return { problems: problems.map((problem) => `${CHANGELOG}: ${problem}`), moved };
 };
 
 /**
@@ -530,6 +253,9 @@ const restoreCacheBumps = (cwd, { oldBase, oldTip, baseTip, hooks }) => {
   return bumped;
 };
 
+const formatProblem = (label, lines) =>
+  `${label}:\n${lines.map((line) => `    ${line}`).join("\n")}`;
+
 const regenerateSteps = ({ remote, branch, oldTip, worktree }) =>
   [
     `The temporary worktree ${worktree} holds the rebased branch. Regenerate there:`,
@@ -541,26 +267,25 @@ const regenerateSteps = ({ remote, branch, oldTip, worktree }) =>
     "  4. Remove the worktree with the command below.",
   ].join("\n  ");
 
-/**
- * Generated files that took the base side lack the change of the branch
- * until a regeneration, so the run must not push them as they are.
- */
-const generatedProblem = (paths, alone, target) =>
-  `${formatProblem("Generated files that took the base side and need a regeneration", paths)}\n  ${
-    alone ? regenerateSteps(target) : OTHER_PROBLEMS_FIRST
-  }`;
+// A push of the result makes the next run compare the pushed result with
+// itself, so the other problems must be fixed before the push.
+const OTHER_PROBLEMS_FIRST =
+  "Fix the other problems first. After a push of the result, the next run cannot find them, because it compares the pushed result with itself.";
 
 /**
- * The problems with recovery steps. Each set of steps ends with a push, so
- * a problem prints its steps only when it is the only problem of the run.
+ * Generated files that took the base side lack the change of the branch
+ * until a regeneration, so the run must not push them as they are. The
+ * regeneration steps end with a push, so they are printed only when `alone`
+ * is true: when these files are the only problem of the run.
  */
-const recoveryProblems = (moved, generated, alone, target) =>
-  [
-    { items: moved, problem: movedProblem },
-    { items: generated, problem: generatedProblem },
-  ]
-    .filter(({ items }) => items.length > 0)
-    .map(({ items, problem }, _, active) => problem(items, alone && active.length === 1, target));
+const generatedProblems = (paths, alone, target) =>
+  paths.length === 0
+    ? []
+    : [
+        `${formatProblem("Generated files that took the base side and need a regeneration", paths)}\n  ${
+          alone ? regenerateSteps(target) : OTHER_PROBLEMS_FIRST
+        }`,
+      ];
 
 /**
  * Run the checks of the rebase result in the temporary worktree `cwd`.
@@ -575,29 +300,17 @@ const checkResult = (cwd, log, options, rebased, state) => {
   }
   const generated = [...state.generated].toSorted();
   return checkRebase(cwd, log, options, rebased, {
-    ignored: [
-      CHANGELOG,
-      ...generated,
-      ...state.cacheFiles,
-      ...state.bumped.map(({ file }) => file),
-    ],
+    ignored: [...generated, ...state.cacheFiles, ...state.bumped.map(({ file }) => file)],
     // A cache version line takes the base value + 1, so only that line of
     // a cache file can differ from the branch.
-    hunks: { ignored: [CHANGELOG, ...generated], dropLine: isCacheVersionDiffLine },
+    hunks: { ignored: generated, dropLine: isCacheVersionDiffLine },
     checks: (tips, treeProblems) => {
-      const changelog = checkChangelog(cwd, tips);
-      const others = [
-        ...changelog.problems,
-        ...checkVersions(versionChanges(cwd, oldBase, oldTip), versionsAfter),
-      ];
-      const target = { ...tips, remote: rebased.remote, base: options.base };
+      const others = checkVersions(versionChanges(cwd, oldBase, oldTip), versionsAfter);
+      const target = { ...tips, remote: rebased.remote };
       const alone = treeProblems.length === 0 && others.length === 0;
-      return [...recoveryProblems(changelog.moved, generated, alone, target), ...others];
+      return [...generatedProblems(generated, alone, target), ...others];
     },
-    passed: [
-      "CHANGELOG check: the rebase kept the lines of the branch and removed no base line.",
-      "CHANGELOG check: the new entries of the branch are in the first release section.",
-    ],
+    passed: [],
   });
 };
 
@@ -634,9 +347,6 @@ const rebaseReasons = (cwd, { oldBase, oldTip, baseTip }) => {
   const mergeTree = merge.stdout.trim().split("\n")[0];
   const reasons = [];
   const branchPaths = changedPaths(cwd, oldBase, oldTip);
-  if (branchPaths.has(CHANGELOG)) {
-    reasons.push(`The branch changes ${CHANGELOG}.`);
-  }
   const basePaths = changedPaths(cwd, oldBase, baseTip);
   const generated = [...GENERATED].filter((path) => branchPaths.has(path) && basePaths.has(path));
   if (generated.length > 0) {

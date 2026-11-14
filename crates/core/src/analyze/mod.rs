@@ -1,4 +1,6 @@
 mod absent_component_prop;
+mod constant_parameter;
+pub(crate) use constant_parameter::release_resolution_payloads;
 mod boundary;
 mod boundary_calls;
 mod boundary_coverage;
@@ -39,6 +41,7 @@ mod security;
 mod semantic_scope;
 mod server_only;
 mod thin_wrapper;
+mod unconfigured_check;
 mod unlisted_binaries;
 mod unprovided_inject;
 mod unrendered_component;
@@ -96,6 +99,7 @@ use crate::results::{
     UnusedDependency, UnusedExport, UnusedMember,
 };
 use crate::suppress::{IssueKind, SuppressionContext};
+use unconfigured_check::record_unconfigured_check;
 
 use class_member_rules::ClassMemberRules;
 use component_health::{populate_duplicate_prop_shape_findings, populate_thin_wrapper_findings};
@@ -798,7 +802,9 @@ pub(crate) fn find_dead_code_full(
         suppressions: &run_context.suppressions,
         line_offsets_by_file: &run_context.line_offsets_by_file,
         class_member_rules: &class_member_rules,
+        plugin_result,
         collect_usages,
+        excluded,
         results: &mut results,
     });
 
@@ -935,8 +941,7 @@ fn collect_federation_runtime_remotes(
     remotes.rules
 }
 
-/// Shared context for the post-detector populate sequence in
-/// `find_dead_code_full`.
+/// Shared context for the post-detector populate sequence of `find_dead_code_full`.
 struct PostDetectionInput<'a, 'm> {
     graph: &'a ModuleGraph,
     modules: &'a [ModuleInfo],
@@ -948,16 +953,17 @@ struct PostDetectionInput<'a, 'm> {
     suppressions: &'a SuppressionContext<'m>,
     line_offsets_by_file: &'a LineOffsetsMap<'m>,
     class_member_rules: &'a ClassMemberRules,
+    plugin_result: Option<&'a crate::plugins::AggregatedPluginResult>,
     /// Whether the editor/LSP usages path is active; gates in-process-only
     /// intel (`react_component_intel`) off the bare `fallow` / `audit` hot path.
     collect_usages: bool,
+    excluded: &'a FxHashSet<FileId>,
     results: &'a mut AnalysisResults,
 }
 
 /// Run the post-detector populate/reclassify phases: server-action
 /// reclassification, security, catalog/override, framework-convention findings,
-/// and stale-suppression accounting. Extracted from `find_dead_code_full` so
-/// that orchestrator reads as setup -> detect -> populate.
+/// and stale-suppression accounting.
 fn populate_post_detection_findings(input: &mut PostDetectionInput<'_, '_>) {
     filter_public_workspace_results(input.config, input.workspaces, input.results);
 
@@ -1023,6 +1029,7 @@ fn populate_package_and_framework_findings(input: &mut PostDetectionInput<'_, '_
         collect_usages: input.collect_usages,
         results: input.results,
     });
+    constant_parameter::populate(input);
 }
 
 /// Append stale-suppression and missing-reason findings, then record the
@@ -1080,7 +1087,7 @@ fn populate_component_contract_findings(input: &mut FrameworkSpecificFindingsInp
     populate_unprovided_inject_findings(input);
     populate_unrendered_component_findings(input);
     populate_unused_component_prop_findings(input);
-    populate_absent_component_prop_findings(input);
+    absent_component_prop::populate(input);
     populate_unused_component_emit_findings(input);
     populate_unused_component_input_findings(input);
     populate_unused_component_output_findings(input);
@@ -1340,36 +1347,6 @@ fn populate_unused_component_prop_findings(input: &mut FrameworkSpecificFindings
     input.results.unused_component_props =
         retain_unsuppressed(input, findings, IssueKind::UnusedComponentProp, |f| {
             Some((f.prop.path.as_path(), f.prop.line))
-        });
-}
-
-fn populate_absent_component_prop_findings(input: &mut FrameworkSpecificFindingsInput<'_>) {
-    if input.config.rules.absent_component_props == Severity::Off
-        && !input.config.overrides.iter().any(|overrides| {
-            overrides
-                .rules
-                .absent_component_props
-                .is_some_and(|severity| severity != Severity::Off)
-        })
-    {
-        return;
-    }
-    let findings = absent_component_prop::find_absent_component_props(
-        &absent_component_prop::AbsentPropInput {
-            graph: input.graph,
-            modules: input.modules,
-            resolved_modules: input.resolved_modules,
-            declared_deps: input.declared_deps,
-            public_api_entry_points: input.public_api_entry_points,
-            line_offsets_by_file: input.line_offsets_by_file,
-        },
-    )
-    .into_iter()
-    .map(crate::results::AbsentComponentPropFinding::with_actions)
-    .collect();
-    input.results.absent_component_props =
-        retain_unsuppressed(input, findings, IssueKind::AbsentComponentProp, |finding| {
-            Some((finding.prop.path.as_path(), finding.prop.line))
         });
 }
 
@@ -1971,21 +1948,6 @@ fn run_boundary_violation_detector(
         .collect()
 }
 
-/// Report that a detector produced structurally zero findings because it was
-/// never configured, so a consumer does not read the counter as a measurement.
-///
-/// `rules: off` is deliberately NOT reported here: that zero is the user's own
-/// choice and is already visible in `fallow config`.
-fn record_unconfigured_check(config: &ResolvedConfig, kind: WorkspaceDiagnosticKind) {
-    // Anchored at the project root, stored project-relative: the envelopes'
-    // post-serialisation strip only removes a `root + separator` prefix, so a
-    // root-anchored absolute path would reach JSON output verbatim.
-    let diagnostic =
-        fallow_config::WorkspaceDiagnostic::new(&config.root, config.root.clone(), kind)
-            .into_root_relative(&config.root);
-    fallow_config::record_workspace_diagnostics(&config.root, vec![diagnostic]);
-}
-
 fn filter_public_workspace_results(
     config: &ResolvedConfig,
     workspaces: &[fallow_config::WorkspaceInfo],
@@ -2096,6 +2058,12 @@ fn populate_security_findings(
         );
         results.security_findings = security_findings;
         results.security_unresolved_edge_files = stats.client_files_with_unresolved_edges;
+        if stats.client_roots == 0 {
+            record_unconfigured_check(
+                ctx.config,
+                WorkspaceDiagnosticKind::ClientServerLeakNoClientRoots,
+            );
+        }
     }
 
     if ctx.config.rules.security_sink != Severity::Off {
@@ -2118,31 +2086,31 @@ fn populate_tainted_sink_findings(
         categories.and_then(|c| c.include.clone()),
         categories.and_then(|c| c.exclude.clone()),
     );
+    let sink_context = security::TaintedSinkContext {
+        category_filter: &filter,
+        request_receivers: ctx.request_receivers,
+        root: &ctx.config.root,
+    };
     let (sink_findings, sink_stats) = security::find_tainted_sinks(
         ctx.graph,
         ctx.modules,
         ctx.suppressions,
         ctx.line_offsets_by_file,
         ctx.declared_deps,
-        &security::TaintedSinkContext {
-            category_filter: &filter,
-            request_receivers: ctx.request_receivers,
-            root: &ctx.config.root,
-        },
+        &sink_context,
     );
     results.security_findings.extend(sink_findings);
     results.security_unresolved_callee_sites = sink_stats.sinks_skipped_dynamic_callee;
     results.security_unresolved_callee_diagnostics = sink_stats.unresolved_callee_diagnostics;
-    results
-        .security_findings
-        .extend(security::find_hardcoded_secret_candidates(
-            ctx.graph,
-            ctx.modules,
-            ctx.suppressions,
-            ctx.line_offsets_by_file,
-            &filter,
-            &ctx.config.root,
-        ));
+    results.suppressed_security_findings = sink_stats.suppressed_findings;
+    security::find_hardcoded_secret_candidates(
+        ctx.graph,
+        ctx.modules,
+        ctx.suppressions,
+        ctx.line_offsets_by_file,
+        &sink_context,
+        results,
+    );
 }
 
 fn annotate_security_findings(
@@ -2431,37 +2399,6 @@ fn populate_unused_store_member_findings(
         .into_iter()
         .map(UnusedStoreMemberFinding::with_actions)
         .collect();
-}
-
-#[derive(Clone, Copy)]
-struct UnresolvedImportDetectorInput<'a> {
-    resolved_modules: &'a [ResolvedModule],
-    config: &'a ResolvedConfig,
-    suppressions: &'a crate::suppress::SuppressionContext<'a>,
-    virtual_prefixes: &'a [&'a str],
-    generated_patterns: &'a [&'a str],
-    generated_type_prefixes: &'a [&'a str],
-    line_offsets_by_file: &'a LineOffsetsMap<'a>,
-}
-
-fn run_unresolved_import_detector(
-    input: UnresolvedImportDetectorInput<'_>,
-) -> Vec<UnresolvedImportFinding> {
-    if input.config.rules.unresolved_imports == Severity::Off || input.resolved_modules.is_empty() {
-        return Vec::new();
-    }
-    find_unresolved_imports(
-        input.resolved_modules,
-        input.config,
-        input.suppressions,
-        input.virtual_prefixes,
-        input.generated_patterns,
-        input.generated_type_prefixes,
-        input.line_offsets_by_file,
-    )
-    .into_iter()
-    .map(UnresolvedImportFinding::with_actions)
-    .collect()
 }
 
 #[cfg(test)]

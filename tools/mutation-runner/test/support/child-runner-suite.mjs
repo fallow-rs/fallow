@@ -73,7 +73,20 @@ export const childRunnerSuite = ({
       assert.equal(ready.capabilities.hot_switch, false);
       assert.equal(ready.capabilities.fresh_modules_per_run, true);
       assert.equal(ready.capabilities.batch_mutants, false);
+      // Only the node:test adapter answers a replay request.
+      assert.equal(ready.capabilities.replay === true, runner === "node-test");
       assert.deepEqual(ready.notes, []);
+    });
+
+    test("a runner without the replay capability refuses a replay request", async (t) => {
+      if (runner === "node-test") {
+        t.skip("node:test replays");
+        return;
+      }
+      const refused = await request({ type: "replay" });
+      assert.equal(refused.type, "error");
+      assert.equal(refused.error.code, "bad-request");
+      assert.match(refused.error.message, /replay capability/u);
     });
 
     test("the dry run reports every test with its suite path, status and line", () => {

@@ -1,0 +1,9 @@
+{
+  "projects": {
+    "app": {
+      "root": "",
+      "sourceRoot": "src",
+      "architect": { "build": { "options": { "browser": "src/main.ts" } } }
+    }
+  }
+}

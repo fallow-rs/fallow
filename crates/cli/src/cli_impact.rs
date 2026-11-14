@@ -130,9 +130,10 @@ fn impact_enable(root: &Path, quiet: bool, output: fallow_config::OutputFormat) 
                  repo, never uploaded)."
             );
             println!(
-                "Tip: run `fallow init --hooks` (or add `--gate-marker pre-commit` to \
+                "Tip: run `{} init --hooks` (or add `--gate-marker pre-commit` to \
                  your existing hook's `fallow audit` line) so blocked-then-fixed \
-                 commits are recorded as contained."
+                 commits are recorded as contained.",
+                crate::report::suggestions::fallow_command()
             );
         } else {
             println!("Fallow Impact is already enabled.");

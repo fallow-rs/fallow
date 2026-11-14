@@ -6,8 +6,8 @@
 
 use oxc_ast::ast::{
     Argument, ArrayExpression, ArrowFunctionExpression, BlockStatement, CallExpression, Class,
-    Expression, Function, FunctionBody, ObjectExpression, Statement, SwitchCase, ThrowStatement,
-    VariableDeclaration, VariableDeclarationKind,
+    Expression, Function, FunctionBody, LogicalExpression, ObjectExpression, Statement, SwitchCase,
+    ThrowStatement, VariableDeclaration, VariableDeclarationKind,
 };
 use oxc_ast_visit::{Visit, walk};
 use oxc_span::{GetSpan, Span};
@@ -239,6 +239,21 @@ impl Collector<'_> {
                 MutantChange::new(MutantChange::STATEMENT, "{}"),
             );
         }
+    }
+
+    /// Adds the `nullish-fallback` candidate of `a ?? b`: the region from
+    /// the `??` token at `token_start` to the end of `b` is removed, so the
+    /// expression becomes `a`. The left operand keeps its place, and `??`
+    /// binds more loosely than any operand that it can have without
+    /// parentheses, so the grouping of the context does not change.
+    pub(super) fn nullish_fallback(&mut self, it: &LogicalExpression<'_>, token_start: u32) {
+        self.add(
+            it.span,
+            Operator::NullishFallback,
+            (token_start, it.right.span().end),
+            String::new(),
+            MutantChange::new(MutantChange::FALLBACK, ""),
+        );
     }
 
     /// Adds the `array-literal` candidate.

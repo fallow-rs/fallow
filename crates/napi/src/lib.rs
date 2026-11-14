@@ -51,6 +51,7 @@ pub struct DeadCodeOptions {
     pub unrendered_components: Option<bool>,
     pub unused_component_props: Option<bool>,
     pub absent_component_props: Option<bool>,
+    pub constant_parameters: Option<bool>,
     pub unused_component_emits: Option<bool>,
     pub unused_component_inputs: Option<bool>,
     pub unused_component_outputs: Option<bool>,
@@ -435,6 +436,7 @@ impl TryFrom<DeadCodeOptions> for api::DeadCodeOptions {
                 unrendered_components: value.unrendered_components.unwrap_or(false),
                 unused_component_props: value.unused_component_props.unwrap_or(false),
                 absent_component_props: value.absent_component_props.unwrap_or(false),
+                constant_parameters: value.constant_parameters.unwrap_or(false),
                 unused_component_emits: value.unused_component_emits.unwrap_or(false),
                 unused_component_inputs: value.unused_component_inputs.unwrap_or(false),
                 unused_component_outputs: value.unused_component_outputs.unwrap_or(false),
@@ -975,6 +977,7 @@ mod tests {
         assert!(filters.unused_class_members);
         assert!(filters.unused_store_members);
         assert!(filters.absent_component_props);
+        assert!(filters.constant_parameters);
         assert!(filters.unresolved_imports);
         assert!(filters.unlisted_deps);
         assert!(filters.duplicate_exports);
@@ -1002,6 +1005,19 @@ mod tests {
         let defaults =
             api::DeadCodeOptions::try_from(DeadCodeOptions::default()).expect("defaults");
         assert!(!defaults.filters.absent_component_props);
+    }
+
+    #[test]
+    fn constant_parameter_opt_in_maps_to_its_filter() {
+        let options = api::DeadCodeOptions::try_from(DeadCodeOptions {
+            constant_parameters: Some(true),
+            ..DeadCodeOptions::default()
+        })
+        .expect("options");
+        assert!(options.filters.constant_parameters);
+        let defaults =
+            api::DeadCodeOptions::try_from(DeadCodeOptions::default()).expect("defaults");
+        assert!(!defaults.filters.constant_parameters);
     }
 
     #[test]
@@ -1038,6 +1054,7 @@ mod tests {
             unrendered_components: Some(true),
             unused_component_props: Some(true),
             absent_component_props: Some(true),
+            constant_parameters: Some(true),
             unused_component_emits: Some(true),
             unused_component_inputs: Some(true),
             unused_component_outputs: Some(true),

@@ -3,7 +3,8 @@
 //! The check runs after the tests and reads only the survivors. A survivor
 //! whose mutated file does not type-check becomes `compile_error`, which the
 //! score does not count. A survivor that removes an optional-chaining link
-//! from a receiver whose declared type excludes nullish values keeps the
+//! or a nullish fallback (`a ?? b` to `a`) from a receiver whose declared
+//! type excludes nullish values keeps the
 //! status `survived` and gets an advisory `equivalence_hint`. A survivor that
 //! the checker cannot check keeps the status `survived`.
 
@@ -120,6 +121,7 @@ pub fn apply_outcomes(
                 output.compile_errors += 1;
                 result.status = MutantStatus::CompileError;
                 result.type_error_codes = codes;
+                result.equivalence_hint = None;
             }
             TypecheckOutcome::Hinted(hint) => {
                 output.checked += 1;
@@ -260,6 +262,7 @@ mod tests {
                     disposition: MutantDisposition::Planned,
                     function: None,
                     test_reach: None,
+                    constant_parameter: false,
                 })
                 .collect(),
             test_files: Vec::new(),
@@ -303,8 +306,10 @@ mod tests {
             attempts: Vec::new(),
             cached: false,
             resumed: false,
+            carried: false,
             type_error_codes: Vec::new(),
             equivalence_hint: None,
+            witness: None,
         }
     }
 
@@ -340,6 +345,24 @@ mod tests {
         assert_eq!(after.counts.equivalent, 0);
         assert_eq!(after.counts.survived, before.counts.survived);
         assert_eq!(after.score, before.score);
+    }
+
+    /// A mutant that does not type-check is not a survivor, so it loses a
+    /// hint that the plan gave it.
+    #[test]
+    fn a_compile_error_removes_the_hint_of_the_survivor() {
+        let mut broken = result("broken", MutantStatus::Survived);
+        broken.equivalence_hint = Some(MutantEquivalenceHint::ConstantParameter);
+        let mut results = vec![broken];
+        apply_outcomes(
+            &mut results,
+            vec![(
+                "broken".to_owned(),
+                TypecheckOutcome::CompileError(vec![2322]),
+            )],
+        );
+        assert_eq!(results[0].status, MutantStatus::CompileError);
+        assert_eq!(results[0].equivalence_hint, None);
     }
 
     #[test]

@@ -52,6 +52,7 @@ pub(super) fn audit_review_benchmark_options<'a>(
         css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 0,
+        mutation_report: None,
         brief: true,
         max_decisions: 4,
         walkthrough_guide: false,

@@ -259,6 +259,11 @@ pub fn collect_unresolved_refs_and_accesses(
     (unresolved_names, member_accesses)
 }
 
+/// The callee path prefix of a sink in template markup (`template.innerHTML`
+/// for Vue `v-html`, Svelte `{@html}` and Angular `[innerHTML]`). The span of
+/// such a sink covers its tag or attribute, not the exact sink expression.
+pub const TEMPLATE_SINK_CALLEE_PREFIX: &str = "template.";
+
 pub fn template_html_sink(snippet: &str, span_start: usize, span_end: usize) -> Option<SinkSite> {
     template_dom_sink("innerHTML", snippet, span_start, span_end)
 }
@@ -297,7 +302,7 @@ fn template_dom_sink(
 
     Some(SinkSite {
         sink_shape: SinkShape::MemberAssign,
-        callee_path: format!("template.{property}"),
+        callee_path: format!("{TEMPLATE_SINK_CALLEE_PREFIX}{property}"),
         arg_index: 0,
         arg_is_non_literal: true,
         arg_kind,
@@ -312,6 +317,7 @@ fn template_dom_sink(
         span_end: u32::try_from(span_end).ok()?,
         url_arg_literal: None,
         url_shape: None,
+        call_options: None,
     })
 }
 

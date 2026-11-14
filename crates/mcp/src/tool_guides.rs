@@ -37,6 +37,14 @@ pub struct ToolGuide {
 /// self-describing.
 pub const TOOL_GUIDE_NOTE: &str = "This guide explains parameters and output for one tool. Read only the guide for the tool you are about to call.";
 
+/// The over-limit refusal is the same on every tool, so the guides of the
+/// tools with the largest output share one section.
+const OUTPUT_LIMIT_SECTION: ToolGuideSection = ToolGuideSection {
+    topic: "narrow",
+    summary: "What to do when a response is over the output cap.",
+    detail: "The server refuses a response over its cap (1000000 bytes by default) with `isError: true`, `exit_code: 2` and `code: FALLOW_MCP_SUBPROCESS_OUTPUT_LIMIT`. The body has `result_bytes`, `limit_bytes` and a short `result_preview`, but no analysis. `narrow` lists the parameters of this tool that make the output smaller, the most effective first. Call again with one or more of them, for example a smaller `issue_types` set, a `file` list, a `workspace`, a `changed_since` ref or a `top` value. `max_output_bytes` only lowers the cap. The server operator sets the cap with `FALLOW_MCP_MAX_OUTPUT_BYTES`, up to 16 MiB.",
+};
+
 const CHECK_HEALTH_SECTIONS: &[ToolGuideSection] = &[
     ToolGuideSection {
         topic: "group_by",
@@ -123,6 +131,7 @@ A baselined run also carries `baseline_staleness`. Read `gate_trips` for the `--
 
 The MCP server converts the CLI's exit 1 into a successful result so the findings reach you. Read `gate_outcomes` and `baseline_staleness` for the verdict. Every entry that reported `fail` or `warn`, and a baseline that matched less than it was saved with, is also restated as a plain sentence in the result's root `warnings` array.",
     },
+    OUTPUT_LIMIT_SECTION,
 ];
 
 const ANALYZE_SECTIONS: &[ToolGuideSection] = &[
@@ -130,6 +139,11 @@ const ANALYZE_SECTIONS: &[ToolGuideSection] = &[
         topic: "absent_component_props",
         summary: "Optional props that inspected callers do not supply.",
         detail: r#"Select issue_types: ["absent-component-props"] to enable this default-off rule. Each candidate carries the declaration, framework, default presence and inspected caller locations. Review defaults and API intent manually; static evidence does not prove runtime unreachability. Its actions are not auto-fixable. Configured warning or error severity still controls the normal issue gates."#,
+    },
+    ToolGuideSection {
+        topic: "constant_parameters",
+        summary: "Parameters that each visible call passes in one way.",
+        detail: r#"Select issue_types: ["constant-parameters"] to enable this default-off rule. Each candidate carries the function, the parameter, the reason (identical-argument or never-passed), the value, the call count, the condition reads and up to 20 inspected calls. The rule abstains when any caller can be invisible. Review the calls and the intent manually; a test caller counts unless production mode is on. Its actions are not auto-fixable."#,
     },
     ToolGuideSection {
         topic: "boundary_violations",
@@ -146,6 +160,7 @@ const ANALYZE_SECTIONS: &[ToolGuideSection] = &[
         summary: "How to dispatch the follow-up commands a response suggests.",
         detail: r"Responses also include a top-level `next_steps[]` array of read-only follow-up commands (`{id, command, reason}`) computed from the findings. The stable `id` (e.g. `trace-unused-export`, `trace-clone`, `complexity-breakdown`) maps to a sibling tool or `code_execute` host call (`traceExport`, `traceClone`, `checkHealth({complexity_breakdown:true})`), so dispatch on `id` rather than running the CLI `command` string verbatim.",
     },
+    OUTPUT_LIMIT_SECTION,
 ];
 
 const GET_CLOUD_RUNTIME_CONTEXT_SECTIONS: &[ToolGuideSection] = &[
@@ -295,7 +310,14 @@ For PR review, `runtime_coverage.verdict` puts `hot-path-touched` before `cold-c
 
 Dependency-level findings (unused, misplaced, type-only, or test-only dependencies, overrides, and catalog entries) are in audit scope only when the changed set holds the package manifest that declares them, workspace manifests included. Unlisted dependencies follow imports. Use `analyze` to see every dependency finding.",
     },
+    OUTPUT_LIMIT_SECTION,
 ];
+
+const MUTATION_TASKS_SECTIONS: &[ToolGuideSection] = &[ToolGuideSection {
+    topic: "witness",
+    summary: "How to read the witness of a task and turn it into a test.",
+    detail: "After a `fallow mutation --record-args values` run, a task can have witness. Read witness.verdict first. Only verdict witness can have args, original and mutant: args is a recorded input, original the result of the current code, and mutant the result of the changed code. A test that calls the export with args and asserts original should kill the mutant; run it on the current code to confirm, because the replay ran each call in a new worker with a clock that starts at a fixed time and a fixed Math.random seed. When original.outcome is threw, assert that the call throws (value.name, value.message). Values use the replay encoding: JSON, and objects with a $replay tag for other values: {\"$replay\":\"undefined\"} is undefined, {\"$replay\":\"number\",\"value\":\"NaN\"} is NaN, {\"$replay\":\"bigint\",\"value\":\"12\"} is 12n, and date, regexp, map, set and bytes are a Date, a RegExp, a Map, a Set and a typed array. The text fields are for people, not test code. Other verdicts (no_witness_found, unstable, timeout, not_callable, not_replayable) give no input; none of them means that the mutant is equivalent. A stale task has no args. replay_command shows both sides again.",
+}];
 
 /// Every tool with a long-form guide, in catalogue order.
 pub const TOOL_GUIDES: &[ToolGuide] = &[
@@ -330,6 +352,10 @@ pub const TOOL_GUIDES: &[ToolGuide] = &[
     ToolGuide {
         tool: "inspect_target",
         sections: INSPECT_TARGET_SECTIONS,
+    },
+    ToolGuide {
+        tool: "mutation_tasks",
+        sections: MUTATION_TASKS_SECTIONS,
     },
 ];
 

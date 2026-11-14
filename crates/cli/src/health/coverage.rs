@@ -591,15 +591,6 @@ fn detect_package_manager(root: &Path) -> Option<LocalPackageManager> {
 }
 
 impl LocalPackageManager {
-    const fn install_command(self) -> &'static str {
-        match self {
-            Self::Npm => "npm install --save-dev @fallow-cli/fallow-cov",
-            Self::Pnpm => "pnpm add -D @fallow-cli/fallow-cov",
-            Self::Yarn => "yarn add -D @fallow-cli/fallow-cov",
-            Self::Bun => "bun add -d @fallow-cli/fallow-cov",
-        }
-    }
-
     fn resolve_sidecar(self, root: &Path) -> Option<PathBuf> {
         match self {
             Self::Npm => resolve_sidecar_via_command(
@@ -719,9 +710,9 @@ fn sidecar_missing_message(root: Option<&Path>) -> String {
         );
         if let Some(package_manager) = detect_package_manager(root) {
             checks.insert(1, package_manager.lookup_hint().to_owned());
-            package_manager
-                .install_command()
-                .clone_into(&mut install_example);
+        }
+        if let Some(manager) = fallow_config::PackageManager::detect(root) {
+            install_example = manager.add_dev_command(root, "@fallow-cli/fallow-cov");
         }
     }
     format!(
@@ -4316,6 +4307,13 @@ mod tests {
                 "yarn add -D @fallow-cli/fallow-cov",
             ),
             (
+                "yarn 1 workspace root",
+                r#"{"name":"p","packageManager":"yarn@1.22.22","workspaces":["packages/*"]}"#,
+                "yarn.lock",
+                "`yarn bin fallow-cov`",
+                "yarn add -D -W @fallow-cli/fallow-cov",
+            ),
+            (
                 "bun",
                 r#"{"name":"p","packageManager":"bun@1.2.0"}"#,
                 "bun.lock",
@@ -4382,30 +4380,16 @@ mod tests {
     }
 
     #[test]
-    fn package_manager_install_commands_match_detected_tool() {
-        for (manager, install, hint) in [
+    fn package_manager_lookup_hints_match_detected_tool() {
+        for (manager, hint) in [
             (
                 super::LocalPackageManager::Npm,
-                "npm install --save-dev @fallow-cli/fallow-cov",
                 "`npm root` + `.bin/fallow-cov`",
             ),
-            (
-                super::LocalPackageManager::Pnpm,
-                "pnpm add -D @fallow-cli/fallow-cov",
-                "`pnpm bin`",
-            ),
-            (
-                super::LocalPackageManager::Yarn,
-                "yarn add -D @fallow-cli/fallow-cov",
-                "`yarn bin fallow-cov`",
-            ),
-            (
-                super::LocalPackageManager::Bun,
-                "bun add -d @fallow-cli/fallow-cov",
-                "`bun pm bin`",
-            ),
+            (super::LocalPackageManager::Pnpm, "`pnpm bin`"),
+            (super::LocalPackageManager::Yarn, "`yarn bin fallow-cov`"),
+            (super::LocalPackageManager::Bun, "`bun pm bin`"),
         ] {
-            assert_eq!(manager.install_command(), install);
             assert_eq!(manager.lookup_hint(), hint);
         }
     }

@@ -20,11 +20,38 @@ const INFERRED_PROJECT = "<inferred>";
 const compareText = (left, right) => Buffer.compare(Buffer.from(left), Buffer.from(right));
 const slash = (value) => value.split(path.sep).join("/");
 
+const DIRECTIVE_LINE = /^(?:\/\/\/?|\/\*+)\s*@ts-(?:ignore|expect-error)\b/u;
+const BLANK_OR_LINE_COMMENT = /^(?:$|\/\/)/u;
+
+// Strict-mode name errors, such as `arguments` used as a declaration name.
+// They do not change which symbol a name resolves to. Other binding errors,
+// such as a duplicate declaration, do, so they stay blocking under a directive.
+const NAME_ONLY_BINDING_CODES = new Set([1100, 1101, 1102, 1212, 1213, 1214, 1215]);
+
+// The compiler drops a binding or semantic diagnostic when an `@ts-ignore` or
+// `@ts-expect-error` comment precedes its line, with only blank lines and `//`
+// comment lines in between. Svelte, for example, declares
+// `export const arguments` under `// @ts-ignore` in an ambient file.
+const isSuppressedByDirective = (project, diagnostic) => {
+  if (!NAME_ONLY_BINDING_CODES.has(diagnostic.code)) return false;
+  const text = project.program.getSourceFile(diagnostic.fileName)?.text;
+  if (typeof text !== "string" || !Number.isInteger(diagnostic.pos)) return false;
+  const lines = text.slice(0, diagnostic.pos).split(/\r?\n/u);
+  for (let index = lines.length - 2; index >= 0; index -= 1) {
+    const line = lines[index].trim();
+    if (DIRECTIVE_LINE.test(line)) return true;
+    if (!BLANK_OR_LINE_COMMENT.test(line)) return false;
+  }
+  return false;
+};
+
 const structuralDiagnostics = (project) => [
   ...project.program.getConfigFileParsingDiagnostics(),
   ...project.program.getProgramDiagnostics(),
   ...project.program.getSyntacticDiagnostics(),
-  ...project.program.getBindDiagnostics(),
+  ...project.program
+    .getBindDiagnostics()
+    .filter((diagnostic) => !isSuppressedByDirective(project, diagnostic)),
 ];
 
 const isProjectLocalDiagnostic = (project, diagnostic) => {

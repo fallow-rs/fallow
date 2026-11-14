@@ -73,6 +73,8 @@ mod lean_profile;
 mod list_envelopes;
 mod mutation;
 mod mutation_ci;
+mod mutation_plan_runner;
+mod mutation_replay;
 mod next_steps;
 mod package_baselines;
 mod pr_comment_envelope;
@@ -350,15 +352,15 @@ pub use mutation::{
     MutationInspectSchemaVersion, MutationInspectStatus, MutationKillMatrix,
     MutationKillMatrixStatus, MutationKillMatrixTarget, MutationKillMatrixTargetStatus,
     MutationPlanCountsOutput, MutationPlanDisposition, MutationPlanFile, MutationPlanMutant,
-    MutationPlanOutput, MutationPlanSchemaVersion, MutationRecheck, MutationRecheckMutant,
-    MutationRecheckOutcome, MutationReport, MutationResumeOutput, MutationRunIssue,
-    MutationRunnerOutput, MutationRuntimeOutput, MutationSchemaVersion, MutationScopeKind,
-    MutationScopeOutput, MutationSkippedFile, MutationStaleReason, MutationStatusCounts,
-    MutationSummary, MutationTargetOnlyKill, MutationTask, MutationTasksOutput,
-    MutationTasksSchemaVersion, MutationTasksSummary, MutationTestKillRow, MutationTimings,
-    MutationTypecheckOutput, MutationTypecheckSkip, MutationTypecheckSkipReason, MutationVerdict,
-    MutationVerdictInput, MutationVerdictJoin, MutationVerdictKind, MutationVerdictSchemaVersion,
-    MutationWorktreeCheck, SAMPLED_OUT_REASON, SKIPPED_TESTS_CODE,
+    MutationPlanOutput, MutationPlanRunner, MutationPlanSchemaVersion, MutationRecheck,
+    MutationRecheckMutant, MutationRecheckOutcome, MutationReport, MutationResumeOutput,
+    MutationRunIssue, MutationRunnerOutput, MutationRuntimeOutput, MutationSchemaVersion,
+    MutationScopeKind, MutationScopeOutput, MutationSkippedFile, MutationStaleReason,
+    MutationStatusCounts, MutationSummary, MutationTargetOnlyKill, MutationTask,
+    MutationTasksOutput, MutationTasksSchemaVersion, MutationTasksSummary, MutationTestKillRow,
+    MutationTimings, MutationTypecheckOutput, MutationTypecheckSkip, MutationTypecheckSkipReason,
+    MutationVerdict, MutationVerdictInput, MutationVerdictJoin, MutationVerdictKind,
+    MutationVerdictSchemaVersion, MutationWorktreeCheck, SAMPLED_OUT_REASON, SKIPPED_TESTS_CODE,
     serialize_mutation_inspect_json_output, serialize_mutation_json_output,
     serialize_mutation_plan_json_output, serialize_mutation_tasks_json_output,
 };
@@ -367,6 +369,12 @@ pub use mutation_ci::{
     MutationCiLocation, MutationCiState, MutationCiView, MutationHeading, MutationNotRunReason,
     MutationRunNotice, mutation_decision_row, mutation_review_summary_line, mutation_run_notice,
     render_mutation_section, survived_description,
+};
+pub use mutation_replay::{
+    MutantWitness, MutationNotReplayable, MutationRecordMode, MutationRecordedFunction,
+    MutationRecordingOutput, MutationReplayCall, MutationReplayInput, MutationReplayInputSource,
+    MutationReplayOutcome, MutationReplayOutput, MutationReplaySide, MutationReplayVerdict,
+    MutationTaskWitness, MutationWitnessSide,
 };
 pub use next_steps::{
     AuditNextStepsInput, BaselineRecheckInput, CombinedNextStepsInput, DeadCodeNextStepsInput,
@@ -412,11 +420,13 @@ pub use root_envelopes::{
     serialize_combined_json_output, serialize_json_root_output, serialize_named_json_output,
 };
 pub use sarif::{
-    GHAS_SARIF_FINGERPRINT_KEY, SARIF_FINDING_ID_KEY, SARIF_FINGERPRINT_KEY, SarifDocumentInput,
-    SarifFindingFields, SarifFindingInput, SarifResultInput, SarifRuleInput,
+    GHAS_SARIF_FINGERPRINT_KEY, SARIF_CATEGORY_AUDIT_DEAD_CODE, SARIF_CATEGORY_AUDIT_DIFF_RISK,
+    SARIF_CATEGORY_AUDIT_DUPES, SARIF_CATEGORY_AUDIT_HEALTH, SARIF_CATEGORY_DEAD_CODE,
+    SARIF_CATEGORY_DUPES, SARIF_CATEGORY_HEALTH, SARIF_FINDING_ID_KEY, SARIF_FINGERPRINT_KEY,
+    SarifDocumentInput, SarifFindingFields, SarifFindingInput, SarifResultInput, SarifRuleInput,
     SarifSourceSnippetCache, append_sarif_findings, build_sarif_document, build_sarif_result,
     build_sarif_result_with_snippet, build_sarif_rule, ensure_unique_result_fingerprints,
-    sarif_finding_fingerprint,
+    extend_sarif_runs_with_category, sarif_finding_fingerprint,
 };
 pub use saved_health::health_report_from_saved_value;
 pub use security::{

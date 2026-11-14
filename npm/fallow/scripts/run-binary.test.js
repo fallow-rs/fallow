@@ -24,11 +24,10 @@ function currentPlatformPackage() {
 
 // Install a fake platform package whose `fallow` binary is the given Node
 // script. Returns the scratch directory and the environment for the launcher.
-function installFakeBinary(t, script) {
+function installFakeBinary(t, script, pkg = currentPlatformPackage()) {
   const work = fs.mkdtempSync(path.join(os.tmpdir(), "fallow-launcher-"));
   t.after(() => fs.rmSync(work, { recursive: true, force: true }));
 
-  const pkg = currentPlatformPackage();
   assert.ok(pkg, "the test host must map to a supported platform package");
   const pkgDir = path.join(work, "node_modules", ...pkg.split("/"));
   fs.mkdirSync(pkgDir, { recursive: true });
@@ -62,6 +61,43 @@ function runLauncher(t, launcher, args) {
   assert.equal(result.status, 0, result.stderr);
   return JSON.parse(fs.readFileSync(argsFile, "utf8"));
 }
+
+// CI does not install the wrapper dependencies, so the launcher finds
+// `detect-libc` only through NODE_PATH. A stub there pins the host to glibc.
+// An installed real `detect-libc` takes precedence, so skip on a musl host.
+function glibcTestPackage() {
+  if (process.platform !== "linux") return null;
+  try {
+    if (require("detect-libc").familySync() !== "glibc") return null;
+  } catch {
+    // Not installed: the NODE_PATH stub decides.
+  }
+  const { getPlatformPackage } = require("./platform-package");
+  return getPlatformPackage("linux", process.arch, "glibc");
+}
+
+function writeGlibcStub(nodeModules) {
+  const dir = path.join(nodeModules, "detect-libc");
+  fs.mkdirSync(dir, { recursive: true });
+  fs.writeFileSync(path.join(dir, "index.js"), 'module.exports = { familySync: () => "glibc" };\n');
+}
+
+const GLIBC_PACKAGE = glibcTestPackage();
+
+test(
+  "launcher on a glibc host runs the musl package when the gnu package is missing",
+  { skip: GLIBC_PACKAGE === null && "needs a Linux glibc host" },
+  (t) => {
+    const musl = GLIBC_PACKAGE.replace(/-gnu$/, "-musl");
+    const { work, env } = installFakeBinary(t, "process.exit(0);\n", musl);
+    writeGlibcStub(path.join(work, "node_modules"));
+    const result = spawnSync(process.execPath, [path.join(BIN_DIR, "fallow"), "check"], {
+      encoding: "utf8",
+      env,
+    });
+    assert.equal(result.status, 0, result.stderr);
+  },
+);
 
 // The fake binary writes a large payload the way the Rust binary does: plain
 // write calls on fd 1, and it stops at the first write error but exits 0.
@@ -218,6 +254,70 @@ test("resolveTypeAwareCompanion accepts only an exact matching package", (t) => 
   assert.equal(resolveTypeAwareCompanion("3.8.0", resolvePackage), undefined);
 });
 
+// `fallow` does not depend on `fallow-type-aware`. pnpm links a project
+// devDependency only into the project node_modules, where the wrapper package
+// cannot resolve it, so the launcher also resolves from the project root. It
+// accepts that companion only when the running `fallow` package is in the same
+// node_modules tree, so a global install never runs a project's companion.
+function writeProjectCompanion(t, version) {
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), "fallow-type-aware-project-"));
+  t.after(() => fs.rmSync(project, { recursive: true, force: true }));
+  const nodeModules = path.join(project, "node_modules");
+  const companionDir = path.join(
+    nodeModules,
+    ".pnpm",
+    "fallow-type-aware@x",
+    "node_modules",
+    "fallow-type-aware",
+  );
+  fs.mkdirSync(companionDir, { recursive: true });
+  fs.symlinkSync(companionDir, path.join(nodeModules, "fallow-type-aware"), "dir");
+  fs.writeFileSync(path.join(companionDir, "fallow-type-aware.mjs"), "#!/usr/bin/env node\n");
+  fs.writeFileSync(
+    path.join(companionDir, "package.json"),
+    JSON.stringify({ name: "fallow-type-aware", version }),
+  );
+  const fallowScripts = path.join(
+    nodeModules,
+    ".pnpm",
+    "fallow@x",
+    "node_modules",
+    "fallow",
+    "scripts",
+  );
+  fs.mkdirSync(fallowScripts, { recursive: true });
+  return { project, companion: path.join(companionDir, "fallow-type-aware.mjs"), fallowScripts };
+}
+
+test("resolveTypeAwareCompanion finds an exact-version companion in the project node_modules", (t) => {
+  const { resolveTypeAwareCompanion } = require(RUN_BINARY);
+  const { project, companion, fallowScripts } = writeProjectCompanion(t, "3.8.0");
+  assert.equal(
+    fs.realpathSync(
+      resolveTypeAwareCompanion("3.8.0", undefined, undefined, project, fallowScripts),
+    ),
+    fs.realpathSync(companion),
+  );
+  assert.equal(
+    resolveTypeAwareCompanion("3.9.0", undefined, undefined, project, fallowScripts),
+    undefined,
+    "a companion of another version is rejected",
+  );
+});
+
+test("resolveTypeAwareCompanion ignores a project companion for a fallow from another install", (t) => {
+  const { resolveTypeAwareCompanion } = require(RUN_BINARY);
+  const { project } = writeProjectCompanion(t, "3.8.0");
+  const globalInstall = fs.mkdtempSync(path.join(os.tmpdir(), "fallow-global-"));
+  t.after(() => fs.rmSync(globalInstall, { recursive: true, force: true }));
+  const globalScripts = path.join(globalInstall, "lib", "node_modules", "fallow", "scripts");
+  fs.mkdirSync(globalScripts, { recursive: true });
+  assert.equal(
+    resolveTypeAwareCompanion("3.8.0", undefined, undefined, project, globalScripts),
+    undefined,
+  );
+});
+
 test("childEnvironment marks launcher-wired companions as npm-wrapper", (t) => {
   const { childEnvironment } = require(RUN_BINARY);
   const previousBin = process.env.FALLOW_TYPE_AWARE_BIN;
@@ -291,3 +391,117 @@ test(
     ]);
   },
 );
+
+test("missingPlatformPackageMessage names the detected libc and the reinstall flag", () => {
+  const { missingPlatformPackageMessage } = require(RUN_BINARY);
+  const message = missingPlatformPackageMessage("@fallow-cli/linux-x64-musl", "musl");
+  assert.match(message, /Could not find @fallow-cli\/linux-x64-musl\./);
+  assert.match(message, /This host uses musl\./);
+  assert.match(message, /--libc=musl/);
+  assert.doesNotMatch(
+    missingPlatformPackageMessage("@fallow-cli/darwin-arm64", undefined),
+    /--libc/,
+  );
+});
+
+// A pnpm-style project with a stand-in `fallow-similar-code` package. Its
+// scripts follow the exports of npm/fallow-similar-code/scripts and report the
+// given verification result.
+function writeSimilarCodeCompanion(t, { version, verified }) {
+  const project = fs.mkdtempSync(path.join(os.tmpdir(), "fallow-similar-code-project-"));
+  t.after(() => fs.rmSync(project, { recursive: true, force: true }));
+  const nodeModules = path.join(project, "node_modules");
+  const packageDir = path.join(
+    nodeModules,
+    ".pnpm",
+    "fsc@x",
+    "node_modules",
+    "fallow-similar-code",
+  );
+  fs.mkdirSync(path.join(packageDir, "scripts"), { recursive: true });
+  fs.symlinkSync(packageDir, path.join(nodeModules, "fallow-similar-code"), "dir");
+  fs.writeFileSync(
+    path.join(packageDir, "package.json"),
+    JSON.stringify({ name: "fallow-similar-code", version }),
+  );
+  const binaryPath = path.join(packageDir, "native", "fallow-similar-code");
+  fs.writeFileSync(
+    path.join(packageDir, "scripts", "run-binary.js"),
+    `module.exports = {
+  resolvePlatformPackage: () => "@fallow-cli/fallow-similar-code-test",
+  resolveBinaryArtifact: () => ({ binaryPath: ${JSON.stringify(binaryPath)} }),
+};\n`,
+  );
+  fs.writeFileSync(
+    path.join(packageDir, "scripts", "verify-binary.js"),
+    `module.exports = { verifyBinary: () => ({ ok: ${verified}, message: "stand-in" }) };\n`,
+  );
+  const fallowScripts = path.join(
+    nodeModules,
+    ".pnpm",
+    "fallow@x",
+    "node_modules",
+    "fallow",
+    "scripts",
+  );
+  fs.mkdirSync(fallowScripts, { recursive: true });
+  return { project, binaryPath, fallowScripts };
+}
+
+test("resolveSimilarCodeProvider returns the verified binary of an exact-version companion", (t) => {
+  const { resolveSimilarCodeProvider } = require(RUN_BINARY);
+  const good = writeSimilarCodeCompanion(t, { version: "3.8.0", verified: true });
+  const options = (fixture) => ({
+    projectRoot: fixture.project,
+    launcherDir: fixture.fallowScripts,
+  });
+  assert.equal(resolveSimilarCodeProvider("3.8.0", options(good)), good.binaryPath);
+  assert.equal(resolveSimilarCodeProvider("3.9.0", options(good)), undefined, "another version");
+
+  const unverified = writeSimilarCodeCompanion(t, { version: "3.8.0", verified: false });
+  const reports = [];
+  assert.equal(
+    resolveSimilarCodeProvider("3.8.0", {
+      ...options(unverified),
+      report: (message) => reports.push(message),
+    }),
+    undefined,
+  );
+  assert.equal(reports.length, 1);
+  assert.match(reports[0], /similar-code companion failed verification: stand-in/);
+});
+
+test("resolveSimilarCodeProvider ignores a project companion for a fallow from another install", (t) => {
+  const { resolveSimilarCodeProvider } = require(RUN_BINARY);
+  const { project } = writeSimilarCodeCompanion(t, { version: "3.8.0", verified: true });
+  const globalInstall = fs.mkdtempSync(path.join(os.tmpdir(), "fallow-global-"));
+  t.after(() => fs.rmSync(globalInstall, { recursive: true, force: true }));
+  const launcherDir = path.join(globalInstall, "lib", "node_modules", "fallow", "scripts");
+  fs.mkdirSync(launcherDir, { recursive: true });
+  assert.equal(
+    resolveSimilarCodeProvider("3.8.0", { projectRoot: project, launcherDir }),
+    undefined,
+  );
+});
+
+test("childEnvironment passes the similar-code provider only to commands that use it", (t) => {
+  const { childEnvironment } = require(RUN_BINARY);
+  const previous = process.env.FALLOW_SIMILAR_CODE_PROVIDER;
+  delete process.env.FALLOW_SIMILAR_CODE_PROVIDER;
+  t.after(() => {
+    if (previous === undefined) delete process.env.FALLOW_SIMILAR_CODE_PROVIDER;
+    else process.env.FALLOW_SIMILAR_CODE_PROVIDER = previous;
+  });
+  const noTypeAware = () => undefined;
+  const resolveProvider = () => "/verified/fallow-similar-code";
+  const env = (args) =>
+    childEnvironment("3.8.0", noTypeAware, undefined, { args, resolveProvider })
+      .FALLOW_SIMILAR_CODE_PROVIDER;
+
+  assert.equal(env(["similar-code", "status"]), "/verified/fallow-similar-code");
+  assert.equal(env(["mcp-server"]), "/verified/fallow-similar-code");
+  assert.equal(env(["dead-code"]), undefined);
+
+  process.env.FALLOW_SIMILAR_CODE_PROVIDER = "/user/choice";
+  assert.equal(env(["similar-code"]), "/user/choice");
+});

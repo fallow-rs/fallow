@@ -4,10 +4,9 @@
 //! `tainted-sink` catalogue (one `TaintedSink` kind covering every CWE category
 //! in `security_matchers.toml`). Findings are CANDIDATES for downstream agent
 //! verification, NOT verified vulnerabilities.
-//! This command is the ONLY surface for security findings: they never appear
-//! under bare `fallow` or the `audit` gate. There is no `confidence` or
-//! `signal_strength` field; structural traces and reachability context are the
-//! only honest signals.
+//! This command is the ONLY surface for security findings: they never appear under bare `fallow`
+//! or the `audit` gate. There is no `confidence` or `signal_strength` field; structural traces
+//! and reachability context are the only honest signals.
 
 use crate::report::sink::outln;
 use colored::Colorize;
@@ -48,6 +47,10 @@ use crate::load_config_for_analysis;
 use fallow_output::{
     RuntimeCoverageFinding, RuntimeCoverageHotPath, RuntimeCoverageReport, RuntimeCoverageVerdict,
 };
+use survivors_input::{
+    CandidateInput, load_candidate_map, load_verdicts, resolve_verdict_candidate,
+    unknown_verdict_message,
+};
 
 pub use fallow_api::SecurityGateMode;
 
@@ -55,8 +58,18 @@ pub use fallow_api::SecurityGateMode;
 mod base_cache;
 #[path = "security_gate_new.rs"]
 mod gate_new;
+#[path = "security_human.rs"]
+mod human;
+use human::{
+    dead_code_hint, is_server_only_leak, render_human, render_human_summary, runtime_hint_text,
+    source_reachability_hint, unresolved_callee_reason_label,
+};
+#[cfg(test)]
+use human::{gate_human_header, hop_role_label};
 #[path = "security_sarif.rs"]
 mod sarif;
+#[path = "security_survivors_input.rs"]
+mod survivors_input;
 
 pub use sarif::build_security_sarif;
 use sarif::render_sarif;
@@ -633,6 +646,7 @@ fn build_survivors_output(
 ) -> Result<SecuritySurvivorsOutput, String> {
     let CandidateInput {
         candidates,
+        stable_ids,
         workspace_diagnostics,
     } = load_candidate_map(opts.candidates)?;
     let verdicts = load_verdicts(opts.verdicts)?;
@@ -643,29 +657,27 @@ fn build_survivors_output(
 
     for verdict in &verdicts {
         validate_verdict(verdict)?;
-        if !seen.insert(verdict.finding_id.clone()) {
+        let Some((finding_id, candidate)) =
+            resolve_verdict_candidate(&candidates, &stable_ids, &verdict.finding_id)
+        else {
+            return Err(unknown_verdict_message(&verdict.finding_id, &stable_ids));
+        };
+        if !seen.insert(finding_id.clone()) {
             return Err(format!(
-                "Verifier verdict file has duplicate verdict for finding_id `{}`.",
-                verdict.finding_id
+                "Verifier verdict file has duplicate verdict for finding_id `{finding_id}`."
             ));
         }
-        let Some(candidate) = candidates.get(&verdict.finding_id) else {
-            return Err(format!(
-                "Verifier verdict references unknown finding_id `{}`.",
-                verdict.finding_id
-            ));
-        };
         match verdict.verdict {
             SecurityVerifierVerdictStatus::Survivor => {
                 survivors.insert(
-                    verdict.finding_id.clone(),
+                    finding_id.clone(),
                     survivor_from_verdict(verdict, candidate),
                 );
             }
             SecurityVerifierVerdictStatus::Dismissed => dismissed += 1,
             SecurityVerifierVerdictStatus::NeedsHumanReview => {
                 needs_human_review.insert(
-                    verdict.finding_id.clone(),
+                    finding_id.clone(),
                     survivor_from_verdict(verdict, candidate),
                 );
             }
@@ -692,105 +704,6 @@ fn build_survivors_output(
     })
 }
 
-struct CandidateInput {
-    candidates: BTreeMap<String, SecurityFinding>,
-    workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
-}
-
-fn load_candidate_map(path: &Path) -> Result<CandidateInput, String> {
-    let mut value = load_json_file(path, "candidate")?;
-    let workspace_diagnostics = value
-        .get_mut("workspace_diagnostics")
-        .map(serde_json::Value::take)
-        .map(serde_json::from_value)
-        .transpose()
-        .map_err(|err| {
-            format!(
-                "Candidate file {} contains malformed workspace diagnostics: {err}",
-                path.display()
-            )
-        })?
-        .unwrap_or_default();
-    let Some(serde_json::Value::Array(findings)) = value
-        .get_mut("security_findings")
-        .map(serde_json::Value::take)
-    else {
-        return Err(format!(
-            "Candidate file {} must be raw `fallow security --format json` output with a security_findings array.",
-            path.display()
-        ));
-    };
-    let mut candidates = BTreeMap::new();
-    for finding in findings {
-        let finding: SecurityFinding = serde_json::from_value(finding).map_err(|err| {
-            format!(
-                "Candidate file {} contains a malformed security finding: {err}",
-                path.display()
-            )
-        })?;
-        if finding.finding_id.is_empty() {
-            return Err(format!(
-                "Candidate file {} contains a security finding with an empty finding_id.",
-                path.display()
-            ));
-        }
-        match candidates.entry(finding.finding_id.clone()) {
-            std::collections::btree_map::Entry::Vacant(entry) => {
-                entry.insert(finding);
-            }
-            std::collections::btree_map::Entry::Occupied(entry) => {
-                return Err(format!(
-                    "Candidate file {} contains duplicate finding_id `{}`.",
-                    path.display(),
-                    entry.key()
-                ));
-            }
-        }
-    }
-    Ok(CandidateInput {
-        candidates,
-        workspace_diagnostics,
-    })
-}
-
-fn load_verdicts(path: &Path) -> Result<Vec<SecurityVerifierVerdict>, String> {
-    let value = load_json_file(path, "verdict")?;
-    let verdicts_value = if let Some(items) = value.get("verdicts") {
-        if value
-            .get("schema_version")
-            .and_then(serde_json::Value::as_str)
-            != Some("fallow-security-verdicts/v1")
-        {
-            return Err(format!(
-                "Verifier verdict file {} must use schema_version `fallow-security-verdicts/v1`.",
-                path.display()
-            ));
-        }
-        if !items.is_array() {
-            return Err(format!(
-                "Verifier verdict file {} must contain a verdicts array.",
-                path.display()
-            ));
-        }
-        items.clone()
-    } else {
-        value
-    };
-    serde_json::from_value::<Vec<SecurityVerifierVerdict>>(verdicts_value).map_err(|err| {
-        format!(
-            "Failed to parse verifier verdict file {}: {err}",
-            path.display()
-        )
-    })
-}
-
-fn load_json_file(path: &Path, label: &str) -> Result<serde_json::Value, String> {
-    let src = std::fs::read_to_string(path)
-        .map_err(|err| format!("Failed to read {label} file {}: {err}", path.display()))?;
-    serde_json::from_str(&src)
-        .map_err(|err| format!("Failed to parse {label} file {}: {err}", path.display()))
-}
-
 fn validate_verdict(verdict: &SecurityVerifierVerdict) -> Result<(), String> {
     if verdict.schema_version != "fallow-security-verdict/v1" {
         return Err(format!(
@@ -809,7 +722,7 @@ fn survivor_from_verdict(
     candidate: &SecurityFinding,
 ) -> SecuritySurvivor {
     SecuritySurvivor {
-        finding_id: verdict.finding_id.clone(),
+        finding_id: candidate.finding_id.clone(),
         verdict: verdict.verdict,
         reason: verdict.reason.clone(),
         rationale: verdict.rationale.clone(),
@@ -2345,439 +2258,6 @@ fn write_sarif_file(
     })
 }
 
-/// One-line gate verdict header. Leads with the ACTION ("REVIEW REQUIRED") and
-/// immediately qualifies with the candidate framing, so a human never reads the
-/// gate as "fallow confirmed a vulnerability". The wire `verdict` token stays
-/// `fail`; only this human prose says "REVIEW REQUIRED".
-fn gate_human_header(gate: &SecurityGate) -> String {
-    use crate::report::plural;
-    let checked = match gate.mode {
-        SecurityGateMode::New => "in changed lines",
-        SecurityGateMode::NewlyReachable => "newly reachable from entry points",
-    };
-    match gate.verdict {
-        SecurityGateVerdict::Fail => format!(
-            "Gate: REVIEW REQUIRED, {} new security item{} {checked}. fallow has not confirmed a vulnerability.",
-            gate.new_count,
-            plural(gate.new_count),
-        ),
-        SecurityGateVerdict::Pass => {
-            format!("Gate: PASS, no new security items {checked}.")
-        }
-    }
-}
-
-fn unresolved_callee_human_hint(output: &SecurityOutput) -> Option<String> {
-    let diagnostics = output.unresolved_callee_diagnostics.as_ref()?;
-    let top_reason = diagnostics.by_reason.first()?;
-    let top_file = diagnostics.top_files.first()?;
-    Some(format!(
-        "Most unresolved callees: {} in {}.",
-        unresolved_callee_reason_label(top_reason.reason),
-        top_file.path
-    ))
-}
-
-fn unresolved_callee_reason_label(
-    reason: fallow_types::extract::SkippedSecurityCalleeReason,
-) -> &'static str {
-    match reason {
-        fallow_types::extract::SkippedSecurityCalleeReason::ComputedMember => "computed-member",
-        fallow_types::extract::SkippedSecurityCalleeReason::DynamicDispatch => "dynamic-dispatch",
-        fallow_types::extract::SkippedSecurityCalleeReason::UnsupportedAssignmentObject => {
-            "unsupported-assignment-object"
-        }
-    }
-}
-
-#[must_use]
-fn render_human_summary(output: &SecurityOutput) -> String {
-    use crate::report::plural;
-    use std::fmt::Write as _;
-
-    let mut out = String::new();
-    if let Some(gate) = &output.gate {
-        out.push_str(&gate_human_header(gate));
-        out.push('\n');
-    }
-    let count = output.security_findings.len();
-    if count == 0 {
-        out.push_str("Security review: no items to check in the scanned code.\n");
-    } else {
-        let _ = writeln!(
-            out,
-            "Security review: {count} item{} to check. These are unverified security candidates, not confirmed vulnerabilities.",
-            plural(count),
-        );
-        out.push_str(
-            "Next: check whether the listed code can run with unsafe input, secrets, or settings, and whether anything blocks the risk.\n",
-        );
-    }
-    if output.unresolved_edge_files > 0 {
-        let n = output.unresolved_edge_files;
-        let verb = if n == 1 { "uses" } else { "use" };
-        let _ = writeln!(
-            out,
-            "Blind spot: {n} client file{} {verb} dynamic imports that fallow could not follow.",
-            plural(n)
-        );
-    }
-    if output.unresolved_callee_sites > 0 {
-        let n = output.unresolved_callee_sites;
-        let verb = if n == 1 { "uses" } else { "use" };
-        let _ = writeln!(
-            out,
-            "Blind spot: {n} call site{} {verb} code patterns that fallow could not resolve.",
-            plural(n)
-        );
-        if let Some(hint) = unresolved_callee_human_hint(output) {
-            let _ = writeln!(out, "{hint}");
-        }
-    }
-    out
-}
-
-/// Human output. Frames findings as candidates and states the next human action
-/// per finding; surfaces the unresolved-edge blind spot as a counted line.
-#[must_use]
-#[expect(
-    clippy::format_push_string,
-    reason = "small report renderer; readability over avoiding the extra allocation"
-)]
-pub fn render_human(output: &SecurityOutput) -> String {
-    use crate::report::plural;
-
-    let mut out = String::new();
-    push_human_gate(&mut out, output);
-    let count = output.security_findings.len();
-    out.push_str(&format!("Security review: {count} item{}", plural(count)));
-    if count == 0 {
-        out.push_str(" to check in the scanned code.\n");
-    } else {
-        out.push_str(" to check.\n");
-        out.push_str(
-            "These are unverified security candidates, not confirmed vulnerabilities. Check whether the listed code can run with unsafe input, secrets, or settings, and whether anything blocks the risk.\n",
-        );
-    }
-    out.push('\n');
-
-    if output.security_findings.is_empty() {
-        out.push_str("No security details to show.\n");
-    } else {
-        push_human_findings(&mut out, &output.security_findings);
-    }
-
-    push_human_blind_spots(&mut out, output);
-
-    out.push_str(&format!(
-        "\nResult: {count} security item{} to check.",
-        plural(count),
-    ));
-    if count > 0 {
-        out.push_str(" Review the listed evidence and trace before changing code.");
-    }
-    out.push('\n');
-    out
-}
-
-fn push_human_gate(out: &mut String, output: &SecurityOutput) {
-    if let Some(gate) = &output.gate {
-        out.push_str(&gate_human_header(gate));
-        out.push_str("\n\n");
-    }
-}
-
-fn push_human_findings(out: &mut String, findings: &[SecurityFinding]) {
-    for finding in findings {
-        push_human_finding(out, finding);
-    }
-}
-
-fn push_human_finding(out: &mut String, finding: &SecurityFinding) {
-    use std::fmt::Write as _;
-
-    push_human_finding_header(out, finding);
-    let _ = writeln!(out, "    evidence: {}", finding.evidence);
-    if let Some(hint) = dead_code_hint(finding) {
-        let _ = writeln!(out, "    dead-code: {hint}");
-    }
-    if let Some(runtime) = finding.runtime.as_ref() {
-        let _ = writeln!(out, "    runtime: {}", runtime_hint_text(runtime));
-    }
-    push_human_reachability(out, finding);
-    push_human_import_trace(out, finding);
-    push_human_next_step(out, finding);
-    out.push('\n');
-}
-
-fn push_human_finding_header(out: &mut String, finding: &SecurityFinding) {
-    use colored::Colorize;
-    use std::fmt::Write as _;
-
-    let kind = security_finding_label(finding);
-    let (glyph, label) = human_severity_marker(finding.severity);
-    let _ = writeln!(
-        out,
-        "{} {label} {kind}  {}:{}",
-        glyph,
-        finding.path.to_string_lossy().replace('\\', "/").bold(),
-        finding.line,
-    );
-}
-
-fn push_human_reachability(out: &mut String, finding: &SecurityFinding) {
-    use std::fmt::Write as _;
-
-    let Some(reach) = finding.reachability.as_ref() else {
-        return;
-    };
-    let entry = if reach.reachable_from_entry {
-        "reachable from a runtime entry point"
-    } else {
-        "not reached from any runtime entry point"
-    };
-    let boundary = if reach.crosses_boundary {
-        "; crosses an architecture boundary"
-    } else {
-        ""
-    };
-    let _ = writeln!(
-        out,
-        "    code path: {entry} (blast radius {}){boundary}",
-        reach.blast_radius,
-    );
-    if reach.reachable_from_untrusted_source {
-        push_human_untrusted_trace(out, finding);
-    }
-}
-
-fn push_human_untrusted_trace(out: &mut String, finding: &SecurityFinding) {
-    use std::fmt::Write as _;
-
-    let Some(reach) = finding.reachability.as_ref() else {
-        return;
-    };
-    let hops = reach.untrusted_source_hop_count.unwrap_or(0);
-    let _ = writeln!(
-        out,
-        "    input path: this module is reachable from a module that receives \
-         untrusted input via {hops} import hop{}",
-        crate::report::plural(hops as usize),
-    );
-    if !reach.untrusted_source_trace.is_empty() {
-        out.push_str("    input import trace:\n");
-        for hop in &reach.untrusted_source_trace {
-            let _ = writeln!(
-                out,
-                "      {}:{} ({})",
-                hop.path.to_string_lossy().replace('\\', "/"),
-                hop.line,
-                hop_role_label(hop.role),
-            );
-        }
-    }
-}
-
-fn push_human_import_trace(out: &mut String, finding: &SecurityFinding) {
-    use std::fmt::Write as _;
-
-    if finding.trace.is_empty() {
-        return;
-    }
-    out.push_str("    import trace:\n");
-    for hop in &finding.trace {
-        let _ = writeln!(
-            out,
-            "      {}:{} ({})",
-            hop.path.to_string_lossy().replace('\\', "/"),
-            hop.line,
-            hop_role_label(hop.role),
-        );
-    }
-}
-
-fn push_human_next_step(out: &mut String, finding: &SecurityFinding) {
-    if is_server_only_leak(finding) {
-        out.push_str(
-            "    Next: check whether this server-only code is meant to run on the client. \
-             If it is pulled in only through next/dynamic(..., { ssr: false }), type-only, \
-             or removed at build time, mark it as a false positive. fallow already \
-             excludes a \"use server\" module whose value exports are all async \
-             functions. If the sink is a \"use server\" module, move its non-action \
-             export (a top-level const, a re-export, or a default value) to a \
-             server-only file.\n",
-        );
-    } else if matches!(finding.kind, SecurityFindingKind::ClientServerLeak) {
-        out.push_str(
-            "    Next: check whether this import can ship a secret to the browser. If \
-             it is type-only, server-only, or removed at build time, mark it as a false \
-             positive.\n",
-        );
-    } else if finding.dead_code.is_some() {
-        out.push_str(
-            "    Next: first verify the dead-code finding. If the code is safe to \
-             remove, delete it. Otherwise check and harden the risky call.\n",
-        );
-    } else {
-        out.push_str(
-            "    Next: check whether unsafe input, secrets, or settings can reach this \
-             risky call without a safe guard. If not, mark it as a false positive.\n",
-        );
-    }
-}
-
-fn push_human_blind_spots(out: &mut String, output: &SecurityOutput) {
-    use crate::report::plural;
-    use std::fmt::Write as _;
-
-    if output.unresolved_edge_files > 0 {
-        let n = output.unresolved_edge_files;
-        let verb = if n == 1 { "uses" } else { "use" };
-        let _ = writeln!(
-            out,
-            "{} Blind spot: {n} client file{} {verb} dynamic imports that fallow could not \
-             follow. Code behind those imports may be missing from this report.",
-            "[I]".blue().bold(),
-            plural(n),
-        );
-    }
-
-    if output.unresolved_callee_sites > 0 {
-        let n = output.unresolved_callee_sites;
-        let verb = if n == 1 { "uses" } else { "use" };
-        let _ = writeln!(
-            out,
-            "{} Blind spot: {n} call site{} {verb} code patterns that fallow could not resolve, \
-             such as dynamic dispatch, computed members, or aliased bindings.",
-            "[I]".blue().bold(),
-            plural(n),
-        );
-        if let Some(hint) = unresolved_callee_human_hint(output) {
-            let _ = writeln!(out, "    {hint}");
-        }
-    }
-}
-
-/// Render the human-facing label for a finding. The secret-leak
-/// `ClientServerLeak` keeps its bespoke kebab kind; the server-only variant uses
-/// its own kebab label so a reader tells the two apart; `TaintedSink` uses the
-/// catalogue title plus the CWE number carried on the finding.
-fn security_finding_label(finding: &SecurityFinding) -> String {
-    match finding.kind {
-        SecurityFindingKind::ClientServerLeak if is_server_only_leak(finding) => {
-            "server-only-import".to_string()
-        }
-        SecurityFindingKind::ClientServerLeak => "client-server-leak".to_string(),
-        SecurityFindingKind::TaintedSink => {
-            let title = finding
-                .category
-                .as_deref()
-                .and_then(security_catalogue_title)
-                .or(finding.category.as_deref())
-                .unwrap_or("tainted-sink");
-            match finding.cwe {
-                Some(cwe) => format!("{title} (CWE-{cwe})"),
-                None => title.to_string(),
-            }
-        }
-    }
-}
-
-fn human_severity_marker(severity: SecuritySeverity) -> (colored::ColoredString, &'static str) {
-    use colored::Colorize;
-    match severity {
-        SecuritySeverity::High => ("[H]".red().bold(), "high"),
-        SecuritySeverity::Medium => ("[M]".yellow().bold(), "medium"),
-        SecuritySeverity::Low => ("[L]".blue().bold(), "low"),
-    }
-}
-
-fn dead_code_hint(finding: &SecurityFinding) -> Option<String> {
-    let context = finding.dead_code.as_ref()?;
-    match context.kind {
-        SecurityDeadCodeKind::UnusedFile => Some(
-            "also reported as unused-file; delete this file instead of hardening the sink"
-                .to_string(),
-        ),
-        SecurityDeadCodeKind::UnusedExport => Some(format!(
-            "also reported as unused-export{}; remove the export instead of hardening the sink",
-            context
-                .export_name
-                .as_ref()
-                .map_or(String::new(), |name| format!(" `{name}`"))
-        )),
-    }
-}
-
-const fn hop_role_label(role: TraceHopRole) -> &'static str {
-    match role {
-        TraceHopRole::ClientBoundary => "client boundary",
-        TraceHopRole::UntrustedSource => "untrusted source",
-        TraceHopRole::ModuleSource => "source module",
-        TraceHopRole::Intermediate => "intermediate",
-        TraceHopRole::SecretSource => "secret source",
-        TraceHopRole::Sink => "sink site",
-    }
-}
-
-fn source_reachability_hint(finding: &SecurityFinding) -> Option<&'static str> {
-    finding
-        .reachability
-        .as_ref()
-        .filter(|reach| reach.reachable_from_untrusted_source)
-        .map(|_| {
-            "Module-level context: the sink module is reachable from an untrusted-source module; fallow does not prove value flow."
-        })
-}
-
-fn runtime_hint_text(runtime: &SecurityRuntimeContext) -> String {
-    use std::fmt::Write as _;
-
-    let mut text = format!(
-        "{} in {}:{}",
-        runtime_state_label(runtime.state),
-        runtime.function,
-        runtime.line
-    );
-    if let Some(invocations) = runtime.invocations {
-        let _ = write!(
-            text,
-            " ({} invocation{})",
-            invocations,
-            crate::report::plural(invocations as usize)
-        );
-    }
-    if let Some(evidence) = runtime.evidence.as_deref() {
-        text.push_str("; ");
-        text.push_str(evidence);
-    }
-    text
-}
-
-const fn runtime_state_label(state: SecurityRuntimeState) -> &'static str {
-    match state {
-        SecurityRuntimeState::RuntimeHot => "runtime-hot",
-        SecurityRuntimeState::RuntimeCold => "runtime-cold",
-        SecurityRuntimeState::NeverExecuted => "never-executed",
-        SecurityRuntimeState::LowTraffic => "low-traffic",
-        SecurityRuntimeState::CoverageUnavailable => "coverage-unavailable",
-        SecurityRuntimeState::RuntimeUnknown => "runtime-unknown",
-    }
-}
-
-/// The `category` string distinguishing the server-only-import sink from the
-/// secret-leak sink (both `ClientServerLeak` kind). Matches the constant in
-/// `crates/core/src/analyze/security/mod.rs`.
-const SERVER_ONLY_CATEGORY: &str = "server-only-import";
-
-/// Whether a `ClientServerLeak` finding is the server-only-import variant rather
-/// than the original secret-leak variant. Keys on `category` because both share
-/// the `ClientServerLeak` kind and the same rule.
-fn is_server_only_leak(finding: &SecurityFinding) -> bool {
-    matches!(finding.kind, SecurityFindingKind::ClientServerLeak)
-        && finding.category.as_deref() == Some(SERVER_ONLY_CATEGORY)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2827,6 +2307,8 @@ mod tests {
             dead_code: None,
             reachability: None,
             finding_id: String::new(),
+            stable_finding_id: None,
+            stable_id_input: None,
             candidate: SecurityCandidate {
                 source_kind: None,
                 sink: SecurityCandidateSink {
@@ -3335,6 +2817,7 @@ mod tests {
         )
         .expect_err("missing candidate should fail");
         assert!(missing.contains("unknown finding_id"));
+        assert!(missing.contains("Key verdicts by stable_finding_id"));
     }
 
     #[test]
@@ -3912,6 +3395,44 @@ mod tests {
         let out = render_human(&output_with(vec![], 3));
         assert!(out.contains("Blind spot: 3 client files use dynamic imports"));
         assert!(out.contains("Code behind those imports may be missing from this report."));
+    }
+
+    fn output_without_client_roots() -> SecurityOutput {
+        let mut output = output_with(vec![], 0);
+        output.workspace_diagnostics = vec![
+            fallow_config::WorkspaceDiagnostic::new(
+                Path::new("/proj"),
+                PathBuf::from("/proj"),
+                fallow_config::WorkspaceDiagnosticKind::ClientServerLeakNoClientRoots,
+            )
+            .into_root_relative(Path::new("/proj")),
+        ];
+        output
+    }
+
+    #[test]
+    fn human_render_says_the_leak_rule_had_no_client_roots() {
+        colored::control::set_override(false);
+        let out = render_human(&output_without_client_roots());
+        assert!(
+            out.contains(
+                "Blind spot: no file has a top-level \"use client\" directive, so the \
+                 client-server-leak rule had no starting point."
+            ),
+            "got: {out}"
+        );
+        let summary = render_human_summary(&output_without_client_roots());
+        assert!(
+            summary.contains("Blind spot: no file has a top-level \"use client\" directive"),
+            "got: {summary}"
+        );
+    }
+
+    #[test]
+    fn human_render_omits_the_no_client_roots_line_without_the_diagnostic() {
+        colored::control::set_override(false);
+        let out = render_human(&output_with(vec![], 0));
+        assert!(!out.contains("\"use client\""), "got: {out}");
     }
 
     #[test]

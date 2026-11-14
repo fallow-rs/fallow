@@ -1159,6 +1159,40 @@ fn audit_pass_verdict_when_no_changes() {
         Some(0),
         "should report 0 changed files"
     );
+    // A pass verdict over no changed file checked nothing. A CI job that
+    // reads only the verdict must see that on stderr, also under --quiet.
+    assert!(
+        output
+            .stderr
+            .contains("Note: the audit compared no changed files against HEAD"),
+        "an empty audit must say that it compared nothing: {}",
+        output.stderr
+    );
+}
+
+#[test]
+fn audit_with_changed_files_prints_no_empty_scope_note() {
+    let dir = create_audit_fixture("withchanges");
+    fs::write(
+        dir.path().join("src/utils.ts"),
+        "export const used = () => 43;\nexport const unused = () => 0;\n",
+    )
+    .unwrap();
+    let output = run_fallow_raw(&[
+        "audit",
+        "--root",
+        dir.path().to_str().unwrap(),
+        "--base",
+        "HEAD",
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert!(
+        !output.stderr.contains("compared no changed files"),
+        "an audit with changed files must not warn about an empty scope: {}",
+        output.stderr
+    );
 }
 
 #[test]
@@ -2701,18 +2735,18 @@ fn audit_demotion_shared_diff_source_takes_precedence_over_worktree_diff() {
     assert_eq!(control_json["attribution"]["duplication_demoted"], 1);
     assert_eq!(control_json["attribution"]["duplication_introduced"], 0);
 
-    // A shared diff claiming an added line INSIDE the scaffolding clone
-    // instance (src/a.ts spans lines 2-12 after the refactor). The worktree
-    // diff sees no added line there, so any behavior change below is the
-    // shared source deciding.
+    // A shared diff that adds src/a.ts as a new file (no base lines, so no
+    // containing base clone group), with an added line INSIDE the scaffolding
+    // clone instance (lines 2-12 after the refactor). The worktree diff sees
+    // no added line there, so the shared source decides any change below.
     let diff_dir = TempDir::new().expect("diff dir should be created");
     let diff_path = diff_dir.path().join("touch-instance.diff");
     fs::write(
         &diff_path,
         "diff --git a/src/a.ts b/src/a.ts\n\
-         --- a/src/a.ts\n\
+         --- /dev/null\n\
          +++ b/src/a.ts\n\
-         @@ -4,0 +5,1 @@\n\
+         @@ -0,0 +5,1 @@\n\
          +  const injected = 'x';\n",
     )
     .unwrap();
@@ -8939,7 +8973,7 @@ fn audit_cache_prune_reports_and_removes_aged_snapshot_files() {
     let root = fixture.path();
     let scan = TempDir::new().expect("scan root should be created");
     // The current `AUDIT_BASE_SNAPSHOT_CACHE_VERSION` directory.
-    let snapshot_dir = root.join(".fallow/cache/audit-base-v21");
+    let snapshot_dir = root.join(".fallow/cache/audit-base-v22");
     fs::create_dir_all(&snapshot_dir).unwrap();
     let aged = snapshot_dir.join("00000000000000aa.bin");
     let fresh = snapshot_dir.join("00000000000000bb.bin");

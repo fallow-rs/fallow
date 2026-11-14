@@ -2502,6 +2502,10 @@ fn branching_totals(
 }
 
 #[test]
+#[expect(
+    clippy::too_many_lines,
+    reason = "test fixture; one field per snapshot key set, length tracks the field count"
+)]
 fn audit_base_snapshot_cache_payload_roundtrips_sets() {
     let key = AuditBaseSnapshotCacheKey {
         hash: 42,
@@ -2552,6 +2556,14 @@ fn audit_base_snapshot_cache_payload_roundtrips_sets() {
             ],
         }],
         inherited_health: Vec::new(),
+        own_config_unused_code: Some(
+            [
+                "unused-file:scripts/b.ts".to_string(),
+                "unused-file:scripts/a.ts".to_string(),
+            ]
+            .into_iter()
+            .collect(),
+        ),
     };
 
     let cached = cached_from_snapshot(&key, &snapshot).expect("snapshot should serialize");
@@ -2597,6 +2609,10 @@ fn audit_base_snapshot_cache_payload_roundtrips_sets() {
     assert_eq!(decoded.boundary_edges, snapshot.boundary_edges);
     assert_eq!(decoded.cycles, snapshot.cycles);
     assert_eq!(decoded.public_api, snapshot.public_api);
+    assert_eq!(
+        decoded.own_config_unused_code,
+        snapshot.own_config_unused_code
+    );
 }
 
 #[test]
@@ -2923,6 +2939,7 @@ fn audit_base_snapshot_cache_roundtrips_from_disk() {
         css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 100,
+        mutation_report: None,
         brief: false,
         max_decisions: 4,
         walkthrough_guide: false,
@@ -2956,6 +2973,7 @@ fn audit_base_snapshot_cache_roundtrips_from_disk() {
         public_api: FxHashSet::default(),
         dupe_groups: Vec::new(),
         inherited_health: Vec::new(),
+        own_config_unused_code: None,
     };
 
     save_cached_base_snapshot(&opts, &key, &snapshot);
@@ -3015,6 +3033,7 @@ fn audit_base_snapshot_cache_rejects_mismatched_key() {
         css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 100,
+        mutation_report: None,
         brief: false,
         max_decisions: 4,
         walkthrough_guide: false,
@@ -3047,6 +3066,7 @@ fn audit_base_snapshot_cache_rejects_mismatched_key() {
         boundary_edges: vec![],
         cycles: vec![],
         public_api: vec![],
+        own_config_unused_code: None,
     };
     let cache_dir = audit_base_snapshot_cache_dir(&cache_root);
     ensure_audit_base_snapshot_cache_dir(&cache_dir).expect("cache dir should be created");
@@ -3116,6 +3136,7 @@ fn audit_base_snapshot_cache_key_includes_extended_config() {
         css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 100,
+        mutation_report: None,
         brief: false,
         max_decisions: 4,
         walkthrough_guide: false,
@@ -3208,6 +3229,7 @@ fn audit_gate_all_skips_base_snapshot() {
         css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 100,
+        mutation_report: None,
         brief: true,
         max_decisions: 4,
         walkthrough_guide: false,
@@ -3320,6 +3342,7 @@ fn audit_gate_new_only_skips_base_snapshot_for_docs_only_diff() {
         css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 100,
+        mutation_report: None,
         brief: false,
         max_decisions: 4,
         walkthrough_guide: false,
@@ -3433,6 +3456,7 @@ fn audit_reuses_dead_code_parse_for_health_when_production_matches() {
         css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 100,
+        mutation_report: None,
         brief: false,
         max_decisions: 4,
         walkthrough_guide: false,
@@ -3545,6 +3569,7 @@ fn audit_new_only_does_not_gate_reshaped_clone_group_without_added_lines() {
         css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 100,
+        mutation_report: None,
         brief: false,
         max_decisions: 4,
         walkthrough_guide: false,
@@ -3728,6 +3753,7 @@ fn audit_new_only_still_gates_pasted_clone_as_introduced() {
         css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 100,
+        mutation_report: None,
         brief: false,
         max_decisions: 4,
         walkthrough_guide: false,
@@ -3855,6 +3881,7 @@ fn audit_dupes_falls_back_to_own_discovery_when_health_off() {
         css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 100,
+        mutation_report: None,
         brief: false,
         max_decisions: 4,
         walkthrough_guide: false,
@@ -3963,6 +3990,7 @@ fn audit_gate_new_only_inherits_pre_existing_duplicates_in_focused_files() {
         css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 100,
+        mutation_report: None,
         brief: false,
         max_decisions: 4,
         walkthrough_guide: false,
@@ -4117,6 +4145,7 @@ export function App() {
         css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 100,
+        mutation_report: None,
         brief: false,
         max_decisions: 4,
         walkthrough_guide: false,
@@ -4278,6 +4307,7 @@ export function App() {
         css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 100,
+        mutation_report: None,
         brief: false,
         max_decisions: 4,
         walkthrough_guide: false,
@@ -4379,6 +4409,7 @@ fn audit_base_uses_new_explicit_config_without_hard_failure() {
         css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 100,
+        mutation_report: None,
         brief: false,
         max_decisions: 4,
         walkthrough_guide: false,
@@ -4475,6 +4506,7 @@ fn audit_base_uses_current_discovered_config_for_attribution() {
         css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 100,
+        mutation_report: None,
         brief: false,
         max_decisions: 4,
         walkthrough_guide: false,
@@ -4580,6 +4612,7 @@ fn audit_base_current_config_attribution_survives_cache_hit() {
         css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 100,
+        mutation_report: None,
         brief: false,
         max_decisions: 4,
         walkthrough_guide: false,
@@ -4709,6 +4742,7 @@ fn audit_dupes_only_materializes_groups_touching_changed_files() {
         css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 100,
+        mutation_report: None,
         brief: false,
         max_decisions: 4,
         walkthrough_guide: false,
@@ -4889,6 +4923,7 @@ fn audit_envelope_states_a_failed_type_aware_completeness_gate() {
         css_deep: false,
         runtime_coverage: None,
         min_invocations_hot: 100,
+        mutation_report: None,
         brief: false,
         max_decisions: 4,
         walkthrough_guide: false,

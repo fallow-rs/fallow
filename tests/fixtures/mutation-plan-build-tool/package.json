@@ -1,0 +1,10 @@
+{
+  "name": "mutation-plan-build-tool",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "devDependencies": {
+    "vite": "^8.2.2",
+    "vitest": "^5.1.0"
+  }
+}

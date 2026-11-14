@@ -86,7 +86,10 @@ pub fn scrub_analysis_env(cmd: &mut Command) {
         // A test suite started inside a Claude Code session must not get the
         // plugin hint on stderr.
         .env_remove("CLAUDECODE")
-        .env_remove("CLAUDE_CODE_CHILD_SESSION");
+        .env_remove("CLAUDE_CODE_CHILD_SESSION")
+        // A test suite that `npx` or `npm exec` started must not get the
+        // `npx fallow` form of the human hints.
+        .env_remove("npm_command");
 }
 
 /// Build a fallow command with deterministic output settings.
@@ -135,6 +138,14 @@ pub fn run_fallow_combined(fixture: &str, args: &[&str]) -> CommandOutput {
 /// Run fallow with raw args (no --root injection). Useful for error path tests.
 pub fn run_fallow_raw(args: &[&str]) -> CommandOutput {
     run_fallow_raw_with_env(args, &[])
+}
+
+/// Run fallow with raw args (no --root injection) in the working directory
+/// `dir`, so that a relative path argument resolves against `dir`.
+pub fn run_fallow_raw_in_dir(dir: &Path, args: &[&str]) -> CommandOutput {
+    let mut cmd = fallow_command();
+    cmd.current_dir(dir).args(args);
+    execute(cmd)
 }
 
 /// Run fallow with raw args and string environment variables.

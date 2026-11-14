@@ -30,13 +30,16 @@ mod cjs;
 #[path = "unused_exports_condition_targets.rs"]
 mod condition_targets;
 use condition_targets::ConditionTargetFamilies;
+#[path = "unused_exports_declaration_siblings.rs"]
+mod declaration_siblings;
+use declaration_siblings::{DeclarationSiblingCredit, declaration_sibling_credit};
 #[path = "unused_exports_types.rs"]
 mod types;
 use types::drop_types_paired_with_schemas;
 pub use types::suppress_signature_backing_types;
 
 /// Pre-compiled glob matchers for plugin/framework used_exports rules.
-type PluginMatchers<'a> = Vec<CompiledUsedExportRule<'a>>;
+pub(super) type PluginMatchers<'a> = Vec<CompiledUsedExportRule<'a>>;
 
 const TANSTACK_ROUTER_PLUGIN_NAME: &str = "tanstack-router";
 
@@ -56,10 +59,13 @@ struct UnusedExportModuleContext<'a> {
     /// Sorted Effect schema export names per file. `Some` only when
     /// `effect.schemaExportsAsTypes` is on.
     schema_exports: Option<&'a FxHashMap<FileId, Vec<String>>>,
+    /// Export names of each declaration file that the importers of its JS
+    /// sibling use (`lib.d.mts` next to `lib.mjs`).
+    declaration_sibling_credit: &'a DeclarationSiblingCredit,
 }
 
 /// Compile plugin-discovered used_exports rules (includes framework preset rules).
-fn compile_plugin_matchers(
+pub(super) fn compile_plugin_matchers(
     plugin_result: Option<&crate::plugins::AggregatedPluginResult>,
 ) -> PluginMatchers<'_> {
     let Some(pr) = plugin_result else {
@@ -102,13 +108,13 @@ fn is_react_native_active(plugin_result: Option<&crate::plugins::AggregatedPlugi
     plugin_result.is_some_and(|pr| has_react_native_plugin(&pr.active_plugins))
 }
 
-struct CompiledUsedExportRule<'a> {
+pub(super) struct CompiledUsedExportRule<'a> {
     path: crate::plugins::CompiledPathRule,
     exports: Vec<&'a str>,
 }
 
 impl CompiledUsedExportRule<'_> {
-    fn matches(&self, path: &str) -> bool {
+    pub(super) fn matches(&self, path: &str) -> bool {
         self.path.matches(path)
     }
 }
@@ -438,6 +444,7 @@ pub fn find_unused_exports(
     let schema_exports = types::schema_exports_by_file(config, graph, modules);
 
     let ambiguity = graph.ambiguity_participants();
+    let declaration_sibling_credit = declaration_sibling_credit(graph);
     let module_context = UnusedExportModuleContext {
         graph,
         config,
@@ -449,6 +456,7 @@ pub fn find_unused_exports(
         line_offsets_by_file,
         ambiguity: &ambiguity,
         schema_exports: schema_exports.as_ref(),
+        declaration_sibling_credit: &declaration_sibling_credit,
     };
 
     let module_results: Vec<UnusedExportModuleResult> = graph
@@ -653,7 +661,11 @@ fn unused_export_candidate_is_skipped(
     export_str: &str,
     match_ctx: &mut UnusedExportMatchContext<'_>,
 ) -> bool {
-    let has_cross_file_ref = export_has_reachable_reference(ctx.graph, module, export);
+    let has_cross_file_ref = export_has_reachable_reference(ctx.graph, module, export)
+        || ctx
+            .declaration_sibling_credit
+            .get(&module.file_id)
+            .is_some_and(|names| names.contains(export_str));
     let is_referenced = has_cross_file_ref || (module.is_reachable() && export.is_side_effect_used);
     if matches!(
         export.visibility,

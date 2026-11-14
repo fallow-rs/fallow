@@ -1048,6 +1048,49 @@ test(
   },
 );
 
+test(
+  "measurement captures the CPU time of the process tree, also of a child process",
+  { skip: !PROCESS_TREE_RSS_AVAILABLE },
+  async () => {
+    // A fixed amount of work, so the CPU time does not depend on the machine load.
+    const busy = "let x = 0; for (let i = 0; i < 4e8; i++) x += i; if (x < 0) console.log(x);";
+    const result = await runProcess(
+      process.execPath,
+      [
+        "-e",
+        `require("node:child_process").spawnSync(process.execPath, ["-e", ${JSON.stringify(busy)}]);`,
+      ],
+      REPO_ROOT,
+      null,
+    );
+
+    assert.equal(result.status, 0);
+    assert.ok(result.cpu_ms >= 250, `expected the busy child in cpu_ms, got ${result.cpu_ms}`);
+  },
+);
+
+test(
+  "measurement keeps the CPU time of a run that ends before the first sample",
+  { skip: !PROCESS_TREE_RSS_AVAILABLE },
+  async () => {
+    // The child reports its own CPU time; the runner must not lose the end of the run.
+    const busy = [
+      "let x = 0; for (let i = 0; i < 3e7; i++) x += i; if (x < 0) console.log(x);",
+      "const { user, system } = process.cpuUsage();",
+      "console.log(Math.round((user + system) / 1000));",
+    ].join(" ");
+    const result = await runProcess(process.execPath, ["-e", busy], REPO_ROOT, null);
+    const ownCpuMs = Number(result.stdout.trim());
+
+    assert.equal(result.status, 0);
+    assert.ok(
+      result.cpu_ms >= ownCpuMs - 20,
+      `expected at least the ${ownCpuMs} ms that the child used, got ${result.cpu_ms}`,
+    );
+    assert.doesNotMatch(result.stderr, /^(?:real|user|sys) /mu);
+  },
+);
+
 test("measurement validation requires complete paired runs", () => {
   const discovery = {
     corpus: [{ id: "one" }],
@@ -1064,6 +1107,7 @@ test("measurement validation requires complete paired runs", () => {
           iteration,
           mode: "baseline",
           wall_ms: 1,
+          cpu_ms: 1,
           peak_process_tree_rss_kb: 1,
           candidate_count: 2,
         },
@@ -1072,6 +1116,7 @@ test("measurement validation requires complete paired runs", () => {
           iteration,
           mode: "refined",
           wall_ms: 2,
+          cpu_ms: 2,
           peak_process_tree_rss_kb: 2,
           candidate_count: 1,
         },
@@ -1120,6 +1165,15 @@ test("measurement validation requires complete paired runs", () => {
   assert.throws(
     () => validateMeasurements(discovery, invalidIteration),
     /iteration is outside its expected range/,
+  );
+
+  const noCpu = structuredClone(measurements);
+  delete noCpu.projects[0].runs[0].cpu_ms;
+  assert.throws(
+    () => validateMeasurements(discovery, noCpu),
+    process.platform === "win32"
+      ? /mix process-tree CPU time and wall time/
+      : /no process-tree CPU time/,
   );
 
   measurements.projects[0].runs.pop();

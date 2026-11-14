@@ -12,12 +12,14 @@ use std::fmt::Write as _;
 use colored::Colorize as _;
 use fallow_api::mutation::split_control_run_failure;
 use fallow_output::{
-    DUPLICATE_TEST_IDS_CODE, MutantResult, MutantStatus, MutationCompletionStatus,
-    MutationInspectOutput, MutationInspectStatus, MutationKillMatrix, MutationKillMatrixStatus,
-    MutationKillMatrixTargetStatus, MutationPlanDisposition, MutationPlanOutput, MutationReport,
-    MutationResumeOutput, MutationScopeKind, MutationScopeOutput, MutationSkippedFile,
-    MutationStaleReason, MutationTargetOnlyKill, MutationTestKillRow, MutationTypecheckOutput,
-    SKIPPED_TESTS_CODE, TestReachClass,
+    DUPLICATE_TEST_IDS_CODE, MutantEquivalenceHint, MutantResult, MutantStatus,
+    MutationCompletionStatus, MutationInspectOutput, MutationInspectStatus, MutationKillMatrix,
+    MutationKillMatrixStatus, MutationKillMatrixTargetStatus, MutationPlanDisposition,
+    MutationPlanOutput, MutationReplayCall, MutationReplayOutcome, MutationReplayOutput,
+    MutationReplaySide, MutationReplayVerdict, MutationReport, MutationResumeOutput,
+    MutationScopeKind, MutationScopeOutput, MutationSkippedFile, MutationStaleReason,
+    MutationTargetOnlyKill, MutationTestKillRow, MutationTypecheckOutput, SKIPPED_TESTS_CODE,
+    TestReachClass,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -358,7 +360,16 @@ fn covered_by_line(tests: &[String]) -> Option<String> {
 }
 
 /// The note under a survivor with an `equivalence_hint`.
-pub const EQUIVALENCE_HINT_TEXT: &str = "hint: the type of the receiver excludes null and undefined. If no runtime value can be nullish, the mutant is equivalent; record it in a verdict file.";
+pub const fn equivalence_hint_text(hint: MutantEquivalenceHint) -> &'static str {
+    match hint {
+        MutantEquivalenceHint::TypeNonNullish => {
+            "hint: the type of the receiver excludes null and undefined. If no runtime value can be nullish, the mutant is equivalent; record it in a verdict file."
+        }
+        MutantEquivalenceHint::ConstantParameter => {
+            "hint: each visible call passes the same literal for the parameter that this test reads, so the test always has this value. If no caller outside the project exists, the mutant is equivalent; record it in a verdict file."
+        }
+    }
+}
 
 fn render_survivors(out: &mut String, report: &MutationReport, code: Option<&CodeLookup>) {
     let groups = grouped(report, MutantStatus::Survived, MAX_SURVIVORS_SHOWN);
@@ -392,8 +403,8 @@ fn render_survivors(out: &mut String, report: &MutationReport, code: Option<&Cod
             if let Some(line) = covered_by_line(&mutant.covering_tests) {
                 let _ = writeln!(out, "      {}", line.dimmed());
             }
-            if mutant.equivalence_hint.is_some() {
-                let _ = writeln!(out, "      {}", EQUIVALENCE_HINT_TEXT.dimmed());
+            if let Some(hint) = mutant.equivalence_hint {
+                let _ = writeln!(out, "      {}", equivalence_hint_text(hint).dimmed());
             }
         }
     }
@@ -807,6 +818,24 @@ fn render_kill_id_list(out: &mut String, label: &str, ids: &[String], one: &str,
     }
 }
 
+/// The baseline failures that make one target incomplete, at most
+/// [`MAX_MATRIX_IDS_SHOWN`] of them.
+fn render_target_baseline_failures(out: &mut String, failures: &[String]) {
+    if failures.is_empty() {
+        return;
+    }
+    let mut shown: Vec<String> = failures
+        .iter()
+        .take(MAX_MATRIX_IDS_SHOWN)
+        .map(|id| shorten(id, MAX_TEST_NAME_CHARS))
+        .collect();
+    let hidden = failures.len().saturating_sub(MAX_MATRIX_IDS_SHOWN);
+    if hidden > 0 {
+        shown.push(format!("+{hidden} more"));
+    }
+    let _ = writeln!(out, "    Baseline failures: {}", shown.join(", "));
+}
+
 fn render_subsuming_tests(out: &mut String, tests: &[String]) {
     if tests
         .iter()
@@ -934,6 +963,7 @@ fn render_kill_matrix(out: &mut String, matrix: &MutationKillMatrix) {
             let _ = write!(out, " ({})", target.reasons.join(", "));
         }
         out.push('\n');
+        render_target_baseline_failures(out, &target.baseline_failures);
     }
     for reason in &matrix.reasons {
         let _ = writeln!(out, "  {reason}: {}", kill_matrix_reason(reason));
@@ -1024,6 +1054,26 @@ pub fn render_run(report: &MutationReport, options: &RunReportOptions<'_>) -> St
     out
 }
 
+/// Writes the runner line of a plan whose runner a run refuses. A plan with
+/// a supported runner, or with a runtime runner that the plan does not
+/// check, gets no line. A plan with no test file or no mutant gets no line
+/// either, because its run starts no runner.
+fn write_unsupported_runner(out: &mut String, plan: &MutationPlanOutput) {
+    let runner = &plan.runner;
+    if runner.supported != Some(false) || plan.no_test_files || plan.counts.total == 0 {
+        return;
+    }
+    if let Some(message) = &runner.message {
+        let _ = writeln!(
+            out,
+            "Runner: {message}. A run stops before the first mutant."
+        );
+    }
+    if let Some(help) = &runner.help {
+        let _ = writeln!(out, "  hint: {help}");
+    }
+}
+
 /// Renders the human output of `--plan`.
 pub fn render_plan(plan: &MutationPlanOutput) -> String {
     let counts = &plan.counts;
@@ -1032,7 +1082,8 @@ pub fn render_plan(plan: &MutationPlanOutput) -> String {
     let pruned = counts.pruned_dead_code
         + counts.pruned_generated
         + counts.pruned_side_effect_sink
-        + counts.pruned_framework_config;
+        + counts.pruned_framework_config
+        + counts.pruned_build_tool_only;
     let sampled = if counts.sampled_out > 0 {
         format!(" ({} sampled out)", counts.sampled_out)
     } else {
@@ -1059,6 +1110,7 @@ pub fn render_plan(plan: &MutationPlanOutput) -> String {
     } else if counts.total == 0 {
         out.push_str(&no_data_line(&plan.scope));
     }
+    write_unsupported_runner(&mut out, plan);
     let pruned_by_reason = prune_counts(
         plan.mutants
             .iter()
@@ -1214,6 +1266,15 @@ pub fn render_inspect(packet: &MutationInspectOutput) -> String {
             let _ = writeln!(out, "{}", more_line(hidden, "file", "files"));
         }
     }
+    write_killing_tests(&mut out, packet);
+    if let Some(replay) = &packet.replay {
+        write_replay(&mut out, replay);
+    }
+    out
+}
+
+/// The killing tests of an inspect packet, or the first killer.
+fn write_killing_tests(out: &mut String, packet: &MutationInspectOutput) {
     if packet.kill_matrix_complete || !packet.killing_tests.is_empty() {
         let title = if packet.kill_matrix_complete {
             "Killing tests (complete matrix)"
@@ -1244,5 +1305,90 @@ pub fn render_inspect(packet: &MutationInspectOutput) -> String {
     } else if let Some(killed_by) = &packet.killed_by {
         let _ = writeln!(out, "\nKilled by: {killed_by}");
     }
-    out
+}
+
+/// The widest text of one replay column.
+const MAX_REPLAY_TEXT_CHARS: usize = 40;
+
+fn replay_cell(call: &MutationReplayCall) -> String {
+    let text = match call.outcome {
+        MutationReplayOutcome::Returned => call.text.clone(),
+        MutationReplayOutcome::Threw => format!("threw {}", call.text),
+        MutationReplayOutcome::TimedOut => "timed out".to_owned(),
+        MutationReplayOutcome::NotCallable => "not a function".to_owned(),
+    };
+    shorten(&text, MAX_REPLAY_TEXT_CHARS)
+}
+
+fn replay_verdict_line(replay: &MutationReplayOutput) -> String {
+    let reason = replay.reason.as_deref().unwrap_or_default();
+    match replay.verdict {
+        MutationReplayVerdict::Witness => format!(
+            "{}: each side gave the same result on each call, and the sides differ. A test with this input can kill the mutant.",
+            "Witness".green().bold()
+        ),
+        MutationReplayVerdict::NoWitnessFound => {
+            let mut chars = reason.chars();
+            let detail = chars.next().map_or_else(
+                || "No witness found".to_owned(),
+                |first| first.to_uppercase().chain(chars).collect(),
+            );
+            format!("{detail}. Another input can still show a difference.")
+        }
+        MutationReplayVerdict::Unstable => format!(
+            "{}: {reason}. A difference that does not repeat is not a witness.",
+            "Unstable".yellow().bold()
+        ),
+        MutationReplayVerdict::Timeout => format!("{}: {reason}.", "Timeout".yellow().bold()),
+        MutationReplayVerdict::NotCallable => format!("Not callable: {reason}."),
+        MutationReplayVerdict::NotReplayable => format!("Not replayable: {reason}."),
+    }
+}
+
+/// The replay section: the call, the results of each side side by side, the
+/// verdict and the fixed values of the replay.
+fn write_replay(out: &mut String, replay: &MutationReplayOutput) {
+    let args: Vec<String> = replay.input.args.iter().map(ToString::to_string).collect();
+    let call = format!(
+        "{}({})",
+        replay.export.as_deref().unwrap_or("?"),
+        args.join(", ")
+    );
+    let _ = write!(out, "\nReplay  {}", shorten(&call, MAX_TEST_NAME_CHARS));
+    if let Some(id) = &replay.input.input_id {
+        let _ = write!(
+            out,
+            "  recorded input {id} ({} of the recorded inputs ran)",
+            replay.inputs_checked
+        );
+    }
+    out.push('\n');
+    if !replay.calls.is_empty() {
+        let cells = |side: MutationReplaySide| -> Vec<String> {
+            replay
+                .calls
+                .iter()
+                .filter(|call| call.side == side)
+                .map(replay_cell)
+                .collect()
+        };
+        let original = cells(MutationReplaySide::Original);
+        let mutant = cells(MutationReplaySide::Mutant);
+        let width = original
+            .iter()
+            .map(|cell| cell.chars().count())
+            .chain(std::iter::once("original".len()))
+            .max()
+            .unwrap_or(0);
+        let _ = writeln!(out, "  call  {:<width$}  mutant", "original");
+        for (index, (left, right)) in original.iter().zip(&mutant).enumerate() {
+            let _ = writeln!(out, "  {:<4}  {left:<width$}  {right}", index + 1);
+        }
+    }
+    let _ = writeln!(out, "{}", replay_verdict_line(replay));
+    let _ = writeln!(
+        out,
+        "Replay contract {}: the clock starts at {} ms and moves 1 ms at each read, Math.random seed {}, a new worker for each call, {} ms call limit.",
+        replay.contract_version, replay.clock_ms, replay.seed, replay.call_timeout_ms
+    );
 }

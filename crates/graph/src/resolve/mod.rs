@@ -602,7 +602,9 @@ fn build_resolved_module(input: ResolvedModuleBuildInput<'_>) -> ResolvedModule 
     module
 }
 
-/// Record the missing `exports` paths of each unresolved bare specifier once.
+/// Record the missing target paths of each unresolved specifier once: the
+/// `exports` paths of a bare specifier, or else the paths that a matching
+/// path alias substitutes.
 fn collect_missing_export_targets(
     ctx: &ResolveContext<'_>,
     module: &ResolvedModule,
@@ -618,6 +620,7 @@ fn collect_missing_export_targets(
         .filter_map(|specifier| {
             let aliased = workspace_alias::aliased_specifier(ctx, &module.path, specifier);
             fallbacks::missing_package_export_paths(ctx, aliased.as_deref().unwrap_or(specifier))
+                .or_else(|| missing_alias_targets(ctx, &module.path, specifier))
                 .map(|paths| MissingExportTarget {
                     specifier: specifier.to_string(),
                     paths,
@@ -626,6 +629,27 @@ fn collect_missing_export_targets(
         .collect();
     targets.sort_unstable_by(|left, right| left.specifier.cmp(&right.specifier));
     targets
+}
+
+/// The paths that the nearest tsconfig `paths` entry substitutes for an
+/// unresolved `specifier`, or else the paths that a plugin path alias
+/// substitutes. `None` when no alias matches.
+fn missing_alias_targets(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+) -> Option<Vec<PathBuf>> {
+    let tsconfig_targets =
+        package_credit::nearest_tsconfig_alias_targets(ctx, from_file, specifier);
+    if tsconfig_targets.is_empty() {
+        return fallbacks::missing_path_alias_targets(ctx, from_file, specifier);
+    }
+    Some(
+        tsconfig_targets
+            .iter()
+            .map(|target| fallbacks::normalize_path_lexically(target))
+            .collect(),
+    )
 }
 
 fn resolved_module_without_export_hints(input: ResolvedModuleBuildInput<'_>) -> ResolvedModule {

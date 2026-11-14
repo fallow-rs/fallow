@@ -1,5 +1,6 @@
 use super::*;
 use fallow_output::DUPLICATE_TEST_IDS_CODE;
+use targets::Unmatched;
 
 /// The mutant runs: the tests and the bail flag of each run with an active
 /// mutant. Control runs are left out.
@@ -99,6 +100,7 @@ fn targets_run_without_bail_then_the_other_tests_run_with_bail() {
         [targets::ResolvedTarget {
             target: tid("t2"),
             test_ids: vec![tid("t2")],
+            unmatched: None,
         }]
     );
 }
@@ -175,21 +177,31 @@ fn a_file_target_selects_each_test_of_the_file_and_needs_no_other_run() {
 }
 
 #[test]
-fn a_target_that_selects_no_dry_run_test_stops_the_run() {
+fn a_single_target_that_selects_no_dry_run_test_stops_the_run() {
     let spawner = FakeSpawner::new(script(
         |_| standard_dry(),
         |_, run| Ok(run_result(run, RunStatus::Survived, None)),
     ));
-    let error = run_schedule(
-        &spawner,
-        &plan(&["m1"]),
-        &target_config(&[tid("t1"), "test/missing.test.ts".to_owned()]),
-    )
-    .expect_err("an unmatched target is an error");
+    let error = run_schedule(&spawner, &plan(&["m1"]), &target_config(&[tid("gone")]))
+        .expect_err("no target selects a test");
     assert_eq!(
         error,
-        ScheduleError::UnmatchedTargets(vec!["test/missing.test.ts".to_owned()])
+        ScheduleError::UnmatchedTargets(vec![unmatched(&tid("gone"), Unmatched::NoTest)])
     );
+    assert_eq!(dry_runs_of(&spawner).len(), 1, "the file of the target ran");
+    let message = error.to_string();
+    assert!(
+        message.contains("no test of the dry run has this id"),
+        "{message}"
+    );
+}
+
+fn unmatched(target: &str, reason: Unmatched) -> targets::ResolvedTarget {
+    targets::ResolvedTarget {
+        target: target.to_owned(),
+        test_ids: Vec::new(),
+        unmatched: Some(reason),
+    }
 }
 
 #[test]
@@ -356,7 +368,10 @@ fn a_file_target_with_only_duplicate_test_ids_is_unmatched() {
         &target_config(std::slice::from_ref(&file)),
     )
     .expect_err("no test is left");
-    assert_eq!(error, ScheduleError::UnmatchedTargets(vec![file]));
+    assert_eq!(
+        error,
+        ScheduleError::UnmatchedTargets(vec![unmatched(&file, Unmatched::NoTest)])
+    );
 }
 
 #[test]
@@ -389,4 +404,121 @@ fn a_target_that_avoids_the_duplicate_test_id_runs() {
     let outcome =
         run_schedule(&spawner, &plan(&["m1"]), &target_config(&[tid("t1")])).expect("schedule");
     assert_eq!(outcome.targets[0].test_ids, [tid("t1")]);
+}
+
+#[test]
+fn a_target_that_reaches_no_planned_code_is_reported_and_the_other_targets_run() {
+    // The runner lists test/b.test.ts, but no planned code reaches it, so
+    // the dry run does not run it.
+    let (outcome, spawner) = run_targets_result(&[tid("t2"), "test/b.test.ts".to_owned()], &["t2"])
+        .expect("one matched target is enough");
+    assert_eq!(outcome.results["m2"].killing_tests, [tid("t2")]);
+    assert!(!mutant_runs(&spawner).is_empty());
+    assert_eq!(outcome.targets.len(), 2);
+    assert_eq!(
+        outcome.targets[1],
+        unmatched("test/b.test.ts", Unmatched::NoPlannedCode)
+    );
+}
+
+#[test]
+fn a_target_outside_the_test_files_of_the_runner_is_reported_and_the_other_targets_run() {
+    let (outcome, _) = run_targets_result(&[tid("t1"), "test/missing.test.ts".to_owned()], &["t1"])
+        .expect("one matched target is enough");
+    assert_eq!(outcome.results["m1"].killing_tests, [tid("t1")]);
+    assert_eq!(
+        outcome.targets[1],
+        unmatched("test/missing.test.ts", Unmatched::NotATestFile)
+    );
+}
+
+#[test]
+fn targets_that_match_no_dry_run_file_stop_the_run_before_the_dry_run() {
+    let spawner = FakeSpawner::new(script(
+        |_| standard_dry(),
+        |_, run| Ok(run_result(run, RunStatus::Survived, None)),
+    ));
+    let error = run_schedule(
+        &spawner,
+        &plan(&["m1"]),
+        &target_config(&[
+            "test/missing.test.ts".to_owned(),
+            "test/b.test.ts".to_owned(),
+        ]),
+    )
+    .expect_err("no target matches");
+    assert_eq!(
+        error,
+        ScheduleError::UnmatchedTargets(vec![
+            unmatched("test/missing.test.ts", Unmatched::NotATestFile),
+            unmatched("test/b.test.ts", Unmatched::NoPlannedCode),
+        ])
+    );
+    assert!(dry_runs_of(&spawner).is_empty(), "no dry run happens");
+    let message = error.to_string();
+    assert!(message.contains("does not list the file"), "{message}");
+    assert!(message.contains("reaches no planned code"), "{message}");
+}
+
+fn run_targets_result(
+    targets: &[String],
+    killers: &'static [&'static str],
+) -> Result<(ScheduleOutcome, FakeSpawner), ScheduleError> {
+    let spawner = FakeSpawner::new(script(
+        |_| standard_dry(),
+        move |_, run| {
+            let killers: Vec<String> = killers.iter().map(|id| tid(id)).collect();
+            Ok(killed_by_each(run, &killers))
+        },
+    ));
+    let outcome = run_schedule(&spawner, &plan(&["m1", "m2"]), &target_config(targets))?;
+    Ok((outcome, spawner))
+}
+
+#[test]
+fn targets_without_a_test_file_of_the_plan_stop_the_run() {
+    let spawner = FakeSpawner::new(script(
+        |_| standard_dry(),
+        |_, run| Ok(run_result(run, RunStatus::Survived, None)),
+    ));
+    let mut plan = plan(&["m1"]);
+    plan.test_files.clear();
+    let error = run_schedule(
+        &spawner,
+        &plan,
+        &target_config(&["test/a.test.ts".to_owned(), "src/a.ts".to_owned()]),
+    )
+    .expect_err("no test file reaches the planned code");
+    assert_eq!(
+        error,
+        ScheduleError::UnmatchedTargets(vec![
+            unmatched("test/a.test.ts", Unmatched::NoPlannedCode),
+            unmatched("src/a.ts", Unmatched::NotATestFile),
+        ])
+    );
+    assert!(dry_runs_of(&spawner).is_empty(), "no dry run happens");
+}
+
+#[test]
+fn targets_without_a_test_file_of_the_runner_in_the_plan_stop_the_run() {
+    let spawner = FakeSpawner::new(script(
+        |_| standard_dry(),
+        |_, run| Ok(run_result(run, RunStatus::Survived, None)),
+    ));
+    let mut plan = plan(&["m1"]);
+    plan.test_files = vec!["test/types.test-d.ts".to_owned()];
+    let error = run_schedule(
+        &spawner,
+        &plan,
+        &target_config(&["test/a.test.ts".to_owned()]),
+    )
+    .expect_err("the dry run runs no file");
+    assert_eq!(
+        error,
+        ScheduleError::UnmatchedTargets(vec![unmatched(
+            "test/a.test.ts",
+            Unmatched::NoPlannedCode
+        )])
+    );
+    assert!(dry_runs_of(&spawner).is_empty(), "no dry run happens");
 }

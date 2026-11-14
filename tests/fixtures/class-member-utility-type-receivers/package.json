@@ -1,0 +1,6 @@
+{
+  "name": "class-member-utility-type-receivers",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts"
+}

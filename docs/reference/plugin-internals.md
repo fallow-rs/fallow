@@ -97,6 +97,28 @@ Metro maps the key to a folder, which is often generated output. The plugin
 reads the object as a `extraNodeModules` property value or as the right side
 of a `config.resolver.extraNodeModules = {...}` assignment.
 
+## Inline config in package.json
+
+A plugin with a `package_json_config_key`, such as `prettier` or `jest`, also
+reads its config from that key of a `package.json`. `PackageJson` keeps the
+raw value of each key in `INLINE_TOOL_CONFIG_KEYS`
+(`PackageJson::inline_tool_config`), so the plugin run reads it from the
+loaded manifest. A repeated key keeps its last value, as `JSON.parse` does,
+and no value of these keys fails manifest parsing. A new key goes in that
+list; a registry test fails for a built-in key that the list does not have.
+
+The root run reads the root manifest, and each workspace run reads the
+workspace manifest. Each run skips the key when the plugin matches a config
+file among its files. The value goes through `resolve_config_in_project`
+like a config file, so its entries, setup files and entry pattern
+replacements apply to that package.
+
+A package that the root manifest's key names counts as used in every package.
+A package that a workspace manifest's key names counts as used only in the
+manifests that the tool resolves the package from: that workspace manifest and
+each manifest above it, up to the root manifest. A sibling workspace that
+declares the same package gets no credit.
+
 ## Packages that a config needs installed
 
 A plugin may push a `RequiredDependency` when a config needs a package that no
@@ -377,8 +399,9 @@ the root directory of another project.
 A config comes from the analyzed repository, so its paths are untrusted. A
 plugin that reads a file at a path from a config must not read outside the
 project root. The Jest `projects` expansion, the Vitest `test.projects`
-expansion and inline project `extends`, the Rstest `projects` expansion, and
-the script `--config` files use two checks from `config_parser`:
+expansion and inline project `extends`, the Rstest `projects` expansion, the
+Stylelint `extends` chain, and the script `--config` files use two checks
+from `config_parser`:
 
 - `glob_base_is_inside_root` runs before a glob. It compares the literal base
   of the pattern with the root, so a pattern such as `../**` or `/etc/*` does
@@ -392,14 +415,15 @@ The project globs also go through
 `fallow_config::glob_validation::disk_glob_pattern`, so a `.*` segment does
 not match `..` and the glob does not list the parent directory.
 
-For Jest and Vitest, the boundary is the project root, not the `root`
-argument of `resolve_config`. In a workspace run, that argument is the workspace package
-directory, and a package config can name a sibling package. The registry
-calls `Plugin::resolve_config_in_project` with both roots. A plugin that reads
-config paths overrides it. The default calls `resolve_config`. The Jest and
-Vitest plugins override it. The Rstest plugin does not, so its boundary is the
-`root` argument. In a workspace run, Rstest therefore does not follow a
-sibling package. This is stricter than the project root.
+For Jest, Vitest and Stylelint, the boundary is the project root, not the
+`root` argument of `resolve_config`. In a workspace run, that argument is the
+workspace package directory, and a package config can name a sibling package.
+The registry calls `Plugin::resolve_config_in_project` with both roots. A
+plugin that reads config paths overrides it. The default calls
+`resolve_config`. The Jest, Vitest and Stylelint plugins override it. The
+Rstest plugin does not, so its boundary is the `root` argument. In a workspace
+run, Rstest therefore does not follow a sibling package. This is stricter than
+the project root.
 
 A declared `always_used` pattern is matched against the project-relative path
 without a `**/` rewrite, so it covers a root-level file only. A plugin that

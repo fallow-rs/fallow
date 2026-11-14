@@ -19,8 +19,9 @@ and parse-cache changes.
   `graphql.rs`: component and embedded-language extraction.
 - `crates/extract/src/sfc_template/`: template-visible usage for supported
   component formats.
-- `crates/extract/src/css.rs`, `css_metrics.rs`, `css_classes.rs`, and
-  `css_in_js/`: CSS, CSS-in-JS, token, and styling facts.
+- `crates/extract/src/css.rs`, `css_metrics.rs`, `css_classes.rs`,
+  `css_url.rs`, and `css_in_js/`: CSS, CSS-in-JS, token, and styling facts,
+  and the packages that stylesheet `url()` values name.
 - `crates/extract/src/source_map.rs`: source-map normalization and mapping.
 
 Shared extraction result types live in `crates/types/src/extract.rs`.
@@ -301,6 +302,139 @@ uses this contract. Unknown wrappers, including configurable module resolvers su
 local-loader fallback. Ordinary awaited loader calls still credit their accessed
 members; discarded imports and unread promise bindings credit no export. Changes
 to these cached import facts invalidate both extraction and graph caches.
+
+`FunctionContractFacts` (`crates/extract/src/function_contracts.rs`) is the
+call evidence of plain functions. The semantic pass records:
+
+- one contract for each function that a module-scope binding holds, with its
+  parameter facts and an `incomplete` reason when a use can be invisible;
+- one call record for each direct call whose callee is an admitted import
+  binding (`admitted_import_symbol`) or one of these local functions;
+- one escape for each other read of a local function, including a JSX
+  element name and a tagged template callee.
+
+Calls through bindings that are not admitted, and calls to globals, are not
+stored. Calls of a package import are stored, because extraction cannot tell a
+package from a workspace package or a path alias before resolution. The sites
+are grouped per callee, so the target and the member path are stored once. A
+call whose arguments are all `Unknown` stores no argument facts, only
+`arg_count`, and a string literal longer than `MAX_LITERAL_STRING_BYTES` is
+`Unknown`. The facts follow `import_binding_references`
+through the span remap and `merge_into`, so a call target index stays valid
+after the script blocks of a host file merge. A Vue, Svelte, Astro, Glimmer or
+MDX file sets `template_callers`, and so does an HTML page with an inline
+script body that is not data (JSON, an import map or a template), because the script facts do not see the
+calls of its template, of an inline script, or of another script block. The
+graph cache does not store these facts, so a change to them changes only
+`CACHE_VERSION`.
+
+Only the `constant-parameter` rule reads these facts, and the rule is off by
+default. `ResolvedConfig::reads_call_facts` is `true` when the rule is on,
+globally or in an override. Each opt-in (`--constant-parameters`, the
+`constant_parameters` filter of the API, and the `negate-condition` operator
+of `fallow mutation`) sets the rule before the session parses. When the value
+is `false`:
+
+- the parse drops the facts from each module, and a cache hit does not decode
+  them;
+- `CacheStore::record_module` stores no facts. `CachedModule.call_facts` is
+  `None`, and the entry records in this way that the facts are absent.
+
+`CachedModule.call_facts` holds the facts as a separate bitcode blob. A run
+that reads no facts copies the blob of an entry that a reader wrote, and does
+not decode it. A run that reads the facts treats an entry with `None`, or
+with a blob that does not decode, as a miss (`cached_hit_to_module`), and
+`record_module` then adds the facts. A rewrite of an entry keeps the
+complexity and the call facts that an earlier run stored and the current run
+did not extract. The warm parse store of a long-lived process records which
+parses have the facts, as it does for complexity.
+
+A contract also holds these facts:
+
+- `is_async` is `true` for an `async` function declaration, function
+  expression or arrow function.
+- `ParamFact.written` is `true` when the module writes the parameter binding:
+  in the body, in a default value, or in a nested function or arrow. For an
+  object or array pattern, a write of any binding of the pattern counts. A
+  `var` or function declaration in the body that redeclares the parameter
+  also counts, because it can replace the value without a write reference.
+  A written parameter can hold a value that no caller passes.
+
+An argument fact is `Literal`, `Param`, `Binding`, `Object` or `Unknown`. `Param(i)` exists only
+for a self-call: a call of a local function inside the body or a default
+value of that same function, at any depth, for example in an arrow callback.
+The argument must be the identifier of the formal identifier parameter at
+index `i` of that function, and the parameter must have `written == false`.
+A rest parameter never gets `Param`, because `f(r)` passes `[r]`.
+TypeScript wrappers such as `as`, `<T>x`, `satisfies` and `!` do not change
+the fact. A call of a different function that passes a parameter stores
+`Unknown`. `args` never holds a spread argument, because the list stops
+before the first spread. `-0` and `0` are different `Number` facts, because
+`Object.is` and `1 / x` tell them apart.
+
+Two more argument facts carry a value with a known identity:
+
+- `Binding` names an immutable binding. For a local root, the extractor
+  checks that the identifier resolves to a module-scope `const` with a
+  literal initializer (`Mode.Grid` for an enum, with a declared member). For
+  an admitted import root, it stores the import index and the static path:
+  one segment at most for a named or default import, one or two for a
+  namespace import. The analysis checks the origin. `literal_consts` lists
+  the exported literal constants of a module for that check.
+- `Object` is an object literal with no spread, no computed key, no numeric
+  key and no `__proto__` key, with at most `MAX_OBJECT_KEYS` keys. Each other
+  object literal is `Unknown`, because a dropped key would look absent. A key
+  value is `Literal`, `Binding`, `PassThrough` or `Unknown`; a method, a
+  getter and a setter are `Unknown`. `PassThrough` exists only for a
+  self-call, when the value is the unchanged binding of the same key of the
+  object-pattern parameter at the same position.
+
+`ParamFact.keys` holds the static keys of an object-pattern parameter whose
+value is a plain binding. A computed or numeric key, a nested pattern and a
+key of `Object.prototype` (`PROTOTYPE_KEYS`) are not recorded. A pattern with
+a default other than `{}` records no key, because that default can set a key
+that no caller passes. Each key has its own `written` and `condition_reads`.
+The SFC merge moves each `BindingRoot::Import` index past the imports of the
+earlier blocks, and the span remap moves the key spans.
+
+A read of `arguments` opens the contract also when a decorator, a parameter
+decorator of a method, an `extends` clause or a computed key of a class inside
+the function reads it, because
+these parts run in the scope of the function. Methods and field initializers
+bind their own `arguments`.
+
+Read an argument with `CallSite::arg_at`, not by an index into `args`. It
+gives one of three outcomes for a parameter position:
+
+- `ArgAt::Fact` for a known fact, never `Unknown`;
+- `ArgAt::Unknown` from the first spread on, past the kept facts, or for a
+  stored `Unknown`;
+- `ArgAt::Omitted` at or past `arg_count`.
+
+A consumer of these facts reads them together with other facts:
+
+- For a named or default import of a function, a non-empty `member_path`,
+  for example `call`, `apply` or `bind`, is not a plain call of the function.
+  The consumer treats the function as open for that site. For a namespace
+  import, the first segment of `member_path` is the export name.
+- A use of an import binding that is not a direct call is an
+  `ImportBindingReference`, not a `FunctionCall`.
+- `export { f }` and `export default f` are exports, not escapes, so the
+  consumer reads `exports` for them.
+- Calls through `require`, `import()` and CommonJS bindings are not admitted
+  and are not stored, so the consumer abstains for those modules.
+- `direct_eval` is `true` when the module calls `eval` directly at any depth.
+  A direct `eval` can call each binding in scope, so the consumer treats each
+  contract of the module, and each import that the module calls, as open.
+- A file with no imports, no exports and no CommonJS exports can be a classic
+  script. Its top-level functions are globals, which another script or an
+  inline handler can call. The collector records facts for such a file, so
+  the consumer abstains for its contracts.
+- A Vue `<script src="./x.ts">` adds a side-effect import of `x.ts` to the
+  host file. `x.ts` parses as a plain module without `template_callers`. The
+  template reaches its bindings only through component options, which are
+  escapes, but the consumer treats a module that a template host imports for
+  side effects as a template host too.
 
 ## Embedded-source and import regression boundaries
 

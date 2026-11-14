@@ -9,9 +9,16 @@ use serde::de::IgnoredAny;
 const MANIFEST_SOURCE: &str = include_str!("../../mutation-runner-protocol.json");
 
 /// The request types that the scheduler sends.
-const REQUIRED_REQUESTS: &[&str] = &["init", "dry_run", "run", "reload", "shutdown"];
+const REQUIRED_REQUESTS: &[&str] = &["init", "dry_run", "run", "reload", "replay", "shutdown"];
 /// The response types that the transport decodes.
-const REQUIRED_RESPONSES: &[&str] = &["ready", "dry_run_result", "run_result", "reloaded", "error"];
+const REQUIRED_RESPONSES: &[&str] = &[
+    "ready",
+    "dry_run_result",
+    "run_result",
+    "reloaded",
+    "replay_result",
+    "error",
+];
 /// The run statuses that the scheduler maps.
 const REQUIRED_RUN_STATUSES: &[&str] = &["killed", "survived", "timeout", "runtime_error"];
 /// The failure kinds that a run result can carry.
@@ -26,6 +33,7 @@ const REQUIRED_CAPABILITIES: &[&str] = &[
     "bail",
     "fresh_modules_per_run",
     "batch_mutants",
+    "replay",
 ];
 /// The `ready` notes that the report reads.
 pub const TYPECHECK_NOT_RUN_NOTE: &str = "typecheck-not-run";
@@ -66,6 +74,8 @@ pub struct Manifest {
         expect(dead_code, reason = "only the drift test reads the runtime names")
     )]
     pub runtime: RuntimeNames,
+    /// The versioned contract of the `replay` request.
+    pub replay: ReplayContract,
     pub runners: Vec<RunnerRange>,
 }
 
@@ -81,6 +91,21 @@ pub struct RuntimeNames {
     pub active_function: String,
     pub hit_function: String,
 }
+
+/// The replay contract: one function called on the original and on one
+/// mutant. The version changes when the meaning of a call record changes.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReplayContract {
+    pub contract_version: u32,
+    pub sides: Vec<String>,
+    pub outcomes: Vec<String>,
+}
+
+/// The sides of a replay that the API reads.
+const REQUIRED_REPLAY_SIDES: &[&str] = &["original", "mutant"];
+/// The call outcomes of a replay that the API reads.
+const REQUIRED_REPLAY_OUTCOMES: &[&str] = &["returned", "threw", "timed_out", "not_callable"];
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -195,6 +220,19 @@ pub fn parse_manifest(source: &str) -> Result<Manifest, String> {
         REQUIRED_CAPABILITIES,
     )?;
     require_all("ready_notes", &manifest.ready_notes, REQUIRED_READY_NOTES)?;
+    if manifest.replay.contract_version == 0 {
+        return Err("the replay contract version must be positive".to_owned());
+    }
+    require_all(
+        "replay.sides",
+        &manifest.replay.sides,
+        REQUIRED_REPLAY_SIDES,
+    )?;
+    require_all(
+        "replay.outcomes",
+        &manifest.replay.outcomes,
+        REQUIRED_REPLAY_OUTCOMES,
+    )?;
     if manifest.runners.is_empty() {
         return Err("the manifest names no runner".to_owned());
     }

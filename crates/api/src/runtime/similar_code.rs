@@ -121,7 +121,7 @@ pub fn run_similar_code(options: &SimilarCodeOptions) -> ProgrammaticResult<Simi
         .adapter_provider_path
         .as_deref()
         .map_or_else(
-            similar_code::ready_provider,
+            || similar_code::ready_provider(resolved.root()),
             similar_code::ready_provider_from_adapter_path,
         )
         .map_err(provider_error)?;
