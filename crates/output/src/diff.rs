@@ -56,6 +56,15 @@ struct ChangeBlock {
     old_len: u64,
 }
 
+impl ChangeBlock {
+    /// Last base line that the run removed. `None` when it removed no line.
+    fn last_removed_line(self) -> Option<u64> {
+        (self.old_start + self.old_len)
+            .checked_sub(1)
+            .filter(|_| self.old_len > 0)
+    }
+}
+
 /// Where one head line sits relative to the change blocks of its file.
 enum HeadLinePlace {
     /// An unchanged line, at this base line.
@@ -216,11 +225,15 @@ impl DiffIndex {
     /// is a key of this diff.
     ///
     /// Unchanged lines map exactly. An added line at the start of the range
-    /// maps to the first base line that its block removed. An added line at
-    /// the end maps to the last one. A file that the diff does not name maps
-    /// unchanged. `None` when the range holds no base line, when the diff
-    /// adds `path` as a new file, or when the index stopped at
-    /// [`MAX_ADDED_LINES`].
+    /// maps to the last base line that its block removed, which is the
+    /// removed line next to the unchanged lines inside the range. An added
+    /// line at the end maps to the first removed line, for the same reason.
+    /// A block that replaces several lines thus does not widen the range to
+    /// base lines that the range does not reach. A range that starts and
+    /// ends in one block maps to every line that the block removed. A file
+    /// that the diff does not name maps unchanged. `None` when the range
+    /// holds no base line, when the diff adds `path` as a new file, or when
+    /// the index stopped at [`MAX_ADDED_LINES`].
     #[must_use]
     pub fn base_line_range(&self, path: &str, start: u64, end: u64) -> Option<(u64, u64)> {
         let map = &self.base_lines;
@@ -228,14 +241,28 @@ impl DiffIndex {
             return None;
         }
         let blocks = map.change_blocks.get(path).map_or(&[][..], Vec::as_slice);
-        let base_start = match head_line_place(blocks, start) {
-            HeadLinePlace::Unchanged(line) => line,
-            HeadLinePlace::Added(block) => block.old_start,
-        };
-        let base_end = match head_line_place(blocks, end) {
-            HeadLinePlace::Unchanged(line) => line,
-            HeadLinePlace::Added(block) => (block.old_start + block.old_len).checked_sub(1)?,
-        };
+        let (base_start, base_end) =
+            match (head_line_place(blocks, start), head_line_place(blocks, end)) {
+                (HeadLinePlace::Added(first), HeadLinePlace::Added(last))
+                    if first.new_start == last.new_start =>
+                {
+                    (first.old_start, first.last_removed_line()?)
+                }
+                (start_place, end_place) => {
+                    let base_start = match start_place {
+                        HeadLinePlace::Unchanged(line) => line,
+                        HeadLinePlace::Added(block) => {
+                            block.last_removed_line().unwrap_or(block.old_start)
+                        }
+                    };
+                    let base_end = match end_place {
+                        HeadLinePlace::Unchanged(line) => line,
+                        HeadLinePlace::Added(block) if block.old_len > 0 => block.old_start,
+                        HeadLinePlace::Added(block) => block.old_start.checked_sub(1)?,
+                    };
+                    (base_start, base_end)
+                }
+            };
         (base_start <= base_end).then_some((base_start, base_end))
     }
 
@@ -494,6 +521,28 @@ mod tests {
         let index = DiffIndex::from_unified_diff(EDIT_DIFF);
         assert_eq!(index.base_line_range("a.js", 7, 7), Some((7, 7)));
         assert_eq!(index.base_line_range("a.js", 1, 12), Some((1, 10)));
+    }
+
+    /// Three base lines become two head lines. A range that starts on the
+    /// second head line reaches only the last replaced base line, so it maps
+    /// to that line and not to the first one (issue #4580).
+    #[test]
+    fn base_line_range_maps_a_start_in_a_multi_line_replacement_to_its_last_removed_line() {
+        let index = DiffIndex::from_unified_diff(
+            "diff --git a/b.ts b/b.ts\n--- a/b.ts\n+++ b/b.ts\n@@ -1,3 +1,2 @@\n-one\n-two\n-three\n+ONE\n+TWO\n",
+        );
+        assert_eq!(index.base_line_range("b.ts", 2, 15), Some((3, 16)));
+        assert_eq!(index.base_line_range("b.ts", 1, 2), Some((1, 3)));
+    }
+
+    #[test]
+    fn base_line_range_maps_an_end_in_a_multi_line_replacement_to_its_first_removed_line() {
+        let index = DiffIndex::from_unified_diff(
+            "diff --git a/b.ts b/b.ts\n--- a/b.ts\n+++ b/b.ts\n@@ -10,3 +10,2 @@\n-ten\n-eleven\n-twelve\n+TEN\n+ELEVEN\n",
+        );
+        assert_eq!(index.base_line_range("b.ts", 1, 10), Some((1, 10)));
+        assert_eq!(index.base_line_range("b.ts", 1, 11), Some((1, 10)));
+        assert_eq!(index.base_line_range("b.ts", 12, 20), Some((13, 21)));
     }
 
     #[test]

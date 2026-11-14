@@ -538,7 +538,10 @@ line states exit code 0.
   (`crates/api/src/audit_run/clone_containment.rs`). The check maps each head
   instance to its base path through the rename list and the diff renames,
   and to its base lines through the line changes of the diff
-  (`DiffIndex::base_line_range`). An edit inside one copy of a base clone
+  (`DiffIndex::base_line_range`). A rewritten line at the start or end of an
+  instance maps to the replaced base line next to the unchanged lines of the
+  instance, so a block that turns several lines into fewer does not move the
+  span outside its base instance. An edit inside one copy of a base clone
   splits the base group into smaller groups with new keys, and this rule
   keeps them inherited. The rule records no demotion, because the group
   matches a base group. A file that the diff adds has no base lines, so a

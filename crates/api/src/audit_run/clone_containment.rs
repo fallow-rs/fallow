@@ -212,6 +212,30 @@ mod tests {
         assert!(keys.is_empty());
     }
 
+    /// The change renames one copy and replaces the three lines above the
+    /// other copy with two. The second copy moves up one line, and its clone
+    /// starts on a replaced line, which holds only the clone's first token
+    /// (issue #4580).
+    #[test]
+    fn renamed_copy_with_a_rewritten_first_line_in_the_other_copy_is_contained() {
+        let diff = DiffIndex::from_unified_diff(
+            "diff --git a/src/a.js b/src/r.js\nsimilarity index 100%\nrename from src/a.js\nrename to src/r.js\ndiff --git a/src/b.js b/src/b.js\n--- a/src/b.js\n+++ b/src/b.js\n@@ -1,3 +1,2 @@\n-import { a0 } from './a.js';\n-import { c0 } from './c.js';\n-export const b0 = a0 + c0;\n+import { a0 } from './r.js';\n+export const b0 = a0;\n",
+        );
+        let renames = [RenamedFile {
+            from: root().join("src/a.js"),
+            to: root().join("src/r.js"),
+        }];
+        let base = vec![BaseCloneGroup {
+            instances: vec![span("src/a.js", 1, 14), span("src/b.js", 3, 16)],
+        }];
+        let moved = group(vec![
+            instance("src/b.js", 2, 15),
+            instance("src/r.js", 1, 14),
+        ]);
+        let keys = base_contained_dupe_group_keys([&moved], &root(), &diff, &base, &renames);
+        assert_eq!(keys.len(), 1);
+    }
+
     #[test]
     fn renamed_copy_maps_to_its_base_path() {
         let diff = DiffIndex::from_unified_diff(
