@@ -49,26 +49,13 @@ pub(super) fn extract_identifiers_from_host_expr(expr: &str, refs: &mut Vec<Stri
             i += 1;
             continue;
         }
-        let is_ident_start = c.is_ascii_alphabetic() || c == b'_' || c == b'$';
-        if is_ident_start {
-            let start = i;
-            while i < bytes.len() {
-                let cc = bytes[i];
-                if cc.is_ascii_alphanumeric() || cc == b'_' || cc == b'$' {
-                    i += 1;
-                } else {
-                    break;
-                }
-            }
+        if c.is_ascii_alphabetic() || c == b'_' || c == b'$' {
+            let end = identifier_end(bytes, i);
             // A member tail (`foo.bar` -> skip `bar`) is not a component member.
-            let is_member_tail = prev_significant == Some(b'.');
-            let ident = &expr[start..i];
-            if !is_member_tail
-                && is_valid_member_identifier(ident)
-                && !refs.iter().any(|r| r == ident)
-            {
-                refs.push(ident.to_string());
+            if prev_significant != Some(b'.') {
+                push_member_ref(&expr[i..end], refs);
             }
+            i = end;
             prev_significant = Some(b'a'); // any non-`.` significant byte
             continue;
         }
@@ -76,6 +63,20 @@ pub(super) fn extract_identifiers_from_host_expr(expr: &str, refs: &mut Vec<Stri
             prev_significant = Some(c);
         }
         i += 1;
+    }
+}
+
+/// The index after the identifier that starts at `start`.
+fn identifier_end(bytes: &[u8], start: usize) -> usize {
+    bytes[start..]
+        .iter()
+        .position(|&b| !(b.is_ascii_alphanumeric() || b == b'_' || b == b'$'))
+        .map_or(bytes.len(), |offset| start + offset)
+}
+
+fn push_member_ref(ident: &str, refs: &mut Vec<String>) {
+    if is_valid_member_identifier(ident) && !refs.iter().any(|r| r == ident) {
+        refs.push(ident.to_string());
     }
 }
 

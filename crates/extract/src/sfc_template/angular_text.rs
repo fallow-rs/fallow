@@ -85,53 +85,69 @@ pub(super) fn mask_string_contents(snippet: &str) -> String {
             if byte == quote {
                 in_quote = None;
             } else {
-                masked[index] = b' ';
-                if byte == b'\\' && index + 1 < masked.len() {
-                    index += 1;
-                    masked[index] = b' ';
-                }
+                index = blank_string_byte(&mut masked, index);
             }
-            index += 1;
-            continue;
-        }
-        match template_frames.last_mut() {
-            Some(None) => {
-                if byte == b'`' {
-                    template_frames.pop();
-                } else if byte == b'$' && masked.get(index + 1) == Some(&b'{') {
-                    template_frames.push(Some(0));
-                    index += 1;
-                } else {
-                    masked[index] = b' ';
-                    if byte == b'\\' && index + 1 < masked.len() {
-                        index += 1;
-                        masked[index] = b' ';
-                    }
-                }
-            }
-            frame => match byte {
-                b'\'' | b'"' => in_quote = Some(byte),
-                b'`' => template_frames.push(None),
-                b'{' => {
-                    if let Some(Some(depth)) = frame {
-                        *depth += 1;
-                    }
-                }
-                b'}' => match frame {
-                    Some(Some(0)) => {
-                        template_frames.pop();
-                    }
-                    Some(Some(depth)) => *depth -= 1,
-                    _ => {}
-                },
-                _ => {}
-            },
+        } else if matches!(template_frames.last(), Some(None)) {
+            index = step_template_text(&mut masked, &mut template_frames, index);
+        } else {
+            step_code(byte, &mut template_frames, &mut in_quote);
         }
         index += 1;
     }
     // Only whole string contents between ASCII delimiters become spaces, so
     // every multi-byte character is replaced in full.
     String::from_utf8(masked).unwrap_or_default()
+}
+
+/// Blank one string byte, and the byte after it when it is an escape.
+/// Returns the index of the last blanked byte.
+fn blank_string_byte(masked: &mut [u8], index: usize) -> usize {
+    let byte = masked[index];
+    masked[index] = b' ';
+    if byte == b'\\' && index + 1 < masked.len() {
+        masked[index + 1] = b' ';
+        return index + 1;
+    }
+    index
+}
+
+/// Read one byte of template literal text: the closing backtick, the start
+/// of a `${` interpolation, or text to blank. Returns the index of the last
+/// byte read.
+fn step_template_text(masked: &mut [u8], frames: &mut Vec<Option<u32>>, index: usize) -> usize {
+    match masked[index] {
+        b'`' => {
+            frames.pop();
+            index
+        }
+        b'$' if masked.get(index + 1) == Some(&b'{') => {
+            frames.push(Some(0));
+            index + 1
+        }
+        _ => blank_string_byte(masked, index),
+    }
+}
+
+/// Read one byte of code: a quote or backtick opens a string, and a brace
+/// counts toward the open `${` interpolation.
+fn step_code(byte: u8, frames: &mut Vec<Option<u32>>, in_quote: &mut Option<u8>) {
+    match byte {
+        b'\'' | b'"' => *in_quote = Some(byte),
+        b'`' => frames.push(None),
+        b'{' => {
+            if let Some(Some(depth)) = frames.last_mut() {
+                *depth += 1;
+            }
+        }
+        b'}' => match frames.last_mut() {
+            Some(Some(0)) => {
+                frames.pop();
+            }
+            Some(Some(depth)) => *depth -= 1,
+            _ => {}
+        },
+        _ => {}
+    }
 }
 
 #[cfg(test)]
