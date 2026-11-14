@@ -492,3 +492,26 @@ describe("package.json license commands", () => {
     expect(properties["fallow.license.showStatusBar"]?.default).toBe(true);
   });
 });
+
+describe("package.json feature enable links", () => {
+  const cases = [
+    { view: "fallow.security", when: "!fallow.security.enabled", command: "fallow.enableSecurity" },
+    { view: "fallow.health", when: "!fallow.health.enabled", command: "fallow.enableHealth" },
+  ] as const;
+
+  // `workbench.action.openSettings` with a query can freeze the Settings
+  // editor in Cursor (#4553). The disabled-state links turn the setting on
+  // directly, so they never open the Settings editor.
+  it.each(cases)("links the disabled $view welcome to $command", (entry) => {
+    const welcome = pkg.contributes.viewsWelcome.find(
+      (item) => item.view === entry.view && item.when === entry.when,
+    );
+    expect(welcome?.contents).toContain(`(command:${entry.command})`);
+    expect(welcome?.contents).not.toContain("command:fallow.openSettings");
+  });
+
+  it.each(cases)("contributes $command and hides it from the palette once on", (entry) => {
+    expect(command(entry.command)?.title).toMatch(/^Fallow: /);
+    expect(commandPaletteEntry(entry.command)?.when).toBe(entry.when);
+  });
+});

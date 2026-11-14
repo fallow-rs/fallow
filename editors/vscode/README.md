@@ -45,6 +45,8 @@ code --install-extension fallow-rs.fallow-vscode
 | `Fallow: Audit Changed Files` | Audit the current change set for a pass/warn/fail verdict, shown in the audit verdict status-bar item (or an information message when that item is disabled). Findings are static candidates to verify. |
 | `Fallow: Reload Health` | Re-run the Health view analysis (score, complexity, hotspot and refactoring candidates) |
 | `Fallow: Scan for Security Candidates` | Scan for local security candidates (`client-server-leak`, tainted-sink CWE findings) and populate the Security Candidates view. Requires `fallow.security.enabled`. Results are UNVERIFIED candidates to verify, never confirmed vulnerabilities. |
+| `Fallow: Enable Security Candidates` | Set `fallow.security.enabled` to `true` in workspace settings (user settings when no folder is open). The Security Candidates welcome link runs this command. |
+| `Fallow: Enable Health View` | Set `fallow.health.enabled` to `true` in workspace settings (user settings when no folder is open). The Health welcome link runs this command. |
 | `Fallow: Load Runtime Coverage` | Analyze a local runtime-coverage capture and populate the Runtime Coverage view with hot paths and cleanup candidates. Prompts for a capture when `fallow.coverage.capturePath` is empty. Requires the fallow-cov sidecar (`fallow coverage setup`). |
 | `Fallow: Reload Runtime Coverage` | Re-run the runtime-coverage analysis against the current capture |
 | `Fallow: Clear Runtime Coverage` | Clear the Runtime Coverage view back to its empty state |

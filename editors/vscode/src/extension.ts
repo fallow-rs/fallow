@@ -10,6 +10,7 @@ import { runBaselineCommand } from "./baselineCommand.js";
 import { shouldAcceptLspAnalysisComplete } from "./analysisNotification.js";
 import { startClient, stopClient, restartClient } from "./client.js";
 import { cancelReleaseRetry } from "./download.js";
+import { enableFeature } from "./enableFeature.js";
 import { createSingleFlight } from "./analysis-single-flight.js";
 import {
   getHealthEnabled,
@@ -1025,6 +1026,14 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     vscode.commands.registerCommand("fallow.openSettings", () => {
       void vscode.commands.executeCommand("workbench.action.openSettings", "fallow");
     }),
+  );
+
+  // Turn on an opt-in view from its sidebar welcome link (#4553).
+  context.subscriptions.push(
+    vscode.commands.registerCommand("fallow.enableSecurity", () =>
+      enableFeature("security.enabled"),
+    ),
+    vscode.commands.registerCommand("fallow.enableHealth", () => enableFeature("health.enabled")),
   );
 
   // License management commands (activate / status / refresh / deactivate).
