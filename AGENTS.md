@@ -61,6 +61,12 @@ maintainer, a maintainer step that a documented procedure requires (for
 example the npm approval of a release), and an open decision for the
 maintainer, reported with a recommended answer.
 
+Ask each open decision as a multiple-choice question with the question tool
+of the client (`AskUserQuestion` in Claude Code). Give 2 to 4 options, each
+with one line about its effect. Put the recommended option first and mark it
+as recommended. Ask all open decisions in one round. When the client has no
+question tool, write each question with lettered options.
+
 Use the corresponding tracked skills under `.agents/skills/`. Codex consumes
 that canonical tree directly. Claude adapters under `.claude/skills/` are
 generated and must pass `npm run check:agent-adapters`.
