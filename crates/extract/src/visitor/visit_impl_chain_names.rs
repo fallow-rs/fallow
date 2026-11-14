@@ -51,6 +51,19 @@ pub(super) fn call_receiver_name(expr: &Expression<'_>) -> Option<String> {
     member_chain_name(expr, true)
 }
 
+/// `expr` is a method call on a member callee, plain (`p.rotate(1)`) or
+/// optional (`p?.rotate(1)`). `call_receiver_name` gives a `()` path for both.
+pub(super) fn is_member_call(expr: &Expression<'_>) -> bool {
+    match expr {
+        Expression::CallExpression(call) => call.callee.is_member_expression(),
+        Expression::ChainExpression(chain) => matches!(
+            &chain.expression,
+            ChainElement::CallExpression(call) if call.callee.is_member_expression()
+        ),
+        _ => false,
+    }
+}
+
 /// Build the name for `static_member_object_name` and
 /// `call_receiver_name`. With `allow_call_arguments`, a method call
 /// with arguments is a `()` link.

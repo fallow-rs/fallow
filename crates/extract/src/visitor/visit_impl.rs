@@ -2461,7 +2461,7 @@ impl<'a> ModuleInfoExtractor {
         init: &Expression<'a>,
     ) {
         self.record_declarator_member_destructuring(declarator, init);
-        self.record_this_method_result_alias(declarator, init);
+        self.record_method_result_aliases(declarator, init);
 
         // `a ?? new A()`, `f ? new A() : null` and similar inits hold the
         // class instance in one operand. Bind through that operand.

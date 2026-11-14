@@ -28,6 +28,9 @@ pub(super) struct ReceiverAlias {
     pub(super) target: (String, String),
     /// The local holds a Durable Object stub of the namespace at `target`.
     pub(super) stub: bool,
+    /// More parameter paths that the local can hold, for a conditional init
+    /// with branches on different paths. A read on the local reads each one.
+    pub(super) alternatives: Vec<(String, String)>,
 }
 
 impl ReceiverAlias {
@@ -35,6 +38,7 @@ impl ReceiverAlias {
         Self {
             target,
             stub: false,
+            alternatives: Vec::new(),
         }
     }
 }
@@ -60,6 +64,13 @@ pub(super) struct DurableObjectCalls {
     /// member). Each one becomes a member access at the end of the body,
     /// unless its path is in `namespaces`.
     method_accesses: Vec<(String, String, String)>,
+}
+
+impl DurableObjectCalls {
+    /// `local` holds a Durable Object id of a namespace receiver.
+    pub(super) fn holds_id(&self, local: &str) -> bool {
+        self.ids.contains_key(local)
+    }
 }
 
 /// Namespace methods that make a Durable Object id.
@@ -172,6 +183,7 @@ impl StructuralParamMemberCollector {
         let alias = ReceiverAlias {
             target: namespace,
             stub: true,
+            alternatives: Vec::new(),
         };
         Some((local.name.to_string(), alias))
     }

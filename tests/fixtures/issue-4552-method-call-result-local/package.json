@@ -1,0 +1,6 @@
+{
+  "name": "issue-4552-method-call-result-local",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts"
+}
