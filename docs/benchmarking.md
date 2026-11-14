@@ -27,6 +27,15 @@ to judge an I/O change.
 compare instruction counts across a change to this profile: the codegen
 changes, so CodSpeed records a one-time baseline shift.
 
+A cold build of a shard compiles several large crates at once, and
+cargo-codspeed always adds full debug info (`-Cdebuginfo=2`). Each CodSpeed job
+in `.github/workflows/bench.yml` therefore adds 8 GiB of swap on the temporary
+disk (`scripts/ci-add-swap.sh`) before the build. The build runs through
+`scripts/ci-with-resource-log.sh`, which prints the available memory, the used
+swap and the available disk every 30 seconds. When a runner stops in "Build
+benchmark shard" with exit code 143 and no compiler error, read the last
+`resources:` lines of the job log to find the resource that ran out.
+
 The optional TypeScript semantic companion is measured separately with
 CodSpeed walltime. Simulation cannot measure the interpreted Node.js process or
 its child process, so `tools/type-aware-sidecar/bench/session.mjs` uses the
