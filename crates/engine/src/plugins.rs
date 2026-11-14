@@ -25,6 +25,16 @@ pub mod registry {
     pub fn builtin_plugin_names() -> Vec<&'static str> {
         core_backend::builtin_plugin_names()
     }
+
+    /// The config globs that the named built-in plugin reads by file name,
+    /// and the binaries whose `--config` / `-c` package script argument names
+    /// a config of the plugin. `None` when no built-in plugin has this name.
+    #[must_use]
+    pub fn builtin_config_lookup(
+        plugin_name: &str,
+    ) -> Option<(&'static [&'static str], &'static [&'static str])> {
+        core_backend::builtin_config_lookup(plugin_name)
+    }
 }
 
 /// Aggregated results from all active plugins for a project.

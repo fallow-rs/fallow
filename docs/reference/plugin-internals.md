@@ -458,6 +458,13 @@ against the package root. Both results add up. A `vite.config` file next to
 a `vitest.config` file is shadowed only when the `vitest.config` file does not
 name it: a `projects` entry, an `extends` path and an import all load it.
 
+Playwright reads `playwright.config.<ext>` and `playwright.<name>.config.<ext>`
+by file name, and a config with any other name through `--config` or `-c`
+from a package script. Playwright resolves `testDir`, `globalSetup`,
+`globalTeardown` and a reporter path against the directory of the config, not
+the directory that it runs in, so the plugin reads a script config the same
+way as a config that it finds by name.
+
 The run directory is not always the base of the globs. The Vitest root is
 `test.root`, else the Vite `root`, against the run directory. `setupFiles`,
 `globalSetup` and a reporter path are relative to the Vitest root. The include

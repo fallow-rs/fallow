@@ -211,7 +211,7 @@ fn entry_path_exists(root: &Path, entry: &str) -> bool {
 
 /// Expand `{a,b}` brace groups into their cartesian product. `index.{ts,tsx}`
 /// yields `index.ts`, `index.tsx`; a pattern with no braces yields itself.
-fn expand_braces(pattern: &str) -> Vec<String> {
+pub fn expand_braces(pattern: &str) -> Vec<String> {
     let Some(open) = pattern.find('{') else {
         return vec![pattern.to_string()];
     };

@@ -334,24 +334,31 @@ pub(super) const KNIP_UNSUPPORTED_PLUGIN_KEYS: &[&str] = &[
     "zx",
 ];
 
+/// Knip plugin keys whose spelling differs from the built-in fallow plugin
+/// that covers the same tool. Every other entry of `KNIP_PLUGIN_KEYS` has to
+/// match a registered plugin name exactly, so a new spelling difference fails
+/// `plugin_keys_resolve_to_builtin_plugins` until it is declared here.
+pub(super) const KNIP_PLUGIN_KEY_ALIASES: &[(&str, &str)] = &[
+    ("electron-vite", "electron"),
+    ("nest", "nestjs"),
+    ("next", "nextjs"),
+    ("panda-css", "pandacss"),
+    ("turbo", "turborepo"),
+    ("webdriver-io", "webdriverio"),
+];
+
+/// The name of the built-in fallow plugin that covers a knip plugin key.
+pub(super) fn fallow_plugin_name(knip_key: &str) -> &str {
+    KNIP_PLUGIN_KEY_ALIASES
+        .iter()
+        .find(|(key, _)| *key == knip_key)
+        .map_or(knip_key, |(_, plugin)| plugin)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use rustc_hash::{FxHashMap, FxHashSet};
-
-    /// Knip plugin keys whose spelling differs from the built-in fallow plugin
-    /// that covers the same tool. Every other entry of `KNIP_PLUGIN_KEYS` has
-    /// to match a registered plugin name exactly, so a new spelling
-    /// difference fails `plugin_keys_resolve_to_builtin_plugins` until it is
-    /// declared here.
-    const KNIP_PLUGIN_KEY_ALIASES: &[(&str, &str)] = &[
-        ("electron-vite", "electron"),
-        ("nest", "nestjs"),
-        ("next", "nextjs"),
-        ("panda-css", "pandacss"),
-        ("turbo", "turborepo"),
-        ("webdriver-io", "webdriverio"),
-    ];
 
     fn builtin_plugins() -> FxHashSet<&'static str> {
         fallow_engine::plugins::registry::builtin_plugin_names()

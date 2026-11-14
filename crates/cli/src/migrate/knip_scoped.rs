@@ -13,6 +13,7 @@ use super::knip_fields::{
 };
 use super::knip_tables::{
     KNIP_PLUGIN_KEYS, KNIP_RULE_MAP, KNIP_UNMAPPABLE_FIELDS, KNIP_UNSUPPORTED_PLUGIN_KEYS,
+    fallow_plugin_name,
 };
 use super::{MigrationWarning, string_or_array};
 
@@ -22,8 +23,10 @@ type JsonMap = Map<String, Value>;
 /// `overrides` cannot scope them.
 const PROJECT_LEVEL_ISSUE_TYPES: &[&str] = &["dependencies", "devDependencies", "unlisted"];
 
-/// The suffix that marks a knip entry pattern as a production entry.
-const PRODUCTION_MARKER: char = '!';
+/// The suffix that marks a knip pattern or name as production-only: an
+/// `entry` or `project` pattern, or an `ignoreDependencies` or
+/// `ignoreBinaries` name.
+pub(super) const PRODUCTION_MARKER: char = '!';
 
 /// One knip config section: the root, or one entry of `workspaces`.
 pub(super) struct KnipScope {
@@ -489,7 +492,7 @@ fn migrate_workspace_field(
                 });
             }
         }
-        _ => warn_unmapped_workspace_field(name, scope, warnings),
+        _ => warn_unmapped_workspace_field((name, value), scope, warnings),
     }
 }
 
@@ -573,25 +576,153 @@ fn glob_key_selects(glob: &str, key: &str) -> bool {
     fallow_config::compile_path_glob(glob).is_ok_and(|glob| glob.compile_matcher().is_match(key))
 }
 
-fn warn_unmapped_workspace_field(
+/// The warning for a knip `project` setting that names production
+/// exclusions (`!pattern!`), or `None` when it names none.
+///
+/// Fallow has no setting that excludes files only in production mode, so
+/// the warning names each exclusion and the findings that `--production`
+/// reports as a result.
+pub(super) fn project_warning(value: &Value, scope: &KnipScope) -> Option<MigrationWarning> {
+    let exclusions: Vec<String> = string_or_array(value)
+        .into_iter()
+        .filter(|pattern| {
+            pattern.len() > 2 && pattern.starts_with('!') && pattern.ends_with(PRODUCTION_MARKER)
+        })
+        .collect();
+    if exclusions.is_empty() {
+        return None;
+    }
+    let listed = exclusions
+        .iter()
+        .map(|pattern| format!("`{pattern}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let files: Vec<String> = exclusions
+        .iter()
+        .filter_map(|pattern| scope.rebase(&pattern[1..pattern.len() - 1]))
+        .map(|file| Value::from(file).to_string())
+        .collect();
+    Some(MigrationWarning {
+        source: "knip",
+        field: scope.field("project"),
+        message: format!(
+            "production exclusions {listed} not migrated; fallow has no production-only \
+             exclusion, so `--production` reports unused files and exports in these paths"
+        ),
+        suggestion: (!files.is_empty()).then(|| {
+            format!(
+                "to hide these findings in every mode, add an overrides entry with files [{}] \
+                 and rules unused-files and unused-exports set to off",
+                files.join(", ")
+            )
+        }),
+    })
+}
+
+/// The warning for a knip plugin section, such as `"playwright": {...}`, that
+/// a built-in fallow plugin covers.
+///
+/// Fallow finds the config files of a plugin by file name, and for some
+/// plugins also from a `--config` argument in a package.json script. A
+/// section whose `config` names other files gets a warning that names them,
+/// because fallow reads them only from such a script argument, and the test files, setup files and
+/// other files that they name then look unused. Any other section gets the
+/// auto-detected warning with `remove_suggestion`.
+pub(super) fn plugin_section_warning(
     name: &str,
+    value: &Value,
+    scope: &KnipScope,
+    remove_suggestion: &str,
+) -> MigrationWarning {
+    let lookup = fallow_engine::plugins::registry::builtin_config_lookup(fallow_plugin_name(name))
+        .filter(|(patterns, _)| !patterns.is_empty());
+    let unread: Vec<String> = match (lookup, value.get("config")) {
+        (Some((patterns, _)), Some(configs)) => string_or_array(configs)
+            .into_iter()
+            .filter(|config| !config_name_is_read(config, patterns))
+            .collect(),
+        _ => Vec::new(),
+    };
+    let (Some((_, binaries)), false) = (lookup, unread.is_empty()) else {
+        return MigrationWarning {
+            source: "knip",
+            field: scope.field(name),
+            message: format!(
+                "plugin config `{name}` is auto-detected by fallow's built-in plugins"
+            ),
+            suggestion: Some(remove_suggestion.to_string()),
+        };
+    };
+    let listed = unread
+        .iter()
+        .map(|config| format!("`{config}`"))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let entry_hint =
+        "add entry patterns for the test files, setup files and reporters that each config names";
+    let suggestion = match binaries.first() {
+        Some(binary) => format!(
+            "pass each of these configs to `{binary}` with `--config` in a package.json script, or {entry_hint}"
+        ),
+        None => entry_hint.to_string(),
+    };
+    MigrationWarning {
+        source: "knip",
+        field: scope.field(name),
+        message: format!(
+            "plugin config `{name}` names config files that fallow does not find by file name: {listed}"
+        ),
+        suggestion: Some(suggestion),
+    }
+}
+
+/// Whether a built-in plugin reads the knip `config` value `config` by its
+/// file name. Each `{a,b}` alternative of the value must match one of the
+/// plugin's config globs, in any directory.
+fn config_name_is_read(config: &str, patterns: &[&str]) -> bool {
+    let matchers: Vec<globset::GlobMatcher> = patterns
+        .iter()
+        .flat_map(|pattern| [(*pattern).to_string(), format!("**/{pattern}")])
+        .filter_map(|pattern| fallow_config::compile_path_glob(&pattern).ok())
+        .map(|glob| glob.compile_matcher())
+        .collect();
+    // Fallow reads every package.json, including the inline tool config that
+    // knip lists as `package.json` in the default config of many plugins.
+    crate::plugin_check::expand_braces(&normalize_path(config))
+        .iter()
+        .all(|candidate| {
+            candidate == "package.json"
+                || candidate.ends_with("/package.json")
+                || matchers.iter().any(|matcher| matcher.is_match(candidate))
+        })
+}
+
+fn warn_unmapped_workspace_field(
+    (name, value): (&str, &Value),
     scope: &KnipScope,
     warnings: &mut Vec<MigrationWarning>,
 ) {
+    if name == "project"
+        && let Some(warning) = project_warning(value, scope)
+    {
+        warnings.push(warning);
+        return;
+    }
+    if KNIP_PLUGIN_KEYS.contains(&name) {
+        warnings.push(plugin_section_warning(
+            name,
+            value,
+            scope,
+            "remove this section, or add an entry pattern if a plugin misses a file",
+        ));
+        return;
+    }
     let field = scope.field(name);
     let (message, suggestion) = if let Some((_, message, suggestion)) = KNIP_UNMAPPABLE_FIELDS
         .iter()
         .find(|(unmappable, _, _)| *unmappable == name)
     {
         ((*message).to_string(), suggestion.map(str::to_string))
-    } else if KNIP_PLUGIN_KEYS.contains(&name) {
-        (
-            format!("plugin config `{name}` is auto-detected by fallow's built-in plugins"),
-            Some(
-                "remove this section, or add an entry pattern if a plugin misses a file"
-                    .to_string(),
-            ),
-        )
     } else if KNIP_UNSUPPORTED_PLUGIN_KEYS.contains(&name) {
         (
             format!("plugin config `{name}` has no fallow plugin equivalent"),

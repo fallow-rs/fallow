@@ -1,0 +1,12 @@
+{
+  "name": "playwright-named-configs",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "e2e": "playwright test -c config/e2e.ts",
+    "e2e:ci": "node_modules/.bin/playwright test --config=config/ci.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.48.0"
+  }
+}
