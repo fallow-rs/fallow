@@ -2797,7 +2797,10 @@ mod proptests {
             bins in prop::collection::vec("[a-z][a-z0-9]{0,10}", 2..5),
         ) {
             let reserved = ["npm", "npx", "yarn", "pnpm", "pnpx", "bun", "bunx",
-                "node", "env", "cross", "sh", "bash", "exec", "sudo", "nohup"];
+                "node", "env", "cross", "sh", "bash", "exec", "sudo", "nohup",
+                // Shell reserved words start or end a compound command, not a binary.
+                "if", "then", "else", "elif", "fi", "do", "done", "while", "until", "for",
+                "select", "case", "esac", "in", "function"];
             prop_assume!(!bins.iter().any(|b| reserved.contains(&b.as_str())));
             let script = bins.join(" && ");
             let commands = parse_script(&script);
@@ -2831,10 +2834,100 @@ fn script_binaries_skip_downloaded_commands_only() {
 }
 
 #[test]
+fn script_binaries_skip_shell_reserved_words() {
+    for (script, expected) in [
+        (
+            r#"for app in lib/*/ apps/*/; do if grep -q x "$app/package.json"; then hyprctl reload "$app" || exit 1; fi; done"#,
+            vec!["grep", "hyprctl", "exit"],
+        ),
+        (
+            "while true; do tailscale up; done",
+            vec!["true", "tailscale"],
+        ),
+        (
+            "until ! hyprctl ping; do sleep 1; done",
+            vec!["hyprctl", "sleep"],
+        ),
+        (
+            "if [ -n \"$CI\" ]; then :; else hyprctl reload; fi",
+            vec!["[", ":", "hyprctl"],
+        ),
+        ("{ hyprctl reload; } > log.txt", vec!["hyprctl"]),
+        ("done < list.txt", vec![]),
+        ("case \"$1\" in", vec![]),
+        ("if true; then npx create-thing; fi", vec!["true"]),
+        ("> \"build log.txt\" npx create-thing", vec![]),
+        // A reserved word is a command name when it is not in command position.
+        ("hyprctl for", vec!["hyprctl"]),
+    ] {
+        assert_eq!(super::script_binaries(script), expected, "{script}");
+    }
+}
+
+#[test]
+fn script_binaries_read_commands_inside_subshells() {
+    for (script, expected) in [
+        (
+            r#"([ -n "$CI" ] || (hyprctl install))"#,
+            vec!["[", "hyprctl"],
+        ),
+        ("(cd app && tailscale up)", vec!["cd", "tailscale"]),
+        ("echo $(hyprctl version)", vec!["echo", "hyprctl"]),
+        (
+            "$(npm bin)/hyprctl reload",
+            vec!["node_modules/.bin/hyprctl"],
+        ),
+        ("echo $((1 + 2)) && hyprctl", vec!["echo", "hyprctl"]),
+        ("tailscale up 'a (b) c'", vec!["tailscale"]),
+        ("echo $(( (1 + 2) * 3 ))", vec!["echo"]),
+        ("echo $( (hyprctl) )", vec!["echo", "hyprctl"]),
+        ("case \"$1\" in (build) hyprctl;; esac", vec!["hyprctl"]),
+        (
+            "case \"$1\" in a) true;; (lint) tailscale up;; *) hyprctl;; esac",
+            vec!["true", "tailscale", "hyprctl"],
+        ),
+        (
+            "case \"$1\" in a) (cd app && hyprctl);; esac",
+            vec!["cd", "hyprctl"],
+        ),
+        (
+            "build() { hyprctl reload; }; build",
+            vec!["hyprctl", "build"],
+        ),
+        (
+            "function build { hyprctl reload; }; build",
+            vec!["hyprctl", "build"],
+        ),
+        (r"echo \>& hyprctl reload", vec!["echo", "hyprctl"]),
+        ("(true) > \"$(hyprctl path)\"", vec!["true", "hyprctl"]),
+        ("(hyprctl) > build.log 2>&1", vec!["hyprctl"]),
+        (
+            "hyprctl > build.log 2>&1 && tailscale up",
+            vec!["hyprctl", "tailscale"],
+        ),
+        (
+            "hyprctl &> build.log; tailscale <&3",
+            vec!["hyprctl", "tailscale"],
+        ),
+        ("hyprctl & tailscale up", vec!["hyprctl", "tailscale"]),
+        (
+            "(hyprctl); (tailscale up) && sleep 1",
+            vec!["hyprctl", "tailscale", "sleep"],
+        ),
+        (
+            "if true; then (cd app && hyprctl); fi",
+            vec!["true", "cd", "hyprctl"],
+        ),
+    ] {
+        assert_eq!(super::script_binaries(script), expected, "{script}");
+    }
+}
+
+#[test]
 fn script_binaries_keep_a_script_named_x() {
     for script in ["yarn x", "pnpm x"] {
         assert!(
-            !super::downloads_its_command(script),
+            !super::shell::downloads_its_command(script),
             "{script} runs the script `x`, so it is not a download"
         );
     }

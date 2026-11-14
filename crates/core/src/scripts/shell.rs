@@ -147,17 +147,196 @@ pub(super) fn is_builtin_command(cmd: &str) -> bool {
     )
 }
 
+/// The kind of an open unquoted parenthesis in a script.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Paren {
+    /// `(` in command position opens a subshell: a new command starts in it.
+    /// `case_depth` is the number of `case` commands open at the `(`.
+    Subshell { case_depth: usize },
+    /// `(` that starts a `case` pattern (`(lint) eslint .;;`).
+    Pattern,
+    /// `$(`, `$((`, `((` and every other `(`: the text stays in the current
+    /// segment.
+    Other,
+}
+
+/// The parser state that carries from one line of a shell file to the next:
+/// the open quotes, parentheses and `case` commands.
+#[derive(Default)]
+pub(super) struct ShellState {
+    parens: Vec<Paren>,
+    case_depth: usize,
+    in_single_quote: bool,
+    in_double_quote: bool,
+}
+
+/// One command segment of a script, with the subshells that close and open
+/// between the previous segment and this one.
+pub(super) struct ShellSegment<'a> {
+    pub text: &'a str,
+    /// The number of subshells that close before this segment.
+    pub closed: usize,
+    /// The number of subshells that open before this segment, after the
+    /// closed ones.
+    pub opened: usize,
+}
+
+/// Collects the segments of one script.
+struct SegmentSink<'a, 's> {
+    segments: Vec<ShellSegment<'a>>,
+    closed: usize,
+    opened: usize,
+    state: &'s mut ShellState,
+}
+
+impl<'a> SegmentSink<'a, '_> {
+    fn push(&mut self, text: &'a str) {
+        match first_command_word(text) {
+            Some("case") => self.state.case_depth += 1,
+            Some("esac") => self.state.case_depth = self.state.case_depth.saturating_sub(1),
+            _ => {}
+        }
+        self.segments.push(ShellSegment {
+            text,
+            closed: std::mem::take(&mut self.closed),
+            opened: std::mem::take(&mut self.opened),
+        });
+    }
+
+    /// Push the subshell changes that no segment after them carries.
+    fn finish(mut self) -> Vec<ShellSegment<'a>> {
+        if self.closed > 0 || self.opened > 0 {
+            self.push("");
+        }
+        self.segments
+    }
+}
+
+/// The first word of a segment after the reserved words that start it.
+fn first_command_word(text: &str) -> Option<&str> {
+    text.split_whitespace()
+        .find(|word| !COMMAND_PREFIX_WORDS.contains(word))
+}
+
+/// The words of `segment` after the reserved words that start it and after
+/// a `case ... in` header. `None` when the header has no `in` yet. The flag
+/// is true in a `case` body, where the next word can be a pattern.
+fn words_after_case_header(segment: &str, case_depth: usize) -> Option<(Vec<&str>, bool)> {
+    let mut words = segment
+        .split_whitespace()
+        .skip_while(|word| COMMAND_PREFIX_WORDS.contains(word))
+        .peekable();
+    if words.peek() == Some(&"case") {
+        words.by_ref().find(|word| *word == "in")?;
+        return Some((words.collect(), true));
+    }
+    Some((words.collect(), case_depth > 0))
+}
+
+/// What a `(` at the start of a word opens. `segment` is the text of the
+/// current segment before the `(`, and `after` is the text after it.
+fn paren_kind(segment: &str, after: &str, state: &ShellState) -> Paren {
+    if after.starts_with('(')
+        || !state
+            .parens
+            .iter()
+            .all(|open| matches!(open, Paren::Subshell { .. }))
+    {
+        return Paren::Other;
+    }
+    let Some((words, in_case_body)) = words_after_case_header(segment, state.case_depth) else {
+        return Paren::Other;
+    };
+    let at_command = match words.as_slice() {
+        [] => true,
+        // `a) (cd app && tsc);;`: a command follows the pattern.
+        [pattern] => in_case_body && ends_case_pattern(pattern),
+        _ => false,
+    };
+    if !at_command {
+        Paren::Other
+    } else if is_case_pattern(after) || (in_case_body && words.is_empty() && is_header_end(segment))
+    {
+        Paren::Pattern
+    } else {
+        Paren::Subshell {
+            case_depth: state.case_depth,
+        }
+    }
+}
+
+/// Whether `segment` starts with a `case` header, where the first word after
+/// `in` is always a pattern.
+fn is_header_end(segment: &str) -> bool {
+    first_command_word(segment) == Some("case")
+}
+
+/// Whether the text after a `(` closes a `case` pattern (`(lint) eslint .`).
+/// The shell allows only an operator or a redirection after the `)` of a
+/// subshell, so a pattern is a single word with a command after it. This
+/// finds a pattern in a segment that is parsed without its `case` header.
+fn is_case_pattern(after_paren: &str) -> bool {
+    let Some(close) = after_paren.find(')') else {
+        return false;
+    };
+    let pattern = &after_paren[..close];
+    if pattern.is_empty()
+        || pattern.contains(|ch: char| ch.is_whitespace() || "()'\"`$;&|<>\\".contains(ch))
+    {
+        return false;
+    }
+    let rest = after_paren[close + 1..].trim_start();
+    let Some(next) = rest.split_whitespace().next() else {
+        return false;
+    };
+    !next.starts_with([';', '&', '|', ')', '#']) && redirection_tokens(&[next]).is_none()
+}
+
+/// Whether the `)` that follows `segment` ends a `case` pattern
+/// (`build) tsc;;`) and not a subshell. A pattern is the first word after the
+/// `in` of the header, after a `;;` or at the start of a line in a `case`
+/// body. `before` is the script text before `segment`.
+fn ends_pattern(before: &str, segment: &str, case_depth: usize) -> bool {
+    let before = before.trim_end();
+    let pattern_start = is_header_end(segment) || before.is_empty() || before.ends_with(";;");
+    match words_after_case_header(segment, case_depth) {
+        Some((words, true)) if pattern_start => {
+            matches!(words.as_slice(), [word] if *word != "esac")
+        }
+        _ => false,
+    }
+}
+
 /// Split a script string on shell operators (`&&`, `||`, `;`, `|`, `&`).
-/// Respects single and double quotes.
+/// Respects single and double quotes. A subshell (`(cd app && build)`)
+/// starts and ends a segment.
 pub fn split_shell_operators(script: &str) -> Vec<&str> {
-    let mut segments = Vec::new();
+    split_shell_commands(script, &mut ShellState::default())
+        .into_iter()
+        .map(|segment| segment.text)
+        .collect()
+}
+
+/// Split a script as [`split_shell_operators`] does, and report where each
+/// subshell opens and closes. `state` carries the open subshells and `case`
+/// commands from the previous line of a shell file.
+pub(super) fn split_shell_commands<'a>(
+    script: &'a str,
+    state: &mut ShellState,
+) -> Vec<ShellSegment<'a>> {
+    let mut sink = SegmentSink {
+        segments: Vec::new(),
+        closed: 0,
+        opened: 0,
+        state,
+    };
     let mut start = 0;
     let bytes = script.as_bytes();
     let len = bytes.len();
     let mut i = 0;
     let mut word_start = 0;
-    let mut in_single_quote = false;
-    let mut in_double_quote = false;
+    let mut in_single_quote = sink.state.in_single_quote;
+    let mut in_double_quote = sink.state.in_double_quote;
 
     while i < len {
         let b = bytes[i];
@@ -183,8 +362,35 @@ pub fn split_shell_operators(script: &str) -> Vec<&str> {
             continue;
         }
 
+        if b == b'(' {
+            let kind = if i == word_start {
+                paren_kind(&script[start..i], &script[i + 1..], sink.state)
+            } else {
+                Paren::Other
+            };
+            sink.state.parens.push(kind);
+            if matches!(kind, Paren::Subshell { .. }) {
+                // Only reserved words and a pattern come before the `(`, so
+                // this pushes no command.
+                sink.push(&script[start..i]);
+                sink.opened += 1;
+                i += 1;
+                start = i;
+                word_start = i;
+                continue;
+            }
+        }
+        if b == b')' && closes_subshell(&script[..start], &script[start..i], sink.state) {
+            sink.push(&script[start..i]);
+            sink.closed += 1;
+            i += 1;
+            start = i;
+            word_start = i;
+            continue;
+        }
+
         if let Some(op_len) = shell_operator_len(bytes, i) {
-            segments.push(&script[start..i]);
+            sink.push(&script[start..i]);
             i += op_len;
             start = i;
             word_start = i;
@@ -198,10 +404,32 @@ pub fn split_shell_operators(script: &str) -> Vec<&str> {
     }
 
     if start < len {
-        segments.push(&script[start..]);
+        sink.push(&script[start..]);
     }
 
-    segments
+    sink.state.in_single_quote = in_single_quote;
+    sink.state.in_double_quote = in_double_quote;
+    sink.finish()
+}
+
+/// Whether the `)` after `segment` closes a subshell, and pop the `(` that it
+/// matches. A `)` that ends a `case` pattern matches no `(` or a pattern `(`.
+/// Only a `case` that opens in the subshell can hold such a pattern. A `)`
+/// without an open `(` closes nothing.
+fn closes_subshell(before: &str, segment: &str, state: &mut ShellState) -> bool {
+    match state.parens.last().copied() {
+        Some(Paren::Subshell { case_depth })
+            if (state.case_depth > case_depth || is_header_end(segment))
+                && ends_pattern(before, segment, state.case_depth) =>
+        {
+            false
+        }
+        Some(kind) => {
+            state.parens.pop();
+            matches!(kind, Paren::Subshell { .. })
+        }
+        None => false,
+    }
 }
 
 /// Command substitutions that print the `node_modules/.bin` directory of the
@@ -349,17 +577,120 @@ fn shell_operator_len(bytes: &[u8], i: usize) -> Option<usize> {
     if b == b'|' && next != Some(b'|') {
         return Some(1);
     }
-    if b == b'&' && next != Some(b'&') {
+    // `2>&1`, `<&3` and `&> log` are redirections, not a background `&`.
+    // An escaped `\>` before the `&` is a literal character, not an operator.
+    let prev = i.checked_sub(1).map(|prev| bytes[prev]);
+    let prev_escaped = i.checked_sub(2).map(|before| bytes[before]) == Some(b'\\');
+    let redirection = (matches!(prev, Some(b'>' | b'<')) && !prev_escaped) || next == Some(b'>');
+    if b == b'&' && next != Some(b'&') && !redirection {
         return Some(1);
     }
 
     None
 }
 
-/// Skip env var assignments (`KEY=value`) and env wrapper commands (`cross-env`, `dotenv`, `env`)
-/// at the start of a token list. Returns the index of the first real command token, or `None`
-/// if all tokens were consumed.
+/// Shell reserved words that a command follows in the same segment
+/// (`then eslint .`, `do tsc; done`, `! grep x`).
+const COMMAND_PREFIX_WORDS: &[&str] = &[
+    "if", "then", "else", "elif", "do", "while", "until", "!", "{",
+];
+
+/// Shell reserved words after which the segment holds no command: the end of
+/// a compound command (`fi`, `done`, `esac`, `}`) and the headers whose words
+/// are not commands (`for app in lib/*`).
+const NON_COMMAND_WORDS: &[&str] = &["fi", "done", "esac", "}", "for", "select", "in"];
+
+/// Redirection operators, longest first, after an optional file descriptor
+/// number (`2>&1`, `&> log`, `> log`).
+const REDIRECTION_OPERATORS: &[&str] = &[
+    "&>>", "<<<", "&>", ">>", ">&", "<&", ">|", "<>", "<<", ">", "<",
+];
+
+/// The number of tokens that the redirection at the start of `tokens` takes:
+/// 1 when the target is in the same token (`2>&1`, `>log`), 2 when it is the
+/// next token (`> log`), or `None` when `tokens` does not start with one.
+pub(super) fn redirection_tokens(tokens: &[&str]) -> Option<usize> {
+    let token = tokens
+        .first()?
+        .trim_start_matches(|ch: char| ch.is_ascii_digit());
+    let operator = REDIRECTION_OPERATORS
+        .iter()
+        .find(|operator| token.starts_with(**operator))?;
+    Some(if token.len() == operator.len() { 2 } else { 1 })
+}
+
+/// Whether `token` ends a `case` pattern (`build)`, `(lint)`, `*)`) or is a
+/// function header (`build()`). An unquoted `)` cannot end a command name,
+/// but it does end a command substitution (`$(npm bin)`).
+fn ends_case_pattern(token: &str) -> bool {
+    token.ends_with(')') && !token.contains("$(") && !token.contains('`')
+}
+
+/// Return the index of the command at the start of a segment, after the
+/// shell reserved words (`then`, `do`), a `case` pattern, a function
+/// header (`function name`, `name()`) and the
+/// redirections before the command (`> log`). Return `None` when the segment
+/// runs no command. The shell reads a reserved word only in command
+/// position, so a caller passes the tokens of a whole segment.
+pub(super) fn command_start(tokens: &[&str]) -> Option<usize> {
+    let mut idx = 0;
+    while let Some(token) = tokens.get(idx) {
+        idx += if COMMAND_PREFIX_WORDS.contains(token) {
+            1
+        } else if *token == "function" {
+            2
+        } else if *token == "case" {
+            // `case "$1" in build) tsc`: the command follows the pattern.
+            tokens[idx..].iter().position(|word| *word == "in")? + 1
+        } else if ends_case_pattern(token) {
+            1
+        } else if let Some(taken) = redirection_tokens(&tokens[idx..]) {
+            taken
+        } else {
+            break;
+        };
+    }
+    let token = tokens.get(idx)?;
+    (!NON_COMMAND_WORDS.contains(token)).then_some(idx)
+}
+
+/// Package-manager commands that download and run a package that the project
+/// does not need to install (`npx foo`, `pnpm dlx foo`).
+pub(super) fn downloads_its_command(segment: &str) -> bool {
+    let words = split_words(segment);
+    let words: Vec<&str> = words.iter().map(|word| word.value.as_ref()).collect();
+    let Some(start) = command_start(&words) else {
+        return false;
+    };
+    let mut tokens = words[start..].iter().copied().skip_while(|token| {
+        super::ENV_WRAPPERS.contains(token)
+            || *token == "--"
+            || (token.contains('=') && !token.starts_with('-'))
+    });
+    let Some(manager) = tokens.next() else {
+        return false;
+    };
+    // Flags such as `--filter web` can come before the subcommand, so the
+    // subcommand is the first token that is not a flag or a flag value.
+    let mut subcommands = tokens.filter(|token| !token.starts_with('-'));
+    match manager {
+        "npx" | "pnpx" | "bunx" => true,
+        "pnpm" | "yarn" => subcommands.any(|token| token == "dlx"),
+        // `npm x` and `bun x` are the aliases of `npm exec` and `bunx`.
+        "npm" | "bun" => subcommands.next().is_some_and(|token| token == "x"),
+        _ => false,
+    }
+}
+
+/// Skip shell reserved words, env var assignments (`KEY=value`) and env
+/// wrapper commands (`cross-env`, `dotenv`, `env`) at the start of a token
+/// list. Returns the index of the first real command token, or `None` if all
+/// tokens were consumed. Reserved words count only at index 0, the start of a
+/// segment: after a wrapper, `for` is the name of a command.
 pub fn skip_initial_wrappers(tokens: &[&str], mut idx: usize) -> Option<usize> {
+    if idx == 0 {
+        idx = command_start(tokens)?;
+    }
     while idx < tokens.len() && super::is_env_assignment(tokens[idx]) {
         idx += 1;
     }
@@ -700,6 +1031,54 @@ mod tests {
         assert!(command_substitutions("echo \\$(node none.ts) \\`x`").is_empty());
         assert!(command_substitutions("x=$(node none.ts").is_empty());
         assert!(command_substitutions("x=`node none.ts").is_empty());
+    }
+
+    #[test]
+    fn split_subshell_parentheses() {
+        let segments: Vec<&str> = split_shell_operators(r#"([ -n "$CI" ] || (skill install))"#)
+            .into_iter()
+            .map(str::trim)
+            .filter(|segment| !segment.is_empty())
+            .collect();
+        assert_eq!(segments, vec![r#"[ -n "$CI" ]"#, "skill install"]);
+    }
+
+    #[test]
+    fn split_keeps_substitution_and_word_parentheses() {
+        assert_eq!(
+            split_shell_operators("$(npm bin)/tsc -p ."),
+            vec!["$(npm bin)/tsc -p ."]
+        );
+        assert_eq!(
+            split_shell_operators("echo $((1 + 2))"),
+            vec!["echo $((1 + 2))"]
+        );
+        assert_eq!(
+            split_shell_operators("tool 'a (b) c'"),
+            vec!["tool 'a (b) c'"]
+        );
+        assert_eq!(split_shell_operators(r"tool \(b\)"), vec![r"tool \(b\)"]);
+        assert_eq!(split_shell_operators("a) tool"), vec!["a) tool"]);
+    }
+
+    #[test]
+    fn skip_reserved_words_at_segment_start() {
+        assert_eq!(skip_initial_wrappers(&["then", "eslint", "."], 0), Some(1));
+        assert_eq!(
+            skip_initial_wrappers(&["do", "if", "!", "grep"], 0),
+            Some(3)
+        );
+        assert_eq!(
+            skip_initial_wrappers(&["then", "A=1", "eslint"], 0),
+            Some(2)
+        );
+        assert_eq!(
+            skip_initial_wrappers(&["for", "app", "in", "lib/*"], 0),
+            None
+        );
+        assert_eq!(skip_initial_wrappers(&["done", "<", "list.txt"], 0), None);
+        assert_eq!(skip_initial_wrappers(&["fi"], 0), None);
+        assert_eq!(skip_initial_wrappers(&["nohup", "done"], 1), Some(1));
     }
 
     #[test]

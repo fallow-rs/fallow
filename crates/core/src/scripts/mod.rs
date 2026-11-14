@@ -1511,29 +1511,6 @@ pub fn is_shell_builtin(cmd: &str) -> bool {
     is_builtin_command(cmd)
 }
 
-/// Package-manager commands that download and run a package that the project
-/// does not need to install (`npx foo`, `pnpm dlx foo`).
-fn downloads_its_command(segment: &str) -> bool {
-    let mut tokens = segment.split_whitespace().skip_while(|token| {
-        ENV_WRAPPERS.contains(token)
-            || *token == "--"
-            || (token.contains('=') && !token.starts_with('-'))
-    });
-    let Some(manager) = tokens.next() else {
-        return false;
-    };
-    // Flags such as `--filter web` can come before the subcommand, so the
-    // subcommand is the first token that is not a flag or a flag value.
-    let mut subcommands = tokens.filter(|token| !token.starts_with('-'));
-    match manager {
-        "npx" | "pnpx" | "bunx" => true,
-        "pnpm" | "yarn" => subcommands.any(|token| token == "dlx"),
-        // `npm x` and `bun x` are the aliases of `npm exec` and `bunx`.
-        "npm" | "bun" => subcommands.next().is_some_and(|token| token == "x"),
-        _ => false,
-    }
-}
-
 /// The binary names that the commands of one script body run, after
 /// environment, package-manager and wrapper prefixes. A command that a
 /// package manager downloads on demand (`npx`, `pnpm dlx`) is not included.
@@ -1541,7 +1518,7 @@ fn downloads_its_command(segment: &str) -> bool {
 pub fn script_binaries(script: &str) -> Vec<String> {
     let mut binaries = Vec::new();
     for segment in shell::split_shell_operators(script) {
-        if downloads_its_command(segment) {
+        if shell::downloads_its_command(segment) {
             continue;
         }
         for command in parse_script(segment) {

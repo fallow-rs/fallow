@@ -220,6 +220,155 @@ fn directory_change_applies_per_command_segment() {
 }
 
 #[test]
+fn directory_change_in_a_subshell_ends_with_the_subshell() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("sub")).unwrap();
+    write(
+        dir.path(),
+        "run.sh",
+        "(cd sub && tsx inner.ts); tsx root.ts\n(cd sub) && tsx next.ts\n",
+    );
+    let result = analyze(dir.path(), "bash run.sh");
+    for entry in ["sub/inner.ts", "root.ts", "next.ts"] {
+        assert!(
+            has_entry(&result, entry),
+            "{entry}: {:?}",
+            result.entry_files
+        );
+    }
+    assert!(
+        !has_entry(&result, "sub/root.ts"),
+        "{:?}",
+        result.entry_files
+    );
+}
+
+#[test]
+fn directory_change_in_a_multi_line_subshell_ends_with_the_subshell() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("sub")).unwrap();
+    write(
+        dir.path(),
+        "run.sh",
+        "(cd sub && tsx inner.ts\ntsx later.ts)\ntsx last.ts\n(true; cd sub\nnode deep.js\n)\nnode root.js\n(cd sub\npwd)\nnode top.js\n",
+    );
+    let result = analyze(dir.path(), "bash run.sh");
+    for entry in [
+        "sub/inner.ts",
+        "sub/later.ts",
+        "last.ts",
+        "sub/deep.js",
+        "root.js",
+    ] {
+        assert!(
+            has_entry(&result, entry),
+            "{entry}: {:?}",
+            result.entry_files
+        );
+    }
+    for entry in ["sub/last.ts", "sub/root.js", "sub/top.js"] {
+        assert!(
+            !has_entry(&result, entry),
+            "{entry}: {:?}",
+            result.entry_files
+        );
+    }
+}
+
+#[test]
+fn case_pattern_in_a_subshell_does_not_end_the_subshell() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("sub")).unwrap();
+    write(
+        dir.path(),
+        "run.sh",
+        "(cd sub; case a in a) node inner.js;; esac); node root.js\n",
+    );
+    let result = analyze(dir.path(), "bash run.sh");
+    for entry in ["sub/inner.js", "root.js"] {
+        assert!(
+            has_entry(&result, entry),
+            "{entry}: {:?}",
+            result.entry_files
+        );
+    }
+}
+
+#[test]
+fn case_pattern_with_a_space_in_a_subshell_does_not_end_the_subshell() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("sub")).unwrap();
+    write(
+        dir.path(),
+        "run.sh",
+        "(cd sub; case a in a ) node inner.js;; esac)\ncase x in\nx) (cd sub\npwd)\nnode root.js\n;;\nesac\n",
+    );
+    let result = analyze(dir.path(), "bash run.sh");
+    for entry in ["sub/inner.js", "root.js"] {
+        assert!(
+            has_entry(&result, entry),
+            "{entry}: {:?}",
+            result.entry_files
+        );
+    }
+    assert!(
+        !has_entry(&result, "sub/root.js"),
+        "{:?}",
+        result.entry_files
+    );
+}
+
+#[test]
+fn helper_call_after_a_directory_change_in_a_subshell_is_not_followed() {
+    let dir = tempfile::tempdir().unwrap();
+    write(dir.path(), "run.sh", "node wrong.js\n");
+    write(dir.path(), "sub/run.sh", "node right.js\n");
+    let result = analyze(dir.path(), "(cd sub && bash run.sh)");
+    assert!(!has_entry(&result, "wrong.js"), "{:?}", result.entry_files);
+}
+
+#[test]
+fn quoted_substitution_over_lines_does_not_end_the_subshell() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("sub")).unwrap();
+    write(
+        dir.path(),
+        "run.sh",
+        "(\n  cd sub\n  value=\"$(\n    printf value\n  )\"\n  node inner.js\n)\nnode root.js\n",
+    );
+    let result = analyze(dir.path(), "bash run.sh");
+    for entry in ["sub/inner.js", "root.js"] {
+        assert!(
+            has_entry(&result, entry),
+            "{entry}: {:?}",
+            result.entry_files
+        );
+    }
+}
+
+#[test]
+fn directory_change_ignores_a_redirection_after_the_target() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("sub")).unwrap();
+    write(dir.path(), "run.sh", "cd sub &>build.log\nnode entry.js\n");
+    let result = analyze(dir.path(), "bash run.sh");
+    assert!(
+        has_entry(&result, "sub/entry.js"),
+        "{:?}",
+        result.entry_files
+    );
+}
+
+#[test]
+fn directory_change_in_a_script_subshell_does_not_stop_helper_lookup() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("sub")).unwrap();
+    write(dir.path(), "run.sh", "node entry.js\n");
+    let result = analyze(dir.path(), "if true; then (cd sub); fi; bash run.sh");
+    assert!(has_entry(&result, "entry.js"), "{:?}", result.entry_files);
+}
+
+#[test]
 fn top_level_directory_change_stops_helper_lookup() {
     let dir = tempfile::tempdir().unwrap();
     write(dir.path(), "run.sh", "root-cli\n");
