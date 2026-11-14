@@ -310,20 +310,31 @@ function isSkipRequested(env = process.env) {
   return v === "1" || v === "true" || v === "yes";
 }
 
+// `detect-libc` is a dependency of the installed `fallow` package. The GitHub
+// Action runs this file from the Action checkout, which has no `node_modules`,
+// so a plain `require` fails there. Without the fallback to the installed
+// package, a glibc host looks for the musl package, which npm did not install.
+function detectLibcFamily(resolveOptions) {
+  try {
+    return require("detect-libc").familySync();
+  } catch {
+    // Not next to this file; try the installed package.
+  }
+  if (resolveOptions === undefined) return undefined;
+  try {
+    return require(require.resolve("detect-libc", resolveOptions)).familySync();
+  } catch {
+    return undefined;
+  }
+}
+
 // The same selection as the launcher in run-binary.js, so that verification
 // checks the binary that the launcher runs.
 function currentPlatformPackageName(resolveFrom) {
-  let libcFamily;
-  if (process.platform === "linux") {
-    try {
-      libcFamily = require("detect-libc").familySync();
-    } catch {
-      libcFamily = undefined;
-    }
-  }
+  const options = resolveFrom ? { paths: [resolveFrom] } : undefined;
+  const libcFamily = process.platform === "linux" ? detectLibcFamily(options) : undefined;
   const candidates = getPlatformPackageCandidates(process.platform, process.arch, libcFamily);
   if (candidates.length === 0) return null;
-  const options = resolveFrom ? { paths: [resolveFrom] } : undefined;
   const installed = resolveInstalledPlatformPackage(candidates, (request) =>
     require.resolve(request, options),
   );
