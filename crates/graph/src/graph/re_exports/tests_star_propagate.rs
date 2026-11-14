@@ -395,6 +395,33 @@ fn entry_named_re_export_mixed_consumer_credits_unconsumed_namespace_through_sta
 }
 
 #[test]
+fn entry_named_re_export_mixed_consumer_credits_unconsumed_namespace_from_direct_source() {
+    let mut entry = module(0, "index");
+    entry.re_exports = vec![re_export(1, "Merged", "Merged")];
+    entry.resolved_imports = vec![named_import(2, "keep")];
+
+    let mut leaf = module(1, "leaf");
+    leaf.exports = vec![type_export("Merged"), export("Merged")].into();
+
+    let mut internal = module(2, "internal");
+    internal.exports = vec![export("keep")].into();
+    internal.resolved_imports = vec![type_import(0, "Merged")];
+    internal.type_referenced_import_bindings = vec!["Merged".to_string()];
+
+    let graph = with_re_export_differential_check(|| build(&[entry, leaf, internal], 0));
+
+    // The entry re-export is public API, so the value side is credited even
+    // though the only in-graph consumer reads the type side.
+    assert_eq!(
+        export_states(&graph, 1, "Merged"),
+        vec![
+            (true, vec![ExportNamespace::Type]),
+            (false, vec![ExportNamespace::Value]),
+        ]
+    );
+}
+
+#[test]
 fn non_entry_named_re_export_through_star_without_consumer_stays_uncredited() {
     let mut entry = module(0, "index");
     entry.resolved_imports = vec![named_import(1, "alive")];
