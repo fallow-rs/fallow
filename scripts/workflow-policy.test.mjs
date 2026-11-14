@@ -1456,6 +1456,26 @@ test("publication re-checks the release metadata the tag-last workflow cannot re
   assert.match(procedure, /release-published\.yml/u);
 });
 
+test("publication runs the Action on Linux with binary verification on", () => {
+  const workflow = readWorkflow(".github/workflows/release-published.yml");
+  const job = indentedBlock(workflow, "action-smoke", 2);
+
+  assert.match(job, /runs-on: ubuntu-/u);
+  assert.match(job, /permissions:\n\s+contents: read/u);
+  assert.match(job, /persist-credentials: false/u);
+  assert.match(job, /uses: \.\//u);
+  // The job exists to run the verifier. A skip, or a pinned CLI version,
+  // makes it pass on a release that is broken for users.
+  assert.doesNotMatch(job, /FALLOW_SKIP_BINARY_VERIFY/u);
+  assert.doesNotMatch(job, /^\s+version:/mu);
+  const runBlocks = job
+    .split(/^\s+run: \|?$/mu)
+    .slice(1)
+    .join("\n");
+  assert.doesNotMatch(runBlocks, /\$\{\{ github\.event/u);
+  assert.doesNotMatch(job, /^\s+ref:/mu);
+});
+
 test("release verifies committed signing-key parity before signing", () => {
   const workflow = readWorkflow(".github/workflows/release.yml");
   const parityStep = workflow.indexOf("- name: Verify binary-signing public key parity");

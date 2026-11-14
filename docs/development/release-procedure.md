@@ -781,6 +781,10 @@ runs. The gate fails when these conditions occur:
     Assets, tag and target are frozen at publication, but the title and body
     are not, so a failure there is repaired with `gh release edit --title` or
     `--notes-file` rather than by recreating anything.
+    The same workflow runs the Action on a glibc Linux runner with binary
+    verification on, against the release that npm now serves as `latest`. A
+    failure of that job means that the Action is broken for users: repair it
+    with a patch release.
     Then verify every published crate, npm package, editor package, MCP
     Registry entry, binary, schema, documentation deployment, and companion
     contract from its real public endpoint.

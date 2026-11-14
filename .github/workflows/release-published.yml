@@ -47,3 +47,50 @@ jobs:
           node scripts/verify-release-metadata.mjs \
             --tag "$TAG_NAME" \
             --release-json release.json
+
+  # The published Action on a glibc Linux runner, with binary verification on.
+  # The smoke jobs in `test-action.yml` set FALLOW_SKIP_BINARY_VERIFY, because
+  # a pull request can carry a verifier that is newer than the published
+  # packages. So this job is the only one that runs the verifier of the Action
+  # against the packages that npm installs for the new release. With 3.43.0 the
+  # verifier looked for the musl package on a glibc host, and no job failed
+  # (issue #4591).
+  action-smoke:
+    name: Run the published Action on Linux
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+
+      # No `version` input: the Action installs the latest published release,
+      # as a workflow of a user does.
+      - name: Run the Action with binary verification
+        id: fallow
+        uses: ./
+        with:
+          command: dead-code
+          root: tests/fixtures/basic-project
+          format: json
+          fail-on-issues: false
+
+      - name: Check the result and the installed version
+        shell: bash
+        env:
+          RESULTS_PATH: ${{ steps.fallow.outputs.results }}
+          TAG_NAME: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          jq -e '.total_issues' "$RESULTS_PATH" > /dev/null
+          installed="$(jq -r '.version' "$RESULTS_PATH")"
+          if [ "v${installed}" != "$TAG_NAME" ]; then
+            echo "::error::The Action installed fallow ${installed}, but the release is ${TAG_NAME}"
+            exit 1
+          fi
