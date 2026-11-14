@@ -3,8 +3,8 @@ use std::path::Path;
 use fallow_types::discover::FileId;
 use fallow_types::extract::{
     ArgFact, BindingArg, BindingRoot, CallSite, CallTarget, ContractIncomplete, FunctionContract,
-    FunctionContractFacts, ImportBindingReferenceKind, KeyArg, KeyValue, LiteralValue, ModuleInfo,
-    OpaqueLoads, ParamKind,
+    FunctionContractFacts, ImportBindingReferenceKind, KeyArg, KeyValue, LiteralValue,
+    LoaderReturn, ModuleInfo, OpaqueLoads, ParamKind,
 };
 
 fn parse_at(path: &str, source: &str) -> ModuleInfo {
@@ -847,12 +847,14 @@ fn read_names(names: &[&str]) -> OpaqueLoads {
     OpaqueLoads {
         names: names.iter().map(ToString::to_string).collect(),
         escapes: false,
+        loaders: Vec::new(),
     }
 }
 
 const ESCAPE: OpaqueLoads = OpaqueLoads {
     names: Vec::new(),
     escapes: true,
+    loaders: Vec::new(),
 };
 
 #[test]
@@ -947,11 +949,89 @@ fn a_jsx_member_tag_of_a_loaded_value_records_the_name() {
     );
 }
 
+fn loader(promise: bool) -> OpaqueLoads {
+    OpaqueLoads {
+        names: Vec::new(),
+        escapes: false,
+        loaders: vec![LoaderReturn {
+            contract: 0,
+            promise,
+        }],
+    }
+}
+
+#[test]
+fn a_module_scope_function_that_returns_a_loaded_value_is_a_loader() {
+    for (source, promise) in [
+        ("export const load = (name: string) => import(name);", true),
+        (
+            "export async function get(name: string) { return await import(name); }",
+            true,
+        ),
+        (
+            "export async function get(name: string) {\n  const mod = await import(name);\n  return mod;\n}",
+            true,
+        ),
+        (
+            "export const load = (name: string) => require(name);",
+            false,
+        ),
+        (
+            "export const load = function (name: string) { return require(name); };",
+            false,
+        ),
+        (
+            "export const load = (name: string) => import(name).catch(() => null);",
+            true,
+        ),
+    ] {
+        assert_eq!(opaque_loads(source), loader(promise), "{source}");
+    }
+}
+
+#[test]
+fn a_return_from_a_function_that_is_not_a_loader_candidate_records_an_escape() {
+    for source in [
+        "export function outer(name: string) {\n  const inner = () => import(name);\n  return inner;\n}",
+        "export function outer(name: string) {\n  return [1].map(() => require(name));\n}",
+        "export class Loader {\n  load(name: string) { return import(name); }\n}",
+        "export const api = { load(name: string) { return import(name); } };",
+        "export function* load(name: string) { return import(name); }",
+        "export async function* load(name: string) { return await import(name); }",
+    ] {
+        assert!(opaque_loads(source).escapes, "{source}");
+    }
+}
+
+#[test]
+fn a_call_records_the_reads_of_its_result_as_a_value_and_as_a_promise() {
+    let info = parse(
+        "import { load } from './load';\n\
+         const mod = await load(name);\n\
+         mod.migrate();\n\
+         load(name).then((m) => m.pad());\n\
+         load(name);\n",
+    );
+    let results = &facts(&info).calls[0].results;
+    assert_eq!(results.value, read_names(&["migrate", "then"]));
+    assert_eq!(results.promise, read_names(&["migrate", "pad"]));
+}
+
+#[test]
+fn a_call_result_with_too_many_reads_records_an_escape() {
+    let reads = (0..40)
+        .map(|n| format!("mod.f{n}();"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let info = parse(&format!(
+        "import {{ load }} from './load';\nconst mod = load(name);\n{reads}"
+    ));
+    assert_eq!(facts(&info).calls[0].results.value, ESCAPE);
+}
+
 #[test]
 fn a_loaded_value_that_escapes_records_an_escape() {
     for source in [
-        "export const load = (name: string) => import(name);",
-        "export async function get(name: string) { return await import(name); }",
         "const mod = await import(name);\nconst alias = mod;",
         "let mod;\nmod = await import(name);\nmod.pad();",
         "console.log(await import(name));",
@@ -975,11 +1055,11 @@ fn a_loaded_value_that_escapes_records_an_escape() {
         "import(name).then((m) => m);",
         "import(name).then((...args) => args);",
         "const promise = import(name);",
-        "export const load = (x: string) => import(`${x}`);",
-        "export const load = (x: string) => import(`@/views/${x}`);",
-        "export const load = (x: string) => import('pkg/' + x);",
-        "export const load = (x: string) => require(`./views/${x}`);",
-        "export const load = (x: string) => import((x as string));",
+        "console.log(import(`${x}`));",
+        "console.log(import(`@/views/${x}`));",
+        "console.log(import('pkg/' + x));",
+        "console.log(require(`./views/${x}`));",
+        "console.log(import((x as string)));",
         "const r = require;\nconst mod = r(process.env.X);\nmod.pad('z', 2);",
         "export const mod = await import(name);",
         "export let mod = await import(name);",
@@ -1041,8 +1121,8 @@ fn a_load_with_a_known_source_or_pattern_records_nothing() {
 #[test]
 fn an_imports_map_prefix_keeps_a_data_suffix_opaque() {
     for source in [
-        "export const load = (x: string) => import(`#i18n/${x}.json`);",
-        "export const load = (x: string) => require('#styles/' + x + '.css');",
+        "console.log(import(`#i18n/${x}.json`));",
+        "console.log(require('#styles/' + x + '.css'));",
     ] {
         assert_eq!(opaque_loads(source), ESCAPE, "{source}");
     }

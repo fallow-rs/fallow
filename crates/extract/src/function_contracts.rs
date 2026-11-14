@@ -8,8 +8,8 @@
 //! admitted, and calls to globals, are not stored, so the cost stays low.
 
 use fallow_types::extract::{
-    ArgFact, CallSite, CallTarget, ContractIncomplete, FunctionCalls, FunctionContract,
-    FunctionContractFacts, ImportInfo, LiteralValue, LocalFunctionEscape, OpaqueLoads,
+    ArgFact, CallResultReads, CallSite, CallTarget, ContractIncomplete, FunctionCalls,
+    FunctionContract, FunctionContractFacts, ImportInfo, LiteralValue, LocalFunctionEscape,
     OptionKeyFact, ParamFact, ParamKind,
 };
 use oxc_ast::AstKind;
@@ -27,6 +27,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::function_body::BodyRef;
 use crate::js_text::JsText as _;
+use crate::opaque_loads::{LoaderCandidates, ReadContext};
 
 /// The count of argument facts kept for one call. `CallSite.arg_count`
 /// keeps the full count, so a later position is unknown, not omitted.
@@ -37,14 +38,28 @@ pub const MAX_ARG_FACTS: usize = 16;
 /// cap can only hide a finding, never add one.
 pub const MAX_LITERAL_STRING_BYTES: usize = 64;
 
-/// A call site with its callee, before the sites are grouped per callee.
-type FlatCall = (CallTarget, Box<str>, CallSite);
+/// A call site with its callee.
+type SiteCall = (CallTarget, Box<str>, CallSite);
+
+/// A call site with its callee and the reads of its result, before the
+/// sites are grouped per callee.
+type FlatCall = (CallTarget, Box<str>, CallSite, CallResultReads);
+
+/// The loads with an unknown source of one program, for the semantic pass.
+pub struct OpaqueLoadInput<'l> {
+    /// The span of each `import()` or `require` call with an unknown source.
+    pub loads: &'l FxHashSet<Span>,
+    /// `true` for a component script whose template can read each top-level
+    /// binding, such as a Vue `<script setup>` block.
+    pub template_reads_root: bool,
+}
 
 /// Collect the call evidence of one parsed program.
 pub fn collect(
     semantic: &Semantic<'_>,
     program: &Program<'_>,
     imports: &[ImportInfo],
+    opaque: &OpaqueLoadInput<'_>,
 ) -> FunctionContractFacts {
     let ModuleContracts {
         declarations,
@@ -52,18 +67,33 @@ pub fn collect(
         scopes,
         ..
     } = collect_contracts(semantic, program);
+    let loader_candidates: LoaderCandidates = scopes
+        .iter()
+        .zip(&declarations)
+        .enumerate()
+        // A call of a generator gives an iterator, not the returned value.
+        .filter(|(_, (_, contract))| contract.incomplete != Some(ContractIncomplete::Generator))
+        .filter_map(|(index, (scope, contract))| {
+            Some((scope.span, (u32::try_from(index).ok()?, contract.is_async)))
+        })
+        .collect();
+    let context = ReadContext {
+        template_reads_root: opaque.template_reads_root,
+        loader_candidates: &loader_candidates,
+    };
+    let opaque_loads = crate::opaque_loads::collect(semantic, opaque.loads, context);
     let (values, literal_consts) = values::value_scope(semantic, program, imports);
     let mut calls = Vec::new();
     let mut escapes = Vec::new();
     collect_local_uses(
-        semantic,
+        (semantic, context),
         &values,
         &bindings,
         &scopes,
         &mut calls,
         &mut escapes,
     );
-    collect_import_calls(semantic, &values, imports, &mut calls);
+    collect_import_calls((semantic, context), &values, imports, &mut calls);
     escapes.sort_by_key(|escape| escape.span_start);
     FunctionContractFacts {
         declarations,
@@ -71,9 +101,24 @@ pub fn collect(
         escapes,
         template_callers: false,
         direct_eval: calls_direct_eval(semantic),
-        opaque_loads: OpaqueLoads::default(),
+        opaque_loads,
         literal_consts,
     }
+}
+
+/// Add the reads of the result of the call at `call_id`. A call whose
+/// result the code discards reads nothing.
+fn with_result_reads(
+    (semantic, context): (&Semantic<'_>, ReadContext<'_>),
+    call_id: NodeId,
+    (target, member_path, site): SiteCall,
+) -> FlatCall {
+    let results = if site.result_used {
+        crate::opaque_loads::read_call_result(semantic, call_id, context)
+    } else {
+        CallResultReads::default()
+    };
+    (target, member_path, site, results)
 }
 
 /// `true` when an `eval` that no binding shadows is the callee of a call.
@@ -208,7 +253,7 @@ impl SelfCallScope {
 
 /// Record each read of a local function binding as a call or an escape.
 fn collect_local_uses(
-    semantic: &Semantic<'_>,
+    (semantic, context): (&Semantic<'_>, ReadContext<'_>),
     values: &values::ValueScope,
     bindings: &[(SymbolId, u32)],
     scopes: &[SelfCallScope],
@@ -227,13 +272,16 @@ fn collect_local_uses(
                 continue;
             };
             match local_use(nodes, node_id, identifier.span) {
-                LocalUse::Call(call_id) => calls.extend(function_call(
-                    nodes,
-                    (scoping, values),
-                    call_id,
-                    (CallTarget::Local(index), String::new()),
-                    scopes.get(index as usize),
-                )),
+                LocalUse::Call(call_id) => calls.extend(
+                    function_call(
+                        nodes,
+                        (scoping, values),
+                        call_id,
+                        (CallTarget::Local(index), String::new()),
+                        scopes.get(index as usize),
+                    )
+                    .map(|call| with_result_reads((semantic, context), call_id, call)),
+                ),
                 LocalUse::Export => {}
                 LocalUse::Escape => escapes.push(LocalFunctionEscape {
                     contract: index,
@@ -940,7 +988,7 @@ fn unwrap_upward(nodes: &AstNodes<'_>, node_id: NodeId, span: Span) -> (NodeId, 
 
 /// Record each direct call whose callee root is an admitted import binding.
 fn collect_import_calls(
-    semantic: &Semantic<'_>,
+    (semantic, context): (&Semantic<'_>, ReadContext<'_>),
     values: &values::ValueScope,
     imports: &[ImportInfo],
     calls: &mut Vec<FlatCall>,
@@ -974,7 +1022,7 @@ fn collect_import_calls(
                 (CallTarget::Import(import_index), path),
                 None,
             ) {
-                calls.push(call);
+                calls.push(with_result_reads((semantic, context), call_id, call));
             }
         }
     }
@@ -1019,7 +1067,7 @@ fn function_call(
     call_id: NodeId,
     (target, member_path): (CallTarget, String),
     scope: Option<&SelfCallScope>,
-) -> Option<FlatCall> {
+) -> Option<SiteCall> {
     let AstKind::CallExpression(call) = nodes.kind(call_id) else {
         return None;
     };
@@ -1063,13 +1111,15 @@ fn function_call(
 /// Group the sites per callee. The groups follow their first site, and the
 /// sites of a group follow source order.
 fn group_calls(mut flat: Vec<FlatCall>) -> Vec<FunctionCalls> {
-    flat.sort_by_key(|(_, _, site)| site.span_start);
+    flat.sort_by_key(|(_, _, site, _)| site.span_start);
     let mut groups: Vec<FunctionCalls> = Vec::new();
     let mut index: FxHashMap<(CallTarget, Box<str>), usize> = FxHashMap::default();
-    for (target, member_path, site) in flat {
+    for (target, member_path, site, results) in flat {
         match index.entry((target, member_path)) {
             std::collections::hash_map::Entry::Occupied(entry) => {
-                groups[*entry.get()].sites.push(site);
+                let group = &mut groups[*entry.get()];
+                group.sites.push(site);
+                group.results.merge(results);
             }
             std::collections::hash_map::Entry::Vacant(entry) => {
                 let (target, member_path) = entry.key().clone();
@@ -1078,9 +1128,14 @@ fn group_calls(mut flat: Vec<FlatCall>) -> Vec<FunctionCalls> {
                     target,
                     member_path,
                     sites: vec![site],
+                    results,
                 });
             }
         }
+    }
+    for group in &mut groups {
+        crate::opaque_loads::limit_names(&mut group.results.value);
+        crate::opaque_loads::limit_names(&mut group.results.promise);
     }
     groups
 }

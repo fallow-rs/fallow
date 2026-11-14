@@ -50,13 +50,6 @@ impl FunctionContractFacts {
         })
     }
 
-    /// These facts with the uses of the loads with an unknown source.
-    #[must_use]
-    pub fn with_opaque_loads(mut self, opaque_loads: OpaqueLoads) -> Self {
-        self.opaque_loads = opaque_loads;
-        self
-    }
-
     /// `true` when the module has no call evidence to store.
     #[must_use]
     pub fn is_empty(&self) -> bool {
@@ -73,30 +66,89 @@ impl FunctionContractFacts {
 /// How the code of one module uses the values of its loads with an unknown
 /// source. A consumer must treat each exported contract of the project with
 /// one of `names` as its export name as open. When `escapes` is `true`, the
-/// consumer must treat each exported contract of the project as open.
+/// consumer must treat each exported contract of the project as open. For
+/// each of `loaders`, the consumer reads the results of the calls of that
+/// function with the same rules.
 #[derive(Debug, Clone, Default, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
 pub struct OpaqueLoads {
     /// The export names that the code reads on a loaded value, sorted and
     /// without repeats. `default` names the default export.
     pub names: Vec<String>,
     /// `true` when a loaded value goes to code that the facts do not follow,
-    /// for example an alias, a call argument, a return value or a spread.
+    /// for example an alias, a call argument, a spread, or a return from a
+    /// function that has no contract.
     pub escapes: bool,
+    /// The functions of the module that return a loaded value, sorted and
+    /// without repeats. Each caller of such a function gets the loaded value.
+    pub loaders: Vec<LoaderReturn>,
 }
 
 impl OpaqueLoads {
-    /// `true` when no load reads a name and no loaded value escapes.
+    /// `true` when no load reads a name, no loaded value escapes, and no
+    /// function returns a loaded value.
     #[must_use]
     pub const fn is_empty(&self) -> bool {
-        self.names.is_empty() && !self.escapes
+        self.names.is_empty() && !self.escapes && self.loaders.is_empty()
     }
 
-    /// Add the names and the escape of `other`.
+    /// Add the names, the escape and the loaders of `other`.
     pub fn merge(&mut self, other: Self) {
         self.names.extend(other.names);
         self.names.sort_unstable();
         self.names.dedup();
         self.escapes |= other.escapes;
+        self.loaders.extend(other.loaders);
+        self.loaders.sort_unstable();
+        self.loaders.dedup();
+    }
+
+    /// Move each loader index past `base`, for the facts of a later script
+    /// block of one host file.
+    pub fn shift_loaders(&mut self, base: u32) {
+        for loader in &mut self.loaders {
+            loader.contract = loader.contract.saturating_add(base);
+        }
+    }
+}
+
+/// A function contract that returns the value of a load with an unknown
+/// source, such as `const load = (path) => import(path)`.
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, bitcode::Encode, bitcode::Decode,
+)]
+pub struct LoaderReturn {
+    /// Index into [`FunctionContractFacts::declarations`].
+    pub contract: u32,
+    /// `true` when a call of the function gives a promise of the loaded
+    /// value: the function is `async`, or it returns the promise of an
+    /// `import()`.
+    pub promise: bool,
+}
+
+/// How the code uses the results of the calls of one callee, read with the
+/// rules of [`OpaqueLoads`]. The extractor does not know what the callee
+/// returns, so it reads the results in two ways. When the callee is a
+/// loader ([`OpaqueLoads::loaders`]), a consumer reads the way that matches
+/// the loader.
+#[derive(Debug, Clone, Default, PartialEq, Eq, bitcode::Encode, bitcode::Decode)]
+pub struct CallResultReads {
+    /// The uses when each call gives the loaded value.
+    pub value: OpaqueLoads,
+    /// The uses when each call gives a promise of the loaded value.
+    pub promise: OpaqueLoads,
+}
+
+impl CallResultReads {
+    /// Add the uses of `other`.
+    pub fn merge(&mut self, other: Self) {
+        self.value.merge(other.value);
+        self.promise.merge(other.promise);
+    }
+
+    /// Move each loader index past `base`.
+    pub fn shift_loaders(&mut self, base: u32) {
+        self.value.shift_loaders(base);
+        self.promise.shift_loaders(base);
     }
 }
 
@@ -233,6 +285,8 @@ pub struct FunctionCalls {
     pub member_path: Box<str>,
     /// Each call of this callee, in source order. Never empty.
     pub sites: Vec<CallSite>,
+    /// The uses of the results of the sites whose result the code uses.
+    pub results: CallResultReads,
 }
 
 /// One direct call of a [`FunctionCalls`] callee.

@@ -115,6 +115,7 @@ impl ModuleInfoExtractor {
                 for site in &mut calls.sites {
                     merge_binding_args(&mut site.args, import_base);
                 }
+                calls.results.shift_loaders(local_base);
                 calls
             }));
         facts.literal_consts.extend(incoming.literal_consts);
@@ -126,7 +127,9 @@ impl ModuleInfoExtractor {
             }));
         facts.template_callers |= incoming.template_callers;
         facts.direct_eval |= incoming.direct_eval;
-        facts.opaque_loads.merge(incoming.opaque_loads);
+        let mut opaque_loads = incoming.opaque_loads;
+        opaque_loads.shift_loaders(local_base);
+        facts.opaque_loads.merge(opaque_loads);
         facts
             .calls
             .sort_by_key(|calls| calls.sites.first().map_or(0, |site| site.span_start));

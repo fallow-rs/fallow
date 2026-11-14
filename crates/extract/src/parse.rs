@@ -1817,11 +1817,10 @@ fn compute_semantic_usage_with_candidates(
         &imported_call_reference_spans,
     );
     let namespace_member_uses = crate::namespace_member_uses::collect(&semantic, imports, exports);
-    let opaque_loads = crate::opaque_loads::collect(
-        &semantic,
-        candidates.opaque_loads,
-        candidates.template_reads_root,
-    );
+    let opaque = crate::function_contracts::OpaqueLoadInput {
+        loads: candidates.opaque_loads,
+        template_reads_root: candidates.template_reads_root,
+    };
     SemanticUsage {
         import_binding_usage: ImportBindingUsage {
             unused,
@@ -1844,8 +1843,9 @@ fn compute_semantic_usage_with_candidates(
         component_contracts: crate::component_contracts::collect(&semantic, imports, exports),
         effect_facts: crate::effect_facts::collect(&semantic, program, imports, exports),
         shared_state: crate::shared_state::collect(&semantic, imports, candidates.mode),
-        function_contracts: crate::function_contracts::collect(&semantic, program, imports)
-            .with_opaque_loads(opaque_loads),
+        function_contracts: crate::function_contracts::collect(
+            &semantic, program, imports, &opaque,
+        ),
     }
 }
 
