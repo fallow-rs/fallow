@@ -1086,7 +1086,8 @@ each reason:
     resolves to a namespace re-export (`export * as ns`) blocks the surface
     of its source. `default` names the default export.
   - `escapes` is `true` when the value goes to code that the pass does not
-    follow: an alias, a later assignment, a return, a call argument
+    follow: an alias, a later assignment, a return from a function that is
+    not a loader (see `loaders` below), a call argument
     (`Promise.all([import(x)])` too), an object or array element, an export,
     a spread, an iteration, a computed key that is not a literal, a direct
     call, a rest element, a `.then` callback that is not an inline
@@ -1102,6 +1103,20 @@ each reason:
     line names each module with such an escape.
   - A discarded value (`await import(x);`, `require(x);`) blocks nothing.
     When the loaded file is part of the analysis, its callers are visible.
+  - `loaders` holds each module-scope function that returns the loaded
+    value, with a `return` or as an arrow expression body, for example
+    `export const load = (path) => import(path)`. Such a return is not an
+    escape. The flag `promise` is `true` when a call gives a promise of the
+    value: the function is `async`, or it returns the promise of an
+    `import()`. Extraction reads the uses of the result of each call of a
+    local or imported function twice, as the value and as a promise, into
+    `FunctionCalls::results`. The rule reads the side that matches the
+    loader, so `const mod = await load(name); mod.migrate()` blocks only
+    exports named `migrate`. A loader that returns the result of another
+    loader is also a loader. A return from a nested function or a method is
+    still an escape. A loader with a caller that the facts do not hold
+    (any abstain reason other than `test-file`, for example `entry-export`
+    or `value-reference`) blocks each export.
   A function that no export exposes stays a candidate. A file outside the
   analysis, such as a test file or a support-only file under `--production`,
   does not count.

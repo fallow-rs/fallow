@@ -61,11 +61,11 @@ assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 // The call facts blob of `CachedModule` encodes these types. A blob that an
 // older shape wrote does not decode, and the entry then parses again on each
 // run that reads call facts, so a shape change needs a `CACHE_VERSION` bump.
-assert_cached_type_size!(fallow_types::extract::FunctionContractFacts, 136);
+assert_cached_type_size!(fallow_types::extract::FunctionContractFacts, 160);
 assert_cached_type_size!(fallow_types::extract::FunctionContract, 48);
 assert_cached_type_size!(fallow_types::extract::ParamFact, 56);
 assert_cached_type_size!(fallow_types::extract::OptionKeyFact, 48);
-assert_cached_type_size!(fallow_types::extract::FunctionCalls, 48);
+assert_cached_type_size!(fallow_types::extract::FunctionCalls, 160);
 assert_cached_type_size!(fallow_types::extract::CallSite, 48);
 assert_cached_type_size!(fallow_types::extract::ArgFact, 32);
 assert_cached_type_size!(fallow_types::extract::BindingArg, 24);

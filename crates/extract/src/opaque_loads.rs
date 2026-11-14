@@ -6,43 +6,56 @@
 //! `.then((m) => m.pad())` callback. When the value goes to code that the
 //! pass does not follow, such as an alias, a call argument or a return
 //! value, the pass records an escape. A discarded value reads no export.
+//! A value that a module-scope function returns makes that function a
+//! loader. The analysis then reads the result of each call of the function
+//! with the same rules, so `const mod = await load(name); mod.pad()` reads
+//! `pad`.
 //! A read of the global `require` as a value, such as `require.call(...)`
 //! or `[name].map(require)`, is also an escape: the pass cannot see the
 //! loads that go through it.
 
-use fallow_types::extract::OpaqueLoads;
+use fallow_types::extract::{CallResultReads, LoaderReturn, OpaqueLoads};
 use oxc_ast::AstKind;
 use oxc_ast::ast::{Argument, BinaryOperator, BindingPattern, Expression, FormalParameters};
 use oxc_semantic::{AstNodes, NodeId, Reference, Scoping, Semantic, SymbolId};
 use oxc_span::{GetSpan, Span};
 use oxc_syntax::operator::UnaryOperator;
 use oxc_syntax::symbol::SymbolFlags;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::js_text::JsText;
 use crate::namespace_member_uses::{destructured_keys, member_chain, unwrap_upward};
 
+/// The module-scope functions that can be a loader: the span of each
+/// function with the index of its contract and its `async` flag. A loaded
+/// value that another function returns is an escape.
+pub type LoaderCandidates = FxHashMap<Span, (u32, bool)>;
+
+/// The most names that the reads of the results of one call keep. A call
+/// with more reads counts as an escape. This can only hide a finding, never
+/// add one, and it keeps the facts of each call small.
+const MAX_RESULT_NAMES: usize = 32;
+
+/// What the reader needs to know about the program besides the AST.
+#[derive(Clone, Copy)]
+pub struct ReadContext<'c> {
+    /// `true` for a component script whose template can read each
+    /// top-level binding, such as a Vue `<script setup>` block.
+    pub template_reads_root: bool,
+    /// The functions whose `return` of a loaded value makes them a loader.
+    pub loader_candidates: &'c LoaderCandidates,
+}
+
 /// Read the uses of each load whose `import()` or call span is in `loads`.
-/// `template_reads_root` is `true` for a component script whose template
-/// can read each top-level binding, such as a Vue `<script setup>` block.
 pub fn collect(
     semantic: &Semantic<'_>,
     loads: &FxHashSet<Span>,
-    template_reads_root: bool,
+    context: ReadContext<'_>,
 ) -> OpaqueLoads {
-    let mut reader = Reader {
-        scoping: semantic.scoping(),
-        nodes: semantic.nodes(),
-        names: FxHashSet::default(),
-        escapes: false,
-        template_reads_root,
-    };
+    let mut reader = Reader::new(semantic, context);
     reader.read_require_values();
     if loads.is_empty() {
-        return OpaqueLoads {
-            names: Vec::new(),
-            escapes: reader.escapes,
-        };
+        return reader.finish();
     }
     let mut found = 0;
     for node in reader.nodes.iter() {
@@ -58,11 +71,37 @@ pub fn collect(
     }
     // A load that the pass cannot find has uses that it cannot read.
     reader.escapes |= found < loads.len();
-    let mut names: Vec<String> = reader.names.into_iter().collect();
-    names.sort_unstable();
-    OpaqueLoads {
-        names,
-        escapes: reader.escapes,
+    reader.finish()
+}
+
+/// Read the uses of the result of the call at `call`, once as the loaded
+/// value and once as a promise of it. When the callee is a loader, the
+/// analysis uses the reads that match the loader.
+pub fn read_call_result(
+    semantic: &Semantic<'_>,
+    call: NodeId,
+    context: ReadContext<'_>,
+) -> CallResultReads {
+    let span = semantic.nodes().kind(call).span();
+    let read = |promise: bool| {
+        let mut reader = Reader::new(semantic, context);
+        reader.read_load(call, span, promise);
+        let mut reads = reader.finish();
+        limit_names(&mut reads);
+        reads
+    };
+    CallResultReads {
+        value: read(false),
+        promise: read(true),
+    }
+}
+
+/// Replace the names of call result reads with an escape when they pass
+/// [`MAX_RESULT_NAMES`].
+pub fn limit_names(reads: &mut OpaqueLoads) {
+    if reads.names.len() > MAX_RESULT_NAMES {
+        reads.names = Vec::new();
+        reads.escapes = true;
     }
 }
 
@@ -71,13 +110,39 @@ struct Reader<'s, 'a> {
     nodes: &'s AstNodes<'a>,
     names: FxHashSet<String>,
     escapes: bool,
+    loaders: FxHashSet<LoaderReturn>,
     template_reads_root: bool,
+    loader_candidates: &'s LoaderCandidates,
 }
 
 /// The members of `require` that call the loader with other arguments.
 const REQUIRE_CALL_FORWARDS: &[&str] = &["call", "apply", "bind"];
 
-impl Reader<'_, '_> {
+impl<'s, 'a> Reader<'s, 'a> {
+    fn new(semantic: &'s Semantic<'a>, context: ReadContext<'s>) -> Self {
+        Self {
+            scoping: semantic.scoping(),
+            nodes: semantic.nodes(),
+            names: FxHashSet::default(),
+            escapes: false,
+            loaders: FxHashSet::default(),
+            template_reads_root: context.template_reads_root,
+            loader_candidates: context.loader_candidates,
+        }
+    }
+
+    fn finish(self) -> OpaqueLoads {
+        let mut names: Vec<String> = self.names.into_iter().collect();
+        names.sort_unstable();
+        let mut loaders: Vec<LoaderReturn> = self.loaders.into_iter().collect();
+        loaders.sort_unstable();
+        OpaqueLoads {
+            names,
+            escapes: self.escapes,
+            loaders,
+        }
+    }
+
     /// Record an escape for a read of the global `require` that is not a
     /// direct call. An ambient `declare` of `require` has no runtime
     /// binding, so its references also read the global loader.
@@ -142,7 +207,7 @@ impl Reader<'_, '_> {
     fn read_promise(&mut self, node: NodeId, span: Span) {
         let parent = self.nodes.parent_id(node);
         let AstKind::StaticMemberExpression(member) = self.nodes.kind(parent) else {
-            if !self.is_discarded(node) {
+            if !self.is_discarded(node) && !self.read_return(node, span, true) {
                 self.escapes = true;
             }
             return;
@@ -244,8 +309,49 @@ impl Reader<'_, '_> {
                     UnaryOperator::Typeof | UnaryOperator::Void | UnaryOperator::LogicalNot
                 ) => {}
             AstKind::ExpressionStatement(_) if self.is_discarded(node) => {}
-            _ => self.escapes = true,
+            _ => {
+                if !self.read_return(node, span, false) {
+                    self.escapes = true;
+                }
+            }
         }
+    }
+
+    /// Record a loader when a loader candidate returns the value at `node`,
+    /// with a `return` or as the expression body of an arrow function.
+    /// `promise` is `true` when the value is a promise of the loaded value.
+    fn read_return(&mut self, node: NodeId, span: Span, promise: bool) -> bool {
+        let parent = self.nodes.parent_id(node);
+        let function = match self.nodes.kind(parent) {
+            AstKind::ReturnStatement(statement)
+                if statement.argument.as_ref().map(GetSpan::span) == Some(span) =>
+            {
+                self.nodes
+                    .ancestors(parent)
+                    .find_map(|ancestor| match ancestor.kind() {
+                        AstKind::Function(function) => Some(function.span),
+                        AstKind::ArrowFunctionExpression(arrow) => Some(arrow.span),
+                        _ => None,
+                    })
+            }
+            AstKind::ArrowFunctionExpression(arrow)
+                if arrow.get_expression().map(GetSpan::span) == Some(span) =>
+            {
+                Some(arrow.span)
+            }
+            _ => None,
+        };
+        let Some(&(contract, is_async)) =
+            function.and_then(|function| self.loader_candidates.get(&function))
+        else {
+            return false;
+        };
+        // An `async` function wraps its return value in a promise.
+        self.loaders.insert(LoaderReturn {
+            contract,
+            promise: promise || is_async,
+        });
+        true
     }
 
     /// Read a binding of the loaded value. `alias` is `true` when a plain

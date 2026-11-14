@@ -501,6 +501,160 @@ fn a_read_through_a_re_export_blocks_the_origin_function() {
     }
 }
 
+const LOADER: &str = "export const load = async (path: string) => await import(path);\n";
+const MIGRATE: &str =
+    "export function migrate(step: number, dry: boolean) { return dry ? step : step + 1; }\n";
+
+/// A project whose `src/run.ts` holds `run`, and whose `src/load.ts` holds
+/// `loader`. `format` and `migrate` each have two calls with a constant
+/// argument.
+fn analyze_loader(loader: &str, run: &str) -> Project {
+    let main = format!(
+        "import {{ migrate }} from './migrate';\nimport './run';\n{MAIN}migrate(1, true);\nmigrate(2, true);\n"
+    );
+    analyze(&base_with(
+        &[
+            ("src/load.ts", loader),
+            ("src/migrate.ts", MIGRATE),
+            ("src/run.ts", run),
+        ],
+        &main,
+    ))
+}
+
+fn assert_blocks_only_migrate(project: &Project, case: &str) {
+    assert_eq!(project.findings("format").len(), 2, "{case}");
+    assert_eq!(project.reason("src/format.ts", "format"), None, "{case}");
+    assert!(project.findings("migrate").is_empty(), "{case}");
+    assert_eq!(
+        project.reason("src/migrate.ts", "migrate"),
+        Some(OPAQUE_REASON),
+        "{case}"
+    );
+}
+
+#[test]
+fn a_loader_helper_blocks_only_the_names_that_its_callers_read() {
+    let run = "import { load } from './load';\nconst name = process.argv[2];\nconst mod = await load(name);\nmod.migrate();\n";
+    let project = analyze_loader(LOADER, run);
+    assert_blocks_only_migrate(&project, run);
+}
+
+#[test]
+fn each_read_of_a_loader_result_blocks_the_name() {
+    let head = "import { load } from './load';\nconst name = process.argv[2];\n";
+    for read in [
+        "(await load(name)).migrate();\n",
+        "const { migrate } = await load(name);\n",
+        "load(name).then((m) => m.migrate());\n",
+        "load(name).catch(() => null).then((m) => m.migrate());\n",
+        "if ('migrate' in (await load(name))) console.log(1);\n",
+        "await load(name);\nconst mod = await load(name);\nmod.migrate();\n",
+    ] {
+        let run = format!("{head}{read}");
+        assert_blocks_only_migrate(&analyze_loader(LOADER, &run), &run);
+    }
+}
+
+#[test]
+fn each_loader_shape_counts_as_a_loader() {
+    let run = "import { load } from './load';\nconst name = process.argv[2];\nconst mod = await load(name);\nmod.migrate();\n";
+    let sync =
+        "import { load } from './load';\nconst name = process.argv[2];\nload(name).migrate();\n";
+    let then = "import { load } from './load';\nconst name = process.argv[2];\nload(name).then((m) => m.migrate());\n";
+    for (loader, run) in [
+        (
+            "export async function load(path: string) {\n  const mod = await import(path);\n  return mod;\n}\n",
+            run,
+        ),
+        (
+            "export function load(path: string) {\n  return import(path);\n}\n",
+            then,
+        ),
+        (
+            "export const load = (path: string) => import(path).catch(() => null);\n",
+            run,
+        ),
+        (
+            "export const load = function (path: string) { return require(path); };\n",
+            sync,
+        ),
+        (
+            "export const load = (path: string) => require(path);\n",
+            sync,
+        ),
+        (
+            "const raw = (path: string) => import(path);\nexport const load = async (path: string) => raw(path);\n",
+            run,
+        ),
+    ] {
+        assert_blocks_only_migrate(&analyze_loader(loader, run), loader);
+    }
+}
+
+#[test]
+fn a_loader_that_its_own_module_calls_blocks_the_names() {
+    // The import keeps `run.ts` a module: the top-level bindings of a
+    // classic script are globals that other scripts can call.
+    let run = format!(
+        "import './migrate';\n{LOADER}const name = process.argv[2];\n(await load(name)).migrate();\n"
+    )
+    .replace("export const load", "const load");
+    assert_blocks_only_migrate(&analyze_loader(LOADER, &run), &run);
+}
+
+#[test]
+fn a_function_that_returns_a_loader_result_is_a_loader() {
+    let loader = format!(
+        "{LOADER}export async function open(path: string) {{\n  const mod = await load(path);\n  return mod;\n}}\n"
+    );
+    let run = "import { open } from './load';\nconst name = process.argv[2];\nconst mod = await open(name);\nmod.migrate();\n";
+    assert_blocks_only_migrate(&analyze_loader(&loader, run), run);
+}
+
+#[test]
+fn a_loader_that_a_barrel_re_exports_blocks_the_names() {
+    let main = format!(
+        "import {{ migrate }} from './migrate';\nimport './run';\n{MAIN}migrate(1, true);\nmigrate(2, true);\n"
+    );
+    let run = "import { load } from './barrel';\nconst name = process.argv[2];\n(await load(name)).migrate();\n";
+    let project = analyze(&base_with(
+        &[
+            ("src/load.ts", LOADER),
+            ("src/barrel.ts", "export { load } from './load';\n"),
+            ("src/migrate.ts", MIGRATE),
+            ("src/run.ts", run),
+        ],
+        &main,
+    ));
+    assert_blocks_only_migrate(&project, run);
+}
+
+#[test]
+fn a_loader_result_or_a_loader_that_escapes_blocks_each_export() {
+    let head = "import { load } from './load';\nconst name = process.argv[2];\n";
+    for read in [
+        "console.log(await load(name));\n",
+        "const mod = await load(name);\nconst alias = mod;\nalias.migrate();\n",
+        "const promise = load(name);\n",
+        "[name].map(load);\n",
+        "load.call(null, name);\n",
+        "load?.(name);\n",
+        "const mod = await import(name);\nmod.load('x');\n",
+    ] {
+        let run = format!("{head}{read}");
+        let project = analyze_loader(LOADER, &run);
+        assert_abstains(&project, "src/format.ts", "format", OPAQUE_REASON);
+    }
+}
+
+#[test]
+fn a_loader_that_an_entry_point_exports_blocks_each_export() {
+    let main = format!("{MAIN}export const load = async (path: string) => await import(path);\n");
+    let project = analyze(&base_with(&[], &main));
+    assert_abstains(&project, "src/format.ts", "format", OPAQUE_REASON);
+}
+
 #[test]
 fn a_data_file_suffix_is_not_an_unknown_source() {
     let data = "console.log(await import(`@/locales/${name}.json`));\n";

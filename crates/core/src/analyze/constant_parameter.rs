@@ -12,8 +12,9 @@ use std::path::{Path, PathBuf};
 
 use fallow_config::ResolvedConfig;
 use fallow_types::extract::{
-    CallSite, CallTarget, ExportName, FunctionContract, FunctionContractFacts,
-    ImportBindingReferenceKind, ImportedName, ModuleInfo, ParamFact, ParamKind, VisibilityTag,
+    CallResultReads, CallSite, CallTarget, ExportName, FunctionCalls, FunctionContract,
+    FunctionContractFacts, ImportBindingReferenceKind, ImportedName, ModuleInfo, OpaqueLoads,
+    ParamFact, ParamKind, VisibilityTag,
 };
 use fallow_types::suppress::IssueKind;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -258,6 +259,9 @@ struct Gate<'a> {
     blocked: FxHashMap<FnId, Abstain>,
     reasons: FxHashMap<FnId, Reasons>,
     calls: FxHashMap<FnId, Vec<Call<'a>>>,
+    /// The reads of the call results of each function, with the module of
+    /// the calls. The rule reads them when the function is a loader.
+    results: FxHashMap<FnId, Vec<(FileId, &'a CallResultReads)>>,
     /// `true` when a framework convention imports a module with no import
     /// statement somewhere in the project.
     has_auto_imports: bool,
@@ -280,10 +284,12 @@ fn find_constant_parameters(input: &ConstantParameterInput<'_>) -> Evaluation {
         gate.block_broken_module(module.file_id);
     }
     gate.block_surfaces();
-    gate.block_opaque_loads();
     for module in input.modules {
         gate.scan_module(module);
     }
+    // A loader passes the loaded value to its callers. The callers are
+    // complete only after each module is scanned.
+    gate.block_opaque_loads();
     let findings = gate.emit();
     let candidates = if input.type_aware {
         gate.type_candidates()
@@ -325,6 +331,7 @@ impl<'a> Gate<'a> {
             blocked: FxHashMap::default(),
             reasons: FxHashMap::default(),
             calls: FxHashMap::default(),
+            results: FxHashMap::default(),
             has_auto_imports: input.resolved_modules.iter().any(|module| {
                 module
                     .resolved_imports
@@ -601,10 +608,15 @@ impl<'a> Gate<'a> {
     /// of the analysis can call. A name that the code reads on the loaded
     /// value blocks each export of that name, also through a re-export. A
     /// value that escapes blocks each export.
+    ///
+    /// A function that returns a loaded value is a loader. Each call of a
+    /// loader gives the loaded value, so the rule reads the call results
+    /// with the same rules. A loader with a caller that the facts do not
+    /// hold is an escape.
     fn block_opaque_loads(&mut self) {
         let reason = Abstain::OpaqueModuleLoad;
-        let graph = self.input.graph;
-        let mut names: FxHashSet<&str> = FxHashSet::default();
+        let mut names: FxHashSet<&'a str> = FxHashSet::default();
+        let mut pending: Vec<(FnId, bool)> = Vec::new();
         for module in self.input.modules {
             let Some(loads) = facts(module).map(|facts| &facts.opaque_loads) else {
                 continue;
@@ -612,17 +624,93 @@ impl<'a> Gate<'a> {
             if loads.is_empty() || self.input.excluded.contains(&module.file_id) {
                 continue;
             }
-            if loads.escapes {
-                if let Some(node) = graph.modules.get(module.file_id.0 as usize) {
-                    tracing::debug!(
-                        path = %node.path.display(),
-                        "constant-parameter: the value of an unknown-source load escapes"
-                    );
-                }
-                self.block_all_exports(reason);
-            }
-            names.extend(loads.names.iter().map(String::as_str));
+            self.read_loads(module.file_id, loads, &mut names, &mut pending);
         }
+        let mut loaders: FxHashSet<(FnId, bool)> = FxHashSet::default();
+        while let Some((id, promise)) = pending.pop() {
+            if self.all_exports_blocked.contains(reason) {
+                return;
+            }
+            if !loaders.insert((id, promise)) {
+                continue;
+            }
+            let results = self.results.get(&id).cloned().unwrap_or_default();
+            for (file, reads) in results {
+                if self.input.excluded.contains(&file) {
+                    continue;
+                }
+                let reads = if promise {
+                    &reads.promise
+                } else {
+                    &reads.value
+                };
+                self.read_loads(file, reads, &mut names, &mut pending);
+            }
+        }
+        self.block_read_names(names);
+        // A loader with a hidden caller, also one that a read name blocks,
+        // gives the loaded value to code that the rule does not see.
+        let hidden: Vec<FileId> = loaders
+            .iter()
+            .filter(|(id, _)| self.has_hidden_callers(*id))
+            .map(|((file, _), _)| *file)
+            .collect();
+        if !hidden.is_empty() {
+            self.log_escape(hidden);
+            self.block_all_exports(reason);
+        }
+    }
+
+    /// Record the reads of loaded values in the module `file`. An escape
+    /// blocks each export.
+    fn read_loads(
+        &mut self,
+        file: FileId,
+        loads: &'a OpaqueLoads,
+        names: &mut FxHashSet<&'a str>,
+        pending: &mut Vec<(FnId, bool)>,
+    ) {
+        if loads.escapes {
+            self.log_escape(vec![file]);
+            self.block_all_exports(Abstain::OpaqueModuleLoad);
+        }
+        names.extend(loads.names.iter().map(String::as_str));
+        pending.extend(
+            loads
+                .loaders
+                .iter()
+                .map(|loader| ((file, loader.contract), loader.promise)),
+        );
+    }
+
+    fn log_escape(&self, mut files: Vec<FileId>) {
+        if !tracing::enabled!(tracing::Level::DEBUG) {
+            return;
+        }
+        files.sort_unstable_by_key(|file| file.0);
+        files.dedup();
+        for file in files {
+            if let Some(node) = self.input.graph.modules.get(file.0 as usize) {
+                tracing::debug!(
+                    path = %node.path.display(),
+                    "constant-parameter: the value of an unknown-source load escapes"
+                );
+            }
+        }
+    }
+
+    /// `true` when a caller of the function can be outside the facts. Each
+    /// reason other than a test file can hide a caller or a use.
+    fn has_hidden_callers(&self, id: FnId) -> bool {
+        let reasons = self.reasons.get(&id).copied().unwrap_or_default();
+        reasons.0 & !Abstain::TestFile.bit() != 0
+    }
+
+    /// Block each export with a name that the code reads on a loaded value,
+    /// also through a re-export.
+    fn block_read_names(&mut self, names: FxHashSet<&str>) {
+        let reason = Abstain::OpaqueModuleLoad;
+        let graph = self.input.graph;
         if names.is_empty() || self.all_exports_blocked.contains(reason) {
             return;
         }
@@ -888,33 +976,35 @@ impl<'a> Gate<'a> {
         let file = module.file_id;
         for group in &facts.calls {
             match group.target {
-                CallTarget::Local(contract) => self
-                    .calls
-                    .entry((file, contract))
-                    .or_default()
-                    .extend(group.sites.iter().map(|site| Call { file, site })),
+                CallTarget::Local(contract) => self.add_calls((file, contract), file, group),
                 CallTarget::Import(index) => {
-                    self.collect_import_calls(
-                        module,
-                        index as usize,
-                        &group.member_path,
-                        &group.sites,
-                    );
+                    self.collect_import_calls(module, index as usize, group);
                 }
             }
         }
+    }
+
+    fn add_calls(&mut self, id: FnId, file: FileId, group: &'a FunctionCalls) {
+        self.calls
+            .entry(id)
+            .or_default()
+            .extend(group.sites.iter().map(|site| Call { file, site }));
+        self.results
+            .entry(id)
+            .or_default()
+            .push((file, &group.results));
     }
 
     fn collect_import_calls(
         &mut self,
         module: &ModuleInfo,
         index: usize,
-        member_path: &str,
-        sites: &'a [CallSite],
+        group: &'a FunctionCalls,
     ) {
         let Some(import) = module.imports.get(index) else {
             return;
         };
+        let member_path = &*group.member_path;
         let (name, rest) = match &import.imported_name {
             ImportedName::Namespace => {
                 let (head, rest) = member_path.split_once('.').unwrap_or((member_path, ""));
@@ -961,11 +1051,7 @@ impl<'a> Gate<'a> {
             return;
         };
         if rest.is_empty() {
-            let file = module.file_id;
-            self.calls
-                .entry(id)
-                .or_default()
-                .extend(sites.iter().map(|site| Call { file, site }));
+            self.add_calls(id, module.file_id, group);
         } else {
             // `f.call(...)`, `f.apply(...)` or `f.bind(...)` shift or hide
             // the arguments.
