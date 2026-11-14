@@ -29,7 +29,7 @@ impl StructuralParamMemberCollector {
     /// [`Self::resolve_receiver_path`], and whether the path goes through a
     /// Durable Object stub local. For a local with alternatives, this is the
     /// first path only.
-    pub(super) fn resolve_receiver(
+    fn resolve_receiver(
         &self,
         object: &Expression<'_>,
         allow_call_arguments: bool,
@@ -86,7 +86,7 @@ impl StructuralParamMemberCollector {
     /// The parameter paths that a local with the init `init` holds:
     /// `local.rotate(angle)` gives the `rotate()` path of `local`, and a
     /// conditional gives the paths of its branches (issue #4552).
-    pub(super) fn call_result_alias(&self, init: &Expression<'_>) -> Option<ReceiverAlias> {
+    fn call_result_alias(&self, init: &Expression<'_>) -> Option<ReceiverAlias> {
         let init = unwrap_static_expr(init);
         if !is_member_call(init) && !matches!(init, Expression::ConditionalExpression(_)) {
             return None;
@@ -108,7 +108,7 @@ impl StructuralParamMemberCollector {
         })
     }
 
-    pub(super) fn collect_call_result_alias_targets(
+    fn collect_call_result_alias_targets(
         &self,
         expr: &Expression<'_>,
         targets: &mut Vec<(String, String)>,
