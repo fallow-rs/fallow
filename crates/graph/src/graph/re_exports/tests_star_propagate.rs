@@ -1,10 +1,15 @@
-use super::capture_propagation_visits;
 use super::propagate::count_star_name_checks;
 use super::test_support::{
-    build, export, module, named_import, re_export, type_export, type_import,
+    build, discovered_files, export, module, named_import, re_export, symbol, type_export,
+    type_import,
 };
-use crate::graph::{ExportNamespace, ExportSymbol, ModuleGraph};
-use fallow_types::discover::FileId;
+use super::{capture_propagation_visits, with_re_export_differential_check};
+use crate::graph::types::ReferencePathNode;
+use crate::graph::{ExportNamespace, ExportSymbol, ModuleGraph, ReachabilityRoots, ReferenceKind};
+use crate::resolve::ResolvedReplacedModuleTarget;
+use fallow_types::discover::{EntryPoint, EntryPointSource, FileId};
+use fallow_types::extract::ModuleLoadMechanism;
+use rustc_hash::FxHashSet;
 
 fn reference_namespaces(export: &ExportSymbol) -> Vec<ExportNamespace> {
     let mut namespaces: Vec<_> = export
@@ -239,5 +244,251 @@ fn star_keeps_a_shadowed_type_off_an_ambiguous_source() {
     assert_eq!(
         export_states(&graph, 6, "Item"),
         vec![(false, vec![ExportNamespace::Value])]
+    );
+}
+
+#[test]
+fn entry_named_type_re_export_credits_declaration_through_star_barrel() {
+    let mut entry = module(0, "index");
+    let mut entry_re = re_export(1, "ViaStar", "ViaStar");
+    entry_re.info.is_type_only = true;
+    entry.re_exports = vec![entry_re];
+
+    let mut kit = module(1, "kit_index");
+    kit.re_exports = vec![re_export(2, "*", "*")];
+
+    let mut types = module(2, "kit_types");
+    types.exports = vec![type_export("ViaStar"), type_export("UnusedSibling")].into();
+
+    let graph = with_re_export_differential_check(|| build(&[entry, kit, types], 0));
+
+    let via_star = symbol(&graph, 2, "ViaStar");
+    assert_eq!(via_star.references.len(), 1);
+    assert_eq!(via_star.references[0].from_file, FileId(0));
+    assert_eq!(via_star.references[0].kind, ReferenceKind::ReExport);
+    assert_eq!(via_star.references[0].namespace, ExportNamespace::Type);
+    assert!(symbol(&graph, 2, "UnusedSibling").references.is_empty());
+
+    let surface_refs =
+        graph.effective_export_surface_references(FileId(1), "ViaStar", ExportNamespace::Type);
+    assert_eq!(surface_refs.len(), 1);
+    assert_eq!(surface_refs[0].from_file, FileId(0));
+}
+
+#[test]
+fn entry_named_re_export_credits_through_multi_hop_and_cyclic_star_barrels() {
+    let mut entry = module(0, "index");
+    let mut type_re = re_export(1, "ViaStar", "PublicStar");
+    type_re.info.is_type_only = true;
+    let value_re = re_export(1, "runtimeFn", "runtimeFn");
+    entry.re_exports = vec![type_re, value_re];
+
+    let mut star_a = module(1, "star_a");
+    star_a.re_exports = vec![re_export(2, "*", "*")];
+
+    let mut star_b = module(2, "star_b");
+    star_b.re_exports = vec![re_export(1, "*", "*"), re_export(3, "*", "*")];
+
+    let mut leaf = module(3, "leaf");
+    leaf.exports = vec![
+        type_export("ViaStar"),
+        export("runtimeFn"),
+        export("unexported"),
+    ]
+    .into();
+
+    let graph = with_re_export_differential_check(|| build(&[entry, star_a, star_b, leaf], 0));
+
+    assert_eq!(
+        reference_namespaces(symbol(&graph, 3, "ViaStar")),
+        vec![ExportNamespace::Type]
+    );
+    assert_eq!(
+        reference_namespaces(symbol(&graph, 3, "runtimeFn")),
+        vec![ExportNamespace::Type, ExportNamespace::Value]
+    );
+    assert!(
+        symbol(&graph, 3, "runtimeFn")
+            .references
+            .iter()
+            .any(|r| r.from_file == FileId(0)
+                && r.kind == ReferenceKind::ReExport
+                && r.namespace == ExportNamespace::Value)
+    );
+    assert!(symbol(&graph, 3, "unexported").references.is_empty());
+}
+
+#[test]
+fn entry_named_re_export_through_type_only_star_credits_only_type_namespace() {
+    let mut entry = module(0, "index");
+    entry.re_exports = vec![re_export(1, "Merged", "Merged")];
+
+    let mut star = module(1, "star");
+    let mut type_star = re_export(2, "*", "*");
+    type_star.info.is_type_only = true;
+    star.re_exports = vec![type_star];
+
+    let mut leaf = module(2, "leaf");
+    leaf.exports = vec![type_export("Merged"), export("Merged")].into();
+
+    let graph = with_re_export_differential_check(|| build(&[entry, star, leaf], 0));
+
+    assert_eq!(
+        export_states(&graph, 2, "Merged"),
+        vec![(true, vec![ExportNamespace::Type]), (false, vec![])]
+    );
+}
+
+#[test]
+fn entry_type_only_named_re_export_through_star_credits_value_backed_type_and_isolates_value() {
+    let mut entry = module(0, "index");
+    let mut merged_re = re_export(1, "Merged", "Merged");
+    merged_re.info.is_type_only = true;
+    let mut class_re = re_export(1, "Widget", "Widget");
+    class_re.info.is_type_only = true;
+    entry.re_exports = vec![merged_re, class_re];
+
+    let mut star = module(1, "star");
+    star.re_exports = vec![re_export(2, "*", "*")];
+
+    let mut leaf = module(2, "leaf");
+    leaf.exports = vec![type_export("Merged"), export("Merged"), export("Widget")].into();
+
+    let graph = with_re_export_differential_check(|| build(&[entry, star, leaf], 0));
+
+    assert_eq!(
+        export_states(&graph, 2, "Merged"),
+        vec![(true, vec![ExportNamespace::Type]), (false, vec![])]
+    );
+    assert_eq!(
+        export_states(&graph, 2, "Widget"),
+        vec![(false, vec![ExportNamespace::Type])]
+    );
+}
+
+#[test]
+fn entry_named_re_export_mixed_consumer_credits_unconsumed_namespace_through_star() {
+    let mut entry = module(0, "index");
+    entry.re_exports = vec![re_export(1, "Merged", "Merged")];
+    entry.resolved_imports = vec![named_import(3, "keep")];
+
+    let mut star = module(1, "star");
+    star.re_exports = vec![re_export(2, "*", "*")];
+
+    let mut leaf = module(2, "leaf");
+    leaf.exports = vec![type_export("Merged"), export("Merged")].into();
+
+    let mut internal = module(3, "internal");
+    internal.exports = vec![export("keep")].into();
+    internal.resolved_imports = vec![type_import(0, "Merged")];
+    internal.type_referenced_import_bindings = vec!["Merged".to_string()];
+
+    let graph = with_re_export_differential_check(|| build(&[entry, star, leaf, internal], 0));
+
+    assert_eq!(
+        export_states(&graph, 2, "Merged"),
+        vec![
+            (true, vec![ExportNamespace::Type]),
+            (false, vec![ExportNamespace::Value]),
+        ]
+    );
+}
+
+#[test]
+fn non_entry_named_re_export_through_star_without_consumer_stays_uncredited() {
+    let mut entry = module(0, "index");
+    entry.resolved_imports = vec![named_import(1, "alive")];
+
+    let mut mid_barrel = module(1, "mid_barrel");
+    mid_barrel.exports = vec![export("alive")].into();
+    let mut dead_re = re_export(2, "DeadViaStar", "DeadViaStar");
+    dead_re.info.is_type_only = true;
+    mid_barrel.re_exports = vec![dead_re];
+
+    let mut star = module(2, "star");
+    star.re_exports = vec![re_export(3, "*", "*")];
+
+    let mut leaf = module(3, "leaf");
+    leaf.exports = vec![type_export("DeadViaStar")].into();
+
+    let graph = with_re_export_differential_check(|| build(&[entry, mid_barrel, star, leaf], 0));
+
+    assert!(symbol(&graph, 3, "DeadViaStar").references.is_empty());
+}
+
+#[test]
+fn entry_named_re_export_through_star_records_route_provenance_without_duplicate_hops() {
+    let mut entry = module(0, "index");
+    let mut entry_re = re_export(1, "ViaStar", "ViaStar");
+    entry_re.info.is_type_only = true;
+    entry.re_exports = vec![entry_re];
+
+    let mut kit = module(1, "kit_index");
+    kit.re_exports = vec![re_export(2, "*", "*")];
+
+    let mut types = module(2, "kit_types");
+    types.exports = vec![type_export("ViaStar")].into();
+
+    let test_root = module(3, "entry_test");
+    let modules = [entry, kit, types, test_root];
+    let files = discovered_files(&modules);
+    let all_entries = [
+        EntryPoint {
+            path: modules[0].path.clone(),
+            source: EntryPointSource::PackageJsonMain,
+        },
+        EntryPoint {
+            path: modules[3].path.clone(),
+            source: EntryPointSource::TestFile,
+        },
+    ];
+    let runtime_entries = [all_entries[0].clone()];
+    let test_entries = [all_entries[1].clone()];
+    let replacements = [ResolvedReplacedModuleTarget {
+        source_file: FileId(3),
+        target_file: FileId(1),
+    }];
+
+    let graph = with_re_export_differential_check(|| {
+        ModuleGraph::build_with_declaration_seeding(
+            &modules,
+            &replacements,
+            &ReachabilityRoots {
+                all: &all_entries,
+                runtime: &runtime_entries,
+                test: &test_entries,
+            },
+            &files,
+            &FxHashSet::default(),
+        )
+    });
+
+    let via_star = symbol(&graph, 2, "ViaStar");
+    assert_eq!(via_star.references.len(), 1);
+    let path_id = via_star
+        .reference_path(0)
+        .expect("provenance-enabled build must record a route path");
+    let ReferencePathNode::Route {
+        parent,
+        graph: route_graph,
+        start,
+        terminal,
+        start_mechanism,
+    } = graph.reference_paths[path_id.index()]
+    else {
+        panic!("entry star-route reference must use compact Route provenance");
+    };
+    assert!(
+        parent.is_none(),
+        "entry is the reference origin, so Route must not carry a duplicate parent hop"
+    );
+    assert_eq!(
+        graph
+            .reference_routes
+            .canonical_hops(route_graph, start, terminal, start_mechanism),
+        vec![
+            (FileId(2), ModuleLoadMechanism::EsModule),
+            (FileId(1), ModuleLoadMechanism::EsModule),
+        ]
     );
 }
