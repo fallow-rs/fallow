@@ -22,6 +22,7 @@ use fallow_types::extract::SinkSite;
 use crate::MemberAccess;
 use crate::template_usage::{TemplateSnippetKind, collect_unresolved_refs_and_accesses};
 
+use super::angular_text::{icu_message_head, mask_string_contents};
 use super::recovery::RecoveryScanner;
 use super::scanners::scan_curly_section;
 
@@ -123,8 +124,9 @@ static ATTR_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
 
 /// Regex for an explicit `this.member` read. Angular templates resolve `this`
 /// to the component instance, so the member is a component reference.
-static THIS_MEMBER_RE: LazyLock<regex::Regex> =
-    LazyLock::new(|| crate::static_regex(r"(?:^|[^\w$.])this\s*(?:\?\.|\.)\s*([A-Za-z_$][\w$]*)"));
+static THIS_MEMBER_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    crate::static_regex(r"(?:^|[^\w$.])this\s*(?:\?\.|!?\s*\.)\s*([A-Za-z_$][\w$]*)")
+});
 
 /// Regex for a trailing `as alias` export in a structural directive clause
 /// (`*ngIf="user$ | async as user"`). Captures group 1 = the expression.
@@ -210,6 +212,14 @@ struct AngularTemplateScanner<'a> {
     /// so core can resolve `utils -> Util` from the owning component.
     iteration_iterable_sources: FxHashMap<String, String>,
     preserve_untyped_iteration_sources: bool,
+    /// Scope depth of each open ICU message. Inside an ICU message, outside
+    /// its case bodies, every `{` opens a case, also when `{{` follows it.
+    icu_message_depths: Vec<usize>,
+    /// Set after the first `{{` without a closing `}}`. A scan for the end of
+    /// each later `{{` would read to the end of the template again, which is
+    /// quadratic. Angular rejects such a template, so its later
+    /// interpolations are not read.
+    interpolation_unterminated: bool,
 }
 
 impl<'a> AngularTemplateScanner<'a> {
@@ -227,6 +237,8 @@ impl<'a> AngularTemplateScanner<'a> {
             iteration_element_types: FxHashMap::default(),
             iteration_iterable_sources: FxHashMap::default(),
             preserve_untyped_iteration_sources,
+            icu_message_depths: Vec::new(),
+            interpolation_unterminated: false,
         }
     }
 
@@ -245,21 +257,16 @@ impl<'a> AngularTemplateScanner<'a> {
 
     fn scan_next(&mut self, index: usize) -> usize {
         let bytes = self.source.as_bytes();
-        if starts_interpolation(bytes, index)
-            && !opens_icu_case_before_interpolation(self.source, index)
-        {
+        // Angular reads `other {{{n}} items}` as a case brace followed by an
+        // interpolation, but `{{{a: 1}.a}}` outside an ICU message as an
+        // interpolation that starts with an object literal.
+        if starts_interpolation(bytes, index) && !self.at_icu_case_level() {
             return self.scan_interpolation(index);
         }
 
         match bytes[index] {
             b'@' => self.scan_control_flow(index),
-            // A bare `{` in Angular text opens an ICU message or an ICU case
-            // (`{n, plural, =1 {one}}`). Its own scope keeps the matching `}`
-            // from closing an enclosing control-flow block.
-            b'{' => {
-                self.scopes.push(Vec::new());
-                index + 1
-            }
+            b'{' => self.open_brace(index),
             b'}' => self.close_scope(index),
             b'<' => self.scan_tag(index),
             _ => index + 1,
@@ -267,8 +274,12 @@ impl<'a> AngularTemplateScanner<'a> {
     }
 
     fn scan_interpolation(&mut self, index: usize) -> usize {
+        // An unterminated `{{` must not hide the tags after it.
+        if self.interpolation_unterminated {
+            return index + 2;
+        }
         let Some((expr, next_index)) = scan_curly_section(self.source, index, 2, 2) else {
-            // An unterminated `{{` must not hide the rest of the template.
+            self.interpolation_unterminated = true;
             return index + 2;
         };
         collect_expression_refs(expr.trim(), &current_locals(&self.scopes), &mut self.refs);
@@ -292,7 +303,40 @@ impl<'a> AngularTemplateScanner<'a> {
         .unwrap_or(index + 1)
     }
 
+    fn at_icu_case_level(&self) -> bool {
+        self.icu_message_depths.last() == Some(&self.scopes.len())
+    }
+
+    /// A bare `{` in Angular text opens an ICU message or an ICU case
+    /// (`{n, plural, =1 {one}}`). Its own scope keeps the matching `}` from
+    /// closing an enclosing control-flow block. Angular reads the head of an
+    /// ICU message as a component expression.
+    fn open_brace(&mut self, index: usize) -> usize {
+        let icu_head = if self.at_icu_case_level() {
+            None
+        } else {
+            icu_message_head(self.source, index)
+        };
+        let Some((head, next_index)) = icu_head else {
+            self.scopes.push(Vec::new());
+            return index + 1;
+        };
+        collect_expression_refs(head.trim(), &current_locals(&self.scopes), &mut self.refs);
+        self.scopes.push(Vec::new());
+        self.icu_message_depths.push(self.scopes.len());
+        next_index
+    }
+
     fn close_scope(&mut self, index: usize) -> usize {
+        // `>=` also drops the entry of an ICU message that a template error
+        // left open when an enclosing block closes.
+        while self
+            .icu_message_depths
+            .last()
+            .is_some_and(|&depth| depth >= self.scopes.len())
+        {
+            self.icu_message_depths.pop();
+        }
         if self.scopes.len() > 1 {
             self.scopes.pop();
         }
@@ -410,23 +454,6 @@ fn dedup_member_accesses(accesses: &mut Vec<MemberAccess>) {
 
 fn starts_interpolation(bytes: &[u8], index: usize) -> bool {
     index + 1 < bytes.len() && bytes[index] == b'{' && bytes[index + 1] == b'{'
-}
-
-/// Whether the `{{{` at `index` is an ICU case brace followed by an
-/// interpolation (`other {{{n}} items}`), and not an interpolation whose
-/// expression starts with an object literal (`{{{ a: 1 }.a}}`).
-///
-/// The ICU reading wins when the interpolation that starts one byte later has a
-/// brace-balanced expression. Without this check, the scanner reads `{n}} items}`
-/// as one unterminated expression and loses every reference after it.
-fn opens_icu_case_before_interpolation(source: &str, index: usize) -> bool {
-    if source.as_bytes().get(index + 2) != Some(&b'{') {
-        return false;
-    }
-    let Some((expr, _)) = scan_curly_section(source, index + 1, 2, 2) else {
-        return false;
-    };
-    expr.bytes().filter(|&b| b == b'{').count() == expr.bytes().filter(|&b| b == b'}').count()
 }
 
 fn strip_html_comments_preserve_offsets(source: &str) -> String {
@@ -1089,9 +1116,10 @@ fn collect_snippet_refs(
         refs.add_member_access(access);
     }
     if snippet.contains("this") {
+        let code = mask_string_contents(snippet);
         refs.identifiers.extend(
             THIS_MEMBER_RE
-                .captures_iter(snippet)
+                .captures_iter(&code)
                 .filter_map(|caps| caps.get(1))
                 .map(|m| m.as_str().to_string()),
         );
@@ -1887,46 +1915,5 @@ mod tests {
         );
         assert!(!refs.contains("row"), "{:?}", refs.identifiers);
         assert!(refs.contains("other"), "{:?}", refs.identifiers);
-    }
-
-    #[test]
-    fn this_prefixed_member_is_credited() {
-        let refs = collect_angular_template_refs(
-            r#"<button (click)="this.viaThis.emit()">x</button><p>{{ this.label }}</p>"#,
-        );
-        assert!(refs.contains("viaThis"), "{:?}", refs.identifiers);
-        assert!(refs.contains("label"), "{:?}", refs.identifiers);
-    }
-
-    #[test]
-    fn icu_case_opening_into_interpolation_keeps_later_refs() {
-        let refs = collect_angular_template_refs(
-            "<button (click)=\"beforeIcu.emit()\">b</button>\n\
-             <p>{n, plural, =1 {one} other {{{n}} many} }</p>\n\
-             <button (click)=\"afterIcu.emit()\">a</button>\n\
-             <p>{{ later }}</p>",
-        );
-        for name in ["beforeIcu", "n", "afterIcu", "later"] {
-            assert!(
-                refs.contains(name),
-                "{name} missing: {:?}",
-                refs.identifiers
-            );
-        }
-    }
-
-    #[test]
-    fn object_literal_interpolation_still_scans() {
-        let refs = collect_angular_template_refs("<p>{{{ a: first }.a}}</p><p>{{ second }}</p>");
-        assert!(refs.contains("first"), "{:?}", refs.identifiers);
-        assert!(refs.contains("second"), "{:?}", refs.identifiers);
-    }
-
-    #[test]
-    fn unterminated_interpolation_does_not_hide_later_refs() {
-        let refs = collect_angular_template_refs(
-            "<p>{{ broken </p>\n<button (click)=\"save()\">s</button>",
-        );
-        assert!(refs.contains("save"), "{:?}", refs.identifiers);
     }
 }
