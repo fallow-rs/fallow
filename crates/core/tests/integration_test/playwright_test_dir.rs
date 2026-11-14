@@ -78,6 +78,24 @@ fn project_test_dirs_scope_test_entries() {
     assert_helper_export_reported(&findings);
 }
 
+/// A config named `playwright.<name>.config.ts`, and a config that a package
+/// script passes with `-c` or `--config=`, also through a binary path such as
+/// `node_modules/.bin/playwright`, are Playwright configs too. Their test
+/// directories and global setup files are entry points. A file and an export
+/// that no config reaches stay unused.
+#[test]
+fn named_and_script_configs_keep_their_test_dirs_and_setup_files() {
+    let findings = analyze_fixture("playwright-named-configs");
+    let mut unused_files: Vec<&str> = findings
+        .unused_files
+        .iter()
+        .filter_map(|path| path.split("playwright-named-configs/").nth(1))
+        .collect();
+    unused_files.sort_unstable();
+    assert_eq!(unused_files, ["orphan.ts"]);
+    assert_helper_export_reported(&findings);
+}
+
 /// Two config files in one project keep the test entries of both configs.
 #[test]
 fn multiple_configs_keep_each_test_dir() {

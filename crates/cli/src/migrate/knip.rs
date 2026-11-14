@@ -1428,6 +1428,167 @@ mod tests {
         assert_eq!(rules.get("unused-files").unwrap(), "off");
     }
 
+    fn warning_for<'a>(warnings: &'a [MigrationWarning], field: &str) -> &'a MigrationWarning {
+        let matching: Vec<&MigrationWarning> =
+            warnings.iter().filter(|w| w.field == field).collect();
+        assert_eq!(matching.len(), 1, "one warning for {field}: {warnings:?}");
+        matching[0]
+    }
+
+    #[test]
+    fn migrate_knip_production_ignore_entries_lose_the_marker_with_a_warning() {
+        let knip = serde_json::json!({
+            "ignoreDependencies": ["left-pad!", "lodash", "/^@org/!"],
+            "ignoreBinaries": ["tsx!"],
+            "workspaces": {"apps/web": {"ignoreDependencies": ["react!"]}}
+        });
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert_eq!(
+            config.get("ignoreDependencies").unwrap(),
+            &serde_json::json!(["left-pad", "lodash", "@org*"])
+        );
+        assert_eq!(
+            config.get("ignoreBinaries").unwrap(),
+            &serde_json::json!(["tsx"])
+        );
+        assert_eq!(
+            config["workspaces"]["settings"]["apps/web"]["ignoreDependencies"],
+            serde_json::json!(["react"])
+        );
+        let messages: Vec<(&str, &str)> = warnings
+            .iter()
+            .map(|w| (w.field.as_str(), w.message.as_str()))
+            .collect();
+        assert_eq!(
+            messages,
+            [
+                (
+                    "ignoreDependencies",
+                    "`left-pad!` applies only in production mode; fallow has no production-only ignoreDependencies, so `left-pad` is now ignored in every mode"
+                ),
+                (
+                    "ignoreDependencies",
+                    "`/^@org/!` applies only in production mode; fallow has no production-only ignoreDependencies, so `@org*` is now ignored in every mode"
+                ),
+                (
+                    "ignoreBinaries",
+                    "`tsx!` applies only in production mode; fallow has no production-only ignoreBinaries, so `tsx` is now ignored in every mode"
+                ),
+                (
+                    "workspaces.apps/web.ignoreDependencies",
+                    "`react!` applies only in production mode; fallow has no production-only ignoreDependencies, so `react` is now ignored in every mode"
+                ),
+            ]
+        );
+        assert_eq!(
+            warnings[0].suggestion.as_deref(),
+            Some("remove `left-pad` if the default mode must report it")
+        );
+    }
+
+    #[test]
+    fn migrate_knip_project_production_exclusions_are_named_in_the_warning() {
+        let knip = serde_json::json!({
+            "project": ["**/*.js!", "!scripts/**!", "!tests/**!", "!legacy/**"],
+            "workspaces": {"apps/web": {"project": ["src/**", "!e2e/**!"]}}
+        });
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        let root = warning_for(&warnings, "project");
+        assert_eq!(
+            root.message,
+            "production exclusions `!scripts/**!`, `!tests/**!` not migrated; fallow has no production-only exclusion, so `--production` reports unused files and exports in these paths"
+        );
+        assert_eq!(
+            root.suggestion.as_deref(),
+            Some(
+                "to hide these findings in every mode, add an overrides entry with files [\"scripts/**\", \"tests/**\"] and rules unused-files and unused-exports set to off"
+            )
+        );
+        let workspace = warning_for(&warnings, "workspaces.apps/web.project");
+        assert_eq!(
+            workspace.message,
+            "production exclusions `!e2e/**!` not migrated; fallow has no production-only exclusion, so `--production` reports unused files and exports in these paths"
+        );
+        assert_eq!(
+            workspace.suggestion.as_deref(),
+            Some(
+                "to hide these findings in every mode, add an overrides entry with files [\"apps/web/e2e/**\"] and rules unused-files and unused-exports set to off"
+            )
+        );
+
+        // A `project` without a production exclusion keeps the general warning.
+        let mut plain_warnings = Vec::new();
+        migrate_knip(
+            &serde_json::json!({"project": ["src/**", "!legacy/**"]}),
+            &mut empty_config(),
+            &mut plain_warnings,
+        );
+        assert_eq!(
+            warning_for(&plain_warnings, "project").message,
+            "Fallow auto-discovers project files"
+        );
+    }
+
+    #[test]
+    fn migrate_knip_plugin_configs_with_names_fallow_skips_are_named() {
+        let knip = serde_json::json!({
+            "playwright": {"config": ["playwright.e2e.config.ts", "e2e/pw.ts", "./suites/smoke.ts"]},
+            "vitest": {"config": ["vitest.config.ts"]},
+            "jest": {"config": ["jest.config.{js,ts}", "package.json"]},
+            "next": {"config": "config/next.custom.mjs"},
+            "workspaces": {
+                "apps/web": {"playwright": {"config": "playwright.config.{js,ts,mjs}"}},
+                "apps/api": {"playwright": {"config": "custom.ts"}}
+            }
+        });
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        let playwright = warning_for(&warnings, "playwright");
+        assert_eq!(
+            playwright.message,
+            "plugin config `playwright` names config files that fallow does not find by file name: `e2e/pw.ts`, `./suites/smoke.ts`"
+        );
+        assert_eq!(
+            playwright.suggestion.as_deref(),
+            Some(
+                "pass each of these configs to `playwright` with `--config` in a package.json script, or add entry patterns for the test files, setup files and reporters that each config names"
+            )
+        );
+        assert!(
+            warning_for(&warnings, "vitest")
+                .message
+                .contains("auto-detected")
+        );
+        // Fallow reads the inline config in package.json without a config file.
+        assert!(
+            warning_for(&warnings, "jest")
+                .message
+                .contains("auto-detected")
+        );
+        // `next` is the knip key of the fallow `nextjs` plugin.
+        assert_eq!(
+            warning_for(&warnings, "next").message,
+            "plugin config `next` names config files that fallow does not find by file name: `config/next.custom.mjs`"
+        );
+        assert!(
+            warning_for(&warnings, "workspaces.apps/web.playwright")
+                .message
+                .contains("auto-detected")
+        );
+        assert_eq!(
+            warning_for(&warnings, "workspaces.apps/api.playwright").message,
+            "plugin config `playwright` names config files that fallow does not find by file name: `custom.ts`"
+        );
+    }
+
     #[test]
     fn migrate_knip_include_single_string() {
         let knip: serde_json::Value = serde_json::from_str(r#"{"include": "files"}"#).unwrap();

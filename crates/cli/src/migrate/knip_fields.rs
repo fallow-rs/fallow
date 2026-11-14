@@ -1,7 +1,9 @@
 use serde_json::{Map, Value};
 
 use super::knip_regex::{knip_regex_source, regex_to_exact_glob};
-use super::knip_scoped::{KnipScope, append_unique};
+use super::knip_scoped::{
+    KnipScope, PRODUCTION_MARKER, append_unique, plugin_section_warning, project_warning,
+};
 use super::knip_tables::{
     KNIP_MIGRATED_FIELDS, KNIP_NAMESPACE_ISSUE_TYPES, KNIP_PLUGIN_KEYS, KNIP_RULE_MAP,
     KNIP_UNMAPPABLE_FIELDS, KNIP_UNMAPPABLE_ISSUE_TYPES, KNIP_UNSUPPORTED_PLUGIN_KEYS,
@@ -296,22 +298,45 @@ fn migrate_ignore_names(
     let deps = string_or_array(ignore_deps_val);
     let mut migrated = Vec::new();
     for dep in deps {
-        let Some(source) = knip_regex_source(&dep) else {
-            migrated.push(dep);
-            continue;
+        // Knip applies an entry with the production marker only in production
+        // mode. As a literal name with the marker it would match nothing.
+        let (body, production_only) = match dep.strip_suffix(PRODUCTION_MARKER) {
+            Some(body) if !body.is_empty() => (body, true),
+            _ => (dep.as_str(), false),
         };
-        if let Some(glob) = regex_to_exact_glob(source) {
-            migrated.push(glob);
-            continue;
+        let name = match knip_regex_source(body) {
+            None => body.to_string(),
+            Some(source) => {
+                let Some(glob) = regex_to_exact_glob(source) else {
+                    warnings.push(MigrationWarning {
+                        source: "knip",
+                        field: field.to_string(),
+                        message: format!(
+                            "regex pattern `{dep}` skipped (no glob matches the same names)"
+                        ),
+                        suggestion: Some(
+                            "rewrite it as a glob such as `@scope/*`, or add each name".to_string(),
+                        ),
+                    });
+                    continue;
+                };
+                glob
+            }
+        };
+        if production_only {
+            warnings.push(MigrationWarning {
+                source: "knip",
+                field: field.to_string(),
+                message: format!(
+                    "`{dep}` applies only in production mode; fallow has no production-only \
+                     {target_key}, so `{name}` is now ignored in every mode"
+                ),
+                suggestion: Some(format!(
+                    "remove `{name}` if the default mode must report it"
+                )),
+            });
         }
-        warnings.push(MigrationWarning {
-            source: "knip",
-            field: field.to_string(),
-            message: format!("regex pattern `{dep}` skipped (no glob matches the same names)"),
-            suggestion: Some(
-                "rewrite it as a glob such as `@scope/*`, or add each name".to_string(),
-            ),
-        });
+        migrated.push(name);
     }
     let any = !migrated.is_empty();
     append_unique(config, target_key, migrated);
@@ -357,7 +382,12 @@ pub(super) fn migrate_ignore_exports_used_in_file(
 /// Warn about knip fields that have no fallow equivalent.
 pub(super) fn warn_unmappable_fields(obj: &JsonMap, warnings: &mut Vec<MigrationWarning>) {
     for (field, message, suggestion) in KNIP_UNMAPPABLE_FIELDS {
-        if obj.contains_key(*field) {
+        if *field == "project"
+            && let Some(value) = obj.get(*field)
+            && let Some(warning) = project_warning(value, &KnipScope::root())
+        {
+            warnings.push(warning);
+        } else if obj.contains_key(*field) {
             warnings.push(MigrationWarning {
                 source: "knip",
                 field: (*field).to_string(),
@@ -370,26 +400,22 @@ pub(super) fn warn_unmappable_fields(obj: &JsonMap, warnings: &mut Vec<Migration
 
 /// Warn about every root key the migration did not translate.
 ///
-/// A key that a built-in fallow plugin covers is reported as auto-detected. A
+/// A key that a built-in fallow plugin covers is reported as auto-detected,
+/// unless its `config` names files that the plugin does not read. A
 /// key that no fallow plugin covers is reported as unsupported. A key in
 /// neither plugin table and in neither the migrated nor the unmappable table
 /// is reported as unknown, so a migration never loses a section without saying
 /// so. `warn_unmappable_fields` already reports the documented-unmappable
 /// keys, so they are skipped here rather than reported twice.
 pub(super) fn warn_unhandled_root_keys(obj: &JsonMap, warnings: &mut Vec<MigrationWarning>) {
-    for key in obj.keys() {
+    for (key, value) in obj {
         if KNIP_PLUGIN_KEYS.contains(&key.as_str()) {
-            warnings.push(MigrationWarning {
-                source: "knip",
-                field: key.clone(),
-                message: format!(
-                    "plugin config `{key}` is auto-detected by fallow's built-in plugins"
-                ),
-                suggestion: Some(
-                    "remove this section; fallow detects framework config automatically"
-                        .to_string(),
-                ),
-            });
+            warnings.push(plugin_section_warning(
+                key,
+                value,
+                &KnipScope::root(),
+                "remove this section; fallow detects framework config automatically",
+            ));
         } else if KNIP_UNSUPPORTED_PLUGIN_KEYS.contains(&key.as_str()) {
             warnings.push(MigrationWarning {
                 source: "knip",

@@ -62,6 +62,20 @@ pub fn builtin_config_patterns_of(plugin_names: &[String]) -> Vec<&'static str> 
     patterns
 }
 
+/// How the named built-in plugin finds its config files: the globs that it
+/// reads by file name, and the binaries whose `--config` / `-c` package script
+/// argument names a config of the plugin. `None` when no built-in plugin has
+/// this name.
+#[must_use]
+pub fn builtin_config_lookup(
+    plugin_name: &str,
+) -> Option<(&'static [&'static str], &'static [&'static str])> {
+    builtin::create_builtin_plugins()
+        .iter()
+        .find(|plugin| plugin.name() == plugin_name)
+        .map(|plugin| (plugin.config_patterns(), plugin.script_config_binaries()))
+}
+
 /// The always-used globs of the active built-in plugins, sorted and without
 /// duplicates. Some plugins list their config file here instead of in
 /// `config_patterns`, for example `.vitepress/config.ts`.
@@ -1051,11 +1065,16 @@ impl PluginRegistry {
             // the tool in the package root, so a matched config below the
             // package root is also read here, against the package root.
             let in_package_root = abs_path.parent() == Some(package_root);
+            // A script can run a binary by its path, such as
+            // `node_modules/.bin/playwright`.
+            let binary = config_file
+                .binary
+                .rsplit('/')
+                .next()
+                .unwrap_or(&config_file.binary);
             for plugin in &self.plugins {
                 let plugin = plugin.as_ref();
-                if !plugin
-                    .script_config_binaries()
-                    .contains(&config_file.binary.as_str())
+                if !plugin.script_config_binaries().contains(&binary)
                     || (in_package_root
                         && cached_plugin_config_matchers(plugin)
                             .iter()

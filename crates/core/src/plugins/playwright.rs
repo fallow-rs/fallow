@@ -41,11 +41,22 @@ const TEST_RUNNER_PACKAGE: &str = "@playwright/test";
 /// runner. It activates the plugin only together with a Playwright config.
 const CORE_PACKAGE: &str = "playwright";
 
-/// The config files that the plugin reads. A root config with the core package
+/// The default root config files. One of them together with the core package
 /// shows that the project uses the test runner.
 const CONFIG_FILES: &[&str] = &["playwright.config.ts", "playwright.config.js"];
 
-const CONFIG_PATTERNS: &[&str] = &["playwright.config.{ts,js}"];
+/// The default config and the configs named `playwright.<name>.config.*`,
+/// which projects select with `--config` for separate suites, for example
+/// `playwright.e2e.config.ts`. A config with any other name is read when a
+/// package script passes it with `--config` or `-c`.
+const CONFIG_PATTERNS: &[&str] = &[
+    "playwright.config.{ts,js,mts,mjs,cts,cjs}",
+    "playwright.*.config.{ts,js,mts,mjs,cts,cjs}",
+];
+
+/// The binary whose `--config` / `-c` script argument names a Playwright
+/// config.
+const SCRIPT_CONFIG_BINARIES: &[&str] = &["playwright"];
 
 pub struct PlaywrightPlugin;
 
@@ -78,6 +89,10 @@ impl Plugin for PlaywrightPlugin {
 
     fn tooling_dependencies(&self) -> &'static [&'static str] {
         &[TEST_RUNNER_PACKAGE, CORE_PACKAGE]
+    }
+
+    fn script_config_binaries(&self) -> &'static [&'static str] {
+        SCRIPT_CONFIG_BINARIES
     }
 
     fn fixture_glob_patterns(&self) -> &'static [&'static str] {
@@ -116,6 +131,8 @@ impl Plugin for PlaywrightPlugin {
                 .push(config_dir.join(teardown.trim_start_matches("./")));
         }
 
+        add_reporters(&mut result, source, config_path, config_dir);
+
         let (web_deps, web_setup) = collect_web_server(source, config_path, root, config_dir);
         result.referenced_dependencies.extend(web_deps);
         result.setup_files.extend(web_setup);
@@ -134,6 +151,44 @@ impl Plugin for PlaywrightPlugin {
         result.accumulate_config_entry_patterns = true;
 
         result
+    }
+}
+
+/// The reporters that Playwright ships. Any other name is a package.
+const BUILTIN_REPORTERS: &[&str] = &[
+    "blob", "dot", "github", "html", "json", "junit", "line", "list", "null",
+];
+
+/// Whether a reporter value is a file path, not a package name: a relative
+/// path, or an absolute path in POSIX or Windows form (`C:/r.ts` or `C:\r.ts`).
+fn is_reporter_path(reporter: &str) -> bool {
+    let bytes = reporter.as_bytes();
+    reporter.starts_with('.')
+        || reporter.starts_with('/')
+        || reporter.starts_with('\\')
+        || (bytes.len() > 2
+            && bytes[0].is_ascii_alphabetic()
+            && bytes[1] == b':'
+            && matches!(bytes[2], b'/' | b'\\'))
+}
+
+/// Credit the custom reporters of a config. Playwright loads a reporter path
+/// relative to the config directory as a module, so the file is used. Any
+/// other name that is not a built-in reporter is a package.
+fn add_reporters(result: &mut PluginResult, source: &str, config_path: &Path, config_dir: &Path) {
+    for reporter in config_parser::extract_config_shallow_strings(source, config_path, "reporter") {
+        if BUILTIN_REPORTERS.contains(&reporter.as_str()) {
+            continue;
+        }
+        if is_reporter_path(&reporter) {
+            result
+                .setup_files
+                .push(config_dir.join(reporter.trim_start_matches("./")));
+            continue;
+        }
+        result
+            .referenced_dependencies
+            .push(crate::resolve::extract_package_name(&reporter));
     }
 }
 
@@ -606,6 +661,53 @@ mod tests {
                 Path::new("/project/teardown.ts"),
             ]
         );
+    }
+
+    #[test]
+    fn resolve_config_custom_reporters() {
+        let source = r#"
+            export default {
+                reporter: [
+                    ["./reporters/custom.ts", { outputFile: "out.json" }],
+                    ["allure-playwright"],
+                    ["@scope/reporter/json"],
+                    ["list"],
+                    ["html", { open: "never" }]
+                ]
+            };
+        "#;
+        let result = PlaywrightPlugin.resolve_config(
+            Path::new("/project/playwright.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+        assert_eq!(
+            result.setup_files,
+            vec![Path::new("/project/reporters/custom.ts")]
+        );
+        assert_eq!(
+            result.referenced_dependencies,
+            vec![
+                "allure-playwright".to_string(),
+                "@scope/reporter".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn reporter_paths_and_package_names() {
+        for path in [
+            "./r.ts",
+            "../r.ts",
+            "/abs/r.ts",
+            "C:/repo/r.ts",
+            "c:\\repo\\r.ts",
+        ] {
+            assert!(is_reporter_path(path), "{path} is a path");
+        }
+        for package in ["allure-playwright", "@scope/reporter/json", "C:", "c:r"] {
+            assert!(!is_reporter_path(package), "{package} is a package name");
+        }
     }
 
     #[test]
