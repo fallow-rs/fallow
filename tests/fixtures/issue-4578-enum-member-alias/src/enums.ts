@@ -1,0 +1,10 @@
+export enum Color { Red = 'red', Green = 'green' }
+export enum Tone { Warm = 'warm', Cool = 'cool' }
+export enum Level { Low = 'low', High = 'high' }
+export enum Kind { One = 'one', Two = 'two' }
+export enum Mood { Happy = 'happy', Sad = 'sad' }
+export enum Shape { Circle = 'circle', Square = 'square' }
+export enum Size { Small = 's', Large = 'l' }
+export enum Hue { Light = 'light', Dark = 'dark' }
+export enum Grade { One = 'one', Two = 'two' }
+export enum Step { One = 'one', Two = 'two' }

@@ -16,7 +16,7 @@ impl ModuleInfoExtractor {
         let mut additional_facts = Vec::new();
         let mut additional_typed_property_facts = Vec::new();
         for (index, access) in self.member_accesses.iter().enumerate() {
-            if self.shadowed_member_access_indices.contains(&index) {
+            if self.shadowed_reads.skips(index, &access.object) {
                 continue;
             }
             let alternatives = self

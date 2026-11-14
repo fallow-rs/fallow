@@ -143,8 +143,10 @@ error by suppressing a downstream detector.
   member access. The semantic pass (`crates/extract/src/namespace_member_uses.rs`)
   adds a `NamespaceMemberUse` fact for each use that a member access does not
   record: a chain of two or more links (`N.Inner.x`, the type `N.Inner.T`), a
-  value that leaves its chain (an argument, an alias, a spread), and a
-  reference inside the namespace body. Scope resolution of the semantic model
+  value that leaves its chain (an argument, an object value, a spread), and a
+  reference inside the namespace body. The pass follows a `const` alias that
+  is not exported (`const M = N.Inner; M.x`) and records its reads as reads
+  of the root, so the alias itself is no escape. Scope resolution of the semantic model
   keeps a shadowed name from giving credit. An inline import type
   (`import("./x").N.a`) has no local binding, so the pass keys its qualifier
   by the source (`import(./x)`), and the member pass reads that key as a
@@ -152,8 +154,16 @@ error by suppressing a downstream detector.
   use of the qualifier. The member pass stores a whole
   use as the marker `*` or `Inner.*` in the accessed-member set, so the
   re-export propagation carries it like any other member name. The marker
-  applies to namespace members only, so an escaping class or enum keeps its
-  member findings. A declaration file, an export of an entry point, and a
+  applies to namespace members only, so an escaping class keeps its member
+  findings. The pass records the same uses for every import binding and for
+  each exported enum, because it does not know at extraction time which
+  binding is a namespace or an enum. When a whole enum leaves its chain
+  (`takesEnum(Shape)`, `{ ref: Size }`), the member pass stores the marker
+  `(escape)` and counts each member of the enum as used, as for
+  `Object.values(Shape)`. A class field alias (`levels = Level`) is an
+  escape for a namespace but not for an enum: the fact carries
+  `class_field`, and the visitor follows the reads of the field through
+  `this.levels` and the component template. A declaration file, an export of an entry point, and a
   member of a namespace that is reported itself are never reported.
 - Keep issue identity and ordering deterministic. Baselines, audits, editor
   diagnostics, and review comments depend on stable keys.
