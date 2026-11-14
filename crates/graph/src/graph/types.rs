@@ -43,6 +43,15 @@ impl ModuleNode {
         self.flags & FLAG_ENTRY_POINT != 0
     }
 
+    /// Whether the export `name` carries a visibility tag such as `@public`
+    /// that marks it as used by code outside the project. Such an export
+    /// exposes what it forwards the same way an entry-point export does.
+    pub(crate) fn export_is_public(&self, name: &str) -> bool {
+        self.exports
+            .iter()
+            .any(|export| export.visibility.suppresses_unused() && export.name.matches_str(name))
+    }
+
     /// Whether this module is reachable from any entry point.
     #[inline]
     pub const fn is_reachable(&self) -> bool {

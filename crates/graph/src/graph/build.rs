@@ -6,7 +6,7 @@ use crate::resolve::InlineLoaderRequest;
 use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
 use fallow_types::discover::{DiscoveredFile, FileId};
 use fallow_types::extract::{
-    ExportName, ImportLoadKind, ImportedName, ModuleLoadMechanism, SemanticFact, VisibilityTag,
+    ExportName, ImportLoadKind, ImportedName, ModuleLoadMechanism, SemanticFact,
 };
 
 use super::narrowing::{AttachContext, ReferenceDedup, attach_symbol_reference};
@@ -546,8 +546,8 @@ fn push_re_export_stub(
         name,
         is_type_only: re_export.info.is_type_only,
         is_side_effect_used: false,
-        visibility: VisibilityTag::None,
-        expected_unused_reason: None,
+        visibility: re_export.info.visibility,
+        expected_unused_reason: re_export.info.expected_unused_reason.clone(),
         span: re_export.info.span,
         references: Vec::new(),
         reference_paths: Vec::new(),
@@ -908,7 +908,7 @@ mod tests {
     use super::*;
     use crate::resolve::{ResolveResult, ResolvedImport, ResolvedModule};
     use fallow_types::discover::{DiscoveredFile, FileId};
-    use fallow_types::extract::ImportedName;
+    use fallow_types::extract::{ImportedName, VisibilityTag};
 
     fn make_export(name: ExportName) -> ExportSymbol {
         ExportSymbol {
@@ -1466,6 +1466,8 @@ mod tests {
                     span: oxc_span::Span::default(),
                     statement_span: oxc_span::Span::new(0, 0),
                     source_span: oxc_span::Span::new(0, 0),
+                    visibility: VisibilityTag::None,
+                    expected_unused_reason: None,
                 },
                 target: ResolveResult::InternalModule(FileId(1)),
             }],
@@ -1496,6 +1498,8 @@ mod tests {
                     span: oxc_span::Span::default(),
                     statement_span: oxc_span::Span::new(0, 0),
                     source_span: oxc_span::Span::new(0, 0),
+                    visibility: VisibilityTag::None,
+                    expected_unused_reason: None,
                 },
                 target: ResolveResult::NpmPackage("react".to_string()),
             }],
@@ -1522,6 +1526,8 @@ mod tests {
                 span: oxc_span::Span::default(),
                 statement_span: oxc_span::Span::new(0, 0),
                 source_span: oxc_span::Span::new(0, 0),
+                visibility: VisibilityTag::None,
+                expected_unused_reason: None,
             },
             target: ResolveResult::NpmPackage(source.to_string()),
         }
@@ -1727,6 +1733,8 @@ mod tests {
                         span: oxc_span::Span::default(),
                         statement_span: oxc_span::Span::new(0, 0),
                         source_span: oxc_span::Span::new(0, 0),
+                        visibility: VisibilityTag::None,
+                        expected_unused_reason: None,
                     },
                     target: ResolveResult::InternalModule(FileId(1)),
                 }],
@@ -1798,6 +1806,8 @@ mod tests {
                     span: oxc_span::Span::default(),
                     statement_span: oxc_span::Span::new(0, 0),
                     source_span: oxc_span::Span::new(0, 0),
+                    visibility: VisibilityTag::None,
+                    expected_unused_reason: None,
                 },
                 target: ResolveResult::InternalModule(FileId(1)),
             }],
@@ -1829,6 +1839,8 @@ mod tests {
                     span: oxc_span::Span::new(start, start + 1),
                     statement_span: oxc_span::Span::new(0, 0),
                     source_span: oxc_span::Span::new(0, 0),
+                    visibility: VisibilityTag::None,
+                    expected_unused_reason: None,
                 },
                 target: ResolveResult::Unresolvable("./source".to_string()),
             };

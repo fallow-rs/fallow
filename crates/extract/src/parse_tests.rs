@@ -1,7 +1,5 @@
-use super::{
-    advance_jsdoc_brace_stack, classify_jsdoc_visibility_tag, scan_jsdoc_import_tags_in,
-    scan_jsdoc_imports_in,
-};
+use super::jsdoc_visibility::classify_jsdoc_visibility_tag;
+use super::{advance_jsdoc_brace_stack, scan_jsdoc_import_tags_in, scan_jsdoc_imports_in};
 use crate::parse_source_to_module;
 use fallow_types::discover::FileId;
 use fallow_types::extract::{ImportInfo, ImportedName, VisibilityTag};

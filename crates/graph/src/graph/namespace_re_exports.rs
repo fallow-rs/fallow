@@ -175,8 +175,8 @@ pub(super) fn propagate_namespace_re_exports(
 }
 
 /// Whether a barrel hands the namespace re-export it exports under
-/// `exported_name` to consumers the graph cannot enumerate: an entry point, or
-/// a member of the exposed namespace closure (issues #2357, #2372, #2373)
+/// `exported_name` to consumers the graph cannot enumerate: an entry point, a
+/// barrel export with a visibility tag such as `@public`, or a member of the exposed namespace closure (issues #2357, #2372, #2373)
 /// whose whole namespace object some consumer observes. Both credit every
 /// export of the namespace target, `default` included, because the namespace
 /// object exposes it.
@@ -194,7 +194,7 @@ fn exposes_namespace_object(
         || graph
             .modules
             .get(file_id.0 as usize)
-            .is_some_and(super::types::ModuleNode::is_entry_point)
+            .is_some_and(|module| module.is_entry_point() || module.export_is_public(exported_name))
 }
 
 /// Map a `FileId` to its index in `graph.modules`. Returns `None` if the id
@@ -444,6 +444,8 @@ mod tests {
                 span: oxc_span::Span::new(0, 10),
                 statement_span: oxc_span::Span::new(0, 0),
                 source_span: oxc_span::Span::new(0, 0),
+                visibility: VisibilityTag::None,
+                expected_unused_reason: None,
             },
             target: ResolveResult::InternalModule(target),
         }
@@ -459,6 +461,8 @@ mod tests {
                 span: oxc_span::Span::new(0, 10),
                 statement_span: oxc_span::Span::new(0, 0),
                 source_span: oxc_span::Span::new(0, 0),
+                visibility: VisibilityTag::None,
+                expected_unused_reason: None,
             },
             target: ResolveResult::InternalModule(target),
         }
@@ -474,6 +478,8 @@ mod tests {
                 span: oxc_span::Span::new(0, 10),
                 statement_span: oxc_span::Span::new(0, 0),
                 source_span: oxc_span::Span::new(0, 0),
+                visibility: VisibilityTag::None,
+                expected_unused_reason: None,
             },
             target: ResolveResult::InternalModule(target),
         }
@@ -1341,6 +1347,8 @@ mod tests {
                         span: oxc_span::Span::new(0, 10),
                         statement_span: oxc_span::Span::new(0, 0),
                         source_span: oxc_span::Span::new(0, 0),
+                        visibility: VisibilityTag::None,
+                        expected_unused_reason: None,
                     },
                     target: ResolveResult::InternalModule(FileId(3)),
                 }],
@@ -1523,6 +1531,8 @@ mod tests {
                         span: oxc_span::Span::new(0, 10),
                         statement_span: oxc_span::Span::new(0, 0),
                         source_span: oxc_span::Span::new(0, 0),
+                        visibility: VisibilityTag::None,
+                        expected_unused_reason: None,
                     },
                     target: ResolveResult::InternalModule(FileId(2)),
                 }],

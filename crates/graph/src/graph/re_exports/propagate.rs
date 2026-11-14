@@ -1462,7 +1462,10 @@ pub(in crate::graph) fn propagate_named_re_export(input: NamedReExportPropagatio
         (type_refs, value_refs),
     );
 
-    let is_entry_point = modules[barrel_idx].is_entry_point();
+    // A JSDoc visibility tag such as `@public` on the barrel export marks it
+    // as public API, so it credits its source like an entry-point export does.
+    let is_entry_point =
+        modules[barrel_idx].is_entry_point() || modules[barrel_idx].export_is_public(exported_name);
     let mut changed = false;
     for (namespace, resolves, refs) in [
         (ExportNamespace::Type, type_resolves, type_refs.as_slice()),

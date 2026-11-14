@@ -906,6 +906,8 @@ mod tests {
                 span: Span::default(),
                 statement_span: Span::new(0, 0),
                 source_span: Span::new(0, 0),
+                visibility: fallow_types::extract::VisibilityTag::None,
+                expected_unused_reason: None,
             },
             target: ResolveResult::InternalModule(FileId(1)),
         }

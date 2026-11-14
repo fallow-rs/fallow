@@ -2324,32 +2324,6 @@ impl<'a> ModuleInfoExtractor {
         }
     }
 
-    /// Record `export { x } from './src'` re-export specifiers, abstaining the
-    /// SvelteKit load-data harvest on a re-exported `load`.
-    fn record_export_re_exports(&mut self, decl: &ExportFromDeclaration<'a>, is_type_only: bool) {
-        let source = &decl.source;
-        for spec in &decl.specifiers {
-            // `export { load } from './x'` re-exports the load: the terminal
-            // object is not a direct literal here, so the load-data harvest
-            // abstains on this file.
-            if !is_type_only
-                && !spec.export_kind.is_type()
-                && spec.exported.name().as_str() == "load"
-            {
-                self.has_unharvestable_load = true;
-            }
-            self.re_exports.push(ReExportInfo {
-                source: source.value.text().into_owned(),
-                imported_name: spec.local.name().to_string(),
-                exported_name: spec.exported.name().to_string(),
-                is_type_only: is_type_only || spec.export_kind.is_type(),
-                span: spec.span,
-                statement_span: decl.span,
-                source_span: source.span,
-            });
-        }
-    }
-
     /// Record the exports of an `export <declaration>` statement.
     fn record_export_declaration(&mut self, declaration: &Declaration<'a>, is_type_only: bool) {
         self.extract_declaration_exports(declaration, is_type_only);
@@ -4243,6 +4217,8 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
             span: decl.span,
             statement_span: decl.span,
             source_span: decl.source.span,
+            visibility: VisibilityTag::None,
+            expected_unused_reason: None,
         });
 
         walk::walk_export_all_declaration(self, decl);

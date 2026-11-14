@@ -758,8 +758,7 @@ mod tests {
                         exported_name: "value".to_string(),
                         is_type_only: false,
                         span: oxc_span::Span::new(0, 10),
-                        statement_span: oxc_span::Span::new(0, 0),
-                        source_span: oxc_span::Span::new(0, 0),
+                        ..Default::default()
                     },
                     target: ResolveResult::InternalModule(FileId(2)),
                 }],
@@ -908,8 +907,7 @@ mod tests {
                     exported_name: "*".to_string(),
                     is_type_only: false,
                     span: oxc_span::Span::new(20, 30),
-                    statement_span: oxc_span::Span::new(0, 0),
-                    source_span: oxc_span::Span::new(0, 0),
+                    ..Default::default()
                 },
                 target: ResolveResult::InternalModule(FileId(1)),
             });
@@ -939,8 +937,7 @@ mod tests {
                         exported_name: "value".to_string(),
                         is_type_only: false,
                         span: oxc_span::Span::new(0, 10),
-                        statement_span: oxc_span::Span::new(0, 0),
-                        source_span: oxc_span::Span::new(0, 0),
+                        ..Default::default()
                     },
                     target: ResolveResult::InternalModule(FileId(2)),
                 }],
@@ -1957,8 +1954,7 @@ mod tests {
                         exported_name: "value".to_string(),
                         is_type_only: false,
                         span: oxc_span::Span::new(0, 10),
-                        statement_span: oxc_span::Span::new(0, 0),
-                        source_span: oxc_span::Span::new(0, 0),
+                        ..Default::default()
                     },
                     target: ResolveResult::InternalModule(FileId(id + 1)),
                 }],

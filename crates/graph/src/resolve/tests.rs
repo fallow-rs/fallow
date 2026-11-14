@@ -102,6 +102,8 @@ fn make_re_export(source: &str, imported: &str, exported: &str) -> ReExportInfo 
         span: oxc_span::Span::default(),
         statement_span: oxc_span::Span::new(0, 0),
         source_span: oxc_span::Span::new(0, 0),
+        visibility: fallow_types::extract::VisibilityTag::None,
+        expected_unused_reason: None,
     }
 }
 
@@ -666,6 +668,8 @@ fn re_exports_preserves_type_only() {
             span: oxc_span::Span::default(),
             statement_span: oxc_span::Span::new(0, 0),
             source_span: oxc_span::Span::new(0, 0),
+            visibility: fallow_types::extract::VisibilityTag::None,
+            expected_unused_reason: None,
         }];
         let file = Path::new("/project/src/index.ts");
         let result = resolve_re_exports(ctx, file, &re_exports);
