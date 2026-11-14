@@ -11,7 +11,9 @@
     "system": "git status && ffmpeg -version && ./scripts/run.sh && $TOOL x",
     "ignored": "custom-ignored --x",
     "declared": "declared-only run",
-    "own": "my-own-bin"
+    "own": "my-own-bin",
+    "loop": "for app in lib/*/; do if grep -q x \"$app/package.json\"; then loop-tool \"$app\" || exit 1; fi; done",
+    "subshell": "([ -n \"$CI\" ] || (subshell-tool install))"
   },
   "devDependencies": {
     "declared-only": "1.0.0",

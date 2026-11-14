@@ -223,9 +223,19 @@ impl<'a, 'c> HelperWalk<'a, 'c> {
         };
         self.stack.push(helper.to_path_buf());
         let mut cwd = Some(cwd.to_path_buf());
+        // The directory of the caller of each open subshell: a `cd` in a
+        // subshell does not move the commands after it.
+        let mut outer_dirs: Vec<Option<PathBuf>> = Vec::new();
+        let mut state = shell::ShellState::default();
         for line in lines.iter() {
-            for segment in shell::split_shell_operators(line) {
-                let segment = segment.trim();
+            for segment in shell::split_shell_commands(line, &mut state) {
+                for _ in 0..segment.closed {
+                    if let Some(outer) = outer_dirs.pop() {
+                        cwd = outer;
+                    }
+                }
+                outer_dirs.extend(std::iter::repeat_n(cwd.clone(), segment.opened));
+                let segment = segment.text.trim();
                 if segment.is_empty() {
                     continue;
                 }
@@ -314,8 +324,14 @@ impl<'a, 'c> HelperWalk<'a, 'c> {
                 .contains(&first.trim_start_matches('('))
                 .then_some(None);
         }
-        let target: String = segment["cd".len()..]
-            .trim()
+        // A redirection after the target (`cd app 2>/dev/null`) is not part
+        // of it.
+        let words: Vec<&str> = segment["cd".len()..].split_whitespace().collect();
+        let target_words = (0..words.len())
+            .find(|&idx| shell::redirection_tokens(&words[idx..]).is_some())
+            .unwrap_or(words.len());
+        let target: String = words[..target_words]
+            .join(" ")
             .chars()
             .filter(|ch| !matches!(ch, '"' | '\''))
             .collect();
@@ -388,15 +404,30 @@ fn is_shell_helper(path: &Path) -> bool {
 }
 
 /// Whether a command segment of `command` changes the working directory.
+/// A change in a subshell (`(cd app)`) ends with the subshell, so it counts
+/// only when a command follows it in the same subshell (`(cd app && build)`).
 fn changes_directory(command: &str) -> bool {
-    shell::split_shell_operators(command)
+    let mut depth = 0usize;
+    // The depth of the outermost open subshell that changed its directory.
+    let mut changed_at: Option<usize> = None;
+    shell::split_shell_commands(command, &mut shell::ShellState::default())
         .into_iter()
         .any(|segment| {
-            segment
-                .split_whitespace()
-                .next()
-                .map(|word| word.trim_start_matches('('))
-                .is_some_and(|word| DIRECTORY_CHANGERS.contains(&word))
+            depth = depth.saturating_sub(segment.closed) + segment.opened;
+            if changed_at.is_some_and(|changed| depth < changed) {
+                changed_at = None;
+            }
+            let Some(first) = segment.text.split_whitespace().next() else {
+                return false;
+            };
+            if DIRECTORY_CHANGERS.contains(&first) {
+                if depth == 0 {
+                    return true;
+                }
+                changed_at = Some(changed_at.map_or(depth, |changed| changed.min(depth)));
+                return false;
+            }
+            changed_at.is_some()
         })
 }
 

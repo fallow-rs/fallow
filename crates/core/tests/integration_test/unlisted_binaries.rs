@@ -45,6 +45,8 @@ fn reports_binaries_that_no_package_provides() {
                 sites(&[("package.json", 7)])
             ),
             ("hyprctl".to_string(), sites(&[("src/index.ts", 3)])),
+            ("loop-tool".to_string(), sites(&[("package.json", 15)])),
+            ("subshell-tool".to_string(), sites(&[("package.json", 16)])),
             ("tailscale".to_string(), sites(&[("src/index.ts", 4)])),
         ]
     );
