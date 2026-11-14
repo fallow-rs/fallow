@@ -205,6 +205,26 @@ describe("Fallow VS Code extension", () => {
     assert.equal(editor?.selection.active.line, 1);
   });
 
+  for (const { command, key } of [
+    { command: "fallow.enableSecurity", key: "security.enabled" },
+    { command: "fallow.enableHealth", key: "health.enabled" },
+  ]) {
+    it(`sets ${key} in workspace settings from ${command}`, async () => {
+      const workspaceValue = (): boolean | undefined =>
+        vscode.workspace.getConfiguration("fallow").inspect<boolean>(key)?.workspaceValue;
+      assert.equal(workspaceValue(), undefined);
+
+      try {
+        await vscode.commands.executeCommand(command);
+        assert.equal(workspaceValue(), true);
+      } finally {
+        await vscode.workspace
+          .getConfiguration("fallow")
+          .update(key, undefined, vscode.ConfigurationTarget.Workspace);
+      }
+    });
+  }
+
   it("frames completed security scans as unverified candidates in the actual toast", async () => {
     const messages: string[] = [];
     windowApi.showInformationMessage = async (message: string) => {

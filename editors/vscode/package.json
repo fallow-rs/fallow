@@ -171,6 +171,14 @@
         "title": "Fallow: Open Settings"
       },
       {
+        "command": "fallow.enableSecurity",
+        "title": "Fallow: Enable Security Candidates"
+      },
+      {
+        "command": "fallow.enableHealth",
+        "title": "Fallow: Enable Health View"
+      },
+      {
         "command": "fallow.noop",
         "title": "Fallow: No-op (internal)"
       },
@@ -871,6 +879,14 @@
           "when": "false"
         },
         {
+          "command": "fallow.enableSecurity",
+          "when": "!fallow.security.enabled"
+        },
+        {
+          "command": "fallow.enableHealth",
+          "when": "!fallow.health.enabled"
+        },
+        {
           "command": "fallow.reloadCoverage",
           "when": "fallow.hasCoverage"
         },
@@ -915,7 +931,7 @@
       },
       {
         "view": "fallow.health",
-        "contents": "The Health view is turned off.\nEnable [fallow.health.enabled](command:fallow.openSettings) to see the project health score, complexity findings, hotspot candidates, and refactoring candidates.",
+        "contents": "The Health view is turned off.\nEnable [fallow.health.enabled](command:fallow.enableHealth) to see the project health score, complexity findings, hotspot candidates, and refactoring candidates.",
         "when": "!fallow.health.enabled"
       },
       {
@@ -925,7 +941,7 @@
       },
       {
         "view": "fallow.security",
-        "contents": "Security candidate scanning is off by default.\nEnable [fallow.security.enabled](command:fallow.openSettings) to scan for security candidates.\nResults are UNVERIFIED candidates to verify, never confirmed vulnerabilities.",
+        "contents": "Security candidate scanning is off by default.\nEnable [fallow.security.enabled](command:fallow.enableSecurity) to scan for security candidates.\nResults are UNVERIFIED candidates to verify, never confirmed vulnerabilities.",
         "when": "!fallow.security.enabled"
       },
       {
