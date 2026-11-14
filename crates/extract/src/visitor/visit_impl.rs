@@ -69,6 +69,9 @@ mod visit_helpers;
 mod visit_jsx_runtime;
 #[path = "visit_impl_member_destructuring.rs"]
 mod visit_member_destructuring;
+#[path = "visit_impl_value_alias.rs"]
+pub(super) mod visit_value_alias;
+use visit_value_alias::unwrap_static_expr;
 #[path = "visit_impl_module_require.rs"]
 mod visit_module_require;
 #[path = "visit_impl_node_runtime.rs"]
@@ -2794,6 +2797,7 @@ impl<'a> ModuleInfoExtractor {
         }
 
         self.record_declarator_instance_bindings(declarator, init);
+        self.record_declarator_value_alias(declarator, decl.kind, init);
         self.record_projection_declarator(declarator);
         self.record_factory_property_declarator(declarator, init);
 
@@ -3579,6 +3583,10 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 && let Some(type_name) = self.extract_angular_inject_target(call)
             {
                 self.insert_class_binding_target(this_key.clone(), type_name);
+            }
+
+            if let Some(value) = prop.value.as_ref() {
+                self.record_value_alias(this_key.clone(), value);
             }
 
             if let Some(value) = prop.value.as_ref()
@@ -5441,18 +5449,6 @@ fn constructed_class_name<'e>(expr: &Expression<'e>) -> Option<&'e str> {
     };
     let name = callee.name.as_str();
     (!super::helpers::is_builtin_constructor(name)).then_some(name)
-}
-
-fn unwrap_static_expr<'a, 'b>(mut expr: &'b Expression<'a>) -> &'b Expression<'a> {
-    loop {
-        match expr {
-            Expression::ParenthesizedExpression(paren) => expr = &paren.expression,
-            Expression::TSAsExpression(ts_as) => expr = &ts_as.expression,
-            Expression::TSSatisfiesExpression(ts_sat) => expr = &ts_sat.expression,
-            Expression::TSNonNullExpression(ts_non_null) => expr = &ts_non_null.expression,
-            _ => return expr,
-        }
-    }
 }
 
 fn html_element_availability_test(expr: &Expression<'_>) -> bool {

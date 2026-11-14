@@ -1042,10 +1042,10 @@ pub(crate) struct ModuleInfoExtractor {
     /// provably hold no class instance, such as `const service = { m() {} }` or
     /// a parameter `service: number`.
     scoped_non_instance_bindings: Vec<FxHashSet<String>>,
-    /// Indices into `member_accesses` whose receiver root is one of those
-    /// shadows. `resolve_bound_member_accesses` does not resolve them through
-    /// the module-flat class bindings.
-    shadowed_member_access_indices: FxHashSet<usize>,
+    /// The reads in `member_accesses` whose receiver root is one of those
+    /// shadows or a nested shadow of a module alias. `resolve_bound_member_accesses`
+    /// does not resolve them through the module-flat class bindings.
+    shadowed_reads: visit_impl::visit_value_alias::ShadowedReads,
     class_type_param_constraints: Vec<FxHashMap<String, Option<TypePropertyTarget>>>,
     pending_playwright_factory_calls: Vec<PendingPlaywrightFactory>,
     pending_playwright_factory_aliases: Vec<(String, String)>,

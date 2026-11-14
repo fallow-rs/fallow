@@ -684,13 +684,33 @@ pub(in crate::visitor) fn object_property_value<'b, 'a>(
 
 /// The value that a getter `get key() { return value }` gives, when its body
 /// is that one return statement.
+///
+/// The getter has its own `this`, which is the object literal, not the
+/// instance of an enclosing class. A value read off `this` names nothing that
+/// the enclosing scope can resolve, so it gives no value.
 fn getter_return_value<'b, 'a>(value: &'b Expression<'a>) -> Option<&'b Expression<'a>> {
     let Expression::FunctionExpression(getter) = value else {
         return None;
     };
     match getter.body.as_deref()?.statements.as_slice() {
-        [Statement::ReturnStatement(statement)] => statement.argument.as_ref(),
+        [Statement::ReturnStatement(statement)] => statement
+            .argument
+            .as_ref()
+            .filter(|argument| !is_this_rooted(argument)),
         _ => None,
+    }
+}
+
+/// Whether a member chain starts at `this` (`this`, `this.a`, `this.a.b`).
+fn is_this_rooted(expr: &Expression<'_>) -> bool {
+    let mut current = expr;
+    loop {
+        match super::unwrap_static_expr(current) {
+            Expression::ThisExpression(_) => return true,
+            Expression::StaticMemberExpression(member) => current = &member.object,
+            Expression::ComputedMemberExpression(member) => current = &member.object,
+            _ => return false,
+        }
     }
 }
 
