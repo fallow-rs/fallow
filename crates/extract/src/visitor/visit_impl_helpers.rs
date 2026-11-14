@@ -12,7 +12,7 @@ use crate::js_text::JsText;
 use super::super::helpers::{extract_type_annotation_name, is_meta_url_arg};
 use super::visit_chain_names::MAX_RECORDED_CHAIN_LINKS;
 use super::{
-    ITERABLE_ELEMENT_CALLBACK_METHODS, assignment_target_identifier_name, call_receiver_name,
+    ITERABLE_ELEMENT_CALLBACK_METHODS, assignment_target_identifier_name,
     static_member_object_name, unwrap_parens, unwrap_static_expr,
 };
 
@@ -82,10 +82,14 @@ impl<'a> Visit<'a> for SignatureTypeCollector {
     }
 }
 
+#[path = "visit_impl_call_result_aliases.rs"]
+mod call_result_aliases;
 #[path = "visit_impl_durable_objects.rs"]
 mod durable_objects;
+#[path = "visit_impl_receiver_paths.rs"]
+mod receiver_paths;
 
-use durable_objects::{DurableObjectCalls, ReceiverAlias, ResolvedReceiver};
+use durable_objects::{DurableObjectCalls, ReceiverAlias};
 
 pub(super) struct StructuralParamMemberCollector {
     target_params: FxHashSet<String>,
@@ -152,58 +156,6 @@ impl StructuralParamMemberCollector {
         }
     }
 
-    /// The tracked parameter and the property path that `object` reads. With
-    /// `allow_call_arguments`, a method call with arguments is a `()` link, as
-    /// in `call_receiver_name`. Use that form only to record a member access.
-    fn resolve_receiver_path(
-        &self,
-        object: &Expression<'_>,
-        allow_call_arguments: bool,
-    ) -> Option<(String, String)> {
-        self.resolve_receiver(object, allow_call_arguments)
-            .map(|receiver| (receiver.param, receiver.path))
-    }
-
-    /// [`Self::resolve_receiver_path`], and whether the path goes through a
-    /// Durable Object stub local.
-    fn resolve_receiver(
-        &self,
-        object: &Expression<'_>,
-        allow_call_arguments: bool,
-    ) -> Option<ResolvedReceiver> {
-        let object_path = if allow_call_arguments {
-            call_receiver_name(object)?
-        } else {
-            static_member_object_name(object)?
-        };
-        let (root, suffix) = object_path
-            .split_once('.')
-            .map_or((object_path.as_str(), ""), |(root, suffix)| (root, suffix));
-        for (aliases, shadowed) in self.alias_stack.iter().zip(&self.shadowed_stack).rev() {
-            if let Some(alias) = aliases.get(root) {
-                let (param, alias_path) = &alias.target;
-                let path = match (alias_path.is_empty(), suffix.is_empty()) {
-                    (true, _) => suffix.to_string(),
-                    (_, true) => alias_path.clone(),
-                    (false, false) => format!("{alias_path}.{suffix}"),
-                };
-                return Some(ResolvedReceiver {
-                    param: param.clone(),
-                    path,
-                    via_stub: alias.stub,
-                });
-            }
-            if shadowed.contains(root) {
-                return None;
-            }
-        }
-        self.target_params.contains(root).then(|| ResolvedReceiver {
-            param: root.to_string(),
-            path: suffix.to_string(),
-            via_stub: false,
-        })
-    }
-
     /// The parameter and the element path of an array that a property path of
     /// a tracked parameter holds: `(m, days[])` for `m.days`. The parameter
     /// itself (an empty path) is not an array, so it gives no element.
@@ -252,17 +204,17 @@ impl<'a> Visit<'a> for StructuralParamMemberCollector {
         // `local.rotate(1).translate(1, 1)` reads `translate` on the
         // `rotate()` path of `local`, as the call without arguments does
         // (issue #4311).
-        if let Some(receiver) = self.resolve_receiver(&expr.object, true) {
+        for receiver in self.resolve_receivers(&expr.object, true) {
             self.record_member_access(receiver, expr.property.name.to_string());
         }
         walk::walk_static_member_expression(self, expr);
     }
 
     fn visit_computed_member_expression(&mut self, expr: &ComputedMemberExpression<'a>) {
-        if let Expression::StringLiteral(property) = &expr.expression
-            && let Some(receiver) = self.resolve_receiver(&expr.object, true)
-        {
-            self.record_member_access(receiver, property.value.text().into_owned());
+        if let Expression::StringLiteral(property) = &expr.expression {
+            for receiver in self.resolve_receivers(&expr.object, true) {
+                self.record_member_access(receiver, property.value.text().into_owned());
+            }
         }
         walk::walk_computed_member_expression(self, expr);
     }
@@ -355,7 +307,7 @@ impl<'a> Visit<'a> for StructuralParamMemberCollector {
             .map(|(local, target)| (local, ReceiverAlias::plain(target)))
             .collect::<Vec<_>>();
         for declarator in &decl.declarations {
-            aliases.extend(self.durable_object_stub_alias(declarator));
+            aliases.extend(self.declarator_receiver_alias(declarator));
         }
         if matches!(
             decl.kind,

@@ -18496,3 +18496,150 @@ fn security_spawn_command_carries_options_metadata() {
         }]
     );
 }
+
+#[test]
+fn local_of_method_call_result_records_return_type_path() {
+    // Issue #4552: `const rotated = local.rotate(angle)` binds `rotated` to
+    // the `rotate()` path of `Point`, for a parameter typed `Point` and for a
+    // `new Point()` local. A conditional with the call in one branch and the
+    // receiver in the other records the read on both paths.
+    let info = parse(
+        r"
+        import { Point } from './point';
+
+        export function direct(local: Point, angle: number): Point {
+            const rotated = local.rotate(angle);
+            return rotated.translate(1, 1);
+        }
+
+        export function conditional(angle: number): Point {
+            const local = new Point(0, 0);
+            const rotated = angle ? local.rotate(angle) : local;
+            return rotated.flip();
+        }
+        ",
+    );
+
+    let typed_path = |path: &str, member: &str| {
+        info.semantic_facts.iter().any(|fact| {
+            matches!(
+                fact,
+                SemanticFact::TypedPropertyMemberAccess(access)
+                    if access.type_name == "Point"
+                        && access.property_path == path
+                        && access.member == member
+            )
+        })
+    };
+    assert!(
+        typed_path("rotate()", "translate"),
+        "{:?}",
+        info.semantic_facts
+    );
+    assert!(typed_path("rotate()", "flip"), "{:?}", info.semantic_facts);
+    assert!(
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Point" && access.member == "flip"),
+        "{:?}",
+        info.member_accesses
+    );
+}
+
+#[test]
+fn local_of_method_call_result_on_type_only_parameter_records_return_type_path() {
+    // Issue #4552: with `import type { Point }`, a parameter typed `Point` is
+    // a structural parameter. `const rotated = local.rotate(angle)` reads on
+    // the `rotate()` path, and a conditional with the receiver in the other
+    // branch also reads on `Point` itself. A nested shadow of the local reads
+    // nothing on `Point`.
+    let info = parse(
+        r"
+        import type { Point } from './point';
+
+        export function direct(local: Point, angle: number): Point {
+            const rotated = local.rotate(angle);
+            return rotated.translate(1, 1);
+        }
+
+        export function conditional(local: Point, angle: number): Point {
+            const rotated = angle ? local.rotate(angle) : local;
+            {
+                const rotated = { shadowed() {} };
+                rotated.shadowed();
+            }
+            return rotated.flip();
+        }
+        ",
+    );
+
+    let typed_path = |path: &str, member: &str| {
+        info.semantic_facts.iter().any(|fact| {
+            matches!(
+                fact,
+                SemanticFact::TypedPropertyMemberAccess(access)
+                    if access.type_name == "Point"
+                        && access.property_path == path
+                        && access.member == member
+            )
+        })
+    };
+    let direct_access = |member: &str| {
+        info.member_accesses
+            .iter()
+            .any(|access| access.object == "Point" && access.member == member)
+    };
+    assert!(
+        typed_path("rotate()", "translate"),
+        "{:?}",
+        info.semantic_facts
+    );
+    assert!(typed_path("rotate()", "flip"), "{:?}", info.semantic_facts);
+    assert!(direct_access("flip"), "{:?}", info.member_accesses);
+    assert!(!direct_access("translate"), "{:?}", info.member_accesses);
+    assert!(
+        !typed_path("rotate()", "shadowed"),
+        "{:?}",
+        info.semantic_facts
+    );
+    assert!(!direct_access("shadowed"), "{:?}", info.member_accesses);
+}
+
+#[test]
+fn local_of_unbound_call_result_records_no_class_path() {
+    // A call on a receiver with no bound class, a free function call, and a
+    // conditional of such values give the local no class path.
+    let info = parse(
+        r"
+        import { Point } from './point';
+
+        export function run(input: unknown, make: () => Point): void {
+            const a = (input as any).rotate(1);
+            a.alpha();
+            const b = make();
+            b.beta();
+            const c = input ? make() : (input as any).rotate(1);
+            c.gamma();
+        }
+        ",
+    );
+
+    for member in ["alpha", "beta", "gamma"] {
+        assert!(
+            !info.semantic_facts.iter().any(|fact| matches!(
+                fact,
+                SemanticFact::TypedPropertyMemberAccess(access) if access.member == member
+            )),
+            "{member}: {:?}",
+            info.semantic_facts
+        );
+        assert!(
+            !info
+                .member_accesses
+                .iter()
+                .any(|access| access.object.starts_with("Point") && access.member == member),
+            "{member}: {:?}",
+            info.member_accesses
+        );
+    }
+}
