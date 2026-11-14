@@ -11,6 +11,7 @@ export class Inputs {
   readonly widthPct = input(0);
   readonly shadowed = input("");
   readonly items = input<string[]>([]);
+  readonly icuCount = input(0);
   readonly neverRead = input("");
   n = 1;
 }

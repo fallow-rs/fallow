@@ -6,3 +6,4 @@
 <div [style.width.%]="widthPct()"></div>
 <p>{{ shadowed() }}</p>
 @for (shadowed of items(); track shadowed) { <i>{{ shadowed }}</i> }
+<p>{icuCount(), plural, =1 {one} other {many}}</p>
