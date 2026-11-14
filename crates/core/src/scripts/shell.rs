@@ -335,30 +335,16 @@ pub(super) fn split_shell_commands<'a>(
     let len = bytes.len();
     let mut i = 0;
     let mut word_start = 0;
-    let mut in_single_quote = sink.state.in_single_quote;
-    let mut in_double_quote = sink.state.in_double_quote;
+    let mut quotes = Quotes {
+        single: sink.state.in_single_quote,
+        double: sink.state.in_double_quote,
+    };
 
     while i < len {
         let b = bytes[i];
 
-        if b == b'\\' && !in_single_quote && !starts_windows_path(&script[word_start..]) {
-            i = (i + 2).min(len);
-            continue;
-        }
-
-        if b == b'\'' && !in_double_quote {
-            in_single_quote = !in_single_quote;
-            i += 1;
-            continue;
-        }
-        if b == b'"' && !in_single_quote {
-            in_double_quote = !in_double_quote;
-            i += 1;
-            continue;
-        }
-
-        if in_single_quote || in_double_quote {
-            i += 1;
+        if let Some(next) = quotes.step(script, i, word_start) {
+            i = next;
             continue;
         }
 
@@ -407,9 +393,39 @@ pub(super) fn split_shell_commands<'a>(
         sink.push(&script[start..]);
     }
 
-    sink.state.in_single_quote = in_single_quote;
-    sink.state.in_double_quote = in_double_quote;
+    sink.state.in_single_quote = quotes.single;
+    sink.state.in_double_quote = quotes.double;
     sink.finish()
+}
+
+/// The quote state of [`split_shell_commands`].
+struct Quotes {
+    single: bool,
+    double: bool,
+}
+
+impl Quotes {
+    /// Consume the byte at `i` when it is an escape, a quote, or a byte inside
+    /// quotes, and return the index after it. Return `None` for a byte that
+    /// the caller must read as shell syntax.
+    fn step(&mut self, script: &str, i: usize, word_start: usize) -> Option<usize> {
+        let len = script.len();
+        match script.as_bytes()[i] {
+            b'\\' if !self.single && !starts_windows_path(&script[word_start..]) => {
+                Some((i + 2).min(len))
+            }
+            b'\'' if !self.double => {
+                self.single = !self.single;
+                Some(i + 1)
+            }
+            b'"' if !self.single => {
+                self.double = !self.double;
+                Some(i + 1)
+            }
+            _ if self.single || self.double => Some(i + 1),
+            _ => None,
+        }
+    }
 }
 
 /// Whether the `)` after `segment` closes a subshell, and pop the `(` that it
