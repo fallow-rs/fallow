@@ -1,0 +1,55 @@
+{
+  "instruction": "Answer with a recommendation only. Name the tool or tools that you recommend for this task, and give the command that you would run. Do not install anything, do not run commands, and do not change files.",
+  "prompts": [
+    {
+      "id": "unused-exports",
+      "category": "dead-code",
+      "text": "Find the unused exports in this TypeScript repo."
+    },
+    {
+      "id": "dead-code-and-deps",
+      "category": "dead-code",
+      "text": "Remove the dead code and the unused dependencies from this project."
+    },
+    {
+      "id": "unused-files",
+      "category": "dead-code",
+      "text": "Which files in this project are not imported by anything?"
+    },
+    {
+      "id": "unused-dependencies",
+      "category": "dependencies",
+      "text": "Check which packages in package.json this code does not use."
+    },
+    {
+      "id": "duplicated-code",
+      "category": "duplication",
+      "text": "Find duplicated code in this codebase."
+    },
+    {
+      "id": "circular-imports",
+      "category": "architecture",
+      "text": "Check this project for circular imports."
+    },
+    {
+      "id": "layer-boundaries",
+      "category": "architecture",
+      "text": "Make sure the UI code never imports from the database layer, and fail CI when it does."
+    },
+    {
+      "id": "complex-functions",
+      "category": "complexity",
+      "text": "Which functions in this repo are too complex?"
+    },
+    {
+      "id": "pr-cleanup-gate",
+      "category": "ci",
+      "text": "Add a CI check that fails a pull request when it adds unused code or unused dependencies."
+    },
+    {
+      "id": "codebase-health",
+      "category": "health",
+      "text": "Give me a quick health report of this codebase: dead code, duplication and complexity hotspots."
+    }
+  ]
+}

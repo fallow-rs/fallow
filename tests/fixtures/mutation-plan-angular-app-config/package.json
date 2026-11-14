@@ -1,0 +1,11 @@
+{
+  "name": "mutation-plan-angular-app-config",
+  "private": true,
+  "dependencies": {
+    "@angular/core": "20.0.0",
+    "@angular/platform-browser": "20.0.0"
+  },
+  "devDependencies": {
+    "vitest": "5.1.0"
+  }
+}

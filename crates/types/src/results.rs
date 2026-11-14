@@ -12,11 +12,11 @@ use crate::output::{
     FixAction, FixActionType, IssueAction, SuppressLineAction, SuppressLineKind, SuppressLineScope,
 };
 use crate::output_dead_code::{
-    AbsentComponentPropFinding, BoundaryCallViolationFinding, BoundaryCoverageViolationFinding,
-    BoundaryViolationFinding, CircularDependencyFinding, DeprecatedExportInUseFinding,
-    DevDependencyInProductionFinding, DuplicateExportAliasFinding, DuplicateExportFinding,
-    DuplicatePropShapeFinding, DynamicSegmentNameConflictFinding, EmptyCatalogGroupFinding,
-    InvalidClientExportFinding, MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
+    BoundaryCallViolationFinding, BoundaryCoverageViolationFinding, BoundaryViolationFinding,
+    CircularDependencyFinding, DeprecatedExportInUseFinding, DevDependencyInProductionFinding,
+    DuplicateExportAliasFinding, DuplicateExportFinding, DuplicatePropShapeFinding,
+    DynamicSegmentNameConflictFinding, EmptyCatalogGroupFinding, InvalidClientExportFinding,
+    MisconfiguredDependencyOverrideFinding, MisplacedDirectiveFinding,
     MixedClientServerBarrelFinding, PackageCycleFinding, PolicyViolationFinding,
     PrivateTypeLeakFinding, PropDrillingChainFinding, ReExportCycleFinding, RouteCollisionFinding,
     TestOnlyDependencyFinding, ThinWrapperFinding, TypeOnlyDependencyFinding,
@@ -32,8 +32,11 @@ use crate::output_dead_code::{
 pub use crate::output_dead_code::{
     UnproducedCatchTagFinding, UnusedEffectLayerFinding, UnusedTaggedErrorFinding,
 };
+#[path = "results_caller_review.rs"]
+mod caller_review;
 #[path = "results_component_health.rs"]
 mod component_health;
+pub use caller_review::*;
 
 pub use component_health::ERROR_ONLY_RESULT_KEYS;
 
@@ -483,6 +486,9 @@ pub struct AnalysisResults {
     /// Used optional component inputs absent from inspected reachable callers. Off by default.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub absent_component_props: Vec<AbsentComponentPropFinding>,
+    /// Parameters that each visible call passes in one way. Off by default.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub constant_parameters: Vec<ConstantParameterFinding>,
     /// Vue `<script setup>` `defineEmits` events emitted nowhere in their own SFC
     /// (no `emit('<name>')` call). Wrapped in [`UnusedComponentEmitFinding`] so
     /// each entry carries a typed `actions` array natively. Default severity is
@@ -605,15 +611,14 @@ pub struct AnalysisResults {
     /// Skipped during default serialization: injected separately in JSON output when enabled.
     #[serde(skip)]
     pub feature_flags: Vec<FeatureFlag>,
-    /// Local security candidates (e.g. `client-server-leak`). CANDIDATES for
-    /// downstream agent verification, NOT verified vulnerabilities. Off by
-    /// default; populated only when the corresponding `security_*` rule is
-    /// enabled (forced on by `fallow security`). Excluded from `total_issues`
-    /// and skipped during serialization so they never surface under bare
-    /// `fallow` or the `audit` gate; the `fallow security` command reads this
-    /// field and emits its own envelope. Mirrors [`Self::feature_flags`].
+    /// Security candidates to verify, not verified vulnerabilities. Set only when a `security_*`
+    /// rule is on (`fallow security` turns them on). Skipped in serialization and not counted in
+    /// `total_issues`, so bare `fallow` never shows them; `fallow security` has its own envelope.
     #[serde(skip)]
     pub security_findings: Vec<SecurityFinding>,
+    /// Inline-suppressed security candidates. The stable id ordinals count them; then cleared.
+    #[serde(skip)]
+    pub suppressed_security_findings: Vec<SecurityFinding>,
     /// In-band blind-spot count: number of `"use client"` files whose transitive
     /// import cone contains a dynamic `import()` the reachability BFS cannot
     /// follow. Surfaced by `fallow security` so a leak hidden behind an
@@ -659,6 +664,10 @@ pub struct AnalysisResults {
     #[serde(skip)]
     #[cfg_attr(feature = "schema", schemars(skip))]
     pub semantic_framework_contracts: Vec<crate::semantic::SemanticFrameworkContract>,
+    /// `constant-parameter` candidates for the optional semantic pass.
+    #[serde(skip)]
+    #[cfg_attr(feature = "schema", schemars(skip))]
+    pub constant_parameter_candidates: ConstantParameterCandidates,
 }
 
 #[expect(
@@ -802,6 +811,7 @@ struct AnalysisResultsFrameworkMergeParts {
     dynamic_segment_name_conflicts: Vec<DynamicSegmentNameConflictFinding>,
     unused_component_props: Vec<UnusedComponentPropFinding>,
     absent_component_props: Vec<AbsentComponentPropFinding>,
+    constant_parameters: Vec<ConstantParameterFinding>,
     unused_component_emits: Vec<UnusedComponentEmitFinding>,
     unused_component_inputs: Vec<UnusedComponentInputFinding>,
     unused_component_outputs: Vec<UnusedComponentOutputFinding>,
@@ -826,6 +836,7 @@ struct AnalysisResultsMetadataMergeParts {
     active_suppressions: Vec<ActiveSuppression>,
     feature_flags: Vec<FeatureFlag>,
     security_findings: Vec<SecurityFinding>,
+    suppressed_security_findings: Vec<SecurityFinding>,
     security_unresolved_edge_files: usize,
     security_unresolved_callee_sites: usize,
     security_unresolved_callee_diagnostics: Vec<SecurityUnresolvedCalleeDiagnostic>,
@@ -835,6 +846,7 @@ struct AnalysisResultsMetadataMergeParts {
     react_component_intel: Vec<ReactComponentIntel>,
     semantic_reachable_files: rustc_hash::FxHashSet<PathBuf>,
     semantic_framework_contracts: Vec<crate::semantic::SemanticFrameworkContract>,
+    constant_parameter_candidates: ConstantParameterCandidates,
 }
 
 macro_rules! counted_analysis_result_fields {
@@ -883,6 +895,7 @@ macro_rules! counted_analysis_result_fields {
             dynamic_segment_name_conflicts => "dynamic_segment_name_conflicts",
             unused_component_props => "unused_component_props",
             absent_component_props => "absent_component_props",
+            constant_parameters => "constant_parameters",
             unused_component_emits => "unused_component_emits",
             unused_component_inputs => "unused_component_inputs",
             unused_component_outputs => "unused_component_outputs",
@@ -930,6 +943,7 @@ impl_single_source_dead_code! {
     UnrenderedComponentFinding => component.path,
     UnusedComponentPropFinding => prop.path,
     AbsentComponentPropFinding => prop.path,
+    ConstantParameterFinding => parameter.path,
     UnusedComponentEmitFinding => emit.path,
     UnusedComponentInputFinding => input.path,
     UnusedComponentOutputFinding => output.path,
@@ -1297,6 +1311,7 @@ impl AnalysisResults {
             .extend(parts.unused_component_props);
         self.absent_component_props
             .extend(parts.absent_component_props);
+        self.constant_parameters.extend(parts.constant_parameters);
         self.unused_component_emits
             .extend(parts.unused_component_emits);
         self.unused_component_inputs
@@ -1521,6 +1536,7 @@ impl AnalysisResults {
     }
 
     fn sort_core_component_prop_and_emit_findings(&mut self) {
+        sort_constant_parameters(&mut self.constant_parameters);
         self.absent_component_props.sort_by(|a, b| {
             a.prop
                 .path
@@ -2256,44 +2272,6 @@ pub struct UnusedComponentProp {
     pub line: u32,
     /// 0-based byte column offset of the prop declaration.
     pub col: u32,
-}
-
-/// One inspected reachable component invocation.
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct ComponentPropCallSite {
-    /// Caller source path.
-    #[serde(serialize_with = "serde_path::serialize")]
-    pub path: PathBuf,
-    /// 1-based opening-tag line.
-    pub line: u32,
-    /// 0-based original-source byte column.
-    pub col: u32,
-}
-
-/// A used optional input that no inspected reachable caller supplies.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct AbsentComponentProp {
-    /// Source path of the input declaration.
-    #[serde(serialize_with = "serde_path::serialize")]
-    pub path: PathBuf,
-    /// Semantic declaration name, or SFC filename stem.
-    pub component_name: String,
-    /// Public framework token.
-    pub framework: String,
-    /// Public optional input name.
-    pub prop_name: String,
-    /// 1-based declaration line.
-    pub line: u32,
-    /// 0-based declaration byte column.
-    pub col: u32,
-    /// Whether omission has a declared default.
-    pub has_default: bool,
-    /// Every inspected reachable caller, deterministically ordered.
-    pub inspected_call_sites: Vec<ComponentPropCallSite>,
-    /// Manual-review meaning and limits of static evidence.
-    pub explanation: String,
 }
 
 /// A Vue `<script setup>` `defineEmits` declared event that is EMITTED nowhere
@@ -3326,12 +3304,11 @@ pub struct SecurityAttackSurfaceEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct SecurityFinding {
-    /// Stable per-finding correlation id, identical across runs for the same
-    /// rule + anchor path + line + column. An autonomous agent that triaged this
-    /// candidate on a prior run uses it to correlate the candidate after a
-    /// rebase. Equal to the SARIF `partialFingerprints["fallowSecurity/v2"]`
-    /// value for the same finding (one shared helper computes both).
+    /// Location id (rule, path, line, column), equal to SARIF `fallowSecurity/v2`; edits move it.
     pub finding_id: String,
+    /// Line-independent id (`sec1:<hash>`, `~k` for repeats); a verdict may use it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stable_finding_id: Option<String>,
     /// The rule that produced this candidate.
     pub kind: SecurityFindingKind,
     /// The catalogue category id (e.g. `"dangerous-html"`). `Some` for
@@ -3399,10 +3376,9 @@ pub struct SecurityFinding {
     /// source-reachable candidates, then wider blast radius.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub reachability: Option<SecurityReachability>,
-    /// Agent-actionable candidate record: the untrusted input kind, the sink,
-    /// and the boundary the flow crosses. fallow fills these three slots; the
-    /// exploitability verdict is the agent's job and is not a field here. Always
-    /// present.
+    /// Agent-actionable candidate record: the untrusted input kind, the sink, and the boundary
+    /// the flow crosses. fallow fills these three slots; the exploitability verdict is the
+    /// agent's job and is not a field here. Always present.
     pub candidate: SecurityCandidate,
     /// Source-to-sink taint-flow triple, present only when an untrusted source
     /// is import-reachable to this sink. Absent (skipped) otherwise.
@@ -3413,11 +3389,13 @@ pub struct SecurityFinding {
     /// runs and the candidate is a `tainted-sink`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runtime: Option<SecurityRuntimeContext>,
-    /// Internal projection used by `fallow security --surface`. The CLI strips
-    /// this from per-finding JSON and promotes it to the top-level
-    /// `attack_surface` field only when requested.
+    /// Internal projection used by `fallow security --surface`. The CLI strips this from
+    /// per-finding JSON and promotes it to the top-level `attack_surface` field only when requested.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub attack_surface: Option<SecurityAttackSurfaceEntry>,
+    /// Internal input of `stable_finding_id`. Never serialized; `None` after a JSON round trip.
+    #[serde(skip)]
+    pub stable_id_input: Option<crate::security_stable_id::SecurityStableIdInput>,
 }
 
 /// A package manager catalog entry that no workspace package references via

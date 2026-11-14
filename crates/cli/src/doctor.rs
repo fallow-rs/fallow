@@ -14,9 +14,10 @@ pub const HELP: &str = "\
 Diagnose project readiness without analysis or mutation.
 
 Checks the root, config resolution, workspace discovery, external plugins, the
-optional type-aware companion, installed dependencies, and whether the
-persisted extraction and module-graph caches would be reused. Uses only local
-reads and supports human and JSON output.
+optional type-aware companion, installed dependencies, whether the
+persisted extraction and module-graph caches would be reused, and whether
+the installed mutation test runner is in the supported version range. Uses
+only local reads and supports human and JSON output.
 
 Usage: fallow doctor [OPTIONS]
 
@@ -124,6 +125,7 @@ const fn check_id(id: fallow_output::DoctorCheckId) -> &'static str {
         fallow_output::DoctorCheckId::Dependencies => "dependencies",
         fallow_output::DoctorCheckId::Cache => "cache",
         fallow_output::DoctorCheckId::GraphCache => "graph-cache",
+        fallow_output::DoctorCheckId::MutationRunner => "mutation-runner",
     }
 }
 
@@ -163,6 +165,7 @@ mod tests {
                 "dependencies",
                 "cache",
                 "graph-cache",
+                "mutation-runner",
             ]
         );
     }

@@ -233,7 +233,11 @@ fn svelte_runes_stay_in_place_and_their_arguments_mutate() {
     for operator_text in ["*", ">", "+=", "'a'"] {
         assert!(originals.contains(&operator_text), "{operator_text}");
     }
-    assert!(result.code.contains("$state((__fallow_m_a("));
+    assert!(
+        result
+            .code
+            .contains("$state((typeof __fallow_m_a === \"function\" && __fallow_m_a(")
+    );
     assert!(result.code.contains("$effect(() => {"));
     assert_eq!(result.code.matches("function __fallow_m_a(id)").count(), 1);
 }

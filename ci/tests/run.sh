@@ -121,6 +121,7 @@ assert_contains "$GITLAB_RUN_WRITER_SCRIPT" "bash -eo pipefail <<'FALLOW_RUN_WRI
 OUT=$(run_gitlab_install "$INSTALL_TMP/pinned" "")
 assert_contains "$OUT" "Using fallow version from" "install: reads package.json pin"
 assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow@2.7.3" "install: installs project pin"
+assert_contains "$(cat /tmp/fallow-version-source)" "$INSTALL_TMP/pinned/package.json" "install: records package.json as the version source"
 
 OUT=$(run_gitlab_install "$INSTALL_TMP/range" "")
 assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow@^2.52.0" "install: supports package.json semver range"
@@ -128,16 +129,27 @@ assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow@^2.52.0"
 OUT=$(run_gitlab_install "$INSTALL_TMP/pinned" "latest")
 assert_contains "$OUT" "Using fallow version from FALLOW_VERSION: latest" "install: explicit FALLOW_VERSION wins"
 assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow" "install: explicit latest installs latest"
+assert_contains "$(cat /tmp/fallow-version-source)" "FALLOW_VERSION" "install: records FALLOW_VERSION as the version source"
 
 OUT=$(run_gitlab_install "$INSTALL_TMP/unsafe" "")
 assert_contains "$OUT" "Ignoring unsupported fallow package.json spec" "install: warns on unsupported package spec"
 assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow" "install: unsupported package spec falls back to latest"
+assert_contains "$(cat /tmp/fallow-version-source)" "the latest release" "install: records the latest release for an unsupported package spec"
 
 OUT=$(run_gitlab_install "$INSTALL_TMP/empty" "")
 assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow" "install: no package spec falls back to latest"
+assert_contains "$(cat /tmp/fallow-version-source)" "the latest release" "install: records the latest release as the version source"
 
 OUT=$(run_gitlab_install "$INSTALL_TMP/empty" "2.0.0 - 2.5.0")
 assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow@2.0.0 - 2.5.0" "install: supports npm hyphen ranges"
+
+# `fallow` does not depend on `fallow-type-aware`, so the template installs the
+# exact-version companion after `fallow` unless type-aware analysis is off.
+OUT=$(run_gitlab_install "$INSTALL_TMP/pinned" "")
+assert_contains "$OUT" "DRY RUN: npm install -g --ignore-scripts fallow-type-aware@<installed fallow version>" \
+  "install: installs the exact-version type-aware companion"
+OUT=$(FALLOW_TYPE_AWARE=false run_gitlab_install "$INSTALL_TMP/pinned" "")
+assert_not_contains "$OUT" "fallow-type-aware" "install: FALLOW_TYPE_AWARE=false skips the type-aware companion"
 
 OUT=$(run_gitlab_install "$INSTALL_TMP/empty" "file:../fallow")
 cmd_status=$?
@@ -178,6 +190,7 @@ else
   fail "install: FALLOW_SKIP_INSTALL succeeds when fallow is on PATH" "exit=$skip_status: $OUT"
 fi
 assert_contains "$OUT" "using pre-installed fallow 9.9.9" "install: FALLOW_SKIP_INSTALL reuses fallow on PATH"
+assert_contains "$(cat /tmp/fallow-version-source 2>/dev/null || true)" "PATH (FALLOW_SKIP_INSTALL)" "install: FALLOW_SKIP_INSTALL records PATH as the version source"
 assert_not_contains "$OUT" "DRY RUN: npm install" "install: FALLOW_SKIP_INSTALL skips npm install"
 # The skip path must record the binary's semver to /tmp/fallow-version-spec so the
 # MR-integration script-prep block can pin remote scripts (parity with install path).
@@ -241,6 +254,25 @@ if [ -n "${FALLOW_TEST_ENV_FILE:-}" ]; then
     "FALLOW_TYPE_AWARE_PROJECTS=${FALLOW_TYPE_AWARE_PROJECTS:-}" \
     "FALLOW_TYPE_AWARE_REQUIRE=${FALLOW_TYPE_AWARE_REQUIRE:-}" \
     > "$FALLOW_TEST_ENV_FILE"
+fi
+if [ "${1:-}" = "--version" ] && [ -n "${MOCK_FALLOW_VERSION:-}" ]; then
+  printf 'fallow %s\n' "$MOCK_FALLOW_VERSION"
+  exit 0
+fi
+# MOCK_NO_REPORT mimics a fallow before 3.4.2: no `report` subcommand, and
+# `--format codeclimate` on the analysis run. MOCK_NO_CODECLIMATE also
+# rejects that format.
+if [ "${1:-}" = "report" ] && [ "${MOCK_NO_REPORT:-}" = "1" ]; then
+  printf "error: unrecognized subcommand 'report'\n" >&2
+  exit 2
+fi
+if [ "${MOCK_NO_REPORT:-}" = "1" ] && [[ " $* " == *" --format codeclimate "* ]]; then
+  if [ "${MOCK_NO_CODECLIMATE:-}" = "1" ]; then
+    printf "error: invalid value 'codeclimate' for '--format <FORMAT>'\n" >&2
+    exit 2
+  fi
+  printf '%s\n' '[{"type":"issue","check_name":"fallow/unused-file","description":"Unused file","categories":["Bug Risk"],"severity":"minor","fingerprint":"f1","location":{"path":"src/a.ts","lines":{"begin":1}}}]'
+  exit 0
 fi
 if [ "${1:-}" = "report" ]; then
   printf '[]\n'
@@ -1140,6 +1172,73 @@ fi
 assert_contains "$(cat "$CODEQUALITY_LOG")" \
   "report --from fallow-results.json --root $RUNNER_TMP/root --format codeclimate --quiet --report-path-prefix custom/base" \
   "run writer: Code Quality rendering preserves explicit path prefix"
+
+# A fallow before 3.4.2 has no `report` subcommand (issue #4481). The Code
+# Quality step then asks the analysis run for `--format codeclimate`.
+rm -rf "$CODEQUALITY_WORK"; mkdir -p "$CODEQUALITY_WORK"
+printf 'package.json\n' > /tmp/fallow-version-source
+OUT=$(run_generated_gitlab_fixture "$CODEQUALITY_WORK" \
+  MOCK_NO_REPORT=1 \
+  MOCK_FALLOW_VERSION=2.91.0 \
+  FALLOW_CODEQUALITY=true \
+  FALLOW_TEST_LOG="$CODEQUALITY_LOG")
+cmd_status=$?
+if [ "$cmd_status" -eq 0 ]; then
+  pass "run writer: Code Quality on a fallow without report does not fail the job"
+else
+  fail "run writer: Code Quality on a fallow without report does not fail the job" "exit $cmd_status: $OUT"
+fi
+assert_json_length "$(cat "$CODEQUALITY_WORK/gl-code-quality-report.json" 2> /dev/null)" 1 \
+  "run writer: Code Quality on a fallow without report keeps the findings"
+assert_contains "$(grep '^fallow check' "$CODEQUALITY_LOG")" "--format codeclimate" \
+  "run writer: Code Quality on a fallow without report runs the analysis as codeclimate"
+assert_contains "$OUT" "fallow 2.91.0 from package.json" \
+  "run writer: Code Quality fallback names the version and its source"
+assert_not_contains "$OUT" "unrecognized subcommand" \
+  "run writer: Code Quality fallback hides the raw clap error"
+
+# The second analysis run must not write a baseline or a snapshot again,
+# but it keeps the scope of the first run.
+rm -rf "$CODEQUALITY_WORK"; mkdir -p "$CODEQUALITY_WORK"
+run_generated_gitlab_fixture "$CODEQUALITY_WORK" \
+  MOCK_NO_REPORT=1 \
+  MOCK_FALLOW_VERSION=2.91.0 \
+  FALLOW_CODEQUALITY=true \
+  FALLOW_COMMAND= \
+  FALLOW_CHANGED_SINCE=main \
+  FALLOW_SAVE_SNAPSHOT=true \
+  FALLOW_SAVE_BASELINE=saved-baseline.json \
+  FALLOW_TEST_LOG="$CODEQUALITY_LOG" > /dev/null
+CODEQUALITY_RUN=$(grep -e '--format codeclimate' "$CODEQUALITY_LOG" | grep -v '^fallow report' || true)
+assert_contains "$(grep -c -e '--save-snapshot' "$CODEQUALITY_LOG")" "1" \
+  "run writer: Code Quality fallback saves the snapshot once"
+assert_not_contains "$CODEQUALITY_RUN" "--save-snapshot" \
+  "run writer: Code Quality fallback run saves no snapshot"
+assert_not_contains "$CODEQUALITY_RUN" "--save-baseline" \
+  "run writer: Code Quality fallback run saves no baseline"
+assert_contains "$CODEQUALITY_RUN" "--changed-since main" \
+  "run writer: Code Quality fallback run keeps the changed-files scope"
+
+# A fallow that cannot produce Code Quality at all skips only that step.
+rm -rf "$CODEQUALITY_WORK"; mkdir -p "$CODEQUALITY_WORK"
+OUT=$(run_generated_gitlab_fixture "$CODEQUALITY_WORK" \
+  MOCK_NO_REPORT=1 \
+  MOCK_NO_CODECLIMATE=1 \
+  MOCK_FALLOW_VERSION=2.0.0 \
+  FALLOW_CODEQUALITY=true)
+cmd_status=$?
+if [ "$cmd_status" -eq 0 ]; then
+  pass "run writer: Code Quality skip does not fail the job"
+else
+  fail "run writer: Code Quality skip does not fail the job" "exit $cmd_status: $OUT"
+fi
+assert_json_length "$(cat "$CODEQUALITY_WORK/gl-code-quality-report.json" 2> /dev/null)" 0 \
+  "run writer: Code Quality skip writes an empty report"
+assert_contains "$OUT" "WARNING: Skipped the Code Quality report: fallow 2.0.0 from package.json" \
+  "run writer: Code Quality skip names the version and its source"
+assert_contains "$OUT" "3.4.2" "run writer: Code Quality skip names the minimum version"
+assert_contains "$OUT" "FALLOW_VERSION" "run writer: Code Quality skip names the fix"
+rm -f /tmp/fallow-version-source
 
 # =========================================================================
 # Behavioral parity between action/scripts/install.sh and ci/gitlab-ci.yml
@@ -2318,7 +2417,7 @@ for prop_command in dead-code ""; do
       prop_envelope=$(gitlab_gate_envelope '' '')
       jq --arg level "$prop_severity" --argjson count "$prop_total" '.total_issues = $count | .summary.total_issues = $count | .prop_drilling_chains = [{prop:"user",depth:3,hops:[{file:"src/Page.tsx",line:4,component:"Page"}],effective_severity:$level}]' "$prop_envelope" > "$GATE_WORK/prop-envelope.json"
     else
-      jq --arg level "$prop_severity" --argjson count "$prop_total" '.check.total_issues = $count | .check.prop_drilling_chains = [{prop:"user",depth:3,hops:[{file:"src/Page.tsx",line:4,component:"Page"}],effective_severity:$level}]' "$FIXTURES/combined-health-baselined.json" > "$GATE_WORK/prop-envelope.json"
+      jq --arg level "$prop_severity" --argjson count "$prop_total" '.check.total_issues = $count | .gate_outcomes["error-severity-findings"].observed = $count | .check.prop_drilling_chains = [{prop:"user",depth:3,hops:[{file:"src/Page.tsx",line:4,component:"Page"}],effective_severity:$level}]' "$FIXTURES/combined-health-baselined.json" > "$GATE_WORK/prop-envelope.json"
     fi
     PROP_EXIT=0
     OUT=$(run_generated_gitlab_fixture "$GATE_WORK" MOCK_GATE_ENVELOPE="$GATE_WORK/prop-envelope.json" FALLOW_COMMAND="$prop_command" FALLOW_HEALTH_BASELINE=h.json FALLOW_FAIL_ON_ISSUES=true 2>&1) || PROP_EXIT=$?
@@ -2330,6 +2429,109 @@ for prop_command in dead-code ""; do
     fi
   done
 done
+
+# The count gate follows rule severity, the same as the CLI exit code. A
+# finding whose rule is `warn` stays in the count line, but it does not fail
+# the pipeline. The CLI publishes the error count as
+# `gate_outcomes["error-severity-findings"].observed`.
+SEVERITY_WARN_ONLY='{"error-severity-findings":{"status":"pass","enforced":true,"observed":0.0,"threshold_label":"error"}}'
+for severity_command in dead-code check architecture; do
+  jq '.total_issues = 2 | .summary.total_issues = 2' "$(gitlab_gate_envelope "$SEVERITY_WARN_ONLY")" > "$GATE_WORK/severity-warn.json"
+  SEVERITY_EXIT=0
+  OUT=$(run_generated_gitlab_fixture "$GATE_WORK" MOCK_GATE_ENVELOPE="$GATE_WORK/severity-warn.json" \
+    FALLOW_COMMAND="$severity_command" FALLOW_FAIL_ON_ISSUES=true 2>&1) || SEVERITY_EXIT=$?
+  assert_contains "$OUT" "Found 2 issues" "severity count: $severity_command keeps warn findings in the count"
+  [ "$SEVERITY_EXIT" -eq 0 ] && pass "severity count: $severity_command with warn-only findings passes" \
+    || fail "severity count: $severity_command with warn-only findings passes" "exit $SEVERITY_EXIT: $OUT"
+done
+jq '.total_issues = 3 | .summary.total_issues = 3' \
+  "$(gitlab_gate_envelope '{"error-severity-findings":{"status":"fail","enforced":true,"observed":1.0,"threshold_label":"error"}}')" \
+  > "$GATE_WORK/severity-error.json"
+SEVERITY_EXIT=0
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" MOCK_GATE_ENVELOPE="$GATE_WORK/severity-error.json" \
+  FALLOW_COMMAND=dead-code FALLOW_FAIL_ON_ISSUES=true 2>&1) || SEVERITY_EXIT=$?
+assert_contains "$OUT" "Fallow found 1 unused code issues at error severity (3 in total)" \
+  "severity count: the failure counts only the findings at error severity"
+[ "$SEVERITY_EXIT" -eq 1 ] && pass "severity count: an error finding fails the pipeline" \
+  || fail "severity count: an error finding fails the pipeline" "exit $SEVERITY_EXIT: $OUT"
+jq --argjson gates "$SEVERITY_WARN_ONLY" '.check.total_issues = 4 | .gate_outcomes += $gates' \
+  "$FIXTURES/combined-health-baselined.json" > "$GATE_WORK/severity-bare.json"
+SEVERITY_EXIT=0
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" MOCK_GATE_ENVELOPE="$GATE_WORK/severity-bare.json" \
+  FALLOW_COMMAND= FALLOW_HEALTH_BASELINE=h.json FALLOW_FAIL_ON_ISSUES=true 2>&1) || SEVERITY_EXIT=$?
+assert_contains "$OUT" "Found 4 issues" "severity count: the bare run keeps warn findings in the count"
+[ "$SEVERITY_EXIT" -eq 0 ] && pass "severity count: a bare run with warn-only dead code passes" \
+  || fail "severity count: a bare run with warn-only dead code passes" "exit $SEVERITY_EXIT: $OUT"
+# Fallow 3.29.0 to 3.31.x publish the entry without `observed`. A `pass`
+# status then means no finding at error severity.
+jq '.total_issues = 2 | .summary.total_issues = 2' \
+  "$(gitlab_gate_envelope '{"error-severity-findings":{"status":"pass","enforced":true}}')" \
+  > "$GATE_WORK/severity-no-observed.json"
+SEVERITY_EXIT=0
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" MOCK_GATE_ENVELOPE="$GATE_WORK/severity-no-observed.json" \
+  FALLOW_COMMAND=dead-code FALLOW_FAIL_ON_ISSUES=true 2>&1) || SEVERITY_EXIT=$?
+[ "$SEVERITY_EXIT" -eq 0 ] && pass "severity count: a pass entry without observed passes" \
+  || fail "severity count: a pass entry without observed passes" "exit $SEVERITY_EXIT: $OUT"
+jq '.check.total_issues = 4 | .gate_outcomes += {"error-severity-findings":{"status":"pass","enforced":true}}' \
+  "$FIXTURES/combined-health-baselined.json" > "$GATE_WORK/severity-bare-no-observed.json"
+SEVERITY_EXIT=0
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" MOCK_GATE_ENVELOPE="$GATE_WORK/severity-bare-no-observed.json" \
+  FALLOW_COMMAND= FALLOW_HEALTH_BASELINE=h.json FALLOW_FAIL_ON_ISSUES=true 2>&1) || SEVERITY_EXIT=$?
+[ "$SEVERITY_EXIT" -eq 0 ] && pass "severity count: a bare run with a pass entry without observed passes" \
+  || fail "severity count: a bare run with a pass entry without observed passes" "exit $SEVERITY_EXIT: $OUT"
+# A `fail` status without `observed` gives no error count, so the full count gates.
+jq '.total_issues = 2 | .summary.total_issues = 2' \
+  "$(gitlab_gate_envelope '{"error-severity-findings":{"status":"fail","enforced":true}}')" \
+  > "$GATE_WORK/severity-fail-no-observed.json"
+SEVERITY_EXIT=0
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" MOCK_GATE_ENVELOPE="$GATE_WORK/severity-fail-no-observed.json" \
+  FALLOW_COMMAND=dead-code FALLOW_FAIL_ON_ISSUES=true 2>&1) || SEVERITY_EXIT=$?
+[ "$SEVERITY_EXIT" -eq 1 ] && pass "severity count: a fail entry without observed gates on the full count" \
+  || fail "severity count: a fail entry without observed gates on the full count" "exit $SEVERITY_EXIT: $OUT"
+# A fallow older than 3.29.0 publishes no gate_outcomes: the full count gates.
+jq '.total_issues = 2 | .summary.total_issues = 2' "$(gitlab_gate_envelope '')" > "$GATE_WORK/severity-old.json"
+SEVERITY_EXIT=0
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" MOCK_GATE_ENVELOPE="$GATE_WORK/severity-old.json" \
+  FALLOW_COMMAND=dead-code FALLOW_FAIL_ON_ISSUES=true 2>&1) || SEVERITY_EXIT=$?
+[ "$SEVERITY_EXIT" -eq 1 ] && pass "severity count: without gate_outcomes the full count gates" \
+  || fail "severity count: without gate_outcomes the full count gates" "exit $SEVERITY_EXIT: $OUT"
+
+# An audit that compared no changed file has a pass verdict that checked
+# nothing. A pipeline outside a merge request has no base to compare with.
+printf '%s\n' '{"command":"audit","verdict":"pass","changed_files_count":0,"base_ref":"main","attribution":{"gate":"new-only"},"summary":{"dead_code_issues":0,"complexity_findings":0,"duplication_clone_groups":0}}' \
+  > "$GATE_WORK/audit-empty.json"
+EMPTY_AUDIT_EXIT=0
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" MOCK_GATE_ENVELOPE="$GATE_WORK/audit-empty.json" \
+  FALLOW_COMMAND=audit FALLOW_FAIL_ON_ISSUES=true 2>&1) || EMPTY_AUDIT_EXIT=$?
+assert_contains "$OUT" "WARNING: Fallow audit compared no changed files against main, so its pass verdict checked nothing." \
+  "empty audit: a run with no changed files warns"
+assert_contains "$OUT" "This pipeline has no merge request base." \
+  "empty audit: a pipeline with no merge request base says so"
+[ "$EMPTY_AUDIT_EXIT" -eq 0 ] && pass "empty audit: the warning does not fail the pipeline" \
+  || fail "empty audit: the warning does not fail the pipeline" "exit $EMPTY_AUDIT_EXIT: $OUT"
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" MOCK_GATE_ENVELOPE="$GATE_WORK/audit-empty.json" \
+  FALLOW_COMMAND=audit FALLOW_CHANGED_SINCE=abc123 2>&1) || true
+assert_contains "$OUT" "WARNING: Fallow audit compared no changed files against main" \
+  "empty audit: a run with a base and no changes still warns"
+assert_not_contains "$OUT" "This pipeline has no merge request base." \
+  "empty audit: a run with a base does not blame a missing base"
+printf '%s\n' '{"command":"audit","verdict":"pass","changed_files_count":0,"base_ref":"a\r\nINJECTED","attribution":{"gate":"new-only"},"summary":{"dead_code_issues":0,"complexity_findings":0,"duplication_clone_groups":0}}' \
+  > "$GATE_WORK/audit-empty-hostile.json"
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" MOCK_GATE_ENVELOPE="$GATE_WORK/audit-empty-hostile.json" \
+  FALLOW_COMMAND=audit 2>&1) || true
+assert_contains "$OUT" "against a  INJECTED, so" \
+  "empty audit: a hostile base ref stays on the warning line"
+if grep -q '^INJECTED' <<< "$OUT"; then
+  fail "empty audit: a hostile base ref starts no line of its own" "$OUT"
+else
+  pass "empty audit: a hostile base ref starts no line of its own"
+fi
+printf '%s\n' '{"command":"audit","verdict":"pass","changed_files_count":2,"base_ref":"main","attribution":{"gate":"new-only"},"summary":{"dead_code_issues":0,"complexity_findings":0,"duplication_clone_groups":0}}' \
+  > "$GATE_WORK/audit-changed.json"
+OUT=$(run_generated_gitlab_fixture "$GATE_WORK" MOCK_GATE_ENVELOPE="$GATE_WORK/audit-changed.json" \
+  FALLOW_COMMAND=audit 2>&1) || true
+assert_not_contains "$OUT" "compared no changed files" \
+  "empty audit: a run with changed files does not warn"
 
 # A gate the variable asked for fails the pipeline even with
 # FALLOW_FAIL_ON_ISSUES false, which is the whole point of every issue here.

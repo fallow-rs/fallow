@@ -1177,6 +1177,7 @@ fn process_config_result_merges_all_fields() {
         required_dependencies: vec![],
         always_used_files: vec!["setup.ts".to_string()],
         path_aliases: vec![],
+        checked_alias_prefixes: vec![],
         setup_files: vec![PathBuf::from("/project/test/setup.ts")],
         fixture_patterns: vec![],
         scss_include_paths: vec![],
@@ -1276,6 +1277,7 @@ fn process_config_result_accumulates_across_multiple_calls() {
         required_dependencies: vec![],
         always_used_files: vec![],
         path_aliases: vec![],
+        checked_alias_prefixes: vec![],
         setup_files: vec![PathBuf::from("/project/setup-a.ts")],
         fixture_patterns: vec![],
         scss_include_paths: vec![],
@@ -1301,6 +1303,7 @@ fn process_config_result_accumulates_across_multiple_calls() {
         required_dependencies: vec![],
         always_used_files: vec!["c.ts".to_string()],
         path_aliases: vec![],
+        checked_alias_prefixes: vec![],
         setup_files: vec![],
         fixture_patterns: vec![],
         scss_include_paths: vec![],
@@ -1958,6 +1961,133 @@ fn run_workspace_fast_eslint_config_parsed_when_eslint_active_at_root() {
          got: {:?}",
         result.referenced_dependencies
     );
+}
+
+/// Run the workspace pass on `apps/web` with `manifest` as its `package.json`
+/// and `extra_files` as its only files. Returns the result and the paths of
+/// the workspace and root manifests.
+fn run_workspace_fast_with_manifest(
+    manifest: &serde_json::Value,
+    extra_files: &[&str],
+) -> (AggregatedPluginResult, PathBuf, PathBuf) {
+    let registry = PluginRegistry::default();
+    let matchers = registry.precompile_config_matchers();
+    let tmp = tempfile::tempdir().unwrap();
+    let ws_dir = tmp.path().join("apps/web");
+    std::fs::create_dir_all(&ws_dir).unwrap();
+    let mut relative_files = Vec::new();
+    for file in extra_files {
+        std::fs::write(ws_dir.join(file), "export default {};").unwrap();
+        relative_files.push((ws_dir.join(file), (*file).to_string()));
+    }
+    let pkg: PackageJson = serde_json::from_value(manifest.clone()).unwrap();
+    let result = registry.run_workspace_fast(&WorkspacePluginRunInput {
+        pkg: &pkg,
+        root: &ws_dir,
+        project_root: tmp.path(),
+        root_dependencies: &[],
+        precompiled_config_matchers: &matchers,
+        relative_files: &relative_files,
+        skip_config_plugins: &FxHashSet::default(),
+        production_mode: false,
+        candidate_index: None,
+    });
+    (
+        result,
+        ws_dir.join("package.json"),
+        tmp.path().join("package.json"),
+    )
+}
+
+fn prettier_string_manifest() -> serde_json::Value {
+    serde_json::json!({
+        "prettier": "@acme/config-prettier",
+        "devDependencies": { "prettier": "^3", "@acme/config-prettier": "*" }
+    })
+}
+
+#[test]
+fn run_workspace_fast_credits_inline_config_to_own_and_root_manifest() {
+    let (result, ws_manifest, root_manifest) =
+        run_workspace_fast_with_manifest(&prettier_string_manifest(), &[]);
+    let credit = |manifest: &PathBuf| (manifest.clone(), "@acme/config-prettier".to_string());
+    assert!(
+        result
+            .package_referenced_dependencies
+            .contains(&credit(&ws_manifest))
+            && result
+                .package_referenced_dependencies
+                .contains(&credit(&root_manifest)),
+        "workspace package.json#prettier must credit its package to the workspace and root manifests, got: {:?}",
+        result.package_referenced_dependencies
+    );
+    assert!(
+        !result
+            .referenced_dependencies
+            .contains(&"@acme/config-prettier".to_string()),
+        "a workspace inline config must not credit its package project-wide, got: {:?}",
+        result.referenced_dependencies
+    );
+}
+
+#[test]
+fn run_workspace_fast_credits_inline_config_to_each_manifest_up_to_the_root() {
+    let (result, ws_manifest, root_manifest) =
+        run_workspace_fast_with_manifest(&prettier_string_manifest(), &[]);
+    let project_root = root_manifest.parent().unwrap();
+    let mut credited: Vec<&PathBuf> = result
+        .package_referenced_dependencies
+        .iter()
+        .filter(|(_, dep)| dep == "@acme/config-prettier")
+        .map(|(manifest, _)| manifest)
+        .collect();
+    credited.sort();
+    let mut expected = [
+        root_manifest.clone(),
+        project_root.join("apps/package.json"),
+        ws_manifest,
+    ];
+    expected.sort();
+    assert_eq!(
+        credited,
+        expected.iter().collect::<Vec<_>>(),
+        "the tool resolves the package from apps/web, apps and the project root, and from no directory above the project"
+    );
+}
+
+#[test]
+fn run_workspace_fast_skips_inline_config_when_workspace_has_config_file() {
+    // A config file that the plugin matches in the workspace files skips the
+    // inline key, as in the root run.
+    let (result, _, _) =
+        run_workspace_fast_with_manifest(&prettier_string_manifest(), &["prettier.config.js"]);
+    assert!(
+        result.package_referenced_dependencies.is_empty(),
+        "a matched workspace config file skips package.json#prettier, got: {:?}",
+        result.package_referenced_dependencies
+    );
+}
+
+#[test]
+fn package_json_keeps_the_inline_config_key_of_every_builtin_plugin() {
+    for plugin in builtin::create_builtin_plugins() {
+        let Some(key) = plugin.package_json_config_key() else {
+            continue;
+        };
+        assert!(
+            fallow_config::INLINE_TOOL_CONFIG_KEYS.contains(&key),
+            "INLINE_TOOL_CONFIG_KEYS must list the `{key}` key of the {} plugin",
+            plugin.name()
+        );
+        let pkg: PackageJson =
+            serde_json::from_value(serde_json::json!({ key: { "k": 1 } })).unwrap();
+        assert_eq!(
+            pkg.inline_tool_config(key),
+            Some(&serde_json::json!({ "k": 1 })),
+            "PackageJson must keep the `{key}` key of the {} plugin",
+            plugin.name()
+        );
+    }
 }
 
 #[test]

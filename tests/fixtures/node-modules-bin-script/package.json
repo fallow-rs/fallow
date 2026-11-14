@@ -1,0 +1,17 @@
+{
+  "name": "node-modules-bin-script",
+  "private": true,
+  "type": "module",
+  "main": "src/index.js",
+  "scripts": {
+    "gen": "./node_modules/.bin/kysely-codegen --out-file src/db.d.ts",
+    "gen:node": "node node_modules/.bin/scope-gen",
+    "gen:old": "$(npm bin)/old-bin"
+  },
+  "devDependencies": {
+    "kysely-codegen": "1.0.0",
+    "@scope/gen": "1.0.0",
+    "old-bin": "1.0.0",
+    "idle-dep": "1.0.0"
+  }
+}

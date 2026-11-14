@@ -72,6 +72,8 @@ pub enum MutationOperatorName {
     RegexConstructor,
     /// Opt-in. A lookaround negated, or `\b` and `\B` swapped.
     RegexAssertion,
+    /// Opt-in. `a ?? b` to `a`.
+    NullishFallback,
 }
 
 impl MutationOperatorName {
@@ -101,6 +103,7 @@ impl MutationOperatorName {
             Self::ThrowStatement => "throw-statement",
             Self::RegexConstructor => "regex-constructor",
             Self::RegexAssertion => "regex-assertion",
+            Self::NullishFallback => "nullish-fallback",
         }
     }
 }
@@ -209,8 +212,9 @@ pub struct MutationConfig {
     /// Type-check each survived mutant through the TypeScript-Go companion
     /// of `--type-aware`. A survivor that does not type-check becomes
     /// `compile_error` and does not count in the score. A survivor that
-    /// removes an optional-chaining link from a receiver whose type excludes
-    /// `null` and `undefined` gets an advisory `equivalence_hint`. Its status
+    /// removes an optional-chaining link or a nullish fallback from a
+    /// receiver whose type excludes `null` and `undefined` gets an advisory
+    /// `equivalence_hint`. Its status
     /// and the score do not change. Unset or `false` checks no survivor.
     /// `--typecheck` turns the check on.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -343,6 +347,7 @@ mod tests {
             MutationOperatorName::BooleanLiteral,
             MutationOperatorName::StringLiteral,
             MutationOperatorName::OptionalChaining,
+            MutationOperatorName::NullishFallback,
         ] {
             let json = serde_json::to_value(name).expect("serializes");
             assert_eq!(json, serde_json::Value::String(name.as_str().to_owned()));

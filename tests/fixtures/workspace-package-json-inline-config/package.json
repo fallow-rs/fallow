@@ -1,0 +1,12 @@
+{
+  "name": "workspace-package-json-inline-config",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "workspaces": ["apps/*", "packages/*"],
+  "devDependencies": {
+    "prettier": "^3.0.0",
+    "prettier-plugin-hoisted": "^1.0.0",
+    "unused-root-control": "^1.0.0"
+  }
+}

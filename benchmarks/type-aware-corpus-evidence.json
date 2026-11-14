@@ -2,19 +2,19 @@
   "schema_version": 1,
   "generated_from": {
     "discovery_provenance": {
-      "generated_at": "2026-11-10T10:08:24.907Z",
+      "generated_at": "2026-11-10T18:28:44.209Z",
       "manifest_sha256": "3a55fcd52dfb4269a47951128ca7cba41d3183423bb1f30623f69e3ee8d5412e",
       "fallow": {
         "version": "fallow 3.42.0",
-        "sha256": "ed69b62c2d29fc6044be8bacf4a9716e8f039c6d5b409ebfe3164998e6688d26"
+        "sha256": "661f67d8edaaa046d3cf4307f07b5019ed0cc851366d9da18b0cf11aed2da903"
       },
       "sidecar": {
-        "sha256": "ceec1e5fd41ceb6acd5008708828eedd0be4d1b263cece13e01994cd9959747a"
+        "sha256": "4e6637a142dc5fd5b92258c5911258557c39df4b81727dae4f9a3f27d939a1fe"
       },
       "runtime": {
         "platform": "darwin",
         "architecture": "arm64",
-        "node": "v24.22.1"
+        "node": "v26.13.0"
       },
       "dependency_environments": {
         "svelte": {
@@ -22,80 +22,80 @@
           "path_base": "fallow-workspace-root",
           "dependency_root": ".",
           "lockfile": "pnpm-lock.yaml",
-          "lockfile_sha256": "813b3e105713ce22bfebd12e3a54505fedda4d9ced71bc1f794712bca1f2aace",
-          "type_declaration_tree_sha256": "3a758e19c268098e608db1392c7a2ee714888700fc42e7706fded1d4726fbe57"
+          "lockfile_sha256": "857a138639ee3d541e9d4f17c1d0dce7a93fd449c1ba691e9a7d987b05ea46b5",
+          "type_declaration_tree_sha256": "b1169e3716f0c714bd69c2f1251767780fff96623fb750e0c4fbf8b9bffcb022"
         },
         "vue-core": {
           "dependency_installation": "ancestor-workspace",
           "path_base": "fallow-workspace-root",
           "dependency_root": ".",
           "lockfile": "pnpm-lock.yaml",
-          "lockfile_sha256": "813b3e105713ce22bfebd12e3a54505fedda4d9ced71bc1f794712bca1f2aace",
-          "type_declaration_tree_sha256": "3a758e19c268098e608db1392c7a2ee714888700fc42e7706fded1d4726fbe57"
+          "lockfile_sha256": "857a138639ee3d541e9d4f17c1d0dce7a93fd449c1ba691e9a7d987b05ea46b5",
+          "type_declaration_tree_sha256": "b1169e3716f0c714bd69c2f1251767780fff96623fb750e0c4fbf8b9bffcb022"
         },
         "astro": {
           "dependency_installation": "ancestor-workspace",
           "path_base": "fallow-workspace-root",
           "dependency_root": ".",
           "lockfile": "pnpm-lock.yaml",
-          "lockfile_sha256": "813b3e105713ce22bfebd12e3a54505fedda4d9ced71bc1f794712bca1f2aace",
-          "type_declaration_tree_sha256": "3a758e19c268098e608db1392c7a2ee714888700fc42e7706fded1d4726fbe57"
+          "lockfile_sha256": "857a138639ee3d541e9d4f17c1d0dce7a93fd449c1ba691e9a7d987b05ea46b5",
+          "type_declaration_tree_sha256": "b1169e3716f0c714bd69c2f1251767780fff96623fb750e0c4fbf8b9bffcb022"
         },
         "typescript": {
           "dependency_installation": "ancestor-workspace",
           "path_base": "fallow-workspace-root",
           "dependency_root": ".",
           "lockfile": "pnpm-lock.yaml",
-          "lockfile_sha256": "813b3e105713ce22bfebd12e3a54505fedda4d9ced71bc1f794712bca1f2aace",
-          "type_declaration_tree_sha256": "3a758e19c268098e608db1392c7a2ee714888700fc42e7706fded1d4726fbe57"
+          "lockfile_sha256": "857a138639ee3d541e9d4f17c1d0dce7a93fd449c1ba691e9a7d987b05ea46b5",
+          "type_declaration_tree_sha256": "b1169e3716f0c714bd69c2f1251767780fff96623fb750e0c4fbf8b9bffcb022"
         },
         "next.js": {
           "dependency_installation": "ancestor-workspace",
           "path_base": "fallow-workspace-root",
           "dependency_root": ".",
           "lockfile": "pnpm-lock.yaml",
-          "lockfile_sha256": "813b3e105713ce22bfebd12e3a54505fedda4d9ced71bc1f794712bca1f2aace",
-          "type_declaration_tree_sha256": "3a758e19c268098e608db1392c7a2ee714888700fc42e7706fded1d4726fbe57"
+          "lockfile_sha256": "857a138639ee3d541e9d4f17c1d0dce7a93fd449c1ba691e9a7d987b05ea46b5",
+          "type_declaration_tree_sha256": "b1169e3716f0c714bd69c2f1251767780fff96623fb750e0c4fbf8b9bffcb022"
         },
         "preact": {
           "dependency_installation": "ancestor-workspace",
           "path_base": "fallow-workspace-root",
           "dependency_root": ".",
           "lockfile": "pnpm-lock.yaml",
-          "lockfile_sha256": "813b3e105713ce22bfebd12e3a54505fedda4d9ced71bc1f794712bca1f2aace",
-          "type_declaration_tree_sha256": "3a758e19c268098e608db1392c7a2ee714888700fc42e7706fded1d4726fbe57"
+          "lockfile_sha256": "857a138639ee3d541e9d4f17c1d0dce7a93fd449c1ba691e9a7d987b05ea46b5",
+          "type_declaration_tree_sha256": "b1169e3716f0c714bd69c2f1251767780fff96623fb750e0c4fbf8b9bffcb022"
         },
         "query": {
           "dependency_installation": "ancestor-workspace",
           "path_base": "fallow-workspace-root",
           "dependency_root": ".",
           "lockfile": "pnpm-lock.yaml",
-          "lockfile_sha256": "813b3e105713ce22bfebd12e3a54505fedda4d9ced71bc1f794712bca1f2aace",
-          "type_declaration_tree_sha256": "3a758e19c268098e608db1392c7a2ee714888700fc42e7706fded1d4726fbe57"
+          "lockfile_sha256": "857a138639ee3d541e9d4f17c1d0dce7a93fd449c1ba691e9a7d987b05ea46b5",
+          "type_declaration_tree_sha256": "b1169e3716f0c714bd69c2f1251767780fff96623fb750e0c4fbf8b9bffcb022"
         },
         "vite": {
           "dependency_installation": "ancestor-workspace",
           "path_base": "fallow-workspace-root",
           "dependency_root": ".",
           "lockfile": "pnpm-lock.yaml",
-          "lockfile_sha256": "813b3e105713ce22bfebd12e3a54505fedda4d9ced71bc1f794712bca1f2aace",
-          "type_declaration_tree_sha256": "3a758e19c268098e608db1392c7a2ee714888700fc42e7706fded1d4726fbe57"
+          "lockfile_sha256": "857a138639ee3d541e9d4f17c1d0dce7a93fd449c1ba691e9a7d987b05ea46b5",
+          "type_declaration_tree_sha256": "b1169e3716f0c714bd69c2f1251767780fff96623fb750e0c4fbf8b9bffcb022"
         },
         "fastify": {
           "dependency_installation": "ancestor-workspace",
           "path_base": "fallow-workspace-root",
           "dependency_root": ".",
           "lockfile": "pnpm-lock.yaml",
-          "lockfile_sha256": "813b3e105713ce22bfebd12e3a54505fedda4d9ced71bc1f794712bca1f2aace",
-          "type_declaration_tree_sha256": "3a758e19c268098e608db1392c7a2ee714888700fc42e7706fded1d4726fbe57"
+          "lockfile_sha256": "857a138639ee3d541e9d4f17c1d0dce7a93fd449c1ba691e9a7d987b05ea46b5",
+          "type_declaration_tree_sha256": "b1169e3716f0c714bd69c2f1251767780fff96623fb750e0c4fbf8b9bffcb022"
         },
         "zod": {
           "dependency_installation": "ancestor-workspace",
           "path_base": "fallow-workspace-root",
           "dependency_root": ".",
           "lockfile": "pnpm-lock.yaml",
-          "lockfile_sha256": "813b3e105713ce22bfebd12e3a54505fedda4d9ced71bc1f794712bca1f2aace",
-          "type_declaration_tree_sha256": "3a758e19c268098e608db1392c7a2ee714888700fc42e7706fded1d4726fbe57"
+          "lockfile_sha256": "857a138639ee3d541e9d4f17c1d0dce7a93fd449c1ba691e9a7d987b05ea46b5",
+          "type_declaration_tree_sha256": "b1169e3716f0c714bd69c2f1251767780fff96623fb750e0c4fbf8b9bffcb022"
         }
       },
       "fixtures": [
@@ -163,12 +163,12 @@
     },
     "evidence_producer": {
       "protocol_version": 7,
-      "sidecar_sha256": "ceec1e5fd41ceb6acd5008708828eedd0be4d1b263cece13e01994cd9959747a",
-      "request_set_sha256": "f4cfd84a9019bb0247fff927360bccae86fa8274079d540458a9fe7616227eb9",
-      "response_set_sha256": "e8c6fcf0cd4283b1594d1cb80129d3b26e3b9a9a1ebf0ffb8ff4b28a4a76ffcc"
+      "sidecar_sha256": "4e6637a142dc5fd5b92258c5911258557c39df4b81727dae4f9a3f27d939a1fe",
+      "request_set_sha256": "314401376e65324c5e72bda3dabeecf7983edb389f4b4dcbef98b85c06214f3d",
+      "response_set_sha256": "10288dcd3521af5fcbe3e93dcd490a58ddda7e2f98b7f58c1d3c8539cd5d7379"
     },
     "adjudication": {
-      "decisions_sha256": "d62bf6c597bf2985c08f543d628d7ab3432ba74e87aa9af6ecc17b52cb52ee9b",
+      "decisions_sha256": "f2b4b3780706ce1fa5f7415cf2b1427aa658d9862c08b698caf21ffe3be34fcd",
       "reviewed_on": "2026-11-10",
       "reviewer": "primary-source-adjudication",
       "method": "Confirmed uses require an exact checker-resolved declaration and concrete source use. Contract-preserved records require an exact inherited declaration and independently reviewed contract or override behavior. Retained candidates are indeterminate unless source review proves that only the declaration exists.",
@@ -176,30 +176,21 @@
         "verdict": "approved",
         "reviews": [
           {
+            "project_id": "svelte",
+            "candidate_count": 62,
+            "candidate_set_sha256": "2572ffc6ac452666bbdaf797f71a1a12974d50f23a6d8c975748b48b71da3bbc",
+            "evidence_sha256": "563a5a52cc9eea60bc5c3f55612507d1333f1b1a5cd4bb867a4eac5a776ce00b",
+            "reviewer": "independent-source-review-svelte",
+            "method": "Two or more reviewers checked each record against the pinned source. Confirmed uses were checked for a concrete source use of the exact member, with accessor reads and writes credited to the matching half. Contract-preserved records were checked for the declaration, the heritage edge, the signature, and a required interface member, an abstract member, or an override that changes the behavior of the class.",
+            "verdict": "approved"
+          },
+          {
             "project_id": "astro",
             "candidate_count": 20,
             "candidate_set_sha256": "b9e97b08f624956c7bb77fdbb8d91ce6bb085e40329758cb4df3e16b3f8f5e0e",
             "evidence_sha256": "85533c9ad449200cb3766acbf8ff89e29a737b7d311b50d3f20fde524ef59c26",
             "reviewer": "independent-source-review-astro",
-            "method": "Two reviewers checked each record against the pinned source. Confirmed uses were checked for a concrete source use of the exact member, with accessor reads and writes credited to the matching half. Contract-preserved records were checked for the declaration, the heritage edge, the signature, and a required interface member, an abstract member, or an override that changes the behavior of the class.",
-            "verdict": "approved"
-          },
-          {
-            "project_id": "next.js",
-            "candidate_count": 64,
-            "candidate_set_sha256": "7f650cfcd2d4fb0dd784603f63ed390894452b53de5ca461be20b2c3a84c24f2",
-            "evidence_sha256": "0b3198e26039cced724b066c68a5844bc7a0d5cdf2136572c57b18e3a36e6b29",
-            "reviewer": "independent-source-review-next.js",
-            "method": "Two reviewers checked each record against the pinned source. Confirmed uses were checked for a concrete source use of the exact member, with accessor reads and writes credited to the matching half. Contract-preserved records were checked for the declaration, the heritage edge, the signature, and a required interface member, an abstract member, or an override that changes the behavior of the class.",
-            "verdict": "approved"
-          },
-          {
-            "project_id": "query",
-            "candidate_count": 3,
-            "candidate_set_sha256": "8e2a04bfe7918a1145f796aa9c44f0b0fd48cf71e898e49fd1279668ef3ab2e9",
-            "evidence_sha256": "fc8e89177c3589366b08e300e0a86548a957e5db4292628f0095d68c7bba8bca",
-            "reviewer": "independent-source-review-query",
-            "method": "Two reviewers checked each record against the pinned source. Confirmed uses were checked for a concrete source use of the exact member, with accessor reads and writes credited to the matching half. Contract-preserved records were checked for the declaration, the heritage edge, the signature, and a required interface member, an abstract member, or an override that changes the behavior of the class.",
+            "method": "Two or more reviewers checked each record against the pinned source. Confirmed uses were checked for a concrete source use of the exact member, with accessor reads and writes credited to the matching half. Contract-preserved records were checked for the declaration, the heritage edge, the signature, and a required interface member, an abstract member, or an override that changes the behavior of the class.",
             "verdict": "approved"
           },
           {
@@ -208,7 +199,25 @@
             "candidate_set_sha256": "bb9a3d9822393f596327cc8d5dcfe2f627d3295c92011e3911cb6ca51358d543",
             "evidence_sha256": "1b22718975075a3145d6bbc8b332417edd7bf60b5732f4acdc093a9dc3209c3a",
             "reviewer": "independent-source-review-typescript",
-            "method": "Two reviewers checked each record against the pinned source. Confirmed uses were checked for a concrete source use of the exact member, with accessor reads and writes credited to the matching half. Contract-preserved records were checked for the declaration, the heritage edge, the signature, and a required interface member, an abstract member, or an override that changes the behavior of the class.",
+            "method": "Two or more reviewers checked each record against the pinned source. Confirmed uses were checked for a concrete source use of the exact member, with accessor reads and writes credited to the matching half. Contract-preserved records were checked for the declaration, the heritage edge, the signature, and a required interface member, an abstract member, or an override that changes the behavior of the class.",
+            "verdict": "approved"
+          },
+          {
+            "project_id": "next.js",
+            "candidate_count": 64,
+            "candidate_set_sha256": "7f650cfcd2d4fb0dd784603f63ed390894452b53de5ca461be20b2c3a84c24f2",
+            "evidence_sha256": "0b3198e26039cced724b066c68a5844bc7a0d5cdf2136572c57b18e3a36e6b29",
+            "reviewer": "independent-source-review-next.js",
+            "method": "Two or more reviewers checked each record against the pinned source. Confirmed uses were checked for a concrete source use of the exact member, with accessor reads and writes credited to the matching half. Contract-preserved records were checked for the declaration, the heritage edge, the signature, and a required interface member, an abstract member, or an override that changes the behavior of the class.",
+            "verdict": "approved"
+          },
+          {
+            "project_id": "query",
+            "candidate_count": 3,
+            "candidate_set_sha256": "8e2a04bfe7918a1145f796aa9c44f0b0fd48cf71e898e49fd1279668ef3ab2e9",
+            "evidence_sha256": "fc8e89177c3589366b08e300e0a86548a957e5db4292628f0095d68c7bba8bca",
+            "reviewer": "independent-source-review-query",
+            "method": "Two or more reviewers checked each record against the pinned source. Confirmed uses were checked for a concrete source use of the exact member, with accessor reads and writes credited to the matching half. Contract-preserved records were checked for the declaration, the heritage edge, the signature, and a required interface member, an abstract member, or an override that changes the behavior of the class.",
             "verdict": "approved"
           },
           {
@@ -217,7 +226,7 @@
             "candidate_set_sha256": "54609a071ff13c4f533f5288108376381acd289b0cbad11948a71508ee1270ba",
             "evidence_sha256": "a6484c021405984f93eae6476654e979bf7923807b963a7cd602e70124c5ce8b",
             "reviewer": "independent-source-review-vite",
-            "method": "Two reviewers checked each record against the pinned source. Confirmed uses were checked for a concrete source use of the exact member, with accessor reads and writes credited to the matching half. Contract-preserved records were checked for the declaration, the heritage edge, the signature, and a required interface member, an abstract member, or an override that changes the behavior of the class.",
+            "method": "Two or more reviewers checked each record against the pinned source. Confirmed uses were checked for a concrete source use of the exact member, with accessor reads and writes credited to the matching half. Contract-preserved records were checked for the declaration, the heritage edge, the signature, and a required interface member, an abstract member, or an override that changes the behavior of the class.",
             "verdict": "approved"
           }
         ]
@@ -225,7 +234,7 @@
     }
   },
   "summary": {
-    "schema_version": 5,
+    "schema_version": 6,
     "gate": {
       "go": true,
       "checks": {
@@ -262,35 +271,25 @@
     },
     "accuracy": {
       "candidate_count": 466,
-      "confirmed_used_count": 121,
-      "contract_preserved_count": 57,
-      "retained_count": 288,
+      "confirmed_used_count": 167,
+      "contract_preserved_count": 73,
+      "retained_count": 226,
       "truth_counts": {
-        "used": 121,
-        "preserved": 57,
+        "used": 167,
+        "preserved": 73,
         "unused": 2,
-        "indeterminate": 286
+        "indeterminate": 224
       },
       "confirmation_precision": 1,
-      "correct_confirmed_count": 121,
-      "confirmation_yield": 0.259657,
-      "checked_candidate_count": 356,
-      "checked_confirmation_yield": 0.339888,
-      "blocking_diagnostics_count": 110,
-      "blocking_diagnostics_share": 0.236052,
-      "no_type_evidence_count": 288,
-      "no_type_evidence_share": 0.618026,
+      "correct_confirmed_count": 167,
+      "confirmation_yield": 0.358369,
+      "checked_candidate_count": 435,
+      "checked_confirmation_yield": 0.383908,
+      "blocking_diagnostics_count": 31,
+      "blocking_diagnostics_share": 0.066524,
+      "no_type_evidence_count": 226,
+      "no_type_evidence_share": 0.484979,
       "blocked_projects": [
-        {
-          "project_id": "svelte",
-          "blocked_candidate_count": 79,
-          "programs": [
-            {
-              "config": "packages/svelte/tsconfig.json",
-              "blocking_diagnostic_count": 7
-            }
-          ]
-        },
         {
           "project_id": "astro",
           "blocked_candidate_count": 5,
@@ -330,15 +329,15 @@
           ]
         }
       ],
-      "safe_resolution_yield": 0.381974,
-      "adjudicated_truth_count": 180,
-      "adjudicated_truth_coverage": 0.386266,
+      "safe_resolution_yield": 0.515021,
+      "adjudicated_truth_count": 242,
+      "adjudicated_truth_coverage": 0.519313,
       "adjudication_scope": "Baseline class members only: confirmed uses, required contracts, and reviewed declaration-only negatives. Semantic-only promotions and indeterminate candidates are excluded; corpus-wide recall is not claimed.",
       "correct_unused_retention": 1,
-      "abstained_count": 136,
-      "abstention": 0.291845,
-      "unresolved_count": 152,
-      "unresolved": 0.32618
+      "abstained_count": 153,
+      "abstention": 0.328326,
+      "unresolved_count": 73,
+      "unresolved": 0.156652
     },
     "ignored_paths": [
       {
@@ -350,11 +349,12 @@
       }
     ],
     "value": {
-      "confirmed_repository_count": 6,
+      "confirmed_repository_count": 7,
       "confirmed_repositories": [
         "astro",
         "next.js",
         "query",
+        "svelte",
         "typescript",
         "vite",
         "vitest"
@@ -366,20 +366,25 @@
     },
     "performance": {
       "baseline_wall_ms": {
-        "median": 986.476,
-        "p95": 4639.444
+        "median": 587.227,
+        "p95": 3691.857
       },
       "refined_wall_ms": {
-        "median": 1209.797,
-        "p95": 7654.181
+        "median": 1136.939,
+        "p95": 5696.736
       },
       "marginal_overhead_ms": {
-        "median": 275.835,
-        "p95": 3630.626
+        "clock": "process-tree-cpu",
+        "median": 485,
+        "p95": 3577
+      },
+      "marginal_wall_overhead_ms": {
+        "median": 257.833,
+        "p95": 2242.973
       },
       "process_tree_peak_rss_kb": {
-        "baseline_p95": 831632,
-        "refined_p95": 2078028
+        "baseline_p95": 711275.2,
+        "refined_p95": 1680288.8
       },
       "program_counts": [
         1,
@@ -507,21 +512,21 @@
       ],
       "phase_timings_ms": {
         "diagnostics": {
-          "median": 49,
-          "p95": 1070.45
+          "median": 27,
+          "p95": 544.45
         },
         "project_setup": {
-          "median": 53,
-          "p95": 663.75
+          "median": 45,
+          "p95": 713.65
         },
         "symbol_scan": {
-          "median": 77,
-          "p95": 1836.85
+          "median": 131.5,
+          "p95": 1490.6
         }
       },
       "reason_counts": {
         "ambiguous_project": 0,
-        "blocking_diagnostics": 440,
+        "blocking_diagnostics": 124,
         "capacity": 0,
         "no_project": 0,
         "svelte_virtual_module_exports": 0,
@@ -531,6 +536,105 @@
     }
   },
   "confirmations": [
+    {
+      "key": "tac_0044b892f03f349197c7",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/compiler/phases/nodes.js",
+        "line": 146,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/client/visitors/AnimateDirective.js",
+          "line": 31,
+          "col": 29
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/client/visitors/AttachTag.js",
+          "line": 18,
+          "col": 29
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/client/visitors/AwaitBlock.js",
+          "line": 80,
+          "col": 30
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/client/visitors/BindDirective.js",
+          "line": 270,
+          "col": 29
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/client/visitors/EachBlock.js",
+          "line": 349,
+          "col": 30
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/client/visitors/HtmlTag.js",
+          "line": 49,
+          "col": 30
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/client/visitors/IfBlock.js",
+          "line": 120,
+          "col": 30
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/client/visitors/KeyBlock.js",
+          "line": 34,
+          "col": 30
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/client/visitors/shared/utils.js",
+          "line": 366,
+          "col": 32
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/client/visitors/SvelteElement.js",
+          "line": 150,
+          "col": 30
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/client/visitors/TransitionDirective.js",
+          "line": 34,
+          "col": 29
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/client/visitors/UseDirective.js",
+          "line": 41,
+          "col": 29
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/server/visitors/AwaitBlock.js",
+          "line": 38,
+          "col": 28
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/server/visitors/EachBlock.js",
+          "line": 77,
+          "col": 28
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/server/visitors/HtmlTag.js",
+          "line": 18,
+          "col": 29
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/server/visitors/IfBlock.js",
+          "line": 43,
+          "col": 28
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/server/visitors/SvelteElement.js",
+          "line": 85,
+          "col": 28
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
     {
       "key": "tac_00530fea3fe4fb81fc5b",
       "project_id": "typescript",
@@ -563,6 +667,35 @@
           "path": "packages/next/src/server/next-server.ts",
           "line": 1077,
           "col": 43
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_04ef7fe280650856d2cf",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/internal/client/reactivity/batch.js",
+        "line": 263,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/internal/client/dom/blocks/branches.js",
+          "line": 214,
+          "col": 11
+        },
+        {
+          "path": "packages/svelte/src/internal/client/dom/blocks/each.js",
+          "line": 324,
+          "col": 11
+        },
+        {
+          "path": "packages/svelte/src/internal/client/reactivity/batch.js",
+          "line": 779,
+          "col": 12
         }
       ],
       "feature_buckets": [
@@ -627,6 +760,25 @@
       ]
     },
     {
+      "key": "tac_0bbc52b13b385a7db3d0",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/compiler/phases/scope.js",
+        "line": 120,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/compiler/phases/2-analyze/visitors/EachBlock.js",
+          "line": 93,
+          "col": 28
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
       "key": "tac_0ddcf52f16aec7dc6155",
       "project_id": "next.js",
       "declaration": {
@@ -658,6 +810,30 @@
           "path": "src/server/project.ts",
           "line": 3002,
           "col": 28
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_11c4b12dfaaa5ddf82a3",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/internal/client/reactivity/batch.js",
+        "line": 907,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/internal/client/dom/blocks/branches.js",
+          "line": 229,
+          "col": 9
+        },
+        {
+          "path": "packages/svelte/src/internal/client/dom/blocks/each.js",
+          "line": 382,
+          "col": 10
         }
       ],
       "feature_buckets": [
@@ -761,6 +937,30 @@
       ]
     },
     {
+      "key": "tac_1928713288df165f48d7",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/internal/server/renderer.js",
+        "line": 993,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/internal/server/renderer.js",
+          "line": 915,
+          "col": 47
+        },
+        {
+          "path": "packages/svelte/src/internal/server/renderer.test.ts",
+          "line": 123,
+          "col": 10
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
       "key": "tac_19ed61348c3adcc77aed",
       "project_id": "typescript",
       "declaration": {
@@ -773,6 +973,44 @@
           "path": "src/services/codefixes/helpers.ts",
           "line": 904,
           "col": 22
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_1a12236302c2c8904871",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/internal/server/renderer.js",
+        "line": 1059,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/internal/server/abort-signal.js",
+          "line": 7,
+          "col": 50
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_1b340a906e91e4d0b689",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/compiler/phases/nodes.js",
+        "line": 174,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/compiler/phases/2-analyze/visitors/StyleDirective.js",
+          "line": 36,
+          "col": 28
         }
       ],
       "feature_buckets": [
@@ -866,6 +1104,54 @@
       ]
     },
     {
+      "key": "tac_29ab70bab39550cfb2da",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/internal/client/reactivity/batch.js",
+        "line": 250,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/internal/client/dom/blocks/boundary.js",
+          "line": 482,
+          "col": 40
+        },
+        {
+          "path": "packages/svelte/src/internal/client/dom/blocks/branches.js",
+          "line": 216,
+          "col": 11
+        },
+        {
+          "path": "packages/svelte/src/internal/client/dom/blocks/each.js",
+          "line": 377,
+          "col": 12
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_2cb99cc852c8dd9c2783",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/compiler/phases/scope.js",
+        "line": 883,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/compiler/phases/scope.js",
+          "line": 737,
+          "col": 12
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
       "key": "tac_322bc4e69dcc33869f36",
       "project_id": "vite",
       "declaration": {
@@ -888,6 +1174,30 @@
           "path": "packages/vite/src/node/server/pluginContainer.ts",
           "line": 216,
           "col": 18
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_3565384c8b0d20086054",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/compiler/phases/1-parse/index.js",
+        "line": 309,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/compiler/phases/1-parse/state/element.js",
+          "line": 126,
+          "col": 10
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/1-parse/state/tag.js",
+          "line": 656,
+          "col": 11
         }
       ],
       "feature_buckets": [
@@ -1005,6 +1315,30 @@
       ]
     },
     {
+      "key": "tac_3f0cc7b7dcb4b1acec37",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/compiler/phases/1-parse/index.js",
+        "line": 282,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/compiler/phases/1-parse/read/script.js",
+          "line": 25,
+          "col": 21
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/1-parse/read/style.js",
+          "line": 479,
+          "col": 25
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
       "key": "tac_3fdf71b546318dce31a5",
       "project_id": "typescript",
       "declaration": {
@@ -1017,6 +1351,30 @@
           "path": "src/server/editorServices.ts",
           "line": 5070,
           "col": 29
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_4651b1722a4797ad6e16",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/internal/client/reactivity/batch.js",
+        "line": 643,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/internal/client/reactivity/deriveds.js",
+          "line": 408,
+          "col": 18
+        },
+        {
+          "path": "packages/svelte/src/internal/client/reactivity/sources.js",
+          "line": 200,
+          "col": 8
         }
       ],
       "feature_buckets": [
@@ -1068,6 +1426,25 @@
       ]
     },
     {
+      "key": "tac_473bfc5fd81fe14e2795",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/compiler/phases/1-parse/index.js",
+        "line": 65,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/compiler/phases/1-parse/state/element.js",
+          "line": 157,
+          "col": 25
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
       "key": "tac_484d0c754beab3131a44",
       "project_id": "typescript",
       "declaration": {
@@ -1080,6 +1457,35 @@
           "path": "src/server/project.ts",
           "line": 2311,
           "col": 35
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_494135ca79c02cfe9d9f",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/internal/client/dom/blocks/boundary.js",
+        "line": 376,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/internal/client/dom/blocks/boundary.js",
+          "line": 377,
+          "col": 58
+        },
+        {
+          "path": "packages/svelte/src/internal/client/reactivity/async.js",
+          "line": 397,
+          "col": 28
+        },
+        {
+          "path": "packages/svelte/src/internal/client/reactivity/deriveds.js",
+          "line": 192,
+          "col": 14
         }
       ],
       "feature_buckets": [
@@ -1137,6 +1543,40 @@
           "path": "src/server/project.ts",
           "line": 2521,
           "col": 39
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_51afeec4bdc66c7e4ba4",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/compiler/phases/1-parse/index.js",
+        "line": 215,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/compiler/phases/1-parse/read/script.js",
+          "line": 32,
+          "col": 8
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/1-parse/read/style.js",
+          "line": 33,
+          "col": 8
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/1-parse/state/element.js",
+          "line": 412,
+          "col": 9
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/1-parse/state/tag.js",
+          "line": 745,
+          "col": 13
         }
       ],
       "feature_buckets": [
@@ -1369,6 +1809,44 @@
       ]
     },
     {
+      "key": "tac_68655cdfbd1232f019f3",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/internal/server/renderer.js",
+        "line": 1038,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/internal/server/renderer.js",
+          "line": 269,
+          "col": 29
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_695580fd7d2e51a87e37",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/compiler/phases/scope.js",
+        "line": 875,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/compiler/phases/scope.js",
+          "line": 717,
+          "col": 20
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
       "key": "tac_69a9a29e96fecfcf0acf",
       "project_id": "typescript",
       "declaration": {
@@ -1464,6 +1942,25 @@
       ]
     },
     {
+      "key": "tac_729c11804cd71d323eff",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/internal/client/dom/blocks/boundary.js",
+        "line": 464,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/internal/client/dom/blocks/boundary.js",
+          "line": 597,
+          "col": 17
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
       "key": "tac_752f31291118fadb59c4",
       "project_id": "typescript",
       "declaration": {
@@ -1486,6 +1983,40 @@
           "path": "src/services/codefixes/inferFromUsage.ts",
           "line": 245,
           "col": 28
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_75cc9dac99b031ade44e",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/internal/client/reactivity/batch.js",
+        "line": 663,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/internal/client/dom/blocks/await.js",
+          "line": 90,
+          "col": 11
+        },
+        {
+          "path": "packages/svelte/src/internal/client/reactivity/async.js",
+          "line": 300,
+          "col": 38
+        },
+        {
+          "path": "packages/svelte/src/internal/client/reactivity/batch.js",
+          "line": 837,
+          "col": 10
+        },
+        {
+          "path": "packages/svelte/src/internal/client/reactivity/deriveds.js",
+          "line": 247,
+          "col": 9
         }
       ],
       "feature_buckets": [
@@ -1632,6 +2163,25 @@
       ]
     },
     {
+      "key": "tac_84117e71283f74da657b",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/compiler/phases/nodes.js",
+        "line": 157,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/compiler/phases/2-analyze/visitors/IfBlock.js",
+          "line": 38,
+          "col": 31
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
       "key": "tac_8546367a858312fdc24a",
       "project_id": "typescript",
       "declaration": {
@@ -1706,6 +2256,103 @@
           "path": "packages/next/src/server/route-modules/pages/pages-handler.ts",
           "line": 320,
           "col": 43
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_897f6b3aa488460e5a45",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/compiler/phases/nodes.js",
+        "line": 150,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/client/visitors/AwaitBlock.js",
+          "line": 74,
+          "col": 30
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/client/visitors/HtmlTag.js",
+          "line": 20,
+          "col": 47
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/client/visitors/IfBlock.js",
+          "line": 19,
+          "col": 47
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/client/visitors/KeyBlock.js",
+          "line": 16,
+          "col": 47
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/client/visitors/shared/utils.js",
+          "line": 141,
+          "col": 80
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/client/visitors/SvelteElement.js",
+          "line": 98,
+          "col": 47
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_8c4ed14c924a1cf15472",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/compiler/phases/1-parse/index.js",
+        "line": 224,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/compiler/phases/1-parse/read/context.js",
+          "line": 15,
+          "col": 19
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/1-parse/state/element.js",
+          "line": 576,
+          "col": 21
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/1-parse/state/tag.js",
+          "line": 280,
+          "col": 18
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_8e87454cd715cb5bf37c",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/compiler/phases/scope.js",
+        "line": 767,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/compiler/phases/2-analyze/index.js",
+          "line": 389,
+          "col": 27
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/scope.js",
+          "line": 768,
+          "col": 73
         }
       ],
       "feature_buckets": [
@@ -1789,6 +2436,35 @@
       ]
     },
     {
+      "key": "tac_9c09d95414a8908981df",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/internal/client/reactivity/batch.js",
+        "line": 659,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/internal/client/reactivity/async.js",
+          "line": 151,
+          "col": 19
+        },
+        {
+          "path": "packages/svelte/src/internal/client/reactivity/batch.js",
+          "line": 789,
+          "col": 10
+        },
+        {
+          "path": "packages/svelte/src/internal/client/reactivity/deriveds.js",
+          "line": 221,
+          "col": 9
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
       "key": "tac_9d71cd8de8a8b2291f9f",
       "project_id": "astro",
       "declaration": {
@@ -1858,6 +2534,44 @@
           "path": "src/services/codefixes/generateAccessors.ts",
           "line": 265,
           "col": 18
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_a38df3b1db8b6f1d97cd",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/internal/client/reactivity/batch.js",
+        "line": 713,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/internal/client/reactivity/effects.js",
+          "line": 124,
+          "col": 16
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_a3a2447c71def2979b6d",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/compiler/phases/3-transform/client/transform-template/template.js",
+        "line": 74,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/client/transform-template/index.js",
+          "line": 48,
+          "col": 69
         }
       ],
       "feature_buckets": [
@@ -2039,6 +2753,25 @@
       ]
     },
     {
+      "key": "tac_a9cd1601a23c071eacb6",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/compiler/phases/3-transform/client/transform-template/template.js",
+        "line": 78,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/client/transform-template/index.js",
+          "line": 48,
+          "col": 42
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
       "key": "tac_aa0d271c5aa2a17df736",
       "project_id": "typescript",
       "declaration": {
@@ -2061,6 +2794,79 @@
           "path": "src/services/refactors/convertExport.ts",
           "line": 216,
           "col": 24
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_ac1e026451f61d60d6e6",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/compiler/phases/1-parse/index.js",
+        "line": 166,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/compiler/phases/1-parse/read/context.js",
+          "line": 59,
+          "col": 13
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/1-parse/read/style.js",
+          "line": 32,
+          "col": 8
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/1-parse/state/element.js",
+          "line": 70,
+          "col": 12
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/1-parse/state/tag.js",
+          "line": 27,
+          "col": 12
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_ae1e2f9cb7e40274ea21",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/compiler/phases/scope.js",
+        "line": 709,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/compiler/migrate/index.js",
+          "line": 1902,
+          "col": 31
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/2-analyze/index.js",
+          "line": 476,
+          "col": 27
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/server/visitors/RegularElement.js",
+          "line": 187,
+          "col": 25
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/server/visitors/VariableDeclaration.js",
+          "line": 236,
+          "col": 24
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/scope.js",
+          "line": 711,
+          "col": 45
         }
       ],
       "feature_buckets": [
@@ -2377,6 +3183,63 @@
       ]
     },
     {
+      "key": "tac_b81983255d2ecc7a1b9b",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/reactivity/url-search-params.js",
+        "line": 124,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/reactivity/url.test.ts",
+          "line": 84,
+          "col": 37
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_b8a4df8033956ab30209",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/internal/server/renderer.js",
+        "line": 1053,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/internal/server/renderer.js",
+          "line": 749,
+          "col": 19
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_b95cde9433a7421c9ad4",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/internal/client/dom/blocks/boundary.js",
+        "line": 448,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/internal/client/reactivity/async.js",
+          "line": 399,
+          "col": 11
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
       "key": "tac_b98088a6e1cd144871eb",
       "project_id": "vite",
       "declaration": {
@@ -2459,6 +3322,25 @@
       ]
     },
     {
+      "key": "tac_bf66f0e5a8e4bee6c82f",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/internal/server/renderer.js",
+        "line": 1047,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/internal/server/renderer.js",
+          "line": 783,
+          "col": 26
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
       "key": "tac_c033e30b206e0a2c78d4",
       "project_id": "vite",
       "declaration": {
@@ -2509,6 +3391,25 @@
           "path": "src/server/session.ts",
           "line": 897,
           "col": 94
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_c1fc6a3f8fd60ed3b5ac",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/compiler/phases/3-transform/client/transform-template/template.js",
+        "line": 14,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/client/transform-template/index.js",
+          "line": 75,
+          "col": 20
         }
       ],
       "feature_buckets": [
@@ -2569,7 +3470,7 @@
         }
       ],
       "feature_buckets": [
-        "exact-cross-file-symbol-use"
+        "callback-inference"
       ]
     },
     {
@@ -2697,6 +3598,74 @@
       ]
     },
     {
+      "key": "tac_cb94b4bd46bcc5c2e9ae",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/compiler/phases/scope.js",
+        "line": 132,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/compiler/migrate/index.js",
+          "line": 641,
+          "col": 71
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/2-analyze/index.js",
+          "line": 617,
+          "col": 15
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/2-analyze/visitors/VariableDeclarator.js",
+          "line": 120,
+          "col": 13
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/client/transform-client.js",
+          "line": 306,
+          "col": 23
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/client/visitors/VariableDeclaration.js",
+          "line": 341,
+          "col": 59
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/server/transform-server.js",
+          "line": 242,
+          "col": 29
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/server/visitors/VariableDeclaration.js",
+          "line": 179,
+          "col": 63
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_cba560d22abc67224736",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/compiler/phases/1-parse/index.js",
+        "line": 68,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/compiler/phases/1-parse/state/element.js",
+          "line": 109,
+          "col": 16
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
       "key": "tac_cbdf679276e04262e141",
       "project_id": "typescript",
       "declaration": {
@@ -2809,6 +3778,30 @@
           "path": "src/services/refactors/moveToFile.ts",
           "line": 706,
           "col": 50
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_d05a222582f2deeeb408",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/compiler/phases/1-parse/index.js",
+        "line": 300,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/compiler/phases/1-parse/state/element.js",
+          "line": 537,
+          "col": 10
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/1-parse/state/tag.js",
+          "line": 156,
+          "col": 9
         }
       ],
       "feature_buckets": [
@@ -2985,6 +3978,35 @@
       ]
     },
     {
+      "key": "tac_d78c14d6fa9f35952c48",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/compiler/phases/1-parse/index.js",
+        "line": 322,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/compiler/phases/1-parse/state/element.js",
+          "line": 74,
+          "col": 9
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/1-parse/state/tag.js",
+          "line": 39,
+          "col": 9
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/1-parse/state/text.js",
+          "line": 16,
+          "col": 8
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
       "key": "tac_d7edc72eca1470bceb1f",
       "project_id": "typescript",
       "declaration": {
@@ -2997,6 +4019,44 @@
           "path": "src/services/codefixes/inferFromUsage.ts",
           "line": 380,
           "col": 16
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_db0a3bf2d1aa4601fdcd",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/internal/client/reactivity/batch.js",
+        "line": 846,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/internal/client/reactivity/async.js",
+          "line": 400,
+          "col": 7
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_dcfef9d14c1f3c6238fd",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/internal/client/reactivity/batch.js",
+        "line": 859,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/internal/client/reactivity/async.js",
+          "line": 404,
+          "col": 8
         }
       ],
       "feature_buckets": [
@@ -3038,6 +4098,30 @@
       ]
     },
     {
+      "key": "tac_dfcc0fe422eb1a1c3c49",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/internal/client/reactivity/batch.js",
+        "line": 911,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/internal/client/reactivity/batch.js",
+          "line": 1417,
+          "col": 21
+        },
+        {
+          "path": "packages/svelte/src/internal/client/runtime.js",
+          "line": 532,
+          "col": 23
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
       "key": "tac_e112b4acdc188c3c2489",
       "project_id": "typescript",
       "declaration": {
@@ -3050,6 +4134,84 @@
           "path": "src/services/utilities.ts",
           "line": 2620,
           "col": 20
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_e16d0ebc32709e861dba",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/internal/client/dom/blocks/boundary.js",
+        "line": 368,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/internal/client/reactivity/batch.js",
+          "line": 994,
+          "col": 12
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_e412c90f6a524fce6e7e",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/compiler/phases/scope.js",
+        "line": 151,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/compiler/phases/2-analyze/index.js",
+          "line": 1102,
+          "col": 10
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/2-analyze/visitors/DeclarationTag.js",
+          "line": 48,
+          "col": 20
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/2-analyze/visitors/SnippetBlock.js",
+          "line": 91,
+          "col": 14
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/client/visitors/DeclarationTag.js",
+          "line": 75,
+          "col": 20
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/client/visitors/shared/utils.js",
+          "line": 56,
+          "col": 15
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/server/transform-server.js",
+          "line": 218,
+          "col": 67
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/server/visitors/DeclarationTag.js",
+          "line": 70,
+          "col": 20
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/server/visitors/shared/utils.js",
+          "line": 379,
+          "col": 15
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/nodes.js",
+          "line": 139,
+          "col": 10
         }
       ],
       "feature_buckets": [
@@ -3215,6 +4377,65 @@
       ]
     },
     {
+      "key": "tac_ee11496b14a3b183902b",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/compiler/phases/nodes.js",
+        "line": 167,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/client/visitors/AnimateDirective.js",
+          "line": 27,
+          "col": 30
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/client/visitors/AttachTag.js",
+          "line": 14,
+          "col": 30
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/client/visitors/BindDirective.js",
+          "line": 266,
+          "col": 30
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/client/visitors/EachBlock.js",
+          "line": 343,
+          "col": 30
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/client/visitors/shared/element.js",
+          "line": 130,
+          "col": 79
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/client/visitors/TransitionDirective.js",
+          "line": 30,
+          "col": 30
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/client/visitors/UseDirective.js",
+          "line": 37,
+          "col": 30
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/server/visitors/HtmlTag.js",
+          "line": 14,
+          "col": 30
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/3-transform/server/visitors/KeyBlock.js",
+          "line": 11,
+          "col": 43
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
       "key": "tac_efdc3f0d4f4f4a850973",
       "project_id": "next.js",
       "declaration": {
@@ -3291,6 +4512,30 @@
       ]
     },
     {
+      "key": "tac_f5a271c4fee91a8d3642",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/compiler/phases/1-parse/index.js",
+        "line": 263,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/compiler/phases/1-parse/read/style.js",
+          "line": 662,
+          "col": 10
+        },
+        {
+          "path": "packages/svelte/src/compiler/phases/1-parse/state/element.js",
+          "line": 71,
+          "col": 22
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
       "key": "tac_f6deeb9f6dbd5e554c47",
       "project_id": "typescript",
       "declaration": {
@@ -3360,6 +4605,25 @@
           "path": "packages/vite/src/node/server/pluginContainer.ts",
           "line": 891,
           "col": 10
+        }
+      ],
+      "feature_buckets": [
+        "exact-cross-file-symbol-use"
+      ]
+    },
+    {
+      "key": "tac_ff0b1c03fe968ca01c6e",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/reactivity/url-search-params.js",
+        "line": 186,
+        "col": 1
+      },
+      "uses": [
+        {
+          "path": "packages/svelte/src/reactivity/url.test.ts",
+          "line": 224,
+          "col": 29
         }
       ],
       "feature_buckets": [
@@ -3588,6 +4852,25 @@
       }
     },
     {
+      "key": "tac_2a3c1a69a2451386ae65",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/reactivity/url-search-params.js",
+        "line": 129,
+        "col": 1
+      },
+      "contract": {
+        "relation": "override",
+        "optional": false,
+        "declaration": {
+          "path": "node_modules/@typescript/typescript-darwin-arm64/lib/lib.dom.d.ts",
+          "line": 44949,
+          "col": 4,
+          "excerpt": "keys(): URLSearchParamsIterator<string>;"
+        }
+      }
+    },
+    {
       "key": "tac_2cd95d97c293f69f80de",
       "project_id": "astro",
       "declaration": {
@@ -3645,6 +4928,25 @@
       }
     },
     {
+      "key": "tac_3d3e09b4f1f8d26ed93e",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/reactivity/url.js",
+        "line": 102,
+        "col": 1
+      },
+      "contract": {
+        "relation": "override",
+        "optional": false,
+        "declaration": {
+          "path": "node_modules/@typescript/typescript-darwin-arm64/lib/lib.dom.d.ts",
+          "line": 37332,
+          "col": 4,
+          "excerpt": "hostname: string;"
+        }
+      }
+    },
+    {
       "key": "tac_3e579ff2d2be1c548d82",
       "project_id": "next.js",
       "declaration": {
@@ -3679,6 +4981,25 @@
           "line": 1355,
           "col": 8,
           "excerpt": "trailers: NodeJS.Dict<string>;"
+        }
+      }
+    },
+    {
+      "key": "tac_42c1a7177f9378d63930",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/reactivity/url-search-params.js",
+        "line": 172,
+        "col": 1
+      },
+      "contract": {
+        "relation": "override",
+        "optional": false,
+        "declaration": {
+          "path": "node_modules/@typescript/typescript-darwin-arm64/lib/lib.dom.d.ts",
+          "line": 44951,
+          "col": 4,
+          "excerpt": "values(): URLSearchParamsIterator<string>;"
         }
       }
     },
@@ -3778,6 +5099,44 @@
       }
     },
     {
+      "key": "tac_56f837fd79031c0fcf8c",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/reactivity/set.js",
+        "line": 201,
+        "col": 1
+      },
+      "contract": {
+        "relation": "override",
+        "optional": false,
+        "declaration": {
+          "path": "node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2015.iterable.d.ts",
+          "line": 201,
+          "col": 4,
+          "excerpt": "entries(): SetIterator<[T, T]>;"
+        }
+      }
+    },
+    {
+      "key": "tac_605963062d9ea25fcb25",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/reactivity/url-search-params.js",
+        "line": 161,
+        "col": 1
+      },
+      "contract": {
+        "relation": "override",
+        "optional": false,
+        "declaration": {
+          "path": "node_modules/@typescript/typescript-darwin-arm64/lib/lib.dom.d.ts",
+          "line": 37561,
+          "col": 4,
+          "excerpt": "sort(): void;"
+        }
+      }
+    },
+    {
       "key": "tac_6160b66f59131a415cc7",
       "project_id": "next.js",
       "declaration": {
@@ -3854,6 +5213,25 @@
       }
     },
     {
+      "key": "tac_665abb14bf2d37339ac6",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/reactivity/url.js",
+        "line": 136,
+        "col": 1
+      },
+      "contract": {
+        "relation": "override",
+        "optional": false,
+        "declaration": {
+          "path": "node_modules/@typescript/typescript-darwin-arm64/lib/lib.dom.d.ts",
+          "line": 37351,
+          "col": 4,
+          "excerpt": "password: string;"
+        }
+      }
+    },
+    {
       "key": "tac_6b3f44a0f102ce916db0",
       "project_id": "next.js",
       "declaration": {
@@ -3869,6 +5247,44 @@
           "line": 37561,
           "col": 4,
           "excerpt": "sort(): void;"
+        }
+      }
+    },
+    {
+      "key": "tac_7f24123d1a3ace5ef04d",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/reactivity/url.js",
+        "line": 92,
+        "col": 1
+      },
+      "contract": {
+        "relation": "override",
+        "optional": false,
+        "declaration": {
+          "path": "node_modules/@typescript/typescript-darwin-arm64/lib/lib.dom.d.ts",
+          "line": 37326,
+          "col": 4,
+          "excerpt": "host: string;"
+        }
+      }
+    },
+    {
+      "key": "tac_7fbcc5d7d6779b11cdfa",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/reactivity/url.js",
+        "line": 200,
+        "col": 1
+      },
+      "contract": {
+        "relation": "override",
+        "optional": false,
+        "declaration": {
+          "path": "node_modules/@typescript/typescript-darwin-arm64/lib/lib.dom.d.ts",
+          "line": 37339,
+          "col": 4,
+          "excerpt": "toString(): string;"
         }
       }
     },
@@ -4006,6 +5422,25 @@
       }
     },
     {
+      "key": "tac_983e0de2f0a30079f22b",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/reactivity/url.js",
+        "line": 132,
+        "col": 1
+      },
+      "contract": {
+        "relation": "override",
+        "optional": false,
+        "declaration": {
+          "path": "node_modules/@typescript/typescript-darwin-arm64/lib/lib.dom.d.ts",
+          "line": 37351,
+          "col": 4,
+          "excerpt": "password: string;"
+        }
+      }
+    },
+    {
       "key": "tac_9c7457d58c6bc328efc9",
       "project_id": "typescript",
       "declaration": {
@@ -4025,6 +5460,25 @@
       }
     },
     {
+      "key": "tac_9cc33d3eb11778302fc0",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/reactivity/url.js",
+        "line": 184,
+        "col": 1
+      },
+      "contract": {
+        "relation": "override",
+        "optional": false,
+        "declaration": {
+          "path": "node_modules/@typescript/typescript-darwin-arm64/lib/lib.dom.d.ts",
+          "line": 37387,
+          "col": 4,
+          "excerpt": "username: string;"
+        }
+      }
+    },
+    {
       "key": "tac_9d9a919e69ad253331aa",
       "project_id": "typescript",
       "declaration": {
@@ -4040,6 +5494,25 @@
           "line": 868,
           "col": 4,
           "excerpt": "scheduleInvalidateResolutionsOfFailedLookupLocations(): void {"
+        }
+      }
+    },
+    {
+      "key": "tac_9ee34dd5ad068d494aae",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/reactivity/url.js",
+        "line": 189,
+        "col": 1
+      },
+      "contract": {
+        "relation": "override",
+        "optional": false,
+        "declaration": {
+          "path": "node_modules/@typescript/typescript-darwin-arm64/lib/lib.dom.d.ts",
+          "line": 37345,
+          "col": 4,
+          "excerpt": "readonly origin: string;"
         }
       }
     },
@@ -4139,6 +5612,25 @@
       }
     },
     {
+      "key": "tac_bb1ae2ee5245c0c9d89a",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/reactivity/url.js",
+        "line": 98,
+        "col": 1
+      },
+      "contract": {
+        "relation": "override",
+        "optional": false,
+        "declaration": {
+          "path": "node_modules/@typescript/typescript-darwin-arm64/lib/lib.dom.d.ts",
+          "line": 37332,
+          "col": 4,
+          "excerpt": "hostname: string;"
+        }
+      }
+    },
+    {
       "key": "tac_bc0e8493f8ac67aebcef",
       "project_id": "next.js",
       "declaration": {
@@ -4173,6 +5665,25 @@
           "line": 553,
           "col": 8,
           "excerpt": "chunkedEncoding: boolean;"
+        }
+      }
+    },
+    {
+      "key": "tac_c28b7d8ecd9477b9e7d2",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/reactivity/url.js",
+        "line": 204,
+        "col": 1
+      },
+      "contract": {
+        "relation": "override",
+        "optional": false,
+        "declaration": {
+          "path": "node_modules/@typescript/typescript-darwin-arm64/lib/lib.dom.d.ts",
+          "line": 37393,
+          "col": 4,
+          "excerpt": "toJSON(): string;"
         }
       }
     },
@@ -4234,6 +5745,25 @@
       }
     },
     {
+      "key": "tac_cffd22bb5e664bcc7eb7",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/reactivity/url.js",
+        "line": 180,
+        "col": 1
+      },
+      "contract": {
+        "relation": "override",
+        "optional": false,
+        "declaration": {
+          "path": "node_modules/@typescript/typescript-darwin-arm64/lib/lib.dom.d.ts",
+          "line": 37387,
+          "col": 4,
+          "excerpt": "username: string;"
+        }
+      }
+    },
+    {
       "key": "tac_d0b9a08fc10e8b60b337",
       "project_id": "next.js",
       "declaration": {
@@ -4249,6 +5779,25 @@
           "line": 723,
           "col": 8,
           "excerpt": "addTrailers(headers: OutgoingHttpHeaders | ReadonlyArray<[string, string]>): void;"
+        }
+      }
+    },
+    {
+      "key": "tac_d3030b3a0c1b20c87386",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/reactivity/url.js",
+        "line": 86,
+        "col": 1
+      },
+      "contract": {
+        "relation": "override",
+        "optional": false,
+        "declaration": {
+          "path": "node_modules/@typescript/typescript-darwin-arm64/lib/lib.dom.d.ts",
+          "line": 37326,
+          "col": 4,
+          "excerpt": "host: string;"
         }
       }
     },
@@ -4344,6 +5893,25 @@
           "line": 1362,
           "col": 8,
           "excerpt": "trailersDistinct: NodeJS.Dict<string[]>;"
+        }
+      }
+    },
+    {
+      "key": "tac_e076139dd315beae1c76",
+      "project_id": "svelte",
+      "declaration": {
+        "path": "packages/svelte/src/reactivity/map.js",
+        "line": 273,
+        "col": 1
+      },
+      "contract": {
+        "relation": "override",
+        "optional": false,
+        "declaration": {
+          "path": "node_modules/@typescript/typescript-darwin-arm64/lib/lib.es2015.iterable.d.ts",
+          "line": 151,
+          "col": 4,
+          "excerpt": "keys(): MapIterator<K>;"
         }
       }
     },

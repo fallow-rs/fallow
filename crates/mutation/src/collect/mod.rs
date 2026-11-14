@@ -1470,6 +1470,9 @@ impl<'a> Visit<'a> for Collector<'_> {
                     change,
                 );
             }
+            if operator == LogicalOperator::Coalesce {
+                self.nullish_fallback(it, start);
+            }
         }
         walk::walk_logical_expression(self, it);
         self.negate_operands(it);

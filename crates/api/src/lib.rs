@@ -182,8 +182,8 @@ pub use markdown_output::{
     build_grouped_markdown, build_health_markdown, build_markdown, build_walkthrough_markdown,
 };
 pub use mutation::{
-    MutationProgress, MutationProgressSink, MutationRunOptions, MutationRunScope,
-    apply_mutation_verdicts, validate_mutation_verdicts,
+    MutationProgress, MutationProgressSink, MutationReplayOptions, MutationRunOptions,
+    MutationRunScope, apply_mutation_verdicts, validate_mutation_verdicts,
 };
 pub use output_contracts::{
     AuditOutput, BoundariesListLogicalGroup, BoundariesListRule, BoundariesListZone,
@@ -209,7 +209,7 @@ pub use runtime::{
     TraceFileProgrammaticOutput, TraceImportPathOutput, TraceImportPathProgrammaticOutput,
     benchmark_trace_clone_compact_json, benchmark_trace_graph_family_compact_json,
     inspect_similar_code, load_health_config, parse_similar_code_candidate_snapshot, plan_mutation,
-    review_similar_code, run_architecture, run_audit, run_boundary_violations,
+    replay_mutation, review_similar_code, run_architecture, run_audit, run_boundary_violations,
     run_circular_dependencies, run_combined, run_complexity_with_runner, run_dead_code,
     run_dead_code_with_baseline, run_decision_surface, run_duplication, run_feature_flags,
     run_health, run_health_with_runner, run_mutation, run_mutation_with_progress, run_similar_code,
@@ -484,6 +484,8 @@ pub struct DeadCodeFilters {
     pub unused_component_props: bool,
     /// Review optional props omitted by known reachable callers.
     pub absent_component_props: bool,
+    /// Review parameters that each visible call passes in one way.
+    pub constant_parameters: bool,
     /// Declared component emits never used.
     pub unused_component_emits: bool,
     /// Declared component inputs never bound.
@@ -560,6 +562,7 @@ impl DeadCodeFilters {
             || self.unrendered_components
             || self.unused_component_props
             || self.absent_component_props
+            || self.constant_parameters
             || self.unused_component_emits
             || self.unused_component_inputs
             || self.unused_component_outputs
@@ -628,6 +631,7 @@ impl DeadCodeFilters {
             "--unrendered-components" => self.unrendered_components = true,
             "--unused-component-props" => self.unused_component_props = true,
             "--absent-component-props" => self.absent_component_props = true,
+            "--constant-parameters" => self.constant_parameters = true,
             "--unused-component-emits" => self.unused_component_emits = true,
             "--unused-component-inputs" => self.unused_component_inputs = true,
             "--unused-component-outputs" => self.unused_component_outputs = true,

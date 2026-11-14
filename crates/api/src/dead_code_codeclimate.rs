@@ -17,10 +17,13 @@ use fallow_types::output_dead_code::{
 };
 use fallow_types::results::AnalysisResults;
 
+#[path = "dead_code_codeclimate_caller_review.rs"]
+mod caller_review;
 #[path = "dead_code_codeclimate_catalog.rs"]
 mod catalog_issues;
 #[path = "dead_code_codeclimate_component_io.rs"]
 mod component_io;
+use caller_review::{push_absent_component_prop_issues, push_constant_parameter_issues};
 use catalog_issues::{
     push_empty_catalog_group_issues, push_misconfigured_dependency_override_issues,
     push_unresolved_catalog_reference_issues, push_unused_catalog_entry_issues,
@@ -1237,42 +1240,6 @@ fn push_unrendered_component_issues(
     }
 }
 
-fn push_absent_component_prop_issues(
-    issues: &mut Vec<CodeClimateIssue>,
-    findings: &[fallow_types::output_dead_code::AbsentComponentPropFinding],
-    root: &Path,
-    severity: Severity,
-) {
-    for finding in findings {
-        let prop = &finding.prop;
-        let path = cc_path(&prop.path, root);
-        let fingerprint = codeclimate_fingerprint_hash(&[
-            "fallow/absent-component-prop",
-            &path,
-            &prop.component_name,
-            &prop.prop_name,
-        ]);
-        let description = format!(
-            "Optional prop '{}.{}' is absent from inspected callers. {}",
-            prop.component_name, prop.prop_name, prop.explanation
-        );
-        issues.push(dead_code_issue(
-            finding.finding_id.as_deref(),
-            finding.introduced,
-            &[],
-            CodeClimateIssueInput {
-                check_name: "fallow/absent-component-prop",
-                description: &description,
-                severity: finding_codeclimate(finding, severity),
-                category: "Clarity",
-                path: &path,
-                begin_line: Some(prop.line),
-                fingerprint: &fingerprint,
-            },
-        ));
-    }
-}
-
 fn push_unused_component_prop_issues(
     issues: &mut Vec<CodeClimateIssue>,
     findings: &[fallow_types::output_dead_code::UnusedComponentPropFinding],
@@ -2072,6 +2039,12 @@ impl CodeClimateBuilder<'_> {
             &self.results.absent_component_props,
             self.root,
             self.rules.absent_component_props,
+        );
+        push_constant_parameter_issues(
+            &mut self.issues,
+            &self.results.constant_parameters,
+            self.root,
+            self.rules.constant_parameters,
         );
         push_unused_component_prop_issues(
             &mut self.issues,

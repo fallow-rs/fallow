@@ -430,22 +430,9 @@ fn impact_config_dir() -> Option<PathBuf> {
     }
 }
 
-/// Whether this run should be treated as CI for the Impact record gate. In
-/// production it is `fallow_engine::ci_env::is_ci()`; under test it reads the per-test
-/// `TEST_FORCE_CI` override (default `false`) so the suite records into its
-/// isolated store regardless of the ambient CI env. The store path is ALWAYS
-/// the per-test temp dir under `#[cfg(test)]` (see [`impact_config_dir`]), so
-/// bypassing the CI gate in tests can never touch a real user store.
-fn record_gate_is_ci() -> bool {
-    #[cfg(test)]
-    {
-        TEST_FORCE_CI.with(std::cell::Cell::get)
-    }
-    #[cfg(not(test))]
-    {
-        fallow_engine::ci_env::is_ci()
-    }
-}
+#[path = "impact_record_gate.rs"]
+mod record_gate;
+use record_gate::record_gate_skips;
 
 /// Path to the per-project store file in the user's private config dir, or
 /// `None` when no config dir is resolvable (e.g. stripped CI env), in which
@@ -1020,7 +1007,8 @@ pub fn record_audit_run(
     // baked into a devcontainer/dotfiles image would otherwise start writing
     // per-project files on every CI run (pre-relocation this was emergent from
     // a fresh CI checkout having no in-repo store file; now it is explicit).
-    if record_gate_is_ci() {
+    // A root in a temp folder is skipped too, see `record_gate_skips`.
+    if record_gate_skips(root) {
         return Ok(());
     }
     // Serialise the load -> mutate -> save window so two worktrees of the same
@@ -1093,7 +1081,7 @@ pub fn record_combined_run(
     attribution: Option<&AttributionInput<'_>>,
     analysis_identity: &fallow_types::semantic::SemanticAnalysisIdentity,
 ) -> Result<(), String> {
-    if record_gate_is_ci() {
+    if record_gate_skips(root) {
         return Ok(());
     }
     let _lock = ImpactStoreLock::acquire(root);
@@ -1773,57 +1761,9 @@ fn collect_member_findings(
     }
 }
 
-/// Push unrendered-component and component prop/emit/input/output findings.
-fn collect_component_findings(
-    results: &AnalysisResults,
-    push: &mut impl FnMut(&Path, &'static str, Option<String>),
-) {
-    for f in &results.unrendered_components {
-        push(
-            &f.component.path,
-            "unrendered-component",
-            Some(f.component.component_name.clone()),
-        );
-    }
-    for finding in &results.absent_component_props {
-        push(
-            &finding.prop.path,
-            "absent-component-prop",
-            Some(format!(
-                "{}.{}",
-                finding.prop.component_name, finding.prop.prop_name
-            )),
-        );
-    }
-    for f in &results.unused_component_props {
-        push(
-            &f.prop.path,
-            "unused-component-prop",
-            Some(f.prop.prop_name.clone()),
-        );
-    }
-    for f in &results.unused_component_emits {
-        push(
-            &f.emit.path,
-            "unused-component-emit",
-            Some(f.emit.emit_name.clone()),
-        );
-    }
-    for f in &results.unused_component_inputs {
-        push(
-            &f.input.path,
-            "unused-component-input",
-            Some(f.input.input_name.clone()),
-        );
-    }
-    for f in &results.unused_component_outputs {
-        push(
-            &f.output.path,
-            "unused-component-output",
-            Some(f.output.output_name.clone()),
-        );
-    }
-}
+#[path = "impact_component_findings.rs"]
+mod component_findings;
+use component_findings::collect_component_findings;
 
 /// Push unresolved-import and boundary-violation findings.
 fn collect_import_boundary_findings(

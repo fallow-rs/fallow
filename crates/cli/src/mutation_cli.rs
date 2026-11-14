@@ -35,6 +35,15 @@ const MIN_SCORE_EXIT_CODE: u8 = 1;
 /// The exit code of invalid input and execution errors.
 const INPUT_EXIT_CODE: u8 = 2;
 
+/// The values of `--record-args`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, clap::ValueEnum)]
+pub enum RecordArgsFlag {
+    /// Keep the types of the arguments only.
+    Shapes,
+    /// Keep the argument values, after the redaction of secrets.
+    Values,
+}
+
 #[derive(Subcommand)]
 pub enum MutationSubcommand {
     /// Show one mutant of a saved report against the current file. Runs no code.
@@ -51,6 +60,28 @@ pub enum MutationSubcommand {
         /// (default: the report of the last run).
         #[arg(long, value_name = "PATH")]
         report: Option<PathBuf>,
+        /// Call the export of the mutated function with `--args` on the
+        /// original and on the mutant, three times each, and compare the
+        /// results. Runs project code. A difference that each call repeats is
+        /// a witness. Equal results are "no witness found", never
+        /// "equivalent".
+        #[arg(long)]
+        replay: bool,
+        /// The arguments of the replay call as a JSON array, for example
+        /// `[2, 3]`. Objects with a `$replay` tag give `undefined`, special
+        /// numbers, bigints, dates, regular expressions, maps, sets and
+        /// typed arrays (default: up to 3 inputs that a `fallow mutation
+        /// --record-args values` run recorded for the export).
+        #[arg(long = "args", value_name = "JSON", requires = "replay")]
+        replay_args: Option<String>,
+        /// The export to call (default: the export that holds the mutated
+        /// function).
+        #[arg(long = "export", value_name = "NAME", requires = "replay")]
+        replay_export: Option<String>,
+        /// The time limit of one replay call, for example `30s` (default:
+        /// 5s, at most 10m). A call past it is `timed_out`.
+        #[arg(long = "call-timeout", value_name = "DURATION", requires = "replay")]
+        call_timeout: Option<String>,
     },
     /// List the open tasks of a saved report as one batch. Runs no code.
     ///
@@ -127,13 +158,21 @@ pub struct MutationArgs {
     /// effect. This is a flag only, never a config key.
     #[arg(long)]
     pub allow_side_effects: bool,
+    /// Record the arguments of the changed exported functions in a record pass
+    /// (off by default). `shapes` keeps their types, `values` keeps the
+    /// values for `fallow mutation inspect --replay`. The values stay in the
+    /// gitignored cache directory for 7 days, and an input with a secret
+    /// (by key name or by entropy) is not kept.
+    #[arg(long, value_name = "MODE", value_enum)]
+    pub record_args: Option<RecordArgsFlag>,
     /// Exit with code 1 when the mutation score is below this percentage.
     #[arg(long, value_name = "0-100")]
     pub min_score: Option<f64>,
     /// The operators to use, comma-separated. Default: the default set. The
     /// opt-in operators (block-statement, array-literal, object-literal,
     /// method-expression, switch-case, call-expression, throw-statement,
-    /// regex-constructor, regex-assertion) run only when named here.
+    /// regex-constructor, regex-assertion, nullish-fallback) run only when
+    /// named here.
     #[arg(long, value_name = "NAMES", value_delimiter = ',')]
     pub operators: Vec<String>,
     /// A verdict document that marks mutants as equivalent. Equivalent
@@ -153,9 +192,10 @@ pub struct MutationArgs {
     pub runner_config: Option<PathBuf>,
     /// Type-check each survived mutant through the `--type-aware`
     /// companion. A survivor that does not type-check becomes
-    /// `compile_error` and leaves the score. An optional-chaining survivor on a
-    /// receiver whose type excludes `null` and `undefined` gets an advisory
-    /// `equivalence_hint`. Its status and the score do not change.
+    /// `compile_error` and leaves the score. An optional-chaining or
+    /// nullish-fallback survivor on a receiver whose type excludes `null` and
+    /// `undefined` gets an advisory `equivalence_hint`. Its status and the
+    /// score do not change.
     #[arg(long)]
     pub typecheck: bool,
     /// Continue an interrupted or partial run: reuse the killed and confirmed
@@ -176,15 +216,20 @@ pub struct MutationArgs {
     pub kill_matrix_for: Vec<String>,
     /// Rerun the open tasks of a saved report (its `survived` and
     /// `no_coverage` mutants) against the current tests. The worktree may
-    /// change test files only. The run replaces the saved report, so
-    /// `fallow mutation tasks` then lists the mutants that are still open.
+    /// change test files only. The report keeps the earlier result of each
+    /// other mutant, so its summary counts the full set. The recheck does not
+    /// run those mutants again: after you remove or change a test that killed
+    /// them, run `fallow mutation` without `--recheck`. The run replaces the
+    /// saved report, so `fallow mutation tasks` then lists the mutants that
+    /// are still open.
     #[arg(
         long,
         conflicts_with_all = ["all", "paths", "plan", "resume", "allow_dirty", "max_mutants", "mutants_per_line", "function_scope", "min_score"]
     )]
     pub recheck: bool,
     /// The saved report of `--recheck` (default: the report of the last run).
-    /// A recheck without `--mutant` replaces the saved report.
+    /// A recheck without `--mutant` replaces this file and the report of the
+    /// last run.
     #[arg(long, value_name = "PATH", requires = "recheck")]
     pub report: Option<PathBuf>,
     /// Recheck only these mutant ids of the report, comma-separated or
@@ -404,8 +449,9 @@ pub fn run_options(input: &MutationCliInput<'_>) -> Result<MutationRunOptions, P
         runner_config,
         output_paths: input
             .output_file
-            .map(absolute_output_path)
             .into_iter()
+            .chain(recheck_report_file(input))
+            .map(absolute_output_path)
             .collect(),
         typecheck: input.args.typecheck || input.config.typecheck == Some(true),
         resume: input.args.resume,
@@ -413,6 +459,11 @@ pub fn run_options(input: &MutationCliInput<'_>) -> Result<MutationRunOptions, P
         kill_matrix_targets: input.args.kill_matrix_for.clone(),
         mutant_ids: Vec::new(),
         test_changes_only: false,
+        record_args: match input.args.record_args {
+            None => fallow_api::mutation::RecordArgsMode::Off,
+            Some(RecordArgsFlag::Shapes) => fallow_api::mutation::RecordArgsMode::Shapes,
+            Some(RecordArgsFlag::Values) => fallow_api::mutation::RecordArgsMode::Values,
+        },
     })
 }
 
@@ -581,8 +632,21 @@ pub fn run(input: &MutationCliInput<'_>) -> ExitCode {
             style,
         );
     }
-    if let Some(MutationSubcommand::Inspect { mutant_id, report }) = &input.subcommand {
-        return run_inspect(input, mutant_id, report.as_deref());
+    if let Some(MutationSubcommand::Inspect {
+        mutant_id,
+        report,
+        replay,
+        replay_args,
+        replay_export,
+        call_timeout,
+    }) = &input.subcommand
+    {
+        let replay = replay.then(|| ReplayFlags {
+            args: replay_args.as_deref(),
+            export: replay_export.as_deref(),
+            call_timeout: call_timeout.as_deref(),
+        });
+        return run_inspect(input, mutant_id, report.as_deref(), replay);
     }
     match run_inner(input) {
         Ok(code) => code,
@@ -678,10 +742,13 @@ fn run_inner(input: &MutationCliInput<'_>) -> Result<ExitCode, ProgrammaticError
     let mut report = run_with_progress(&options, input)
         .map_err(|error| diff::contextualize(error, stdin_diff.as_ref()))?;
     complete_file_digests(&mut report, input.root);
-    report.recheck = recheck.as_ref().map(|selection| selection.section(&report));
     // Before the verdicts: an equivalent verdict for a survivor does not make
-    // the run one in which no mutant has a test result.
+    // the run one in which no mutant has a test result. Before the merge of
+    // a recheck: an earlier result is no test result of this run.
     let blocked = baseline_blocked_run_error(&report);
+    report.recheck = recheck
+        .as_ref()
+        .map(|selection| selection.merge_into(&mut report));
     if let Some(verdicts) = verdicts {
         apply_mutation_verdicts(&mut report, &verdicts)?;
     }
@@ -698,14 +765,7 @@ fn run_inner(input: &MutationCliInput<'_>) -> Result<ExitCode, ProgrammaticError
             2,
         )
     })?;
-    // A recheck of named mutants keeps the saved report, so the other open
-    // tasks stay in it.
-    let saved_path = input
-        .args
-        .mutants
-        .is_empty()
-        .then(|| save_report(&options.analysis, &value))
-        .flatten();
+    let saved_path = save_reports(input, &options.analysis, &value);
     let saved = saved_path.is_some();
     if saved {
         remove_journal(&options.analysis, &report);
@@ -807,8 +867,9 @@ fn compare_with(
 }
 
 /// Narrows the run options to the mutants of a recheck and gives the minimum
-/// score. The score of a recheck covers only the rechecked mutants, so the
-/// project gate of `mutation.minScore` does not apply to it.
+/// score. A recheck runs only the selected mutants, and the other results
+/// come from the earlier report, so the project gate of `mutation.minScore`
+/// does not apply to it.
 fn apply_recheck(
     input: &MutationCliInput<'_>,
     options: &mut MutationRunOptions,
@@ -855,6 +916,87 @@ fn save_report(analysis: &AnalysisOptions, value: &serde_json::Value) -> Option<
             );
             None
         }
+    }
+}
+
+/// Saves the report of the run and gives the path of the saved report of
+/// the last run. A recheck also replaces its `--report` file. A recheck of
+/// named mutants saves nothing, so the other open tasks stay in the saved
+/// reports.
+fn save_reports(
+    input: &MutationCliInput<'_>,
+    analysis: &AnalysisOptions,
+    value: &serde_json::Value,
+) -> Option<PathBuf> {
+    if !input.args.mutants.is_empty() {
+        return None;
+    }
+    let saved = save_report(analysis, value);
+    if let Some(path) = recheck_report_file(input) {
+        replace_report_file(path, value, input.json_style, saved.as_deref());
+    }
+    saved
+}
+
+/// The `--report` file of a recheck, which the run replaces. The run writes
+/// it after the run, so the worktree check leaves it out, as it does for the
+/// `--output-file`.
+fn recheck_report_file<'a>(input: &'a MutationCliInput<'_>) -> Option<&'a Path> {
+    input
+        .args
+        .recheck
+        .then_some(input.args.report.as_deref())
+        .flatten()
+}
+
+/// Gives `temporary` the permissions of the file at `target`, when it
+/// exists.
+fn keep_permissions(target: &Path, temporary: &Path) -> std::io::Result<()> {
+    match std::fs::metadata(target) {
+        Ok(metadata) => std::fs::set_permissions(temporary, metadata.permissions()),
+        Err(_) => Ok(()),
+    }
+}
+
+/// Replaces the `--report` file of a recheck with the merged report, so a
+/// later `fallow mutation tasks --report <file>` lists the open mutants. The
+/// write goes to a temporary file in the directory of the target first, so
+/// a reader never sees half a report. A symlink stays a symlink, and the
+/// file keeps its permissions. A file that is the saved report `saved` has the
+/// report already. A failed write is a warning, not a run error.
+fn replace_report_file(
+    path: &Path,
+    value: &serde_json::Value,
+    style: JsonStyle,
+    saved: Option<&Path>,
+) {
+    let same = |saved: &Path| dunce::canonicalize(saved).ok() == dunce::canonicalize(path).ok();
+    if saved.is_some_and(same) {
+        return;
+    }
+    let result = style
+        .serialize(value)
+        .map_err(|error| error.to_string())
+        .and_then(|json| {
+            let name = path
+                .file_name()
+                .map(|name| name.to_string_lossy().into_owned())
+                .ok_or_else(|| "the path has no file name".to_owned())?;
+            let target = dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+            let temporary = target.with_file_name(format!(".{name}.{}.tmp", std::process::id()));
+            std::fs::write(&temporary, format!("{json}\n"))
+                .and_then(|()| keep_permissions(&target, &temporary))
+                .and_then(|()| std::fs::rename(&temporary, &target))
+                .map_err(|error| {
+                    let _ = std::fs::remove_file(&temporary);
+                    error.to_string()
+                })
+        });
+    if let Err(error) = result {
+        eprintln!(
+            "fallow: warning: the recheck did not replace {}: {error}",
+            path.display()
+        );
     }
 }
 
@@ -1000,11 +1142,99 @@ fn project_ancestors(root: &Path) -> Vec<PathBuf> {
     Vec::new()
 }
 
-fn run_inspect(input: &MutationCliInput<'_>, mutant_id: &str, report: Option<&Path>) -> ExitCode {
+/// The replay flags of `fallow mutation inspect`.
+#[derive(Debug, Clone, Copy)]
+struct ReplayFlags<'a> {
+    args: Option<&'a str>,
+    export: Option<&'a str>,
+    call_timeout: Option<&'a str>,
+}
+
+/// Parses the `--args` value: a JSON array of replay values. Without
+/// `--args`, the replay uses the recorded inputs.
+fn replay_args(text: Option<&str>) -> Result<Option<Vec<serde_json::Value>>, ProgrammaticError> {
+    let Some(text) = text else {
+        return Ok(None);
+    };
+    match serde_json::from_str::<serde_json::Value>(text) {
+        Ok(serde_json::Value::Array(args)) => Ok(Some(args)),
+        Ok(_) => Err(input_error(
+            "--args must be a JSON array, for example [2, 3]",
+            "mutation.replay.args",
+        )),
+        Err(error) => Err(input_error(
+            format!("--args is not valid JSON: {error}"),
+            "mutation.replay.args",
+        )),
+    }
+}
+
+/// Replays the mutant of a fresh packet and adds the result. A stale packet
+/// cannot replay, because the current file no longer gives the mutant of
+/// the report.
+fn add_replay(
+    input: &MutationCliInput<'_>,
+    packet: &mut fallow_output::MutationInspectOutput,
+    root: &Path,
+    flags: ReplayFlags<'_>,
+) -> Result<(), ProgrammaticError> {
+    let args = replay_args(flags.args)?;
+    if packet.status != fallow_output::MutationInspectStatus::Fresh {
+        return Err(ProgrammaticError::new(
+            format!(
+                "the mutant `{}` is stale, so it cannot replay",
+                packet.location.mutant_id
+            ),
+            INPUT_EXIT_CODE,
+        )
+        .with_code("FALLOW_MUTATION_REPLAY_STALE")
+        .with_context("mutation.replay")
+        .with_help("run `fallow mutation` again for a report of the current files"));
+    }
+    let call_timeout = match flags.call_timeout {
+        Some(text) => Some(parse_duration(text).ok_or_else(|| {
+            input_error(
+                format!("--call-timeout `{text}` is not a duration such as 500ms, 30s or 2m"),
+                "mutation.replay.callTimeout",
+            )
+        })?),
+        None => None,
+    };
+    let options = run_options(input)?;
+    let replay = fallow_api::replay_mutation(&fallow_api::MutationReplayOptions {
+        analysis: AnalysisOptions {
+            root: Some(root.to_path_buf()),
+            ..options.analysis
+        },
+        file: packet.location.file.clone(),
+        mutant_id: packet.location.mutant_id.clone(),
+        span: packet.location.span,
+        operator: fallow_api::mutation::Operator::from_name(&packet.location.operator),
+        export: flags.export.map(str::to_owned),
+        args,
+        runtime: options.runtime,
+        runner_config: options.runner_config,
+        call_timeout,
+        runner_timeout: options.runner_timeout,
+    })?;
+    packet.replay = Some(replay);
+    Ok(())
+}
+
+fn run_inspect(
+    input: &MutationCliInput<'_>,
+    mutant_id: &str,
+    report: Option<&Path>,
+    replay: Option<ReplayFlags<'_>>,
+) -> ExitCode {
     let (output, style) = (input.output, input.json_style);
     let packet = inspect_report_path(input, report).and_then(|(path, root)| {
         let saved = crate::mutation_inspect::read_saved_report(&path)?;
-        crate::mutation_inspect::inspect(&saved, mutant_id, &root)
+        let mut packet = crate::mutation_inspect::inspect(&saved, mutant_id, &root)?;
+        if let Some(flags) = replay {
+            add_replay(input, &mut packet, &root, flags)?;
+        }
+        Ok(packet)
     });
     let packet = match packet {
         Ok(packet) => packet,
@@ -1058,7 +1288,23 @@ fn run_tasks(input: &MutationCliInput<'_>, report: Option<&Path>) -> ExitCode {
     }
     let batch = inspect_report_path(input, report).and_then(|(path, root)| {
         let saved = crate::mutation_inspect::read_saved_report(&path)?;
-        tasks::tasks(&saved, &root)
+        let analysis = AnalysisOptions {
+            root: Some(root.clone()),
+            config_path: input.config_path.map(Path::to_path_buf),
+            allow_remote_extends: input.allow_remote_extends,
+            ..AnalysisOptions::default()
+        };
+        // Markdown can go into a PR comment, so it never holds a value.
+        let markdown = matches!(input.output, OutputFormat::Markdown);
+        let store = (!markdown)
+            .then(|| fallow_api::mutation::mutation_witness_store(&analysis))
+            .flatten();
+        let values = |mutant_id: &str, input_id: &str| {
+            store
+                .as_ref()
+                .and_then(|store| store.values(mutant_id, input_id))
+        };
+        tasks::tasks(&saved, &root, &values)
     });
     let batch = match batch {
         Ok(batch) => batch,

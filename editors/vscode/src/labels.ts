@@ -22,6 +22,7 @@ const CATEGORY_TO_REGISTRY_CODE = {
   "unused-load-data-keys": "unused-load-data-key",
   "unused-component-prop": "unused-component-prop",
   "absent-component-prop": "absent-component-prop",
+  "constant-parameter": "constant-parameter",
   "unused-component-emit": "unused-component-emit",
   "unused-component-input": "unused-component-input",
   "unused-component-output": "unused-component-output",

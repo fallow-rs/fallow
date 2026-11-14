@@ -1,0 +1,11 @@
+$icons: "@acme/icons";
+
+@font-face {
+  font-family: "Icons";
+  src: url(@acme/icons/files/icons.woff2) format("woff2");
+}
+
+.icon {
+  background: url("#{$icons}/files/arrow.svg");
+  mask-image: url($icon-mask);
+}

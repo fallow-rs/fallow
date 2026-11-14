@@ -36,6 +36,7 @@ impl IssueFilters {
             "unprovided_injects" => self.unprovided_injects,
             "unrendered_components" => self.unrendered_components,
             "absent_component_props" => self.absent_component_props,
+            "constant_parameters" => self.constant_parameters,
             "unused_component_props" => self.unused_component_props,
             "unused_component_emits" => self.unused_component_emits,
             "unused_component_inputs" => self.unused_component_inputs,

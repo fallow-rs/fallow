@@ -160,5 +160,14 @@ expression: "serde_json::to_string_pretty(&value).unwrap()"
   "no_test_files": true,
   "framework_config_checked": true,
   "skipped_files": [],
-  "unmatched_paths": []
+  "unmatched_paths": [],
+  "runner": {
+    "name": "vitest",
+    "package": "vitest",
+    "installed_version": null,
+    "supported_range": ">=4.1.0 <6.0.0",
+    "supported": false,
+    "message": "vitest is not installed; the supported range is >=4.1.0 <6.0.0",
+    "help": "install vitest 4.1.0 or a later version below 6.0.0; a vitest 4.x release from 4.1.0 is in the range"
+  }
 }

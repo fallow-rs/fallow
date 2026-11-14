@@ -35,7 +35,7 @@ pub async fn run_health(binary: &str, params: HealthParams) -> Result<CallToolRe
             health_typed_value(options, None)
         })
         .await?;
-        if let Some(result) = typed_tool_result(result) {
+        if let Some(result) = typed_tool_result("check_health", result) {
             return Ok(result);
         }
     }

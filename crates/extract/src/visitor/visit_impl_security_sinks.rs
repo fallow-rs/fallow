@@ -4,7 +4,7 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::borrow::Cow;
 
 use fallow_types::extract::{
-    SecurityControlSite, SinkArgKind, SinkLiteralValue, SinkShape, SinkSite,
+    SecurityControlSite, SinkArgKind, SinkCallOptions, SinkLiteralValue, SinkShape, SinkSite,
     SkippedSecurityCalleeExpressionKind, SkippedSecurityCalleeReason, SkippedSecurityCalleeSite,
 };
 use fallow_types::security_sinks::{JSX_SPREAD_SINK_PROPS, node_binding_module};
@@ -437,6 +437,73 @@ fn is_metadata_service_literal(value: &str) -> bool {
     value.contains("169.254.169.254") || value.contains("metadata.google.internal")
 }
 
+/// Whether the callee is `spawn(command, args?, options?)` or its sync form.
+fn is_spawn_callee(callee_path: &str) -> bool {
+    let name = callee_path.rsplit('.').next().unwrap_or(callee_path);
+    matches!(name, "spawn" | "spawnSync")
+}
+
+/// The options object of a `spawn(command, args?, options?)` call. An object
+/// literal in the second position is the options object. A second argument
+/// that is not an array or an object literal can be either, so the options
+/// stay unknown when no third argument follows it. An options object with a
+/// duplicate key also stays unknown: the last property wins at runtime, and a
+/// non-literal value of a later duplicate leaves no literal property to read.
+fn spawn_call_options(arguments: &[Argument<'_>]) -> SinkCallOptions {
+    let known = |expr: Option<&Expression<'_>>| match expr {
+        None => SinkCallOptions {
+            properties: Vec::new(),
+            keys: Vec::new(),
+            keys_complete: true,
+        },
+        Some(expr) => {
+            let keys = object_key_metadata(expr);
+            SinkCallOptions {
+                properties: object_literal_properties(expr),
+                keys: keys.keys,
+                keys_complete: keys.complete && !has_duplicate_static_key(expr),
+            }
+        }
+    };
+    let unknown = || SinkCallOptions {
+        properties: Vec::new(),
+        keys: Vec::new(),
+        keys_complete: false,
+    };
+    let Some(second) = arguments.get(1) else {
+        return known(None);
+    };
+    let Some(second) = second.as_expression() else {
+        return unknown();
+    };
+    if matches!(unwrap_static_expr(second), Expression::ObjectExpression(_)) {
+        return known(Some(second));
+    }
+    match arguments.get(2) {
+        Some(third) => third
+            .as_expression()
+            .map_or_else(unknown, |third| known(Some(third))),
+        None if matches!(unwrap_static_expr(second), Expression::ArrayExpression(_)) => known(None),
+        None => unknown(),
+    }
+}
+
+/// Whether an object literal names one static key in more than one property.
+fn has_duplicate_static_key(expr: &Expression<'_>) -> bool {
+    let Expression::ObjectExpression(obj) = unwrap_static_expr(expr) else {
+        return false;
+    };
+    let mut seen = FxHashSet::default();
+    obj.properties.iter().any(|prop| {
+        let ObjectPropertyKind::ObjectProperty(prop) = prop else {
+            return false;
+        };
+        prop.key
+            .static_name()
+            .is_some_and(|key| !seen.insert(key.text().into_owned()))
+    })
+}
+
 fn should_capture_missing_jwt_verify_options(
     callee_path: &str,
     sink_shape: SinkShape,
@@ -737,6 +804,7 @@ impl ModuleInfoExtractor {
             span_end: expr.span.end,
             url_arg_literal: None,
             url_shape: None,
+            call_options: None,
         });
     }
 
@@ -883,6 +951,7 @@ impl ModuleInfoExtractor {
             } else {
                 None
             },
+            call_options: None,
         }
     }
 
@@ -924,6 +993,7 @@ impl ModuleInfoExtractor {
                 span_end: expr.span.end,
                 url_arg_literal: None,
                 url_shape: None,
+                call_options: None,
             });
         }
     }
@@ -949,6 +1019,8 @@ impl ModuleInfoExtractor {
         // The arg-0 URL literal is captured once per call so secret-to-network
         // findings can carry a destination-host signal on the arg-1 sink.
         let url_arg_literal = call_url_arg_literal(expr);
+        let mut call_options =
+            is_spawn_callee(callee_path).then(|| Box::new(spawn_call_options(&expr.arguments)));
         for (index, arg) in expr.arguments.iter().enumerate() {
             let Some(arg_expr) = arg.as_expression() else {
                 continue;
@@ -962,6 +1034,7 @@ impl ModuleInfoExtractor {
             {
                 continue;
             }
+            let pushed_before = self.security_sinks.len();
             self.push_security_sink_arg(PushSinkArgInput {
                 callee_path,
                 sink_shape,
@@ -970,6 +1043,11 @@ impl ModuleInfoExtractor {
                 url_arg_literal: url_arg_literal.clone(),
                 span: expr.span,
             });
+            if arg_index == 0
+                && let Some(site) = self.security_sinks.get_mut(pushed_before)
+            {
+                site.call_options = call_options.take();
+            }
         }
     }
 
@@ -1073,6 +1151,7 @@ impl ModuleInfoExtractor {
             span_end: span.end,
             url_arg_literal: None,
             url_shape: None,
+            call_options: None,
         });
     }
 
@@ -1105,6 +1184,7 @@ impl ModuleInfoExtractor {
             span_end: span.end,
             url_arg_literal: None,
             url_shape: None,
+            call_options: None,
         });
     }
 
@@ -1696,6 +1776,7 @@ impl ModuleInfoExtractor {
             } else {
                 None
             },
+            call_options: None,
         });
     }
 
@@ -1733,6 +1814,7 @@ impl ModuleInfoExtractor {
             span_end: expr.span.end,
             url_arg_literal: None,
             url_shape: None,
+            call_options: None,
         });
     }
 
@@ -1845,6 +1927,7 @@ impl ModuleInfoExtractor {
             span_end: span.end,
             url_arg_literal: None,
             url_shape: None,
+            call_options: None,
         })
     }
 }

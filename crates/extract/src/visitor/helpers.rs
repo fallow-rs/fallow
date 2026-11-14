@@ -1665,7 +1665,7 @@ pub(super) fn collect_class_type_param_constraint_origins(
 
 #[must_use]
 pub(super) fn extract_type_reference_origin(ty: &TSType<'_>) -> Option<Span> {
-    match ty {
+    match heritage_names::unwrap_member_preserving_type(ty) {
         TSType::TSTypeReference(reference) => match &reference.type_name {
             TSTypeName::IdentifierReference(reference) => Some(reference.span),
             _ => None,
@@ -1681,7 +1681,7 @@ pub(super) fn extract_type_reference_origin(ty: &TSType<'_>) -> Option<Span> {
 }
 
 pub fn extract_type_reference_name(ty: &TSType<'_>) -> Option<String> {
-    match ty {
+    match heritage_names::unwrap_member_preserving_type(ty) {
         TSType::TSTypeReference(type_ref) => extract_type_name(&type_ref.type_name),
         TSType::TSParenthesizedType(paren) => extract_type_reference_name(&paren.type_annotation),
         TSType::TSUnionType(union) => extract_nullable_union_name(union),

@@ -24,16 +24,33 @@ FALLOW_TYPE_AWARE_BIN="$PWD/tools/type-aware-sidecar/fallow-type-aware.mjs" \
   --format json --quiet
 ```
 
-Normal npm installations receive the exact matching optional companion package:
+The `fallow` package does not install the companion, because the companion
+brings TypeScript 7 (about 30 MB). A project that uses `--type-aware` installs
+it at the same version as `fallow`:
 
 ```bash
-npm install --save-dev fallow
+npm install --save-dev fallow fallow-type-aware@<fallow version>
 npx fallow dead-code --unused-class-members --type-aware --format json --quiet
 ```
 
-Install `fallow-type-aware` at the same version manually only when optional npm
-dependencies are disabled. The `fallow` launcher discovers an exact version
-match and passes its trusted executable path to the native binary.
+The `fallow` launcher looks for the companion next to the `fallow` package
+first (npm and Yarn hoist it there), then from the project root (pnpm links
+it only there). It accepts a companion from the project root only when it is in
+the same `node_modules` tree as the running `fallow` package, so a global
+`fallow` never runs a companion that a cloned project ships. It accepts only an
+exact version match and passes the trusted executable path to the native
+binary.
+
+A global `fallow` needs the companion in the same global install
+(`npm install --global fallow-type-aware@<fallow version>`). npx and other
+package runners install `fallow` in their own cache, so they never use the
+project companion. Start both packages together
+(`npx -p fallow@<version> -p fallow-type-aware@<version> fallow`), or set
+`FALLOW_TYPE_AWARE_BIN` to the companion executable. The GitHub Action and the
+GitLab template install the companion themselves, unless type-aware analysis is
+turned off. With `FALLOW_SKIP_INSTALL=true`, the GitLab job must install the
+companion together with `fallow`. Without the companion, `--type-aware`
+and `type-aware status` name the install command.
 
 The companion depends on `typescript@7.0.2`, accepts any TypeScript 7 release that a package manager override selects, and uses `typescript/unstable/sync`, which
 runs the native TypeScript-Go backend. The canonical protocol manifest at
@@ -140,8 +157,8 @@ never forwards a compiler diagnostic as a Fallow issue.
 `fallow mutation --typecheck` uses the same companion with the one-shot
 `mutant-typecheck` operation. It compares the error diagnostics of a mutated
 file with the original file and returns only the diagnostic codes of new
-errors. For a mutant that removes an optional-chaining link, it adds the
-advisory hint `type-non-nullish` to a `compiles` result when the declared type
+errors. For a mutant that removes an optional-chaining link or a nullish
+fallback (`a ?? b` to `a`), it adds the advisory hint `type-non-nullish` to a `compiles` result when the declared type
 of the receiver is never nullish. The hint never changes the status. See
 [`mutation-testing.md`](mutation-testing.md).
 
@@ -221,6 +238,102 @@ closed-world evidence and an exact declaration guard:
 fallow fix --type-aware --dry-run --format json --quiet
 fallow fix --type-aware --yes --format json --quiet
 ```
+
+### Call evidence for `constant-parameter`
+
+The opt-in `constant-parameter` rule uses the one-shot `call-evidence`
+operation when the run has type-aware mode on:
+
+```bash
+fallow dead-code --constant-parameters --type-aware --format json --quiet
+```
+
+The static closed-world gate selects the candidates first. The companion never
+reads each function of a project. It answers two questions and returns
+evidence only. Fallow computes each verdict.
+
+- For a parameter with a default where each call passes an argument: can an
+  argument that is not a literal be `undefined`? When no argument can, the
+  default never applies (reason `unused-default`).
+- For a method of an exported class whose module passes the gate: which calls
+  does `getSignatureUsage` resolve, and can each argument be `undefined`? The
+  verdicts are `never-passed` and `unused-default`. The finding names the
+  method as `Class.method`.
+
+`getSignatureUsage` follows the class and interface hierarchy, so the list of
+calls can hold a call that dispatches to an override or to another
+implementer. A larger set is safe for both claims: when each call of the
+larger set omits a parameter, or passes a value that cannot be `undefined`,
+each call of the real set does too. A missing call is not safe. The companion
+abstains for a method, with a stable reason, when one of these shapes can hide
+a call:
+
+- a decorator on the class or the method, an overload, a generator, a computed
+  name, or a read of `arguments`,
+- a member of the same name that a base type or an interface from a dependency
+  declares, because a framework can call it,
+- a member of the same name in a declaration file of a dependency whose owner
+  type the class matches, because code of the dependency can receive an
+  instance and call it,
+- a name that the platform calls, such as `then`, `toString`, `toJSON` or
+  `handleEvent`, and a read of `Class.prototype`,
+- a reference that is not a call, such as `this.save` as a value or `bind`,
+- a reference by name that does not resolve, such as a call on an `any`
+  receiver,
+- a file outside the program of the class that names the method, such as
+  another package of a monorepo or a component template,
+- a computed access on a receiver whose type has the method, also on a call
+  result or an asserted receiver, or a computed call on an untyped receiver or
+  a `Reflect` call when a string literal spells the name,
+- a reference to another member of the same name whose owner type the class
+  is assignable to. TypeScript types are structural, so code can pass an
+  instance as a type that the class never `implements`.
+
+An argument type is evidence only under these rules:
+
+- The project has `strictNullChecks`. Without it, `T | undefined` reads as
+  `T`.
+- A JavaScript file without `checkJs` gives only the form of the argument,
+  such as a literal, an object, a function or `new X()`.
+- The check follows the bindings and the object literal members that an
+  argument reads, a few levels deep. An assertion (`as T`, `<T>x`, `x!`, not
+  `as const`), an `any` value, a `@ts-ignore`, `@ts-expect-error` or
+  `@ts-nocheck` comment, a definite assignment or an ambient declaration on
+  that path removes the evidence.
+- The checker keeps a narrowing across a call, also when a closure writes the
+  binding. So a `let`, `var` or parameter that code writes after its
+  declaration gives only its declared type, and a compound expression that
+  reads such a binding or a member gives no evidence.
+- Without `noUncheckedIndexedAccess`, an index read has a type without
+  `undefined`, also through the return type of a function. An index read, a
+  call result, a destructured binding, and a binding whose value comes from
+  one of these give no evidence.
+- A narrowing by a user-defined type guard (`x is T`) is a claim, so an
+  identifier that a type guard narrows gives no evidence. The tail of an
+  optional chain gives no evidence either.
+- A bare member read uses the declared type of the member. A class field
+  without an initializer is evidence only under `strictPropertyInitialization`,
+  and a read of `this.x` in a constructor or a field initializer gives no
+  evidence, because the field can still be unset there.
+
+A type does not prove a run-time value. Each such finding carries
+`evidence: "type-aware"`, and its explanation says that an `any` value, a cast,
+or data from outside the program can break the claim. Type evidence never
+overrides an abstain reason of the static gate. Without type-aware mode, the
+output of the rule does not change. `_meta.type_aware.call_evidence` counts the
+candidates, the findings and each abstention reason.
+
+The experimental tsrs backend does not serve `getSignatureUsage`, so with that
+backend each method abstains with `backend-unsupported`, and only the
+`unused-default` findings of functions remain.
+
+The operation builds its own Programs, next to the Programs of the
+`semantic-queries` request of the same run, and a semantic session does not
+accept it. So an editor session reports only the findings of the rule that the
+call facts prove. On the pinned corpus of the release gate, the marginal CPU
+time of the operation stays below the runtime gate. On a large monorepo with
+many TypeScript projects, it costs about as much as the class-member
+refinement.
 
 ## Fail-closed behavior
 
@@ -528,12 +641,26 @@ npm run type-aware:corpus -- evidence \
   --sidecar-bin tools/type-aware-sidecar/fallow-type-aware.mjs
 ```
 
-Review the pinned source and evidence for every proposed removal and every
-known-unused negative. Record independent approvals bound to the current
-candidate-set and evidence digests in `benchmarks/type-aware-adjudication.json`.
-`adjudicate` applies those decisions; it does not perform the source review.
+Review the pinned source and evidence for every confirmed use, every
+contract-preserved candidate and every known-unused negative. `review-packets`
+writes one packet for each project to `target/type-aware-corpus/review/`. Each
+packet holds the review criteria, the output format and the source lines around
+every declaration, use and contract.
+
+Give each packet to two or more reviewers who work separately. Each reviewer
+writes `<reviews>/<project>/<reviewer>.json` with a verdict for every record.
+`record-reviews --reviews <reviews>` then writes the independent reviews, bound
+to the current candidate-set and evidence digests, to
+`benchmarks/type-aware-adjudication.json`. It also writes a feature override for
+each confirmed use where all reviewers give the same allowed bucket. The command
+fails on any rejection. To keep a rejected record, write its reason in
+`<reviews>/overrule.json`. The decisions file then lists that record under
+`overruled_rejections`. `adjudicate` applies the decisions; it does not perform
+the source review.
 
 ```bash
+npm run type-aware:corpus -- review-packets
+npm run type-aware:corpus -- record-reviews --reviews <reviews>
 npm run type-aware:corpus -- adjudicate
 npm run type-aware:corpus -- verify-ledger
 npm run type-aware:corpus -- supplemental \
@@ -553,6 +680,16 @@ maximum count of minor releases between the Fallow version that produced
 release bump past that lag fails CI. Regenerate the gate, or add a waiver with
 a tracking issue, a last version (`until_version`) and a reason. A waiver on
 fresh evidence also fails, so that it does not stay after the regeneration.
+
+The runtime gate (`maximum_p95_marginal_overhead_ms`) compares the CPU time
+of the process tree, user plus system time of Fallow, the sidecar and the
+TypeScript process, for each measured baseline and refined pair. Wall time
+on a shared machine depends more on other load than on the change, so the
+summary reports the wall-time overhead only for information. The runner
+samples the process tree every 100 ms and keeps the highest CPU time of each
+process, so a process that exits keeps its last sample. On macOS the sample
+comes from `ps`, on Linux from `/proc/<pid>/stat`. Windows has no sample, and
+there the gate compares wall time.
 
 Use `--project` only with a non-canonical `--out-dir` for iteration. The
 publication gate requires the complete manifest, repeated normalized output,

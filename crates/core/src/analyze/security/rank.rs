@@ -1035,6 +1035,8 @@ mod tests {
         let path = PathBuf::from(ROOT).join(name);
         SecurityFinding {
             finding_id: String::new(),
+            stable_finding_id: None,
+            stable_id_input: None,
             kind: SecurityFindingKind::TaintedSink,
             category: Some("dangerous-html".to_string()),
             cwe: Some(79),

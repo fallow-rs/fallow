@@ -410,6 +410,11 @@ const validateMeasurementRunShape = (projectId, run, measurements, dependencies)
     `${projectId} measurement has an invalid wall time`,
     fail,
   );
+  requireValid(
+    platform === "win32" ? true : [Number.isFinite(run.cpu_ms), run.cpu_ms >= 0].every(Boolean),
+    `${projectId} measurement has no process-tree CPU time`,
+    fail,
+  );
   const rssValid = [
     Number.isFinite(run.peak_process_tree_rss_kb),
     run.peak_process_tree_rss_kb > 0,
@@ -501,6 +506,16 @@ export const validateMeasurements = (discovery, measurements, dependencies) => {
     seen.add(project.id);
     validateMeasurementProject(project, discovered, measurements, dependencies);
   });
+  // One clock for the whole gate: a mix of CPU and wall time would subtract
+  // one from the other in a pair.
+  const cpuRuns = measurements.projects.flatMap(({ runs }) =>
+    runs.map((run) => Number.isFinite(Object(run).cpu_ms)),
+  );
+  requireValid(
+    cpuRuns.every(Boolean) || !cpuRuns.some(Boolean),
+    "measurement runs mix process-tree CPU time and wall time; rerun measure",
+    dependencies.fail,
+  );
   requireValid(
     equalJson(
       comparableProvenance(discovery.provenance),

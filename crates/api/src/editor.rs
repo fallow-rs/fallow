@@ -238,6 +238,10 @@ pub mod editor_results {
         UnusedExport, UnusedFile, UnusedLoadDataKey, UnusedMember, UnusedServerAction,
         UnusedSvelteEvent,
     };
+    pub use fallow_types::results::{
+        ConstantParameter, ConstantParameterCallSite, ConstantParameterFinding,
+        ConstantParameterReason, ConstantParameterValue, ConstantParameterValueKind,
+    };
     pub use fallow_types::results::{DuplicateExportAlias, DuplicateExportAliasLocation};
     pub use fallow_types::results::{
         EffectCatchSite, EffectLayerKind, UnproducedCatchTag, UnusedEffectLayer, UnusedTaggedError,

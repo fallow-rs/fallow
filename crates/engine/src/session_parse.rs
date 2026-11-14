@@ -36,7 +36,10 @@ pub(super) fn parse_files_with_config(
     let parse_result = crate::source::parse_all_files(
         files,
         cache.as_ref(),
-        need_complexity,
+        fallow_extract::ParseNeeds {
+            complexity: need_complexity,
+            call_facts: config.reads_call_facts(),
+        },
         cancellation,
         &config.flags.patterns(),
         config.extraction_mode,

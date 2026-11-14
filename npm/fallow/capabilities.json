@@ -1,6 +1,6 @@
 {
   "name": "fallow",
-  "version": "3.42.0",
+  "version": "3.43.0",
   "manifest_version": "1",
   "description": "Codebase analyzer for TypeScript/JavaScript: unused code, circular dependencies, code duplication, complexity hotspots, and architecture boundary violations",
   "global_flags": [
@@ -577,7 +577,7 @@
       "name": "--coverage",
       "type": "string",
       "required": false,
-      "description": "Path to Istanbul or raw V8 coverage data for exact CRAP scores in combined mode. Also settable via `FALLOW_COVERAGE` or `health.coverage`"
+      "description": "Path to Istanbul or raw V8 coverage data for measured CRAP scores in combined mode. Also settable via `FALLOW_COVERAGE` or `health.coverage`"
     },
     {
       "name": "--coverage-root",
@@ -794,6 +794,16 @@
           "type": "bool",
           "required": false,
           "description": "Review optional props omitted by known reachable callers (enables this rule)",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--constant-parameters",
+          "type": "bool",
+          "required": false,
+          "description": "Review parameters that each visible call passes in one way (enables this rule)",
           "possible_values": [
             "true",
             "false"
@@ -1326,6 +1336,16 @@
           ]
         },
         {
+          "name": "--record-args",
+          "type": "string",
+          "required": false,
+          "description": "Record the arguments of the changed exported functions in a record pass (off by default). `shapes` keeps their types, `values` keeps the values for `fallow mutation inspect --replay`. The values stay in the gitignored cache directory for 7 days, and an input with a secret (by key name or by entropy) is not kept",
+          "possible_values": [
+            "shapes",
+            "values"
+          ]
+        },
+        {
           "name": "--min-score",
           "type": "string",
           "required": false,
@@ -1335,7 +1355,7 @@
           "name": "--operators",
           "type": "string",
           "required": false,
-          "description": "The operators to use, comma-separated. Default: the default set. The opt-in operators (block-statement, array-literal, object-literal, method-expression, switch-case, call-expression, throw-statement, regex-constructor, regex-assertion) run only when named here"
+          "description": "The operators to use, comma-separated. Default: the default set. The opt-in operators (block-statement, array-literal, object-literal, method-expression, switch-case, call-expression, throw-statement, regex-constructor, regex-assertion, nullish-fallback) run only when named here"
         },
         {
           "name": "--verdicts",
@@ -1359,7 +1379,7 @@
           "name": "--typecheck",
           "type": "bool",
           "required": false,
-          "description": "Type-check each survived mutant through the `--type-aware` companion. A survivor that does not type-check becomes `compile_error` and leaves the score. An optional-chaining survivor on a receiver whose type excludes `null` and `undefined` gets an advisory `equivalence_hint`. Its status and the score do not change",
+          "description": "Type-check each survived mutant through the `--type-aware` companion. A survivor that does not type-check becomes `compile_error` and leaves the score. An optional-chaining or nullish-fallback survivor on a receiver whose type excludes `null` and `undefined` gets an advisory `equivalence_hint`. Its status and the score do not change",
           "possible_values": [
             "true",
             "false"
@@ -1395,7 +1415,7 @@
           "name": "--recheck",
           "type": "bool",
           "required": false,
-          "description": "Rerun the open tasks of a saved report (its `survived` and `no_coverage` mutants) against the current tests. The worktree may change test files only. The run replaces the saved report, so `fallow mutation tasks` then lists the mutants that are still open",
+          "description": "Rerun the open tasks of a saved report (its `survived` and `no_coverage` mutants) against the current tests. The worktree may change test files only. The report keeps the earlier result of each other mutant, so its summary counts the full set. The recheck does not run those mutants again: after you remove or change a test that killed them, run `fallow mutation` without `--recheck`. The run replaces the saved report, so `fallow mutation tasks` then lists the mutants that are still open",
           "possible_values": [
             "true",
             "false"
@@ -1405,7 +1425,7 @@
           "name": "--report",
           "type": "string",
           "required": false,
-          "description": "The saved report of `--recheck` (default: the report of the last run). A recheck without `--mutant` replaces the saved report"
+          "description": "The saved report of `--recheck` (default: the report of the last run). A recheck without `--mutant` replaces this file and the report of the last run"
         },
         {
           "name": "--mutant",
@@ -1666,7 +1686,7 @@
           "name": "--branch",
           "type": "string",
           "required": false,
-          "description": "Fallback base branch/ref for the pre-commit hook when no upstream is set"
+          "description": "Has no effect. The pre-commit hook runs `fallow audit --staged`, which compares the staged changes with HEAD. Kept so that existing install scripts still run"
         },
         {
           "name": "--decline",
@@ -2205,7 +2225,7 @@
           "name": "--coverage",
           "type": "string",
           "required": false,
-          "description": "Path to coverage data for exact per-function CRAP scores. Accepts an Istanbul coverage map JSON file (coverage-final.json, from `jest --coverage`, `vitest run --coverage`, c8 or nyc), a directory containing coverage-final.json, a raw V8 coverage directory (`NODE_V8_COVERAGE=<dir> node --test`), or a single V8 coverage JSON file. Transpiled V8 scripts (tsx, bundles) map back to their source files through the source map that Node records in the dump. A script that differs from the file on disk and has no source map keeps the estimate. Use --coverage-root when the data was generated in a different environment (CI runner, Docker). Affects CRAP scores only, not --coverage-gaps. Also configurable via FALLOW_COVERAGE env var"
+          "description": "Path to coverage data for measured per-function CRAP scores. Accepts an Istanbul coverage map JSON file (coverage-final.json, from `jest --coverage`, `vitest run --coverage`, c8 or nyc), a directory containing coverage-final.json, a raw V8 coverage directory (`NODE_V8_COVERAGE=<dir> node --test`), or a single V8 coverage JSON file. Transpiled V8 scripts (tsx, bundles) map back to their source files through the source map that Node records in the dump. A script that differs from the file on disk and has no source map keeps the estimate. Use --coverage-root when the data was generated in a different environment (CI runner, Docker). Affects CRAP scores only, not --coverage-gaps. Also configurable via FALLOW_COVERAGE env var"
         },
         {
           "name": "--coverage-root",
@@ -2518,10 +2538,26 @@
           "default": "100"
         },
         {
+          "name": "--mutation-report",
+          "type": "string",
+          "required": false,
+          "description": "Saved `fallow mutation --format json` report (for example `.fallow/mutation/last-report.json`). The review brief counts the surviving mutants on the added lines of each changed file in the `mutation` component of the focus score. A file whose source changed since the run adds nothing. Reads the file only; it runs no test. Only the review brief reads it"
+        },
+        {
           "name": "--gate-marker",
           "type": "string",
           "required": false,
           "description": "Internal marker identifying a gate run (e.g. `pre-commit`), set by the generated git hook so Fallow Impact can record a containment event when the gate blocks then clears. Hidden; never changes the verdict, exit code, or output"
+        },
+        {
+          "name": "--staged",
+          "type": "bool",
+          "required": false,
+          "description": "Audit the staged index instead of the working tree. The changed files are the staged changes against HEAD (`git diff --cached`), and the analysis reads every file from the index, so unstaged edits and untracked files do not affect the verdict. A file that is staged and then deleted from the working tree is still audited. The base is HEAD, so `--base` and `--changed-since` are rejected. The generated pre-commit hook uses this flag",
+          "possible_values": [
+            "true",
+            "false"
+          ]
         },
         {
           "name": "--brief",
@@ -3932,7 +3968,7 @@
       "description": "Suppression comment or tag no longer matches any issue",
       "label": "Stale Suppressions",
       "config_key": "stale-suppressions",
-      "registry_index": 46,
+      "registry_index": 47,
       "aliases": [],
       "lsp": true,
       "filter_flag": "--stale-suppressions",
@@ -3968,7 +4004,7 @@
       "description": "Suppression comment omits a required reason",
       "label": "Missing Suppression Reasons",
       "config_key": "require-suppression-reason",
-      "registry_index": 47,
+      "registry_index": 48,
       "aliases": [
         "missing-suppression-reasons"
       ],
@@ -4000,7 +4036,7 @@
       "description": "Catalog entry not referenced by any workspace package",
       "label": "Unused Catalog Entries",
       "config_key": "unused-catalog-entries",
-      "registry_index": 48,
+      "registry_index": 49,
       "aliases": [
         "catalog",
         "unused-catalog-entries"
@@ -4040,7 +4076,7 @@
       "description": "Named catalog group has no entries",
       "label": "Empty Catalog Groups",
       "config_key": "empty-catalog-groups",
-      "registry_index": 49,
+      "registry_index": 50,
       "aliases": [
         "empty-catalog",
         "empty-catalog-groups"
@@ -4080,7 +4116,7 @@
       "description": "package.json references a catalog that does not declare the package",
       "label": "Unresolved Catalog References",
       "config_key": "unresolved-catalog-references",
-      "registry_index": 50,
+      "registry_index": 51,
       "aliases": [
         "unresolved-catalog",
         "unresolved-catalog-references"
@@ -4120,7 +4156,7 @@
       "description": "Package-manager override target is not declared or resolved",
       "label": "Unused Dependency Overrides",
       "config_key": "unused-dependency-overrides",
-      "registry_index": 51,
+      "registry_index": 52,
       "aliases": [
         "unused-dependency-overrides",
         "unused-override",
@@ -4161,7 +4197,7 @@
       "description": "Package-manager override has an unparsable key or value",
       "label": "Misconfigured Dependency Overrides",
       "config_key": "misconfigured-dependency-overrides",
-      "registry_index": 52,
+      "registry_index": 53,
       "aliases": [
         "misconfigured-dependency-overrides",
         "misconfigured-override",
@@ -4413,6 +4449,42 @@
       "docs_url": "https://fallow.tools/docs/explanations/dead-code/#absent-component-props"
     },
     {
+      "id": "constant-parameter",
+      "rule_id": "fallow/constant-parameter",
+      "command": "dead-code",
+      "category": "Dead code",
+      "description": "Each visible call passes a function parameter in the same way",
+      "label": "Constant Parameters",
+      "config_key": "constant-parameters",
+      "registry_index": 35,
+      "aliases": [
+        "constant-parameters"
+      ],
+      "lsp": true,
+      "filter_flag": "--constant-parameters",
+      "result_key": "constant_parameters",
+      "summary_label": "Constant parameters",
+      "summary_docs_anchor": "constant-parameters",
+      "sarif_rule_ids": [
+        "fallow/constant-parameter"
+      ],
+      "codeclimate_check_names": [
+        "fallow/constant-parameter"
+      ],
+      "ts_alias": null,
+      "counts_in_total": true,
+      "fixable": false,
+      "suppressible": true,
+      "suppress_comment": "// fallow-ignore-next-line constant-parameter",
+      "default_severity": "off",
+      "opt_in": true,
+      "frameworks": [],
+      "note": "Opt-in manual review candidate; defaults to off. Inspect the calls and the intent of the parameter before changing the function. No automatic fix.",
+      "license": "free",
+      "license_note": null,
+      "docs_url": "https://fallow.tools/docs/explanations/dead-code/#constant-parameters"
+    },
+    {
       "id": "unused-component-prop",
       "rule_id": "fallow/unused-component-prop",
       "command": "dead-code",
@@ -4456,7 +4528,7 @@
       "description": "A Vue <script setup> defineEmits event is emitted nowhere in its own component",
       "label": "Unused Component Emits",
       "config_key": "unused-component-emits",
-      "registry_index": 35,
+      "registry_index": 36,
       "aliases": [
         "unused-component-emits"
       ],
@@ -4492,7 +4564,7 @@
       "description": "An Angular @Input() / signal input() / model() input is read nowhere in its own component",
       "label": "Unused Component Inputs",
       "config_key": "unused-component-inputs",
-      "registry_index": 36,
+      "registry_index": 37,
       "aliases": [
         "unused-component-inputs"
       ],
@@ -4528,7 +4600,7 @@
       "description": "An Angular @Output() / signal output() output is emitted nowhere in its own component",
       "label": "Unused Component Outputs",
       "config_key": "unused-component-outputs",
-      "registry_index": 37,
+      "registry_index": 38,
       "aliases": [
         "unused-component-outputs"
       ],
@@ -4564,7 +4636,7 @@
       "description": "A Svelte component dispatches a createEventDispatcher event whose name is listened to nowhere in the project",
       "label": "Unused Svelte Events",
       "config_key": "unused-svelte-events",
-      "registry_index": 38,
+      "registry_index": 39,
       "aliases": [
         "unused-svelte-events"
       ],
@@ -4600,7 +4672,7 @@
       "description": "An Effect layer is composed only into layers that nothing uses",
       "label": "Unused Effect Layers",
       "config_key": "unused-effect-layers",
-      "registry_index": 41,
+      "registry_index": 42,
       "aliases": [
         "unused-effect-layers"
       ],
@@ -4636,7 +4708,7 @@
       "description": "An Effect tagged error class is referenced only as a type or a catchTag string, and no code constructs or fails with it",
       "label": "Unused Tagged Errors",
       "config_key": "unused-tagged-errors",
-      "registry_index": 42,
+      "registry_index": 43,
       "aliases": [
         "unused-tagged-errors"
       ],
@@ -4672,7 +4744,7 @@
       "description": "A catchTag handler names a project error tag that no code produces",
       "label": "Unproduced Catch Tags",
       "config_key": "unproduced-catch-tags",
-      "registry_index": 43,
+      "registry_index": 44,
       "aliases": [
         "unproduced-catch-tags"
       ],
@@ -4708,7 +4780,7 @@
       "description": "A Next.js Server Action exported from a \"use server\" file is referenced by no code in the project",
       "label": "Unused Server Actions",
       "config_key": "unused-server-actions",
-      "registry_index": 39,
+      "registry_index": 40,
       "aliases": [
         "unused-server-actions"
       ],
@@ -4744,7 +4816,7 @@
       "description": "A SvelteKit load() return-object key is read by no consumer",
       "label": "Unused Load Data Keys",
       "config_key": "unused-load-data-keys",
-      "registry_index": 40,
+      "registry_index": 41,
       "aliases": [
         "unused-load-data-keys"
       ],
@@ -4780,7 +4852,7 @@
       "description": "A React/Preact prop is forwarded unchanged through 3+ pass-through components to a distant consumer",
       "label": "Prop Drilling",
       "config_key": "prop-drilling",
-      "registry_index": 58,
+      "registry_index": 59,
       "aliases": [],
       "lsp": true,
       "filter_flag": null,
@@ -4814,7 +4886,7 @@
       "description": "A React/Preact component whose whole body is a single spread-forwarded child render (a candidate for inlining)",
       "label": "Thin Wrappers",
       "config_key": "thin-wrapper",
-      "registry_index": 59,
+      "registry_index": 60,
       "aliases": [
         "thin-wrappers"
       ],
@@ -4850,7 +4922,7 @@
       "description": "Three or more React/Preact components across two or more files declare an identical prop-name set (a missing shared Props type)",
       "label": "Duplicate Prop Shapes",
       "config_key": "duplicate-prop-shape",
-      "registry_index": 60,
+      "registry_index": 61,
       "aliases": [
         "duplicate-prop-shapes"
       ],
@@ -4886,7 +4958,7 @@
       "description": "Two or more Next.js App Router route files resolve to the same URL",
       "label": "Route Collisions",
       "config_key": "route-collision",
-      "registry_index": 44,
+      "registry_index": 45,
       "aliases": [
         "route-collisions"
       ],
@@ -4924,7 +4996,7 @@
       "description": "Sibling Next.js dynamic route segments use different slug names at the same position",
       "label": "Dynamic Segment Conflicts",
       "config_key": "dynamic-segment-name-conflict",
-      "registry_index": 45,
+      "registry_index": 46,
       "aliases": [
         "dynamic-segment-name-conflicts"
       ],
@@ -5142,7 +5214,7 @@
       "description": "CSS or CSS-in-JS hardcoded styling value bypasses the design token system",
       "label": "CSS Token Drift",
       "config_key": "css-token-drift",
-      "registry_index": 61,
+      "registry_index": 62,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -5172,7 +5244,7 @@
       "description": "CSS or CSS-in-JS declaration block is duplicated across rules",
       "label": "CSS Duplicate Block",
       "config_key": "css-duplicate-block",
-      "registry_index": 62,
+      "registry_index": 63,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -5202,7 +5274,7 @@
       "description": "CSS selector, nesting, or important usage is structurally complex",
       "label": "CSS Selector Complexity",
       "config_key": "css-selector-complexity",
-      "registry_index": 63,
+      "registry_index": 64,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -5232,7 +5304,7 @@
       "description": "CSS or CSS-in-JS surface appears unused",
       "label": "CSS Dead Surface",
       "config_key": "css-dead-surface",
-      "registry_index": 64,
+      "registry_index": 65,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -5262,7 +5334,7 @@
       "description": "CSS or CSS-in-JS reference resolves to no stylesheet definition",
       "label": "CSS Broken Reference",
       "config_key": "css-broken-reference",
-      "registry_index": 65,
+      "registry_index": 66,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -5652,7 +5724,7 @@
       "description": "Detected feature flag pattern",
       "label": "Feature Flags",
       "config_key": "feature-flags",
-      "registry_index": 56,
+      "registry_index": 57,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -7152,7 +7224,7 @@
       "description": "The change weakens tests or a coverage threshold",
       "label": "Weakened Tests",
       "config_key": "weakened-tests",
-      "registry_index": 66,
+      "registry_index": 67,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -7182,7 +7254,7 @@
       "description": "The change adds a suppression comment",
       "label": "Added Suppressions",
       "config_key": "added-suppression",
-      "registry_index": 67,
+      "registry_index": 68,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -7212,7 +7284,7 @@
       "description": "The change adds a test-environment branch to source code",
       "label": "Test-Only Branches",
       "config_key": "test-only-branch",
-      "registry_index": 68,
+      "registry_index": 69,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -7242,7 +7314,7 @@
       "description": "The change edits one copy of duplicated code but not its siblings",
       "label": "Diverged Clone Siblings",
       "config_key": "diverged-clone-sibling",
-      "registry_index": 69,
+      "registry_index": 70,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -7272,7 +7344,7 @@
       "description": "The change adds a dependency",
       "label": "Added Dependencies",
       "config_key": "added-dependency",
-      "registry_index": 70,
+      "registry_index": 71,
       "aliases": [],
       "lsp": false,
       "filter_flag": null,
@@ -8863,6 +8935,11 @@
       "task": "check untested-but-reachable code",
       "command": "fallow health --coverage-gaps",
       "note": null
+    },
+    {
+      "task": "improve or check the tests of a change",
+      "command": "fallow mutation --plan --base <ref>",
+      "note": "The plan runs no code. Without `--plan`, the command runs the project tests against each mutant, so ask the user first."
     },
     {
       "task": "consolidate duplication",

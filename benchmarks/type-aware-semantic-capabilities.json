@@ -6,8 +6,8 @@
     "syntax-and-style-lint-rules"
   ],
   "artifacts": {
-    "fallow_sha256": "ed69b62c2d29fc6044be8bacf4a9716e8f039c6d5b409ebfe3164998e6688d26",
-    "sidecar_sha256": "ceec1e5fd41ceb6acd5008708828eedd0be4d1b263cece13e01994cd9959747a"
+    "fallow_sha256": "661f67d8edaaa046d3cf4307f07b5019ed0cc851366d9da18b0cf11aed2da903",
+    "sidecar_sha256": "4e6637a142dc5fd5b92258c5911258557c39df4b81727dae4f9a3f27d939a1fe"
   },
   "coverage": {
     "capability_ids": [
@@ -31,8 +31,8 @@
         "path_base": "fallow-workspace-root",
         "dependency_root": ".",
         "lockfile": "pnpm-lock.yaml",
-        "lockfile_sha256": "813b3e105713ce22bfebd12e3a54505fedda4d9ced71bc1f794712bca1f2aace",
-        "type_declaration_tree_sha256": "3a758e19c268098e608db1392c7a2ee714888700fc42e7706fded1d4726fbe57"
+        "lockfile_sha256": "857a138639ee3d541e9d4f17c1d0dce7a93fd449c1ba691e9a7d987b05ea46b5",
+        "type_declaration_tree_sha256": "b1169e3716f0c714bd69c2f1251767780fff96623fb750e0c4fbf8b9bffcb022"
       },
       "programs": {
         "inspect": [
@@ -8384,8 +8384,8 @@
         "path_base": "fallow-workspace-root",
         "dependency_root": ".",
         "lockfile": "pnpm-lock.yaml",
-        "lockfile_sha256": "813b3e105713ce22bfebd12e3a54505fedda4d9ced71bc1f794712bca1f2aace",
-        "type_declaration_tree_sha256": "3a758e19c268098e608db1392c7a2ee714888700fc42e7706fded1d4726fbe57"
+        "lockfile_sha256": "857a138639ee3d541e9d4f17c1d0dce7a93fd449c1ba691e9a7d987b05ea46b5",
+        "type_declaration_tree_sha256": "b1169e3716f0c714bd69c2f1251767780fff96623fb750e0c4fbf8b9bffcb022"
       },
       "programs": {
         "inspect": [

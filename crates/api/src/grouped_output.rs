@@ -342,6 +342,11 @@ where
                 .unused_component_props
                 .push(item.clone());
         }
+        for item in &results.constant_parameters {
+            self.entry_for_path(&item.parameter.path)
+                .constant_parameters
+                .push(item.clone());
+        }
         for item in &results.absent_component_props {
             self.entry_for_path(&item.prop.path)
                 .absent_component_props

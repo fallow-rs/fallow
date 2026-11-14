@@ -7,12 +7,8 @@
 use std::path::{Path, PathBuf};
 
 use super::config_parser;
+use super::extends_walk::{ExtendsWalk, workspace_package_dir, workspace_package_file};
 use super::{Plugin, PluginResult};
-
-#[path = "eslint_extends_walk.rs"]
-mod extends_walk;
-
-use extends_walk::ExtendsWalk;
 
 pub struct EslintPlugin;
 
@@ -396,8 +392,7 @@ fn follow_chained_config(
 /// `node_modules`, or, in a project without an install, found by its name.
 ///
 /// A shareable config from a registry package lives under `node_modules`, so
-/// it is not a project file and gets no file credit. The returned path uses
-/// the spelling of `root`, so it matches the discovered file.
+/// it is not a project file and gets no file credit.
 fn workspace_shared_config_file(
     config_dir: &Path,
     extends_name: &str,
@@ -406,36 +401,9 @@ fn workspace_shared_config_file(
     walk: &mut ExtendsWalk<'_>,
 ) -> Option<PathBuf> {
     let full_name = normalize_eslint_config_name(extends_name);
-    let pkg_dir =
-        find_package_dir(config_dir, pkg_name).or_else(|| walk.workspace_package_dir(pkg_name))?;
-    let pkg_json_str = std::fs::read_to_string(pkg_dir.join("package.json")).ok()?;
-    let pkg_json: serde_json::Value = serde_json::from_str(&pkg_json_str).ok()?;
+    let pkg_dir = workspace_package_dir(config_dir, pkg_name, walk)?;
     let subpath = full_name.get(pkg_name.len()..).unwrap_or_default();
-    let subpath_key = format!(".{subpath}");
-    let entry_rel = required_main_entry(&pkg_json, &subpath_key)
-        .or_else(|| resolve_package_entry(&pkg_json, &subpath_key, &pkg_dir))?;
-    let entry = dunce::canonicalize(pkg_dir.join(entry_rel)).ok()?;
-    let (ancestor, rel) = root.ancestors().find_map(|ancestor| {
-        let canonical = dunce::canonicalize(ancestor).ok()?;
-        let rel = entry.strip_prefix(&canonical).ok()?.to_path_buf();
-        Some((ancestor, rel))
-    })?;
-    if rel
-        .components()
-        .any(|component| component.as_os_str() == "node_modules")
-    {
-        return None;
-    }
-    Some(ancestor.join(rel))
-}
-
-/// The `main` entry that `require` loads for a package without `exports`.
-/// The legacy `ESLint` config loader uses `require`, so `module` does not apply.
-fn required_main_entry(pkg_json: &serde_json::Value, subpath_key: &str) -> Option<String> {
-    if subpath_key != "." || pkg_json.get("exports").is_some_and(|e| !e.is_null()) {
-        return None;
-    }
-    pkg_json.get("main")?.as_str().map(str::to_string)
+    workspace_package_file(&pkg_dir, subpath, root)
 }
 
 /// True when an `extends` entry references a sibling file rather than a package.
@@ -443,7 +411,7 @@ fn is_path_like_extends(name: &str) -> bool {
     name.starts_with("./") || name.starts_with("../") || name.starts_with('/')
 }
 
-fn push_setup_file_once(result: &mut PluginResult, path: PathBuf) {
+pub(super) fn push_setup_file_once(result: &mut PluginResult, path: PathBuf) {
     if !result.setup_files.iter().any(|existing| existing == &path) {
         result.setup_files.push(path);
     }
@@ -563,7 +531,7 @@ fn credit_preset_plugin_dependencies(root: &Path, pkg_name: &str, result: &mut P
 /// Subpath key is `"."` for the main entry or `"./subpath"` for named subpaths.
 /// An exports map owns the package's public entries, including blocked subpaths.
 /// Packages without exports retain their legacy main entry and extension probes.
-fn resolve_package_entry(
+pub(super) fn resolve_package_entry(
     pkg_json: &serde_json::Value,
     subpath_key: &str,
     pkg_dir: &Path,

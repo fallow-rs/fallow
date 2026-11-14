@@ -359,6 +359,43 @@ fn multiple_env_vars() {
 }
 
 #[test]
+fn file_utility_arguments_are_not_file_args() {
+    for script in [
+        "cp ./README.md ./deno/lib",
+        "node ./deno-build.mjs && cp ./README.md ./deno/lib",
+        "mv dist/index.js lib/index.js",
+        "cat src/banner.ts",
+        "chmod +x bin/cli.js",
+        "touch src/generated.ts",
+        "mkdir -p lib && rm -rf lib/old.js",
+        "echo src/banner.ts | tee dist/banner.ts",
+        "ln -s ../src/cli.js bin/cli.js",
+        "grep -l TODO src/a.ts && sed -i s/a/b/ src/b.ts",
+        "rimraf dist/index.js",
+        "npx cp src/a.js dist/a.js",
+    ] {
+        let cmds = parse_script(script);
+        assert!(
+            cmds.iter()
+                .filter(|cmd| cmd.binary != "node")
+                .all(|cmd| cmd.file_args.is_empty()),
+            "`{script}` must not make utility arguments file args, got: {cmds:?}"
+        );
+    }
+    let build = parse_script("node ./deno-build.mjs && cp ./README.md ./deno/lib");
+    assert_eq!(build[0].file_args, vec!["./deno-build.mjs".to_string()]);
+    // A program that runs another program keeps the entry point of that
+    // program.
+    let wrapped = parse_script("xargs node scripts/run.js");
+    assert!(
+        wrapped
+            .iter()
+            .any(|cmd| cmd.file_args.iter().any(|f| f == "scripts/run.js")),
+        "xargs must keep the script that it runs, got: {wrapped:?}"
+    );
+}
+
+#[test]
 fn formatter_and_linter_targets_are_not_file_args() {
     for script in [
         "oxfmt --check \"**/*.ts\"",
@@ -2801,4 +2838,50 @@ fn script_binaries_keep_a_script_named_x() {
             "{script} runs the script `x`, so it is not a download"
         );
     }
+}
+
+#[test]
+fn node_modules_bin_path_credits_the_package_of_the_binary() {
+    let mut bin_map = FxHashMap::default();
+    bin_map.insert("kysely-codegen".to_string(), "kysely-codegen".to_string());
+    for script in [
+        "./node_modules/.bin/kysely-codegen --out-file x.ts",
+        "node_modules/.bin/kysely-codegen",
+        "../../node_modules/.bin/kysely-codegen",
+        "node ./node_modules/.bin/kysely-codegen",
+        "tsx node_modules/.bin/kysely-codegen",
+        "$(npm bin)/kysely-codegen",
+        "node --require ./setup.js ./node_modules/.bin/kysely-codegen",
+        "node -r ./a.js node_modules/.bin/kysely-codegen",
+        "./node_modules/.bin/tsx node_modules/.bin/kysely-codegen",
+    ] {
+        let result = analyze_command(script, Path::new("/nonexistent"), &bin_map);
+        assert!(
+            result.used_packages.contains("kysely-codegen"),
+            "{script}: {:?}",
+            result.used_packages
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn node_modules_bin_path_follows_the_link_relative_to_the_given_path() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let workspace = dir.path().join("packages/app");
+    let bin_dir = dir.path().join("node_modules/.bin");
+    std::fs::create_dir_all(&workspace).expect("workspace dir");
+    std::fs::create_dir_all(&bin_dir).expect("bin dir");
+    std::os::unix::fs::symlink("../@scope/gen/cli.js", bin_dir.join("gen")).expect("bin link");
+
+    let result = analyze_command(
+        "../../node_modules/.bin/gen",
+        &workspace,
+        &FxHashMap::default(),
+    );
+    assert!(
+        result.used_packages.contains("@scope/gen"),
+        "{:?}",
+        result.used_packages
+    );
 }

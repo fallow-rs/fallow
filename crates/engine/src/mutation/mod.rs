@@ -17,6 +17,8 @@
 //!   replaces the module with `vi.mock` does not reach it.
 //! - `pruned`: a static rule removes the mutant (see [`PruneReason`](crate::mutation::PruneReason)).
 
+mod build_tool;
+mod constant_condition;
 mod database_write;
 mod function_scope;
 mod layout;
@@ -33,11 +35,11 @@ use std::path::{Path, PathBuf};
 use serde::Serialize;
 
 pub use fallow_mutation::{
-    FunctionRef, Mutant, MutantChange, MutantId, MutationError, Operator, RESERVED_PREFIX,
-    SourceKind,
+    FunctionRef, Mutant, MutantChange, MutantId, MutationError, MutationOptions, Operator,
+    RESERVED_PREFIX, SourceKind,
 };
 pub use fallow_output::DiffIndex;
-pub use layout::{instrument_source, is_component_file};
+pub use layout::{export_containing, instrument_source, is_component_file};
 pub use skipped_tests::{SkipKind, SkippedTest};
 
 use crate::EngineError;
@@ -117,6 +119,9 @@ pub struct MutationPlanRequest {
     /// [`PruneReason::NotSelected`]. It stays in the plan, because the
     /// instrumented file still holds its switch. `None` selects each mutant.
     pub mutant_ids: Option<BTreeSet<String>>,
+    /// Wrap each exported function that holds a planned mutant, so that a
+    /// recording dry run can record its arguments.
+    pub record_exports: bool,
 }
 
 impl MutationPlanRequest {
@@ -132,6 +137,7 @@ impl MutationPlanRequest {
             function_scope: false,
             skip_component_files: false,
             mutant_ids: None,
+            record_exports: false,
         }
     }
 }
@@ -192,7 +198,8 @@ pub struct MutationPlanInputs<'a> {
     /// The dead-code results of the analysis.
     pub results: &'a AnalysisResults,
     /// The framework config exports. `None` when the caller has no plugin
-    /// facts. The plan then prunes no `framework-config` mutants and sets
+    /// facts. The plan then prunes no `framework-config` and no
+    /// `build-tool-only` mutants and sets
     /// [`MutationPlan::framework_config_checked`] to false.
     pub framework_config_exports: Option<&'a FrameworkConfigExports>,
     /// The setup files of the test runner config, absolute or relative to
@@ -219,6 +226,10 @@ pub enum PruneReason {
     SideEffectSink,
     /// The mutant is in an export that a framework reads as config.
     FrameworkConfig,
+    /// Only tool config files reach the file, for example a Vite plugin
+    /// module that only `vite.config.ts` imports. The code runs in the dev
+    /// server or the build, and no test or application entry reaches it.
+    BuildToolOnly,
     /// The request selects other mutants by id
     /// ([`MutationPlanRequest::mutant_ids`]).
     NotSelected,
@@ -275,6 +286,11 @@ pub struct PlannedMutant {
     /// How tests reach the code of the mutant in the module graph. `None`
     /// for a pruned mutant.
     pub test_reach: Option<MutantTestReach>,
+    /// True for a `negate-condition` mutant that sets a parameter test to
+    /// the value that each visible call gives it. A survivor gets the
+    /// `constant-parameter` hint. The plan document does not hold it.
+    #[serde(skip)]
+    pub constant_parameter: bool,
 }
 
 /// How tests reach the code of one mutant, from the module graph.
@@ -360,6 +376,8 @@ pub struct PruneCounts {
     pub side_effect_sink: usize,
     /// Mutants in framework config exports.
     pub framework_config: usize,
+    /// Mutants in files that only tool config files reach.
+    pub build_tool_only: usize,
     /// Mutants that the request did not select by id. A plan document never
     /// selects by id, so its output has no such count.
     #[serde(skip)]
@@ -424,9 +442,10 @@ pub struct MutationPlan {
     /// `no-coverage`, and a report shows this one fact instead of one line
     /// for each mutant.
     pub no_test_files: bool,
-    /// True when the plan applied the `framework-config` prune rule. False
-    /// when the caller gave no framework config exports, so that a mutant in
-    /// such an export can be `planned`.
+    /// True when the plan applied the `framework-config` and
+    /// `build-tool-only` prune rules. False when the caller gave no framework
+    /// config exports, so that a mutant in such an export or in a module that
+    /// only a tool config file imports can be `planned`.
     pub framework_config_checked: bool,
     /// The selected files that the plan did not instrument, sorted by path.
     pub skipped_files: Vec<SkippedFile>,

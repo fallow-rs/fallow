@@ -53,13 +53,41 @@ pub struct RunRequest {
     pub bail: bool,
 }
 
+/// The body of a `replay` request (replay contract 1): call `export` of
+/// `file` with `args` on the original and on `mutant_id`, `calls` times each,
+/// in turns.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct ReplayRequest {
+    /// The root-relative source file. It must be in the `path_map`.
+    pub file: String,
+    pub export: String,
+    pub mutant_id: String,
+    /// The arguments in the replay encoding.
+    pub args: Vec<serde_json::Value>,
+    pub calls: u32,
+    pub call_timeout_ms: u64,
+    /// The fixed value of `Date.now()` in each call.
+    pub clock_ms: i64,
+    /// The seed of `Math.random` in each call.
+    pub seed: i64,
+}
+
 /// One request.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Request {
     Init(InitRequest),
-    DryRun { test_files: Vec<String> },
+    DryRun {
+        test_files: Vec<String>,
+    },
+    /// Runs the dry-run test files again with the recorder on, and gives the
+    /// recorded arguments of the wrapped exports. Its test results count for
+    /// nothing.
+    Record {
+        test_files: Vec<String>,
+    },
     Run(RunRequest),
     Reload,
+    Replay(ReplayRequest),
     Shutdown,
 }
 
@@ -70,6 +98,8 @@ impl Request {
             Self::DryRun { .. } => "dry_run",
             Self::Run(_) => "run",
             Self::Reload => "reload",
+            Self::Replay(_) => "replay",
+            Self::Record { .. } => "record",
             Self::Shutdown => "shutdown",
         }
     }
@@ -81,6 +111,8 @@ impl Request {
             Self::DryRun { .. } => Some("dry_run_result"),
             Self::Run(_) => Some("run_result"),
             Self::Reload => Some("reloaded"),
+            Self::Replay(_) => Some("replay_result"),
+            Self::Record { .. } => Some("record_result"),
             Self::Shutdown => None,
         }
     }
@@ -93,8 +125,11 @@ impl Request {
         object.insert("type".to_owned(), self.type_name().into());
         let body = match self {
             Self::Init(body) => serde_json::to_value(body),
-            Self::DryRun { test_files } => Ok(serde_json::json!({ "test_files": test_files })),
+            Self::DryRun { test_files } | Self::Record { test_files } => {
+                Ok(serde_json::json!({ "test_files": test_files }))
+            }
             Self::Run(body) => serde_json::to_value(body),
+            Self::Replay(body) => serde_json::to_value(body),
             Self::Reload | Self::Shutdown => Ok(serde_json::Value::Null),
         };
         if let Ok(serde_json::Value::Object(fields)) = body {
@@ -115,6 +150,10 @@ pub struct Capabilities {
     pub bail: bool,
     pub fresh_modules_per_run: bool,
     pub batch_mutants: bool,
+    /// The adapter answers a `replay` request.
+    pub replay: bool,
+    /// The adapter answers a `record` request.
+    pub record: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
@@ -188,6 +227,35 @@ pub struct DryRunResult {
     pub duplicate_test_ids: Vec<String>,
 }
 
+/// The body of a `record_result` response.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct RecordResult {
+    #[serde(default)]
+    pub recorded_args: Vec<RecordedFunction>,
+    #[serde(default)]
+    pub duration_ms: u64,
+}
+
+/// The arguments that a recording dry run gives for one exported function.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct RecordedFunction {
+    /// `<root-relative file>#<export name>`.
+    pub key: String,
+    /// The distinct inputs, each an argument list in the replay encoding.
+    #[serde(default)]
+    pub inputs: Vec<Vec<serde_json::Value>>,
+    /// The calls whose arguments cannot be replayed, by reason.
+    #[serde(default)]
+    pub not_replayable: Vec<RecordRefusal>,
+}
+
+/// The count of calls of one reason that a recording dry run did not keep.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct RecordRefusal {
+    pub reason: String,
+    pub count: u64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum RunStatus {
@@ -255,6 +323,47 @@ pub struct RemoteError {
     pub retryable: bool,
 }
 
+/// The side of one replay call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReplaySide {
+    Original,
+    Mutant,
+}
+
+/// The outcome of one replay call.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ReplayOutcome {
+    Returned,
+    Threw,
+    TimedOut,
+    NotCallable,
+}
+
+/// One replay call record.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ReplayCall {
+    pub side: ReplaySide,
+    pub index: u32,
+    pub outcome: ReplayOutcome,
+    /// The returned or thrown value in the replay encoding. `null` for a
+    /// call that timed out.
+    #[serde(default)]
+    pub value: serde_json::Value,
+    /// A short text of the value for people.
+    #[serde(default)]
+    pub text: String,
+}
+
+/// The body of a `replay_result` response.
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+pub struct ReplayResult {
+    pub calls: Vec<ReplayCall>,
+    #[serde(default)]
+    pub duration_ms: u64,
+}
+
 /// One decoded response.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Response {
@@ -262,6 +371,8 @@ pub enum Response {
     DryRun(DryRunResult),
     Run(RunResult),
     Reloaded(Reloaded),
+    Replay(ReplayResult),
+    Record(RecordResult),
 }
 
 /// Why a companion exchange failed.
@@ -368,6 +479,8 @@ pub fn decode_response(
         "dry_run_result" => Response::DryRun(serde_json::from_value(value).map_err(body)?),
         "run_result" => Response::Run(serde_json::from_value(value).map_err(body)?),
         "reloaded" => Response::Reloaded(serde_json::from_value(value).map_err(body)?),
+        "replay_result" => Response::Replay(serde_json::from_value(value).map_err(body)?),
+        "record_result" => Response::Record(serde_json::from_value(value).map_err(body)?),
         other => {
             return Err(LinkFault::Protocol(format!(
                 "no response type `{other}` exists"
@@ -388,6 +501,37 @@ mod tests {
             Err(LinkFault::Protocol(message)) => message,
             other => panic!("expected a protocol fault, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn a_replay_result_decodes_with_each_outcome() {
+        let line = r#"{"v":1,"id":4,"type":"replay_result","duration_ms":12,"calls":[{"side":"original","index":1,"outcome":"returned","value":5,"text":"5"},{"side":"mutant","index":1,"outcome":"timed_out","value":null,"text":"timed out"}]}"#;
+        let Response::Replay(result) = decode_response(line, 1, 4, "replay_result").unwrap() else {
+            panic!("expected a replay result");
+        };
+        assert_eq!(result.calls.len(), 2);
+        assert_eq!(result.calls[0].side, ReplaySide::Original);
+        assert_eq!(result.calls[0].value, serde_json::json!(5));
+        assert_eq!(result.calls[1].outcome, ReplayOutcome::TimedOut);
+    }
+
+    #[test]
+    fn a_replay_request_line_has_every_field() {
+        let request = Request::Replay(ReplayRequest {
+            file: "src/a.ts".to_owned(),
+            export: "add".to_owned(),
+            mutant_id: "m1".to_owned(),
+            args: vec![serde_json::json!(1)],
+            calls: 3,
+            call_timeout_ms: 2000,
+            clock_ms: 1,
+            seed: 2,
+        });
+        let line: serde_json::Value = serde_json::from_str(&request.to_line(1, 9)).unwrap();
+        assert_eq!(line["type"], "replay");
+        assert_eq!(line["export"], "add");
+        assert_eq!(line["args"], serde_json::json!([1]));
+        assert_eq!(request.response_type(), Some("replay_result"));
     }
 
     #[test]

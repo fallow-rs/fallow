@@ -345,6 +345,7 @@ const COUNTED_FINDING_KEYS: ReadonlyArray<CheckFindingKey> = [
   "unused_load_data_keys",
   "unused_component_props",
   "absent_component_props",
+  "constant_parameters",
   "unused_component_emits",
   "unused_component_inputs",
   "unused_component_outputs",

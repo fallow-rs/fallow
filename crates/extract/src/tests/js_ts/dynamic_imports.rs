@@ -2663,3 +2663,17 @@ fn component_loader_contract_abstains_in_incomplete_namespace_and_catch_scopes()
         );
     }
 }
+
+#[test]
+fn a_pattern_branch_of_a_conditional_import_gives_a_pattern() {
+    let info = parse_source(
+        "export const load = (flag: boolean, n: string) => import(flag ? './a' : './plugins/' + n);",
+    );
+    assert!(
+        info.dynamic_import_patterns
+            .iter()
+            .any(|pattern| pattern.prefix == "./plugins/"),
+        "{:?}",
+        info.dynamic_import_patterns
+    );
+}

@@ -167,6 +167,8 @@ mod tests {
     fn tainted_sink(path: PathBuf) -> SecurityFinding {
         SecurityFinding {
             finding_id: String::new(),
+            stable_finding_id: None,
+            stable_id_input: None,
             candidate: fallow_api::editor_results::SecurityCandidate::default(),
             taint_flow: None,
             attack_surface: None,
@@ -199,6 +201,8 @@ mod tests {
     fn client_server_leak(path: PathBuf) -> SecurityFinding {
         SecurityFinding {
             finding_id: String::new(),
+            stable_finding_id: None,
+            stable_id_input: None,
             candidate: fallow_api::editor_results::SecurityCandidate::default(),
             taint_flow: None,
             attack_surface: None,

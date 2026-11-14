@@ -1,7 +1,7 @@
 //! Inline suppression comment parsing.
 //!
 //! Parses `fallow-ignore-file` and `fallow-ignore-next-line` comments from
-//! source files, supporting `//`, `/* */`, and `<!-- -->` styles.
+//! source files, supporting `//`, `/* */`, JSDoc `/** */`, and `<!-- -->` styles.
 
 use oxc_ast::ast::Comment;
 
@@ -141,66 +141,217 @@ pub(crate) fn parse_suppressions(comments: &[Comment], source: &str) -> ParsedSu
         let content_span = comment.content_span();
         let text = &source
             [content_span.start as usize..content_span.end.min(source.len() as u32) as usize];
-        let trimmed = text.trim();
+        // Most comments hold no marker. Skip them before the line lookup,
+        // which scans the source from its start.
+        if !text.contains(MARKER_PREFIX) {
+            continue;
+        }
 
-        if let Some(rest) = trimmed.strip_prefix("fallow-ignore-file") {
-            let rest = rest.trim();
-            let src_comment_line = byte_offset_to_line(source, comment.span.start);
-            push_suppressions(&mut parsed, 0, src_comment_line, rest);
-        } else if let Some(rest) = trimmed.strip_prefix("fallow-ignore-next-line") {
-            // A block comment may span lines: only the marker line carries
-            // targets (later lines are prose), and the suppression applies to
-            // the line after the comment ENDS, not after it starts.
-            let rest = rest.lines().next().unwrap_or("").trim();
-            let src_comment_line = byte_offset_to_line(source, comment.span.start);
+        let first_line = byte_offset_to_line(source, comment.span.start);
+        if comment.is_block() {
+            // A block comment may span lines. A next-line marker applies to
+            // the line after the comment ENDS, not after the marker line.
             let suppressed_line = byte_offset_to_line(source, comment.span.end) + 1;
-
-            push_suppressions(&mut parsed, suppressed_line, src_comment_line, rest);
+            push_block_markers(&mut parsed, text.lines(), first_line, suppressed_line);
+        } else if let Some(marker) = match_line_marker(text) {
+            push_marker(&mut parsed, marker, first_line, first_line + 1);
         }
     }
 
     parsed
 }
 
+/// The text that each suppression marker starts with.
+const MARKER_PREFIX: &str = "fallow-ignore-";
+
+/// A `fallow-ignore-*` marker and the rest of its line (the targets).
+#[derive(Clone, Copy)]
+enum Marker<'a> {
+    File(&'a str),
+    NextLine(&'a str),
+}
+
+impl<'a> Marker<'a> {
+    const fn rest(&self) -> &'a str {
+        match self {
+            Self::File(rest) | Self::NextLine(rest) => rest,
+        }
+    }
+}
+
+/// Match a marker at the start of the text.
+fn split_marker(text: &str) -> Option<Marker<'_>> {
+    if let Some(rest) = text.strip_prefix("fallow-ignore-file") {
+        Some(Marker::File(rest.trim()))
+    } else {
+        text.strip_prefix("fallow-ignore-next-line")
+            .map(|rest| Marker::NextLine(rest.trim()))
+    }
+}
+
+/// Match a marker at the start of a line comment (`//` or `<!-- -->`).
+fn match_line_marker(text: &str) -> Option<Marker<'_>> {
+    split_marker(text.trim())
+}
+
+/// Match a marker at the start of one line of a block comment.
+///
+/// Leading and trailing runs of `*` are stripped first, so the JSDoc forms
+/// `/** fallow-ignore-next-line */`, ` * fallow-ignore-next-line` and
+/// `/** fallow-ignore-file **/` match.
+///
+/// A block comment holds prose, and a wrapped prose line can start with the
+/// marker word. Such a line is a marker only when each target token before
+/// an optional `-- reason` is a known issue kind or has the issue-kind shape.
+/// A typo such as `unused-exprt` then still gives the unknown-kind warning,
+/// and ` * fallow-ignore-next-line well-known pattern.` is not a marker.
+fn match_block_marker(line: &str) -> Option<Marker<'_>> {
+    let text = line
+        .trim()
+        .trim_start_matches('*')
+        .trim_end_matches('*')
+        .trim();
+    let marker = split_marker(text)?;
+    let (targets, _reason) = split_suppression_reason(marker.rest());
+    let is_marker = targets
+        .split(|c: char| c == ',' || c.is_whitespace())
+        .filter(|token| !token.is_empty())
+        .all(|token| has_issue_kind_shape(token) || parse_suppression_target(token).is_some());
+    is_marker.then_some(marker)
+}
+
+/// True for two or more lowercase ASCII words joined by `-`, like
+/// `unused-export`.
+fn has_issue_kind_shape(token: &str) -> bool {
+    token.contains('-')
+        && token
+            .split('-')
+            .all(|word| !word.is_empty() && word.bytes().all(|b| b.is_ascii_lowercase()))
+}
+
+/// True when the rest of a line after `/*` opens a multi-line block comment
+/// that the source scan follows: a bare `/*` or `/**`, or a marker.
+///
+/// Text such as `/* glob` inside a template literal then does not open a
+/// block that hides later lines.
+fn opens_source_block(rest: &str) -> bool {
+    let rest = rest.trim();
+    rest.is_empty() || rest == "*" || match_block_marker(rest).is_some()
+}
+
+fn push_marker(
+    parsed: &mut ParsedSuppressions,
+    marker: Marker<'_>,
+    comment_line: u32,
+    suppressed_line: u32,
+) {
+    match marker {
+        Marker::File(rest) => push_suppressions(parsed, 0, comment_line, rest),
+        Marker::NextLine(rest) => push_suppressions(parsed, suppressed_line, comment_line, rest),
+    }
+}
+
+/// Record every marker line of one block comment.
+///
+/// `lines` is the comment content, `first_line` is the 1-based line of the
+/// first content line, and `suppressed_line` is the line after the comment.
+/// Only a marker line carries targets: the other lines are prose.
+fn push_block_markers<'a>(
+    parsed: &mut ParsedSuppressions,
+    lines: impl Iterator<Item = &'a str>,
+    first_line: u32,
+    suppressed_line: u32,
+) {
+    for (line, comment_line) in lines.zip(first_line..) {
+        if let Some(marker) = match_block_marker(line) {
+            push_marker(parsed, marker, comment_line, suppressed_line);
+        }
+    }
+}
+
 /// Parse suppressions from raw source text using simple string scanning.
+///
+/// A `//` line, a one-line `<!-- -->` comment, and a `/* */` block comment
+/// that starts a line can carry a marker. A block comment may span lines, as
+/// in a multi-line JSDoc comment. A single-line block comment counts only
+/// when `*/` ends the line.
 #[expect(
     clippy::cast_possible_truncation,
     reason = "line count is bounded by file size"
 )]
 pub fn parse_suppressions_from_source(source: &str) -> ParsedSuppressions {
     let mut parsed = ParsedSuppressions::default();
+    let lines: Vec<&str> = source.lines().collect();
 
-    for (line_idx, line) in source.lines().enumerate() {
-        let trimmed = line.trim();
+    let mut idx = 0;
+    while idx < lines.len() {
+        let comment_line = (idx as u32) + 1;
+        let trimmed = lines[idx].trim();
 
-        let comment_text = if let Some(rest) = trimmed.strip_prefix("//") {
-            Some(rest.trim())
-        } else if let Some(rest) = trimmed.strip_prefix("/*") {
-            rest.strip_suffix("*/").map(str::trim)
+        if let Some(rest) = trimmed.strip_prefix("//") {
+            if let Some(marker) = match_line_marker(rest) {
+                push_marker(&mut parsed, marker, comment_line, comment_line + 1);
+            }
         } else if let Some(rest) = trimmed.strip_prefix("<!--") {
-            rest.strip_suffix("-->").map(str::trim)
-        } else {
-            None
-        };
-
-        let Some(text) = comment_text else {
-            continue;
-        };
-
-        if let Some(rest) = text.strip_prefix("fallow-ignore-file") {
-            let rest = rest.trim();
-            let src_comment_line = (line_idx as u32) + 1;
-            push_suppressions(&mut parsed, 0, src_comment_line, rest);
-        } else if let Some(rest) = text.strip_prefix("fallow-ignore-next-line") {
-            let rest = rest.trim();
-            let src_comment_line = (line_idx as u32) + 1;
-            let suppressed_line = src_comment_line + 1;
-
-            push_suppressions(&mut parsed, suppressed_line, src_comment_line, rest);
+            if let Some(marker) = rest.strip_suffix("-->").and_then(match_line_marker) {
+                push_marker(&mut parsed, marker, comment_line, comment_line + 1);
+            }
+        } else if let Some(rest) = trimmed.strip_prefix("/*") {
+            idx = scan_source_block(&mut parsed, &lines, idx, rest);
         }
+        idx += 1;
     }
 
     parsed
+}
+
+/// Record the markers of a `/*` comment that starts line `idx` of the source
+/// scan, and return the index of the last line of the comment.
+///
+/// An unclosed or unrecognized opener carries no markers and returns `idx`, so
+/// the scan goes on with the next line and a later marker still counts.
+#[expect(
+    clippy::cast_possible_truncation,
+    reason = "line count is bounded by file size"
+)]
+fn scan_source_block(
+    parsed: &mut ParsedSuppressions,
+    lines: &[&str],
+    idx: usize,
+    rest: &str,
+) -> usize {
+    const BLOCK_END: &str = "*/";
+    let comment_line = (idx as u32) + 1;
+    if let Some(end) = rest.find(BLOCK_END) {
+        if end + BLOCK_END.len() == rest.len() {
+            let content = std::iter::once(&rest[..end]);
+            push_block_markers(parsed, content, comment_line, comment_line + 1);
+        }
+        return idx;
+    }
+    if !opens_source_block(rest) {
+        return idx;
+    }
+    let Some(close_idx) = (idx + 1..lines.len()).find(|&i| lines[i].contains(BLOCK_END)) else {
+        return idx;
+    };
+    // A `//` marker line inside the block still counts: the scan cannot tell a
+    // real block comment from text in a string.
+    for (inner_idx, line) in lines.iter().enumerate().take(close_idx).skip(idx + 1) {
+        let inner_line = (inner_idx as u32) + 1;
+        if let Some(marker) = line.trim().strip_prefix("//").and_then(match_line_marker) {
+            push_marker(parsed, marker, inner_line, inner_line + 1);
+        }
+    }
+    let close_line = lines[close_idx];
+    let content = std::iter::once(rest)
+        .chain(lines[idx + 1..close_idx].iter().copied())
+        .chain(std::iter::once(
+            &close_line[..close_line.find(BLOCK_END).unwrap_or(close_line.len())],
+        ));
+    let suppressed_line = (close_idx as u32) + 2;
+    push_block_markers(parsed, content, comment_line, suppressed_line);
+    close_idx
 }
 
 #[cfg(test)]
@@ -661,6 +812,297 @@ mod tests {
         assert!(parsed.suppressions.is_empty());
         assert_eq!(parsed.unknown_kinds.len(), 1);
         assert_eq!(parsed.unknown_kinds[0].token, "nonexistent-kind");
+    }
+
+    fn parse_oxc(source: &str) -> ParsedSuppressions {
+        use oxc_allocator::Allocator;
+        use oxc_parser::Parser;
+        use oxc_span::SourceType;
+
+        let allocator = Allocator::default();
+        let parser_return = Parser::new(&allocator, source, SourceType::mjs()).parse();
+        parse_suppressions(&parser_return.program.comments, source)
+    }
+
+    #[test]
+    fn parse_oxc_single_line_jsdoc_next_line_suppression() {
+        let parsed =
+            parse_oxc("/** fallow-ignore-next-line unused-export */\nexport const foo = 1;\n");
+        assert_eq!(parsed.suppressions.len(), 1);
+        assert_eq!(parsed.suppressions[0].line, 2);
+        assert_eq!(parsed.suppressions[0].comment_line, 1);
+        assert_eq!(
+            parsed.suppressions[0].issue_kind_target(),
+            Some(IssueKind::UnusedExport)
+        );
+        assert!(parsed.unknown_kinds.is_empty());
+    }
+
+    #[test]
+    fn parse_oxc_multi_line_jsdoc_next_line_suppression() {
+        let parsed = parse_oxc(
+            "/**\n * fallow-ignore-next-line unused-export\n */\nexport const foo = 1;\n",
+        );
+        assert_eq!(parsed.suppressions.len(), 1);
+        assert_eq!(
+            parsed.suppressions[0].line, 4,
+            "suppression must land on the line after `*/`"
+        );
+        assert_eq!(
+            parsed.suppressions[0].comment_line, 2,
+            "comment_line must point at the marker line"
+        );
+        assert_eq!(
+            parsed.suppressions[0].issue_kind_target(),
+            Some(IssueKind::UnusedExport)
+        );
+        assert!(parsed.unknown_kinds.is_empty());
+    }
+
+    #[test]
+    fn parse_oxc_multi_line_jsdoc_marker_after_prose() {
+        let parsed = parse_oxc(
+            "/**\n * Kept for the legacy import path.\n * fallow-ignore-next-line unused-export -- legacy\n * More prose.\n */\nexport const foo = 1;\n",
+        );
+        assert_eq!(parsed.suppressions.len(), 1);
+        assert_eq!(parsed.suppressions[0].line, 6);
+        assert_eq!(parsed.suppressions[0].comment_line, 3);
+        assert_eq!(parsed.suppressions[0].reason.as_deref(), Some("legacy"));
+        assert!(
+            parsed.unknown_kinds.is_empty(),
+            "prose lines must not be tokenized into unknown kinds"
+        );
+    }
+
+    #[test]
+    fn parse_oxc_jsdoc_file_suppression() {
+        let parsed = parse_oxc("/** fallow-ignore-file unused-export */\nexport const foo = 1;\n");
+        assert_eq!(parsed.suppressions.len(), 1);
+        assert_eq!(parsed.suppressions[0].line, 0);
+        assert_eq!(
+            parsed.suppressions[0].issue_kind_target(),
+            Some(IssueKind::UnusedExport)
+        );
+    }
+
+    #[test]
+    fn parse_oxc_jsdoc_unknown_kind_surfaces_as_unknown() {
+        let parsed = parse_oxc(
+            "/**\n * fallow-ignore-next-line nonexistent-kind\n */\nexport const foo = 1;\n",
+        );
+        assert!(parsed.suppressions.is_empty());
+        assert_eq!(parsed.unknown_kinds.len(), 1);
+        assert_eq!(parsed.unknown_kinds[0].token, "nonexistent-kind");
+        assert_eq!(parsed.unknown_kinds[0].comment_line, 2);
+    }
+
+    #[test]
+    fn parse_oxc_line_comment_marker_after_text_ignored() {
+        let parsed =
+            parse_oxc("// see fallow-ignore-next-line unused-export\nexport const foo = 1;\n");
+        assert!(parsed.suppressions.is_empty());
+        assert!(parsed.unknown_kinds.is_empty());
+    }
+
+    #[test]
+    fn parse_oxc_jsdoc_marker_inside_prose_ignored() {
+        let parsed = parse_oxc(
+            "/** Do not use fallow-ignore-next-line here */\nexport const foo = 1;\n/**\n * Do not use fallow-ignore-file here.\n */\nexport const bar = 2;\n",
+        );
+        assert!(parsed.suppressions.is_empty());
+        assert!(parsed.unknown_kinds.is_empty());
+    }
+
+    #[test]
+    fn parse_source_single_line_jsdoc_suppressions() {
+        let parsed = parse_suppressions_from_source(
+            "/** fallow-ignore-file code-duplication */\n/** fallow-ignore-next-line unused-export */\nexport const foo = 1;\n",
+        );
+        assert_eq!(parsed.suppressions.len(), 2);
+        assert_eq!(parsed.suppressions[0].line, 0);
+        assert_eq!(
+            parsed.suppressions[0].issue_kind_target(),
+            Some(IssueKind::CodeDuplication)
+        );
+        assert_eq!(parsed.suppressions[1].line, 3);
+        assert_eq!(
+            parsed.suppressions[1].issue_kind_target(),
+            Some(IssueKind::UnusedExport)
+        );
+        assert!(parsed.unknown_kinds.is_empty());
+    }
+
+    #[test]
+    fn parse_source_multi_line_jsdoc_file_suppression() {
+        let parsed = parse_suppressions_from_source(
+            "/**\n * fallow-ignore-file code-duplication\n */\nexport const foo = 1;\n",
+        );
+        assert_eq!(parsed.suppressions.len(), 1);
+        assert_eq!(parsed.suppressions[0].line, 0);
+        assert_eq!(parsed.suppressions[0].comment_line, 2);
+        assert_eq!(
+            parsed.suppressions[0].issue_kind_target(),
+            Some(IssueKind::CodeDuplication)
+        );
+    }
+
+    #[test]
+    fn parse_source_multi_line_jsdoc_next_line_targets_line_after_close() {
+        let parsed = parse_suppressions_from_source(
+            "/**\n * Kept for the legacy path.\n * fallow-ignore-next-line unused-export\n */\nexport const foo = 1;\n",
+        );
+        assert_eq!(parsed.suppressions.len(), 1);
+        assert_eq!(parsed.suppressions[0].line, 5);
+        assert_eq!(parsed.suppressions[0].comment_line, 3);
+        assert!(parsed.unknown_kinds.is_empty());
+    }
+
+    #[test]
+    fn parse_source_block_comment_with_code_after_close_is_scanned_once() {
+        let parsed = parse_suppressions_from_source(
+            "/*\n * fallow-ignore-next-line unused-export\n */\nexport const foo = 1;\n// fallow-ignore-next-line unused-type\nexport type Bar = 1;\n",
+        );
+        let lines: Vec<u32> = parsed.suppressions.iter().map(|s| s.line).collect();
+        assert_eq!(lines, vec![4, 6]);
+    }
+
+    #[test]
+    fn jsdoc_wrapped_prose_line_is_not_a_marker() {
+        let source = "/**\n * Use the comment below to hide a finding:\n * fallow-ignore-next-line is how you hide a finding.\n */\nexport const foo = 1;\n";
+        for parsed in [parse_oxc(source), parse_suppressions_from_source(source)] {
+            assert!(parsed.suppressions.is_empty(), "{:?}", parsed.suppressions);
+            assert!(
+                parsed.unknown_kinds.is_empty(),
+                "{:?}",
+                parsed.unknown_kinds
+            );
+        }
+    }
+
+    #[test]
+    fn jsdoc_marker_reason_prose_does_not_fail_the_target_rule() {
+        // The reason text after `--` is prose. Without the `--` split, its
+        // words fail the issue-kind shape and the line is not a marker.
+        let source = "/**\n * fallow-ignore-next-line unused-export -- kept for the legacy path, see notes.\n */\nexport const foo = 1;\n";
+        for parsed in [parse_oxc(source), parse_suppressions_from_source(source)] {
+            assert_eq!(parsed.suppressions.len(), 1);
+            assert_eq!(
+                parsed.suppressions[0].issue_kind_target(),
+                Some(IssueKind::UnusedExport)
+            );
+            assert_eq!(
+                parsed.suppressions[0].reason.as_deref(),
+                Some("kept for the legacy path, see notes.")
+            );
+            assert!(parsed.unknown_kinds.is_empty());
+        }
+
+        let parsed = parse_oxc(
+            "/**\n * fallow-ignore-next-line -- kept for the legacy path\n */\nexport const foo = 1;\n",
+        );
+        assert_eq!(parsed.suppressions.len(), 1);
+        assert_eq!(parsed.suppressions[0].target, None);
+        assert_eq!(
+            parsed.suppressions[0].reason.as_deref(),
+            Some("kept for the legacy path")
+        );
+    }
+
+    #[test]
+    fn jsdoc_prose_line_with_hyphenated_first_word_is_not_a_marker() {
+        let source = "/**\n * Cache keys follow the\n * fallow-ignore-next-line well-known pattern for caches.\n */\nexport const foo = 1;\n";
+        for parsed in [parse_oxc(source), parse_suppressions_from_source(source)] {
+            assert!(parsed.suppressions.is_empty(), "{:?}", parsed.suppressions);
+            assert!(
+                parsed.unknown_kinds.is_empty(),
+                "{:?}",
+                parsed.unknown_kinds
+            );
+        }
+    }
+
+    #[test]
+    fn jsdoc_marker_with_typo_kind_still_warns() {
+        let source = "/**\n * fallow-ignore-next-line unused-exprt\n */\nexport const foo = 1;\n";
+        for parsed in [parse_oxc(source), parse_suppressions_from_source(source)] {
+            let tokens: Vec<&str> = parsed
+                .unknown_kinds
+                .iter()
+                .map(|u| u.token.as_str())
+                .collect();
+            assert_eq!(tokens, vec!["unused-exprt"]);
+        }
+    }
+
+    #[test]
+    fn source_scan_unclosed_opener_in_string_keeps_later_marker() {
+        let source = "const glob = `\n/* glob\n`;\n// fallow-ignore-file code-duplication\nexport const foo = 1;\n";
+        let parsed = parse_suppressions_from_source(source);
+        assert_eq!(parsed.suppressions.len(), 1, "{:?}", parsed.suppressions);
+        assert_eq!(parsed.suppressions[0].line, 0);
+        assert_eq!(parsed.suppressions[0].comment_line, 4);
+        assert_eq!(
+            parsed.suppressions[0].issue_kind_target(),
+            Some(IssueKind::CodeDuplication)
+        );
+    }
+
+    #[test]
+    fn source_scan_comment_shape_in_string_is_not_a_marker() {
+        let source = "const doc = `\n/* start\n * fallow-ignore-file code-duplication\n */\n`;\nexport const foo = 1;\n";
+        let parsed = parse_suppressions_from_source(source);
+        assert!(parsed.suppressions.is_empty(), "{:?}", parsed.suppressions);
+    }
+
+    #[test]
+    fn source_scan_unclosed_block_mid_file_keeps_later_line_marker() {
+        let source = "export const a = 1;\n/**\n * never closed\n// fallow-ignore-next-line unused-export\nexport const b = 2;\n";
+        let parsed = parse_suppressions_from_source(source);
+        assert_eq!(parsed.suppressions.len(), 1, "{:?}", parsed.suppressions);
+        assert_eq!(parsed.suppressions[0].line, 5);
+        assert_eq!(parsed.suppressions[0].comment_line, 4);
+    }
+
+    #[test]
+    fn source_scan_line_marker_inside_candidate_block_counts() {
+        let source = "/**\n// fallow-ignore-next-line unused-export\nexport const b = 2;\nconst end = \"*/\";\n";
+        let parsed = parse_suppressions_from_source(source);
+        assert_eq!(parsed.suppressions.len(), 1, "{:?}", parsed.suppressions);
+        assert_eq!(parsed.suppressions[0].line, 3);
+        assert_eq!(parsed.suppressions[0].comment_line, 2);
+    }
+
+    #[test]
+    fn jsdoc_block_with_two_marker_lines_records_both() {
+        let source = "/**\n * fallow-ignore-file code-duplication\n * fallow-ignore-next-line unused-export\n */\nexport const foo = 1;\n";
+        for parsed in [parse_oxc(source), parse_suppressions_from_source(source)] {
+            let found: Vec<(u32, Option<IssueKind>)> = parsed
+                .suppressions
+                .iter()
+                .map(|s| (s.line, s.issue_kind_target()))
+                .collect();
+            assert_eq!(
+                found,
+                vec![
+                    (0, Some(IssueKind::CodeDuplication)),
+                    (5, Some(IssueKind::UnusedExport)),
+                ]
+            );
+        }
+    }
+
+    #[test]
+    fn line_comment_does_not_strip_stars() {
+        let source = "//* fallow-ignore-next-line unused-export\nexport const foo = 1;\n// fallow-ignore-next-line unused-export*\nexport const bar = 1;\n";
+        for parsed in [parse_oxc(source), parse_suppressions_from_source(source)] {
+            assert!(parsed.suppressions.is_empty(), "{:?}", parsed.suppressions);
+            let tokens: Vec<&str> = parsed
+                .unknown_kinds
+                .iter()
+                .map(|u| u.token.as_str())
+                .collect();
+            assert_eq!(tokens, vec!["unused-export*"]);
+        }
     }
 
     #[test]

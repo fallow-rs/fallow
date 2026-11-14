@@ -1,6 +1,7 @@
 const test = require("node:test");
 const assert = require("node:assert/strict");
 const crypto = require("node:crypto");
+const { spawnSync } = require("node:child_process");
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
@@ -374,13 +375,8 @@ test("verifyInstalled reports the .exe name when a win32 signature is absent", a
   assert.match(result.message, /fallow\.exe/);
 });
 
-test("verifyInstalled resolves a global npm install from the fallow package directory", async (t) => {
-  const pkg = currentPlatformPackage();
-  if (!pkg) {
-    t.skip("unsupported platform");
-    return;
-  }
-
+// Install a signed fake platform package under a scratch global node_modules.
+function writeGlobalInstall(t, pkg) {
   const { privateKey, rawPub } = makeKeypair();
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "fallow-vbtest-global-"));
   t.after(() => cleanup(root));
@@ -402,15 +398,85 @@ test("verifyInstalled resolves a global npm install from the fallow package dire
     fs.writeFileSync(`${binaryPath}.sig`, crypto.sign(null, content, privateKey));
   }
 
-  const result = await verifyInstalled({
+  return { root, resolveFrom, rawPub };
+}
+
+const sha256OfFile = ({ binaryPath }) =>
+  crypto.createHash("sha256").update(fs.readFileSync(binaryPath)).digest("hex");
+
+async function verifyGlobalInstall(t, pkg) {
+  const { resolveFrom, rawPub } = writeGlobalInstall(t, pkg);
+  return verifyInstalled({
     resolveFrom,
     verifyFn: (p) => _verifyWithKey(p, rawPub),
-    digestProvider: ({ binaryPath }) =>
-      crypto.createHash("sha256").update(fs.readFileSync(binaryPath)).digest("hex"),
+    digestProvider: sha256OfFile,
   });
+}
+
+test("verifyInstalled resolves a global npm install from the fallow package directory", async (t) => {
+  const pkg = currentPlatformPackage();
+  if (!pkg) {
+    t.skip("unsupported platform");
+    return;
+  }
+  const result = await verifyGlobalInstall(t, pkg);
   assert.equal(result.ok, true);
   assert.equal(result.package, pkg);
   assert.equal(result.version, "9.9.9");
+});
+
+// CI does not install the wrapper dependencies, so a child process gets a
+// `detect-libc` stub through NODE_PATH that pins the host to glibc. An installed
+// real `detect-libc` takes precedence, so skip on a musl host.
+function glibcTestPackage() {
+  if (process.platform !== "linux") return null;
+  try {
+    if (require("detect-libc").familySync() !== "glibc") return null;
+  } catch {
+    // Not installed: the NODE_PATH stub decides.
+  }
+  return getPlatformPackage("linux", process.arch, "glibc");
+}
+
+test("verifyInstalled on a glibc host verifies the musl package when the gnu package is missing", (t) => {
+  const gnu = glibcTestPackage();
+  if (gnu === null) {
+    t.skip("needs a Linux glibc host");
+    return;
+  }
+  const musl = gnu.replace(/-gnu$/, "-musl");
+  const { root, resolveFrom, rawPub } = writeGlobalInstall(t, musl);
+  const stubDir = path.join(root, "stub", "detect-libc");
+  fs.mkdirSync(stubDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(stubDir, "index.js"),
+    'module.exports = { familySync: () => "glibc" };\n',
+  );
+
+  const script = `
+    const crypto = require("node:crypto");
+    const fs = require("node:fs");
+    const { verifyInstalled, _verifyWithKey } = require(${JSON.stringify(path.join(__dirname, "verify-binary.js"))});
+    verifyInstalled({
+      resolveFrom: process.env.RESOLVE_FROM,
+      verifyFn: (p) => _verifyWithKey(p, Buffer.from(process.env.RAW_PUB, "hex")),
+      digestProvider: ({ binaryPath }) =>
+        crypto.createHash("sha256").update(fs.readFileSync(binaryPath)).digest("hex"),
+    }).then((result) => process.stdout.write(JSON.stringify(result)));
+  `;
+  const child = spawnSync(process.execPath, ["-e", script], {
+    encoding: "utf8",
+    env: {
+      ...process.env,
+      NODE_PATH: path.join(root, "stub"),
+      RESOLVE_FROM: resolveFrom,
+      RAW_PUB: rawPub.toString("hex"),
+    },
+  });
+  assert.equal(child.status, 0, child.stderr);
+  const result = JSON.parse(child.stdout);
+  assert.equal(result.ok, true, result.message);
+  assert.equal(result.package, musl);
 });
 
 test("verifyInstalled with dirOverride fails on a bad signature", async (t) => {
@@ -595,7 +661,7 @@ test("verifyInstalled falls back to the provider when the embedded digest is mis
     },
   });
   assert.equal(result.ok, true);
-  assert.equal(providerCalls, 2);
+  assert.equal(providerCalls, 1);
 });
 
 test("verifyInstalled falls back to the provider when fallowDigests is partial / malformed", async (t) => {
@@ -619,8 +685,8 @@ test("verifyInstalled falls back to the provider when fallowDigests is partial /
     },
   });
   assert.equal(result.ok, true);
-  // Both shipped binaries fall back because their embedded entries are absent or malformed.
-  assert.equal(providerCalls, 2);
+  // The shipped binary falls back because its embedded entry is absent or malformed.
+  assert.equal(providerCalls, 1);
 });
 
 test("verifyInstalled returns digest-mismatch when the embedded digest disagrees with the binary", async (t) => {

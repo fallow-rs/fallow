@@ -1,0 +1,8 @@
+{
+  "name": "vite-nested-config",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "devDependencies": {
+    "vite": "5.0.0"
+  }
+}

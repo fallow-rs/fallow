@@ -924,6 +924,7 @@ mod tests {
             unrendered_components: 0,
             unused_component_props: 0,
             absent_component_props: 0,
+            constant_parameters: 0,
             unused_component_emits: 0,
             unused_component_inputs: 0,
             unused_component_outputs: 0,

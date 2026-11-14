@@ -1,4 +1,9 @@
-use serde::{Deserialize, Deserializer, Serialize, de::Error};
+use std::collections::BTreeMap;
+
+use serde::{
+    Deserialize, Deserializer, Serialize,
+    de::{Error, IgnoredAny, MapAccess, Visitor},
+};
 
 use super::pnpm_catalog::PnpmCatalogData;
 
@@ -60,6 +65,65 @@ where
         }
         _ => Ok(None),
     }
+}
+
+/// The `package.json` keys that hold the inline config of a built-in plugin
+/// ([`PackageJson::inline_tool_config`]).
+pub const INLINE_TOOL_CONFIG_KEYS: &[&str] = &[
+    "babel",
+    "commit-and-tag-version",
+    "eslintConfig",
+    "graphql",
+    "jest",
+    "mocha",
+    "nodemonConfig",
+    "prettier",
+    "release-it",
+    "stylelint",
+    "textlint",
+    "tsd",
+    "tsdown",
+    "tsup",
+];
+
+/// Keeps the value of each [`INLINE_TOOL_CONFIG_KEYS`] key raw. A repeated key
+/// keeps its last value, as `JSON.parse` does, and any value is accepted, so
+/// these keys never fail manifest parsing.
+fn deserialize_inline_tool_configs<'de, D>(
+    deserializer: D,
+) -> Result<BTreeMap<&'static str, serde_json::Value>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    struct InlineToolConfigs;
+
+    impl<'de> Visitor<'de> for InlineToolConfigs {
+        type Value = BTreeMap<&'static str, serde_json::Value>;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("a package.json object")
+        }
+
+        fn visit_map<A>(self, mut map: A) -> Result<Self::Value, A::Error>
+        where
+            A: MapAccess<'de>,
+        {
+            let mut configs = BTreeMap::new();
+            while let Some(key) = map.next_key::<String>()? {
+                match INLINE_TOOL_CONFIG_KEYS.iter().find(|known| **known == key) {
+                    Some(known) => {
+                        configs.insert(*known, map.next_value()?);
+                    }
+                    None => {
+                        map.next_value::<IgnoredAny>()?;
+                    }
+                }
+            }
+            Ok(configs)
+        }
+    }
+
+    deserializer.deserialize_map(InlineToolConfigs)
 }
 
 #[derive(Debug, Clone, Default, Deserialize, Serialize)]
@@ -199,9 +263,21 @@ pub struct PackageJson {
     /// kept raw so that an unexpected shape does not fail manifest parsing.
     #[serde(default)]
     pub n8n: Option<serde_json::Value>,
+    /// The value of each [`INLINE_TOOL_CONFIG_KEYS`] key that the manifest
+    /// has, kept raw. See [`PackageJson::inline_tool_config`].
+    #[serde(default, flatten, deserialize_with = "deserialize_inline_tool_configs")]
+    pub inline_tool_configs: BTreeMap<&'static str, serde_json::Value>,
 }
 
 impl PackageJson {
+    /// The raw value of the tool config key `key`, such as `prettier` or
+    /// `nodemonConfig`. Returns `None` when the manifest has no such key, or
+    /// when `key` is not in [`INLINE_TOOL_CONFIG_KEYS`].
+    #[must_use]
+    pub fn inline_tool_config(&self, key: &str) -> Option<&serde_json::Value> {
+        self.inline_tool_configs.get(key)
+    }
+
     /// Load from a package.json file.
     ///
     /// # Errors
@@ -554,6 +630,50 @@ fn extract_exports_entries(value: &serde_json::Value, entries: &mut Vec<String>)
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn inline_tool_config_keeps_the_last_value_of_a_repeated_key() {
+        let pkg: PackageJson = serde_json::from_str(
+            r#"{"name": "app", "jest": {}, "devDependencies": {"jest": "1"}, "jest": {"x": 1}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            pkg.inline_tool_config("jest"),
+            Some(&serde_json::json!({ "x": 1 }))
+        );
+        assert_eq!(pkg.name.as_deref(), Some("app"));
+        assert_eq!(pkg.dev_dependency_names(), vec!["jest"]);
+    }
+
+    #[test]
+    fn repeated_unknown_key_parses() {
+        let pkg: PackageJson =
+            serde_json::from_str(r#"{"name": "app", "custom": 1, "custom": {"y": 2}}"#).unwrap();
+        assert_eq!(pkg.name.as_deref(), Some("app"));
+        assert!(pkg.inline_tool_configs.is_empty());
+    }
+
+    #[test]
+    fn inline_tool_config_keeps_any_value_shape() {
+        let pkg: PackageJson = serde_json::from_str(
+            r#"{"prettier": "@acme/prettier-config", "jest": 5, "mocha": null, "tsup": [1, "a"]}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            pkg.inline_tool_config("prettier"),
+            Some(&serde_json::json!("@acme/prettier-config"))
+        );
+        assert_eq!(pkg.inline_tool_config("jest"), Some(&serde_json::json!(5)));
+        assert_eq!(
+            pkg.inline_tool_config("mocha"),
+            Some(&serde_json::Value::Null)
+        );
+        assert_eq!(
+            pkg.inline_tool_config("tsup"),
+            Some(&serde_json::json!([1, "a"]))
+        );
+        assert_eq!(pkg.inline_tool_config("custom"), None);
+    }
 
     #[test]
     fn package_json_workspace_patterns_array() {

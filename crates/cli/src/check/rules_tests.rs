@@ -240,6 +240,7 @@ fn apply_rules_all_off_clears_everything() {
         unrendered_components: Severity::Off,
         unused_component_props: Severity::Off,
         absent_component_props: Severity::Off,
+        constant_parameters: Severity::Off,
         unused_component_emits: Severity::Off,
         unused_component_inputs: Severity::Off,
         unused_component_outputs: Severity::Off,
@@ -406,6 +407,7 @@ fn warn_severity_with_issues_returns_false() {
         unrendered_components: Severity::Warn,
         unused_component_props: Severity::Warn,
         absent_component_props: Severity::Off,
+        constant_parameters: Severity::Off,
         unused_component_emits: Severity::Warn,
         unused_component_inputs: Severity::Warn,
         unused_component_outputs: Severity::Warn,
@@ -491,6 +493,7 @@ fn mixed_severity_returns_true_for_error_with_issues() {
         unrendered_components: Severity::Warn,
         unused_component_props: Severity::Warn,
         absent_component_props: Severity::Off,
+        constant_parameters: Severity::Off,
         unused_component_emits: Severity::Warn,
         unused_component_inputs: Severity::Warn,
         unused_component_outputs: Severity::Warn,
@@ -1105,6 +1108,7 @@ fn promote_warns_to_errors_promotes_all_warns() {
         unrendered_components: Severity::Warn,
         unused_component_props: Severity::Warn,
         absent_component_props: Severity::Off,
+        constant_parameters: Severity::Off,
         unused_component_emits: Severity::Warn,
         unused_component_inputs: Severity::Warn,
         unused_component_outputs: Severity::Warn,
@@ -1204,6 +1208,7 @@ fn promote_warns_to_errors_preserves_off() {
         unrendered_components: Severity::Off,
         unused_component_props: Severity::Off,
         absent_component_props: Severity::Off,
+        constant_parameters: Severity::Off,
         unused_component_emits: Severity::Off,
         unused_component_inputs: Severity::Off,
         unused_component_outputs: Severity::Off,
@@ -3251,6 +3256,7 @@ fn default_file_scoped_stale_suppression_missing_reason_warn_not_error() {
         unrendered_components: Severity::Warn,
         unused_component_props: Severity::Warn,
         absent_component_props: Severity::Off,
+        constant_parameters: Severity::Off,
         unused_component_emits: Severity::Warn,
         unused_component_inputs: Severity::Warn,
         unused_component_outputs: Severity::Warn,
@@ -3521,6 +3527,7 @@ fn base_unused_component_props_off_clears_findings() {
     let rules = RulesConfig {
         unused_component_props: Severity::Off,
         absent_component_props: Severity::Off,
+        constant_parameters: Severity::Off,
         ..RulesConfig::default()
     };
     let config = config_with_rules(rules);

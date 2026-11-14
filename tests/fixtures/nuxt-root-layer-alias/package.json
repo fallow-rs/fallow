@@ -1,0 +1,9 @@
+{
+  "name": "nuxt-root-layer-alias",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "nuxt": "^4.1.0",
+    "vue": "^3.5.0"
+  }
+}

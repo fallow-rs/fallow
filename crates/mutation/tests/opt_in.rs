@@ -14,6 +14,7 @@ fn only(source: &str, kind: SourceKind, operator: Operator) -> Instrumented {
     let options = MutationOptions {
         operators: vec![operator],
         ranges: None,
+        record_exports: false,
     };
     run_with(source, kind, &options)
 }
@@ -40,7 +41,7 @@ fn mutated(source: &str, operator: Operator) -> Vec<String> {
 
 #[test]
 fn the_default_set_leaves_out_each_opt_in_operator() {
-    let source = "function f(s, o) {\n  const a = [1];\n  const b = { k: 1 };\n  switch (s) { case 1: g(); break; }\n  if (!s) { throw new Error(\"x\"); }\n  const r = new RegExp(\"^a+$\");\n  return s.trim() + h(a, b, r, /(?=a)\\b/);\n}\n";
+    let source = "function f(s, o) {\n  const a = [1];\n  const b = { k: 1 };\n  switch (s) { case 1: g(); break; }\n  if (!s) { throw new Error(\"x\"); }\n  const r = new RegExp(\"^a+$\");\n  return s.trim() + h(a, b, r, /(?=a)\\b/, o ?? s);\n}\n";
     let result = run(source, JS);
     let opt_in: Vec<_> = result
         .mutants
@@ -55,6 +56,7 @@ fn the_default_set_leaves_out_each_opt_in_operator() {
         &MutationOptions {
             operators: Operator::ALL.to_vec(),
             ranges: None,
+            record_exports: false,
         },
     );
     for operator in Operator::OPT_IN {
@@ -145,6 +147,7 @@ fn block_statement_keeps_nested_mutants_and_declarations_valid() {
                 Operator::ReturnValue,
             ],
             ranges: None,
+            record_exports: false,
         },
     );
     // The body of `f` declares the function `g`, so only the body of `g`
@@ -305,6 +308,68 @@ fn throw_statement_removes_a_thrown_instance() {
 }
 
 #[test]
+fn nullish_fallback_removes_the_fallback_operand() {
+    assert_eq!(
+        mutated("const x = a ?? b;", Operator::NullishFallback),
+        vec!["const x = a ;"]
+    );
+    assert_eq!(
+        mutated("const x = a ?? (b, c);", Operator::NullishFallback),
+        vec!["const x = a ;"]
+    );
+    assert_eq!(
+        mutated("const x = a ?? b ?? c;", Operator::NullishFallback),
+        vec!["const x = a  ?? c;", "const x = a ?? b ;"]
+    );
+    assert_eq!(
+        mutated("const x = (a ?? b) || c;", Operator::NullishFallback),
+        vec!["const x = (a ) || c;"]
+    );
+    assert_eq!(
+        mutated("const x = f(a?.b ?? 0);", Operator::NullishFallback),
+        vec!["const x = f(a?.b );"]
+    );
+    assert_eq!(
+        mutated("const x = a /* ?? */ ?? b;", Operator::NullishFallback),
+        vec!["const x = a /* ?? */ ;"]
+    );
+    assert_eq!(
+        mutated("const x = \"é€\" ?? b;", Operator::NullishFallback),
+        vec!["const x = \"é€\" ;"]
+    );
+    assert_cases(
+        Operator::NullishFallback,
+        JS,
+        &[
+            ("x = a || b;", &[]),
+            ("x = a && b;", &[]),
+            ("a ??= b;", &[]),
+        ],
+    );
+    let result = only("const x = a ?? b;", JS, Operator::NullishFallback);
+    let change = result.mutants[0].change;
+    assert_eq!((change.from, change.to), ("?? <expression>", ""));
+}
+
+#[test]
+fn nullish_fallback_mutants_run_like_the_applied_mutant() {
+    let fixture = r#"const out = [];
+const pick = (v, d) => v ?? d;
+out.push(pick(null, 1), pick(0, 1), pick(undefined, 2) ?? 3);
+const o = { a: null, b: { c: 0 } };
+out.push((o.a ?? o.b.c) || "none", o.b?.c ?? "no", !(o.a ?? false));
+console.log(JSON.stringify(out));
+"#;
+    let options = MutationOptions {
+        operators: vec![Operator::NullishFallback],
+        ranges: None,
+        record_exports: false,
+    };
+    let count = assert_runs_like_each_mutant(fixture, &options);
+    assert!(count == 0 || count >= 5, "{count}");
+}
+
+#[test]
 fn regex_assertion_negates_lookarounds_and_word_boundaries() {
     assert_cases(
         Operator::RegexAssertion,
@@ -386,6 +451,7 @@ fn statement_sites_keep_each_line_and_parse() {
         &MutationOptions {
             operators: Operator::ALL.to_vec(),
             ranges: None,
+            record_exports: false,
         },
     );
     assert_eq!(result.code.lines().count(), source.lines().count() + 2);
@@ -504,6 +570,7 @@ fn opt_in_mutants_run_like_the_applied_mutant() {
     let options = MutationOptions {
         operators: Operator::ALL.to_vec(),
         ranges: None,
+        record_exports: false,
     };
     for fixture in [SLOPPY_FIXTURE, STRICT_FIXTURE] {
         let count = assert_runs_like_each_mutant(fixture, &options);
@@ -542,6 +609,7 @@ fn statement_start_guard_keeps_the_statement_grouping() {
         let options = MutationOptions {
             operators,
             ranges: None,
+            record_exports: false,
         };
         assert_runs_like_each_mutant(STATEMENT_START_FIXTURE, &options);
     }

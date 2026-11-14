@@ -3,6 +3,8 @@ name: Benchmarks
 # Runs on main and on demand. A pull request runs these jobs only when it
 # carries the "ci:perf" label, to keep pull request jobs few. Add the label to
 # get a result before merge. Without it, a change shows one commit later on main.
+# The "Perf label for cache formats" job runs on each pull request: it fails
+# when the branch changes a benchmarked cache format without the label.
 # Main runs keep the CodSpeed base results that a labeled pull request
 # compares against.
 on:
@@ -19,6 +21,9 @@ on:
       - '.github/scripts/generate-benchmark-matrix.mjs'
       - '.github/scripts/generate-benchmark-matrix.test.mjs'
       - 'scripts/check-benchmark-harness.py'
+      - 'scripts/check-perf-label.mjs'
+      - 'scripts/check-version-bumps.mjs'
+      - 'scripts/version-constants.mjs'
   push:
     branches: [main]
     paths:
@@ -40,7 +45,7 @@ on:
 # cancelled: scripts/verify-release-ci.mjs reads the result for the release
 # commit before a release can start.
 # A "labeled" event for another label also gets a group of its own, so it
-# does not cancel a real ci:perf run (its jobs skip).
+# does not cancel a real ci:perf run (its benchmark jobs skip).
 concurrency:
   group: "bench-${{ ((github.event_name == 'pull_request' && !(github.event.action == 'labeled' && github.event.label.name != 'ci:perf')) || (github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'chore: release v'))) && github.ref || github.run_id }}"
   cancel-in-progress: "${{ github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'chore: release v')) }}"
@@ -72,6 +77,34 @@ jobs:
 
       - name: Check benchmark harness drift
         run: python3 scripts/check-benchmark-harness.py
+
+  perf-label:
+    name: Perf label for cache formats
+    runs-on: ubuntu-26.04
+    # Each pull request event, with or without the label: a change of a
+    # benchmarked cache format without "ci:perf" fails here, and adding the
+    # label starts a new run that passes.
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    timeout-minutes: 5
+    steps:
+      # The check reads the commits of the branch that the base does not
+      # contain, so it needs the full history.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+          filter: blob:none
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26'
+      - name: Require ci:perf for a cache format change
+        env:
+          BASE_REF: ${{ github.base_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
+        run: node scripts/check-perf-label.mjs --base "origin/$BASE_REF" --head "$HEAD_SHA" --labels-json "$LABELS"
 
   determine-matrix:
     name: Determine benchmark matrix

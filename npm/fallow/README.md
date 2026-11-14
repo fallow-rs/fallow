@@ -54,9 +54,11 @@ Every issue carries an `actions[]` array with an `auto_fixable` flag, so scripts
 
 Default analysis stays Rust-native and syntactic. Use `--type-aware` when a
 cleanup or refactor needs exact checker-backed identity across aliases,
-re-exports, packages, or tests:
+re-exports, packages, or tests. It needs the `fallow-type-aware` companion at
+the same version as `fallow`, which brings TypeScript 7:
 
 ```bash
+npm install --save-dev fallow-type-aware@<fallow version>
 npx fallow dead-code --unused-class-members --type-aware --format json --quiet
 npx fallow fix --type-aware --dry-run --format json --quiet
 npx fallow dead-code --type-aware --symbol-impact src/api.ts:Client --format json --quiet
