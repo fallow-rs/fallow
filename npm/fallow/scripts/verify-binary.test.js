@@ -479,6 +479,43 @@ test("verifyInstalled on a glibc host verifies the musl package when the gnu pac
   assert.equal(result.package, musl);
 });
 
+// The GitHub Action runs the verifier from the Action checkout, which has no
+// `node_modules`. `detect-libc` is then only next to the installed `fallow`
+// package, and npm installed only the gnu platform package on a glibc host.
+test("verifyInstalled finds detect-libc in the installed package and verifies the gnu package", (t) => {
+  const gnu = glibcTestPackage();
+  if (gnu === null) {
+    t.skip("needs a Linux glibc host");
+    return;
+  }
+  const { root, resolveFrom, rawPub } = writeGlobalInstall(t, gnu);
+  const stubDir = path.join(root, "node_modules", "detect-libc");
+  fs.mkdirSync(stubDir, { recursive: true });
+  fs.writeFileSync(
+    path.join(stubDir, "index.js"),
+    'module.exports = { familySync: () => "glibc" };\n',
+  );
+
+  const script = `
+    const crypto = require("node:crypto");
+    const fs = require("node:fs");
+    const { verifyInstalled, _verifyWithKey } = require(${JSON.stringify(path.join(__dirname, "verify-binary.js"))});
+    verifyInstalled({
+      resolveFrom: process.env.RESOLVE_FROM,
+      verifyFn: (p) => _verifyWithKey(p, Buffer.from(process.env.RAW_PUB, "hex")),
+      digestProvider: ({ binaryPath }) =>
+        crypto.createHash("sha256").update(fs.readFileSync(binaryPath)).digest("hex"),
+    }).then((result) => process.stdout.write(JSON.stringify(result)));
+  `;
+  const env = { ...process.env, RESOLVE_FROM: resolveFrom, RAW_PUB: rawPub.toString("hex") };
+  delete env.NODE_PATH;
+  const child = spawnSync(process.execPath, ["-e", script], { encoding: "utf8", env });
+  assert.equal(child.status, 0, child.stderr);
+  const result = JSON.parse(child.stdout);
+  assert.equal(result.ok, true, result.message);
+  assert.equal(result.package, gnu);
+});
+
 test("verifyInstalled with dirOverride fails on a bad signature", async (t) => {
   const { privateKey, rawPub } = makeKeypair();
   const dir = makePlatformDir(privateKey, { corruptSigFor: "fallow" });
