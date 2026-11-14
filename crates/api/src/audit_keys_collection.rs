@@ -45,6 +45,7 @@ pub(super) enum AuditCollection {
     DynamicSegmentNameConflicts,
     UnusedComponentProps,
     AbsentComponentProps,
+    ConstantParameters,
     UnusedComponentEmits,
     UnusedComponentInputs,
     UnusedComponentOutputs,
@@ -58,7 +59,7 @@ pub(super) enum AuditCollection {
 
 impl AuditCollection {
     #[cfg(test)]
-    pub(super) const ALL: [Self; 54] = [
+    pub(super) const ALL: [Self; 55] = [
         Self::PropDrillingChains,
         Self::ThinWrappers,
         Self::DuplicatePropShapes,
@@ -104,6 +105,7 @@ impl AuditCollection {
         Self::DynamicSegmentNameConflicts,
         Self::UnusedComponentProps,
         Self::AbsentComponentProps,
+        Self::ConstantParameters,
         Self::UnusedComponentEmits,
         Self::UnusedComponentInputs,
         Self::UnusedComponentOutputs,
@@ -162,6 +164,7 @@ impl AuditCollection {
             Self::DynamicSegmentNameConflicts => "dynamic_segment_name_conflicts",
             Self::UnusedComponentProps => "unused_component_props",
             Self::AbsentComponentProps => "absent_component_props",
+            Self::ConstantParameters => "constant_parameters",
             Self::UnusedComponentEmits => "unused_component_emits",
             Self::UnusedComponentInputs => "unused_component_inputs",
             Self::UnusedComponentOutputs => "unused_component_outputs",

@@ -123,9 +123,10 @@ hooks {
       }
       // Same command as the required "Rust Structure" CI job: unused
       // dependencies and files, visibility, crate boundaries, complexity and
-      // duplication. See docs/development/quality-gates.md#rust-structure.
+      // duplication, and the file-growth gate against the base branch. See
+      // docs/development/quality-gates.md#rust-structure.
       ["cargo-fallow"] {
-        check = "if command -v cargo-fallow >/dev/null 2>&1; then cargo fallow check --baseline cargo-fallow-baseline.json --fail-on-issues --quiet; else sh scripts/hook-tool-hint.sh cargo-fallow; fi"
+        check = "sh scripts/hook-cargo-fallow.sh origin/main upstream/main"
       }
       // Same rule as the "File length" step of the CI "Fallow Self Analysis"
       // job: a .mjs or .ts file over 2000 lines must not grow on the branch.

@@ -9,6 +9,57 @@ const REQUIRED_GATES = [
   "maximum_p95_refined_rss_kb",
 ];
 
+/** The commands of the corpus runner. */
+export const COMMANDS = new Set([
+  "prepare",
+  "discover",
+  "measure",
+  "focused",
+  "evidence",
+  "adjudicate",
+  "verify-ledger",
+  "summarize",
+  "verify-publication",
+  "supplemental",
+  "capabilities",
+  "review-packets",
+  "record-reviews",
+]);
+
+export const corpusUsage = ({
+  defaultDiscoveryRuns,
+  defaultRuns,
+  defaultWarmups,
+}) => `Usage: node scripts/type-aware-corpus.mjs <command> [options]
+
+Commands:
+  prepare        Materialize clean worktrees at the pinned public refs
+  discover       Run baseline and refined discovery for the pinned corpus
+  measure        Warm up, then alternate baseline/refined release runs
+  focused        Run the candidate-bearing semantic edge-case suite
+  evidence       Create or refresh the manual evidence ledger template
+  review-packets Write one source review packet per project below review/
+  record-reviews Write the independent reviews from the reviewer files
+  adjudicate     Apply the checked-in review decisions to the evidence ledger
+  verify-ledger  Require truth status and source evidence for every candidate
+  summarize      Verify the ledger and write compact gate metrics
+  verify-publication  Check tracked evidence and summary for generator drift
+  supplemental   Regenerate and verify the clean public Vitest smoke
+  capabilities   Prove all five semantic capabilities on Astro and Vitest
+
+Options:
+  --manifest PATH     Default: benchmarks/type-aware-corpus.json
+  --project ID        Select one project, repeatable
+  --fallow-bin PATH   Default: target/release/fallow
+  --sidecar-bin PATH  Required for discover, measure, focused, evidence, summarize, verify-publication, and supplemental
+  --out-dir PATH      Isolated artifact directory, required with --project
+  --discovery-runs N  Repeated normalized discovery runs, default: ${defaultDiscoveryRuns}
+  --runs N            Measured pairs per project, default: ${defaultRuns}
+  --warmups N         Warmup pairs per project, default: ${defaultWarmups}
+  --reviews DIR       Reviewer files <DIR>/<project>/<reviewer>.json for record-reviews
+
+Canonical artifacts are written below target/type-aware-corpus. Corpus projects are read-only.`;
+
 const requireValid = (condition, message, fail) => {
   if (!condition) fail(message);
 };
@@ -186,6 +237,8 @@ const optionHandlers = (dependencies) => ({
   "--warmups": (options, value, option) =>
     positiveIntegerOption(options, "warmups", value, dependencies.parsePositiveInteger, option),
   "--project": (options, value) => options.projects.push(value),
+  "--reviews": (options, value) =>
+    resolvePathOption(options, "reviewsDir", value, dependencies.resolve),
 });
 
 const parseOption = (argv, index, options, handlers, dependencies) => {

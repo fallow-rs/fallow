@@ -196,6 +196,20 @@ pub fn is_component_file(path: &str) -> bool {
     matches!(Layout::from_path(path), Some(Layout::Component(_)))
 }
 
+/// The export whose declaration holds `span` in a plain JavaScript or
+/// TypeScript source (see [`fallow_mutation::export_containing`]). The parse
+/// runs inside `parse_bounded`, so a deep source gives `None`.
+pub fn export_containing(
+    source: &str,
+    kind: fallow_mutation::SourceKind,
+    span: (u32, u32),
+) -> Option<String> {
+    fallow_extract::parse_bounded(source, || {
+        fallow_mutation::export_containing(source, kind, span)
+    })
+    .flatten()
+}
+
 /// Instruments a source file of any layout that `fallow mutation` supports:
 /// JavaScript, TypeScript, and the script blocks of Vue, Svelte and Astro
 /// components. Returns `None` for another file type.

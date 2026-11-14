@@ -114,6 +114,14 @@ pub const TASK_MATRIX: &[TaskRow] = &[
         probe: &["health", "--coverage-gaps"],
     },
     TaskRow {
+        task: "improve or check the tests of a change",
+        command: "fallow mutation --plan --base <ref>",
+        note: Some(
+            "The plan runs no code. Without `--plan`, the command runs the project tests against each mutant, so ask the user first.",
+        ),
+        probe: &["mutation", "--plan", "--base", "main"],
+    },
+    TaskRow {
         task: "consolidate duplication",
         command: "fallow dupes --trace dup:<fingerprint>",
         note: None,

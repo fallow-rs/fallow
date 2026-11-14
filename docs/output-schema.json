@@ -884,6 +884,13 @@
           },
           "description": "Used optional component inputs absent from inspected reachable callers. Off by default."
         },
+        "constant_parameters": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ConstantParameterFinding"
+          },
+          "description": "Parameters that each visible call passes in one way. Off by default."
+        },
         "unused_component_emits": {
           "type": "array",
           "items": {
@@ -1561,6 +1568,13 @@
             "$ref": "#/definitions/AbsentComponentPropFinding"
           },
           "description": "Used optional component inputs absent from inspected reachable callers. Off by default."
+        },
+        "constant_parameters": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ConstantParameterFinding"
+          },
+          "description": "Parameters that each visible call passes in one way. Off by default."
         },
         "unused_component_emits": {
           "type": "array",
@@ -6365,6 +6379,10 @@
           "type": "integer",
           "description": "Optional consumed props omitted by known reachable callers, for manual review."
         },
+        "constant_parameters": {
+          "type": "integer",
+          "description": "Parameters that each visible call passes in one way, for manual review.\nAbsent while zero, so a run with the opt-in rule off keeps its shape."
+        },
         "unused_component_emits": {
           "type": "integer",
           "description": "Vue `<script setup>` emits emitted nowhere inside their own SFC."
@@ -7407,6 +7425,13 @@
           },
           "description": "Used optional component inputs absent from inspected reachable callers. Off by default."
         },
+        "constant_parameters": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ConstantParameterFinding"
+          },
+          "description": "Parameters that each visible call passes in one way. Off by default."
+        },
         "unused_component_emits": {
           "type": "array",
           "items": {
@@ -8032,6 +8057,11 @@
           "type": "string",
           "const": "review-component-prop",
           "description": "Review caller evidence, defaults and component API intent manually."
+        },
+        {
+          "type": "string",
+          "const": "review-constant-parameter",
+          "description": "Review the calls, the default and the intent of a parameter that each\ncall passes in one way (manual; used by constant-parameter findings)."
         },
         {
           "type": "string",
@@ -8924,7 +8954,7 @@
         {
           "type": "string",
           "const": "new-only",
-          "description": "Fail only on findings the current changeset introduced, determined by\na base-snapshot attribution pass. The default."
+          "description": "Fail only on findings the current changeset introduced, determined by\na base-snapshot attribution pass. An unused file or unused export\noutside the changed files counts when the base does not report it.\nThe default."
         },
         {
           "type": "string",
@@ -13454,6 +13484,19 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "client-server-leak-no-client-roots"
+            }
+          },
+          "required": [
+            "kind"
+          ],
+          "description": "`client-server-leak` is not `off`, but no analyzed file has a\ntop-level `\"use client\"` directive. The detector starts only from those\nfiles, so it had no starting point and its zero count measures\nnothing. React Router Framework Mode and a plain Vite SPA are typical\nprojects of this shape: their client code carries no directive.\n\nLike [`Self::BoundariesNotConfigured`], an analyze pass with the rule\n`off` does not report it. `fallow security` raises a top-level `off`\nto `warn` before the pass, so that command always reports it."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "excluded-by-default-ignore"
             },
             "pattern": {
@@ -14967,7 +15010,14 @@
       "properties": {
         "finding_id": {
           "type": "string",
-          "description": "Stable per-finding correlation id, identical across runs for the same\nrule + anchor path + line + column. An autonomous agent that triaged this\ncandidate on a prior run uses it to correlate the candidate after a\nrebase. Equal to the SARIF `partialFingerprints[\"fallowSecurity/v2\"]`\nvalue for the same finding (one shared helper computes both)."
+          "description": "Location id (rule, path, line, column), equal to SARIF `fallowSecurity/v2`; edits move it."
+        },
+        "stable_finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Line-independent id (`sec1:<hash>`, `~k` for repeats); a verdict may use it."
         },
         "kind": {
           "description": "The rule that produced this candidate.",
@@ -15048,7 +15098,7 @@
           "description": "Graph-derived reachability ranking signal (issues #860 and #885). `None`\nuntil the post-detection ranking pass fills it; additive on the wire\n(skipped when absent). Drives the order findings are emitted in:\nruntime-reachable candidates sort first, followed by source-backed and\nsource-reachable candidates, then wider blast radius."
         },
         "candidate": {
-          "description": "Agent-actionable candidate record: the untrusted input kind, the sink,\nand the boundary the flow crosses. fallow fills these three slots; the\nexploitability verdict is the agent's job and is not a field here. Always\npresent.",
+          "description": "Agent-actionable candidate record: the untrusted input kind, the sink, and the boundary\nthe flow crosses. fallow fills these three slots; the exploitability verdict is the\nagent's job and is not a field here. Always present.",
           "$ref": "#/definitions/SecurityCandidate"
         },
         "taint_flow": {
@@ -15082,7 +15132,7 @@
               "type": "null"
             }
           ],
-          "description": "Internal projection used by `fallow security --surface`. The CLI strips\nthis from per-finding JSON and promotes it to the top-level\n`attack_surface` field only when requested."
+          "description": "Internal projection used by `fallow security --surface`. The CLI strips this from\nper-finding JSON and promotes it to the top-level `attack_surface` field only when requested."
         }
       },
       "required": [
@@ -19723,7 +19773,7 @@
           "additionalProperties": {
             "$ref": "#/definitions/SecuritySurvivor"
           },
-          "description": "Verifier-retained candidates keyed by finding id."
+          "description": "Verifier-retained candidates keyed by the candidate `finding_id`, also\nwhen the verdict names the candidate by its `stable_finding_id`."
         },
         "needs_human_review": {
           "type": "object",
@@ -19858,7 +19908,7 @@
         },
         "finding_id": {
           "type": "string",
-          "description": "Stable candidate id from `security_findings[].finding_id`."
+          "description": "Candidate id: `security_findings[].finding_id` or\n`security_findings[].stable_finding_id`. Use the stable id when the\nverdict must survive edits that move the sink to another line."
         },
         "verdict": {
           "description": "Verifier's verdict for the candidate.",
@@ -21731,11 +21781,27 @@
         },
         "runtime": {
           "type": "integer",
-          "description": "Runtime-weight component (paid): a hot path (runtime evidence of high\ninvocation) adds an invocation-bucketed weight so it amplifies the blast\nand outranks an otherwise-equal cold unit. `0` in free mode (no runtime\ninput), so the free-tier total stays the four deterministic components and\nis byte-identical to the no-runtime baseline."
+          "description": "Runtime-weight component (paid): a hot path (runtime evidence of high\ninvocation) adds an invocation-bucketed weight so it amplifies the blast\nand outranks an otherwise-equal cold unit. `0` and omitted in free mode\n(no runtime input)."
+        },
+        "churn": {
+          "type": "integer",
+          "description": "Churn component: the recency-weighted commit count of the file in the\nchurn window (90-day half-life), in capped bands. Omitted while it is\nzero, which includes a test file and a run without a git history or on a\nshallow clone."
+        },
+        "worsened": {
+          "type": "integer",
+          "description": "Worsened component: the functions of the file whose complexity metrics\ngrew against the matched base finding (`worsened_metrics`), capped.\nOmitted while it is zero, which includes a run without a base."
+        },
+        "test_reach": {
+          "type": "integer",
+          "description": "Test-reach component: the changed exports of the file that no test\nruns for real (`mocked-only`, `none`, or `none-file` in a project with\ntests), capped. Omitted while it is zero."
+        },
+        "mutation": {
+          "type": "integer",
+          "description": "Mutation component: the surviving mutants on the added lines of the\nfile, from the `--mutation-report` file, capped. Omitted while it is\nzero. Without `--mutation-report` the component is not measured, which\ndoes not mean that no mutant survives."
         },
         "total": {
           "type": "integer",
-          "description": "The summed total of every present component (the four deterministic ones\nplus the runtime weight)."
+          "description": "The sum of every component, also of the components that the wire\nomits because they are zero."
         }
       },
       "required": [
@@ -23525,6 +23591,17 @@
             }
           ],
           "description": "Advisory project-local public-signature coupling."
+        },
+        "call_evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/TypeAwareCallEvidenceMeta"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The call evidence of the `constant-parameter` rule. Present when the\nrule sent candidates to the companion."
         },
         "executed": {
           "type": "boolean",
@@ -28129,6 +28206,11 @@
           "type": "string",
           "const": "graph-cache",
           "description": "Persisted module-graph reuse.\n\nSeparate from [`Cache`](Self::Cache) because a warm run reuses the two\nblobs independently: the extraction cache can be perfectly reusable\nwhile the graph is discarded on every run, and the graph is the larger\nof the two on a real project."
+        },
+        {
+          "type": "string",
+          "const": "mutation-runner",
+          "description": "The installed version of the mutation test runner."
         }
       ],
       "description": "Stable identifier for a doctor check. Declaration order is output order."
@@ -31359,6 +31441,13 @@
           },
           "description": "Used optional component inputs absent from inspected reachable callers. Off by default."
         },
+        "constant_parameters": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ConstantParameterFinding"
+          },
+          "description": "Parameters that each visible call passes in one way. Off by default."
+        },
         "unused_component_emits": {
           "type": "array",
           "items": {
@@ -33212,6 +33301,17 @@
             }
           ],
           "description": "The verdict of the `mutation-min-score` gate. Present only when a\nminimum applies: from `--min-score`, or from `mutation.minScore` when\nthe run is not a recheck. The exit code of the run reads this entry."
+        },
+        "recording": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutationRecordingOutput"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The argument recording of the dry run. Present only with\n`--record-args`. It holds counts and reasons, never argument values."
         }
       },
       "required": [
@@ -33286,7 +33386,7 @@
         },
         "framework_config_checked": {
           "type": "boolean",
-          "description": "True when the plan applied the `framework-config` prune rule."
+          "description": "True when the plan applied the `framework-config` and\n`build-tool-only` prune rules."
         },
         "skipped_files": {
           "type": "array",
@@ -33301,6 +33401,10 @@
             "type": "string"
           },
           "description": "The paths of a `paths` scope that select no file."
+        },
+        "runner": {
+          "description": "The selected test runner and the verdict on its installed version.",
+          "$ref": "#/definitions/MutationPlanRunner"
         }
       },
       "required": [
@@ -33315,7 +33419,8 @@
         "no_test_files",
         "framework_config_checked",
         "skipped_files",
-        "unmatched_paths"
+        "unmatched_paths",
+        "runner"
       ],
       "description": "The envelope of `fallow mutation --plan`. It runs no user code."
     },
@@ -33478,6 +33583,17 @@
         "kill_matrix_complete": {
           "type": "boolean",
           "description": "True only for exact requested membership with terminal pass or fail results."
+        },
+        "replay": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutationReplayOutput"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The replay of the mutant. Present only with `--replay`."
         }
       },
       "required": [
@@ -33495,7 +33611,7 @@
         "killing_tests",
         "kill_matrix_complete"
       ],
-      "description": "The envelope of `fallow mutation inspect`. It runs no user code."
+      "description": "The envelope of `fallow mutation inspect`. It runs no user code, except\nwith `--replay`."
     },
     "MutationVerdictInput": {
       "type": "object",
@@ -34023,6 +34139,10 @@
           "type": "boolean",
           "description": "True when the status comes from the journal of an interrupted run\n(`--resume`). The mutant did not run in this run."
         },
+        "carried": {
+          "type": "boolean",
+          "description": "True when the status and its evidence come from the earlier report\nof a `--recheck` run: the recheck did not select the mutant, its file\nhas the digest of that report, and each test file of its killing\ntests exists. The mutant did not run in this run, and the kill matrix\nof this run has no evidence of it."
+        },
         "type_error_codes": {
           "type": "array",
           "items": {
@@ -34040,6 +34160,17 @@
             }
           ],
           "description": "An advisory hint that the mutant may be equivalent to the original\ncode. The hint never changes the status: the mutant stays `survived`\nand counts in the score. A person decides, and records the decision in\na verdict file. The hint can be wrong."
+        },
+        "witness": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutantWitness"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The replay of a recorded input. Present only after a `--record-args\nvalues` run, for a survived or uncovered mutant with a recorded input\nof its export."
         }
       },
       "required": [
@@ -34587,6 +34718,10 @@
         "pruned_framework_config": {
           "type": "integer",
           "description": "Mutants in framework config exports."
+        },
+        "pruned_build_tool_only": {
+          "type": "integer",
+          "description": "Mutants in files that only tool config files reach. Absent when 0."
         }
       },
       "required": [
@@ -34751,7 +34886,7 @@
         },
         "hinted": {
           "type": "integer",
-          "description": "The mutants of the final report that have an `equivalence_hint`. They\nkeep the status `survived`. A verdict that makes a mutant `equivalent`\nremoves its hint and lowers this count."
+          "description": "The mutants of the final report that have the `type-non-nullish`\nhint. They keep the status `survived`. A verdict that makes a mutant\n`equivalent` removes its hint and lowers this count."
         },
         "skipped": {
           "type": "array",
@@ -36146,7 +36281,7 @@
           "items": {
             "type": "string"
           },
-          "description": "Why the evidence of this target is incomplete, sorted. The run-wide\nreasons `partial-mutation-run`, `baseline-failure`, and\n`missing-test-file-metadata` apply to each target.\n`incomplete-mutant-results` means that a test of this target covers a\nmutant with incomplete evidence. `unmatched-target` means that the\ntarget selects no test."
+          "description": "Why the evidence of this target is incomplete, sorted.\n`baseline-failure` means that a test failed with no active mutant, and\nthat the failure can affect this target: the failing test is a test\nof the target or is in a test file of the target, or it covers, kills,\nor ran without a mutant that a test of the target covers or kills.\n`partial-mutation-run` means that the run is partial. When baseline\nfailures are the only cause of a partial run, only the targets with\n`baseline-failure` get it. Each other cause applies to each target,\nand so does `missing-test-file-metadata`.\n`incomplete-mutant-results` means that a test of this target covers a\nmutant with incomplete evidence. `unmatched-target` means that the\ntarget selects no test. With it, `not-a-test-file` means that the\nrunner does not list the file of the target as a test file, and\n`no-planned-code` means that the file reaches no planned code, so\nthe dry run does not run it. A run stops only when no target selects\na test."
         }
       },
       "required": [
@@ -36559,6 +36694,17 @@
             "type": "string"
           },
           "description": "The test files of the tests that reached the mutant in the dry run,\nsorted. Empty for `no_coverage`. `fallow mutation inspect` gives the\ntest ids and the static test files of one mutant."
+        },
+        "witness": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutationTaskWitness"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The witness of the task: a recorded input that shows a difference, with\nthe results of both sides. Present only after a `--record-args\nvalues` run."
         }
       },
       "required": [
@@ -36633,6 +36779,17 @@
             "$ref": "#/definitions/MutationRecheckMutant"
           },
           "description": "The rechecked mutants, sorted by file, line and mutant id."
+        },
+        "carried": {
+          "type": "integer",
+          "description": "The mutants of the report that keep their result from the earlier\nreport (`carried`), because the recheck did not select them. The\nsummary counts them. The recheck does not run them again, so a test\nthat became weaker does not change their result."
+        },
+        "stale_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The files of the earlier report outside this run whose earlier\nresults do not apply, sorted: the source changed after the report,\nthe test file of a killing test is gone, or the report has no digest\nor no readable entry for the file. The report leaves out their\nmutants. Run `fallow mutation` on them for new\nresults."
         }
       },
       "required": [
@@ -36863,10 +37020,15 @@
         {
           "type": "string",
           "const": "type-non-nullish",
-          "description": "The mutant removes an optional-chaining link (`?.`), and the declared\ntype of the receiver excludes `null` and `undefined`. If no run-time\nvalue can be nullish, the mutant is equivalent. A run-time value can\nstill be nullish, for example in a method that loses its `this`, or\nin a call whose declared return type hides a nullish value."
+          "description": "The mutant removes an optional-chaining link (`?.`) or a nullish\nfallback (`a ?? b` to `a`), and the declared type of the receiver\nexcludes `null` and `undefined`. If no run-time\nvalue can be nullish, the mutant is equivalent. A run-time value can\nstill be nullish, for example in a method that loses its `this`, or\nin a call whose declared return type hides a nullish value."
+        },
+        {
+          "type": "string",
+          "const": "constant-parameter",
+          "description": "The mutant sets a branch or loop test to a constant. The test reads a\nparameter, each visible call of the function passes the same literal\nfor it, and the literal gives the test the same constant. The\ncall evidence and the closed-world gate of the `constant-parameter`\nrule prove the calls. A caller outside the project can still pass\nanother value."
         }
       ],
-      "description": "Why a survivor may be equivalent, as far as the type check can tell."
+      "description": "Why a survivor may be equivalent: a fact of the type check or of the\ncall evidence. The hint is advisory and never changes the status."
     },
     "SharedStateInventory": {
       "type": "object",
@@ -37130,6 +37292,797 @@
         }
       ],
       "description": "Runtime relationships that static observations cannot establish."
+    },
+    "MutationReplayOutput": {
+      "type": "object",
+      "properties": {
+        "contract_version": {
+          "type": "integer",
+          "description": "The version of the replay contract of the runner companion."
+        },
+        "verdict": {
+          "description": "The verdict of the replay.",
+          "$ref": "#/definitions/MutationReplayVerdict"
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why the replay did not run or did not end. Absent otherwise."
+        },
+        "export": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The export that the replay called. `null` when no export holds the\nmutant."
+        },
+        "input": {
+          "description": "The arguments of each call. With recorded inputs, the input of the\nfirst witness, else the last input that ran.",
+          "$ref": "#/definitions/MutationReplayInput"
+        },
+        "inputs_checked": {
+          "type": "integer",
+          "description": "The inputs that the replay ran, in order, up to the first witness."
+        },
+        "calls_per_side": {
+          "type": "integer",
+          "description": "The calls of each side. The sides take turns."
+        },
+        "call_timeout_ms": {
+          "type": "integer",
+          "description": "The time limit of one call, in milliseconds."
+        },
+        "clock_ms": {
+          "type": "integer",
+          "description": "The fixed value of `Date.now()` in each call."
+        },
+        "seed": {
+          "type": "integer",
+          "description": "The seed of `Math.random` in each call."
+        },
+        "calls": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MutationReplayCall"
+          },
+          "description": "Each call, in call order."
+        },
+        "duration_ms": {
+          "type": "integer",
+          "description": "The wall time of the replay request, in milliseconds. It differs\nbetween two replays of the same input."
+        }
+      },
+      "required": [
+        "contract_version",
+        "verdict",
+        "input",
+        "inputs_checked",
+        "calls_per_side",
+        "call_timeout_ms",
+        "clock_ms",
+        "seed",
+        "calls",
+        "duration_ms"
+      ],
+      "description": "The replay of one export on the original and on one mutant (replay\ncontract 1)."
+    },
+    "MutationReplayVerdict": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "witness",
+          "description": "Each call of a side gave the same result, and the two sides differ.\nThe input is a witness: a test with this input can kill the mutant."
+        },
+        {
+          "type": "string",
+          "const": "no_witness_found",
+          "description": "Each call of both sides gave the same result for each input. These\ninputs show no difference. Another input can still show one."
+        },
+        {
+          "type": "string",
+          "const": "unstable",
+          "description": "The calls of one side gave different results, for example from a\nclock or a random source that the replay does not fix. Such a\ndifference is never a witness."
+        },
+        {
+          "type": "string",
+          "const": "timeout",
+          "description": "A call did not end before the call timeout, or the replay did not end\nbefore its wall limit. The module load, the original or the mutant\ncan block."
+        },
+        {
+          "type": "string",
+          "const": "not_callable",
+          "description": "The export is not a function."
+        },
+        {
+          "type": "string",
+          "const": "not_replayable",
+          "description": "The replay did not run: the function has no export to call, the file\nis a component file, or no recorded input can run. `reason` says why."
+        }
+      ],
+      "description": "The verdict of one replay. A replay never decides that a mutant is\nequivalent: equal results on both sides give `no_witness_found`, which\nsays only that this input shows no difference."
+    },
+    "MutationReplayInput": {
+      "type": "object",
+      "properties": {
+        "source": {
+          "description": "Where the arguments come from.",
+          "$ref": "#/definitions/MutationReplayInputSource"
+        },
+        "input_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The id of a recorded input. Absent for `--args`."
+        },
+        "args": {
+          "type": "array",
+          "items": true,
+          "description": "The arguments in the replay encoding: JSON values, and objects with a\n`$replay` tag for `undefined`, special numbers, bigints, dates,\nregular expressions, maps, sets and typed arrays."
+        }
+      },
+      "required": [
+        "source",
+        "args"
+      ],
+      "description": "The input of a replay."
+    },
+    "MutationReplayInputSource": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "argument",
+          "description": "The `--args` value of the command."
+        },
+        {
+          "type": "string",
+          "const": "recorded",
+          "description": "An input that the record pass of `fallow mutation --record-args values`\nrecorded."
+        }
+      ],
+      "description": "Where the arguments of a replay come from."
+    },
+    "MutationReplayCall": {
+      "type": "object",
+      "properties": {
+        "side": {
+          "description": "The side of the call.",
+          "$ref": "#/definitions/MutationReplaySide"
+        },
+        "index": {
+          "type": "integer",
+          "description": "The 1-based number of the call on its side."
+        },
+        "outcome": {
+          "description": "How the call ended.",
+          "$ref": "#/definitions/MutationReplayOutcome"
+        },
+        "value": {
+          "type": [
+            "null",
+            "boolean",
+            "number",
+            "string",
+            "array",
+            "object"
+          ],
+          "description": "The returned or thrown value in the replay encoding. An error is\n`{\"$replay\": \"error\", \"name\", \"message\"}`. `null` for a call that\ntimed out."
+        },
+        "text": {
+          "type": "string",
+          "description": "A short text of the value for people, at most 200 characters."
+        }
+      },
+      "required": [
+        "side",
+        "index",
+        "outcome",
+        "value",
+        "text"
+      ],
+      "description": "One call of a replay."
+    },
+    "MutationReplaySide": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "original",
+          "description": "The original code: no mutant is active."
+        },
+        {
+          "type": "string",
+          "const": "mutant",
+          "description": "The code with the mutant active."
+        }
+      ],
+      "description": "The side of one replay call."
+    },
+    "MutationReplayOutcome": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "returned",
+          "description": "The function returned. A returned promise counts with its value."
+        },
+        {
+          "type": "string",
+          "const": "threw",
+          "description": "The function, or the load of its module, threw. A rejected promise\ncounts too."
+        },
+        {
+          "type": "string",
+          "const": "timed_out",
+          "description": "The call did not end before the call timeout."
+        },
+        {
+          "type": "string",
+          "const": "not_callable",
+          "description": "The export is not a function."
+        }
+      ],
+      "description": "The outcome of one replay call."
+    },
+    "MutationPlanRunner": {
+      "type": "object",
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "The runner: `vitest`, `node-test` or `bun-test`."
+        },
+        "package": {
+          "type": "string",
+          "description": "The package or runtime that the supported range applies to."
+        },
+        "installed_version": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The installed version of the package. `null` when the package is not\ninstalled, or when `supported` is `null`."
+        },
+        "supported_range": {
+          "type": "string",
+          "description": "The supported range, for example `>=4.1.0 <6.0.0`."
+        },
+        "supported": {
+          "type": [
+            "boolean",
+            "null"
+          ],
+          "description": "True when the installed version is in the range. False when it is\noutside the range or when the package is not installed. `null` for\n`node-test` and `bun-test`: their range applies to the runtime, and a\nrun selects the runtime when it starts."
+        },
+        "message": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The problem when `supported` is false, else `null`."
+        },
+        "help": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The install step when `supported` is false, else `null`."
+        }
+      },
+      "required": [
+        "name",
+        "package",
+        "supported_range"
+      ],
+      "description": "The test runner of a plan. The plan reads the `package.json` of the\ninstalled runner package and runs no code. A run that starts the runner\nstops when `supported` is false: with `FALLOW_MUTATION_RUNNER_UNSUPPORTED`\nfor a version outside the range, and with the companion error\n`runner-not-found` for a runner that is not installed. A run of a plan\nwith no test file or no mutant starts no runner."
+    },
+    "MutationRecordingOutput": {
+      "type": "object",
+      "properties": {
+        "mode": {
+          "description": "What the cache keeps.",
+          "$ref": "#/definitions/MutationRecordMode"
+        },
+        "saved": {
+          "type": "boolean",
+          "description": "True when the inputs are in the cache file\n`<cache dir>/mutation/recorded-args.json`."
+        },
+        "error": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why the run recorded nothing or saved nothing, for example a runner\nthat records no arguments. Absent when the inputs are saved."
+        },
+        "functions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MutationRecordedFunction"
+          },
+          "description": "The recorded exported functions, sorted by file and export."
+        }
+      },
+      "required": [
+        "mode",
+        "saved",
+        "functions"
+      ],
+      "description": "The argument recording of a run."
+    },
+    "MutationRecordMode": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "shapes",
+          "description": "The types of the arguments only."
+        },
+        {
+          "type": "string",
+          "const": "values",
+          "description": "The argument values, after the redaction of secrets."
+        }
+      ],
+      "description": "What a record pass keeps of the arguments."
+    },
+    "MutationRecordedFunction": {
+      "type": "object",
+      "properties": {
+        "file": {
+          "type": "string",
+          "description": "The project-root-relative path of the file."
+        },
+        "export": {
+          "type": "string",
+          "description": "The export name. `fallow mutation inspect --replay` calls it."
+        },
+        "input_count": {
+          "type": "integer",
+          "description": "The number of distinct inputs that the cache keeps."
+        },
+        "not_replayable": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MutationNotReplayable"
+          },
+          "description": "The calls whose arguments the cache does not keep, by reason."
+        }
+      },
+      "required": [
+        "file",
+        "export",
+        "input_count",
+        "not_replayable"
+      ],
+      "description": "The recorded arguments of one exported function."
+    },
+    "MutationNotReplayable": {
+      "type": "object",
+      "properties": {
+        "reason": {
+          "type": "string",
+          "description": "Why the arguments cannot be replayed. One of a fixed set: `a\nfunction`, `a symbol`, `a proxy`, `a cyclic value`, `a class\ninstance`, `a value that is too large`, `an accessor property`, `an\nobject with a symbol key`, `an object that this runtime cannot check\nfor a proxy`, `a value that cannot be read`, `a value under a secret\nkey name` or `a string that looks like a secret`. It never holds text\nof the code or of a value."
+        },
+        "count": {
+          "type": "integer",
+          "description": "The number of calls."
+        }
+      },
+      "required": [
+        "reason",
+        "count"
+      ],
+      "description": "The calls of one reason whose arguments a recording did not keep."
+    },
+    "MutantWitness": {
+      "type": "object",
+      "properties": {
+        "verdict": {
+          "description": "The verdict of the replay. Never `equivalent`.",
+          "$ref": "#/definitions/MutationReplayVerdict"
+        },
+        "input_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The recorded input of the verdict. `fallow mutation tasks` joins its\nvalues from the cache."
+        },
+        "inputs_checked": {
+          "type": "integer",
+          "description": "The recorded inputs that the replay ran."
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why the replay gave no witness, for example `no witness found (2\ninputs, recorded, 3 calls of each side)`. Absent for a witness."
+        }
+      },
+      "required": [
+        "verdict",
+        "inputs_checked"
+      ],
+      "description": "The replay of a recorded input against a survived or uncovered mutant,\nafter a `fallow mutation --record-args values` run. It holds no argument\nvalue: the values stay in the gitignored cache directory."
+    },
+    "MutationTaskWitness": {
+      "type": "object",
+      "properties": {
+        "verdict": {
+          "description": "The verdict of the replay. Never `equivalent`.",
+          "$ref": "#/definitions/MutationReplayVerdict"
+        },
+        "input_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The recorded input of the verdict."
+        },
+        "inputs_checked": {
+          "type": "integer",
+          "description": "The recorded inputs that the replay ran."
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Why the replay gave no witness. Absent for a witness."
+        },
+        "replay_command": {
+          "type": "string",
+          "description": "The command that replays the mutant again and shows both sides."
+        },
+        "args": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": true,
+          "description": "The arguments of the input in the replay encoding: JSON, and objects\nwith a `$replay` tag for other values (`{\"$replay\": \"undefined\"}`,\n`{\"$replay\": \"bigint\", \"value\": \"12\"}`, and `date`, `regexp`, `map`,\n`set` and `bytes`). Absent for another verdict, for a stale task, when\nthe cache no longer has the input (7 days), and in the markdown\noutput."
+        },
+        "original": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutationWitnessSide"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The result on the original code: the value that a new test asserts.\nThe replay ran with a fixed clock and seed, so run the new test on the\ncurrent code to confirm it."
+        },
+        "mutant": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutationWitnessSide"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The result on the mutant."
+        }
+      },
+      "required": [
+        "verdict",
+        "inputs_checked",
+        "replay_command"
+      ],
+      "description": "The witness of a task: the reference of the report, and the values from\nthe local cache when the cache still has them. Only the verdict\n`witness` can have `args`, `original` and `mutant`."
+    },
+    "MutationWitnessSide": {
+      "type": "object",
+      "properties": {
+        "outcome": {
+          "description": "How the call ended.",
+          "$ref": "#/definitions/MutationReplayOutcome"
+        },
+        "value": {
+          "type": [
+            "null",
+            "boolean",
+            "number",
+            "string",
+            "array",
+            "object"
+          ],
+          "description": "The returned or thrown value in the replay encoding."
+        },
+        "text": {
+          "type": "string",
+          "description": "A short text of the value for people."
+        }
+      },
+      "required": [
+        "outcome",
+        "value",
+        "text"
+      ],
+      "description": "The result of one side of a witness."
+    },
+    "ConstantParameterFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Source path of the function."
+        },
+        "function_name": {
+          "type": "string",
+          "description": "The module-scope binding name of the function. For a method of an\nexported class, which only type-aware mode reports, `Class.method`."
+        },
+        "parameter_name": {
+          "type": "string",
+          "description": "The parameter name. For an option key, the local binding of the key\nin the object pattern: `abort` for `{ signal: abort }`."
+        },
+        "parameter_index": {
+          "type": "integer",
+          "description": "0-based index of the parameter. A TypeScript `this` parameter does\nnot count."
+        },
+        "option_key": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The property key, when the finding is about one key of an\nobject-pattern parameter: `retries` in `{ retries = 3 }`. Absent for\na plain parameter."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the parameter, or of the key binding."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column of the parameter, or of the key binding."
+        },
+        "reason": {
+          "description": "Why the rule reports the parameter.",
+          "$ref": "#/definitions/ConstantParameterReason"
+        },
+        "evidence": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConstantParameterEvidence"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The evidence that the finding needs beyond the syntactic call facts.\nAbsent for a finding that the call facts prove alone."
+        },
+        "value": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/ConstantParameterValue"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "The value that each call passes. Present if and only if `reason` is\n`identical-argument`."
+        },
+        "optional": {
+          "type": "boolean",
+          "description": "`true` when the parameter has the TypeScript `?` marker."
+        },
+        "has_default": {
+          "type": "boolean",
+          "description": "`true` when the parameter, or the option key, has a default value."
+        },
+        "condition_reads": {
+          "type": "integer",
+          "description": "The count of conditional tests in the function whose test is the\nparameter, `!parameter` or `!!parameter`: the test of an `if`, a\n`?:`, a `while`, a `do` or a `for`. Nested functions count. A\ncomparison such as `parameter === true` and an operand of `&&` or\n`||` do not count."
+        },
+        "call_site_count": {
+          "type": "integer",
+          "description": "The count of calls that the rule read for this parameter. A\nrecursive call that passes the parameter on unchanged does not count."
+        },
+        "inspected_call_sites": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ConstantParameterCallSite"
+          },
+          "description": "The first calls in source order, at most 20. The list is never longer\nthan `call_site_count`."
+        },
+        "explanation": {
+          "type": "string",
+          "description": "What the finding means and what static analysis does not prove."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file, the function or the\nparameter gives a new id. Absent in output from older versions."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        },
+        "effective_severity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EffectiveSeverity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Gate severity of this finding after `rules` and `overrides[].rules`\nresolve for its path. Not part of the finding identity, baseline keys\nor fingerprints."
+        }
+      },
+      "required": [
+        "path",
+        "function_name",
+        "parameter_name",
+        "parameter_index",
+        "line",
+        "col",
+        "reason",
+        "optional",
+        "has_default",
+        "condition_reads",
+        "call_site_count",
+        "inspected_call_sites",
+        "explanation",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for a [`ConstantParameter`] finding. No action is\nauto-fixable: a change of the function and each call is a refactor that\nneeds the tests, and a default that differs from the constant can change\nbehavior."
+    },
+    "ConstantParameterReason": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "identical-argument",
+          "description": "Each call passes the same value for the parameter: the same literal,\nor the same immutable binding."
+        },
+        {
+          "type": "string",
+          "const": "never-passed",
+          "description": "The parameter is optional or has a default, and each call omits it.\nFor an option key: no call sets the key."
+        },
+        {
+          "type": "string",
+          "const": "unused-default",
+          "description": "The parameter has a default, and each call passes a value whose type\nexcludes `undefined`, so the default never applies. Only type-aware\nmode reports this reason."
+        }
+      ],
+      "description": "Why the rule reports a parameter."
+    },
+    "ConstantParameterValue": {
+      "type": "object",
+      "properties": {
+        "kind": {
+          "description": "The type of the value.",
+          "$ref": "#/definitions/ConstantParameterValueKind"
+        },
+        "text": {
+          "type": "string",
+          "description": "The value as text. A number uses the JavaScript `String(n)` form,\nexcept that negative zero is `-0`. A string is the raw value with no\nquotes. `null`, `undefined`, `true` and `false` are the keyword. A\nbinding is its name."
+        }
+      },
+      "required": [
+        "kind",
+        "text"
+      ],
+      "description": "The value that each call passes: a literal, or an immutable binding."
+    },
+    "ConstantParameterValueKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "boolean",
+          "description": "`true` or `false`."
+        },
+        {
+          "type": "string",
+          "const": "null",
+          "description": "`null`."
+        },
+        {
+          "type": "string",
+          "const": "undefined",
+          "description": "`undefined`."
+        },
+        {
+          "type": "string",
+          "const": "number",
+          "description": "A number."
+        },
+        {
+          "type": "string",
+          "const": "string",
+          "description": "A string."
+        },
+        {
+          "type": "string",
+          "const": "binding",
+          "description": "An immutable binding: a `const` with a literal initializer, or an\nenum member. The text is the binding name in its declaring module,\nwith the member: `DEFAULT_LIMIT` or `Mode.Grid`."
+        }
+      ],
+      "description": "The type of a [`ConstantParameterValue`]."
+    },
+    "ConstantParameterCallSite": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Caller source path."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the call."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column of the call."
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "col"
+      ],
+      "description": "One inspected call of the reported function."
+    },
+    "ConstantParameterEvidence": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "type-aware",
+          "description": "The TypeScript checker gave the evidence: the calls of a class\nmethod, or the argument types of an `unused-default` finding. A type\ndoes not prove a run-time value: an `any` value, a cast, or data from\noutside the program can break it."
+        }
+      ],
+      "description": "The evidence that a [`ConstantParameter`] finding needs beyond the\nsyntactic call facts."
+    },
+    "TypeAwareCallEvidenceMeta": {
+      "type": "object",
+      "properties": {
+        "default_candidates": {
+          "type": "integer",
+          "description": "Parameters with a default whose arguments the companion typed."
+        },
+        "method_candidates": {
+          "type": "integer",
+          "description": "Methods of exported classes whose calls the companion read."
+        },
+        "findings": {
+          "type": "integer",
+          "description": "Findings that the evidence proved."
+        },
+        "abstention_reasons": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer"
+          },
+          "description": "The count of each reason that a candidate got no evidence, such as\n`outside-program` or `decorator`. An open set: a later version can\nadd a reason."
+        },
+        "elapsed_ms": {
+          "type": "integer",
+          "description": "Duration of the request as reported by the companion."
+        }
+      },
+      "required": [
+        "default_candidates",
+        "method_candidates",
+        "findings",
+        "elapsed_ms"
+      ],
+      "description": "The call evidence that the `constant-parameter` rule asked the companion\nfor."
     }
   }
 }

@@ -2,6 +2,7 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 
 import {
+  CALL_EVIDENCE_OPERATION,
   MUTANT_TYPECHECK_OPERATION,
   SESSION_ENVELOPE_TYPES,
   STATUS_OPERATION,
@@ -9,7 +10,9 @@ import {
 } from "./generated-protocol.mjs";
 import { analyzeSemanticQueries, createSemanticSession } from "./semantic.mjs";
 import { checkMutants } from "./mutant-typecheck.mjs";
+import { collectCallEvidence } from "./call-evidence.mjs";
 import {
+  createCallEvidenceResponse,
   createMutantTypecheckResponse,
   createSemanticResponse,
   createStatusResponse,
@@ -98,8 +101,11 @@ const runSession = async (input, output) => {
         throw new Error("invalid semantic session envelope");
       }
       const request = parseRequest(envelope.request);
-      if (request.operation === MUTANT_TYPECHECK_OPERATION) {
-        throw new Error("a semantic session does not accept a mutant-typecheck request");
+      if (
+        request.operation === MUTANT_TYPECHECK_OPERATION ||
+        request.operation === CALL_EVIDENCE_OPERATION
+      ) {
+        throw new Error(`a semantic session does not accept a ${request.operation} request`);
       }
       if (!session) {
         root = request.root;
@@ -160,6 +166,14 @@ export const run = async ({ input, output, args = [] }) => {
     writeJson(
       output,
       createMutantTypecheckResponse({ results, elapsedMs: performance.now() - startedAt }),
+    );
+    return;
+  }
+  if (request.operation === CALL_EVIDENCE_OPERATION) {
+    const evidence = collectCallEvidence(request);
+    writeJson(
+      output,
+      createCallEvidenceResponse({ ...evidence, elapsedMs: performance.now() - startedAt }),
     );
     return;
   }

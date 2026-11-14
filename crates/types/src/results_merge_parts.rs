@@ -65,6 +65,7 @@ pub(super) fn split_merge_parts(
         dynamic_segment_name_conflicts,
         unused_component_props,
         absent_component_props,
+        constant_parameters,
         unused_component_emits,
         unused_component_inputs,
         unused_component_outputs,
@@ -85,6 +86,7 @@ pub(super) fn split_merge_parts(
         active_suppressions,
         feature_flags,
         security_findings,
+        suppressed_security_findings,
         security_unresolved_edge_files,
         security_unresolved_callee_sites,
         security_unresolved_callee_diagnostics,
@@ -94,6 +96,7 @@ pub(super) fn split_merge_parts(
         react_component_intel,
         semantic_reachable_files,
         semantic_framework_contracts,
+        constant_parameter_candidates,
     } = other;
 
     (
@@ -146,6 +149,7 @@ pub(super) fn split_merge_parts(
             dynamic_segment_name_conflicts,
             unused_component_props,
             absent_component_props,
+            constant_parameters,
             unused_component_emits,
             unused_component_inputs,
             unused_component_outputs,
@@ -169,6 +173,7 @@ pub(super) fn split_merge_parts(
             active_suppressions,
             feature_flags,
             security_findings,
+            suppressed_security_findings,
             security_unresolved_edge_files,
             security_unresolved_callee_sites,
             security_unresolved_callee_diagnostics,
@@ -178,6 +183,7 @@ pub(super) fn split_merge_parts(
             react_component_intel,
             semantic_reachable_files,
             semantic_framework_contracts,
+            constant_parameter_candidates,
         },
     )
 }

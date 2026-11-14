@@ -1,4 +1,7 @@
 //! Subcommand dispatch for the `fallow` command line.
+#[path = "dispatch_issue_filters.rs"]
+mod issue_filters;
+use issue_filters::{check_issue_filters_core, check_issue_filters_framework};
 
 #[path = "dispatch_coverage_upload.rs"]
 mod coverage_upload;
@@ -50,6 +53,11 @@ use ci_dispatch::map_ci_subcommand;
 #[path = "dispatch_audit_inputs.rs"]
 mod audit_inputs;
 use audit_inputs::resolve_audit_inputs;
+#[path = "dispatch_audit_command.rs"]
+mod audit_command;
+use audit_command::dispatch_audit_command;
+#[path = "dispatch_audit_staged.rs"]
+mod audit_staged;
 
 fn dispatch_mutation_command(
     dispatch: &DispatchContext<'_>,
@@ -524,129 +532,6 @@ use architecture::dispatch_architecture_command;
 /// keep each builder within the unit-size limit.
 pub fn check_issue_filters(command: &Command) -> IssueFilters {
     check_issue_filters_framework(command, &check_issue_filters_core(command))
-}
-
-/// First half of the `IssueFilters` mapping: core/general filter flags over a
-/// `Default` base. The framework/catalog half layers on top via struct update.
-fn check_issue_filters_core(command: &Command) -> IssueFilters {
-    let Command::Check {
-        unused_files,
-        unused_exports,
-        unused_deps,
-        unused_types,
-        private_type_leaks,
-        deprecated_exports_in_use,
-        unused_enum_members,
-        unused_class_members,
-        unresolved_imports,
-        unlisted_deps,
-        duplicate_exports,
-        duplicate_export_aliases,
-        circular_deps,
-        re_export_cycles,
-        package_cycles,
-        boundary_violations,
-        policy_violations,
-        stale_suppressions,
-        ..
-    } = command
-    else {
-        unreachable!("check filter builder only handles check commands");
-    };
-
-    let mut filters = IssueFilters::default();
-    for (flag, active) in [
-        ("--unused-files", *unused_files),
-        ("--unused-exports", *unused_exports),
-        ("--unused-deps", *unused_deps),
-        ("--unused-types", *unused_types),
-        ("--private-type-leaks", *private_type_leaks),
-        ("--deprecated-exports-in-use", *deprecated_exports_in_use),
-        ("--unused-enum-members", *unused_enum_members),
-        ("--unused-class-members", *unused_class_members),
-        ("--unresolved-imports", *unresolved_imports),
-        ("--unlisted-deps", *unlisted_deps),
-        ("--duplicate-exports", *duplicate_exports),
-        ("--duplicate-export-aliases", *duplicate_export_aliases),
-        ("--circular-deps", *circular_deps),
-        ("--re-export-cycles", *re_export_cycles),
-        ("--package-cycles", *package_cycles),
-        ("--boundary-violations", *boundary_violations),
-        ("--policy-violations", *policy_violations),
-        ("--stale-suppressions", *stale_suppressions),
-    ] {
-        enable_check_filter(&mut filters, flag, active);
-    }
-    filters
-}
-
-/// Second half of the `IssueFilters` mapping: framework/component, store, svelte,
-/// catalog, and dependency-override flags, layered onto the core `base`.
-fn check_issue_filters_framework(command: &Command, base: &IssueFilters) -> IssueFilters {
-    let Command::Check {
-        unused_namespace_members,
-        unused_store_members,
-        unprovided_injects,
-        unrendered_components,
-        unused_component_props,
-        absent_component_props,
-        unused_component_emits,
-        unused_component_inputs,
-        unused_component_outputs,
-        unused_svelte_events,
-        unused_effect_layers,
-        unused_tagged_errors,
-        unproduced_catch_tags,
-        unused_server_actions,
-        unused_load_data_keys,
-        unlisted_binaries,
-        unused_catalog_entries,
-        empty_catalog_groups,
-        unresolved_catalog_references,
-        unused_dependency_overrides,
-        misconfigured_dependency_overrides,
-        ..
-    } = command
-    else {
-        unreachable!("check filter builder only handles check commands");
-    };
-
-    let mut filters = base.clone();
-    for (flag, active) in [
-        ("--unused-namespace-members", *unused_namespace_members),
-        ("--unused-store-members", *unused_store_members),
-        ("--unprovided-injects", *unprovided_injects),
-        ("--unrendered-components", *unrendered_components),
-        ("--unused-component-props", *unused_component_props),
-        ("--absent-component-props", *absent_component_props),
-        ("--unused-component-emits", *unused_component_emits),
-        ("--unused-component-inputs", *unused_component_inputs),
-        ("--unused-component-outputs", *unused_component_outputs),
-        ("--unused-svelte-events", *unused_svelte_events),
-        ("--unused-effect-layers", *unused_effect_layers),
-        ("--unused-tagged-errors", *unused_tagged_errors),
-        ("--unproduced-catch-tags", *unproduced_catch_tags),
-        ("--unused-server-actions", *unused_server_actions),
-        ("--unused-load-data-keys", *unused_load_data_keys),
-        ("--unlisted-binaries", *unlisted_binaries),
-        ("--unused-catalog-entries", *unused_catalog_entries),
-        ("--empty-catalog-groups", *empty_catalog_groups),
-        (
-            "--unresolved-catalog-references",
-            *unresolved_catalog_references,
-        ),
-        (
-            "--unused-dependency-overrides",
-            *unused_dependency_overrides,
-        ),
-        (
-            "--misconfigured-dependency-overrides",
-            *misconfigured_dependency_overrides,
-        ),
-    ] {
-        enable_check_filter(&mut filters, flag, active);
-    }
-    filters
 }
 
 fn enable_check_filter(filters: &mut IssueFilters, flag: &str, active: bool) {
@@ -1291,86 +1176,6 @@ fn dispatch_setup_hooks_command(command: &Command, dispatch: &DispatchContext<'_
         gitignore_claude: *gitignore_claude,
         uninstall: *uninstall,
     })
-}
-
-fn dispatch_audit_command(command: Command, dispatch: &DispatchContext<'_>) -> ExitCode {
-    let Command::Audit {
-        production_dead_code,
-        production_health,
-        production_dupes,
-        dead_code_baseline,
-        health_baseline,
-        dupes_baseline,
-        max_crap,
-        coverage,
-        coverage_root,
-        only,
-        skip,
-        no_css,
-        css_deep,
-        no_css_deep,
-        gate,
-        worsened,
-        runtime_coverage,
-        min_invocations_hot,
-        gate_marker,
-        brief,
-        max_decisions,
-        walkthrough_guide,
-        walkthrough_file,
-        walkthrough,
-        mark_viewed,
-        show_cleared,
-        show_deprioritized,
-        path,
-    } = command
-    else {
-        unreachable!("audit dispatcher only handles audit commands");
-    };
-
-    // The walkthrough flags imply the brief path (the guide digest + the
-    // graph-snapshot pin are brief-path data).
-    let brief = brief || walkthrough_guide || walkthrough || walkthrough_file.is_some();
-
-    let scope = match crate::scope_path::resolve_command_scope(dispatch.root, dispatch.output, path)
-    {
-        Ok(scope) => scope.map(|resolved| resolved.absolute),
-        Err(code) => return code,
-    };
-
-    dispatch_audit(
-        dispatch,
-        &AuditDispatchArgs {
-            production_dead_code,
-            production_health,
-            production_dupes,
-            dead_code_baseline,
-            health_baseline,
-            dupes_baseline,
-            max_crap,
-            coverage,
-            coverage_root,
-            only,
-            skip,
-            no_css,
-            css_deep,
-            no_css_deep,
-            gate,
-            worsened,
-            runtime_coverage,
-            min_invocations_hot,
-            gate_marker,
-            brief,
-            max_decisions,
-            walkthrough_guide,
-            walkthrough_file,
-            walkthrough,
-            mark_viewed,
-            show_cleared,
-            show_deprioritized,
-            scope,
-        },
-    )
 }
 
 fn dispatch_audit_cache_command(
@@ -2096,6 +1901,8 @@ struct AuditDispatchArgs {
     worsened: Option<AuditWorsenedArg>,
     runtime_coverage: Option<PathBuf>,
     min_invocations_hot: u64,
+    /// Saved `fallow mutation` report for the `mutation` focus component.
+    mutation_report: Option<PathBuf>,
     gate_marker: Option<String>,
     brief: bool,
     max_decisions: usize,
@@ -2113,6 +1920,9 @@ struct AuditDispatchArgs {
     /// Expand the de-prioritized units in the human focus map.
     show_deprioritized: bool,
     scope: Option<PathBuf>,
+    /// The checkout of `--staged`. The dispatch root is then the temporary
+    /// worktree that holds the staged index.
+    staged_host: Option<PathBuf>,
 }
 
 struct ResolvedAuditInputs {
@@ -2142,10 +1952,19 @@ fn dispatch_audit(dispatch: &DispatchContext<'_>, args: &AuditDispatchArgs) -> E
         );
     }
 
-    let inputs = match resolve_audit_inputs(dispatch, args) {
+    let mut inputs = match resolve_audit_inputs(dispatch, args) {
         Ok(inputs) => inputs,
         Err(code) => return code,
     };
+    if let Some(host) = args.staged_host.as_deref() {
+        // The temporary worktree is removed after the run, so the caches of
+        // a staged audit stay in the checkout.
+        inputs.cache_dir = fallow_engine::repo_refs::remap_cache_dir_for_base_worktree(
+            dispatch.root,
+            host,
+            &inputs.cache_dir,
+        );
+    }
     if (!args.only.is_empty() || !args.skip.is_empty()) && audit_renders_brief(args) {
         eprintln!(
             "Note: --only and --skip have no effect on the review brief, which keeps every \
@@ -2153,6 +1972,12 @@ fn dispatch_audit(dispatch: &DispatchContext<'_>, args: &AuditDispatchArgs) -> E
         );
     }
     note_inert_health_flags(args, inputs.analyses);
+    if args.mutation_report.is_some() && !audit_renders_brief(args) {
+        eprintln!(
+            "Note: --mutation-report has no effect without --brief: only the review brief \
+             reads it."
+        );
+    }
 
     // The brief and the walkthrough views always exit 0, so the gate stands
     // down there and says so.
@@ -2257,6 +2082,21 @@ fn run_resolved_audit(
     inputs: &ResolvedAuditInputs,
 ) -> ExitCode {
     let cli = dispatch.cli;
+    let mutation_report = match args
+        .mutation_report
+        .as_deref()
+        .filter(|_| audit_renders_brief(args))
+        .map(crate::audit_focus::mutation::read_audit_mutation_report)
+    {
+        Some(Err(error)) => {
+            return crate::error::emit_programmatic_error(
+                &error,
+                dispatch.output,
+                dispatch.json_style,
+            );
+        }
+        report => report.and_then(Result::ok),
+    };
     audit::run_audit_with_type_aware(
         &audit::AuditOptions {
             root: dispatch.root,
@@ -2268,7 +2108,11 @@ fn run_resolved_audit(
             threads: dispatch.threads,
             quiet: dispatch.quiet,
             allow_remote_extends: cli.allow_remote_extends,
-            changed_since: cli.changed_since.as_deref(),
+            changed_since: if args.staged_host.is_some() {
+                Some("HEAD")
+            } else {
+                cli.changed_since.as_deref()
+            },
             production: cli.production,
             production_dead_code: Some(inputs.production.dead_code),
             production_health: Some(inputs.production.health),
@@ -2301,6 +2145,7 @@ fn run_resolved_audit(
             css_deep: audit_css_deep_enabled(&inputs.audit_cfg, args),
             runtime_coverage: args.runtime_coverage.as_deref(),
             min_invocations_hot: args.min_invocations_hot,
+            mutation_report: mutation_report.as_ref(),
             brief: args.brief,
             max_decisions: args.max_decisions,
             walkthrough_guide: args.walkthrough_guide,
@@ -2318,6 +2163,7 @@ fn run_resolved_audit(
             projects: &cli.type_aware_project,
             require: cli.type_aware_require.map(Into::into),
         },
+        args.staged_host.as_deref(),
     )
 }
 
@@ -2351,39 +2197,6 @@ fn dispatch_decision_surface(dispatch: &DispatchContext<'_>, max_decisions: usiz
         &inputs,
         max_decisions,
     ))
-}
-
-fn decision_surface_audit_args(max_decisions: usize) -> AuditDispatchArgs {
-    AuditDispatchArgs {
-        production_dead_code: false,
-        production_health: false,
-        production_dupes: false,
-        dead_code_baseline: None,
-        health_baseline: None,
-        dupes_baseline: None,
-        max_crap: None,
-        coverage: None,
-        coverage_root: None,
-        only: Vec::new(),
-        skip: Vec::new(),
-        no_css: true,
-        css_deep: false,
-        no_css_deep: false,
-        gate: None,
-        worsened: None,
-        runtime_coverage: None,
-        min_invocations_hot: 0,
-        gate_marker: None,
-        brief: true,
-        max_decisions,
-        walkthrough_guide: false,
-        walkthrough_file: None,
-        walkthrough: false,
-        mark_viewed: Vec::new(),
-        show_cleared: false,
-        show_deprioritized: false,
-        scope: None,
-    }
 }
 
 #[path = "dispatch_decision_surface.rs"]

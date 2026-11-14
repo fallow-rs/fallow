@@ -19,7 +19,7 @@ import {
 } from "./backend.mjs";
 
 import { canonicalFileIdentity } from "./file-identity.mjs";
-import { NON_NULLISH_HINT, nonNullishLinks } from "./optional-chain-proof.mjs";
+import { NON_NULLISH_HINT, nonNullishMutants } from "./optional-chain-proof.mjs";
 
 const { DiagnosticCategory } = sync;
 
@@ -154,7 +154,7 @@ const checkInProject = (context, file, original, config) => {
     const reason = projectSkipReason(project, file, original);
     if (reason !== null) return unchecked(file, reason);
     check.baseline = countKeys(fileErrors(project, file.absolutePath));
-    check.hinted = nonNullishLinks(project, file, original);
+    check.hinted = nonNullishMutants(project, file, original);
     return file.mutants.map((mutant) => checkMutant(context, check, mutant));
   } finally {
     context.overlay.delete(check.identity);

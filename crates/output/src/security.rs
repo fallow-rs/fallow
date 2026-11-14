@@ -653,7 +653,9 @@ pub enum SecurityVerifierVerdictStatus {
 pub struct SecurityVerifierVerdict {
     /// Must be `fallow-security-verdict/v1`.
     pub schema_version: String,
-    /// Stable candidate id from `security_findings[].finding_id`.
+    /// Candidate id: `security_findings[].finding_id` or
+    /// `security_findings[].stable_finding_id`. Use the stable id when the
+    /// verdict must survive edits that move the sink to another line.
     pub finding_id: String,
     /// Verifier's verdict for the candidate.
     pub verdict: SecurityVerifierVerdictStatus,
@@ -689,7 +691,8 @@ pub struct SecuritySurvivorsOutput {
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     /// Aggregate verdict counts.
     pub summary: SecuritySurvivorsSummary,
-    /// Verifier-retained candidates keyed by finding id.
+    /// Verifier-retained candidates keyed by the candidate `finding_id`, also
+    /// when the verdict names the candidate by its `stable_finding_id`.
     pub survivors: BTreeMap<String, SecuritySurvivor>,
     /// Ambiguous candidates keyed by finding id. These are not dismissed and are
     /// kept explicit so queues can decide whether to include them.

@@ -1,7 +1,7 @@
 //! Plugin path alias lookups: the alias prefix match, the workspace scope of
 //! an alias, and the alias fallback of the resolver.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::super::types::{ResolveContext, ResolveResult};
 use super::{
@@ -25,8 +25,11 @@ pub(in crate::resolve) fn alias_match_remainder<'a>(
         .then_some(remainder)
 }
 
-/// Return the plugin path aliases that apply to `specifier` in `from_file`, in
-/// declaration order.
+/// Return the plugin path aliases that apply to `specifier` in `from_file`,
+/// the longest prefix first and otherwise in declaration order.
+///
+/// The longest prefix wins, as for TypeScript `paths` patterns. Nuxt points `#layers/<name>/` at a named layer, so that alias must win over the
+/// static `#layers/` fallback that points at the `layers/` directory.
 ///
 /// A workspace alias applies only to files inside its workspace. The deepest
 /// workspace that contains `from_file` and declares a matching prefix owns the
@@ -48,7 +51,7 @@ pub(in crate::resolve) fn applicable_path_aliases<'c>(
         })
         .map(|alias| alias.scope.as_str())
         .max_by_key(|scope| Path::new(scope).components().count());
-    match owner {
+    let mut aliases: Vec<(&str, &str)> = match owner {
         Some(owner) => ctx
             .scoped_path_aliases
             .iter()
@@ -60,7 +63,9 @@ pub(in crate::resolve) fn applicable_path_aliases<'c>(
             .iter()
             .map(|(prefix, replacement)| (prefix.as_str(), replacement.as_str()))
             .collect(),
-    }
+    };
+    aliases.sort_by_key(|(prefix, _)| std::cmp::Reverse(prefix.len()));
+    aliases
 }
 
 /// Whether a plugin path alias that applies to `from_file` matches `specifier`.
@@ -110,6 +115,29 @@ pub(in crate::resolve) fn try_path_alias_fallback(
             .ok()?;
             classify_alias_target(ctx, resolved.path())
         })
+}
+
+/// The paths that the applicable plugin path aliases substitute for an
+/// unresolved `specifier`, in alias order, or `None` when no alias matches.
+///
+/// An alias can point at generated code that does not exist before the
+/// build. The unresolved-import check tests these paths against the ignore
+/// rules of the repository, the same as the target of a relative import.
+pub(in crate::resolve) fn missing_path_alias_targets(
+    ctx: &ResolveContext<'_>,
+    from_file: &Path,
+    specifier: &str,
+) -> Option<Vec<PathBuf>> {
+    let paths: Vec<PathBuf> = applicable_path_aliases(ctx, from_file, specifier)
+        .into_iter()
+        .filter_map(|(prefix, replacement)| {
+            let remainder = alias_match_remainder(specifier, prefix)?;
+            let remainder = remainder.trim_start_matches('/');
+            let path = ctx.root.join(replacement).join(remainder);
+            Some(super::normalize_path_lexically(&path))
+        })
+        .collect();
+    (!paths.is_empty()).then_some(paths)
 }
 
 /// Map the file that an alias substitution resolved to onto a resolve result.

@@ -1022,6 +1022,25 @@ fn collect_check_frameworks(env: &Value, out: &mut Vec<Annotation>) {
     );
 }
 
+fn collect_constant_parameters(env: &Value, out: &mut Vec<Annotation>) {
+    push_each(
+        out,
+        env,
+        "constant_parameters",
+        "Constant parameter",
+        Anchor::line_col,
+        |it| {
+            format!(
+                "Parameter '{}' of '{}' is passed in one way by each visible call ({}). {}",
+                crate::report::github::constant_parameter_label(it),
+                s(it, "function_name"),
+                s(it, "reason"),
+                s(it, "explanation")
+            )
+        },
+    );
+}
+
 fn collect_check_components(env: &Value, out: &mut Vec<Annotation>) {
     push_each(
         out,
@@ -1037,6 +1056,7 @@ fn collect_check_components(env: &Value, out: &mut Vec<Annotation>) {
             )
         },
     );
+    collect_constant_parameters(env, out);
     push_each(
         out,
         env,

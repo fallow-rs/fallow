@@ -351,6 +351,14 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#absent-component-props",
     },
     RuleDef {
+        id: "fallow/constant-parameter",
+        category: "Dead code",
+        name: "Constant parameters",
+        short: "Each visible call passes a function parameter in the same way",
+        full: "A parameter of a module-scope function gets the same literal at each visible call (reason identical-argument), or an optional parameter is passed by no call (reason never-passed). The finding lists the value, the call count, the calls, and the count of conditions that test the parameter; a condition that tests a constant points at a branch that cannot run. Enable constant-parameters explicitly; it defaults to off. The rule fires only when each caller is visible. It abstains for public API and entry-point exports, exports that a plugin marks as used, dynamic imports, CommonJS, escaped namespaces, a function used as a value or through call/apply/bind, template hosts that can import the function, direct eval, classic scripts, framework auto-imports, open contracts (arguments, overloads, a reassigned binding, decorators, generators), a module with a parse error that can import the function, and fewer than 2 calls. A self-call that passes an optional parameter on blocks never-passed. A written, rest or destructured parameter gives no finding. In the default mode a test file is a caller; with --production only production callers count. Review the parameter manually; static analysis does not prove that no caller outside the project exists.",
+        docs_path: "explanations/dead-code#constant-parameters",
+    },
+    RuleDef {
         id: "fallow/unused-component-prop",
         category: "Dead code",
         name: "Unused component props",
@@ -824,6 +832,10 @@ fn member_rule_guide(id: &str) -> Option<RuleGuide> {
         "fallow/unrendered-component" => RuleGuide {
             example: "components/Orphan.vue is re-exported from a barrel (export { default as Orphan } from './Orphan.vue') but no template, registration, h() call, or dynamic import ever renders it.",
             how_to_fix: "Render the component where it belongs, or delete it and remove the dead barrel re-export. If it is rendered reflectively (a dynamic <component :is> from a non-literal value), suppress the line with // fallow-ignore-next-line unrendered-component.",
+        },
+        "fallow/constant-parameter" => RuleGuide {
+            example: "format(value, compact, locale?) is called 14 times in the project, each time as format(n, true). compact is always true, so the branch for false cannot run, and no call passes locale.",
+            how_to_fix: "Review the calls and the intent of the parameter. Remove the parameter and move the value into the function, or keep it when the flexibility is deliberate. Add a fallow-ignore-next-line constant-parameter comment above the parameter or the function to keep it. This candidate has no automatic fix.",
         },
         "fallow/absent-component-prop" => RuleGuide {
             example: "Card declares highlight?: boolean with a false default, reads highlight in its render body, and every inspected reachable caller renders <Card /> without highlight.",

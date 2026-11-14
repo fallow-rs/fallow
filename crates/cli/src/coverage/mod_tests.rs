@@ -94,15 +94,42 @@ fn detect_package_manager_prefers_package_manager_field() {
     );
 }
 
+/// Yarn 1 refuses `yarn add -D` at a workspace root without `-W`
+/// (fallow-rs/fallow#4519).
+#[test]
+fn yarn_classic_workspace_root_sidecar_install_adds_the_root_flag() {
+    let root = tempfile::tempdir().expect("temp root");
+    std::fs::write(
+        root.path().join("package.json"),
+        r#"{"private":true,"workspaces":["packages/*"]}"#,
+    )
+    .expect("write package.json");
+    std::fs::write(root.path().join("yarn.lock"), "# yarn lockfile v1\n").expect("write lockfile");
+    assert_eq!(
+        PackageManager::Yarn.install_command(root.path()),
+        "yarn add -D -W @fallow-cli/fallow-cov"
+    );
+    assert_eq!(
+        PackageManager::Yarn.install_args(root.path()),
+        ("yarn", vec!["add", "-D", "-W", "@fallow-cli/fallow-cov"])
+    );
+    assert_eq!(
+        PackageManager::Yarn.add_runtime_package_command(root.path(), "@fallow-cli/beacon"),
+        "yarn add -W @fallow-cli/beacon"
+    );
+}
+
 #[test]
 fn package_manager_commands_match_each_tool() {
+    let empty = tempfile::tempdir().expect("temp root");
+    let empty_root = empty.path().to_path_buf();
     assert_eq!(PackageManager::Npm.label(), "npm");
     assert_eq!(
-        PackageManager::Npm.add_runtime_package_command("pkg"),
+        PackageManager::Npm.add_runtime_package_command(&empty_root, "pkg"),
         "npm install pkg"
     );
     assert_eq!(
-        PackageManager::Npm.install_command(),
+        PackageManager::Npm.install_command(&empty_root),
         "npm install --save-dev @fallow-cli/fallow-cov"
     );
     assert_eq!(PackageManager::Npm.run_script("build"), "npm run build");
@@ -110,11 +137,11 @@ fn package_manager_commands_match_each_tool() {
 
     assert_eq!(PackageManager::Pnpm.label(), "pnpm");
     assert_eq!(
-        PackageManager::Pnpm.add_runtime_package_command("pkg"),
+        PackageManager::Pnpm.add_runtime_package_command(&empty_root, "pkg"),
         "pnpm add pkg"
     );
     assert_eq!(
-        PackageManager::Pnpm.install_command(),
+        PackageManager::Pnpm.install_command(&empty_root),
         "pnpm add -D @fallow-cli/fallow-cov"
     );
     assert_eq!(PackageManager::Pnpm.run_script("build"), "pnpm build");
@@ -125,11 +152,11 @@ fn package_manager_commands_match_each_tool() {
 
     assert_eq!(PackageManager::Yarn.label(), "yarn");
     assert_eq!(
-        PackageManager::Yarn.add_runtime_package_command("pkg"),
+        PackageManager::Yarn.add_runtime_package_command(&empty_root, "pkg"),
         "yarn add pkg"
     );
     assert_eq!(
-        PackageManager::Yarn.install_command(),
+        PackageManager::Yarn.install_command(&empty_root),
         "yarn add -D @fallow-cli/fallow-cov"
     );
     assert_eq!(PackageManager::Yarn.run_script("build"), "yarn build");
@@ -140,11 +167,11 @@ fn package_manager_commands_match_each_tool() {
 
     assert_eq!(PackageManager::Bun.label(), "bun");
     assert_eq!(
-        PackageManager::Bun.add_runtime_package_command("pkg"),
+        PackageManager::Bun.add_runtime_package_command(&empty_root, "pkg"),
         "bun add pkg"
     );
     assert_eq!(
-        PackageManager::Bun.install_command(),
+        PackageManager::Bun.install_command(&empty_root),
         "bun add -d @fallow-cli/fallow-cov"
     );
     assert_eq!(PackageManager::Bun.run_script("build"), "bun run build");

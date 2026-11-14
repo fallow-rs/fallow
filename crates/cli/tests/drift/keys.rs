@@ -41,6 +41,7 @@ const SYMBOL_FIELDS: &[&str] = &[
     "specifier",
     "entry_name",
     "catalog_name",
+    "parameter_name",
 ];
 
 /// The issue kind the harness uses for every clone group.

@@ -6,7 +6,7 @@ import { extname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { compileFunction } from "node:vm";
 
-import { realPath } from "./child.mjs";
+import { readOverlay, realPath, recordOverlayError } from "./child.mjs";
 
 const SCRIPT_FORMATS = new Set(["module", "commonjs", "module-typescript", "commonjs-typescript"]);
 const JAVASCRIPT_FORMATS = new Set(["module", "commonjs"]);
@@ -124,4 +124,19 @@ export const registerOverlayHook = (overlay, onLoad, onIncomplete) => {
       return { ...result, source: served.source, shortCircuit: true };
     },
   });
+};
+
+/**
+ * Serves the instrumented files of the overlay file in this process, and
+ * gives the set of the source paths that the process loaded. A file that
+ * the hook cannot serve for certain goes into the integrity log.
+ */
+export const serveOverlay = (overlayPath) => {
+  const loaded = new Set();
+  registerOverlayHook(
+    readOverlay(overlayPath),
+    (entry) => loaded.add(entry.source),
+    (message) => recordOverlayError(overlayPath, message),
+  );
+  return loaded;
 };

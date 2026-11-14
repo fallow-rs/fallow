@@ -494,6 +494,10 @@ fn merge_results_covers_all_fields() {
     assert_eq!(target.unprovided_injects.len(), 1);
     assert_eq!(target.unrendered_components.len(), 1);
     assert_eq!(target.unused_component_props.len(), 1);
+    assert_eq!(
+        target.constant_parameters[0].parameter.parameter_name,
+        "compact"
+    );
     let candidate = &target.absent_component_props[0];
     assert_eq!(candidate.prop.component_name, "Widget");
     assert_eq!(candidate.prop.prop_name, "highlight");
@@ -651,6 +655,8 @@ fn merge_test_unused_member(
 )]
 pub fn merge_test_source_with_all_fields() -> EditorAnalysisResults {
     EditorAnalysisResults {
+        constant_parameter_candidates: fallow_types::results::ConstantParameterCandidates::default(
+        ),
         shared_state: None,
         unused_files: vec![UnusedFileFinding::with_actions(UnusedFile {
             path: "/f.ts".into(),
@@ -1039,6 +1045,35 @@ pub fn merge_test_source_with_all_fields() -> EditorAnalysisResults {
                 },
             ),
         ],
+        constant_parameters: vec![
+            super::editor_results::ConstantParameterFinding::with_actions(
+                super::editor_results::ConstantParameter {
+                    path: "/format.ts".into(),
+                    function_name: "format".to_string(),
+                    parameter_name: "compact".to_string(),
+                    option_key: None,
+                    parameter_index: 1,
+                    line: 3,
+                    col: 4,
+                    reason: super::editor_results::ConstantParameterReason::IdenticalArgument,
+                    evidence: None,
+                    value: Some(super::editor_results::ConstantParameterValue {
+                        kind: super::editor_results::ConstantParameterValueKind::Boolean,
+                        text: "true".to_string(),
+                    }),
+                    optional: false,
+                    has_default: false,
+                    condition_reads: 1,
+                    call_site_count: 3,
+                    inspected_call_sites: vec![super::editor_results::ConstantParameterCallSite {
+                        path: "/main.ts".into(),
+                        line: 2,
+                        col: 0,
+                    }],
+                    explanation: "Review the parameter".to_string(),
+                },
+            ),
+        ],
         unused_component_emits: vec![
             super::editor_results::UnusedComponentEmitFinding::with_actions(
                 super::editor_results::UnusedComponentEmit {
@@ -1228,6 +1263,8 @@ pub fn merge_test_source_with_all_fields() -> EditorAnalysisResults {
         }),
         security_findings: vec![super::editor_results::SecurityFinding {
             finding_id: String::new(),
+            stable_finding_id: None,
+            stable_id_input: None,
             candidate: super::editor_results::SecurityCandidate::default(),
             taint_flow: None,
             attack_surface: None,
@@ -1247,6 +1284,7 @@ pub fn merge_test_source_with_all_fields() -> EditorAnalysisResults {
             reachability: None,
             runtime: None,
         }],
+        suppressed_security_findings: vec![],
         security_unresolved_edge_files: 2,
         security_unresolved_callee_sites: 3,
         security_unresolved_callee_diagnostics: vec![

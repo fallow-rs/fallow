@@ -2094,6 +2094,101 @@ make("CanRead"); make("CanWrite"); make(kind);"#;
 }
 
 #[test]
+fn cache_roundtrip_preserves_function_contracts() {
+    let source = "import { format } from './format';\n\
+        export async function save(id, strict?: boolean, ...rest) { if (strict) {} strict = !strict; save(id); return id; }\n\
+        let mutable = () => {};\n\
+        save(1, true, ...more);\n\
+        format('a');\n\
+        items.map(save);";
+    let module = parse_from_content(FileId(0), Path::new("src/save.ts"), source);
+    let facts = module
+        .function_contracts
+        .as_deref()
+        .expect("the module has call evidence");
+    assert_eq!(facts.declarations.len(), 2);
+    let save = &facts.declarations[0];
+    assert!(save.is_async);
+    assert!(save.params[1].written);
+    assert!(
+        facts
+            .call_sites()
+            .any(|(_, _, site)| site.args == [fallow_types::extract::ArgFact::Param(0)])
+    );
+    assert_eq!(facts.calls.len(), 2);
+    assert_eq!(facts.escapes.len(), 1);
+    let cached = module_to_cached_from_parts(&module, 10, 20);
+    let decoded: CachedModule =
+        bitcode::decode(&bitcode::encode(&cached)).expect("decode cached module");
+    let restored = cached_to_module(&decoded, FileId(0));
+    assert_eq!(restored.function_contracts, module.function_contracts);
+}
+
+#[test]
+fn cache_roundtrip_preserves_each_function_contract_fact_variant() {
+    use fallow_types::extract::{ArgFact, CallTarget, ContractIncomplete, LiteralValue, ParamKind};
+    let source = "import { format } from './format';\n\
+        function local(flag, { a }, [b], c?: number, d = 1, ...rest) { if (flag) {} }\n\
+        local(true, null, undefined, 1.5, -0, 's', `t`, x);\n\
+        local(false, ...more);\n\
+        format.call(null, 2);\n\
+        function reads() { return arguments; }\n\
+        let mutable = () => {};\n\
+        export const load = (name) => import(name);\n\
+        require(process.env.X).pad();\n\
+        eval(code);";
+    let module = parse_from_content(FileId(0), Path::new("src/local.ts"), source);
+    let facts = module
+        .function_contracts
+        .as_deref()
+        .expect("the module has call evidence");
+    let kinds: Vec<_> = facts.declarations[0]
+        .params
+        .iter()
+        .map(|param| param.kind)
+        .collect();
+    assert!(kinds.contains(&ParamKind::Identifier));
+    assert!(kinds.contains(&ParamKind::Object));
+    assert!(kinds.contains(&ParamKind::Array));
+    let literals: Vec<_> = facts
+        .call_sites()
+        .filter(|(target, _, _)| *target == CallTarget::Local(0))
+        .flat_map(|(_, _, site)| site.args.iter())
+        .filter_map(|arg| match arg {
+            ArgFact::Literal(value) => Some(std::mem::discriminant(value)),
+            _ => None,
+        })
+        .collect();
+    for value in [
+        LiteralValue::Boolean(true),
+        LiteralValue::Null,
+        LiteralValue::Undefined,
+        LiteralValue::Number(0),
+        LiteralValue::String("s".into()),
+    ] {
+        assert!(literals.contains(&std::mem::discriminant(&value)));
+    }
+    assert!(facts.calls.iter().any(
+        |calls| matches!(calls.target, CallTarget::Import(_)) && &*calls.member_path == "call"
+    ));
+    let reasons: Vec<_> = facts
+        .declarations
+        .iter()
+        .filter_map(|contract| contract.incomplete)
+        .collect();
+    assert!(reasons.contains(&ContractIncomplete::ArgumentsRead));
+    assert!(reasons.contains(&ContractIncomplete::MutableBinding));
+    assert!(facts.direct_eval);
+    assert!(facts.opaque_loads.escapes);
+    assert_eq!(facts.opaque_loads.names, ["pad"]);
+    let cached = module_to_cached_from_parts(&module, 10, 20);
+    let decoded: CachedModule =
+        bitcode::decode(&bitcode::encode(&cached)).expect("decode cached module");
+    let restored = cached_to_module(&decoded, FileId(0));
+    assert_eq!(restored.function_contracts, module.function_contracts);
+}
+
+#[test]
 fn cache_roundtrip_preserves_import_binding_references() {
     let source = "import { useSelector, useDispatch, Provider } from 'react-redux';\n\
         export const useAppSelector = useSelector.withTypes<{ n: number }>();\n\
@@ -2510,4 +2605,125 @@ fn eviction_keeps_the_latest_working_set_above_the_low_target() {
     );
 
     let _ = std::fs::remove_dir_all(&dir);
+}
+
+const CALL_FACTS_SOURCE: &str = "export function format(value, compact) { return compact ? value : value; }\n\
+    format(1, true);\n\
+    format(2, true);";
+
+fn module_with_call_facts() -> ModuleInfo {
+    let module = parse_from_content(FileId(0), Path::new("src/format.ts"), CALL_FACTS_SOURCE);
+    assert!(module.function_contracts.is_some());
+    module
+}
+
+fn fingerprint() -> fallow_types::source_fingerprint::SourceFingerprint {
+    fallow_types::source_fingerprint::SourceFingerprint::new(10, 20)
+}
+
+#[test]
+fn an_entry_without_call_facts_records_that_they_are_absent() {
+    let cached = module_to_cached(&module_with_call_facts(), fingerprint(), false, false);
+    assert!(cached.call_facts.is_none());
+    let module = cached_hit_to_module(&cached, FileId(0), false, false)
+        .expect("a run that reads no call facts hits the entry");
+    assert!(module.function_contracts.is_none());
+    assert!(
+        cached_hit_to_module(&cached, FileId(0), false, true).is_none(),
+        "a run that reads call facts must parse the file again"
+    );
+}
+
+#[test]
+fn a_run_without_call_facts_does_not_decode_the_blob() {
+    let cached = module_to_cached(&module_with_call_facts(), fingerprint(), false, true);
+    assert!(
+        cached
+            .call_facts
+            .as_deref()
+            .is_some_and(|blob| !blob.is_empty())
+    );
+    let module = cached_hit_to_module(&cached, FileId(0), false, false).expect("hit");
+    assert!(module.function_contracts.is_none());
+    assert!(
+        cached_to_module_opts(&cached, FileId(0), false, false)
+            .function_contracts
+            .is_none()
+    );
+}
+
+#[test]
+fn a_module_with_no_call_facts_gets_an_empty_blob() {
+    let module = parse_from_content(
+        FileId(0),
+        Path::new("src/value.ts"),
+        "export type A = string;\n",
+    );
+    assert!(module.function_contracts.is_none());
+    let cached = module_to_cached(&module, fingerprint(), false, true);
+    assert_eq!(cached.call_facts.as_deref(), Some(&[][..]));
+    let restored = cached_hit_to_module(&cached, FileId(0), false, true)
+        .expect("an empty blob gives usable facts");
+    assert!(restored.function_contracts.is_none());
+}
+
+#[test]
+fn a_call_facts_blob_that_does_not_decode_is_a_miss() {
+    let mut cached = module_to_cached(&module_with_call_facts(), fingerprint(), false, true);
+    cached.call_facts = Some(vec![0xff; 3].into_boxed_slice());
+    assert!(cached_hit_to_module(&cached, FileId(0), false, true).is_none());
+    assert!(cached_hit_to_module(&cached, FileId(0), false, false).is_some());
+}
+
+#[test]
+fn a_reader_of_call_facts_adds_them_to_an_entry_without_them() {
+    let module = module_with_call_facts();
+    let path = Path::new("/project/src/format.ts");
+    let mut store = CacheStore::new(Path::new("/project"));
+    assert!(store.record_module(path, &module, fingerprint(), false, false));
+    assert!(
+        store
+            .get_by_path_only(path)
+            .expect("entry")
+            .call_facts
+            .is_none()
+    );
+    assert!(
+        !store.record_module(path, &module, fingerprint(), false, false),
+        "an unchanged entry that gains nothing stays as it is"
+    );
+    assert!(store.record_module(path, &module, fingerprint(), false, true));
+    let entry = store.get_by_path_only(path).expect("entry");
+    let restored = cached_hit_to_module(entry, FileId(0), false, true).expect("facts stored");
+    assert_eq!(restored.function_contracts, module.function_contracts);
+}
+
+#[test]
+fn a_run_without_call_facts_keeps_the_stored_facts() {
+    let module = module_with_call_facts();
+    let path = Path::new("/project/src/format.ts");
+    let mut store = CacheStore::new(Path::new("/project"));
+    assert!(store.record_module(path, &module, fingerprint(), false, true));
+    let blob = store
+        .get_by_path_only(path)
+        .expect("entry")
+        .call_facts
+        .clone();
+
+    let mut without_facts = module.clone();
+    without_facts.function_contracts = None;
+    let moved = fallow_types::source_fingerprint::SourceFingerprint::new(11, 20);
+    assert!(store.record_module(path, &without_facts, moved, false, false));
+    assert_eq!(
+        store.get_by_path_only(path).expect("entry").call_facts,
+        blob
+    );
+
+    assert!(
+        store.record_module(path, &without_facts, moved, true, false),
+        "a run that adds complexity rewrites the entry"
+    );
+    let entry = store.get_by_path_only(path).expect("entry");
+    assert!(entry.complexity_extracted);
+    assert_eq!(entry.call_facts, blob);
 }

@@ -24,29 +24,11 @@ const TOP_LEVEL_HELP_TEMPLATE: &str =
     "{about-with-newline}\n{usage-heading} {usage}{after-help}\n\nOptions:\n{options}";
 
 // Macros instead of consts so `concat!` can assemble the short (`-h`) and
-// long (`--help`) after-help surfaces from the same source fragments.
+// long (`--help`) after-help surfaces from the same source fragments. The
+// cheat sheet file ends with a newline, so one `\n` follows it below.
 macro_rules! top_level_task_cheat_sheet {
     () => {
-        "\
-When the agent is about to...
-  delete an \"unused\" export or file        fallow dead-code --trace <file>:<export>
-  prove exact TypeScript symbol consumers  fallow dead-code --type-aware --symbol-impact <file>:<export-or-class.method>
-  find how one module reaches another      fallow trace --path <from> <to>
-  delete an \"unused\" dependency            fallow dead-code --trace-dependency <name>
-  migrate a dependency                     fallow trace --dependency <name> --sites
-  commit or open a PR                      fallow audit --base <ref>
-  read a diff before approving it          fallow review --base <ref> --brief
-  prioritize refactoring                   fallow health --hotspots --targets
-  ask who owns code                        fallow health --ownership
-  check untested-but-reachable code        fallow health --coverage-gaps
-  consolidate duplication                  fallow dupes --trace dup:<fingerprint>
-  find feature flags                       fallow flags
-  check architecture rules before editing  fallow guard <files>
-  check cycles and boundaries after edits  fallow architecture
-  surface security candidates              fallow security
-  inspect a target before editing          fallow inspect --file <path>
-  understand a finding                     fallow explain <issue-type>
-  scope a monorepo                         --workspace <glob> / --changed-workspaces <ref>"
+        include_str!("cli_task_cheat_sheet.txt")
     };
 }
 
@@ -123,14 +105,14 @@ Reference:
 
 const TOP_LEVEL_AFTER_HELP: &str = concat!(
     top_level_task_cheat_sheet!(),
-    "\n\n",
+    "\n",
     top_level_core_command_groups!(),
     "\n\nRun fallow --help for the complete command list."
 );
 
 pub const TOP_LEVEL_AFTER_LONG_HELP: &str = concat!(
     top_level_task_cheat_sheet!(),
-    "\n\n",
+    "\n",
     top_level_core_command_groups!(),
     "\n\n",
     top_level_extended_command_groups!(),
@@ -610,7 +592,7 @@ pub struct Cli {
     #[arg(hide_short_help = true, long, value_name = "PATH", num_args = 0..=1, default_missing_value = "")]
     pub save_snapshot: Option<Option<String>>,
 
-    /// Path to Istanbul or raw V8 coverage data for exact CRAP scores in combined mode.
+    /// Path to Istanbul or raw V8 coverage data for measured CRAP scores in combined mode.
     /// Also settable via `FALLOW_COVERAGE` or `health.coverage`.
     #[arg(hide_short_help = true, long, value_name = "PATH")]
     pub coverage: Option<PathBuf>,
@@ -733,6 +715,10 @@ pub enum Command {
         /// Review optional props omitted by known reachable callers (enables this rule)
         #[arg(long)]
         absent_component_props: bool,
+
+        /// Review parameters that each visible call passes in one way (enables this rule)
+        #[arg(long)]
+        constant_parameters: bool,
 
         /// Only report unused component emits
         #[arg(long)]
@@ -1237,8 +1223,10 @@ pub enum Command {
         #[arg(long)]
         hooks: bool,
 
-        /// Fallback base branch/ref for the pre-commit hook when no upstream is set
-        #[arg(long, requires = "hooks")]
+        /// Has no effect. The pre-commit hook runs `fallow audit --staged`,
+        /// which compares the staged changes with HEAD. Kept so that existing
+        /// install scripts still run.
+        #[arg(long, requires = "hooks", hide = true)]
         branch: Option<String>,
 
         /// Record that this project deliberately stays unconfigured: persists a
@@ -1637,7 +1625,7 @@ pub enum Command {
         #[arg(long, value_name = "PATH")]
         trend_from: Option<PathBuf>,
 
-        /// Path to coverage data for exact per-function CRAP scores. Accepts an
+        /// Path to coverage data for measured per-function CRAP scores. Accepts an
         /// Istanbul coverage map JSON file (coverage-final.json, from
         /// `jest --coverage`, `vitest run --coverage`, c8 or nyc), a directory
         /// containing coverage-final.json, a raw V8 coverage directory
@@ -1789,19 +1777,19 @@ pub enum Command {
     /// Combines dead-code + complexity + duplication + styling scoped to
     /// changed files and returns a verdict (pass/warn/fail).
     ///
-    /// `fallow audit` answers "will CI block this?": it gates (exit 1 on a
-    /// fail verdict). The `review` alias plus `--brief` answer "where do I
-    /// look?": the same analysis rendered as a deterministic orientation brief
-    /// that ALWAYS exits 0, so a reviewer or agent can read it regardless of
-    /// the verdict. `--format` is orthogonal to `--brief`.
-    /// When `--changed-since`/`--base` is unset, the base is the git merge-base
-    /// against the branch's upstream or the remote default (`origin/HEAD`,
-    /// `origin/main`, `origin/master`); set `FALLOW_AUDIT_BASE` to pin it.
-    /// By default, only findings introduced by the changeset affect the verdict;
-    /// inherited findings are reported with new-vs-inherited attribution and
-    /// individual JSON findings include `introduced: true/false`. Use
-    /// `--gate all` or `[audit] gate = "all"` to fail on every finding in
-    /// changed files without running the extra base-snapshot attribution pass.
+    /// `fallow audit` answers "will CI block this?": it gates (exit 1 on a fail verdict). The
+    /// `review` alias plus `--brief` answer "where do I look?": the same analysis rendered as a
+    /// deterministic orientation brief that ALWAYS exits 0, so a reviewer or agent can read it
+    /// regardless of the verdict. `--format` is orthogonal to `--brief`. When
+    /// `--changed-since`/`--base` is unset, the base is the git merge-base against the branch's
+    /// upstream or the remote default (`origin/HEAD`, `origin/main`, `origin/master`); set
+    /// `FALLOW_AUDIT_BASE` to pin it. By default, only findings introduced by the changeset
+    /// affect the verdict; inherited findings are reported with new-vs-inherited attribution
+    /// and individual JSON findings include `introduced: true/false`. The default gate also
+    /// reports an unused file or unused export outside the changed files that the base does not
+    /// report: the change removed its last use, or a config change made it unreachable. Use
+    /// `--gate all` or `[audit] gate = "all"` to fail on every finding in changed files without
+    /// running the extra base-snapshot attribution pass.
     ///
     /// The global --baseline / --save-baseline flags are rejected on audit.
     /// Use --dead-code-baseline, --health-baseline, and --dupes-baseline
@@ -1921,12 +1909,17 @@ pub enum Command {
         #[arg(long, default_value_t = 100)]
         min_invocations_hot: u64,
 
-        /// Internal marker identifying a gate run (e.g. `pre-commit`), set by
-        /// the generated git hook so Fallow Impact can record a containment
-        /// event when the gate blocks then clears. Hidden; never changes the
-        /// verdict, exit code, or output.
-        #[arg(long, value_name = "MARKER", hide = true)]
-        gate_marker: Option<String>,
+        /// Saved `fallow mutation --format json` report (for example
+        /// `.fallow/mutation/last-report.json`). The review brief counts the
+        /// surviving mutants on the added lines of each changed file in the
+        /// `mutation` component of the focus score. A file whose source
+        /// changed since the run adds nothing. Reads the file only; it runs no
+        /// test. Only the review brief reads it.
+        #[arg(long, value_name = "FILE")]
+        mutation_report: Option<PathBuf>,
+
+        #[command(flatten)]
+        gate_run: AuditGateRunArgs,
 
         /// Render the deterministic review brief instead of the gating audit
         /// report. The brief answers "where do I look?" rather than "will CI
@@ -2348,53 +2341,6 @@ pub enum BaselinesCli {
         /// Rebase the file paths of the coverage input onto this root.
         #[arg(long, value_name = "PATH")]
         coverage_root: Option<PathBuf>,
-    },
-}
-
-#[derive(clap::Subcommand)]
-pub enum AuditCacheCli {
-    /// Remove reusable audit caches owned by an explicit project root.
-    ///
-    /// Deletes this project's cache entries unconditionally, warm or not. To
-    /// apply the age-based GC policy across every cache entry instead, use
-    /// `fallow audit-cache prune`.
-    Remove {
-        /// Print what would be removed without touching the filesystem.
-        #[arg(long)]
-        dry_run: bool,
-
-        /// Confirm removal in non-interactive environments.
-        #[arg(long, alias = "force")]
-        yes: bool,
-    },
-
-    /// Apply the audit cache GC policy now and report every entry.
-    ///
-    /// Runs the same reclaim policy every `fallow audit` run already applies
-    /// silently: orphaned-sidecar cleanup, age-based reclaim under the
-    /// resolved threshold, and cross-repo reclaim of abandoned entries whose
-    /// recorded owner root no longer exists. It also bounds the base-snapshot
-    /// files in the project cache directory (`pass: "snapshot"`): files older
-    /// than the threshold go, and only the newest 32 stay. Entries owned by
-    /// other live projects are never touched. Use `--dry-run` to preview every decision
-    /// the policy would take without touching the filesystem. `--root` is
-    /// optional and defaults to the current directory. Reported sizes come
-    /// from a full recursive walk of each cache entry, which can take a few
-    /// seconds on large caches. To delete one project's caches
-    /// unconditionally, use `fallow audit-cache remove --root <path> --yes`.
-    Prune {
-        /// Preview decisions without touching the filesystem.
-        #[arg(long)]
-        dry_run: bool,
-
-        /// Age threshold in days for this invocation. Overrides
-        /// FALLOW_AUDIT_CACHE_MAX_AGE_DAYS and the `audit.cacheMaxAgeDays`
-        /// config field (default 30). `0` disables age-based reclaim but
-        /// still reclaims orphaned sidecars and entries whose recorded owner
-        /// root is gone; unconditional deletion of one project's caches is
-        /// `fallow audit-cache remove --root <path> --yes`.
-        #[arg(long, value_name = "N")]
-        max_age_days: Option<u32>,
     },
 }
 
@@ -2826,15 +2772,6 @@ pub enum BaselineModeArg {
     Identity,
 }
 
-impl From<BaselineModeArg> for fallow_engine::baseline::HealthBaselineMode {
-    fn from(value: BaselineModeArg) -> Self {
-        match value {
-            BaselineModeArg::Count => Self::Count,
-            BaselineModeArg::Identity => Self::Identity,
-        }
-    }
-}
-
 #[derive(Clone, Copy, Debug, clap::ValueEnum)]
 pub enum CiProviderArg {
     Github,
@@ -2850,15 +2787,8 @@ pub enum TypeAwareRequireArg {
     Complete,
 }
 
-impl From<TypeAwareRequireArg> for fallow_config::TypeAwareRequire {
-    fn from(value: TypeAwareRequireArg) -> Self {
-        match value {
-            TypeAwareRequireArg::BestEffort => Self::BestEffort,
-            TypeAwareRequireArg::Complete => Self::Complete,
-        }
-    }
-}
-
+#[path = "cli_args_conversions.rs"]
+mod conversions;
 #[path = "cli_args_health.rs"]
 mod health_args;
 pub use health_args::*;

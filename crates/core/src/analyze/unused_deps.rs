@@ -16,11 +16,12 @@ use super::bundle_externalization::source_sets_packages_external;
 use super::gitignored_targets::GitignoredTargets;
 use super::package_json_utils::{find_dep_line_in_json, read_pkg_json_content};
 use super::predicates::{
-    is_builtin_module, is_config_file, is_implicit_dependency, is_path_alias, is_virtual_module,
+    is_builtin_module, is_config_file, is_implicit_dependency, is_path_alias, is_test_or_spec_file,
+    is_test_runner_config_file, is_virtual_module,
 };
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
-use crate::plugins::{CompiledPathRule, ProvidedDependencyRule};
+use crate::plugins::{CheckedAliasPrefix, CompiledPathRule, ProvidedDependencyRule};
 
 #[path = "unused_deps_peer_closure.rs"]
 mod peer_closure;
@@ -28,11 +29,14 @@ mod peer_closure;
 mod production_only;
 #[path = "unused_deps_required.rs"]
 mod required;
+#[path = "unused_deps_unresolved_filters.rs"]
+mod unresolved_filters;
 #[path = "unused_deps_workspace_scope.rs"]
 mod workspace_scope;
 use peer_closure::{PeerDependencyResolver, PeerSeedInput, peer_closure_shared_seeds};
 pub use peer_closure::{peer_closure_seeds, peer_dependency_hosts};
 pub use production_only::{credit_production_ignores, find_type_only_dependencies};
+use unresolved_filters::{UnresolvedImportFilters, unresolved_spec_is_silenced};
 use workspace_scope::{collect_unlisted_dependencies, drop_workspace_ignored};
 
 /// Return `true` if a virtual-module `prefix` from the active plugin set covers
@@ -1768,13 +1772,15 @@ fn accepts_ancestor_declaration(
 }
 
 /// Return `true` when every file that imports `dep` through the root
-/// declaration is a test/story or config file, and the dependency is not
-/// exclusively type-only imported.
+/// declaration is a test/story file or a test runner config file, and the
+/// dependency is not exclusively type-only imported.
+///
+/// Other config files (`astro.config.mjs`, `vite.config.ts`) configure the
+/// production build, so an import from such a file is production use.
 fn dependency_is_test_only(
     dep: &str,
     graph: &ModuleGraph,
     config: &ResolvedConfig,
-    test_globs: &globset::GlobSet,
     root_importers: &RootImporters<'_>,
 ) -> bool {
     let file_ids = root_importers.of(dep);
@@ -1794,7 +1800,7 @@ fn dependency_is_test_only(
                 .path
                 .strip_prefix(&config.root)
                 .unwrap_or(&module.path);
-            test_globs.is_match(relative) || is_config_file(&module.path)
+            is_test_or_spec_file(relative) || is_test_runner_config_file(&module.path)
         })
     })
 }
@@ -1812,10 +1818,6 @@ pub fn find_test_only_dependencies(
     config: &ResolvedConfig,
     workspaces: &[fallow_config::WorkspaceInfo],
 ) -> Vec<TestOnlyDependency> {
-    let Some(test_globs) = production_exclude_globset() else {
-        return Vec::new();
-    };
-
     let root_pkg_path = config.root.join("package.json");
     let root_pkg_content = read_pkg_json_content(&root_pkg_path);
     let workspace_names: FxHashSet<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
@@ -1833,7 +1835,7 @@ pub fn find_test_only_dependencies(
             continue;
         }
 
-        let test_only = dependency_is_test_only(&dep, graph, config, test_globs, &root_importers);
+        let test_only = dependency_is_test_only(&dep, graph, config, &root_importers);
         if test_only && !ignore_deps.suppresses(&dep) {
             let line = root_pkg_content
                 .as_deref()
@@ -2591,65 +2593,6 @@ fn manifest_chain_declares(
         || declares(root_deps)
 }
 
-/// Plumbing for the per-spec skip checks in `find_unresolved_imports`.
-struct UnresolvedImportFilters<'a> {
-    config: &'a ResolvedConfig,
-    virtual_prefixes: &'a [&'a str],
-    generated_patterns: &'a [&'a str],
-    generated_type_prefixes: &'a [&'a str],
-}
-
-/// Return `true` when an unresolvable specifier should be silenced (builtin,
-/// virtual, generated artifact, type-only generated prefix, or config-ignored).
-fn unresolved_spec_is_silenced(
-    spec: &str,
-    is_type_only: bool,
-    filters: &UnresolvedImportFilters<'_>,
-) -> bool {
-    if is_builtin_module(spec) || is_virtual_module(spec) {
-        return true;
-    }
-    if filters
-        .virtual_prefixes
-        .iter()
-        .any(|prefix| matches_virtual_prefix(prefix, spec))
-    {
-        return true;
-    }
-    if !filters.generated_patterns.is_empty() {
-        let bare = spec
-            .strip_suffix(".js")
-            .or_else(|| spec.strip_suffix(".ts"))
-            .unwrap_or(spec);
-        if filters
-            .generated_patterns
-            .iter()
-            .any(|pat| bare.ends_with(pat))
-        {
-            return true;
-        }
-    }
-    if is_type_only
-        && filters
-            .generated_type_prefixes
-            .iter()
-            .any(|prefix| spec.starts_with(prefix))
-    {
-        return true;
-    }
-    // Config compilation strips a single leading "./" from
-    // ignoreUnresolvedImports globs (see #1385), so the specifier must be
-    // stripped the same way or exact-path entries like "./generated/x.js"
-    // never match. The raw form is still tried so wildcard patterns that
-    // count the "./" segment keep matching.
-    let normalized_spec = spec.strip_prefix("./").unwrap_or(spec);
-    filters
-        .config
-        .ignore_unresolved_imports
-        .iter()
-        .any(|matcher| matcher.is_match(spec) || matcher.is_match(normalized_spec))
-}
-
 /// Resolve the anchor `(line, col)` plus the specifier column for an edge.
 ///
 /// The finding anchors on the source specifier (the string the user must
@@ -2718,6 +2661,7 @@ pub fn find_unresolved_imports(
     virtual_prefixes: &[&str],
     generated_patterns: &[&str],
     generated_type_prefixes: &[&str],
+    checked_alias_prefixes: &[CheckedAliasPrefix],
     line_offsets_by_file: &LineOffsetsMap<'_>,
 ) -> Vec<UnresolvedImport> {
     let filters = UnresolvedImportFilters {
@@ -2725,6 +2669,7 @@ pub fn find_unresolved_imports(
         virtual_prefixes,
         generated_patterns,
         generated_type_prefixes,
+        checked_alias_prefixes,
     };
     let mut gitignored = GitignoredTargets::new(&config.root);
     let mut unresolved = Vec::new();
@@ -2744,7 +2689,7 @@ pub fn find_unresolved_imports(
             if reported_specs.contains(spec.as_str()) {
                 continue;
             }
-            if unresolved_spec_is_silenced(spec, edge.is_type_only(), &filters) {
+            if unresolved_spec_is_silenced(spec, &module.path, edge.is_type_only(), &filters) {
                 continue;
             }
             if gitignored.ignores_missing_target(&module.path, spec) {

@@ -318,6 +318,7 @@
             "unrendered-components": true,
             "unused-component-props": true,
             "absent-component-props": true,
+            "constant-parameters": true,
             "unused-component-emits": true,
             "unused-component-inputs": true,
             "unused-component-outputs": true,
@@ -432,6 +433,9 @@
               "type": "boolean"
             },
             "absent-component-props": {
+              "type": "boolean"
+            },
+            "constant-parameters": {
               "type": "boolean"
             },
             "unused-component-emits": {

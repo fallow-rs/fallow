@@ -248,6 +248,7 @@
         "unrendered-components": "warn",
         "unused-component-props": "warn",
         "absent-component-props": "off",
+        "constant-parameters": "off",
         "unused-component-emits": "warn",
         "unused-component-inputs": "warn",
         "unused-component-outputs": "warn",
@@ -1231,7 +1232,7 @@
           ]
         },
         "typecheck": {
-          "description": "Type-check each survived mutant through the TypeScript-Go companion\nof `--type-aware`. A survivor that does not type-check becomes\n`compile_error` and does not count in the score. A survivor that\nremoves an optional-chaining link from a receiver whose type excludes\n`null` and `undefined` gets an advisory `equivalence_hint`. Its status\nand the score do not change. Unset or `false` checks no survivor.\n`--typecheck` turns the check on.",
+          "description": "Type-check each survived mutant through the TypeScript-Go companion\nof `--type-aware`. A survivor that does not type-check becomes\n`compile_error` and does not count in the score. A survivor that\nremoves an optional-chaining link or a nullish fallback from a\nreceiver whose type excludes `null` and `undefined` gets an advisory\n`equivalence_hint`. Its status\nand the score do not change. Unset or `false` checks no survivor.\n`--typecheck` turns the check on.",
           "type": [
             "boolean",
             "null"
@@ -1384,6 +1385,11 @@
           "description": "Opt-in. A lookaround negated, or `\\b` and `\\B` swapped.",
           "type": "string",
           "const": "regex-assertion"
+        },
+        {
+          "description": "Opt-in. `a ?? b` to `a`.",
+          "type": "string",
+          "const": "nullish-fallback"
         }
       ]
     },
@@ -1808,6 +1814,11 @@
         },
         "absent-component-props": {
           "description": "Used optional inputs absent from inspected callers. Requires manual review; off by default.",
+          "$ref": "#/$defs/Severity",
+          "default": "off"
+        },
+        "constant-parameters": {
+          "description": "Parameters, and option keys of object-pattern parameters, that each\nvisible call passes in one way. Requires manual review; off by\ndefault. A `warn` finding does not change the CLI exit code unless\n`--fail-on-issues` is set. When the rule is on, the dead-code count\ngate of the GitHub Action counts it unless `fail-on-issues` is\n`false`.",
           "$ref": "#/$defs/Severity",
           "default": "off"
         },
@@ -2741,6 +2752,17 @@
             }
           ]
         },
+        "constant-parameters": {
+          "description": "Optional override for constant parameters.",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
         "unused-component-emits": {
           "description": "Optional override for [`RulesConfig::unused_component_emits`].",
           "anyOf": [
@@ -3376,6 +3398,12 @@
           "minimum": 0,
           "default": 0
         },
+        "constantParameters": {
+          "description": "Baseline count of constant parameter review candidates. Absent while\nzero, so a baseline without the opt-in rule keeps its shape.",
+          "type": "integer",
+          "format": "uint",
+          "minimum": 0
+        },
         "analysisIdentity": {
           "description": "Compatibility identity for the analysis that produced these counts.\nMissing values in existing configs are treated as syntactic.",
           "$ref": "#/$defs/SemanticAnalysisIdentity",
@@ -3749,7 +3777,7 @@
       "description": "Value of `audit.gate`: which findings drive the `fallow audit` verdict.",
       "oneOf": [
         {
-          "description": "Fail only on findings the current changeset introduced, determined by\na base-snapshot attribution pass. The default.",
+          "description": "Fail only on findings the current changeset introduced, determined by\na base-snapshot attribution pass. An unused file or unused export\noutside the changed files counts when the base does not report it.\nThe default.",
           "type": "string",
           "const": "new-only"
         },

@@ -8,12 +8,13 @@ use rustc_hash::FxHashMap;
 
 use fallow_types::extract::{ModuleInfo, SinkLiteralValue, SinkShape, SinkSite};
 use fallow_types::results::{
-    SecurityCandidate, SecurityCandidateBoundary, SecurityCandidateSink, SecurityFinding,
-    SecurityFindingKind, SecuritySeverity, TraceHop, TraceHopRole,
+    AnalysisResults, SecurityCandidate, SecurityCandidateBoundary, SecurityCandidateSink,
+    SecurityFinding, SecurityFindingKind, SecuritySeverity, TraceHop, TraceHopRole,
 };
+use fallow_types::security_stable_id::SecurityStableIdInput;
 use fallow_types::suppress::IssueKind;
 
-use super::tainted_sink::{CategoryFilter, build_actions, is_low_value_anchor};
+use super::tainted_sink::{TaintedSinkContext, build_actions, is_low_value_anchor};
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 use crate::discover::FileId;
 use crate::graph::{ModuleGraph, ModuleNode};
@@ -30,18 +31,44 @@ enum SecretSignal {
     EntropyWithIdentifier,
 }
 
-#[must_use]
+impl SecretSignal {
+    /// The signal name in the stable id hash input. A test value that a real
+    /// credential of a known provider replaces gets a new id, so its old
+    /// verdict does not apply to the credential.
+    const fn stable_id_label(self) -> &'static str {
+        match self {
+            Self::Provider(provider) => provider,
+            Self::EntropyWithIdentifier => "entropy",
+        }
+    }
+}
+
+/// The hard-coded secret candidates of one module scan.
+#[derive(Debug, Default)]
+struct HardcodedSecretCandidates {
+    /// The reported candidates.
+    findings: Vec<SecurityFinding>,
+    /// Candidates that an inline suppression comment hides. The stable id
+    /// step counts them for the tiebreak ordinal only.
+    suppressed: Vec<SecurityFinding>,
+}
+
+/// Add the hard-coded secret candidates to `results.security_findings`,
+/// sorted by path, line and column. Candidates that an inline comment
+/// suppresses go to `results.suppressed_security_findings`.
 pub fn find_hardcoded_secret_candidates(
     graph: &ModuleGraph,
     modules: &[ModuleInfo],
     suppressions: &SuppressionContext<'_>,
     line_offsets_by_file: &LineOffsetsMap<'_>,
-    category_filter: &CategoryFilter,
-    root: &std::path::Path,
-) -> Vec<SecurityFinding> {
-    if !category_filter.explicitly_admits(CATEGORY_ID) {
-        return Vec::new();
+    context: &TaintedSinkContext<'_>,
+    results: &mut AnalysisResults,
+) {
+    let root = context.root;
+    if !context.category_filter.explicitly_admits(CATEGORY_ID) {
+        return;
     }
+    let mut candidates = HardcodedSecretCandidates::default();
 
     let modules_by_id: FxHashMap<FileId, &ModuleInfo> =
         modules.iter().map(|m| (m.file_id, m)).collect();
@@ -51,16 +78,18 @@ pub fn find_hardcoded_secret_candidates(
         root,
     };
 
-    let mut findings = Vec::new();
     for node in &graph.modules {
         let Some(module) = modules_by_id.get(&node.file_id) else {
             continue;
         };
-        collect_module_secret_candidates(&mut findings, node, module, &ctx);
+        collect_module_secret_candidates(&mut candidates, node, module, &ctx);
     }
 
-    sort_security_findings(&mut findings);
-    findings
+    sort_security_findings(&mut candidates.findings);
+    results.security_findings.extend(candidates.findings);
+    results
+        .suppressed_security_findings
+        .extend(candidates.suppressed);
 }
 
 struct HardcodedSecretContext<'a> {
@@ -70,7 +99,7 @@ struct HardcodedSecretContext<'a> {
 }
 
 fn collect_module_secret_candidates(
-    findings: &mut Vec<SecurityFinding>,
+    candidates: &mut HardcodedSecretCandidates,
     node: &ModuleNode,
     module: &ModuleInfo,
     ctx: &HardcodedSecretContext<'_>,
@@ -91,8 +120,16 @@ fn collect_module_secret_candidates(
     }
 
     for sink in &module.security_sinks {
-        if let Some(finding) = build_hardcoded_secret_finding(node, file_id, sink, ctx) {
-            findings.push(finding);
+        let Some(finding) = build_hardcoded_secret_finding(node, file_id, sink, ctx) else {
+            continue;
+        };
+        if ctx
+            .suppressions
+            .is_suppressed(file_id, finding.line, IssueKind::SecuritySink)
+        {
+            candidates.suppressed.push(finding);
+        } else {
+            candidates.findings.push(finding);
         }
     }
 }
@@ -111,13 +148,6 @@ fn build_hardcoded_secret_finding(
     };
     let signal = classify_secret_literal(&sink.callee_path, value)?;
     let (line, col) = byte_offset_to_line_col(ctx.line_offsets_by_file, file_id, sink.span_start);
-    if ctx
-        .suppressions
-        .is_suppressed(file_id, line, IssueKind::SecuritySink)
-    {
-        return None;
-    }
-
     Some(create_hardcoded_secret_finding(
         node, sink, signal, line, col,
     ))
@@ -149,6 +179,10 @@ fn create_hardcoded_secret_finding(
 
     SecurityFinding {
         finding_id: String::new(),
+        stable_finding_id: None,
+        stable_id_input: Some(SecurityStableIdInput::SecretSignal(
+            signal.stable_id_label().to_owned(),
+        )),
         kind: SecurityFindingKind::TaintedSink,
         category: Some(CATEGORY_ID.to_string()),
         cwe: Some(CWE_ID),

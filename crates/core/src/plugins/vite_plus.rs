@@ -14,7 +14,10 @@ const ENABLERS: &[&str] = &["vite-plus"];
 
 const CONFIG_PATTERNS: &[&str] = &["**/vite.config.{ts,js,mts,mjs,cts,cjs}"];
 
-const ALWAYS_USED: &[&str] = &["vite.config.{ts,js,mts,mjs,cts,cjs}"];
+/// Every config that the root run reads is an entry point. A workspace package
+/// can keep its own config while only the root manifest lists `vite-plus`, and
+/// the local files that such a config imports must stay reachable.
+const ALWAYS_USED: &[&str] = CONFIG_PATTERNS;
 
 const TOOLING_DEPENDENCIES: &[&str] = &["vite-plus"];
 

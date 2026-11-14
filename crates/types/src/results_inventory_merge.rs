@@ -8,6 +8,8 @@ impl AnalysisResults {
             .extend(parts.semantic_reachable_files);
         self.feature_flags.extend(parts.feature_flags);
         self.security_findings.extend(parts.security_findings);
+        self.suppressed_security_findings
+            .extend(parts.suppressed_security_findings);
         self.security_unresolved_edge_files += parts.security_unresolved_edge_files;
         self.security_unresolved_callee_sites += parts.security_unresolved_callee_sites;
         self.security_unresolved_callee_diagnostics
@@ -29,6 +31,8 @@ impl AnalysisResults {
         }
         self.react_component_intel
             .extend(parts.react_component_intel);
+        self.constant_parameter_candidates
+            .extend(parts.constant_parameter_candidates);
         for contract in parts.semantic_framework_contracts {
             if !self.semantic_framework_contracts.contains(&contract) {
                 self.semantic_framework_contracts.push(contract);

@@ -9,6 +9,126 @@ pub struct ResolvedTarget {
     pub target: String,
     /// The dry-run test ids that the target selects, sorted.
     pub test_ids: Vec<String>,
+    /// Why the target selects no test. `None` when `test_ids` is nonempty,
+    /// and also before the scheduler checks the target against the files of
+    /// the dry run.
+    pub unmatched: Option<Unmatched>,
+}
+
+/// Why a `--kill-matrix-for` target selects no test of the dry run.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unmatched {
+    /// The runner does not list the file of the target as a test file.
+    NotATestFile,
+    /// The runner lists the file, but the file reaches no planned code, so
+    /// the dry run does not run it. A test that runs the code only in a
+    /// child process is an example.
+    NoPlannedCode,
+    /// The dry run runs the file, but no test of the file has the target
+    /// id, or each test of the file has a duplicate id.
+    NoTest,
+}
+
+impl Unmatched {
+    /// The reason code of the report. `NoTest` has no code of its own:
+    /// `unmatched-target` describes it fully.
+    pub const fn reason(self) -> Option<&'static str> {
+        match self {
+            Self::NotATestFile => Some("not-a-test-file"),
+            Self::NoPlannedCode => Some("no-planned-code"),
+            Self::NoTest => None,
+        }
+    }
+
+    const fn describe(self) -> &'static str {
+        match self {
+            Self::NotATestFile => "the runner does not list the file as a test file",
+            Self::NoPlannedCode => {
+                "the file reaches no planned code, so the dry run does not run it"
+            }
+            Self::NoTest => "no test of the dry run has this id",
+        }
+    }
+}
+
+/// The test files that decide if a target can match: `runner` lists each
+/// test file of the runner, and `dry` the files that the dry run runs.
+#[derive(Clone, Copy)]
+pub(super) struct TargetFiles<'a> {
+    runner: &'a [String],
+    dry: &'a [String],
+}
+
+impl<'a> TargetFiles<'a> {
+    pub(super) const fn new(runner: &'a [String], dry: &'a [String]) -> Self {
+        Self { runner, dry }
+    }
+
+    /// Why `target` cannot select a test before the dry run runs. `None`
+    /// when the dry run runs the file of the target.
+    fn unmatched(self, target: &str) -> Option<Unmatched> {
+        let names = |files: &[String]| files.iter().any(|file| names_file(target, file));
+        if names(self.dry) {
+            None
+        } else if names(self.runner) {
+            Some(Unmatched::NoPlannedCode)
+        } else {
+            Some(Unmatched::NotATestFile)
+        }
+    }
+}
+
+/// True when `target` is `file` or a test id (`file::name`) of `file`.
+fn names_file(target: &str, file: &str) -> bool {
+    target
+        .strip_prefix(file)
+        .is_some_and(|rest| rest.is_empty() || rest.starts_with("::"))
+}
+
+/// Checks the targets of `config` before the dry run. The dry run can take
+/// a long time, so when the dry run runs the file of no target, the run
+/// stops before it. A run with at least one possible target goes on.
+pub(super) fn check_targets(
+    config: &ScheduleConfig,
+    caps: Capabilities,
+    files: TargetFiles<'_>,
+) -> Result<(), ScheduleError> {
+    if config.targets.is_empty() {
+        return Ok(());
+    }
+    if !caps.test_filter {
+        return Err(ScheduleError::TargetsNeedTestFilter);
+    }
+    let unmatched: Option<Vec<ResolvedTarget>> = config
+        .targets
+        .iter()
+        .map(|target| {
+            files.unmatched(target).map(|reason| ResolvedTarget {
+                target: target.clone(),
+                test_ids: Vec::new(),
+                unmatched: Some(reason),
+            })
+        })
+        .collect();
+    match unmatched {
+        Some(unmatched) => Err(ScheduleError::UnmatchedTargets(unmatched)),
+        None => Ok(()),
+    }
+}
+
+/// The message of the error for targets that select no test.
+pub(super) fn unmatched_message(targets: &[ResolvedTarget]) -> String {
+    let named: Vec<String> = targets
+        .iter()
+        .map(|target| {
+            let reason = target.unmatched.unwrap_or(Unmatched::NoTest).describe();
+            format!("{} ({reason})", target.target)
+        })
+        .collect();
+    format!(
+        "no --kill-matrix-for target selects a test of the dry run: {}; the dry run runs the test files that reach the planned code",
+        named.join(", ")
+    )
 }
 
 impl Worker<'_> {
@@ -154,18 +274,30 @@ pub(super) fn job_targets(context: &JobContext<'_>, tests: &[String]) -> Vec<Str
 }
 
 /// The test ids that the targets of `config` select, and the resolved
-/// targets in `outcome`. `None` outside target mode.
+/// targets in `outcome`. `None` outside target mode. A target that selects
+/// no test stays in `outcome` with the reason. The run stops only when no
+/// target selects a test.
 pub(super) fn config_targets(
     config: &ScheduleConfig,
     dry: &DryRunResult,
     caps: Capabilities,
+    files: TargetFiles<'_>,
     outcome: &mut ScheduleOutcome,
 ) -> Result<Option<FxHashSet<String>>, ScheduleError> {
     if config.targets.is_empty() {
         return Ok(None);
     }
     let (targets, _) = resolve_targets(&config.targets, &dry.tests, caps)?;
-    let (targets, ids) = without_duplicate_ids(targets, &reported_duplicates(dry))?;
+    let (mut targets, ids) = without_duplicate_ids(targets, &reported_duplicates(dry))?;
+    for target in targets
+        .iter_mut()
+        .filter(|target| target.test_ids.is_empty())
+    {
+        target.unmatched = Some(files.unmatched(&target.target).unwrap_or(Unmatched::NoTest));
+    }
+    if ids.is_empty() {
+        return Err(ScheduleError::UnmatchedTargets(targets));
+    }
     outcome.targets = targets;
     Ok(Some(ids))
 }
@@ -182,7 +314,7 @@ pub(super) fn duplicate_message(ids: &[String]) -> String {
 /// numbers tests that share a title in report order, so the kills of such a
 /// test can belong to its twin. A target that names a duplicate id is an
 /// error. A file target drops the duplicate ids and keeps its other tests;
-/// a file target with no test left is unmatched.
+/// a file target with no test left selects no test.
 fn without_duplicate_ids(
     targets: Vec<ResolvedTarget>,
     duplicate_ids: &[String],
@@ -196,27 +328,20 @@ fn without_duplicate_ids(
     if !named.is_empty() {
         return Err(ScheduleError::DuplicateTargetTestIds(named));
     }
-    let mut unmatched = Vec::new();
     let mut ids = FxHashSet::default();
     let mut kept = Vec::with_capacity(targets.len());
     for mut target in targets {
         target.test_ids.retain(|id| !duplicates.contains(id));
-        if target.test_ids.is_empty() {
-            unmatched.push(target.target.clone());
-        }
         ids.extend(target.test_ids.iter().cloned());
         kept.push(target);
     }
-    if unmatched.is_empty() {
-        Ok((kept, ids))
-    } else {
-        Err(ScheduleError::UnmatchedTargets(unmatched))
-    }
+    Ok((kept, ids))
 }
 
 /// Matches each `--kill-matrix-for` target against the tests of the dry run.
 /// A target selects each test whose id or file equals it. Gives the targets
-/// with their tests, and the union of the selected test ids.
+/// with their tests, and the union of the selected test ids. A target that
+/// selects no test has an empty `test_ids`.
 pub(super) fn resolve_targets(
     targets: &[String],
     tests: &[DryTest],
@@ -226,7 +351,6 @@ pub(super) fn resolve_targets(
         return Err(ScheduleError::TargetsNeedTestFilter);
     }
     let mut resolved = Vec::with_capacity(targets.len());
-    let mut unmatched = Vec::new();
     let mut ids = FxHashSet::default();
     for target in targets {
         let mut test_ids: Vec<String> = tests
@@ -236,18 +360,12 @@ pub(super) fn resolve_targets(
             .collect();
         test_ids.sort();
         test_ids.dedup();
-        if test_ids.is_empty() {
-            unmatched.push(target.clone());
-        }
         ids.extend(test_ids.iter().cloned());
         resolved.push(ResolvedTarget {
             target: target.clone(),
             test_ids,
+            unmatched: None,
         });
     }
-    if unmatched.is_empty() {
-        Ok((resolved, ids))
-    } else {
-        Err(ScheduleError::UnmatchedTargets(unmatched))
-    }
+    Ok((resolved, ids))
 }

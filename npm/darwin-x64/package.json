@@ -1,6 +1,6 @@
 {
   "name": "@fallow-cli/darwin-x64",
-  "version": "3.42.0",
+  "version": "3.43.0",
   "description": "Fallow CLI binary for macOS x64 (Intel)",
   "license": "MIT",
   "repository": {
@@ -15,8 +15,6 @@
   ],
   "files": [
     "fallow",
-    "fallow.sig",
-    "fallow-similar-code",
-    "fallow-similar-code.sig"
+    "fallow.sig"
   ]
 }

@@ -435,6 +435,8 @@ invariants in this file.
     the exception: the workflow stages it and step 11 approves it. The VS Code release is
     published by separate Marketplace and Open VSX jobs. A credential-free
     public verifier checks every exact target before the final release gate.
+    A separate job publishes `server.json` to the MCP Registry after the
+    approved `fallow` root is public.
 11. The run pauses for the npm approval, and the maintainer approval is
     what lets it continue. One review of the `release` environment starts
     `Publish to npm` and `Publish Rust crates` together. Monitor the run until
@@ -488,8 +490,12 @@ invariants in this file.
 
     After the approval the wait job downloads the public tarball and requires
     its sha256 to equal the digest of the staged tarball. Then both VSIX
-    publishers become ready, and the `release` environment asks for a second
-    review. Approve it right after the npm approval. Each VSIX publisher checks
+    publishers and `Publish to the MCP Registry` become ready, and the
+    `release` environment asks for a second review. One review starts all
+    three jobs. Approve it right after the npm approval. The MCP Registry job
+    publishes `server.json` with GitHub OIDC. The registry requires the public
+    `fallow` package of the version, so this job cannot start earlier. A rerun
+    of the job passes at once when the registry already lists the version. Each VSIX publisher checks
     the public tarball against its own copy of the staged digest again. Only
     then does it upload; a public tarball with other bytes fails the run
     instead. The
@@ -503,7 +509,8 @@ invariants in this file.
     legs to pass before `release-verified` (see [musl smoke](#musl-smoke)),
     and require the `Publish VS Code Marketplace
     targets`, `Publish Open VSX targets`, `Verify public VS Code registry
-    targets`, and `Release ready for signed tag` jobs to pass. The
+    targets`, `Publish to the MCP Registry`, and `Release ready for signed
+    tag` jobs to pass. The
     public verifier requires the exact universal plus six platform tuples and
     normalized payloads from both registries, without accepting a universal
     fallback.
@@ -774,9 +781,9 @@ runs. The gate fails when these conditions occur:
     Assets, tag and target are frozen at publication, but the title and body
     are not, so a failure there is repaired with `gh release edit --title` or
     `--notes-file` rather than by recreating anything.
-    Then verify every published crate, npm package, editor package, binary,
-    schema, documentation deployment, and companion contract from its real
-    public endpoint.
+    Then verify every published crate, npm package, editor package, MCP
+    Registry entry, binary, schema, documentation deployment, and companion
+    contract from its real public endpoint.
 13. Complete the required post-publication NAPI, Docker, rolling-tag, issue,
     discussion, and companion-repository follow-ups. Require their resulting
     `main` workflows to finish green and every touched worktree to be clean.

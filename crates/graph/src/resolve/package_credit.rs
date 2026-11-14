@@ -182,7 +182,7 @@ fn declared_package_name(specifier: &str) -> Option<String> {
 /// Expanded `paths` targets for `specifier` from the nearest tsconfig with
 /// `paths`, most specific pattern first, as `try_tsconfig_paths_from_config`
 /// tries them. The catch-all pattern `*` never counts as an alias.
-fn nearest_tsconfig_alias_targets(
+pub(super) fn nearest_tsconfig_alias_targets(
     ctx: &ResolveContext<'_>,
     from_file: &Path,
     specifier: &str,

@@ -3,7 +3,8 @@
 //! `--mutant`, else each `survived` and `no_coverage` mutant. Each selected
 //! file must still have the digest of the report, and the run allows a
 //! dirty worktree only for test files, so the result proves a change of the
-//! tests only.
+//! tests only. The report of the run merges the earlier results of the
+//! mutants that the recheck did not select (see `merge`).
 
 use std::collections::BTreeSet;
 use std::fmt::Write as _;
@@ -38,6 +39,7 @@ pub struct Selection {
     root: PathBuf,
     report_sha256: String,
     mutants: Vec<Selected>,
+    previous: merge::Previous,
 }
 
 impl Selection {
@@ -59,8 +61,21 @@ impl Selection {
         files.into_iter().map(|file| self.root.join(file)).collect()
     }
 
+    /// Gives each mutant of `report` that the recheck did not select its
+    /// result from the earlier report, while its file is unchanged, and
+    /// returns the recheck facts of the merged report.
+    pub fn merge_into(&self, report: &mut MutationReport) -> MutationRecheck {
+        let selected: rustc_hash::FxHashSet<&str> = self
+            .mutants
+            .iter()
+            .map(|mutant| mutant.mutant_id.as_str())
+            .collect();
+        let merged = merge::merge(report, &self.previous, &selected, &self.root);
+        self.section(report, merged)
+    }
+
     /// The recheck facts of `report`, the run of the selected mutants.
-    pub fn section(&self, report: &MutationReport) -> MutationRecheck {
+    fn section(&self, report: &MutationReport, merged: merge::Merged) -> MutationRecheck {
         let fails_on_original = !report.baseline_failures.is_empty();
         let mut mutants: Vec<MutationRecheckMutant> = self
             .mutants
@@ -101,6 +116,8 @@ impl Selection {
             tests_fail_on_original: count(MutationRecheckOutcome::TestsFailOnOriginal),
             unsettled: count(MutationRecheckOutcome::Unsettled),
             mutants,
+            carried: merged.carried,
+            stale_files: merged.stale_files,
         }
     }
 }
@@ -155,6 +172,7 @@ pub fn select(path: &Path, root: &Path, ids: &[String]) -> Result<Selection, Pro
     Ok(Selection {
         root: root.to_path_buf(),
         report_sha256: sha256_hex(&bytes),
+        previous: merge::Previous::parse(&bytes),
         mutants: chosen
             .into_iter()
             .map(|mutant| Selected {
@@ -255,8 +273,30 @@ pub fn render(recheck: &MutationRecheck) -> String {
     } else if recheck.unsettled == 0 {
         text.push_str("Each rechecked mutant is killed.\n");
     }
+    if recheck.carried > 0 {
+        let noun = if recheck.carried == 1 {
+            "mutant"
+        } else {
+            "mutants"
+        };
+        let _ = writeln!(
+            text,
+            "The report keeps the earlier result of the other {} {noun}, so its summary counts the full set. The recheck did not run them again: after you remove or change a test that killed them, run `fallow mutation` without `--recheck`.",
+            recheck.carried
+        );
+    }
+    if !recheck.stale_files.is_empty() {
+        let _ = writeln!(
+            text,
+            "The earlier results of these files do not apply, so the report leaves out their mutants: {}. Run `fallow mutation` on them for new results.",
+            recheck.stale_files.join(", ")
+        );
+    }
     text
 }
+
+#[path = "mutation_recheck_merge.rs"]
+mod merge;
 
 #[cfg(test)]
 #[path = "mutation_recheck_tests.rs"]

@@ -1,0 +1,14 @@
+{
+  "name": "biome-extends-packages",
+  "private": true,
+  "main": "src/index.ts",
+  "scripts": {
+    "lint": "biome check ."
+  },
+  "devDependencies": {
+    "@acme/biome-config": "1.0.0",
+    "@biomejs/biome": "2.0.0",
+    "biome-config-shared": "1.0.0",
+    "biome-config-unused-control": "1.0.0"
+  }
+}

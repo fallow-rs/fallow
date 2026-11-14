@@ -33,7 +33,7 @@ pub async fn run_check_changed(
             run_dead_code(&options).and_then(serialize_dead_code_programmatic_json)
         })
         .await?;
-        if let Some(result) = typed_tool_result(result) {
+        if let Some(result) = typed_tool_result("check_changed", result) {
             return Ok(result);
         }
     }

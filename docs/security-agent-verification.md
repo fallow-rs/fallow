@@ -30,7 +30,8 @@ See [`docs/output-schema.json`](output-schema.json) for the generated fallow out
 
 For each `security_findings[]` item, build a verifier packet from these fields:
 
-- `finding_id`, the stable correlation id
+- `finding_id`, the location-based correlation id
+- `stable_finding_id`, the line-independent correlation id for verdicts that must survive edits
 - `kind`, `category`, `cwe`, `path`, `line`, `col`, and `evidence`
 - `severity`, the review-priority tier, not a verified vulnerability verdict
 - `candidate.source_kind`, the deterministic untrusted-input kind or `null`
@@ -60,6 +61,59 @@ their verdicts must not be matched to fresh candidates by path and line alone.
 Stored review history does not transfer automatically, and SARIF consumers may
 close and reopen security alerts once. The legacy `fallowSecurity/v1` key is not
 emitted because it could merge distinct sinks again.
+
+An edit above a sink moves its line, so `finding_id` changes. Each finding also
+has a `stable_finding_id` of the form `sec1:<16 hex digits>`. It hashes the
+rule, the project-relative path and a name of the finding without its line:
+
+- A sink in script code: the exact source text of the full sink expression.
+  The extractor records the byte span of each sink in `SinkSite`: the full
+  assignment for an assignment sink, and the full call with all arguments for
+  a call sink. `fallow_extract::sink_identity_text` lexes the text of that
+  span with the Oxc parser and joins the token texts. Whitespace, comments,
+  CRLF line ends, a leading byte order mark and a trailing comma before a
+  closing bracket do not count. Text inside string, template and regex
+  literals counts as it is. For a JSX attribute sink such as
+  `dangerouslySetInnerHTML`, the span is the attribute and not the element.
+  Two such attributes with the same text share a base id, also on different
+  elements or next to different other attributes.
+- A hard-coded secret: the binding name and the detector signal, which is the
+  provider family (for example `Stripe key`) or `entropy`. The secret value
+  never enters the hash. A new value with the same signal keeps the id and
+  its verdict: one entropy value in place of another, or one key in place of
+  another key of the same provider. Only a new signal gives a new id, for
+  example a known provider key in place of an `entropy` test value.
+- A client-server leak: the project-relative paths of the first and the last
+  trace hop, and the names of the env secrets that the server module reads
+  (for example `process.env.DATABASE_PASSWORD`). A read of a different secret
+  gives a new id.
+
+Identical names in one file get the suffix `~1`, `~2` and so on, in source
+order. A sink that an inline suppression comment hides keeps its place in
+this order, so a suppression does not give its id to the next identical sink.
+An edit above the sink keeps the stable id. A reformat keeps it when the
+formatter changes only whitespace, comments, line breaks or trailing commas.
+A change to the sink text or a file rename gives a new stable id. A new quote
+style also changes the text of a string literal, so it gives a new id. A
+verdict for the old id then fails with exit code 2 and does not apply to
+another candidate.
+
+`stable_finding_id` is absent when fallow does not know the exact sink text.
+This is the case for a sink in Vue, Svelte or Angular template markup, because
+its span covers the tag or the attribute and not the sink expression. It is
+also the case for a span whose text does not lex as one complete expression,
+object property or JSX attribute without a syntax error, and for an anchor
+file that fallow cannot read. Key the verdict of such a finding by
+`finding_id`.
+
+The hash does not include the enclosing function. This is a deliberate
+trade-off: a finding has no scope information, and the sink text already
+separates most sinks. Two sinks with identical text in different functions of
+one file share a base id, and the second one gets the suffix `~1`. When an edit
+deletes the first sink, the second sink gets the base id, and the stored
+verdict of the deleted sink applies to it. A new identical sink above an
+existing one moves the suffixes in the same way. After an edit that adds or
+removes such a sink, review the remaining sinks with that text again.
 
 ## MCP Flow
 
@@ -189,7 +243,7 @@ The survivor renderer accepts either an array of verdict objects or this wrapper
 }
 ```
 
-The renderer rejects unknown verdict values, duplicate `finding_id` values, unsupported schema versions, a wrapper `verdicts` field that is not an array, and verdicts that do not match any candidate in the `--candidates` file.
+A verdict `finding_id` can name the candidate `finding_id` or its `stable_finding_id`. Store the stable id when a verdict file must stay valid across edits and rebases. The renderer rejects unknown verdict values, two verdicts for one candidate (also when one uses each id), unsupported schema versions, a wrapper `verdicts` field that is not an array, and verdicts that do not match any candidate in the `--candidates` file.
 
 Allowed `verdict` values:
 
@@ -221,7 +275,7 @@ fallow security survivors \
   --format json
 ```
 
-The renderer emits `kind: "security-survivors"` with `survivors` and `needs_human_review` objects keyed by `finding_id`, plus `summary.unverdicted` for candidates with no matching verdict. Human output says "verifier-retained candidate" and keeps the boundary clear: fallow did not prove a vulnerability. In CI, add `--require-verdict-for-each-candidate` so an incomplete verdict file exits 2 instead of silently rendering a partial review.
+The renderer emits `kind: "security-survivors"` with `survivors` and `needs_human_review` objects keyed by the candidate `finding_id`, plus `summary.unverdicted` for candidates with no matching verdict. Human output says "verifier-retained candidate" and keeps the boundary clear: fallow did not prove a vulnerability. In CI, add `--require-verdict-for-each-candidate` so an incomplete verdict file exits 2 instead of silently rendering a partial review.
 
 Carry through:
 
@@ -232,7 +286,7 @@ Carry through:
 - `taint_flow` or `reachability_trace`
 - verifier `impact`, `reason`, and `fix_direction`
 
-Do not rewrite fallow's original JSON with verdict fields. Store verifier output beside it, keyed by `finding_id`, so reruns can correlate after a rebase without changing the fallow contract.
+Do not rewrite fallow's original JSON with verdict fields. Store verifier output beside it, keyed by `stable_finding_id`, so reruns can correlate after a rebase without changing the fallow contract. When a finding has no `stable_finding_id` (a template markup sink, or an anchor file that fallow could not read), key its verdict by `finding_id`.
 
 ## Rendering Blind Spots
 

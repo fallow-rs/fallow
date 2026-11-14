@@ -73,6 +73,9 @@ pub enum Operator {
     /// (`(?=` and `(?!` swap, `(?<=` and `(?<!` swap), or `\b` and `\B`
     /// swap.
     RegexAssertion,
+    /// Opt-in. `a ?? b` becomes `a`: the fallback of a nullish coalescing
+    /// expression is removed.
+    NullishFallback,
 }
 
 impl Operator {
@@ -94,7 +97,7 @@ impl Operator {
     ];
 
     /// The operators that run only when a run names them.
-    pub const OPT_IN: [Self; 9] = [
+    pub const OPT_IN: [Self; 10] = [
         Self::BlockStatement,
         Self::ArrayLiteral,
         Self::ObjectLiteral,
@@ -104,11 +107,12 @@ impl Operator {
         Self::ThrowStatement,
         Self::RegexConstructor,
         Self::RegexAssertion,
+        Self::NullishFallback,
     ];
 
     /// Every operator, in a stable order: the default set, then the opt-in
     /// set.
-    pub const ALL: [Self; 22] = [
+    pub const ALL: [Self; 23] = [
         Self::ArithmeticOperator,
         Self::RelationalOperator,
         Self::LogicalOperator,
@@ -131,6 +135,7 @@ impl Operator {
         Self::ThrowStatement,
         Self::RegexConstructor,
         Self::RegexAssertion,
+        Self::NullishFallback,
     ];
 
     /// True for an operator of [`Operator::DEFAULT`].
@@ -163,6 +168,7 @@ impl Operator {
             Self::ThrowStatement => "throw-statement",
             Self::RegexConstructor => "regex-constructor",
             Self::RegexAssertion => "regex-assertion",
+            Self::NullishFallback => "nullish-fallback",
         }
     }
 

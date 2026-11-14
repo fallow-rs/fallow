@@ -86,6 +86,7 @@ fn no_filters() -> IssueFilters {
         unrendered_components: false,
         unused_component_props: false,
         absent_component_props: false,
+        constant_parameters: false,
         unused_component_emits: false,
         unused_component_inputs: false,
         unused_component_outputs: false,
@@ -696,6 +697,7 @@ fn apply_all_filter_types_simultaneously() {
         unrendered_components: true,
         unused_component_props: true,
         absent_component_props: true,
+        constant_parameters: true,
         unused_component_emits: true,
         unused_component_inputs: true,
         unused_component_outputs: true,
@@ -767,4 +769,21 @@ fn apply_unused_deps_clears_optional_and_type_only() {
     assert!(results.unused_optional_dependencies.is_empty());
     assert!(results.type_only_dependencies.is_empty());
     assert_eq!(results.unused_exports.len(), 1);
+}
+
+#[test]
+fn type_aware_summary_names_the_constant_parameter_evidence() {
+    let meta = fallow_types::envelope::TypeAwareMeta {
+        call_evidence: Some(fallow_types::envelope::TypeAwareCallEvidenceMeta {
+            default_candidates: 3,
+            method_candidates: 2,
+            findings: 1,
+            ..fallow_types::envelope::TypeAwareCallEvidenceMeta::default()
+        }),
+        ..fallow_types::envelope::TypeAwareMeta::default()
+    };
+    assert!(
+        format_type_aware_summary(&meta)
+            .ends_with("; 5 constant-parameter candidates checked, 1 finding with type evidence")
+    );
 }

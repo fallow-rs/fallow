@@ -11,6 +11,7 @@ import {
   compareWithMain,
   followMain,
   ghMainReaders,
+  gitHeadReader,
   isChangelogFragment,
   parseGhChecks,
   parseGhMergeable,
@@ -22,6 +23,7 @@ import {
   waitForChecks,
   waitForCommitRuns,
   waitForPullRequestChecks,
+  withRateLimitWait,
 } from "./ship-wait-checks.mjs";
 
 const SCRIPT = fileURLToPath(new URL("./ship-wait-checks.mjs", import.meta.url));
@@ -536,6 +538,135 @@ test("a suspended machine does not use up the error window", async () => {
   assert.equal(result.status, "pass");
   assert.equal(script.reads(), 4);
   assert.equal(warnings.length, 3);
+});
+
+test("a rate-limited read waits until the reset and does not use the error window", async () => {
+  const limited = { ok: false, error: "API rate limit exceeded", retryAtMs: 45 * MINUTE_MS };
+  const script = scripted([limited, { ok: true, checks: [check("lint", "pass")] }]);
+  const sleeps = [];
+  const warnings = [];
+
+  const result = await waitForChecks({
+    ...script,
+    sleep: async (ms) => {
+      sleeps.push(ms);
+      await script.sleep(ms);
+    },
+    minChecks: 1,
+    intervalMs: 30 * 1000,
+    timeoutMs: 60 * MINUTE_MS,
+    warn: (line) => warnings.push(line),
+  });
+
+  assert.equal(result.status, "pass");
+  assert.deepEqual(sleeps, [45 * MINUTE_MS]);
+  assert.deepEqual(warnings, [
+    "Read of the checks failed: API rate limit exceeded. Next read in 2700 seconds, after the rate limit resets.",
+  ]);
+});
+
+test("a rate-limit reset after the deadline ends the wait with a timeout", async () => {
+  const limited = { ok: false, error: "API rate limit exceeded", retryAtMs: 45 * MINUTE_MS };
+  const script = scripted([limited]);
+  const warnings = [];
+
+  const result = await waitForChecks({
+    ...script,
+    minChecks: 1,
+    intervalMs: 30 * 1000,
+    timeoutMs: 10 * MINUTE_MS,
+    warn: (line) => warnings.push(line),
+  });
+
+  assert.equal(result.status, "timeout");
+  assert.equal(script.reads(), 1);
+  assert.deepEqual(warnings, [
+    "Read of the checks failed: API rate limit exceeded. The rate limit resets after the end of the wait.",
+  ]);
+});
+
+test("a rate-limit wait between failed reads does not use up the error window", async () => {
+  const limited = { ok: false, error: "API rate limit exceeded", retryAtMs: 45 * MINUTE_MS };
+  const script = scripted([
+    failure,
+    limited,
+    failure,
+    { ok: true, checks: [check("lint", "pass")] },
+  ]);
+
+  const result = await waitForChecks({
+    ...script,
+    minChecks: 1,
+    intervalMs: 30 * 1000,
+    timeoutMs: 120 * MINUTE_MS,
+    warn: () => {},
+  });
+
+  assert.equal(result.status, "pass");
+  assert.equal(script.reads(), 4);
+});
+
+test("withRateLimitWait adds the reset time only to a rate-limit error", () => {
+  let resets = 0;
+  const readReset = () => {
+    resets += 1;
+    return { ok: true, resetMs: 1_000_000 };
+  };
+  const limited = withRateLimitWait(
+    () => ({ ok: false, error: "HTTP 403: API rate limit exceeded for user ID 1." }),
+    readReset,
+  );
+  const other = withRateLimitWait(() => ({ ok: false, error: "HTTP 504" }), readReset);
+  const passing = withRateLimitWait(() => ({ ok: true, checks: [] }), readReset);
+  const graphql = withRateLimitWait(
+    () => ({ ok: false, error: "GraphQL: API rate limit already exceeded for user ID 1." }),
+    readReset,
+  );
+  const noReset = withRateLimitWait(
+    () => ({ ok: false, error: "API rate limit exceeded" }),
+    () => ({ ok: false, error: "HTTP 500" }),
+  );
+
+  assert.deepEqual(limited(), {
+    ok: false,
+    error: "HTTP 403: API rate limit exceeded for user ID 1.",
+    retryAtMs: 1_000_000,
+  });
+  assert.equal(graphql().retryAtMs, 1_000_000);
+  assert.deepEqual(other(), { ok: false, error: "HTTP 504" });
+  assert.deepEqual(passing(), { ok: true, checks: [] });
+  assert.deepEqual(noReset(), { ok: false, error: "API rate limit exceeded" });
+  assert.equal(resets, 2);
+});
+
+test("the head reader fetches again when another fetch holds the ref lock", () => {
+  const lock =
+    "error: cannot lock ref 'refs/remotes/origin/main': is at 2090fcd but expected 4f93d20";
+  const calls = [];
+  const fetches = [
+    { status: 1, stderr: lock },
+    { status: 0, stderr: "" },
+  ];
+  const git = (args) => {
+    calls.push(args[0]);
+    if (args[0] === "fetch") {
+      return fetches.shift();
+    }
+    return { status: 0, stdout: "2090fcdaf2eadca43e7d37452f17add066d57785\n", stderr: "" };
+  };
+
+  assert.deepEqual(gitHeadReader(git)(), {
+    ok: true,
+    sha: "2090fcdaf2eadca43e7d37452f17add066d57785",
+  });
+  assert.deepEqual(calls, ["fetch", "fetch", "rev-parse"]);
+});
+
+test("the head reader reports a fetch that keeps failing on the ref lock", () => {
+  const lock = "error: cannot lock ref 'refs/remotes/origin/main': is at a but expected b";
+  const git = () => ({ status: 1, stderr: lock });
+
+  assert.deepEqual(gitHeadReader(git)(), { ok: false, error: lock });
 });
 
 test("a good read resets the backoff and the error window", async () => {
@@ -1177,6 +1308,8 @@ test(
       for (const [older, newer] of [
         ["CANCELLED", "SUCCESS"],
         ["SUCCESS", "CANCELLED"],
+        // A label event starts a new run of a job that failed before.
+        ["FAILURE", "SUCCESS"],
       ]) {
         const result = runWithFakeGh(
           {

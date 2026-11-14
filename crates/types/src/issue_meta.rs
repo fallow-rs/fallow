@@ -503,6 +503,19 @@ pub const ISSUE_KIND_META: &[IssueKindMeta] = &[
         docs_category: "framework",
     },
     IssueKindMeta {
+        kind: Some(IssueKind::ConstantParameter),
+        code: "constant-parameter",
+        aliases: &["constant-parameters"],
+        label: "Constant Parameters",
+        config_key: Some("constant-parameters"),
+        filter_flag: Some("--constant-parameters"),
+        mcp_issue_type: Some("constant-parameters"),
+        suppress_token: Some("constant-parameter"),
+        suppress_file_level: false,
+        lsp: true,
+        docs_category: "source",
+    },
+    IssueKindMeta {
         kind: Some(IssueKind::UnusedComponentEmit),
         code: "unused-component-emit",
         aliases: &["unused-component-emits"],
@@ -1615,6 +1628,17 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
         counts_in_total: true,
     },
     IssueResultMeta {
+        code: "constant-parameter",
+        sarif_description: "Each visible call passes this parameter in one way; review the parameter and its callers manually.",
+        meta_description: "Each visible call passes this parameter in one way; review the parameter and its callers manually.",
+        meta_docs_path: "explanations/dead-code#constant-parameters",
+        meta_name: "Constant parameters",
+        summary_label: "Constant parameters",
+        docs_anchor: "constant-parameters",
+        result_key: "constant_parameters",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
         code: "unused-component-emit",
         sarif_description: "A Vue <script setup> defineEmits event is emitted nowhere in its own component",
         meta_description: "A Vue script setup defineEmits event is emitted nowhere in its own component.",
@@ -1900,16 +1924,6 @@ pub fn issue_result_meta_by_code(code: &str) -> Option<&'static IssueResultMeta>
     ISSUE_RESULT_META.iter().find(|meta| meta.code == code)
 }
 
-/// SARIF rule ids used by CI formatters for a canonical issue code.
-#[must_use]
-pub fn issue_sarif_rule_ids(code: &str) -> Vec<String> {
-    let mut ids = vec![format!("fallow/{code}")];
-    if code == "stale-suppression" {
-        ids.push("fallow/missing-suppression-reason".to_string());
-    }
-    ids
-}
-
 /// Short SARIF rule description for a rule id emitted by dead-code output.
 #[must_use]
 pub fn issue_sarif_rule_description(rule_id: &str) -> Option<&'static str> {
@@ -1918,22 +1932,6 @@ pub fn issue_sarif_rule_description(rule_id: &str) -> Option<&'static str> {
         return Some("Suppression comment omits a required reason");
     }
     issue_result_meta_by_code(code).map(|meta| meta.sarif_description)
-}
-
-/// CodeClimate check names used by CI formatters for a canonical issue code.
-#[must_use]
-pub fn issue_codeclimate_check_names(code: &str) -> Vec<String> {
-    if !CODECLIMATE_RESULT_CODES.contains(&code) {
-        return Vec::new();
-    }
-    issue_sarif_rule_ids(code)
-}
-
-/// Documentation anchor under `/explanations/dead-code` for a canonical issue
-/// code.
-#[must_use]
-pub fn issue_docs_anchor(code: &str) -> Option<&'static str> {
-    issue_result_meta_by_code(code).map(|meta| meta.docs_anchor)
 }
 
 /// Published TypeScript alias policy for backwards-compatible bare names.
@@ -1945,20 +1943,9 @@ pub fn issue_ts_alias(code: &str) -> Option<TsAliasMeta> {
         .map(|meta| meta.alias)
 }
 
-/// Rows exposed by the LSP issue-type capability.
-pub fn diagnostic_issue_metas() -> impl Iterator<Item = &'static IssueKindMeta> {
-    ISSUE_KIND_META.iter().filter(|meta| meta.lsp)
-}
-
-/// Rows that map to a serialized `AnalysisResults` array.
-pub fn result_issue_metas() -> impl Iterator<Item = &'static IssueResultMeta> {
-    ISSUE_RESULT_META.iter()
-}
-
-/// Rows whose serialized `AnalysisResults` array contributes to `total_issues`.
-pub fn counted_result_issue_metas() -> impl Iterator<Item = &'static IssueResultMeta> {
-    result_issue_metas().filter(|meta| meta.counts_in_total)
-}
+#[path = "issue_meta_lookup.rs"]
+mod lookup;
+pub use lookup::*;
 
 /// Canonical issue codes `fallow fix` can rewrite automatically. Shared by the
 /// `fallow schema` `issue_types` rows (`fixable`) and the `fallow://issue-types`

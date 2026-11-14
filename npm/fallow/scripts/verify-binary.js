@@ -31,7 +31,10 @@ const crypto = require("node:crypto");
 const fs = require("node:fs");
 const https = require("node:https");
 const path = require("node:path");
-const { getPlatformPackage } = require("./platform-package");
+const {
+  getPlatformPackageCandidates,
+  resolveInstalledPlatformPackage,
+} = require("./platform-package");
 
 const GITHUB_REPO = "fallow-rs/fallow";
 const DIGEST_TIMEOUT_MS = 10000;
@@ -296,16 +299,10 @@ function binaryTargetsForPlatform(platformId) {
   // and tests can synthesize a Windows verify without running on Windows.
   const isWindows = typeof platformId === "string" && platformId.startsWith("win32");
   const ext = isWindows ? ".exe" : "";
-  // The platform package ships the multicall CLI plus the local-only
-  // similar-code provider. Both are signed and digest-pinned. Verifying them
-  // together keeps the Rust sibling lookup free of project or PATH overrides.
-  return [
-    { binary: `fallow${ext}`, asset: `fallow-${platformId}${ext}` },
-    {
-      binary: `fallow-similar-code${ext}`,
-      asset: `fallow-similar-code-${platformId}${ext}`,
-    },
-  ];
+  // The platform package ships only the multicall CLI. The similar-code
+  // provider ships in the `fallow-similar-code` package, whose own verifier
+  // checks it.
+  return [{ binary: `fallow${ext}`, asset: `fallow-${platformId}${ext}` }];
 }
 
 function isSkipRequested(env = process.env) {
@@ -313,17 +310,24 @@ function isSkipRequested(env = process.env) {
   return v === "1" || v === "true" || v === "yes";
 }
 
-function currentPlatformPackageName() {
-  if (process.platform !== "linux") {
-    return getPlatformPackage(process.platform, process.arch);
-  }
+// The same selection as the launcher in run-binary.js, so that verification
+// checks the binary that the launcher runs.
+function currentPlatformPackageName(resolveFrom) {
   let libcFamily;
-  try {
-    libcFamily = require("detect-libc").familySync();
-  } catch {
-    libcFamily = undefined;
+  if (process.platform === "linux") {
+    try {
+      libcFamily = require("detect-libc").familySync();
+    } catch {
+      libcFamily = undefined;
+    }
   }
-  return getPlatformPackage(process.platform, process.arch, libcFamily);
+  const candidates = getPlatformPackageCandidates(process.platform, process.arch, libcFamily);
+  if (candidates.length === 0) return null;
+  const options = resolveFrom ? { paths: [resolveFrom] } : undefined;
+  const installed = resolveInstalledPlatformPackage(candidates, (request) =>
+    require.resolve(request, options),
+  );
+  return installed ? installed.pkg : candidates[0];
 }
 
 function readManifestForPackage(manifestPath, pkg) {
@@ -366,7 +370,7 @@ function resolvePlatformPackageForVerify(opts) {
     };
   }
 
-  const pkg = currentPlatformPackageName();
+  const pkg = currentPlatformPackageName(opts.resolveFrom);
   if (!pkg) {
     return {
       ok: false,

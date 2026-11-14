@@ -32,7 +32,7 @@ const FINGERPRINT: SourceFingerprint = SourceFingerprint {
 /// Encodes the cache entry of `module`. The entry stamps the wall-clock time
 /// for eviction, so the stamp is cleared: two calls can fall in two seconds.
 fn cache_bytes(module: &fallow_extract::ModuleInfo) -> Vec<u8> {
-    let mut cached = module_to_cached(module, FINGERPRINT, true);
+    let mut cached = module_to_cached(module, FINGERPRINT, true, true);
     cached.last_seen_secs = 0;
     bitcode::encode(&cached)
 }

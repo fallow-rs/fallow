@@ -18430,3 +18430,69 @@ fn element_of_typed_parameter_field_records_typed_property_path() {
         "a string key reads the property `key`, found: {paths:?}"
     );
 }
+
+fn spawn_command_sink(source: &str) -> fallow_types::extract::SinkSite {
+    let info = parse(&format!(
+        "import {{ spawn }} from \"node:child_process\";\n{source}"
+    ));
+    info.security_sinks
+        .into_iter()
+        .find(|sink| sink.callee_path.ends_with("spawn") && sink.arg_index == 0)
+        .expect("spawn command sink captured")
+}
+
+fn spawn_command_options(source: &str) -> Option<fallow_types::extract::SinkCallOptions> {
+    spawn_command_sink(source)
+        .call_options
+        .map(|options| *options)
+}
+
+#[test]
+fn security_spawn_command_carries_options_metadata() {
+    let keys_of = |source: &str| {
+        spawn_command_options(source).map(|options| (options.keys, options.keys_complete))
+    };
+
+    assert_eq!(keys_of("spawn(cmd);"), Some((Vec::new(), true)));
+    assert_eq!(keys_of("spawn(cmd, [\"x\"]);"), Some((Vec::new(), true)));
+    assert_eq!(
+        keys_of("spawn(cmd, [], { shell: false, stdio: \"inherit\" });"),
+        Some((vec!["shell".to_string(), "stdio".to_string()], true))
+    );
+    assert_eq!(
+        keys_of("spawn(cmd, { shell: true });"),
+        Some((vec!["shell".to_string()], true))
+    );
+    assert_eq!(
+        keys_of("spawn(cmd, args);"),
+        Some((Vec::new(), false)),
+        "a second argument variable can be the options object"
+    );
+    assert_eq!(
+        keys_of("spawn(cmd, args, options);"),
+        Some((Vec::new(), false))
+    );
+    assert_eq!(
+        keys_of("spawn(cmd, [], { ...base });"),
+        Some((Vec::new(), false))
+    );
+    assert_eq!(
+        keys_of("spawn(cmd, [], { shell: false, shell: true });"),
+        Some((vec!["shell".to_string()], false)),
+        "the last duplicate key wins at runtime, so the options stay unknown"
+    );
+    assert_eq!(
+        keys_of("spawn(cmd, [], { shell: false, shell: useShell });"),
+        Some((vec!["shell".to_string()], false))
+    );
+
+    let options =
+        spawn_command_options("spawn(cmd, [], { shell: false });").expect("spawn options captured");
+    assert_eq!(
+        options.properties,
+        vec![fallow_types::extract::SinkObjectProperty {
+            key: "shell".to_string(),
+            value: SinkLiteralValue::Boolean(false),
+        }]
+    );
+}

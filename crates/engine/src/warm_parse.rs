@@ -105,6 +105,7 @@ struct WarmEntry {
     /// The wall-clock time before the parse read `fingerprints`.
     read_started_ns: u64,
     has_complexity: bool,
+    has_call_facts: bool,
     retained_bytes: u64,
     parse: WarmParse,
 }
@@ -245,16 +246,24 @@ impl WarmParseStore {
         self.lock().is_empty()
     }
 
-    /// The kept parse for `key`, when it has complexity or the caller needs
-    /// none. A hit becomes the most recently used entry.
-    pub(crate) fn get(&self, key: &WarmParseKey<'_>, need_complexity: bool) -> Option<WarmParse> {
+    /// The kept parse for `key`, when it has the complexity and the call
+    /// facts that the caller needs. A hit becomes the most recently used
+    /// entry.
+    pub(crate) fn get(
+        &self,
+        key: &WarmParseKey<'_>,
+        need_complexity: bool,
+        need_call_facts: bool,
+    ) -> Option<WarmParse> {
         if !key.is_reusable() {
             return None;
         }
         let entries = self.lock();
-        let entry = entries
-            .iter()
-            .find(|entry| entry.matches(key) && (entry.has_complexity || !need_complexity))?;
+        let entry = entries.iter().find(|entry| {
+            entry.matches(key)
+                && (entry.has_complexity || !need_complexity)
+                && (entry.has_call_facts || !need_call_facts)
+        })?;
         let kept_read_started_ns = entry.read_started_ns;
         let parse = entry.parse.clone();
         drop(entries);
@@ -284,7 +293,13 @@ impl WarmParseStore {
     /// Keep the parse for `key`. It replaces an older parse of the same file
     /// list, and the least recently used entries leave the store until it is
     /// within its limits.
-    pub(crate) fn put(&self, key: &WarmParseKey<'_>, has_complexity: bool, parse: WarmParse) {
+    pub(crate) fn put(
+        &self,
+        key: &WarmParseKey<'_>,
+        has_complexity: bool,
+        has_call_facts: bool,
+        parse: WarmParse,
+    ) {
         let retained_bytes = key.retained_bytes();
         let keep = key.is_reusable()
             && self.limits.max_entries > 0
@@ -297,6 +312,7 @@ impl WarmParseStore {
             fingerprints: key.fingerprints.to_vec(),
             read_started_ns: key.read_started_ns,
             has_complexity,
+            has_call_facts,
             retained_bytes,
             parse,
         });
@@ -400,24 +416,32 @@ mod tests {
         let root = Path::new("/project");
         let listed = files(&["/project/a.ts", "/project/b.ts"]);
         let marks = fingerprints(2, 5);
-        store.put(&key(root, &listed, &marks), true, parse());
+        store.put(&key(root, &listed, &marks), true, true, parse());
 
-        assert!(store.get(&key(root, &listed, &marks), true).is_some());
+        assert!(
+            store
+                .get(&key(root, &listed, &marks), true, false)
+                .is_some()
+        );
 
         let mut edited = marks.clone();
         edited[1].mtime_ns += 1;
-        assert!(store.get(&key(root, &listed, &edited), false).is_none());
+        assert!(
+            store
+                .get(&key(root, &listed, &edited), false, false)
+                .is_none()
+        );
 
         let added = files(&["/project/a.ts", "/project/b.ts", "/project/c.ts"]);
         assert!(
             store
-                .get(&key(root, &added, &fingerprints(3, 5)), false)
+                .get(&key(root, &added, &fingerprints(3, 5)), false, false)
                 .is_none()
         );
 
         let mut other_config = key(root, &listed, &marks);
         other_config.cache_config_hash = 8;
-        assert!(store.get(&other_config, false).is_none());
+        assert!(store.get(&other_config, false, false).is_none());
     }
 
     #[test]
@@ -426,10 +450,34 @@ mod tests {
         let root = Path::new("/project");
         let listed = files(&["/project/a.ts"]);
         let marks = fingerprints(1, 5);
-        store.put(&key(root, &listed, &marks), false, parse());
+        store.put(&key(root, &listed, &marks), false, true, parse());
 
-        assert!(store.get(&key(root, &listed, &marks), true).is_none());
-        assert!(store.get(&key(root, &listed, &marks), false).is_some());
+        assert!(
+            store
+                .get(&key(root, &listed, &marks), true, false)
+                .is_none()
+        );
+        assert!(
+            store
+                .get(&key(root, &listed, &marks), false, false)
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn a_parse_without_call_facts_does_not_serve_a_request_for_them() {
+        let store = WarmParseStore::new(WarmParseLimits::default());
+        let root = Path::new("/project");
+        let listed = files(&["/project/a.ts"]);
+        let marks = fingerprints(1, 5);
+        store.put(&key(root, &listed, &marks), true, false, parse());
+
+        assert!(store.get(&key(root, &listed, &marks), true, true).is_none());
+        assert!(
+            store
+                .get(&key(root, &listed, &marks), true, false)
+                .is_some()
+        );
     }
 
     #[test]
@@ -438,10 +486,14 @@ mod tests {
         let root = Path::new("/project");
         let listed = files(&["/project/a.ts"]);
         let marks = [SourceFingerprint::new(10, 5)];
-        store.put(&key(root, &listed, &marks), true, parse());
+        store.put(&key(root, &listed, &marks), true, true, parse());
 
         assert!(store.is_empty());
-        assert!(store.get(&key(root, &listed, &marks), false).is_none());
+        assert!(
+            store
+                .get(&key(root, &listed, &marks), false, false)
+                .is_none()
+        );
     }
 
     #[test]
@@ -456,20 +508,20 @@ mod tests {
             read_started_ns: 20,
             ..key(project.path(), &listed, &marks)
         };
-        store.put(&recent, true, parse());
+        store.put(&recent, true, true, parse());
 
         assert_eq!(store.len(), 1);
         assert!(
-            store.get(&recent, false).is_none(),
+            store.get(&recent, false, false).is_none(),
             "a readable file without a matching kept module is not reused"
         );
         let settled = WarmParseKey {
             read_started_ns: u64::MAX,
             ..recent
         };
-        store.put(&settled, true, parse());
+        store.put(&settled, true, true, parse());
         assert!(
-            store.get(&settled, false).is_some(),
+            store.get(&settled, false, false).is_some(),
             "a settled fingerprint needs no content check"
         );
     }
@@ -498,9 +550,9 @@ mod tests {
             ..key(project.path(), &listed, &marks)
         };
         let store = WarmParseStore::new(WarmParseLimits::default());
-        store.put(&recent, true, kept);
+        store.put(&recent, true, true, kept);
 
-        assert!(store.get(&recent, false).is_some());
+        assert!(store.get(&recent, false, false).is_some());
     }
 
     /// A hit that checked the content of an unsettled file proves the
@@ -516,14 +568,14 @@ mod tests {
             ..key(project.path(), &listed, &marks)
         };
         let store = WarmParseStore::new(WarmParseLimits::default());
-        store.put(&recent, true, kept);
+        store.put(&recent, true, true, kept);
 
         let later = WarmParseKey {
             read_started_ns: 20 + TIMESTAMP_SETTLE_WINDOW_NS,
             ..recent
         };
         assert!(
-            store.get(&later, false).is_some(),
+            store.get(&later, false, false).is_some(),
             "the kept content matches"
         );
         assert_eq!(
@@ -537,7 +589,7 @@ mod tests {
         // explain a hit here.
         std::fs::write(&listed[0].path, "export const b = 1;\n").expect("rewrite source");
         assert!(
-            store.get(&later, false).is_some(),
+            store.get(&later, false, false).is_some(),
             "a settled entry needs no content read"
         );
     }
@@ -549,11 +601,15 @@ mod tests {
         let listed = files(&["/project/a.ts"]);
         let before = fingerprints(1, 5);
         let after = fingerprints(1, 6);
-        store.put(&key(root, &listed, &before), true, parse());
-        store.put(&key(root, &listed, &after), true, parse());
+        store.put(&key(root, &listed, &before), true, true, parse());
+        store.put(&key(root, &listed, &after), true, true, parse());
 
         assert_eq!(store.len(), 1);
-        assert!(store.get(&key(root, &listed, &after), true).is_some());
+        assert!(
+            store
+                .get(&key(root, &listed, &after), true, false)
+                .is_some()
+        );
     }
 
     #[test]
@@ -566,24 +622,39 @@ mod tests {
         let first = files(&["/first/a.ts"]);
         let second = files(&["/second/a.ts"]);
         let third = files(&["/third/a.ts"]);
-        store.put(&key(Path::new("/first"), &first, &marks), true, parse());
-        store.put(&key(Path::new("/second"), &second, &marks), true, parse());
+        store.put(
+            &key(Path::new("/first"), &first, &marks),
+            true,
+            true,
+            parse(),
+        );
+        store.put(
+            &key(Path::new("/second"), &second, &marks),
+            true,
+            true,
+            parse(),
+        );
         assert!(
             store
-                .get(&key(Path::new("/first"), &first, &marks), true)
+                .get(&key(Path::new("/first"), &first, &marks), true, false)
                 .is_some()
         );
-        store.put(&key(Path::new("/third"), &third, &marks), true, parse());
+        store.put(
+            &key(Path::new("/third"), &third, &marks),
+            true,
+            true,
+            parse(),
+        );
 
         assert_eq!(store.len(), 2);
         assert!(
             store
-                .get(&key(Path::new("/second"), &second, &marks), true)
+                .get(&key(Path::new("/second"), &second, &marks), true, false)
                 .is_none()
         );
         assert!(
             store
-                .get(&key(Path::new("/first"), &first, &marks), true)
+                .get(&key(Path::new("/first"), &first, &marks), true, false)
                 .is_some()
         );
     }
@@ -598,6 +669,7 @@ mod tests {
                 &large,
                 &fingerprints(1, 64 * 1024 * 1024),
             ),
+            true,
             true,
             parse(),
         );
@@ -614,6 +686,7 @@ mod tests {
                 &fingerprints(1, 16 * 1024 * 1024),
             ),
             true,
+            true,
             parse(),
         );
         assert_eq!(store.len(), 1);
@@ -625,12 +698,20 @@ mod tests {
         let root = Path::new("/project");
         let listed = files(&["/project/a.ts", "/project/b.ts"]);
         let marks = fingerprints(2, 5);
-        store.put(&key(root, &listed, &marks), true, parse());
+        store.put(&key(root, &listed, &marks), true, true, parse());
 
         let mut renumbered = listed.clone();
         renumbered[0].id = FileId(7);
-        assert!(store.get(&key(root, &renumbered, &marks), false).is_none());
-        assert!(store.get(&key(root, &listed, &marks), false).is_some());
+        assert!(
+            store
+                .get(&key(root, &renumbered, &marks), false, false)
+                .is_none()
+        );
+        assert!(
+            store
+                .get(&key(root, &listed, &marks), false, false)
+                .is_some()
+        );
     }
 
     #[test]
@@ -643,9 +724,10 @@ mod tests {
             max_retained_bytes: small_key.retained_bytes(),
         });
         let large = files(&["/large/a.ts", "/large/b.ts"]);
-        store.put(&small_key, true, parse());
+        store.put(&small_key, true, true, parse());
         store.put(
             &key(Path::new("/large"), &large, &fingerprints(2, 6)),
+            true,
             true,
             parse(),
         );
@@ -654,6 +736,7 @@ mod tests {
         let other = files(&["/other/a.ts"]);
         store.put(
             &key(Path::new("/other"), &other, &fingerprints(1, 6)),
+            true,
             true,
             parse(),
         );
@@ -664,7 +747,11 @@ mod tests {
         );
         assert!(
             store
-                .get(&key(Path::new("/other"), &other, &fingerprints(1, 6)), true)
+                .get(
+                    &key(Path::new("/other"), &other, &fingerprints(1, 6)),
+                    true,
+                    false
+                )
                 .is_some()
         );
     }

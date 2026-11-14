@@ -22,6 +22,7 @@ fallow-output = { workspace = true }
 fallow-process = { workspace = true }
 fallow-types = { workspace = true }
 dunce = { workspace = true }
+ed25519-dalek = { version = "3", default-features = false, features = ["alloc"] }
 globset = { workspace = true }
 rayon = { workspace = true }
 rustc-hash = { workspace = true }

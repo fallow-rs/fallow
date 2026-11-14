@@ -699,9 +699,8 @@ export const checkRebase = (
   }
   const merged =
     rebased.upstream === null ? "a merge" : `a merge of the commits after ${rebased.upstream}`;
-  log(
-    `Tree check: outside ${ignored.join(", ")}, the result matches ${merged} into ${options.base}.`,
-  );
+  const scope = ignored.length === 0 ? "" : `outside ${ignored.join(", ")}, `;
+  log(`Tree check: ${scope}the result matches ${merged} into ${options.base}.`);
   if (rebased.upstream !== null) {
     log("Hunk check: the result has the same hunks as the own commits of the branch.");
   }

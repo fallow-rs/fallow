@@ -1002,6 +1002,12 @@ specifier resolves back to workspace source. Package `imports` aliases are
 owned by the nearest package manifest; do not turn unmatched hash specifiers
 into global aliases. Per-file tsconfig failure may degrade to ordinary relative
 or package resolution, with diagnostics, without inventing missing path aliases.
+Plugin path aliases apply the longest prefix first, so a Nuxt
+`#layers/<name>/` alias wins over the static `#layers/` fallback. A plugin
+marks an alias to a directory that its config names as checked
+(`PluginResult::push_checked_path_alias`). An unresolved import under a checked
+prefix reports, also when a virtual module prefix such as the Nuxt `#` covers
+it.
 A bare specifier that a `paths` pattern of the nearest tsconfig matches is an
 alias, also when its scope is lowercase or a real package has the same name.
 When it resolves into `node_modules`, the package of the resolved file gets the
@@ -1033,6 +1039,140 @@ extensions, the same as TypeScript without `moduleSuffixes`. A base file wins.
 Without a base file, the first result stays. The family edges that
 `crates/graph/src/resolve/react_native.rs` adds never point to the importing
 file.
+
+## Constant parameters
+
+`crates/core/src/analyze/constant_parameter.rs` reads the function contract
+facts of extraction (see the extraction reference). It joins the calls of each
+module-scope function across the project. An import call resolves to its
+origin export through re-export chains with `ModuleGraph::resolve_export`
+and `export_binding_origin`, so two imports of one function, through a barrel
+or directly, merge into one call list. The rule reports a parameter only when
+the world is closed. Each condition that can hide a caller makes it abstain
+for the function with one `Abstain` reason; `RUST_LOG=debug` logs the count of
+each reason:
+
+- `parse-incomplete`: a module of the project has a parse error or a panic.
+- `open-contract`: the contract has an `incomplete` reason.
+- `public-api`: the value surface of a package entry point, or an export with
+  a visibility tag such as `@public`.
+- `entry-export`: the value surface of an entry point (this covers
+  `dynamicallyLoaded`), an export that a plugin `used_exports` rule matches,
+  or a side-effect registration.
+- `dynamic-import`: a dynamic import or a dynamic import pattern reaches the
+  module. This covers a source that resolves to a file, and a pattern with a
+  relative static prefix, which blocks only the files that it matches.
+- `opaque-module-load`: a module of the analysis has an `import()` or a
+  `require` call whose source does not give a file or a pattern, such as
+  `import(name)`, `` import(`${name}`) `` or `require(name)`. A conditional
+  or logical source counts when one branch has no static specifier, as in
+  `import(flag ? './a' : name)`. `module.require(name)`,
+  `globalThis.require(name)` and a module-level `const r = require` also
+  count. A local binding named `require`, such as a parameter, does not
+  count. A template or concatenation source whose last static part ends in
+  a data extension, such as `` import(`@/locales/${lang}.json`) ``, does not
+  count. A query such as `?raw` after the extension is allowed. A source that starts with `#` still counts, because a package
+  `imports` map can change the extension.
+  Extraction records `FunctionContractFacts::opaque_loads`. The semantic
+  pass in `crates/extract/src/opaque_loads.rs` reads the uses of each loaded
+  value:
+  - `names` holds each export name that the code reads on the value: a
+    member (`mod.pad`, `mod?.pad?.()`, `mod['pad']`), a destructured key, an
+    `in` test (`'pad' in mod`), a parameter of an inline `.then` callback,
+    `(await import(x)).default`, `require(x).pad` and a JSX member tag
+    (`<mod.Pad />`). The rule blocks the function that each module exports
+    with that name, also through a re-export. An alias re-export
+    (`export { pad as leftPad }`) blocks the origin function. A name that
+    resolves to a namespace re-export (`export * as ns`) blocks the surface
+    of its source. `default` names the default export.
+  - `escapes` is `true` when the value goes to code that the pass does not
+    follow: an alias, a later assignment, a return, a call argument
+    (`Promise.all([import(x)])` too), an object or array element, an export,
+    a spread, an iteration, a computed key that is not a literal, a direct
+    call, a rest element, a `.then` callback that is not an inline
+    function, or a `.then` callback that reads `arguments`. A top-level
+    binding of the value in a Vue `<script setup>` block, a Svelte script,
+    an Astro frontmatter or a Glimmer file is also an escape, because the
+    template can read it. A read of the global `require` as a value, such
+    as `require.call(null, x)` or `[x].map(require)`, is also an escape. An
+    ambient `declare` of `require` does not hide the global loader.
+    `.catch()` and `.finally()` on the load keep the loaded value. On an
+    escape, the rule blocks each exported function of the project and, in
+    type-aware mode, each exported class with methods. A debug log
+    line names each module with such an escape.
+  - A discarded value (`await import(x);`, `require(x);`) blocks nothing.
+    When the loaded file is part of the analysis, its callers are visible.
+  A function that no export exposes stays a candidate. A file outside the
+  analysis, such as a test file or a support-only file under `--production`,
+  does not count.
+- `commonjs`: the module has CommonJS exports, or a `require` reads it.
+- `namespace-escape`: a namespace import of the module is read as a value, or
+  a named import resolves to a namespace re-export.
+- `value-reference`: a local escape, an import binding reference that is not
+  a call (also in a module without function facts, for example `[1].map(f)`
+  or `<F />`), a call with a member path on a named or default import (`call`,
+  `apply`, `bind`), or an import whose uses the facts do not hold. The last
+  case covers a used binding with no recorded call or reference, and an
+  `ImportedCallSite` with no matching call fact.
+- `unresolved-target`: a call or reference whose target does not resolve to
+  one export blocks each exported function with that export name.
+- `template-callers`: a template host, or a file that is not a JavaScript or
+  TypeScript module, blocks its own contracts and each function that it
+  imports. A side-effect import from such a file blocks each contract of the
+  target, which covers a Vue `<script src>`. An HTML page with an inline
+  script blocks each exported function of the project, because extraction
+  does not record the imports or the `import()` calls of that script.
+- `direct-eval`: the same, for a module with a direct `eval`.
+- `classic-script`: a module with no imports, no exports and no re-exports.
+- `auto-import`: a synthetic auto-import edge reaches the module.
+- `asset-import`: an import, a dynamic import or a re-export with a query,
+  such as `./op.ts?raw` or `./op.ts?url`, or with a webpack inline loader,
+  such as `raw-loader!./op.ts`, reads the module as text or as a file. The
+  rule blocks each contract of the module, because a copy of the code can
+  run with callers that the project does not hold. A type-only import does
+  not block.
+- `test-file`: a test file declares the function. The path below the project
+  root matches the test subset of `PRODUCTION_EXCLUDE_PATTERNS`
+  (`is_test_or_spec_file`, which leaves out the tooling-config and dotfile
+  patterns). A test file stays a caller of the functions of other files.
+- `too-few-calls`: fewer than `MIN_CALL_SITES` (2) calls.
+
+The analysis also reads `import_binding_references`, which
+`release_resolution_payload` drops before analysis. While the rule is on,
+`analyze::release_resolution_payloads` keeps that one field.
+
+For one parameter, a written, rest or array-pattern parameter gives no
+finding. A self-call that passes the parameter on at the same position is
+neutral and does not count; `ArgFact::Param` at another position is unknown.
+Each other call must give one value (`identical-argument`), or
+`ArgAt::Omitted` for an optional or defaulted parameter (`never-passed`). An
+omitted argument and a literal `undefined` are different. A `never-passed`
+subject with a neutral self-call gives no finding, because the recursion
+carries a value that the function made.
+
+`constant_parameter_values.rs` decides when two values are the same. A
+literal equals the same literal. An `ArgFact::Binding` resolves to a
+`(declaring module, local name, enum member)` key: a local binding as the
+extractor recorded it, an import through `resolve_export` and
+`export_binding_origin`. The origin must be in `literal_consts` of its module
+(a `const` with a literal initializer), or an export with an `EnumMember`
+member of that name. Two bindings with one value, or a binding and its
+literal, are different values. An object literal, an array literal and a
+folded expression are unknown.
+
+An object-pattern parameter gives one subject for each recorded key
+(`ParamFact.keys`) that the module does not write. The extractor records keys
+only for a pattern with no default or the default `{}`. For each call, an
+omitted argument or `undefined` sets no key when the parameter has that
+default, and is unknown when it has none. An `ArgFact::Object` gives the
+value of the key, or no key; each other argument is unknown. A
+`KeyValue::PassThrough` of the same key at the same position is a neutral
+self-call. The finding carries `option_key`, and `parameter_name`, `line` and
+`col` name the local binding of the key.
+
+A `constant-parameter` suppression on the line of the parameter, of the
+option key or of the function hides the finding. Calls from each module count, also from test
+files and unreachable files; `--production` drops test files at discovery.
 
 ## Framework and analysis regression boundaries
 

@@ -26,6 +26,7 @@
 //! ignore, baseline and rule filters, so a filter never changes the id of a
 //! finding that stays in the report.
 
+use crate::results::ConstantParameterFinding;
 use std::path::Path;
 
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -484,6 +485,7 @@ fn visit_families<V: FamilyVisitor>(results: &mut AnalysisResults, visitor: &mut
         dynamic_segment_name_conflicts,
         unused_component_props,
         absent_component_props,
+        constant_parameters,
         unused_component_emits,
         unused_component_inputs,
         unused_component_outputs,
@@ -499,6 +501,7 @@ fn visit_families<V: FamilyVisitor>(results: &mut AnalysisResults, visitor: &mut
         // Security findings carry their own `finding_id` from
         // `fallow_security::identity`. The other fields are not findings.
         security_findings: _,
+        suppressed_security_findings: _,
         security_unresolved_edge_files: _,
         security_unresolved_callee_sites: _,
         security_unresolved_callee_diagnostics: _,
@@ -517,6 +520,7 @@ fn visit_families<V: FamilyVisitor>(results: &mut AnalysisResults, visitor: &mut
         react_component_intel: _,
         semantic_reachable_files: _,
         semantic_framework_contracts: _,
+        constant_parameter_candidates: _,
     } = results;
 
     visitor.visit(unused_files);
@@ -561,6 +565,7 @@ fn visit_families<V: FamilyVisitor>(results: &mut AnalysisResults, visitor: &mut
     visitor.visit(dynamic_segment_name_conflicts);
     visitor.visit(unused_component_props);
     visitor.visit(absent_component_props);
+    visitor.visit(constant_parameters);
     visitor.visit(unused_component_emits);
     visitor.visit(unused_component_inputs);
     visitor.visit(unused_component_outputs);
@@ -1048,6 +1053,16 @@ identified!(
         f.prop.prop_name.clone(),
     ],
     position: |g| (g.prop.line, g.prop.col, 0),
+);
+identified!(
+    ConstantParameterFinding,
+    token: |_t| "constant-parameter",
+    parts: |f, p| vec![
+        p.key(&f.parameter.path),
+        f.parameter.function_name.clone(),
+        f.parameter.parameter_name.clone(),
+    ],
+    position: |g| (g.parameter.line, g.parameter.col, 0),
 );
 identified!(
     AbsentComponentPropFinding,

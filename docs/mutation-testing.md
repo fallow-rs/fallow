@@ -13,6 +13,7 @@ read-only next steps. It never writes a test and never proposes a code change.
 | `fallow mutation --plan` | no | `mutation-plan` |
 | `fallow mutation` | yes | `mutation` |
 | `fallow mutation inspect <mutant_id> [--report <file>]` | no | `mutation-inspect` |
+| `fallow mutation inspect <mutant_id> --replay [--args <json>] [--export <name>]` | yes | `mutation-inspect` with `replay` |
 | `fallow mutation tasks [--report <file>]` | no | `mutation-tasks` |
 | `fallow mutation export [--report <file>]` | no | `mutation-testing-report-schema` document |
 | `fallow mutation --recheck [--report <file>] [--mutant <id>]` | yes | `mutation` |
@@ -47,7 +48,7 @@ read-only next steps. It never writes a test and never proposes a code change.
   `--time-budget` (`90s`, `10m`, `1h`),
   `--setup-timeout` (default `2m`), `--runner-config`, `--kill-matrix`,
   `--kill-matrix-for`, `--concurrency`, `--runtime`, `--allow-dirty`, `--allow-side-effects`,
-  `--min-score`, `--operators`, `--verdicts`, `--typecheck`, `--resume` and
+  `--min-score`, `--operators`, `--verdicts`, `--typecheck`, `--record-args`, `--resume` and
   `--recheck` (with `--report` and `--mutant`) and `--compare`.
   The global `--no-cache` flag also turns off the result cache (see "Result
   cache"). `--resume` continues an interrupted or partial run (see "Outcome
@@ -94,6 +95,15 @@ read-only next steps. It never writes a test and never proposes a code change.
 - The prelude goes into each block with module scope (the Vue `<script>`, the
   Svelte module script). When a component has no such block, each block gets
   its own prelude.
+- Each call of a prelude function in a switch has a `typeof` guard, as in
+  `typeof __fallow_m_a === "function" && __fallow_m_a("ID")`. A test can
+  serialize a source function with `toString` and run it in another realm:
+  a `node:vm` context, or a browser page through Playwright `page.evaluate`
+  or `addInitScript`. The prelude functions do not exist in that realm.
+  Without the guard, the function throws
+  `ReferenceError: __fallow_m_a is not defined`, and the test is a baseline
+  failure. With the guard, the function runs the original code there. The
+  mutants of that function then get no hit and no kill from that realm.
 - The framework compiler moves some code out of the block scope, where the
   prelude is not visible or where a switch is not valid. These positions give
   no mutant:
@@ -154,8 +164,10 @@ Opt-in set:
 | `throw-statement` | `throw new X(...)` becomes `{}` |
 | `regex-constructor` | the `regex-literal` and `regex-assertion` changes of a `new RegExp("...")` pattern |
 | `regex-assertion` | a lookaround is negated, or `\b` and `\B` swap |
+| `nullish-fallback` | `a ?? b` becomes `a` |
 
-The opt-in operators follow the StrykerJS mutator set. They make many more
+Most opt-in operators follow the StrykerJS mutator set. `nullish-fallback` is
+not in that set. The opt-in operators make many more
 mutants, and many of them are equivalent or killed by any test that runs the
 code. The rules of each opt-in operator:
 
@@ -193,6 +205,12 @@ code. The rules of each opt-in operator:
 - `throw-statement`: only a `throw` of a `new` expression is removed.
 - `regex-constructor`: the pattern must be a string literal, and the flags a
   string literal or absent. The callee is `RegExp`, with or without `new`.
+- `nullish-fallback`: the `??` token and the right operand are removed, so
+  `a ?? b` becomes `a`. The mutant survives when no test gives a `null` or
+  `undefined` left operand. `logical-operator` changes `??` to `&&`, which
+  does not remove the fallback. `a ??= b` gives no `nullish-fallback`
+  mutant. With `--typecheck`, a survivor can get the hint
+  `type-non-nullish`. See [Type check of survivors](#type-check-of-survivors).
 - `regex-assertion`: `\b` in a character class is a backspace, so it gives
   no mutant.
 
@@ -498,10 +516,28 @@ or relational mutant, so it adds little test-strength signal for its run time.
   `rc` suffix counts, because some plugins also list application files as
   config, for example `codegen*.ts`, `src/module.ts` or `app/routes.ts`.
   The config and always-used globs of external plugins count too. In a tool config file, a
-  top-level `module.exports = ...` statement counts as the default export. A mutant inside a function in such an export is not
-  pruned, so an inline Vite plugin keeps its mutants. The rule lives in
-  `framework_config_exports` (`crates/engine/src/mutation/mod.rs`) and
-  `framework_regions` (`crates/engine/src/mutation/plan.rs`).
+  top-level `module.exports = ...` statement counts as the default export.
+  When no runner test and no other entry point reaches a tool config file,
+  each of its mutants is pruned, also a mutant in a function such as an inline
+  Vite plugin hook or a middleware callback. That code runs only in the build
+  tool. When a test or an application entry imports the tool config file, only
+  the config object is pruned, because that code can call the functions. An
+  example is an Angular `src/app/app.config.ts` that `src/main.ts` imports. In a framework config export of another file,
+  a mutant inside a function is not pruned. The rule lives in
+  `framework_config_exports` (`crates/engine/src/mutation/mod.rs`),
+  `framework_regions` and `file_prune` (`crates/engine/src/mutation/plan.rs`).
+- Mutants in a file that only tool config files reach are pruned
+  (`build-tool-only`). An example is a Vite plugin module that only
+  `vite.config.ts` imports, and the modules that it imports. The plan walks
+  the module graph from the tool config files of the `framework-config` rule,
+  and a second time from each other entry point. A file that the second walk
+  reaches is not pruned, so a file that a test, a setup file or application
+  code also imports keeps its normal status. The rule runs only when the plan
+  applies the `framework-config` rule. Like `dead-code` and `generated`, the
+  reason holds for the full file, so it comes before `side-effect-sink`. The
+  plan counts report these mutants as `pruned_build_tool_only`, a field that
+  is absent when it is 0. The rule lives in `build_tool_reach`
+  (`crates/engine/src/mutation/build_tool.rs`).
 - Fallow does not write to project files. The instrumented files live in the
   Fallow cache. The report lists any path that the tests changed.
 - The companions run in their own process group on Unix and in a Job Object on
@@ -529,7 +565,7 @@ or relational mutant, so it adds little test-strength signal for its run time.
 |---|---|
 | `0` | The plan, the run or inspect finished. Survivors do not fail a run. |
 | `1` | `--min-score` or `mutation.minScore` is set, and the score is lower. |
-| `2` | Invalid input or an execution error: a dirty worktree without `--allow-dirty`, a cache directory that hides project files, a missing runtime or runner, a companion file with a wrong digest, an invalid verdict document, `--typecheck` without a type-aware companion, a run in which baseline failures leave each mutant without a test result, a run path that fails the self-check (see Run-path self-check), a `--resume` journal of other inputs (`FALLOW_MUTATION_RESUME_MISMATCH`), a `--kill-matrix-for` target that selects no test of the dry run (`FALLOW_MUTATION_TARGET_UNMATCHED`), a `--kill-matrix-for` test ID target that names a duplicate test ID (`FALLOW_MUTATION_TARGET_DUPLICATE_TEST_ID`), a `--recheck` with a changed source file, an unknown mutant id or no open task (see Recheck), a `--compare` with a saved report or a run that is not complete (`FALLOW_MUTATION_COMPARE_INCOMPLETE`, see Compare). |
+| `2` | Invalid input or an execution error: a dirty worktree without `--allow-dirty`, a cache directory that hides project files, a missing runtime or runner, a companion file with a wrong digest, an invalid verdict document, `--typecheck` without a type-aware companion, a run in which baseline failures leave each mutant without a test result, a run path that fails the self-check (see Run-path self-check), a `--resume` journal of other inputs (`FALLOW_MUTATION_RESUME_MISMATCH`), a `--kill-matrix-for` run in which no target selects a test of the dry run (`FALLOW_MUTATION_TARGET_UNMATCHED`), a `--kill-matrix-for` test ID target that names a duplicate test ID (`FALLOW_MUTATION_TARGET_DUPLICATE_TEST_ID`), a `--recheck` with a changed source file, an unknown mutant id or no open task (see Recheck), a `--compare` with a saved report or a run that is not complete (`FALLOW_MUTATION_COMPARE_INCOMPLETE`, see Compare), a replay of a stale mutant, a runner with no replay, or a replay companion that fails (see Replay). |
 | `128 + signal` | SIGINT, SIGTERM, SIGHUP or SIGQUIT stopped the run (`130` for SIGINT). A run that a signal stops during the mutant runs prints the report of the finished mutants, with the completion `partial`. A run that a signal stops earlier prints no report and no error. |
 
 The flag wins over the config key. The minimum applies to the score, in
@@ -588,6 +624,33 @@ coverage. The scheduler corrects this after the dry run:
 view before the coverage is known. A run can execute a mutant that the plan
 shows as `pending`.
 
+## Runner version check before a run
+
+A run gets the runner version from the `ready` response of the companion.
+It stops with `FALLOW_MUTATION_RUNNER_UNSUPPORTED` when the version is
+outside the range of `crates/api/mutation-runner-protocol.json`. `--plan` and
+`fallow doctor` start no companion. They read the `package.json` of the
+installed Vitest (`crates/api/src/mutation/runner_version.rs`). The lookup
+follows the Node resolution of the companion: the `node_modules` directory of
+the project root, then the `node_modules` directory of each ancestor. It runs
+no project code.
+
+- The `mutation-plan` JSON has a `runner` object: `name`, `package`,
+  `installed_version`, `supported_range`, `supported`, `message` and `help`.
+  `supported` is false for a version outside the range and for a Vitest that
+  is not installed. It is `null` for `node-test` and `bun-test`, because their
+  range applies to the runtime that the run selects.
+- The human plan prints a `Runner:` line and a `hint:` line only when the run
+  starts a runner: the plan has a test file and a mutant.
+- The plan exits 0 also when `supported` is false. A plan is not a run, and
+  the exit code table promises 0 for a finished plan.
+- `fallow doctor` has the advisory `mutation-runner` check, with the same
+  message and help. It is skipped when `mutation.runner` does not select
+  Vitest, the root `package.json` declares no Vitest, and the root
+  `node_modules` holds no Vitest. The root install counts because a
+  workspace package can declare a Vitest that the package manager installs
+  at the root.
+
 ## Function scope
 
 The changed-code scope mutates the added lines of the diff only. A change to
@@ -623,7 +686,8 @@ select nothing for it. `--function-scope` (config key
   `unary-operator`, `update-operator`, `return-value`, `removed-call`,
   `optional-chaining`, `boolean-literal`, `string-literal`, `regex-literal`
   and `removed-chain-link`, then the opt-in operators `method-expression`,
-  `call-expression`, `throw-statement`, `switch-case`, `regex-assertion`,
+  `call-expression`, `throw-statement`, `switch-case`, `nullish-fallback`,
+  `regex-assertion`,
   `regex-constructor`, `array-literal`, `object-literal` and
   `block-statement`.
 - Mutants of the same operator on one line keep the order of a SHA-256 hash
@@ -758,7 +822,7 @@ The `kill_matrix` object has these fields:
 | `tests` | Entries with `test_id`, `file`, `kills`, `unique_kills`, `subsuming_tests`, and `notes`. In target mode, also `target_only_kills`. |
 | `candidates` | Test IDs whose observed kill sets other tests cover. |
 | `coverage_without_kills` | Test IDs with runtime coverage and no observed kills. |
-| `targets` | Only in target mode: each `--kill-matrix-for` target with the `test_ids` that it selects, and the `status` (`complete` or `incomplete`) and `reasons` of its own evidence. |
+| `targets` | Only in target mode: each `--kill-matrix-for` target with the `test_ids` that it selects, and the `status` (`complete` or `incomplete`) and `reasons` of its own evidence. A target that selects no test is `incomplete` with the reason `unmatched-target`. |
 
 Each mutant and attempt records `killing_tests` and `kill_matrix_complete`. The existing `killed_by` field keeps the first observed killer. Outside matrix mode, `killing_tests` is empty.
 
@@ -783,10 +847,24 @@ fallow mutation src/math.ts \
   (`file::name`), the same string as `kill_matrix.tests[].test_id`. Fallow
   removes a leading `./`, changes `\` to `/` in the file part, and makes an
   absolute path inside the root relative.
-- A target that selects no test of the dry run stops the run with exit `2`
-  (`FALLOW_MUTATION_TARGET_UNMATCHED`). The dry run runs the test files that
-  reach the planned code, so the scope must include code that the target
-  tests load.
+- The dry run runs the test files that reach the planned code, so the scope
+  must include code that the target tests load. A target that selects no
+  test of the dry run does not stop the run. Its entry in
+  `kill_matrix.targets` has empty `test_ids`, the status `incomplete`, and
+  the reason `unmatched-target`. One more reason tells why:
+
+  | Reason | Meaning |
+  |---|---|
+  | `not-a-test-file` | The runner does not list the file of the target as a test file. |
+  | `no-planned-code` | The runner lists the file, but the file reaches no planned code, so the dry run does not run it. A test that runs the code only in a child process (for example with `spawnSync`) is an example. |
+
+  With only `unmatched-target`, the dry run ran the file, but no test of the
+  file has the target ID, or each test of the file has a duplicate ID.
+- When no target selects a test, the run stops with exit `2`
+  (`FALLOW_MUTATION_TARGET_UNMATCHED`). A run with one target stops in the
+  same way. The message names each target and its reason. When the dry run
+  runs the file of no target, the run stops before the dry run. This is also
+  true when no test file reaches the planned code.
 - A test ID target that names a duplicate test ID stops the run with exit
   `2` (`FALLOW_MUTATION_TARGET_DUPLICATE_TEST_ID`). The message names each
   such ID. A test file target drops the duplicate IDs and keeps its other
@@ -814,13 +892,40 @@ fallow mutation src/math.ts \
 
 Each entry of `kill_matrix.targets` has its own `status` and `reasons`. A
 target is `incomplete` with the reason `incomplete-mutant-results` when one
-of its tests covers a mutant with incomplete evidence. The run-wide reasons
-`partial-mutation-run`, `baseline-failure`, and `missing-test-file-metadata`
-make each target incomplete. Only the tests of a complete target can be
-candidates. One incomplete mutant therefore removes the candidates of the
-targets that cover it, not of all targets. The top-level `status` stays
-`incomplete` when any evidence is incomplete, so `candidates` can be nonempty
-while `status` is `incomplete`.
+of its tests covers a mutant with incomplete evidence. Only the tests of a
+complete target can be candidates. One incomplete mutant therefore removes the
+candidates of the targets that cover it, not of all targets. The top-level
+`status` stays `incomplete` when any evidence is incomplete, so `candidates`
+can be nonempty while `status` is `incomplete`.
+
+A baseline failure (a test or a test file that fails with no active mutant)
+gives a target the reason `baseline-failure` only when the failure can affect
+the target:
+
+- the failing test is a test of the target;
+- the failing test, or a file error, is in the test file of a test of the
+  target;
+- the failing test failed a control run or the dry run of a restarted
+  companion. It covers or kills a mutant that a test of the target covers or
+  kills, or that mutant ran without it (`mutant_ids` of the failure).
+
+A failure in the first dry run drops the coverage of the failing test. For
+such a failure, only the test file can connect it to a target. Shared state
+across test files, for example a global or a database, is outside this rule.
+The human report names the failures of each target under its line.
+
+When baseline failures are the only cause of a partial run, only the targets
+with `baseline-failure` also get `partial-mutation-run`. Each other cause of
+a partial run, for example the time budget, gives each target
+`partial-mutation-run`. `missing-test-file-metadata` also applies to each
+target.
+
+A failing test gives no kill evidence. A passing test in the test file of a
+baseline failure can share state with the failure. Neither test makes the kill
+of a target test shared. This is also true for a test of another target. A
+kill that only such tests also make stays in `unique_kills`, and the target
+test is not a candidate. The `target_only_kills` of the target test do not
+name such a test.
 
 Each target test with coverage gets a row in `kill_matrix.tests`. Other tests
 get no row.
@@ -1340,8 +1445,13 @@ test run.
 ### Vitest module loading
 
 - A Vite plugin of the adapter serves the instrumented files to each
-  `import` that the Vite module runner handles. A script file gets its copy
-  in the `transform` hook, and a component file in the `load` hook.
+  `import` that the Vite module runner handles. The plugin gives each copy in
+  the `load` hook, as if the copy were the file on disk. Each `transform`
+  hook of Vite, Vitest and the project then runs on the copy, as with
+  `vitest run`. For example, Vitest rewrites each `import.meta.env` read to
+  the environment object that `vi.stubEnv` changes. When a project plugin
+  with `enforce: "pre"` loads a mapped script file first, the plugin replaces
+  the code of that file with the copy in its `transform` hook.
 - A native `require`, for example through `createRequire(import.meta.url)`,
   does not go through Vite. The setup file of the adapter registers a
   synchronous module hook (`module.registerHooks`) in each worker, so that
@@ -1809,10 +1919,11 @@ are not checked, so the cost grows with the number of survivors only.
   file, for example a caller of a function with an inferred return type,
   stays `survived`. The check also does not run Vitest type tests, so the
   `typecheck-not-run` note stays.
-- A survivor that removes an optional-chaining link can get an advisory
-  hint. The mutants `a?.b` to `a.b`, `a?.()` to `a()` and `a?.[k]` to `a[k]`
-  change nothing when `a` is never `null` or `undefined` at run time. The
-  companion reads the declared type of `a` in the original file. When the
+- A survivor that removes an optional-chaining link or a nullish fallback
+  can get an advisory hint. The mutants `a?.b` to `a.b`, `a?.()` to `a()`,
+  `a?.[k]` to `a[k]` and `a ?? b` to `a` (`nullish-fallback`) change nothing
+  when `a` is never `null` or `undefined` at run time. The companion reads
+  the declared type of `a` in the original file. When the
   type excludes `null` and `undefined`, and the mutated file type-checks, the
   survivor gets `equivalence_hint: "type-non-nullish"`. The status stays
   `survived`, and the mutant stays in the score. `typecheck.hinted` counts the
@@ -1845,6 +1956,9 @@ are not checked, so the cost grows with the number of survivors only.
   `<T>x`, `x!`) anywhere in the receiver, or in the initializer of a local
   binding that the receiver reads. It looks through parentheses and
   `satisfies`.
+- For `a ?? b`, the hint does not apply when `a` is an optional chain, for
+  example `o?.items.map(f) ?? []`. The chain gives `undefined` when a link
+  short-circuits, whatever the declared type of its last call.
 - The hint does not apply to a declaration that no code in the project
   checks: a `declare` variable, a variable in a `.d.ts` file, a binding
   without an initializer, a `for` or `catch` variable, a destructured
@@ -1887,6 +2001,52 @@ are not checked, so the cost grows with the number of survivors only.
 - The protocol operation is `mutant-typecheck` in
   `crates/api/type-aware-protocol.json`. It is a one-shot request; a semantic
   session refuses it.
+
+## Constant parameter hint
+
+A `negate-condition` survivor can get the advisory hint
+`equivalence_hint: "constant-parameter"`. The hint needs no option and no
+companion.
+
+```ts
+export const load = (id: string, strict: boolean) => {
+  if (!strict) return fallback(); // each call passes `true`
+  return read(id);
+};
+```
+
+Each visible call passes `true` for `strict`, so `!strict` is always `false`.
+The mutant `if (false)` changes nothing for these calls, and no test can kill
+it through a real caller. The mutant `if (true)` changes the result, so it
+gets no hint.
+
+- The test of the condition must be a parameter `p`, `!p` or `!!p`: the test
+  of an `if`, a `?:` or a loop. A test that combines the parameter with other
+  values, such as `p && q`, gets no hint.
+- Each visible call must pass the same literal for the parameter. The hint
+  uses the call evidence and the closed-world gate of the `constant-parameter`
+  dead-code rule, also when the project sets the rule to `off`. A function
+  that the gate blocks gets no hint. For example, a value reference to the
+  function, an export of an entry point, a public API export, or fewer calls
+  than the rule needs blocks it. A module that only tests reach gets no hint,
+  because the rule reads runtime code only. A test call counts as a call.
+- An inline or file suppression of `constant-parameter` removes the hint for
+  that function too. A severity in `rules` or in `overrides` does not change
+  the hint, because the severity decides only what `fallow dead-code`
+  reports.
+- A run computes the call evidence only when it runs `negate-condition`.
+- The literal decides the value of the test as JavaScript does: `false`,
+  `null`, `undefined`, `0`, `-0`, `NaN` and `""` are falsy. When each call
+  passes `undefined` for a parameter with a default value, the default
+  applies, and the survivor gets no hint.
+- The hint is advisory. The status stays `survived`, and the score does not
+  change. A caller outside the project, for example a user of a published
+  package, can still pass another value. Read the callers before you write
+  a verdict. A verdict for a hinted survivor sets the status `equivalent` and
+  removes the hint.
+- `typecheck.hinted` counts only the `type-non-nullish` hints.
+- The human report and `fallow mutation tasks` show one line under a hinted
+  survivor.
 
 ## Verdicts for equivalent mutants
 
@@ -1943,7 +2103,8 @@ source text.
   function body or `case` clause, `<statement>` for a `throw` statement,
   `<array>` and `<object>` for a non-empty literal, and `<call>` for a
   replaced or removed call. A `method-expression` pair is the two method
-  names, for example `{"from": "startsWith", "to": "endsWith"}`.
+  names, for example `{"from": "startsWith", "to": "endsWith"}`. A
+  `nullish-fallback` change is `{"from": "?? <expression>", "to": ""}`.
 - A `regex-assertion` side is `(?=`, `(?!`, `(?<=`, `(?<!`, `\b` or `\B`.
 - A `regex-literal` quantifier side is `+`, `*` or `?`, and a shortened
   range is `{"from": "{n,m}", "to": "{n}"}`.
@@ -1976,6 +2137,194 @@ and span.
 The run report lists a digest for each mutated file. The plan lists digests
 only for the files that it instruments, so a plan mutant in a file that no test
 reaches inspects as `no-digest`.
+
+## Replay
+
+`fallow mutation inspect <mutant_id> --replay` calls one export of the file of
+the mutant with one input on the original code and on the mutant, and shows
+the results side by side. Use it to find a ready test input for a survivor.
+The replay runs project code: the module of the file and each module that it
+imports. It runs no test.
+
+- `--args <json>` gives the arguments as a JSON array, for example
+  `--args '[2, 3]'`. Without `--args`, the replay runs up to 3 inputs that a
+  `--record-args values` run recorded for the export (see Argument
+  recording). It stops at the first witness, a timeout or an export that is
+  not a function. An unstable input does not stop it, and when no input
+  shows a witness, an unstable input is the result. `replay.inputs_checked`
+  counts the inputs that ran, and `replay.input` is the input of the result,
+  with its `input_id` and `source: "recorded"`. With no usable recorded
+  input, the verdict is `not_replayable`, and the reason names the recording
+  or the reasons of the calls.
+- `--export <name>` names the export to call. The default is the export
+  whose declaration holds the function of the mutant: `export function f`,
+  `export const f = () => {}`, `export default`, or a local function that an
+  `export { f as g }` list exports. A mutant in a nested function calls the
+  outer export. A class or an object literal is not a function, so a mutant
+  in a method needs `--export`. A mutant in top-level code, or in a function
+  that no callable export holds, needs `--export` too, for example the
+  export that reads the value.
+- `--call-timeout <duration>` sets the limit of one call (default `5s`, at
+  most `10m`). Another value exits with code 2 and
+  `FALLOW_INVALID_MUTATION_OPTIONS`.
+- The replay needs a `fresh` packet. A stale mutant exits with code 2 and
+  `FALLOW_MUTATION_REPLAY_STALE`. The replay finds the mutant by its id and
+  its span. When the current file gives no such mutant, it exits with code 2
+  and `FALLOW_MUTATION_UNKNOWN_MUTANT`. `--args` that is not a JSON array
+  exits with code 2 and `FALLOW_INVALID_MUTATION_OPTIONS`.
+- The Vitest and `node:test` runners replay. The `bun test` runner exits
+  with code 2 and `FALLOW_MUTATION_REPLAY_UNSUPPORTED`. A companion failure
+  exits with code 2 and `FALLOW_MUTATION_REPLAY_FAILED`.
+
+### Verdicts
+
+The replay calls each side three times, in turns: original, mutant,
+original, mutant, original, mutant. A side is stable when each of its calls
+gives the same outcome and the same value. The comparison ignores the key
+order of an object and the order of a set and a map, because a deep
+equality check of a test does not see it. An outcome is part of the value:
+a `threw` call never equals a `returned` call.
+
+| Verdict | Meaning |
+|---|---|
+| `witness` | Both sides are stable, and they differ. A test with this input can kill the mutant. |
+| `no_witness_found` | Both sides are stable and equal for each input. The reason says `no witness found (N inputs, source, 3 calls of each side)`. Another input can still show a difference. |
+| `unstable` | The calls of one side differ, for example from a source of random values that the replay does not fix. A difference that does not repeat is never a witness. |
+| `timeout` | A call did not end before the call limit, or the replay did not end before its wall limit. The module load, the original or the mutant can block. |
+| `not_callable` | The export is not a function. |
+| `not_replayable` | The replay did not run: no export holds the mutant, or the file is a component file. `reason` says why. |
+
+A replay never gives the verdict `equivalent`. Equal results say only that
+this input shows no difference. Use `--verdicts` to record an equivalent
+mutant after a review.
+
+### Replay contract
+
+The runner companion owns the replay contract. Its version is
+`replay.contract_version` in `crates/api/mutation-runner-protocol.json`, and
+the output gives it as `replay.contract_version`. Version 1 has these rules:
+
+- The API sends one `replay` request with the file, the export, the mutant
+  id, the arguments, the number of calls of each side, the call limit, the
+  fixed clock and the seed. The companion answers with `replay_result`: one
+  record for each call, in call order, with the side, the 1-based index, the
+  outcome (`returned`, `threw`, `timed_out` or `not_callable`), the value and
+  a short text. The API decides the verdict.
+- Each call runs in a new worker with new modules: Vitest runs the replay
+  test file once for each call, and `node:test` starts a new Node process
+  for each call. So module state, globals, the environment and the timers of
+  one call never reach the next call or the other side. A switch in
+  top-level code runs once at import, so the load counts as part of the
+  call: the mutant is active when the module evaluates, and an error that
+  the load throws is a `threw` outcome.
+- Each call runs in an `AsyncLocalStorage` store with its own active mutant.
+  A timer or a promise of one call reads the mutant of that call, also when
+  it runs during a later call.
+- A Node process that a call starts inherits the side through the
+  subprocess preload in `NODE_OPTIONS`, for the original and for the mutant.
+- In each call, the clock starts at 2026-01-01T00:00:00Z for `Date.now()`,
+  `new Date()` and `Date()`, and at 0 for `performance.now()`. Each read
+  moves the clock by 1 ms, so a busy wait on the clock ends. `Math.random`
+  starts from seed 1. The runner can read the clock while it loads the
+  module, so a value can be some milliseconds after the start, but it is
+  the same on each call of a side. Values from the clock gave false
+  witnesses before this rule. Other sources (for example
+  `crypto.randomUUID()`, the network or the file system) are not fixed.
+  They give `unstable`, never `witness`.
+- A call that runs past the call limit is `timed_out`. The call timer uses
+  the timers of `node:timers`, so fake timers of the project do not stop it.
+  A synchronous endless loop of the mutant through instrumented code ends at
+  the loop check. A loop that blocks the worker in other code ends at the
+  wall limit of the request (the call limit and 20 seconds for each call,
+  and 30 seconds more): the API stops the companion, and the verdict is
+  `timeout`. A process that a `node:test` call starts and that outlives the
+  call runs until the request ends, because the API stops the companion and
+  its process tree after each replay request.
+- Arguments use the replay encoding: JSON values, and objects with a
+  `$replay` tag for `undefined` (`{"$replay": "undefined"}`), `NaN`,
+  `Infinity` and `-0` (`{"$replay": "number", "value": "NaN"}`), bigints,
+  dates, regular expressions, maps, sets and typed arrays (`{"$replay":
+  "bytes", "type", "values"}`, with tagged special numbers). A plain object
+  with an own `$replay` key is `{"$replay": "object", "entries"}`. A
+  function, a symbol, a class instance (also a subclass of a built-in class,
+  such as `Buffer`), a proxy, a stream, a DOM node, a cyclic value and an
+  accessor property are not replayable as an argument. A hole of a sparse
+  array becomes `undefined`, and the extra own properties of an array, a map
+  or a date are not part of the value.
+- Results use the same encoding, with more tags for values that cannot be
+  arguments: `error` (`name` and `message`, no stack), `instance` (`class`
+  and the own enumerable `fields`), `function` (`name`), `symbol`
+  (`description`), `proxy`, `cycle`, `accessor`, `truncated` (more than 32
+  levels or 10,000 values) and `unreadable`. A `timed_out` call has the value
+  `null`, so read `outcome` before `value`. `text` is a short display text,
+  and `duration_ms` is wall time, so these two fields can differ between two
+  replays of the same input.
+
+## Argument recording
+
+`fallow mutation --record-args <shapes|values>` records the arguments of the
+changed exported functions. A replay without `--args` uses them. Recording is
+off by default.
+
+- The record pass wraps each exported function that holds a planned mutant: an
+  `export function`, an `export const` with a function value, and a local
+  function or function value that an `export { a as b }` list exports. A
+  default export declaration, a class, a method and an object literal get
+  no wrap. A local that an export list names twice gets the wrap of its
+  first name only.
+- The arguments come from a record pass: after the mutant runs, a new
+  companion runs the test files once more with the recorder on, from its
+  own run directory. Only the files of this pass hold the wraps, and its
+  test results count for nothing. The dry run and each mutant run load the
+  files without the wraps, so recording never changes a result of the run
+  or a key of the result cache. A wrap is a plain function that keeps
+  `this`, `new`, the return value, the thrown error, `name` and `length`, but
+  not the own properties, `toString` or the stack frames of the function.
+- Only calls with no active mutant count. A function keeps up to 8 distinct
+  inputs, in the order of the first call, and the pass encodes at most 64
+  calls of each function. An input with a JSON text of more than 16 KiB, or
+  a collection with more than 10,000 values, is "a value that is too large".
+- A call whose arguments cannot be replayed counts under one fixed reason:
+  `a function`, `a symbol`, `a proxy`, `a cyclic value`, `a class instance`,
+  `a value that is too large`, `an accessor property`, `an object with a
+  symbol key`, `an object that this runtime cannot check for a proxy`, `a
+  value that cannot be read`, `a value under a secret key name` or `a string
+  that looks like a secret`. A reason never holds text of the code or of a
+  value. Without `util.types.isProxy` (Vitest browser mode, Node before
+  20.16), each argument object is not replayable, because a read could run
+  the traps of a proxy.
+- The cache file `<cache dir>/mutation/recorded-args.json` keeps the inputs
+  for 7 days. The file is readable only by its owner, and the cache
+  directory has a `.gitignore` with `*`. Each `fallow mutation` run removes
+  the expired entries, and a recording run replaces the entries of its
+  functions.
+- Before an input goes into the cache, the redaction removes each input
+  that holds a value under a secret key name (a name that holds `token`,
+  `secret`, `password`, `passwd`, `pwd`, `authorization`, `auth`, `bearer`,
+  `jwt`, `apikey`, `accesskey`, `signature`, `cookie`, `credential`,
+  `privatekey` or `session`, in any case and with `-` or `_`), also the key
+  of a `Map`. It also removes each input with a string that looks like a
+  secret: an `Authorization` scheme (`Bearer`, `Basic`), a PEM block, a URL
+  with a password, a JSON Web Token, or a word of at least 24 characters
+  with an entropy of at least 4.2 bits for each character, or a hex text of
+  at least 32 characters. A word splits at `/`, `\`, `:`, `?`, `&`, `=`,
+  `#`, `,` and `;` first, so a file path is no secret, but a word of base64
+  characters also counts as a whole. A typed array of 16 to 512 bytes with
+  a byte entropy of at least 3.5 bits counts as a key too. The input then
+  counts as not replayable. The redaction is a heuristic: do not record in a
+  project whose tests pass real credentials.
+- `shapes` keeps only the types of the arguments, for example
+  `["number", {"name": "string"}]`. A replay needs `values`.
+- The report gets the object `recording`: the `mode`, `saved`, an `error`
+  when the run recorded or saved nothing (for example `the runner records no
+  arguments` for `bun test`), and for each recorded function its `file`,
+  `export`, `input_count` and the `not_replayable` reasons, sorted by reason.
+  The report, the export, SARIF, a PR comment and an uploaded artifact never
+  hold an argument value.
+- The output of `fallow mutation inspect --replay` is the exception: it is
+  local output on stdout, and it shows the recorded input that it replays,
+  with the results of both sides. Do not paste it where the values must not
+  go.
 
 ## Tasks
 
@@ -2018,6 +2367,43 @@ The header says that one test can cover several items, and that an item that
 no input can detect can be skipped. The markdown output puts the two lines in
 a fenced block. The MCP tool `mutation_tasks` returns the JSON batch. It runs
 no mutants.
+
+### Witnesses
+
+After a `fallow mutation --record-args values` run, the run replays the
+recorded inputs of up to 20 open tasks, in rank order, in one companion of
+the run, with a call limit of 5 seconds and within the time budget. Each
+task with recorded inputs gets `witness` in the report: the `verdict`, the
+`input_id`, `inputs_checked` and the `reason` of a verdict other than
+`witness`. The report holds no value. The values of each witness go to
+`<cache dir>/mutation/witnesses.json`, with the time to live and the file
+mode of the recorded inputs, and a run replaces the witnesses of the
+earlier run.
+
+`fallow mutation tasks` adds `witness` to such a task: the reference of the
+report, `replay_command` (`fallow mutation inspect <id> --replay`), and for
+a `witness` verdict the cached `args` with the result of the current code
+(`original`) and of the changed code (`mutant`). Read `witness.verdict`
+first: only `witness` can have these values. A test with these arguments
+that asserts the `original` value should kill the mutant. Run it on the
+current code to confirm, because the replay ran with a fixed clock and seed
+and a new worker for each call. A `threw` outcome means that the test
+asserts the throw. The values use the replay encoding (see Replay
+contract). A stale task, and a task whose cache entry expired, keeps the
+reference and the command, but no value. A saved witness with a verdict
+that the reader does not know reads as absent. The human output shows the input and both results. The markdown
+output can go into a PR comment, so it shows only that a recorded input
+shows a difference, and the command. The MCP tool `mutation_tasks` gives
+the JSON packets, and its guide `fallow://tools/mutation_tasks` explains
+the field. A verdict other than `witness` never means that the mutant is
+equivalent.
+
+The search stops before a step that does not fit in the time budget: it
+needs a minute for each recorded input, and it clamps each call and each
+companion start to the time left. The search runs only after a record pass
+that succeeded. The end check of the worktree comes after the search,
+because the replays run project code. Two runs in one cache directory at
+the same time can replace the witnesses of each other.
 
 ## Export
 
@@ -2121,25 +2507,48 @@ fallow mutation tasks              # what is still open
   committed after the report to another file, for example a module that a
   selected file imports or the runner config. Run `fallow mutation` again
   after such a commit.
-- The run plans the files of the selected mutants. The other mutants of
-  these files are `pruned` with `prune_reason` `not-selected`, because the
-  instrumented file holds their switch too. They leave the score.
+- The run plans the files of the selected mutants only. The report then
+  merges the earlier report: each mutant that the recheck did not select
+  keeps its earlier status and evidence, and gets `carried: true`. This is
+  also true for the mutants of the files outside the run. The summary, the
+  score and `functions` count the merged set. The kill matrix stays the
+  evidence of this run, so it has no data of a carried mutant.
+- An earlier result applies only while its file has the SHA-256 digest of
+  the earlier report. An earlier kill also needs each test file of its
+  killing tests (`killed_by` and `killing_tests`). The report leaves out the
+  mutants of a file outside the run when one of its earlier results does
+  not apply, and `recheck.stale_files` names the file. This is also true
+  for a file outside the run with an earlier entry that does not parse.
+- In a file of the run, a mutant without an earlier result that applies
+  stays `pruned` with `prune_reason` `not-selected`. Examples are an entry
+  that does not parse, a kill whose test file is gone, and a mutant that
+  the earlier report does not list. A recheck resets `--mutants-per-line`
+  and `--function-scope`, so it can plan a mutant that an earlier run with
+  these options did not list.
+- The recheck does not run a carried mutant again. A test that you removed
+  from a test file that still exists, or a test that you made weaker, does
+  not change a carried kill. After such a change, run `fallow mutation`
+  without `--recheck` for a score that the current tests support.
 - An id that the report does not have exits with code 2 and
   `FALLOW_MUTATION_UNKNOWN_MUTANT`. A report without an open task exits with
   code 2 and `FALLOW_MUTATION_NOTHING_TO_RECHECK`.
 - `--recheck` conflicts with `--all`, paths, `--changed-since`, `--plan`,
-  `--resume`, `--allow-dirty`, `--max-mutants` and `--min-score`. The score
-  covers only the rechecked mutants, so `mutation.minScore` does not apply.
+  `--resume`, `--allow-dirty`, `--max-mutants` and `--min-score`. The run
+  tests only the rechecked mutants, so `mutation.minScore` does not apply.
   The other run flags apply.
 - The output is a normal `mutation` report with the optional `recheck`
-  object. A recheck without `--mutant` replaces the saved report, so `tasks`
-  then lists the mutants that are still open. A recheck with `--mutant`
-  keeps the saved report, so the other open tasks stay in it. Pass
+  object. A recheck without `--mutant` replaces the saved report of the last
+  run and, with `--report <file>`, also that file, so `tasks` then lists the
+  mutants that are still open. The write goes to a temporary file first,
+  then a rename replaces the file. A failed write is a warning. A recheck
+  with `--mutant` keeps the saved report and the `--report` file. Pass
   `-o <file>` to keep a copy of the output.
 
 The `recheck` object has `report_sha256` (the digest of the earlier report),
-a count for each outcome, and `mutants`: each selected mutant with its
-`mutant_id`, `file`, `line`, `previous_status`, `status` and `outcome`.
+a count for each outcome, `mutants`: each selected mutant with its
+`mutant_id`, `file`, `line`, `previous_status`, `status` and `outcome`,
+`carried`: the number of mutants with an earlier result, and the optional
+`stale_files`.
 
 | `outcome` | Meaning |
 |---|---|
@@ -2156,9 +2565,9 @@ change of the tests weakens the detection of mutants: a mutant that a test
 killed before and that survives now.
 
 ```bash
-fallow mutation src/utils.ts --format json > before.json   # save a report
+fallow mutation src/utils.ts --format json -o .fallow/before.json   # save a report
 # change, move or remove tests, then commit
-fallow mutation src/utils.ts --compare before.json
+fallow mutation src/utils.ts --compare .fallow/before.json
 ```
 
 - The saved report is a `fallow mutation --format json` report, for example

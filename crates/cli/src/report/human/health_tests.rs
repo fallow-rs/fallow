@@ -642,10 +642,8 @@ fn health_shown_vs_total_when_truncated() {
     assert!(text.contains("1 shown, 10 total"));
 }
 
-#[test]
-fn health_findings_explain_estimated_crap_scores() {
-    let root = PathBuf::from("/project");
-    let report = fallow_output::HealthReport {
+fn static_estimated_crap_report(root: &Path) -> fallow_output::HealthReport {
+    fallow_output::HealthReport {
         findings: vec![
             fallow_output::ComplexityViolation {
                 path: root.join("src/risky.ts"),
@@ -680,10 +678,37 @@ fn health_findings_explain_estimated_crap_scores() {
             ..Default::default()
         },
         ..Default::default()
-    };
+    }
+}
+
+#[test]
+fn health_findings_explain_estimated_crap_scores() {
+    let root = PathBuf::from("/project");
+    let report = static_estimated_crap_report(&root);
     let text = plain(&build_health_human_lines(&report, &root));
-    assert!(text.contains("CRAP scores are estimated from export references"));
-    assert!(text.contains("fallow health --coverage <coverage-final.json>"));
+    assert!(
+        text.contains(
+            "No coverage file found, so CRAP scores are a static estimate. Pass `--coverage <coverage-final.json>` for measured scores, or raise `health.maxCrap`."
+        ),
+        "static estimate note missing from output: {text}"
+    );
+    assert_eq!(
+        text.matches("CRAP scores are a static estimate").count(),
+        1,
+        "the static estimate note must show once per run: {text}"
+    );
+}
+
+#[test]
+fn health_explain_describes_static_crap_estimate() {
+    let root = PathBuf::from("/project");
+    let report = static_estimated_crap_report(&root);
+    let lines = build_health_human_lines_with_explain(&report, &root, true, false, false, None);
+    let text = plain(&lines);
+    assert!(
+        text.contains("an untested function scores cc^2 + cc"),
+        "--explain must describe the static CRAP estimate: {text}"
+    );
 }
 
 #[test]
@@ -759,6 +784,23 @@ fn crap_notes_name_v8_coverage_input() {
         file_scores_crap_note(&istanbul),
         "CRAP from Istanbul coverage data (2/2 functions matched)."
     );
+}
+
+/// The file-scores footer and the static estimate note use the same terms,
+/// so a reader sees one name for one coverage model.
+#[test]
+fn file_scores_footer_uses_static_estimate_terms() {
+    let report = fallow_output::HealthReport {
+        summary: fallow_output::HealthSummary {
+            coverage_model: Some(fallow_output::CoverageModel::StaticEstimated),
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let note = file_scores_crap_note(&report);
+    assert!(note.contains("static estimate"), "{note}");
+    assert!(note.contains("for measured scores"), "{note}");
+    assert!(!note.contains("exact scores"), "{note}");
 }
 
 #[test]

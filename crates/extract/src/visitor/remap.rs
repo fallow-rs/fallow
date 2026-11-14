@@ -30,6 +30,26 @@ impl ModuleInfoExtractor {
         for reference in &mut self.import_binding_references {
             reference.span_start = remap_start(reference.span_start);
         }
+        for contract in &mut self.function_contracts.declarations {
+            contract.span_start = remap_start(contract.span_start);
+            for param in &mut contract.params {
+                param.span_start = remap_start(param.span_start);
+                for key in &mut param.keys {
+                    key.span_start = remap_start(key.span_start);
+                }
+            }
+        }
+        for site in self
+            .function_contracts
+            .calls
+            .iter_mut()
+            .flat_map(|calls| calls.sites.iter_mut())
+        {
+            site.span_start = remap_start(site.span_start);
+        }
+        for escape in &mut self.function_contracts.escapes {
+            escape.span_start = remap_start(escape.span_start);
+        }
         for start in self
             .callee_uses
             .iter_mut()

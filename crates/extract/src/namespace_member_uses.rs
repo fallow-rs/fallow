@@ -37,10 +37,10 @@ enum ChainUse {
 }
 
 /// The outermost static member chain over a root identifier.
-struct Chain {
-    node: NodeId,
-    span: Span,
-    segments: Vec<String>,
+pub struct Chain {
+    pub node: NodeId,
+    pub span: Span,
+    pub segments: Vec<String>,
 }
 
 /// Collect the namespace member uses of a module, sorted and without repeats.
@@ -296,7 +296,7 @@ fn join_path(prefix: &str, suffix: &str) -> String {
 
 /// Follow static member links up from a root identifier: `N.a.b`, the type
 /// `N.a.T`, `N["a"]` and the JSX tag `<N.a />`.
-fn member_chain(nodes: &AstNodes<'_>, node_id: NodeId, identifier_span: Span) -> Chain {
+pub fn member_chain(nodes: &AstNodes<'_>, node_id: NodeId, identifier_span: Span) -> Chain {
     let mut current = node_id;
     let mut span = identifier_span;
     let mut segments = Vec::new();
@@ -338,7 +338,7 @@ fn member_chain(nodes: &AstNodes<'_>, node_id: NodeId, identifier_span: Span) ->
 
 /// Walk up through parentheses and the TypeScript expression wrappers that
 /// do not change the runtime value.
-fn unwrap_upward(nodes: &AstNodes<'_>, node_id: NodeId, span: Span) -> (NodeId, Span) {
+pub fn unwrap_upward(nodes: &AstNodes<'_>, node_id: NodeId, span: Span) -> (NodeId, Span) {
     let mut current = node_id;
     let mut current_span = span;
     loop {
@@ -415,7 +415,7 @@ fn classify(nodes: &AstNodes<'_>, chain: &Chain) -> ChainUse {
 
 /// The keys of `const { a, b: c } = ...` when every key is static and the
 /// pattern has no rest element.
-fn destructured_keys(pattern: &BindingPattern<'_>) -> Option<Vec<String>> {
+pub fn destructured_keys(pattern: &BindingPattern<'_>) -> Option<Vec<String>> {
     let BindingPattern::ObjectPattern(object) = pattern else {
         return None;
     };

@@ -1,5 +1,4 @@
 // Generated from tools/mutation-runner/src/adapters/bun-test.mjs. Do not edit.
-import { spawn } from "node:child_process";
 import { existsSync, readFileSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -10,6 +9,7 @@ import {
   childProcessAdapter,
   createWorkDir,
   initTestFiles,
+  spawnWithStderrTail,
   withTestIds,
 } from "./child-process.mjs";
 import {
@@ -167,18 +167,13 @@ const readLines = (path) =>
 /** Starts one `bun test` process and waits for it. */
 const spawnBun = (args, { root, env }) =>
   new Promise((resolveExit, rejectExit) => {
-    const child = spawn(process.execPath, args, {
+    const { child, stderr } = spawnWithStderrTail(process.execPath, args, {
       cwd: root,
       env,
-      stdio: ["ignore", "ignore", "pipe"],
-    });
-    let stderr = "";
-    child.stderr.setEncoding("utf8");
-    child.stderr.on("data", (chunk) => {
-      stderr = (stderr + chunk).slice(-STDERR_TAIL_BYTES);
+      tailBytes: STDERR_TAIL_BYTES,
     });
     child.on("error", rejectExit);
-    child.on("close", (code, signal) => resolveExit({ code, signal, stderr }));
+    child.on("close", (code, signal) => resolveExit({ code, signal, stderr: stderr() }));
   });
 
 const hasFailedCase = (cases) => cases.some((testCase) => testCase.status === "fail");

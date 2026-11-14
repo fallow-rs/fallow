@@ -1217,6 +1217,23 @@ impl ResolvedConfig {
 mod tests;
 
 impl ResolvedConfig {
+    /// Whether a rule of this config reads the call facts of the modules: the
+    /// `constant-parameter` rule is on, globally or in an override.
+    ///
+    /// A run for which this is `false` neither stores nor decodes call facts.
+    /// The parse cache records which entries hold them, so a later run that
+    /// reads them parses only the files whose entry lacks them.
+    #[must_use]
+    pub fn reads_call_facts(&self) -> bool {
+        self.rules.constant_parameters != crate::Severity::Off
+            || self.overrides.iter().any(|overrides| {
+                overrides
+                    .rules
+                    .constant_parameters
+                    .is_some_and(|severity| severity != crate::Severity::Off)
+            })
+    }
+
     /// Request optional shared-state facts with a distinct cache identity.
     pub fn request_shared_state(&mut self) {
         if self.extraction_mode == fallow_types::shared_state::ExtractionMode::Standard {

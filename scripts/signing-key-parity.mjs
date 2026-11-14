@@ -9,15 +9,8 @@ const BASE64_PATTERN = /^[A-Za-z0-9+/]{43}=$/u;
 
 const escapeRegExp = (value) => value.replaceAll(/[.*+?^${}()|[\]\\]/g, "\\$&");
 
-export const parseEmbeddedPublicKey = (source, constantName, surface) => {
-  const pattern = new RegExp(
-    `\\bconst\\s+${escapeRegExp(constantName)}\\s*=\\s*Buffer\\.from\\(\\s*\\[([\\s\\S]*?)\\]\\s*\\)`,
-    "u",
-  );
-  const match = source.match(pattern);
-  assert.ok(match, `${surface}: missing ${constantName} Buffer.from array`);
-
-  const tokens = match[1]
+const parseKeyBytes = (list, surface) => {
+  const tokens = list
     .split(",")
     .map((token) => token.trim())
     .filter(Boolean);
@@ -31,6 +24,27 @@ export const parseEmbeddedPublicKey = (source, constantName, surface) => {
   });
 
   return Buffer.from(bytes);
+};
+
+export const parseEmbeddedPublicKey = (source, constantName, surface) => {
+  const pattern = new RegExp(
+    `\\bconst\\s+${escapeRegExp(constantName)}\\s*=\\s*Buffer\\.from\\(\\s*\\[([\\s\\S]*?)\\]\\s*\\)`,
+    "u",
+  );
+  const match = source.match(pattern);
+  assert.ok(match, `${surface}: missing ${constantName} Buffer.from array`);
+  return parseKeyBytes(match[1], surface);
+};
+
+/** Parses `const NAME: [u8; 32] = [ ... ];` from Rust source. */
+export const parseRustPublicKey = (source, constantName, surface) => {
+  const pattern = new RegExp(
+    `\\bconst\\s+${escapeRegExp(constantName)}\\s*:\\s*\\[u8;\\s*32\\]\\s*=\\s*\\[([\\s\\S]*?)\\]\\s*;`,
+    "u",
+  );
+  const match = source.match(pattern);
+  assert.ok(match, `${surface}: missing ${constantName} [u8; 32] array`);
+  return parseKeyBytes(match[1], surface);
 };
 
 export const parseDocumentedPublicKey = (securityPolicy) => {
@@ -70,6 +84,7 @@ export const assertSigningKeyParity = ({
   vscodeSource,
   npmVerifierSource,
   companionVerifierSource,
+  rustProviderSource,
   securityPolicy,
   releasePublicKey,
 }) => {
@@ -84,6 +99,11 @@ export const assertSigningKeyParity = ({
     "PUBLIC_KEY",
     "similar-code companion verifier",
   );
+  const rustProviderKey = parseRustPublicKey(
+    rustProviderSource,
+    "RELEASE_BINARY_SIGNING_KEY",
+    "similar-code Rust provider check",
+  );
   const documented = parseDocumentedPublicKey(securityPolicy);
 
   assert.deepEqual(npmKey, vscodeKey, "npm verifier: embedded public key differs from VS Code");
@@ -91,6 +111,11 @@ export const assertSigningKeyParity = ({
     companionKey,
     vscodeKey,
     "similar-code companion verifier: embedded public key differs from VS Code",
+  );
+  assert.deepEqual(
+    rustProviderKey,
+    vscodeKey,
+    "similar-code Rust provider check: embedded public key differs from VS Code",
   );
   assert.deepEqual(
     documented.fingerprint,
@@ -123,6 +148,10 @@ export const checkRepositorySigningKeyParity = ({
     npmVerifierSource: readFileSync(resolve(root, "npm/fallow/scripts/verify-binary.js"), "utf8"),
     companionVerifierSource: readFileSync(
       resolve(root, "npm/fallow-similar-code/scripts/verify-binary.js"),
+      "utf8",
+    ),
+    rustProviderSource: readFileSync(
+      resolve(root, "crates/api/src/similar_code/launcher_provider.rs"),
       "utf8",
     ),
     securityPolicy: readFileSync(resolve(root, "SECURITY.md"), "utf8"),

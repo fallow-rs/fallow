@@ -291,18 +291,23 @@ pub(super) fn workspace_patterns_from_param(value: Option<&str>) -> Option<Vec<S
 /// parameter happened to force the CLI fallback; it is a no-op on every
 /// envelope that carries none of them.
 ///
-/// The body obeys the same 16 MiB cap as the CLI route and is refused with
+/// The body obeys the same server cap as the CLI route and is refused with
 /// the same over-limit body, so a parameter that selects the typed route
 /// cannot return more than the CLI route would.
-pub(super) fn json_success(value: &serde_json::Value) -> CallToolResult {
-    json_success_with_limit(value, super::DEFAULT_MAX_OUTPUT_BYTES)
+pub(super) fn json_success(tool: &str, value: &serde_json::Value) -> CallToolResult {
+    json_success_with_limit(tool, value, super::server_output_limit())
 }
 
-fn json_success_with_limit(value: &serde_json::Value, max_output_bytes: usize) -> CallToolResult {
+fn json_success_with_limit(
+    tool: &str,
+    value: &serde_json::Value,
+    max_output_bytes: usize,
+) -> CallToolResult {
     let text = super::gate_verdicts::annotate_value(value).unwrap_or_else(|| value.to_string());
     if text.len() > max_output_bytes {
         return super::over_limit_result(
             &super::OverLimit {
+                tool,
                 stream: "result",
                 context: "typed",
                 captured: &text,
@@ -337,10 +342,11 @@ pub(super) fn typed_error_needs_cli(error: &ProgrammaticError) -> bool {
 /// Render a finished typed-route result, or `None` when the tool must run the
 /// CLI instead (see [`typed_error_needs_cli`]).
 pub(super) fn typed_tool_result(
+    tool: &str,
     result: Result<serde_json::Value, ProgrammaticError>,
 ) -> Option<CallToolResult> {
     match result {
-        Ok(value) => Some(json_success(&value)),
+        Ok(value) => Some(json_success(tool, &value)),
         Err(err) if typed_error_needs_cli(&err) => None,
         Err(err) => Some(CallToolResult::error(vec![ContentBlock::text(
             programmatic_error_body(&err),
@@ -413,7 +419,7 @@ mod tests {
         let value = serde_json::json!({ "files": ["x".repeat(64)] });
         let total = value.to_string().len();
 
-        let result = json_success_with_limit(&value, 32);
+        let result = json_success_with_limit("project_info", &value, 32);
 
         assert_eq!(result.is_error, Some(true));
         let body: serde_json::Value =
@@ -435,10 +441,36 @@ mod tests {
     }
 
     #[test]
+    fn typed_refusal_names_the_parameters_that_narrow_the_tool() {
+        let value = serde_json::json!({ "clone_groups": ["x".repeat(64)] });
+
+        let result = json_success_with_limit("find_dupes", &value, 32);
+
+        let body: serde_json::Value =
+            serde_json::from_str(result_text(&result)).expect("over-limit body is JSON");
+        assert_eq!(body["context"], "typed");
+        let narrow = body["narrow"].as_array().expect("narrow array");
+        assert!(narrow.iter().any(|param| param == "top"), "{narrow:?}");
+    }
+
+    #[test]
+    fn typed_refusal_omits_narrow_for_a_tool_without_narrowing_parameters() {
+        let value = serde_json::json!({ "files": ["x".repeat(64)] });
+
+        let result = json_success_with_limit("project_info", &value, 32);
+
+        let body: serde_json::Value =
+            serde_json::from_str(result_text(&result)).expect("over-limit body is JSON");
+        assert!(body.get("narrow").is_none(), "{body}");
+        let help = body["help"].as_str().expect("help string");
+        assert!(!help.contains("`narrow`"), "{help}");
+    }
+
+    #[test]
     fn typed_result_within_the_cap_is_returned_unchanged() {
         let value = serde_json::json!({ "ok": true });
 
-        let result = json_success_with_limit(&value, 1024);
+        let result = json_success_with_limit("find_dupes", &value, 1024);
 
         assert_eq!(result.is_error, Some(false));
         assert_eq!(result_text(&result), value.to_string());

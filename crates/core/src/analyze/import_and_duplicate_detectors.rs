@@ -21,6 +21,9 @@ pub(super) fn run_import_and_duplicate_detectors(
                 virtual_prefixes: input.virtual_prefixes,
                 generated_patterns: input.generated_patterns,
                 generated_type_prefixes: input.generated_type_prefixes,
+                checked_alias_prefixes: input
+                    .plugin_result
+                    .map_or(&[], |result| result.checked_alias_prefixes.as_slice()),
                 line_offsets_by_file: input.line_offsets_by_file,
             })
         },
@@ -90,5 +93,38 @@ fn run_duplicate_export_alias_detector(
     )
     .into_iter()
     .map(DuplicateExportAliasFinding::with_actions)
+    .collect()
+}
+
+#[derive(Clone, Copy)]
+struct UnresolvedImportDetectorInput<'a> {
+    resolved_modules: &'a [ResolvedModule],
+    config: &'a ResolvedConfig,
+    suppressions: &'a crate::suppress::SuppressionContext<'a>,
+    virtual_prefixes: &'a [&'a str],
+    generated_patterns: &'a [&'a str],
+    generated_type_prefixes: &'a [&'a str],
+    checked_alias_prefixes: &'a [crate::plugins::CheckedAliasPrefix],
+    line_offsets_by_file: &'a LineOffsetsMap<'a>,
+}
+
+fn run_unresolved_import_detector(
+    input: UnresolvedImportDetectorInput<'_>,
+) -> Vec<UnresolvedImportFinding> {
+    if input.config.rules.unresolved_imports == Severity::Off || input.resolved_modules.is_empty() {
+        return Vec::new();
+    }
+    find_unresolved_imports(
+        input.resolved_modules,
+        input.config,
+        input.suppressions,
+        input.virtual_prefixes,
+        input.generated_patterns,
+        input.generated_type_prefixes,
+        input.checked_alias_prefixes,
+        input.line_offsets_by_file,
+    )
+    .into_iter()
+    .map(UnresolvedImportFinding::with_actions)
     .collect()
 }

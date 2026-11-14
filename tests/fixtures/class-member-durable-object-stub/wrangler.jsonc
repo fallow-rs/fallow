@@ -1,0 +1,7 @@
+{
+  "name": "worker",
+  "main": "src/index.ts",
+  "durable_objects": {
+    "bindings": [{ "name": "QUOTA", "class_name": "DailyQuota" }]
+  }
+}

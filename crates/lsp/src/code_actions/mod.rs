@@ -1,4 +1,5 @@
 mod absent_props;
+mod constant_parameters;
 mod quick_fix;
 mod suppress;
 #[cfg(test)]
@@ -11,6 +12,7 @@ use fallow_api::EditorAnalysisResults as AnalysisResults;
 use ls_types::*;
 
 pub use absent_props::*;
+pub use constant_parameters::*;
 pub use quick_fix::*;
 pub use suppress::*;
 
@@ -84,6 +86,9 @@ pub fn build_code_action_response(input: CodeActionInput<'_>) -> Option<CodeActi
 
     if let Some(source) = absent_prop_source {
         actions.extend(build_suppress_absent_prop_actions(
+            results, file_path, uri, range, source,
+        ));
+        actions.extend(build_suppress_constant_parameter_actions(
             results, file_path, uri, range, source,
         ));
     }

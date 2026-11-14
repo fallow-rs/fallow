@@ -37,12 +37,14 @@ mod css_mask;
 mod css_masked_bytes;
 pub mod css_metrics;
 mod css_module_classes;
+mod css_url;
 pub mod dom_classes;
 pub mod effect_facts;
 mod effect_schema;
 pub mod federation_runtime;
 pub mod flags;
 mod function_body;
+mod function_contracts;
 mod function_hash;
 pub mod glimmer;
 pub(crate) mod graphql;
@@ -59,6 +61,7 @@ mod module_parse;
 mod namespace_member_uses;
 mod nesting;
 pub mod og_image;
+mod opaque_loads;
 mod parse;
 mod parse_degradation;
 pub mod sfc;
@@ -67,6 +70,7 @@ mod sfc_props;
 mod sfc_template;
 mod shared_state;
 pub mod similar_code;
+mod sink_identity;
 mod source_map;
 mod stack;
 pub mod suppress;
@@ -124,6 +128,7 @@ pub use css_in_js::{
 };
 pub use css_metrics::{compute_css_analytics, parse_css_color_rgb};
 pub use dom_classes::{DomClassScan, scan_dom_class_values};
+pub use function_contracts::{ParameterCondition, parameter_conditions};
 pub use glimmer::{is_glimmer_file, strip_glimmer_templates};
 pub use js_text::JsText;
 pub use mdx::{extract_mdx_statements, extract_mdx_statements_mapped};
@@ -137,9 +142,11 @@ pub use sfc_css::{
     scoped_unused_classes, sfc_preprocessor_virtual_stylesheet, sfc_virtual_stylesheet,
 };
 pub use similar_code::extract_similar_code_functions;
+pub use sink_identity::sink_identity_text;
 pub use source_map::{ExtractionResult, ScriptSection, embedded_script_sections};
 pub use stack::register_thread_stack;
 pub use tailwind::{TailwindArbitraryUse, scan_tailwind_arbitrary_values};
+pub use template_usage::TEMPLATE_SINK_CALLEE_PREFIX;
 
 #[expect(
     clippy::expect_used,
@@ -179,6 +186,16 @@ fn strip_bom(source: &str) -> &str {
     source.strip_prefix(BOM_CHAR).unwrap_or(source)
 }
 
+/// The optional facts that a parse run must give for each module.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ParseNeeds {
+    /// Per-function complexity, for the `health` command.
+    pub complexity: bool,
+    /// The call facts (`ModuleInfo::function_contracts`), for the rules that
+    /// read them.
+    pub call_facts: bool,
+}
+
 /// Parse all files, extracting imports and exports.
 ///
 /// Small file sets use a sequential fast path to avoid parallel scheduling
@@ -192,6 +209,9 @@ fn strip_bom(source: &str) -> &str {
 /// Flag detection uses the built-in patterns only. A caller with a resolved
 /// config uses [`parse_all_files_cancellable`] with the config's patterns,
 /// because the cache keys on them.
+///
+/// The modules carry no call facts, as in a run of the default config. A
+/// caller that reads them uses [`parse_all_files_with_mode`].
 pub fn parse_all_files(
     files: &[DiscoveredFile],
     cache: Option<&CacheStore>,
@@ -217,6 +237,7 @@ pub fn parse_all_files(
 ///
 /// `flag_patterns` are the user flag patterns that detection applies on top
 /// of the built-in ones. They must match the patterns the cache was keyed on.
+/// The modules carry no call facts, as for [`parse_all_files`].
 pub fn parse_all_files_cancellable(
     files: &[DiscoveredFile],
     cache: Option<&CacheStore>,
@@ -227,7 +248,10 @@ pub fn parse_all_files_cancellable(
     parse_all_files_with_mode(
         files,
         cache,
-        need_complexity,
+        ParseNeeds {
+            complexity: need_complexity,
+            call_facts: false,
+        },
         cancellation,
         flag_patterns,
         fallow_types::shared_state::ExtractionMode::Standard,
@@ -235,10 +259,15 @@ pub fn parse_all_files_cancellable(
 }
 
 /// Parse files with an explicit optional-fact mode matching the cache identity.
+///
+/// When `needs.call_facts` is `false`, the returned modules carry no call
+/// facts (`function_contracts` is `None`), and a cache hit does not decode
+/// them. When it is `true`, a cache entry that did not record call facts is a
+/// miss, so each returned module has its call facts.
 pub fn parse_all_files_with_mode(
     files: &[DiscoveredFile],
     cache: Option<&CacheStore>,
-    need_complexity: bool,
+    needs: ParseNeeds,
     cancellation: Option<&AtomicBool>,
     flag_patterns: &FlagPatterns,
     mode: fallow_types::shared_state::ExtractionMode,
@@ -247,7 +276,7 @@ pub fn parse_all_files_with_mode(
         if cancellation.is_some_and(|cancelled| cancelled.load(Ordering::SeqCst)) {
             return ParseFileResult::default();
         }
-        parse_single_file_cached(file, cache, need_complexity, flag_patterns, mode)
+        parse_single_file_cached(file, cache, needs, flag_patterns, mode)
     };
     let results: Vec<ParseFileResult> = if files.len() <= PARALLEL_PARSE_FILE_THRESHOLD {
         files.iter().map(parse_one).collect()
@@ -403,10 +432,14 @@ impl ParseFileResult {
 fn parse_single_file_cached(
     file: &DiscoveredFile,
     cache: Option<&CacheStore>,
-    need_complexity: bool,
+    needs: ParseNeeds,
     flag_patterns: &FlagPatterns,
     mode: fallow_types::shared_state::ExtractionMode,
 ) -> ParseFileResult {
+    let ParseNeeds {
+        complexity: need_complexity,
+        call_facts: need_call_facts,
+    } = needs;
     let cached_by_path = cache.and_then(|store| store.get_by_path_only(&file.path));
 
     if let Some(cached) = cached_by_path
@@ -424,12 +457,10 @@ fn parse_single_file_cached(
             if cached.source_fingerprint() == fingerprint
                 && fingerprint.is_trustworthy_without_content()
                 && (!need_complexity || cached.complexity_extracted)
+                && let Some(module) =
+                    cache::cached_hit_to_module(cached, file.id, need_complexity, need_call_facts)
             {
-                return ParseFileResult::cache_hit(cache::cached_to_module_opts(
-                    cached,
-                    file.id,
-                    need_complexity,
-                ));
+                return ParseFileResult::cache_hit(module);
             }
         }
     }
@@ -444,19 +475,16 @@ fn parse_single_file_cached(
     if let Some(cached) = cached_by_path
         && cached.content_hash == content_hash
         && (!need_complexity || cached.complexity_extracted)
+        && let Some(module) =
+            cache::cached_hit_to_module(cached, file.id, need_complexity, need_call_facts)
     {
-        return ParseFileResult::cache_hit(cache::cached_to_module_opts(
-            cached,
-            file.id,
-            need_complexity,
-        ))
-        .with_source_bytes_read(raw.len());
+        return ParseFileResult::cache_hit(module).with_source_bytes_read(raw.len());
     }
 
     let parse_start = std::time::Instant::now();
     // Drop a count that a scan outside a parse left on this thread.
     css_masked_bytes::take();
-    let module = module_parse::parse_source_without_bom(
+    let mut module = module_parse::parse_source_without_bom(
         file.id,
         &file.path,
         source,
@@ -467,6 +495,11 @@ fn parse_single_file_cached(
             mode,
         },
     );
+    if !need_call_facts {
+        // A cache hit of the same run gives no call facts, so a parsed module
+        // must not give them either.
+        module.function_contracts = None;
+    }
     let parse_cpu_nanos = u64::try_from(parse_start.elapsed().as_nanos()).unwrap_or(u64::MAX);
     let mut result =
         ParseFileResult::cache_miss(module, parse_cpu_nanos).with_source_bytes_read(raw.len());

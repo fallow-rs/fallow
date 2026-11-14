@@ -118,6 +118,8 @@ fn the_summary_names_the_next_step() {
         tests_fail_on_original: 0,
         unsettled: 0,
         mutants: Vec::new(),
+        carried: 0,
+        stale_files: Vec::new(),
     };
     let text = render(&recheck);
     assert!(text.contains("     2  killed\n"), "{text}");

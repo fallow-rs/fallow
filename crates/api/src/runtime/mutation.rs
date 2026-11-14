@@ -21,6 +21,8 @@ use fallow_output::{
 use fallow_types::envelope::ElapsedMs;
 use rustc_hash::FxHashSet;
 
+use super::mutation_record::{record_and_search, settle_recording};
+use super::mutation_witness::{WitnessSearch, search_witnesses};
 use crate::ProgrammaticError;
 use crate::analysis_context::{ProgrammaticAnalysisContext, resolve_programmatic_analysis_context};
 use crate::mutation::companion::{COMPANION_FILES, install};
@@ -30,6 +32,7 @@ use crate::mutation::last_report::ignore_cache_dir;
 use crate::mutation::manifest::{Manifest, RunnerRange, manifest};
 use crate::mutation::node_args::node_test_args;
 use crate::mutation::protocol::{InitOptions, InitRequest};
+use crate::mutation::recorded_args::RecordPass;
 use crate::mutation::report::{
     CompletionFacts, baseline_failures, completion, function_results, issues, mutant_results,
     plan_counts, plan_files, plan_mutants, skipped_files, skipped_tests_issue, summary,
@@ -38,6 +41,7 @@ use crate::mutation::report::{
 use crate::mutation::result_cache::{KeyFiles, NOT_KEYED, ResultCache};
 use crate::mutation::run_dir::{RunFile, write_run_dir};
 use crate::mutation::runner_select::{Runner, select_runner};
+use crate::mutation::runner_version::{plan_runner, runner_version_help};
 use crate::mutation::scheduler::clock::SystemClock;
 use crate::mutation::scheduler::{
     OutcomeJournal, ResultLookup, ScheduleConfig, ScheduleError, ScheduleIssue, ScheduleOutcome,
@@ -50,12 +54,12 @@ use crate::mutation::{
     MutationProgress, MutationProgressSink, MutationRunOptions, MutationRunScope,
 };
 
-type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
+pub(super) type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
 
 /// The default timeout of `init` and the dry run (`protocol.md` section 8).
-const DEFAULT_RUNNER_TIMEOUT: Duration = Duration::from_secs(120);
+pub(super) const DEFAULT_RUNNER_TIMEOUT: Duration = Duration::from_secs(120);
 
-fn mutation_error(code: &str, message: impl Into<String>) -> ProgrammaticError {
+pub(super) fn mutation_error(code: &str, message: impl Into<String>) -> ProgrammaticError {
     ProgrammaticError::new(message, 2).with_code(code)
 }
 
@@ -63,7 +67,7 @@ fn mutation_error(code: &str, message: impl Into<String>) -> ProgrammaticError {
     clippy::cast_possible_truncation,
     reason = "a run lasts far less than 2^64 milliseconds"
 )]
-const fn millis(duration: Duration) -> u64 {
+pub(super) const fn millis(duration: Duration) -> u64 {
     duration.as_millis() as u64
 }
 
@@ -211,7 +215,12 @@ fn kill_matrix_mode<'a>(
     }
 }
 
-fn load_session(resolved: &ProgrammaticAnalysisContext) -> ProgrammaticResult<AnalysisSession> {
+/// Loads the analysis session of a mutation run. `operators` is the
+/// operator list of the options, `None` when the options name none.
+fn load_session(
+    resolved: &ProgrammaticAnalysisContext,
+    operators: Option<&[fallow_engine::mutation::Operator]>,
+) -> ProgrammaticResult<AnalysisSession> {
     let mut project = fallow_engine::project_config::config_for_project_with_load_options(
         resolved.root(),
         resolved.config_path().as_deref(),
@@ -226,6 +235,26 @@ fn load_session(resolved: &ProgrammaticAnalysisContext) -> ProgrammaticResult<An
     })?;
     project.config.no_cache = resolved.no_cache;
     project.config.threads = resolved.threads;
+    // The `constant-parameter` hint of a `negate-condition` survivor reads
+    // the findings of this rule, so the analysis of a mutation run computes
+    // them even when the project leaves the rule off. A mutation run reports
+    // no dead-code finding.
+    let negates = match operators {
+        Some(operators) => operators.contains(&fallow_engine::mutation::Operator::NegateCondition),
+        None => project
+            .config
+            .mutation
+            .operators
+            .as_ref()
+            .is_none_or(|names| {
+                names.iter().any(|name| {
+                    name.as_str() == fallow_engine::mutation::Operator::NegateCondition.as_str()
+                })
+            }),
+    };
+    if negates && project.config.rules.constant_parameters == fallow_config::Severity::Off {
+        project.config.rules.constant_parameters = fallow_config::Severity::Warn;
+    }
     Ok(AnalysisSession::from_config(project))
 }
 
@@ -336,15 +365,15 @@ fn config_operators(
         .map(Some)
 }
 
-struct Planned {
-    resolved: ProgrammaticAnalysisContext,
-    cache_dir: PathBuf,
+pub(super) struct Planned {
+    pub(super) resolved: ProgrammaticAnalysisContext,
+    pub(super) cache_dir: PathBuf,
     /// The test runner, selected from the config value and the first plan.
-    runner: Runner,
-    plan: MutationPlan,
+    pub(super) runner: Runner,
+    pub(super) plan: MutationPlan,
     base_ref: Option<String>,
     /// The selected runner config file, relative to the project root.
-    runner_config: Option<String>,
+    pub(super) runner_config: Option<String>,
     /// The names of the selected operators. `None` uses the default set.
     operators: Option<Vec<String>>,
 }
@@ -411,13 +440,25 @@ fn runner_config(
     ))
 }
 
-fn plan_for(
+pub(super) fn plan_for(
     options: &MutationRunOptions,
     before_plan: impl FnOnce(&Path, &Path) -> ProgrammaticResult<()>,
 ) -> ProgrammaticResult<Planned> {
+    plan_with_wraps(options, before_plan, false)
+}
+
+/// [`plan_for`] with the argument recording wraps when `record_exports` is
+/// set. Only the record pass loads a plan with wraps: a wrap changes the
+/// inferred name of a function value, so the dry run and the mutant runs
+/// load the plan without them.
+pub(super) fn plan_with_wraps(
+    options: &MutationRunOptions,
+    before_plan: impl FnOnce(&Path, &Path) -> ProgrammaticResult<()>,
+    record_exports: bool,
+) -> ProgrammaticResult<Planned> {
     validate(options)?;
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
-    let session = load_session(&resolved)?;
+    let session = load_session(&resolved, options.operators.as_deref())?;
     let cache_dir = session.config().cache_dir.clone();
     let configured = session.config().mutation.runner;
     before_plan(resolved.root(), &cache_dir)?;
@@ -449,6 +490,7 @@ fn plan_for(
         skip_component_files: false,
         mutant_ids: (!options.mutant_ids.is_empty())
             .then(|| options.mutant_ids.iter().cloned().collect()),
+        record_exports,
     };
     // The runner decision reads the test files of the first plan. A second
     // plan without the component files keeps that decision.
@@ -499,6 +541,8 @@ pub fn plan_mutation(options: &MutationRunOptions) -> ProgrammaticResult<Mutatio
         framework_config_checked: plan.framework_config_checked,
         skipped_files: skipped_files(plan),
         unmatched_paths: plan.unmatched_paths.clone(),
+        runner: plan_runner(planned.runner, planned.resolved.root())
+            .map_err(|message| mutation_error("FALLOW_MUTATION_PROTOCOL_INVALID", message))?,
     })
 }
 
@@ -514,7 +558,7 @@ fn unsafe_cache_dir(message: String) -> ProgrammaticError {
 /// worktree check leaves the mutation cache out, and the analysis writes a
 /// `.gitignore` that ignores the whole cache directory, so such a cache
 /// directory hides each stray write from the check.
-fn guard_cache_dir(root: &Path, cache_dir: &Path) -> ProgrammaticResult<()> {
+pub(super) fn guard_cache_dir(root: &Path, cache_dir: &Path) -> ProgrammaticResult<()> {
     if !canonical_path(root).starts_with(canonical_path(cache_dir)) {
         return Ok(());
     }
@@ -743,26 +787,6 @@ fn guard_mutant_ids(options: &MutationRunOptions, plan: &MutationPlan) -> Progra
     ))
 }
 
-/// The help of a runner version outside `range`. It names the supported
-/// range as an install step. When the minimum is not a `.0.0` release, it
-/// also says that a minor update inside the major version is enough.
-fn runner_version_help(range: &RunnerRange) -> String {
-    let RunnerRange {
-        package,
-        min_version,
-        max_version_exclusive,
-        ..
-    } = range;
-    let install =
-        format!("install {package} {min_version} or a later version below {max_version_exclusive}");
-    match min_version.split_once('.') {
-        Some((major, rest)) if rest != "0.0" => {
-            format!("{install}; a {package} {major}.x release from {min_version} is in the range")
-        }
-        _ => install,
-    }
-}
-
 /// Maps a schedule error to its public error. A setup watchdog fault names
 /// `--setup-timeout`, because a slow or busy host is the usual cause. A
 /// runner version error names the supported range of `runner`.
@@ -824,7 +848,7 @@ fn default_concurrency() -> usize {
         .max(1)
 }
 
-fn runtime_error(runner: Runner, message: String) -> ProgrammaticError {
+pub(super) fn runtime_error(runner: Runner, message: String) -> ProgrammaticError {
     mutation_error("FALLOW_MUTATION_RUNTIME_NOT_FOUND", message)
         .with_help(runner.runtime_help())
         .with_context("mutation.runtime")
@@ -868,6 +892,43 @@ struct Execution {
     cache: Option<MutationCacheOutput>,
     resume: Option<MutationResumeOutput>,
     setup_ms: u64,
+    /// The record pass of `--record-args`. `None` without recording.
+    record: Option<RecordPass>,
+    /// The companion facts of the witness search of `--record-args
+    /// values`. `None` otherwise.
+    witness: Option<WitnessSearch>,
+}
+
+/// Stores the recorded inputs, then searches the witnesses of the open
+/// tasks, because the search reads the stored inputs.
+fn recording_and_witnesses(
+    options: &MutationRunOptions,
+    planned: &Planned,
+    execution: &Execution,
+    results: &mut [fallow_output::MutantResult],
+) -> Option<fallow_output::MutationRecordingOutput> {
+    let recording = settle_recording(options, &planned.cache_dir, execution.record.as_ref());
+    if let Some(search) = &execution.witness {
+        search_witnesses(
+            search,
+            &planned.plan,
+            planned.resolved.root(),
+            &planned.cache_dir,
+            results,
+        );
+    }
+    recording
+}
+
+/// The instrumented files of `plan` as the run directory takes them.
+pub(super) fn run_files(plan: &MutationPlan) -> Vec<RunFile<'_>> {
+    plan.files
+        .iter()
+        .map(|file| RunFile {
+            path: &file.path,
+            code: &file.instrumented_code,
+        })
+        .collect()
 }
 
 /// The journal path as the report shows it: relative to the root, with `/`
@@ -1106,7 +1167,11 @@ fn store_results(cache: &ResultCache, outcome: &mut ScheduleOutcome) -> Mutation
 /// `node:test` and `bun:test` runners get the static test files, because
 /// their glob discovery does not go into dot directories. Vitest has its own
 /// include configuration.
-fn init_options(runner: Runner, root: &Path, static_test_files: &[String]) -> InitOptions {
+pub(super) fn init_options(
+    runner: Runner,
+    root: &Path,
+    static_test_files: &[String],
+) -> InitOptions {
     let node_args = match runner {
         Runner::NodeTest => node_test_args(root),
         Runner::Vitest | Runner::BunTest => Vec::new(),
@@ -1167,6 +1232,8 @@ fn execute(
             cache: None,
             resume: unread_journal(options, planned),
             setup_ms: 0,
+            record: None,
+            witness: None,
         });
     }
     progress(MutationProgress::Setup {
@@ -1191,15 +1258,8 @@ fn execute(
     let mutation_cache = planned.cache_dir.join("mutation");
     let companion = install(&mutation_cache, COMPANION_FILES)
         .map_err(|message| mutation_error("FALLOW_MUTATION_COMPANION_INTEGRITY", message))?;
-    let files: Vec<RunFile<'_>> = plan
-        .files
-        .iter()
-        .map(|file| RunFile {
-            path: &file.path,
-            code: &file.instrumented_code,
-        })
-        .collect();
-    let run_dir = write_run_dir(&mutation_cache, &files, Some(&companion)).map_err(cache_error)?;
+    let run_dir =
+        write_run_dir(&mutation_cache, &run_files(plan), Some(&companion)).map_err(cache_error)?;
     let root = planned.resolved.root().to_path_buf();
     let runtime_label = format!("{} {}", runtime.kind.name(), runtime.version);
     let (result_cache, run_journal) = open_stores(
@@ -1241,12 +1301,14 @@ fn execute(
     let mut outcome = run_schedule_with_progress(&spawner, &schedule, &config, progress)
         .map_err(|error| schedule_error(&error, &config.runner, config.runner_timeout))?;
     let runner = runner_output(&outcome, name, manifest, &runtime);
-    let cache = match (&result_cache, outcome.ready.is_some()) {
-        (Some(result_cache), true) => Some(store_results(result_cache, &mut outcome)),
-        _ => None,
-    };
+    let cache = (outcome.ready.is_some())
+        .then(|| result_cache.map(|result_cache| store_results(&result_cache, &mut outcome)))
+        .flatten();
     let resume = settle_journal(options, run_journal, &mut outcome);
+    let (record, witness) = record_and_search(options, &outcome, spawner, &config, &mutation_cache);
     Ok(Execution {
+        record,
+        witness,
         outcome: Some(outcome),
         runner,
         cache,
@@ -1389,19 +1451,17 @@ pub fn run_mutation_with_progress(
     let plan_ms = millis(started.elapsed());
     let execution = execute(options, &planned, deadline, progress);
     progress(MutationProgress::Finalize);
-    let worktree_end = settle_worktree(start_snapshot.as_ref(), |start| {
-        take_worktree_snapshot(
-            planned.resolved.root(),
-            &planned.cache_dir,
-            &options.output_paths,
-            Some(start),
-        )
-    });
-    let execution = execution.map_err(|error| with_worktree_facts(error, &worktree_end))?;
-    let WorktreeEnd {
-        changed_paths,
-        check_error,
-    } = worktree_end;
+    let settle = || {
+        settle_worktree(start_snapshot.as_ref(), |start| {
+            take_worktree_snapshot(
+                planned.resolved.root(),
+                &planned.cache_dir,
+                &options.output_paths,
+                Some(start),
+            )
+        })
+    };
+    let execution = execution.map_err(|error| with_worktree_facts(error, &settle()))?;
     let plan = &planned.plan;
     let outcome = execution.outcome.as_ref();
     let mut results = mutant_results(plan, outcome);
@@ -1412,6 +1472,13 @@ pub fn run_mutation_with_progress(
         &mut results,
     );
     let typecheck_ms = millis(typecheck.elapsed);
+    let recording = recording_and_witnesses(options, &planned, &execution, &mut results);
+    // The end snapshot comes after the witness replays, because they run
+    // project code too.
+    let WorktreeEnd {
+        changed_paths,
+        check_error,
+    } = settle();
     let baseline = baseline_failures(outcome);
     let completion = completion(&CompletionFacts {
         plan,
@@ -1465,6 +1532,7 @@ pub fn run_mutation_with_progress(
         recheck: None,
         compare: None,
         gate_outcomes: None,
+        recording,
     })
 }
 

@@ -1,15 +1,18 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { join, relative, resolve } from "node:path";
+import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 import { CompanionError, expectRequest, isPlainObject } from "../protocol.mjs";
 import { overlayErrorsPath } from "../runtime/child.mjs";
 import { LOOP_TIMEOUT_NAME, WALL_LOOP_TIMEOUT_NAME } from "../runtime/global.mjs";
+import { recordEntries } from "../runtime/records.mjs";
+import { SIDES } from "../runtime/replay.mjs";
 import { createWorkDir } from "./child-process.mjs";
 import { REUSED_POOLS, createReusedPool } from "./vitest-reuse.mjs";
 import {
   TEST_ID_SEPARATOR,
+  addRecords,
   attributeHits,
   buildOverlay,
   byCodeUnit,
@@ -22,6 +25,7 @@ import {
   isSupportedVersion,
   parseVersion,
   realPath,
+  replayEntry,
   runResult,
   testErrorText,
   toPosix,
@@ -30,6 +34,8 @@ import {
   unsupportedVersion,
   validateDryRun,
   validateInit,
+  validateRecord,
+  validateReplay,
   validateRun,
 } from "./common.mjs";
 
@@ -41,6 +47,12 @@ const OVERLAY_KEY = "fallowOverlay";
 const SUBPROCESS_PRELOAD_KEY = "fallowSubprocessPreload";
 const SUBPROCESS_PRELOAD = new URL("../runtime/node-subprocess-preload.mjs", import.meta.url);
 const SETUP_FILE = fileURLToPath(new URL("../runtime/vitest-setup.mjs", import.meta.url));
+const REPLAY_FILE = fileURLToPath(new URL("../runtime/vitest-replay.mjs", import.meta.url));
+const REPLAY_KEY = "fallowReplay";
+const RECORD_ARGS_KEY = "fallowRecordArgs";
+// The time of the module loads and of Vitest itself in a replay test, on top
+// of the call timeouts.
+const REPLAY_TEST_MARGIN_MS = 10_000;
 /** The companion directory, with the runtime files that a test worker loads. */
 const COMPANION_DIR = fileURLToPath(new URL("..", import.meta.url));
 const TIMEOUT_MESSAGE = /\b(?:Test|Hook) timed out in \d+ms/u;
@@ -86,21 +98,34 @@ const isComponent = (source) => COMPONENT_FILE.test(source);
 /** A request for a file on disk: no virtual module and no query. */
 const isPlainRequest = (id) => !id.startsWith("\0") && !id.includes("?");
 
-/** The overlay entry of a plain request for a component file, or undefined. */
-const componentEntry = (overlay, id) => {
-  if (!isPlainRequest(id)) return undefined;
-  const entry = overlay.get(realPath(id));
-  return entry !== undefined && isComponent(entry.source) ? entry : undefined;
+/**
+ * The overlay entry that the plugin serves for a request, or undefined. A
+ * script file gets its copy also for a request with a query. A component file
+ * gets its copy only for a plain request.
+ */
+const servedEntry = (overlay, id) => {
+  if (id.startsWith("\0")) return undefined;
+  const entry = overlay.get(realPath(id.split("?", 1)[0]));
+  if (entry === undefined) return undefined;
+  return !isComponent(entry.source) || isPlainRequest(id) ? entry : undefined;
 };
 
 /**
- * Serves the instrumented copy of each mapped file. A script file gets its
- * copy in the `transform` hook. A component file gets its copy in the `load`
- * hook, so the framework plugin compiles the instrumented component also when
- * its own `transform` hook runs first. A component request with a query (a
+ * Serves the instrumented copy of each mapped file in the `load` hook, as
+ * if the copy were the file on disk. Each `transform` hook of Vite, Vitest
+ * and the project then runs on the copy, as `vitest run` runs it on the
+ * original. For example, Vitest rewrites each `import.meta.env` read to the
+ * environment object that `vi.stubEnv` changes, and a framework plugin
+ * compiles the instrumented component. A component request with a query (a
  * style or a template block) is not served: the framework plugin makes it
- * from the component that it compiled. The `config` hook also
- * adds this plugin to each inline project definition. Vitest 4 gives the
+ * from the component that it compiled.
+ *
+ * A project plugin with `enforce: "pre"` can load a script file before this
+ * plugin, and Vite keeps the first `load` result. The `transform` hook then
+ * replaces the code of that file with the copy. The transforms that ran
+ * before this plugin do not apply to the copy in that case.
+ *
+ * The `config` hook adds this plugin to each inline project definition. Vitest 4 gives the
  * plugins of `createVitest` to the root project only. Vitest 5 does not give
  * them to an inline project with a `browser` block, also when browser mode
  * is off. Vite keeps one copy of a plugin that a project gets twice.
@@ -113,6 +138,14 @@ const componentEntry = (overlay, id) => {
  * its own default entries to the list, so the workspace root stays allowed.
  */
 const overlayPlugin = (overlay, loaded) => {
+  const servedIds = new Set();
+  const serve = (entry) => {
+    loaded.add(entry.source);
+    return {
+      code: readFileSync(entry.target, "utf8"),
+      map: readSourceMap(`${entry.target}.map`),
+    };
+  };
   const plugin = {
     name: OVERLAY_PLUGIN,
     enforce: "pre",
@@ -128,20 +161,16 @@ const overlayPlugin = (overlay, loaded) => {
       return { server: { fs: { allow: [COMPANION_DIR] } } };
     },
     load(id) {
-      const entry = componentEntry(overlay, id);
+      const entry = servedEntry(overlay, id);
       if (entry === undefined) return null;
-      loaded.add(entry.source);
-      return readFileSync(entry.target, "utf8");
+      servedIds.add(id);
+      return serve(entry);
     },
     transform(_code, id) {
-      if (id.startsWith("\0")) return null;
-      const entry = overlay.get(realPath(id.split("?", 1)[0]));
+      if (servedIds.delete(id)) return null;
+      const entry = servedEntry(overlay, id);
       if (entry === undefined || isComponent(entry.source)) return null;
-      loaded.add(entry.source);
-      return {
-        code: readFileSync(entry.target, "utf8"),
-        map: readSourceMap(`${entry.target}.map`),
-      };
+      return serve(entry);
     },
   };
   return plugin;
@@ -727,6 +756,24 @@ const setVitestEnv = () => {
 };
 
 /**
+ * The project that loads a replay file: a project in Node (not browser mode)
+ * whose root holds the file, the deepest root first. Without such a project,
+ * the first project in Node, else the first project.
+ */
+const holdsPath = (root, path) => {
+  const rel = relative(root, path);
+  return rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel);
+};
+
+const replayProject = (projects, path) => {
+  const inNode = projects.filter((project) => project.config.browser?.enabled !== true);
+  const holding = inNode
+    .filter((project) => holdsPath(project.config.root, path))
+    .toSorted((left, right) => right.config.root.length - left.config.root.length);
+  return holding[0] ?? inNode[0] ?? projects[0];
+};
+
+/**
  * Creates the Vitest adapter for an `init` request. It starts one Vitest
  * instance with no file parallelism and one worker, and keeps the project
  * `isolate` setting.
@@ -777,9 +824,18 @@ export const createAdapter = async (init) => {
   const reuse = createReuseControl(vitest.projects, workers);
   const runSpecifications = async (
     specifications,
-    { mutantId, bail, timeoutMs = null, loopBudgetMs = null, shared = false, reuseProcess = null },
+    {
+      mutantId,
+      bail,
+      timeoutMs = null,
+      loopBudgetMs = null,
+      shared = false,
+      reuseProcess = null,
+      recordArgs = false,
+    },
   ) => {
     provideActiveMutant(vitest, mutantId, loopBudgetMs);
+    for (const project of vitest.projects) project.provide(RECORD_ARGS_KEY, recordArgs);
     // A mutant run in a shared worker keeps the worker process for the next
     // mutant run. Control and dry runs, and runs without bail, start a new
     // one. The dry-run check passes `reuseProcess` to test the reused process.
@@ -926,6 +982,32 @@ export const createAdapter = async (init) => {
     });
   };
 
+  /**
+   * Runs the dry-run test files once more with the recorder on, and gives
+   * the recorded arguments. The test results of this pass count for
+   * nothing, so a test that the wraps change never changes a run.
+   */
+  const record = async (request) => {
+    validateRecord(request);
+    const started = performance.now();
+    const specifications = dryRunSelection(request.test_files).map(([, spec]) => spec);
+    const result = await runSpecifications(specifications, {
+      mutantId: null,
+      bail: false,
+      recordArgs: true,
+    });
+    const records = new Map();
+    for (const testModule of result.testModules) {
+      for (const testCase of testModule.children.allTests()) {
+        addRecords(records, testCase.meta().fallowArgs);
+      }
+    }
+    return {
+      recorded_args: recordEntries(records),
+      duration_ms: Math.round(performance.now() - started),
+    };
+  };
+
   /** Groups the requested tests into one specification for each test module. */
   const specificationsFor = (requested) => {
     const groups = new Map();
@@ -1046,6 +1128,52 @@ export const createAdapter = async (init) => {
     return (await runRequested(request, requested, false)).body;
   };
 
+  /** Runs one replay call as the only test of a run, in a new worker. */
+  const replayCall = async (project, request, call) => {
+    const testTimeoutMs = request.call_timeout_ms + REPLAY_TEST_MARGIN_MS;
+    for (const each of vitest.projects) {
+      each.provide(REPLAY_KEY, { ...request, ...call, test_timeout_ms: testTimeoutMs });
+    }
+    const result = await runSpecifications(() => [project.createSpecification(REPLAY_FILE)], {
+      mutantId: null,
+      bail: false,
+      timeoutMs: testTimeoutMs,
+    });
+    const testCase = result.testModules.flatMap((testModule) => [
+      ...testModule.children.allTests(),
+    ])[0];
+    const replayed = testCase?.meta().fallowReplay;
+    if (isPlainObject(replayed)) return replayed;
+    const errors = [
+      ...runErrors(result, root).map((error) => error.message),
+      ...(testCase?.result().errors ?? []).map((error) => errorMessage(error)),
+    ];
+    throw new CompanionError(
+      "internal",
+      `the replay test gave no result${errors.length > 0 ? `: ${errors.join("; ")}` : ""}`,
+    );
+  };
+
+  /**
+   * Runs each call of the replay in its own run, so each call has a new
+   * worker: globals, the environment and leftover timers of one call never
+   * reach the next call or the other side.
+   */
+  const replay = async (request) => {
+    validateReplay(request);
+    const entry = replayEntry(overlay, request.file);
+    const project = replayProject(vitest.projects, entry.path);
+    const started = performance.now();
+    const calls = [];
+    for (let index = 1; index <= request.calls; index += 1) {
+      for (const side of SIDES) {
+        const call = await replayCall(project, request, { side, module_path: entry.path });
+        calls.push({ side, index, ...call });
+      }
+    }
+    return { calls, duration_ms: Math.round(performance.now() - started) };
+  };
+
   return {
     runnerVersion: version,
     testFiles: [...new Set(initFiles.map(([file]) => file))],
@@ -1056,10 +1184,14 @@ export const createAdapter = async (init) => {
       bail: true,
       fresh_modules_per_run: freshModulesPerRun,
       batch_mutants: false,
+      replay: true,
+      record: true,
     },
     notes: runnerNotes(vitest.projects),
     dryRun,
     run,
+    replay,
+    record,
     reload: async () => ({ method: freshModulesPerRun ? "noop" : "restart_required" }),
     close: async () => {
       try {

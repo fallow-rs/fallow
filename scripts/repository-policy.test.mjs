@@ -19,7 +19,7 @@ import { releasedSkillNames } from "./released-skills.mjs";
 const readJson = (path) => JSON.parse(readFileSync(path, "utf8"));
 
 /** The published release this branch evolves from. */
-const RELEASED_TAG = "v3.42.0";
+const RELEASED_TAG = "v3.43.0";
 
 const markdownFilesUnder = (root) =>
   readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
@@ -501,6 +501,7 @@ test("type-aware manifest keeps every runtime and package surface in parity", ()
   assert.equal(manifest.analysis_operation, "semantic-queries");
   assert.equal(manifest.status_operation, "status");
   assert.equal(manifest.mutant_typecheck_operation, "mutant-typecheck");
+  assert.equal(manifest.call_evidence_operation, "call-evidence");
   assert.deepEqual(manifest.query_operations, [
     "symbol-use",
     "symbol-trace",
@@ -744,6 +745,10 @@ test("file-size guard runs for commits and on every pull request", () => {
   // `base: auto` gives the check step the merge base, so `check` enforces
   // the file-growth gate.
   assert.match(job, /baseline: cargo-fallow-baseline\.json\n\s+base: auto/u);
+  // A rebase commits resolved conflicts without the pre-commit hook. So the
+  // pre-push check must also enforce the file-growth gate against the base.
+  const prePush = /\["pre-push"\][\s\S]*$/u.exec(preCommit)?.[0] ?? "";
+  assert.match(prePush, /sh scripts\/hook-cargo-fallow\.sh origin\/main upstream\/main/u);
 });
 
 test("fallow audit holds the file-length rule for .mjs and .ts files", () => {

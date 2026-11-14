@@ -407,6 +407,7 @@ fn analysis_stage_classification_covers_only_analyze_stage_kinds() {
         WorkspaceDiagnosticKind::PnpmWorkspaceOverridesIgnored {
             cause: PnpmWorkspaceOverridesIgnoredCause::PnpmVersion,
         },
+        WorkspaceDiagnosticKind::ClientServerLeakNoClientRoots,
     ];
     for kind in &analysis_stage {
         assert!(
@@ -699,6 +700,7 @@ fn source_never_analyzed_covers_every_file_the_run_did_not_read() {
         WorkspaceDiagnosticKind::NodeModulesMissing,
         WorkspaceDiagnosticKind::BoundariesNotConfigured,
         WorkspaceDiagnosticKind::RulePacksNotConfigured,
+        WorkspaceDiagnosticKind::ClientServerLeakNoClientRoots,
     ] {
         assert!(
             !kind.source_never_analyzed(),

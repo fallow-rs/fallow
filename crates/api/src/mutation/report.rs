@@ -6,10 +6,10 @@ use std::fmt::Write as _;
 use fallow_engine::module_graph::ExportTestReach;
 use fallow_engine::mutation::{MutantDisposition, MutationPlan, PlannedMutant, PruneReason};
 use fallow_output::{
-    MutantLocation, MutantResult, MutantStatus, MutantTestReach, MutationBaselineFailure,
-    MutationCompletion, MutationFunctionResult, MutationIncompleteReason, MutationPlanCountsOutput,
-    MutationPlanDisposition, MutationPlanFile, MutationPlanMutant, MutationReport,
-    MutationRunIssue, MutationSkippedFile, MutationStatusCounts, MutationSummary,
+    MutantEquivalenceHint, MutantLocation, MutantResult, MutantStatus, MutantTestReach,
+    MutationBaselineFailure, MutationCompletion, MutationFunctionResult, MutationIncompleteReason,
+    MutationPlanCountsOutput, MutationPlanDisposition, MutationPlanFile, MutationPlanMutant,
+    MutationReport, MutationRunIssue, MutationSkippedFile, MutationStatusCounts, MutationSummary,
     SAMPLED_OUT_REASON, SKIPPED_TESTS_CODE, TestReachClass,
 };
 use fallow_types::envelope::ToolVersion;
@@ -129,6 +129,7 @@ pub const fn plan_counts(plan: &MutationPlan) -> MutationPlanCountsOutput {
         pruned_generated: plan.counts.pruned.generated,
         pruned_side_effect_sink: plan.counts.pruned.side_effect_sink,
         pruned_framework_config: plan.counts.pruned.framework_config,
+        pruned_build_tool_only: plan.counts.pruned.build_tool_only,
     }
 }
 
@@ -160,6 +161,9 @@ pub fn mutant_results(plan: &MutationPlan, outcome: Option<&ScheduleOutcome>) ->
             if result.status == MutantStatus::NoCoverage {
                 result.test_reach = test_reach(mutant);
             }
+            if result.status == MutantStatus::Survived && mutant.constant_parameter {
+                result.equivalence_hint = Some(MutantEquivalenceHint::ConstantParameter);
+            }
             result
         })
         .collect()
@@ -182,8 +186,10 @@ fn mutant_result(mutant: &PlannedMutant, outcome: Option<&ScheduleOutcome>) -> M
         attempts: Vec::new(),
         cached: false,
         resumed: false,
+        carried: false,
         type_error_codes: Vec::new(),
         equivalence_hint: None,
+        witness: None,
     };
     let scheduled = outcome.and_then(|outcome| outcome.results.get(mutant.mutant.id.as_str()));
     match (mutant.disposition, scheduled) {
@@ -572,6 +578,7 @@ mod tests {
             rank,
             disposition,
             function,
+            constant_parameter: false,
             test_reach: Some(fallow_engine::mutation::MutantTestReach {
                 reach: ExportTestReach::MockedOnly,
                 export_name: Some("add".to_owned()),
@@ -1272,6 +1279,29 @@ mod tests {
             "{mutants}"
         );
         assert!(files.contains("test/a.test.ts"), "{files}");
+    }
+
+    #[test]
+    fn the_build_tool_only_count_is_absent_when_zero() {
+        let mut plan = plan(
+            vec![planned(
+                "m1",
+                Some(1),
+                MutantDisposition::Pruned(PruneReason::BuildToolOnly),
+                None,
+            )],
+            0,
+        );
+        let mutants = serde_json::to_string(&plan_mutants(&plan)).expect("json");
+        assert!(
+            mutants.contains(r#""prune_reason":"build-tool-only""#),
+            "{mutants}"
+        );
+        let without = serde_json::to_string(&plan_counts(&plan)).expect("json");
+        assert!(!without.contains("pruned_build_tool_only"), "{without}");
+        plan.counts.pruned.build_tool_only = 1;
+        let with = serde_json::to_string(&plan_counts(&plan)).expect("json");
+        assert!(with.contains(r#""pruned_build_tool_only":1"#), "{with}");
     }
 
     #[test]

@@ -556,6 +556,16 @@ impl<'a> CompactLineBuilder<'a> {
                 finding.component.component_name,
             ));
         }
+        for finding in &self.results.constant_parameters {
+            self.lines.push(format!(
+                "constant-parameter:{}:{}:{}({}) {} (review candidate)",
+                self.rel(&finding.parameter.path),
+                finding.parameter.line,
+                finding.parameter.function_name,
+                finding.parameter.parameter_name,
+                finding.parameter.reason.as_str(),
+            ));
+        }
         for finding in &self.results.absent_component_props {
             self.lines.push(format!(
                 "absent-component-prop:{}:{}:{}.{} (review candidate)",

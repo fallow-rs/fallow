@@ -42,17 +42,38 @@ const DOWNLOAD_ENV: &[&str] = &[
     "SSL_CERT_FILE",
 ];
 
-pub(super) fn discover_provider() -> Result<PathBuf, String> {
+/// The sibling of the active executable comes first (release archives ship
+/// it there). Otherwise the provider that the npm launcher passed in, after
+/// its signature check.
+/// `project_root` only selects the package manager of the install hint.
+pub(super) fn discover_provider(project_root: Option<&Path>) -> Result<PathBuf, String> {
     let current_exe = std::env::current_exe()
         .map_err(|error| format!("failed to locate the active Fallow executable: {error}"))?;
-    discover_provider_from(&current_exe)
+    select_provider(
+        discover_provider_from(&current_exe, project_root),
+        super::launcher_provider::provider_from_env(),
+    )
+}
+
+fn select_provider(
+    sibling: Result<PathBuf, String>,
+    launcher: Option<Result<PathBuf, String>>,
+) -> Result<PathBuf, String> {
+    match (sibling, launcher) {
+        (Ok(path), _) => Ok(path),
+        (Err(_), Some(launcher)) => launcher,
+        (Err(error), None) => Err(error),
+    }
 }
 
 #[expect(
     clippy::filetype_is_file,
     reason = "provider discovery accepts regular files only and rejects every special file type"
 )]
-fn discover_provider_from(current_exe: &Path) -> Result<PathBuf, String> {
+fn discover_provider_from(
+    current_exe: &Path,
+    project_root: Option<&Path>,
+) -> Result<PathBuf, String> {
     let current_exe = dunce::canonicalize(current_exe).map_err(|error| {
         format!(
             "failed to resolve the active Fallow executable {}: {error}",
@@ -81,7 +102,12 @@ fn discover_provider_from(current_exe: &Path) -> Result<PathBuf, String> {
         }
     }
     Err(format!(
-        "Similar-code companion `{SIDECAR_BINARY}` was not found next to the active Fallow executable. Install the exact-version `fallow-similar-code` package, then run `fallow similar-code status`. Project-local executables and PATH are intentionally not searched."
+        "Similar-code companion `{SIDECAR_BINARY}` was not found next to the active Fallow executable. For a project that has `fallow` as a devDependency, add the companion at the same version: `{project_command}`. For a global `fallow`, run `npm install --global fallow-similar-code@{version}`. For npx, start both packages together: `npx -p fallow@{version} -p fallow-similar-code@{version} fallow similar-code status`. The `fallow` npm launcher passes the signed companion binary to Fallow. Project-local executables and PATH are never searched.",
+        version = env!("CARGO_PKG_VERSION"),
+        project_command = fallow_config::PackageManager::suggested_add_dev_command(
+            project_root,
+            &format!("{SIDECAR_BINARY}@{}", env!("CARGO_PKG_VERSION"))
+        ),
     ))
 }
 
@@ -611,7 +637,7 @@ mod tests {
             "fallow"
         });
         std::fs::write(&fallow, b"").unwrap();
-        let error = discover_provider_from(&fallow).unwrap_err();
+        let error = discover_provider_from(&fallow, None).unwrap_err();
         assert!(error.contains("not found next to"));
 
         let sidecar = temp.path().join(if cfg!(windows) {
@@ -621,8 +647,87 @@ mod tests {
         });
         std::fs::write(&sidecar, b"").unwrap();
         assert_eq!(
-            discover_provider_from(&fallow).unwrap(),
+            discover_provider_from(&fallow, None).unwrap(),
             dunce::canonicalize(sidecar).unwrap()
+        );
+    }
+
+    #[test]
+    fn the_sibling_provider_comes_before_the_launcher_provider() {
+        let sibling = PathBuf::from("/install/fallow-similar-code");
+        let launcher = PathBuf::from("/project/node_modules/x/fallow-similar-code");
+        assert_eq!(
+            select_provider(Ok(sibling.clone()), Some(Ok(launcher.clone()))).unwrap(),
+            sibling
+        );
+        assert_eq!(
+            select_provider(Err("no sibling".to_owned()), Some(Ok(launcher.clone()))).unwrap(),
+            launcher
+        );
+        assert_eq!(
+            select_provider(
+                Err("no sibling".to_owned()),
+                Some(Err("bad signature".to_owned()))
+            )
+            .unwrap_err(),
+            "bad signature"
+        );
+        assert_eq!(
+            select_provider(Err("no sibling".to_owned()), None).unwrap_err(),
+            "no sibling"
+        );
+    }
+
+    #[test]
+    fn missing_provider_names_the_npm_install_command() {
+        let temp = tempfile::tempdir().unwrap();
+        let fallow = temp.path().join("fallow");
+        std::fs::write(&fallow, b"").unwrap();
+        let error = discover_provider_from(&fallow, None).unwrap_err();
+        assert!(error.contains(&format!(
+            "npm install --save-dev fallow-similar-code@{}",
+            env!("CARGO_PKG_VERSION")
+        )));
+    }
+
+    #[test]
+    fn missing_provider_uses_the_package_manager_of_the_project() {
+        let temp = tempfile::tempdir().unwrap();
+        let fallow = temp.path().join("fallow");
+        std::fs::write(&fallow, b"").unwrap();
+        let project = tempfile::tempdir().unwrap();
+        std::fs::write(project.path().join("bun.lock"), "").unwrap();
+        let error = discover_provider_from(&fallow, Some(project.path())).unwrap_err();
+        assert!(
+            error.contains(&format!(
+                "`bun add -d fallow-similar-code@{}`",
+                env!("CARGO_PKG_VERSION")
+            )),
+            "{error}"
+        );
+    }
+
+    /// Yarn 1 refuses `yarn add -D` at a workspace root without `-W`
+    /// (fallow-rs/fallow#4519).
+    #[test]
+    fn missing_provider_adds_the_yarn_classic_workspace_root_flag() {
+        let temp = tempfile::tempdir().unwrap();
+        let fallow = temp.path().join("fallow");
+        std::fs::write(&fallow, b"").unwrap();
+        let project = tempfile::tempdir().unwrap();
+        std::fs::write(
+            project.path().join("package.json"),
+            r#"{"private":true,"workspaces":["packages/*"]}"#,
+        )
+        .unwrap();
+        std::fs::write(project.path().join("yarn.lock"), "# yarn lockfile v1\n").unwrap();
+        let error = discover_provider_from(&fallow, Some(project.path())).unwrap_err();
+        assert!(
+            error.contains(&format!(
+                "`yarn add -D -W fallow-similar-code@{}`",
+                env!("CARGO_PKG_VERSION")
+            )),
+            "{error}"
         );
     }
 

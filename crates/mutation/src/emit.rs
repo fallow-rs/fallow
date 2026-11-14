@@ -4,9 +4,16 @@
 //! mutation switch:
 //!
 //! ```text
-//! (__fallow_m_a("ID1") ? (MUT1) : __fallow_m_a("ID2") ? (MUT2)
-//!   : (__fallow_m_c("ID1"), __fallow_m_c("ID2"), (ORIGINAL)))
+//! (A("ID1") ? (MUT1) : A("ID2") ? (MUT2) : (C("ID1"), C("ID2"), (ORIGINAL)))
 //! ```
+//!
+//! `A("ID")` stands for `typeof __fallow_m_a === "function" &&
+//! __fallow_m_a("ID")`, and `C("ID")` for the same guard on `__fallow_m_c`.
+//! A test can serialize a function with `toString` and run it in another
+//! realm, such as a `node:vm` context or a browser page. The prelude
+//! functions do not exist there. `typeof` of an undeclared name gives
+//! `"undefined"` and does not throw, so the guard is false and the original
+//! code runs.
 //!
 //! A mutated branch copies the raw original text of the site with one region
 //! replaced. Only the original branch holds the instrumented inner sites, so
@@ -18,8 +25,8 @@
 //! `if` statement in a block:
 //!
 //! ```text
-//! {if (__fallow_m_a("ID1")) {MUT1} else if (__fallow_m_a("ID2")) {MUT2}
-//!   else {__fallow_m_c("ID1"); __fallow_m_c("ID2"); ORIGINAL}}
+//! {if (A("ID1")) {MUT1} else if (A("ID2")) {MUT2}
+//!   else {C("ID1"); C("ID2"); ORIGINAL}}
 //! ```
 //!
 //! The statements move into a nested block. The collector makes statement
@@ -87,6 +94,16 @@ impl Writer<'_> {
     fn push(&mut self, text: &str) {
         self.out.push_str(text);
     }
+
+    /// Pushes a call of a prelude function that is false, and calls nothing,
+    /// in a realm without the prelude. See the module docs.
+    fn push_guarded(&mut self, function: &str, id: &str) {
+        use std::fmt::Write as _;
+        let _ = write!(
+            self.out,
+            "typeof {function} === \"function\" && {function}(\"{id}\")"
+        );
+    }
 }
 
 struct Tree {
@@ -122,18 +139,49 @@ struct Emitter<'s, 't> {
     sites: &'t [EmitSite],
     tree: Tree,
     statement_starts: &'t BTreeSet<u32>,
+    /// The top-level insertions, sorted by offset, and the index of the next
+    /// one to write.
+    top_level: &'t [Insertion],
+    next_top_level: usize,
 }
 
 impl Emitter<'_, '_> {
+    /// Copies `from..to` of the original text with each top-level insertion
+    /// at an offset in `from..=to`. Only the gaps between root sites call it,
+    /// so an insertion never lands in a branch of a site.
+    fn copy_top_level(&mut self, from: u32, to: u32) {
+        let mut cursor = from;
+        while let Some(insertion) = self.top_level.get(self.next_top_level) {
+            if insertion.offset > to {
+                break;
+            }
+            let offset = insertion.offset.max(cursor);
+            self.writer.copy(cursor, offset);
+            self.writer.push(&insertion.text);
+            cursor = offset;
+            self.next_top_level += 1;
+        }
+        self.writer.copy(cursor, to);
+    }
+
     fn range(&mut self, from: u32, to: u32, nodes: &[usize], parent_start: Option<u32>) {
+        let top = parent_start.is_none();
         let mut cursor = from;
         for &node in nodes {
             let span = self.sites[node].span;
-            self.writer.copy(cursor, span.0);
+            if top {
+                self.copy_top_level(cursor, span.0);
+            } else {
+                self.writer.copy(cursor, span.0);
+            }
             self.site(node, parent_start);
             cursor = span.1;
         }
-        self.writer.copy(cursor, to);
+        if top {
+            self.copy_top_level(cursor, to);
+        } else {
+            self.writer.copy(cursor, to);
+        }
     }
 
     fn site(&mut self, node: usize, parent_start: Option<u32>) {
@@ -160,8 +208,8 @@ impl Emitter<'_, '_> {
         }
         self.writer.push("(");
         for mutant in &site.mutants {
-            self.writer
-                .push(&format!("{ACTIVE_FUNCTION}(\"{}\") ? (", mutant.id));
+            self.writer.push_guarded(ACTIVE_FUNCTION, &mutant.id);
+            self.writer.push(" ? (");
             self.writer.copy(start, mutant.region.0);
             self.writer.push(&mutant.replacement);
             self.writer.copy(mutant.region.1, end);
@@ -169,8 +217,8 @@ impl Emitter<'_, '_> {
         }
         self.writer.push("(");
         for mutant in &site.mutants {
-            self.writer
-                .push(&format!("{HIT_FUNCTION}(\"{}\"), ", mutant.id));
+            self.writer.push_guarded(HIT_FUNCTION, &mutant.id);
+            self.writer.push(", ");
         }
         self.writer.push("(");
         if start == end {
@@ -190,8 +238,9 @@ impl Emitter<'_, '_> {
         let (start, end) = site.span;
         self.writer.push("{");
         for mutant in &site.mutants {
-            self.writer
-                .push(&format!("if ({ACTIVE_FUNCTION}(\"{}\")) {{", mutant.id));
+            self.writer.push("if (");
+            self.writer.push_guarded(ACTIVE_FUNCTION, &mutant.id);
+            self.writer.push(") {");
             self.writer.copy(start, mutant.region.0);
             self.writer.push(&mutant.replacement);
             self.writer.copy(mutant.region.1, end);
@@ -199,8 +248,8 @@ impl Emitter<'_, '_> {
         }
         self.writer.push("{");
         for mutant in &site.mutants {
-            self.writer
-                .push(&format!("{HIT_FUNCTION}(\"{}\"); ", mutant.id));
+            self.writer.push_guarded(HIT_FUNCTION, &mutant.id);
+            self.writer.push("; ");
         }
         let children = std::mem::take(&mut self.tree.children[node]);
         self.range(start, end, &children, Some(start));
@@ -212,11 +261,16 @@ impl Emitter<'_, '_> {
 }
 
 /// Emits the instrumented text and its splice map.
+///
+/// `insertions` go before the first site, in order. `top_level` holds
+/// insertions at offsets outside each site, or at a boundary of a root
+/// site, sorted by offset.
 pub fn emit(
     source: &str,
     sites: &[EmitSite],
     statement_starts: &BTreeSet<u32>,
     insertions: &[Insertion],
+    top_level: &[Insertion],
 ) -> (String, SpliceMap) {
     let tree = build_tree(sites);
     let mut emitter = Emitter {
@@ -228,6 +282,8 @@ pub fn emit(
         sites,
         tree,
         statement_starts,
+        top_level,
+        next_top_level: 0,
     };
     let mut cursor = 0;
     for insertion in insertions {
