@@ -78,6 +78,18 @@ route_module_exports!(
 
 const ROUTE_CONFIG_EXPORTS: &[&str] = &["default"];
 
+/// Exports that the server runtime reads from `entry.server` (the
+/// `ServerEntryModule` type). React Router 7 names the instrumentation hook
+/// `unstable_instrumentations`; React Router 8 names it `instrumentations`.
+const ENTRY_SERVER_EXPORTS: &[&str] = &[
+    "default",
+    "handleDataRequest",
+    "handleError",
+    "streamTimeout",
+    "instrumentations",
+    "unstable_instrumentations",
+];
+
 define_plugin! {
     struct ReactRouterPlugin => "react-router",
     enablers: ENABLERS,
@@ -91,6 +103,7 @@ define_plugin! {
         ("app/routes/**/*.{ts,tsx,js,jsx}", ROUTE_EXPORTS),
         ("app/root.{ts,tsx,js,jsx}", ROOT_EXPORTS),
         ("app/routes.{ts,js,mts,mjs}", ROUTE_CONFIG_EXPORTS),
+        ("app/entry.server.{ts,tsx,js,jsx}", ENTRY_SERVER_EXPORTS),
     ],
     resolve_config(config_path, source, root) {
         let mut result = PluginResult::default();
@@ -154,16 +167,18 @@ fn add_app_dir_patterns(result: &mut PluginResult, app_dir: &str) {
     let route_dir_pattern = route_dir_pattern(app_dir);
     let route_config_pattern = route_config_pattern(app_dir);
     let root_pattern = format!("{app_dir}/root.{{ts,tsx,js,jsx}}");
+    let entry_server_pattern = format!("{app_dir}/entry.server.{{ts,tsx,js,jsx}}");
 
     result.push_entry_pattern(route_dir_pattern.clone());
     result.push_entry_pattern(root_pattern.clone());
     result.push_entry_pattern(format!("{app_dir}/entry.client.{{ts,tsx,js,jsx}}"));
-    result.push_entry_pattern(format!("{app_dir}/entry.server.{{ts,tsx,js,jsx}}"));
+    result.push_entry_pattern(entry_server_pattern.clone());
     result.push_entry_pattern(route_config_pattern.clone());
 
     result.push_used_export_rule(route_dir_pattern, ROUTE_EXPORTS.iter().copied());
     result.push_used_export_rule(root_pattern, ROOT_EXPORTS.iter().copied());
     result.push_used_export_rule(route_config_pattern, ROUTE_CONFIG_EXPORTS.iter().copied());
+    result.push_used_export_rule(entry_server_pattern, ENTRY_SERVER_EXPORTS.iter().copied());
 }
 
 /// Credits the imports of the built-in server entry when the app has no
@@ -783,6 +798,10 @@ mod tests {
         assert!(result.used_exports.iter().any(|rule| {
             rule.path.pattern == "src/routes/**/*.{ts,tsx,js,jsx}"
                 && rule.exports.iter().any(|export| export == "loader")
+        }));
+        assert!(result.used_exports.iter().any(|rule| {
+            rule.path.pattern == "src/entry.server.{ts,tsx,js,jsx}"
+                && rule.exports.iter().any(|export| export == "streamTimeout")
         }));
     }
 
