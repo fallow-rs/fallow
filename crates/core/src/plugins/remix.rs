@@ -57,6 +57,15 @@ route_module_exports!(
     "shouldRevalidate",
 );
 
+/// Exports that the Remix server runtime reads from `entry.server` (the
+/// `ServerEntryModule` type).
+const ENTRY_SERVER_EXPORTS: &[&str] = &[
+    "default",
+    "handleDataRequest",
+    "handleError",
+    "streamTimeout",
+];
+
 define_plugin! {
     struct RemixPlugin => "remix",
     enablers: ENABLERS,
@@ -69,6 +78,7 @@ define_plugin! {
     used_exports: [
         ("app/routes/**/*.{ts,tsx,js,jsx}", ROUTE_EXPORTS),
         ("app/root.{ts,tsx,js,jsx}", ROOT_EXPORTS),
+        ("app/entry.server.{ts,tsx,js,jsx}", ENTRY_SERVER_EXPORTS),
     ],
 }
 

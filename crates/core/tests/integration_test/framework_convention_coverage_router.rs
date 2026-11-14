@@ -365,3 +365,55 @@ fn react_router_authored_entry_server_does_not_credit_isbot() {
         "an authored server entry without an isbot import leaves isbot unused: {unused_deps:?}"
     );
 }
+
+fn collect_unused_exports_with_entry_exports(fixture: &str) -> Vec<(String, String)> {
+    let root = fixture_path(fixture);
+    let mut config = create_config(root.clone());
+    config.include_entry_exports = true;
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+    collect_unused_exports(&root, &results)
+}
+
+#[test]
+fn react_router_entry_server_exports_are_framework_used() {
+    let unused = collect_unused_exports_with_entry_exports("react-router-entry-server-exports");
+
+    for export in [
+        "default",
+        "streamTimeout",
+        "handleError",
+        "handleDataRequest",
+        "instrumentations",
+        "unstable_instrumentations",
+    ] {
+        assert!(
+            !has_unused_export(&unused, "app/entry.server.tsx", export),
+            "React Router reads `{export}` from entry.server, found: {unused:?}"
+        );
+    }
+    assert!(
+        has_unused_export(&unused, "app/entry.server.tsx", "strayServerHelper"),
+        "a non-convention entry.server export stays reported, found: {unused:?}"
+    );
+}
+
+#[test]
+fn remix_entry_server_exports_are_framework_used() {
+    let unused = collect_unused_exports_with_entry_exports("remix-entry-server-exports");
+
+    for export in [
+        "default",
+        "streamTimeout",
+        "handleError",
+        "handleDataRequest",
+    ] {
+        assert!(
+            !has_unused_export(&unused, "app/entry.server.tsx", export),
+            "Remix reads `{export}` from entry.server, found: {unused:?}"
+        );
+    }
+    assert!(
+        has_unused_export(&unused, "app/entry.server.tsx", "strayServerHelper"),
+        "a non-convention entry.server export stays reported, found: {unused:?}"
+    );
+}
