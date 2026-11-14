@@ -1,0 +1,3 @@
+### Fixed
+
+- **Entry-point named re-exports through `export *` barrels credit the underlying declaration.** `fallow dead-code` and `fallow dead-code --trace` dropped entry-point credit when a configured entry file re-exported a type or value by name from an intermediate `export *` barrel, reporting the source declaration as unused. An entry-point named re-export now also credits each namespace (type and value) on its own. When an in-graph consumer reads only one namespace of a merged declaration, the other namespace is no longer reported as unused, also for a re-export from a direct source. (Fixes [#4579](https://github.com/fallow-rs/fallow/issues/4579))

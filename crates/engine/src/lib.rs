@@ -1133,6 +1133,60 @@ mod tests {
             "trace should include the consumer named import"
         );
     }
+
+    #[test]
+    fn trace_export_credits_entry_type_reexport_through_star_barrel() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path();
+        std::fs::create_dir_all(root.join("src/kit")).expect("src/kit dir");
+        std::fs::write(
+            root.join(".fallowrc.json"),
+            r#"{ "entry": ["src/index.ts"] }"#,
+        )
+        .expect("fallowrc");
+        std::fs::write(
+            root.join("src/index.ts"),
+            "export type { ViaStar } from './kit';\n",
+        )
+        .expect("src/index.ts");
+        std::fs::write(root.join("src/kit/index.ts"), "export * from './types';\n")
+            .expect("src/kit/index.ts");
+        std::fs::write(
+            root.join("src/kit/types.ts"),
+            "export type ViaStar = { a: string };\n",
+        )
+        .expect("src/kit/types.ts");
+
+        let config = config_for_project(root, None).expect("config").config;
+        let session = AnalysisSession::from_resolved_config(config).expect("session");
+        let artifacts = session
+            .analyze_dead_code_with_artifacts(false, true)
+            .expect("analysis succeeds");
+        let graph = artifacts.graph.as_ref().expect("graph is retained");
+        let trace =
+            crate::trace::trace_export(graph, session.root(), "src/kit/types.ts", "ViaStar")
+                .expect("trace exists");
+
+        assert!(
+            trace.is_used,
+            "entry type re-export through a star barrel must mark declaration as used, got {trace:?}"
+        );
+        assert_eq!(trace.direct_references.len(), 1);
+        assert_eq!(trace.direct_references[0].kind, "re-export");
+        assert_eq!(
+            trace.reason,
+            "Used by 1 file(s), re-exported through 2 barrel(s)"
+        );
+        let star_hop = trace
+            .re_export_chains
+            .iter()
+            .find(|hop| hop.barrel_file.to_string_lossy().replace('\\', "/") == "src/kit/index.ts")
+            .expect("star barrel hop must appear in re_export_chains");
+        assert_eq!(
+            star_hop.reference_count, 1,
+            "star barrel hop must reflect the entry re-export reference"
+        );
+    }
 }
 
 mod shared_state;

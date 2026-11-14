@@ -1216,29 +1216,6 @@ fn collect_namespace_export_indices(
     );
 }
 
-fn namespace_export_indices(
-    module: &ModuleNode,
-    effective_exports: &EffectiveExportIndex,
-    file_id: FileId,
-    name: &str,
-    namespace: ExportNamespace,
-) -> Vec<usize> {
-    let mut candidates = Vec::new();
-    let mut indices = Vec::new();
-    collect_namespace_export_indices(
-        module,
-        effective_exports,
-        file_id,
-        name,
-        namespace,
-        SlotBuffers {
-            candidates: &mut candidates,
-            indices: &mut indices,
-        },
-    );
-    indices
-}
-
 fn collect_namespace_references(
     module: &ModuleNode,
     name: &str,
@@ -1485,28 +1462,40 @@ pub(in crate::graph) fn propagate_named_re_export(input: NamedReExportPropagatio
         (type_refs, value_refs),
     );
 
-    if type_refs.is_empty() && value_refs.is_empty() {
-        if modules[barrel_idx].is_entry_point() {
-            return propagate_entry_point_named(EntryPointNamedPropagation {
-                modules,
-                effective_exports,
-                barrel_id,
-                source_id,
-                source_idx,
-                imported_name,
-                type_resolves,
-                value_resolves,
-                reference_paths,
-            });
-        }
-        return false;
-    }
-
+    let is_entry_point = modules[barrel_idx].is_entry_point();
     let mut changed = false;
-    for (namespace, refs) in [
-        (ExportNamespace::Type, type_refs.as_slice()),
-        (ExportNamespace::Value, value_refs.as_slice()),
+    for (namespace, resolves, refs) in [
+        (ExportNamespace::Type, type_resolves, type_refs.as_slice()),
+        (
+            ExportNamespace::Value,
+            value_resolves,
+            value_refs.as_slice(),
+        ),
     ] {
+        if !resolves {
+            continue;
+        }
+        if refs.is_empty() {
+            if is_entry_point {
+                changed |= propagate_entry_point_named_namespace(EntryPointNamedPropagation {
+                    modules,
+                    effective_exports,
+                    barrel_id,
+                    source_id,
+                    source_idx,
+                    imported_name,
+                    namespace,
+                    existing_refs,
+                    declaration_routes,
+                    buffers: SlotBuffers {
+                        candidates,
+                        indices,
+                    },
+                    reference_paths,
+                });
+            }
+            continue;
+        }
         changed |= attach_named_refs_for_namespace(NamedNamespacePropagation {
             modules,
             effective_exports,
@@ -1606,8 +1595,10 @@ fn attach_named_refs_for_namespace(input: NamedNamespacePropagation<'_>) -> bool
     changed
 }
 
-/// Entry point barrel with named re-export and no in-graph consumers — synthesize
-/// a `ReExport` reference so the source export is correctly marked as used.
+/// Entry-point barrel with a named re-export and no in-graph consumers in one
+/// namespace: synthesize a `ReExport` reference on the source module's
+/// declaration slot, or route it to the effective origin when the source
+/// forwards the name through `export *`.
 struct EntryPointNamedPropagation<'a> {
     modules: &'a mut [ModuleNode],
     effective_exports: &'a EffectiveExportIndex,
@@ -1615,12 +1606,14 @@ struct EntryPointNamedPropagation<'a> {
     source_id: FileId,
     source_idx: usize,
     imported_name: &'a str,
-    type_resolves: bool,
-    value_resolves: bool,
+    namespace: ExportNamespace,
+    existing_refs: &'a mut FxHashSet<RoutedReferenceKey>,
+    declaration_routes: &'a mut EffectiveDeclarationRouteCache,
+    buffers: SlotBuffers<'a>,
     reference_paths: &'a mut ReferencePathInterner,
 }
 
-fn propagate_entry_point_named(input: EntryPointNamedPropagation<'_>) -> bool {
+fn propagate_entry_point_named_namespace(input: EntryPointNamedPropagation<'_>) -> bool {
     let EntryPointNamedPropagation {
         modules,
         effective_exports,
@@ -1628,43 +1621,69 @@ fn propagate_entry_point_named(input: EntryPointNamedPropagation<'_>) -> bool {
         source_id,
         source_idx,
         imported_name,
-        type_resolves,
-        value_resolves,
+        namespace,
+        existing_refs,
+        declaration_routes,
+        buffers,
         reference_paths,
     } = input;
-    let synthetic_path = reference_paths.direct(source_id, ModuleLoadMechanism::EsModule);
-    let mut changed = false;
-    for namespace in [ExportNamespace::Type, ExportNamespace::Value] {
-        if (namespace == ExportNamespace::Type && !type_resolves)
-            || (namespace == ExportNamespace::Value && !value_resolves)
-        {
-            continue;
-        }
-        for export_idx in namespace_export_indices(
-            &modules[source_idx],
+    let SlotBuffers {
+        candidates,
+        indices,
+    } = buffers;
+    collect_namespace_export_indices(
+        &modules[source_idx],
+        effective_exports,
+        source_id,
+        imported_name,
+        namespace,
+        SlotBuffers {
+            candidates,
+            indices: &mut *indices,
+        },
+    );
+    if indices.is_empty() {
+        let synthetic_ref = [RoutedReference {
+            reference: SymbolReference {
+                from_file: barrel_id,
+                kind: ReferenceKind::ReExport,
+                namespace,
+                import_span: oxc_span::Span::new(0, 0),
+            },
+            path: None,
+        }];
+        return propagate_to_effective_origin(EffectiveOriginPropagation {
+            modules,
             effective_exports,
             source_id,
             imported_name,
             namespace,
+            references: &synthetic_ref,
+            existing_refs,
+            declaration_routes,
+            reference_paths,
+        });
+    }
+    let synthetic_path = reference_paths.direct(source_id, ModuleLoadMechanism::EsModule);
+    let source = &mut modules[source_idx];
+    let mut changed = false;
+    for &export_idx in &*indices {
+        if !source.exports[export_idx].has_reference_from(
+            barrel_id,
+            oxc_span::Span::new(0, 0),
+            synthetic_path,
+            namespace,
         ) {
-            let source = &mut modules[source_idx];
-            if !source.exports[export_idx].has_reference_from(
-                barrel_id,
-                oxc_span::Span::new(0, 0),
+            source.exports[export_idx].push_reference(
+                SymbolReference {
+                    from_file: barrel_id,
+                    kind: ReferenceKind::ReExport,
+                    namespace,
+                    import_span: oxc_span::Span::new(0, 0),
+                },
                 synthetic_path,
-                namespace,
-            ) {
-                source.exports[export_idx].push_reference(
-                    SymbolReference {
-                        from_file: barrel_id,
-                        kind: ReferenceKind::ReExport,
-                        namespace,
-                        import_span: oxc_span::Span::new(0, 0),
-                    },
-                    synthetic_path,
-                );
-                changed = true;
-            }
+            );
+            changed = true;
         }
     }
     changed
