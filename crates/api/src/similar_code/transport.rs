@@ -101,6 +101,9 @@ fn discover_provider_from(
             return Ok(canonical);
         }
     }
+    if crate::companion_install::is_standalone_fallow_binary(Some(&current_exe)) {
+        return Err(standalone_missing_provider(install_dir));
+    }
     Err(format!(
         "Similar-code companion `{SIDECAR_BINARY}` was not found next to the active Fallow executable. For a project that has `fallow` as a devDependency, add the companion at the same version: `{project_command}`. For a global `fallow`, run `npm install --global fallow-similar-code@{version}`. For npx, start both packages together: `npx -p fallow@{version} -p fallow-similar-code@{version} fallow similar-code status`. The `fallow` npm launcher passes the signed companion binary to Fallow. Project-local executables and PATH are never searched.",
         version = env!("CARGO_PKG_VERSION"),
@@ -109,6 +112,17 @@ fn discover_provider_from(
             &format!("{SIDECAR_BINARY}@{}", env!("CARGO_PKG_VERSION"))
         ),
     ))
+}
+
+/// A binary outside `node_modules` has no npm launcher to pass the signed
+/// companion, so only a sibling file in its install directory works.
+fn standalone_missing_provider(install_dir: &Path) -> String {
+    let version = env!("CARGO_PKG_VERSION");
+    format!(
+        "Similar-code companion `{SIDECAR_BINARY}` was not found next to the active Fallow executable. This Fallow binary is not the npm install (for example Homebrew or `cargo install`). No npm launcher passes the companion to it. Download the v{version} release archive of your platform: https://github.com/fallow-rs/fallow/releases/tag/v{version}. Copy `{SIDECAR_BINARY}{exe}` from the archive into `{dir}`. Or install Fallow and the companion from npm: `npm install --global fallow@{version} {SIDECAR_BINARY}@{version}`. Fallow does not search project-local executables or PATH.",
+        exe = std::env::consts::EXE_SUFFIX,
+        dir = install_dir.display(),
+    )
 }
 
 fn binary_names(binary: &str) -> Vec<String> {
@@ -678,11 +692,47 @@ mod tests {
         );
     }
 
+    /// An npm platform package keeps the `fallow` binary in `node_modules`.
+    fn npm_install_fallow(temp: &Path) -> PathBuf {
+        let package_dir = temp
+            .join("node_modules")
+            .join("@fallow-cli")
+            .join("linux-x64-gnu");
+        std::fs::create_dir_all(&package_dir).unwrap();
+        let fallow = package_dir.join("fallow");
+        std::fs::write(&fallow, b"").unwrap();
+        fallow
+    }
+
+    /// A Homebrew or `cargo install` binary has no npm launcher, so the
+    /// npm-only commands cannot help (fallow-rs/fallow#4609).
     #[test]
-    fn missing_provider_names_the_npm_install_command() {
+    fn missing_provider_of_a_binary_outside_node_modules_names_its_install_directory() {
         let temp = tempfile::tempdir().unwrap();
         let fallow = temp.path().join("fallow");
         std::fs::write(&fallow, b"").unwrap();
+        let error = discover_provider_from(&fallow, None).unwrap_err();
+        let version = env!("CARGO_PKG_VERSION");
+        let install_dir = dunce::canonicalize(temp.path()).unwrap();
+        assert!(error.contains("is not the npm install"), "{error}");
+        assert!(
+            error.contains(&format!("`{}`", install_dir.display())),
+            "{error}"
+        );
+        assert!(error.contains(&format!("v{version}")), "{error}");
+        assert!(
+            error.contains(&format!(
+                "npm install --global fallow@{version} fallow-similar-code@{version}"
+            )),
+            "{error}"
+        );
+        assert!(!error.contains("devDependency"), "{error}");
+    }
+
+    #[test]
+    fn missing_provider_names_the_npm_install_command() {
+        let temp = tempfile::tempdir().unwrap();
+        let fallow = npm_install_fallow(temp.path());
         let error = discover_provider_from(&fallow, None).unwrap_err();
         assert!(error.contains(&format!(
             "npm install --save-dev fallow-similar-code@{}",
@@ -693,8 +743,7 @@ mod tests {
     #[test]
     fn missing_provider_uses_the_package_manager_of_the_project() {
         let temp = tempfile::tempdir().unwrap();
-        let fallow = temp.path().join("fallow");
-        std::fs::write(&fallow, b"").unwrap();
+        let fallow = npm_install_fallow(temp.path());
         let project = tempfile::tempdir().unwrap();
         std::fs::write(project.path().join("bun.lock"), "").unwrap();
         let error = discover_provider_from(&fallow, Some(project.path())).unwrap_err();
@@ -712,8 +761,7 @@ mod tests {
     #[test]
     fn missing_provider_adds_the_yarn_classic_workspace_root_flag() {
         let temp = tempfile::tempdir().unwrap();
-        let fallow = temp.path().join("fallow");
-        std::fs::write(&fallow, b"").unwrap();
+        let fallow = npm_install_fallow(temp.path());
         let project = tempfile::tempdir().unwrap();
         std::fs::write(
             project.path().join("package.json"),

@@ -30,6 +30,26 @@ start both packages together with
 `npx -p fallow@<version> -p fallow-similar-code@<version> fallow similar-code`.
 An MCP client that starts `npx fallow-mcp` needs the same `-p` pair.
 
+A `fallow` binary from Homebrew or `cargo install` has no npm launcher. It
+finds the companion only next to the real path of its own executable. Copy
+`fallow-similar-code` from the release archive of the same version and
+platform into that directory, or install `fallow` and the companion from npm.
+
+For Homebrew, the directory is the `bin` directory of the Cellar, for example
+`/opt/homebrew/Cellar/fallow/<version>/bin`. It is not the directory of the
+`/opt/homebrew/bin/fallow` link. A Homebrew upgrade installs `fallow` in a new
+Cellar directory, so copy the companion of the new version again.
+
+The error names this directory and leaves out the npm project commands when
+two conditions are true:
+
+- The executable name is `fallow`, `fallow-lsp`, `fallow-mcp`, or
+  `fallow-multicall`.
+- The real path of the executable has no `node_modules` directory.
+
+Any other process, for example `node` with the Node-API addon, gets the npm
+commands.
+
 For a non-interactive setup that the user has already approved, add `--yes`.
 Project config, MCP, Node API calls, and model output cannot authorize setup.
 

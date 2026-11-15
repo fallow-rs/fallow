@@ -223,7 +223,8 @@ pub fn status(root: &Path) -> TypeAwareStatus {
             let remediation = if discovery_source == "environment-override" {
                 error
             } else {
-                discovery::missing_sidecar_install_hint(Some(root))
+                let current_exe = std::env::current_exe().ok();
+                discovery::missing_sidecar_install_hint(Some(root), current_exe.as_deref())
             };
             return TypeAwareStatus {
                 available: false,
@@ -514,10 +515,107 @@ mod tests {
         assert!(find_installed_sidecar(&executable).is_none());
     }
 
+    /// A Homebrew, `cargo install`, or release-archive binary has no npm
+    /// launcher, so the npm-only commands cannot help (fallow-rs/fallow#4609).
+    #[test]
+    fn a_binary_outside_node_modules_gets_the_standalone_hint() {
+        let install = tempfile::tempdir().expect("temporary install directory");
+        let executable = install.path().join("fallow");
+        std::fs::write(&executable, []).expect("write fallow executable fixture");
+
+        // A project-local companion stays outside the trust boundary.
+        let project = tempfile::tempdir().expect("temporary project directory");
+        let project_bin = project.path().join("node_modules").join(".bin");
+        std::fs::create_dir_all(&project_bin).expect("create project bin directory");
+        std::fs::write(project_bin.join(SIDECAR_BINARY), [])
+            .expect("write project-local sidecar fixture");
+
+        let error = discover_type_aware_sidecar_from(
+            None,
+            Some(executable.as_path()),
+            Some(project.path()),
+        )
+        .expect_err("no trusted companion is installed");
+
+        assert!(error.contains("is not the npm install"), "{error}");
+        assert_eq!(
+            error.contains("export FALLOW_TYPE_AWARE_BIN"),
+            !cfg!(windows),
+            "{error}"
+        );
+        assert!(!error.contains("devDependency"), "{error}");
+        assert!(!error.contains("npx -p"), "{error}");
+    }
+
+    #[test]
+    fn the_unix_standalone_hint_names_the_environment_override() {
+        let version = env!("CARGO_PKG_VERSION");
+        let hint = discovery::standalone_install_hint(false);
+        for text in [
+            format!("`npm install --global fallow-type-aware@{version}`"),
+            "`export FALLOW_TYPE_AWARE_BIN=\"$(npm prefix --global)/bin/fallow-type-aware\"`"
+                .to_owned(),
+            "the environment that starts Fallow, such as your shell or your editor".to_owned(),
+            format!("`npm install --global fallow@{version} fallow-type-aware@{version}`"),
+        ] {
+            assert!(hint.contains(&text), "{text}\n{hint}");
+        }
+    }
+
+    /// The npm launcher starts the companion through Node with a script path
+    /// on Windows, so the hint names no unproven `.cmd` override there.
+    #[test]
+    fn the_windows_standalone_hint_names_only_the_npm_install() {
+        let version = env!("CARGO_PKG_VERSION");
+        let hint = discovery::standalone_install_hint(true);
+        assert!(
+            hint.contains(&format!(
+                "`npm install --global fallow@{version} fallow-type-aware@{version}`"
+            )),
+            "{hint}"
+        );
+        assert!(!hint.contains("FALLOW_TYPE_AWARE_BIN"), "{hint}");
+        assert!(!hint.contains(".cmd"), "{hint}");
+    }
+
+    #[test]
+    fn status_of_a_binary_outside_node_modules_gets_the_standalone_hint() {
+        let install = tempfile::tempdir().expect("temporary install directory");
+        let executable = install.path().join("fallow");
+        std::fs::write(&executable, []).expect("write fallow executable fixture");
+        let hint = discovery::missing_sidecar_install_hint(None, Some(executable.as_path()));
+        assert!(hint.contains("is not the npm install"), "{hint}");
+        assert!(!hint.contains("devDependency"), "{hint}");
+    }
+
+    /// The sentences of the hint stay short enough to read in a terminal.
+    #[test]
+    fn standalone_hint_sentences_stay_short() {
+        for windows in [false, true] {
+            let hint = discovery::standalone_install_hint(windows);
+            // A code span counts as one word.
+            let prose = hint
+                .split('`')
+                .enumerate()
+                .map(|(index, part)| if index % 2 == 0 { part } else { "code" })
+                .collect::<String>();
+            for sentence in prose.split(". ") {
+                let words = sentence.split_whitespace().count();
+                assert!(words <= 25, "{words} words: {sentence}");
+            }
+        }
+    }
+
     #[test]
     fn does_not_discover_project_local_or_path_sidecars() {
         let install = tempfile::tempdir().expect("temporary install directory");
-        let executable = install.path().join("fallow");
+        let package_dir = install
+            .path()
+            .join("node_modules")
+            .join("@fallow-cli")
+            .join("darwin-arm64");
+        std::fs::create_dir_all(&package_dir).expect("create npm package directory");
+        let executable = package_dir.join("fallow");
         std::fs::write(&executable, []).expect("write fallow executable fixture");
 
         let project = tempfile::tempdir().expect("temporary project directory");
@@ -554,7 +652,7 @@ mod tests {
         let version = env!("CARGO_PKG_VERSION");
         let project = tempfile::tempdir().expect("temporary project directory");
         std::fs::write(project.path().join("pnpm-lock.yaml"), "").expect("write lockfile");
-        let hint = discovery::missing_sidecar_install_hint(Some(project.path()));
+        let hint = discovery::missing_sidecar_install_hint(Some(project.path()), None);
         assert!(
             hint.contains(&format!("`pnpm add -D fallow-type-aware@{version}`")),
             "{hint}"
@@ -571,14 +669,14 @@ mod tests {
             "# yarn lockfile v1\n",
         )
         .expect("write lockfile");
-        let hint = discovery::missing_sidecar_install_hint(Some(yarn_classic_root.path()));
+        let hint = discovery::missing_sidecar_install_hint(Some(yarn_classic_root.path()), None);
         assert!(
             hint.contains(&format!("`yarn add -D -W fallow-type-aware@{version}`")),
             "{hint}"
         );
 
         let plain = tempfile::tempdir().expect("temporary project directory");
-        let hint = discovery::missing_sidecar_install_hint(Some(plain.path()));
+        let hint = discovery::missing_sidecar_install_hint(Some(plain.path()), None);
         assert!(
             hint.contains(&format!(
                 "`npm install --save-dev fallow-type-aware@{version}`"

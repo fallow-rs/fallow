@@ -41,14 +41,22 @@ pub(super) fn discover_type_aware_sidecar_from(
 
     Err(format!(
         "Type-aware sidecar `{SIDECAR_BINARY}` was not found next to the active Fallow executable. {} The Fallow binary itself does not search project node_modules or PATH. The normal command still works without --type-aware.",
-        missing_sidecar_install_hint(project_root)
+        missing_sidecar_install_hint(project_root, current_exe)
     ))
 }
 
 /// How to install the exact-version companion for each way to run Fallow.
 /// The project command uses the package manager of `project_root` (npm when
 /// no lockfile or `packageManager` field names one); the command is only shown.
-pub(super) fn missing_sidecar_install_hint(project_root: Option<&Path>) -> String {
+/// A binary outside `node_modules` gets the `FALLOW_TYPE_AWARE_BIN` route,
+/// because no npm launcher passes the companion to it.
+pub(super) fn missing_sidecar_install_hint(
+    project_root: Option<&Path>,
+    current_exe: Option<&Path>,
+) -> String {
+    if crate::companion_install::is_standalone_fallow_binary(current_exe) {
+        return standalone_install_hint(cfg!(windows));
+    }
     let project_command = fallow_config::PackageManager::suggested_add_dev_command(
         project_root,
         &format!("{SIDECAR_BINARY}@{}", env!("CARGO_PKG_VERSION")),
@@ -56,6 +64,22 @@ pub(super) fn missing_sidecar_install_hint(project_root: Option<&Path>) -> Strin
     format!(
         "For a project that has `fallow` as a devDependency, add the companion at the same version: `{project_command}`. For a global `fallow`, run `npm install --global {SIDECAR_BINARY}@{version}`. For npx, start both packages together: `npx -p fallow@{version} -p {SIDECAR_BINARY}@{version} fallow`, or set FALLOW_TYPE_AWARE_BIN to a trusted executable path.",
         version = env!("CARGO_PKG_VERSION")
+    )
+}
+
+/// On Windows the npm launcher starts the companion through Node with a
+/// script path, so the hint names only the npm install of Fallow there.
+pub(super) fn standalone_install_hint(windows: bool) -> String {
+    let version = env!("CARGO_PKG_VERSION");
+    let intro = "This Fallow binary is not the npm install (for example Homebrew or `cargo install`). No npm launcher passes the companion to it.";
+    let npm_install = format!("`npm install --global fallow@{version} {SIDECAR_BINARY}@{version}`");
+    if windows {
+        return format!(
+            "{intro} Install Fallow and the companion from npm: {npm_install}. Then run the `fallow` command of that install."
+        );
+    }
+    format!(
+        "{intro} Install the companion: `npm install --global {SIDECAR_BINARY}@{version}`. Then set FALLOW_TYPE_AWARE_BIN in the environment that starts Fallow, such as your shell or your editor: `export FALLOW_TYPE_AWARE_BIN=\"$(npm prefix --global)/bin/{SIDECAR_BINARY}\"`. Or install Fallow and the companion from npm: {npm_install}."
     )
 }
 
