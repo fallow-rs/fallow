@@ -141,7 +141,8 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    timeout-minutes: 30
+    # A cold build with two compile jobs takes longer than one with four.
+    timeout-minutes: 45
     env:
       # One rayon thread keeps simulated instruction counts stable: adaptive
       # work splitting on steals changes them between runs of the same code.
@@ -174,6 +175,10 @@ jobs:
       - name: Build benchmark shard
         # Keep PR feedback focused on deterministic API/session/cache paths.
         # The resource log shows the cause when the runner stops mid-build.
+        env:
+          # Four parallel compiles of the large fallow crates, with full debug
+          # info, use more than the 16 GB of the runner (#4605).
+          CARGO_BUILD_JOBS: "2"
         run: bash scripts/ci-with-resource-log.sh cargo codspeed build -p ${{ matrix.package }} --bench ${{ matrix.bench }} --features codspeed
 
       - name: Run benchmark shard
@@ -232,6 +237,10 @@ jobs:
       - name: Build full benchmark shard
         # Full suites include audit/git-heavy and scaling paths that are useful but noisier.
         # The resource log shows the cause when the runner stops mid-build.
+        env:
+          # Four parallel compiles of the large fallow crates, with full debug
+          # info, use more than the 16 GB of the runner (#4605).
+          CARGO_BUILD_JOBS: "2"
         run: bash scripts/ci-with-resource-log.sh cargo codspeed build -p ${{ matrix.package }} --bench ${{ matrix.bench }} --features codspeed
 
       - name: Run full benchmark shard
