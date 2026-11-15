@@ -141,7 +141,8 @@ jobs:
     permissions:
       contents: read
       id-token: write
-    timeout-minutes: 30
+    # A cold build with two compile jobs takes longer than one with four.
+    timeout-minutes: 45
     env:
       # One rayon thread keeps simulated instruction counts stable: adaptive
       # work splitting on steals changes them between runs of the same code.
@@ -164,9 +165,21 @@ jobs:
         with:
           tool: cargo-codspeed@4.7.0
 
+      - name: Add swap for the build
+        # A cold build compiles several large crates at once with full debug
+        # info. Without extra swap, a memory peak can stop the hosted runner
+        # with exit code 143 and no compiler error (#4605). The temporary
+        # disk at /mnt has the free space.
+        run: bash scripts/ci-add-swap.sh /mnt/bench.swap 8
+
       - name: Build benchmark shard
         # Keep PR feedback focused on deterministic API/session/cache paths.
-        run: cargo codspeed build -p ${{ matrix.package }} --bench ${{ matrix.bench }} --features codspeed
+        # The resource log shows the cause when the runner stops mid-build.
+        env:
+          # Four parallel compiles of the large fallow crates, with full debug
+          # info, use more than the 16 GB of the runner (#4605).
+          CARGO_BUILD_JOBS: "2"
+        run: bash scripts/ci-with-resource-log.sh cargo codspeed build -p ${{ matrix.package }} --bench ${{ matrix.bench }} --features codspeed
 
       - name: Run benchmark shard
         uses: CodSpeedHQ/action@af75f77f17a054769abefaa42fe8dc2975469b5f # v5.6.3
@@ -214,9 +227,21 @@ jobs:
         with:
           tool: cargo-codspeed@4.7.0
 
+      - name: Add swap for the build
+        # A cold build compiles several large crates at once with full debug
+        # info. Without extra swap, a memory peak can stop the hosted runner
+        # with exit code 143 and no compiler error (#4605). The temporary
+        # disk at /mnt has the free space.
+        run: bash scripts/ci-add-swap.sh /mnt/bench.swap 8
+
       - name: Build full benchmark shard
         # Full suites include audit/git-heavy and scaling paths that are useful but noisier.
-        run: cargo codspeed build -p ${{ matrix.package }} --bench ${{ matrix.bench }} --features codspeed
+        # The resource log shows the cause when the runner stops mid-build.
+        env:
+          # Four parallel compiles of the large fallow crates, with full debug
+          # info, use more than the 16 GB of the runner (#4605).
+          CARGO_BUILD_JOBS: "2"
+        run: bash scripts/ci-with-resource-log.sh cargo codspeed build -p ${{ matrix.package }} --bench ${{ matrix.bench }} --features codspeed
 
       - name: Run full benchmark shard
         uses: CodSpeedHQ/action@af75f77f17a054769abefaa42fe8dc2975469b5f # v5.6.3
