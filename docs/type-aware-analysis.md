@@ -52,6 +52,27 @@ turned off. With `FALLOW_SKIP_INSTALL=true`, the GitLab job must install the
 companion together with `fallow`. Without the companion, `--type-aware`
 and `type-aware status` name the install command.
 
+A `fallow` binary from Homebrew, `cargo install`, or a release archive has no
+npm launcher, so it does not find a global companion. On macOS and Linux,
+install the companion with npm, then set `FALLOW_TYPE_AWARE_BIN` to it:
+
+```bash
+npm install --global fallow-type-aware@<fallow version>
+export FALLOW_TYPE_AWARE_BIN="$(npm prefix --global)/bin/fallow-type-aware"
+```
+
+Set the variable in the environment that starts Fallow. For a terminal, that
+is the shell profile. For an editor that starts `fallow-lsp`, it is the
+environment of the editor process. On Windows, the npm launcher starts the
+companion through Node, so install `fallow` and the companion from npm.
+
+`--type-aware`, `type-aware status`, and `mutation --typecheck` name these
+steps instead of the npm project commands when two conditions are true:
+
+- The executable name is `fallow`, `fallow-lsp`, `fallow-mcp`, or
+  `fallow-multicall`.
+- The real path of the executable has no `node_modules` directory.
+
 The companion depends on `typescript@7.0.2`, accepts any TypeScript 7 release that a package manager override selects, and uses `typescript/unstable/sync`, which
 runs the native TypeScript-Go backend. The canonical protocol manifest at
 `crates/api/type-aware-protocol.json` owns the wire version, semantic schema,

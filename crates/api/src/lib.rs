@@ -41,6 +41,7 @@ pub mod combined_output;
 /// One-line-per-finding compact text builders for dead-code, grouped, health,
 /// and duplication output.
 pub mod compact_output;
+mod companion_install;
 pub mod coverage;
 pub mod dead_code_codeclimate;
 pub mod dead_code_sarif;
