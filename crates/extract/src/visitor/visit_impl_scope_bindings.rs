@@ -172,6 +172,17 @@ impl ModuleInfoExtractor {
             .is_some_and(|scope| scope.contains(root))
     }
 
+    /// Whether a read of `object` at this point of the walk must not resolve
+    /// through a class binding: its root is a nested shadow, or the read is
+    /// at module scope and only a nested scope declares the class binding of
+    /// its root (issue #4603). Call it only during the walk: the finalize
+    /// pass runs at depth zero.
+    pub(in crate::visitor) fn walk_read_is_shadowed(&self, object: &str) -> bool {
+        let root = object.split_once('.').map_or(object, |(root, _)| root);
+        self.class_binding_root_is_shadowed(object)
+            || (self.is_module_scope() && self.shadowed_reads.is_nested_only(root))
+    }
+
     /// Record the nested declarators of `var` that provably hold no class
     /// instance. Call it together with `record_nested_declaration_names`.
     pub(super) fn record_non_instance_declarators(&mut self, var: &VariableDeclaration<'_>) {
@@ -229,6 +240,13 @@ impl ModuleInfoExtractor {
                 .nested_roots
                 .insert(self.member_accesses.len());
         }
+        // A nested class binding can follow the read in the walk, so the
+        // finalize pass decides once it knows every nested binding.
+        if self.is_module_scope() {
+            self.shadowed_reads
+                .module_scope
+                .insert(self.member_accesses.len());
+        }
         self.member_accesses
             .push(crate::MemberAccess { object, member });
     }
@@ -239,6 +257,7 @@ impl ModuleInfoExtractor {
         target: String,
     ) {
         self.clear_non_instance_binding(&binding);
+        self.track_binding_scope(&binding);
         self.walk_order_class_bindings
             .insert(binding.clone(), target.clone());
         let target = super::super::BindingTarget::Class(target);
@@ -258,6 +277,7 @@ impl ModuleInfoExtractor {
         target: String,
     ) {
         self.clear_non_instance_binding(&binding);
+        self.track_binding_scope(&binding);
         if !self.binding_target_names.contains_key(&binding) {
             self.walk_order_class_bindings
                 .insert(binding.clone(), target.clone());
@@ -265,6 +285,22 @@ impl ModuleInfoExtractor {
         self.binding_target_names
             .entry(binding)
             .or_insert(super::super::BindingTarget::Class(target));
+    }
+
+    /// Track whether only a nested scope declares the class binding
+    /// `binding`. Call it before the binding map takes `binding`. An
+    /// assignment in a nested scope to an outer name does not declare it.
+    fn track_binding_scope(&mut self, binding: &str) {
+        if self.is_module_scope() {
+            self.shadowed_reads.nested_only_bindings.remove(binding);
+        } else if !binding.contains('.')
+            && self.nested_scope_shadows(binding)
+            && !self.binding_target_names.contains_key(binding)
+        {
+            self.shadowed_reads
+                .nested_only_bindings
+                .insert(binding.to_string());
+        }
     }
 
     pub(super) fn nested_scope_shadows(&self, name: &str) -> bool {

@@ -46,7 +46,12 @@ impl ModuleInfoExtractor {
         binding: String,
         value: &Expression<'_>,
     ) -> bool {
-        if self.binding_target_names.contains_key(&binding) {
+        // A module-scope alias with the name of a class binding that only a
+        // nested scope declares is another binding. It takes the module-scope
+        // reads (issue #4603).
+        let replaces_nested =
+            self.is_module_scope() && self.shadowed_reads.is_nested_only(&binding);
+        if self.binding_target_names.contains_key(&binding) && !replaces_nested {
             return false;
         }
         let Some(source) = value_alias_source(value) else {
@@ -60,7 +65,11 @@ impl ModuleInfoExtractor {
             Some(BindingTarget::FactoryCall { .. } | BindingTarget::Ambiguous) => return false,
             None => source.to_string(),
         };
-        self.insert_class_binding_target_if_absent(binding, target);
+        if replaces_nested {
+            self.insert_class_binding_target(binding, target);
+        } else {
+            self.insert_class_binding_target_if_absent(binding, target);
+        }
         true
     }
 }
@@ -77,6 +86,12 @@ pub(in crate::visitor) struct ShadowedReads {
     pub(in crate::visitor) nested_roots: FxHashSet<usize>,
     /// Module-scope `const` aliases of a binding (`const Alias = Color`).
     pub(in crate::visitor) module_aliases: FxHashSet<String>,
+    /// Reads written at module scope.
+    pub(in crate::visitor) module_scope: FxHashSet<usize>,
+    /// Class binding names that only a nested scope declares, such as
+    /// `const Alias = new Foo()` in a function body. A read at module scope
+    /// never sees such a binding (issue #4603).
+    pub(in crate::visitor) nested_only_bindings: FxHashSet<String>,
 }
 
 impl ShadowedReads {
@@ -85,13 +100,21 @@ impl ShadowedReads {
         self.module_aliases.contains(root)
     }
 
+    /// Whether a read of `root` at module scope must not resolve through the
+    /// class binding of `root`, because only a nested scope declares it.
+    pub(in crate::visitor) fn is_nested_only(&self, root: &str) -> bool {
+        self.nested_only_bindings.contains(root)
+    }
+
     /// Whether the read at `index` of `object` skips the class bindings. A
     /// nested declaration with the name of a module alias holds another
-    /// value, so its reads do not resolve through the alias.
+    /// value, so its reads do not resolve through the alias. A read at module
+    /// scope does not resolve through a class binding of a nested scope.
     pub(in crate::visitor) fn skips(&self, index: usize, object: &str) -> bool {
         let root = object.split_once('.').map_or(object, |(root, _)| root);
         self.class_roots.contains(&index)
             || (self.nested_roots.contains(&index) && self.is_module_alias(root))
+            || (self.module_scope.contains(&index) && self.is_nested_only(root))
     }
 }
 

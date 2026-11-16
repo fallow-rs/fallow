@@ -18789,3 +18789,45 @@ fn object_literal_getter_this_is_not_the_class_instance() {
         info.member_accesses
     );
 }
+
+/// Issue #4603: a member read at module scope resolves through the binding of
+/// module scope, not through a class binding of the same name that only a
+/// function body declares. Both orders of the read and the function hold.
+#[test]
+fn module_scope_read_skips_nested_class_binding_of_same_name() {
+    let accesses = |source: &str| {
+        parse(source)
+            .member_accesses
+            .iter()
+            .map(|access| format!("{}.{}", access.object, access.member))
+            .collect::<Vec<_>>()
+    };
+    let after = accesses(
+        "import { E } from './e';\nimport { Foo } from './f';\nexport function setup(): void { const Alias = new Foo(); void Alias; }\nconst Alias = E;\nconsole.log(Alias.One);",
+    );
+    assert!(after.iter().any(|a| a == "E.One"), "{after:?}");
+    assert!(!after.iter().any(|a| a == "Foo.One"), "{after:?}");
+    let before = accesses(
+        "import { E } from './e';\nimport { Foo } from './f';\nconst Alias = E;\nconsole.log(Alias.One);\nexport function setup(): void { const Alias = new Foo(); void Alias; }",
+    );
+    assert!(before.iter().any(|a| a == "E.One"), "{before:?}");
+    assert!(!before.iter().any(|a| a == "Foo.One"), "{before:?}");
+    let global = accesses(
+        "import { Foo } from './f';\nexport function setup(): void { const Alias = new Foo(); void Alias; }\nconsole.log(Alias.One);",
+    );
+    assert!(!global.iter().any(|a| a == "Foo.One"), "{global:?}");
+    let assigned = accesses(
+        "import { Foo } from './f';\nlet svc: Foo | undefined;\nexport function init(): void { svc = new Foo(); }\nsvc?.run();",
+    );
+    assert!(
+        assigned.iter().any(|a| a == "Foo.run"),
+        "an assignment in a function to a module binding keeps its credit: {assigned:?}"
+    );
+    let nested = accesses(
+        "import { H } from './h';\ndescribe('x', () => {\n  test('a', async ({ page }) => {\n    const d = new H(page);\n    await d.m();\n  });\n});",
+    );
+    assert!(
+        nested.iter().any(|a| a == "H.m"),
+        "a read in the scope of the nested binding keeps its credit: {nested:?}"
+    );
+}
