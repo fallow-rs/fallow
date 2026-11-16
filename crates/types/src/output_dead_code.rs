@@ -3174,51 +3174,71 @@ impl UnusedNamespaceMemberFinding {
     }
 }
 
-/// Build the `IssueAction` vec for the three `unused_dependencies`,
-/// `unused_dev_dependencies`, `unused_optional_dependencies` views over the
-/// same bare [`UnusedDependency`] struct. Each wrapper differs only in the
-/// `package_json_location` string (`"dependencies"` / `"devDependencies"` /
-/// `"optionalDependencies"`) baked into the fix-action description and in
-/// the `suppress_issue_kind` used by the inline-suppress comment. All three
-/// share the cross-workspace swap (when `dep.used_in_workspaces` is
-/// non-empty the primary fix flips from `remove-dependency` to
-/// `move-dependency` because the dep is imported by ANOTHER workspace and
-/// `fallow fix` cannot safely remove it).
-fn build_unused_dependency_actions(
-    dep: &UnusedDependency,
-    package_json_location: &str,
-    suppress_issue_kind: &str,
-) -> Vec<IssueAction> {
-    let mut actions = Vec::with_capacity(2);
-    let cross_workspace = !dep.used_in_workspaces.is_empty();
-    actions.push(if cross_workspace {
-        IssueAction::Fix(FixAction {
-            kind: FixActionType::MoveDependency,
+/// Wire-shape envelope for an [`UnusedMember`] finding consumed under the
+/// `unused_protected_class_members` key (a `protected` class method or
+/// property that neither its class nor a subclass reads). Emits only a
+/// line-level suppress action: a subclass outside the project can read the
+/// member, so removal is a decision for the user.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct UnusedProtectedClassMemberFinding {
+    /// The underlying dead-code entry.
+    #[serde(flatten)]
+    pub member: UnusedMember,
+    /// Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+    /// `~<k>` suffix when several findings of one type share an identity.
+    /// Line and column are not inputs, so the id survives line shifts,
+    /// reformats and reorders. A rename of the file or the symbol gives a
+    /// new id. Absent in output from older versions.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub finding_id: Option<String>,
+    /// Suggested next steps. Always emitted (possibly empty for
+    /// forward-compat).
+    pub actions: Vec<IssueAction>,
+    /// Set by the audit pass when this finding is introduced relative to
+    /// the merge-base.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub introduced: Option<AuditIntroduced>,
+    /// Gate severity of this finding after `rules` and `overrides[].rules`
+    /// resolve for its path. CI formats read it for the annotation, SARIF
+    /// and CodeClimate level. Absent in output from older versions. Not
+    /// part of the finding identity, baseline keys or fingerprints.
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "deserialize_effective_severity"
+    )]
+    pub effective_severity: Option<EffectiveSeverity>,
+    /// Advisory caveats on the verdict behind this finding. A protected
+    /// member takes the member rule unchanged: any module this run analyzed
+    /// incompletely can hold the access that credits it. Sorted,
+    /// deduplicated, and omitted from the wire when empty. This is disclosure
+    /// only, because a protected member offers no mutation.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub reachability_caveats: Vec<ReachabilityCaveat>,
+}
+
+impl UnusedProtectedClassMemberFinding {
+    /// Build the wrapper from a raw [`UnusedMember`]. Emits only a line-level
+    /// suppress action.
+    #[must_use]
+    pub fn with_actions(member: UnusedMember) -> Self {
+        let actions = vec![IssueAction::SuppressLine(SuppressLineAction {
+            kind: SuppressLineKind::SuppressLine,
             auto_fixable: false,
-            description: "Move this dependency to the workspace package.json that imports it"
-                .to_string(),
-            note: Some(
-                "fallow fix will not remove dependencies that are imported by another workspace"
-                    .to_string(),
-            ),
-            available_in_catalogs: None,
-            suggested_target: None,
-        })
-    } else {
-        IssueAction::Fix(FixAction {
-            kind: FixActionType::RemoveDependency,
-            auto_fixable: true,
-            description: format!("Remove from {package_json_location} in package.json"),
-            note: None,
-            available_in_catalogs: None,
-            suggested_target: None,
-        })
-    });
-    actions.push(build_ignore_dependencies_suppress_action(
-        &dep.package_name,
-        suppress_issue_kind,
-    ));
-    actions
+            description: "Suppress with an inline comment above the line".to_string(),
+            comment: "// fallow-ignore-next-line unused-protected-class-member".to_string(),
+            scope: None,
+        })];
+        Self {
+            finding_id: None,
+            member,
+            actions,
+            introduced: None,
+            effective_severity: None,
+            reachability_caveats: Vec::new(),
+        }
+    }
 }
 
 /// Build the standard `add-to-config` `ignoreDependencies` suppress action
@@ -3876,40 +3896,6 @@ impl DuplicateExportFinding {
     }
 }
 
-/// Build a paste-ready `ignoreExports` config value from a duplicate-export
-/// finding's locations. Returns one `{ file, exports: ["*"] }` entry per
-/// distinct file in insertion order. `None` when no locations carry a path.
-fn build_duplicate_exports_ignore_rules(
-    export: &DuplicateExport,
-) -> Option<Vec<IgnoreExportsRule>> {
-    let mut entries: Vec<IgnoreExportsRule> = Vec::with_capacity(export.locations.len());
-    for loc in &export.locations {
-        // Normalize separators to forward slashes so pasting the action value
-        // into `.fallowrc.json` produces a portable rule. On Windows
-        // `to_string_lossy` preserves backslashes, which the old
-        // `inject_actions` post-pass implicitly normalized because it read
-        // the path AFTER `strip_root_prefix` had already run through
-        // `normalize_uri`; the typed wrapper builds the value before
-        // serialization, so the normalization has to be explicit here.
-        let path = loc.path.to_string_lossy().replace('\\', "/");
-        if path.is_empty() {
-            continue;
-        }
-        if entries.iter().any(|existing| existing.file == path) {
-            continue;
-        }
-        entries.push(IgnoreExportsRule {
-            file: path,
-            exports: vec!["*".to_string()],
-        });
-    }
-    if entries.is_empty() {
-        None
-    } else {
-        Some(entries)
-    }
-}
-
 /// Wire-shape envelope for an [`UnusedCatalogEntry`] finding. Per-instance
 /// `auto_fixable` flips to `false` when `hardcoded_consumers` is non-empty or
 /// the source is not `pnpm-workspace.yaml`.
@@ -4400,6 +4386,7 @@ impl_caveated_finding!(
     UnusedEnumMemberFinding,
     UnusedClassMemberFinding,
     UnusedNamespaceMemberFinding,
+    UnusedProtectedClassMemberFinding,
     UnusedStoreMemberFinding,
     UnusedDependencyFinding,
     UnusedDevDependencyFinding,
@@ -4525,6 +4512,7 @@ impl_gated_finding!(
     UnusedEnumMemberFinding,
     UnusedClassMemberFinding,
     UnusedNamespaceMemberFinding,
+    UnusedProtectedClassMemberFinding,
     UnusedStoreMemberFinding,
     UnusedDependencyFinding,
     UnusedDevDependencyFinding,
@@ -4556,6 +4544,12 @@ impl_gated_finding!(
 // document WHY position 0 has a specific value, so a future refactor that
 // re-orders actions tells you what broke instead of just "the snapshot
 // changed".
+#[path = "output_dead_code_actions.rs"]
+mod output_dead_code_actions;
+use output_dead_code_actions::{
+    build_duplicate_exports_ignore_rules, build_unused_dependency_actions,
+};
+
 #[cfg(test)]
 #[path = "output_dead_code_caveat_tokens.rs"]
 mod caveat_tokens;

@@ -206,8 +206,9 @@ pub mod editor_results {
         UnusedComponentInputFinding, UnusedComponentOutputFinding, UnusedComponentPropFinding,
         UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
         UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
-        UnusedNamespaceMemberFinding, UnusedOptionalDependencyFinding, UnusedServerActionFinding,
-        UnusedStoreMemberFinding, UnusedSvelteEventFinding, UnusedTypeFinding,
+        UnusedNamespaceMemberFinding, UnusedOptionalDependencyFinding,
+        UnusedProtectedClassMemberFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
+        UnusedSvelteEventFinding, UnusedTypeFinding,
     };
     pub use fallow_types::output_dead_code::{
         UnproducedCatchTagFinding, UnusedEffectLayerFinding, UnusedTaggedErrorFinding,

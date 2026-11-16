@@ -746,6 +746,8 @@ pub struct UnusedMemberResults {
     pub store_members: Vec<UnusedMember>,
     /// Unused members of exported TypeScript namespaces.
     pub namespace_members: Vec<UnusedMember>,
+    /// Unused `protected` class methods / properties.
+    pub protected_class_members: Vec<UnusedMember>,
 }
 
 /// A class-member candidate plus whether it only exists for semantic
@@ -856,6 +858,7 @@ type MemberScanBuckets = (
     Vec<UnusedClassMemberCandidate>,
     Vec<UnusedMember>,
     Vec<UnusedMember>,
+    Vec<UnusedMember>,
 );
 
 struct MemberReportContext<'a, 'scan> {
@@ -873,6 +876,7 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
     let mut unused_class_members = Vec::new();
     let mut unused_store_members = Vec::new();
     let mut unused_namespace_members = Vec::new();
+    let mut unused_protected_class_members = Vec::new();
     let allowlist = ClassMemberAllowlist::from_rules(input.user_class_member_allowlist);
     let semantic_framework_candidates =
         ClassMemberAllowlist::from_rules(input.semantic_framework_candidates);
@@ -890,11 +894,14 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
     }
     .collect();
 
-    for (enum_members, class_members, store_members, namespace_members) in member_results {
+    for (enum_members, class_members, store_members, namespace_members, protected_members) in
+        member_results
+    {
         unused_enum_members.extend(enum_members);
         unused_class_members.extend(class_members);
         unused_store_members.extend(store_members);
         unused_namespace_members.extend(namespace_members);
+        unused_protected_class_members.extend(protected_members);
     }
 
     if input.report_unmatched_patterns {
@@ -907,6 +914,7 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
         class_members: unused_class_members,
         store_members: unused_store_members,
         namespace_members: drop_members_of_unused_namespaces(unused_namespace_members),
+        protected_class_members: unused_protected_class_members,
     }
 }
 
@@ -921,7 +929,7 @@ impl MemberReportContext<'_, '_> {
     }
 
     fn collect_module(&self, module: &crate::graph::ModuleNode) -> MemberScanBuckets {
-        let mut buckets = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        let mut buckets = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
         if !module.is_reachable() {
             return buckets;
         }
@@ -1068,6 +1076,10 @@ impl MemberReportContext<'_, '_> {
             skip_context.super_class,
             skip_context.implemented_interfaces,
         );
+        if member.is_protected {
+            buckets.4.push(unused);
+            return;
+        }
         push_unused_member(buckets, unused, member.kind, semantic_only);
     }
 }
@@ -1516,6 +1528,9 @@ fn build_unsuppressed_unused_member(
 ) -> Option<UnusedMember> {
     let (line, col) = byte_offset_to_line_col(line_offsets_by_file, file_id, member.span.start);
     let issue_kind = match member.kind {
+        MemberKind::ClassMethod | MemberKind::ClassProperty if member.is_protected => {
+            IssueKind::UnusedProtectedClassMember
+        }
         MemberKind::EnumMember => IssueKind::UnusedEnumMember,
         MemberKind::ClassMethod | MemberKind::ClassProperty => IssueKind::UnusedClassMember,
         MemberKind::StoreMember => IssueKind::UnusedStoreMember,

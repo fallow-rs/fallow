@@ -76,4 +76,21 @@ pub(super) fn push_member_sarif_results(
             )
         },
     );
+    push_sarif_results(
+        sarif_results,
+        &results.unused_protected_class_members,
+        snippets,
+        |m| {
+            with_caveats(
+                sarif_member_fields(
+                    &m.member,
+                    root,
+                    "fallow/unused-protected-class-member",
+                    finding_level(m, rules.unused_protected_class_members),
+                    "Protected class",
+                ),
+                &m.reachability_caveats,
+            )
+        },
+    );
 }

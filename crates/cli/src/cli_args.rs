@@ -700,6 +700,10 @@ pub enum Command {
         #[arg(long)]
         unused_namespace_members: bool,
 
+        /// Only report unused protected class members
+        #[arg(long)]
+        unused_protected_class_members: bool,
+
         /// Only report unprovided injects
         #[arg(long)]
         unprovided_injects: bool,
@@ -2279,29 +2283,6 @@ pub enum Command {
     },
 }
 
-#[derive(Subcommand)]
-pub enum SecuritySubcommand {
-    /// Render verifier-retained survivor candidates from fallow output plus verifier verdicts.
-    Survivors {
-        /// Raw `fallow security --format json` candidate output.
-        #[arg(long, value_name = "PATH")]
-        candidates: PathBuf,
-        /// Verifier verdict JSON file.
-        #[arg(long, value_name = "PATH")]
-        verdicts: PathBuf,
-        /// Fail when any candidate has no matching verdict.
-        #[arg(long)]
-        require_verdict_for_each_candidate: bool,
-    },
-    /// Group unresolved security callees into actionable blind-spot output.
-    #[command(name = "blind-spots")]
-    BlindSpots {
-        /// Scope diagnostics to selected files.
-        #[arg(long, value_name = "PATH")]
-        file: Vec<PathBuf>,
-    },
-}
-
 #[derive(clap::Subcommand)]
 pub enum BaselinesCli {
     /// Remove the baseline entries that match no current finding.
@@ -2809,6 +2790,10 @@ pub use ci_args::*;
 #[path = "cli_args_report.rs"]
 mod report_args;
 pub use report_args::*;
+
+#[path = "cli_args_security.rs"]
+mod cli_args_security;
+pub use cli_args_security::SecuritySubcommand;
 
 #[cfg(test)]
 #[path = "cli_args_report_tests.rs"]

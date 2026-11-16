@@ -285,6 +285,7 @@ fn canonical_from_legacy(category: &str, key: &str) -> Option<String> {
         "unused_enum_members" => member("unused-enum-member"),
         "unused_class_members" => member("unused-class-member"),
         "unused_namespace_members" => member("unused-namespace-member"),
+        "unused_protected_class_members" => member("unused-protected-class-member"),
         "unused_store_members" => member("unused-store-member"),
         "unlisted_dependencies" => canonical("unlisted-dependency", &[key.to_owned()]),
         "private_type_leaks" => {

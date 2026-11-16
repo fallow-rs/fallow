@@ -2045,6 +2045,11 @@ pub struct MemberInfo {
     /// project, because that code calls the overridden member.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub override_base: Option<String>,
+    /// True for a class member with the TypeScript `protected` modifier. Only
+    /// the `unused-protected-class-members` rule checks these members. Every
+    /// other consumer that checks class members skips them.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_protected: bool,
 }
 
 /// The kind of member.
@@ -2254,19 +2259,6 @@ pub struct FederationRuntimeRemoteFact {
     pub call: FederationRuntimeCall,
     /// The remote alias the call names, or `None` for a non-literal argument.
     pub remote: Option<String>,
-}
-
-/// Iterate Angular template member names from typed semantic facts.
-fn angular_template_member_names_from_parts(
-    semantic_facts: &[SemanticFact],
-) -> impl Iterator<Item = &str> {
-    semantic_facts.iter().filter_map(|fact| {
-        if let SemanticFact::AngularTemplateMemberAccess(access) = fact {
-            Some(access.member.as_str())
-        } else {
-            None
-        }
-    })
 }
 
 /// Iterate Angular template member names from a module's typed facts.
@@ -3727,6 +3719,10 @@ pub use factory::*;
 #[path = "extract_component_contracts.rs"]
 mod component_contracts;
 pub use component_contracts::*;
+
+#[path = "extract_template_members.rs"]
+mod extract_template_members;
+use extract_template_members::angular_template_member_names_from_parts;
 
 #[cfg(test)]
 #[path = "extract_tests.rs"]

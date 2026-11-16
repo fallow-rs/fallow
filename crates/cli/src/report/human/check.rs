@@ -252,47 +252,6 @@ pub(in crate::report) fn print_human(input: &PrintHumanInput<'_>) {
     }
 }
 
-fn print_human_footer(input: &PrintHumanInput<'_>, total: usize) {
-    if total == 0 {
-        eprintln!(
-            "{}",
-            clean_status_line(input.elapsed, input.failed_parse_files)
-        );
-        return;
-    }
-
-    let unused_file_set: FxHashSet<&std::path::Path> = input
-        .results
-        .unused_files
-        .iter()
-        .map(|f| f.file.path.as_path())
-        .collect();
-    let suppressed_exports = input
-        .results
-        .unused_exports
-        .iter()
-        .filter(|e| unused_file_set.contains(e.export.path.as_path()))
-        .count();
-    let suppressed_types = input
-        .results
-        .unused_types
-        .iter()
-        .filter(|e| unused_file_set.contains(e.export.path.as_path()))
-        .count();
-    let summary = build_summary_footer(input.results, suppressed_exports, suppressed_types);
-    eprintln!(
-        "{}",
-        super::findings_status_line(
-            &format!("{summary} ({:.2}s)", input.elapsed.as_secs_f64()),
-            input.run_fails,
-        )
-    );
-    print_suppression_footer(input.results);
-    if let Some(line) = cascade_footer(input.results) {
-        eprintln!("  {}", line.dimmed());
-    }
-}
-
 /// The footer line for the findings that the cascade filter hid, or `None`
 /// when it hid nothing.
 fn cascade_footer(results: &AnalysisResults) -> Option<String> {
@@ -345,6 +304,10 @@ fn suppression_footer(results: &AnalysisResults) -> Option<String> {
 ///
 /// Each section (unused files, exports, etc.) produces a header line followed by
 /// detail lines. Empty sections are omitted entirely.
+#[path = "check_human_footer.rs"]
+mod check_human_footer;
+use check_human_footer::print_human_footer;
+
 #[cfg(test)]
 fn build_human_lines(
     results: &AnalysisResults,
@@ -537,6 +500,10 @@ fn check_explain_for_header(line: &str) -> Option<&'static crate::explain::RuleD
         ("Unused enum members", "fallow/unused-enum-member"),
         ("Unused class members", "fallow/unused-class-member"),
         ("Unused namespace members", "fallow/unused-namespace-member"),
+        (
+            "Unused protected class members",
+            "fallow/unused-protected-class-member",
+        ),
         ("Unused store members", "fallow/unused-store-member"),
         ("Unresolved imports", "fallow/unresolved-import"),
         ("Unlisted dependencies", "fallow/unlisted-dependency"),
@@ -1115,7 +1082,8 @@ fn build_unused_code_section(input: &mut UnusedCodeSectionInput<'_>) {
         || !input.results.unused_enum_members.is_empty()
         || !input.results.unused_class_members.is_empty()
         || !input.results.unused_store_members.is_empty()
-        || !input.results.unused_namespace_members.is_empty();
+        || !input.results.unused_namespace_members.is_empty()
+        || !input.results.unused_protected_class_members.is_empty();
     if !has_unused_code {
         return;
     }
@@ -1309,6 +1277,18 @@ fn build_unused_member_sections(
         max_files: max_grouped_files,
         get_path: |m| m.member.path.as_path(),
         format_detail: &|m: &UnusedNamespaceMemberFinding| {
+            format_unused_member(&m.member, &m.reachability_caveats)
+        },
+    });
+    build_human_grouped_section(GroupedSectionInput {
+        lines,
+        items: &results.unused_protected_class_members,
+        title: "Unused protected class members",
+        level: severity_to_level(rules.unused_protected_class_members),
+        root,
+        max_files: max_grouped_files,
+        get_path: |m| m.member.path.as_path(),
+        format_detail: &|m: &UnusedProtectedClassMemberFinding| {
             format_unused_member(&m.member, &m.reachability_caveats)
         },
     });
@@ -3404,6 +3384,9 @@ fn collect_dead_code_rules(
     for m in &results.unused_namespace_members {
         insert_matching_rule(rules, &m.member.path, root, resolver);
     }
+    for m in &results.unused_protected_class_members {
+        insert_matching_rule(rules, &m.member.path, root, resolver);
+    }
     for p in &results.constant_parameters {
         insert_matching_rule(rules, &p.parameter.path, root, resolver);
     }
@@ -3930,6 +3913,12 @@ fn summary_caveat_rollup(results: &AnalysisResults) -> (usize, Vec<ReachabilityC
         )
         .chain(
             results
+                .unused_protected_class_members
+                .iter()
+                .map(|m| m.reachability_caveats.as_slice()),
+        )
+        .chain(
+            results
                 .unused_dependencies
                 .iter()
                 .map(|d| d.reachability_caveats.as_slice()),
@@ -4076,6 +4065,11 @@ fn check_summary_member_categories(
             "Unused namespace members",
             results.unused_namespace_members.len(),
             severity_to_level(rules.unused_namespace_members),
+        ),
+        (
+            "Unused protected class members",
+            results.unused_protected_class_members.len(),
+            severity_to_level(rules.unused_protected_class_members),
         ),
         (
             "Unresolved imports",

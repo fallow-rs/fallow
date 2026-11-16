@@ -466,6 +466,7 @@ mod tests {
                 ("UnusedMember", "UnusedClassMemberFinding"),
                 ("UnusedMember", "UnusedEnumMemberFinding"),
                 ("UnusedMember", "UnusedNamespaceMemberFinding"),
+                ("UnusedMember", "UnusedProtectedClassMemberFinding"),
                 ("UnusedMember", "UnusedStoreMemberFinding"),
             ]),
             aliases

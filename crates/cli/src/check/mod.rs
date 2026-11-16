@@ -57,6 +57,7 @@ pub struct IssueFilters {
     pub unused_enum_members: bool,
     pub unused_class_members: bool,
     pub unused_namespace_members: bool,
+    pub unused_protected_class_members: bool,
     pub unused_store_members: bool,
     pub unprovided_injects: bool,
     pub unrendered_components: bool,
@@ -154,6 +155,7 @@ impl IssueFilters {
             "--unused-enum-members" => self.unused_enum_members = true,
             "--unused-class-members" => self.unused_class_members = true,
             "--unused-namespace-members" => self.unused_namespace_members = true,
+            "--unused-protected-class-members" => self.unused_protected_class_members = true,
             "--unused-store-members" => self.unused_store_members = true,
             "--unprovided-injects" => self.unprovided_injects = true,
             "--unrendered-components" => self.unrendered_components = true,
@@ -203,6 +205,7 @@ impl IssueFilters {
             || self.unused_enum_members
             || self.unused_class_members
             || self.unused_namespace_members
+            || self.unused_protected_class_members
             || self.unused_store_members
             || self.unprovided_injects
             || self.unrendered_components
@@ -266,6 +269,11 @@ impl IssueFilters {
         if self.deprecated_exports_in_use && rules.deprecated_exports_in_use == Severity::Off {
             rules.deprecated_exports_in_use = Severity::Warn;
         }
+        if self.unused_protected_class_members
+            && rules.unused_protected_class_members == Severity::Off
+        {
+            rules.unused_protected_class_members = Severity::Warn;
+        }
     }
 
     /// When any filter is active, clear issue types that were NOT requested.
@@ -319,6 +327,9 @@ impl IssueFilters {
         }
         if !self.unused_namespace_members {
             results.unused_namespace_members.clear();
+        }
+        if !self.unused_protected_class_members {
+            results.unused_protected_class_members.clear();
         }
         if !self.unlisted_deps {
             results.unlisted_dependencies.clear();
@@ -2013,60 +2024,6 @@ struct BaselineIo<'a> {
     filters: &'a IssueFilters,
 }
 
-/// Which channels narrowed the run before the baseline comparison, so the
-/// current results cover less than a whole-project baseline ever described. A
-/// save records this set, and [`baseline_notes::compare_with_saved_baseline`]
-/// turns it into the set that stops this run from judging a loaded file.
-///
-/// Mirrors the health side's `baseline_scope_reasons` and adds the
-/// dead-code-only filter channel, because `--unused-*` flags drop whole
-/// baseline categories. The diff channel is resolved exactly as
-/// `apply_scope_filters` resolves it: on these commands `--diff-file` and
-/// `--diff-stdin` never reach `opts.diff_index` and arrive through the shared
-/// index instead, so reading the field alone would miss every diff-scoped run.
-/// Production mode counts as narrowing too: it drops test, story and dev files
-/// before analysis, and the resolved config carries the effective flag whether
-/// it came from the CLI or from the project config. `includeEntryExports`
-/// counts for the same reason: it changes which exports the run judges, from
-/// the flag or from the config.
-///
-/// This command can name every channel, because it reads the flags rather than
-/// a set already resolved from them.
-fn baseline_scope_reasons(
-    opts: &CheckOptions<'_>,
-    config: &ResolvedConfig,
-    change_scope: &fallow_engine::change_scope::ChangeScope,
-) -> fallow_output::BaselineScopeReasons {
-    use fallow_output::ScopeReason;
-
-    let diff_scoped = opts.diff_index.is_some()
-        || (opts.use_shared_diff_index
-            && crate::report::ci::diff_filter::shared_diff_index().is_some());
-    fallow_output::BaselineScopeReasons::empty()
-        .insert_if(diff_scoped, ScopeReason::Diff)
-        .insert_if(
-            change_scope.scope_reason() == Some(ScopeReason::ChangedSince),
-            ScopeReason::ChangedSince,
-        )
-        .insert_if(
-            change_scope.scope_reason() == Some(ScopeReason::PackageBaselines),
-            ScopeReason::PackageBaselines,
-        )
-        .insert_if(opts.workspace.is_some(), ScopeReason::Workspace)
-        .insert_if(
-            opts.changed_workspaces.is_some(),
-            ScopeReason::ChangedWorkspaces,
-        )
-        .insert_if(opts.scope.is_some(), ScopeReason::Scope)
-        .insert_if(!opts.file.is_empty(), ScopeReason::File)
-        .insert_if(opts.filters.any_active(), ScopeReason::IssueTypeFilter)
-        .insert_if(config.production, ScopeReason::Production)
-        .insert_if(
-            config.include_entry_exports,
-            ScopeReason::IncludeEntryExports,
-        )
-}
-
 /// Save baseline and/or compare against an existing baseline.
 ///
 /// Returns `Ok(None)` when no baseline was loaded, `Ok(Some(_))` with this
@@ -2086,6 +2043,9 @@ fn handle_baseline(
 
     Ok(None)
 }
+
+mod baseline_scope;
+use baseline_scope::baseline_scope_reasons;
 
 #[cfg(test)]
 #[path = "check_tests.rs"]

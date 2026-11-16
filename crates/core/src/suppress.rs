@@ -631,6 +631,7 @@ mod tests {
             IssueKind::UnusedClassMember,
             IssueKind::UnusedStoreMember,
             IssueKind::UnusedNamespaceMember,
+            IssueKind::UnusedProtectedClassMember,
             IssueKind::UnprovidedInject,
             IssueKind::UnresolvedImport,
             IssueKind::DuplicateExport,

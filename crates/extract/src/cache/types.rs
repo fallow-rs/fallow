@@ -10,7 +10,7 @@ use crate::MemberKind;
 /// extraction semantics change, and give the reason in the commit message and
 /// the CHANGELOG. A stale version serves old extraction results from a warm
 /// cache. The `assert_cached_type_size!` guards below catch shape changes.
-pub(super) const CACHE_VERSION: u32 = 445;
+pub(super) const CACHE_VERSION: u32 = 446;
 
 /// Duplication token cache version. Bump it when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes, and give the
@@ -632,6 +632,8 @@ pub struct CachedMember {
     /// Root identifier of the class `extends` expression for an `override`
     /// member, else `None`.
     pub(crate) override_base: Option<String>,
+    /// True for a class member with the `protected` modifier.
+    pub(crate) is_protected: bool,
 }
 
 /// Cached dynamic import pattern data (template literals, `import.meta.glob`).

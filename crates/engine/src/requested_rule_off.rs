@@ -21,8 +21,8 @@ const CYCLE_RULES: &[RequestedRule] = &[
 /// A rule is not in this table when one of these is true:
 ///
 /// - The selector turns the rule on: `--private-type-leaks`,
-///   `--absent-component-props`, `--constant-parameters` and
-///   `--deprecated-exports-in-use`.
+///   `--absent-component-props`, `--constant-parameters`,
+///   `--deprecated-exports-in-use` and `--unused-protected-class-members`.
 /// - `off` is the documented way to narrow the selector:
 ///   `type-only-dependencies`, `test-only-dependencies` and
 ///   `dev-dependencies-in-production` under `--unused-deps`.
@@ -309,6 +309,11 @@ mod tests {
         (
             "--constant-parameters",
             "constant-parameters",
+            "the flag turns the rule on",
+        ),
+        (
+            "--unused-protected-class-members",
+            "unused-protected-class-members",
             "the flag turns the rule on",
         ),
         (
