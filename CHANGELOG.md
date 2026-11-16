@@ -7,6 +7,37 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.43.2] - 2026-11-16
+
+### Fixed
+
+- **`fallow dead-code` no longer reports enum members that code reads through an alias, or of an enum that code passes on whole.**
+  A member read through `const Alias = Color`, through a class field such as
+  `protected readonly levels = Level`, through `this.levels.High`, or through
+  an Angular template (inline or `templateUrl`) that reads the field is now
+  used. Members that no alias reads are still reported. When code passes the
+  whole enum on, for example as `takesEnum(Shape)` or `{ ref: Size }`, each
+  member of that enum is now used, as with `Object.values(Shape)`. A
+  `typeof E` (for example `keyof typeof E`) now counts as a use of every
+  member of `E`.
+  (Closes [#4578](https://github.com/fallow-rs/fallow/issues/4578))
+
+- **`unused-component-inputs` and `unused-component-outputs` read more Angular template syntax.** The template scanner now credits a member in these places: a pipe argument (`value | slice: start()`), an interpolation in a plain attribute (`title="{{ label() }}"`), a keyed structural directive clause (`*ngTemplateOutlet="tpl; context: ctx"`, `*ngIf="ready; else loading"`), the condition of `@else if (cond; as alias)`, a style binding with a `%` unit (`[style.width.%]`), an explicit `this.` or `this!.` read, the head of an ICU message (`{count, plural, ...}`), and a host binding value in backticks. A component member that has the same name as a `@for` loop item elsewhere in the template is no longer hidden. An ICU case that opens into an interpolation (`other {{{n}} items}`) no longer stops the scan, so the members that the template reads after the ICU message are credited again. (Closes [#4576](https://github.com/fallow-rs/fallow/issues/4576))
+- **Inputs and outputs of a base class are credited from a subclass in another file.** When a component or directive extends a base class from another file, its class body and its template now credit the inputs and outputs that the base class declares. The subclass can extend the base directly, through an intermediate class, or through a re-export. (Closes [#4577](https://github.com/fallow-rs/fallow/issues/4577))
+
+- **A Homebrew or `cargo install` binary now names a companion install that works for it.** Such a binary has no npm launcher, so it does not find a global npm companion. When `fallow-type-aware` is missing, the message now names `FALLOW_TYPE_AWARE_BIN` with the global npm path on macOS and Linux. On Windows, it names the npm install of `fallow`. When `fallow-similar-code` is missing, the message names the release archive and the directory of the binary. The npm install keeps its messages and its companion lookup.
+  (Closes [#4609](https://github.com/fallow-rs/fallow/issues/4609))
+
+- **Runtime coverage finds the sidecar in a Yarn Plug'n'Play project.** Fallow now reads the signed binary from `.yarn/unplugged`. Before, discovery stopped at the unsigned wrapper, and the run failed with a signature error.
+
+- **An unsigned `node_modules/.bin/fallow-cov` wrapper no longer hides a working sidecar.** Discovery now continues to `~/.fallow/bin` and `PATH`. It uses the wrapper only when no other location has a sidecar, so the signature error names the file that exists. Before, a pnpm project with a custom `virtualStoreDir` failed with a signature error even when `~/.fallow/bin/fallow-cov` was installed.
+
+- **`fallow agent install` no longer registers `fallow mcp-server` for a binary that cannot serve MCP.** The Homebrew and `cargo install fallow-cli` binary has no `mcp-server` subcommand, but it answers `fallow mcp-server --version` with its own version and exit code 0. The MCP step took that answer as proof of the MCP server and printed a `codex mcp add` command that failed. Now the step accepts the running binary only when the answer comes from the MCP server (`fallow-mcp <version>`). Without another launcher, the step skips with `mcp_entry_unavailable`. Its message names `cargo install fallow-mcp` and the release archive, so a Homebrew or `cargo install` user gets a route that works.
+
+### Security
+
+- **Runtime coverage no longer starts a package manager to find the `fallow-cov` sidecar.** Before, sidecar discovery ran `yarn bin`, `pnpm bin`, `bun pm bin` or `npm root` in the analyzed project. A package manager reads config from the project, for example `.yarnrc` `yarn-path`, `.yarnrc.yml` `yarnPath` and plugins, or `.pnpmfile.cjs`, so a repository could run its own code when you analyzed it with `--runtime-coverage`. This happened before the sidecar signature check. Fallow now looks only in fixed install locations: the `@fallow-cli/fallow-cov-<platform>` package in `node_modules`, the pnpm and Bun stores, the Yarn `unplugged` folder, `node_modules/.bin`, `~/.fallow/bin` and `PATH`. This applies to `health`, `audit` and `security` with `--runtime-coverage`, to the MCP runtime-coverage tools, and to the sidecar check of `fallow coverage setup`. Versions 2.39.0 to 3.43.1 are affected. On an older version, set `FALLOW_COV_BIN` to a signed `fallow-cov` binary. Thanks [@hgrgr](https://github.com/hgrgr) for the report. ([GHSA-m9pr-74q6-w362](https://github.com/fallow-rs/fallow/security/advisories/GHSA-m9pr-74q6-w362))
+
 ## [3.43.1] - 2026-11-14
 
 ### Changed
@@ -17315,7 +17346,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.43.1...HEAD
+[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.43.2...HEAD
+[3.43.2]: https://github.com/fallow-rs/fallow/compare/v3.43.1...v3.43.2
 [3.43.1]: https://github.com/fallow-rs/fallow/compare/v3.43.0...v3.43.1
 [3.43.0]: https://github.com/fallow-rs/fallow/compare/v3.42.0...v3.43.0
 [3.42.0]: https://github.com/fallow-rs/fallow/compare/v3.41.0...v3.42.0
