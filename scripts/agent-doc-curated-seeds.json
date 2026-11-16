@@ -1650,7 +1650,7 @@
       "section": "flags:global",
       "row": "--quiet",
       "column": "Description",
-      "seed": "Suppress progress output"
+      "seed": "Suppress progress output; `audit` also prints only actionable findings"
     },
     {
       "section": "flags:global",

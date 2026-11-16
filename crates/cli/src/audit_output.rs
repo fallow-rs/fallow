@@ -30,9 +30,12 @@ use complexity_notes::worsened_class_label;
 mod codeclimate;
 #[path = "audit_complexity_notes.rs"]
 mod complexity_notes;
+#[path = "audit_quiet.rs"]
+mod quiet;
 #[cfg(test)]
 use codeclimate::build_audit_codeclimate;
 use codeclimate::{build_audit_codeclimate_issues, print_audit_codeclimate};
+pub use quiet::print_audit_report;
 
 /// Print audit results and return the appropriate exit code.
 #[must_use]
@@ -409,7 +412,7 @@ fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: O
     }
 
     let has_check_issues = result.summary.dead_code_issues > 0;
-    let has_health_findings = result.summary.complexity_findings > 0;
+    let has_health_findings = quiet::complexity_section_has_rows(result, quiet);
     let has_dupe_groups = result.summary.duplication_clone_groups > 0;
     // Styling is verdict-neutral but must still surface when it is the ONLY
     // signal (a project clean of dead-code/complexity/dupes but with styling
@@ -426,6 +429,8 @@ fn print_audit_human(result: &AuditResult, quiet: bool, explain: bool, output: O
 
     if has_check_issues || has_health_findings || has_dupe_groups || has_styling || has_diff_risk {
         print_audit_findings(result, quiet, explain, show_headers);
+    } else if quiet {
+        quiet::print_quiet_empty_state(output);
     }
 
     if !has_dupe_groups && let Some(ref dupes) = result.dupes {
@@ -462,7 +467,7 @@ pub fn print_audit_findings(result: &AuditResult, quiet: bool, explain: bool, sh
         }
     }
 
-    if result.summary.complexity_findings > 0
+    if quiet::complexity_section_has_rows(result, quiet)
         && let Some(ref health) = result.health
     {
         print_audit_complexity_section(health, quiet, explain, show_headers);

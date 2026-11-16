@@ -989,6 +989,39 @@ Invariants:
   They skip the Health run, the feature-flag pass, and the security rules,
   because none of that reaches their output.
 
+## Quiet audit report
+
+`fallow audit --quiet` prints the actionable view of the report in the
+human, compact and markdown formats. `FALLOW_QUIET=1` sets quiet too.
+`--ci` sets quiet, but its default format is SARIF, so only `--ci` with an
+explicit `--format human`, `compact` or `markdown` gets the view. `audit_quiet.rs` builds the view after the verdict and
+after the impact record, so the exit code and the impact data use the
+complete result.
+
+- The view keeps introduced and worsened findings, diff-risk findings, the
+  configuration and analysis diagnostics, and the `insufficient` and
+  `no_match` records of `health.thresholdOverrides`.
+- The complexity section also prints when it holds only kept override
+  records, so an `insufficient` record stays when every complexity finding
+  is inherited.
+- When no row is actionable, the human and markdown reports print one line,
+  `No introduced or worsened findings.`. The compact report stays empty.
+- The view drops inherited findings, the aggregate health metrics (vital
+  signs, health score, file scores, hotspots, refactoring targets, trend,
+  large functions and CSS analytics) and the `stale` and `active` override
+  records.
+- Without a base snapshot (`--gate all`), every finding is part of the
+  gate, so the view keeps all findings and drops only the aggregate metrics
+  and the routine override records.
+- `DeadCodeAuditLedger::retain_introduced_results` filters the dead-code
+  collections with the same exhaustive collection list as
+  `annotate_results`. A finding without a ledger record stays.
+- JSON, SARIF, CodeClimate, review, PR-comment and GitHub formats keep the
+  complete report under `--quiet`. Their consumers read the inherited
+  context and the JSON schema does not make these sections optional.
+- The review brief and the walkthrough modes keep their own output
+  contracts.
+
 ## Audit cache maintenance
 
 `fallow audit-cache` maintains the reusable base-snapshot caches

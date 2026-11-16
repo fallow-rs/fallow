@@ -2055,7 +2055,7 @@ Available on all commands:
 | `--pretty` | `bool` | `false` | Indent JSON output for manual inspection. Requires the final output format to be JSON |
 | `--lean` | `bool` | `false` | Trim JSON for agent context: leave out empty arrays and zero dead-code summary counts, group workspace diagnostics, cap health tables, and move repeated action text to `_meta.actions`. Requires JSON output. Applies to dead-code, health and the combined report; other commands reject it. Run without `--lean` for the full diagnostic list and the complete tables |
 | `--full-tables` | `bool` | `false` | With `--lean`, keep every row of the health tables (`hotspots`, `file_scores`, `large_functions`) |
-| `-q, --quiet` | `bool` | `false` | Suppress progress output |
+| `-q, --quiet` | `bool` | `false` | Suppress progress output; `audit` also prints only actionable findings |
 | `--no-cache` | `bool` | `false` | Disable incremental caching |
 | `--threads` | `string` | - | Number of parser threads |
 | `--changed-since` | `string` | - | Only report issues in files changed since this git ref (e.g., main, HEAD~5) |
