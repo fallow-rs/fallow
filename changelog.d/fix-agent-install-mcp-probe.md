@@ -1,3 +1,0 @@
-### Fixed
-
-- **`fallow agent install` no longer registers `fallow mcp-server` for a binary that cannot serve MCP.** The Homebrew and `cargo install fallow-cli` binary has no `mcp-server` subcommand, but it answers `fallow mcp-server --version` with its own version and exit code 0. The MCP step took that answer as proof of the MCP server and printed a `codex mcp add` command that failed. Now the step accepts the running binary only when the answer comes from the MCP server (`fallow-mcp <version>`). Without another launcher, the step skips with `mcp_entry_unavailable`. Its message names `cargo install fallow-mcp` and the release archive, so a Homebrew or `cargo install` user gets a route that works.
