@@ -1426,6 +1426,13 @@ impl FallowConfig {
                 health_errors.join("\n  - ")
             ));
         }
+        let allow_errors = config.circular_dependencies.allow_errors();
+        if !allow_errors.is_empty() {
+            return Err(miette::miette!(
+                "invalid config:\n  - {}",
+                allow_errors.join("\n  - ")
+            ));
+        }
         if let Some(pattern) = &config.unused_component_props.ignore_pattern
             && let Err(e) = regex::Regex::new(pattern)
         {

@@ -8,7 +8,7 @@
     reason = "tests use unwrap and expect to keep fixture setup concise"
 )]
 
-use crate::common::{parse_json, run_fallow_in_root};
+use crate::common::{git, parse_json, run_fallow_in_root};
 
 const UNMATCHED_KIND: &str = "circular-dependencies-allow-unmatched";
 
@@ -166,4 +166,81 @@ fn no_entry_is_unmatched_when_the_rule_is_off_or_the_run_is_production() {
         &["--format", "json", "--quiet"],
     ));
     assert!(unmatched_entries(&off).is_empty(), "{off}");
+}
+
+#[test]
+fn a_monorepo_entry_uses_paths_from_the_project_root() {
+    let dir = tempfile::tempdir().expect("temporary project");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("packages/app/src")).expect("create workspace");
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"mono","private":true,"workspaces":["packages/*"]}"#,
+    )
+    .expect("write root package");
+    std::fs::write(
+        root.join("packages/app/package.json"),
+        r#"{"name":"app","private":true,"type":"module","main":"src/a.mjs"}"#,
+    )
+    .expect("write workspace package");
+    std::fs::write(
+        root.join("packages/app/src/a.mjs"),
+        "import { b } from './b.mjs';\nexport function a() { return b(); }\nexport function a2() { return 2; }\n",
+    )
+    .expect("write a");
+    std::fs::write(
+        root.join("packages/app/src/b.mjs"),
+        "import { a2 } from './a.mjs';\nexport function b() { return a2(); }\n",
+    )
+    .expect("write b");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"circularDependencies": {"allow": [
+            ["packages/app/src/b.mjs", "packages/app/src/a.mjs"],
+            ["src/a.mjs", "src/b.mjs"]
+        ]}}"#,
+    )
+    .expect("write config");
+
+    let json = parse_json(&run_fallow_in_root(
+        "dead-code",
+        root,
+        &["--format", "json", "--quiet"],
+    ));
+    assert!(cycle_files(&json).is_empty(), "{json}");
+    let entries = unmatched_entries(&json);
+    assert_eq!(entries.len(), 1, "{json}");
+    assert_eq!(
+        entries[0]["files"],
+        serde_json::json!(["src/a.mjs", "src/b.mjs"]),
+        "a path relative to the workspace matches no cycle"
+    );
+}
+
+#[test]
+fn a_changed_since_run_reports_no_false_unmatched_entry() {
+    let dir = cycle_project(r#"[["src/a.mjs", "src/b.mjs"]]"#);
+    let root = dir.path();
+    git(root, &["init", "-b", "main"]);
+    git(root, &["add", "."]);
+    git(
+        root,
+        &["-c", "commit.gpgsign=false", "commit", "-m", "initial"],
+    );
+    std::fs::write(root.join("src/other.mjs"), "export const other = 1;\n").expect("write file");
+    git(root, &["add", "."]);
+    git(
+        root,
+        &["-c", "commit.gpgsign=false", "commit", "-m", "other"],
+    );
+
+    let json = parse_json(&run_fallow_in_root(
+        "dead-code",
+        root,
+        &["--changed-since", "HEAD~1", "--format", "json", "--quiet"],
+    ));
+    assert!(
+        unmatched_entries(&json).is_empty(),
+        "the accepted cycle is outside the changed files, but the entry still matched: {json}"
+    );
 }

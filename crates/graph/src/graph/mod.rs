@@ -45,7 +45,7 @@ pub(super) fn relativize(path: &Path, root: &Path) -> String {
 }
 
 pub use ambiguity::{AmbiguityParticipants, AmbiguousStarExport};
-pub use cycles::CycleOptions;
+pub use cycles::{CycleOptions, CycleSearch, MAX_CYCLE_LENGTH, MAX_CYCLES_PER_SCC};
 pub use effective_exports::{EffectiveExportBinding, EffectiveExportResolution, ExportNamespace};
 pub use effective_re_exports::EffectiveReExportRoute;
 pub use entry_load::{DominatingImport, EntryLoadClosure};

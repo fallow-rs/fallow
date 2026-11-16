@@ -20,6 +20,26 @@ pub struct CycleOptions {
     pub ignore_lazy_imports: bool,
 }
 
+/// The most cycles that the detector lists for one strongly connected group
+/// of files. A dense group has very many cycles, so the detector stops here.
+pub const MAX_CYCLES_PER_SCC: usize = 20;
+
+/// The most files that a listed cycle has. The detector does not look for
+/// longer cycles.
+pub const MAX_CYCLE_LENGTH: usize = 12;
+
+/// The result of [`ModuleGraph::find_cycles_accepting`].
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct CycleSearch {
+    /// The listed cycles that the `accept` callback did not accept, in the
+    /// order of [`ModuleGraph::find_cycles`].
+    pub cycles: Vec<Vec<FileId>>,
+    /// The strongly connected groups whose enumeration stopped at
+    /// [`MAX_CYCLES_PER_SCC`]. Such a group can have cycles that are not
+    /// listed and not given to the `accept` callback.
+    pub capped_sccs: Vec<Vec<FileId>>,
+}
+
 impl ModuleGraph {
     /// Find all circular dependency cycles in the module graph.
     ///
@@ -45,9 +65,22 @@ impl ModuleGraph {
     /// files into one SCC and cannot use a slot of the per-SCC cycle cap.
     #[must_use]
     pub fn find_cycles_with(&self, options: CycleOptions) -> Vec<Vec<FileId>> {
+        self.find_cycles_accepting(options, &mut |_| false).cycles
+    }
+
+    /// Find the cycles like [`Self::find_cycles_with`], and drop each cycle
+    /// that `accept` accepts. An accepted cycle does not use a slot of the
+    /// per-group cycle limit, so the enumeration continues past it. The
+    /// callback gets each cycle once, in cycle order.
+    #[must_use]
+    pub fn find_cycles_accepting(
+        &self,
+        options: CycleOptions,
+        accept: &mut dyn FnMut(&[FileId]) -> bool,
+    ) -> CycleSearch {
         let n = self.modules.len();
         if n == 0 {
-            return Vec::new();
+            return CycleSearch::default();
         }
 
         let (all_succs, succ_ranges) = self.build_runtime_successors(n, options);
@@ -60,7 +93,7 @@ impl ModuleGraph {
             state.run_dfs_from(start_node, &all_succs, &succ_ranges);
         }
 
-        self.enumerate_cycles_from_sccs(&state.sccs, &all_succs, &succ_ranges)
+        self.enumerate_cycles_from_sccs(&state.sccs, &all_succs, &succ_ranges, accept)
     }
 
     /// Build the flattened runtime-successor adjacency (type-only edges,
@@ -112,9 +145,8 @@ impl ModuleGraph {
         sccs: &[Vec<FileId>],
         all_succs: &[usize],
         succ_ranges: &[Range<usize>],
-    ) -> Vec<Vec<FileId>> {
-        const MAX_CYCLES_PER_SCC: usize = 20;
-
+        accept: &mut dyn FnMut(&[FileId]) -> bool,
+    ) -> CycleSearch {
         let succs = SuccessorMap {
             all_succs,
             succ_ranges,
@@ -122,6 +154,7 @@ impl ModuleGraph {
         };
 
         let mut result: Vec<Vec<FileId>> = Vec::new();
+        let mut capped_sccs: Vec<Vec<FileId>> = Vec::new();
         let mut seen_cycles: FxHashSet<Vec<u32>> = FxHashSet::default();
 
         for scc in sccs {
@@ -131,14 +164,19 @@ impl ModuleGraph {
                     cycle.swap(0, 1);
                 }
                 let key: Vec<u32> = cycle.iter().map(|&n| n as u32).collect();
-                if seen_cycles.insert(key) {
-                    result.push(cycle.into_iter().map(|n| FileId(n as u32)).collect());
+                let files: Vec<FileId> = cycle.into_iter().map(|n| FileId(n as u32)).collect();
+                if seen_cycles.insert(key) && !accept(&files) {
+                    result.push(files);
                 }
                 continue;
             }
 
             let scc_nodes: Vec<usize> = scc.iter().map(|id| id.0 as usize).collect();
-            let elementary = enumerate_elementary_cycles(&scc_nodes, &succs, MAX_CYCLES_PER_SCC);
+            let (elementary, capped) =
+                enumerate_elementary_cycles(&scc_nodes, &succs, MAX_CYCLES_PER_SCC, accept);
+            if capped {
+                capped_sccs.push(scc.clone());
+            }
 
             for cycle in elementary {
                 let key: Vec<u32> = cycle.iter().map(|&n| n as u32).collect();
@@ -156,7 +194,10 @@ impl ModuleGraph {
             })
         });
 
-        result
+        CycleSearch {
+            cycles: result,
+            capped_sccs,
+        }
     }
 }
 
@@ -313,10 +354,15 @@ fn try_record_cycle(
     modules: &[ModuleNode],
     seen: &mut FxHashSet<Vec<u32>>,
     cycles: &mut Vec<Vec<usize>>,
+    accept: &mut dyn FnMut(&[FileId]) -> bool,
 ) {
     let canonical = canonical_cycle(path, modules);
     let key: Vec<u32> = canonical.iter().map(|&n| n as u32).collect();
-    if seen.insert(key) {
+    if !seen.insert(key) {
+        return;
+    }
+    let files: Vec<FileId> = canonical.iter().map(|&n| FileId(n as u32)).collect();
+    if !accept(&files) {
         cycles.push(canonical);
     }
 }
@@ -333,6 +379,7 @@ struct DfsCycleInput<'a> {
     max_cycles: usize,
     seen: &'a mut FxHashSet<Vec<u32>>,
     cycles: &'a mut Vec<Vec<usize>>,
+    accept: &'a mut dyn FnMut(&[FileId]) -> bool,
 }
 
 fn dfs_find_cycles_from(input: &mut DfsCycleInput<'_>) {
@@ -370,7 +417,13 @@ fn dfs_find_cycles_from(input: &mut DfsCycleInput<'_>) {
         }
 
         if w == input.start && path.len() >= 2 && path.len() == input.depth_limit {
-            try_record_cycle(&path, input.succs.modules, input.seen, input.cycles);
+            try_record_cycle(
+                &path,
+                input.succs.modules,
+                input.seen,
+                input.cycles,
+                input.accept,
+            );
             continue;
         }
 
@@ -393,12 +446,15 @@ fn dfs_find_cycles_from(input: &mut DfsCycleInput<'_>) {
 ///
 /// Uses iterative deepening: first finds all 2-node cycles, then 3-node, etc.
 /// This ensures the shortest, most actionable cycles are always found first.
-/// Stops after `max_cycles` total cycles to bound work on dense SCCs.
+/// Stops after `max_cycles` total cycles to bound work on dense SCCs. A
+/// cycle that `accept` accepts does not count. The flag is `true` when the
+/// enumeration stopped at `max_cycles`.
 fn enumerate_elementary_cycles(
     scc_nodes: &[usize],
     succs: &SuccessorMap<'_>,
     max_cycles: usize,
-) -> Vec<Vec<usize>> {
+    accept: &mut dyn FnMut(&[FileId]) -> bool,
+) -> (Vec<Vec<usize>>, bool) {
     let scc_set: FxHashSet<usize> = scc_nodes.iter().copied().collect();
     let mut cycles: Vec<Vec<usize>> = Vec::new();
     let mut seen: FxHashSet<Vec<u32>> = FxHashSet::default();
@@ -406,7 +462,7 @@ fn enumerate_elementary_cycles(
     let mut sorted_nodes: Vec<usize> = scc_nodes.to_vec();
     sorted_nodes.sort_by(|a, b| succs.modules[*a].path.cmp(&succs.modules[*b].path));
 
-    let max_depth = scc_nodes.len().min(12); // Cap depth to avoid very long cycles
+    let max_depth = scc_nodes.len().min(MAX_CYCLE_LENGTH);
     for depth_limit in 2..=max_depth {
         if cycles.len() >= max_cycles {
             break;
@@ -425,11 +481,13 @@ fn enumerate_elementary_cycles(
                 max_cycles,
                 seen: &mut seen,
                 cycles: &mut cycles,
+                accept,
             });
         }
     }
 
-    cycles
+    let capped = cycles.len() >= max_cycles;
+    (cycles, capped)
 }
 
 #[cfg(test)]
@@ -744,7 +802,7 @@ mod tests {
         let mut seen = FxHashSet::default();
         let mut cycles = Vec::new();
 
-        try_record_cycle(&[0, 1, 2], &modules, &mut seen, &mut cycles);
+        try_record_cycle(&[0, 1, 2], &modules, &mut seen, &mut cycles, &mut |_| false);
         assert_eq!(cycles.len(), 1);
         assert_eq!(cycles[0], vec![0, 1, 2]);
     }
@@ -755,9 +813,9 @@ mod tests {
         let mut seen = FxHashSet::default();
         let mut cycles = Vec::new();
 
-        try_record_cycle(&[0, 1, 2], &modules, &mut seen, &mut cycles);
-        try_record_cycle(&[1, 2, 0], &modules, &mut seen, &mut cycles);
-        try_record_cycle(&[2, 0, 1], &modules, &mut seen, &mut cycles);
+        try_record_cycle(&[0, 1, 2], &modules, &mut seen, &mut cycles, &mut |_| false);
+        try_record_cycle(&[1, 2, 0], &modules, &mut seen, &mut cycles, &mut |_| false);
+        try_record_cycle(&[2, 0, 1], &modules, &mut seen, &mut cycles, &mut |_| false);
 
         assert_eq!(
             cycles.len(),
@@ -772,7 +830,7 @@ mod tests {
         let mut seen = FxHashSet::default();
         let mut cycles = Vec::new();
 
-        try_record_cycle(&[0], &modules, &mut seen, &mut cycles);
+        try_record_cycle(&[0], &modules, &mut seen, &mut cycles, &mut |_| false);
         assert_eq!(cycles.len(), 1);
         assert_eq!(cycles[0], vec![0]);
     }
@@ -783,8 +841,8 @@ mod tests {
         let mut seen = FxHashSet::default();
         let mut cycles = Vec::new();
 
-        try_record_cycle(&[0, 1], &modules, &mut seen, &mut cycles);
-        try_record_cycle(&[2, 3], &modules, &mut seen, &mut cycles);
+        try_record_cycle(&[0, 1], &modules, &mut seen, &mut cycles, &mut |_| false);
+        try_record_cycle(&[2, 3], &modules, &mut seen, &mut cycles, &mut |_| false);
 
         assert_eq!(cycles.len(), 2);
     }
@@ -864,6 +922,7 @@ mod tests {
             scc_set: &scc_set,
             succs: &succs,
             max_cycles: 10,
+            accept: &mut |_| false,
             seen: &mut seen,
             cycles: &mut cycles,
         });
@@ -888,6 +947,7 @@ mod tests {
             scc_set: &scc_set,
             succs: &succs,
             max_cycles: 10,
+            accept: &mut |_| false,
             seen: &mut seen,
             cycles: &mut cycles,
         });
@@ -914,6 +974,7 @@ mod tests {
             scc_set: &scc_set,
             succs: &succs,
             max_cycles: 10,
+            accept: &mut |_| false,
             seen: &mut seen,
             cycles: &mut cycles,
         });
@@ -940,6 +1001,7 @@ mod tests {
             scc_set: &scc_set,
             succs: &succs,
             max_cycles: 10,
+            accept: &mut |_| false,
             seen: &mut seen,
             cycles: &mut cycles,
         });
@@ -968,6 +1030,7 @@ mod tests {
             scc_set: &scc_set,
             succs: &succs,
             max_cycles: 10,
+            accept: &mut |_| false,
             seen: &mut seen,
             cycles: &mut cycles,
         });
@@ -1000,6 +1063,7 @@ mod tests {
             scc_set: &scc_set,
             succs: &succs,
             max_cycles: 2,
+            accept: &mut |_| false,
             seen: &mut seen,
             cycles: &mut cycles,
         });
@@ -1029,6 +1093,7 @@ mod tests {
                 scc_set: &scc_set,
                 succs: &succs,
                 max_cycles: 10,
+                accept: &mut |_| false,
                 seen: &mut seen,
                 cycles: &mut cycles,
             });
@@ -1047,7 +1112,7 @@ mod tests {
             succ_ranges: &succ_ranges,
             modules: &modules,
         };
-        let cycles = enumerate_elementary_cycles(&[], &succs, 10);
+        let cycles = enumerate_elementary_cycles(&[], &succs, 10, &mut |_| false).0;
         assert!(cycles.is_empty());
     }
 
@@ -1064,7 +1129,7 @@ mod tests {
         };
         let scc_nodes: Vec<usize> = (0..4).collect();
 
-        let cycles = enumerate_elementary_cycles(&scc_nodes, &succs, 3);
+        let cycles = enumerate_elementary_cycles(&scc_nodes, &succs, 3, &mut |_| false).0;
         assert!(
             cycles.len() <= 3,
             "should respect max_cycles=3 limit, got {}",
@@ -1082,7 +1147,7 @@ mod tests {
         };
         let scc_nodes: Vec<usize> = vec![0, 1, 2];
 
-        let cycles = enumerate_elementary_cycles(&scc_nodes, &succs, 20);
+        let cycles = enumerate_elementary_cycles(&scc_nodes, &succs, 20, &mut |_| false).0;
         assert_eq!(cycles.len(), 1);
         assert_eq!(cycles[0].len(), 3);
     }
@@ -1098,7 +1163,7 @@ mod tests {
         };
         let scc_nodes: Vec<usize> = vec![0, 1, 2];
 
-        let cycles = enumerate_elementary_cycles(&scc_nodes, &succs, 20);
+        let cycles = enumerate_elementary_cycles(&scc_nodes, &succs, 20, &mut |_| false).0;
         assert!(cycles.len() >= 2, "should find at least 2 cycles");
         assert!(
             cycles[0].len() <= cycles[cycles.len() - 1].len(),
@@ -1194,6 +1259,7 @@ mod tests {
                 scc_set: &scc_set,
                 succs: &succs,
                 max_cycles: 10,
+                accept: &mut |_| false,
                 seen: &mut seen,
                 cycles: &mut cycles,
             });
@@ -1212,7 +1278,7 @@ mod tests {
             succ_ranges: &succ_ranges,
             modules: &modules,
         };
-        let cycles = enumerate_elementary_cycles(&[0], &succs, 20);
+        let cycles = enumerate_elementary_cycles(&[0], &succs, 20, &mut |_| false).0;
         assert!(
             cycles.is_empty(),
             "self-loop should not produce elementary cycles"
@@ -1245,7 +1311,7 @@ mod tests {
             modules: &modules,
         };
         let scc_nodes: Vec<usize> = vec![0, 1, 2, 3];
-        let cycles = enumerate_elementary_cycles(&scc_nodes, &succs, 20);
+        let cycles = enumerate_elementary_cycles(&scc_nodes, &succs, 20, &mut |_| false).0;
         assert_eq!(
             cycles.len(),
             2,
@@ -1264,7 +1330,7 @@ mod tests {
             modules: &modules,
         };
         let scc_nodes: Vec<usize> = vec![0, 1, 2, 3, 4];
-        let cycles = enumerate_elementary_cycles(&scc_nodes, &succs, 20);
+        let cycles = enumerate_elementary_cycles(&scc_nodes, &succs, 20, &mut |_| false).0;
 
         assert!(
             cycles.len() >= 3,
@@ -1315,7 +1381,7 @@ mod tests {
             modules: &modules,
         };
         let scc_nodes: Vec<usize> = (0..15).collect();
-        let cycles = enumerate_elementary_cycles(&scc_nodes, &succs, 20);
+        let cycles = enumerate_elementary_cycles(&scc_nodes, &succs, 20, &mut |_| false).0;
 
         assert!(
             cycles.is_empty(),
@@ -1334,7 +1400,7 @@ mod tests {
             modules: &modules,
         };
         let scc_nodes: Vec<usize> = (0..12).collect();
-        let cycles = enumerate_elementary_cycles(&scc_nodes, &succs, 20);
+        let cycles = enumerate_elementary_cycles(&scc_nodes, &succs, 20, &mut |_| false).0;
 
         assert_eq!(
             cycles.len(),
@@ -1354,7 +1420,7 @@ mod tests {
             modules: &modules,
         };
         let scc_nodes: Vec<usize> = (0..13).collect();
-        let cycles = enumerate_elementary_cycles(&scc_nodes, &succs, 20);
+        let cycles = enumerate_elementary_cycles(&scc_nodes, &succs, 20, &mut |_| false).0;
 
         assert!(
             cycles.is_empty(),
@@ -1637,5 +1703,30 @@ mod tests {
             cycles.is_empty(),
             "cycle broken by type-only edge in the middle should not be reported"
         );
+    }
+
+    #[test]
+    fn accepted_cycles_leave_their_slots_to_other_cycles() {
+        let mut edges = Vec::new();
+        for from in 0..5_u32 {
+            for to in 0..5_u32 {
+                if from != to {
+                    edges.push((from, to));
+                }
+            }
+        }
+        let graph = build_cycle_graph(5, &edges);
+        let all = graph.find_cycles_accepting(super::CycleOptions::default(), &mut |_| false);
+        assert_eq!(all.cycles.len(), super::MAX_CYCLES_PER_SCC);
+        assert_eq!(all.capped_sccs.len(), 1);
+
+        let mut offered = 0;
+        let rest = graph.find_cycles_accepting(super::CycleOptions::default(), &mut |cycle| {
+            offered += 1;
+            cycle.len() == 2
+        });
+        assert_eq!(rest.cycles.len(), super::MAX_CYCLES_PER_SCC);
+        assert!(rest.cycles.iter().all(|cycle| cycle.len() > 2));
+        assert_eq!(offered, 10 + super::MAX_CYCLES_PER_SCC);
     }
 }

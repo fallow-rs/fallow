@@ -5,12 +5,39 @@ use std::path::Path;
 
 use crate::discover::FileId;
 use fallow_config::ResolvedConfig;
+use rustc_hash::FxHashMap;
 
-use crate::graph::ModuleGraph;
+use crate::graph::{CycleOptions, MAX_CYCLE_LENGTH, ModuleGraph};
+
+/// The cycles of `graph` that no `circularDependencies.allow` entry accepts.
+/// Records which entries had an effect, for the unmatched-entry diagnostic.
+///
+/// The detector checks each entry while it lists cycles, so an accepted
+/// cycle does not use a slot of the per-group cycle limit. An entry that
+/// the detector cannot check counts as matched: an entry longer than the
+/// longest listed cycle, and an entry whose files all lie in one group whose
+/// listing stopped at the limit.
+pub(super) fn find_unaccepted_cycles(
+    graph: &ModuleGraph,
+    config: &ResolvedConfig,
+) -> Vec<Vec<FileId>> {
+    let options = CycleOptions {
+        ignore_lazy_imports: config.circular_dependencies.ignore_lazy_imports,
+    };
+    let mut allow_list = CycleAllowList::new(config);
+    let search = if allow_list.entries.is_empty() {
+        graph.find_cycles_accepting(options, &mut |_| false)
+    } else {
+        graph.find_cycles_accepting(options, &mut |cycle| allow_list.accepts(graph, cycle))
+    };
+    allow_list.mark_unprovable(graph, &search.capped_sccs);
+    allow_list.record();
+    search.cycles
+}
 
 /// The `allow` entries of one cycle detection pass, with a flag per entry
 /// that records whether the entry matched a cycle.
-pub(super) struct CycleAllowList<'a> {
+struct CycleAllowList<'a> {
     config: &'a ResolvedConfig,
     canonical_root: Option<std::path::PathBuf>,
     entries: Vec<Vec<String>>,
@@ -18,7 +45,7 @@ pub(super) struct CycleAllowList<'a> {
 }
 
 impl<'a> CycleAllowList<'a> {
-    pub(super) fn new(config: &'a ResolvedConfig) -> Self {
+    fn new(config: &'a ResolvedConfig) -> Self {
         let entries: Vec<Vec<String>> = config
             .circular_dependencies
             .allow
@@ -41,10 +68,7 @@ impl<'a> CycleAllowList<'a> {
 
     /// Whether an entry accepts `cycle`. Every entry that matches is marked
     /// as matched, so two equal entries do not report one as unmatched.
-    pub(super) fn accepts(&mut self, graph: &ModuleGraph, cycle: &[FileId]) -> bool {
-        if self.entries.is_empty() {
-            return false;
-        }
+    fn accepts(&mut self, graph: &ModuleGraph, cycle: &[FileId]) -> bool {
         let files: Vec<String> = cycle
             .iter()
             .map(|id| self.relative_path(&graph.modules[id.0 as usize].path))
@@ -59,8 +83,32 @@ impl<'a> CycleAllowList<'a> {
         accepted
     }
 
+    /// Mark each unmatched entry that the detector cannot check as matched,
+    /// so it gives no false unmatched-entry diagnostic.
+    fn mark_unprovable(&mut self, graph: &ModuleGraph, capped_sccs: &[Vec<FileId>]) {
+        if self.matched.iter().all(|matched| *matched) {
+            return;
+        }
+        let mut group_of: FxHashMap<String, usize> = FxHashMap::default();
+        for (group, scc) in capped_sccs.iter().enumerate() {
+            for id in scc {
+                let path = self.relative_path(&graph.modules[id.0 as usize].path);
+                group_of.insert(path, group);
+            }
+        }
+        for (entry, matched) in self.entries.iter().zip(&mut self.matched) {
+            if *matched {
+                continue;
+            }
+            let first_group = entry.first().and_then(|file| group_of.get(file));
+            let in_one_capped_group =
+                first_group.is_some() && entry.iter().all(|file| group_of.get(file) == first_group);
+            *matched = entry.len() > MAX_CYCLE_LENGTH || in_one_capped_group;
+        }
+    }
+
     /// Store which entries matched a cycle in this pass.
-    pub(super) fn record(self) {
+    fn record(self) {
         self.config
             .circular_dependencies_allow_effect
             .record(self.matched);

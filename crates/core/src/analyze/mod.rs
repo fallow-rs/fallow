@@ -452,26 +452,21 @@ fn find_circular_dependencies(
     suppressions: &crate::suppress::SuppressionContext<'_>,
     workspaces: &[fallow_config::WorkspaceInfo],
 ) -> Vec<CircularDependency> {
-    let cycles = graph.find_cycles_with(crate::graph::CycleOptions {
-        ignore_lazy_imports: config.circular_dependencies.ignore_lazy_imports,
-    });
-    let mut allow_list = cycle_allow::CycleAllowList::new(config);
-    let mut dependencies: Vec<CircularDependency> = cycles
-        .into_iter()
-        .filter_map(|cycle| {
-            if allow_list.accepts(graph, &cycle)
-                || is_circular_dependency_suppressed(graph, line_offsets_map, suppressions, &cycle)
-            {
-                return None;
-            }
-            Some(cycle_finding::circular_dependency_from_cycle(
-                graph,
-                line_offsets_map,
-                &cycle,
-            ))
-        })
-        .collect();
-    allow_list.record();
+    let mut dependencies: Vec<CircularDependency> =
+        cycle_allow::find_unaccepted_cycles(graph, config)
+            .into_iter()
+            .filter_map(|cycle| {
+                if is_circular_dependency_suppressed(graph, line_offsets_map, suppressions, &cycle)
+                {
+                    return None;
+                }
+                Some(cycle_finding::circular_dependency_from_cycle(
+                    graph,
+                    line_offsets_map,
+                    &cycle,
+                ))
+            })
+            .collect();
 
     if !workspaces.is_empty() {
         for dep in &mut dependencies {

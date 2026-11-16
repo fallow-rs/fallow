@@ -2155,13 +2155,14 @@
           "type": "boolean"
         },
         "allow": {
-          "description": "Accepted cycles. Each entry is the list of files of one cycle, in\nimport order, without the repeat of the first file at the end. An\nentry accepts a cycle that has exactly these files in this order, from\nany start file: `[\"src/a.ts\", \"src/b.ts\", \"src/c.ts\"]` also accepts\n`src/b.ts -> src/c.ts -> src/a.ts`. A cycle with another set of files\nstays reported, also when it shares an import with an accepted cycle.\n\nEach path is relative to the project root, also in a monorepo: write\n`packages/app/src/a.ts`, not a path relative to the workspace. Globs\nare not supported. An entry that matches no cycle in a run gives a\n`circular-dependencies-allow-unmatched` diagnostic. Default `[]`.",
+          "description": "Accepted cycles. Each entry is the list of files of one cycle, in\nimport order, without the repeat of the first file at the end. An\nentry accepts a cycle that has exactly these files in this order, from\nany start file: `[\"src/a.ts\", \"src/b.ts\", \"src/c.ts\"]` also accepts\n`src/b.ts -> src/c.ts -> src/a.ts`. A cycle with another set of files\nstays reported, also when it shares an import with an accepted cycle.\n\nEach path is relative to the project root, also in a monorepo: write\n`packages/app/src/a.ts`, not a path relative to the workspace. The\nmatch is case-sensitive on every platform. Globs are not supported.\nAn entry needs at least 2 files and lists each file once.\n\nAn entry that matches no cycle in a run gives a\n`circular-dependencies-allow-unmatched` diagnostic. The detector lists\nat most 20 cycles per group of files that import each other, and no\ncycle with more than 12 files. An accepted cycle does not count toward\nthe 20. An entry with more than 12 files, or with all files in a group\nthat reached the limit, gives no diagnostic, because the detector\ncannot prove that it matches no cycle.\n\nA `fallow-ignore-next-line circular-dependency` comment on an accepted\ncycle becomes a stale suppression: remove the comment when you add the\nentry. Default `[]`.",
           "type": "array",
           "items": {
             "type": "array",
             "items": {
               "type": "string"
-            }
+            },
+            "minItems": 2
           }
         }
       },
