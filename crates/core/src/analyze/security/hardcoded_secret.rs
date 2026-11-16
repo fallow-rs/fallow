@@ -24,6 +24,8 @@ pub const CATEGORY_ID: &str = fallow_security::HARDCODED_SECRET_CATEGORY_ID;
 const CWE_ID: u32 = 798;
 const MIN_ENTROPY_LENGTH: usize = 20;
 const MIN_ENTROPY_BITS_PER_CHAR: f64 = 4.0;
+/// The number of words from which an entropy candidate reads as a sentence.
+const MIN_PROSE_WORDS: usize = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SecretSignal {
@@ -226,10 +228,41 @@ fn classify_secret_literal(context_name: &str, value: &str) -> Option<SecretSign
     if let Some(provider) = provider_secret_family(value) {
         return Some(SecretSignal::Provider(provider));
     }
-    if is_secret_shaped_identifier(context_name) && has_high_entropy(value) {
+    if is_secret_shaped_identifier(context_name)
+        && !is_prose(value)
+        && !is_public_url(value)
+        && has_high_entropy(value)
+    {
         return Some(SecretSignal::EntropyWithIdentifier);
     }
     None
+}
+
+/// Whether the value reads as a sentence: three or more words. A message such
+/// as "The personal access token is unexpectedly long." has a high character
+/// entropy, but it is not a credential. Two words stay a candidate, because an
+/// authorization value such as `Bearer <token>` has one space.
+fn is_prose(value: &str) -> bool {
+    value.split_whitespace().nth(MIN_PROSE_WORDS - 1).is_some()
+}
+
+/// Whether the value is an `http` or `https` URL that carries no credential: no
+/// user information, no query and no fragment. A documentation link under a
+/// name such as `TOKEN_HELP` is not a credential. A URL with `user:pass@` or a
+/// `?token=` query stays a candidate.
+fn is_public_url(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    let Some(rest) = lower
+        .strip_prefix("https://")
+        .or_else(|| lower.strip_prefix("http://"))
+    else {
+        return false;
+    };
+    let authority = rest.split('/').next().unwrap_or(rest);
+    !authority.is_empty()
+        && !authority.contains('@')
+        && !rest.contains(['?', '#'])
+        && !rest.chars().any(char::is_whitespace)
 }
 
 fn redacted_evidence(signal: SecretSignal, context_name: &str) -> String {
@@ -539,6 +572,62 @@ mod tests {
         assert_eq!(
             classify_secret_literal("apiKey", "mF9a7Qp2Lx8Nz4Rv6Ts0"),
             Some(SecretSignal::EntropyWithIdentifier)
+        );
+    }
+
+    #[test]
+    fn entropy_skips_prose_messages() {
+        assert_eq!(
+            classify_secret_literal(
+                "error.credentials.too-long",
+                "The personal access token is unexpectedly long."
+            ),
+            None
+        );
+        assert_eq!(
+            classify_secret_literal(
+                "error.credentials.platform",
+                "The operating system credential prompt failed."
+            ),
+            None
+        );
+        assert_eq!(
+            classify_secret_literal("authToken", "Bearer mF9a7Qp2Lx8Nz4Rv6Ts0"),
+            Some(SecretSignal::EntropyWithIdentifier)
+        );
+    }
+
+    #[test]
+    fn entropy_skips_public_urls_but_keeps_credential_urls() {
+        assert_eq!(
+            classify_secret_literal(
+                "DATA_CENTER_TOKEN_HELP",
+                "https://confluence.atlassian.com/enterprise/using-personal-access-tokens-1026032365.html"
+            ),
+            None
+        );
+        assert_eq!(
+            classify_secret_literal(
+                "dbPassword",
+                "https://admin:mF9a7Qp2Lx8Nz4Rv6Ts0@db.internal.test/app"
+            ),
+            Some(SecretSignal::EntropyWithIdentifier)
+        );
+        assert_eq!(
+            classify_secret_literal(
+                "webhookToken",
+                "https://hooks.internal.test/x?token=mF9a7Qp2Lx8Nz4Rv6Ts0"
+            ),
+            Some(SecretSignal::EntropyWithIdentifier)
+        );
+    }
+
+    #[test]
+    fn provider_prefix_ignores_the_prose_and_url_filters() {
+        let pem = "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIB...\n-----END RSA PRIVATE KEY-----";
+        assert_eq!(
+            classify_secret_literal("helpText", pem),
+            Some(SecretSignal::Provider("PEM private key"))
         );
     }
 
