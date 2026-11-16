@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use rustc_hash::FxHashMap;
 
-use oxc_ast::ast::{Expression, ObjectExpression, ObjectPropertyKind};
+use oxc_ast::ast::{Expression, LogicalOperator, ObjectExpression, ObjectPropertyKind};
 
 use super::config_parser;
 use super::{PathRule, Plugin, PluginResult};
@@ -116,22 +116,13 @@ impl Plugin for PlaywrightPlugin {
             result.referenced_dependencies.push(dep);
         }
 
-        if let Some(setup) =
-            config_parser::extract_config_string(source, config_path, &["globalSetup"])
-        {
-            result
-                .setup_files
-                .push(config_dir.join(setup.trim_start_matches("./")));
-        }
-        if let Some(teardown) =
-            config_parser::extract_config_string(source, config_path, &["globalTeardown"])
-        {
-            result
-                .setup_files
-                .push(config_dir.join(teardown.trim_start_matches("./")));
+        for key in ["globalSetup", "globalTeardown"] {
+            for file in branch_strings(source, config_path, key) {
+                add_loaded_module(&mut result, &file, root, config_dir);
+            }
         }
 
-        add_reporters(&mut result, source, config_path, config_dir);
+        add_reporters(&mut result, source, config_path, root, config_dir);
 
         let (web_deps, web_setup) = collect_web_server(source, config_path, root, config_dir);
         result.referenced_dependencies.extend(web_deps);
@@ -175,21 +166,76 @@ fn is_reporter_path(reporter: &str) -> bool {
 /// Credit the custom reporters of a config. Playwright loads a reporter path
 /// relative to the config directory as a module, so the file is used. Any
 /// other name that is not a built-in reporter is a package.
-fn add_reporters(result: &mut PluginResult, source: &str, config_path: &Path, config_dir: &Path) {
-    for reporter in config_parser::extract_config_shallow_strings(source, config_path, "reporter") {
+fn add_reporters(
+    result: &mut PluginResult,
+    source: &str,
+    config_path: &Path,
+    root: &Path,
+    config_dir: &Path,
+) {
+    for reporter in branch_strings(source, config_path, "reporter") {
         if BUILTIN_REPORTERS.contains(&reporter.as_str()) {
             continue;
         }
         if is_reporter_path(&reporter) {
-            result
-                .setup_files
-                .push(config_dir.join(reporter.trim_start_matches("./")));
+            add_loaded_module(result, &reporter, root, config_dir);
             continue;
         }
         result
             .referenced_dependencies
             .push(crate::resolve::extract_package_name(&reporter));
     }
+}
+
+/// The top-level string values of `key` in each config object, as
+/// `extract_config_shallow_strings` gives them. This reader also reads each
+/// branch of `a ? x : y` and the operands of `a || x` and `a ?? x`, because
+/// a config can pick a reporter or a setup file by environment. A branch
+/// without a static string, such as `undefined`, adds nothing.
+fn branch_strings(source: &str, config_path: &Path, key: &str) -> Vec<String> {
+    config_parser::extract_from_source(source, config_path, |program| {
+        let mut values = Vec::new();
+        for object in config_parser::find_config_objects(program) {
+            if let Some(prop) = config_parser::find_property(object, key) {
+                collect_branch_strings(&prop.value, &mut values);
+            }
+        }
+        Some(values)
+    })
+    .unwrap_or_default()
+}
+
+fn collect_branch_strings(expr: &Expression<'_>, values: &mut Vec<String>) {
+    match expr.get_inner_expression() {
+        Expression::ConditionalExpression(conditional) => {
+            collect_branch_strings(&conditional.consequent, values);
+            collect_branch_strings(&conditional.alternate, values);
+        }
+        Expression::LogicalExpression(logical) => {
+            if logical.operator != LogicalOperator::And {
+                collect_branch_strings(&logical.left, values);
+            }
+            collect_branch_strings(&logical.right, values);
+        }
+        inner => values.extend(config_parser::collect_shallow_string_values(inner)),
+    }
+}
+
+/// Mark a module that Playwright loads from the config, such as a reporter
+/// or a `globalSetup` file, as used. Playwright reads the default export of
+/// the module, so that export counts as used under `includeEntryExports`.
+/// Other exports of the module stay reportable.
+fn add_loaded_module(result: &mut PluginResult, file: &str, root: &Path, config_dir: &Path) {
+    let path = config_parser::lexical_normalize(&config_dir.join(file.trim_start_matches("./")));
+    if let Ok(relative) = path.strip_prefix(root) {
+        let pattern = globset::escape(&config_parser::path_to_config_string(relative));
+        if relative.extension().is_none() {
+            // Playwright resolves a path without an extension as a module.
+            result.push_entry_export_credit(format!("{pattern}.*"), ["default"]);
+        }
+        result.push_entry_export_credit(pattern, ["default"]);
+    }
+    result.setup_files.push(path);
 }
 
 /// A `testDir` or `testMatch` value of one config scope.
@@ -795,6 +841,64 @@ mod tests {
             source,
             Path::new("/project"),
         )
+    }
+
+    #[test]
+    fn conditional_reporter_and_global_setup_read_each_branch() {
+        let result = resolve(
+            r#"
+            const external = Boolean(process.env.EXTERNAL_ORIGIN);
+            export default defineConfig({
+                reporter: external ? "./a.ts" : [["./b.ts"], ["allure-playwright"]],
+                globalSetup: external ? undefined : "./setup.ts",
+                globalTeardown: process.env.TEARDOWN || "./teardown.ts",
+            });
+            "#,
+        );
+        assert_eq!(
+            result.setup_files,
+            vec![
+                PathBuf::from("/project/setup.ts"),
+                PathBuf::from("/project/teardown.ts"),
+                PathBuf::from("/project/a.ts"),
+                PathBuf::from("/project/b.ts"),
+            ]
+        );
+        assert!(
+            result
+                .referenced_dependencies
+                .contains(&"allure-playwright".to_string())
+        );
+    }
+
+    #[test]
+    fn global_setup_array_reads_each_file() {
+        let result = resolve(r#"export default { globalSetup: ["./one.ts", "./two.ts"] };"#);
+        assert_eq!(
+            result.setup_files,
+            vec![
+                PathBuf::from("/project/one.ts"),
+                PathBuf::from("/project/two.ts"),
+            ]
+        );
+    }
+
+    #[test]
+    fn loaded_modules_credit_only_the_default_export() {
+        let result = resolve(
+            r#"export default {
+                reporter: [["./reporters/custom.ts"], ["list"]],
+                globalSetup: "./setup",
+            };"#,
+        );
+        assert_eq!(
+            result.entry_export_credits,
+            vec![
+                crate::plugins::UsedExportRule::new("setup.*", ["default"]),
+                crate::plugins::UsedExportRule::new("setup", ["default"]),
+                crate::plugins::UsedExportRule::new("reporters/custom.ts", ["default"]),
+            ]
+        );
     }
 
     #[test]

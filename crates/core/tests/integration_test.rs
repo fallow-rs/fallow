@@ -639,6 +639,8 @@ mod issue_956_playwright_pnpm_exec;
 mod lexical_nodes;
 #[path = "integration_test/playwright_bare_package.rs"]
 mod playwright_bare_package;
+#[path = "integration_test/playwright_reporter_global_setup.rs"]
+mod playwright_reporter_global_setup;
 #[path = "integration_test/playwright_test_dir.rs"]
 mod playwright_test_dir;
 #[path = "integration_test/script_multiplexers.rs"]
