@@ -143,6 +143,8 @@ const JSCPD_UNMAPPABLE_FIELDS: &[(&str, &str, Option<&str>)] = &[
 const JSCPD_MIGRATED_FIELDS: &[&str] = &[
     "$schema",
     "ignore",
+    "ignoreIdentifiers",
+    "ignoreLiterals",
     "minLines",
     "minTokens",
     "mode",
@@ -182,7 +184,63 @@ fn duplicate_options_from_jscpd(
     insert_jscpd_mode(obj, &mut dupes, warnings);
     insert_jscpd_skip_local(obj, &mut dupes);
     insert_jscpd_ignore(obj, &mut dupes);
+    insert_jscpd_normalization(obj, &mut dupes, warnings);
     dupes
+}
+
+/// Map jscpd's `ignoreIdentifiers` and `ignoreLiterals` to fallow's
+/// `normalization` block.
+///
+/// jscpd's `ignoreIdentifiers: true` and `"consistent"` require each name to
+/// stand for one name on the other side, which is fallow's
+/// `consistentIdentifiers`. `"blind"` lets any name match any name.
+/// `ignoreLiterals` blinds both string and numeric literals.
+fn insert_jscpd_normalization(
+    obj: &serde_json::Map<String, serde_json::Value>,
+    dupes: &mut serde_json::Map<String, serde_json::Value>,
+    warnings: &mut Vec<MigrationWarning>,
+) {
+    let mut normalization = serde_json::Map::new();
+    match obj.get("ignoreIdentifiers") {
+        Some(serde_json::Value::Bool(true)) => insert_identifiers(&mut normalization, true),
+        Some(serde_json::Value::String(value)) if value == "consistent" => {
+            insert_identifiers(&mut normalization, true);
+        }
+        Some(serde_json::Value::String(value)) if value == "blind" => {
+            insert_identifiers(&mut normalization, false);
+        }
+        Some(serde_json::Value::Bool(false)) | None => {}
+        Some(other) => warnings.push(MigrationWarning {
+            source: "jscpd",
+            field: "ignoreIdentifiers".to_string(),
+            message: format!("unknown ignoreIdentifiers value `{other}`; not migrated"),
+            suggestion: Some("use true, \"consistent\" or \"blind\"".to_string()),
+        }),
+    }
+    if obj
+        .get("ignoreLiterals")
+        .and_then(serde_json::Value::as_bool)
+        == Some(true)
+    {
+        normalization.insert("ignoreStringValues".to_string(), true.into());
+        normalization.insert("ignoreNumericValues".to_string(), true.into());
+    }
+    if !normalization.is_empty() {
+        dupes.insert(
+            "normalization".to_string(),
+            serde_json::Value::Object(normalization),
+        );
+    }
+}
+
+fn insert_identifiers(
+    normalization: &mut serde_json::Map<String, serde_json::Value>,
+    consistent: bool,
+) {
+    normalization.insert("ignoreIdentifiers".to_string(), true.into());
+    if consistent {
+        normalization.insert("consistentIdentifiers".to_string(), true.into());
+    }
 }
 
 fn insert_jscpd_numeric_options(
@@ -352,6 +410,52 @@ mod tests {
         assert_eq!(dupes.get("mode").unwrap(), "weak");
         assert_eq!(warnings.len(), 1);
         assert!(warnings[0].message.contains("differ semantically"));
+    }
+
+    #[test]
+    fn migrate_jscpd_consistent_identifiers_and_literals() {
+        for value in ["true", r#""consistent""#] {
+            let jscpd: serde_json::Value = serde_json::from_str(&format!(
+                r#"{{"ignoreIdentifiers": {value}, "ignoreLiterals": false}}"#
+            ))
+            .unwrap();
+            let mut config = empty_config();
+            let mut warnings = vec![];
+            migrate_jscpd(&jscpd, &mut config, &mut warnings);
+            assert!(warnings.is_empty(), "{warnings:?}");
+            let normalization = &config["duplicates"]["normalization"];
+            assert_eq!(normalization["ignoreIdentifiers"], true);
+            assert_eq!(normalization["consistentIdentifiers"], true);
+            assert!(normalization.get("ignoreStringValues").is_none());
+        }
+    }
+
+    #[test]
+    fn migrate_jscpd_blind_identifiers_and_ignored_literals() {
+        let jscpd: serde_json::Value =
+            serde_json::from_str(r#"{"ignoreIdentifiers": "blind", "ignoreLiterals": true}"#)
+                .unwrap();
+        let mut config = empty_config();
+        let mut warnings = vec![];
+        migrate_jscpd(&jscpd, &mut config, &mut warnings);
+        assert!(warnings.is_empty(), "{warnings:?}");
+        let normalization = &config["duplicates"]["normalization"];
+        assert_eq!(normalization["ignoreIdentifiers"], true);
+        assert!(normalization.get("consistentIdentifiers").is_none());
+        assert_eq!(normalization["ignoreStringValues"], true);
+        assert_eq!(normalization["ignoreNumericValues"], true);
+    }
+
+    #[test]
+    fn migrate_jscpd_unknown_identifiers_value_warns() {
+        let jscpd: serde_json::Value =
+            serde_json::from_str(r#"{"ignoreIdentifiers": "loose"}"#).unwrap();
+        let mut config = empty_config();
+        let mut warnings = vec![];
+        migrate_jscpd(&jscpd, &mut config, &mut warnings);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].field, "ignoreIdentifiers");
+        assert!(config.get("duplicates").is_none());
     }
 
     #[test]
@@ -918,6 +1022,8 @@ mod tests {
         "hashFunction",
         "ignore",
         "ignoreCase",
+        "ignoreIdentifiers",
+        "ignoreLiterals",
         "ignorePattern",
         "list",
         "listeners",

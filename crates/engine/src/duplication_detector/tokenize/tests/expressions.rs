@@ -102,7 +102,7 @@ fn tokenize_template_literal() {
     let tokens = tokenize("const s = `hello ${name}`;");
     let has_template = tokens
         .iter()
-        .any(|t| matches!(t.kind, TokenKind::TemplateLiteral));
+        .any(|t| matches!(t.kind, TokenKind::TemplateLiteral(_)));
     assert!(has_template, "Should contain template literal token");
 }
 
@@ -190,7 +190,7 @@ fn tokenize_tagged_template_literal() {
     let tokens = tokenize("const x = html`<div>${content}</div>`;");
     let has_template = tokens
         .iter()
-        .any(|t| matches!(t.kind, TokenKind::TemplateLiteral));
+        .any(|t| matches!(t.kind, TokenKind::TemplateLiteral(_)));
     let has_html = tokens
         .iter()
         .any(|t| matches!(&t.kind, TokenKind::Identifier(n) if n == "html"));
@@ -203,7 +203,7 @@ fn tokenize_template_literal_with_multiple_expressions() {
     let tokens = tokenize("const s = `${a} + ${b} = ${a + b}`;");
     let has_template = tokens
         .iter()
-        .any(|t| matches!(t.kind, TokenKind::TemplateLiteral));
+        .any(|t| matches!(t.kind, TokenKind::TemplateLiteral(_)));
     let has_add = tokens
         .iter()
         .any(|t| matches!(t.kind, TokenKind::Operator(OperatorType::Add)));

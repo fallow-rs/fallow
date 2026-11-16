@@ -206,7 +206,7 @@ pub fn source_token_kinds_equivalent(
             }
             if matches!(
                 current_token.kind,
-                detector::token_types::TokenKind::TemplateLiteral
+                detector::token_types::TokenKind::TemplateLiteral(_)
                     | detector::token_types::TokenKind::RegExpLiteral
             ) {
                 return match (

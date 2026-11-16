@@ -80,7 +80,15 @@ fn hash_token_resolved(kind: &TokenKind, norm: ResolvedNormalization, namespace:
         }
         TokenKind::BooleanLiteral(val) => hash_namespaced(namespace, &[4, u8::from(*val)]),
         TokenKind::NullLiteral => hash_namespaced(namespace, &[5]),
-        TokenKind::TemplateLiteral => hash_namespaced(namespace, &[6]),
+        TokenKind::TemplateLiteral(text) => {
+            if norm.ignore_string_values {
+                hash_namespaced(namespace, &[6, 0])
+            } else {
+                let mut buf = vec![6];
+                buf.extend_from_slice(text.as_bytes());
+                hash_namespaced(namespace, &buf)
+            }
+        }
         TokenKind::RegExpLiteral => hash_namespaced(namespace, &[7]),
         TokenKind::Operator(op) => hash_namespaced(namespace, &[8, *op as u8]),
         TokenKind::Punctuation(p) => hash_namespaced(namespace, &[9, *p as u8]),
@@ -243,11 +251,15 @@ mod tests {
     }
 
     #[test]
-    fn template_literal_has_stable_hash() {
-        let tokens = vec![make_token(TokenKind::TemplateLiteral)];
-        let h1 = normalize_and_hash(&tokens, DetectionMode::Strict);
-        let h2 = normalize_and_hash(&tokens, DetectionMode::Semantic);
-        assert_eq!(h1[0].hash, h2[0].hash);
+    fn template_literal_text_follows_string_normalization() {
+        let tokens = vec![
+            make_token(TokenKind::TemplateLiteral("Invoice ${}".to_string())),
+            make_token(TokenKind::TemplateLiteral("Order ${}".to_string())),
+        ];
+        let mild = normalize_and_hash(&tokens, DetectionMode::Mild);
+        assert_ne!(mild[0].hash, mild[1].hash);
+        let weak = normalize_and_hash(&tokens, DetectionMode::Weak);
+        assert_eq!(weak[0].hash, weak[1].hash);
     }
 
     #[test]
@@ -262,7 +274,7 @@ mod tests {
     fn null_template_regexp_have_distinct_hashes() {
         let tokens = vec![
             make_token(TokenKind::NullLiteral),
-            make_token(TokenKind::TemplateLiteral),
+            make_token(TokenKind::TemplateLiteral(String::new())),
             make_token(TokenKind::RegExpLiteral),
         ];
         let hashed = normalize_and_hash(&tokens, DetectionMode::Strict);
@@ -321,7 +333,7 @@ mod tests {
             make_token(TokenKind::NumericLiteral("1".to_string())),
             make_token(TokenKind::BooleanLiteral(true)),
             make_token(TokenKind::NullLiteral),
-            make_token(TokenKind::TemplateLiteral),
+            make_token(TokenKind::TemplateLiteral(String::new())),
             make_token(TokenKind::RegExpLiteral),
             make_token(TokenKind::Operator(OperatorType::Add)),
             make_token(TokenKind::Punctuation(PunctuationType::OpenParen)),
@@ -343,6 +355,7 @@ mod tests {
             ignore_identifiers: true,
             ignore_string_values: false,
             ignore_numeric_values: false,
+            consistent_identifiers: false,
         };
         let tokens = vec![
             make_token(TokenKind::Identifier("foo".to_string())),
@@ -360,6 +373,7 @@ mod tests {
             ignore_identifiers: false,
             ignore_string_values: true,
             ignore_numeric_values: false,
+            consistent_identifiers: false,
         };
         let tokens = vec![
             make_token(TokenKind::StringLiteral("hello".to_string())),
@@ -376,6 +390,7 @@ mod tests {
             ignore_identifiers: false,
             ignore_string_values: false,
             ignore_numeric_values: true,
+            consistent_identifiers: false,
         };
         let tokens = vec![
             make_token(TokenKind::NumericLiteral("42".to_string())),
@@ -392,6 +407,7 @@ mod tests {
             ignore_identifiers: false,
             ignore_string_values: true,
             ignore_numeric_values: true,
+            consistent_identifiers: false,
         };
         let tokens = vec![
             make_token(TokenKind::Identifier("foo".to_string())),
@@ -435,6 +451,7 @@ mod tests {
             ignore_identifiers: Some(true),
             ignore_string_values: None,
             ignore_numeric_values: None,
+            consistent_identifiers: None,
         };
         let norm = ResolvedNormalization::resolve(DetectionMode::Strict, &overrides);
         assert!(norm.ignore_identifiers);
@@ -470,6 +487,7 @@ mod tests {
                     ignore_identifiers: ids,
                     ignore_string_values: strings,
                     ignore_numeric_values: nums,
+                    consistent_identifiers: false,
                 }
             })
         }
@@ -484,7 +502,7 @@ mod tests {
                 "[0-9]{1,10}(\\.[0-9]{1,5})?".prop_map(TokenKind::NumericLiteral),
                 any::<bool>().prop_map(TokenKind::BooleanLiteral),
                 Just(TokenKind::NullLiteral),
-                Just(TokenKind::TemplateLiteral),
+                Just(TokenKind::TemplateLiteral(String::new())),
                 Just(TokenKind::RegExpLiteral),
                 Just(TokenKind::Operator(OperatorType::Add)),
                 Just(TokenKind::Operator(OperatorType::Assign)),

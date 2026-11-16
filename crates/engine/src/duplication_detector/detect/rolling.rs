@@ -2,7 +2,7 @@ use rustc_hash::FxHashMap;
 
 use super::boundary::{build_boundary_prefixes, range_contains_boundary};
 use super::extraction::RawGroup;
-use super::{CorpusTotals, FileData, filtering, ranking, statistics};
+use super::{CorpusTotals, FileData, consistency, filtering, ranking, statistics};
 use crate::duplicates::types::DuplicationReport;
 
 const HASH_BASE: u64 = 0x0000_0100_0000_01b3;
@@ -39,6 +39,7 @@ pub(super) struct RollingDetectInput<'a> {
     pub(super) skip_local: bool,
     pub(super) totals: CorpusTotals,
     pub(super) may_have_boundaries: bool,
+    pub(super) consistent_identifiers: bool,
 }
 
 impl SeedOccurrences {
@@ -129,6 +130,7 @@ pub(super) fn detect(input: RollingDetectInput<'_>) -> DuplicationReport {
         skip_local,
         totals,
         may_have_boundaries,
+        consistent_identifiers,
     } = input;
     let t0 = std::time::Instant::now();
     let ranked_files = ranking::rank_reduce(files);
@@ -160,6 +162,12 @@ pub(super) fn detect(input: RollingDetectInput<'_>) -> DuplicationReport {
         seed_classes = seed_class_count,
         "rolling_step3_raw_groups"
     );
+
+    let raw_groups = if consistent_identifiers {
+        consistency::refine_groups(raw_groups, files, min_tokens)
+    } else {
+        raw_groups
+    };
 
     let t0 = std::time::Instant::now();
     let clone_groups = filtering::build_groups(raw_groups, files, min_lines, skip_local);
@@ -841,6 +849,7 @@ mod tests {
             skip_local: false,
             totals: totals(files),
             may_have_boundaries: false,
+            consistent_identifiers: false,
         })
     }
 

@@ -514,7 +514,13 @@ impl<'a> Visit<'a> for TokenExtractor<'_> {
     }
 
     fn visit_template_literal(&mut self, lit: &TemplateLiteral<'a>) {
-        self.push(TokenKind::TemplateLiteral, lit.span);
+        let text = lit
+            .quasis
+            .iter()
+            .map(|quasi| quasi.value.raw.as_str())
+            .collect::<Vec<_>>()
+            .join("${}");
+        self.push(TokenKind::TemplateLiteral(text), lit.span);
         walk::walk_template_literal(self, lit);
     }
 
