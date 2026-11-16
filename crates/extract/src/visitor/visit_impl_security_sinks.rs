@@ -114,6 +114,9 @@ pub(in crate::visitor) struct SinkAliasState {
     /// JSX sink props of locals bound to an object literal, keyed by the local
     /// name. A JSX spread of the local (`<div {...props} />`) emits them.
     jsx_spread_object_sinks: FxHashMap<String, Vec<SinkSite>>,
+    /// Sink sites of calls of inert local callees, dropped after the walk
+    /// when the module never writes the callee root.
+    inert_callee_sinks: Vec<local_callees::InertCalleeSinks>,
 }
 
 /// Flatten an `Identifier` or `StaticMemberExpression` callee to a dotted path.
@@ -969,9 +972,8 @@ impl ModuleInfoExtractor {
             return;
         };
         self.capture_security_control_call(&callee_path, expr.span);
-        if self.callee_is_inert_local_function(&expr.callee) {
-            return;
-        }
+        let inert_root = self.inert_local_callee_root(&expr.callee);
+        let sinks_before = self.security_sinks.len();
         let sink_shape = if callee_path.contains('.') {
             SinkShape::MemberCall
         } else {
@@ -1006,6 +1008,9 @@ impl ModuleInfoExtractor {
                 url_shape: None,
                 call_options: None,
             });
+        }
+        if let Some(root) = inert_root {
+            self.defer_inert_callee_sinks(root, sinks_before);
         }
     }
 

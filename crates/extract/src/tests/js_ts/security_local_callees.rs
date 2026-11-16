@@ -16,6 +16,16 @@ fn assert_no_sink(source: &str, path: &str) {
     );
 }
 
+fn assert_call_argument_sink(source: &str, path: &str, arg_index: u32) {
+    let sinks = parse_source(source).security_sinks;
+    assert!(
+        sinks
+            .iter()
+            .any(|sink| sink.callee_path == path && sink.arg_index == arg_index),
+        "expected {path} argument {arg_index}"
+    );
+}
+
 fn assert_sink(source: &str, path: &str) {
     let paths = sink_paths(source);
     assert!(
@@ -116,5 +126,31 @@ fn an_unresolved_request_stays_a_sink() {
     assert_sink(
         "import request from 'request';\nexport const run = (url: string) => request(url);\n",
         "request",
+    );
+}
+
+#[test]
+fn a_local_function_reassigned_later_stays_a_sink() {
+    assert_sink(
+        "import got from 'got';\nlet request = (u: string) => u;\nexport const run = (u: string) => request(u);\nexport function configure() { request = got; }\n",
+        "request",
+    );
+}
+
+#[test]
+fn a_method_replaced_by_a_member_write_stays_a_sink() {
+    assert_call_argument_sink(
+        "import _ from 'lodash';\nconst utils = { merge(a: object, b: object): object { return a; } };\nutils.merge = _.merge;\napp.post('/b', (req, res) => { utils.merge({}, req.body); });\n",
+        "utils.merge",
+        1,
+    );
+}
+
+#[test]
+fn a_method_of_an_object_passed_to_a_call_stays_a_sink() {
+    assert_call_argument_sink(
+        "import _ from 'lodash';\nconst utils = { merge(a: object, b: object) { return a; } };\nObject.assign(utils, { merge: _.merge });\nexport const run = (body: object) => utils.merge({}, body);\n",
+        "utils.merge",
+        1,
     );
 }

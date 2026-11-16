@@ -3468,7 +3468,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.record_module_vars(&program.body);
         self.record_program_local_import_loaders(program);
         self.record_program_component_loader_imports(program);
-        walk::walk_program(self, program);
+        self.walk_program_and_drop_inert_callee_sinks(program);
         self.finish_local_import_loaders();
         self.finish_promise_import_bindings();
         self.finish_register_loader_new_urls();
