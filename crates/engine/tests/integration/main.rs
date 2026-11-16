@@ -7,6 +7,7 @@
 
 mod cache_model;
 mod churn_cache_transparency;
+mod dupes_consistent_identifiers;
 mod dupes_integration;
 mod dupes_profile;
 mod dupes_span;

@@ -87,7 +87,7 @@ export const value = async (): Promise<void> => {
 fn may_span_lines(kind: &TokenKind) -> bool {
     matches!(
         kind,
-        TokenKind::StringLiteral(_) | TokenKind::TemplateLiteral | TokenKind::Boundary(_)
+        TokenKind::StringLiteral(_) | TokenKind::TemplateLiteral(_) | TokenKind::Boundary(_)
     )
 }
 

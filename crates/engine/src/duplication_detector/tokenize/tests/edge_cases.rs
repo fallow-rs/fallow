@@ -493,7 +493,7 @@ export async function fetchAndProcess(url, options = {}) {
         .any(|t| matches!(t.kind, TokenKind::Keyword(KeywordType::Return)));
     let has_template = tokens
         .iter()
-        .any(|t| matches!(t.kind, TokenKind::TemplateLiteral));
+        .any(|t| matches!(t.kind, TokenKind::TemplateLiteral(_)));
     let has_spread = tokens
         .iter()
         .any(|t| matches!(t.kind, TokenKind::Operator(OperatorType::Spread)));

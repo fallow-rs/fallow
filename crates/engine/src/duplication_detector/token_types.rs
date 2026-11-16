@@ -30,8 +30,10 @@ pub enum TokenKind {
     BooleanLiteral(bool),
     /// The `null` literal.
     NullLiteral,
-    /// A template literal, collapsed to one token regardless of its parts.
-    TemplateLiteral,
+    /// A template literal with its static text: the cooked text of each quasi,
+    /// joined with `${}` where an expression stands. Normalization may erase
+    /// the text. The expressions follow as their own tokens.
+    TemplateLiteral(String),
     /// A regular expression literal, collapsed to one token.
     RegExpLiteral,
     /// An operator.

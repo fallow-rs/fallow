@@ -258,6 +258,14 @@ pub struct NormalizationConfig {
     /// Default in `semantic` mode.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub ignore_numeric_values: Option<bool>,
+
+    /// Require a one-to-one mapping between the identifier names of clone
+    /// instances. Takes effect only when `ignoreIdentifiers` is on: `a = b + c`
+    /// then matches `x = y + z`, but not `x = x + x`. A clone that breaks the
+    /// mapping keeps each maximal part that maps one-to-one.
+    /// Default: `false` in every mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub consistent_identifiers: Option<bool>,
 }
 
 /// Resolved normalization flags: mode defaults merged with user overrides.
@@ -269,6 +277,9 @@ pub struct ResolvedNormalization {
     pub ignore_string_values: bool,
     /// Blind numeric literal values to one hash.
     pub ignore_numeric_values: bool,
+    /// Require a one-to-one identifier mapping between clone instances.
+    /// Only `true` when `ignore_identifiers` is also `true`.
+    pub consistent_identifiers: bool,
 }
 
 impl ResolvedNormalization {
@@ -281,10 +292,13 @@ impl ResolvedNormalization {
             DetectionMode::Semantic => (true, true, true),
         };
 
+        let ignore_identifiers = overrides.ignore_identifiers.unwrap_or(default_ids);
         Self {
-            ignore_identifiers: overrides.ignore_identifiers.unwrap_or(default_ids),
+            ignore_identifiers,
             ignore_string_values: overrides.ignore_string_values.unwrap_or(default_strings),
             ignore_numeric_values: overrides.ignore_numeric_values.unwrap_or(default_numbers),
+            consistent_identifiers: ignore_identifiers
+                && overrides.consistent_identifiers.unwrap_or(false),
         }
     }
 }
@@ -453,6 +467,7 @@ mod tests {
             ignore_identifiers: Some(true),
             ignore_string_values: None,
             ignore_numeric_values: None,
+            consistent_identifiers: None,
         };
         let resolved = ResolvedNormalization::resolve(DetectionMode::Strict, &overrides);
         assert!(resolved.ignore_identifiers);
@@ -466,6 +481,7 @@ mod tests {
             ignore_identifiers: Some(false),
             ignore_string_values: Some(false),
             ignore_numeric_values: None,
+            consistent_identifiers: None,
         };
         let resolved = ResolvedNormalization::resolve(DetectionMode::Semantic, &overrides);
         assert!(!resolved.ignore_identifiers);
@@ -479,11 +495,36 @@ mod tests {
             ignore_identifiers: Some(true),
             ignore_string_values: Some(false), // override weak default (true -> false)
             ignore_numeric_values: Some(true),
+            consistent_identifiers: None,
         };
         let resolved = ResolvedNormalization::resolve(DetectionMode::Weak, &overrides);
         assert!(resolved.ignore_identifiers);
         assert!(!resolved.ignore_string_values); // overridden from true to false
         assert!(resolved.ignore_numeric_values);
+    }
+
+    #[test]
+    fn consistent_identifiers_needs_ignore_identifiers() {
+        let consistent_only = NormalizationConfig {
+            consistent_identifiers: Some(true),
+            ..NormalizationConfig::default()
+        };
+        assert!(
+            !ResolvedNormalization::resolve(DetectionMode::Mild, &consistent_only)
+                .consistent_identifiers
+        );
+        assert!(
+            ResolvedNormalization::resolve(DetectionMode::Semantic, &consistent_only)
+                .consistent_identifiers
+        );
+        assert!(
+            !ResolvedNormalization::resolve(
+                DetectionMode::Semantic,
+                &NormalizationConfig::default()
+            )
+            .consistent_identifiers,
+            "no preset enables the check"
+        );
     }
 
     #[test]
@@ -687,11 +728,13 @@ ignoreNumericValues = false
             ignore_identifiers: true,
             ignore_string_values: false,
             ignore_numeric_values: true,
+            consistent_identifiers: false,
         };
         let b = ResolvedNormalization {
             ignore_identifiers: true,
             ignore_string_values: false,
             ignore_numeric_values: true,
+            consistent_identifiers: false,
         };
         assert_eq!(a, b);
 
@@ -699,6 +742,7 @@ ignoreNumericValues = false
             ignore_identifiers: false,
             ignore_string_values: false,
             ignore_numeric_values: true,
+            consistent_identifiers: false,
         };
         assert_ne!(a, c);
     }
@@ -745,6 +789,7 @@ ignoreNumericValues = false
                 ignore_identifiers: Some(true),
                 ignore_string_values: None,
                 ignore_numeric_values: Some(false),
+                consistent_identifiers: None,
             },
             min_corpus_size_for_shingle_filter: 2048,
             min_corpus_size_for_token_cache: 8_000,
@@ -795,6 +840,7 @@ ignoreNumericValues = false
             ignore_identifiers: Some(true),
             ignore_string_values: None,
             ignore_numeric_values: Some(false),
+            consistent_identifiers: None,
         };
         let json = serde_json::to_string(&config).unwrap();
         assert!(json.contains("ignoreIdentifiers"));
