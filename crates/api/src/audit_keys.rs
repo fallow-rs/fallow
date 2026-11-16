@@ -97,6 +97,20 @@ impl DeadCodeAuditLedger {
             .count()
     }
 
+    /// Number of counted findings that are introduced, with the filter of
+    /// [`Self::visible_count`]. This is the dead-code count of a report that
+    /// keeps only introduced findings.
+    #[must_use]
+    pub fn visible_introduced_count(&self) -> usize {
+        self.records
+            .iter()
+            .filter(|record| {
+                record.introduced
+                    && is_counted_dead_code_finding(record.collection, record.effective_severity)
+            })
+            .count()
+    }
+
     /// Number of visible findings inherited from the base snapshot.
     #[must_use]
     pub fn inherited_count(&self) -> usize {

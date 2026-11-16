@@ -1617,6 +1617,34 @@ fn audit_ledger_routes_override_severity_and_persists_introduced_flags() {
 }
 
 #[test]
+fn audit_ledger_counts_visible_introduced_findings_like_the_verdict() {
+    let root = root();
+    let config: FallowConfig = serde_json::from_value(json!({
+        "rules": { "unused-exports": "warn" },
+        "overrides": [{
+            "files": ["src/off/**"],
+            "rules": { "unused-exports": "off" }
+        }]
+    }))
+    .expect("config");
+    let config = config.resolve(root.clone(), OutputFormat::Json, 1, false, true, None);
+    let mut results = AnalysisResults::default();
+    for (path, name) in [
+        ("src/base.ts", "baseExport"),
+        ("src/new.ts", "newExport"),
+        ("src/off/new.ts", "offExport"),
+    ] {
+        results.unused_exports.push(export(&root.join(path), name));
+    }
+    let base = FxHashSet::from_iter(["unused-export:src/base.ts:baseExport".to_string()]);
+
+    let ledger = dead_code_audit_ledger(&results, &root, &config, Some(&base));
+
+    assert_eq!(ledger.visible_count(), 2);
+    assert_eq!(ledger.visible_introduced_count(), 1);
+}
+
+#[test]
 fn audit_ledger_retains_only_introduced_dead_code() {
     let root = root();
     let config =

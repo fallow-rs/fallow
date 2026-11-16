@@ -991,15 +991,21 @@ Invariants:
 
 ## Quiet audit report
 
-`fallow audit --quiet` (and `--ci` or `FALLOW_QUIET=1`, which also set
-quiet) prints the actionable view of the report in the human, compact and
-markdown formats. `audit_quiet.rs` builds the view after the verdict and
+`fallow audit --quiet` prints the actionable view of the report in the
+human, compact and markdown formats. `FALLOW_QUIET=1` sets quiet too.
+`--ci` sets quiet, but its default format is SARIF, so only `--ci` with an
+explicit `--format human`, `compact` or `markdown` gets the view. `audit_quiet.rs` builds the view after the verdict and
 after the impact record, so the exit code and the impact data use the
 complete result.
 
 - The view keeps introduced and worsened findings, diff-risk findings, the
   configuration and analysis diagnostics, and the `insufficient` and
   `no_match` records of `health.thresholdOverrides`.
+- The complexity section also prints when it holds only kept override
+  records, so an `insufficient` record stays when every complexity finding
+  is inherited.
+- When no row is actionable, the human and markdown reports print one line,
+  `No introduced or worsened findings.`. The compact report stays empty.
 - The view drops inherited findings, the aggregate health metrics (vital
   signs, health score, file scores, hotspots, refactoring targets, trend,
   large functions and CSS analytics) and the `stale` and `active` override

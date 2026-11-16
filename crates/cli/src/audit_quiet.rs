@@ -39,6 +39,29 @@ const fn quiet_filters_format(output: OutputFormat) -> bool {
     )
 }
 
+/// Whether the complexity section has rows to print: complexity findings, or
+/// under `--quiet` the override records that need a configuration change.
+/// Those records stay when every complexity finding is inherited.
+pub(super) fn complexity_section_has_rows(result: &AuditResult, quiet: bool) -> bool {
+    result.summary.complexity_findings > 0
+        || (quiet
+            && result
+                .health
+                .as_ref()
+                .is_some_and(|health| !health.report.threshold_overrides.is_empty()))
+}
+
+/// Print one line when the quiet human or markdown report has no row. The
+/// compact format prints one line per record, so it stays empty.
+pub(super) fn print_quiet_empty_state(output: OutputFormat) {
+    if matches!(output, OutputFormat::Human | OutputFormat::Markdown) {
+        crate::report::sink::outln!("{QUIET_EMPTY_STATE}");
+    }
+}
+
+/// The quiet human and markdown report when no row is actionable.
+const QUIET_EMPTY_STATE: &str = "No introduced or worsened findings.";
+
 /// Reduce `result` to its actionable view. Without a base snapshot (for
 /// example under `--gate all`) every finding is part of the gate, so only the
 /// aggregate metrics and the routine override records go.
@@ -58,7 +81,7 @@ fn retain_actionable(result: &mut AuditResult) {
         comparison
             .dead_code
             .retain_introduced_results(&mut check.results);
-        result.summary.dead_code_issues = check.results.total_issues();
+        result.summary.dead_code_issues = comparison.dead_code.visible_introduced_count();
     }
     if let Some(dupes) = result.dupes.as_mut() {
         let mut introduced = comparison.dupes.introduced();
