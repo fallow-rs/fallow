@@ -762,6 +762,8 @@ mod issue_4498_production_excluded_import;
 mod issue_4552_method_call_result_local;
 #[path = "integration_test/issue_4578_enum_member_alias.rs"]
 mod issue_4578_enum_member_alias;
+#[path = "integration_test/issue_4603_nested_class_binding_shadow.rs"]
+mod issue_4603_nested_class_binding_shadow;
 #[path = "integration_test/issue_609_velite.rs"]
 mod issue_609_velite;
 #[path = "integration_test/issue_704_auto_import_components.rs"]

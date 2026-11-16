@@ -1816,7 +1816,7 @@ impl ModuleInfoExtractor {
             prefix = parent;
         }
         if let Some(class) = self.walk_order_class_bindings.get(object)
-            && !self.class_binding_root_is_shadowed(object)
+            && !self.walk_read_is_shadowed(object)
         {
             self.walk_order_member_accesses.push((
                 Some(object.to_string()),
