@@ -20,6 +20,9 @@ use super::{
 };
 use crate::js_text::JsText;
 
+#[path = "visit_impl_security_local_callees.rs"]
+mod local_callees;
+
 struct ArgSinkSiteInput<'site, 'ast> {
     callee_path: &'site str,
     sink_shape: SinkShape,
@@ -60,6 +63,11 @@ enum SinkBinding {
     NodeModuleMember(String),
     /// A `<script>` element (`document.createElement("script")`).
     ScriptElement,
+    /// A local function whose body runs no call and writes no member. A call
+    /// of it cannot reach a library sink of the same name.
+    InertFunction,
+    /// An object literal, valued by the names of its inert inline methods.
+    InertMethods(Vec<String>),
 }
 
 /// Properties of a `<script>` element whose value the browser loads or runs
@@ -106,6 +114,9 @@ pub(in crate::visitor) struct SinkAliasState {
     /// JSX sink props of locals bound to an object literal, keyed by the local
     /// name. A JSX spread of the local (`<div {...props} />`) emits them.
     jsx_spread_object_sinks: FxHashMap<String, Vec<SinkSite>>,
+    /// Sink sites of calls of inert local callees, dropped after the walk
+    /// when the module never writes the callee root.
+    inert_callee_sinks: Vec<local_callees::InertCalleeSinks>,
 }
 
 /// Flatten an `Identifier` or `StaticMemberExpression` callee to a dotted path.
@@ -961,6 +972,8 @@ impl ModuleInfoExtractor {
             return;
         };
         self.capture_security_control_call(&callee_path, expr.span);
+        let inert_root = self.inert_local_callee_root(&expr.callee);
+        let sinks_before = self.security_sinks.len();
         let sink_shape = if callee_path.contains('.') {
             SinkShape::MemberCall
         } else {
@@ -995,6 +1008,9 @@ impl ModuleInfoExtractor {
                 url_shape: None,
                 call_options: None,
             });
+        }
+        if let Some(root) = inert_root {
+            self.defer_inert_callee_sinks(root, sinks_before);
         }
     }
 
@@ -1651,10 +1667,14 @@ impl ModuleInfoExtractor {
 
     /// The sink binding that a value gives to `name`: an alias of a
     /// code-executing global or of a Node.js module binding, a `require()` of
-    /// a module in [`NODE_BINDING_MODULES`](fallow_types::security_sinks::NODE_BINDING_MODULES), or a new `<script>` element.
+    /// a module in [`NODE_BINDING_MODULES`](fallow_types::security_sinks::NODE_BINDING_MODULES), a new `<script>` element, or an
+    /// inert local function or object.
     fn sink_binding_of_value(&self, name: &str, value: &Expression<'_>) -> Option<SinkBinding> {
         if is_create_script_element_call(value) {
             return Some(SinkBinding::ScriptElement);
+        }
+        if let Some(binding) = local_callees::inert_value_binding(value) {
+            return Some(binding);
         }
         if let Some(module) = self.node_binding_module_of_require(value) {
             return Some(SinkBinding::NodeModule(module));
