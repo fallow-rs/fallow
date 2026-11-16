@@ -1,0 +1,3 @@
+### Fixed
+
+- **`fallow security` no longer reports a call of an inert local function as a library sink.** Some rows match a callee by name only, for example `request(url)` for `ssrf` and `x.merge(a, b)` for `prototype-pollution`. When the module declares that function, or an object literal with that inline method, and its body runs no call and writes no member, the call cannot reach the library. The call is then not a candidate. A local function that runs a call still matches by name, because it can forward its argument to the library. (Closes [#4611](https://github.com/fallow-rs/fallow/issues/4611))

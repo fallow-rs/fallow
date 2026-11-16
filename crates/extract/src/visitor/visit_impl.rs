@@ -2297,7 +2297,7 @@ impl<'a> ModuleInfoExtractor {
         if self.namespace_depth == 0 {
             self.scoped_array_binding_element_types
                 .push(FxHashMap::default());
-            self.preseed_nested_declarations(statements);
+            self.preseed_scope_declarations(statements);
         }
         self.preseed_direct_object_binding_targets(statements);
         match body {
@@ -3462,7 +3462,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.record_program_spy_api_locals(program);
         self.record_program_type_aliases(program);
         self.record_program_prologue(program);
-        self.record_program_sanitizer_functions(program);
+        self.record_program_function_facts(program);
         self.record_local_function_return_types(program);
         self.preseed_direct_object_binding_targets(&program.body);
         self.record_module_vars(&program.body);
@@ -3615,7 +3615,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.preseed_direct_object_binding_scope_roots(&stmt.body);
         if self.namespace_depth == 0 {
             self.push_nested_scope_frames();
-            self.preseed_nested_declarations(&stmt.body);
+            self.preseed_scope_declarations(&stmt.body);
         }
         self.preseed_direct_object_binding_targets(&stmt.body);
         for statement in &stmt.body {

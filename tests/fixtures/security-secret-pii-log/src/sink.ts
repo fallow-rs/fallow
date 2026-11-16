@@ -7,10 +7,10 @@ interface RequestLike {
 
 const logger = {
   error(value: unknown): void {
-    void value;
+    process.stderr.write(String(value));
   },
   warn(value: unknown): void {
-    void value;
+    process.stderr.write(String(value));
   },
 };
 
