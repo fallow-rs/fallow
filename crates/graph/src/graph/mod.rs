@@ -198,7 +198,7 @@ pub struct ModuleGraph {
     /// Test entry point `FileId`s.
     pub test_entry_points: FxHashSet<FileId>,
     /// Support entry point `FileId`s, such as files that package.json scripts run.
-    pub support_entry_points: FxHashSet<FileId>,
+    support_entry_points: FxHashSet<FileId>,
     /// Compact correlation index for distinct test-root replacement profiles.
     ///
     /// Empty when no test root declares a project-internal replacement. That

@@ -166,7 +166,7 @@ const CONFIG_NAME_SEGMENTS: &[&str] = &[".config.", ".conf."];
 /// Variant names count too: a test runner name, then `.` or `-`, and a
 /// `.config.` or `.conf.` segment (`vitest.unit.config.ts`,
 /// `playwright-ct.config.ts`).
-pub(in crate::analyze) fn is_test_runner_config_file(path: &std::path::Path) -> bool {
+fn is_test_runner_config_file(path: &std::path::Path) -> bool {
     let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
     if TEST_RUNNER_CONFIG_PREFIXES
         .iter()
