@@ -370,7 +370,7 @@ fn record_style_rule(style: &StyleRule<'_>, depth: u8, acc: &mut Accumulator) {
     analytics.important_declarations = analytics
         .important_declarations
         .saturating_add(saturate_u32(important));
-    if declaration_count == 0 {
+    if declaration_count == 0 && !has_nested_declarations(&style.rules.0) {
         analytics.empty_rule_count = analytics.empty_rule_count.saturating_add(1);
     }
     analytics.max_nesting_depth = analytics.max_nesting_depth.max(depth);
@@ -415,6 +415,25 @@ fn record_style_rule(style: &StyleRule<'_>, depth: u8, acc: &mut Accumulator) {
     }
 
     collect_rule_property_tokens(&style.declarations, acc, style.loc.line.saturating_add(1));
+}
+
+/// Whether the child rules of a style rule hold declarations that apply to the
+/// style rule itself. lightningcss stores a declaration after a nested rule
+/// (`.a { &:hover {} color: red; }`) and a declaration in a nested at-rule
+/// (`.a { @media (...) { color: red; } }`) as nested declarations, not in the
+/// own block of the style rule. A nested style rule has its own selector, so
+/// its declarations do not count here.
+fn has_nested_declarations(rules: &[CssRule<'_>]) -> bool {
+    rules.iter().any(|rule| match rule {
+        CssRule::NestedDeclarations(nested) => !nested.declarations.is_empty(),
+        CssRule::Media(rule) => has_nested_declarations(&rule.rules.0),
+        CssRule::Supports(rule) => has_nested_declarations(&rule.rules.0),
+        CssRule::Container(rule) => has_nested_declarations(&rule.rules.0),
+        CssRule::LayerBlock(rule) => has_nested_declarations(&rule.rules.0),
+        CssRule::StartingStyle(rule) => has_nested_declarations(&rule.rules.0),
+        CssRule::Scope(rule) => has_nested_declarations(&rule.rules.0),
+        _ => false,
+    })
 }
 
 /// Fold bare declarations of a nested at-rule into the totals and token sets.
@@ -1216,6 +1235,48 @@ mod tests {
         );
         assert_eq!(a.total_declarations, 2);
         assert_eq!(a.important_declarations, 1);
+    }
+
+    #[test]
+    fn declarations_after_nested_rule_count_as_rule_declarations() {
+        // A declaration after a nested rule is stored as nested declarations
+        // in the parent rule. The parent rule is not empty.
+        let a = analytics(
+            ".c {\n  &:hover { color: blue; }\n  animation: fade 1s;\n  font-family: Brand, sans-serif;\n}\n\
+             .empty {}\n\
+             @keyframes fade { from { opacity: 0; } }",
+        );
+        assert_eq!(a.referenced_keyframes, vec!["fade".to_string()]);
+        assert!(
+            a.referenced_font_families.contains(&"Brand".to_string()),
+            "{:?}",
+            a.referenced_font_families
+        );
+        assert_eq!(a.total_declarations, 3);
+        assert_eq!(a.empty_rule_count, 1);
+    }
+
+    #[test]
+    fn rule_with_only_nested_at_rule_declarations_is_not_empty() {
+        // The `@media` declarations apply to `.a`. A nested style rule has its
+        // own selector, so `.b` with only `&:hover` stays empty.
+        let a = analytics(
+            ".a {\n  @media (min-width: 1px) {\n    color: red;\n  }\n}\n\
+             .b {\n  &:hover { color: blue; }\n}",
+        );
+        assert_eq!(a.empty_rule_count, 1);
+    }
+
+    #[test]
+    fn nested_at_rule_defines_custom_properties() {
+        let a = analytics(
+            ".a {\n  color: red;\n  @supports (display: grid) {\n    --gap: 2rem;\n  }\n}",
+        );
+        assert!(
+            a.defined_custom_properties.contains(&"--gap".to_string()),
+            "{:?}",
+            a.defined_custom_properties
+        );
     }
 
     #[test]
