@@ -106,7 +106,8 @@ export const partitionWorkspaces = (
  * workspaces list. A single-package repo (or one with no listable workspaces)
  * can never use scoping, so the item omits the workspace entry there. `null`
  * (the list was never probed / unavailable) keeps the entry, so the picker
- * stays reachable on an older CLI that cannot list workspaces. Pure so the rule is unit-tested without a status bar.
+ * stays reachable on an older CLI that cannot list workspaces. Pure so the rule
+ * is unit-tested without a status bar.
  */
 export const shouldShowWorkspacePicker = (output: WorkspacesOutput | null): boolean => {
   if (output === null) {

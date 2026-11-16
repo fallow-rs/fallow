@@ -62,6 +62,11 @@ export interface FindingsVisibility {
 /** Everything that the single status bar item shows. */
 export interface StatusModel {
   readonly hasWorkspaceFolder: boolean;
+  /**
+   * Name of the folder that the analysis runs in, set only in a window with
+   * more than one folder. The CLI and the LSP analyze the first folder.
+   */
+  readonly analysisFolder: string | null;
   readonly analysis: AnalysisStatus;
   /** The live `fallow.changedSince` setting, or null when it is not set. */
   readonly changedSince: string | null;
@@ -128,6 +133,7 @@ const SEPARATOR = " · ";
 
 export const initialStatusModel = (): StatusModel => ({
   hasWorkspaceFolder: true,
+  analysisFolder: null,
   analysis: { kind: "idle" },
   changedSince: null,
   health: null,
@@ -172,31 +178,28 @@ export const licenseBarNotice = (license: LicenseIndicator): string | null => {
 
 const REFRESH_LICENSE_LINK = "[Refresh](command:fallow.license.refresh)";
 
-const validLicenseHoverLine = (days: number | null, tier: string): string => {
-  if (days === null) {
-    return `$(verified) License: active${tier}.`;
-  }
-  const refresh = days <= LICENSE_EXPIRY_NOTICE_DAYS ? ` ${REFRESH_LICENSE_LINK}` : "";
-  return `$(verified) License: active${tier}, expires in ${plural(days, "day")}.${refresh}`;
-};
+/**
+ * Whether the license needs a refresh or an activation: it shows in the item
+ * text, or the CLI suggests a refresh (`refresh_suggested`, set after the
+ * `refresh_after` date of the license).
+ */
+const licenseNeedsAction = (license: LicenseIndicator): boolean =>
+  licenseBarNotice(license) !== null ||
+  (license.kind === "status" && license.status.refresh_suggested);
 
-const licenseHoverLine = (license: LicenseIndicator): string | null => {
-  if (license.kind === "hidden") {
-    return null;
-  }
-  if (license.kind === "unchecked") {
-    return "$(key) License: not checked yet. [Show status](command:fallow.license.status)";
-  }
-  const { status } = license;
+const licenseStateLine = (status: LicenseStatusJson): string => {
   const tier = status.tier !== null ? ` (${escapeMarkdownText(status.tier)})` : "";
   switch (status.state) {
-    case "valid":
-      return validLicenseHoverLine(status.days_until_expiry, tier);
+    case "valid": {
+      const days = status.days_until_expiry;
+      const expiry = days === null ? "" : `, expires in ${plural(days, "day")}`;
+      return `$(verified) License: active${tier}${expiry}.`;
+    }
     case "expired_warning":
     case "expired_watermark":
-      return `$(warning) License: expired${tier}. ${REFRESH_LICENSE_LINK}`;
+      return `$(warning) License: expired${tier}.`;
     case "hard_fail":
-      return `$(error) License: expired${tier}, paid features are blocked. ${REFRESH_LICENSE_LINK}`;
+      return `$(error) License: expired${tier}, paid features are blocked.`;
     case "missing":
       return "$(warning) License: the license file is not valid. [Activate](command:fallow.license.activate)";
     default: {
@@ -206,6 +209,39 @@ const licenseHoverLine = (license: LicenseIndicator): string | null => {
   }
 };
 
+const licenseDetailLines = (status: LicenseStatusJson): string[] => {
+  const lines: string[] = [];
+  if (status.state !== "valid" && status.days_since_expiry !== null) {
+    lines.push(`Expired ${plural(status.days_since_expiry, "day")} ago.`);
+  }
+  if (status.seats !== null) {
+    lines.push(`Seats: ${status.seats}`);
+  }
+  if (status.features.length > 0) {
+    lines.push(`Features: ${status.features.map(escapeMarkdownText).join(", ")}`);
+  }
+  return lines;
+};
+
+const licenseHoverLines = (license: LicenseIndicator): string[] => {
+  if (license.kind === "hidden") {
+    return [];
+  }
+  if (license.kind === "unchecked") {
+    return ["$(key) License: not checked yet. [Show status](command:fallow.license.status)"];
+  }
+  const { status } = license;
+  const lines = [licenseStateLine(status), ...licenseDetailLines(status)];
+  if (status.state !== "missing" && licenseNeedsAction(license)) {
+    const recommended = status.refresh_suggested ? "Refresh recommended. " : "";
+    lines.push(`${recommended}${REFRESH_LICENSE_LINK}`);
+  }
+  return lines;
+};
+
+const isLicenseBlocked = (model: StatusModel): boolean =>
+  model.license.kind === "status" && model.license.status.state === "hard_fail";
+
 const isAuditFailure = (model: StatusModel): boolean =>
   model.showAudit &&
   (model.audit.kind === "error" ||
@@ -214,7 +250,8 @@ const isAuditFailure = (model: StatusModel): boolean =>
 const isAuditWarning = (model: StatusModel): boolean =>
   model.showAudit && model.audit.kind === "result" && model.audit.audit.verdict === "warn";
 
-const leadingIcon = (model: StatusModel): string => {
+/** Icon for a running or failed analysis or audit, or null when there is none. */
+const stateIcon = (model: StatusModel): string | null => {
   if (model.analysis.kind === "analyzing" || (model.showAudit && model.audit.kind === "running")) {
     return "$(loading~spin)";
   }
@@ -224,10 +261,19 @@ const leadingIcon = (model: StatusModel): string => {
   if (isAuditWarning(model)) {
     return "$(warning)";
   }
-  if (model.findings.mutedAll) {
-    return "$(eye-closed)";
+  return null;
+};
+
+/**
+ * Leading icons. Hidden findings always show the closed eye, also next to a
+ * state icon, so a warning or a spinner never hides that state.
+ */
+const leadingIcons = (model: StatusModel): string => {
+  const state = stateIcon(model);
+  if (!model.findings.mutedAll) {
+    return state ?? "$(search)";
   }
-  return "$(search)";
+  return state ? `${state} $(eye-closed)` : "$(eye-closed)";
 };
 
 const analysisText = (model: StatusModel): string => {
@@ -260,7 +306,7 @@ export const renderStatusText = (model: StatusModel): string => {
   }
   const params = model.analysis.kind === "result" ? model.analysis.params : undefined;
   const base = renderStatusBarText(
-    `${leadingIcon(model)} ${analysisText(model)}`,
+    `${leadingIcons(model)} ${analysisText(model)}`,
     model.changedSince,
     params?.changedSinceScope,
     params?.packageBaselines ?? [],
@@ -269,7 +315,10 @@ export const renderStatusText = (model: StatusModel): string => {
   return notice ? `${base}${SEPARATOR}${notice}` : base;
 };
 
-/** Background tint: only the audit verdict colors the item. */
+/**
+ * Background tint. A failed audit gives the error background. A `warn`
+ * verdict or a blocked license (`hard_fail`) gives the warning background.
+ */
 export const statusBackground = (model: StatusModel): StatusBackground => {
   if (!model.hasWorkspaceFolder) {
     return null;
@@ -277,7 +326,7 @@ export const statusBackground = (model: StatusModel): StatusBackground => {
   if (isAuditFailure(model)) {
     return "statusBarItem.errorBackground";
   }
-  if (isAuditWarning(model)) {
+  if (isAuditWarning(model) || isLicenseBlocked(model)) {
     return "statusBarItem.warningBackground";
   }
   return null;
@@ -359,6 +408,11 @@ const hoverTitle = (workspace: WorkspaceSummary): string => {
   return `**${BRAND}** (workspace: ${escapeMarkdownText(workspace.active)})`;
 };
 
+const folderHoverLines = (folder: string | null): string[] =>
+  folder === null
+    ? []
+    : [`$(root-folder) Folder: ${escapeMarkdownText(folder)} (the first folder of this window)`];
+
 const HOVER_ACTIONS =
   "[$(play) Run analysis](command:fallow.analyze) · [$(wrench) Auto-fix](command:fallow.fix) · [$(output) Output](command:fallow.showOutput)";
 
@@ -369,15 +423,13 @@ export const renderStatusTooltip = (model: StatusModel): string => {
   }
   const lines: string[] = [
     hoverTitle(model.workspace),
+    ...folderHoverLines(model.analysisFolder),
     ...analysisHoverLines(model),
     healthHoverLine(model),
     ...auditHoverLines(model),
+    ...licenseHoverLines(model.license),
   ];
-  for (const line of [
-    licenseHoverLine(model.license),
-    workspaceHoverLine(model.workspace),
-    findingsHoverLine(model.findings),
-  ]) {
+  for (const line of [workspaceHoverLine(model.workspace), findingsHoverLine(model.findings)]) {
     if (line !== null) {
       lines.push(line);
     }
@@ -464,7 +516,7 @@ const auditMenuDescription = (model: StatusModel): string | undefined => {
 };
 
 const licenseMenuEntry = (license: LicenseIndicator): StatusMenuEntry | null => {
-  if (licenseBarNotice(license) === null || license.kind !== "status") {
+  if (!licenseNeedsAction(license) || license.kind !== "status") {
     return null;
   }
   if (license.status.state === "missing") {

@@ -42,10 +42,17 @@ export type { AnalysisCompleteParams } from "./statusBar-utils.js";
 let item: vscode.StatusBarItem | null = null;
 let model: StatusModel = initialStatusModel();
 
+/** The name of the first folder, which the CLI and the LSP analyze, in a multi-root window. */
+const multiRootAnalysisFolder = (): string | null => {
+  const folders = vscode.workspace.workspaceFolders ?? [];
+  return folders.length > 1 ? (folders[0]?.name ?? null) : null;
+};
+
 /** Settings are read on each render, so a settings change needs no reload. */
 const withLiveSettings = (state: StatusModel): StatusModel => ({
   ...state,
   hasWorkspaceFolder: (vscode.workspace.workspaceFolders?.length ?? 0) > 0,
+  analysisFolder: multiRootAnalysisFolder(),
   changedSince: getChangedSince() || null,
   showHealthGrade: getHealthStatusBar(),
   showAudit: getAuditEnabled(),

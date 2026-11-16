@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 interface FakeItem {
   id: string;
@@ -15,6 +15,10 @@ interface FakeItem {
 }
 
 const created: FakeItem[] = [];
+const ONE_FOLDER = [{ name: "repo", uri: { fsPath: "/repo" } }];
+const folders = vi.hoisted(() => ({
+  workspaceFolders: [] as Array<{ name: string; uri: { fsPath: string } }>,
+}));
 const settings = { auditEnabled: true, healthStatusBar: true, licenseStatusBar: true };
 const quickPick = vi.fn();
 const executeCommand = vi.fn();
@@ -29,7 +33,7 @@ vi.mock("vscode", () => ({
   ThemeColor: class {
     public constructor(public readonly id: string) {}
   },
-  workspace: { workspaceFolders: [{ uri: { fsPath: "/repo" } }] },
+  workspace: folders,
   commands: { executeCommand: (...args: unknown[]) => executeCommand(...args) },
   window: {
     showQuickPick: (...args: unknown[]) => quickPick(...args),
@@ -85,6 +89,10 @@ const failAudit = { verdict: "fail", changed_files_count: 1, base_ref: "main", a
 }, summary: {} } as unknown as AuditOutput;
 
 const health = { health_score: { score: 71.6, grade: "C" } } as unknown as HealthOutput;
+
+beforeEach(() => {
+  folders.workspaceFolders = ONE_FOLDER;
+});
 
 afterEach(() => {
   disposeStatusBar();
@@ -164,5 +172,17 @@ describe("Fallow status bar item", () => {
     quickPick.mockResolvedValue(undefined);
     await showStatusBarMenu();
     expect(executeCommand).not.toHaveBeenCalled();
+  });
+
+  it("names the analyzed folder in a multi-root window", () => {
+    folders.workspaceFolders = [
+      { name: "web", uri: { fsPath: "/web" } },
+      { name: "api", uri: { fsPath: "/api" } },
+    ];
+    const item = createStatusBar() as unknown as FakeItem;
+    expect(item.tooltip?.value).toContain("Folder: web (the first folder of this window)");
+    folders.workspaceFolders = ONE_FOLDER;
+    refreshStatusBar();
+    expect(item.tooltip?.value).not.toContain("Folder:");
   });
 });

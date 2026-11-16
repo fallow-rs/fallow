@@ -173,7 +173,6 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   // hot path (#902).
   const statusBar = createStatusBar();
   context.subscriptions.push(statusBar);
-  context.subscriptions.push({ dispose: () => disposeStatusBar() });
   const licenseIndicatorEnabled = initLicenseIndicator();
   refreshWorkspacePicker(context);
   context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(refreshStatusBar));

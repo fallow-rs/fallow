@@ -199,7 +199,6 @@ describe("statusBackground", () => {
       "statusBarItem.warningBackground",
     );
     expect(statusBackground(resultModel())).toBeNull();
-    expect(statusBackground(resultModel({ license: license({ state: "hard_fail" }) }))).toBeNull();
     expect(statusBackground({ ...initialStatusModel(), analysis: { kind: "error" } })).toBeNull();
   });
 });
@@ -398,5 +397,123 @@ describe("HOVER_COMMANDS", () => {
       ),
     );
     expect([...linked].sort()).toEqual([...HOVER_COMMANDS].sort());
+  });
+});
+
+describe("hidden findings with other states", () => {
+  const hidden = { mutedAll: true, mutedCategoryCount: 0 };
+
+  it("keeps the closed eye next to each audit state", () => {
+    const cases: Array<[StatusModel["audit"], string]> = [
+      [{ kind: "idle" }, "$(eye-closed) Fallow 9 · C"],
+      [{ kind: "running" }, "$(loading~spin) $(eye-closed) Fallow 9 · C"],
+      [{ kind: "error" }, "$(error) $(eye-closed) Fallow 9 · C"],
+      [{ kind: "result", audit: audit("pass") }, "$(eye-closed) Fallow 9 · C"],
+      [{ kind: "result", audit: audit("warn") }, "$(warning) $(eye-closed) Fallow 9 · C"],
+      [{ kind: "result", audit: audit("fail", 1) }, "$(error) $(eye-closed) Fallow 9 · C"],
+    ];
+    for (const [auditState, text] of cases) {
+      expect(renderStatusText(resultModel({ audit: auditState, findings: hidden }))).toBe(text);
+    }
+  });
+
+  it("keeps the closed eye while the analysis runs or fails", () => {
+    expect(
+      renderStatusText({ ...initialStatusModel(), analysis: { kind: "analyzing" }, findings: hidden }),
+    ).toBe("$(loading~spin) $(eye-closed) Fallow: analyzing");
+    expect(
+      renderStatusText({ ...initialStatusModel(), analysis: { kind: "error" }, findings: hidden }),
+    ).toBe("$(error) $(eye-closed) Fallow: error");
+  });
+});
+
+describe("license refresh suggestion", () => {
+  const suggested = license({ days_until_expiry: 200, refresh_suggested: true });
+
+  it("offers a refresh in the hover and the menu, not in the bar text", () => {
+    expect(renderStatusText(resultModel({ license: suggested }))).toBe("$(search) Fallow 9 · C");
+    const markdown = renderStatusTooltip(resultModel({ license: suggested }));
+    expect(markdown).toContain("Refresh recommended.");
+    expect(markdown).toContain("[Refresh](command:fallow.license.refresh)");
+    expect(
+      buildStatusMenuEntries(resultModel({ license: suggested })).map((entry) => entry.command),
+    ).toContain("fallow.license.refresh");
+  });
+
+  it("offers no refresh when the CLI does not suggest one", () => {
+    const markdown = renderStatusTooltip(resultModel({ license: license() }));
+    expect(markdown).not.toContain("command:fallow.license.refresh");
+  });
+});
+
+describe("license backgrounds", () => {
+  const hardFail = license({ state: "hard_fail", days_until_expiry: null, days_since_expiry: 40 });
+
+  it("uses the warning background when paid features are blocked", () => {
+    expect(statusBackground(resultModel({ license: hardFail }))).toBe(
+      "statusBarItem.warningBackground",
+    );
+    expect(renderStatusText(resultModel({ license: hardFail }))).toBe(
+      "$(search) Fallow 9 · C · $(error) license expired",
+    );
+  });
+
+  it("lets a failed audit win over a blocked license", () => {
+    expect(
+      statusBackground(
+        resultModel({ license: hardFail, audit: { kind: "result", audit: audit("fail", 1) } }),
+      ),
+    ).toBe("statusBarItem.errorBackground");
+  });
+
+  it("gives an expired license that still works a notice without a background", () => {
+    for (const state of ["expired_warning", "expired_watermark"] as const) {
+      const model = resultModel({
+        license: license({ state, days_until_expiry: null, days_since_expiry: 3 }),
+      });
+      expect(statusBackground(model)).toBeNull();
+      expect(renderStatusText(model)).toContain("license expired");
+    }
+  });
+
+  it("ignores the license when it is hidden", () => {
+    expect(statusBackground(resultModel({ license: { kind: "hidden" } }))).toBeNull();
+  });
+});
+
+describe("license details in the hover", () => {
+  it("lists seats and features of an active license", () => {
+    const markdown = renderStatusTooltip(
+      resultModel({ license: license({ features: ["runtime_coverage", "audit"] }) }),
+    );
+    expect(markdown).toContain("Seats: 5");
+    expect(markdown).toContain("Features: runtime\\_coverage, audit");
+  });
+
+  it("states how long ago an expired license expired", () => {
+    const markdown = renderStatusTooltip(
+      resultModel({
+        license: license({ state: "expired_warning", days_until_expiry: null, days_since_expiry: 3 }),
+      }),
+    );
+    expect(markdown).toContain("Expired 3 days ago.");
+    expect(
+      renderStatusTooltip(
+        resultModel({
+          license: license({ state: "hard_fail", days_until_expiry: null, days_since_expiry: 1 }),
+        }),
+      ),
+    ).toContain("Expired 1 day ago.");
+  });
+});
+
+describe("multi-root windows", () => {
+  it("names the folder that the count comes from", () => {
+    const markdown = renderStatusTooltip(resultModel({ analysisFolder: "web-app" }));
+    expect(markdown).toContain("$(root-folder) Folder: web\\-app (the first folder of this window)");
+  });
+
+  it("names no folder in a single-folder window", () => {
+    expect(renderStatusTooltip(resultModel())).not.toContain("Folder:");
   });
 });
