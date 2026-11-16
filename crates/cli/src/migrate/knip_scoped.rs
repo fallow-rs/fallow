@@ -622,8 +622,9 @@ pub(super) fn migrate_project(
 }
 
 /// Append globs to `production.ignore`, and create the `production` object
-/// when the config has none. A boolean `production` value stays as it is,
-/// because the boolean form has no `ignore` list.
+/// when the config has none. A boolean `production` value becomes the object
+/// form with the same value for each analysis, because only the object form
+/// has an `ignore` list.
 fn append_production_ignore(config: &mut JsonMap, globs: Vec<String>) {
     if globs.is_empty() {
         return;
@@ -631,6 +632,13 @@ fn append_production_ignore(config: &mut JsonMap, globs: Vec<String>) {
     let production = config
         .entry("production".to_string())
         .or_insert_with(|| Value::Object(JsonMap::new()));
+    if let Some(enabled) = production.as_bool() {
+        *production = serde_json::json!({
+            "deadCode": enabled,
+            "health": enabled,
+            "dupes": enabled,
+        });
+    }
     if let Some(production) = production.as_object_mut() {
         append_unique(production, "ignore", globs);
     }

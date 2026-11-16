@@ -4,7 +4,7 @@
   The object form of `production` accepts `ignore`, an array of
   project-root-relative globs, for example
   `"production": { "deadCode": true, "ignore": ["scripts/**"] }`. A run in
-  production mode leaves these paths out, in addition to the built-in test,
+  production mode excludes these paths, in addition to the built-in test,
   spec, story and dev patterns. The default run keeps them. The globs apply to
   each analysis that runs in production mode, also when `--production` or a
   `FALLOW_PRODUCTION*` variable selects the mode. The boolean form of

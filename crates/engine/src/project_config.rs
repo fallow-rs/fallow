@@ -235,10 +235,8 @@ pub fn config_for_project_with_load_options(
         None => (FallowConfig::default(), None),
     };
     if path.is_some() {
-        config.production = config
-            .production
-            .for_analysis(ProductionAnalysis::DeadCode)
-            .into();
+        let dead_code = config.production.for_analysis(ProductionAnalysis::DeadCode);
+        config.production = config.production.for_run(dead_code);
         validate_boundaries_and_rule_packs(root, &config)?;
     }
     let threads = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);

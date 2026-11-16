@@ -1494,6 +1494,33 @@ mod tests {
     }
 
     #[test]
+    fn migrate_knip_production_exclusions_convert_a_boolean_production() {
+        let mut config = empty_config();
+        config.insert("production".to_string(), serde_json::json!(true));
+        let mut warnings = Vec::new();
+        migrate_knip(
+            &serde_json::json!({"project": ["src/**", "!scripts/**!"]}),
+            &mut config,
+            &mut warnings,
+        );
+        assert_eq!(
+            config.get("production"),
+            Some(&serde_json::json!({
+                "deadCode": true,
+                "health": true,
+                "dupes": true,
+                "ignore": ["scripts/**"]
+            })),
+            "the boolean form becomes the object form with the same modes"
+        );
+        assert!(
+            warning_for(&warnings, "project")
+                .message
+                .contains("migrated to production.ignore")
+        );
+    }
+
+    #[test]
     fn migrate_knip_project_production_exclusions_map_to_production_ignore() {
         let knip = serde_json::json!({
             "project": ["**/*.js!", "!scripts/**!", "!tests/**!", "!legacy/**", "!../x/**!"],

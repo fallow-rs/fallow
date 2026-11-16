@@ -1142,6 +1142,32 @@ mod tests {
     }
 
     #[test]
+    fn watch_filter_applies_production_ignore_only_in_production_mode() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path().to_path_buf();
+        let mut config = make_config(&root, OutputFormat::Human, 1, true);
+        config.production_ignore = vec!["scripts/**".to_string()];
+        let seed = root.join("scripts/seed.ts");
+        let index = root.join("src/index.ts");
+
+        let default_filter =
+            WatchFilter::new_with_global_gitignore(&config, ignore::gitignore::Gitignore::empty());
+        assert!(
+            default_filter.allows(&seed),
+            "the default run watches scripts/"
+        );
+
+        config.production = true;
+        let production_filter =
+            WatchFilter::new_with_global_gitignore(&config, ignore::gitignore::Gitignore::empty());
+        assert!(
+            !production_filter.allows(&seed),
+            "production mode drops scripts/"
+        );
+        assert!(production_filter.allows(&index));
+    }
+
+    #[test]
     fn root_lifecycle_detaches_and_reattaches() {
         let temp = tempfile::tempdir().expect("tempdir");
         let root = temp.path().join("project");

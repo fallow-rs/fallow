@@ -99,3 +99,32 @@ fn boolean_production_form_is_unchanged() {
         vec!["scripts/seed.js", "src/orphan.js"]
     );
 }
+
+fn health_files_analyzed(root: &Path) -> u64 {
+    let output = run_fallow_in_root("health", root, &["--format", "json", "--quiet"]);
+    assert!(
+        output.code == 0 || output.code == 1,
+        "health should not crash. stdout: {}\nstderr: {}",
+        output.stdout,
+        output.stderr
+    );
+    parse_json(&output)["summary"]["files_analyzed"]
+        .as_u64()
+        .unwrap()
+}
+
+#[test]
+fn production_ignore_follows_the_per_analysis_scope() {
+    let dir = fixture(r#"{ "deadCode": true, "health": false, "ignore": ["scripts/**"] }"#);
+    assert_eq!(
+        health_files_analyzed(dir.path()),
+        3,
+        "health is not in production mode, so it keeps scripts/"
+    );
+    let dir = fixture(r#"{ "health": true, "ignore": ["scripts/**"] }"#);
+    assert_eq!(
+        health_files_analyzed(dir.path()),
+        2,
+        "health in production mode drops scripts/"
+    );
+}

@@ -3011,11 +3011,11 @@ fn resolve_user_config(
 /// `analyze_project` is the dead-code entry point used by the LSP and other
 /// programmatic embedders. When the loaded config uses the per-analysis
 /// production form (`production: { deadCode: true, ... }`), the production
-/// flag must be flattened to the dead-code analysis here. Otherwise
-/// `ResolvedConfig::resolve` calls `.global()` which returns false for the
-/// per-analysis variant and the production-mode rule overrides
-/// (`unused_dev_dependencies: off`, etc.) plus `resolved.production = true`
-/// are silently dropped.
+/// flag must be flattened to the dead-code analysis here with `for_run`.
+/// Otherwise `ResolvedConfig::resolve` calls `.global()`, which is true for
+/// the per-analysis variant only when every analysis is on, and the
+/// production-mode rule overrides (`unused_dev_dependencies: off`, etc.) plus
+/// `resolved.production = true` are silently dropped.
 #[cfg_attr(
     not(test),
     expect(
