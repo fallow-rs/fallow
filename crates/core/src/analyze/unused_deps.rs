@@ -16,8 +16,8 @@ use super::bundle_externalization::source_sets_packages_external;
 use super::gitignored_targets::GitignoredTargets;
 use super::package_json_utils::{find_dep_line_in_json, read_pkg_json_content};
 use super::predicates::{
-    is_builtin_module, is_config_file, is_implicit_dependency, is_path_alias, is_test_or_spec_file,
-    is_test_runner_config_file, is_virtual_module,
+    is_builtin_module, is_config_file, is_implicit_dependency, is_path_alias, is_test_importer,
+    is_virtual_module,
 };
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
@@ -1772,7 +1772,7 @@ fn accepts_ancestor_declaration(
 }
 
 /// Return `true` when every file that imports `dep` through the root
-/// declaration is a test/story file or a test runner config file, and the
+/// declaration is a test file (see [`is_test_importer`]), and the
 /// dependency is not exclusively type-only imported.
 ///
 /// Other config files (`astro.config.mjs`, `vite.config.ts`) configure the
@@ -1794,15 +1794,9 @@ fn dependency_is_test_only(
         return false;
     }
 
-    file_ids.iter().all(|id| {
-        graph.modules.get(id.0 as usize).is_some_and(|module| {
-            let relative = module
-                .path
-                .strip_prefix(&config.root)
-                .unwrap_or(&module.path);
-            is_test_or_spec_file(relative) || is_test_runner_config_file(&module.path)
-        })
-    })
+    file_ids
+        .iter()
+        .all(|id| is_test_importer(graph, *id, &config.root))
 }
 
 /// Find production dependencies that are only imported by test/dev files.

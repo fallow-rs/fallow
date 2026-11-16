@@ -181,6 +181,25 @@ pub(in crate::analyze) fn is_test_runner_config_file(path: &std::path::Path) -> 
     starts_with_runner && CONFIG_NAME_SEGMENTS.iter().any(|s| name.contains(s))
 }
 
+/// Check if a module is test code for `test-only-dependencies`: a test file
+/// by name, a test runner config file, or a test entry point of a test
+/// runner that no runtime entry point reaches. The last case covers a test
+/// runner setting such as Vitest `include: ['src/**/*.vitest.ts']`
+/// (issue #4618).
+pub(in crate::analyze) fn is_test_importer(
+    graph: &crate::graph::ModuleGraph,
+    id: crate::discover::FileId,
+    root: &std::path::Path,
+) -> bool {
+    let Some(module) = graph.modules.get(id.0 as usize) else {
+        return false;
+    };
+    let relative = module.path.strip_prefix(root).unwrap_or(&module.path);
+    is_test_or_spec_file(relative)
+        || is_test_runner_config_file(&module.path)
+        || (graph.test_entry_points.contains(&id) && !module.is_runtime_reachable())
+}
+
 /// Check if a file is a configuration file consumed by tooling, not via imports.
 ///
 /// These files should never be reported as unused because they are loaded by
