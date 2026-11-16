@@ -1221,11 +1221,11 @@ mutant. Their results decide no mutant status.
   database. Vitest's `fileParallelism: false` serializes tests inside each
   companion, but several companions can still run at once. Each Vitest
   companion runs one worker. The companion removes `VITEST_MAX_WORKERS` from
-  its environment, so `--concurrency` sets the number of parallel tests. When a phase has
-  more than one worker, restarted init and dry-run faults and baseline
-  mismatches suggest `--concurrency 1` or `mutation.concurrency: 1`. Shared
-  state is a possible cause; the report keeps the original error. Serial
-  phases and the first companion's setup do not receive this hint.
+  its environment, so `--concurrency` sets the number of parallel tests. When
+  a phase has more than one worker, restarted init and dry-run faults and
+  baseline mismatches suggest `--concurrency 1` or `mutation.concurrency: 1`.
+  Shared state is a possible cause; the report keeps the original error.
+  Serial phases and the first companion's setup do not receive this hint.
 - A static mutant needs a new companion before and after its run when the
   runner keeps modules loaded between runs (Vitest with `isolate: false`).
   After a reload of the worker gave `restart_required`, the companion that

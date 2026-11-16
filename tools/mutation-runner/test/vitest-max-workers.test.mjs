@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, describe, test } from "node:test";
@@ -13,18 +13,34 @@ import { VITEST_MAJORS, createFixtureProject } from "./support/vitest-fixture.mj
 // one companion for each unit of `--concurrency`.
 const INHERITED_MAX_WORKERS = "4";
 const DRY_RUN_LIMIT_MS = 60_000;
+const POOL_LOG_POLL_MS = 100;
 
-const withLimit = (promise, companion) =>
-  Promise.race([
-    promise,
-    new Promise((_, reject) => {
-      const timer = setTimeout(
-        () => reject(new Error(`no dry run result:\n${companion.stderr()}`)),
-        DRY_RUN_LIMIT_MS,
-      );
-      timer.unref();
-    }),
-  ]);
+const readPoolIds = (logPath) =>
+  existsSync(logPath) ? [...new Set(readFileSync(logPath, "utf8").trim().split("\n"))] : [];
+
+// A second worker can crash Vitest before the dry run returns. The poll stops
+// the wait as soon as the log shows a second pool id, so a regression fails
+// fast with the pool ids instead of at the dry-run time limit.
+const withLimit = (promise, companion, logPath) => {
+  let timer;
+  let poll;
+  const guard = new Promise((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error(`no dry run result:\n${companion.stderr()}`)),
+      DRY_RUN_LIMIT_MS,
+    );
+    poll = setInterval(() => {
+      const poolIds = readPoolIds(logPath);
+      if (poolIds.some((id) => id !== "1")) {
+        reject(new Error(`tests ran in more than one worker: ${poolIds.join(", ")}`));
+      }
+    }, POOL_LOG_POLL_MS);
+  });
+  return Promise.race([promise, guard]).finally(() => {
+    clearTimeout(timer);
+    clearInterval(poll);
+  });
+};
 
 for (const { packageName, version } of VITEST_MAJORS) {
   describe(`vitest ${version} with VITEST_MAX_WORKERS in the environment`, () => {
@@ -53,7 +69,7 @@ for (const { packageName, version } of VITEST_MAJORS) {
         options: {},
       });
       assert.equal(ready.type, "ready", JSON.stringify(ready));
-      dryRun = await withLimit(request({ type: "dry_run" }), companion);
+      dryRun = await withLimit(request({ type: "dry_run" }), companion, logPath);
     });
 
     after(() => {
@@ -65,8 +81,7 @@ for (const { packageName, version } of VITEST_MAJORS) {
     test("every test file runs in the same single worker", () => {
       assert.equal(dryRun.type, "dry_run_result", JSON.stringify(dryRun));
       assert.equal(dryRun.tests.length, 4, JSON.stringify(dryRun));
-      const poolIds = new Set(readFileSync(logPath, "utf8").trim().split("\n"));
-      assert.deepEqual([...poolIds], ["1"]);
+      assert.deepEqual(readPoolIds(logPath), ["1"]);
     });
   });
 }
