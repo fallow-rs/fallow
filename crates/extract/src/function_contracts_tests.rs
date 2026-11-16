@@ -982,14 +982,13 @@ fn a_fallback_between_a_loaded_value_and_its_members_is_the_loaded_value() {
             "const api = await mod;\napi.migrate();",
             &["migrate", "then"],
         ),
-        (
-            "var api = mod.default ?? mod;\nvar mod = api ?? api;",
-            &["default"],
-        ),
     ] {
         let source = format!("{head}{read}");
         assert_eq!(opaque_loads(&source), read_names(names), "{source}");
     }
+    let source =
+        "var mod = await import(name);\nvar api = mod.default ?? mod;\nvar mod = api ?? api;";
+    assert_eq!(opaque_loads(source), read_names(&["default"]), "{source}");
     let source = "export async function load(name: string) {\n  const mod = await import(name);\n  return mod.default ?? mod;\n}";
     assert_eq!(
         opaque_loads(source),
