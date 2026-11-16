@@ -13,6 +13,7 @@ pub(super) fn excluded_import_message(pattern: &str, file_count: u32, files: &[S
         "The production pattern '{pattern}' excluded {file_count} {noun} that production code \
          imports: {sample}{more}. Fallow does not analyze these files in production mode, so an \
          export or a parameter that only they use can be reported. Move the files out of the \
-         matched path, or run this analysis without --production."
+         matched path, or turn production mode off for dead code with --no-production or \
+         `production: {{ deadCode: false }}` in the config."
     )
 }

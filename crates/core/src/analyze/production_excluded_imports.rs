@@ -5,10 +5,17 @@
 //! because discovery gave the file no [`FileId`]. This pass matches those
 //! targets against [`PRODUCTION_EXCLUDE_PATTERNS`], so it reads no excluded
 //! file and runs no second analysis.
+//!
+//! An import of a workspace package keeps no file path in its result. For an
+//! import whose specifier names a workspace package, the pass reads the entry
+//! fields of that package manifest (`main`, `module`, `source` and the
+//! matching `exports` key) and matches the entry files that exist.
 
 use std::path::{Path, PathBuf};
 
-use fallow_config::{ResolvedConfig, WorkspaceDiagnostic, WorkspaceDiagnosticKind};
+use fallow_config::{
+    PackageJson, ResolvedConfig, WorkspaceDiagnostic, WorkspaceDiagnosticKind, WorkspaceInfo,
+};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::discover::{FileId, PRODUCTION_EXCLUDE_PATTERNS, SOURCE_EXTENSIONS};
@@ -25,6 +32,7 @@ const SAMPLE_LIMIT: usize = 5;
 pub(super) fn diagnostics(
     config: &ResolvedConfig,
     resolved_modules: &[ResolvedModule],
+    workspaces: &[WorkspaceInfo],
     excluded: &FxHashSet<FileId>,
 ) -> Vec<WorkspaceDiagnostic> {
     if !config.production {
@@ -33,43 +41,185 @@ pub(super) fn diagnostics(
     let Some(matcher) = PatternMatcher::new() else {
         return Vec::new();
     };
-    let canonical_root = dunce::canonicalize(&config.root).ok();
-    let mut by_pattern: FxHashMap<usize, Vec<String>> = FxHashMap::default();
-    let mut seen: FxHashSet<&Path> = FxHashSet::default();
+    let mut collector = Collector {
+        config,
+        matcher: &matcher,
+        canonical_root: dunce::canonicalize(&config.root).ok(),
+        seen: FxHashSet::default(),
+        by_pattern: FxHashMap::default(),
+    };
+    let mut manifests = WorkspaceManifests::new(workspaces);
+    let mut searched: FxHashSet<&str> = FxHashSet::default();
 
     for module in resolved_modules
         .iter()
         .filter(|module| !excluded.contains(&module.file_id))
     {
-        for target in external_targets(module) {
-            if !seen.insert(target.as_path()) || !has_source_extension(target) {
-                continue;
-            }
-            let Some(relative) = relative_to_root(target, &config.root, canonical_root.as_deref())
-            else {
-                continue;
-            };
-            if config.ignore_patterns.is_match(relative) {
-                continue;
-            }
-            if let Some(index) = matcher.first_match(relative) {
-                by_pattern
-                    .entry(index)
-                    .or_default()
-                    .push(relative.to_string_lossy().replace('\\', "/"));
+        for (specifier, target) in import_edges(module) {
+            if let ResolveResult::ExternalFile(path) = target {
+                collector.consider(path);
+            } else if searched.insert(specifier) {
+                for entry in manifests.entry_files(specifier) {
+                    if entry.is_file() {
+                        collector.consider(&entry);
+                    }
+                }
             }
         }
     }
+    collector.finish()
+}
 
-    let mut entries: Vec<(usize, Vec<String>)> = by_pattern.into_iter().collect();
-    entries.sort_unstable_by_key(|(index, _)| *index);
-    entries
-        .into_iter()
-        .map(|(index, mut files)| {
-            files.sort_unstable();
-            diagnostic(config, matcher.patterns[index], files)
-        })
-        .collect()
+/// The dropped files found so far, grouped by the index of their pattern.
+struct Collector<'a> {
+    config: &'a ResolvedConfig,
+    matcher: &'a PatternMatcher,
+    canonical_root: Option<PathBuf>,
+    /// Root-relative paths, so one file reached through two spellings of the
+    /// root (a symlink such as `/tmp` on macOS) counts once.
+    seen: FxHashSet<String>,
+    by_pattern: FxHashMap<usize, Vec<String>>,
+}
+
+impl Collector<'_> {
+    fn consider(&mut self, path: &Path) {
+        if !has_source_extension(path) {
+            return;
+        }
+        let Some(relative) =
+            relative_to_root(path, &self.config.root, self.canonical_root.as_deref())
+        else {
+            return;
+        };
+        if self.config.ignore_patterns.is_match(relative) {
+            return;
+        }
+        let Some(index) = self.matcher.first_match(relative) else {
+            return;
+        };
+        let key = relative.to_string_lossy().replace('\\', "/");
+        if self.seen.insert(key.clone()) {
+            self.by_pattern.entry(index).or_default().push(key);
+        }
+    }
+
+    fn finish(self) -> Vec<WorkspaceDiagnostic> {
+        let mut entries: Vec<(usize, Vec<String>)> = self.by_pattern.into_iter().collect();
+        entries.sort_unstable_by_key(|(index, _)| *index);
+        entries
+            .into_iter()
+            .map(|(index, mut files)| {
+                files.sort_unstable();
+                diagnostic(self.config, self.matcher.patterns[index], files)
+            })
+            .collect()
+    }
+}
+
+/// The specifier and the resolved target of each static import, dynamic
+/// import and re-export of `module`.
+fn import_edges(module: &ResolvedModule) -> impl Iterator<Item = (&str, &ResolveResult)> {
+    module
+        .resolved_imports
+        .iter()
+        .chain(&module.resolved_dynamic_imports)
+        .map(|import| (import.info.source.as_str(), &import.target))
+        .chain(
+            module
+                .re_exports
+                .iter()
+                .map(|re_export| (re_export.info.source.as_str(), &re_export.target)),
+        )
+}
+
+/// The manifests of the workspace packages, read on first use.
+struct WorkspaceManifests<'a> {
+    workspaces: &'a [WorkspaceInfo],
+    loaded: FxHashMap<usize, Option<PackageJson>>,
+}
+
+impl<'a> WorkspaceManifests<'a> {
+    fn new(workspaces: &'a [WorkspaceInfo]) -> Self {
+        Self {
+            workspaces,
+            loaded: FxHashMap::default(),
+        }
+    }
+
+    /// The entry files that a specifier of a workspace package selects:
+    /// `main`, `module`, `source` and `exports["."]` for the bare name, and
+    /// `exports["./<subpath>"]` for a subpath. Empty for any other specifier.
+    fn entry_files(&mut self, specifier: &str) -> Vec<PathBuf> {
+        let Some((index, subpath)) = self.workspaces.iter().enumerate().find_map(|(index, ws)| {
+            let rest = specifier.strip_prefix(ws.name.as_str())?;
+            match rest.strip_prefix('/') {
+                Some(subpath) => Some((index, Some(subpath))),
+                None => rest.is_empty().then_some((index, None)),
+            }
+        }) else {
+            return Vec::new();
+        };
+        let workspace = &self.workspaces[index];
+        let Some(manifest) = self
+            .loaded
+            .entry(index)
+            .or_insert_with(|| fallow_config::load_dir_package_json(&workspace.root))
+            .as_ref()
+        else {
+            return Vec::new();
+        };
+        let mut entries = Vec::new();
+        match subpath {
+            None => {
+                entries.extend(
+                    [&manifest.main, &manifest.module, &manifest.source]
+                        .into_iter()
+                        .flatten()
+                        .cloned(),
+                );
+                if let Some(exports) = &manifest.exports {
+                    collect_export_targets(export_entry(exports, "."), &mut entries);
+                }
+            }
+            Some(subpath) => {
+                if let Some(exports) = &manifest.exports {
+                    let key = format!("./{subpath}");
+                    collect_export_targets(export_entry(exports, &key), &mut entries);
+                }
+            }
+        }
+        entries
+            .iter()
+            .map(|entry| workspace.root.join(entry.trim_start_matches("./")))
+            .collect()
+    }
+}
+
+/// The `exports` value for `key`. An `exports` object without `.`-prefixed
+/// keys is a condition map for the bare name.
+fn export_entry<'v>(exports: &'v serde_json::Value, key: &str) -> Option<&'v serde_json::Value> {
+    match exports {
+        serde_json::Value::Object(map) if map.keys().any(|k| k.starts_with('.')) => map.get(key),
+        _ => (key == ".").then_some(exports),
+    }
+}
+
+/// Every string target in an `exports` value, through nested conditions.
+fn collect_export_targets(value: Option<&serde_json::Value>, out: &mut Vec<String>) {
+    match value {
+        Some(serde_json::Value::String(target)) => out.push(target.clone()),
+        Some(serde_json::Value::Object(conditions)) => {
+            for condition in conditions.values() {
+                collect_export_targets(Some(condition), out);
+            }
+        }
+        Some(serde_json::Value::Array(alternatives)) => {
+            for alternative in alternatives {
+                collect_export_targets(Some(alternative), out);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn diagnostic(config: &ResolvedConfig, pattern: &str, files: Vec<String>) -> WorkspaceDiagnostic {
@@ -91,19 +241,6 @@ fn diagnostic(config: &ResolvedConfig, pattern: &str, files: Vec<String>) -> Wor
         },
     )
     .into_root_relative(&config.root)
-}
-
-fn external_targets(module: &ResolvedModule) -> impl Iterator<Item = &PathBuf> {
-    module
-        .resolved_imports
-        .iter()
-        .chain(&module.resolved_dynamic_imports)
-        .map(|import| &import.target)
-        .chain(module.re_exports.iter().map(|re_export| &re_export.target))
-        .filter_map(|target| match target {
-            ResolveResult::ExternalFile(path) => Some(path),
-            _ => None,
-        })
 }
 
 fn has_source_extension(path: &Path) -> bool {

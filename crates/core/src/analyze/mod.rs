@@ -748,7 +748,7 @@ pub(crate) fn find_dead_code_full(
     config.begin_dead_code_pass(workspaces);
     fallow_config::record_workspace_diagnostics(
         &config.root,
-        production_excluded_imports::diagnostics(config, resolved_modules, excluded),
+        production_excluded_imports::diagnostics(config, resolved_modules, workspaces, excluded),
     );
 
     let run_context = build_dead_code_run_context(graph, config, workspaces, modules);

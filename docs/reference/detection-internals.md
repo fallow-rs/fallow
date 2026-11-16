@@ -979,11 +979,22 @@ pass matches each such target with a source extension against the production
 patterns and attributes it to the first matching pattern in built-in order. It
 reads no dropped file and runs no second analysis.
 
+An import of a workspace package resolves to `NpmPackage` or to a fallback
+`InternalModule`, so its result keeps no file path. For an import whose
+specifier names a workspace package, the pass reads the entry fields of that
+package manifest: `main`, `module`, `source` and `exports["."]` for the bare
+name, and `exports["./<subpath>"]` for a subpath. Each entry file that exists
+goes through the same match. A subpath that the `exports` map does not name is
+not checked, because the pass does not repeat the resolver.
+
 Preserve these properties:
 
 - One `production-excluded-file-imported` entry per pattern, with an exact
   `file_count` and a sample of at most five files in path order. `path` is the
   first file.
+- The pass counts a file once by its root-relative path, also when two
+  imports reach it through two spellings of the root (`/tmp` and
+  `/private/tmp` on macOS).
 - A file that `ignorePatterns` matches is not counted. The project chose that
   exclusion.
 - A support-only file (the `excluded` set of the pass) does not count as an

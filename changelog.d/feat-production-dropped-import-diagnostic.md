@@ -7,7 +7,8 @@
   appear in a finding. When a production file imports such a file,
   `workspace_diagnostics[]` now carries one `production-excluded-file-imported`
   entry for each pattern, with `pattern`, `file_count` and the first five
-  `files`. The human output prints the same warning on stderr. The production
+  `files`. An import of a workspace package whose entry file such a pattern
+  excludes counts too. The human output prints the same warning on stderr. The production
   patterns do not change. To analyze the file, move it out of the matched path,
   or run that analysis without production mode (`--no-production` or
   `production: { deadCode: false }`).
