@@ -6,4 +6,4 @@
 
 ### Security
 
-- **Runtime coverage no longer starts a package manager to find the `fallow-cov` sidecar.** Fallow looks only in fixed install locations: the `@fallow-cli/fallow-cov-<platform>` package in `node_modules`, the pnpm and Bun stores, the Yarn `unplugged` folder, `node_modules/.bin`, `~/.fallow/bin` and `PATH`. This applies to `health`, `audit` and `security` with `--runtime-coverage`, to the MCP runtime-coverage tools, and to `fallow coverage setup`.
+- **Runtime coverage finds the `fallow-cov` sidecar in fixed install locations only.** Fallow looks in the `@fallow-cli/fallow-cov-<platform>` package in `node_modules`, the pnpm and Bun stores, the Yarn `unplugged` folder, `node_modules/.bin`, `~/.fallow/bin` and `PATH`. This applies to `health`, `audit` and `security` with `--runtime-coverage`, to the MCP runtime-coverage tools, and to the sidecar check of `fallow coverage setup`.

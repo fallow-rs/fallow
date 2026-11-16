@@ -15,7 +15,7 @@ use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::common::{fallow_bin, scrub_analysis_env};
+use super::common::{commit_all, fallow_bin, git, scrub_analysis_env};
 
 const FAKE_TOOLS: &[&str] = &["npm", "pnpm", "yarn", "bun", "corepack"];
 
@@ -127,17 +127,29 @@ fn write_project(root: &Path, package_manager: Option<&str>, lockfile: &str) {
     fs::write(root.join("src/index.js"), "export const value = 1;\n").expect("write source");
     fs::write(root.join(lockfile), "").expect("write lockfile");
     fs::write(root.join(".yarnrc"), "yarn-path \"./tools/yarn.js\"\n").expect("write .yarnrc");
+    // `audit` needs a repository with a base branch before it reaches
+    // sidecar discovery.
+    git(root, &["init", "-q", "-b", "main"]);
+    commit_all(root, "initial");
+    // `audit` also needs a changed file against that base.
+    fs::write(root.join("src/index.js"), "export const value = 2;\n").expect("change source");
 }
 
-fn assert_no_spawn(sandbox: &Sandbox, label: &str, args: &[&str]) {
+/// Run fallow and assert that no fake package manager started. Returns the
+/// combined stdout and stderr.
+fn assert_no_spawn(sandbox: &Sandbox, label: &str, args: &[&str]) -> String {
     let output = sandbox.command(args).output().expect("run fallow");
-    let spawned = sandbox.spawned();
-    assert!(
-        spawned.is_empty(),
-        "`{label}` started a package manager during sidecar discovery:\n{spawned}\nstdout:\n{}\nstderr:\n{}",
+    let combined = format!(
+        "stdout:\n{}\nstderr:\n{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr),
     );
+    let spawned = sandbox.spawned();
+    assert!(
+        spawned.is_empty(),
+        "`{label}` started a package manager during sidecar discovery:\n{spawned}\n{combined}",
+    );
+    combined
 }
 
 #[test]
@@ -147,7 +159,7 @@ fn runtime_coverage_commands_start_no_package_manager() {
     for root in &sandbox.projects {
         let root = root.to_string_lossy().into_owned();
         for command in ["health", "audit", "security"] {
-            assert_no_spawn(
+            let combined = assert_no_spawn(
                 &sandbox,
                 &format!("{command} --runtime-coverage in {root}"),
                 &[
@@ -160,6 +172,11 @@ fn runtime_coverage_commands_start_no_package_manager() {
                     "json",
                     "--quiet",
                 ],
+            );
+            // Without this, a command that stops before discovery would pass.
+            assert!(
+                combined.contains("Sidecar binary fallow-cov not found"),
+                "`{command}` in {root} did not reach sidecar discovery:\n{combined}"
             );
         }
     }
