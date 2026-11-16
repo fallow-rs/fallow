@@ -455,6 +455,33 @@ fn is_spawn_callee(callee_path: &str) -> bool {
     matches!(name, "spawn" | "spawnSync" | "execFile" | "execFileSync")
 }
 
+/// Whether the second argument of a `spawn` or `execFile` call gets the call
+/// options, so that the shell-argument rows can read it. An object literal in
+/// that position is the options object itself, not an argument array. A `spawn`
+/// call with a non-literal command already matches the command row whenever
+/// the options can enable a shell, so its argument array gets no options and
+/// the call gives one candidate.
+fn argument_array_gets_options(callee_path: &str, arguments: &[Argument<'_>]) -> bool {
+    let Some(second) = arguments.get(1).and_then(Argument::as_expression) else {
+        return false;
+    };
+    if matches!(unwrap_static_expr(second), Expression::ObjectExpression(_)) {
+        return false;
+    }
+    let name = callee_path.rsplit('.').next().unwrap_or(callee_path);
+    if !matches!(name, "spawn" | "spawnSync") {
+        return true;
+    }
+    arguments
+        .first()
+        .and_then(Argument::as_expression)
+        .is_some_and(|command| match unwrap_static_expr(command) {
+            Expression::StringLiteral(_) => true,
+            Expression::TemplateLiteral(tpl) => tpl.expressions.is_empty(),
+            _ => false,
+        })
+}
+
 /// The options object of a `spawn(command, args?, options?)` or an
 /// `execFile(file, args?, options?, callback?)` call. An object
 /// literal in the second position is the options object. A second argument
@@ -1039,6 +1066,8 @@ impl ModuleInfoExtractor {
         let url_arg_literal = call_url_arg_literal(expr);
         let mut call_options =
             is_spawn_callee(callee_path).then(|| Box::new(spawn_call_options(&expr.arguments)));
+        let args_get_options =
+            call_options.is_some() && argument_array_gets_options(callee_path, &expr.arguments);
         for (index, arg) in expr.arguments.iter().enumerate() {
             let Some(arg_expr) = arg.as_expression() else {
                 continue;
@@ -1063,9 +1092,8 @@ impl ModuleInfoExtractor {
             });
             // The command and the argument array both get the options: with
             // `shell: true`, the shell also parses each argument.
-            if arg_index <= 1
-                && let Some(site) = self.security_sinks.get_mut(pushed_before)
-            {
+            let gets_options = arg_index == 0 || (arg_index == 1 && args_get_options);
+            if gets_options && let Some(site) = self.security_sinks.get_mut(pushed_before) {
                 site.call_options = if arg_index == 0 {
                     call_options.clone()
                 } else {

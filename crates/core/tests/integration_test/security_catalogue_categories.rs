@@ -1401,7 +1401,7 @@ fn llm_call_injection_langchain_invoke_does_not_fire() {
 
 // ── catalogue gaps: callee variants of existing categories ───────────────────
 
-const CATALOGUE_GAP_SINKS: [(&str, &str, u32); 35] = [
+const CATALOGUE_GAP_SINKS: [(&str, &str, u32); 36] = [
     ("src/esm-default-exec.ts", "command-injection", 78),
     ("src/esm-namespace-exec.ts", "command-injection", 78),
     ("src/esm-default-vm.ts", "code-injection", 94),
@@ -1430,6 +1430,7 @@ const CATALOGUE_GAP_SINKS: [(&str, &str, u32); 35] = [
     ("src/spawn-shell-args.ts", "command-injection", 78),
     ("src/exec-file-shell-args.ts", "command-injection", 78),
     ("src/exec-file-sync-shell-args.ts", "command-injection", 78),
+    ("src/spawn-shell-cmd-args.ts", "command-injection", 78),
     ("src/shelljs.ts", "command-injection", 78),
     ("src/ssti-handlebars.ts", "ssti", 1336),
     ("src/ssti-lodash.ts", "ssti", 1336),
@@ -1511,6 +1512,10 @@ fn catalogue_gap_lookalikes_do_not_fire() {
         (
             "src/spawn-args-no-shell.ts",
             "an untrusted argument without a shell is not a candidate",
+        ),
+        (
+            "src/exec-file-shell-options-only.ts",
+            "an options object in the argument position does not reach the shell",
         ),
         (
             "src/exec-local-shadow.ts",
