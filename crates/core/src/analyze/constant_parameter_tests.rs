@@ -649,6 +649,35 @@ fn a_loader_result_or_a_loader_that_escapes_blocks_each_export() {
 }
 
 #[test]
+fn a_fallback_between_a_loaded_value_and_its_members_blocks_only_the_names() {
+    let head = "const name = process.argv[2];\nconst mod = await import(name);\n";
+    for read in [
+        "const api = mod.default ?? mod;\napi.migrate();\n",
+        "const api = mod.default || mod;\napi.migrate();\n",
+        "const api = mod.default ? mod.default : mod;\napi.migrate();\n",
+    ] {
+        let run = format!("{head}{read}");
+        assert_blocks_only_migrate(&analyze_loader(LOADER, &run), &run);
+    }
+    let loader = "export async function load(path: string) {\n  const mod = await import(path);\n  return mod.default ?? mod;\n}\n";
+    let run = "import { load } from './load';\nconst name = process.argv[2];\nconst api = await load(name);\napi.migrate();\n";
+    assert_blocks_only_migrate(&analyze_loader(loader, run), run);
+}
+
+#[test]
+fn a_fallback_to_another_value_blocks_each_export() {
+    let head = "const name = process.argv[2];\nconst mod = await import(name);\n";
+    for read in [
+        "const api = mod ?? globalThis;\napi.migrate();\n",
+        "const api = process.env.X ? mod : {};\napi.migrate();\n",
+    ] {
+        let run = format!("{head}{read}");
+        let project = analyze_loader(LOADER, &run);
+        assert_abstains(&project, "src/format.ts", "format", OPAQUE_REASON);
+    }
+}
+
+#[test]
 fn a_loader_that_an_entry_point_exports_blocks_each_export() {
     let main = format!("{MAIN}export const load = async (path: string) => await import(path);\n");
     let project = analyze(&base_with(&[], &main));

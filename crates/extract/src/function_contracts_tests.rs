@@ -941,6 +941,86 @@ fn a_load_with_an_unknown_source_records_the_names_that_the_code_reads() {
 }
 
 #[test]
+fn a_fallback_between_a_loaded_value_and_its_members_is_the_loaded_value() {
+    let head = "const mod = await import(name);\n";
+    for (read, names) in [
+        (
+            "const api = mod.default ?? mod;\napi.migrate();",
+            &["default", "migrate"][..],
+        ),
+        (
+            "const api = mod.default || mod;\napi.migrate();",
+            &["default", "migrate"],
+        ),
+        (
+            "const api = mod.default ? mod.default : mod;\napi.migrate();",
+            &["default", "migrate"],
+        ),
+        (
+            "const api = flag ? mod : mod['default'];\napi.migrate();",
+            &["default", "migrate"],
+        ),
+        ("(mod?.default ?? mod).migrate();", &["default", "migrate"]),
+        (
+            "const api = mod.default ?? mod.main ?? mod;\nconst { migrate } = api;",
+            &["default", "main", "migrate"],
+        ),
+        (
+            "const api = (mod.default as Api) ?? mod;\napi.migrate();",
+            &["default", "migrate"],
+        ),
+        ("const api = mod ?? mod;\napi.migrate();", &["migrate"]),
+        (
+            "const api = await (mod.default ?? mod);\napi.migrate();",
+            &["default", "migrate", "then"],
+        ),
+        (
+            "const api = mod.default ? await mod.default : mod;\napi.migrate();",
+            &["default", "migrate"],
+        ),
+        (
+            "const api = await mod;\napi.migrate();",
+            &["migrate", "then"],
+        ),
+    ] {
+        let source = format!("{head}{read}");
+        assert_eq!(opaque_loads(&source), read_names(names), "{source}");
+    }
+    let source =
+        "var mod = await import(name);\nvar api = mod.default ?? mod;\nvar mod = api ?? api;";
+    assert_eq!(opaque_loads(source), read_names(&["default"]), "{source}");
+    let source = "export async function load(name: string) {\n  const mod = await import(name);\n  return mod.default ?? mod;\n}";
+    assert_eq!(
+        opaque_loads(source),
+        OpaqueLoads {
+            names: vec!["default".to_string()],
+            ..loader(true)
+        },
+        "{source}"
+    );
+}
+
+#[test]
+fn a_fallback_to_another_value_records_an_escape() {
+    let head = "const mod = await import(name);\n";
+    for read in [
+        "const api = mod ?? fallback;\napi.migrate();",
+        "const api = mod || {};\napi.migrate();",
+        "const api = flag ? mod : other;\napi.migrate();",
+        "const api = mod.default.inner ?? mod;\napi.migrate();",
+        "const api = mod ? mod : null;",
+        "const api = mod && mod.default;",
+        "const api = await (mod ?? other);\napi.migrate();",
+        "const api = mod.default ?? mod;\nconsole.log(api);",
+        "export const api = mod.default ?? mod;",
+        "console.log(mod.default ?? mod);",
+    ] {
+        let source = format!("{head}{read}");
+        assert!(opaque_loads(&source).escapes, "{source}");
+    }
+}
+
+#[test]
 fn a_jsx_member_tag_of_a_loaded_value_records_the_name() {
     let source = "const mod = await import(name);\nexport const View = () => <mod.Pad />;";
     assert_eq!(

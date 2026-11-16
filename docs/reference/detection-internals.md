@@ -1111,6 +1111,14 @@ each reason:
     escape, the rule blocks each exported function of the project and, in
     type-aware mode, each exported class with methods. A debug log
     line names each module with such an escape.
+  - A fallback of a binding of the value, `mod.default ?? mod`,
+    `mod.default || mod` or `flag ? mod.default : mod`, is also the loaded
+    value when each branch is the binding or one named member of it. The
+    pass reads the result with the same rules, so
+    `const api = mod.default ?? mod; api.migrate()` reads `default` and
+    `migrate`. A branch with any other value, such as `mod ?? {}`, is an
+    escape. An `await` of the binding or of such a fallback reads `then`
+    and keeps the loaded value.
   - A discarded value (`await import(x);`, `require(x);`) blocks nothing.
     When the loaded file is part of the analysis, its callers are visible.
   - `loaders` holds each module-scope function that returns the loaded

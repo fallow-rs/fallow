@@ -10,13 +10,21 @@
 //! loader. The analysis then reads the result of each call of the function
 //! with the same rules, so `const mod = await load(name); mod.pad()` reads
 //! `pad`.
+//! A fallback such as `mod.default ?? mod`, `mod.default || mod` or
+//! `flag ? mod.default : mod` is also the loaded value when each branch is
+//! the binding of the value or one member of it. The pass then reads the
+//! result with the same rules. A branch with any other value is an escape.
+//! An `await` of such a value reads `then` and gives the value.
 //! A read of the global `require` as a value, such as `require.call(...)`
 //! or `[name].map(require)`, is also an escape: the pass cannot see the
 //! loads that go through it.
 
 use fallow_types::extract::{CallResultReads, LoaderReturn, OpaqueLoads};
 use oxc_ast::AstKind;
-use oxc_ast::ast::{Argument, BinaryOperator, BindingPattern, Expression, FormalParameters};
+use oxc_ast::ast::{
+    Argument, BinaryOperator, BindingPattern, Expression, FormalParameters, LogicalOperator,
+    MemberExpression,
+};
 use oxc_semantic::{AstNodes, NodeId, Reference, Scoping, Semantic, SymbolId};
 use oxc_span::{GetSpan, Span};
 use oxc_syntax::operator::UnaryOperator;
@@ -111,9 +119,15 @@ struct Reader<'s, 'a> {
     names: FxHashSet<String>,
     escapes: bool,
     loaders: FxHashSet<LoaderReturn>,
+    /// The bindings of loaded values that the reader read. A `var` can
+    /// bind a fallback of itself, so a second read stops the loop.
+    bindings: FxHashSet<SymbolId>,
     template_reads_root: bool,
     loader_candidates: &'s LoaderCandidates,
 }
+
+/// The member that an `await` reads on its operand.
+const THEN: &str = "then";
 
 /// The members of `require` that call the loader with other arguments.
 const REQUIRE_CALL_FORWARDS: &[&str] = &["call", "apply", "bind"];
@@ -126,6 +140,7 @@ impl<'s, 'a> Reader<'s, 'a> {
             names: FxHashSet::default(),
             escapes: false,
             loaders: FxHashSet::default(),
+            bindings: FxHashSet::default(),
             template_reads_root: context.template_reads_root,
             loader_candidates: context.loader_candidates,
         }
@@ -379,6 +394,9 @@ impl<'s, 'a> Reader<'s, 'a> {
     }
 
     fn read_binding(&mut self, symbol: SymbolId) {
+        if !self.bindings.insert(symbol) {
+            return;
+        }
         for reference in self.scoping.get_resolved_references(symbol) {
             if !reference.is_read() {
                 continue;
@@ -389,8 +407,116 @@ impl<'s, 'a> Reader<'s, 'a> {
                 continue;
             };
             let (node, span) = unwrap_upward(self.nodes, node, identifier.span);
-            self.read_value(node, span, true);
+            match self.fallback_result(symbol, node, span) {
+                // The result is a new value, so a binding of it is no alias.
+                Some((node, span, awaited)) => {
+                    if awaited {
+                        // `await` reads `then` on the value.
+                        self.names.insert(THEN.to_string());
+                    }
+                    self.read_value(node, span, false);
+                }
+                None => self.read_value(node, span, true),
+            }
         }
+    }
+
+    /// The outermost fallback or `await` that holds the read of `symbol` at
+    /// `node`, when each branch is `symbol` or one member of it. The flag is
+    /// `true` when the result goes through an `await`.
+    fn fallback_result(
+        &self,
+        symbol: SymbolId,
+        node: NodeId,
+        span: Span,
+    ) -> Option<(NodeId, Span, bool)> {
+        let mut result = None;
+        let mut awaited = false;
+        let (mut node, mut span) = (node, span);
+        loop {
+            let parent = self.nodes.parent_id(node);
+            if parent == node {
+                break;
+            }
+            let follows = match self.nodes.kind(parent) {
+                AstKind::LogicalExpression(logical)
+                    if matches!(
+                        logical.operator,
+                        LogicalOperator::Coalesce | LogicalOperator::Or
+                    ) =>
+                {
+                    self.is_loaded_value(symbol, &logical.left)
+                        && self.is_loaded_value(symbol, &logical.right)
+                }
+                AstKind::ConditionalExpression(cond) if cond.test.span() != span => {
+                    self.is_loaded_value(symbol, &cond.consequent)
+                        && self.is_loaded_value(symbol, &cond.alternate)
+                }
+                AstKind::AwaitExpression(_) => {
+                    awaited = true;
+                    true
+                }
+                _ => false,
+            };
+            if !follows {
+                break;
+            }
+            let parent_span = self.nodes.kind(parent).span();
+            (node, span) = unwrap_upward(self.nodes, parent, parent_span);
+            result = Some((node, span, awaited));
+        }
+        result
+    }
+
+    /// `true` when `expr` is `symbol`, one named member of it, or a
+    /// fallback or an `await` of such a value.
+    fn is_loaded_value(&self, symbol: SymbolId, expr: &Expression<'_>) -> bool {
+        match expr.get_inner_expression() {
+            Expression::Identifier(_) => self.is_reference_to(symbol, expr),
+            Expression::LogicalExpression(logical) => {
+                matches!(
+                    logical.operator,
+                    LogicalOperator::Coalesce | LogicalOperator::Or
+                ) && self.is_loaded_value(symbol, &logical.left)
+                    && self.is_loaded_value(symbol, &logical.right)
+            }
+            Expression::ConditionalExpression(cond) => {
+                self.is_loaded_value(symbol, &cond.consequent)
+                    && self.is_loaded_value(symbol, &cond.alternate)
+            }
+            Expression::AwaitExpression(await_expr) => {
+                self.is_loaded_value(symbol, &await_expr.argument)
+            }
+            Expression::ChainExpression(chain) => chain
+                .expression
+                .as_member_expression()
+                .is_some_and(|member| self.is_member_of(symbol, member)),
+            inner => inner
+                .as_member_expression()
+                .is_some_and(|member| self.is_member_of(symbol, member)),
+        }
+    }
+
+    fn is_member_of(&self, symbol: SymbolId, member: &MemberExpression<'_>) -> bool {
+        let named = match member {
+            MemberExpression::StaticMemberExpression(_) => true,
+            MemberExpression::ComputedMemberExpression(computed) => {
+                matches!(computed.expression, Expression::StringLiteral(_))
+            }
+            MemberExpression::PrivateFieldExpression(_) => false,
+        };
+        named && self.is_reference_to(symbol, member.object())
+    }
+
+    fn is_reference_to(&self, symbol: SymbolId, expr: &Expression<'_>) -> bool {
+        let Expression::Identifier(identifier) = expr.get_inner_expression() else {
+            return false;
+        };
+        identifier
+            .reference_id
+            .get()
+            .and_then(|id| self.scoping.get_reference(id).symbol_id())
+            == Some(symbol)
     }
 
     /// `true` for a declarator of `export const x = ...`. Another module can
