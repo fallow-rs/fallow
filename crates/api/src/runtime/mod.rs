@@ -88,7 +88,7 @@ pub(super) fn resolve_effective_production_modes(
         health: health_override,
         dupes: dupes_override,
     }
-    .effective_modes(config))
+    .effective_modes(&config))
 }
 
 fn load_context_production_config(

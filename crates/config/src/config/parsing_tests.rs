@@ -4232,6 +4232,44 @@ fn validate_user_globs_framework_plugin_invalid_entry_glob() {
 }
 
 #[test]
+fn validate_user_globs_rejects_invalid_production_ignore_glob() {
+    let config: FallowConfig =
+        serde_json::from_str(r#"{"production": {"ignore": ["[invalid-glob"]}}"#).unwrap();
+    let errors = config.validate_user_globs().unwrap_err();
+    assert!(
+        errors
+            .iter()
+            .any(|error| error.to_string().contains("production.ignore")),
+        "the error names the field: {errors:?}"
+    );
+}
+
+#[test]
+fn validate_user_globs_rejects_unmatchable_production_ignore_prefixes() {
+    let config: FallowConfig = serde_json::from_str(
+        r#"{"production": {"ignore": ["!scripts/keep/**", "./scripts/**", "scripts/**"]}}"#,
+    )
+    .unwrap();
+    let errors: Vec<String> = config
+        .validate_user_globs()
+        .unwrap_err()
+        .iter()
+        .map(ToString::to_string)
+        .collect();
+    assert_eq!(errors.len(), 2, "{errors:?}");
+    assert!(
+        errors[0].contains("production.ignore: '!scripts/keep/**'")
+            && errors[0].contains("negated pattern"),
+        "{errors:?}"
+    );
+    assert!(
+        errors[1].contains("production.ignore: './scripts/**'")
+            && errors[1].contains("'scripts/**'"),
+        "{errors:?}"
+    );
+}
+
+#[test]
 fn validate_user_globs_rejects_invalid_ignore_dependencies_glob() {
     let config = FallowConfig {
         ignore_dependencies: vec![

@@ -1,9 +1,7 @@
 use serde_json::{Map, Value};
 
 use super::knip_regex::{knip_regex_source, regex_to_exact_glob};
-use super::knip_scoped::{
-    KnipScope, PRODUCTION_MARKER, append_unique, plugin_section_warning, project_warning,
-};
+use super::knip_scoped::{KnipScope, PRODUCTION_MARKER, append_unique, plugin_section_warning};
 use super::knip_tables::{
     KNIP_MIGRATED_FIELDS, KNIP_NAMESPACE_ISSUE_TYPES, KNIP_PLUGIN_KEYS, KNIP_RULE_MAP,
     KNIP_UNMAPPABLE_FIELDS, KNIP_UNMAPPABLE_ISSUE_TYPES, KNIP_UNSUPPORTED_PLUGIN_KEYS,
@@ -382,12 +380,7 @@ pub(super) fn migrate_ignore_exports_used_in_file(
 /// Warn about knip fields that have no fallow equivalent.
 pub(super) fn warn_unmappable_fields(obj: &JsonMap, warnings: &mut Vec<MigrationWarning>) {
     for (field, message, suggestion) in KNIP_UNMAPPABLE_FIELDS {
-        if *field == "project"
-            && let Some(value) = obj.get(*field)
-            && let Some(warning) = project_warning(value, &KnipScope::root())
-        {
-            warnings.push(warning);
-        } else if obj.contains_key(*field) {
+        if obj.contains_key(*field) {
             warnings.push(MigrationWarning {
                 source: "knip",
                 field: (*field).to_string(),
@@ -748,14 +741,13 @@ mod tests {
 
     #[test]
     fn warn_unmappable_fields_detects_known_fields() {
-        let obj: JsonMap =
-            serde_json::from_str(r#"{"project": ["src/**"], "compilers": {}}"#).unwrap();
+        let obj: JsonMap = serde_json::from_str(r#"{"paths": {}, "compilers": {}}"#).unwrap();
         let mut warnings = Vec::new();
         warn_unmappable_fields(&obj, &mut warnings);
 
         assert_eq!(warnings.len(), 2);
         let fields: Vec<&str> = warnings.iter().map(|w| w.field.as_str()).collect();
-        assert!(fields.contains(&"project"));
+        assert!(fields.contains(&"paths"));
         assert!(fields.contains(&"compilers"));
     }
 
@@ -780,7 +772,7 @@ mod tests {
     #[test]
     fn warn_unmappable_fields_suggestion_presence() {
         let obj: JsonMap =
-            serde_json::from_str(r#"{"ignoreFiles": ["x.ts"], "project": ["src"]}"#).unwrap();
+            serde_json::from_str(r#"{"ignoreFiles": ["x.ts"], "paths": {}}"#).unwrap();
         let mut warnings = Vec::new();
         warn_unmappable_fields(&obj, &mut warnings);
 
@@ -792,8 +784,8 @@ mod tests {
         assert!(!suggestion.contains("ignorePatterns"));
         assert!(!suggestion.contains("ignoreFindings"));
 
-        let project_warning = warnings.iter().find(|w| w.field == "project").unwrap();
-        assert!(project_warning.suggestion.is_none());
+        let paths_warning = warnings.iter().find(|w| w.field == "paths").unwrap();
+        assert!(paths_warning.suggestion.is_none());
     }
 
     fn concrete_suppression_kind(suggestion: &str) -> Option<&str> {

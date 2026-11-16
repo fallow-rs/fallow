@@ -510,7 +510,7 @@ pub struct FallowConfig {
     #[serde(default)]
     pub resolve: ResolveConfig,
 
-    /// Enables production mode, which excludes test/spec/story/dev files from discovery and forces `unused-dev-dependencies` and `unused-optional-dependencies` to `off`. Accepts a boolean (default false) applied to all analyses, or a per-analysis object `{ deadCode?, health?, dupes? }` (each boolean, default false) that scopes production mode to individual analyses in combined `fallow` and `fallow audit`. Set it to analyze only shipped code; the `--production`/`--no-production` and `--production-{dead-code,health,dupes}` CLI flags and `FALLOW_PRODUCTION*` env vars override this value (CLI flags win, then per-analysis env, then global env, then config).
+    /// Enables production mode, which excludes test/spec/story/dev files from discovery and forces `unused-dev-dependencies` and `unused-optional-dependencies` to `off`. Accepts a boolean (default false) applied to all analyses, or a per-analysis object `{ deadCode?, health?, dupes?, ignore? }` that scopes production mode to individual analyses in combined `fallow` and `fallow audit` (each analysis key a boolean, default false). The object key `ignore` is a glob array of extra paths that discovery drops in production mode only. Set it to analyze only shipped code; the `--production`/`--no-production` and `--production-{dead-code,health,dupes}` CLI flags and `FALLOW_PRODUCTION*` env vars override this value (CLI flags win, then per-analysis env, then global env, then config).
     #[serde(default)]
     pub production: ProductionConfig,
 
@@ -679,13 +679,13 @@ pub enum ProductionAnalysis {
 
 /// Value of the `production` config key: excludes test/spec/story/dev files
 /// from discovery, either globally or per analysis family.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum ProductionConfig {
     /// Boolean form applying to every analysis. The default is `false`.
     Global(bool),
-    /// Object form (`{ deadCode?, health?, dupes? }`) scoping production mode
-    /// per analysis family.
+    /// Object form (`{ deadCode?, health?, dupes?, ignore? }`) scoping
+    /// production mode per analysis family.
     PerAnalysis(PerAnalysisProductionConfig),
 }
 
@@ -745,12 +745,20 @@ impl Not for ProductionConfig {
     }
 }
 
+impl Not for &ProductionConfig {
+    type Output = bool;
+
+    fn not(self) -> Self::Output {
+        !self.any_enabled()
+    }
+}
+
 impl ProductionConfig {
     /// Whether production mode applies to `analysis` under this config.
     #[must_use]
-    pub const fn for_analysis(self, analysis: ProductionAnalysis) -> bool {
+    pub const fn for_analysis(&self, analysis: ProductionAnalysis) -> bool {
         match self {
-            Self::Global(value) => value,
+            Self::Global(value) => *value,
             Self::PerAnalysis(config) => match analysis {
                 ProductionAnalysis::DeadCode => config.dead_code,
                 ProductionAnalysis::Health => config.health,
@@ -759,29 +767,55 @@ impl ProductionConfig {
         }
     }
 
-    /// The boolean form's value; `false` for the per-analysis form, which has
-    /// no global toggle.
+    /// The boolean form's value. The per-analysis form counts as global
+    /// production mode only when it turns on every analysis family.
     #[must_use]
-    pub const fn global(self) -> bool {
+    pub const fn global(&self) -> bool {
         match self {
-            Self::Global(value) => value,
-            Self::PerAnalysis(_) => false,
+            Self::Global(value) => *value,
+            Self::PerAnalysis(config) => config.dead_code && config.health && config.dupes,
         }
     }
 
     /// Whether production mode is enabled for at least one analysis family.
     #[must_use]
-    pub const fn any_enabled(self) -> bool {
+    pub const fn any_enabled(&self) -> bool {
         match self {
-            Self::Global(value) => value,
+            Self::Global(value) => *value,
             Self::PerAnalysis(config) => config.dead_code || config.health || config.dupes,
         }
+    }
+
+    /// The `ignore` globs of the object form. The boolean form has none.
+    #[must_use]
+    pub fn ignore(&self) -> &[String] {
+        match self {
+            Self::Global(_) => &[],
+            Self::PerAnalysis(config) => &config.ignore,
+        }
+    }
+
+    /// The config of one run, with production mode set to `enabled` for every
+    /// analysis family. The `ignore` globs stay, so a run in production mode
+    /// still drops them when a CLI flag or one analysis selects the mode.
+    #[must_use]
+    pub fn for_run(&self, enabled: bool) -> Self {
+        let ignore = self.ignore();
+        if ignore.is_empty() {
+            return Self::Global(enabled);
+        }
+        Self::PerAnalysis(PerAnalysisProductionConfig {
+            dead_code: enabled,
+            health: enabled,
+            dupes: enabled,
+            ignore: ignore.to_vec(),
+        })
     }
 }
 
 /// Object form of the `production` config key, scoping production mode to
 /// individual analysis families in combined `fallow` and `fallow audit`.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "camelCase")]
 pub struct PerAnalysisProductionConfig {
     /// When `production` is a per-analysis object, enables production mode for dead-code analysis only (boolean, default false): unused-files/exports/dependencies detection excludes test/spec/story/dev files and forces `unused-dev-dependencies`/`unused-optional-dependencies` to `off`, while health and dupes stay on the full tree. Set it to scope production analysis to dead code independently.
@@ -790,6 +824,9 @@ pub struct PerAnalysisProductionConfig {
     pub health: bool,
     /// When `production` is a per-analysis object, enables production mode for duplication analysis only (boolean, default false), so clone detection runs on shipped code only (test/spec/story/dev files excluded) while dead-code and health stay on the full tree. Set it to scope production analysis to dupes independently.
     pub dupes: bool,
+    /// When `production` is a per-analysis object, an array of project-root-relative glob patterns for paths that discovery drops in production mode only, in addition to the built-in test/spec/story/dev patterns (default empty). The default run keeps these paths. The globs apply to each analysis that runs in production mode, also when the `--production` flag or a `FALLOW_PRODUCTION*` env var selects the mode. Set it for tooling, CI scripts, seeds and test harnesses that never ship (e.g. `["scripts/**"]`). A single `*` stays within one path segment; use `**` to match across directories.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ignore: Vec<String>,
 }
 
 /// The `audit` config section: in-repo defaults for `fallow audit`, each
@@ -1182,6 +1219,48 @@ mod tests {
         assert!(!config.production.for_analysis(ProductionAnalysis::DeadCode));
         assert!(config.production.for_analysis(ProductionAnalysis::Health));
         assert!(!config.production.for_analysis(ProductionAnalysis::Dupes));
+    }
+
+    #[test]
+    fn deserialize_json_production_ignore() {
+        let config: FallowConfig =
+            serde_json::from_str(r#"{"production": {"deadCode": true, "ignore": ["scripts/**"]}}"#)
+                .unwrap();
+        assert!(config.production.for_analysis(ProductionAnalysis::DeadCode));
+        assert_eq!(config.production.ignore(), ["scripts/**".to_string()]);
+        assert!(
+            ProductionConfig::Global(true).ignore().is_empty(),
+            "the boolean form has no ignore globs"
+        );
+    }
+
+    #[test]
+    fn production_for_run_keeps_ignore_globs() {
+        let config: FallowConfig =
+            serde_json::from_str(r#"{"production": {"ignore": ["scripts/**"]}}"#).unwrap();
+        let on = config.production.for_run(true);
+        assert!(on.global());
+        assert_eq!(on.ignore(), ["scripts/**".to_string()]);
+        let off = config.production.for_run(false);
+        assert!(!off.any_enabled());
+        assert_eq!(off.ignore(), ["scripts/**".to_string()]);
+        assert_eq!(
+            ProductionConfig::Global(false).for_run(true),
+            ProductionConfig::Global(true),
+            "a config without ignore globs keeps the boolean form"
+        );
+    }
+
+    #[test]
+    fn production_global_needs_every_analysis_in_the_object_form() {
+        let partial: FallowConfig =
+            serde_json::from_str(r#"{"production": {"deadCode": true, "health": true}}"#).unwrap();
+        assert!(!partial.production.global());
+        let all: FallowConfig = serde_json::from_str(
+            r#"{"production": {"deadCode": true, "health": true, "dupes": true}}"#,
+        )
+        .unwrap();
+        assert!(all.production.global());
     }
 
     #[test]

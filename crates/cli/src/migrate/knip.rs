@@ -7,7 +7,7 @@ use super::knip_fields::{
 };
 use super::knip_scoped::{
     KnipScope, WorkspaceMigration, config_marks_production_entry, migrate_entry,
-    migrate_ignore_issues, migrate_workspaces,
+    migrate_ignore_issues, migrate_project, migrate_workspaces,
 };
 #[cfg(test)]
 use super::knip_tables::KNIP_RULE_MAP;
@@ -38,6 +38,10 @@ pub(super) fn migrate_knip(
 
     if let Some(value) = obj.get("ignore") {
         migrate_ignore(value, &root, config, warnings);
+    }
+
+    if let Some(value) = obj.get("project") {
+        migrate_project(value, &root, config, warnings);
     }
 
     if let Some(ignore_deps_val) = obj.get("ignoreDependencies") {
@@ -1490,49 +1494,79 @@ mod tests {
     }
 
     #[test]
-    fn migrate_knip_project_production_exclusions_are_named_in_the_warning() {
+    fn migrate_knip_production_exclusions_convert_a_boolean_production() {
+        let mut config = empty_config();
+        config.insert("production".to_string(), serde_json::json!(true));
+        let mut warnings = Vec::new();
+        migrate_knip(
+            &serde_json::json!({"project": ["src/**", "!scripts/**!"]}),
+            &mut config,
+            &mut warnings,
+        );
+        assert_eq!(
+            config.get("production"),
+            Some(&serde_json::json!({
+                "deadCode": true,
+                "health": true,
+                "dupes": true,
+                "ignore": ["scripts/**"]
+            })),
+            "the boolean form becomes the object form with the same modes"
+        );
+        assert!(
+            warning_for(&warnings, "project")
+                .message
+                .contains("migrated to production.ignore")
+        );
+    }
+
+    #[test]
+    fn migrate_knip_project_production_exclusions_map_to_production_ignore() {
         let knip = serde_json::json!({
-            "project": ["**/*.js!", "!scripts/**!", "!tests/**!", "!legacy/**"],
+            "project": ["**/*.js!", "!scripts/**!", "!tests/**!", "!legacy/**", "!../x/**!"],
             "workspaces": {"apps/web": {"project": ["src/**", "!e2e/**!"]}}
         });
         let mut config = empty_config();
         let mut warnings = Vec::new();
         migrate_knip(&knip, &mut config, &mut warnings);
 
-        let root = warning_for(&warnings, "project");
         assert_eq!(
-            root.message,
-            "production exclusions `!scripts/**!`, `!tests/**!` not migrated; fallow has no production-only exclusion, so `--production` reports unused files and exports in these paths"
+            config.get("production"),
+            Some(&serde_json::json!({
+                "ignore": ["scripts/**", "tests/**", "apps/web/e2e/**"]
+            })),
+            "each production exclusion becomes a production.ignore glob, and the default run keeps the paths"
+        );
+        let project_warnings: Vec<&MigrationWarning> =
+            warnings.iter().filter(|w| w.field == "project").collect();
+        assert_eq!(
+            project_warnings
+                .iter()
+                .map(|w| w.message.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "pattern `!../x/**!` leaves the workspace; not migrated",
+                "Fallow auto-discovers project files; production exclusions `!scripts/**!`, `!tests/**!` migrated to production.ignore",
+            ]
         );
         assert_eq!(
-            root.suggestion.as_deref(),
-            Some(
-                "to hide these findings in every mode, add an overrides entry with files [\"scripts/**\", \"tests/**\"] and rules unused-files and unused-exports set to off"
-            )
-        );
-        let workspace = warning_for(&warnings, "workspaces.apps/web.project");
-        assert_eq!(
-            workspace.message,
-            "production exclusions `!e2e/**!` not migrated; fallow has no production-only exclusion, so `--production` reports unused files and exports in these paths"
-        );
-        assert_eq!(
-            workspace.suggestion.as_deref(),
-            Some(
-                "to hide these findings in every mode, add an overrides entry with files [\"apps/web/e2e/**\"] and rules unused-files and unused-exports set to off"
-            )
+            warning_for(&warnings, "workspaces.apps/web.project").message,
+            "Fallow auto-discovers project files; production exclusions `!e2e/**!` migrated to production.ignore"
         );
 
         // A `project` without a production exclusion keeps the general warning.
+        let mut plain_config = empty_config();
         let mut plain_warnings = Vec::new();
         migrate_knip(
             &serde_json::json!({"project": ["src/**", "!legacy/**"]}),
-            &mut empty_config(),
+            &mut plain_config,
             &mut plain_warnings,
         );
         assert_eq!(
             warning_for(&plain_warnings, "project").message,
             "Fallow auto-discovers project files"
         );
+        assert!(plain_config.get("production").is_none());
     }
 
     #[test]

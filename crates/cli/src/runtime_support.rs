@@ -328,7 +328,7 @@ pub fn load_config_for_analysis(
             let production = options
                 .production_override
                 .unwrap_or_else(|| config.production.for_analysis(analysis));
-            config.production = production.into();
+            config.production = config.production.for_run(production);
             config
         }
         None => FallowConfig {

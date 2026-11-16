@@ -621,6 +621,45 @@ mod tests {
         );
     }
 
+    /// The editor session loads the config with `config_for_project`, so the
+    /// `production.ignore` globs must reach discovery there too (issue #4622).
+    #[test]
+    fn editor_session_applies_production_ignore() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path();
+        std::fs::create_dir_all(root.join("src")).expect("src dir");
+        std::fs::create_dir_all(root.join("scripts")).expect("scripts dir");
+        std::fs::write(root.join("src/index.ts"), "export const a = 1;\n").expect("index");
+        std::fs::write(root.join("scripts/seed.ts"), "export const s = 1;\n").expect("seed");
+        std::fs::write(
+            root.join(".fallowrc.json"),
+            r#"{ "production": { "deadCode": true, "ignore": ["scripts/**"] } }"#,
+        )
+        .expect("config");
+
+        let session = AnalysisSession::load_with_config_options(
+            root,
+            None,
+            fallow_config::ConfigLoadOptions::default(),
+            |_| {},
+        )
+        .expect("session");
+        let files: Vec<String> = session
+            .files()
+            .iter()
+            .map(|file| file.path.to_string_lossy().replace('\\', "/"))
+            .collect();
+
+        assert!(
+            files.iter().any(|file| file.ends_with("/src/index.ts")),
+            "{files:?}"
+        );
+        assert!(
+            !files.iter().any(|file| file.ends_with("/scripts/seed.ts")),
+            "production.ignore drops scripts/ in the editor session: {files:?}"
+        );
+    }
+
     #[test]
     fn analysis_session_returns_retained_artifacts() {
         let temp = tempfile::tempdir().expect("tempdir");
