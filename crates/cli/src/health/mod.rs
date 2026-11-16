@@ -443,6 +443,7 @@ pub fn run_health(
                         require,
                         quiet: opts.quiet,
                         output: opts.output,
+                        refinable_lowered: false,
                     },
                 ) {
                     Ok(meta) => degraded_meta = Some(meta),

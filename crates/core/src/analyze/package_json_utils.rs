@@ -1,5 +1,8 @@
 use std::path::Path;
 
+use fallow_config::{PackageJson, ResolvedConfig};
+use rustc_hash::FxHashSet;
+
 /// Find the 1-based line number of a dependency key in a package.json file.
 ///
 /// Searches the raw file content for `"<package_name>"` followed by `:` on the
@@ -56,6 +59,32 @@ pub fn find_dep_line_in_json(content: &str, package_name: &str) -> u32 {
 /// Read a package.json file's raw text for line-number scanning.
 pub fn read_pkg_json_content(pkg_path: &Path) -> Option<String> {
     std::fs::read_to_string(pkg_path).ok()
+}
+
+/// Collect every package name declared across the root `package.json` and each
+/// workspace `package.json`. This is the dependency universe the plugin system
+/// activates on, reused by the framework-scoped security catalogue rows (#861) to
+/// gate a row on the active framework. Missing or malformed manifests contribute
+/// nothing (a framework row simply stays inert), matching the conservative
+/// false-negatives-over-false-positives posture.
+pub(super) fn collect_declared_dependency_names(
+    config: &ResolvedConfig,
+    root_pkg: Option<&PackageJson>,
+    workspaces: &[fallow_config::WorkspaceInfo],
+) -> FxHashSet<String> {
+    let mut deps: FxHashSet<String> = FxHashSet::default();
+    if let Some(pkg) = root_pkg {
+        deps.extend(pkg.all_dependency_names());
+    }
+    for ws in workspaces {
+        if ws.root == config.root {
+            continue; // already covered by root_pkg
+        }
+        if let Some(pkg) = fallow_config::load_dir_package_json(&ws.root) {
+            deps.extend(pkg.all_dependency_names());
+        }
+    }
+    deps
 }
 
 #[cfg(test)]

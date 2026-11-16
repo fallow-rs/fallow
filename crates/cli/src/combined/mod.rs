@@ -442,6 +442,7 @@ fn run_combined_health(
                             require: resolved.require,
                             quiet: opts.quiet,
                             output: opts.output,
+                            refinable_lowered: false,
                         },
                     )?);
                     None
@@ -559,6 +560,7 @@ fn attach_combined_type_coupling(
                 require: check.config.type_aware.require,
                 quiet: opts.quiet,
                 output: opts.output,
+                refinable_lowered: false,
             },
         )?,
     };

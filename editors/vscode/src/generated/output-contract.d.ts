@@ -689,6 +689,22 @@ kind: "rule-packs-not-configured"
 } | {
 kind: "client-server-leak-no-client-roots"
 } | {
+kind: "production-excluded-file-imported"
+/**
+ * The built-in production pattern that matched, verbatim.
+ */
+pattern: string
+/**
+ * Excluded files that this pattern matched and that a production
+ * file imports. Exact.
+ */
+file_count: number
+/**
+ * The first excluded files in path order, project-root-relative
+ * with forward slashes. Capped at five entries.
+ */
+files: string[]
+} | {
 kind: "excluded-by-default-ignore"
 /**
  * The built-in glob that matched, verbatim (for example
@@ -2104,7 +2120,7 @@ diff_risk_introduced: number
  * The key set is OPEN. A name that a consumer does not recognize means "some
  * gate", not an error.
  *
- * The names that this build can emit are `error-severity-findings`, `regression`, `stale-baseline`, `baseline-growth`, `duplication-threshold`, `duplication-findings`, `health-min-score`, `health-min-severity`, `health-findings`, `health-coverage-gaps`, `health-runtime-coverage`, `security`, `security-advisory`, `audit-verdict`, `type-aware-require`, `parse-error` and `mutation-min-score`. `GateName` describes each name and the default entries of each command.
+ * The names that this build can emit are `error-severity-findings`, `regression`, `stale-baseline`, `baseline-growth`, `duplication-threshold`, `duplication-findings`, `health-min-score`, `health-min-severity`, `health-findings`, `health-coverage-gaps`, `health-runtime-coverage`, `security`, `security-advisory`, `audit-verdict`, `type-aware-require`, `type-aware-fallback`, `parse-error` and `mutation-min-score`. `GateName` describes each name and the default entries of each command.
  */
 export interface GateOutcomes {
 [k: string]: GateOutcome

@@ -29,6 +29,7 @@ mod package_manager;
 mod plugin_slices;
 mod policy;
 mod predicates;
+mod production_excluded_imports;
 mod production_only_suppressions;
 mod prop_drilling;
 mod re_export_cycles;
@@ -685,32 +686,6 @@ fn run_export_usages_collector(
     }
 }
 
-/// Collect every package name declared across the root `package.json` and each
-/// workspace `package.json`. This is the dependency universe the plugin system
-/// activates on, reused by the framework-scoped security catalogue rows (#861) to
-/// gate a row on the active framework. Missing or malformed manifests contribute
-/// nothing (a framework row simply stays inert), matching the conservative
-/// false-negatives-over-false-positives posture.
-fn collect_declared_dependency_names(
-    config: &ResolvedConfig,
-    root_pkg: Option<&PackageJson>,
-    workspaces: &[fallow_config::WorkspaceInfo],
-) -> FxHashSet<String> {
-    let mut deps: FxHashSet<String> = FxHashSet::default();
-    if let Some(pkg) = root_pkg {
-        deps.extend(pkg.all_dependency_names());
-    }
-    for ws in workspaces {
-        if ws.root == config.root {
-            continue; // already covered by root_pkg
-        }
-        if let Some(pkg) = fallow_config::load_dir_package_json(&ws.root) {
-            deps.extend(pkg.all_dependency_names());
-        }
-    }
-    deps
-}
-
 struct DeadCodeRunContext<'a> {
     suppressions: SuppressionContext<'a>,
     line_offsets_by_file: LineOffsetsMap<'a>,
@@ -735,7 +710,8 @@ fn build_dead_code_run_context<'a>(
     let pkg = fallow_config::load_dir_package_json(&config.root);
     let public_api_entry_points =
         public_api_package_entry_points(graph, config, pkg.as_ref(), workspaces);
-    let declared_deps = collect_declared_dependency_names(config, pkg.as_ref(), workspaces);
+    let declared_deps =
+        package_json_utils::collect_declared_dependency_names(config, pkg.as_ref(), workspaces);
 
     DeadCodeRunContext {
         suppressions,
@@ -773,6 +749,10 @@ pub(crate) fn find_dead_code_full(
     // describe this pass only. `ignoreFindings` is consulted by the engine
     // right after this pass, so this is its start as well.
     config.begin_dead_code_pass(workspaces);
+    fallow_config::record_workspace_diagnostics(
+        &config.root,
+        production_excluded_imports::diagnostics(config, resolved_modules, workspaces, excluded),
+    );
 
     let run_context = build_dead_code_run_context(graph, config, workspaces, modules);
     let class_member_rules = ClassMemberRules::new(config, plugin_result);

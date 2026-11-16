@@ -131,6 +131,14 @@ pub const fn stale_baseline_outcome(
     ))
 }
 
+/// The `type-aware-fallback` entry: present when the type-aware pass was
+/// requested and no sidecar was found. The run then reports the findings that
+/// the pass can disprove at `warn`, so they stand down from the findings gate.
+#[must_use]
+pub fn type_aware_fallback_outcome(sidecar_missing: bool) -> Option<GateOutcome> {
+    sidecar_missing.then(|| GateOutcome::new(GateStatus::Skipped, false))
+}
+
 /// The type-aware completeness gate's outcome, `None` unless the `complete`
 /// policy was requested.
 pub fn type_aware_outcome(
@@ -417,6 +425,8 @@ pub struct CheckGateInputs<'a> {
     pub fail_on_stale_baseline: bool,
     pub type_aware_require: fallow_config::TypeAwareRequire,
     pub type_aware_meta: Option<&'a fallow_types::envelope::TypeAwareMeta>,
+    /// No type-aware sidecar was found. See [`type_aware_fallback_outcome`].
+    pub type_aware_sidecar_missing: bool,
     /// The `parse-error` gate, when it is armed. See [`parse_error_outcome`].
     pub parse_error: Option<GateOutcome>,
 }
@@ -440,6 +450,10 @@ pub fn check_gate_outcomes(input: &CheckGateInputs<'_>) -> Option<GateOutcomes> 
     gates.insert_if(
         GateName::TypeAwareRequire,
         type_aware_outcome(input.type_aware_require, input.type_aware_meta),
+    );
+    gates.insert_if(
+        GateName::TypeAwareFallback,
+        type_aware_fallback_outcome(input.type_aware_sidecar_missing),
     );
     gates.insert_if(GateName::ParseError, input.parse_error.clone());
     gates.insert(
@@ -696,6 +710,7 @@ pub fn audit_gate_outcomes(
     verdict: GateStatus,
     loaded_any_baseline: bool,
     type_aware_meta: Option<&fallow_types::envelope::TypeAwareMeta>,
+    type_aware_sidecar_missing: bool,
     parse_error: Option<GateOutcome>,
 ) -> Option<GateOutcomes> {
     let mut gates = GateOutcomes::new();
@@ -703,6 +718,10 @@ pub fn audit_gate_outcomes(
     gates.insert_if(
         GateName::TypeAwareRequire,
         type_aware_meta_outcome(type_aware_meta),
+    );
+    gates.insert_if(
+        GateName::TypeAwareFallback,
+        type_aware_fallback_outcome(type_aware_sidecar_missing),
     );
     gates.insert_if(GateName::ParseError, parse_error);
     gates.insert_if(
@@ -730,6 +749,9 @@ pub struct CombinedGateInputs<'a> {
     /// The type-aware completeness gate when the run requested it: whether
     /// it failed.
     pub type_aware_failed: Option<bool>,
+    /// No type-aware sidecar was found for the dead-code section. See
+    /// [`type_aware_fallback_outcome`].
+    pub type_aware_sidecar_missing: bool,
     /// The duplication threshold and the measured percentage, when the dupes
     /// section ran.
     pub duplication: Option<(f64, f64)>,
@@ -813,6 +835,10 @@ pub fn combined_gate_outcomes(input: &CombinedGateInputs<'_>) -> Option<GateOutc
             GateOutcome::new(status_of(failed), true),
         );
     }
+    gates.insert_if(
+        GateName::TypeAwareFallback,
+        type_aware_fallback_outcome(input.type_aware_sidecar_missing),
+    );
     gates.insert_if(GateName::ParseError, input.parse_error.clone());
     if let Some((threshold, percentage)) = input.duplication {
         gates.insert_if(
@@ -881,6 +907,7 @@ mod tests {
             fail_on_stale_baseline: false,
             type_aware_require: fallow_config::TypeAwareRequire::BestEffort,
             type_aware_meta: None,
+            type_aware_sidecar_missing: false,
             parse_error: None,
         })
         .expect("the default exit rule is always published");
@@ -905,6 +932,7 @@ mod tests {
             fail_on_stale_baseline: false,
             type_aware_require: fallow_config::TypeAwareRequire::BestEffort,
             type_aware_meta: None,
+            type_aware_sidecar_missing: false,
             parse_error: None,
         })
         .expect("the regression gate armed the object");
@@ -1163,6 +1191,7 @@ mod tests {
             baselines: [None, None, None],
             fail_on_stale_baseline: false,
             type_aware_failed: None,
+            type_aware_sidecar_missing: false,
             duplication: Some((1.0, 40.0)),
             clone_groups: Some(3),
             error_findings: Some(1),

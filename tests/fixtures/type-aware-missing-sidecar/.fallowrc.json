@@ -1,0 +1,3 @@
+{
+  "typeAware": { "enabled": true, "projects": ["tsconfig.json"] }
+}

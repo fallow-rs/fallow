@@ -336,6 +336,28 @@ fn handle_impact_closure_trace(
     }
 }
 
+/// Write the `--sarif-file` report when the run requested one. See
+/// [`write_sarif_file`].
+pub fn write_requested_sarif_file(
+    opts: &super::CheckOptions<'_>,
+    config: &ResolvedConfig,
+    results: &fallow_types::results::AnalysisResults,
+    type_aware: Option<&fallow_types::envelope::TypeAwareMeta>,
+    workspace_diagnostics: &[fallow_config::WorkspaceDiagnostic],
+) {
+    let Some(sarif_path) = opts.sarif_file else {
+        return;
+    };
+    write_sarif_file(&SarifFileInput {
+        results,
+        config,
+        sarif_path,
+        quiet: opts.quiet,
+        type_aware,
+        workspace_diagnostics,
+    });
+}
+
 /// What `--sarif-file` writes, and where.
 pub struct SarifFileInput<'a> {
     pub results: &'a fallow_types::results::AnalysisResults,
@@ -630,6 +652,7 @@ mod tests {
             dynamically_loaded: vec![],
             markup_extensions: vec![],
             overrides: vec![],
+            semantic_refinable_capped: false,
             workspace_changed_since: std::collections::BTreeMap::default(),
             workspace_patterns: Vec::new(),
             regression: None,

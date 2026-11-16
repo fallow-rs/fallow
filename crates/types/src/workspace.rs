@@ -23,8 +23,12 @@ use crate::serde_path;
 
 #[path = "workspace_config_entry.rs"]
 mod config_entry;
+#[path = "workspace_health_text.rs"]
+mod health_text;
 #[path = "workspace_plugin_text.rs"]
 mod plugin_text;
+#[path = "workspace_production_text.rs"]
+mod production_text;
 
 pub use config_entry::{OVERRIDE_REASON_BASE_RULE_OFF, OVERRIDE_REASON_PROJECT_LEVEL};
 
@@ -338,6 +342,26 @@ pub enum WorkspaceDiagnosticKind {
     /// `off` does not report it. `fallow security` raises a top-level `off`
     /// to `warn` before the pass, so that command always reports it.
     ClientServerLeakNoClientRoots,
+    /// In production mode, a built-in production pattern (for example
+    /// `**/test/**`) excluded at least one source file that a production file
+    /// imports (issue #4498). Fallow does not analyze an excluded file, so an
+    /// export or a parameter that only this file uses can show up in a
+    /// finding.
+    ///
+    /// One entry per pattern. `path` is the first excluded file in path
+    /// order. The dead-code pass records the entry from the resolved imports
+    /// of the analyzed files. It reads no excluded file. The production
+    /// patterns do not change.
+    ProductionExcludedFileImported {
+        /// The built-in production pattern that matched, verbatim.
+        pattern: String,
+        /// Excluded files that this pattern matched and that a production
+        /// file imports. Exact.
+        file_count: u32,
+        /// The first excluded files in path order, project-root-relative
+        /// with forward slashes. Capped at five entries.
+        files: Vec<String>,
+    },
     /// One of fallow's built-in discovery ignore patterns (`**/dist/**`,
     /// `**/build/**`, `**/coverage/**`, and the four minified-bundle globs)
     /// removed at least one candidate source file from this walk. The files
@@ -734,6 +758,7 @@ impl WorkspaceDiagnosticKind {
             Self::BoundariesNotConfigured => "boundaries-not-configured",
             Self::RulePacksNotConfigured => "rule-packs-not-configured",
             Self::ClientServerLeakNoClientRoots => "client-server-leak-no-client-roots",
+            Self::ProductionExcludedFileImported { .. } => "production-excluded-file-imported",
             Self::ExcludedByDefaultIgnore { .. } => "excluded-by-default-ignore",
             Self::NoSourceFilesAnalyzed { .. } => "no-source-files-analyzed",
             Self::FileScoresUnavailable { .. } => "file-scores-unavailable",
@@ -835,6 +860,7 @@ impl WorkspaceDiagnosticKind {
             | Self::PluginConfigUnreadable { .. }
             | Self::FlagAgeShallowClone
             | Self::FlagAgeUnavailable { .. }
+            | Self::ProductionExcludedFileImported { .. }
             | Self::BaselineInstallStateMismatch { .. } => true,
         }
     }
@@ -956,6 +982,7 @@ impl WorkspaceDiagnosticKind {
             | Self::BoundariesNotConfigured
             | Self::RulePacksNotConfigured
             | Self::ClientServerLeakNoClientRoots
+            | Self::ProductionExcludedFileImported { .. }
             | Self::ExcludedByDefaultIgnore { .. }
             | Self::NoSourceFilesAnalyzed { .. }
             | Self::FileScoresUnavailable { .. }
@@ -1008,7 +1035,8 @@ impl WorkspaceDiagnosticKind {
             | Self::PnpmWorkspaceOverridesIgnored { .. }
             | Self::BoundariesNotConfigured
             | Self::RulePacksNotConfigured
-            | Self::ClientServerLeakNoClientRoots => true,
+            | Self::ClientServerLeakNoClientRoots
+            | Self::ProductionExcludedFileImported { .. } => true,
             Self::UndeclaredWorkspace
             | Self::MalformedPackageJson { .. }
             | Self::GlobMatchedNoPackageJson { .. }
@@ -1103,6 +1131,7 @@ impl WorkspaceDiagnosticKind {
             | Self::BoundariesNotConfigured
             | Self::RulePacksNotConfigured
             | Self::ClientServerLeakNoClientRoots
+            | Self::ProductionExcludedFileImported { .. }
             | Self::ExcludedByDefaultIgnore { .. }
             | Self::PluginConfigUnreadable { .. }
             | Self::PluginEffectNotModeled { .. }
@@ -1167,6 +1196,7 @@ impl WorkspaceDiagnosticKind {
             | Self::BoundariesNotConfigured
             | Self::RulePacksNotConfigured
             | Self::ClientServerLeakNoClientRoots
+            | Self::ProductionExcludedFileImported { .. }
             | Self::ExcludedByDefaultIgnore { .. }
             | Self::NoSourceFilesAnalyzed { .. }
             | Self::FileScoresUnavailable { .. }
@@ -1722,6 +1752,11 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
              React Router Framework Mode or a Vite SPA."
                 .to_string()
         }
+        WorkspaceDiagnosticKind::ProductionExcludedFileImported {
+            pattern,
+            file_count,
+            files,
+        } => production_text::excluded_import_message(pattern, *file_count, files),
         WorkspaceDiagnosticKind::NoSourceFilesAnalyzed {
             excluded_file_count,
         } => {
@@ -1739,109 +1774,17 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
                 )
             }
         }
-        WorkspaceDiagnosticKind::FileScoresUnavailable { error } => format!(
-            "Could not compute per-file health scores ({error}), so the score list is empty and \
-             the scored-file count is 0 because nothing was measured rather than because the \
-             project has nothing to score. Rerun with --no-cache, or scope the run to a \
-             subdirectory to find the input that fails."
-        ),
-        WorkspaceDiagnosticKind::HotspotsSkipped { cause } => match cause.as_str() {
-            "invalid-since" => "Hotspot analysis was skipped because --since could not be read \
-                 as a time window, so the hotspots, churn and ownership sections report nothing \
-                 rather than zero. Spell it as a duration such as 6m or 90d, or drop it to use \
-                 the default window."
-                .to_owned(),
-            "no-commits" => "Hotspot analysis was skipped because the current branch has no \
-                 commits yet, so the hotspots, churn and ownership sections report nothing \
-                 rather than zero. Commit the project to give churn a history, or pass \
-                 --churn-file with exported change history."
-                .to_owned(),
-            "churn-file-unreadable" => format!(
-                "Hotspot analysis was skipped because the churn file '{display}' could no longer \
-                 be read after it was validated, so the hotspots, churn and ownership sections \
-                 report nothing rather than zero. Make sure nothing rewrites the file while \
-                 fallow runs, and rerun."
-            ),
-            // The original single cause, whose wording predates the token and
-            // is kept byte-identical: a consumer matching on this sentence is
-            // reading the same run it always was.
-            _ => "Hotspot analysis was skipped because no git repository was found at the \
-                  project root, so the hotspots, churn and ownership sections report nothing \
-                  rather than zero. Run fallow inside the repository, or pass --churn-file with \
-                  exported change history."
-                .to_owned(),
-        },
-        WorkspaceDiagnosticKind::ChangeCouplingSkipped { cause } => match cause.as_str() {
-            "shallow-clone" => "Change coupling was not measured because the repository is a \
-                 shallow clone, so no change coupling pairs are reported. Fetch the full \
-                 history with `git fetch --unshallow` to measure it."
-                .to_owned(),
-            _ => "Change coupling found no pairs because the history window has fewer \
-                  analyzed commits than the minimum revisions of one file. Widen the window \
-                  with --since, or lower health.changeCoupling.minRevisions."
-                .to_owned(),
-        },
-        WorkspaceDiagnosticKind::ShallowClone {
-            ownership_requested,
-        } => {
-            let ownership = if *ownership_requested {
-                " Ownership signals are skewed too, because a shallow clone inflates \
-                 single-author dominance."
-            } else {
-                ""
-            };
-            format!(
-                "This is a shallow clone, so churn covers only the fetched history and every \
-                 hotspot figure is incomplete.{ownership} Run git fetch --unshallow for the full \
-                 history."
-            )
+        WorkspaceDiagnosticKind::FileScoresUnavailable { .. }
+        | WorkspaceDiagnosticKind::HotspotsSkipped { .. }
+        | WorkspaceDiagnosticKind::ChangeCouplingSkipped { .. }
+        | WorkspaceDiagnosticKind::ShallowClone { .. }
+        | WorkspaceDiagnosticKind::UnpinnedClock
+        | WorkspaceDiagnosticKind::OwnershipUnavailable { .. }
+        | WorkspaceDiagnosticKind::TrendSnapshotUnreadable { .. }
+        | WorkspaceDiagnosticKind::TrendGroupBaselineUnavailable { .. }
+        | WorkspaceDiagnosticKind::CoverageAutoDetected => {
+            health_text::health_stage_message(&display, kind)
         }
-        WorkspaceDiagnosticKind::UnpinnedClock => {
-            "No commit timestamp was available, so churn recency and ownership staleness were \
-             measured against the wall clock and drift between runs over the same commit. Set \
-             FALLOW_CLOCK_EPOCH to pin the run clock."
-                .to_owned()
-        }
-        WorkspaceDiagnosticKind::OwnershipUnavailable { cause, error } => {
-            if cause == "codeowners-parse-failed" {
-                format!(
-                    "Ownership signals are degraded: CODEOWNERS could not be parsed ({error}), \
-                     so hotspot entries carry no declared owner. Fix the CODEOWNERS syntax, or \
-                     drop --ownership for this run."
-                )
-            } else {
-                format!(
-                    "Ownership signals are degraded: health.ownership.botPatterns contains an \
-                     invalid glob ({error}), so no author is classified as a bot and bot commits \
-                     count towards ownership. Fix the pattern, or remove it from the config."
-                )
-            }
-        }
-        WorkspaceDiagnosticKind::TrendSnapshotUnreadable { error } => format!(
-            "Skipped health snapshot '{display}' ({error}), so the trend is computed over fewer \
-             snapshots than this project has on disk. Delete the unreadable file, or rewrite it \
-             with fallow health --save-snapshot."
-        ),
-        WorkspaceDiagnosticKind::TrendGroupBaselineUnavailable { cause } => {
-            if cause == "grouped-by-mismatch" {
-                format!(
-                    "Health snapshot '{display}' was saved with a different --group-by mode, so \
-                     the groups have no trend. The project trend is not affected. Save a new \
-                     snapshot with the same --group-by mode."
-                )
-            } else {
-                format!(
-                    "Health snapshot '{display}' holds no group data, so the groups have no \
-                     trend. The project trend is not affected. Save a new snapshot with \
-                     --group-by and --save-snapshot."
-                )
-            }
-        }
-        WorkspaceDiagnosticKind::CoverageAutoDetected => format!(
-            "Coverage was auto-detected at '{display}' rather than passed with --coverage, so the \
-             CRAP scores depend on whichever coverage file is on disk at run time. Pass --coverage \
-             '{display}' explicitly for reproducible scores."
-        ),
         WorkspaceDiagnosticKind::FlagAgeShallowClone => {
             "This is a shallow clone, so the flag retirement report gives no flag age. Run git \
              fetch --unshallow for the full history, or pass --flag-age off."

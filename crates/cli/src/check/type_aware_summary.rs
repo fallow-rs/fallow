@@ -1,5 +1,29 @@
 //! The human status line of the type-aware pass.
 
+use fallow_config::OutputFormat;
+
+pub(super) fn print_type_aware_summary(result: &super::CheckResult) {
+    if !matches!(result.config.output, OutputFormat::Human) {
+        return;
+    }
+    if let Some(meta) = &result.type_aware_meta {
+        // A pass that never ran has nothing to summarize: every count is zero
+        // because no query happened, not because the project is clean. The
+        // degradation warning already said what happened, so a second line of
+        // zeroes would only dispute it.
+        if !meta.executed && meta.warning_count > 0 {
+            return;
+        }
+        println!(
+            "{}",
+            crate::report::human_status_line(
+                crate::report::type_aware_meta_status(meta),
+                format_type_aware_summary(meta)
+            )
+        );
+    }
+}
+
 pub(super) fn format_type_aware_summary(meta: &fallow_types::envelope::TypeAwareMeta) -> String {
     let candidates = count_noun(meta.candidate_count, "candidate", "candidates");
     let confirmed = count_noun(meta.confirmed_used_count, "confirmed use", "confirmed uses");

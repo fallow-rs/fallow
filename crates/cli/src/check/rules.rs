@@ -9,16 +9,19 @@ pub fn apply_rules(results: &mut fallow_types::results::AnalysisResults, config:
 }
 
 pub use fallow_engine::error_severity::{
-    count_error_severity_issues, promote_policy_finding_warns, promote_warns_to_errors,
+    count_error_severity_issues, promote_policy_finding_warns, strict_rules,
 };
 
 /// Promote every per-finding `warn` severity to `error` for a strict
 /// (fail-on-issues) run: the policy severities and the gate severity that the
 /// CI formats read. Run it again after each rule pass, because a rule pass
 /// writes the gate severities from the config again.
-pub fn promote_finding_warns(results: &mut fallow_types::results::AnalysisResults) {
+pub fn promote_finding_warns(
+    results: &mut fallow_types::results::AnalysisResults,
+    config: &ResolvedConfig,
+) {
     promote_policy_finding_warns(results);
-    fallow_engine::dead_code::promote_effective_warns(results);
+    fallow_engine::dead_code::promote_effective_warns(results, config);
 }
 
 #[cfg(test)]

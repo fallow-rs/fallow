@@ -756,6 +756,8 @@ mod issue_4313_function_array_return_element_member;
 mod issue_4351_nested_function_this_member;
 #[path = "integration_test/issue_4352_for_of_element_binding_scope.rs"]
 mod issue_4352_for_of_element_binding_scope;
+#[path = "integration_test/issue_4498_production_excluded_import.rs"]
+mod issue_4498_production_excluded_import;
 #[path = "integration_test/issue_4552_method_call_result_local.rs"]
 mod issue_4552_method_call_result_local;
 #[path = "integration_test/issue_4578_enum_member_alias.rs"]
