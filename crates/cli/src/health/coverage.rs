@@ -177,21 +177,6 @@ struct RemappedFnKey {
     loc_end: (u32, u32),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum LocalPackageManager {
-    Npm,
-    Pnpm,
-    Yarn,
-    Bun,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PackageManagerOutput {
-    BinaryPath,
-    BinDir,
-    NodeModulesDir,
-}
-
 impl RemappedFunction {
     fn key(&self) -> RemappedFnKey {
         RemappedFnKey {
@@ -389,32 +374,50 @@ pub fn discover_sidecar(root: Option<&Path>) -> Result<PathBuf, String> {
         ));
     }
 
-    if let Some(root) = root
-        && let Some(path) = find_platform_package_sidecar(root)
-    {
-        return Ok(path);
-    }
-    if let Some(root) = root
-        && let Some(path) = find_project_local_sidecar(root)
-    {
-        return Ok(path);
-    }
-    if let Some(root) = root
-        && let Some(path) = find_package_manager_sidecar(root)
-    {
-        return Ok(path);
-    }
+    discover_sidecar_in(root, &canonical_sidecar_path(), || {
+        find_on_path("fallow-cov")
+    })
+    .ok_or_else(|| sidecar_missing_message(root))
+}
 
-    let canonical = canonical_sidecar_path();
+/// Resolve the sidecar from fixed install locations only.
+///
+/// Discovery reads the file system and never starts a program. A package
+/// manager reads config from the analyzed root (`.yarnrc` `yarn-path`,
+/// `.yarnrc.yml` `yarnPath` and plugins, `.pnpmfile.cjs`), so starting one
+/// here would run code from that repository before the signature check.
+///
+/// A `node_modules/.bin/fallow-cov` entry is a package-manager wrapper with
+/// no `.sig` file, and the signature check refuses it. Discovery takes it
+/// only when no other location has a sidecar, so that the user sees the
+/// signature error for the file that exists.
+fn discover_sidecar_in(
+    root: Option<&Path>,
+    canonical: &Path,
+    find_on_path: impl FnOnce() -> Option<PathBuf>,
+) -> Option<PathBuf> {
+    let mut unsigned_wrapper = None;
+    if let Some(root) = root {
+        if let Some(path) = find_platform_package_sidecar(root) {
+            return Some(path);
+        }
+        if let Some(path) = find_project_local_sidecar(root) {
+            if signature_path(&path).is_file() {
+                return Some(path);
+            }
+            unsigned_wrapper = Some(path);
+        }
+    }
     if canonical.is_file() {
-        return Ok(canonical);
+        return Some(canonical.to_path_buf());
     }
+    find_on_path().or(unsigned_wrapper)
+}
 
-    if let Some(path) = find_on_path("fallow-cov") {
-        return Ok(path);
-    }
-
-    Err(sidecar_missing_message(root))
+fn signature_path(binary: &Path) -> PathBuf {
+    let mut path = binary.as_os_str().to_os_string();
+    path.push(".sig");
+    PathBuf::from(path)
 }
 
 fn env_non_empty(key: &str) -> Option<String> {
@@ -491,9 +494,21 @@ fn find_platform_package_sidecar(root: &Path) -> Option<PathBuf> {
 
         let node_modules = ancestor.join("node_modules");
         for store_dir in [".bun", ".pnpm"] {
-            if let Some(path) = find_package_store_platform_sidecar(&node_modules, store_dir) {
+            if let Some(path) = find_package_store_platform_sidecar(
+                &node_modules.join(store_dir),
+                "@fallow-cli+fallow-cov-",
+            ) {
                 return Some(path);
             }
+        }
+
+        // Yarn Plug'n'Play has no `node_modules`. It unpacks a package with a
+        // native binary under `.yarn/unplugged/<scope>-<name>-npm-<version>-<hash>/`.
+        if let Some(path) = find_package_store_platform_sidecar(
+            &ancestor.join(".yarn").join("unplugged"),
+            "@fallow-cli-fallow-cov-",
+        ) {
+            return Some(path);
         }
     }
     None
@@ -517,17 +532,19 @@ fn find_scoped_platform_sidecar(fallow_cli_dir: &Path, binary_name: &str) -> Opt
     None
 }
 
-fn find_package_store_platform_sidecar(node_modules: &Path, store_dir: &str) -> Option<PathBuf> {
+/// Find the newest platform sidecar in a package store whose entries hold
+/// `node_modules/@fallow-cli/fallow-cov-<platform>/` (the pnpm and Bun stores,
+/// and the Yarn `unplugged` folder).
+fn find_package_store_platform_sidecar(store: &Path, entry_prefix: &str) -> Option<PathBuf> {
     let binary_name = sidecar_binary_name();
-    let store = node_modules.join(store_dir);
-    let entries = fs::read_dir(&store).ok()?;
+    let entries = fs::read_dir(store).ok()?;
     let mut candidates = Vec::new();
     for entry in entries.flatten() {
         let name = entry.file_name();
         let Some(name_str) = name.to_str() else {
             continue;
         };
-        if !name_str.starts_with("@fallow-cli+fallow-cov-") {
+        if !name_str.starts_with(entry_prefix) {
             continue;
         }
 
@@ -577,116 +594,6 @@ const fn sidecar_binary_name() -> &'static str {
     }
 }
 
-fn find_package_manager_sidecar(root: &Path) -> Option<PathBuf> {
-    detect_package_manager(root).and_then(|package_manager| package_manager.resolve_sidecar(root))
-}
-
-fn detect_package_manager(root: &Path) -> Option<LocalPackageManager> {
-    fallow_config::PackageManager::detect(root).map(|manager| match manager {
-        fallow_config::PackageManager::Npm => LocalPackageManager::Npm,
-        fallow_config::PackageManager::Pnpm => LocalPackageManager::Pnpm,
-        fallow_config::PackageManager::Yarn => LocalPackageManager::Yarn,
-        fallow_config::PackageManager::Bun => LocalPackageManager::Bun,
-    })
-}
-
-impl LocalPackageManager {
-    fn resolve_sidecar(self, root: &Path) -> Option<PathBuf> {
-        match self {
-            Self::Npm => resolve_sidecar_via_command(
-                root,
-                OsStr::new("npm"),
-                &["root"],
-                PackageManagerOutput::NodeModulesDir,
-            ),
-            Self::Pnpm => resolve_sidecar_via_command(
-                root,
-                OsStr::new("pnpm"),
-                &["bin"],
-                PackageManagerOutput::BinDir,
-            ),
-            Self::Yarn => resolve_sidecar_via_command(
-                root,
-                OsStr::new("yarn"),
-                &["bin", "fallow-cov"],
-                PackageManagerOutput::BinaryPath,
-            ),
-            Self::Bun => resolve_sidecar_via_command(
-                root,
-                OsStr::new("bun"),
-                &["pm", "bin"],
-                PackageManagerOutput::BinDir,
-            ),
-        }
-    }
-}
-
-fn resolve_sidecar_via_command(
-    root: &Path,
-    program: &OsStr,
-    args: &[&str],
-    output_kind: PackageManagerOutput,
-) -> Option<PathBuf> {
-    let output = Command::new(program)
-        .args(args)
-        .current_dir(root)
-        .stdin(Stdio::null())
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let stdout = String::from_utf8(output.stdout).ok()?;
-    resolve_sidecar_from_output(root, &stdout, output_kind)
-}
-
-/// Resolve a sidecar path from a package-manager command's captured stdout.
-/// Split out from [`resolve_sidecar_via_command`] so the path-resolution
-/// branches stay testable without spawning a subprocess (the spawn-based tests
-/// flaked under the instrumented coverage CI run).
-fn resolve_sidecar_from_output(
-    root: &Path,
-    stdout: &str,
-    output_kind: PackageManagerOutput,
-) -> Option<PathBuf> {
-    let candidate = stdout
-        .lines()
-        .rev()
-        .map(str::trim)
-        .find(|line| !line.is_empty())?;
-
-    match output_kind {
-        PackageManagerOutput::BinaryPath => {
-            let path = normalize_package_manager_path(root, candidate);
-            path.is_file().then_some(path)
-        }
-        PackageManagerOutput::BinDir => {
-            let dir = normalize_package_manager_path(root, candidate);
-            project_local_sidecar_names()
-                .iter()
-                .map(|binary| dir.join(binary))
-                .find(|candidate| candidate.is_file())
-        }
-        PackageManagerOutput::NodeModulesDir => {
-            let dir = normalize_package_manager_path(root, candidate).join(".bin");
-            project_local_sidecar_names()
-                .iter()
-                .map(|binary| dir.join(binary))
-                .find(|candidate| candidate.is_file())
-        }
-    }
-}
-
-fn normalize_package_manager_path(root: &Path, candidate: &str) -> PathBuf {
-    let path = PathBuf::from(candidate);
-    if path.is_absolute() {
-        path
-    } else {
-        root.join(path)
-    }
-}
-
 fn project_local_sidecar_names() -> &'static [&'static str] {
     if cfg!(windows) {
         &["fallow-cov.cmd", "fallow-cov.exe", "fallow-cov"]
@@ -702,15 +609,19 @@ fn sidecar_missing_message(root: Option<&Path>) -> String {
     ];
     let mut install_example = "npm install --save-dev @fallow-cli/fallow-cov".to_owned();
     if let Some(root) = root {
-        checks.insert(
-            0,
-            root.join("node_modules/.bin/fallow-cov")
-                .display()
-                .to_string(),
+        checks.splice(
+            0..0,
+            [
+                root.join("node_modules/@fallow-cli/fallow-cov-*")
+                    .display()
+                    .to_string(),
+                "the pnpm and Bun stores in node_modules".to_owned(),
+                root.join(".yarn/unplugged").display().to_string(),
+                root.join("node_modules/.bin/fallow-cov")
+                    .display()
+                    .to_string(),
+            ],
         );
-        if let Some(package_manager) = detect_package_manager(root) {
-            checks.insert(1, package_manager.lookup_hint().to_owned());
-        }
         if let Some(manager) = fallow_config::PackageManager::detect(root) {
             install_example = manager.add_dev_command(root, "@fallow-cli/fallow-cov");
         }
@@ -719,17 +630,6 @@ fn sidecar_missing_message(root: Option<&Path>) -> String {
         "Sidecar binary fallow-cov not found. Checked {}. Install with your package manager (for example `{install_example}`) or set FALLOW_COV_BIN.",
         checks.join(", "),
     )
-}
-
-impl LocalPackageManager {
-    const fn lookup_hint(self) -> &'static str {
-        match self {
-            Self::Npm => "`npm root` + `.bin/fallow-cov`",
-            Self::Pnpm => "`pnpm bin`",
-            Self::Yarn => "`yarn bin fallow-cov`",
-            Self::Bun => "`bun pm bin`",
-        }
-    }
 }
 
 /// Construct a protocol [`StaticFunction`] carrying a v2 [`FunctionIdentity`].
@@ -1741,11 +1641,7 @@ fn is_istanbul_coverage_json(value: &serde_json::Value) -> bool {
 /// Phase 2.5 ships to no existing users, so there is no install-base on the
 /// old unsigned path to accommodate.
 fn verify_sidecar_signature(binary: &Path) -> Result<(), String> {
-    let sig_path = {
-        let mut path = binary.as_os_str().to_os_string();
-        path.push(".sig");
-        PathBuf::from(path)
-    };
+    let sig_path = signature_path(binary);
 
     let sig_bytes = fs::read(&sig_path).map_err(|err| {
         format!(
@@ -2318,13 +2214,13 @@ const fn verdict_rank(verdict: RuntimeCoverageVerdict) -> u8 {
 #[cfg(test)]
 mod tests {
     use super::{
-        AccumulatedFunction, BINARY_SIGNING_VERIFY_KEY, InnerIterations, PackageManagerOutput,
-        RemappedFnKey, RemappedFunction, RuntimeCoverageAnalysisInput, StaticFunctionInput,
-        StaticSignalIndex, build_request, build_static_signal_index, convert_response,
-        discover_sidecar, looks_like_istanbul, merge_remapped_functions, path_binary_candidates,
-        prepare_coverage_sources, resolve_original_source_path, resolve_sidecar_from_output,
-        resolve_sidecar_via_command, sidecar_binary_name, static_function, tracking_state_label,
-        verify_sidecar_signature, write_istanbul_coverage_file,
+        AccumulatedFunction, BINARY_SIGNING_VERIFY_KEY, InnerIterations, RemappedFnKey,
+        RemappedFunction, RuntimeCoverageAnalysisInput, StaticFunctionInput, StaticSignalIndex,
+        build_request, build_static_signal_index, convert_response, discover_sidecar,
+        looks_like_istanbul, merge_remapped_functions, path_binary_candidates,
+        prepare_coverage_sources, resolve_original_source_path, sidecar_binary_name,
+        static_function, tracking_state_label, verify_sidecar_signature,
+        write_istanbul_coverage_file,
     };
     use fallow_config::{FallowConfig, OutputFormat};
     use fallow_cov_protocol::{
@@ -2376,7 +2272,10 @@ mod tests {
     #[test]
     fn runtime_coverage_module_has_no_network_code() {
         let full = include_str!("coverage.rs");
-        let analysis_source = full.split("#[cfg(test)]").next().unwrap_or(full);
+        let analysis_source = full
+            .split("#[cfg(test)]\nmod tests {")
+            .next()
+            .unwrap_or(full);
         const FORBIDDEN: &[&str] = &[
             "ureq::",
             "ureq_",
@@ -2397,6 +2296,115 @@ mod tests {
                 "crates/cli/src/health/coverage.rs must not reference `{needle}`; the runtime-coverage analysis path is sealed and cannot make network calls",
             );
         }
+    }
+
+    /// Sidecar discovery runs before the signature check. A program that it
+    /// starts can read config from the analyzed root and run code from that
+    /// repository, so the only spawn in this module is the verified sidecar.
+    #[test]
+    fn runtime_coverage_module_spawns_only_the_verified_sidecar() {
+        let full = include_str!("coverage.rs");
+        let analysis_source = full
+            .split("#[cfg(test)]\nmod tests {")
+            .next()
+            .unwrap_or(full);
+        assert_eq!(
+            analysis_source.matches("Command::new(").count(),
+            1,
+            "crates/cli/src/health/coverage.rs may start only the verified sidecar in `run_sidecar`"
+        );
+        let run_sidecar = analysis_source
+            .split("fn run_sidecar(")
+            .nth(1)
+            .expect("run_sidecar exists");
+        let before_spawn = run_sidecar
+            .split("Command::new(")
+            .next()
+            .expect("run_sidecar spawns the sidecar");
+        assert!(
+            before_spawn.contains("verify_sidecar_signature(sidecar)"),
+            "run_sidecar must verify the signature before it starts the sidecar"
+        );
+        for needle in [".current_dir(", "Command::new(\"", "OsStr::new(\"yarn"] {
+            assert!(
+                !analysis_source.contains(needle),
+                "crates/cli/src/health/coverage.rs must not contain `{needle}`"
+            );
+        }
+    }
+
+    #[test]
+    fn discovers_yarn_unplugged_platform_sidecar() {
+        let root = make_temp_dir("sidecar-yarn-unplugged");
+        let package_dir = root
+            .join(".yarn")
+            .join("unplugged")
+            .join("@fallow-cli-fallow-cov-darwin-arm64-npm-0.4.1-0123456789")
+            .join("node_modules")
+            .join("@fallow-cli")
+            .join("fallow-cov-darwin-arm64");
+        std::fs::create_dir_all(&package_dir)
+            .unwrap_or_else(|err| panic!("failed to create {}: {err}", package_dir.display()));
+        let sidecar = package_dir.join(sidecar_binary_name());
+        std::fs::write(&sidecar, "")
+            .unwrap_or_else(|err| panic!("failed to write {}: {err}", sidecar.display()));
+        let app = root.join("apps").join("web");
+        std::fs::create_dir_all(&app)
+            .unwrap_or_else(|err| panic!("failed to create {}: {err}", app.display()));
+
+        assert_eq!(super::find_platform_package_sidecar(&app), Some(sidecar));
+
+        std::fs::remove_dir_all(&root)
+            .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
+    }
+
+    #[test]
+    fn unsigned_bin_wrapper_yields_to_canonical_and_path_sidecars() {
+        let root = make_temp_dir("sidecar-unsigned-wrapper");
+        let bin_dir = root.join("node_modules").join(".bin");
+        std::fs::create_dir_all(&bin_dir)
+            .unwrap_or_else(|err| panic!("failed to create {}: {err}", bin_dir.display()));
+        let wrapper = bin_dir.join(super::project_local_sidecar_names()[0]);
+        std::fs::write(&wrapper, "")
+            .unwrap_or_else(|err| panic!("failed to write {}: {err}", wrapper.display()));
+        let canonical = root
+            .join("home")
+            .join(".fallow")
+            .join("bin")
+            .join("fallow-cov");
+        let on_path = root.join("path-bin").join("fallow-cov");
+
+        assert_eq!(
+            super::discover_sidecar_in(Some(&root), &canonical, || None),
+            Some(wrapper.clone()),
+            "the unsigned wrapper is the last resort, so the user sees its signature error"
+        );
+        assert_eq!(
+            super::discover_sidecar_in(Some(&root), &canonical, || Some(on_path.clone())),
+            Some(on_path),
+            "a PATH sidecar wins over an unsigned wrapper"
+        );
+
+        std::fs::create_dir_all(canonical.parent().expect("canonical parent"))
+            .unwrap_or_else(|err| panic!("failed to create canonical dir: {err}"));
+        std::fs::write(&canonical, "")
+            .unwrap_or_else(|err| panic!("failed to write {}: {err}", canonical.display()));
+        assert_eq!(
+            super::discover_sidecar_in(Some(&root), &canonical, || None),
+            Some(canonical.clone()),
+            "the canonical sidecar wins over an unsigned wrapper"
+        );
+
+        std::fs::write(super::signature_path(&wrapper), [0_u8; 64])
+            .unwrap_or_else(|err| panic!("failed to write wrapper signature: {err}"));
+        assert_eq!(
+            super::discover_sidecar_in(Some(&root), &canonical, || None),
+            Some(wrapper),
+            "a signed project-local sidecar wins over the canonical sidecar"
+        );
+
+        std::fs::remove_dir_all(&root)
+            .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
     }
 
     #[test]
@@ -2610,6 +2618,8 @@ mod tests {
         };
         std::fs::write(&sidecar, "")
             .unwrap_or_else(|err| panic!("failed to write {}: {err}", sidecar.display()));
+        std::fs::write(super::signature_path(&sidecar), [0_u8; 64])
+            .unwrap_or_else(|err| panic!("failed to write sidecar signature: {err}"));
 
         let resolved = discover_sidecar(Some(&root))
             .unwrap_or_else(|err| panic!("failed to discover local sidecar: {err}"));
@@ -2806,85 +2816,6 @@ mod tests {
     }
 
     #[test]
-    fn detects_package_manager_from_field_before_lockfiles() {
-        let root = make_temp_dir("sidecar-package-manager-field");
-        std::fs::create_dir_all(&root)
-            .unwrap_or_else(|err| panic!("failed to create {}: {err}", root.display()));
-        std::fs::write(
-            root.join("package.json"),
-            r#"{"name":"demo","packageManager":"pnpm@9.15.0"}"#,
-        )
-        .unwrap_or_else(|err| panic!("failed to write package.json: {err}"));
-        std::fs::write(root.join("package-lock.json"), "")
-            .unwrap_or_else(|err| panic!("failed to write package-lock.json: {err}"));
-
-        assert_eq!(
-            super::detect_package_manager(&root),
-            Some(super::LocalPackageManager::Pnpm)
-        );
-
-        std::fs::remove_dir_all(&root)
-            .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
-    }
-
-    #[test]
-    fn detects_package_manager_from_lockfiles() {
-        for (lockfile, expected) in [
-            ("bun.lock", super::LocalPackageManager::Bun),
-            ("pnpm-lock.yaml", super::LocalPackageManager::Pnpm),
-            ("yarn.lock", super::LocalPackageManager::Yarn),
-            ("npm-shrinkwrap.json", super::LocalPackageManager::Npm),
-        ] {
-            let root = make_temp_dir(&format!("sidecar-lockfile-{lockfile}"));
-            std::fs::create_dir_all(&root)
-                .unwrap_or_else(|err| panic!("failed to create {}: {err}", root.display()));
-            std::fs::write(root.join(lockfile), "")
-                .unwrap_or_else(|err| panic!("failed to write {lockfile}: {err}"));
-
-            assert_eq!(super::detect_package_manager(&root), Some(expected));
-
-            std::fs::remove_dir_all(&root)
-                .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
-        }
-    }
-
-    #[test]
-    fn detect_package_manager_ignores_unknown_package_manager_field() {
-        let root = make_temp_dir("sidecar-package-manager-unknown");
-        std::fs::create_dir_all(&root)
-            .unwrap_or_else(|err| panic!("failed to create {}: {err}", root.display()));
-        std::fs::write(
-            root.join("package.json"),
-            r#"{"name":"demo","packageManager":"pnpmish@1.0.0"}"#,
-        )
-        .unwrap_or_else(|err| panic!("failed to write package.json: {err}"));
-
-        assert_eq!(super::detect_package_manager(&root), None);
-
-        std::fs::remove_dir_all(&root)
-            .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
-    }
-
-    #[test]
-    fn detect_package_manager_falls_back_after_invalid_package_json() {
-        let root = make_temp_dir("sidecar-package-manager-invalid");
-        std::fs::create_dir_all(&root)
-            .unwrap_or_else(|err| panic!("failed to create {}: {err}", root.display()));
-        std::fs::write(root.join("package.json"), "{")
-            .unwrap_or_else(|err| panic!("failed to write package.json: {err}"));
-        std::fs::write(root.join("package-lock.json"), "")
-            .unwrap_or_else(|err| panic!("failed to write package-lock.json: {err}"));
-
-        assert_eq!(
-            super::detect_package_manager(&root),
-            Some(super::LocalPackageManager::Npm)
-        );
-
-        std::fs::remove_dir_all(&root)
-            .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
-    }
-
-    #[test]
     fn package_store_sidecar_prefers_highest_version() {
         let root = make_temp_dir("sidecar-store-version");
         let node_modules = root.join("node_modules");
@@ -2906,92 +2837,11 @@ mod tests {
                 .unwrap_or_else(|err| panic!("failed to write sidecar: {err}"));
         }
 
-        let resolved = super::find_package_store_platform_sidecar(&node_modules, ".pnpm")
-            .expect("store sidecar should resolve");
+        let resolved =
+            super::find_package_store_platform_sidecar(&store, "@fallow-cli+fallow-cov-")
+                .expect("store sidecar should resolve");
 
         assert!(resolved.display().to_string().contains("0.1.8"));
-
-        std::fs::remove_dir_all(&root)
-            .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
-    }
-
-    #[test]
-    fn resolves_yarn_sidecar_without_node_modules_bin() {
-        let root = make_temp_dir("sidecar-yarn");
-        let unplugged_dir = root
-            .join(".yarn")
-            .join("unplugged")
-            .join("fallow-cov")
-            .join("node_modules")
-            .join(".bin");
-        std::fs::create_dir_all(&unplugged_dir)
-            .unwrap_or_else(|err| panic!("failed to create {}: {err}", unplugged_dir.display()));
-
-        let sidecar = if cfg!(windows) {
-            unplugged_dir.join("fallow-cov.cmd")
-        } else {
-            unplugged_dir.join("fallow-cov")
-        };
-        std::fs::write(&sidecar, "")
-            .unwrap_or_else(|err| panic!("failed to write {}: {err}", sidecar.display()));
-
-        // `yarn bin fallow-cov` prints the absolute sidecar path on its last
-        // line. Parse that output directly instead of spawning yarn, which
-        // flaked under the instrumented coverage run.
-        let stdout = format!("{}\n", sidecar.display());
-        let resolved =
-            resolve_sidecar_from_output(&root, &stdout, PackageManagerOutput::BinaryPath)
-                .unwrap_or_else(|| panic!("failed to resolve yarn-local sidecar"));
-
-        assert_eq!(resolved, sidecar);
-
-        std::fs::remove_dir_all(&root)
-            .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
-    }
-
-    #[test]
-    fn resolves_npm_sidecar_from_node_modules_root() {
-        let root = make_temp_dir("sidecar-npm");
-        let bin_dir = root.join("custom-node_modules").join(".bin");
-        std::fs::create_dir_all(&bin_dir)
-            .unwrap_or_else(|err| panic!("failed to create {}: {err}", bin_dir.display()));
-
-        let sidecar = if cfg!(windows) {
-            bin_dir.join("fallow-cov.cmd")
-        } else {
-            bin_dir.join("fallow-cov")
-        };
-        std::fs::write(&sidecar, "")
-            .unwrap_or_else(|err| panic!("failed to write {}: {err}", sidecar.display()));
-
-        // `npm root` prints the node_modules dir; NodeModulesDir resolution
-        // appends `.bin` plus the sidecar name. Parse the printed dir directly
-        // instead of spawning npm.
-        let stdout = format!("{}\n", root.join("custom-node_modules").display());
-        let resolved =
-            resolve_sidecar_from_output(&root, &stdout, PackageManagerOutput::NodeModulesDir)
-                .unwrap_or_else(|| panic!("failed to resolve npm-local sidecar"));
-
-        assert_eq!(resolved, sidecar);
-
-        std::fs::remove_dir_all(&root)
-            .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
-    }
-
-    #[test]
-    fn package_manager_sidecar_resolution_ignores_missing_commands() {
-        let root = make_temp_dir("sidecar-missing-command");
-        std::fs::create_dir_all(&root)
-            .unwrap_or_else(|err| panic!("failed to create {}: {err}", root.display()));
-
-        let resolved = resolve_sidecar_via_command(
-            &root,
-            std::ffi::OsStr::new("definitely-not-fallow-cov-manager"),
-            &["bin"],
-            PackageManagerOutput::BinDir,
-        );
-
-        assert_eq!(resolved, None);
 
         std::fs::remove_dir_all(&root)
             .unwrap_or_else(|err| panic!("failed to clean temp dir {}: {err}", root.display()));
@@ -4234,25 +4084,6 @@ mod tests {
     }
 
     #[test]
-    fn normalize_package_manager_path_joins_relative_against_root() {
-        let root = Path::new("/proj");
-        assert_eq!(
-            super::normalize_package_manager_path(root, "node_modules/.bin/fallow-cov"),
-            PathBuf::from("/proj/node_modules/.bin/fallow-cov")
-        );
-        // Absolute candidates are returned unchanged.
-        let abs = if cfg!(windows) {
-            "C:\\tools\\fallow-cov"
-        } else {
-            "/tools/fallow-cov"
-        };
-        assert_eq!(
-            super::normalize_package_manager_path(root, abs),
-            PathBuf::from(abs)
-        );
-    }
-
-    #[test]
     fn project_local_sidecar_names_include_the_bare_binary() {
         let names = super::project_local_sidecar_names();
         assert!(!names.is_empty());
@@ -4267,7 +4098,7 @@ mod tests {
         assert!(generic.contains("npm install --save-dev @fallow-cli/fallow-cov"));
         assert!(generic.contains("FALLOW_COV_BIN"));
 
-        // With a pnpm project root: the node_modules bin path and a pnpm hint.
+        // With a pnpm project root: the node_modules bin path and the pnpm install command.
         let dir = tempfile::tempdir().expect("tempdir");
         std::fs::write(
             dir.path().join("package.json"),
@@ -4279,45 +4110,43 @@ mod tests {
             scoped.contains("node_modules/.bin/fallow-cov"),
             "got: {scoped}"
         );
-        assert!(scoped.contains("pnpm"), "pnpm hint missing: {scoped}");
+        assert!(
+            scoped.contains("pnpm add -D @fallow-cli/fallow-cov"),
+            "pnpm install command missing: {scoped}"
+        );
     }
 
     #[test]
     fn sidecar_missing_message_uses_detected_package_manager_guidance() {
-        for (name, package_json, lockfile, hint, install) in [
+        for (name, package_json, lockfile, install) in [
             (
                 "npm",
                 r#"{"name":"p","packageManager":"npm@10.0.0"}"#,
                 "package-lock.json",
-                "`npm root` + `.bin/fallow-cov`",
                 "npm install --save-dev @fallow-cli/fallow-cov",
             ),
             (
                 "pnpm",
                 r#"{"name":"p","packageManager":"pnpm@9.0.0"}"#,
                 "pnpm-lock.yaml",
-                "`pnpm bin`",
                 "pnpm add -D @fallow-cli/fallow-cov",
             ),
             (
                 "yarn",
                 r#"{"name":"p","packageManager":"yarn@4.0.0"}"#,
                 "yarn.lock",
-                "`yarn bin fallow-cov`",
                 "yarn add -D @fallow-cli/fallow-cov",
             ),
             (
                 "yarn 1 workspace root",
                 r#"{"name":"p","packageManager":"yarn@1.22.22","workspaces":["packages/*"]}"#,
                 "yarn.lock",
-                "`yarn bin fallow-cov`",
                 "yarn add -D -W @fallow-cli/fallow-cov",
             ),
             (
                 "bun",
                 r#"{"name":"p","packageManager":"bun@1.2.0"}"#,
                 "bun.lock",
-                "`bun pm bin`",
                 "bun add -d @fallow-cli/fallow-cov",
             ),
         ] {
@@ -4334,63 +4163,19 @@ mod tests {
                 "{name} message should list project-local bin path: {message}"
             );
             assert!(
-                message.contains(hint),
-                "{name} message should include lookup hint {hint}: {message}"
+                message.contains(".yarn/unplugged"),
+                "{name} message should list the Yarn unplugged folder: {message}"
             );
+            for command in ["npm root", "pnpm bin", "yarn bin", "bun pm bin"] {
+                assert!(
+                    !message.contains(command),
+                    "{name} message must not name the `{command}` lookup: {message}"
+                );
+            }
             assert!(
                 message.contains(install),
                 "{name} message should include install command {install}: {message}"
             );
-        }
-    }
-
-    #[test]
-    fn detect_package_manager_prefers_package_json_field() {
-        let dir = tempfile::tempdir().expect("tempdir");
-        std::fs::write(
-            dir.path().join("package.json"),
-            r#"{"packageManager":"bun@1.2.0"}"#,
-        )
-        .expect("write package.json");
-        std::fs::write(dir.path().join("pnpm-lock.yaml"), "").expect("write lockfile");
-
-        assert!(matches!(
-            super::detect_package_manager(dir.path()),
-            Some(super::LocalPackageManager::Bun)
-        ));
-    }
-
-    #[test]
-    fn detect_package_manager_falls_back_to_lockfiles() {
-        for (lockfile, expected) in [
-            ("bun.lock", super::LocalPackageManager::Bun),
-            ("pnpm-lock.yaml", super::LocalPackageManager::Pnpm),
-            ("yarn.lock", super::LocalPackageManager::Yarn),
-            ("package-lock.json", super::LocalPackageManager::Npm),
-            ("npm-shrinkwrap.json", super::LocalPackageManager::Npm),
-        ] {
-            let dir = tempfile::tempdir().expect("tempdir");
-            std::fs::write(dir.path().join(lockfile), "").expect("write lockfile");
-
-            assert!(
-                matches!(super::detect_package_manager(dir.path()), Some(actual) if actual == expected),
-                "failed for {lockfile}"
-            );
-        }
-    }
-
-    #[test]
-    fn package_manager_lookup_hints_match_detected_tool() {
-        for (manager, hint) in [
-            (
-                super::LocalPackageManager::Npm,
-                "`npm root` + `.bin/fallow-cov`",
-            ),
-            (super::LocalPackageManager::Pnpm, "`pnpm bin`"),
-            (super::LocalPackageManager::Yarn, "`yarn bin fallow-cov`"),
-            (super::LocalPackageManager::Bun, "`bun pm bin`"),
-        ] {
-            assert_eq!(manager.lookup_hint(), hint);
         }
     }
 

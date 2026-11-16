@@ -1313,6 +1313,12 @@ fn handle_sidecar_step(
             } else {
                 "  -> Install @fallow-cli/fallow-cov globally via npm? [Y/n] ".to_owned()
             };
+            if package_manager.is_some() {
+                println!(
+                    "  -> This runs `{install_command}` in {}. The package manager reads the project's config and can run its install scripts.",
+                    root.display()
+                );
+            }
             let accepted = match confirm(prompt, args) {
                 Ok(accepted) => accepted,
                 Err(message) => {
@@ -1498,11 +1504,8 @@ fn install_sidecar(
         ));
     }
 
-    runtime_coverage::discover_sidecar(Some(root)).map_err(|_| {
-        format!(
-            "sidecar install finished but fallow still could not find fallow-cov. Checked project-local node_modules/.bin, {}, and PATH",
-            runtime_coverage::canonical_sidecar_path().display()
-        )
+    runtime_coverage::discover_sidecar(Some(root)).map_err(|message| {
+        format!("sidecar install finished but fallow still could not find fallow-cov. {message}")
     })
 }
 
