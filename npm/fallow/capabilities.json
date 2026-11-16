@@ -91,7 +91,7 @@
       "name": "--quiet",
       "type": "bool",
       "required": false,
-      "description": "Suppress progress output",
+      "description": "Suppress progress output; `audit` also prints only actionable findings",
       "short": "-q",
       "possible_values": [
         "true",
