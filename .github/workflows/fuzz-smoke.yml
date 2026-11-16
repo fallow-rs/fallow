@@ -45,7 +45,10 @@ jobs:
   fuzz-smoke:
     name: Fuzz harness smoke
     runs-on: ubuntu-26.04
-    timeout-minutes: 45
+    # The step fuzzes each target for FUZZ_TIME_SECONDS, one after the other.
+    # A scheduled run needs about 55 minutes of fuzz time and 12 minutes of
+    # build time, so it gets a higher limit than a push run.
+    timeout-minutes: ${{ github.event_name == 'schedule' && 90 || 45 }}
     permissions:
       contents: read
     steps:
