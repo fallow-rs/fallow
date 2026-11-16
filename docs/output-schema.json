@@ -13497,6 +13497,37 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "production-excluded-file-imported"
+            },
+            "pattern": {
+              "type": "string",
+              "description": "The built-in production pattern that matched, verbatim."
+            },
+            "file_count": {
+              "type": "integer",
+              "description": "Excluded files that this pattern matched and that a production\nfile imports. Exact."
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "The first excluded files in path order, project-root-relative\nwith forward slashes. Capped at five entries."
+            }
+          },
+          "required": [
+            "kind",
+            "pattern",
+            "file_count",
+            "files"
+          ],
+          "description": "In production mode, a built-in production pattern (for example\n`**/test/**`) excluded at least one source file that a production file\nimports (issue #4498). Fallow does not analyze an excluded file, so an\nexport or a parameter that only this file uses can show up in a\nfinding.\n\nOne entry per pattern. `path` is the first excluded file in path\norder. The dead-code pass records the entry from the resolved imports\nof the analyzed files. It reads no excluded file. The production\npatterns do not change."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "excluded-by-default-ignore"
             },
             "pattern": {
