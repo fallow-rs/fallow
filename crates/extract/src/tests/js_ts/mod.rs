@@ -6,6 +6,7 @@ mod command_invocations;
 mod complexity;
 mod create_require_inline;
 mod declaration_scope;
+mod durable_object_env;
 mod dynamic_imports;
 mod exports;
 mod html_tagged_template;

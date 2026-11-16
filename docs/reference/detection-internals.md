@@ -126,6 +126,18 @@ error by suppressing a downstream detector.
   a separate typed property fact that the member pass joins through named and
   re-exported imports; ordinary dotted member accesses are not treated as
   namespace constructors.
+- A typed property fact whose type name the module neither declares nor
+  imports resolves to a global declaration file: a `.d.ts`, `.d.mts` or
+  `.d.cts` file without exports. The type map of an interface includes the
+  properties of each local interface that it extends. A property typed by a
+  type import (`import("./room").Room`) keeps the import as its type, and the
+  member pass resolves it through the type import edge of the declaring file.
+  This is how a Cloudflare Worker `Env` from `wrangler types` reaches the
+  Durable Object class of a binding. The extractor reads the `env` import of
+  `cloudflare:workers` as a receiver of the type `Env`, and `this.env` in a
+  subclass of `DurableObject<E>`, `WorkerEntrypoint<E>` or
+  `WorkflowEntrypoint<E>` of `cloudflare:workers` as a receiver of the type
+  `E` (issue #4548).
 - A member name probe (`"name" in value` or `Reflect.has(value, "name")` with
   a static name) is a `MemberNameProbe` fact. The member pass credits class
   members with that name only in the probe module and in its direct import

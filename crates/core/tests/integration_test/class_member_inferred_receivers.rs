@@ -168,3 +168,44 @@ fn durable_object_stub_credits_member() {
         );
     }
 }
+
+#[test]
+fn durable_object_env_binding_credits_member() {
+    // `worker-configuration.d.ts` declares the global `Env` with the binding
+    // `ROOM: DurableObjectNamespace<import('./src/room').Room>`. A stub of
+    // `ROOM` comes from the `env` import of `cloudflare:workers`, from
+    // `this.env` in a `WorkerEntrypoint<Env>`, from a parameter typed
+    // `Env`, from a helper that returns
+    // `DurableObjectStub<Room>`, or from a field of that type.
+    let unused = unused_class_members("class-member-durable-object-env");
+    assert_credited(
+        &unused,
+        &[
+            "Room.viaEnvImport",
+            "Room.viaEnvImportInline",
+            "Room.viaThisEnv",
+            "Room.viaThisEnvLocal",
+            "Room.viaParam",
+            "Room.viaHelper",
+            "Room.viaHelperLocal",
+            "Room.viaField",
+            "Other.viaOtherHelper",
+            "Other.viaOtherField",
+        ],
+        "Room.unused",
+    );
+    // Each of these names is read on a receiver that is not a `Room`: the
+    // `env` export of a local module, `this.env` of a class without a
+    // Worker base class, and a stub of the class `Other`.
+    for member in [
+        "Room.viaFakeEnv",
+        "Room.viaPlainThis",
+        "Room.viaOtherHelper",
+        "Room.viaOtherField",
+    ] {
+        assert!(
+            unused.contains(&member.to_string()),
+            "{member} has no access on a `Room` and must stay flagged, found: {unused:?}"
+        );
+    }
+}

@@ -456,6 +456,33 @@ fn static_factory_classes(
 /// own module. Shared by the member-credit and whole-object-suppress passes: each
 /// link is an over-credit gate, so a callee that is not a proven factory yields
 /// nothing.
+/// The export keys of the type import `import("<source>").<export_name>` in
+/// `module`. The extractor records each such type import as an import of
+/// `export_name` without a local name.
+fn import_type_seed_keys(
+    module: &ResolvedModule,
+    source: &str,
+    export_name: &str,
+) -> Vec<ExportKey> {
+    module
+        .all_resolved_imports()
+        .filter(|import| {
+            import.info.local_name.is_empty()
+                && import.info.source == source
+                && matches!(
+                    &import.info.imported_name,
+                    crate::extract::ImportedName::Named(name) if name == export_name
+                )
+        })
+        .filter_map(|import| {
+            Some(ExportKey::new(
+                import.target.internal_file_id()?,
+                export_name,
+            ))
+        })
+        .collect()
+}
+
 fn factory_return_class_origins(
     graph: &ModuleGraph,
     indexes: &MemberPassIndexes<'_>,
@@ -467,6 +494,13 @@ fn factory_return_class_origins(
         .get(class_local_name)
         .cloned()
         .unwrap_or_default();
+    if class_seed_keys.is_empty()
+        && let Some((source, export_name)) =
+            fallow_types::extract::parse_import_type_reference(class_local_name)
+        && let Some(factory_module) = indexes.module_by_id.get(&factory_origin_file_id)
+    {
+        class_seed_keys.extend(import_type_seed_keys(factory_module, source, export_name));
+    }
     if class_seed_keys.is_empty()
         && let Some((namespace_local, export_name)) = class_local_name.split_once('.')
         && !export_name.contains('.')

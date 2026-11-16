@@ -58,7 +58,9 @@ const MEMBER_PRESERVING_WRAPPERS: &[&str] = &[
 /// The type that holds the members of `ty`: the first type argument of each
 /// wrapper in [`MEMBER_PRESERVING_WRAPPERS`], also through parentheses and
 /// nested wrappers. Any other type comes back unchanged.
-pub(super) fn unwrap_member_preserving_type<'t, 'a>(ty: &'t TSType<'a>) -> &'t TSType<'a> {
+pub(in crate::visitor) fn unwrap_member_preserving_type<'t, 'a>(
+    ty: &'t TSType<'a>,
+) -> &'t TSType<'a> {
     let mut ty = ty;
     loop {
         crate::cost::walk_step();

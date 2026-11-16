@@ -10,8 +10,8 @@ use oxc_ast::ast::*;
 
 use super::super::visit_chain_names::is_member_call;
 use super::super::{call_receiver_name, static_member_object_name, unwrap_static_expr};
-use super::StructuralParamMemberCollector;
 use super::durable_objects::{ReceiverAlias, ResolvedReceiver};
+use super::{StructuralParamMemberCollector, THIS_ENV_RECEIVER};
 
 impl StructuralParamMemberCollector {
     /// The tracked parameter and the property path that `object` reads. With
@@ -54,9 +54,7 @@ impl StructuralParamMemberCollector {
         let Some(object_path) = object_path else {
             return Vec::new();
         };
-        let (root, suffix) = object_path
-            .split_once('.')
-            .map_or((object_path.as_str(), ""), |(root, suffix)| (root, suffix));
+        let (root, suffix) = self.receiver_root(&object_path);
         for (aliases, shadowed) in self.alias_stack.iter().zip(&self.shadowed_stack).rev() {
             if let Some(alias) = aliases.get(root) {
                 return std::iter::once(&alias.target)
@@ -81,6 +79,37 @@ impl StructuralParamMemberCollector {
         } else {
             Vec::new()
         }
+    }
+
+    /// The receivers of a member access on `object`. An inline stub call
+    /// (`env.NS.getByName(name).method`) reads the namespace path through a
+    /// stub.
+    pub(super) fn resolve_member_receivers(
+        &self,
+        object: &Expression<'_>,
+    ) -> Vec<ResolvedReceiver> {
+        if let Some(stub) = self.inline_stub_receiver(object) {
+            return vec![stub];
+        }
+        self.resolve_receivers(object, true)
+    }
+
+    /// The root receiver and the property path of `object_path`. `this.env`
+    /// is one root when the collector tracks it.
+    fn receiver_root<'p>(&self, object_path: &'p str) -> (&'p str, &'p str) {
+        if self.target_params.contains(THIS_ENV_RECEIVER)
+            && let Some(rest) = object_path.strip_prefix(THIS_ENV_RECEIVER)
+        {
+            if rest.is_empty() {
+                return (THIS_ENV_RECEIVER, "");
+            }
+            if let Some(suffix) = rest.strip_prefix('.') {
+                return (THIS_ENV_RECEIVER, suffix);
+            }
+        }
+        object_path
+            .split_once('.')
+            .map_or((object_path, ""), |(root, suffix)| (root, suffix))
     }
 
     /// The parameter paths that a local with the init `init` holds:

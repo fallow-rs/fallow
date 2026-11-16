@@ -15,6 +15,7 @@ use super::{
     ITERABLE_ELEMENT_CALLBACK_METHODS, assignment_target_identifier_name,
     static_member_object_name, unwrap_parens, unwrap_static_expr,
 };
+use crate::visitor::worker_env::THIS_ENV_RECEIVER;
 
 pub(super) const PINO_PACKAGE: &str = "pino";
 pub(super) const PINO_FACTORY_EXPORT: &str = "pino";
@@ -204,7 +205,7 @@ impl<'a> Visit<'a> for StructuralParamMemberCollector {
         // `local.rotate(1).translate(1, 1)` reads `translate` on the
         // `rotate()` path of `local`, as the call without arguments does
         // (issue #4311).
-        for receiver in self.resolve_receivers(&expr.object, true) {
+        for receiver in self.resolve_member_receivers(&expr.object) {
             self.record_member_access(receiver, expr.property.name.to_string());
         }
         walk::walk_static_member_expression(self, expr);
@@ -212,7 +213,7 @@ impl<'a> Visit<'a> for StructuralParamMemberCollector {
 
     fn visit_computed_member_expression(&mut self, expr: &ComputedMemberExpression<'a>) {
         if let Expression::StringLiteral(property) = &expr.expression {
-            for receiver in self.resolve_receivers(&expr.object, true) {
+            for receiver in self.resolve_member_receivers(&expr.object) {
                 self.record_member_access(receiver, property.value.text().into_owned());
             }
         }
@@ -272,7 +273,11 @@ impl<'a> Visit<'a> for StructuralParamMemberCollector {
     }
 
     fn visit_function(&mut self, func: &Function<'a>, flags: ScopeFlags) {
-        let shadowed = self.collect_shadowed_params(&func.params);
+        let mut shadowed = self.collect_shadowed_params(&func.params);
+        // A function has its own `this`.
+        if self.target_params.contains(THIS_ENV_RECEIVER) {
+            shadowed.insert(THIS_ENV_RECEIVER.to_string());
+        }
         self.shadowed_stack.push(shadowed);
         self.alias_stack.push(FxHashMap::default());
         self.take_pending_element_alias(func.span.start);
@@ -1224,7 +1229,7 @@ fn extract_binding_local_name<'a>(pattern: &'a BindingPattern<'a>) -> Option<&'a
 }
 
 /// Collect `property -> class type` mappings from an object-type member list.
-pub(super) fn collect_object_type_property_types(
+pub(in crate::visitor) fn collect_object_type_property_types(
     members: &[TSSignature<'_>],
 ) -> FxHashMap<String, super::super::TypePropertyTarget> {
     let mut properties = FxHashMap::default();

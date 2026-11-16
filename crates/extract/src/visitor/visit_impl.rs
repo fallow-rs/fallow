@@ -64,7 +64,7 @@ pub(super) use visit_for_of_bindings::ITERABLE_ELEMENT_CALLBACK_METHODS;
 #[path = "visit_impl_function_returns.rs"]
 mod visit_function_returns;
 #[path = "visit_impl_helpers.rs"]
-mod visit_helpers;
+pub(super) mod visit_helpers;
 #[path = "visit_impl_jsx_runtime.rs"]
 mod visit_jsx_runtime;
 #[path = "visit_impl_member_destructuring.rs"]
@@ -1540,14 +1540,7 @@ impl ModuleInfoExtractor {
         let refs = Self::collect_interface_signature_refs(iface);
         self.record_local_signature_refs(&iface.id.name, refs);
         self.record_required_type_members(&iface.id.name, &iface.body.body);
-        let mut properties = collect_object_type_property_types(&iface.body.body);
-        for target in properties.values_mut() {
-            target.owner_span = Some(iface.id.span);
-        }
-        if !properties.is_empty() {
-            self.interface_property_types
-                .insert(iface.id.name.to_string(), properties);
-        }
+        self.record_interface_property_types(iface);
         // React props harvest (Feature A): a plain `interface X { a; b }` with no
         // `extends` heritage and no type parameters can back a
         // `(props: X) => props.a` component. An `interface X extends Y` or a
@@ -5081,6 +5074,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         let type_scope_pushed =
             self.push_class_type_scope(class.id.as_ref(), class.type_parameters.as_deref());
         self.record_lit_custom_element(class);
+        self.record_worker_env_bodies(class);
 
         if let Some(meta) = extract_angular_component_metadata(class) {
             self.record_angular_selector(class, &meta);

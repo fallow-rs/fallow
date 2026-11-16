@@ -16,7 +16,7 @@ fn typed_property_declaring_sites<'a>(
         return vec![(module, name.to_string())];
     }
     let Some(seed_keys) = indexes.local_keys(module.file_id).get(name) else {
-        return Vec::new();
+        return global_declaring_sites(indexes, name);
     };
     let mut sites = Vec::new();
     for seed in seed_keys {
@@ -45,6 +45,21 @@ fn typed_property_declaring_sites<'a>(
         }
     }
     sites
+}
+
+/// The global declaration files that declare `name`, for a type name that the
+/// module neither declares nor imports. See issue #4548.
+fn global_declaring_sites<'a>(
+    indexes: &MemberPassIndexes<'a>,
+    name: &str,
+) -> Vec<(&'a ResolvedModule, String)> {
+    indexes
+        .global_typed_property_modules
+        .get(name)
+        .into_iter()
+        .flatten()
+        .map(|module| (*module, name.to_string()))
+        .collect()
 }
 
 fn module_declares_typed_properties(
