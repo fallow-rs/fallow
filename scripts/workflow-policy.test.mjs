@@ -110,6 +110,37 @@ test("fuzz workflow runs every harness with bounded scheduled coverage", () => {
   }
 });
 
+test("fuzz job time limit covers the fuzz time of every target for each event", () => {
+  const workflow = readWorkflow(".github/workflows/fuzz-smoke.yml");
+  const job = indentedBlock(workflow, "fuzz-smoke", 2);
+  const targetCount = job
+    .match(/targets=\(([^)]+)\)/)[1]
+    .trim()
+    .split(/\s+/).length;
+  const fuzzSeconds = workflow.match(
+    /FUZZ_TIME_SECONDS: \$\{\{ github\.event_name == 'schedule' && '(\d+)' \|\| '(\d+)' \}\}/,
+  );
+  assert.ok(fuzzSeconds, "FUZZ_TIME_SECONDS must select a scheduled and a default value");
+  const timeout = job.match(
+    /^ {4}timeout-minutes: \$\{\{ github\.event_name == 'schedule' && (\d+) \|\| (\d+) \}\}$/m,
+  );
+  assert.ok(timeout, "timeout-minutes must select a scheduled and a default value");
+  // A push run on main spends about 12 minutes on the toolchain, the cache
+  // and the target builds before and between the fuzz runs. The check
+  // reserves 20 minutes to keep a margin for a slow runner or a cold cache.
+  const overheadSeconds = 20 * 60;
+  for (const [event, index] of [
+    ["schedule", 1],
+    ["push", 2],
+  ]) {
+    const neededSeconds = targetCount * Number(fuzzSeconds[index]) + overheadSeconds;
+    assert.ok(
+      Number(timeout[index]) * 60 >= neededSeconds,
+      `${event} run needs ${neededSeconds}s but the job limit is ${timeout[index]} minutes`,
+    );
+  }
+});
+
 test("branch coverage reports weekly on the Fuzz Smoke nightly without gating releases", async () => {
   const workflow = readWorkflow(".github/workflows/branch-coverage.yml");
   const fuzzJob = indentedBlock(readWorkflow(".github/workflows/fuzz-smoke.yml"), "fuzz-smoke", 2);
