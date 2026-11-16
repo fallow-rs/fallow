@@ -221,7 +221,7 @@ pub fn status(root: &Path) -> TypeAwareStatus {
             // Both the sibling and wrapper paths are installation problems the
             // npm package fixes; only a user-set override keeps the raw error.
             let remediation = if discovery_source == "environment-override" {
-                error
+                error.message
             } else {
                 let current_exe = std::env::current_exe().ok();
                 discovery::missing_sidecar_install_hint(Some(root), current_exe.as_deref())
@@ -315,7 +315,9 @@ pub fn status(root: &Path) -> TypeAwareStatus {
 /// Returns the same actionable discovery error used by [`status`] when no
 /// trusted companion file is available.
 pub fn discover_companion(root: &Path) -> Result<(), String> {
-    discover_type_aware_sidecar(root).map(|_| ())
+    discover_type_aware_sidecar(root)
+        .map(|_| ())
+        .map_err(|error| error.message)
 }
 
 /// Result of a completed type-aware pass.
@@ -327,13 +329,27 @@ pub struct TypeAwareOutcome {
     pub warnings: Vec<String>,
 }
 
-/// Opaque type-aware transport failure; the message is the full description.
+/// Type-aware transport failure; the message is the full description.
 #[derive(Debug)]
-pub struct TypeAwareError(String);
+pub struct TypeAwareError {
+    message: String,
+    sidecar_not_found: bool,
+}
+
+impl TypeAwareError {
+    /// True when discovery found no sidecar file, so the pass never started.
+    ///
+    /// False for a sidecar that started and then failed, timed out, or
+    /// returned an invalid response.
+    #[must_use]
+    pub const fn is_sidecar_not_found(&self) -> bool {
+        self.sidecar_not_found
+    }
+}
 
 impl std::fmt::Display for TypeAwareError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(&self.0)
+        formatter.write_str(&self.message)
     }
 }
 
@@ -341,7 +357,19 @@ impl std::error::Error for TypeAwareError {}
 
 impl From<String> for TypeAwareError {
     fn from(message: String) -> Self {
-        Self(message)
+        Self {
+            message,
+            sidecar_not_found: false,
+        }
+    }
+}
+
+impl From<discovery::DiscoveryError> for TypeAwareError {
+    fn from(error: discovery::DiscoveryError) -> Self {
+        Self {
+            message: error.message,
+            sidecar_not_found: error.not_found,
+        }
     }
 }
 
@@ -363,7 +391,7 @@ where
         sidecar_timeout(),
         MAX_SEMANTIC_RESPONSE_BYTES,
     )
-    .map_err(TypeAwareError)
+    .map_err(TypeAwareError::from)
 }
 
 #[cfg(test)]
@@ -476,6 +504,11 @@ mod tests {
             discover_type_aware_sidecar_from(missing.to_str(), Some(executable.as_path()), None)
                 .expect_err("invalid explicit override must not fall back");
 
+        assert!(
+            error.not_found,
+            "a missing override file is a missing sidecar"
+        );
+        let error = error.message;
         assert!(error.contains("FALLOW_TYPE_AWARE_BIN is set"));
         assert!(error.contains("Point it at a trusted fallow-type-aware executable"));
     }
@@ -535,7 +568,8 @@ mod tests {
             Some(executable.as_path()),
             Some(project.path()),
         )
-        .expect_err("no trusted companion is installed");
+        .expect_err("no trusted companion is installed")
+        .message;
 
         assert!(error.contains("is not the npm install"), "{error}");
         assert_eq!(
@@ -634,6 +668,8 @@ mod tests {
 
         let error = discover_type_aware_sidecar_from(None, Some(executable.as_path()), None)
             .expect_err("untrusted discovery locations must be ignored");
+        assert!(error.not_found, "no sibling sidecar is a missing sidecar");
+        let error = error.message;
 
         assert!(error.contains("next to the active Fallow executable"));
         assert!(error.contains("does not search project node_modules or PATH"));

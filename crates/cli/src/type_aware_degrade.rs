@@ -6,17 +6,28 @@
 //! therefore continues with the syntactic result unless `typeAware.require` is
 //! `complete`, which keeps the historical hard failure. This mirrors the LSP
 //! behavior in `crates/lsp/src/analysis.rs`.
+//!
+//! When no sidecar was found, the dead-code run also lowers the findings that
+//! the type-aware pass can disprove to `warn` (#4606). The project asked for
+//! the type-aware result, so a finding that the pass could remove does not
+//! fail the gate. A sidecar that started and then failed or timed out keeps the
+//! configured severities.
 
 use std::path::Path;
 use std::process::ExitCode;
 
-use fallow_config::{OutputFormat, TypeAwareRequire};
+use fallow_config::{OutputFormat, ResolvedConfig, TypeAwareRequire};
 use fallow_types::envelope::TypeAwareMeta;
 
 /// Warning text for a run that fell back to syntactic findings.
-pub fn degraded_message(root: &Path, error: &str) -> String {
+pub fn degraded_message(root: &Path, error: &str, refinable_lowered: bool) -> String {
+    let lowered = if refinable_lowered {
+        "; unused exports, types and class members are reported as warn"
+    } else {
+        ""
+    };
     format!(
-        "type-aware refinement unavailable for {}: {error}; showing conservative syntactic findings",
+        "type-aware refinement unavailable for {}: {error}; showing conservative syntactic findings{lowered}",
         root.display()
     )
 }
@@ -47,6 +58,9 @@ pub struct DegradeContext<'a> {
     pub quiet: bool,
     /// Active output format, used to shape the hard error.
     pub output: OutputFormat,
+    /// The run lowers the findings that the type-aware pass can disprove to
+    /// `warn`, and the warning says so.
+    pub refinable_lowered: bool,
 }
 
 /// Resolve a failed type-aware pass into degraded metadata, or into the exit
@@ -58,9 +72,40 @@ pub fn degrade_or_fail(ctx: &DegradeContext<'_>) -> Result<TypeAwareMeta, ExitCo
             ctx.output,
         ));
     }
-    let message = degraded_message(ctx.root, ctx.error);
+    let message = degraded_message(ctx.root, ctx.error, ctx.refinable_lowered);
     emit_warning(&message, ctx.quiet);
     Ok(degraded_meta(message, ctx.require))
+}
+
+/// Resolve a failed type-aware pass of a dead-code run.
+///
+/// Works like [`degrade_or_fail`]. When no sidecar was found, it also lowers
+/// the rules of the kinds that the type-aware pass can disprove to `warn`, in
+/// the base rules and in each override, so these findings do not fail the
+/// gate. A sidecar that started and then failed keeps the configured rules.
+pub fn degrade_dead_code(
+    error: &fallow_api::TypeAwareError,
+    config: &mut ResolvedConfig,
+    quiet: bool,
+    output: OutputFormat,
+) -> Result<TypeAwareMeta, ExitCode> {
+    let sidecar_not_found = error.is_sidecar_not_found();
+    let meta = degrade_or_fail(&DegradeContext {
+        root: &config.root,
+        error: &error.to_string(),
+        failure_label: "Type-aware analysis failed",
+        require: config.type_aware.require,
+        quiet,
+        output,
+        refinable_lowered: sidecar_not_found,
+    })?;
+    if sidecar_not_found {
+        config.rules.cap_semantic_refinable_at_warn();
+        for entry in &mut config.overrides {
+            entry.rules.cap_semantic_refinable_at_warn();
+        }
+    }
+    Ok(meta)
 }
 
 #[expect(
@@ -85,6 +130,7 @@ mod tests {
             require,
             quiet: true,
             output: OutputFormat::Json,
+            refinable_lowered: false,
         }
     }
 

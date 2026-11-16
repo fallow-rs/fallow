@@ -120,6 +120,10 @@ fn audit_gate_outcomes(result: &AuditResult) -> Option<fallow_output::GateOutcom
             .check
             .as_ref()
             .and_then(|check| check.type_aware_meta.as_ref()),
+        result
+            .check
+            .as_ref()
+            .is_some_and(|check| check.type_aware_sidecar_missing),
         audit_parse_error_outcome(result),
     )
 }

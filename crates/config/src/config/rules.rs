@@ -840,6 +840,62 @@ pub fn is_opt_in_kind(kind: IssueKind) -> bool {
     matches!(default_severity_for_kind(kind), Severity::Off)
 }
 
+/// The finding kinds that the type-aware pass can disprove.
+///
+/// The symbol-use query of the type-aware pass removes a syntactic finding of
+/// these kinds when the checker finds a use. A run without that pass reports
+/// a superset of these findings.
+pub const SEMANTIC_REFINABLE_KINDS: [IssueKind; 3] = [
+    IssueKind::UnusedExport,
+    IssueKind::UnusedType,
+    IssueKind::UnusedClassMember,
+];
+
+/// Whether `rules` reports at least one kind of [`SEMANTIC_REFINABLE_KINDS`].
+#[must_use]
+pub fn any_semantic_refinable_rule_active(rules: &RulesConfig) -> bool {
+    SEMANTIC_REFINABLE_KINDS
+        .iter()
+        .any(|kind| rules.severity_for_kind(*kind) != Severity::Off)
+}
+
+const fn cap_at_warn(severity: Severity) -> Severity {
+    match severity {
+        Severity::Error => Severity::Warn,
+        other => other,
+    }
+}
+
+impl RulesConfig {
+    /// Lower every `error` rule of [`SEMANTIC_REFINABLE_KINDS`] to `warn`.
+    pub fn cap_semantic_refinable_at_warn(&mut self) {
+        for kind in SEMANTIC_REFINABLE_KINDS {
+            let severity = match kind {
+                IssueKind::UnusedExport => &mut self.unused_exports,
+                IssueKind::UnusedType => &mut self.unused_types,
+                IssueKind::UnusedClassMember => &mut self.unused_class_members,
+                _ => continue,
+            };
+            *severity = cap_at_warn(*severity);
+        }
+    }
+}
+
+impl PartialRulesConfig {
+    /// Lower every `error` override of [`SEMANTIC_REFINABLE_KINDS`] to `warn`.
+    pub fn cap_semantic_refinable_at_warn(&mut self) {
+        for kind in SEMANTIC_REFINABLE_KINDS {
+            let severity = match kind {
+                IssueKind::UnusedExport => &mut self.unused_exports,
+                IssueKind::UnusedType => &mut self.unused_types,
+                IssueKind::UnusedClassMember => &mut self.unused_class_members,
+                _ => continue,
+            };
+            *severity = severity.map(cap_at_warn);
+        }
+    }
+}
+
 /// Partial per-issue-type severity for overrides. All fields optional.
 #[derive(Debug, Default, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "kebab-case")]

@@ -57,7 +57,8 @@ pub use fallow_report_protocol::{GateFile, GateFileReason, GateOutcome, GateStat
 ///
 /// A gate reports `skipped` when it stands down: a change-scoped baseline
 /// comparison, `health --report-only`, or a security advisory that a
-/// configured `--gate` shadows. Only `audit-verdict` reports `warn`.
+/// configured `--gate` shadows. `type-aware-fallback` is always `skipped`.
+/// Only `audit-verdict` reports `warn`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
@@ -119,6 +120,14 @@ pub enum GateName {
     /// `--type-aware-require complete`: semantic analysis was partial or
     /// unavailable.
     TypeAwareRequire,
+    /// A note, not a gate that can fail: the type-aware pass was requested
+    /// under `typeAware.require: best-effort`, and no sidecar was found. The
+    /// run reports the findings that the pass can disprove
+    /// (`unused-export`, `unused-type`, `unused-class-member`) at `warn`, so
+    /// they do not fail `error-severity-findings`. Always `status: skipped`
+    /// and `enforced: false`. Absent when the sidecar ran, also when it
+    /// failed or timed out: those runs keep the configured severities.
+    TypeAwareFallback,
     /// `--fail-on-parse-error` or the `failOnParseError` config key: at least
     /// one source file did not parse cleanly (a `source-parse-degraded` or
     /// `source-nesting-too-deep` entry in `workspace_diagnostics[]`). The
@@ -143,7 +152,7 @@ impl GateName {
     /// the emitter rather than against a hand-kept list. A new variant belongs
     /// here as well as in [`Self::as_str`], whose match will not compile until
     /// it is named.
-    pub const ALL: [Self; 17] = [
+    pub const ALL: [Self; 18] = [
         Self::ErrorSeverityFindings,
         Self::Regression,
         Self::StaleBaseline,
@@ -159,6 +168,7 @@ impl GateName {
         Self::SecurityAdvisory,
         Self::AuditVerdict,
         Self::TypeAwareRequire,
+        Self::TypeAwareFallback,
         Self::ParseError,
         Self::MutationMinScore,
     ];
@@ -183,6 +193,7 @@ impl GateName {
             Self::SecurityAdvisory => "security-advisory",
             Self::AuditVerdict => "audit-verdict",
             Self::TypeAwareRequire => "type-aware-require",
+            Self::TypeAwareFallback => "type-aware-fallback",
             Self::ParseError => "parse-error",
             Self::MutationMinScore => "mutation-min-score",
         }

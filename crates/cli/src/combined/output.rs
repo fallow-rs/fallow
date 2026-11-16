@@ -1417,6 +1417,8 @@ fn combined_gate_outcomes(
         ],
         fail_on_stale_baseline: flags.fail_on_stale_baseline,
         type_aware_failed: combined_type_aware_gate_outcome(check_result, health_result),
+        type_aware_sidecar_missing: check_result
+            .is_some_and(|result| result.type_aware_sidecar_missing),
         duplication: dupes_result
             .map(|result| (result.threshold, result.report.stats.duplication_percentage)),
         clone_groups: dupes_result.map(|result| result.report.stats.clone_groups),

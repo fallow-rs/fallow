@@ -325,3 +325,122 @@ fn unknown_backend_selection_fails_before_companion_lookup() {
         output.stdout
     );
 }
+
+const MISSING_SIDECAR_FIXTURE: &str = "type-aware-missing-sidecar";
+
+/// Run `dead-code` on the fixture with no `FALLOW_TYPE_AWARE_BIN`, so the
+/// discovery looks only next to the test binary, where no sidecar exists.
+fn run_without_sidecar(extra_env: &[(&str, &str)], args: &[&str]) -> CommandOutput {
+    let root = fixture_path(MISSING_SIDECAR_FIXTURE);
+    let mut cmd = std::process::Command::new(crate::common::fallow_bin());
+    cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
+    crate::common::scrub_analysis_env(&mut cmd);
+    cmd.env_remove("FALLOW_TYPE_AWARE_BIN")
+        .env_remove("FALLOW_TYPE_AWARE_SCRIPT")
+        .envs(extra_env.iter().copied())
+        .arg("dead-code")
+        .arg("--root")
+        .arg(&root)
+        .args(args);
+    let output = cmd.output().expect("failed to run fallow binary");
+    CommandOutput {
+        stdout: String::from_utf8_lossy(&output.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&output.stderr).to_string(),
+        code: output.status.code().unwrap_or(-1),
+    }
+}
+
+fn class_member_severities(json: &serde_json::Value) -> Vec<String> {
+    json["unused_class_members"]
+        .as_array()
+        .expect("unused_class_members array")
+        .iter()
+        .map(|finding| {
+            finding["effective_severity"]
+                .as_str()
+                .unwrap_or_default()
+                .to_owned()
+        })
+        .collect()
+}
+
+/// A missing sidecar must not fail the gate on a finding that only the
+/// type-aware pass can disprove (#4606). The finding stays in the report at
+/// `warn`, and `gate_outcomes` states why the findings did not gate.
+#[test]
+fn missing_sidecar_reports_refinable_findings_as_warn() {
+    let output = run_without_sidecar(&[], &["--format", "json", "--quiet"]);
+
+    assert_eq!(
+        output.code, 0,
+        "stdout: {}\nstderr: {}",
+        output.stdout, output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["_meta"]["type_aware"]["executed"], false);
+    assert!(
+        json["_meta"]["type_aware"]["warnings"][0]
+            .as_str()
+            .is_some_and(|warning| warning.contains("was not found next to the active Fallow")),
+        "{}",
+        output.stdout
+    );
+    assert_eq!(class_member_severities(&json), vec!["warn".to_owned()]);
+    let fallback = &json["gate_outcomes"]["type-aware-fallback"];
+    assert_eq!(fallback["status"], "skipped", "{}", json["gate_outcomes"]);
+    assert_eq!(fallback["enforced"], false);
+    assert_eq!(
+        json["gate_outcomes"]["error-severity-findings"]["status"],
+        "pass"
+    );
+}
+
+/// A sidecar that starts and then fails is not a missing sidecar. The run keeps
+/// the conservative syntactic findings at their configured severity.
+#[cfg(unix)]
+#[test]
+fn failed_sidecar_keeps_refinable_findings_at_error() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let dir = tempfile::tempdir().expect("temp dir");
+    let sidecar = dir.path().join("fallow-type-aware");
+    std::fs::write(&sidecar, "#!/bin/sh\nexit 3\n").expect("write sidecar");
+    std::fs::set_permissions(&sidecar, std::fs::Permissions::from_mode(0o755))
+        .expect("chmod sidecar");
+    let sidecar_arg = sidecar.to_string_lossy().to_string();
+
+    let output = run_without_sidecar(
+        &[("FALLOW_TYPE_AWARE_BIN", &sidecar_arg)],
+        &["--format", "json", "--quiet"],
+    );
+
+    assert_eq!(
+        output.code, 1,
+        "stdout: {}\nstderr: {}",
+        output.stdout, output.stderr
+    );
+    let json = parse_json(&output);
+    assert_eq!(json["_meta"]["type_aware"]["executed"], false);
+    assert_eq!(class_member_severities(&json), vec!["error".to_owned()]);
+    assert!(
+        json["gate_outcomes"].get("type-aware-fallback").is_none(),
+        "{}",
+        json["gate_outcomes"]
+    );
+}
+
+/// `require: complete` keeps the hard failure for a missing sidecar.
+#[test]
+fn missing_sidecar_still_fails_under_require_complete() {
+    let output = run_without_sidecar(
+        &[],
+        &[
+            "--type-aware-require",
+            "complete",
+            "--format",
+            "json",
+            "--quiet",
+        ],
+    );
+    assert_eq!(output.code, 2, "stdout: {}", output.stdout);
+}

@@ -70,8 +70,9 @@ pub use resolution::{
 };
 pub use resolve::ResolveConfig;
 pub use rules::{
-    KNOWN_RULE_NAMES, PartialRulesConfig, RulesConfig, Severity, closest_known_rule_name,
-    default_severity_for_kind, is_opt_in_kind,
+    KNOWN_RULE_NAMES, PartialRulesConfig, RulesConfig, SEMANTIC_REFINABLE_KINDS, Severity,
+    any_semantic_refinable_rule_active, closest_known_rule_name, default_severity_for_kind,
+    is_opt_in_kind,
 };
 pub use similar_code::SimilarCodeConfig;
 pub use used_class_members::{ScopedUsedClassMemberRule, UsedClassMemberRule};

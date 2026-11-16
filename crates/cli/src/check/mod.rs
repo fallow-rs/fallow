@@ -42,7 +42,9 @@ mod configuration;
 mod type_aware_summary;
 pub use benchmark::benchmark_dead_code_json;
 use configuration::{parse_type_aware_bool, parse_type_aware_require, prepare_check_config};
+#[cfg(test)]
 use type_aware_summary::format_type_aware_summary;
+use type_aware_summary::print_type_aware_summary;
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct IssueFilters {
     pub shared_state: bool,
@@ -612,6 +614,9 @@ pub struct CheckResult {
     /// Advisory coupling report produced in the same semantic batch when a
     /// combined run also requested health analysis.
     pub type_coupling: Option<fallow_types::semantic::TypeCouplingReport>,
+    /// The type-aware pass was requested, no sidecar was found, and the run
+    /// lowered the findings that the pass can disprove to `warn`.
+    pub type_aware_sidecar_missing: bool,
     /// Bounded non-fatal diagnostics from the semantic backend.
     pub type_aware_warnings: Vec<String>,
     /// Workspace, source-discovery, and analysis-stage diagnostics as this
@@ -1123,6 +1128,7 @@ struct CheckCompletionInput<'a> {
     baseline_staleness: Option<LoadedBaselineStaleness>,
     type_aware: Option<fallow_api::TypeAwareOutcome>,
     type_coupling: Option<fallow_types::semantic::TypeCouplingReport>,
+    type_aware_sidecar_missing: bool,
     syntactic_dead_code_keys: Option<rustc_hash::FxHashSet<String>>,
     finding_id_query: Option<fallow_output::FindingIdQuery>,
     /// The results before the architecture selection, when it narrowed them.
@@ -1140,6 +1146,7 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         baseline_staleness,
         type_aware,
         type_coupling,
+        type_aware_sidecar_missing,
         syntactic_dead_code_keys,
         finding_id_query,
         health_results,
@@ -1164,16 +1171,13 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         baseline_notes::run_notes(&config, opts, baseline_staleness.as_ref()),
     );
 
-    if let Some(sarif_path) = opts.sarif_file {
-        output::write_sarif_file(&output::SarifFileInput {
-            results: &results,
-            config: &config,
-            sarif_path,
-            quiet: opts.quiet,
-            type_aware: type_aware.as_ref().map(|outcome| &outcome.meta),
-            workspace_diagnostics: &workspace_diagnostics,
-        });
-    }
+    output::write_requested_sarif_file(
+        opts,
+        &config,
+        &results,
+        type_aware.as_ref().map(|outcome| &outcome.meta),
+        &workspace_diagnostics,
+    );
 
     let retained_files_for_cross_reference = if opts.include_dupes && retained_modules.is_some() {
         retained_files.clone()
@@ -1215,6 +1219,7 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         shared_parse,
         type_aware_meta,
         type_coupling,
+        type_aware_sidecar_missing,
         type_aware_warnings,
         workspace_diagnostics,
         discovered_file_count,
@@ -1248,7 +1253,7 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
 pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
     let start = Instant::now();
 
-    let config = process_clock::time(ProcessSpan::Config, || prepare_check_config(opts))?;
+    let mut config = process_clock::time(ProcessSpan::Config, || prepare_check_config(opts))?;
     validate_effective_type_aware_output(opts.output, config.type_aware.enabled)?;
 
     let mut ws_roots = filtering::resolve_workspace_scope(
@@ -1327,15 +1332,14 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         .type_aware
         .enabled
         .then(|| fallow_api::audit_keys::dead_code_keys(&data.results, &config.root));
+    let mut type_aware_sidecar_missing = false;
     let (type_aware, type_coupling) = if config.type_aware.enabled {
         let include_symbol_use = if opts.filters.any_active() {
             opts.filters.unused_exports
                 || opts.filters.unused_types
                 || opts.filters.unused_class_members
         } else {
-            config.rules.unused_exports != Severity::Off
-                || config.rules.unused_types != Severity::Off
-                || config.rules.unused_class_members != Severity::Off
+            fallow_config::any_semantic_refinable_rule_active(&config.rules)
         };
         let type_aware_projects = config
             .type_aware
@@ -1367,16 +1371,13 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
                 (Some(outcome.type_aware), outcome.type_coupling)
             }),
             Err(error) => {
-                let meta = crate::type_aware_degrade::degrade_or_fail(
-                    &crate::type_aware_degrade::DegradeContext {
-                        root: &config.root,
-                        error: &error.to_string(),
-                        failure_label: "Type-aware analysis failed",
-                        require: config.type_aware.require,
-                        quiet: opts.quiet,
-                        output: opts.output,
-                    },
+                let meta = crate::type_aware_degrade::degrade_dead_code(
+                    &error,
+                    &mut config,
+                    opts.quiet,
+                    opts.output,
                 )?;
+                type_aware_sidecar_missing = error.is_sidecar_not_found();
                 // `degrade_or_fail` already put this on stderr, honoring
                 // `--quiet`. Copying it into the outcome would print the same
                 // sentence a second time from `print_type_aware_warnings`,
@@ -1473,6 +1474,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         baseline_staleness,
         type_aware,
         type_coupling,
+        type_aware_sidecar_missing,
         syntactic_dead_code_keys,
         finding_id_query,
         health_results,
@@ -1621,6 +1623,7 @@ fn prepare_print_check(result: &CheckResult, opts: PrintCheckOptions) -> Prepare
         fail_on_stale_baseline: result.fail_on_stale_baseline,
         type_aware_require: result.config.type_aware.require,
         type_aware_meta: result.type_aware_meta.as_ref(),
+        type_aware_sidecar_missing: result.type_aware_sidecar_missing,
         parse_error: parse_error.clone(),
     });
     PreparedPrintCheck {
@@ -1779,28 +1782,6 @@ pub fn type_aware_completeness_incomplete(result: &CheckResult) -> bool {
             .type_aware_meta
             .as_ref()
             .is_some_and(|meta| crate::report::ci::required_type_aware_incomplete(Some(meta)))
-}
-
-fn print_type_aware_summary(result: &CheckResult) {
-    if !matches!(result.config.output, OutputFormat::Human) {
-        return;
-    }
-    if let Some(meta) = &result.type_aware_meta {
-        // A pass that never ran has nothing to summarize: every count is zero
-        // because no query happened, not because the project is clean. The
-        // degradation warning already said what happened, so a second line of
-        // zeroes would only dispute it.
-        if !meta.executed && meta.warning_count > 0 {
-            return;
-        }
-        println!(
-            "{}",
-            crate::report::human_status_line(
-                crate::report::type_aware_meta_status(meta),
-                format_type_aware_summary(meta)
-            )
-        );
-    }
 }
 
 fn print_type_aware_warnings(result: &CheckResult, quiet: bool) {

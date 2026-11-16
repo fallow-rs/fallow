@@ -473,6 +473,31 @@ more time than the default allows. When the limit is reached and
 findings and records the reason in `_meta.type_aware.warnings` instead of
 failing; `complete` still fails the run.
 
+### Fallback when the type-aware pass cannot run
+
+The fallback depends on `typeAware.require` and on the cause:
+
+| Cause | `best-effort` (default) | `complete` |
+| --- | --- | --- |
+| No sidecar found | Syntactic findings. Kinds the pass can disprove are reported at `warn`. | Exit code 2 |
+| Sidecar failed, timed out, or gave a partial result | Syntactic findings at their configured severity | Exit code 2 |
+
+"No sidecar found" means that discovery found no file: no sibling next to the
+active Fallow executable, or a `FALLOW_TYPE_AWARE_BIN` path where no file
+exists. The kinds that the pass can disprove are `unused-export`,
+`unused-type` and `unused-class-member`. The project asked for the type-aware
+result, so a finding that the pass could remove does not fail the
+`error-severity-findings` gate. The run lowers each `error` rule of these
+kinds to `warn`, in the base rules and in `overrides`. Under
+`--fail-on-issues`, a `warn` finding fails the run as usual.
+
+The JSON output of a run without a sidecar keeps `_meta.type_aware.executed:
+false` and the warning in `_meta.type_aware.warnings`. `gate_outcomes` of
+`dead-code`, `audit` and the bare combined run gets a `type-aware-fallback`
+entry with `status: skipped` and `enforced: false`. A sidecar that starts and
+then fails is a different case: the run keeps the configured severities and
+adds no `type-aware-fallback` entry.
+
 ## Output and integration contract
 
 The first stable semantic wire contract is version 6. Earlier development
