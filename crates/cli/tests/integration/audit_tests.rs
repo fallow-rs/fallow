@@ -1369,7 +1369,6 @@ fn audit_css_styling_finding_survives_line_shift() {
             "--base",
             "HEAD",
             "--no-cache",
-            "--quiet",
         ];
         args.extend_from_slice(extra);
         run_fallow_raw(&args)
@@ -1463,7 +1462,6 @@ fn audit_css_new_equal_value_rule_above_marks_the_new_rule_introduced() {
             "--base",
             "HEAD",
             "--no-cache",
-            "--quiet",
         ];
         args.extend_from_slice(extra);
         run_fallow_raw(&args)
@@ -9251,7 +9249,6 @@ fn audit_css_duplicate_block_survives_line_shift_of_a_later_occurrence() {
             "--base",
             "HEAD",
             "--no-cache",
-            "--quiet",
         ];
         args.extend_from_slice(extra);
         run_fallow_raw(&args)

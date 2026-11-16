@@ -1,0 +1,4 @@
+### Changed
+
+- **`fallow audit --quiet` now prints only the actionable part of the human, compact and markdown reports.** This is a behavior change for existing `--quiet` users. Before, `--quiet` removed only the progress output. Now the report also drops unchanged inherited findings, aggregate metrics (vital signs, health score, hotspots and other ranked lists) and the `stale` and `active` records of `health.thresholdOverrides`. The report keeps introduced and worsened findings, diff-risk findings, configuration errors, analysis failures, warnings about incomplete analysis, and the `insufficient` and `no_match` override records. `--ci` and `FALLOW_QUIET=1` also set quiet, so they get the same view. The verdict, the exit code and the JSON, SARIF, CodeClimate, review and GitHub formats do not change. Run without `--quiet`, or use `--format json`, for the complete report.
+  (Closes [#4575](https://github.com/fallow-rs/fallow/issues/4575))

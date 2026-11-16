@@ -2701,7 +2701,7 @@ use impact_record::record_audit_impact;
 pub use output::audit_json_header_input;
 pub use output::{
     insert_audit_dead_code_json, insert_audit_duplication_json, insert_audit_health_json,
-    print_audit_findings, print_audit_result, print_audit_result_with_style,
+    print_audit_findings, print_audit_result,
 };
 
 /// Run and print one audit. `host_root` is the checkout of `--staged` when
@@ -2729,9 +2729,9 @@ pub fn run_audit_with_type_aware(
         ..*opts
     };
     match execute_audit_for_host(&resolved_opts, type_aware, host_root) {
-        Ok(result) => {
+        Ok(mut result) => {
             let _ = record_audit_impact(opts, host_root, gate_marker, &result);
-            let report_exit = print_audit_command_result(opts, &result, opts.json_style);
+            let report_exit = print_audit_command_result(opts, &mut result, opts.json_style);
             notes::print_run_notes(opts, type_aware, &result);
             if report_exit != ExitCode::SUCCESS {
                 return report_exit;
@@ -2762,7 +2762,7 @@ fn type_aware_meta_completeness_failed(
 
 fn print_audit_command_result(
     opts: &AuditOptions<'_>,
-    result: &AuditResult,
+    result: &mut AuditResult,
     json_style: crate::json_style::JsonStyle,
 ) -> ExitCode {
     if opts.walkthrough_guide {
@@ -2792,7 +2792,7 @@ fn print_audit_command_result(
             json_style,
         );
     }
-    print_audit_result_with_style(result, opts.quiet, opts.explain, json_style)
+    output::print_audit_report(opts, result, json_style)
 }
 
 /// Run the standalone `fallow decision-surface` command: the separable, cheap

@@ -30,9 +30,12 @@ use complexity_notes::worsened_class_label;
 mod codeclimate;
 #[path = "audit_complexity_notes.rs"]
 mod complexity_notes;
+#[path = "audit_quiet.rs"]
+mod quiet;
 #[cfg(test)]
 use codeclimate::build_audit_codeclimate;
 use codeclimate::{build_audit_codeclimate_issues, print_audit_codeclimate};
+pub use quiet::print_audit_report;
 
 /// Print audit results and return the appropriate exit code.
 #[must_use]

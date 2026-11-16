@@ -176,7 +176,7 @@ pub struct Cli {
     #[command(flatten)]
     pub json: crate::json_style::JsonPresentationArgs,
 
-    /// Suppress progress output
+    /// Suppress progress output; `audit` also prints only actionable findings
     #[arg(short, long, global = true)]
     pub quiet: bool,
 

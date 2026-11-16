@@ -6,6 +6,9 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 #[path = "audit_keys_collection.rs"]
 mod collection;
+#[macro_use]
+#[path = "audit_keys_ledger_collections.rs"]
+mod ledger_collections;
 #[path = "audit_keys_styling.rs"]
 mod styling;
 
@@ -139,168 +142,39 @@ impl DeadCodeAuditLedger {
     ///
     /// `StaleSuppression` is the sole legacy finding without a typed
     /// `introduced` slot. Its serializer keeps a narrow stable-key fallback.
-    #[expect(
-        clippy::too_many_lines,
-        reason = "exhaustive result destructuring and field annotation must stay together so new finding collections require an explicit audit decision"
-    )]
     pub fn annotate_results(&self, results: &mut fallow_types::results::AnalysisResults) {
-        let fallow_types::results::AnalysisResults {
-            shared_state: _,
-            unused_files,
-            unused_exports,
-            unused_types,
-            private_type_leaks,
-            deprecated_exports_in_use,
-            unused_dependencies,
-            unused_dev_dependencies,
-            unused_optional_dependencies,
-            unused_enum_members,
-            unused_class_members,
-            unused_namespace_members,
-            unused_store_members,
-            unresolved_imports,
-            unlisted_dependencies,
-            unlisted_binaries,
-            duplicate_exports,
-            duplicate_export_aliases,
-            type_only_dependencies,
-            test_only_dependencies,
-            dev_dependencies_in_production,
-            circular_dependencies,
-            re_export_cycles,
-            package_cycles,
-            boundary_violations,
-            boundary_coverage_violations,
-            boundary_call_violations,
-            policy_violations,
-            stale_suppressions: _stale_suppressions,
-            unused_catalog_entries,
-            empty_catalog_groups,
-            unresolved_catalog_references,
-            unused_dependency_overrides,
-            misconfigured_dependency_overrides,
-            invalid_client_exports,
-            mixed_client_server_barrels,
-            misplaced_directives,
-            unprovided_injects,
-            unrendered_components,
-            unused_component_props,
-            absent_component_props,
-            constant_parameters,
-            unused_component_emits,
-            unused_component_inputs,
-            unused_component_outputs,
-            unused_svelte_events,
-            unused_effect_layers,
-            unused_tagged_errors,
-            unproduced_catch_tags,
-            unused_server_actions,
-            unused_load_data_keys,
-            unused_load_data_keys_global_abstain: _unused_load_data_keys_global_abstain,
-            route_collisions,
-            dynamic_segment_name_conflicts,
-            cascade_hidden: _cascade_hidden,
-            cascade: _cascade,
-            suppression_count: _suppression_count,
-            unused_component_props_exempted: _unused_component_props_exempted,
-            active_suppressions: _active_suppressions,
-            feature_flags: _feature_flags,
-            security_findings: _security_findings,
-            suppressed_security_findings: _suppressed_security_findings,
-            security_unresolved_edge_files: _security_unresolved_edge_files,
-            security_unresolved_callee_sites: _security_unresolved_callee_sites,
-            security_unresolved_callee_diagnostics: _security_unresolved_callee_diagnostics,
-            prop_drilling_chains,
-            thin_wrappers,
-            duplicate_prop_shapes,
-            export_usages: _export_usages,
-            entry_point_summary: _entry_point_summary,
-            render_fan_in: _render_fan_in,
-            react_component_intel: _react_component_intel,
-            semantic_reachable_files: _,
-            semantic_framework_contracts: _semantic_framework_contracts,
-            constant_parameter_candidates: _constant_parameter_candidates,
-        } = results;
-
         macro_rules! annotate {
+            (@no_slot $field:ident, $collection:literal) => {
+                let _ = $field;
+            };
             ($field:ident, $collection:literal) => {
-                for (item, introduced) in $field.iter_mut().zip(
-                    self.records
-                        .iter()
-                        .filter(|record| record.collection == $collection)
-                        .map(|record| record.introduced),
-                ) {
+                for (item, introduced) in $field.iter_mut().zip(self.flags($collection)) {
                     item.introduced = Some(AuditIntroduced(introduced));
                 }
             };
         }
+        for_each_ledger_collection!(results, annotate);
+    }
 
-        annotate!(prop_drilling_chains, "prop_drilling_chains");
-        annotate!(thin_wrappers, "thin_wrappers");
-        annotate!(duplicate_prop_shapes, "duplicate_prop_shapes");
-        annotate!(unused_files, "unused_files");
-        annotate!(unused_exports, "unused_exports");
-        annotate!(unused_types, "unused_types");
-        annotate!(private_type_leaks, "private_type_leaks");
-        annotate!(deprecated_exports_in_use, "deprecated_exports_in_use");
-        annotate!(unused_dependencies, "unused_dependencies");
-        annotate!(unused_dev_dependencies, "unused_dev_dependencies");
-        annotate!(unused_optional_dependencies, "unused_optional_dependencies");
-        annotate!(unused_enum_members, "unused_enum_members");
-        annotate!(unused_class_members, "unused_class_members");
-        annotate!(unused_namespace_members, "unused_namespace_members");
-        annotate!(unused_store_members, "unused_store_members");
-        annotate!(unresolved_imports, "unresolved_imports");
-        annotate!(unlisted_dependencies, "unlisted_dependencies");
-        annotate!(unlisted_binaries, "unlisted_binaries");
-        annotate!(duplicate_exports, "duplicate_exports");
-        annotate!(duplicate_export_aliases, "duplicate_export_aliases");
-        annotate!(type_only_dependencies, "type_only_dependencies");
-        annotate!(test_only_dependencies, "test_only_dependencies");
-        annotate!(
-            dev_dependencies_in_production,
-            "dev_dependencies_in_production"
-        );
-        annotate!(circular_dependencies, "circular_dependencies");
-        annotate!(re_export_cycles, "re_export_cycles");
-        annotate!(package_cycles, "package_cycles");
-        annotate!(boundary_violations, "boundary_violations");
-        annotate!(boundary_coverage_violations, "boundary_coverage_violations");
-        annotate!(boundary_call_violations, "boundary_call_violations");
-        annotate!(policy_violations, "policy_violations");
-        annotate!(unused_catalog_entries, "unused_catalog_entries");
-        annotate!(empty_catalog_groups, "empty_catalog_groups");
-        annotate!(
-            unresolved_catalog_references,
-            "unresolved_catalog_references"
-        );
-        annotate!(unused_dependency_overrides, "unused_dependency_overrides");
-        annotate!(
-            misconfigured_dependency_overrides,
-            "misconfigured_dependency_overrides"
-        );
-        annotate!(invalid_client_exports, "invalid_client_exports");
-        annotate!(mixed_client_server_barrels, "mixed_client_server_barrels");
-        annotate!(misplaced_directives, "misplaced_directives");
-        annotate!(unprovided_injects, "unprovided_injects");
-        annotate!(unrendered_components, "unrendered_components");
-        annotate!(route_collisions, "route_collisions");
-        annotate!(
-            dynamic_segment_name_conflicts,
-            "dynamic_segment_name_conflicts"
-        );
-        annotate!(unused_component_props, "unused_component_props");
-        annotate!(absent_component_props, "absent_component_props");
-        annotate!(constant_parameters, "constant_parameters");
-        annotate!(unused_component_emits, "unused_component_emits");
-        annotate!(unused_component_inputs, "unused_component_inputs");
-        annotate!(unused_component_outputs, "unused_component_outputs");
-        annotate!(unused_svelte_events, "unused_svelte_events");
-        annotate!(unused_effect_layers, "unused_effect_layers");
-        annotate!(unused_tagged_errors, "unused_tagged_errors");
-        annotate!(unproduced_catch_tags, "unproduced_catch_tags");
-        annotate!(unused_server_actions, "unused_server_actions");
-        annotate!(unused_load_data_keys, "unused_load_data_keys");
+    /// Remove every finding that the base snapshot already holds. A finding
+    /// without a ledger record stays, so the filter never hides a finding
+    /// that the comparison did not classify.
+    pub fn retain_introduced_results(&self, results: &mut fallow_types::results::AnalysisResults) {
+        macro_rules! retain {
+            ($(@no_slot)? $field:ident, $collection:literal) => {
+                let mut flags = self.flags($collection);
+                $field.retain(|_| flags.next().unwrap_or(true));
+            };
+        }
+        for_each_ledger_collection!(results, retain);
+    }
+
+    /// The introduced flag of each record of `collection`, in output order.
+    fn flags<'a>(&'a self, collection: &'a str) -> impl Iterator<Item = bool> + 'a {
+        self.records
+            .iter()
+            .filter(move |record| record.collection == collection)
+            .map(|record| record.introduced)
     }
 }
 
