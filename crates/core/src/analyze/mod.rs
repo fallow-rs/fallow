@@ -1,5 +1,7 @@
 mod absent_component_prop;
 mod constant_parameter;
+mod cycle_allow;
+mod cycle_finding;
 pub(crate) use constant_parameter::release_resolution_payloads;
 mod boundary;
 mod boundary_calls;
@@ -99,8 +101,8 @@ use fallow_types::output_dead_code::{
 };
 
 use crate::results::{
-    AnalysisResults, CircularDependency, CircularDependencyEdge, StaleSuppression,
-    UnusedDependency, UnusedExport, UnusedMember,
+    AnalysisResults, CircularDependency, StaleSuppression, UnusedDependency, UnusedExport,
+    UnusedMember,
 };
 use crate::suppress::{IssueKind, SuppressionContext};
 use unconfigured_check::record_unconfigured_check;
@@ -439,29 +441,37 @@ fn add_workspace_public_api_entry_points(
     }
 }
 
+/// The cycles of `graph`, without the cycles that
+/// `circularDependencies.allow` accepts and the suppressed cycles. The
+/// allow-list runs first, so an inline suppression of an accepted cycle is
+/// stale.
 fn find_circular_dependencies(
     graph: &ModuleGraph,
-    options: fallow_config::CircularDependenciesConfig,
+    config: &ResolvedConfig,
     line_offsets_map: &LineOffsetsMap<'_>,
     suppressions: &crate::suppress::SuppressionContext<'_>,
     workspaces: &[fallow_config::WorkspaceInfo],
 ) -> Vec<CircularDependency> {
     let cycles = graph.find_cycles_with(crate::graph::CycleOptions {
-        ignore_lazy_imports: options.ignore_lazy_imports,
+        ignore_lazy_imports: config.circular_dependencies.ignore_lazy_imports,
     });
+    let mut allow_list = cycle_allow::CycleAllowList::new(config);
     let mut dependencies: Vec<CircularDependency> = cycles
         .into_iter()
         .filter_map(|cycle| {
-            if is_circular_dependency_suppressed(graph, line_offsets_map, suppressions, &cycle) {
+            if allow_list.accepts(graph, &cycle)
+                || is_circular_dependency_suppressed(graph, line_offsets_map, suppressions, &cycle)
+            {
                 return None;
             }
-            Some(circular_dependency_from_cycle(
+            Some(cycle_finding::circular_dependency_from_cycle(
                 graph,
                 line_offsets_map,
                 &cycle,
             ))
         })
         .collect();
+    allow_list.record();
 
     if !workspaces.is_empty() {
         for dep in &mut dependencies {
@@ -470,44 +480,6 @@ fn find_circular_dependencies(
     }
 
     dependencies
-}
-
-fn circular_dependency_from_cycle(
-    graph: &ModuleGraph,
-    line_offsets_map: &LineOffsetsMap<'_>,
-    cycle: &[FileId],
-) -> CircularDependency {
-    // One anchor per hop in cycle order: `edges[i]` is the import in
-    // `cycle[i]` pointing to `cycle[i + 1]`. Always populated for every
-    // hop (fallback `(1, 0)` if the span is somehow missing) so
-    // `edges.len() == files.len()` regardless of URL-resolvability on
-    // the consumer side. The LSP renders one squiggly per edge.
-    let edges: Vec<CircularDependencyEdge> = (0..cycle.len())
-        .map(|edge_index| {
-            let from = cycle[edge_index];
-            let (line, col) =
-                cycle_edge_line_col(graph, line_offsets_map, cycle, edge_index).unwrap_or((1, 0));
-            CircularDependencyEdge {
-                path: graph.modules[from.0 as usize].path.clone(),
-                line,
-                col,
-            }
-        })
-        .collect();
-
-    let files: Vec<std::path::PathBuf> = edges.iter().map(|edge| edge.path.clone()).collect();
-    let length = files.len();
-    // Top-level `line`/`col` remain the first hop's anchor for backward
-    // compatibility with consumers that predate `edges`.
-    let (line, col) = edges.first().map_or((1, 0), |edge| (edge.line, edge.col));
-    CircularDependency {
-        files,
-        length,
-        line,
-        col,
-        edges,
-        is_cross_package: false,
-    }
 }
 
 /// Thin wrapper around [`find_circular_dependencies`] that gates on
@@ -522,11 +494,12 @@ fn run_circular_dep_detector(
     workspaces: &[fallow_config::WorkspaceInfo],
 ) -> Vec<CircularDependencyFinding> {
     if config.rules.circular_dependencies == Severity::Off {
+        cycle_allow::record_all_matched(config);
         return Vec::new();
     }
     find_circular_dependencies(
         graph,
-        config.circular_dependencies,
+        config,
         line_offsets_by_file,
         suppressions,
         workspaces,

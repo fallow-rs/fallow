@@ -61,6 +61,8 @@ mod css_in_js_styled;
 mod css_modules;
 #[path = "integration_test/css_url_package_credit.rs"]
 mod css_url_package_credit;
+#[path = "integration_test/cycles_allow.rs"]
+mod cycles_allow;
 #[path = "integration_test/cycles_ignore_lazy_imports.rs"]
 mod cycles_ignore_lazy_imports;
 #[path = "integration_test/declaration_runtime_sibling.rs"]

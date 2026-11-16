@@ -889,6 +889,16 @@ kind: "ignore-patterns-entry-redundant"
  */
 pattern: string
 } | {
+kind: "circular-dependencies-allow-unmatched"
+/**
+ * The entry as one line: the files joined by `, ` in brackets.
+ */
+pattern: string
+/**
+ * The files of the entry, as written in the config.
+ */
+files: string[]
+} | {
 kind: "override-rule-ineffective"
 /**
  * The canonical rule name, also when the config uses an alias.

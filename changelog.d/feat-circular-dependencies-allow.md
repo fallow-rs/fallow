@@ -1,0 +1,3 @@
+### Added
+
+- **`circularDependencies.allow` accepts exact cycles.** Each entry lists the files of one cycle in import order, relative to the project root, for example `[["src/a.ts", "src/b.ts"]]`. An entry accepts only the cycle with exactly these files, from any start file. A new cycle through the same imports stays reported, which an inline `fallow-ignore-next-line circular-dependency` marker does not give. An entry that matches no cycle gives a `circular-dependencies-allow-unmatched` diagnostic in JSON, SARIF, Markdown and the stderr note. `fallow migrate` now translates the `cycles.allow` list of a migrated config. (Closes [#4623](https://github.com/fallow-rs/fallow/issues/4623))

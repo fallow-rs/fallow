@@ -189,7 +189,7 @@ impl UnusedComponentPropsConfig {
 ///
 /// The default leaves the rule unchanged: every runtime import edge takes
 /// part in cycle detection, and only type-only edges are skipped.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "camelCase")]
 pub struct CircularDependenciesConfig {
     /// Skip import edges that load their target on demand or on another
@@ -201,13 +201,26 @@ pub struct CircularDependenciesConfig {
     /// An edge that also carries a static import stays. Default `false`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ignore_lazy_imports: bool,
+    /// Accepted cycles. Each entry is the list of files of one cycle, in
+    /// import order, without the repeat of the first file at the end. An
+    /// entry accepts a cycle that has exactly these files in this order, from
+    /// any start file: `["src/a.ts", "src/b.ts", "src/c.ts"]` also accepts
+    /// `src/b.ts -> src/c.ts -> src/a.ts`. A cycle with another set of files
+    /// stays reported, also when it shares an import with an accepted cycle.
+    ///
+    /// Each path is relative to the project root, also in a monorepo: write
+    /// `packages/app/src/a.ts`, not a path relative to the workspace. Globs
+    /// are not supported. An entry that matches no cycle in a run gives a
+    /// `circular-dependencies-allow-unmatched` diagnostic. Default `[]`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub allow: Vec<Vec<String>>,
 }
 
 impl CircularDependenciesConfig {
     /// True when no option is set, so serialization can omit the section.
     #[must_use]
     pub const fn is_default(&self) -> bool {
-        !self.ignore_lazy_imports
+        !self.ignore_lazy_imports && self.allow.is_empty()
     }
 }
 

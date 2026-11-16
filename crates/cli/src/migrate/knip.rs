@@ -1,5 +1,6 @@
 use serde_json::Value;
 
+use super::knip_cycles::migrate_cycles;
 use super::knip_fields::{
     migrate_exclude, migrate_ignore, migrate_ignore_binaries, migrate_ignore_deps,
     migrate_ignore_exports_used_in_file, migrate_include, migrate_rules, warn_unhandled_root_keys,
@@ -54,6 +55,10 @@ pub(super) fn migrate_knip(
 
     if let Some(value) = obj.get("ignoreExportsUsedInFile") {
         migrate_ignore_exports_used_in_file(value, config, warnings);
+    }
+
+    if let Some(value) = obj.get("cycles") {
+        migrate_cycles(value, config, warnings);
     }
 
     if let Some(rules_val) = obj.get("rules") {
@@ -308,6 +313,24 @@ mod tests {
         let fields: Vec<&str> = warnings.iter().map(|w| w.field.as_str()).collect();
         assert!(fields.contains(&"project"));
         assert!(fields.contains(&"paths"));
+    }
+
+    #[test]
+    fn migrate_knip_cycles_allow_becomes_circular_dependencies_allow() {
+        let knip: serde_json::Value = serde_json::from_str(
+            r#"{"cycles": {"allow": [["src/a.ts", "src/b.ts"]]}, "rules": {"cycles": "warn"}}"#,
+        )
+        .unwrap();
+        let mut config = empty_config();
+        let mut warnings = Vec::new();
+        migrate_knip(&knip, &mut config, &mut warnings);
+
+        assert!(warnings.is_empty(), "{warnings:?}");
+        assert_eq!(
+            config["circularDependencies"],
+            serde_json::json!({"allow": [["src/a.ts", "src/b.ts"]]})
+        );
+        assert_eq!(config["rules"]["circular-dependencies"], "warn");
     }
 
     #[test]

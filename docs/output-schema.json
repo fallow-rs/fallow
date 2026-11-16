@@ -13933,6 +13933,32 @@
           "properties": {
             "kind": {
               "type": "string",
+              "const": "circular-dependencies-allow-unmatched"
+            },
+            "pattern": {
+              "type": "string",
+              "description": "The entry as one line: the files joined by `, ` in brackets."
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "The files of the entry, as written in the config."
+            }
+          },
+          "required": [
+            "kind",
+            "pattern",
+            "files"
+          ],
+          "description": "A `circularDependencies.allow` entry matched no cycle of the run\n(issue #4623): no cycle has exactly these files in this order, from\nany start file. The usual cause is a cycle that the code no longer\nhas, or a path that is not relative to the project root. Not for a\n`--production` run, nor a run with the `circular-dependencies` rule\noff. `path` is the root. Not degraded."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
               "const": "override-rule-ineffective"
             },
             "rule": {

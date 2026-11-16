@@ -3,7 +3,8 @@ use std::sync::{Arc, Mutex};
 /// Which entries of one config list had an effect in the latest pass.
 ///
 /// The stage that decides the effect (source discovery for `ignorePatterns`,
-/// entry point discovery for `entry`) runs before the dead-code envelope is
+/// entry point discovery for `entry`, cycle detection for
+/// `circularDependencies.allow`) runs before the dead-code envelope is
 /// built and does not return its answer to that point. It writes the answer
 /// here, and the envelope reads it through the resolved config.
 ///
@@ -28,7 +29,7 @@ impl EntryEffectRecord {
     /// config order. Empty when no pass recorded an answer, or when the
     /// answer has another length than `entries`.
     #[must_use]
-    pub fn ineffective<'a>(&self, entries: &'a [String]) -> Vec<&'a str> {
+    pub fn ineffective<'a, T>(&self, entries: &'a [T]) -> Vec<&'a T> {
         let Ok(slot) = self.effective.lock() else {
             return Vec::new();
         };
@@ -42,7 +43,7 @@ impl EntryEffectRecord {
             .iter()
             .zip(effective)
             .filter(|(_, effective)| !**effective)
-            .map(|(entry, _)| entry.as_str())
+            .map(|(entry, _)| entry)
             .collect()
     }
 }
