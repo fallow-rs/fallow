@@ -188,3 +188,91 @@ fn a_test_file_under_the_route_directory_is_not_a_root() {
         results.security_findings
     );
 }
+
+#[test]
+fn a_reached_route_module_counts_only_its_client_code_as_a_sink() {
+    let (results, _) = analyze_fixture();
+    for route in ["app/routes/settings.tsx", "app/routes/theme.tsx"] {
+        assert!(
+            !has_finding_on(&results, route),
+            "only the action of theme.tsx reads node:fs and THEME_SECRET: {:#?}",
+            results.security_findings
+        );
+    }
+}
+
+#[test]
+fn an_env_read_that_only_the_loader_makes_is_not_a_finding() {
+    let (results, _) = analyze_fixture();
+    assert!(
+        !results
+            .security_findings
+            .iter()
+            .any(|f| f.evidence.contains("ADMIN_SECRET")
+                || f.evidence.contains("BANNER_LOADER_SECRET")),
+        "{:#?}",
+        results.security_findings
+    );
+}
+
+#[test]
+fn an_env_read_in_the_route_component_is_a_direct_finding() {
+    let (results, _) = analyze_fixture();
+    let findings = findings_on(&results, "app/routes/banner.tsx", SECRET_LEAK);
+    assert_eq!(findings.len(), 1, "{:#?}", results.security_findings);
+    assert!(findings[0].evidence.contains("process.env.BANNER_SECRET"));
+    assert_eq!(findings[0].trace.len(), 1);
+}
+
+#[test]
+fn a_helper_next_to_a_folder_route_is_not_a_root() {
+    let (results, _) = analyze_fixture();
+    for path in [
+        "app/routes/api.users/db.ts",
+        "app/routes/api.users/route.tsx",
+    ] {
+        assert!(
+            !has_finding_on(&results, path),
+            "only the loader of route.tsx uses db.ts: {:#?}",
+            results.security_findings
+        );
+    }
+}
+
+#[test]
+fn a_nested_route_file_with_a_route_export_is_a_root() {
+    let (results, _) = analyze_fixture();
+    let findings = findings_on(&results, "app/routes/_auth/login.tsx", SECRET_LEAK);
+    assert_eq!(findings.len(), 1, "{:#?}", results.security_findings);
+    assert!(sink_path(findings[0]).ends_with("app/lib/billing.ts"));
+}
+
+fn analyze_workspace_fixture() -> AnalysisResults {
+    let root = fixture_path("security-react-router-workspace-markers");
+    let config = create_config_with_rules(root, |rules| {
+        rules.security_client_server_leak = Severity::Warn;
+    });
+    fallow_core::analyze(&config).expect("analysis should succeed")
+}
+
+#[test]
+fn client_markers_apply_in_the_react_router_package() {
+    let results = analyze_workspace_fixture();
+    let findings = findings_on(&results, "packages/web/app/tracker.client.ts", SECRET_LEAK);
+    assert_eq!(findings.len(), 1, "{:#?}", results.security_findings);
+}
+
+#[test]
+fn markers_do_not_apply_in_a_package_without_react_router() {
+    let results = analyze_workspace_fixture();
+    assert!(
+        !has_finding_on(&results, "packages/other/src/store.client.ts"),
+        "{:#?}",
+        results.security_findings
+    );
+    assert!(
+        findings_on(&results, "packages/other/src/panel.ts", SERVER_ONLY).is_empty(),
+        "data.server.ts is not a sink outside the React Router package: {:#?}",
+        results.security_findings
+    );
+}

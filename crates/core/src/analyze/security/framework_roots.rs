@@ -6,36 +6,49 @@
 //!
 //! - A route module ships to the browser without its server-only exports
 //!   (`loader`, `action`, `middleware`, `headers`). Dead-code elimination then
-//!   drops each import that only those exports use. The cone skips these
-//!   imports at each route module that it reaches, the root included (see
-//!   [`super::route_module_split`]). React Router applies the transform to
-//!   the route file wherever another module imports it.
-//! - A test file under the route directory is not a root.
+//!   drops each import and env read that only those exports use. The leak
+//!   scan applies the same split to each route module, as a root and where
+//!   the cone reaches it (see [`super::route_module_split`]). React Router
+//!   applies the transform to the route file wherever another module imports
+//!   it.
 //! - A `*.client.*` file, or a file under a `.client/` directory, runs only in
 //!   the browser. It is a whole-module client root.
 //! - A `*.server.*` file, or a file under a `.server/` directory, must never
 //!   reach the client build. It is a `server-only-import` sink.
 //!
+//! The route modules are the files that the route config names, the root
+//! route, and the route files of the route directory. A helper module next to
+//! a route file is not a root: it is client code only when the cone reaches
+//! it. A test file is never a root. The `.client` and `.server` markers apply
+//! only in the packages where the React Router plugin is active.
+//!
 //! Only the route modules are parsed again, and only when the rule is on and
-//! the React Router plugin is active. Extraction does not keep the
-//! statement-level references that the split needs.
+//! the plugin is active. Extraction does not keep the statement-level
+//! references that the split needs.
 
 use std::path::{Component, Path};
 
+use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::discover::FileId;
-use crate::graph::ModuleGraph;
-use crate::plugins::react_router::{REACT_ROUTER_PLUGIN_NAME, is_route_module_rule};
+use crate::graph::{ModuleGraph, ModuleNode};
+use crate::plugins::react_router::{
+    REACT_ROUTER_PLUGIN_NAME, is_route_export_name, is_route_module_rule,
+};
 use crate::plugins::{AggregatedPluginResult, CompiledPathRule};
 
-use super::route_module_split::server_only_import_spans;
+use super::route_module_split::{RouteModuleSplit, split_route_module};
 use crate::analyze::predicates::is_test_or_spec_file;
 
 /// The file-name and directory marker of a browser-only module.
 const CLIENT_MARKER: &str = "client";
 /// The file-name and directory marker of a server-only module.
 const SERVER_MARKER: &str = "server";
+/// The file stem of a route module in a flat-routes folder (`users/route.tsx`).
+const FOLDER_ROUTE_STEM: &str = "route";
+/// The glob part that a route directory pattern of the plugin ends with.
+const ROUTE_DIRECTORY_GLOB: &str = "/**/";
 
 /// What makes a file a starting point of the leak scan.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -62,11 +75,46 @@ impl ClientRootKind {
 /// The client roots and server-only sinks of the active framework plugins.
 #[derive(Debug, Default)]
 pub struct FrameworkClientRoots {
-    /// Each route module, with the start offsets of the imports that only its
-    /// server-only exports use. The cone does not follow these imports.
-    route_roots: FxHashMap<FileId, FxHashSet<u32>>,
+    /// Each route module with its split. `None` when the file did not parse
+    /// cleanly: the module then counts as a whole.
+    route_roots: FxHashMap<FileId, Option<RouteModuleSplit>>,
     client_roots: FxHashSet<FileId>,
     server_sinks: FxHashSet<FileId>,
+}
+
+/// The route patterns of the plugin, split by shape.
+struct RouteRules {
+    /// Patterns of single route files: the root route and the files that the
+    /// route config names.
+    files: Vec<CompiledPathRule>,
+    /// Route directories (`app/routes/**/*.{ts,tsx,js,jsx}`), with the
+    /// project-relative directory.
+    directories: Vec<(CompiledPathRule, String)>,
+}
+
+impl RouteRules {
+    fn new(plugin_result: &AggregatedPluginResult) -> Self {
+        let mut rules = Self {
+            files: Vec::new(),
+            directories: Vec::new(),
+        };
+        let route_rules = plugin_result
+            .used_exports
+            .iter()
+            .filter(|rule| is_route_module_rule(&rule.plugin_name, &rule.rule.exports));
+        for rule in route_rules {
+            let Some(matcher) =
+                CompiledPathRule::for_used_export_rule(&rule.rule.path, "route module pattern")
+            else {
+                continue;
+            };
+            match rule.rule.path.pattern.split_once(ROUTE_DIRECTORY_GLOB) {
+                Some((directory, _)) => rules.directories.push((matcher, directory.to_owned())),
+                None => rules.files.push(matcher),
+            }
+        }
+        rules
+    }
 }
 
 impl FrameworkClientRoots {
@@ -86,36 +134,45 @@ impl FrameworkClientRoots {
         }) else {
             return Self::default();
         };
-        let route_rules: Vec<CompiledPathRule> = plugin_result
-            .used_exports
+        let scopes: Vec<&str> = plugin_result
+            .active_plugin_scopes
             .iter()
-            .filter(|rule| is_route_module_rule(&rule.plugin_name, &rule.rule.exports))
-            .filter_map(|rule| {
-                CompiledPathRule::for_used_export_rule(&rule.rule.path, "route module pattern")
-            })
+            .filter(|(plugin, _)| plugin == REACT_ROUTER_PLUGIN_NAME)
+            .map(|(_, scope)| scope.as_str())
             .collect();
+        let rules = RouteRules::new(plugin_result);
+        let relative_paths: Vec<String> = graph
+            .modules
+            .iter()
+            .map(|node| relative_path(&node.path, root))
+            .collect();
+        let folder_routes = folder_route_directories(&relative_paths, &rules);
+
         let mut roots = Self::default();
-        for node in &graph.modules {
-            let relative = node.path.strip_prefix(root).unwrap_or(&node.path);
-            if has_marker(relative, SERVER_MARKER) {
+        let mut route_files: Vec<&ModuleNode> = Vec::new();
+        for (node, relative) in graph.modules.iter().zip(&relative_paths) {
+            let path = Path::new(relative);
+            let in_scope = is_in_scope(relative, &scopes);
+            if in_scope && has_marker(path, SERVER_MARKER) {
                 roots.server_sinks.insert(node.file_id);
                 continue;
             }
             // A test file runs in the test runner, not in the browser.
-            if is_test_or_spec_file(relative) {
+            if is_test_or_spec_file(path) {
                 continue;
             }
-            if has_marker(relative, CLIENT_MARKER) {
+            if in_scope && has_marker(path, CLIENT_MARKER) {
                 roots.client_roots.insert(node.file_id);
                 continue;
             }
-            let relative_str = relative.to_string_lossy();
-            if route_rules.iter().any(|rule| rule.matches(&relative_str)) {
-                roots
-                    .route_roots
-                    .insert(node.file_id, server_only_import_spans(&node.path));
+            if is_route_file(node, relative, &rules, &folder_routes) {
+                route_files.push(node);
             }
         }
+        roots.route_roots = route_files
+            .par_iter()
+            .map(|node| (node.file_id, split_route_module(&node.path)))
+            .collect();
         roots
     }
 
@@ -130,19 +187,11 @@ impl FrameworkClientRoots {
         }
     }
 
-    /// The import start offsets of a route module that only its server-only
-    /// exports use.
-    pub(super) fn server_only_imports(&self, file_id: FileId) -> Option<&FxHashSet<u32>> {
-        self.route_roots.get(&file_id)
-    }
-
-    /// Each route module with the import start offsets that the cone skips.
-    pub(super) fn route_server_only_spans(
-        &self,
-    ) -> impl Iterator<Item = (FileId, &FxHashSet<u32>)> + '_ {
+    /// Each route module that parsed cleanly, with its split.
+    pub(super) fn route_splits(&self) -> impl Iterator<Item = (FileId, &RouteModuleSplit)> + '_ {
         self.route_roots
             .iter()
-            .map(|(&file_id, spans)| (file_id, spans))
+            .filter_map(|(&file_id, split)| split.as_ref().map(|split| (file_id, split)))
     }
 
     /// Whether a file is a React Router `.server` module.
@@ -154,6 +203,103 @@ impl FrameworkClientRoots {
     pub(super) fn server_sinks(&self) -> impl Iterator<Item = FileId> + '_ {
         self.server_sinks.iter().copied()
     }
+}
+
+fn relative_path(path: &Path, root: &Path) -> String {
+    path.strip_prefix(root)
+        .unwrap_or(path)
+        .to_string_lossy()
+        .replace('\\', "/")
+}
+
+/// Whether a project-relative path lies in a package where the plugin is
+/// active. An empty scope is the root project, which holds every path.
+fn is_in_scope(relative: &str, scopes: &[&str]) -> bool {
+    scopes.iter().any(|scope| {
+        scope.is_empty()
+            || relative
+                .strip_prefix(scope)
+                .is_some_and(|rest| rest.starts_with('/'))
+    })
+}
+
+/// The project-relative folders that hold a flat-routes `route.*` file inside
+/// a route directory. The other files in such a folder are helpers.
+fn folder_route_directories(relative_paths: &[String], rules: &RouteRules) -> FxHashSet<String> {
+    relative_paths
+        .iter()
+        .filter(|relative| file_stem(relative) == Some(FOLDER_ROUTE_STEM))
+        .filter(|relative| {
+            rules
+                .directories
+                .iter()
+                .any(|(rule, _)| rule.matches(relative))
+        })
+        .filter_map(|relative| {
+            relative
+                .rsplit_once('/')
+                .map(|(folder, _)| folder.to_owned())
+        })
+        .collect()
+}
+
+/// Whether a module is a route module:
+///
+/// - a file that the route config names, or the root route;
+/// - a file directly in a route directory (`routes/about.tsx`);
+/// - a `route.*` file in a folder of a route directory
+///   (`routes/users/route.tsx`);
+/// - a deeper file outside such a folder that exports a route module export.
+///   Route conventions that nest files in folders (`routes/_auth/login.tsx`)
+///   give this shape.
+fn is_route_file(
+    node: &ModuleNode,
+    relative: &str,
+    rules: &RouteRules,
+    folder_routes: &FxHashSet<String>,
+) -> bool {
+    if rules.files.iter().any(|rule| rule.matches(relative)) {
+        return true;
+    }
+    let Some(directory) = rules
+        .directories
+        .iter()
+        .find(|(rule, _)| rule.matches(relative))
+        .map(|(_, directory)| directory.as_str())
+    else {
+        return false;
+    };
+    let Some(inner) = relative
+        .strip_prefix(directory)
+        .and_then(|rest| rest.strip_prefix('/'))
+    else {
+        return false;
+    };
+    let Some((folders, _)) = inner.rsplit_once('/') else {
+        return true;
+    };
+    if file_stem(relative) == Some(FOLDER_ROUTE_STEM) {
+        return true;
+    }
+    let in_route_folder = folders
+        .split('/')
+        .scan(directory.to_owned(), |path, folder| {
+            path.push('/');
+            path.push_str(folder);
+            Some(path.clone())
+        })
+        .any(|folder| folder_routes.contains(&folder));
+    !in_route_folder
+        && node
+            .exports
+            .iter()
+            .any(|export| !export.is_type_only && is_route_export_name(&export.name.to_string()))
+}
+
+/// The file name up to its first dot.
+fn file_stem(relative: &str) -> Option<&str> {
+    let name = relative.rsplit('/').next()?;
+    name.split('.').next()
 }
 
 /// Whether a project-relative path is a `*.<marker>.*` file or lies under a

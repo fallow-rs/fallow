@@ -197,8 +197,14 @@ pub(super) fn find_security_findings(
     let modules_by_id: FxHashMap<FileId, &ModuleInfo> =
         ctx.modules.iter().map(|m| (m.file_id, m)).collect();
 
-    let secret_sources = compute_secret_source_set(&modules_by_id);
+    let mut secret_sources = compute_secret_source_set(&modules_by_id);
     let mut server_only_sources = compute_server_only_source_set(&modules_by_id);
+    apply_route_splits(
+        &modules_by_id,
+        &framework_roots,
+        &mut secret_sources,
+        &mut server_only_sources,
+    );
     server_only_sources.extend(framework_roots.server_sinks());
 
     find_client_server_leaks(
@@ -212,6 +218,38 @@ pub(super) fn find_security_findings(
         ctx.suppressions,
         ctx.line_offsets_by_file,
     )
+}
+
+/// Count only the client code of each React Router route module as a sink:
+/// drop the env reads and the server-only imports that only its server-only
+/// exports use. The same sets serve the route module as a root and as a
+/// module that the cone reaches.
+fn apply_route_splits(
+    modules_by_id: &FxHashMap<FileId, &ModuleInfo>,
+    framework_roots: &FrameworkClientRoots,
+    secret_sources: &mut FxHashMap<FileId, Vec<String>>,
+    server_only_sources: &mut FxHashSet<FileId>,
+) {
+    for (file_id, split) in framework_roots.route_splits() {
+        if let Some(reads) = secret_sources.get_mut(&file_id) {
+            reads.retain(|read| !split.dead_only_env_reads.contains(read));
+            if reads.is_empty() {
+                secret_sources.remove(&file_id);
+            }
+        }
+        if server_only_sources.contains(&file_id) {
+            let imports_client_server_only_code =
+                modules_by_id.get(&file_id).is_some_and(|module| {
+                    module.imports.iter().any(|import| {
+                        super::server_only::is_server_only_import(import)
+                            && !split.server_only_spans.contains(&import.span.start)
+                    })
+                });
+            if !imports_client_server_only_code {
+                server_only_sources.remove(&file_id);
+            }
+        }
+    }
 }
 
 /// The graph facts that the leak scan reads.
@@ -417,11 +455,11 @@ fn find_client_server_leaks(
     // React Router removes the server-only exports of a route module from the
     // client build wherever the module is imported, so the cone skips their
     // imports at every route module, not only at a root.
-    for (file_id, spans) in sources.framework_roots.route_server_only_spans() {
+    for (file_id, split) in sources.framework_roots.route_splits() {
         excluded_spans
             .entry(file_id)
             .or_default()
-            .extend(spans.iter().copied());
+            .extend(split.server_only_spans.iter().copied());
     }
     let empty_spans: FxHashSet<u32> = FxHashSet::default();
 
@@ -501,38 +539,6 @@ fn scan_client_file_for_leaks(
     emit_transitive_client_file_leaks(scan, client_id, kind, findings, stats);
 }
 
-/// Whether the root itself counts as a secret source. An env read in a route
-/// module carries no position, so it cannot be split between the client
-/// exports and the `loader` / `action` that normally read secrets. The
-/// direct case skips route module roots.
-fn is_direct_secret_root(
-    scan: &LeakScanInput<'_>,
-    client_id: FileId,
-    kind: ClientRootKind,
-) -> bool {
-    kind != ClientRootKind::RouteModule && scan.secret_sources.contains_key(&client_id)
-}
-
-/// Whether the root itself imports server-only code that ships to the client.
-/// A route module counts only the imports that its client code uses.
-fn is_direct_server_only_root(
-    scan: &LeakScanInput<'_>,
-    client_id: FileId,
-    kind: ClientRootKind,
-) -> bool {
-    if kind != ClientRootKind::RouteModule {
-        return scan.server_only_sources.contains(&client_id);
-    }
-    let Some(module) = scan.modules_by_id.get(&client_id) else {
-        return false;
-    };
-    let excluded = scan.framework_roots.server_only_imports(client_id);
-    module.imports.iter().any(|import| {
-        super::server_only::is_server_only_import(import)
-            && !excluded.is_some_and(|spans| spans.contains(&import.span.start))
-    })
-}
-
 fn emit_direct_client_file_leaks(
     scan: &LeakScanInput<'_>,
     client_id: FileId,
@@ -541,7 +547,7 @@ fn emit_direct_client_file_leaks(
 ) {
     // Direct case: the client file itself reads a non-public secret. The
     // most direct leak; no import hop needed.
-    if is_direct_secret_root(scan, client_id, kind) {
+    if scan.secret_sources.contains_key(&client_id) {
         findings.push(build_direct_finding(
             scan.graph,
             client_id,
@@ -556,7 +562,7 @@ fn emit_direct_client_file_leaks(
     // API). The most direct server-only leak; no
     // import hop needed. The transitive server-only emit below is gated so a
     // file that is both a direct AND a transitive sink is flagged once.
-    if is_direct_server_only_root(scan, client_id, kind) {
+    if scan.server_only_sources.contains(&client_id) {
         findings.push(build_direct_server_only_finding(
             scan.graph, client_id, kind,
         ));
@@ -580,7 +586,7 @@ fn emit_transitive_client_file_leaks(
     // Only emit a transitive secret finding when the client is not ALREADY
     // flagged by the direct case (avoid double-flagging the same file).
     if let Some(secret_id) = cone.reached_secret
-        && !is_direct_secret_root(scan, client_id, kind)
+        && !scan.secret_sources.contains_key(&client_id)
     {
         findings.push(build_leak_finding(
             scan,
@@ -597,7 +603,7 @@ fn emit_transitive_client_file_leaks(
     // server-only finding when the client is not ALREADY flagged by the
     // direct server-only case above (avoid double-flagging the same file).
     if let Some(server_id) = cone.reached_server_only
-        && !is_direct_server_only_root(scan, client_id, kind)
+        && !scan.server_only_sources.contains(&client_id)
     {
         findings.push(build_server_only_finding(
             scan,

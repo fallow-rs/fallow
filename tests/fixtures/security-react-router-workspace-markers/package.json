@@ -1,0 +1,5 @@
+{
+  "name": "security-react-router-workspace-markers",
+  "private": true,
+  "workspaces": ["packages/*"]
+}

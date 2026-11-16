@@ -512,6 +512,10 @@ pub struct AggregatedPluginResult {
     pub auto_imports: Vec<AutoImportRule>,
     /// Names of active plugins.
     pub active_plugins: Vec<String>,
+    /// Each active built-in plugin with the project-relative root of the
+    /// package where it is active: an empty string for the root project, the
+    /// workspace prefix for a workspace package.
+    pub active_plugin_scopes: Vec<(String, String)>,
     /// Test fixture glob patterns from active plugins: (pattern, plugin_name).
     pub fixture_patterns: Vec<(String, String)>,
     /// Absolute directories contributed by plugins that should be searched
@@ -626,6 +630,9 @@ impl AggregatedPluginResult {
         for rule in &mut self.used_exports {
             *rule = rule.prefixed(ws_prefix);
         }
+        for (_, scope) in &mut self.active_plugin_scopes {
+            *scope = ws_prefix.to_string();
+        }
         for rule in &mut self.config_export_credits {
             *rule = rule.prefixed(ws_prefix);
         }
@@ -695,6 +702,7 @@ impl AggregatedPluginResult {
             checked_alias_prefixes,
             auto_imports,
             active_plugins,
+            active_plugin_scopes,
             fixture_patterns,
             scss_include_paths,
             static_dir_mappings,
@@ -746,6 +754,7 @@ impl AggregatedPluginResult {
         push_missing(&mut self.checked_alias_prefixes, checked_alias_prefixes);
         self.auto_imports.extend(auto_imports);
         extend_unique(&mut self.active_plugins, active_plugins);
+        push_missing(&mut self.active_plugin_scopes, active_plugin_scopes);
         self.fixture_patterns.extend(fixture_patterns);
         self.scss_include_paths.extend(scss_include_paths);
         self.static_dir_mappings.extend(static_dir_mappings);

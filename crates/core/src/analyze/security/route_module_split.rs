@@ -18,7 +18,10 @@
 //!
 //! The result holds the start offsets of the server-only import specifiers
 //! and of the `import()` expressions in dead code. These offsets are the
-//! `import_span` starts of the graph edges of the module.
+//! `import_span` starts of the graph edges of the module. It also holds the
+//! env reads (`process.env.X`, `import.meta.env.X`) that only dead code
+//! makes, so that a secret read in a `loader` does not make the route module
+//! a secret source.
 
 use std::path::Path;
 
@@ -38,21 +41,32 @@ const BOM: char = '\u{FEFF}';
 /// re-export (`export { x } from './y'`) and of every dynamic import pattern.
 const RE_EXPORT_SPAN_START: u32 = 0;
 
-/// Read and split one route module. A file that cannot be read or parsed
-/// gives an empty set, so every import stays in the cone.
-pub(super) fn server_only_import_spans(path: &Path) -> FxHashSet<u32> {
-    let Some(source_type) = SourceType::from_path(path).ok() else {
-        return FxHashSet::default();
-    };
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return FxHashSet::default();
-    };
+/// The env sources whose reads the split tracks, as `member_accesses` names
+/// them.
+const PROCESS_ENV: &str = "process.env";
+const IMPORT_META_ENV: &str = "import.meta.env";
+
+/// What the client build of one route module drops.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub(super) struct RouteModuleSplit {
+    /// The `import_span` starts of the edges that only server-only code uses.
+    pub(super) server_only_spans: FxHashSet<u32>,
+    /// The env reads, such as `process.env.SESSION_SECRET`, that only dead code
+    /// makes. A read in another form stays counted.
+    pub(super) dead_only_env_reads: FxHashSet<String>,
+}
+
+/// Read and split one route module. `None` when the file cannot be read or
+/// parsed cleanly: the caller then keeps every import and env read.
+pub(super) fn split_route_module(path: &Path) -> Option<RouteModuleSplit> {
+    let source_type = SourceType::from_path(path).ok()?;
+    let text = std::fs::read_to_string(path).ok()?;
     let source = text.strip_prefix(BOM).unwrap_or(&text);
     fallow_extract::parse_bounded_or_default(source, source_type, |parsed| {
         if parsed.fatal_error || parsed.diagnostics.has_errors() {
-            return FxHashSet::default();
+            return None;
         }
-        split_program(&parsed.program)
+        Some(split_program(&parsed.program))
     })
 }
 
@@ -70,7 +84,7 @@ enum StatementRole {
     Inert,
 }
 
-fn split_program(program: &Program<'_>) -> FxHashSet<u32> {
+fn split_program(program: &Program<'_>) -> RouteModuleSplit {
     let semantic = SemanticBuilder::new()
         .with_build_nodes(true)
         .build(program)
@@ -82,17 +96,57 @@ fn split_program(program: &Program<'_>) -> FxHashSet<u32> {
     let live = live_statements(&roles, &references);
 
     let mut spans = FxHashSet::default();
+    let mut live_env = EnvReads::default();
+    let mut dead_env = EnvReads::default();
     for (index, statement) in program.body.iter().enumerate() {
         if let Statement::ImportDeclaration(import) = statement {
             add_server_only_specifiers(import, &semantic, &references, &live, &mut spans);
-        } else if !live[index] {
+        } else if live[index] {
+            live_env.visit_statement(statement);
+        } else {
             spans.extend(dynamic_import_starts(statement));
+            dead_env.visit_statement(statement);
         }
     }
     if re_exports_only_server_exports(program) && !has_other_offset_zero_edge(program) {
         spans.insert(RE_EXPORT_SPAN_START);
     }
-    spans
+    RouteModuleSplit {
+        server_only_spans: spans,
+        dead_only_env_reads: dead_env.0.difference(&live_env.0).cloned().collect(),
+    }
+}
+
+/// The static env reads in a statement, as `process.env.X` or
+/// `import.meta.env.X`.
+#[derive(Default)]
+struct EnvReads(FxHashSet<String>);
+
+impl<'a> Visit<'a> for EnvReads {
+    fn visit_static_member_expression(
+        &mut self,
+        member: &oxc_ast::ast::StaticMemberExpression<'a>,
+    ) {
+        if let Some(source) = env_source(&member.object) {
+            self.0.insert(format!("{source}.{}", member.property.name));
+        }
+        oxc_ast_visit::walk::walk_static_member_expression(self, member);
+    }
+}
+
+/// `process.env` or `import.meta.env` when `object` is one of them.
+fn env_source(object: &oxc_ast::ast::Expression<'_>) -> Option<&'static str> {
+    let oxc_ast::ast::Expression::StaticMemberExpression(env) = object else {
+        return None;
+    };
+    if env.property.name != "env" {
+        return None;
+    }
+    match &env.object {
+        oxc_ast::ast::Expression::Identifier(id) if id.name == "process" => Some(PROCESS_ENV),
+        oxc_ast::ast::Expression::ImportMeta(_) => Some(IMPORT_META_ENV),
+        _ => None,
+    }
 }
 
 /// Whether the module has a re-export and every re-export names only
@@ -366,7 +420,7 @@ mod tests {
 
     fn split(source: &str) -> Vec<String> {
         fallow_extract::parse_bounded_or_default(source, SourceType::tsx(), |parsed| {
-            let spans = split_program(&parsed.program);
+            let spans = split_program(&parsed.program).server_only_spans;
             let mut names: Vec<String> = spans
                 .iter()
                 .map(|&start| {
@@ -497,6 +551,39 @@ mod tests {
              export default function Page() { return pages }\n",
         );
         assert!(names.is_empty(), "{names:?}");
+    }
+
+    fn dead_env(source: &str) -> Vec<String> {
+        fallow_extract::parse_bounded_or_default(source, SourceType::tsx(), |parsed| {
+            let mut reads: Vec<String> = split_program(&parsed.program)
+                .dead_only_env_reads
+                .into_iter()
+                .collect();
+            reads.sort();
+            reads
+        })
+    }
+
+    #[test]
+    fn an_env_read_that_only_the_loader_makes_is_dead() {
+        let reads = dead_env(
+            "const secret = () => process.env.SESSION_SECRET\n\
+             export function loader() { return [secret(), import.meta.env.API_KEY] }\n\
+             export default function Page() { return process.env.PUBLIC_NAME }\n",
+        );
+        assert_eq!(
+            reads,
+            ["import.meta.env.API_KEY", "process.env.SESSION_SECRET"]
+        );
+    }
+
+    #[test]
+    fn an_env_read_in_client_code_stays() {
+        let reads = dead_env(
+            "export function loader() { return process.env.TOKEN }\n\
+             export default function Page() { return process.env.TOKEN }\n",
+        );
+        assert!(reads.is_empty(), "{reads:?}");
     }
 
     #[test]

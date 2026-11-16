@@ -95,6 +95,12 @@ pub fn is_route_module_rule(plugin_name: &str, exports: &[String]) -> bool {
     plugin_name == REACT_ROUTER_PLUGIN_NAME && exports.iter().any(|export| export == "loader")
 }
 
+/// Whether `name` is an export that React Router reads from a route module,
+/// the root route included.
+pub fn is_route_export_name(name: &str) -> bool {
+    ROOT_EXPORTS.contains(&name)
+}
+
 /// Exports that the server runtime reads from `entry.server` (the
 /// `ServerEntryModule` type). React Router 7 names the instrumentation hook
 /// `unstable_instrumentations`; React Router 8 names it `instrumentations`.
