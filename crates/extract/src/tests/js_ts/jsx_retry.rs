@@ -121,3 +121,14 @@ fn top_level_return_in_commonjs_js_parses_without_errors() {
         "the require call must be extracted"
     );
 }
+
+#[test]
+fn jsx_retry_keeps_top_level_return_valid_in_js_file() {
+    let source = "const el = <div />;\nif (!el) {\n  return;\n}\nexport const z = el;\n";
+    let info = parse_source_to_module(FileId(0), Path::new("main.js"), source, 0, false);
+    assert_eq!(
+        info.parse_error_count, 0,
+        "the JSX retry of a .js file must allow a top-level return"
+    );
+    assert_eq!(info.exports.len(), 1, "the export must be extracted");
+}

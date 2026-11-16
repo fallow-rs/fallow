@@ -34,7 +34,7 @@ use fallow_types::extract::{FlagPatterns, FunctionComplexity, ImportInfo, Import
 
 use crate::flags::ExtractedFlags;
 use crate::parse_degradation::ParseDegradation;
-use crate::parse_options::{JSX_RETRY_MIN_CLEAN_SOURCE_LEN, parse_options_for};
+use crate::parse_options::{JSX_RETRY_SKIP_CLEAN_MAX_LEN, parse_options_for};
 
 struct JsxRetryParse {
     extractor: ModuleInfoExtractor,
@@ -591,7 +591,7 @@ struct JsxRetryInput<'a> {
 fn parse_with_jsx_retry(input: &JsxRetryInput<'_>) -> Option<JsxRetryParse> {
     // A small file with parse errors can still be a JSX component.
     let small_and_clean =
-        input.source.len() <= JSX_RETRY_MIN_CLEAN_SOURCE_LEN && input.primary_error_count == 0;
+        input.source.len() <= JSX_RETRY_SKIP_CLEAN_MAX_LEN && input.primary_error_count == 0;
     if input.total_extracted != 0 || small_and_clean || input.source_type.is_jsx() {
         return None;
     }
@@ -603,7 +603,7 @@ fn parse_with_jsx_retry(input: &JsxRetryInput<'_>) -> Option<JsxRetryParse> {
     };
     let allocator = Allocator::default();
     let retry_return = Parser::new(&allocator, input.parser_source, jsx_type)
-        .with_options(parse_options_for(jsx_type))
+        .with_options(parse_options_for(input.source_type))
         .parse();
     let degradation = ParseDegradation::from_parser(&retry_return);
     let mut extractor = ModuleInfoExtractor::new();
