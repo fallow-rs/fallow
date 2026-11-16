@@ -664,6 +664,7 @@ impl ModuleGraph {
                 entry_points: entry_point_ids.clone(),
                 runtime_entry_points: runtime_entry_point_ids.clone(),
                 test_entry_points: test_entry_point_ids.clone(),
+                support_entry_points: FxHashSet::default(),
                 test_reachability_index: super::TestReachabilityIndex::default(),
                 reference_paths: Vec::new(),
                 reference_routes: super::types::ReferenceRoutes::default(),

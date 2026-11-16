@@ -92,7 +92,13 @@ pub fn entry_points_hash(
 ) -> u64 {
     use std::hash::{Hash, Hasher};
     let mut hasher = rustc_hash::FxHasher::default();
-    for role in [&entry_points.all, &entry_points.runtime, &entry_points.test] {
+    let roles = [
+        &entry_points.all,
+        &entry_points.runtime,
+        &entry_points.test,
+        &entry_points.support,
+    ];
+    for role in roles {
         let mut keys: Vec<String> = role
             .iter()
             .map(|ep| root_relative_key(root, &ep.path))

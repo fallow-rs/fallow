@@ -21,6 +21,7 @@ mod public_exports;
 mod re_exports;
 mod reachability;
 mod shortest_import_path;
+mod support_reach;
 mod test_reach;
 pub mod types;
 
@@ -196,6 +197,8 @@ pub struct ModuleGraph {
     pub runtime_entry_points: FxHashSet<FileId>,
     /// Test entry point `FileId`s.
     pub test_entry_points: FxHashSet<FileId>,
+    /// Support entry point `FileId`s, such as files that package.json scripts run.
+    pub support_entry_points: FxHashSet<FileId>,
     /// Compact correlation index for distinct test-root replacement profiles.
     ///
     /// Empty when no test root declares a project-internal replacement. That
@@ -1325,11 +1328,8 @@ impl ModuleGraph {
     /// Uses precomputed bitset, O(1) lookup.
     #[must_use]
     pub fn has_namespace_import(&self, file_id: FileId) -> bool {
-        let idx = file_id.0 as usize;
-        if idx >= self.namespace_imported.len() {
-            return false;
-        }
-        self.namespace_imported.contains(idx)
+        // `FixedBitSet::contains` is false for an index past the end.
+        self.namespace_imported.contains(file_id.0 as usize)
     }
 
     /// Get the target `FileId`s of all outgoing edges for a module.

@@ -50,7 +50,8 @@ fn test_runner_entry_files_count_as_test_files() {
 
 /// A test runner can select every file below a directory, such as Playwright
 /// `testDir: './src'` with a regular expression `testMatch`. A test entry
-/// that a runtime entry point reaches stays production code.
+/// that a runtime entry point or a package.json script reaches stays
+/// production code.
 #[test]
 fn runtime_reachable_test_runner_entries_stay_production_code() {
     let root = fixture_path("test-only-runner-test-dir");
@@ -70,5 +71,9 @@ fn runtime_reachable_test_runner_entries_stay_production_code() {
     assert!(
         !test_only_names.contains(&"lodash"),
         "the runtime entry reaches the lodash importer, found: {test_only_names:?}"
+    );
+    assert!(
+        !test_only_names.contains(&"chalk"),
+        "the seed script runs the chalk importer, found: {test_only_names:?}"
     );
 }

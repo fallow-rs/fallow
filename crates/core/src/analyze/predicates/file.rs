@@ -181,23 +181,59 @@ pub(in crate::analyze) fn is_test_runner_config_file(path: &std::path::Path) -> 
     starts_with_runner && CONFIG_NAME_SEGMENTS.iter().any(|s| name.contains(s))
 }
 
-/// Check if a module is test code for `test-only-dependencies`: a test file
-/// by name, a test runner config file, or a test entry point of a test
-/// runner that no runtime entry point reaches. The last case covers a test
-/// runner setting such as Vitest `include: ['src/**/*.vitest.ts']`
-/// (issue #4618).
-pub(in crate::analyze) fn is_test_importer(
-    graph: &crate::graph::ModuleGraph,
-    id: crate::discover::FileId,
-    root: &std::path::Path,
-) -> bool {
-    let Some(module) = graph.modules.get(id.0 as usize) else {
-        return false;
-    };
-    let relative = module.path.strip_prefix(root).unwrap_or(&module.path);
-    is_test_or_spec_file(relative)
-        || is_test_runner_config_file(&module.path)
-        || (graph.test_entry_points.contains(&id) && !module.is_runtime_reachable())
+/// Tells which modules are test code for `test-only-dependencies`.
+pub(in crate::analyze) struct TestImporters<'a> {
+    graph: &'a crate::graph::ModuleGraph,
+    root: &'a std::path::Path,
+    /// The modules that a support entry point, such as a file that a
+    /// package.json script runs, reaches. Computed on first use.
+    support_reach: std::cell::OnceCell<rustc_hash::FxHashSet<crate::discover::FileId>>,
+}
+
+impl<'a> TestImporters<'a> {
+    pub(in crate::analyze) fn new(
+        graph: &'a crate::graph::ModuleGraph,
+        root: &'a std::path::Path,
+    ) -> Self {
+        Self {
+            graph,
+            root,
+            support_reach: std::cell::OnceCell::new(),
+        }
+    }
+
+    fn support_reaches(&self, id: crate::discover::FileId) -> bool {
+        self.support_reach
+            .get_or_init(|| {
+                let reach = self.graph.support_reachable();
+                self.graph
+                    .modules
+                    .iter()
+                    .map(|module| module.file_id)
+                    .filter(|id| reach.contains(id.0 as usize))
+                    .collect()
+            })
+            .contains(&id)
+    }
+
+    /// Whether a module is test code: a test file by name, a test runner
+    /// config file, or a test entry point of a test runner that no runtime
+    /// or support entry point reaches. The last case covers a test runner
+    /// setting such as Vitest `include: ['src/**/*.vitest.ts']` (issue
+    /// #4618). A broad setting such as Playwright `testDir: './src'` can
+    /// also match a production file that a script runs, so a support entry
+    /// point keeps its reach production code.
+    pub(in crate::analyze) fn contains(&self, id: crate::discover::FileId) -> bool {
+        let Some(module) = self.graph.modules.get(id.0 as usize) else {
+            return false;
+        };
+        let relative = module.path.strip_prefix(self.root).unwrap_or(&module.path);
+        is_test_or_spec_file(relative)
+            || is_test_runner_config_file(&module.path)
+            || (self.graph.test_entry_points.contains(&id)
+                && !module.is_runtime_reachable()
+                && !self.support_reaches(id))
+    }
 }
 
 /// Check if a file is a configuration file consumed by tooling, not via imports.
