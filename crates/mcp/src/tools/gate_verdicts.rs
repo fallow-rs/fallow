@@ -569,7 +569,8 @@ fn no_client_roots_warning(root: &Map<String, Value>) -> Option<String> {
         })
         .then(|| {
             "client-server-leak checked nothing: no file has a top-level \"use client\" \
-             directive, so a zero leak count does not mean that no secret reaches client code."
+             directive and no framework plugin supplies a client root, so a zero leak count does \
+             not mean that no secret reaches client code."
                 .to_owned()
         })
 }
@@ -731,8 +732,8 @@ mod tests {
             warnings,
             vec![
                 "client-server-leak checked nothing: no file has a top-level \"use client\" \
-                 directive, so a zero leak count does not mean that no secret reaches client \
-                 code."
+                 directive and no framework plugin supplies a client root, so a zero leak count \
+                 does not mean that no secret reaches client code."
                     .to_owned()
             ]
         );

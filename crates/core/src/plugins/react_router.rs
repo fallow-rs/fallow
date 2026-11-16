@@ -78,6 +78,29 @@ route_module_exports!(
 
 const ROUTE_CONFIG_EXPORTS: &[&str] = &["default"];
 
+/// The name of this plugin in `AggregatedPluginResult::active_plugins` and in
+/// the plugin used-export rules.
+pub const REACT_ROUTER_PLUGIN_NAME: &str = "react-router";
+
+/// Route module exports that React Router removes from the client build
+/// (`SERVER_ONLY_ROUTE_EXPORTS` in `@react-router/dev`). Dead-code
+/// elimination then drops the imports that only these exports use. All other
+/// route exports ship to the browser.
+pub const SERVER_ONLY_ROUTE_EXPORTS: &[&str] = &["loader", "action", "middleware", "headers"];
+
+/// Whether a used-export rule of this plugin matches route modules (the route
+/// directory, the root route, or a route file from the route config). Only
+/// route module rules credit `loader`.
+pub fn is_route_module_rule(plugin_name: &str, exports: &[String]) -> bool {
+    plugin_name == REACT_ROUTER_PLUGIN_NAME && exports.iter().any(|export| export == "loader")
+}
+
+/// Whether `name` is an export that React Router reads from a route module,
+/// the root route included.
+pub fn is_route_export_name(name: &str) -> bool {
+    ROOT_EXPORTS.contains(&name)
+}
+
 /// Exports that the server runtime reads from `entry.server` (the
 /// `ServerEntryModule` type). React Router 7 names the instrumentation hook
 /// `unstable_instrumentations`; React Router 8 names it `instrumentations`.

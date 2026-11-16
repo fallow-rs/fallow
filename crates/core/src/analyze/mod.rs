@@ -164,6 +164,7 @@ struct SecurityDetectionContext<'a, 'm> {
     line_offsets_by_file: &'a LineOffsetsMap<'m>,
     declared_deps: &'a FxHashSet<String>,
     request_receivers: &'a FxHashSet<String>,
+    plugin_result: Option<&'a crate::plugins::AggregatedPluginResult>,
 }
 
 /// Convert a byte offset to (line, col) using pre-computed line offsets.
@@ -986,6 +987,7 @@ fn populate_configured_security_findings(input: &mut PostDetectionInput<'_, '_>)
             line_offsets_by_file: input.line_offsets_by_file,
             declared_deps: input.declared_deps,
             request_receivers: &request_receivers,
+            plugin_result: input.plugin_result,
         },
         input.results,
     );
@@ -2039,12 +2041,7 @@ fn populate_security_findings(
     results: &mut AnalysisResults,
 ) {
     if ctx.config.rules.security_client_server_leak != Severity::Off {
-        let (security_findings, stats) = security::find_security_findings(
-            ctx.graph,
-            ctx.modules,
-            ctx.suppressions,
-            ctx.line_offsets_by_file,
-        );
+        let (security_findings, stats) = security::find_security_findings(ctx);
         results.security_findings = security_findings;
         results.security_unresolved_edge_files = stats.client_files_with_unresolved_edges;
         if stats.client_roots == 0 {

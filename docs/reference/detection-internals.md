@@ -410,6 +410,24 @@ error by suppressing a downstream detector.
   version to move with the changed semantics.
 - Security findings are verification candidates until an agent or human
   confirms the evidence.
+- The `client-server-leak` cone starts from `"use client"` files and from the
+  client roots of the React Router plugin (`security/framework_roots.rs`).
+  React Router removes the `loader`, `action`, `middleware` and `headers`
+  exports from a route file wherever it is imported, and then runs dead-code
+  elimination. So at each route module, the root included, the scan skips
+  the imports, the re-exports and the static env reads
+  (`process.env.X`, `import.meta.env.X`) that only those exports use.
+  Extraction does not keep statement-level references, so
+  `security/route_module_split.rs` parses the route modules again, and only
+  those. An env read in another form, such as a destructure of
+  `process.env`, stays counted for the whole module.
+- A route module is a file that the route config names, the root route, a
+  file directly in a route directory, a `route.*` file, or a deeper file
+  that exports a route module export and is not in a folder with a
+  `route.*` file. A helper next to a `route.*` file is not a root. Test files
+  are not roots. The `.client` and `.server` markers apply only in the
+  packages where the plugin is active
+  (`AggregatedPluginResult::active_plugin_scopes`).
 - The load kind of an edge (`ImportLoadKind`) is the one model for when and
   whether the edge runs its target. `PathReference` (`require.resolve`) and
   `AssetReference` (a webpack asset loader request) keep the target in use,

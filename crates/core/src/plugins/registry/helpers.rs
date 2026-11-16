@@ -84,6 +84,9 @@ pub fn process_static_patterns(
     let pname = plugin.name().to_string();
     result.active_plugins.push(pname.clone());
     result
+        .active_plugin_scopes
+        .push((pname.clone(), String::new()));
+    result
         .entry_point_roles
         .insert(pname.clone(), plugin.entry_point_role());
 

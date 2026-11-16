@@ -356,6 +356,8 @@ mod security_framework_sinks;
 mod security_hardcoded_secret;
 #[path = "integration_test/security_multihop_taint.rs"]
 mod security_multihop_taint;
+#[path = "integration_test/security_react_router_client_roots.rs"]
+mod security_react_router_client_roots;
 #[path = "integration_test/security_request_receivers.rs"]
 mod security_request_receivers;
 #[path = "integration_test/security_secret_to_network.rs"]
