@@ -689,6 +689,22 @@ kind: "rule-packs-not-configured"
 } | {
 kind: "client-server-leak-no-client-roots"
 } | {
+kind: "production-excluded-file-imported"
+/**
+ * The built-in production pattern that matched, verbatim.
+ */
+pattern: string
+/**
+ * Excluded files that this pattern matched and that a production
+ * file imports. Exact.
+ */
+file_count: number
+/**
+ * The first excluded files in path order, project-root-relative
+ * with forward slashes. Capped at five entries.
+ */
+files: string[]
+} | {
 kind: "excluded-by-default-ignore"
 /**
  * The built-in glob that matched, verbatim (for example

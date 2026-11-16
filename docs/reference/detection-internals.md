@@ -964,6 +964,35 @@ dependencies are unused. The unused-dependency pass skips each member that the
 source walk does not reach (`source_walked_workspaces`). This agrees with the
 audit base snapshot, which does not hold the gitignored member.
 
+## Production patterns that drop an imported file
+
+In production mode the walk drops each file that matches
+`PRODUCTION_EXCLUDE_PATTERNS`. A directory pattern such as `**/test/**` also
+matches production source in a directory with that name (issue #4498). The
+patterns do not change, and `ignorePatterns` exceptions cannot lift them.
+
+The dead-code pass reports the case where a production file imports a dropped
+file. `analyze/production_excluded_imports.rs` reads the resolved imports,
+dynamic imports and re-exports of each analyzed file. A dropped file has no
+`FileId`, so an import of it resolves to `ResolveResult::ExternalFile`. The
+pass matches each such target with a source extension against the production
+patterns and attributes it to the first matching pattern in built-in order. It
+reads no dropped file and runs no second analysis.
+
+Preserve these properties:
+
+- One `production-excluded-file-imported` entry per pattern, with an exact
+  `file_count` and a sample of at most five files in path order. `path` is the
+  first file.
+- A file that `ignorePatterns` matches is not counted. The project chose that
+  exclusion.
+- A support-only file (the `excluded` set of the pass) does not count as an
+  importer, because it takes no part in a production run.
+- The kind is analysis-stage, so each dead-code pass clears and re-records it.
+  It warns on stderr and sets `degrades_analysis`. It is not a
+  `source_never_analyzed` kind, so no finding gets a caveat and `fallow fix`
+  keeps its actions.
+
 ## The plugin stage as a diagnostic stage
 
 Framework plugins are the fifth stage that writes `workspace_diagnostics[]`,
