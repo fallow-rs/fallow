@@ -5,14 +5,17 @@ import { openSettingsSearch } from "../src/openSettings.js";
 
 const mocks = vi.hoisted(() => ({
   executeCommand: vi.fn<(command: string, ...args: unknown[]) => Promise<unknown>>(),
+  showWarningMessage: vi.fn<(message: string) => Promise<undefined>>(),
 }));
 
 vi.mock("vscode", () => ({
   commands: { executeCommand: mocks.executeCommand },
+  window: { showWarningMessage: mocks.showWarningMessage },
 }));
 
 beforeEach(() => {
   mocks.executeCommand.mockReset().mockResolvedValue(undefined);
+  mocks.showWarningMessage.mockReset().mockResolvedValue(undefined);
 });
 
 describe("openSettingsSearch", () => {
@@ -29,6 +32,21 @@ describe("openSettingsSearch", () => {
     mocks.executeCommand.mockRejectedValue(new Error("command not found"));
 
     await expect(openSettingsSearch("fallow")).resolves.toBeUndefined();
+  });
+
+  it("names the query in a warning when the command fails", async () => {
+    mocks.executeCommand.mockRejectedValue(new Error("command not found"));
+
+    await openSettingsSearch("fallow.changedSince");
+
+    expect(mocks.showWarningMessage).toHaveBeenCalledTimes(1);
+    expect(mocks.showWarningMessage.mock.calls[0]?.[0]).toContain("fallow.changedSince");
+  });
+
+  it("shows no warning when the command succeeds", async () => {
+    await openSettingsSearch("fallow");
+
+    expect(mocks.showWarningMessage).not.toHaveBeenCalled();
   });
 });
 
