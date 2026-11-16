@@ -24,9 +24,17 @@ const CLOUDFLARE_WORKERS: &str = "cloudflare:workers";
 /// structural collector reads `this.env.<path>` as the path of this receiver.
 pub(super) const THIS_ENV_RECEIVER: &str = "this.env";
 
-/// The type of `this.env` in each method body of a Worker class, keyed by the
-/// body start.
-pub(super) type WorkerEnvBodies = FxHashMap<u32, String>;
+/// The Worker `Env` state of one module.
+#[derive(Default)]
+pub(super) struct WorkerEnvBodies {
+    /// The type of `this.env` in each method body of a Worker class, keyed by
+    /// the body start.
+    env_types: FxHashMap<u32, String>,
+    /// The module imports `cloudflare:workers`.
+    imports_workers: bool,
+    /// The number of imports that `imports_workers` has seen.
+    seen_imports: usize,
+}
 
 /// The type of the global `env` of `cloudflare:workers` (`Cloudflare.Env`),
 /// which `wrangler types` also declares as the global `Env`.
@@ -37,6 +45,19 @@ const GLOBAL_ENV_TYPE: &str = "Env";
 const WORKER_BASE_CLASSES: &[&str] = &["DurableObject", "WorkerEntrypoint", "WorkflowEntrypoint"];
 
 impl ModuleInfoExtractor {
+    /// The module imports `cloudflare:workers`. Each call reads only the
+    /// imports after the previous call.
+    fn imports_cloudflare_workers(&mut self) -> bool {
+        let state = &mut self.worker_env_bodies;
+        if !state.imports_workers {
+            state.imports_workers = self.imports[state.seen_imports.min(self.imports.len())..]
+                .iter()
+                .any(|import| import.source == CLOUDFLARE_WORKERS);
+        }
+        state.seen_imports = self.imports.len();
+        state.imports_workers
+    }
+
     /// The name that `local` imports from `cloudflare:workers`.
     fn cloudflare_workers_import(&self, local: &str) -> Option<&str> {
         self.imports.iter().find_map(|import| {
@@ -88,6 +109,7 @@ impl ModuleInfoExtractor {
             };
             if let Some(body) = body {
                 self.worker_env_bodies
+                    .env_types
                     .insert(body.span().start, env_type.clone());
             }
         }
@@ -98,15 +120,15 @@ impl ModuleInfoExtractor {
     /// function reads the import: the collector of that function also walks
     /// each nested function.
     pub(super) fn implicit_env_receivers(
-        &self,
+        &mut self,
         params: &FormalParameters<'_>,
         body: BodyRef<'_, '_>,
     ) -> Vec<(String, String)> {
         let mut receivers = Vec::new();
-        if let Some(env_type) = self.worker_env_bodies.get(&body.span().start) {
+        if let Some(env_type) = self.worker_env_bodies.env_types.get(&body.span().start) {
             receivers.push((THIS_ENV_RECEIVER.to_string(), env_type.clone()));
         }
-        if self.function_depth > 0 {
+        if self.function_depth > 0 || !self.imports_cloudflare_workers() {
             return receivers;
         }
         let param_names: FxHashSet<&str> = params

@@ -209,3 +209,25 @@ fn durable_object_env_binding_credits_member() {
         );
     }
 }
+
+#[test]
+fn durable_object_env_binding_uses_the_nearest_declaration_file() {
+    // Each Worker package declares its own global `Env`. Package a has the
+    // current `wrangler types` shape (`declare namespace Cloudflare` and a
+    // global `Env` that extends `Cloudflare.Env`, both with a binding).
+    // Package b binds `ROOM` to `RoomB`. The `env.d.ts` of package c imports
+    // a type, so it is a module and its `Env` is not global.
+    let unused = unused_class_members("class-member-durable-object-env-monorepo");
+    for member in ["RoomA.viaA", "LobbyA.viaLobby", "RoomB.viaB"] {
+        assert!(
+            !unused.contains(&member.to_string()),
+            "{member} is called through the `Env` of its own package, found: {unused:?}"
+        );
+    }
+    for member in ["RoomA.viaB", "RoomB.viaA", "RoomC.viaModuleEnv"] {
+        assert!(
+            unused.contains(&member.to_string()),
+            "{member} has no call through the global `Env` of its package, found: {unused:?}"
+        );
+    }
+}

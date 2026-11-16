@@ -1,0 +1,5 @@
+{
+  "name": "class-member-durable-object-env-monorepo",
+  "private": true,
+  "workspaces": ["packages/*"]
+}

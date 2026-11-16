@@ -196,3 +196,41 @@ fn this_env_outside_a_worker_class_reads_nothing() {
         );
     }
 }
+
+#[test]
+fn current_wrangler_env_merges_both_declarations() {
+    let info = parse_at_path(
+        "/project/worker-configuration.d.ts",
+        r#"
+            declare namespace Cloudflare {
+                interface Env {
+                    ROOM: DurableObjectNamespace<import("./src/room").Room>;
+                }
+            }
+            interface Env extends Cloudflare.Env {
+                LOBBY: DurableObjectNamespace<import("./src/room").Lobby>;
+            }
+        "#,
+    );
+    for expected in [
+        entry("Env", "ROOM", r#"import("./src/room").Room"#),
+        entry("Env", "LOBBY", r#"import("./src/room").Lobby"#),
+    ] {
+        assert!(
+            info.type_member_types.contains(&expected),
+            "missing {expected:?}, found: {:?}",
+            info.type_member_types
+        );
+    }
+}
+
+#[test]
+fn a_module_without_the_workers_import_reads_no_env() {
+    let accesses = typed_property_accesses(
+        "/project/src/index.ts",
+        r"
+            export const run = () => env.ROOM.getByName('a').notEnv();
+        ",
+    );
+    assert!(accesses.is_empty(), "found: {accesses:?}");
+}

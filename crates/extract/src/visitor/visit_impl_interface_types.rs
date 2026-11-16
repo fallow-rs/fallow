@@ -32,27 +32,35 @@ impl ModuleInfoExtractor {
         for target in properties.values_mut() {
             target.owner_span = Some(iface.id.span);
         }
+        // Declarations of one name merge, as TypeScript merges them. The
+        // `Env` of `declare namespace Cloudflare` and the global `Env` of a
+        // `wrangler types` file share the name `Env`.
         if !properties.is_empty() {
             self.interface_property_types
-                .insert(name.clone(), properties);
+                .entry(name.clone())
+                .or_default()
+                .extend(properties);
         }
         let import_properties = import_property_types(&iface.body.body);
         if !import_properties.is_empty() {
             self.interface_type_links
                 .import_property_types
-                .insert(name.clone(), import_properties);
+                .entry(name.clone())
+                .or_default()
+                .extend(import_properties);
         }
         let parents: Vec<String> = iface
             .extends
             .iter()
             .filter(|heritage| heritage.type_arguments.is_none())
-            .filter_map(|heritage| match &heritage.type_name {
-                TSTypeName::IdentifierReference(parent) => Some(parent.name.to_string()),
-                _ => None,
-            })
+            .filter_map(|heritage| parent_interface_name(&heritage.type_name))
             .collect();
         if !parents.is_empty() {
-            self.interface_type_links.extends.insert(name, parents);
+            self.interface_type_links
+                .extends
+                .entry(name)
+                .or_default()
+                .extend(parents);
         }
     }
 
@@ -154,4 +162,15 @@ fn import_property_types(members: &[TSSignature<'_>]) -> Vec<(String, String)> {
             ))
         })
         .collect()
+}
+
+/// The local name of an extended interface. A qualified name such as
+/// `Cloudflare.Env` gives its last part, because an interface inside a
+/// non-exported namespace has its bare name in the type map.
+fn parent_interface_name(name: &TSTypeName<'_>) -> Option<String> {
+    match name {
+        TSTypeName::IdentifierReference(parent) => Some(parent.name.to_string()),
+        TSTypeName::QualifiedName(qualified) => Some(qualified.right.name.to_string()),
+        TSTypeName::ThisExpression(_) => None,
+    }
 }

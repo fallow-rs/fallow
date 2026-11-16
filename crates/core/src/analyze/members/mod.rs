@@ -780,9 +780,11 @@ struct MemberPassIndexes<'a> {
     empty: FxHashMap<&'a str, Vec<ExportKey>>,
 }
 
-/// A declaration file (`.d.ts`, `.d.mts`, `.d.cts`) without exports is a
-/// global script: each top-level type in it is visible in every file without
-/// an import. `wrangler types` writes the Worker `Env` in such a file.
+/// A declaration file (`.d.ts`, `.d.mts`, `.d.cts`) without exports and
+/// without an import declaration is a global script: each top-level type in
+/// it is visible in every file without an import. `wrangler types` writes the
+/// Worker `Env` in such a file. A type reference such as `import("./room")`
+/// has no local name and keeps the file global.
 fn is_global_declaration_file(module: &ResolvedModule) -> bool {
     let is_declaration_file = module
         .path
@@ -793,7 +795,13 @@ fn is_global_declaration_file(module: &ResolvedModule) -> bool {
                 .iter()
                 .any(|suffix| name.ends_with(suffix))
         });
-    is_declaration_file && module.exports.is_empty() && module.re_exports.is_empty()
+    is_declaration_file
+        && module.exports.is_empty()
+        && module.re_exports.is_empty()
+        && module
+            .resolved_imports
+            .iter()
+            .all(|import| import.info.local_name.is_empty())
 }
 
 impl<'a> MemberPassIndexes<'a> {

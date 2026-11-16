@@ -128,8 +128,13 @@ error by suppressing a downstream detector.
   namespace constructors.
 - A typed property fact whose type name the module neither declares nor
   imports resolves to a global declaration file: a `.d.ts`, `.d.mts` or
-  `.d.cts` file without exports. The type map of an interface includes the
-  properties of each local interface that it extends. A property typed by a
+  `.d.cts` file without exports and without an import declaration. When more
+  than one such file declares the type, only the nearest files count: the
+  files that share the longest directory prefix with the module. Thus each
+  Worker package of a monorepo uses its own `Env`. The type map of an
+  interface includes the properties of each local interface that it extends,
+  also through a qualified name such as `Cloudflare.Env`. Declarations of one
+  interface name merge their properties. A property typed by a
   type import (`import("./room").Room`) keeps the import as its type, and the
   member pass resolves it through the type import edge of the declaring file.
   This is how a Cloudflare Worker `Env` from `wrangler types` reaches the
@@ -137,7 +142,9 @@ error by suppressing a downstream detector.
   `cloudflare:workers` as a receiver of the type `Env`, and `this.env` in a
   subclass of `DurableObject<E>`, `WorkerEntrypoint<E>` or
   `WorkflowEntrypoint<E>` of `cloudflare:workers` as a receiver of the type
-  `E` (issue #4548).
+  `E` (issue #4548). Known limit: only code in a function body reads these
+  receivers. A stub at the top level of a module
+  (`const stub = env.ROOM.getByName("x")`) gives no credit.
 - A member name probe (`"name" in value` or `Reflect.has(value, "name")` with
   a static name) is a `MemberNameProbe` fact. The member pass credits class
   members with that name only in the probe module and in its direct import

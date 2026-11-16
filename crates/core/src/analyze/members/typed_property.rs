@@ -16,7 +16,7 @@ fn typed_property_declaring_sites<'a>(
         return vec![(module, name.to_string())];
     }
     let Some(seed_keys) = indexes.local_keys(module.file_id).get(name) else {
-        return global_declaring_sites(indexes, name);
+        return global_declaring_sites(indexes, module, name);
     };
     let mut sites = Vec::new();
     for seed in seed_keys {
@@ -47,19 +47,43 @@ fn typed_property_declaring_sites<'a>(
     sites
 }
 
-/// The global declaration files that declare `name`, for a type name that the
-/// module neither declares nor imports. See issue #4548.
+/// The nearest global declaration files that declare `name`, for a type name
+/// that `module` neither declares nor imports. See issue #4548.
+///
+/// The nearest file shares the longest directory prefix with `module`. In a
+/// monorepo, each Worker package has its own `worker-configuration.d.ts`, and
+/// the `Env` of one package must not credit the classes of another package.
 fn global_declaring_sites<'a>(
     indexes: &MemberPassIndexes<'a>,
+    module: &ResolvedModule,
     name: &str,
 ) -> Vec<(&'a ResolvedModule, String)> {
-    indexes
-        .global_typed_property_modules
-        .get(name)
-        .into_iter()
-        .flatten()
-        .map(|module| (*module, name.to_string()))
+    let Some(candidates) = indexes.global_typed_property_modules.get(name) else {
+        return Vec::new();
+    };
+    let shared_depth = |candidate: &ResolvedModule| {
+        candidate
+            .path
+            .parent()
+            .map_or(0, |dir| shared_prefix_depth(dir, &module.path))
+    };
+    let nearest = candidates
+        .iter()
+        .map(|candidate| shared_depth(candidate))
+        .max();
+    candidates
+        .iter()
+        .filter(|candidate| Some(shared_depth(candidate)) == nearest)
+        .map(|candidate| (*candidate, name.to_string()))
         .collect()
+}
+
+/// The number of leading path components that `dir` and `path` share.
+fn shared_prefix_depth(dir: &std::path::Path, path: &std::path::Path) -> usize {
+    dir.components()
+        .zip(path.components())
+        .take_while(|(left, right)| left == right)
+        .count()
 }
 
 fn module_declares_typed_properties(

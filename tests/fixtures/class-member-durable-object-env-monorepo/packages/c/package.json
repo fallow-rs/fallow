@@ -1,0 +1,5 @@
+{
+  "name": "worker-c",
+  "private": true,
+  "main": "src/index.ts"
+}
