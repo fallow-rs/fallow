@@ -2958,7 +2958,7 @@ fn resolve_user_config(
     let dead_code_production = config
         .production
         .for_analysis(fallow_config::ProductionAnalysis::DeadCode);
-    config.production = dead_code_production.into();
+    config.production = config.production.for_run(dead_code_production);
     config
         .validate_resolved_boundaries(root)
         .map_err(|errors| {

@@ -306,6 +306,9 @@ pub struct ResolvedConfig {
     /// global `production` bool ([`super::ProductionConfig::global`]); the
     /// per-analysis object form and CLI/env overrides are applied post-resolve.
     pub production: bool,
+    /// The `production.ignore` globs: project-root-relative paths that
+    /// discovery drops only when [`Self::production`] is set.
+    pub production_ignore: Vec<String>,
     /// Quiet mode from the CLI: suppress non-essential progress and warning
     /// output.
     pub quiet: bool,
@@ -859,6 +862,17 @@ struct ResolvedPluginSettings {
     rule_pack_sources: Vec<PathBuf>,
 }
 
+/// The digest of the detection config plus the external plugins (sorted by
+/// name) and the rule packs.
+fn detection_config_digest(config_json: &str, plugins: &ResolvedPluginSettings) -> String {
+    fallow_types::identity::fnv1a64_parts(&[
+        "config",
+        config_json,
+        &canonical_json_string(&sorted_by_name(&plugins.external_plugins)),
+        &canonical_json_string(&plugins.rule_packs),
+    ])
+}
+
 fn resolve_plugin_settings(
     root: &Path,
     configured_plugins: &[String],
@@ -900,7 +914,7 @@ struct ResolvedProductionRules {
 }
 
 fn resolve_production_rules(
-    production_config: ProductionConfig,
+    production_config: &ProductionConfig,
     rules: RulesConfig,
 ) -> ResolvedProductionRules {
     let production = production_config.global();
@@ -1019,7 +1033,8 @@ impl FallowConfig {
         let compiled_ignores = compile_ignore_settings(&self);
         let config_json = detection_config_json(&self);
 
-        let production_rules = resolve_production_rules(self.production, self.rules);
+        let production_ignore = self.production.ignore().to_vec();
+        let production_rules = resolve_production_rules(&self.production, self.rules);
 
         let plugins =
             resolve_plugin_settings(&root, &self.plugins, self.framework, &self.rule_packs);
@@ -1033,12 +1048,7 @@ impl FallowConfig {
             || cache_config_hash(&plugins.external_plugins, &self.flags),
         );
 
-        let detection_config_digest = fallow_types::identity::fnv1a64_parts(&[
-            "config",
-            &config_json,
-            &canonical_json_string(&sorted_by_name(&plugins.external_plugins)),
-            &canonical_json_string(&plugins.rule_packs),
-        ]);
+        let detection_config_digest = detection_config_digest(&config_json, &plugins);
 
         super::legacy_glob::extend_legacy_glob_groups(
             &mut legacy_glob_groups,
@@ -1094,6 +1104,7 @@ impl FallowConfig {
             rule_packs: plugins.rule_packs,
             rule_pack_sources: plugins.rule_pack_sources,
             production: production_rules.production,
+            production_ignore,
             quiet,
             external_plugins: plugins.external_plugins,
             dynamically_loaded: self.dynamically_loaded,

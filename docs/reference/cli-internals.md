@@ -118,6 +118,14 @@ is `fallow_engine::health::inline_complexity`. In the CLI, `crate::gates`
 builds every `gate_outcomes` entry, and `crate::exit_codes::gate_exit_code`
 maps a gate verdict to the exit code.
 
+Each config loader sets the `production` value of one run with
+`ProductionConfig::for_run`, which sets the mode for every analysis and keeps
+the `production.ignore` globs of the object form. `ResolvedConfig` stores the
+globs in `production_ignore`. Discovery and the watch filter add them to the
+built-in production patterns only when the run is in production mode, so
+`--production` and `FALLOW_PRODUCTION` also apply them. The globs apply to each
+analysis that runs in production mode, not only to dead-code analysis.
+
 Exit 1 on an analysis command means that an enforced gate failed. A config
 load warning never sets it. A workspace diagnostic such as
 `node-modules-missing` or a broken tsconfig `extends` never sets it either.

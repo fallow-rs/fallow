@@ -264,6 +264,24 @@ fn toml_output_deserializes_as_valid_config() {
 }
 
 #[test]
+fn toml_output_keeps_production_ignore() {
+    let result = MigrationResult {
+        config: serde_json::json!({
+            "production": { "ignore": ["scripts/**", "apps/web/e2e/**"] }
+        }),
+        warnings: vec![],
+        sources: vec!["knip.json".to_string()],
+    };
+    let output = generate_toml(&result);
+    let config: fallow_config::FallowConfig = toml::from_str(&output).unwrap();
+    assert_eq!(
+        config.production.ignore(),
+        ["scripts/**".to_string(), "apps/web/e2e/**".to_string()]
+    );
+    assert!(!config.production.any_enabled());
+}
+
+#[test]
 fn jsonc_output_deserializes_as_valid_config() {
     let result = MigrationResult {
         config: serde_json::json!({

@@ -374,8 +374,7 @@ pub(super) fn load_resolved_config_with_options(
     // like the engine and core call sites do.
     config.production = config
         .production
-        .for_analysis(ProductionAnalysis::DeadCode)
-        .into();
+        .for_run(config.production.for_analysis(ProductionAnalysis::DeadCode));
     let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
     Ok(config.resolve(
         root.to_path_buf(),

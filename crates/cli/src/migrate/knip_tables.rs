@@ -21,7 +21,6 @@ pub(super) const KNIP_RULE_MAP: &[(&str, &str)] = &[
 
 /// Knip fields that cannot be mapped and generate warnings.
 pub(super) const KNIP_UNMAPPABLE_FIELDS: &[(&str, &str, Option<&str>)] = &[
-    ("project", "Fallow auto-discovers project files", None),
     (
         "paths",
         "Fallow reads path mappings from tsconfig.json automatically",
@@ -105,6 +104,7 @@ pub(super) const KNIP_MIGRATED_FIELDS: &[&str] = &[
     "ignoreIssues",
     "include",
     "includeEntryExports",
+    "project",
     "rules",
     "workspaces",
 ];

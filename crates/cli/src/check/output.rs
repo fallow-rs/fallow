@@ -645,6 +645,7 @@ mod tests {
             rules: fallow_config::RulesConfig::default(),
             boundaries: fallow_config::ResolvedBoundaryConfig::default(),
             production: false,
+            production_ignore: Vec::new(),
             quiet: true,
             external_plugins: vec![],
             rule_packs: vec![],

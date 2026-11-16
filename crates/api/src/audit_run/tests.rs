@@ -471,7 +471,7 @@ fn production_flags_decide_the_shared_parse() {
     assert!(
         split.effective(
             fallow_config::ProductionAnalysis::Health,
-            fallow_config::ProductionConfig::Global(true)
+            &fallow_config::ProductionConfig::Global(true)
         ),
         "the config decides a mode that no flag sets"
     );

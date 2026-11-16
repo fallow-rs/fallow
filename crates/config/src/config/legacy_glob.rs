@@ -198,6 +198,7 @@ impl GroupCollector {
     fn push_config(&mut self, config: &FallowConfig) {
         self.push_list("entry", &config.entry);
         self.push_list("dynamicallyLoaded", &config.dynamically_loaded);
+        self.push_list("production.ignore", config.production.ignore());
         let positive = |p: &&String| !p.starts_with('!');
         self.push(
             "ignorePatterns",

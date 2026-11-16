@@ -5,6 +5,7 @@ mod legacy_glob;
 mod orphan_declarations;
 mod output_entry_source;
 mod parse_scripts;
+mod production_excludes;
 mod walk;
 
 use std::path::{Component, Path};

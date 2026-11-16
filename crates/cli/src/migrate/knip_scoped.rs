@@ -446,6 +446,7 @@ fn migrate_workspace_field(
         "entry" => migrate_entry(value, scope, migration.production_split, config, warnings),
         "ignore" => migrate_ignore(value, scope, config, warnings),
         "ignoreIssues" => migrate_ignore_issues(value, scope, config, warnings),
+        "project" => migrate_project(value, scope, config, warnings),
         "ignoreDependencies" => {
             if scope.settings_key().is_none() {
                 migrate_ignore_deps(value, &scope.field(name), config, warnings);
@@ -576,47 +577,63 @@ fn glob_key_selects(glob: &str, key: &str) -> bool {
     fallow_config::compile_path_glob(glob).is_ok_and(|glob| glob.compile_matcher().is_match(key))
 }
 
-/// The warning for a knip `project` setting that names production
-/// exclusions (`!pattern!`), or `None` when it names none.
+/// Migrate a knip `project` setting.
 ///
-/// Fallow has no setting that excludes files only in production mode, so
-/// the warning names each exclusion and the findings that `--production`
-/// reports as a result.
-pub(super) fn project_warning(value: &Value, scope: &KnipScope) -> Option<MigrationWarning> {
-    let exclusions: Vec<String> = string_or_array(value)
-        .into_iter()
-        .filter(|pattern| {
-            pattern.len() > 2 && pattern.starts_with('!') && pattern.ends_with(PRODUCTION_MARKER)
-        })
-        .collect();
-    if exclusions.is_empty() {
-        return None;
+/// Fallow discovers project files itself, so only the production exclusions
+/// (`!pattern!`) carry over: each one becomes a `production.ignore` glob,
+/// which discovery drops in production mode only. The warning names the
+/// exclusions that it migrated.
+pub(super) fn migrate_project(
+    value: &Value,
+    scope: &KnipScope,
+    config: &mut JsonMap,
+    warnings: &mut Vec<MigrationWarning>,
+) {
+    let mut migrated = Vec::new();
+    let mut globs = Vec::new();
+    for pattern in string_or_array(value) {
+        if pattern.len() <= 2 || !pattern.starts_with('!') || !pattern.ends_with(PRODUCTION_MARKER)
+        {
+            continue;
+        }
+        match scope.rebase(&pattern[1..pattern.len() - 1]) {
+            Some(glob) => {
+                migrated.push(format!("`{pattern}`"));
+                globs.push(glob);
+            }
+            None => warnings.push(traversal_warning(scope.field("project"), &pattern)),
+        }
     }
-    let listed = exclusions
-        .iter()
-        .map(|pattern| format!("`{pattern}`"))
-        .collect::<Vec<_>>()
-        .join(", ");
-    let files: Vec<String> = exclusions
-        .iter()
-        .filter_map(|pattern| scope.rebase(&pattern[1..pattern.len() - 1]))
-        .map(|file| Value::from(file).to_string())
-        .collect();
-    Some(MigrationWarning {
+    append_production_ignore(config, globs);
+    let message = if migrated.is_empty() {
+        "Fallow auto-discovers project files".to_string()
+    } else {
+        format!(
+            "Fallow auto-discovers project files; production exclusions {} migrated to production.ignore",
+            migrated.join(", ")
+        )
+    };
+    warnings.push(MigrationWarning {
         source: "knip",
         field: scope.field("project"),
-        message: format!(
-            "production exclusions {listed} not migrated; fallow has no production-only \
-             exclusion, so `--production` reports unused files and exports in these paths"
-        ),
-        suggestion: (!files.is_empty()).then(|| {
-            format!(
-                "to hide these findings in every mode, add an overrides entry with files [{}] \
-                 and rules unused-files and unused-exports set to off",
-                files.join(", ")
-            )
-        }),
-    })
+        message,
+        suggestion: None,
+    });
+}
+
+/// Append globs to `production.ignore`, and create the `production` object
+/// when the config has none. A boolean `production` value stays as it is,
+/// because the boolean form has no `ignore` list.
+fn append_production_ignore(config: &mut JsonMap, globs: Vec<String>) {
+    if globs.is_empty() {
+        return;
+    }
+    let production = config
+        .entry("production".to_string())
+        .or_insert_with(|| Value::Object(JsonMap::new()));
+    if let Some(production) = production.as_object_mut() {
+        append_unique(production, "ignore", globs);
+    }
 }
 
 /// The warning for a knip plugin section, such as `"playwright": {...}`, that
@@ -702,12 +719,6 @@ fn warn_unmapped_workspace_field(
     scope: &KnipScope,
     warnings: &mut Vec<MigrationWarning>,
 ) {
-    if name == "project"
-        && let Some(warning) = project_warning(value, scope)
-    {
-        warnings.push(warning);
-        return;
-    }
     if KNIP_PLUGIN_KEYS.contains(&name) {
         warnings.push(plugin_section_warning(
             name,
