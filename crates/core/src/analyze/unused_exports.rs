@@ -32,7 +32,9 @@ mod condition_targets;
 use condition_targets::ConditionTargetFamilies;
 #[path = "unused_exports_declaration_siblings.rs"]
 mod declaration_siblings;
-use declaration_siblings::{DeclarationSiblingCredit, declaration_sibling_credit};
+use declaration_siblings::{
+    DeclarationSiblingCredit, declaration_sibling_credit, runtime_sibling_path,
+};
 #[path = "unused_exports_types.rs"]
 mod types;
 use types::drop_types_paired_with_schemas;
@@ -444,7 +446,8 @@ pub fn find_unused_exports(
     let schema_exports = types::schema_exports_by_file(config, graph, modules);
 
     let ambiguity = graph.ambiguity_participants();
-    let declaration_sibling_credit = declaration_sibling_credit(graph, modules);
+    let declaration_sibling_credit =
+        declaration_sibling_credit(graph, modules, module_info_by_id.as_ref());
     let module_context = UnusedExportModuleContext {
         graph,
         config,
@@ -484,7 +487,7 @@ fn find_unused_exports_for_module(
         return (Vec::new(), Vec::new(), stale_expected_unused);
     }
 
-    let (matching_ignore, matching_plugin) = matchers_for_module(
+    let (matching_ignore, mut matching_plugin) = matchers_for_module(
         &module.path,
         &ctx.config.root,
         ctx.ignore_matchers,
@@ -496,6 +499,13 @@ fn find_unused_exports_for_module(
         ctx.config.include_entry_exports_for(&module.path),
     ) {
         return (Vec::new(), Vec::new(), stale_expected_unused);
+    }
+    // A `usedExports` rule on `lib.mjs` also names the exports of `lib.d.mts`,
+    // which types the same module.
+    if let Some(sibling) = runtime_sibling_path(&module.path) {
+        let (_, sibling_plugin) =
+            matchers_for_module(&sibling, &ctx.config.root, &[], ctx.plugin_matchers);
+        matching_plugin.extend(sibling_plugin);
     }
 
     let same_file_used_exports = same_file_used_exports(module, ctx);
