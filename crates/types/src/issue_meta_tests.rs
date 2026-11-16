@@ -275,6 +275,7 @@ fn ts_alias_policy_is_explicit() {
             ("UnusedMember", "UnusedClassMemberFinding"),
             ("UnusedMember", "UnusedEnumMemberFinding"),
             ("UnusedMember", "UnusedNamespaceMemberFinding"),
+            ("UnusedMember", "UnusedProtectedClassMemberFinding"),
             ("UnusedMember", "UnusedStoreMemberFinding"),
         ]),
         aliases

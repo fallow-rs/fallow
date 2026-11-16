@@ -20,6 +20,7 @@ export const ISSUE_TYPE_DEFAULTS = {
   "unused-optional-dependencies": true,
   "unused-enum-members": true,
   "unused-class-members": true,
+  "unused-protected-class-members": true,
   "unused-namespace-members": true,
   "unused-store-members": true,
   "unresolved-imports": true,
@@ -131,6 +132,7 @@ export const ISSUE_TYPE_ALIASES: Readonly<Record<string, IssueTypeKey>> = {
   "unused-optional-deps": "unused-optional-dependencies",
   "unused-override": "unused-dependency-overrides",
   "unused-overrides": "unused-dependency-overrides",
+  "unused-protected-class-member": "unused-protected-class-members",
   "unused-server-action": "unused-server-actions",
   "unused-store-member": "unused-store-members",
   "unused-svelte-event": "unused-svelte-events",
@@ -183,6 +185,10 @@ export const DIAGNOSTIC_CATEGORIES: ReadonlyArray<DiagnosticCategory> = [
   {
     "code": "unused-class-member",
     "label": "Unused Class Members"
+  },
+  {
+    "code": "unused-protected-class-member",
+    "label": "Unused Protected Class Members"
   },
   {
     "code": "unused-namespace-member",

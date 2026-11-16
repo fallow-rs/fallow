@@ -243,6 +243,7 @@
         "unused-enum-members": "error",
         "unused-class-members": "error",
         "unused-namespace-members": "warn",
+        "unused-protected-class-members": "off",
         "unused-store-members": "warn",
         "unprovided-injects": "warn",
         "unrendered-components": "warn",
@@ -1792,6 +1793,11 @@
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
+        "unused-protected-class-members": {
+          "description": "A `protected` class member that neither its class nor a subclass\nreads through `this` or `super`. Classes of the public API of a\npackage are not checked, because a consumer can subclass them.\nDefaults to `off`, so the default output does not change.",
+          "$ref": "#/$defs/Severity",
+          "default": "off"
+        },
         "unused-store-members": {
           "description": "Store members (Pinia `state` / `getters` / `actions` key, or a\nsetup-store returned key) declared but never accessed by any consumer\nproject-wide. Defaults to `warn`, not `error` like the closed-set\nclass/enum member rules: a store has an OPEN declaration surface\n(plugins, `$onAction`, dynamic dispatch) so analyzer confidence is\ngenuinely lower. A `warn` finding does not change the CLI exit code\nunless `--fail-on-issues` is set. The dead-code count gate of the GitHub\nAction counts it unless `fail-on-issues` is `false`. Promotable to\n`error` once validated on a codebase.",
           "$ref": "#/$defs/Severity",
@@ -2688,6 +2694,17 @@
         },
         "unused-namespace-members": {
           "description": "Optional override for [`RulesConfig::unused_namespace_members`].",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-protected-class-members": {
+          "description": "Optional override for [`RulesConfig::unused_protected_class_members`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

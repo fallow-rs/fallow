@@ -64,6 +64,7 @@ pub(super) fn check_issue_filters_framework(
 ) -> IssueFilters {
     let Command::Check {
         unused_namespace_members,
+        unused_protected_class_members,
         unused_store_members,
         unprovided_injects,
         unrendered_components,
@@ -94,6 +95,10 @@ pub(super) fn check_issue_filters_framework(
     let mut filters = base.clone();
     for (flag, active) in [
         ("--unused-namespace-members", *unused_namespace_members),
+        (
+            "--unused-protected-class-members",
+            *unused_protected_class_members,
+        ),
         ("--unused-store-members", *unused_store_members),
         ("--unprovided-injects", *unprovided_injects),
         ("--unrendered-components", *unrendered_components),

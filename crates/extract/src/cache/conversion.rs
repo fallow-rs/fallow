@@ -79,6 +79,7 @@ fn cached_exports_to_module(exports: &[CachedExport]) -> Vec<crate::ExportInfo> 
                     is_instance_returning_static: member.is_instance_returning_static,
                     is_self_returning: member.is_self_returning,
                     override_base: member.override_base.clone(),
+                    is_protected: member.is_protected,
                 })
                 .collect(),
             super_class: export.super_class.clone(),
@@ -299,6 +300,7 @@ fn module_exports_to_cached(exports: &[crate::ExportInfo]) -> Vec<CachedExport> 
                     is_instance_returning_static: member.is_instance_returning_static,
                     is_self_returning: member.is_self_returning,
                     override_base: member.override_base.clone(),
+                    is_protected: member.is_protected,
                 })
                 .collect(),
             super_class: export.super_class.clone(),

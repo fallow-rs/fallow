@@ -2512,7 +2512,7 @@ fn destructured_class_member_opaque_patterns_credit_whole_instance() {
 }
 
 #[test]
-fn skips_private_and_protected_members() {
+fn skips_private_members_and_marks_protected_members() {
     let info = parse(
         r"
             export class Foo {
@@ -2534,8 +2534,10 @@ fn skips_private_and_protected_members() {
         "private members should be skipped"
     );
     assert!(
-        !members.iter().any(|m| m.name == "internal"),
-        "protected members should be skipped"
+        members
+            .iter()
+            .any(|m| m.name == "internal" && m.is_protected),
+        "protected members should carry the protected marker"
     );
     assert!(
         !members.iter().any(|m| m.name == "runtimePrivate"),
@@ -9089,7 +9091,7 @@ fn class_skips_private_members() {
 }
 
 #[test]
-fn class_skips_protected_members() {
+fn class_marks_protected_members() {
     let info = parse(
         r"
         export class Foo {
@@ -9099,8 +9101,12 @@ fn class_skips_protected_members() {
         ",
     );
     let members = &info.exports[0].members;
-    assert!(!members.iter().any(|m| m.name == "internal"));
-    assert!(members.iter().any(|m| m.name == "open"));
+    assert!(
+        members
+            .iter()
+            .any(|m| m.name == "internal" && m.is_protected)
+    );
+    assert!(members.iter().any(|m| m.name == "open" && !m.is_protected));
 }
 
 #[test]

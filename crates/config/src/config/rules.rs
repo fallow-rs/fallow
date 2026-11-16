@@ -129,6 +129,15 @@ pub struct RulesConfig {
     /// Action counts it unless `fail-on-issues` is `false`.
     #[serde(default = "Severity::default_warn", alias = "unused-namespace-member")]
     pub unused_namespace_members: Severity,
+    /// A `protected` class member that neither its class nor a subclass
+    /// reads through `this` or `super`. Classes of the public API of a
+    /// package are not checked, because a consumer can subclass them.
+    /// Defaults to `off`, so the default output does not change.
+    #[serde(
+        default = "Severity::default_off",
+        alias = "unused-protected-class-member"
+    )]
+    pub unused_protected_class_members: Severity,
     /// Store members (Pinia `state` / `getters` / `actions` key, or a
     /// setup-store returned key) declared but never accessed by any consumer
     /// project-wide. Defaults to `warn`, not `error` like the closed-set
@@ -532,6 +541,7 @@ impl Default for RulesConfig {
             unused_enum_members: Severity::Error,
             unused_class_members: Severity::Error,
             unused_namespace_members: Severity::Warn,
+            unused_protected_class_members: Severity::Off,
             unused_store_members: Severity::Warn,
             unprovided_injects: Severity::Warn,
             unrendered_components: Severity::Warn,
@@ -633,6 +643,7 @@ impl RulesConfig {
             IssueKind::UnusedEnumMember => self.unused_enum_members,
             IssueKind::UnusedClassMember => self.unused_class_members,
             IssueKind::UnusedNamespaceMember => self.unused_namespace_members,
+            IssueKind::UnusedProtectedClassMember => self.unused_protected_class_members,
             IssueKind::UnusedStoreMember => self.unused_store_members,
             IssueKind::UnprovidedInject => self.unprovided_injects,
             IssueKind::UnresolvedImport => self.unresolved_imports,
@@ -739,6 +750,7 @@ impl RulesConfig {
                 unused_enum_members,
                 unused_class_members,
                 unused_namespace_members,
+                unused_protected_class_members,
                 unused_store_members,
                 unprovided_injects,
                 unrendered_components,
@@ -921,6 +933,13 @@ pub struct PartialRulesConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub unused_namespace_members: Option<Severity>,
+    /// Optional override for [`RulesConfig::unused_protected_class_members`].
+    #[serde(
+        default,
+        alias = "unused-protected-class-member",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub unused_protected_class_members: Option<Severity>,
     /// Optional override for [`RulesConfig::unused_store_members`].
     #[serde(
         default,
@@ -1350,6 +1369,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unused-enum-members",
     "unused-class-members",
     "unused-namespace-members",
+    "unused-protected-class-members",
     "unused-store-members",
     "unprovided-injects",
     "unrendered-components",
@@ -1419,6 +1439,7 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "unused-enum-member",
     "unused-class-member",
     "unused-namespace-member",
+    "unused-protected-class-member",
     "unused-store-member",
     "unprovided-inject",
     "unrendered-component",

@@ -705,6 +705,21 @@ fn collect_check_members(env: &Value, out: &mut Vec<Annotation>) {
     push_each(
         out,
         env,
+        "unused_protected_class_members",
+        "Unused protected class member",
+        Anchor::line_col,
+        |it| {
+            format!(
+                "Protected class member '{}.{}' is never referenced by its class or a subclass.\n\nConsider removing it or marking it as private.{}",
+                s(it, "parent_name"),
+                s(it, "member_name"),
+                caveat_note(it),
+            )
+        },
+    );
+    push_each(
+        out,
+        env,
         "unused_namespace_members",
         "Unused namespace member",
         Anchor::line_col,

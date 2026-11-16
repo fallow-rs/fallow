@@ -1,0 +1,66 @@
+//! Severity of each dead-code SARIF rule.
+
+use super::*;
+
+pub(super) fn dead_code_rule_severity(rules: &RulesConfig, issue_code: &str) -> Option<Severity> {
+    let severity = match issue_code {
+        "unused-file" => rules.unused_files,
+        "unused-export" => rules.unused_exports,
+        "unused-type" => rules.unused_types,
+        "private-type-leak" => rules.private_type_leaks,
+        "deprecated-export-in-use" => rules.deprecated_exports_in_use,
+        "unused-dependency" => rules.unused_dependencies,
+        "unused-dev-dependency" => rules.unused_dev_dependencies,
+        "unused-optional-dependency" => rules.unused_optional_dependencies,
+        "type-only-dependency" => rules.type_only_dependencies,
+        "test-only-dependency" => rules.test_only_dependencies,
+        "dev-dependency-in-production" => rules.dev_dependencies_in_production,
+        "unused-enum-member" => rules.unused_enum_members,
+        "unused-class-member" => rules.unused_class_members,
+        "unused-namespace-member" => rules.unused_namespace_members,
+        "unused-protected-class-member" => rules.unused_protected_class_members,
+        "unused-store-member" => rules.unused_store_members,
+        "unresolved-import" => rules.unresolved_imports,
+        "unlisted-dependency" => rules.unlisted_dependencies,
+        "unlisted-binary" => rules.unlisted_binaries,
+        "duplicate-export" => rules.duplicate_exports,
+        "duplicate-export-alias" => rules.duplicate_export_aliases,
+        "circular-dependency" => rules.circular_dependencies,
+        "re-export-cycle" => rules.re_export_cycle,
+        "package-cycle" => rules.package_cycle,
+        "boundary-violation" | "boundary-coverage" | "boundary-call-violation" => {
+            rules.boundary_violation
+        }
+        "policy-violation" => rules.policy_violation,
+        "invalid-client-export" => rules.invalid_client_export,
+        "mixed-client-server-barrel" => rules.mixed_client_server_barrel,
+        "misplaced-directive" => rules.misplaced_directive,
+        "unprovided-inject" => rules.unprovided_injects,
+        "unrendered-component" => rules.unrendered_components,
+        "unused-component-prop" => rules.unused_component_props,
+        "absent-component-prop" => rules.absent_component_props,
+        "constant-parameter" => rules.constant_parameters,
+        "unused-component-emit" => rules.unused_component_emits,
+        "unused-component-input" => rules.unused_component_inputs,
+        "unused-component-output" => rules.unused_component_outputs,
+        "unused-svelte-event" => rules.unused_svelte_events,
+        "unused-effect-layer" => rules.unused_effect_layers,
+        "unused-tagged-error" => rules.unused_tagged_errors,
+        "unproduced-catch-tag" => rules.unproduced_catch_tags,
+        "unused-server-action" => rules.unused_server_actions,
+        "unused-load-data-key" => rules.unused_load_data_keys,
+        "prop-drilling" => rules.prop_drilling,
+        "thin-wrapper" => rules.thin_wrapper,
+        "duplicate-prop-shape" => rules.duplicate_prop_shape,
+        "route-collision" => rules.route_collision,
+        "dynamic-segment-name-conflict" => rules.dynamic_segment_name_conflict,
+        "stale-suppression" => rules.stale_suppressions,
+        "unused-catalog-entry" => rules.unused_catalog_entries,
+        "empty-catalog-group" => rules.empty_catalog_groups,
+        "unresolved-catalog-reference" => rules.unresolved_catalog_references,
+        "unused-dependency-override" => rules.unused_dependency_overrides,
+        "misconfigured-dependency-override" => rules.misconfigured_dependency_overrides,
+        _ => return None,
+    };
+    Some(severity)
+}

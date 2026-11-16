@@ -56,6 +56,10 @@ pub(super) fn baseline_member_import_keys(
             &results.unused_namespace_members,
             root,
         ),
+        unused_protected_class_members: protected_class_member_baseline_keys(
+            &results.unused_protected_class_members,
+            root,
+        ),
         unprovided_injects: inject_baseline_keys(&results.unprovided_injects, root),
         unrendered_components: component_baseline_keys(&results.unrendered_components, root),
         unused_component_props: component_prop_baseline_keys(&results.unused_component_props, root),
@@ -240,6 +244,16 @@ fn store_member_baseline_keys(
 
 fn namespace_member_baseline_keys(
     items: &[crate::results::UnusedNamespaceMemberFinding],
+    root: &Path,
+) -> Vec<String> {
+    items
+        .iter()
+        .map(|m| unused_member_baseline_key(&m.member, root))
+        .collect()
+}
+
+fn protected_class_member_baseline_keys(
+    items: &[crate::results::UnusedProtectedClassMemberFinding],
     root: &Path,
 ) -> Vec<String> {
     items

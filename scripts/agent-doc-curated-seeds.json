@@ -1012,6 +1012,12 @@
     },
     {
       "section": "flags:dead-code-filters",
+      "row": "--unused-protected-class-members",
+      "column": "Issue Type",
+      "seed": "Protected class member is never referenced"
+    },
+    {
+      "section": "flags:dead-code-filters",
       "row": "--unused-server-actions",
       "column": "Issue Type",
       "seed": "A Next.js Server Action exported from a \"use server\" file is referenced by no code in the project"
@@ -2599,6 +2605,12 @@
       "row": "unused-optional-dependency",
       "column": "Description",
       "seed": "Optional dependency listed but never imported; --unused-deps controls unused-dependency, unused-dev-dependency, unused-optional-dependency, type-only-dependency, test-only-dependency, and dev-dependency-in-production"
+    },
+    {
+      "section": "issue-types",
+      "row": "unused-protected-class-member",
+      "column": "Description",
+      "seed": "Protected class member is never referenced"
     },
     {
       "section": "issue-types",

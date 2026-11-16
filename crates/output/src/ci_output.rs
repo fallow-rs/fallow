@@ -1655,6 +1655,7 @@ mod tests {
             "fallow/unused-class-member",
             "fallow/unused-store-member",
             "fallow/unused-namespace-member",
+            "fallow/unused-protected-class-member",
             "fallow/unresolved-import",
             "fallow/unlisted-dependency",
             "fallow/unlisted-binary",

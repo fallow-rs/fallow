@@ -530,6 +530,7 @@ mod severity_gate {
             unused_class_members: _,
             unused_store_members: _,
             unused_namespace_members: _,
+            unused_protected_class_members: _,
             unresolved_imports: _,
             unlisted_dependencies: _,
             unlisted_binaries: _,
@@ -857,6 +858,24 @@ mod severity_gate {
                                 member_name: "m".to_string(),
                                 kind: fallow_api::editor_extract::MemberKind::ClassMethod,
                                 line: 7,
+                                col: 0,
+                            },
+                        ),
+                    );
+                }),
+            ),
+            (
+                "unused-protected-class-member",
+                S::HINT,
+                Box::new(|root, r| {
+                    r.unused_protected_class_members.push(
+                        fallow_api::editor_results::UnusedProtectedClassMemberFinding::with_actions(
+                            fallow_api::editor_results::UnusedMember {
+                                path: root.join("a.ts"),
+                                parent_name: "P".to_string(),
+                                member_name: "h".to_string(),
+                                kind: fallow_api::editor_extract::MemberKind::ClassMethod,
+                                line: 10,
                                 col: 0,
                             },
                         ),

@@ -247,6 +247,7 @@ impl ModuleInfoExtractor {
                     is_instance_returning_static: false,
                     is_self_returning: false,
                     override_base: None,
+                    is_protected: false,
                 })
             })
             .collect();
@@ -426,6 +427,7 @@ impl ModuleInfoExtractor {
             is_instance_returning_static: false,
             is_self_returning: false,
             override_base: None,
+            is_protected: false,
         });
     }
 

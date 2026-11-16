@@ -58,6 +58,9 @@ mod unused_overrides;
 mod unused_server_action;
 mod unused_svelte_event;
 
+mod member_detectors;
+use member_detectors::run_member_detectors;
+
 #[cfg(test)]
 mod test_support;
 
@@ -90,8 +93,8 @@ use fallow_types::output_dead_code::{
     UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
     UnusedEffectLayerFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
     UnusedLoadDataKeyFinding, UnusedNamespaceMemberFinding, UnusedOptionalDependencyFinding,
-    UnusedStoreMemberFinding, UnusedSvelteEventFinding, UnusedTaggedErrorFinding,
-    UnusedTypeFinding,
+    UnusedProtectedClassMemberFinding, UnusedStoreMemberFinding, UnusedSvelteEventFinding,
+    UnusedTaggedErrorFinding, UnusedTypeFinding,
 };
 
 use crate::results::{
@@ -1706,6 +1709,7 @@ impl ParallelDeadCodeDetectorResults {
             unused_class_members: self.member_results.unused_class_members,
             unused_store_members: self.member_results.unused_store_members,
             unused_namespace_members: self.member_results.unused_namespace_members,
+            unused_protected_class_members: self.member_results.unused_protected_class_members,
             unused_dependencies: self.dependency_results.unused_dependencies,
             unused_dev_dependencies: self.dependency_results.unused_dev_dependencies,
             unused_optional_dependencies: self.dependency_results.unused_optional_dependencies,
@@ -1973,6 +1977,11 @@ fn filter_public_workspace_results(
             .any(|root| e.member.path.starts_with(root))
     });
     results.unused_class_members.retain(|e| {
+        !public_roots
+            .iter()
+            .any(|root| e.member.path.starts_with(root))
+    });
+    results.unused_protected_class_members.retain(|e| {
         !public_roots
             .iter()
             .any(|root| e.member.path.starts_with(root))
@@ -2293,43 +2302,6 @@ struct MemberDetectorInput<'a> {
     declared_deps: &'a FxHashSet<String>,
 }
 
-fn run_member_detectors(input: MemberDetectorInput<'_>) -> AnalysisResults {
-    let mut results = AnalysisResults::default();
-    let store_members_active = store_member_rule_is_active(input.config, input.declared_deps);
-    if member_rules_are_disabled(input.config, store_members_active) {
-        return results;
-    }
-
-    let member_results = find_unused_members_with_public_api_entry_points(UnusedMemberScanInput {
-        graph: input.graph,
-        resolved_modules: input.resolved_modules,
-        modules: input.modules,
-        suppressions: input.suppressions,
-        line_offsets_by_file: input.line_offsets_by_file,
-        user_class_member_allowlist: input.user_class_members,
-        semantic_framework_candidates: input.semantic_framework_candidates,
-        ignore_decorators: &input.config.ignore_decorators,
-        public_api_entry_points: input.public_api_entry_points,
-        lit_active: lit_is_declared(input.declared_deps),
-        report_unmatched_patterns: true,
-    });
-    populate_unused_enum_member_findings(&mut results, input.config, member_results.enum_members);
-    populate_unused_class_member_findings(&mut results, input.config, member_results.class_members);
-    populate_unused_store_member_findings(
-        &mut results,
-        store_members_active,
-        member_results.store_members,
-    );
-    if input.config.rules.unused_namespace_members != Severity::Off {
-        results.unused_namespace_members = member_results
-            .namespace_members
-            .into_iter()
-            .map(UnusedNamespaceMemberFinding::with_actions)
-            .collect();
-    }
-    results
-}
-
 fn lit_is_declared(declared_deps: &FxHashSet<String>) -> bool {
     declared_deps.contains("lit")
         || declared_deps.contains("lit-element")
@@ -2340,6 +2312,7 @@ fn member_rules_are_disabled(config: &ResolvedConfig, store_members_active: bool
     config.rules.unused_enum_members == Severity::Off
         && config.rules.unused_class_members == Severity::Off
         && config.rules.unused_namespace_members == Severity::Off
+        && config.rules.unused_protected_class_members == Severity::Off
         && !store_members_active
 }
 

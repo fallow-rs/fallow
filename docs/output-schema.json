@@ -667,6 +667,13 @@
           },
           "description": "Exported members of an exported TypeScript namespace that no code\nreads. Wrapped in [`UnusedNamespaceMemberFinding`]: same inner\n[`UnusedMember`] struct as `unused_enum_members`. `member_name` is the\ndotted path from the exported namespace (`Inner.x`)."
         },
+        "unused_protected_class_members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedProtectedClassMemberFinding"
+          },
+          "description": "`protected` class members that neither the class nor a subclass\nreads. Wrapped in [`UnusedProtectedClassMemberFinding`]: same inner\n[`UnusedMember`] struct as `unused_class_members`. The rule is `off`\nby default, so this array is empty unless a config turns it on."
+        },
         "unused_store_members": {
           "type": "array",
           "items": {
@@ -1351,6 +1358,13 @@
             "$ref": "#/definitions/UnusedNamespaceMemberFinding"
           },
           "description": "Exported members of an exported TypeScript namespace that no code\nreads. Wrapped in [`UnusedNamespaceMemberFinding`]: same inner\n[`UnusedMember`] struct as `unused_enum_members`. `member_name` is the\ndotted path from the exported namespace (`Inner.x`)."
+        },
+        "unused_protected_class_members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedProtectedClassMemberFinding"
+          },
+          "description": "`protected` class members that neither the class nor a subclass\nreads. Wrapped in [`UnusedProtectedClassMemberFinding`]: same inner\n[`UnusedMember`] struct as `unused_class_members`. The rule is `off`\nby default, so this array is empty unless a config turns it on."
         },
         "unused_store_members": {
           "type": "array",
@@ -6359,6 +6373,10 @@
           "type": "integer",
           "description": "Unused namespace members."
         },
+        "unused_protected_class_members": {
+          "type": "integer",
+          "description": "Unused protected class members. Omitted when zero, because the rule\nis `off` by default."
+        },
         "unused_store_members": {
           "type": "integer",
           "description": "Unused store members."
@@ -7207,6 +7225,13 @@
             "$ref": "#/definitions/UnusedNamespaceMemberFinding"
           },
           "description": "Exported members of an exported TypeScript namespace that no code\nreads. Wrapped in [`UnusedNamespaceMemberFinding`]: same inner\n[`UnusedMember`] struct as `unused_enum_members`. `member_name` is the\ndotted path from the exported namespace (`Inner.x`)."
+        },
+        "unused_protected_class_members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedProtectedClassMemberFinding"
+          },
+          "description": "`protected` class members that neither the class nor a subclass\nreads. Wrapped in [`UnusedProtectedClassMemberFinding`]: same inner\n[`UnusedMember`] struct as `unused_class_members`. The rule is `off`\nby default, so this array is empty unless a config turns it on."
         },
         "unused_store_members": {
           "type": "array",
@@ -31224,6 +31249,13 @@
           },
           "description": "Exported members of an exported TypeScript namespace that no code\nreads. Wrapped in [`UnusedNamespaceMemberFinding`]: same inner\n[`UnusedMember`] struct as `unused_enum_members`. `member_name` is the\ndotted path from the exported namespace (`Inner.x`)."
         },
+        "unused_protected_class_members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/UnusedProtectedClassMemberFinding"
+          },
+          "description": "`protected` class members that neither the class nor a subclass\nreads. Wrapped in [`UnusedProtectedClassMemberFinding`]: same inner\n[`UnusedMember`] struct as `unused_class_members`. The rule is `off`\nby default, so this array is empty unless a config turns it on."
+        },
         "unused_store_members": {
           "type": "array",
           "items": {
@@ -38083,6 +38115,88 @@
         "elapsed_ms"
       ],
       "description": "The call evidence that the `constant-parameter` rule asked the companion\nfor."
+    },
+    "UnusedProtectedClassMemberFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "File containing the unused member."
+        },
+        "parent_name": {
+          "type": "string",
+          "description": "Name of the parent enum, class, store, or exported namespace."
+        },
+        "member_name": {
+          "type": "string",
+          "description": "Name of the unused member. A member of a nested namespace has the dotted\npath from the exported namespace (`Inner.x`)."
+        },
+        "kind": {
+          "description": "The kind of member: enum member, class method, class property, store\nmember, or namespace member.",
+          "$ref": "#/definitions/MemberKind"
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line number."
+        },
+        "col": {
+          "type": "integer",
+          "description": "0-based byte column offset."
+        },
+        "finding_id": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a\n`~<k>` suffix when several findings of one type share an identity.\nLine and column are not inputs, so the id survives line shifts,\nreformats and reorders. A rename of the file or the symbol gives a\nnew id. Absent in output from older versions."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/IssueAction"
+          },
+          "description": "Suggested next steps. Always emitted (possibly empty for\nforward-compat)."
+        },
+        "introduced": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/AuditIntroduced"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Set by the audit pass when this finding is introduced relative to\nthe merge-base."
+        },
+        "effective_severity": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/EffectiveSeverity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Gate severity of this finding after `rules` and `overrides[].rules`\nresolve for its path. CI formats read it for the annotation, SARIF\nand CodeClimate level. Absent in output from older versions. Not\npart of the finding identity, baseline keys or fingerprints."
+        },
+        "reachability_caveats": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/ReachabilityCaveat"
+          },
+          "description": "Advisory caveats on the verdict behind this finding. A protected\nmember takes the member rule unchanged: any module this run analyzed\nincompletely can hold the access that credits it. Sorted,\ndeduplicated, and omitted from the wire when empty. This is disclosure\nonly, because a protected member offers no mutation."
+        }
+      },
+      "required": [
+        "path",
+        "parent_name",
+        "member_name",
+        "kind",
+        "line",
+        "col",
+        "actions"
+      ],
+      "description": "Wire-shape envelope for an [`UnusedMember`] finding consumed under the\n`unused_protected_class_members` key (a `protected` class method or\nproperty that neither its class nor a subclass reads). Emits only a\nline-level suppress action: a subclass outside the project can read the\nmember, so removal is a decision for the user."
     }
   }
 }

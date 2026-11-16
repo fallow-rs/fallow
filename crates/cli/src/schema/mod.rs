@@ -455,6 +455,7 @@ fn apply_source_issue_meta(bare_id: &str, m: &mut IssueTypeMeta) -> bool {
         | "missing-suppression-reason"
         | "unused-class-member"
         | "unused-namespace-member"
+        | "unused-protected-class-member"
         | "unused-store-member"
         | "unprovided-inject"
         | "unrendered-component"
@@ -1559,6 +1560,11 @@ mod tests {
             "unused-namespace-member".to_string(),
             "UnusedMember".to_string(),
             "UnusedNamespaceMemberFinding".to_string()
+        )));
+        assert!(aliases.contains(&(
+            "unused-protected-class-member".to_string(),
+            "UnusedMember".to_string(),
+            "UnusedProtectedClassMemberFinding".to_string()
         )));
         assert_eq!(
             expected, aliases,

@@ -3237,6 +3237,13 @@ unused_class_members: UnusedClassMemberFinding[]
  */
 unused_namespace_members?: UnusedNamespaceMemberFinding[]
 /**
+ * `protected` class members that neither the class nor a subclass
+ * reads. Wrapped in [`UnusedProtectedClassMemberFinding`]: same inner
+ * [`UnusedMember`] struct as `unused_class_members`. The rule is `off`
+ * by default, so this array is empty unless a config turns it on.
+ */
+unused_protected_class_members?: UnusedProtectedClassMemberFinding[]
+/**
  * Store members (Pinia `state` / `getters` / `actions` key, or a
  * setup-store returned key) declared but never accessed by any consumer
  * project-wide. Wrapped in [`UnusedStoreMemberFinding`]: same inner
@@ -3759,6 +3766,11 @@ unused_class_members: number
  * Unused namespace members.
  */
 unused_namespace_members?: number
+/**
+ * Unused protected class members. Omitted when zero, because the rule
+ * is `off` by default.
+ */
+unused_protected_class_members?: number
 /**
  * Unused store members.
  */
@@ -4988,6 +5000,70 @@ effective_severity?: (EffectiveSeverity | null)
  * incompletely can hold the access that credits it. Sorted,
  * deduplicated, and omitted from the wire when empty. This is disclosure
  * only, because a namespace member offers no mutation.
+ */
+reachability_caveats?: ReachabilityCaveat[]
+}
+/**
+ * Wire-shape envelope for an [`UnusedMember`] finding consumed under the
+ * `unused_protected_class_members` key (a `protected` class method or
+ * property that neither its class nor a subclass reads). Emits only a
+ * line-level suppress action: a subclass outside the project can read the
+ * member, so removal is a decision for the user.
+ */
+export interface UnusedProtectedClassMemberFinding {
+/**
+ * File containing the unused member.
+ */
+path: string
+/**
+ * Name of the parent enum, class, store, or exported namespace.
+ */
+parent_name: string
+/**
+ * Name of the unused member. A member of a nested namespace has the dotted
+ * path from the exported namespace (`Inner.x`).
+ */
+member_name: string
+kind: MemberKind
+/**
+ * 1-based line number.
+ */
+line: number
+/**
+ * 0-based byte column offset.
+ */
+col: number
+/**
+ * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
+ * `~<k>` suffix when several findings of one type share an identity.
+ * Line and column are not inputs, so the id survives line shifts,
+ * reformats and reorders. A rename of the file or the symbol gives a
+ * new id. Absent in output from older versions.
+ */
+finding_id?: (string | null)
+/**
+ * Suggested next steps. Always emitted (possibly empty for
+ * forward-compat).
+ */
+actions: IssueAction[]
+/**
+ * Set by the audit pass when this finding is introduced relative to
+ * the merge-base.
+ */
+introduced?: (AuditIntroduced | null)
+/**
+ * Gate severity of this finding after `rules` and `overrides[].rules`
+ * resolve for its path. CI formats read it for the annotation, SARIF
+ * and CodeClimate level. Absent in output from older versions. Not
+ * part of the finding identity, baseline keys or fingerprints.
+ */
+effective_severity?: (EffectiveSeverity | null)
+/**
+ * Advisory caveats on the verdict behind this finding. A protected
+ * member takes the member rule unchanged: any module this run analyzed
+ * incompletely can hold the access that credits it. Sorted,
+ * deduplicated, and omitted from the wire when empty. This is disclosure
+ * only, because a protected member offers no mutation.
  */
 reachability_caveats?: ReachabilityCaveat[]
 }
@@ -15813,6 +15889,13 @@ unused_class_members: UnusedClassMemberFinding[]
  */
 unused_namespace_members?: UnusedNamespaceMemberFinding[]
 /**
+ * `protected` class members that neither the class nor a subclass
+ * reads. Wrapped in [`UnusedProtectedClassMemberFinding`]: same inner
+ * [`UnusedMember`] struct as `unused_class_members`. The rule is `off`
+ * by default, so this array is empty unless a config turns it on.
+ */
+unused_protected_class_members?: UnusedProtectedClassMemberFinding[]
+/**
  * Store members (Pinia `state` / `getters` / `actions` key, or a
  * setup-store returned key) declared but never accessed by any consumer
  * project-wide. Wrapped in [`UnusedStoreMemberFinding`]: same inner
@@ -17566,6 +17649,13 @@ unused_class_members: UnusedClassMemberFinding[]
  * dotted path from the exported namespace (`Inner.x`).
  */
 unused_namespace_members?: UnusedNamespaceMemberFinding[]
+/**
+ * `protected` class members that neither the class nor a subclass
+ * reads. Wrapped in [`UnusedProtectedClassMemberFinding`]: same inner
+ * [`UnusedMember`] struct as `unused_class_members`. The rule is `off`
+ * by default, so this array is empty unless a config turns it on.
+ */
+unused_protected_class_members?: UnusedProtectedClassMemberFinding[]
 /**
  * Store members (Pinia `state` / `getters` / `actions` key, or a
  * setup-store returned key) declared but never accessed by any consumer
@@ -23096,14 +23186,14 @@ export type UnusedDependency = UnusedDependencyFinding | UnusedDevDependencyFind
 
 /**
  * Backwards-compat alias for the pre-#384 bare `UnusedMember` union name.
- * Maps to the union of typed wrappers (`UnusedClassMemberFinding`, `UnusedEnumMemberFinding`, `UnusedNamespaceMemberFinding`, `UnusedStoreMemberFinding`)
+ * Maps to the union of typed wrappers (`UnusedClassMemberFinding`, `UnusedEnumMemberFinding`, `UnusedNamespaceMemberFinding`, `UnusedProtectedClassMemberFinding`, `UnusedStoreMemberFinding`)
  * that replaced the pre-migration bare union. The wire shape per variant
  * is byte-identical (each wrapper flattens its bare payload and adds
  * `actions[]` plus optional `introduced`). Consumers that imported
  * `UnusedMember` from `fallow/types` pre-migration continue to work via
  * this alias; new code should narrow on the specific wrapper variant.
  */
-export type UnusedMember = UnusedClassMemberFinding | UnusedEnumMemberFinding | UnusedNamespaceMemberFinding | UnusedStoreMemberFinding;
+export type UnusedMember = UnusedClassMemberFinding | UnusedEnumMemberFinding | UnusedNamespaceMemberFinding | UnusedProtectedClassMemberFinding | UnusedStoreMemberFinding;
 
 /**
  * @deprecated Renamed to BaselineStaleness in 3.27.0, when dead-code and dupes started carrying the same shape. The members are unchanged.

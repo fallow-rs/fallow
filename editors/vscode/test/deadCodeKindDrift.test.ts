@@ -179,6 +179,11 @@ const DEAD_CODE_WIRING = {
     category: "unused-namespace-member",
     finding: { ...member, actions: [] },
   },
+  "unused-protected-class-member": {
+    field: "unused_protected_class_members",
+    category: "unused-protected-class-member",
+    finding: { ...member, actions: [] },
+  },
   "unused-server-action": {
     field: "unused_server_actions",
     category: "unused-server-action",

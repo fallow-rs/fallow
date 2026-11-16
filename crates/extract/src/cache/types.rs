@@ -632,6 +632,8 @@ pub struct CachedMember {
     /// Root identifier of the class `extends` expression for an `override`
     /// member, else `None`.
     pub(crate) override_base: Option<String>,
+    /// True for a class member with the `protected` modifier.
+    pub(crate) is_protected: bool,
 }
 
 /// Cached dynamic import pattern data (template literals, `import.meta.glob`).

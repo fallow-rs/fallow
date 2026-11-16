@@ -446,6 +446,10 @@ fn check_unused_member(
     let class_iter = results.unused_class_members.iter().map(|f| &f.member);
     let store_iter = results.unused_store_members.iter().map(|f| &f.member);
     let namespace_iter = results.unused_namespace_members.iter().map(|f| &f.member);
+    let protected_iter = results
+        .unused_protected_class_members
+        .iter()
+        .map(|f| &f.member);
     for (members, kind_label) in [
         (
             Box::new(enum_iter)
@@ -466,6 +470,11 @@ fn check_unused_member(
             Box::new(namespace_iter)
                 as Box<dyn Iterator<Item = &fallow_api::editor_results::UnusedMember>>,
             "Namespace member",
+        ),
+        (
+            Box::new(protected_iter)
+                as Box<dyn Iterator<Item = &fallow_api::editor_results::UnusedMember>>,
+            "Protected class member",
         ),
     ] {
         for member in members {
