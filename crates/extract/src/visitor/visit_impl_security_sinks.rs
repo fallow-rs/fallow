@@ -448,13 +448,15 @@ fn is_metadata_service_literal(value: &str) -> bool {
     value.contains("169.254.169.254") || value.contains("metadata.google.internal")
 }
 
-/// Whether the callee is `spawn(command, args?, options?)` or its sync form.
+/// Whether the callee takes `(command, args?, options?)`: `spawn`, `execFile`
+/// or a sync form. `execFile` can also take a trailing callback.
 fn is_spawn_callee(callee_path: &str) -> bool {
     let name = callee_path.rsplit('.').next().unwrap_or(callee_path);
-    matches!(name, "spawn" | "spawnSync")
+    matches!(name, "spawn" | "spawnSync" | "execFile" | "execFileSync")
 }
 
-/// The options object of a `spawn(command, args?, options?)` call. An object
+/// The options object of a `spawn(command, args?, options?)` or an
+/// `execFile(file, args?, options?, callback?)` call. An object
 /// literal in the second position is the options object. A second argument
 /// that is not an array or an object literal can be either, so the options
 /// stay unknown when no third argument follows it. An options object with a
@@ -1059,10 +1061,16 @@ impl ModuleInfoExtractor {
                 url_arg_literal: url_arg_literal.clone(),
                 span: expr.span,
             });
-            if arg_index == 0
+            // The command and the argument array both get the options: with
+            // `shell: true`, the shell also parses each argument.
+            if arg_index <= 1
                 && let Some(site) = self.security_sinks.get_mut(pushed_before)
             {
-                site.call_options = call_options.take();
+                site.call_options = if arg_index == 0 {
+                    call_options.clone()
+                } else {
+                    call_options.take()
+                };
             }
         }
     }

@@ -137,6 +137,11 @@ struct RawMatcher {
     /// option is absent or `false`.
     #[serde(default)]
     options_may_enable: Option<Vec<String>>,
+    /// Optional call options that must be proven on. The row matches only
+    /// when the extractor read a complete options object literal in which a
+    /// listed option is `true` or a non-empty string.
+    #[serde(default)]
+    options_enabled: Option<Vec<String>>,
     /// Optional context-name keywords for zero-arg sinks like `Math.random()`.
     #[serde(default)]
     context_keywords: Option<Vec<String>>,
@@ -385,6 +390,9 @@ pub struct Matcher {
     /// Call options that make the row match when they can hold a value other
     /// than `false`.
     pub options_may_enable: Vec<String>,
+    /// Call options of which one must be proven `true` or a non-empty string
+    /// for the row to match.
+    pub options_enabled: Vec<String>,
     /// Context-name keywords admitted by this row.
     pub context_keywords: Vec<String>,
 }
@@ -785,6 +793,7 @@ fn parse_matcher_entry(entry: RawMatcher) -> Result<Matcher, String> {
         object_missing_or_false: entry.object_missing_or_false.unwrap_or_default(),
         object_missing: entry.object_missing.unwrap_or_default(),
         options_may_enable: entry.options_may_enable.unwrap_or_default(),
+        options_enabled: entry.options_enabled.unwrap_or_default(),
         context_keywords: entry.context_keywords.unwrap_or_default(),
     })
 }
@@ -1090,12 +1099,16 @@ mod tests {
                 .options_may_enable
                 .as_ref()
                 .map_or_else(String::new, |keys| keys.join("|"));
+            let options_enabled = m
+                .options_enabled
+                .as_ref()
+                .map_or_else(String::new, |keys| keys.join("|"));
             let context_keywords = m
                 .context_keywords
                 .as_ref()
                 .map_or_else(String::new, |keywords| keywords.join("|"));
             let key = format!(
-                "{}::{}::{pats}::{enabler}::{import_provenance}::{}::{arg_kinds}::{literal_values}::{literal_contains}::{literal_integers}::{object_properties}::{object_missing_or_false}::{object_missing}::{options_may_enable}::{context_keywords}",
+                "{}::{}::{pats}::{enabler}::{import_provenance}::{}::{arg_kinds}::{literal_values}::{literal_contains}::{literal_integers}::{object_properties}::{object_missing_or_false}::{object_missing}::{options_may_enable}::{options_enabled}::{context_keywords}",
                 m.id, m.sink_shape, m.requires_source
             );
             assert!(seen.insert(key.clone()), "duplicate matcher row: {key}");
