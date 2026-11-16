@@ -757,6 +757,19 @@ const setVitestEnv = () => {
 };
 
 /**
+ * Vitest applies `VITEST_MAX_WORKERS` after the config options, so an
+ * inherited value replaces the `maxWorkers: 1` of the adapter. The mutation
+ * run starts one companion for each unit of `--concurrency`, and each
+ * companion must run one worker. The step comes after the `options.env`
+ * values, so no source of the variable can change the worker count.
+ */
+const WORKER_COUNT_ENV = "VITEST_MAX_WORKERS";
+
+const clearWorkerCountEnv = () => {
+  delete process.env[WORKER_COUNT_ENV];
+};
+
+/**
  * The project that loads a replay file: a project in Node (not browser mode)
  * whose root holds the file, the deepest root first. Without such a project,
  * the first project in Node, else the first project.
@@ -792,6 +805,7 @@ export const createAdapter = async (init) => {
   const loaded = new Set();
   setVitestEnv();
   Object.assign(process.env, init.options?.env ?? {});
+  clearWorkerCountEnv();
 
   const vitest = await createVitestInstance({
     createVitest,
