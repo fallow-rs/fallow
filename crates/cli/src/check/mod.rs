@@ -42,7 +42,9 @@ mod configuration;
 mod type_aware_summary;
 pub use benchmark::benchmark_dead_code_json;
 use configuration::{parse_type_aware_bool, parse_type_aware_require, prepare_check_config};
+#[cfg(test)]
 use type_aware_summary::format_type_aware_summary;
+use type_aware_summary::print_type_aware_summary;
 #[derive(Debug, Default, Clone, PartialEq, Eq)]
 pub struct IssueFilters {
     pub shared_state: bool,
@@ -979,7 +981,7 @@ fn apply_rules_and_filters(
     opts.filters.apply(results);
     rules::apply_rules(results, config);
     if opts.fail_on_issues {
-        rules::promote_finding_warns(results);
+        rules::promote_finding_warns(results, config);
     }
 }
 
@@ -1164,16 +1166,13 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         baseline_notes::run_notes(&config, opts, baseline_staleness.as_ref()),
     );
 
-    if let Some(sarif_path) = opts.sarif_file {
-        output::write_sarif_file(&output::SarifFileInput {
-            results: &results,
-            config: &config,
-            sarif_path,
-            quiet: opts.quiet,
-            type_aware: type_aware.as_ref().map(|outcome| &outcome.meta),
-            workspace_diagnostics: &workspace_diagnostics,
-        });
-    }
+    output::write_requested_sarif_file(
+        opts,
+        &config,
+        &results,
+        type_aware.as_ref().map(|outcome| &outcome.meta),
+        &workspace_diagnostics,
+    );
 
     let retained_files_for_cross_reference = if opts.include_dupes && retained_modules.is_some() {
         retained_files.clone()
@@ -1248,7 +1247,7 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
 pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
     let start = Instant::now();
 
-    let config = process_clock::time(ProcessSpan::Config, || prepare_check_config(opts))?;
+    let mut config = process_clock::time(ProcessSpan::Config, || prepare_check_config(opts))?;
     validate_effective_type_aware_output(opts.output, config.type_aware.enabled)?;
 
     let mut ws_roots = filtering::resolve_workspace_scope(
@@ -1333,9 +1332,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
                 || opts.filters.unused_types
                 || opts.filters.unused_class_members
         } else {
-            config.rules.unused_exports != Severity::Off
-                || config.rules.unused_types != Severity::Off
-                || config.rules.unused_class_members != Severity::Off
+            fallow_config::any_symbol_use_rule_active(&config.rules)
         };
         let type_aware_projects = config
             .type_aware
@@ -1367,15 +1364,11 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
                 (Some(outcome.type_aware), outcome.type_coupling)
             }),
             Err(error) => {
-                let meta = crate::type_aware_degrade::degrade_or_fail(
-                    &crate::type_aware_degrade::DegradeContext {
-                        root: &config.root,
-                        error: &error.to_string(),
-                        failure_label: "Type-aware analysis failed",
-                        require: config.type_aware.require,
-                        quiet: opts.quiet,
-                        output: opts.output,
-                    },
+                let meta = crate::type_aware_degrade::degrade_dead_code(
+                    &error,
+                    &mut config,
+                    opts.quiet,
+                    opts.output,
                 )?;
                 // `degrade_or_fail` already put this on stderr, honoring
                 // `--quiet`. Copying it into the outcome would print the same
@@ -1416,7 +1409,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         // the same set for an overridden path.
         rules::apply_rules(&mut data.results, &config);
         if opts.fail_on_issues {
-            rules::promote_finding_warns(&mut data.results);
+            rules::promote_finding_warns(&mut data.results, &config);
         }
     }
     // Type-aware refinement is analysis, not a filter: a finding it removes
@@ -1621,6 +1614,7 @@ fn prepare_print_check(result: &CheckResult, opts: PrintCheckOptions) -> Prepare
         fail_on_stale_baseline: result.fail_on_stale_baseline,
         type_aware_require: result.config.type_aware.require,
         type_aware_meta: result.type_aware_meta.as_ref(),
+        type_aware_sidecar_missing: result.config.semantic_refinable_capped,
         parse_error: parse_error.clone(),
     });
     PreparedPrintCheck {
@@ -1661,9 +1655,7 @@ fn prepare_print_check(result: &CheckResult, opts: PrintCheckOptions) -> Prepare
 
 pub fn effective_check_rules(result: &CheckResult) -> RulesConfig {
     if result.fail_on_issues {
-        let mut rules = result.config.rules.clone();
-        rules::promote_warns_to_errors(&mut rules);
-        rules
+        rules::strict_rules(&result.config)
     } else {
         result.config.rules.clone()
     }
@@ -1779,28 +1771,6 @@ pub fn type_aware_completeness_incomplete(result: &CheckResult) -> bool {
             .type_aware_meta
             .as_ref()
             .is_some_and(|meta| crate::report::ci::required_type_aware_incomplete(Some(meta)))
-}
-
-fn print_type_aware_summary(result: &CheckResult) {
-    if !matches!(result.config.output, OutputFormat::Human) {
-        return;
-    }
-    if let Some(meta) = &result.type_aware_meta {
-        // A pass that never ran has nothing to summarize: every count is zero
-        // because no query happened, not because the project is clean. The
-        // degradation warning already said what happened, so a second line of
-        // zeroes would only dispute it.
-        if !meta.executed && meta.warning_count > 0 {
-            return;
-        }
-        println!(
-            "{}",
-            crate::report::human_status_line(
-                crate::report::type_aware_meta_status(meta),
-                format_type_aware_summary(meta)
-            )
-        );
-    }
 }
 
 fn print_type_aware_warnings(result: &CheckResult, quiet: bool) {

@@ -103,6 +103,7 @@ impl<'a> SeveritySource<'a> {
         let mut rules = config.resolve_rules_for_path(path);
         if self.promote_warns {
             promote_warns_to_errors(&mut rules);
+            config.apply_semantic_refinable_cap(&mut rules);
         }
         rule(&rules)
     }
@@ -381,12 +382,28 @@ pub fn findings_without_severity(mut results: AnalysisResults) -> usize {
 /// Raise every `warn` gate severity to `error`, for `--fail-on-issues`.
 ///
 /// Counted warnings become errors in every CI format. Advisory component
-/// health signals retain their saved severity.
-pub fn promote_effective_warns(results: &mut AnalysisResults) {
+/// health signals retain their saved severity. When a missing type-aware
+/// sidecar capped the refinable rules of `config`, a finding of these kinds
+/// stays `warn`: the strict rules of [`crate::error_severity::strict_rules`]
+/// decide which findings are raised.
+pub fn promote_effective_warns(results: &mut AnalysisResults, config: &ResolvedConfig) {
+    let strict = config
+        .semantic_refinable_capped
+        .then(|| crate::error_severity::strict_rules(config));
+    let capped = strict
+        .as_ref()
+        .map(|rules| SeveritySource::new(rules, Some(config), true));
     for_each_gated_finding(results, &mut |finding| {
-        if finding.effective_severity() == Some(EffectiveSeverity::Warn) {
-            finding.set_effective_severity(Some(EffectiveSeverity::Error));
+        if finding.effective_severity() != Some(EffectiveSeverity::Warn) {
+            return;
         }
+        if capped
+            .as_ref()
+            .is_some_and(|source| finding.rule_severity(source) != Severity::Error)
+        {
+            return;
+        }
+        finding.set_effective_severity(Some(EffectiveSeverity::Error));
     });
 }
 
@@ -1040,7 +1057,7 @@ mod tests {
         results.unused_exports.push(export("src/legacy/old.ts"));
         apply_effective_severities(&mut results, &legacy_warn_config());
 
-        promote_effective_warns(&mut results);
+        promote_effective_warns(&mut results, &legacy_warn_config());
 
         assert!(
             results

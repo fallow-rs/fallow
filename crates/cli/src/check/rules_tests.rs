@@ -1,6 +1,6 @@
 use super::*;
 use fallow_config::{RulesConfig, Severity};
-use fallow_engine::error_severity::has_error_severity_issues;
+use fallow_engine::error_severity::{has_error_severity_issues, promote_warns_to_errors};
 
 type RuleFieldSetter = fn(&mut RulesConfig);
 type ResultFieldCheck = fn(&AnalysisResults) -> bool;

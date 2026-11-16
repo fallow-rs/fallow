@@ -382,9 +382,7 @@ fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOption
             &mut analysis.results,
             &projects,
             &entry_points,
-            config.rules.unused_exports != fallow_config::Severity::Off
-                || config.rules.unused_types != fallow_config::Severity::Off
-                || config.rules.unused_class_members != fallow_config::Severity::Off,
+            fallow_config::any_symbol_use_rule_active(&config.rules),
             config.rules.private_type_leaks != fallow_config::Severity::Off,
             false,
         ) {
@@ -394,8 +392,11 @@ fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOption
                     eprintln!("Type-aware analysis failed: {error}");
                     return exit_invalid_input();
                 }
-                let message =
-                    crate::type_aware_degrade::degraded_message(&config.root, &error.to_string());
+                let message = crate::type_aware_degrade::degraded_message(
+                    &config.root,
+                    &error.to_string(),
+                    false,
+                );
                 eprintln!("Warning: {message}");
                 Some(crate::type_aware_degrade::degraded_meta(
                     message,

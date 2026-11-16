@@ -322,6 +322,11 @@ pub struct ResolvedConfig {
     pub markup_extensions: Vec<String>,
     /// Per-file severity overrides with globs pre-compiled, in config order.
     pub overrides: Vec<ResolvedOverride>,
+    /// The run lowered the rules of [`super::SEMANTIC_REFINABLE_KINDS`] to
+    /// `warn` because the type-aware pass was requested and no sidecar was
+    /// found. The cap then also wins over the `--fail-on-issues` promotion
+    /// of these rules. Set only by [`Self::cap_semantic_refinable_rules`].
+    pub semantic_refinable_capped: bool,
     /// Authored Git baseline refs keyed by workspace root; validated against
     /// discovered packages when an analysis requests package-scoped changes.
     pub workspace_changed_since: BTreeMap<String, String>,
@@ -1031,11 +1036,7 @@ impl FallowConfig {
         let detection_config_digest = fallow_types::identity::fnv1a64_parts(&[
             "config",
             &config_json,
-            &canonical_json_string(&{
-                let mut sorted: Vec<&ExternalPluginDef> = plugins.external_plugins.iter().collect();
-                sorted.sort_by(|a, b| a.name.cmp(&b.name));
-                sorted
-            }),
+            &canonical_json_string(&sorted_by_name(&plugins.external_plugins)),
             &canonical_json_string(&plugins.rule_packs),
         ]);
 
@@ -1098,6 +1099,7 @@ impl FallowConfig {
             dynamically_loaded: self.dynamically_loaded,
             markup_extensions: super::resolve_markup_extensions(&self.markup_extensions),
             overrides: path_policy.overrides,
+            semantic_refinable_capped: false,
             workspace_changed_since,
             workspace_patterns,
             regression: self.regression,
@@ -1120,7 +1122,36 @@ impl FallowConfig {
     }
 }
 
+/// The external plugins in name order, for a digest that does not depend on
+/// the discovery order.
+fn sorted_by_name(plugins: &[ExternalPluginDef]) -> Vec<&ExternalPluginDef> {
+    let mut sorted: Vec<&ExternalPluginDef> = plugins.iter().collect();
+    sorted.sort_by(|a, b| a.name.cmp(&b.name));
+    sorted
+}
+
 impl ResolvedConfig {
+    /// Lower every `error` rule of [`super::SEMANTIC_REFINABLE_KINDS`] to
+    /// `warn`, in the base rules and in each override, for a run whose
+    /// type-aware pass found no sidecar. See
+    /// [`Self::semantic_refinable_capped`].
+    pub fn cap_semantic_refinable_rules(&mut self) {
+        self.rules.cap_semantic_refinable_at_warn();
+        for entry in &mut self.overrides {
+            entry.rules.cap_semantic_refinable_at_warn();
+        }
+        self.semantic_refinable_capped = true;
+    }
+
+    /// Lower the refinable rules of `rules` to `warn` again when the cap of
+    /// [`Self::cap_semantic_refinable_rules`] is on. Call it after a
+    /// `--fail-on-issues` promotion of `rules`, so the cap wins.
+    pub fn apply_semantic_refinable_cap(&self, rules: &mut super::RulesConfig) {
+        if self.semantic_refinable_capped {
+            rules.cap_semantic_refinable_at_warn();
+        }
+    }
+
     /// Turn `includeEntryExports` on in every workspace for this run, the
     /// way the `--include-entry-exports` flag does. It wins over a
     /// `workspaces.settings` value of `false`.

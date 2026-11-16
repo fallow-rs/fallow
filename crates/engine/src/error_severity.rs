@@ -51,6 +51,19 @@ pub fn count_error_severity_issues(
     count_findings_with_severity(results, &source, Severity::Error)
 }
 
+/// The rules of `config` for a strict (`--fail-on-issues`) run.
+///
+/// Every `warn` rule is `error`, except a rule that a missing type-aware
+/// sidecar capped at `warn` (see
+/// [`ResolvedConfig::cap_semantic_refinable_rules`]).
+#[must_use]
+pub fn strict_rules(config: &ResolvedConfig) -> RulesConfig {
+    let mut rules = config.rules.clone();
+    promote_warns_to_errors(&mut rules);
+    config.apply_semantic_refinable_cap(&mut rules);
+    rules
+}
+
 /// Promote all `Warn` severities to `Error` for a single run.
 pub fn promote_warns_to_errors(rules: &mut RulesConfig) {
     for rule in [

@@ -1,0 +1,6 @@
+{
+  "name": "type-aware-missing-sidecar-fixture",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts"
+}
