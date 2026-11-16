@@ -825,7 +825,7 @@ pub struct PerAnalysisProductionConfig {
     /// When `production` is a per-analysis object, enables production mode for duplication analysis only (boolean, default false), so clone detection runs on shipped code only (test/spec/story/dev files excluded) while dead-code and health stay on the full tree. Set it to scope production analysis to dupes independently.
     pub dupes: bool,
     /// When `production` is a per-analysis object, an array of project-root-relative glob patterns for paths that discovery drops in production mode only, in addition to the built-in test/spec/story/dev patterns (default empty). The default run keeps these paths. The globs apply to each analysis that runs in production mode, also when the `--production` flag or a `FALLOW_PRODUCTION*` env var selects the mode. Set it for tooling, CI scripts, seeds and test harnesses that never ship (e.g. `["scripts/**"]`). A single `*` stays within one path segment; use `**` to match across directories.
-    #[serde(skip_serializing_if = "Vec::is_empty")]
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub ignore: Vec<String>,
 }
 
