@@ -12,6 +12,7 @@ import * as vscode from "vscode";
 import { getExecutableExtension } from "./binary-utils.js";
 import { getAutoDownload } from "./config.js";
 import { hostLinuxLibc, type LinuxLibc } from "./libc.js";
+import { openSettingsSearch } from "./openSettings.js";
 
 const GITHUB_REPO = "fallow-rs/fallow";
 const LSP_BINARY_NAME = "fallow-lsp";
@@ -905,7 +906,7 @@ const promptAfterDownloadFailure = async (message: string): Promise<boolean> => 
   );
 
   if (choice === "Open Settings") {
-    void vscode.commands.executeCommand("workbench.action.openSettings", "fallow");
+    void openSettingsSearch("fallow");
   }
 
   if (choice === "Show Output") {

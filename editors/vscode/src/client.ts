@@ -50,6 +50,7 @@ import {
   setDiagnosticCategories,
 } from "./diagnosticFilter.js";
 import { downloadBinary, getBinaryVersion, getInstalledBinaryPath } from "./download.js";
+import { openSettingsSearch } from "./openSettings.js";
 import { TYPE_AWARE_MIN_CLI_VERSION } from "./type-aware-utils.js";
 import { fallowChildEnvironment } from "./typeAwareCompanion.js";
 import { getWorkspaceRoot } from "./workspaceRoot.js";
@@ -189,7 +190,7 @@ const resolveBinaryPath = async (
   }
 
   if (choice === "Set Path") {
-    void vscode.commands.executeCommand("workbench.action.openSettings", "fallow.lspPath");
+    void openSettingsSearch("fallow.lspPath");
   }
 
   return null;
