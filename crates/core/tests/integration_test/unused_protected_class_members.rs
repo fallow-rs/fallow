@@ -74,3 +74,19 @@ fn production_mode_reports_protected_members_that_only_tests_read() {
         "{protected:?}"
     );
 }
+
+/// `Renderer.draw` in one file calls `this.paint()`, and `FancyRenderer` in
+/// another file overrides `paint`. The base-class call credits the override,
+/// so neither `paint` is unused.
+#[test]
+fn override_in_another_file_is_used_when_the_base_class_calls_it() {
+    let (protected, _) = unused_members("unused-protected-class-members", true, false);
+    assert!(
+        !protected.contains(&"src/fancy-renderer.ts:FancyRenderer.paint".to_string()),
+        "{protected:?}"
+    );
+    assert!(
+        !protected.contains(&"src/renderer.ts:Renderer.paint".to_string()),
+        "{protected:?}"
+    );
+}

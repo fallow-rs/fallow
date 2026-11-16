@@ -147,7 +147,7 @@ pub const CHECK_RULES: &[RuleDef] = &[
         category: "Dead code",
         name: "Unused Protected Class Members",
         short: "Protected class member is never referenced",
-        full: "Class methods and properties with the `protected` modifier that neither the class nor a subclass reads. A read through `this` or `super` in the class or in a subclass counts as a use. A subclass override counts as used when the base class calls the member. Classes of the public API of a package are not checked, because a consumer can subclass them. Production mode ignores reads in test files. Defaults to off.",
+        full: "Class methods and properties with the `protected` modifier that neither the class nor a subclass reads. A read through `this` or `super` in the class or in a subclass counts as a use. A subclass override counts as used when the base class calls the member. Classes of the public API of a package are not checked, because a consumer can subclass them. Production mode ignores reads in test files. Defaults to off. Known limits: a read through a string key (`this[\"member\"]()`) gives no credit, and a constructor parameter property (`constructor(protected readonly x: X)`) is not checked.",
         docs_path: "explanations/dead-code#unused-protected-class-members",
     },
     RuleDef {

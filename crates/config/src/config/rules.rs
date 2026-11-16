@@ -132,7 +132,10 @@ pub struct RulesConfig {
     /// A `protected` class member that neither its class nor a subclass
     /// reads through `this` or `super`. Classes of the public API of a
     /// package are not checked, because a consumer can subclass them.
-    /// Defaults to `off`, so the default output does not change.
+    /// Defaults to `off`, so the default output does not change. Known
+    /// limits: a read through a string key (`this["member"]()`) gives no
+    /// credit, and a constructor parameter property
+    /// (`constructor(protected readonly x: X)`) is not checked.
     #[serde(
         default = "Severity::default_off",
         alias = "unused-protected-class-member"

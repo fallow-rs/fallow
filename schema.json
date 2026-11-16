@@ -1794,7 +1794,7 @@
           "default": "warn"
         },
         "unused-protected-class-members": {
-          "description": "A `protected` class member that neither its class nor a subclass\nreads through `this` or `super`. Classes of the public API of a\npackage are not checked, because a consumer can subclass them.\nDefaults to `off`, so the default output does not change.",
+          "description": "A `protected` class member that neither its class nor a subclass\nreads through `this` or `super`. Classes of the public API of a\npackage are not checked, because a consumer can subclass them.\nDefaults to `off`, so the default output does not change. Known\nlimits: a read through a string key (`this[\"member\"]()`) gives no\ncredit, and a constructor parameter property\n(`constructor(protected readonly x: X)`) is not checked.",
           "$ref": "#/$defs/Severity",
           "default": "off"
         },
