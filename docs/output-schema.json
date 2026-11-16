@@ -13515,7 +13515,7 @@
           "required": [
             "kind"
           ],
-          "description": "`client-server-leak` is not `off`, but no analyzed file has a\ntop-level `\"use client\"` directive. The detector starts only from those\nfiles, so it had no starting point and its zero count measures\nnothing. React Router Framework Mode and a plain Vite SPA are typical\nprojects of this shape: their client code carries no directive.\n\nLike [`Self::BoundariesNotConfigured`], an analyze pass with the rule\n`off` does not report it. `fallow security` raises a top-level `off`\nto `warn` before the pass, so that command always reports it."
+          "description": "`client-server-leak` is not `off`, but no analyzed file has a\ntop-level `\"use client\"` directive and no framework plugin supplies a\nclient root. The detector starts only from those files, so it had no\nstarting point and its zero count measures nothing. A plain Vite SPA\nis a typical project of this shape. The React Router plugin supplies\nits route modules and `.client` modules as client roots.\n\nLike [`Self::BoundariesNotConfigured`], an analyze pass with the rule\n`off` does not report it. `fallow security` raises a top-level `off`\nto `warn` before the pass, so that command always reports it."
         },
         {
           "type": "object",

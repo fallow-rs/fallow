@@ -17,7 +17,7 @@
 //! reference; the body never enters the client bundle), so only
 //! [`is_server_only_module`] (used by the barrel detector) includes it.
 
-use fallow_types::extract::{ImportedName, ModuleInfo};
+use fallow_types::extract::{ImportInfo, ImportedName, ModuleInfo};
 
 /// The React Server Components / Server Actions directive marking a module as
 /// server-only.
@@ -81,18 +81,22 @@ pub fn is_server_only_module(module: &ModuleInfo) -> bool {
 /// `"use server"` module that has a non-action value export.
 #[must_use]
 pub fn imports_server_only_code(module: &ModuleInfo) -> bool {
-    module.imports.iter().any(|import| {
-        // An import of the `server-only` poison package, a Node server
-        // runtime module, or `next/server`. The specifier is matched directly
-        // so both the `node:` and bare forms count.
-        if SERVER_ONLY_PACKAGES.contains(&import.source.as_str()) {
-            return true;
-        }
-        // A server-only named API from `next/headers` (cookies / headers /
-        // draftMode), in named (`import { cookies }`) or namespace
-        // (`import * as h`) form. A bare side-effect import does not match.
-        import.source == NEXT_HEADERS_SOURCE && is_next_headers_server_import(&import.imported_name)
-    })
+    module.imports.iter().any(is_server_only_import)
+}
+
+/// Whether one import loads server-only code: the `server-only` poison
+/// package, a Node server runtime module, `next/server`, or a named
+/// server-only API from `next/headers`.
+#[must_use]
+pub fn is_server_only_import(import: &ImportInfo) -> bool {
+    // The specifier is matched directly, so both the `node:` and the bare
+    // forms count.
+    if SERVER_ONLY_PACKAGES.contains(&import.source.as_str()) {
+        return true;
+    }
+    // A named (`import { cookies }`) or namespace (`import * as h`) import of
+    // `next/headers`. A bare side-effect import does not match.
+    import.source == NEXT_HEADERS_SOURCE && is_next_headers_server_import(&import.imported_name)
 }
 
 /// Whether an import binding from `next/headers` names a server-only API. A

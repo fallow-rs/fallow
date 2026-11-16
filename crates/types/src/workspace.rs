@@ -333,10 +333,11 @@ pub enum WorkspaceDiagnosticKind {
     /// [`Self::BoundariesNotConfigured`].
     RulePacksNotConfigured,
     /// `client-server-leak` is not `off`, but no analyzed file has a
-    /// top-level `"use client"` directive. The detector starts only from those
-    /// files, so it had no starting point and its zero count measures
-    /// nothing. React Router Framework Mode and a plain Vite SPA are typical
-    /// projects of this shape: their client code carries no directive.
+    /// top-level `"use client"` directive and no framework plugin supplies a
+    /// client root. The detector starts only from those files, so it had no
+    /// starting point and its zero count measures nothing. A plain Vite SPA
+    /// is a typical project of this shape. The React Router plugin supplies
+    /// its route modules and `.client` modules as client roots.
     ///
     /// Like [`Self::BoundariesNotConfigured`], an analyze pass with the rule
     /// `off` does not report it. `fallow security` raises a top-level `off`
@@ -1746,10 +1747,10 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
                 .to_string()
         }
         WorkspaceDiagnosticKind::ClientServerLeakNoClientRoots => {
-            "No file has a top-level \"use client\" directive, so the client-server-leak \
-             detector had no starting point and its zero count measures nothing. The rule does \
-             not apply to projects whose client code has no \"use client\" directive, such as \
-             React Router Framework Mode or a Vite SPA."
+            "No file has a top-level \"use client\" directive and no framework plugin supplies \
+             a client root, so the client-server-leak detector had no starting point and its zero \
+             count measures nothing. The rule does not apply to projects whose client code has \
+             neither, such as a Vite SPA."
                 .to_string()
         }
         WorkspaceDiagnosticKind::ProductionExcludedFileImported {

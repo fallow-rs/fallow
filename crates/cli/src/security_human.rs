@@ -99,8 +99,9 @@ pub(super) fn render_human_summary(output: &SecurityOutput) -> String {
 
 /// The human line for `client-server-leak-no-client-roots`, shared by the
 /// full and the summary renderer.
-const NO_CLIENT_ROOTS_LINE: &str = "no file has a top-level \"use client\" directive, so the \
-     client-server-leak rule had no starting point. Its zero count does not mean that no secret \
+const NO_CLIENT_ROOTS_LINE: &str = "no file has a top-level \"use client\" directive and no \
+     framework plugin supplies a client root, so the client-server-leak rule had no starting \
+     point. Its zero count does not mean that no secret \
      reaches client code.";
 
 /// Whether the run recorded that `client-server-leak` had no `"use client"`

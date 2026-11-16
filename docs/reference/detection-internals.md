@@ -410,6 +410,17 @@ error by suppressing a downstream detector.
   version to move with the changed semantics.
 - Security findings are verification candidates until an agent or human
   confirms the evidence.
+- The `client-server-leak` cone starts from `"use client"` files and from the
+  client roots of the React Router plugin (`security/framework_roots.rs`).
+  At each route module, the root included, the cone skips the imports and
+  the re-exports that only its `loader`, `action`, `middleware` and
+  `headers` exports use. React Router removes these exports from the route
+  file wherever it is imported, and then runs dead-code elimination.
+  Extraction does not keep statement-level references, so
+  `security/route_module_split.rs` parses the route modules again, and only
+  those. Test files under the route directory are not roots. An env read in
+  a route module has no position, so a route module root never gives the
+  direct secret finding.
 - The load kind of an edge (`ImportLoadKind`) is the one model for when and
   whether the edge runs its target. `PathReference` (`require.resolve`) and
   `AssetReference` (a webpack asset loader request) keep the target in use,

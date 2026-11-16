@@ -1,0 +1,4 @@
+### Added
+
+- **`client-server-leak` now checks React Router Framework Mode apps.** React Router code has no `"use client"` directive, so the rule had no starting point in such an app. When the React Router plugin is active, route modules (`root.tsx` included) are client roots. The cone starts only from the code that React Router keeps in the client build, so an import or a re-export that only `loader`, `action`, `middleware` or `headers` use is not followed. This also applies to a route module that another module imports. Files named `*.client.*` or under a `.client/` directory are client roots too. Files named `*.server.*` or under a `.server/` directory are `server-only-import` sinks. Such an app no longer gets the `client-server-leak-no-client-roots` diagnostic.
+  (Closes [#4582](https://github.com/fallow-rs/fallow/issues/4582))
