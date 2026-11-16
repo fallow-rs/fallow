@@ -1,0 +1,11 @@
+{
+  "name": "playwright-reporter-global-setup",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "e2e": "playwright test --config playwright.e2e.config.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0"
+  }
+}
