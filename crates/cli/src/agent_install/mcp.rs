@@ -2,9 +2,9 @@
 //!
 //! The launcher is resolved before anything is written: the project's own
 //! `node_modules/.bin/fallow-mcp`, then `fallow-mcp` on `PATH`, then the
-//! running binary when it answers `mcp-server --version` (the npm multicall
-//! build). Only the last one is executed as a probe; the first two are
-//! resolved on disk. A launcher that would only work on this machine is never
+//! running binary when `mcp-server --version` prints the MCP server version
+//! (the npm multicall build). Only the last one is executed as a probe; the
+//! first two are resolved on disk. A launcher that would only work on this machine is never
 //! written into a file the team commits.
 //!
 //! JSON cannot carry a marker comment, so ownership of the `fallow` entry is
@@ -12,6 +12,7 @@
 //! launchers fallow writes, with no extra keys, is fallow-managed. Anything
 //! else is foreign and is neither replaced nor removed without `--force`.
 
+use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::time::{Duration, Instant};
@@ -28,6 +29,11 @@ const CURSOR_FILE: &str = ".cursor/mcp.json";
 const CODEX_FILE: &str = ".codex/config.toml";
 const BACKUP_SUFFIX: &str = ".fallow-bak";
 const SELF_PROBE_TIMEOUT: Duration = Duration::from_secs(5);
+/// The first word of the `--version` line of the MCP server entry.
+const MCP_VERSION_PREFIX: &str = "fallow-mcp ";
+/// The version line is short; the probe reads no more than this many bytes.
+const PROBE_OUTPUT_LIMIT: u64 = 4096;
+const NO_LAUNCHER_DETAIL: &str = "no fallow-mcp launcher found. Install fallow through npm (npm i -D fallow), or put fallow-mcp on PATH. cargo install fallow-mcp and the GitHub release archive both supply fallow-mcp";
 
 /// How the MCP server should be started.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
@@ -44,7 +50,7 @@ pub enum McpSource {
     NodeModules,
     /// A `fallow-mcp` executable found on `PATH`.
     Path,
-    /// The running binary answers `mcp-server --version` (npm multicall build).
+    /// The running binary serves `mcp-server` (npm multicall build).
     SelfBinary,
     /// Read back from a config file; provenance unknown.
     Registered,
@@ -150,31 +156,61 @@ pub(super) fn find_on_path(name: &str) -> Option<PathBuf> {
     })
 }
 
-/// Probe the running binary for the multicall `mcp-server` entry. Bounded by
-/// [`SELF_PROBE_TIMEOUT`] so a misbehaving build cannot hang the install;
-/// `crates/multicall/tests/integration/server_dispatch.rs` pins that
-/// `--version` returns before the stdio handshake.
 fn self_supports_mcp_server() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let exe = dunce::canonicalize(&exe).unwrap_or(exe);
-    let mut child = Command::new(&exe)
+    serves_mcp(&exe).then_some(exe)
+}
+
+/// True when `exe mcp-server --version` reaches the MCP server entry of the
+/// multicall build. That entry prints [`MCP_VERSION_PREFIX`]. The plain CLI
+/// build has no `mcp-server` subcommand, but clap still answers `--version`
+/// with `fallow <version>` and exit code 0, so the exit code alone proves
+/// nothing. Bounded by [`SELF_PROBE_TIMEOUT`] so a misbehaving build cannot
+/// hang the install; `crates/multicall/tests/integration/server_dispatch.rs`
+/// pins that `--version` returns before the stdio handshake.
+fn serves_mcp(exe: &Path) -> bool {
+    let Ok(mut child) = Command::new(exe)
         .args(["mcp-server", "--version"])
         .stdin(Stdio::null())
-        .stdout(Stdio::null())
+        .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
-        .ok()?;
+    else {
+        return false;
+    };
+    let Some(stdout) = child.stdout.take() else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return false;
+    };
+    // A reader thread drains stdout, so a child that writes much output
+    // cannot block on a full pipe while this thread polls for its exit.
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut text = String::new();
+        let _ = stdout.take(PROBE_OUTPUT_LIMIT).read_to_string(&mut text);
+        let _ = tx.send(text);
+    });
     let started = Instant::now();
     loop {
         match child.try_wait() {
-            Ok(Some(status)) => return status.success().then_some(exe),
+            Ok(Some(status)) => {
+                if !status.success() {
+                    return false;
+                }
+                let remaining = SELF_PROBE_TIMEOUT.saturating_sub(started.elapsed());
+                return rx
+                    .recv_timeout(remaining)
+                    .is_ok_and(|text| text.starts_with(MCP_VERSION_PREFIX));
+            }
             Ok(None) if started.elapsed() < SELF_PROBE_TIMEOUT => {
                 std::thread::sleep(Duration::from_millis(20));
             }
             Ok(None) | Err(_) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return None;
+                return false;
             }
         }
     }
@@ -256,9 +292,7 @@ fn install_for(ctx: &Ctx, harness: Harness, command: Option<&McpCommand>) -> Vec
             StepReport::new(Some(harness), Step::Mcp, StepStatus::Skipped, ctx.scope())
                 .path(ctx, &path)
                 .reason(Reason::McpEntryUnavailable)
-                .detail(
-                    "no fallow-mcp launcher found: install fallow through npm or put fallow-mcp on PATH",
-                ),
+                .detail(NO_LAUNCHER_DETAIL),
         ];
     };
     if harness == Harness::Claude && ctx.user {
@@ -1028,6 +1062,62 @@ pub const fn cursor_file() -> &'static str {
 
 pub const fn codex_file() -> &'static str {
     CODEX_FILE
+}
+
+#[cfg(all(test, unix))]
+mod serves_mcp_tests {
+    use std::os::unix::fs::PermissionsExt;
+    use std::path::PathBuf;
+
+    use super::serves_mcp;
+
+    fn script(dir: &tempfile::TempDir, body: &str) -> PathBuf {
+        let path = dir.path().join("fallow");
+        std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).expect("write script");
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755))
+            .expect("make script executable");
+        path
+    }
+
+    #[test]
+    fn the_mcp_server_version_line_proves_the_entry() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let exe = script(&dir, "echo 'fallow-mcp 3.43.0'");
+        // On Linux, a fork in a parallel test can hold the new script open for
+        // write, and the spawn then fails with "Text file busy".
+        assert!((0..5).any(|_| serves_mcp(&exe)));
+    }
+
+    #[test]
+    fn a_probe_that_does_not_exit_is_not_the_mcp_server() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        let started = std::time::Instant::now();
+        assert!(!serves_mcp(&script(&dir, "exec sleep 30")));
+        assert!(started.elapsed() < std::time::Duration::from_secs(20));
+    }
+
+    /// clap of the plain CLI answers `mcp-server --version` with its own
+    /// version line and exit code 0.
+    #[test]
+    fn the_cli_version_line_is_not_the_mcp_server() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        assert!(!serves_mcp(&script(&dir, "echo 'fallow 3.43.0'")));
+    }
+
+    #[test]
+    fn a_failed_probe_is_not_the_mcp_server() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        assert!(!serves_mcp(&script(
+            &dir,
+            "echo 'fallow-mcp 3.43.0'; exit 1"
+        )));
+    }
+
+    #[test]
+    fn a_missing_binary_is_not_the_mcp_server() {
+        let dir = tempfile::tempdir().expect("temporary directory");
+        assert!(!serves_mcp(&dir.path().join("missing")));
+    }
 }
 
 #[cfg(test)]
