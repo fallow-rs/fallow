@@ -1,14 +1,10 @@
 import { describe, expect, it } from "vitest";
 import {
-  escapeMarkdown,
   hasLicenseMaterial,
-  licensePlaceholderParts,
-  licenseStatusBarParts,
   parseLicenseJson,
   validateEmail,
   validateJwtShape,
 } from "../src/license-utils.js";
-import { escapeMarkdownMultiline } from "../src/markdown-utils.js";
 import type { LicenseStatusJson } from "../src/license-types.js";
 
 const status = (overrides: Partial<LicenseStatusJson> = {}): LicenseStatusJson => ({
@@ -115,63 +111,6 @@ describe("parseLicenseJson", () => {
 
   it("rejects empty output", () => {
     expect(parseLicenseJson("   ").ok).toBe(false);
-  });
-});
-
-describe("licenseStatusBarParts", () => {
-  it("renders valid with a verified icon and neutral background", () => {
-    const parts = licenseStatusBarParts(status());
-    expect(parts.text).toBe("$(verified) Fallow: team");
-    expect(parts.severity).toBeNull();
-    expect(parts.tooltipMd).toContain("Tier: team");
-    expect(parts.tooltipMd).toContain("Expires in 12 days");
-  });
-
-  it("adds a refresh-recommended line when refresh_suggested is set", () => {
-    const parts = licenseStatusBarParts(status({ refresh_suggested: true }));
-    expect(parts.tooltipMd).toContain("Refresh recommended");
-  });
-
-  it("uses a warning background for expired_warning and expired_watermark", () => {
-    for (const state of ["expired_warning", "expired_watermark"] as const) {
-      const parts = licenseStatusBarParts(
-        status({ state, days_until_expiry: null, days_since_expiry: 3 }),
-      );
-      expect(parts.text).toBe("$(warning) Fallow: expired");
-      expect(parts.severity).toBe("statusBarItem.warningBackground");
-      expect(parts.tooltipMd).toContain("Expired 3 days ago");
-    }
-  });
-
-  it("uses an error background for hard_fail", () => {
-    const parts = licenseStatusBarParts(
-      status({ state: "hard_fail", days_until_expiry: null, days_since_expiry: 45 }),
-    );
-    expect(parts.text).toBe("$(error) Fallow: expired");
-    expect(parts.severity).toBe("statusBarItem.errorBackground");
-  });
-
-  it("produces an activation call-to-action for missing", () => {
-    const parts = licenseStatusBarParts(
-      status({ state: "missing", tier: null, seats: null, features: [] }),
-    );
-    expect(parts.text).toBe("$(key) Fallow: no license");
-    expect(parts.severity).toBeNull();
-    expect(parts.tooltipMd).toContain("command:fallow.license.activate");
-  });
-});
-
-describe("licensePlaceholderParts", () => {
-  it("is neutral with the key icon", () => {
-    const parts = licensePlaceholderParts();
-    expect(parts.text).toBe("$(key) Fallow License");
-    expect(parts.severity).toBeNull();
-  });
-});
-
-describe("escapeMarkdown", () => {
-  it("is referentially identical to escapeMarkdownMultiline (delegation pin)", () => {
-    expect(escapeMarkdown).toBe(escapeMarkdownMultiline);
   });
 });
 

@@ -102,12 +102,11 @@ export const partitionWorkspaces = (
 };
 
 /**
- * Whether the workspace picker status-bar item is worth showing for a given
- * resolved workspaces list. A single-package repo (or one with no listable
- * workspaces) can never use scoping, so the picker is hidden there to avoid a
- * dead status-bar control. `null` (the list was never probed / unavailable)
- * keeps the item shown, so the picker stays reachable on an older CLI that
- * cannot list workspaces. Pure so the rule is unit-tested without a status bar.
+ * Whether the status bar item offers the workspace picker for a given resolved
+ * workspaces list. A single-package repo (or one with no listable workspaces)
+ * can never use scoping, so the item omits the workspace entry there. `null`
+ * (the list was never probed / unavailable) keeps the entry, so the picker
+ * stays reachable on an older CLI that cannot list workspaces. Pure so the rule is unit-tested without a status bar.
  */
 export const shouldShowWorkspacePicker = (output: WorkspacesOutput | null): boolean => {
   if (output === null) {
@@ -181,15 +180,7 @@ export const buildWorkspaceQuickPickItems = (
 };
 
 /**
- * The status-bar label for the picker item. Unscoped reads
- * `$(layers) Fallow: All`; a scoped selection reads `$(layers) <pkg>`.
- * Pure so it can be unit-tested without a status-bar mock.
- */
-export const renderWorkspaceStatusBarText = (active: string): string =>
-  active === CLEAR_WORKSPACE_SCOPE ? "$(layers) Fallow: All" : `$(layers) ${active}`;
-
-/**
- * Disclosure appended to the picker tooltip and select/clear toasts. The scope
+ * Disclosure appended to the select/clear toasts. The scope
  * drives the CLI-backed views (Unused Code, Duplicates, Health, Security); the
  * LSP is not yet workspace-scoped, so editor gutter diagnostics stay
  * project-wide. Stated plainly so a scoped developer is not surprised by
@@ -197,12 +188,6 @@ export const renderWorkspaceStatusBarText = (active: string): string =>
  */
 export const WORKSPACE_SCOPE_DISCLOSURE =
   "Scopes the Unused Code, Duplicates, Health, and Security views; editor diagnostics remain project-wide for now.";
-
-/** Tooltip for the picker status-bar item. Neutral copy: it scopes, not judges. */
-export const renderWorkspaceStatusBarTooltip = (active: string): string =>
-  active === CLEAR_WORKSPACE_SCOPE
-    ? `Fallow: analyzing the whole project. Click to scope to a single workspace. ${WORKSPACE_SCOPE_DISCLOSURE}`
-    : `Fallow: scoped to ${active}. Click to change or clear the scope. ${WORKSPACE_SCOPE_DISCLOSURE}`;
 
 /**
  * Resolve the effective workspace scope. A per-folder `workspaceState`

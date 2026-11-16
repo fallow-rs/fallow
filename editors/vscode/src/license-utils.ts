@@ -1,21 +1,12 @@
 /**
- * Pure helpers for the license UI: parsing the CLI JSON, mapping a license
- * state to status-bar presentation, and validating activation input. No
+ * Pure helpers for the license UI: parsing the CLI JSON, checking for license
+ * material, and validating activation input. `statusBar-model.ts` maps a
+ * license state to the status bar presentation. No
  * `vscode` import so vitest runs these headless (same split as
  * `statusBar-utils.ts` vs `statusBar.ts`).
  */
 
-import { escapeMarkdownMultiline } from "./markdown-utils.js";
 import type { LicenseParseResult, LicenseState, LicenseStatusJson } from "./license-types.js";
-
-/**
- * Theme color key the status-bar item uses for each severity. `null` =
- * neutral (no background). Mirrors `statusBar-utils.ts`'s `SeverityKey`.
- */
-export type LicenseSeverityKey =
-  | "statusBarItem.errorBackground"
-  | "statusBarItem.warningBackground"
-  | null;
 
 const KNOWN_STATES: ReadonlySet<string> = new Set<LicenseState>([
   "valid",
@@ -70,23 +61,6 @@ export const parseLicenseJson = (stdout: string): LicenseParseResult => {
   return { ok: true, data: record as unknown as LicenseStatusJson };
 };
 
-/** Presentation parts for the license status-bar item. */
-export interface LicenseStatusBarParts {
-  /** Status-bar text, including a leading codicon. */
-  readonly text: string;
-  /** Trusted-markdown tooltip body. */
-  readonly tooltipMd: string;
-  /** Theme color key for the background, or `null` for neutral. */
-  readonly severity: LicenseSeverityKey;
-}
-
-/**
- * Escape text destined for a trusted `MarkdownString`. Alias of
- * `escapeMarkdownMultiline` kept for call-site readability; delegates to the
- * canonical implementation in `markdown-utils.ts`.
- */
-export const escapeMarkdown = escapeMarkdownMultiline;
-
 /**
  * Whether any license material is present, mirroring the source precedence in
  * `fallow_license::load_raw_jwt` (`crates/license/src/lib.rs`): an inline
@@ -94,9 +68,9 @@ export const escapeMarkdown = escapeMarkdownMultiline;
  * `~/.fallow/license.jwt`. Pure: the caller supplies the env values, the
  * resolved default path, and a file-exists predicate, so this stays
  * unit-testable without touching the real filesystem or process env. Keep the
- * precedence in sync with the Rust loader. Used to keep the license indicator
- * off the status bar entirely for users who never had a license (the indicator
- * advertises nothing to free users).
+ * precedence in sync with the Rust loader. Used to keep license state out of
+ * the status bar item for users who never had a license (the item advertises
+ * nothing to free users).
  */
 export const hasLicenseMaterial = (
   inlineEnv: string | undefined,
@@ -114,101 +88,6 @@ export const hasLicenseMaterial = (
     return fileExists(explicitPath);
   }
   return fileExists(defaultPath);
-};
-
-const PLACEHOLDER_TEXT = "$(key) Fallow License";
-
-/** Status-bar parts before any probe has run (or when probing is disabled). */
-export const licensePlaceholderParts = (): LicenseStatusBarParts => ({
-  text: PLACEHOLDER_TEXT,
-  tooltipMd: "Fallow license status not checked yet.\n\nRun **Fallow: Show License Status**.",
-  severity: null,
-});
-
-const expiryTooltipLine = (status: LicenseStatusJson): string => {
-  if (status.days_until_expiry !== null) {
-    const d = status.days_until_expiry;
-    return `Expires in ${d} day${d === 1 ? "" : "s"}.`;
-  }
-  if (status.days_since_expiry !== null) {
-    const d = status.days_since_expiry;
-    return `Expired ${d} day${d === 1 ? "" : "s"} ago.`;
-  }
-  return "";
-};
-
-const claimsTooltipLines = (status: LicenseStatusJson): string[] => {
-  const lines: string[] = [];
-  if (status.tier !== null) {
-    lines.push(`Tier: ${escapeMarkdown(status.tier)}`);
-  }
-  if (status.seats !== null) {
-    lines.push(`Seats: ${status.seats}`);
-  }
-  if (status.features.length > 0) {
-    lines.push(`Features: ${status.features.map(escapeMarkdown).join(", ")}`);
-  }
-  const expiry = expiryTooltipLine(status);
-  if (expiry.length > 0) {
-    lines.push(expiry);
-  }
-  return lines;
-};
-
-/**
- * Map a parsed license status to status-bar presentation. Tooltip states facts
- * only and never implies the license verifies findings (#903 adjacency): the
- * license is a cryptographic fact, distinct from heuristic security
- * candidates.
- */
-export const licenseStatusBarParts = (status: LicenseStatusJson): LicenseStatusBarParts => {
-  switch (status.state) {
-    case "valid": {
-      const tierLabel = status.tier !== null ? `: ${escapeMarkdown(status.tier)}` : "";
-      const lines = claimsTooltipLines(status);
-      if (status.refresh_suggested) {
-        lines.push("Refresh recommended to stay ahead of expiry.");
-      }
-      return {
-        text: `$(verified) Fallow${tierLabel}`,
-        tooltipMd: ["**Fallow license active**", ...lines].join("\n\n"),
-        severity: null,
-      };
-    }
-    case "expired_warning":
-    case "expired_watermark": {
-      const lines = claimsTooltipLines(status);
-      lines.push("Run **Fallow: Refresh License** to renew.");
-      return {
-        text: "$(warning) Fallow: expired",
-        tooltipMd: ["**Fallow license expired**", ...lines].join("\n\n"),
-        severity: "statusBarItem.warningBackground",
-      };
-    }
-    case "hard_fail": {
-      const lines = claimsTooltipLines(status);
-      lines.push("Paid features are blocked. Run **Fallow: Refresh License**.");
-      return {
-        text: "$(error) Fallow: expired",
-        tooltipMd: ["**Fallow license expired (past grace window)**", ...lines].join("\n\n"),
-        severity: "statusBarItem.errorBackground",
-      };
-    }
-    case "missing":
-      return {
-        text: "$(key) Fallow: no license",
-        tooltipMd: [
-          "**No Fallow license active**",
-          "Start a 30-day trial or activate a license token.",
-          "[Activate license](command:fallow.license.activate)",
-        ].join("\n\n"),
-        severity: null,
-      };
-    default: {
-      const never: never = status.state;
-      return never;
-    }
-  }
 };
 
 const JWT_SEGMENT = /^[A-Za-z0-9_-]+$/;

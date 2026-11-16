@@ -20,7 +20,6 @@ import {
   getCoveragePath,
   getAuditEnabled,
   getAuditRunOnSave,
-  getDiagnosticStatusBar,
   getDiagnosticSeverity,
   getMutedDiagnosticCategories,
   getComplexityBreakdownEnabled,
@@ -54,9 +53,8 @@ import { countSecurityFindings } from "./security-utils.js";
 import { SecurityTreeProvider } from "./securityTreeView.js";
 import {
   activateLicenseCommand,
-  createLicenseStatusBar,
   deactivateLicenseCommand,
-  disposeLicenseStatusBar,
+  initLicenseIndicator,
   licenseStatusCommand,
   refreshLicenseCommand,
   refreshLicenseStatus,
@@ -64,11 +62,6 @@ import {
 import { DiagnosticFilter } from "./diagnosticFilter.js";
 import { registerDiagnosticMuteUi } from "./diagnosticMute.js";
 import { registerFindingIdUi } from "./findingId.js";
-import {
-  createDiagnosticStatusBar,
-  disposeDiagnosticStatusBar,
-  hasDiagnosticStatusBar,
-} from "./diagnosticStatusBar.js";
 import { HealthTreeProvider, complexityTargetOf } from "./healthTreeView.js";
 import {
   createStatusBar,
@@ -77,26 +70,20 @@ import {
   updateStatusBarHealth,
   setStatusBarAnalyzing,
   setStatusBarError,
+  setStatusBarAudit,
+  setStatusBarFindings,
+  refreshStatusBar,
+  showStatusBarMenu,
   disposeStatusBar,
 } from "./statusBar.js";
+import { STATUS_MENU_COMMAND } from "./statusBar-model.js";
 import { auditScopeSummary, gatingCount } from "./audit-utils.js";
-import {
-  createAuditStatusBar,
-  disposeAuditStatusBar,
-  hasAuditStatusBar,
-  setAuditAnalyzing,
-  setAuditError,
-  setAuditIdle,
-  updateAuditStatusBar,
-} from "./auditStatusBar.js";
 import { OPEN_FILE_COMMAND, openFileCommandHandler } from "./openFileCommand.js";
 import type { AnalysisCompleteParams } from "./statusBar.js";
 import { DeadCodeTreeProvider, DuplicatesTreeProvider } from "./treeView.js";
 import {
   applyWorkspaceVisibility,
   clearWorkspaceScope,
-  createWorkspacePicker,
-  disposeWorkspacePicker,
   refreshWorkspacePicker,
   showWorkspacePicker,
 } from "./workspacePicker.js";
@@ -161,6 +148,13 @@ const SECURITY_CONFIG_KEYS = [
   "fallow.workspace",
 ] as const;
 
+/** Settings that the status bar item reads on each render. */
+const STATUS_BAR_CONFIG_KEYS = [
+  "fallow.audit.statusBar.enabled",
+  "fallow.license.showStatusBar",
+  "fallow.changedSince",
+] as const;
+
 export interface ExtensionApi {
   readonly runAnalysis: typeof runAnalysis;
   readonly runAudit: typeof runAudit;
@@ -173,47 +167,16 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   outputChannel = vscode.window.createOutputChannel("Fallow", { log: true });
   context.subscriptions.push(outputChannel);
 
+  // One status bar item carries the analysis, health, audit, license,
+  // workspace and findings-visibility state. Its click menu runs the existing
+  // commands. License and workspace probes update it later, off the activation
+  // hot path (#902).
   const statusBar = createStatusBar();
   context.subscriptions.push(statusBar);
-
-  // License indicator: a second status-bar item, created only when enabled
-  // (`fallow.license.showStatusBar`). Decoupled from the analysis path, so it
-  // adds no latency to sidebar reveal or `runAnalysis` (#902).
-  // Pushed to subscriptions for teardown and disposed directly in deactivate(),
-  // matching the main analysis status-bar pattern above (no extra
-  // `{ dispose }` wrapper, which would double-dispose the same item).
-  const licenseStatusBar = createLicenseStatusBar();
-  if (licenseStatusBar) {
-    context.subscriptions.push(licenseStatusBar);
-  }
-
-  const workspacePicker = createWorkspacePicker(context);
-  context.subscriptions.push(workspacePicker);
-  context.subscriptions.push({ dispose: () => disposeWorkspacePicker() });
-
-  // Audit verdict status bar. Gated on the setting (default on); creating an
-  // idle item runs no analysis, so it never touches the startup/visibility hot
-  // path (#902). When disabled, the command still runs and reports its verdict
-  // via an information message instead of the status bar.
-  //
-  // The item is created/disposed LIVE when `fallow.audit.statusBar.enabled`
-  // toggles (see the config-change handler), so it never needs a window reload.
-  // Lifecycle goes through the module's create/dispose helpers (which own the
-  // singleton item) rather than pushing the raw item to `subscriptions`, so a
-  // live dispose/recreate cannot leave a dangling subscription. A teardown
-  // disposer guarantees cleanup on extension deactivate.
-  const syncAuditStatusBar = (): void => {
-    if (getAuditEnabled()) {
-      // Idempotent: createAuditStatusBar disposes nothing, so guard re-creates.
-      if (!hasAuditStatusBar()) {
-        createAuditStatusBar();
-      }
-    } else {
-      disposeAuditStatusBar();
-    }
-  };
-  syncAuditStatusBar();
-  context.subscriptions.push({ dispose: () => disposeAuditStatusBar() });
+  context.subscriptions.push({ dispose: () => disposeStatusBar() });
+  const licenseIndicatorEnabled = initLicenseIndicator();
+  refreshWorkspacePicker(context);
+  context.subscriptions.push(vscode.workspace.onDidChangeWorkspaceFolders(refreshStatusBar));
 
   const diagnosticFilter = new DiagnosticFilter(
     context.workspaceState,
@@ -272,25 +235,14 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     void vscode.commands.executeCommand("setContext", "fallow.hasAnalyzed", true);
   };
 
-  // Always-visible diagnostics on/off toggle, just right of the audit item.
-  // Gated on `fallow.diagnostics.statusBar` (default on) and created/disposed
-  // LIVE when the setting toggles, mirroring the audit status-bar handling, so
-  // it never needs a window reload. Lifecycle goes through the module's
-  // create/dispose helpers (which own the singleton item + its filter
-  // subscription) rather than pushing the raw item to `subscriptions`, so a live
-  // dispose/recreate cannot leave a dangling listener. The teardown disposer
-  // below guarantees cleanup on deactivate.
-  const syncDiagnosticStatusBar = (): void => {
-    if (getDiagnosticStatusBar()) {
-      if (!hasDiagnosticStatusBar()) {
-        createDiagnosticStatusBar(diagnosticFilter);
-      }
-    } else {
-      disposeDiagnosticStatusBar();
-    }
+  const syncFindingsVisibility = (): void => {
+    setStatusBarFindings({
+      mutedAll: diagnosticFilter.isMutedAll(),
+      mutedCategoryCount: diagnosticFilter.mutedCategoriesSnapshot().size,
+    });
   };
-  syncDiagnosticStatusBar();
-  context.subscriptions.push({ dispose: () => disposeDiagnosticStatusBar() });
+  syncFindingsVisibility();
+  context.subscriptions.push(diagnosticFilter.onDidChange(syncFindingsVisibility));
 
   const deadCodeProvider = new DeadCodeTreeProvider();
   const duplicatesProvider = new DuplicatesTreeProvider();
@@ -342,9 +294,10 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   // who never opens that view pays nothing even with the feature enabled (#902).
   let securityAnalysisRan = false;
 
-  // One-shot, lazy workspace-visibility probe. The picker is shown by default;
-  // after the first sidebar analysis we list workspaces (cheap, cached) and hide
-  // the picker on single-package repos that can never use scoping (n2). Probed
+  // One-shot, lazy workspace-visibility probe. The status bar item offers the
+  // picker by default; after the first sidebar analysis we list workspaces
+  // (cheap, cached) and drop the workspace entry on single-package repos that
+  // can never use scoping (n2). Probed
   // off the activation hot path so #902 latency isolation is preserved, and
   // fire-and-forget so it never blocks the analysis it follows.
   let workspaceVisibilityProbed = false;
@@ -355,7 +308,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     workspaceVisibilityProbed = true;
     void (async (): Promise<void> => {
       const output = await runWorkspaces(context, false, outputChannel, true);
-      applyWorkspaceVisibility(output);
+      applyWorkspaceVisibility(context, output);
     })();
   };
 
@@ -874,13 +827,11 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   // `runAudit`, so a click while one is in flight is a no-op.
   const reportAuditVerdict = (audit: AuditOutput): void => {
     lastAuditResult = audit;
-    // Read the surface live: the status-bar item is created/disposed when the
-    // setting toggles, so its presence is the source of truth.
-    if (hasAuditStatusBar()) {
-      updateAuditStatusBar(audit);
+    setStatusBarAudit({ kind: "result", audit });
+    if (getAuditEnabled()) {
       return;
     }
-    // Status bar surface disabled: still report the verdict so the command is
+    // Audit verdict in the status bar disabled: still report the verdict so the command is
     // never a silent no-op, and offer the details breakdown. Include the
     // change-set scope (changed files vs base ref) so the verdict is not a
     // contextless word (#908 n3).
@@ -898,7 +849,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   };
 
   const runAuditCommand = async (): Promise<void> => {
-    setAuditAnalyzing();
+    setStatusBarAudit({ kind: "running" });
     await vscode.window.withProgress(
       {
         location: vscode.ProgressLocation.Window,
@@ -916,12 +867,12 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
           if (audit) {
             reportAuditVerdict(audit);
           } else if (lastAuditResult) {
-            updateAuditStatusBar(lastAuditResult);
+            setStatusBarAudit({ kind: "result", audit: lastAuditResult });
           } else {
-            setAuditIdle();
+            setStatusBarAudit({ kind: "idle" });
           }
         } catch {
-          setAuditError();
+          setStatusBarAudit({ kind: "error" });
         }
       },
     );
@@ -938,7 +889,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     vscode.workspace.onDidSaveTextDocument((doc) => {
       // Read both settings live so toggling either takes effect without a window
       // reload: the surface must exist and run-on-save must be on.
-      if (!hasAuditStatusBar() || !getAuditRunOnSave()) {
+      if (!getAuditEnabled() || !getAuditRunOnSave()) {
         return;
       }
       if (!AUDIT_SAVE_LANGUAGES.has(doc.languageId)) {
@@ -1022,6 +973,9 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   // Open Fallow settings (used by walkthrough completion event)
   context.subscriptions.push(
     vscode.commands.registerCommand("fallow.openSettings", () => openSettingsSearch("fallow")),
+  );
+  context.subscriptions.push(
+    vscode.commands.registerCommand(STATUS_MENU_COMMAND, showStatusBarMenu),
   );
 
   // Turn on an opt-in view from its sidebar welcome link (#4553).
@@ -1111,7 +1065,8 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
       const affectsSecurity = affectsAnyConfiguration(e, SECURITY_CONFIG_KEYS);
 
       if (e.affectsConfiguration("fallow.workspace")) {
-        // Keep the picker label in sync with a pinned-default setting change.
+        // Keep the workspace state of the status bar item in sync with a
+        // pinned-default setting change.
         // The workspaceState override (if any) still wins inside the picker. The
         // dead-code/dupes sidebar + status bar re-run is handled by the
         // REANALYSIS_CONFIG_KEYS path below (`fallow.workspace` is a member), so
@@ -1119,18 +1074,10 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
         refreshWorkspacePicker(context);
       }
 
-      if (e.affectsConfiguration("fallow.audit.statusBar.enabled")) {
-        // Create/dispose the audit status-bar item live (mirrors the health
-        // status-bar handling) so toggling the setting never needs a window
-        // reload. The runOnSave path and reportAuditVerdict both read the item's
-        // presence live, so they follow automatically.
-        syncAuditStatusBar();
-      }
-
-      if (e.affectsConfiguration("fallow.diagnostics.statusBar")) {
-        // Create/dispose the diagnostics toggle item live, same as the audit
-        // item, so flipping the setting never needs a window reload.
-        syncDiagnosticStatusBar();
+      if (affectsAnyConfiguration(e, STATUS_BAR_CONFIG_KEYS)) {
+        // The status bar item reads these settings on each render.
+        initLicenseIndicator();
+        refreshStatusBar();
       }
 
       if (e.affectsConfiguration("fallow.diagnostics.mutedCategories")) {
@@ -1234,7 +1181,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
   // Opt-in license probe on startup (`fallow.license.refreshOnStartup`,
   // default false). Fire-and-forget so it never blocks activation or sidebar
   // reveal (#902); the indicator updates asynchronously when it resolves.
-  if (licenseStatusBar && getLicenseRefreshOnStartup()) {
+  if (licenseIndicatorEnabled && getLicenseRefreshOnStartup()) {
     void refreshLicenseStatus(context, outputChannel);
   }
 
@@ -1260,10 +1207,6 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
 export const deactivate = async (): Promise<void> => {
   cancelReleaseRetry();
   disposeStatusBar();
-  disposeLicenseStatusBar();
-  disposeWorkspacePicker();
-  disposeAuditStatusBar();
-  disposeDiagnosticStatusBar();
   // Kill any in-flight CLI children (analysis, audit, health, security, fix,
   // license) before stopping the LSP, so a window reload mid-analysis does not
   // orphan a process that can hold file handles on the project directory.

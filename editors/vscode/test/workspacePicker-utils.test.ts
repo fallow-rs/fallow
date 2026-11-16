@@ -6,8 +6,6 @@ import {
   clearedScopeToast,
   parseWorkspacesOutput,
   partitionWorkspaces,
-  renderWorkspaceStatusBarText,
-  renderWorkspaceStatusBarTooltip,
   resolveWorkspaceScope,
   shouldShowWorkspacePicker,
 } from "../src/workspacePicker-utils.js";
@@ -173,34 +171,8 @@ describe("buildWorkspaceQuickPickItems", () => {
   });
 });
 
-describe("renderWorkspaceStatusBarText", () => {
-  it("shows Fallow: All when unscoped", () => {
-    expect(renderWorkspaceStatusBarText(CLEAR_WORKSPACE_SCOPE)).toBe("$(layers) Fallow: All");
-  });
-
-  it("shows the package name when scoped", () => {
-    expect(renderWorkspaceStatusBarText("my-pkg")).toBe("$(layers) my-pkg");
-  });
-});
-
-describe("renderWorkspaceStatusBarTooltip", () => {
-  it("uses neutral, scope-only copy (never implies confirmed defects)", () => {
-    const scoped = renderWorkspaceStatusBarTooltip("my-pkg");
-    expect(scoped).toContain("scoped to my-pkg");
-    expect(scoped.toLowerCase()).not.toContain("vulnerab");
-    expect(scoped.toLowerCase()).not.toContain("issues in");
-
-    const all = renderWorkspaceStatusBarTooltip(CLEAR_WORKSPACE_SCOPE);
-    expect(all).toContain("whole project");
-  });
-
-  it("discloses that editor diagnostics stay project-wide (#906 C3)", () => {
-    // Health and Security ARE scoped now (#906 C2); only the LSP gutter stays
-    // project-wide, and the disclosure must say so on both tooltip states.
-    expect(renderWorkspaceStatusBarTooltip("my-pkg")).toContain(WORKSPACE_SCOPE_DISCLOSURE);
-    expect(renderWorkspaceStatusBarTooltip(CLEAR_WORKSPACE_SCOPE)).toContain(
-      WORKSPACE_SCOPE_DISCLOSURE,
-    );
+describe("WORKSPACE_SCOPE_DISCLOSURE", () => {
+  it("states that editor diagnostics stay project-wide (#906 C3)", () => {
     expect(WORKSPACE_SCOPE_DISCLOSURE).toContain("Health");
     expect(WORKSPACE_SCOPE_DISCLOSURE).toContain("Security");
     expect(WORKSPACE_SCOPE_DISCLOSURE).toContain("editor diagnostics remain project-wide");

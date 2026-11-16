@@ -1,14 +1,30 @@
 // VS Code injects this module into the extension host at runtime.
 // fallow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
-import { getChangedSince, getHealthStatusBar } from "./config.js";
+import {
+  getAuditEnabled,
+  getChangedSince,
+  getHealthStatusBar,
+  getLicenseShowStatusBar,
+} from "./config.js";
 import { formatHealthStatusPart } from "./health-utils.js";
 import {
-  buildParamsFromCli,
-  buildStatusBarPartsFromLsp,
-  buildStatusBarTooltipMarkdown,
-  renderStatusBarText,
-} from "./statusBar-utils.js";
+  HOVER_COMMANDS,
+  STATUS_MENU_COMMAND,
+  buildStatusMenuEntries,
+  initialStatusModel,
+  renderStatusPresentation,
+} from "./statusBar-model.js";
+import type {
+  AuditStatus,
+  FindingsVisibility,
+  LicenseIndicator,
+  StatusMenuEntry,
+  StatusModel,
+  WorkspaceSummary,
+} from "./statusBar-model.js";
+import { buildParamsFromCli } from "./statusBar-utils.js";
+import type { AnalysisCompleteParams } from "./statusBar-utils.js";
 import type {
   FallowAnalysisScope,
   FallowCheckResult,
@@ -16,173 +32,134 @@ import type {
   HealthOutput,
 } from "./types.js";
 export type { AnalysisCompleteParams } from "./statusBar-utils.js";
-import type {
-  AnalysisCompleteParams,
-  ChangedSinceScopeStatus,
-  PackageBaselineStatus,
-} from "./statusBar-utils.js";
-
-let statusBarItem: vscode.StatusBarItem | null = null;
-let showingAnalysisResult = true;
 
 /**
- * Last health score segment (e.g. `B (82)`), or null when health has not run or
- * is disabled. Stored so the segment survives the CLI/LSP status-bar updates
- * that fire independently of the lazy health spawn.
+ * The single Fallow status bar item. It shows the finding count and the health
+ * grade, and it carries the audit, license, workspace and findings-visibility
+ * state in its hover, its icon and its background. A click opens a menu with
+ * the existing Fallow commands.
  */
-let healthPart: string | null = null;
+let item: vscode.StatusBarItem | null = null;
+let model: StatusModel = initialStatusModel();
 
-const liveChangedSince = (): string | null => getChangedSince() || null;
+/** Settings are read on each render, so a settings change needs no reload. */
+const withLiveSettings = (state: StatusModel): StatusModel => ({
+  ...state,
+  hasWorkspaceFolder: (vscode.workspace.workspaceFolders?.length ?? 0) > 0,
+  changedSince: getChangedSince() || null,
+  showHealthGrade: getHealthStatusBar(),
+  showAudit: getAuditEnabled(),
+  license: getLicenseShowStatusBar() ? state.license : { kind: "hidden" },
+});
 
-// Use `health:` (colon) so the score binds visually to its label and does not
-// read as another issue/duplication count in the ` | `-joined segment list
-// (e.g. `5 issues | 2.3% duplication | health: B (82)`) (#902).
-const healthSuffix = (): string => (healthPart ? ` | health: ${healthPart}` : "");
-
-export const createStatusBar = (): vscode.StatusBarItem => {
-  statusBarItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 50);
-  showingAnalysisResult = true;
-  statusBarItem.command = "fallow.analyze";
-  statusBarItem.text = renderStatusBarText("$(search) Fallow", liveChangedSince());
-  statusBarItem.show();
-  return statusBarItem;
+const render = (): void => {
+  if (!item) {
+    return;
+  }
+  const presentation = renderStatusPresentation(withLiveSettings(model));
+  item.text = presentation.text;
+  const tooltip = new vscode.MarkdownString(presentation.tooltipMarkdown);
+  tooltip.isTrusted = { enabledCommands: [...HOVER_COMMANDS] };
+  // Without this flag the hover shows `$(error)` as literal text (issue #179).
+  tooltip.supportThemeIcons = true;
+  item.tooltip = tooltip;
+  item.accessibilityInformation = { label: presentation.accessibilityLabel, role: "button" };
+  item.backgroundColor = presentation.background
+    ? new vscode.ThemeColor(presentation.background)
+    : undefined;
 };
 
-/** Update the status bar from CLI-driven analysis results. */
+const update = (patch: Partial<StatusModel>): void => {
+  model = { ...model, ...patch };
+  render();
+};
+
+export const createStatusBar = (): vscode.StatusBarItem => {
+  item = vscode.window.createStatusBarItem("fallow.status", vscode.StatusBarAlignment.Left, 50);
+  item.name = "Fallow";
+  item.command = STATUS_MENU_COMMAND;
+  render();
+  item.show();
+  return item;
+};
+
+/** Re-render after a change of a setting that the item reads. */
+export const refreshStatusBar = (): void => {
+  render();
+};
+
+/** Update the item from CLI analysis results. */
 export const updateStatusBar = (
   checkResult: FallowCheckResult | null,
   dupesResult: FallowDupesResult | null,
   scope: FallowAnalysisScope | null,
 ): void => {
-  if (!statusBarItem) {
-    return;
-  }
-
-  const params = buildParamsFromCli(checkResult, dupesResult, scope);
-  applyTooltipAndSeverity(params);
-
-  const parts: string[] = [];
-  if (checkResult) {
-    parts.push(`${params.totalIssues} issues`);
-  }
-  if (dupesResult) {
-    parts.push(`${params.duplicationPercentage.toFixed(1)}% duplication`);
-  }
-  applyStatusBarText(parts, params.changedSinceScope, params.packageBaselines);
+  update({
+    analysis: { kind: "result", params: buildParamsFromCli(checkResult, dupesResult, scope) },
+  });
 };
 
-/** Update the status bar from LSP notification data. */
+/** Update the item from the `fallow/analysisComplete` LSP notification. */
 export const updateStatusBarFromLsp = (params: AnalysisCompleteParams): void => {
-  if (!statusBarItem) {
-    return;
-  }
-
-  applyTooltipAndSeverity(params);
-  applyStatusBarText(
-    buildStatusBarPartsFromLsp(params),
-    params.changedSinceScope,
-    params.packageBaselines,
-  );
-};
-
-const applyTooltipAndSeverity = (params: AnalysisCompleteParams): void => {
-  if (!statusBarItem) {
-    return;
-  }
-
-  // The main status bar item is intentionally left uncolored: a full-width
-  // red/yellow background for a poor health score is more distracting than
-  // informative, and the grade + issue counts in the text already convey it.
-  statusBarItem.backgroundColor = undefined;
-
-  const tooltip = new vscode.MarkdownString(
-    buildStatusBarTooltipMarkdown(params, getChangedSince() || null),
-  );
-  tooltip.isTrusted = true;
-  // Required so `$(name)` codicons in the markdown render as icons rather
-  // than literal text. Without this the popup shows raw `$(error)`,
-  // `$(warning)`, etc. (issue #179).
-  tooltip.supportThemeIcons = true;
-  statusBarItem.tooltip = tooltip;
-};
-
-/**
- * Most recent non-health status parts, cached so an out-of-band health update
- * can re-render the full text (analysis parts plus the health segment) without
- * a fresh analysis run.
- */
-let lastBaseParts: string[] = [];
-let lastChangedSinceScope: ChangedSinceScopeStatus | undefined;
-let lastPackageBaselines: ReadonlyArray<PackageBaselineStatus> = [];
-
-const applyStatusBarText = (
-  parts: string[],
-  changedSinceScope?: ChangedSinceScopeStatus,
-  packageBaselines: ReadonlyArray<PackageBaselineStatus> = [],
-): void => {
-  if (!statusBarItem) {
-    return;
-  }
-  lastBaseParts = parts;
-  lastChangedSinceScope = changedSinceScope;
-  lastPackageBaselines = packageBaselines;
-  showingAnalysisResult = true;
-  const joined = parts.length > 0 ? `$(search) Fallow: ${parts.join(" | ")}` : "$(search) Fallow";
-  const base = `${joined}${healthSuffix()}`;
-  statusBarItem.text = renderStatusBarText(
-    base,
-    liveChangedSince(),
-    changedSinceScope,
-    packageBaselines,
-  );
-};
-
-/**
- * Update the cached health score segment shown in the status bar and re-render.
- * Independent of the CLI/LSP analysis updates: the lazy health spawn calls this
- * when it completes. A null report (or the `health.statusBar` setting off)
- * clears the segment so the existing behavior is unchanged.
- */
-export const updateStatusBarHealth = (report: HealthOutput | null): void => {
-  healthPart = getHealthStatusBar() ? formatHealthStatusPart(report) : null;
-  if (!statusBarItem) {
-    return;
-  }
-  if (!showingAnalysisResult) {
-    return;
-  }
-  // Re-render against the cached analysis parts so the health segment appends
-  // without clobbering the issue/duplication counts.
-  applyStatusBarText(lastBaseParts, lastChangedSinceScope, lastPackageBaselines);
+  update({ analysis: { kind: "result", params } });
 };
 
 export const setStatusBarAnalyzing = (): void => {
-  if (statusBarItem) {
-    showingAnalysisResult = false;
-    statusBarItem.tooltip = undefined;
-    statusBarItem.text = renderStatusBarText(
-      "$(loading~spin) Fallow: Analyzing...",
-      liveChangedSince(),
-    );
-  }
+  update({ analysis: { kind: "analyzing" } });
 };
 
 export const setStatusBarError = (): void => {
-  if (statusBarItem) {
-    showingAnalysisResult = false;
-    statusBarItem.tooltip = undefined;
-    statusBarItem.text = renderStatusBarText("$(error) Fallow: Error", liveChangedSince());
+  update({ analysis: { kind: "error" } });
+};
+
+/**
+ * Store the health score of the last health run. A null report clears it. The
+ * `fallow.health.statusBar` setting controls only the grade in the item text.
+ */
+export const updateStatusBarHealth = (report: HealthOutput | null): void => {
+  const label = formatHealthStatusPart(report);
+  const grade = report?.health_score?.grade.trim() || "?";
+  update({ health: label ? { grade, label } : null });
+};
+
+export const setStatusBarAudit = (audit: AuditStatus): void => {
+  update({ audit });
+};
+
+export const setStatusBarLicense = (license: LicenseIndicator): void => {
+  update({ license });
+};
+
+export const getStatusBarLicense = (): LicenseIndicator => model.license;
+
+export const setStatusBarWorkspace = (workspace: WorkspaceSummary): void => {
+  update({ workspace });
+};
+
+export const setStatusBarFindings = (findings: FindingsVisibility): void => {
+  update({ findings });
+};
+
+interface StatusMenuPick extends vscode.QuickPickItem {
+  readonly entry: StatusMenuEntry;
+}
+
+/** Show the click menu and run the command of the picked row. */
+export const showStatusBarMenu = async (): Promise<void> => {
+  const entries = buildStatusMenuEntries(withLiveSettings(model));
+  const picked = await vscode.window.showQuickPick<StatusMenuPick>(
+    entries.map((entry) => ({ label: entry.label, description: entry.description, entry })),
+    { title: "Fallow", placeHolder: "Pick a Fallow action" },
+  );
+  if (picked) {
+    await vscode.commands.executeCommand(picked.entry.command);
   }
 };
 
 export const disposeStatusBar = (): void => {
-  if (statusBarItem) {
-    statusBarItem.dispose();
-    statusBarItem = null;
+  if (item) {
+    item.dispose();
+    item = null;
   }
-  healthPart = null;
-  lastBaseParts = [];
-  lastChangedSinceScope = undefined;
-  lastPackageBaselines = [];
-  showingAnalysisResult = true;
+  model = initialStatusModel();
 };

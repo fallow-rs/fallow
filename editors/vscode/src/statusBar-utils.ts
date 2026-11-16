@@ -231,11 +231,6 @@ const BREAKDOWN_LINES: ReadonlyArray<BreakdownLine> = [
 export const getDuplicationPercentage = (duplicationPercentage: number): number =>
   Number.isFinite(duplicationPercentage) ? duplicationPercentage : 0;
 
-export const buildStatusBarPartsFromLsp = (params: AnalysisCompleteParams): string[] => [
-  `${params.totalIssues} issues`,
-  `${getDuplicationPercentage(params.duplicationPercentage).toFixed(1)}% duplication`,
-];
-
 export const formatChangedSinceRefForStatusBar = (ref: string): string => {
   const normalized = normalizeInlineText(ref);
   return normalized.length > 48 ? `${normalized.slice(0, 45).trimEnd()}...` : normalized;
@@ -276,59 +271,51 @@ export const renderStatusBarText = (
   return `${base} (since ${formattedRef})`;
 };
 
-export const buildStatusBarTooltipMarkdown = (
-  params: AnalysisCompleteParams,
-  changedSinceRef: string | null = null,
-): string => {
-  const lines: string[] = ["**Fallow** - Analysis Results\n"];
-  const duplicationPercentage = getDuplicationPercentage(params.duplicationPercentage);
-
+const scopeLines = (params: AnalysisCompleteParams, changedSinceRef: string | null): string[] => {
   const scope = params.changedSinceScope;
   if (scope?.state === "dropped") {
-    lines.push(
+    const dropped = [
       `$(warning) Scope since ${escapeMarkdownText(scope.requestedRef)} was dropped; results are full-scope.`,
-    );
-    if (scope.reason) {
-      lines.push(`Reason: ${escapeMarkdownText(scope.reason)}`);
-    }
-  } else {
-    const appliedRef =
-      scope?.requestedRef || (params.packageBaselines?.length ? null : changedSinceRef);
-    if (appliedRef) {
-      lines.push(`$(git-branch) Scoped to changes since ${escapeMarkdownText(appliedRef)}`);
-    } else if (params.packageBaselines?.length) {
-      lines.push("$(git-branch) Code diagnostics and clone groups use package baselines:");
-      for (const baseline of params.packageBaselines) {
-        lines.push(
-          `- ${escapeMarkdownText(baseline.workspace_root)}: ${escapeMarkdownText(baseline.reference)}`,
-        );
-      }
-      lines.push("Unlisted packages and root files remain in full scope.");
-      lines.push("Health and security reports use their own scopes.");
-    }
+    ];
+    return scope.reason ? [...dropped, `Reason: ${escapeMarkdownText(scope.reason)}`] : dropped;
   }
+  const baselines = params.packageBaselines ?? [];
+  const appliedRef = scope?.requestedRef || (baselines.length > 0 ? null : changedSinceRef);
+  if (appliedRef) {
+    return [`$(git-branch) Scoped to changes since ${escapeMarkdownText(appliedRef)}`];
+  }
+  if (baselines.length === 0) {
+    return [];
+  }
+  return [
+    "$(git-branch) Code diagnostics and clone groups use package baselines:",
+    ...baselines.map(
+      (baseline) =>
+        `- ${escapeMarkdownText(baseline.workspace_root)}: ${escapeMarkdownText(baseline.reference)}`,
+    ),
+    "Unlisted packages and root files remain in full scope.",
+    "Health and security reports use their own scopes.",
+  ];
+};
 
+/**
+ * Hover lines for a completed analysis: the scope, then one line per issue
+ * category with a non-zero count. The status bar hover adds the duplication
+ * line and the other sections.
+ */
+export const buildAnalysisSummaryLines = (
+  params: AnalysisCompleteParams,
+  changedSinceRef: string | null = null,
+): string[] => {
+  const lines = scopeLines(params, changedSinceRef);
   for (const line of BREAKDOWN_LINES) {
     const count = params[line.count];
     if (typeof count === "number" && count > 0) {
       lines.push(`${line.icon} ${count} ${line.label}`);
     }
   }
-
-  if (params.cloneGroups > 0) {
-    lines.push(
-      `$(copy) ${params.cloneGroups} clone groups (${duplicationPercentage.toFixed(1)}% duplication)`,
-    );
-  }
-
-  if (params.totalIssues === 0 && params.cloneGroups === 0) {
+  if (params.totalIssues === 0) {
     lines.push("$(check) No issues found");
   }
-
-  lines.push("\n---\n");
-  lines.push(
-    "[$(play) Run Analysis](command:fallow.analyze) · [$(wrench) Auto-Fix](command:fallow.fix) · [$(output) Output](command:fallow.showOutput)",
-  );
-
-  return lines.join("\n\n");
+  return lines;
 };
