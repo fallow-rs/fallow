@@ -395,6 +395,72 @@ fn codex_install_dry_run_reports_the_native_gate() {
     let _ = fs::remove_dir_all(&dir);
 }
 
+/// The `PATH` of the test process without each directory that holds a
+/// `fallow-mcp` launcher, so the MCP step cannot find one on `PATH`.
+fn path_without_fallow_mcp() -> std::ffi::OsString {
+    let path = std::env::var_os("PATH").unwrap_or_default();
+    let kept: Vec<PathBuf> = std::env::split_paths(&path)
+        .filter(|dir| {
+            ["fallow-mcp", "fallow-mcp.exe", "fallow-mcp.cmd"]
+                .iter()
+                .all(|name| !dir.join(name).exists())
+        })
+        .collect();
+    std::env::join_paths(kept).unwrap()
+}
+
+/// The plain CLI build has no `mcp-server` subcommand, although clap answers
+/// `fallow mcp-server --version` with exit code 0. Without another launcher,
+/// the MCP step must skip and must not name `fallow mcp-server`, which fails
+/// with this binary.
+#[test]
+fn plain_cli_binary_is_not_an_mcp_launcher() {
+    let dir = agent_temp_dir("plain-cli-mcp");
+    fs::remove_file(dir.join("node_modules/.bin/fallow-mcp")).unwrap();
+    let home = dir.join("home");
+    fs::create_dir_all(&home).unwrap();
+    let path = path_without_fallow_mcp();
+
+    let output = run_fallow_raw_with_env(
+        &[
+            "agent",
+            "install",
+            "--dry-run",
+            "--harness",
+            "codex",
+            "--root",
+            dir.to_str().unwrap(),
+            "--format",
+            "json",
+        ],
+        &[
+            ("HOME", home.to_str().unwrap()),
+            ("PATH", path.to_str().unwrap()),
+            ("CLAUDECODE", ""),
+            ("CODEX_THREAD_ID", ""),
+            ("CURSOR_AGENT", ""),
+        ],
+    );
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    assert!(
+        !output.stdout.contains("mcp-server"),
+        "the plain CLI cannot serve MCP: {}",
+        output.stdout
+    );
+    let json = crate::common::parse_json(&output);
+    let mcp = json["steps"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|s| s["step"] == "mcp" && s["harness"] == "codex")
+        .expect("codex MCP step");
+    assert_eq!(mcp["status"], "skipped", "{mcp}");
+    assert_eq!(mcp["reason"], "mcp_entry_unavailable", "{mcp}");
+    let detail = mcp["detail"].as_str().unwrap();
+    assert!(detail.contains("cargo install fallow-mcp"), "{detail}");
+    let _ = fs::remove_dir_all(&dir);
+}
+
 #[test]
 fn nothing_detected_writes_only_neutral_files() {
     let dir = agent_temp_dir("neutral");
