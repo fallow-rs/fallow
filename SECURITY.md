@@ -39,6 +39,8 @@ The analysis crates (`fallow-core`, `fallow-extract`, `fallow-graph`) use `#![cf
 
 A `package.json` lifecycle script is read as data and never run. The regression test `safe_analysis` asserts that a `postinstall` sentinel never fires during analysis.
 
+With `--runtime-coverage`, fallow finds the `fallow-cov` sidecar in fixed install locations only, and it starts no package manager or other program for this lookup. A package manager reads config from the analyzed root (for example `.yarnrc` `yarn-path` or `.pnpmfile.cjs`), so starting one would run project code. Fallow verifies the Ed25519 signature of the sidecar before it starts it. The integration test `sidecar_discovery_spawn_tests` puts fake package managers first on `PATH` and asserts that none of them starts. The unit test `runtime_coverage_module_spawns_only_the_verified_sidecar` asserts that the sidecar is the only program that `crates/cli/src/health/coverage.rs` starts.
+
 ## Threat model
 
 The primary security boundary is the project root passed via `--root` (or the discovered config's directory). fallow walks files under that root and reads `package.json`, source files, lockfiles, and CI configs found within it.

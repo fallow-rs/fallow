@@ -151,6 +151,7 @@ mod security_override_tests;
 mod security_stable_id_tests;
 mod security_workflow_tests;
 mod sfc_callee_line_tests;
+mod sidecar_discovery_spawn_tests;
 mod signal_tests;
 mod snapshot_tests;
 mod stable_ci_fingerprint_tests;
