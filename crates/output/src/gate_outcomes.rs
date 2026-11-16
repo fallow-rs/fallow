@@ -122,9 +122,10 @@ pub enum GateName {
     TypeAwareRequire,
     /// A note, not a gate that can fail: the type-aware pass was requested
     /// under `typeAware.require: best-effort`, and no sidecar was found. The
-    /// run reports the findings that the pass can disprove
-    /// (`unused-export`, `unused-type`, `unused-class-member`) at `warn`, so
-    /// they do not fail `error-severity-findings`. Always `status: skipped`
+    /// run reports the findings that the pass can disprove (`unused-export`,
+    /// `unused-type`, `unused-class-member`, `private-type-leak`) at `warn`,
+    /// also under `--fail-on-issues`, so they do not fail
+    /// `error-severity-findings`. Always `status: skipped`
     /// and `enforced: false`. Absent when the sidecar ran, also when it
     /// failed or timed out: those runs keep the configured severities.
     TypeAwareFallback,

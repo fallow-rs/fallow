@@ -485,11 +485,20 @@ The fallback depends on `typeAware.require` and on the cause:
 "No sidecar found" means that discovery found no file: no sibling next to the
 active Fallow executable, or a `FALLOW_TYPE_AWARE_BIN` path where no file
 exists. The kinds that the pass can disprove are `unused-export`,
-`unused-type` and `unused-class-member`. The project asked for the type-aware
-result, so a finding that the pass could remove does not fail the
-`error-severity-findings` gate. The run lowers each `error` rule of these
-kinds to `warn`, in the base rules and in `overrides`. Under
-`--fail-on-issues`, a `warn` finding fails the run as usual.
+`unused-type`, `unused-class-member` and `private-type-leak`. The symbol-use
+query removes the first three when the checker finds a use. The API-surface
+query keeps only the leak candidates that the checker confirms. The project
+asked for the type-aware result, so a finding that the pass could remove does
+not fail the `error-severity-findings` gate. The run lowers each `error` rule
+of these kinds to `warn`, in the base rules and in `overrides`.
+
+`--fail-on-issues` and `--ci` normally raise every `warn` finding to `error`.
+Without a sidecar, the `warn` cap of these kinds wins over that promotion, so
+these findings stay `warn` and do not fail the run. Every other `warn` rule is
+raised to `error` as usual.
+
+The editor (LSP) also continues with the syntactic findings when no sidecar is
+found, but it shows these kinds at their configured severity.
 
 The JSON output of a run without a sidecar keeps `_meta.type_aware.executed:
 false` and the warning in `_meta.type_aware.warnings`. `gate_outcomes` of

@@ -123,7 +123,7 @@ fn audit_gate_outcomes(result: &AuditResult) -> Option<fallow_output::GateOutcom
         result
             .check
             .as_ref()
-            .is_some_and(|check| check.type_aware_sidecar_missing),
+            .is_some_and(|check| check.config.semantic_refinable_capped),
         audit_parse_error_outcome(result),
     )
 }

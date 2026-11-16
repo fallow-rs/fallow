@@ -652,6 +652,7 @@ mod tests {
             dynamically_loaded: vec![],
             markup_extensions: vec![],
             overrides: vec![],
+            semantic_refinable_capped: false,
             workspace_changed_since: std::collections::BTreeMap::default(),
             workspace_patterns: Vec::new(),
             regression: None,

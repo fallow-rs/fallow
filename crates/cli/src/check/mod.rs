@@ -614,9 +614,6 @@ pub struct CheckResult {
     /// Advisory coupling report produced in the same semantic batch when a
     /// combined run also requested health analysis.
     pub type_coupling: Option<fallow_types::semantic::TypeCouplingReport>,
-    /// The type-aware pass was requested, no sidecar was found, and the run
-    /// lowered the findings that the pass can disprove to `warn`.
-    pub type_aware_sidecar_missing: bool,
     /// Bounded non-fatal diagnostics from the semantic backend.
     pub type_aware_warnings: Vec<String>,
     /// Workspace, source-discovery, and analysis-stage diagnostics as this
@@ -984,7 +981,7 @@ fn apply_rules_and_filters(
     opts.filters.apply(results);
     rules::apply_rules(results, config);
     if opts.fail_on_issues {
-        rules::promote_finding_warns(results);
+        rules::promote_finding_warns(results, config);
     }
 }
 
@@ -1128,7 +1125,6 @@ struct CheckCompletionInput<'a> {
     baseline_staleness: Option<LoadedBaselineStaleness>,
     type_aware: Option<fallow_api::TypeAwareOutcome>,
     type_coupling: Option<fallow_types::semantic::TypeCouplingReport>,
-    type_aware_sidecar_missing: bool,
     syntactic_dead_code_keys: Option<rustc_hash::FxHashSet<String>>,
     finding_id_query: Option<fallow_output::FindingIdQuery>,
     /// The results before the architecture selection, when it narrowed them.
@@ -1146,7 +1142,6 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         baseline_staleness,
         type_aware,
         type_coupling,
-        type_aware_sidecar_missing,
         syntactic_dead_code_keys,
         finding_id_query,
         health_results,
@@ -1219,7 +1214,6 @@ fn complete_check_execution(input: CheckCompletionInput<'_>) -> CheckResult {
         shared_parse,
         type_aware_meta,
         type_coupling,
-        type_aware_sidecar_missing,
         type_aware_warnings,
         workspace_diagnostics,
         discovered_file_count,
@@ -1332,14 +1326,13 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         .type_aware
         .enabled
         .then(|| fallow_api::audit_keys::dead_code_keys(&data.results, &config.root));
-    let mut type_aware_sidecar_missing = false;
     let (type_aware, type_coupling) = if config.type_aware.enabled {
         let include_symbol_use = if opts.filters.any_active() {
             opts.filters.unused_exports
                 || opts.filters.unused_types
                 || opts.filters.unused_class_members
         } else {
-            fallow_config::any_semantic_refinable_rule_active(&config.rules)
+            fallow_config::any_symbol_use_rule_active(&config.rules)
         };
         let type_aware_projects = config
             .type_aware
@@ -1377,7 +1370,6 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
                     opts.quiet,
                     opts.output,
                 )?;
-                type_aware_sidecar_missing = error.is_sidecar_not_found();
                 // `degrade_or_fail` already put this on stderr, honoring
                 // `--quiet`. Copying it into the outcome would print the same
                 // sentence a second time from `print_type_aware_warnings`,
@@ -1417,7 +1409,7 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         // the same set for an overridden path.
         rules::apply_rules(&mut data.results, &config);
         if opts.fail_on_issues {
-            rules::promote_finding_warns(&mut data.results);
+            rules::promote_finding_warns(&mut data.results, &config);
         }
     }
     // Type-aware refinement is analysis, not a filter: a finding it removes
@@ -1474,7 +1466,6 @@ pub fn execute_check(opts: &CheckOptions<'_>) -> Result<CheckResult, ExitCode> {
         baseline_staleness,
         type_aware,
         type_coupling,
-        type_aware_sidecar_missing,
         syntactic_dead_code_keys,
         finding_id_query,
         health_results,
@@ -1623,7 +1614,7 @@ fn prepare_print_check(result: &CheckResult, opts: PrintCheckOptions) -> Prepare
         fail_on_stale_baseline: result.fail_on_stale_baseline,
         type_aware_require: result.config.type_aware.require,
         type_aware_meta: result.type_aware_meta.as_ref(),
-        type_aware_sidecar_missing: result.type_aware_sidecar_missing,
+        type_aware_sidecar_missing: result.config.semantic_refinable_capped,
         parse_error: parse_error.clone(),
     });
     PreparedPrintCheck {
@@ -1664,9 +1655,7 @@ fn prepare_print_check(result: &CheckResult, opts: PrintCheckOptions) -> Prepare
 
 pub fn effective_check_rules(result: &CheckResult) -> RulesConfig {
     if result.fail_on_issues {
-        let mut rules = result.config.rules.clone();
-        rules::promote_warns_to_errors(&mut rules);
-        rules
+        rules::strict_rules(&result.config)
     } else {
         result.config.rules.clone()
     }

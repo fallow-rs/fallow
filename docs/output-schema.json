@@ -29091,7 +29091,7 @@
         {
           "type": "string",
           "const": "type-aware-fallback",
-          "description": "A note, not a gate that can fail: the type-aware pass was requested\nunder `typeAware.require: best-effort`, and no sidecar was found. The\nrun reports the findings that the pass can disprove\n(`unused-export`, `unused-type`, `unused-class-member`) at `warn`, so\nthey do not fail `error-severity-findings`. Always `status: skipped`\nand `enforced: false`. Absent when the sidecar ran, also when it\nfailed or timed out: those runs keep the configured severities."
+          "description": "A note, not a gate that can fail: the type-aware pass was requested\nunder `typeAware.require: best-effort`, and no sidecar was found. The\nrun reports the findings that the pass can disprove (`unused-export`,\n`unused-type`, `unused-class-member`, `private-type-leak`) at `warn`,\nalso under `--fail-on-issues`, so they do not fail\n`error-severity-findings`. Always `status: skipped`\nand `enforced: false`. Absent when the sidecar ran, also when it\nfailed or timed out: those runs keep the configured severities."
         },
         {
           "type": "string",

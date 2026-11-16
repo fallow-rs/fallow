@@ -382,7 +382,7 @@ fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOption
             &mut analysis.results,
             &projects,
             &entry_points,
-            fallow_config::any_semantic_refinable_rule_active(&config.rules),
+            fallow_config::any_symbol_use_rule_active(&config.rules),
             config.rules.private_type_leaks != fallow_config::Severity::Off,
             false,
         ) {

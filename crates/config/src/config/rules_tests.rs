@@ -940,8 +940,11 @@ fn apply_partial_preserves_type_only_default() {
 /// The cap changes exactly the kinds of the list and no other rule.
 #[test]
 fn cap_semantic_refinable_lowers_only_listed_error_rules() {
-    let mut all_error = RulesConfig::default();
-    let mut capped = RulesConfig::default();
+    let mut all_error = RulesConfig {
+        private_type_leaks: Severity::Error,
+        ..RulesConfig::default()
+    };
+    let mut capped = all_error.clone();
     for kind in SEMANTIC_REFINABLE_KINDS {
         assert_eq!(all_error.severity_for_kind(kind), Severity::Error);
     }
@@ -952,6 +955,7 @@ fn cap_semantic_refinable_lowers_only_listed_error_rules() {
     capped.unused_exports = Severity::Error;
     capped.unused_types = Severity::Error;
     capped.unused_class_members = Severity::Error;
+    capped.private_type_leaks = all_error.private_type_leaks;
     assert_eq!(
         serde_json::to_value(&capped).unwrap(),
         serde_json::to_value(&all_error).unwrap(),
@@ -969,11 +973,33 @@ fn cap_semantic_refinable_lowers_partial_overrides() {
         unused_class_members: Some(Severity::Error),
         unused_exports: Some(Severity::Off),
         unused_files: Some(Severity::Error),
+        private_type_leaks: Some(Severity::Error),
         ..PartialRulesConfig::default()
     };
     partial.cap_semantic_refinable_at_warn();
     assert_eq!(partial.unused_class_members, Some(Severity::Warn));
+    assert_eq!(partial.private_type_leaks, Some(Severity::Warn));
     assert_eq!(partial.unused_exports, Some(Severity::Off));
     assert_eq!(partial.unused_types, None);
     assert_eq!(partial.unused_files, Some(Severity::Error));
+}
+
+/// The type-aware pass removes each private-type-leak candidate that the
+/// checker does not confirm, so these findings are refinable too. The
+/// symbol-use query does not cover them.
+#[test]
+fn private_type_leaks_are_refinable_but_not_symbol_use() {
+    assert!(SEMANTIC_REFINABLE_KINDS.contains(&IssueKind::PrivateTypeLeak));
+    assert!(!SYMBOL_USE_REFINABLE_KINDS.contains(&IssueKind::PrivateTypeLeak));
+    for kind in SYMBOL_USE_REFINABLE_KINDS {
+        assert!(SEMANTIC_REFINABLE_KINDS.contains(&kind), "{kind:?}");
+    }
+    let only_leaks = RulesConfig {
+        unused_exports: Severity::Off,
+        unused_types: Severity::Off,
+        unused_class_members: Severity::Off,
+        private_type_leaks: Severity::Error,
+        ..RulesConfig::default()
+    };
+    assert!(!any_symbol_use_rule_active(&only_leaks));
 }

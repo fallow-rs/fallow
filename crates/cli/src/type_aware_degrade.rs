@@ -4,14 +4,16 @@
 //! only removes candidates it confirms are used, so a run that loses the
 //! semantic pass is stricter than a refined one, never laxer. Every CLI surface
 //! therefore continues with the syntactic result unless `typeAware.require` is
-//! `complete`, which keeps the historical hard failure. This mirrors the LSP
-//! behavior in `crates/lsp/src/analysis.rs`.
+//! `complete`, which keeps the historical hard failure. The LSP in
+//! `crates/lsp/src/analysis.rs` continues with the syntactic result in the same
+//! way.
 //!
 //! When no sidecar was found, the dead-code run also lowers the findings that
-//! the type-aware pass can disprove to `warn` (#4606). The project asked for
-//! the type-aware result, so a finding that the pass could remove does not
-//! fail the gate. A sidecar that started and then failed or timed out keeps the
-//! configured severities.
+//! the type-aware pass can disprove to `warn` (#4606), also under
+//! `--fail-on-issues`. The project asked for the type-aware result, so a
+//! finding that the pass could remove does not fail the gate. A sidecar that
+//! started and then failed or timed out keeps the configured severities. The
+//! LSP does not lower these findings.
 
 use std::path::Path;
 use std::process::ExitCode;
@@ -22,7 +24,7 @@ use fallow_types::envelope::TypeAwareMeta;
 /// Warning text for a run that fell back to syntactic findings.
 pub fn degraded_message(root: &Path, error: &str, refinable_lowered: bool) -> String {
     let lowered = if refinable_lowered {
-        "; unused exports, types and class members are reported as warn"
+        "; unused exports, types, class members and private type leaks are reported as warn"
     } else {
         ""
     };
@@ -100,10 +102,7 @@ pub fn degrade_dead_code(
         refinable_lowered: sidecar_not_found,
     })?;
     if sidecar_not_found {
-        config.rules.cap_semantic_refinable_at_warn();
-        for entry in &mut config.overrides {
-            entry.rules.cap_semantic_refinable_at_warn();
-        }
+        config.cap_semantic_refinable_rules();
     }
     Ok(meta)
 }
