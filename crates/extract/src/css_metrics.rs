@@ -300,25 +300,6 @@ fn walk_rules(rules: &[CssRule<'_>], depth: u8, acc: &mut Accumulator) {
                 }
                 walk_rules(&rule.rules.0, depth, acc);
             }
-            CssRule::LayerStatement(stmt) => {
-                // `@layer a, b, c;` declares ordering but populates nothing.
-                for name in &stmt.names {
-                    acc.declared_layers.insert(layer_name_string(name));
-                }
-            }
-            CssRule::Property(prop) => {
-                acc.registered_custom_properties
-                    .insert(prop.name.0.to_string());
-            }
-            CssRule::FontFace(font_face) => {
-                for property in &font_face.properties {
-                    if let FontFaceProperty::FontFamily(family) = property
-                        && let Some(name) = font_family_name(family)
-                    {
-                        acc.defined_font_faces.insert(name);
-                    }
-                }
-            }
             CssRule::MozDocument(rule) => walk_rules(&rule.rules.0, depth, acc),
             CssRule::StartingStyle(rule) => walk_rules(&rule.rules.0, depth, acc),
             CssRule::Scope(rule) => walk_rules(&rule.rules.0, depth, acc),
@@ -326,13 +307,40 @@ fn walk_rules(rules: &[CssRule<'_>], depth: u8, acc: &mut Accumulator) {
                 record_style_rule(&rule.style, depth, acc);
                 walk_rules(&rule.style.rules.0, depth.saturating_add(1), acc);
             }
-            CssRule::NestedDeclarations(nested) => record_nested_declarations(nested, acc),
-            CssRule::Keyframes(keyframes) => {
-                acc.defined_keyframes
-                    .insert(keyframes_name_string(&keyframes.name));
-            }
-            _ => {}
+            _ => record_leaf_rule(rule, acc),
         }
+    }
+}
+
+/// Record a rule that holds no nested style rules: declarations nested in a
+/// style rule, layer order, registered properties, font faces and keyframes.
+fn record_leaf_rule(rule: &CssRule<'_>, acc: &mut Accumulator) {
+    match rule {
+        CssRule::LayerStatement(stmt) => {
+            // `@layer a, b, c;` declares ordering but populates nothing.
+            for name in &stmt.names {
+                acc.declared_layers.insert(layer_name_string(name));
+            }
+        }
+        CssRule::Property(prop) => {
+            acc.registered_custom_properties
+                .insert(prop.name.0.to_string());
+        }
+        CssRule::FontFace(font_face) => {
+            for property in &font_face.properties {
+                if let FontFaceProperty::FontFamily(family) = property
+                    && let Some(name) = font_family_name(family)
+                {
+                    acc.defined_font_faces.insert(name);
+                }
+            }
+        }
+        CssRule::NestedDeclarations(nested) => record_nested_declarations(nested, acc),
+        CssRule::Keyframes(keyframes) => {
+            acc.defined_keyframes
+                .insert(keyframes_name_string(&keyframes.name));
+        }
+        _ => {}
     }
 }
 
