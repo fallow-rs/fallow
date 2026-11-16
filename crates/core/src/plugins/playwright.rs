@@ -217,7 +217,11 @@ fn collect_branch_strings(expr: &Expression<'_>, values: &mut Vec<String>) {
             }
             collect_branch_strings(&logical.right, values);
         }
-        inner => values.extend(config_parser::collect_shallow_string_values(inner)),
+        inner => match config_parser::expression_to_string(inner) {
+            // A template literal without expressions, such as `./setup.ts`.
+            Some(value) => values.push(value),
+            None => values.extend(config_parser::collect_shallow_string_values(inner)),
+        },
     }
 }
 
@@ -234,8 +238,27 @@ fn add_loaded_module(result: &mut PluginResult, file: &str, root: &Path, config_
             result.push_entry_export_credit(format!("{pattern}.*"), ["default"]);
         }
         result.push_entry_export_credit(pattern, ["default"]);
+        // A TypeScript project can name the source `reporter.ts` with the
+        // ESM specifier `./reporter.js`. The resolver maps the specifier to
+        // the source, so the credit must name the source too.
+        for source_ext in typescript_source_extensions(relative) {
+            let source = relative.with_extension(source_ext);
+            let pattern = globset::escape(&config_parser::path_to_config_string(&source));
+            result.push_entry_export_credit(pattern, ["default"]);
+        }
     }
     result.setup_files.push(path);
+}
+
+/// The TypeScript source extensions of a JavaScript module specifier.
+fn typescript_source_extensions(path: &Path) -> &'static [&'static str] {
+    match path.extension().and_then(|ext| ext.to_str()) {
+        Some("js") => &["ts", "tsx"],
+        Some("jsx") => &["tsx"],
+        Some("mjs") => &["mts"],
+        Some("cjs") => &["cts"],
+        _ => &[],
+    }
 }
 
 /// A `testDir` or `testMatch` value of one config scope.
@@ -879,6 +902,38 @@ mod tests {
             vec![
                 PathBuf::from("/project/one.ts"),
                 PathBuf::from("/project/two.ts"),
+            ]
+        );
+    }
+
+    #[test]
+    fn template_literal_setup_and_reporter_paths_are_read() {
+        let result = resolve(
+            "export default defineConfig({
+                reporter: [[`./reporter.ts`]],
+                globalSetup: `./setup.ts`,
+                globalTeardown: external ? undefined : `./teardown.ts`,
+            });",
+        );
+        assert_eq!(
+            result.setup_files,
+            vec![
+                PathBuf::from("/project/setup.ts"),
+                PathBuf::from("/project/teardown.ts"),
+                PathBuf::from("/project/reporter.ts"),
+            ]
+        );
+    }
+
+    #[test]
+    fn js_specifier_credits_the_typescript_source() {
+        let result = resolve(r#"export default { reporter: [["./reporter.js"]] };"#);
+        assert_eq!(
+            result.entry_export_credits,
+            vec![
+                crate::plugins::UsedExportRule::new("reporter.js", ["default"]),
+                crate::plugins::UsedExportRule::new("reporter.ts", ["default"]),
+                crate::plugins::UsedExportRule::new("reporter.tsx", ["default"]),
             ]
         );
     }
