@@ -13,7 +13,7 @@ vi.mock("vscode", async () => {
 import { countCheckIssues } from "../src/analysis-utils.js";
 import { DIAGNOSTIC_CATEGORIES } from "../src/diagnosticFilter.js";
 import { ISSUE_CATEGORY_LABELS, type IssueCategory } from "../src/labels.js";
-import { buildParamsFromCli, buildStatusBarPartsFromLsp } from "../src/statusBar-utils.js";
+import { buildParamsFromCli } from "../src/statusBar-utils.js";
 import { DeadCodeTreeProvider } from "../src/treeView.js";
 import type { CheckOutput, FallowCheckResult } from "../src/types.js";
 import { emptyCheck } from "./checkFixtures.js";
@@ -545,10 +545,7 @@ describe("dead-code IssueKind drift guard", () => {
   it("renders an absent optional prop candidate at its declaration for manual review", () => {
     const provider = new DeadCodeTreeProvider();
     const check = checkWith("absent_component_props", absentProp);
-    expect(buildStatusBarPartsFromLsp(buildParamsFromCli(check, null, null))).toEqual([
-      "1 issues",
-      "0.0% duplication",
-    ]);
+    expect(buildParamsFromCli(check, null, null).totalIssues).toBe(1);
     provider.update(check);
     const categories = provider.getChildren();
     expect(categories).toHaveLength(1);

@@ -207,19 +207,12 @@ export const getAuditWorsened = (): AuditWorsened | undefined => {
 };
 
 /**
- * Whether the audit verdict status-bar item is created. Default on; creating an
- * idle item runs no analysis, so this only controls the surface, not cost.
+ * Whether the Fallow status bar item shows the audit verdict. Default on; the
+ * setting controls only the display, not the cost: no audit runs until the
+ * user asks for one.
  */
 export const getAuditEnabled = (): boolean =>
   getConfig().get<boolean>("audit.statusBar.enabled", true);
-
-/**
- * Whether the diagnostics on/off toggle status-bar item is shown. Default on so
- * a first-install user has a visible button to hide the squiggles; the item runs
- * no analysis, so this only controls the surface, not cost.
- */
-export const getDiagnosticStatusBar = (): boolean =>
-  getConfig().get<boolean>("diagnostics.statusBar", true);
 
 export const getDiagnosticSeverity = (): DiagnosticSeveritySetting => {
   const value = getConfig().get<string>("diagnostics.severity", "warning");
@@ -244,7 +237,7 @@ export const getMutedDiagnosticCategories = (): ReadonlySet<string> => {
 
 /**
  * Whether to re-run the audit on save of a JS/TS file. Default OFF so it cannot
- * regress idle latency; the command and status-bar item are the primary entry
+ * regress idle latency; the command and the status bar menu are the primary entry
  * points.
  */
 export const getAuditRunOnSave = (): boolean => getConfig().get<boolean>("audit.runOnSave", false);

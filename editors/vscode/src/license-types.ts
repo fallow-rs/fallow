@@ -5,8 +5,9 @@
  *
  * Source of truth is `LicenseStatusJson` in
  * `crates/cli/src/license/mod.rs`. Keep `LicenseState` in lockstep with the
- * Rust `status_state` match arms; the vitest exhaustiveness guard in
- * `license-utils` fails when a state is added here without a label.
+ * Rust `status_state` match arms; the exhaustive `switch` statements in
+ * `statusBar-model.ts` fail to compile when a state is added here without a
+ * label.
  */
 
 /**
