@@ -1,7 +1,9 @@
 //! A hand-written declaration file next to a JS module (`lib.d.mts` next to
 //! `lib.mjs`, `legacy.d.ts` next to `legacy.js`) types the imports of that
 //! module. Under `includeEntryExports`, an export of the declaration file that
-//! an importer of the JS module uses must not report as unused.
+//! an importer of the JS module uses must not report as unused. A type read
+//! through a namespace import of the JS module (`ns.WrapOpts`) counts as a
+//! use (issue #4551).
 
 use super::common::{create_config, fixture_path};
 use fallow_types::results::AnalysisResults;
@@ -41,6 +43,11 @@ fn declaration_sibling_exports_are_credited_by_runtime_imports() {
             "src/legacy.d.ts",
             &["default", "LegacyOpts"][..],
             &["unusedLegacy"][..],
+        ),
+        (
+            "src/ns.d.mts",
+            &["wrap", "WrapOpts"][..],
+            &["UnusedWrapOpts"][..],
         ),
     ] {
         let reported = unused_names_in(&results, file);

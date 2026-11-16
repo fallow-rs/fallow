@@ -444,7 +444,7 @@ pub fn find_unused_exports(
     let schema_exports = types::schema_exports_by_file(config, graph, modules);
 
     let ambiguity = graph.ambiguity_participants();
-    let declaration_sibling_credit = declaration_sibling_credit(graph);
+    let declaration_sibling_credit = declaration_sibling_credit(graph, modules);
     let module_context = UnusedExportModuleContext {
         graph,
         config,
