@@ -225,6 +225,18 @@ describe("Fallow VS Code extension", () => {
     });
   }
 
+  // `fallow.openSettings` goes through `runCommands` so that Cursor does not
+  // send the Settings editor pane to the extension host (#4595). The Settings
+  // editor must still open in VS Code.
+  it("opens the Settings editor from fallow.openSettings", async () => {
+    try {
+      await vscode.commands.executeCommand("fallow.openSettings");
+      assert.equal(vscode.window.tabGroups.activeTabGroup.activeTab?.label, "Settings");
+    } finally {
+      await vscode.commands.executeCommand("workbench.action.closeAllEditors");
+    }
+  });
+
   it("frames completed security scans as unverified candidates in the actual toast", async () => {
     const messages: string[] = [];
     windowApi.showInformationMessage = async (message: string) => {

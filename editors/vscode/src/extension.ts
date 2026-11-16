@@ -11,6 +11,7 @@ import { shouldAcceptLspAnalysisComplete } from "./analysisNotification.js";
 import { startClient, stopClient, restartClient } from "./client.js";
 import { cancelReleaseRetry } from "./download.js";
 import { enableFeature } from "./enableFeature.js";
+import { openSettingsSearch } from "./openSettings.js";
 import { createSingleFlight } from "./analysis-single-flight.js";
 import {
   getHealthEnabled,
@@ -697,10 +698,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
         await vscode.window.showInformationMessage(message);
       },
       openChangedSinceSetting: async () => {
-        await vscode.commands.executeCommand(
-          "workbench.action.openSettings",
-          "fallow.changedSince",
-        );
+        await openSettingsSearch("fallow.changedSince");
       },
       updateChangedSince: async (value) => {
         await vscode.workspace
@@ -1023,9 +1021,7 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
 
   // Open Fallow settings (used by walkthrough completion event)
   context.subscriptions.push(
-    vscode.commands.registerCommand("fallow.openSettings", () => {
-      void vscode.commands.executeCommand("workbench.action.openSettings", "fallow");
-    }),
+    vscode.commands.registerCommand("fallow.openSettings", () => openSettingsSearch("fallow")),
   );
 
   // Turn on an opt-in view from its sidebar welcome link (#4553).
