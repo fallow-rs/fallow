@@ -1634,14 +1634,6 @@ impl ModuleInfoExtractor {
         }
     }
 
-    fn preseed_nested_declarations(&mut self, statements: &[Statement<'_>]) {
-        for statement in statements {
-            if let Some(declaration) = statement.as_declaration() {
-                self.record_nested_declaration(declaration);
-            }
-        }
-    }
-
     fn preseed_direct_object_binding_scope_roots(&mut self, statements: &[Statement<'_>]) {
         for statement in statements {
             let declaration = match statement {
@@ -3473,6 +3465,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.record_program_sanitizer_functions(program);
         self.record_local_function_return_types(program);
         self.preseed_direct_object_binding_targets(&program.body);
+        self.record_module_vars(&program.body);
         self.record_program_local_import_loaders(program);
         self.record_program_component_loader_imports(program);
         walk::walk_program(self, program);

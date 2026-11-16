@@ -289,10 +289,21 @@ impl ModuleInfoExtractor {
 
     /// Track whether only a nested scope declares the class binding
     /// `binding`. Call it before the binding map takes `binding`. An
-    /// assignment in a nested scope to an outer name does not declare it.
+    /// assignment in a nested scope to an outer name does not declare it. A
+    /// `var` in a block of module scope hoists to module scope.
+    ///
+    /// A module-scope binding with the name of a nested-only binding is
+    /// another binding, so it replaces the nested class binding. Otherwise
+    /// the module-scope reads resolve through the nested class.
     fn track_binding_scope(&mut self, binding: &str) {
-        if self.is_module_scope() {
-            self.shadowed_reads.nested_only_bindings.remove(binding);
+        let hoisted_var = self.function_depth == 0
+            && self.namespace_depth == 0
+            && self.shadowed_reads.module_vars.contains(binding);
+        if self.is_module_scope() || hoisted_var {
+            if self.shadowed_reads.nested_only_bindings.remove(binding) {
+                self.binding_target_names.remove(binding);
+                self.walk_order_class_bindings.remove(binding);
+            }
         } else if !binding.contains('.')
             && self.nested_scope_shadows(binding)
             && !self.binding_target_names.contains_key(binding)
@@ -660,6 +671,26 @@ impl ModuleInfoExtractor {
             return;
         };
         scope.extend(declarations.into_iter().map(|id| id.name.to_string()));
+    }
+
+    pub(super) fn preseed_nested_declarations(&mut self, statements: &[Statement<'_>]) {
+        for statement in statements {
+            if let Some(declaration) = statement.as_declaration() {
+                self.record_nested_declaration(declaration);
+            }
+        }
+    }
+
+    /// Record the `var` names that hoist to module scope, also from a block.
+    /// An SFC or Astro file visits each script with one extractor, so the
+    /// names of every script add up.
+    pub(super) fn record_module_vars<'a>(
+        &mut self,
+        statements: &oxc_allocator::Vec<'a, Statement<'a>>,
+    ) {
+        self.shadowed_reads
+            .module_vars
+            .extend(Self::var_binding_roots(statements));
     }
 
     pub(super) fn var_binding_roots<'a>(

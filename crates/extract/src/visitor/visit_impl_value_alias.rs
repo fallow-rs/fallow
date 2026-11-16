@@ -92,6 +92,9 @@ pub(in crate::visitor) struct ShadowedReads {
     /// `const Alias = new Foo()` in a function body. A read at module scope
     /// never sees such a binding (issue #4603).
     pub(in crate::visitor) nested_only_bindings: FxHashSet<String>,
+    /// `var` names that hoist to module scope, such as a `var` in an `if`
+    /// block of module scope. Such a binding is never nested only.
+    pub(in crate::visitor) module_vars: FxHashSet<String>,
 }
 
 impl ShadowedReads {

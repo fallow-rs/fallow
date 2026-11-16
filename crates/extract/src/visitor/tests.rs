@@ -18831,3 +18831,46 @@ fn module_scope_read_skips_nested_class_binding_of_same_name() {
         "a read in the scope of the nested binding keeps its credit: {nested:?}"
     );
 }
+
+/// Issue #4603: a `var` in a block of module scope hoists to module scope, so
+/// a module-scope read of it keeps the credit of its class binding. A
+/// module-scope binding of another kind with the name of a nested class
+/// binding also keeps its credit.
+#[test]
+fn module_scope_read_keeps_class_binding_of_hoisted_block_var() {
+    let accesses = |source: &str| {
+        parse(source)
+            .member_accesses
+            .iter()
+            .map(|access| format!("{}.{}", access.object, access.member))
+            .collect::<Vec<_>>()
+    };
+    for source in [
+        "import { Foo } from './f';\nif (globalThis.x) { var svc = new Foo(); }\nsvc.run();",
+        "import { Foo } from './f';\ntry { var svc = new Foo(); } catch {}\nsvc.run();",
+        "import { Foo } from './f';\ndeclare function make(): Foo;\n{ var svc: Foo = make(); }\nsvc.run();",
+        "import { Foo } from './f';\nsvc.run();\nif (globalThis.x) { var svc = new Foo(); }",
+    ] {
+        let found = accesses(source);
+        assert!(found.iter().any(|a| a == "Foo.run"), "{source}: {found:?}");
+    }
+    let lexical = accesses(
+        "import { Foo } from './f';\nif (globalThis.x) { const svc = new Foo(); void svc; }\nsvc.run();",
+    );
+    assert!(
+        !lexical.iter().any(|a| a == "Foo.run"),
+        "a lexical binding of a block stays nested: {lexical:?}"
+    );
+    let typed = accesses(
+        "import { Foo } from './f';\nimport { Bar } from './b';\nexport function setup(): void { const svc = new Foo(); void svc; }\nlet svc: Bar;\nsvc.run();",
+    );
+    assert!(typed.iter().any(|a| a == "Bar.run"), "{typed:?}");
+    assert!(!typed.iter().any(|a| a == "Foo.run"), "{typed:?}");
+    let destructured = accesses(
+        "import { Foo } from './f';\nimport { Bar } from './b';\nexport function setup(): void { const svc = new Foo(); void svc; }\nconst { svc }: { svc: Bar } = load();\nsvc.run();",
+    );
+    assert!(
+        !destructured.iter().any(|a| a == "Foo.run"),
+        "{destructured:?}"
+    );
+}
