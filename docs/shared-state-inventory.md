@@ -64,3 +64,16 @@ disk, warm-process and disk-disabled session reuse. Embedded facts remap byte
 offsets and import indices during merging. The graph resolver and graph edges
 are unchanged. Graph restoration already reattaches parsed semantic facts, so
 adding these facts does not change its persisted graph contract.
+
+## Scope
+
+The inventory covers the two forms of hidden coupling in
+[#4281](https://github.com/fallow-rs/fallow/issues/4281):
+
+- a property write through a binding that another module exports;
+- a custom global that one file writes and a different file reads.
+
+The inventory is evidence for a reader, not a finding. It has no severity,
+no `fallow explain` entry and no gate, and each of its `actions` is manual.
+An advisory finding is a separate contract. It needs its own precision check
+on the public corpus before it can exist.
