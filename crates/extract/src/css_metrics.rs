@@ -10,6 +10,7 @@
 //! A hard parse failure yields `None`.
 
 use cssparser::{Delimiter, Parser, ParserInput, parse_important};
+use lightningcss::declaration::DeclarationBlock;
 use lightningcss::printer::PrinterOptions;
 use lightningcss::properties::animation::AnimationName;
 use lightningcss::properties::box_shadow::BoxShadow;
@@ -21,6 +22,7 @@ use lightningcss::properties::{Property, PropertyId};
 use lightningcss::rules::CssRule;
 use lightningcss::rules::font_face::FontFaceProperty;
 use lightningcss::rules::keyframes::KeyframesName;
+use lightningcss::rules::nesting::NestedDeclarationsRule;
 use lightningcss::rules::style::StyleRule;
 use lightningcss::selector::{Component, Selector};
 use lightningcss::stylesheet::{ParserOptions, StyleSheet};
@@ -324,6 +326,7 @@ fn walk_rules(rules: &[CssRule<'_>], depth: u8, acc: &mut Accumulator) {
                 record_style_rule(&rule.style, depth, acc);
                 walk_rules(&rule.style.rules.0, depth.saturating_add(1), acc);
             }
+            CssRule::NestedDeclarations(nested) => record_nested_declarations(nested, acc),
             CssRule::Keyframes(keyframes) => {
                 acc.defined_keyframes
                     .insert(keyframes_name_string(&keyframes.name));
@@ -411,19 +414,41 @@ fn record_style_rule(style: &StyleRule<'_>, depth: u8, acc: &mut Accumulator) {
         });
     }
 
-    collect_rule_property_tokens(style, acc, style.loc.line.saturating_add(1));
+    collect_rule_property_tokens(&style.declarations, acc, style.loc.line.saturating_add(1));
+}
+
+/// Fold bare declarations of a nested at-rule into the totals and token sets.
+/// For `.a { @media (...) { animation: x 1s; } }`, lightningcss stores the
+/// declarations inside the `@media` block as a nested-declarations rule with
+/// no selector. Without this, a `@keyframes` that only such a block uses is
+/// reported as unreferenced. The block is not a new style rule, so the rule
+/// count and the per-rule metrics stay as they are.
+fn record_nested_declarations(nested: &NestedDeclarationsRule<'_>, acc: &mut Accumulator) {
+    let block = &nested.declarations;
+    let important = block.important_declarations.len();
+    let analytics = &mut acc.analytics;
+    analytics.total_declarations = analytics
+        .total_declarations
+        .saturating_add(saturate_u32(block.declarations.len() + important));
+    analytics.important_declarations = analytics
+        .important_declarations
+        .saturating_add(saturate_u32(important));
+    collect_rule_property_tokens(block, acc, nested.loc.line.saturating_add(1));
 }
 
 /// Scan a rule's declarations (normal + `!important`) for design-token values,
 /// custom-property definitions, and `@keyframes` / font-family references,
 /// folding them into `acc`. Colors and `var()` references are collected
 /// separately by the value visitor.
-fn collect_rule_property_tokens(style: &StyleRule<'_>, acc: &mut Accumulator, rule_line: u32) {
-    for property in style
-        .declarations
+fn collect_rule_property_tokens(
+    block: &DeclarationBlock<'_>,
+    acc: &mut Accumulator,
+    rule_line: u32,
+) {
+    for property in block
         .declarations
         .iter()
-        .chain(style.declarations.important_declarations.iter())
+        .chain(block.important_declarations.iter())
     {
         collect_property_tokens(property, acc, rule_line);
         collect_raw_style_value(property, acc, rule_line);
@@ -1174,6 +1199,23 @@ mod tests {
             !a.referenced_keyframes.contains(&"unused".to_string()),
             "no animation references `unused`"
         );
+    }
+
+    #[test]
+    fn declarations_in_nested_at_rule_reference_keyframes() {
+        // Native nesting: an `@media` block inside a style rule holds bare
+        // declarations, which lightningcss stores as nested declarations.
+        let a = analytics(
+            ".pulse {\n  animation: moving 1s ease-out;\n  @media (prefers-reduced-motion: reduce) {\n    animation: still 1s step-end !important;\n  }\n}\n\
+             @keyframes moving { from { opacity: 0; } to { opacity: 1; } }\n\
+             @keyframes still { from, to { opacity: 1; } }",
+        );
+        assert_eq!(
+            a.referenced_keyframes,
+            vec!["moving".to_string(), "still".to_string()]
+        );
+        assert_eq!(a.total_declarations, 2);
+        assert_eq!(a.important_declarations, 1);
     }
 
     #[test]
