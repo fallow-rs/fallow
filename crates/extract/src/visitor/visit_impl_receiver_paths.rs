@@ -41,7 +41,7 @@ impl StructuralParamMemberCollector {
 
     /// Each parameter path that `object` can read. A local with a conditional
     /// init gives one path for each branch.
-    pub(super) fn resolve_receivers(
+    fn resolve_receivers(
         &self,
         object: &Expression<'_>,
         allow_call_arguments: bool,
