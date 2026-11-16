@@ -194,7 +194,8 @@ fn duplicate_options_from_jscpd(
 /// jscpd's `ignoreIdentifiers: true` and `"consistent"` require each name to
 /// stand for one name on the other side, which is fallow's
 /// `consistentIdentifiers`. `"blind"` lets any name match any name.
-/// `ignoreLiterals` blinds both string and numeric literals.
+/// `ignoreLiterals` blinds both string and numeric literals. Without it,
+/// `mode: "weak"` keeps string values, which fallow's `weak` mode blinds.
 fn insert_jscpd_normalization(
     obj: &serde_json::Map<String, serde_json::Value>,
     dupes: &mut serde_json::Map<String, serde_json::Value>,
@@ -224,6 +225,10 @@ fn insert_jscpd_normalization(
     {
         normalization.insert("ignoreStringValues".to_string(), true.into());
         normalization.insert("ignoreNumericValues".to_string(), true.into());
+    } else if obj.get("mode").and_then(serde_json::Value::as_str) == Some("weak") {
+        // The source tool's weak mode only skips comments and still compares
+        // strings, while fallow's weak mode blinds them.
+        normalization.insert("ignoreStringValues".to_string(), false.into());
     }
     if !normalization.is_empty() {
         dupes.insert(
@@ -444,6 +449,32 @@ mod tests {
         assert!(normalization.get("consistentIdentifiers").is_none());
         assert_eq!(normalization["ignoreStringValues"], true);
         assert_eq!(normalization["ignoreNumericValues"], true);
+    }
+
+    #[test]
+    fn migrate_jscpd_weak_mode_keeps_string_values() {
+        for literals in ["", r#", "ignoreLiterals": false"#] {
+            let jscpd: serde_json::Value =
+                serde_json::from_str(&format!(r#"{{"mode": "weak"{literals}}}"#)).unwrap();
+            let mut config = empty_config();
+            let mut warnings = vec![];
+            migrate_jscpd(&jscpd, &mut config, &mut warnings);
+            let normalization = &config["duplicates"]["normalization"];
+            assert_eq!(normalization["ignoreStringValues"], false, "{literals}");
+        }
+    }
+
+    #[test]
+    fn migrate_jscpd_weak_mode_with_ignored_literals_blinds_strings() {
+        let jscpd: serde_json::Value =
+            serde_json::from_str(r#"{"mode": "weak", "ignoreLiterals": true}"#).unwrap();
+        let mut config = empty_config();
+        let mut warnings = vec![];
+        migrate_jscpd(&jscpd, &mut config, &mut warnings);
+        assert_eq!(
+            config["duplicates"]["normalization"]["ignoreStringValues"],
+            true
+        );
     }
 
     #[test]

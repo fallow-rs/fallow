@@ -262,7 +262,7 @@ pub struct NormalizationConfig {
     /// Require a one-to-one mapping between the identifier names of clone
     /// instances. Takes effect only when `ignoreIdentifiers` is on: `a = b + c`
     /// then matches `x = y + z`, but not `x = x + x`. A clone that breaks the
-    /// mapping is split at each token that breaks it.
+    /// mapping keeps each maximal part that maps one-to-one.
     /// Default: `false` in every mode.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub consistent_identifiers: Option<bool>,

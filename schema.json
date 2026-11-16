@@ -1146,7 +1146,7 @@
           ]
         },
         "consistentIdentifiers": {
-          "description": "Require a one-to-one mapping between the identifier names of clone\ninstances. Takes effect only when `ignoreIdentifiers` is on: `a = b + c`\nthen matches `x = y + z`, but not `x = x + x`. A clone that breaks the\nmapping is split at each token that breaks it.\nDefault: `false` in every mode.",
+          "description": "Require a one-to-one mapping between the identifier names of clone\ninstances. Takes effect only when `ignoreIdentifiers` is on: `a = b + c`\nthen matches `x = y + z`, but not `x = x + x`. A clone that breaks the\nmapping keeps each maximal part that maps one-to-one.\nDefault: `false` in every mode.",
           "type": [
             "boolean",
             "null"

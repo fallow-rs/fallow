@@ -180,8 +180,10 @@ pub fn recompute_stats(report: &DuplicationReport) -> DuplicationStats {
 
 /// Compare JS/TS sources for audit-safe reuse of the current analysis at base.
 ///
-/// Token kinds retain identifiers and ordinary literal values. Template and
-/// regex token kinds omit content, so their raw source spans must also match.
+/// Token kinds retain identifiers, ordinary literal values and the cooked
+/// static text of templates. Regex token kinds omit content, and template
+/// token kinds omit the raw spelling of their text, so the raw source spans
+/// of both must also match.
 /// Whole-template comparison conservatively rejects formatting changes inside
 /// interpolation expressions. The boolean is forwarded as tokenizer `skip_imports`.
 #[must_use]

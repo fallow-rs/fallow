@@ -30,7 +30,7 @@ pub enum TokenKind {
     BooleanLiteral(bool),
     /// The `null` literal.
     NullLiteral,
-    /// A template literal with its static text: the raw text of each quasi,
+    /// A template literal with its static text: the cooked text of each quasi,
     /// joined with `${}` where an expression stands. Normalization may erase
     /// the text. The expressions follow as their own tokens.
     TemplateLiteral(String),

@@ -382,14 +382,17 @@ error by suppressing a downstream detector.
   function-like spans with semantic shingles while retaining exact results from
   the configured mode. Candidate generation is deterministically bounded and
   reports skipped comparisons instead of hiding incomplete work.
-- Template literal tokens carry their static text, and string normalization
-  (`ignoreStringValues`) controls that text as it controls string literals.
+- Template literal tokens carry their static text, cooked as for string
+  literals, and string normalization (`ignoreStringValues`) controls that text
+  as it controls string literals.
 - `normalization.consistentIdentifiers` keeps the token hashes blind to
   names. Both exact detectors pass their raw groups through
   `detect/consistency.rs` before subset removal. That step keeps a group of
-  the full length only for instances whose names map one-to-one. Otherwise it
-  splits the group at each token that breaks a mapping. Each part of
-  `minTokens` or more stays a clone. The `near` pass does not use the check.
+  the full length for each class of instances whose names map one-to-one.
+  For each pair of classes it then finds every maximal window that maps
+  one-to-one, and merges the pairs that share a window. Each window of
+  `minTokens` or more tokens stays a clone. The `near` pass does not use the
+  check.
 - Near groups carry a required similarity inside the engine and convert to the
   shared output type only at the detector boundary. `CloneGroup::kind()` is the
   canonical way to distinguish exact and near groups after that conversion.

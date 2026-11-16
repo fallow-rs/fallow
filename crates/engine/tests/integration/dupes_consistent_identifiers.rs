@@ -224,3 +224,80 @@ fn template_literal_text_is_blind_with_ignore_string_values() {
     let report = detect(&[BASE, &changed], &config);
     assert_eq!(report.clone_groups.len(), 1, "{:#?}", report.clone_groups);
 }
+
+/// Two calls of 30 arguments each: `head(arg, ...); tail(arg, ...);`.
+fn two_calls(head: &str, tail: &str, args: &[&str]) -> String {
+    let list = |offset: usize| -> String {
+        (0..30)
+            .map(|index| args[(index + offset) % args.len()])
+            .collect::<Vec<_>>()
+            .join(",\n  ")
+    };
+    format!("{head}(\n  {});\n{tail}(\n  {});\n", list(0), list(1))
+}
+
+fn calls_config() -> DuplicatesConfig {
+    serde_json::from_value(serde_json::json!({
+        "minTokens": 100,
+        "minLines": 1,
+        "normalization": { "ignoreIdentifiers": true, "consistentIdentifiers": true },
+    }))
+    .unwrap()
+}
+
+fn longest_clone_tokens(report: &DuplicationReport, instances: usize) -> usize {
+    report
+        .clone_groups
+        .iter()
+        .filter(|group| group.instances.len() == instances)
+        .map(|group| group.token_count)
+        .max()
+        .unwrap_or(0)
+}
+
+#[test]
+fn consistent_identifiers_finds_the_longest_window_after_a_conflict() {
+    // `a` maps to `x`, then to `z`. Without the first `a`, the rest maps
+    // one-to-one and is longer than `minTokens`.
+    let first = two_calls("a", "a", &["b"]);
+    let second = two_calls("x", "z", &["y"]);
+    let report = detect(&[&first, &second], &calls_config());
+    assert!(
+        longest_clone_tokens(&report, 2) >= 100,
+        "the window after the first conflicting name must stay a clone: {:#?}",
+        report.clone_groups
+    );
+}
+
+#[test]
+fn consistent_identifiers_keeps_a_pair_when_a_third_instance_breaks_often() {
+    let first = two_calls("a", "a", &["b"]);
+    let second = two_calls("x", "z", &["y"]);
+    let third = two_calls("p", "p", &["q", "r", "q", "s"]);
+    let report = detect(&[&first, &second, &third], &calls_config());
+    let pair = report.clone_groups.iter().find(|group| {
+        group.instances.len() == 2
+            && group
+                .instances
+                .iter()
+                .all(|instance| !instance.file.ends_with("file2.js"))
+    });
+    assert!(
+        pair.is_some_and(|group| group.token_count >= 100),
+        "the first two instances must keep their shared clone: {:#?}",
+        report.clone_groups
+    );
+}
+
+#[test]
+fn template_literal_escapes_compare_as_in_strings() {
+    let escaped = BASE.replace("`Invoice total: ${total}`", "`Invoice \\x41: ${total}`");
+    let plain = BASE.replace("`Invoice total: ${total}`", "`Invoice A: ${total}`");
+    let config: DuplicatesConfig = serde_json::from_value(serde_json::json!({
+        "minTokens": 60,
+        "minLines": 3,
+    }))
+    .unwrap();
+    let report = detect(&[&escaped, &plain], &config);
+    assert_eq!(report.clone_groups.len(), 1, "{:#?}", report.clone_groups);
+}
