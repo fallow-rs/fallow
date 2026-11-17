@@ -590,7 +590,7 @@ jobs:
       - name: Install mutation runner dependencies
         run: npm ci --prefix tools/mutation-runner --no-audit --no-fund --ignore-scripts
 
-      - uses: taiki-e/install-action@b80e2bb2635f28eb98b9fce1e2f0887e1535c6b2 # v2.90.0
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-nextest
 
@@ -796,7 +796,7 @@ jobs:
         with:
           components: clippy
           shared-key: windows-debug
-      - uses: taiki-e/install-action@b80e2bb2635f28eb98b9fce1e2f0887e1535c6b2 # v2.90.0
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-nextest
       # One nextest run replaces ten `cargo test` calls. The calls had no
@@ -975,7 +975,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: crate-ci/typos@4c8b7f51ca60df14e3c5ca82770dfbbe6c3dae85 # v1
+      - uses: crate-ci/typos@2611abd15acb0c2e317fb9e45855aabb8b35a414 # v1
       - name: Hidden unicode
         run: python3 scripts/scan-hidden-unicode.py --mode committed
       - name: Hidden-unicode scanner self-test
@@ -1645,7 +1645,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: taiki-e/install-action@b80e2bb2635f28eb98b9fce1e2f0887e1535c6b2 # v2.90.0
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-audit
       - run: cargo audit
@@ -1789,7 +1789,7 @@ jobs:
           rustup toolchain install "$MIRI_TOOLCHAIN" --component miri
           cargo +"$MIRI_TOOLCHAIN" miri setup
 
-      - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
+      - uses: Swatinem/rust-cache@eedcf2fb1c22f010a0eb66b92f378c110977f266 # v2
         with:
           key: miri
           save-if: ${{ github.ref == 'refs/heads/main' }}
