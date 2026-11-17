@@ -78,6 +78,7 @@ pub fn run_combined(options: &CombinedOptions) -> ProgrammaticResult<CombinedPro
             super::type_aware_config::TypeAwareCommand::Analysis,
         )?;
     }
+    let options = &options_with_duplicates_config(options, &resolved)?;
     resolved.install(|| {
         resolved.ensure_not_cancelled("combined analysis")?;
         let production_modes = resolve_effective_production_modes(&resolved, None, None, None)?;
@@ -110,6 +111,29 @@ pub fn run_combined(options: &CombinedOptions) -> ProgrammaticResult<CombinedPro
             telemetry_analysis_run_id: None,
             request_outcomes: resolved.request_outcomes(),
         })
+    })
+}
+
+/// Apply the rule of [`fallow_config::DuplicatesConfig::select`] to the
+/// duplication domain, as the bare `fallow` command does. A run that selects
+/// only the duplication domain names it. A run with another domain runs
+/// duplication by default, so `duplicates.enabled: false` turns it off.
+fn options_with_duplicates_config(
+    options: &CombinedOptions,
+    resolved: &crate::analysis_context::ProgrammaticAnalysisContext,
+) -> ProgrammaticResult<CombinedOptions> {
+    let request = if !options.duplication {
+        fallow_config::DuplicationRequest::Excluded
+    } else if options.dead_code || options.health {
+        fallow_config::DuplicationRequest::Default {
+            command_default: None,
+        }
+    } else {
+        fallow_config::DuplicationRequest::Named
+    };
+    Ok(CombinedOptions {
+        duplication: super::duplication_selection(resolved, request)?.runs(),
+        ..options.clone()
     })
 }
 

@@ -35,7 +35,8 @@ pub use boundaries::{
 };
 pub use dependency_ignore::{IgnoreDependencyMatcher, is_dependency_glob};
 pub use duplicates_config::{
-    DetectionMode, DuplicatesConfig, NormalizationConfig, ResolvedNormalization,
+    DetectionMode, DuplicatesConfig, DuplicationRequest, DuplicationSelection, NormalizationConfig,
+    ResolvedNormalization,
 };
 pub use entry_effect::EntryEffectRecord;
 pub use entry_span::ConfigEntrySpan;

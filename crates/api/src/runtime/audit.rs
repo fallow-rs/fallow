@@ -63,7 +63,7 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
     let analysis = analysis_options_for_audit(options, &resolved_base.git_ref);
     let resolved = audit_section_context(&analysis)?;
     let config = load_programmatic_audit_config(&resolved)?;
-    let options = &options_with_audit_config(options, &config.audit, config.duplicates.enabled);
+    let options = &options_with_audit_config(options, &config.audit, &config.duplicates);
     let changed_files = changed_files_for_run(&resolved)?.unwrap_or_default();
     let changed_files_count = changed_files.len();
 
@@ -338,9 +338,9 @@ impl AuditAnalyses for ProgrammaticAuditAnalyses<'_> {
 /// precedence of `fallow audit`. `gate` and `css_deep` win over the config,
 /// as `--gate` and `--css-deep` / `--no-css-deep` do. `css` can only turn
 /// styling off, as `--no-css` does: the CLI has no flag that overrides
-/// `audit.css: false`. `duplicates_enabled` is the `duplicates.enabled` config
-/// key, the default of the duplication domain when the options and
-/// `audit.dupes` do not select it.
+/// `audit.css: false`. `duplicates` decides the duplication domain with the
+/// rule of [`fallow_config::DuplicatesConfig::select`]: the option wins, then
+/// `audit.dupes`, then `duplicates.enabled`.
 ///
 /// The destructure names every field, so a new `audit` key does not compile
 /// until the typed route applies it, rejects it, or states why it does not
@@ -348,7 +348,7 @@ impl AuditAnalyses for ProgrammaticAuditAnalyses<'_> {
 fn options_with_audit_config(
     options: &AuditOptions,
     config: &fallow_config::AuditConfig,
-    duplicates_enabled: bool,
+    duplicates: &fallow_config::DuplicatesConfig,
 ) -> AuditOptions {
     let fallow_config::AuditConfig {
         gate,
@@ -381,9 +381,15 @@ fn options_with_audit_config(
         ),
         health: Some(options.health.unwrap_or_else(|| health.unwrap_or(true))),
         duplication: Some(
-            options
-                .duplication
-                .unwrap_or_else(|| dupes.unwrap_or(duplicates_enabled)),
+            duplicates
+                .select(match options.duplication {
+                    Some(true) => fallow_config::DuplicationRequest::Named,
+                    Some(false) => fallow_config::DuplicationRequest::Excluded,
+                    None => fallow_config::DuplicationRequest::Default {
+                        command_default: *dupes,
+                    },
+                })
+                .runs(),
         ),
         css: Some(css),
         css_deep: Some(css_deep),

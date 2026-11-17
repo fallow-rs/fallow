@@ -148,17 +148,21 @@ pub fn resolve_bare_analyses(
     root: &std::path::Path,
     output: OutputFormat,
 ) -> Result<BareAnalyses, ExitCode> {
-    let (run_check, mut run_dupes, run_health) = resolve_analyses(&cli.only, &cli.skip);
-    let mut disabled_by_config = false;
-    if run_dupes
-        && cli.only.is_empty()
-        && !crate::cli_production::duplicates_enabled(cli, root, output)?
-    {
-        run_dupes = false;
-        disabled_by_config = true;
-        if cli.dupes_baseline.is_some() {
-            eprintln!("{INERT_DUPES_BASELINE_NOTE}");
+    let (run_check, selected_dupes, run_health) = resolve_analyses(&cli.only, &cli.skip);
+    let request = if !selected_dupes {
+        fallow_config::DuplicationRequest::Excluded
+    } else if cli.only.is_empty() {
+        fallow_config::DuplicationRequest::Default {
+            command_default: None,
         }
+    } else {
+        fallow_config::DuplicationRequest::Named
+    };
+    let selection = crate::cli_production::duplication_selection(cli, root, output, request)?;
+    let run_dupes = selection.runs();
+    let disabled_by_config = selection.off_by_duplicates_enabled();
+    if disabled_by_config && cli.dupes_baseline.is_some() {
+        eprintln!("{INERT_DUPES_BASELINE_NOTE}");
     }
     if run_check || run_dupes || run_health {
         return Ok(BareAnalyses {

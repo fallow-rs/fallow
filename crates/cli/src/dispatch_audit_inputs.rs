@@ -32,7 +32,8 @@ pub(super) fn resolve_audit_inputs(
         args.production_health,
         args.production_dupes,
     )?;
-    let analyses = resolve_audit_analyses(&audit_cfg, config.duplicates.enabled, args);
+    let dupes_selection = audit_duplication_selection(&audit_cfg, &config.duplicates, args);
+    let analyses = resolve_audit_analyses(&audit_cfg, dupes_selection, args);
     if !(analyses.dead_code || analyses.health || analyses.dupes) {
         return Err(emit_input_error(
             "this audit selects no sub-analysis: --skip, the audit.deadCode, audit.health and audit.dupes config keys, and duplicates.enabled leave nothing to run",
@@ -72,7 +73,7 @@ pub(super) fn resolve_audit_inputs(
     // flag had an effect before the audit read that key, so it gets a note
     // and the run goes on.
     let dupes_off_by_duplicates_enabled =
-        !analyses.dupes && resolve_audit_analyses(&audit_cfg, true, args).dupes;
+        !analyses.dupes && dupes_selection.off_by_duplicates_enabled();
     if dupes_off_by_duplicates_enabled && args.dupes_baseline.is_some() {
         eprintln!("{}", combined::INERT_DUPES_BASELINE_NOTE);
     }
@@ -105,16 +106,35 @@ pub(super) fn resolve_audit_inputs(
     })
 }
 
-/// The sub-analyses of this audit.
+/// The decision for the duplication sub-analysis of this audit.
 ///
-/// `duplicates_enabled` is the `duplicates.enabled` config key. It is the
-/// default of the duplication sub-analysis, so a project that turns
-/// duplication detection off gets no clone groups from `fallow audit`. An
-/// explicit `audit.dupes` value or `--only` selects the sub-analysis without
-/// that default.
+/// `--only dupes` names the sub-analysis. Without `--only`, `audit.dupes`
+/// decides, and without that key `duplicates.enabled` decides, so a project
+/// that turns duplication detection off gets no clone groups from
+/// `fallow audit`.
+fn audit_duplication_selection(
+    config: &fallow_config::AuditConfig,
+    duplicates: &fallow_config::DuplicatesConfig,
+    args: &AuditDispatchArgs,
+) -> fallow_config::DuplicationSelection {
+    let (_, selected, _) = combined::resolve_analyses(&args.only, &args.skip);
+    let request = if !selected {
+        fallow_config::DuplicationRequest::Excluded
+    } else if args.only.is_empty() {
+        fallow_config::DuplicationRequest::Default {
+            command_default: config.dupes,
+        }
+    } else {
+        fallow_config::DuplicationRequest::Named
+    };
+    duplicates.select(request)
+}
+
+/// The sub-analyses of this audit. `dupes` is the decision of
+/// [`audit_duplication_selection`].
 fn resolve_audit_analyses(
     config: &fallow_config::AuditConfig,
-    duplicates_enabled: bool,
+    dupes: fallow_config::DuplicationSelection,
     args: &AuditDispatchArgs,
 ) -> audit::AuditAnalysisSelection {
     if audit_renders_brief(args) {
@@ -122,19 +142,19 @@ fn resolve_audit_analyses(
     }
     let architecture = combined::resolve_architecture_selection(&args.only, &args.skip);
     if !args.only.is_empty() {
-        let (dead_code, dupes, health) = combined::resolve_analyses(&args.only, &[]);
+        let (dead_code, _, health) = combined::resolve_analyses(&args.only, &[]);
         return audit::AuditAnalysisSelection {
             dead_code,
             health,
-            dupes,
+            dupes: dupes.runs(),
             architecture,
         };
     }
-    let (dead_code, dupes, health) = combined::resolve_analyses(&[], &args.skip);
+    let (dead_code, _, health) = combined::resolve_analyses(&[], &args.skip);
     audit::AuditAnalysisSelection {
         dead_code: dead_code && config.dead_code.unwrap_or(true),
         health: health && config.health.unwrap_or(true),
-        dupes: dupes && config.dupes.unwrap_or(duplicates_enabled),
+        dupes: dupes.runs(),
         architecture,
     }
 }

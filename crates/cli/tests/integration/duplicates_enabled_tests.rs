@@ -1,6 +1,7 @@
 //! `duplicates.enabled: false` turns the duplication analysis off in the bare
 //! `fallow` command. `--only dupes` and the `fallow dupes` command name the
-//! analysis, so they still run it.
+//! analysis, so they still run it. The health score then has no duplication
+//! measure and no duplication penalty.
 
 #![allow(
     clippy::unwrap_used,
@@ -124,5 +125,87 @@ fn bare_run_names_a_dupes_baseline_that_has_no_effect() {
             .contains("--dupes-baseline has no effect: duplicates.enabled is false"),
         "stderr: {}",
         output.stderr
+    );
+}
+
+#[test]
+fn health_score_measures_duplication_by_default() {
+    let tmp = project("{}");
+    let json = parse_json(&run(tmp.path(), &["health", "--score", "--quiet"]));
+
+    assert!(
+        json["health_score"]["penalties"]["duplication"].is_number(),
+        "{json:#}"
+    );
+}
+
+#[test]
+fn health_score_omits_duplication_with_duplicates_enabled_false() {
+    let tmp = project(DISABLED);
+    let json = parse_json(&run(tmp.path(), &["health", "--score", "--quiet"]));
+
+    assert!(json["health_score"]["score"].is_number(), "{json:#}");
+    assert!(
+        json["health_score"]["penalties"]
+            .get("duplication")
+            .is_none(),
+        "{json:#}"
+    );
+}
+
+#[test]
+fn bare_run_score_omits_duplication_with_duplicates_enabled_false() {
+    let tmp = project(DISABLED);
+    let json = parse_json(&run(tmp.path(), &["--score", "--quiet"]));
+    let health = &json["health"];
+
+    assert!(health["health_score"]["score"].is_number(), "{json:#}");
+    assert!(
+        health["health_score"]["penalties"]
+            .get("duplication")
+            .is_none(),
+        "{json:#}"
+    );
+}
+
+#[test]
+fn include_dupes_runs_the_cross_reference_with_duplicates_enabled_false() {
+    let tmp = project(DISABLED);
+    // `second.js` is then both a clone and an unused file.
+    fs::write(
+        tmp.path().join("src/index.js"),
+        "import { first } from './first.js';\nconsole.log(first);\n",
+    )
+    .unwrap();
+    let output = run_fallow_raw(&[
+        "dead-code",
+        "--include-dupes",
+        "--root",
+        tmp.path().to_str().unwrap(),
+    ]);
+
+    assert!(
+        output.stdout.contains("Duplicated + Unused"),
+        "the flag names the cross-reference: {}",
+        output.stdout
+    );
+}
+
+/// The score of a project does not depend on the analyses that one run
+/// selects, so a run that names duplication gives the same score.
+#[test]
+fn a_named_duplication_run_does_not_change_the_health_score() {
+    let tmp = project(DISABLED);
+    let json = parse_json(&run(
+        tmp.path(),
+        &["--only", "dupes,health", "--score", "--quiet"],
+    ));
+
+    assert_eq!(clone_groups(&json["dupes"]), 1, "{json:#}");
+    assert!(
+        json["health"]["health_score"]["penalties"]
+            .get("duplication")
+            .is_none(),
+        "{json:#}"
     );
 }
