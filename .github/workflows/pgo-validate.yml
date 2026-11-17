@@ -99,6 +99,7 @@ jobs:
 
       - uses: ./.github/actions/setup-rust
         with:
+          save-if: 'false'
           targets: ${{ matrix.target }}
           components: llvm-tools
           cache-key: pgo-validate-instrumented-${{ matrix.target }}
@@ -183,6 +184,7 @@ jobs:
 
       - uses: ./.github/actions/setup-rust
         with:
+          save-if: 'false'
           targets: ${{ matrix.target }}
           components: llvm-tools
           cache-key: pgo-validate-${{ matrix.target }}

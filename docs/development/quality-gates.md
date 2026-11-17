@@ -527,6 +527,18 @@ Coverage falls back to computation on detector failure and publishes only after
 successful fresh computation. Supersession and release concurrency remain as
 specified above.
 
+### Rust cache retention
+
+`.github/actions/setup-rust` saves a Rust cache only on `main`, and pull
+request jobs restore it. The repository uses more than the GitHub cache limit,
+so GitHub evicts the oldest entries within hours. A cache that a daily or
+weekly run saves is gone before its next run, and it evicts the caches that
+pull request jobs restore. On pull requests, a cache miss made `Windows path
+and subprocess handling` about 4 minutes slower. Each workflow without a push
+trigger therefore passes `save-if: 'false'`. `release.yml` and
+`release-validation.yml` keep their caches, because a re-run of a failed
+release job reuses them. `scripts/workflow-policy.test.mjs` checks this rule.
+
 ### Parallel heavy jobs
 
 The slowest `CI` jobs have parts that run in parallel:
