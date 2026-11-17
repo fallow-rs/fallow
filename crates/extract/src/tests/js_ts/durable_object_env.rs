@@ -234,3 +234,82 @@ fn a_module_without_the_workers_import_reads_no_env() {
     );
     assert!(accesses.is_empty(), "found: {accesses:?}");
 }
+
+/// The `Env` type argument of `ExportedHandler` types the untyped `env`
+/// parameter of each Worker handler in the object.
+#[test]
+fn untyped_env_parameter_of_an_exported_handler_reads_the_binding() {
+    for (source, member) in [
+        (
+            r"
+                export default {
+                    async fetch(request, env, ctx) {
+                        const stub = env.ROOM.get(env.ROOM.idFromName('a'));
+                        return new Response(await stub.viaSatisfies());
+                    },
+                } satisfies ExportedHandler<Env>;
+            ",
+            "viaSatisfies",
+        ),
+        (
+            r"
+                export default {
+                    scheduled: async (controller, env) => {
+                        await env.ROOM.getByName('a').viaAs();
+                    },
+                } as ExportedHandler<Env>;
+            ",
+            "viaAs",
+        ),
+        (
+            r"
+                const handler: ExportedHandler<Env> = {
+                    queue: async function (batch, env) {
+                        await env.ROOM.getByName('a').viaAnnotation();
+                    },
+                };
+                export default handler;
+            ",
+            "viaAnnotation",
+        ),
+    ] {
+        let accesses = typed_property_accesses("/project/src/index.ts", source);
+        assert!(
+            accesses.contains(&access("Env", "ROOM", member)),
+            "{member} found: {accesses:?}"
+        );
+    }
+}
+
+/// Only a handler of an `ExportedHandler<E>` object gets the type. A plain
+/// object, a type without the `Env` argument, a method that is not a
+/// handler, and a typed parameter keep their own types.
+#[test]
+fn env_parameter_outside_an_exported_handler_reads_no_env() {
+    for source in [
+        r"
+            export default {
+                async fetch(request, env) {
+                    await env.ROOM.getByName('a').plainObject();
+                },
+            };
+        ",
+        r"
+            export default {
+                async fetch(request, env) {
+                    await env.ROOM.getByName('a').noTypeArgument();
+                },
+            } satisfies ExportedHandler;
+        ",
+        r"
+            export default {
+                async helper(request, env) {
+                    await env.ROOM.getByName('a').notAHandler();
+                },
+            } satisfies ExportedHandler<Env>;
+        ",
+    ] {
+        let accesses = typed_property_accesses("/project/src/index.ts", source);
+        assert!(accesses.is_empty(), "found: {accesses:?}");
+    }
+}

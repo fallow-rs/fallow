@@ -1310,3 +1310,33 @@ fn declare_ambient_property_excluded_from_class_members() {
         "normal method must still be extracted; got {names:?}",
     );
 }
+
+/// `extends_root` names the first `extends` target past the base classes that
+/// the file declares but does not export, also through a generic base.
+#[test]
+fn extends_root_passes_unexported_and_generic_local_bases() {
+    let info = parse_source(
+        r"
+            import { Remote } from 'remote';
+            class Plain extends Remote {}
+            class Generic<E> extends Plain {}
+            export class Deep extends Generic<string> {}
+            export class Direct extends Remote {}
+            export class Shared extends Remote {}
+            export class OverExported extends Shared {}
+            class Loop extends Loop2 {}
+            class Loop2 extends Loop {}
+            export class Cycle extends Loop {}
+        ",
+    );
+    let root = |name: &str| {
+        info.class_heritage
+            .iter()
+            .find(|heritage| heritage.export_name == name)
+            .and_then(|heritage| heritage.extends_root.clone())
+    };
+    assert_eq!(root("Deep").as_deref(), Some("Remote"));
+    assert_eq!(root("Direct"), None);
+    assert_eq!(root("OverExported"), None);
+    assert_eq!(root("Cycle"), None);
+}

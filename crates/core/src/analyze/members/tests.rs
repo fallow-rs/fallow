@@ -923,6 +923,7 @@ fn make_module_with_class_heritage(
             super_class_type_args: Vec::new(),
             generic_instance_bindings: Vec::new(),
             binding_super_class: None,
+            extends_root: None,
         }],
         ..ModuleInfo::empty(FileId(file_id))
     }
@@ -1963,6 +1964,7 @@ fn transitive_error_subclass_name_member_not_flagged() {
         super_class_type_args: Vec::new(),
         generic_instance_bindings: Vec::new(),
         binding_super_class: None,
+        extends_root: None,
     });
     let modules = vec![errors_module];
 

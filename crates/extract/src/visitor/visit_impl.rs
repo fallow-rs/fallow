@@ -65,6 +65,8 @@ pub(super) use visit_for_of_bindings::ITERABLE_ELEMENT_CALLBACK_METHODS;
 mod visit_function_returns;
 #[path = "visit_impl_helpers.rs"]
 pub(super) mod visit_helpers;
+#[path = "visit_impl_html_element_alias.rs"]
+mod visit_html_element_alias;
 #[path = "visit_impl_jsx_runtime.rs"]
 mod visit_jsx_runtime;
 #[path = "visit_impl_member_destructuring.rs"]
@@ -1856,87 +1858,6 @@ impl ModuleInfoExtractor {
         if let BindingPattern::ObjectPattern(obj_pat) = &declarator.id {
             self.record_tainted_destructure_bindings(obj_pat, init);
             self.record_chained_tainted_destructure_bindings(obj_pat, init);
-        }
-    }
-
-    fn record_native_html_element_alias_candidate(
-        &mut self,
-        decl: &VariableDeclaration<'_>,
-        declarator: &VariableDeclarator<'_>,
-        init: &Expression<'_>,
-    ) {
-        if !self.is_module_scope() || decl.kind != VariableDeclarationKind::Const {
-            return;
-        }
-        let BindingPattern::BindingIdentifier(id) = &declarator.id else {
-            return;
-        };
-        let Expression::TSAsExpression(assertion) = init else {
-            return;
-        };
-        let TSType::TSTypeQuery(query) = &assertion.type_annotation else {
-            return;
-        };
-        let TSTypeQueryExprName::IdentifierReference(type_name) = &query.expr_name else {
-            return;
-        };
-        if type_name.name != "HTMLElement" {
-            return;
-        }
-        let Expression::ConditionalExpression(conditional) =
-            unwrap_static_expr(&assertion.expression)
-        else {
-            return;
-        };
-        if html_element_availability_test(&conditional.test)
-            && is_html_element_identifier(&conditional.consequent)
-            && matches!(
-                unwrap_static_expr(&conditional.alternate),
-                Expression::ClassExpression(_)
-            )
-        {
-            self.native_html_element_alias_candidates
-                .insert(id.name.to_string());
-        }
-    }
-
-    pub(super) fn resolve_native_html_element_aliases(&mut self) {
-        if self.native_html_element_alias_candidates.is_empty()
-            || self.local_declaration_names.contains("HTMLElement")
-            || self
-                .imports
-                .iter()
-                .any(|import| import.local_name == "HTMLElement")
-        {
-            return;
-        }
-        let aliases = &self.native_html_element_alias_candidates;
-        for export in &mut self.exports {
-            if export
-                .super_class
-                .as_deref()
-                .is_some_and(|name| aliases.contains(name))
-            {
-                export.super_class = Some("HTMLElement".to_string());
-            }
-        }
-        for heritage in &mut self.class_heritage {
-            if heritage
-                .super_class
-                .as_deref()
-                .is_some_and(|name| aliases.contains(name))
-            {
-                heritage.super_class = Some("HTMLElement".to_string());
-            }
-        }
-        for class in self.local_class_exports.values_mut() {
-            if class
-                .super_class
-                .as_deref()
-                .is_some_and(|name| aliases.contains(name))
-            {
-                class.super_class = Some("HTMLElement".to_string());
-            }
         }
     }
 
@@ -4066,7 +3987,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 instance_bindings,
                 super_class_type_args,
                 generic_instance_bindings,
-                binding_super_class: None,
+                ..Default::default()
             });
         }
         self.exports.push(ExportInfo {
@@ -4276,8 +4197,19 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         for declarator in &decl.declarations {
             self.record_variable_declarator(decl, declarator);
             self.record_declarator_function_name(declarator);
+            self.record_exported_handler_declarator(declarator);
         }
         walk::walk_variable_declaration(self, decl);
+    }
+
+    fn visit_ts_satisfies_expression(&mut self, expr: &TSSatisfiesExpression<'a>) {
+        self.record_exported_handler_env(&expr.expression, &expr.type_annotation);
+        walk::walk_ts_satisfies_expression(self, expr);
+    }
+
+    fn visit_ts_as_expression(&mut self, expr: &TSAsExpression<'a>) {
+        self.record_exported_handler_env(&expr.expression, &expr.type_annotation);
+        walk::walk_ts_as_expression(self, expr);
     }
 
     fn visit_object_property(&mut self, prop: &ObjectProperty<'a>) {
@@ -5436,34 +5368,6 @@ fn constructed_class_name<'e>(expr: &Expression<'e>) -> Option<&'e str> {
     };
     let name = callee.name.as_str();
     (!super::helpers::is_builtin_constructor(name)).then_some(name)
-}
-
-fn html_element_availability_test(expr: &Expression<'_>) -> bool {
-    let Expression::BinaryExpression(binary) = unwrap_static_expr(expr) else {
-        return false;
-    };
-    if !matches!(
-        binary.operator,
-        BinaryOperator::Inequality | BinaryOperator::StrictInequality
-    ) {
-        return false;
-    }
-    let Expression::UnaryExpression(typeof_expr) = unwrap_static_expr(&binary.left) else {
-        return false;
-    };
-    typeof_expr.operator == UnaryOperator::Typeof
-        && is_html_element_identifier(&typeof_expr.argument)
-        && matches!(
-            unwrap_static_expr(&binary.right),
-            Expression::StringLiteral(literal) if literal.value == "undefined"
-        )
-}
-
-fn is_html_element_identifier(expr: &Expression<'_>) -> bool {
-    matches!(
-        unwrap_static_expr(expr),
-        Expression::Identifier(identifier) if identifier.name == "HTMLElement"
-    )
 }
 
 fn asserted_receiver_type<'ast, 'borrow>(

@@ -2,9 +2,9 @@
 //! declares locally.
 
 use fallow_types::extract::{ClassHeritageInfo, MemberAccess, SemanticFact};
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
-use super::ModuleInfoExtractor;
+use super::{LocalClassExportInfo, ModuleInfoExtractor};
 
 impl ModuleInfoExtractor {
     /// Complete the class data of the file after the walk: the heritage of
@@ -54,6 +54,7 @@ impl ModuleInfoExtractor {
                     super_class_type_args: local_class.super_class_type_args.clone(),
                     generic_instance_bindings: local_class.generic_instance_bindings.clone(),
                     binding_super_class: None,
+                    extends_root: None,
                 });
             }
         }
@@ -72,6 +73,8 @@ impl ModuleInfoExtractor {
     /// A generic base stops the fold, because its bindings need the type
     /// arguments of the subclass. A name that the file also imports or
     /// exports stops the fold, because the analysis resolves that name itself.
+    /// The walk for `extends_root` reads only names, so it also passes a
+    /// generic base.
     fn lift_unexported_local_base_classes(&mut self) {
         if self.local_class_exports.is_empty() || self.class_heritage.is_empty() {
             return;
@@ -88,6 +91,12 @@ impl ModuleInfoExtractor {
             .collect();
 
         for heritage in &mut self.class_heritage {
+            heritage.extends_root = extends_root(
+                heritage.super_class.as_deref(),
+                &self.local_class_exports,
+                &exported_locals,
+                &imported_locals,
+            );
             let mut visited: FxHashSet<String> = FxHashSet::default();
             let mut next = heritage.super_class.clone();
             let mut next_type_args = heritage.super_class_type_args.clone();
@@ -214,4 +223,30 @@ fn inherit_base_bindings(heritage: &mut ClassHeritageInfo, base_bindings: &[(Str
                 .push((field.clone(), type_name.clone()));
         }
     }
+}
+
+/// The first `extends` target past the base classes that the file declares
+/// but does not export, or `None` when `super_class` is not such a base. A
+/// cycle of local bases gives `None`.
+fn extends_root(
+    super_class: Option<&str>,
+    local_classes: &FxHashMap<String, LocalClassExportInfo>,
+    exported_locals: &FxHashSet<&str>,
+    imported_locals: &FxHashSet<&str>,
+) -> Option<String> {
+    let mut visited: FxHashSet<&str> = FxHashSet::default();
+    let mut current = super_class?;
+    loop {
+        if exported_locals.contains(current) || imported_locals.contains(current) {
+            break;
+        }
+        let Some(base) = local_classes.get(current) else {
+            break;
+        };
+        if !visited.insert(current) {
+            return None;
+        }
+        current = base.super_class.as_deref()?;
+    }
+    (!visited.is_empty()).then(|| current.to_string())
 }

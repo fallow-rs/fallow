@@ -344,6 +344,7 @@ mod tests {
                 super_class_type_args: Vec::new(),
                 generic_instance_bindings: Vec::new(),
                 binding_super_class: None,
+                extends_root: None,
             }],
             ..empty_module()
         };
