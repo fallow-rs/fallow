@@ -33824,7 +33824,7 @@
         {
           "type": "string",
           "const": "not_killed_by_target",
-          "description": "Each covering `--kill-matrix-for` target test passed, and the\ntarget-first mode ran no other test. The other tests can kill the\nmutant or let it survive. The mutant does not count in the score."
+          "description": "Each covering `--kill-matrix-for` target test passed, and the\ntarget-first mode ran no other test. It is a final status of that\nmode, but it says nothing about the other tests: they can kill the\nmutant or let it survive. The mode has no score."
         }
       ],
       "description": "The result of one mutant."
@@ -33921,7 +33921,7 @@
         {
           "type": "string",
           "const": "complete",
-          "description": "Each planned mutant has a final status. An empty survivor list is\nconclusive."
+          "description": "Each planned mutant has a final status. `not_killed_by_target` is a\nfinal status of the target-first mode. An empty survivor list is\nconclusive."
         },
         {
           "type": "string",
@@ -34337,7 +34337,7 @@
             "number",
             "null"
           ],
-          "description": "The mutation score of the function."
+          "description": "The mutation score of the function. `null` in the target-first mode\nof `--kill-matrix-for`."
         },
         "survived": {
           "type": "array",
@@ -34366,7 +34366,7 @@
             "number",
             "null"
           ],
-          "description": "The mutation score over the executed mutants, a fraction from 0 to 1:\n`(killed + timeout) / (killed + timeout + survived)`. `null` when no\nmutant ran to a tested result. `--min-score` and `mutation.minScore`\ncompare this value in percent."
+          "description": "The mutation score over the executed mutants, a fraction from 0 to 1:\n`(killed + timeout) / (killed + timeout + survived)`. `null` when no\nmutant ran to a tested result, and in the target-first mode of\n`--kill-matrix-for`, which has no survivors. `--min-score` and\n`mutation.minScore` compare this value in percent."
         },
         "coverage": {
           "type": [

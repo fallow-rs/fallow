@@ -197,6 +197,7 @@ pub fn apply_mutation_verdicts(
         .collect();
 
     report.summary = MutationSummary::from_results(&report.mutants);
+    report.withhold_target_first_scores();
     if let Some(typecheck) = report.typecheck.as_mut() {
         typecheck.hinted = report
             .mutants
@@ -402,6 +403,29 @@ mod tests {
         assert_eq!(
             report.mutants[1].equivalence_hint,
             Some(MutantEquivalenceHint::ConstantParameter)
+        );
+    }
+
+    #[test]
+    fn a_verdict_gives_a_target_first_report_no_score() {
+        let mut report = report(vec![
+            mutant("m1", MutantStatus::Killed),
+            mutant("m2", MutantStatus::NotKilledByTarget),
+            mutant("m3", MutantStatus::NoCoverage),
+        ]);
+        report.kill_matrix.target_mode =
+            Some(fallow_output::MutationKillMatrixTargetMode::TargetFirst);
+        report.withhold_target_first_scores();
+
+        apply_mutation_verdicts(&mut report, &document(&["m3"])).unwrap();
+
+        assert_eq!(report.summary.counts.equivalent, 1);
+        assert_eq!(report.summary.score, None);
+        assert!(
+            report
+                .functions
+                .iter()
+                .all(|function| function.score.is_none())
         );
     }
 

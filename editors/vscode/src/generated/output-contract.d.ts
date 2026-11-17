@@ -21506,8 +21506,9 @@ counts: MutationStatusCounts
 /**
  * The mutation score over the executed mutants, a fraction from 0 to 1:
  * `(killed + timeout) / (killed + timeout + survived)`. `null` when no
- * mutant ran to a tested result. `--min-score` and `mutation.minScore`
- * compare this value in percent.
+ * mutant ran to a tested result, and in the target-first mode of
+ * `--kill-matrix-for`, which has no survivors. `--min-score` and
+ * `mutation.minScore` compare this value in percent.
  */
 score?: (number | null)
 /**
@@ -21812,7 +21813,8 @@ in_diff: boolean
 cyclomatic?: (number | null)
 counts: MutationStatusCounts
 /**
- * The mutation score of the function.
+ * The mutation score of the function. `null` in the target-first mode
+ * of `--kill-matrix-for`.
  */
 score?: (number | null)
 /**

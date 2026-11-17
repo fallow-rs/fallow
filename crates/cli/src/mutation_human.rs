@@ -269,15 +269,20 @@ fn completion_text(report: &MutationReport) -> String {
 }
 
 /// The score line: the score over the executed mutants and the main counts
-/// always, the rare counts only when they are not zero.
+/// always, the rare counts only when they are not zero. The target-first mode
+/// of `--kill-matrix-for` has no score, so its line starts at the counts.
 fn summary_line(report: &MutationReport) -> String {
     let counts = &report.summary.counts;
-    let mut line = format!(
-        "Score {}  killed {}  survived {}  timeout {}",
-        percent(report.summary.score),
-        counts.killed,
-        counts.survived,
-        counts.timeout
+    let mut line =
+        if report.kill_matrix.target_mode == Some(MutationKillMatrixTargetMode::TargetFirst) {
+            String::new()
+        } else {
+            format!("Score {}  ", percent(report.summary.score))
+        };
+    let _ = write!(
+        line,
+        "killed {}  survived {}  timeout {}",
+        counts.killed, counts.survived, counts.timeout
     );
     for (label, count) in [
         ("pending", counts.pending),

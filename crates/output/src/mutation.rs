@@ -82,8 +82,9 @@ pub enum MutantStatus {
     /// mutant does not count in the score.
     CompileError,
     /// Each covering `--kill-matrix-for` target test passed, and the
-    /// target-first mode ran no other test. The other tests can kill the
-    /// mutant or let it survive. The mutant does not count in the score.
+    /// target-first mode ran no other test. It is a final status of that
+    /// mode, but it says nothing about the other tests: they can kill the
+    /// mutant or let it survive. The mode has no score.
     NotKilledByTarget,
 }
 
@@ -206,7 +207,8 @@ impl MutationStatusCounts {
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum MutationCompletionStatus {
-    /// Each planned mutant has a final status. An empty survivor list is
+    /// Each planned mutant has a final status. `not_killed_by_target` is a
+    /// final status of the target-first mode. An empty survivor list is
     /// conclusive.
     Complete,
     /// At least one planned mutant has no final status.
@@ -634,7 +636,8 @@ pub struct MutationFunctionResult {
     pub cyclomatic: Option<u16>,
     /// The number of mutants for each status.
     pub counts: MutationStatusCounts,
-    /// The mutation score of the function.
+    /// The mutation score of the function. `null` in the target-first mode
+    /// of `--kill-matrix-for`.
     pub score: Option<f64>,
     /// The ids of the survived mutants, in rank order.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -649,8 +652,9 @@ pub struct MutationSummary {
     pub counts: MutationStatusCounts,
     /// The mutation score over the executed mutants, a fraction from 0 to 1:
     /// `(killed + timeout) / (killed + timeout + survived)`. `null` when no
-    /// mutant ran to a tested result. `--min-score` and `mutation.minScore`
-    /// compare this value in percent.
+    /// mutant ran to a tested result, and in the target-first mode of
+    /// `--kill-matrix-for`, which has no survivors. `--min-score` and
+    /// `mutation.minScore` compare this value in percent.
     pub score: Option<f64>,
     /// The share of mutants that a test reaches, a fraction from 0 to 1:
     /// `covered / (covered + no_coverage)` over the whole plan. `covered`
@@ -1002,6 +1006,21 @@ pub enum MutationKillMatrixTargetMode {
     /// Each mutant runs its target tests and then its other covering tests,
     /// and each survivor gets a retry (`--kill-matrix-full`).
     Full,
+}
+
+impl MutationReport {
+    /// Removes the scores of a target-first `--kill-matrix-for` run. That
+    /// mode runs no other test after the target tests pass, so no mutant is
+    /// `survived`, and a score would always be 100%.
+    pub fn withhold_target_first_scores(&mut self) {
+        if self.kill_matrix.target_mode != Some(MutationKillMatrixTargetMode::TargetFirst) {
+            return;
+        }
+        self.summary.score = None;
+        for function in &mut self.functions {
+            function.score = None;
+        }
+    }
 }
 
 impl Default for MutationKillMatrix {

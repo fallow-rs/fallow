@@ -2432,3 +2432,47 @@ fn a_hinted_survivor_shows_the_advisory_note() {
 
 #[path = "mutation_cli_kill_matrix_tests.rs"]
 mod kill_matrix_targets;
+
+#[test]
+fn min_score_flag_with_the_target_first_mode_is_an_input_error() {
+    let root = Path::new("/project");
+    let target_first = MutationArgs {
+        min_score: Some(80.0),
+        kill_matrix_for: vec!["test/a.test.ts".to_owned()],
+        ..MutationArgs::default()
+    };
+    let error = min_score(&input(
+        root,
+        target_first.clone(),
+        MutationConfig::default(),
+    ))
+    .expect_err("the target-first mode has no score");
+    assert_eq!(error.exit_code, 2);
+    assert!(
+        error.message.contains("--kill-matrix-full"),
+        "{}",
+        error.message
+    );
+
+    let full = MutationArgs {
+        kill_matrix_full: true,
+        ..target_first
+    };
+    assert_eq!(
+        min_score(&input(root, full, MutationConfig::default())).unwrap(),
+        Some(80.0)
+    );
+    let configured = MutationConfig {
+        min_score: Some(80.0),
+        ..MutationConfig::default()
+    };
+    let targets_only = MutationArgs {
+        kill_matrix_for: vec!["test/a.test.ts".to_owned()],
+        ..MutationArgs::default()
+    };
+    assert_eq!(
+        min_score(&input(root, targets_only, configured)).unwrap(),
+        Some(80.0),
+        "the project minScore skips the gate instead of failing the run"
+    );
+}

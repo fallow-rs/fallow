@@ -390,28 +390,38 @@ pub(super) fn resolve_targets(
     Ok((resolved, ids))
 }
 
-/// The evidence of a retried target kill (see
-/// [`retries_unique_kill`]). A second kill keeps the killers of both
-/// runs, so a killer that only the retry saw makes the kill shared. Each
-/// other result leaves the evidence incomplete: the kill is not proven.
+/// The status and the evidence of a retried target kill (see
+/// [`retries_unique_kill`]). The kill is confirmed only when the retry kills
+/// the mutant with the same tests. A retry with other killers, for example
+/// an other test that passed in the first run and fails now, makes the
+/// mutant `flaky`: one run would make the kill shared and the other unique.
+/// Each result other than a confirmed kill leaves the evidence incomplete.
 pub(super) fn confirmed_kill(
     first: &MutantOutcome,
     status: MutantStatus,
     retry: Attempt,
-) -> Attempt {
-    if status != MutantStatus::Killed {
-        return Attempt {
-            kill_matrix_complete: false,
-            ..retry
+) -> (MutantStatus, Attempt) {
+    let killers = |tests: &[String]| -> BTreeSet<String> { tests.iter().cloned().collect() };
+    let same_killers = killers(&first.killing_tests) == killers(&retry.killing_tests);
+    if status != MutantStatus::Killed || !same_killers {
+        let status = if status == MutantStatus::Killed {
+            MutantStatus::Flaky
+        } else {
+            status
         };
+        return (
+            status,
+            Attempt {
+                kill_matrix_complete: false,
+                ..retry
+            },
+        );
     }
-    let mut killing_tests = first.killing_tests.clone();
-    killing_tests.extend(retry.killing_tests.iter().cloned());
-    killing_tests.sort();
-    killing_tests.dedup();
-    Attempt {
-        killing_tests,
-        kill_matrix_complete: first.kill_matrix_complete && retry.kill_matrix_complete,
-        ..retry
-    }
+    (
+        status,
+        Attempt {
+            kill_matrix_complete: first.kill_matrix_complete && retry.kill_matrix_complete,
+            ..retry
+        },
+    )
 }

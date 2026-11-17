@@ -144,3 +144,23 @@ fn mutation_kill_matrix_for_human_report_names_the_baseline_failures_of_a_target
         assert!(text.contains(expected), "missing {expected:?}: {text}");
     }
 }
+
+#[test]
+fn mutation_kill_matrix_for_human_report_of_the_target_first_mode_shows_no_score() {
+    let mut measured = report(
+        vec![
+            mutant("m1", "src/math.ts", 1, MutantStatus::Killed),
+            mutant("m2", "src/math.ts", 2, MutantStatus::NotKilledByTarget),
+        ],
+        Vec::new(),
+    );
+    measured.kill_matrix.target_mode =
+        Some(fallow_output::MutationKillMatrixTargetMode::TargetFirst);
+    measured.withhold_target_first_scores();
+    let text = run_text(&measured, &OPTIONS);
+    assert!(!text.contains("Score"), "{text}");
+    assert!(
+        text.contains("killed 1  survived 0  timeout 0  not killed by target 1"),
+        "{text}"
+    );
+}

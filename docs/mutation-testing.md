@@ -885,15 +885,27 @@ fallow mutation src/math.ts \
   | `target-first` (default) | The mutant is `not_killed_by_target`. No other test runs. | The other covering tests run fastest first, with bail. The first other test that fails stops that run. | Only a kill by exactly one target test and no other test: a unique kill. |
   | `full` (`--kill-matrix-full`) | The other covering tests run with bail, as after a kill. | As in `target-first`. | Each survivor and each timeout, as in normal mode. A target kill gets no retry. |
 
-- A `not_killed_by_target` mutant has no final status: other tests can kill
-  it, or it can survive. It does not count in the score. Its evidence is
-  complete, because the target run gave an exact result for each target
-  test. Use `--kill-matrix-full` when you also want the score of these
-  mutants.
-- In the `target-first` mode, a retry of a unique kill that does not kill the
-  mutant again makes the mutant `flaky`, and its evidence becomes incomplete.
-  A retry that kills again keeps the killers of both runs. A target test that
-  kills only in the retry therefore makes the kill shared.
+- `not_killed_by_target` is a final status of the `target-first` mode. It
+  answers the question of the mode: no target test kills the mutant. It
+  gives no answer about the other tests, which can kill the mutant or let it
+  survive. Its evidence is complete, because the target run gave an exact
+  result for each target test. A run in which each mutant has a final
+  status, `not_killed_by_target` included, is `complete`.
+- The `target-first` mode has no score. No mutant can be `survived` in this
+  mode, so a score would always be 100%. `summary.score` and the score of
+  each function are `null`, and the human and CI reports show no score.
+  `--min-score` with the `target-first` mode exits `2`
+  (`FALLOW_INVALID_MUTATION_OPTIONS`), and the message names
+  `--kill-matrix-full`. A `mutation.minScore` in the config does not stop
+  the run: the gate gets no score and is `skipped`. Use
+  `--kill-matrix-full` for a score.
+- In the `target-first` mode, the retry of a unique kill must kill the
+  mutant again with the same tests. A retry that does not kill the mutant,
+  or that kills it with other tests, makes the mutant `flaky`, and its
+  evidence becomes incomplete. For example, an other test that passes in the
+  first run and fails in the retry would make the kill shared in one run and
+  unique in the other. The journal records a confirmed unique kill, so
+  `--resume` does not retry it again.
 - In the `full` mode, the mutant status has the same meaning as in normal
   mode: `killed` when any covering test kills the mutant.
 - `killing_tests` of a mutant holds each target test that kills it, and the
@@ -959,8 +971,11 @@ each entry, one of the `targets` of that entry. A change that adds several
 equal tests makes each of them a candidate. Keep one test of each shared
 kill.
 
-The two modes give the same `kills`, `unique_kills` and `target_only_kills`
-for each target:
+For deterministic tests, the two modes give the same `kills`, `unique_kills`
+and `target_only_kills` for each target. Only the `target-first` mode
+retries a unique kill, so a flaky test can make a unique kill `flaky` in
+that mode and leave it unique in the `full` mode. The reasons for the
+deterministic case:
 
 - A mutant that no target test kills is in the `kills` of no target, so it
   can change no count of a target. The `target-first` mode skips only the
@@ -970,6 +985,9 @@ for each target:
   shared, and a shared kill is in no `unique_kills` and no
   `target_only_kills`. With no other killer, each other test ran and passed,
   so the kill is unique or target-only in both modes.
+- Both modes run the same test set for each mutant. Target mode never widens
+  a retry to the whole test files, so the `full` mode does not add a test
+  that the `target-first` mode does not run.
 
 The evidence covers the planned mutants only. A test can have a unique kill
 outside the scope of the run, for example outside the changed code. Use a
@@ -2700,8 +2718,10 @@ reads files only. It runs no test.
 - The header says `(ran the project tests)` only when a companion started or a
   mutant has a tested result. Otherwise it says `(no test ran)`.
 - The score line: the score, killed, survived, timeout, and the completion
-  status. The line adds `pending`, `equivalent`, `runtime error`, `flaky`,
-  `compile error` and `not killed by target` only when the count is not zero. A run with
+  status. The target-first mode of `--kill-matrix-for` has no score, so its
+  line starts at `killed`. The line adds `pending`, `equivalent`,
+  `runtime error`, `flaky`, `compile error` and `not killed by target` only
+  when the count is not zero. A run with
   `--mutants-per-line` shows the left-out part of the `pending` count as
   `pending 12 (10 sampled out)`.
 - The scope line shows a full 40-character base SHA as its first 12
@@ -3033,6 +3053,7 @@ The headline is the first match of this table:
 | Unreadable report | `**Fallow could not read the mutation report** (`FALLOW_MUTATION_REPORT_INVALID`).` and the reason in a text block |
 | Gate failed | `**Score below the minimum.** The score is X%, and the minimum is Y%.` |
 | No mutant in the scope | `The scope has no mutant.` |
+| Target-first `--kill-matrix-for` run | `**The target-first kill matrix has no score.** N mutants were not killed by a target; pass `--kill-matrix-full` to score each mutant.` |
 | No score, gate set | `**No mutant was counted.** The score gate was skipped.` |
 | No score, no gate | `**No mutant was counted.**` |
 | Survivors | `**N mutants survived.** Score X%.`, with ` (minimum Y%)` when a gate is set |

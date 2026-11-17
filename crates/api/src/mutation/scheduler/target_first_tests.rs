@@ -64,6 +64,11 @@ fn respond(run: &RunRequest, flaky: Option<&str>, seen: &Mutex<Vec<String>>) -> 
         }
         seen.push(mutant.to_owned());
     }
+    killed_by(run, &killers)
+}
+
+/// The run result in which each test of `killers` fails.
+fn killed_by(run: &RunRequest, killers: &[String]) -> Response {
     let tests: Vec<RunTest> = run
         .test_ids
         .iter()
@@ -219,7 +224,18 @@ fn the_full_mode_runs_each_covering_test_and_retries_each_survivor() {
     let survivor = &full.results["m_survivor"];
     assert_eq!(survivor.status, MutantStatus::Survived);
     assert!(survivor.retried);
-    assert_eq!(runs_of(&runs, "m_survivor").len(), 4);
+    // `o2` is in the same test file but does not cover the survivor. Target
+    // mode never widens the retry to whole files, so the retry runs the
+    // tests of the first run, and both modes see the same target tests.
+    assert_eq!(
+        runs_of(&runs, "m_survivor"),
+        [
+            (names(&[TARGET]).as_slice(), false),
+            (names(&["o1", "o3"]).as_slice(), true),
+            (names(&[TARGET]).as_slice(), false),
+            (names(&["o1", "o3"]).as_slice(), true),
+        ]
+    );
     assert!(!full.results["m_unique"].retried);
     assert_eq!(runs.len(), 10, "full-mode runs: {runs:?}");
     let (first, _) = run_mode(false, None);
@@ -258,4 +274,70 @@ fn the_two_target_modes_never_share_a_cache_key() {
     let full = keys(true);
     assert!(target_first.starts_with("targets-first:"), "{target_first}");
     assert!(full.starts_with("targets:"), "{full}");
+}
+
+#[test]
+fn a_retry_that_adds_an_other_killer_makes_a_unique_kill_flaky() {
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let other_runs = Arc::new(Mutex::new(0_usize));
+    let spawner = FakeSpawner::new(script(
+        |_| dry(),
+        move |_, run| {
+            if run.mutant_id.as_deref() == Some("m_unique") && run.test_ids == [tid("o1")] {
+                let mut count = other_runs.lock().expect("other runs");
+                *count += 1;
+                // `o1` passes in the first run and fails in the retry.
+                if *count == 2 {
+                    return Ok(killed_by(run, &[tid("o1")]));
+                }
+            }
+            Ok(respond(run, None, &seen))
+        },
+    ));
+    let journal = Arc::new(FakeJournal {
+        resume: FxHashMap::default(),
+        appended: Mutex::new(Vec::new()),
+    });
+    let mut config = config(1);
+    config.targets = vec![tid(TARGET)];
+    config.journal = Some(Arc::clone(&journal) as Arc<dyn OutcomeJournal>);
+    let ids: Vec<&str> = MUTANTS.iter().map(|(id, _, _)| *id).collect();
+    let outcome = run_schedule(&spawner, &plan(&ids), &config).expect("schedule");
+    let unique = &outcome.results["m_unique"];
+    assert_eq!(unique.status, MutantStatus::Flaky);
+    assert!(
+        !journal.ids().contains(&"m_unique".to_owned()),
+        "a flaky result runs again on resume"
+    );
+    assert!(
+        !unique.kill_matrix_complete,
+        "the two runs disagree about the other killers"
+    );
+    assert!(unique.retried);
+}
+
+#[test]
+fn the_journal_records_a_confirmed_unique_kill() {
+    let journal = Arc::new(FakeJournal {
+        resume: FxHashMap::default(),
+        appended: Mutex::new(Vec::new()),
+    });
+    let seen = Arc::new(Mutex::new(Vec::new()));
+    let spawner = FakeSpawner::new(script(
+        |_| dry(),
+        move |_, run| Ok(respond(run, None, &seen)),
+    ));
+    let mut config = config(1);
+    config.targets = vec![tid(TARGET)];
+    config.journal = Some(Arc::clone(&journal) as Arc<dyn OutcomeJournal>);
+    let ids: Vec<&str> = MUTANTS.iter().map(|(id, _, _)| *id).collect();
+    let outcome = run_schedule(&spawner, &plan(&ids), &config).expect("schedule");
+    assert!(outcome.results["m_unique"].retried);
+    let mut journaled = journal.ids();
+    journaled.sort();
+    assert_eq!(
+        journaled,
+        ["m_others", "m_shared", "m_survivor", "m_unique"],
+        "a resumed run does not retry a confirmed unique kill again"
+    );
 }

@@ -41,7 +41,7 @@ use window::{loop_budget_ms, round_ms, scaled_ms, settles_loop_timeout, timeout_
 mod stored;
 
 pub use stored::{CachedResult, OutcomeJournal, ResultLookup};
-use stored::{FirstRuns, job_key, journal_first_run, journal_retry, record_stored};
+use stored::{FirstRun, FirstRuns, job_key, journal_first_run, journal_retry, record_stored};
 
 use control::{
     CONFIRMATION_RUN_FAILURE, CONTROL_RUN_FAILURE, ControlCheck, ControlMemo, ControlOutcome,
@@ -1613,7 +1613,14 @@ fn retry_suspects(
         .iter()
         .filter_map(|job| {
             let first = outcome.results.get(&job.id)?;
-            Some((job.id.clone(), (first.status, first.duration_ms)))
+            Some((
+                job.id.clone(),
+                FirstRun {
+                    status: first.status,
+                    duration_ms: first.duration_ms,
+                    killing_tests: first.killing_tests.clone(),
+                },
+            ))
         })
         .collect();
     let finished = |job: &Job, attempt: &Attempt| {
@@ -1636,11 +1643,11 @@ fn retry_suspects(
         let first = outcome.results.get(&job.id);
         let first_status = first.map_or(MutantStatus::Survived, |first| first.status);
         let status = retry_status(first_status, &job, &attempt);
-        let attempt = match first {
+        let (status, attempt) = match first {
             Some(first) if first_status == MutantStatus::Killed => {
                 confirmed_kill(first, status, attempt)
             }
-            _ => attempt,
+            _ => (status, attempt),
         };
         // A kill reports the run that killed the mutant. Each other status
         // keeps the first run, so a retry never shortens a timeout.

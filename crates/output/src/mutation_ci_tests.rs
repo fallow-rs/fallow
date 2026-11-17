@@ -831,3 +831,16 @@ fn run_notice_states_failures_and_partial_runs() {
         )
     );
 }
+
+#[test]
+fn headline_of_a_target_first_run_says_why_it_has_no_score() {
+    let target_first = MutationStatusCounts {
+        total: 3,
+        not_killed_by_target: 1,
+        ..counts(2, 0, 0, 0)
+    };
+    assert_eq!(
+        headline(&ran(target_first, None)),
+        "**The target-first kill matrix has no score.** 1 mutant was not killed by a target; pass `--kill-matrix-full` to score each mutant."
+    );
+}

@@ -217,7 +217,8 @@ pub struct MutationArgs {
     pub kill_matrix_for: Vec<String>,
     /// With `--kill-matrix-for`: also run the other covering tests of a
     /// mutant that no target kills, and retry each survivor. Each mutant
-    /// then gets a final status and the score counts it. Slower.
+    /// then gets a normal status, and the run has a score. Without this
+    /// flag, the run has no score and `--min-score` is an error. Slower.
     #[arg(long, requires = "kill_matrix_for")]
     pub kill_matrix_full: bool,
     /// Rerun the open tasks of a saved report (its `survived` and
@@ -369,6 +370,15 @@ fn min_score(input: &MutationCliInput<'_>) -> Result<Option<f64>, ProgrammaticEr
     {
         return Err(input_error(
             format!("--min-score must be between 0 and 100 (got {score})"),
+            "mutation.minScore",
+        ));
+    }
+    if input.args.min_score.is_some()
+        && !input.args.kill_matrix_for.is_empty()
+        && !input.args.kill_matrix_full
+    {
+        return Err(input_error(
+            "--min-score needs a score, and the target-first mode of --kill-matrix-for has none; pass --kill-matrix-full to score each mutant",
             "mutation.minScore",
         ));
     }

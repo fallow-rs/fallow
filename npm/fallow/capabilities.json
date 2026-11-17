@@ -1425,7 +1425,7 @@
           "name": "--kill-matrix-full",
           "type": "bool",
           "required": false,
-          "description": "With `--kill-matrix-for`: also run the other covering tests of a mutant that no target kills, and retry each survivor. Each mutant then gets a final status and the score counts it. Slower",
+          "description": "With `--kill-matrix-for`: also run the other covering tests of a mutant that no target kills, and retry each survivor. Each mutant then gets a normal status, and the run has a score. Without this flag, the run has no score and `--min-score` is an error. Slower",
           "possible_values": [
             "true",
             "false"

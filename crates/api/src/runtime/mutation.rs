@@ -1505,7 +1505,7 @@ pub fn run_mutation_with_progress(
     let mut errors = run_issues(plan, outcome, &changed_paths, check_error);
     errors.extend(typecheck.issue);
     let timings = run_timings(outcome, execution.setup_ms, plan_ms, typecheck_ms);
-    Ok(MutationReport {
+    let mut report = MutationReport {
         schema_version: MutationSchemaVersion::V2,
         version: tool_version(),
         elapsed_ms: ElapsedMs(millis(started.elapsed())),
@@ -1542,7 +1542,9 @@ pub fn run_mutation_with_progress(
         compare: None,
         gate_outcomes: None,
         recording,
-    })
+    };
+    report.withhold_target_first_scores();
+    Ok(report)
 }
 
 #[cfg(test)]

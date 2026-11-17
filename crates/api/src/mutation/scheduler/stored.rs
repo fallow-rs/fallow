@@ -222,8 +222,16 @@ pub(super) fn journal_first_run(config: &ScheduleConfig, job: &Job, attempt: &At
     );
 }
 
-/// The status and the duration of the first run of each retried mutant.
-pub(super) type FirstRuns = FxHashMap<String, (MutantStatus, Option<u64>)>;
+/// The first run of a retried mutant: its status, duration and killing
+/// tests.
+pub(super) struct FirstRun {
+    pub(super) status: MutantStatus,
+    pub(super) duration_ms: Option<u64>,
+    pub(super) killing_tests: Vec<String>,
+}
+
+/// The first run of each retried mutant.
+pub(super) type FirstRuns = FxHashMap<String, FirstRun>;
 
 /// Journals a retried job when the retry makes it final: a kill, or a
 /// survivor that the retry confirmed without a dropped covering test. The
@@ -236,12 +244,29 @@ pub(super) fn journal_retry(
 ) {
     let (first, first_ms) = firsts
         .get(&job.id)
-        .copied()
-        .unwrap_or((MutantStatus::Survived, None));
-    // The final evidence of a retried target kill joins the killers of both
-    // runs, and the retry alone does not hold them. The result cache stores
-    // the joined evidence at the end of the run.
+        .map_or((MutantStatus::Survived, None), |first| {
+            (first.status, first.duration_ms)
+        });
+    // A retried unique target kill is final only when the retry kills with
+    // the same tests (see `confirmed_kill`). The first run was complete, so
+    // the retry alone gives the evidence.
     if first == MutantStatus::Killed {
+        let same_killers = firsts
+            .get(&job.id)
+            .is_some_and(|first| sorted(&first.killing_tests) == sorted(&retry.killing_tests));
+        if retry.status == MutantStatus::Killed && same_killers {
+            journal_result(
+                config,
+                job,
+                &CachedResult {
+                    status: MutantStatus::Killed,
+                    killing_tests: retry.killing_tests.clone(),
+                    kill_matrix_complete: retry.kill_matrix_complete,
+                    killed_by: retry.killed_by.clone(),
+                    duration_ms: retry.duration_ms,
+                },
+            );
+        }
         return;
     }
     let result = match retry_status(first, job, retry) {
@@ -262,4 +287,11 @@ pub(super) fn journal_retry(
         _ => return,
     };
     journal_result(config, job, &result);
+}
+
+fn sorted(tests: &[String]) -> Vec<&String> {
+    let mut tests: Vec<&String> = tests.iter().collect();
+    tests.sort_unstable();
+    tests.dedup();
+    tests
 }
