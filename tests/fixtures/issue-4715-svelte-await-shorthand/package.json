@@ -1,0 +1,1 @@
+{"name":"sv2","private":true,"version":"1.0.0","type":"module","main":"src/index.ts","dependencies":{"svelte":"^5.0.0"}}

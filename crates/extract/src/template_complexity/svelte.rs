@@ -600,6 +600,18 @@ struct AwaitShorthand<'a> {
 struct AwaitShorthandState<'a> {
     keyword: &'a str,
     kind: ComplexityContributionKind,
+    binding: &'a str,
+}
+
+/// Split the body of a Svelte `{#await ...}` tag (the text after `#await`)
+/// into the promise expression and the binding of a shorthand `then` or
+/// `catch` branch. The binding is empty when the tag has no shorthand branch
+/// or when the branch has no binding. A body that the scanner cannot read
+/// gives `None`.
+pub fn split_svelte_await(after: &str) -> Option<(&str, &str)> {
+    let shorthand = split_await_shorthand(after).ok()?;
+    let binding = shorthand.state.map_or("", |state| state.binding);
+    Some((shorthand.expression, binding))
 }
 
 fn split_await_shorthand(after: &str) -> Result<AwaitShorthand<'_>, ScanError> {
@@ -651,16 +663,21 @@ fn split_await_shorthand(after: &str) -> Result<AwaitShorthand<'_>, ScanError> {
                 if depth == 0
                     && let Some(kind) = kind
                 {
-                    let binding = trimmed[identifier_end..].trim_start();
+                    let binding = trimmed[identifier_end..].trim();
+                    // `{#await promise then}` has no binding, so the keyword
+                    // ends the body. A body that is only the keyword is a bare
+                    // reference to a variable with that name.
+                    let bare_keyword = binding.is_empty() && index > 0;
                     if before_is_boundary(trimmed, index)
                         && after_is_boundary(trimmed, identifier_end)
-                        && starts_binding(binding)
+                        && (bare_keyword || starts_binding(binding))
                     {
                         return Ok(AwaitShorthand {
                             expression: trimmed[..index].trim_end(),
                             state: Some(AwaitShorthandState {
                                 keyword: identifier,
                                 kind,
+                                binding,
                             }),
                         });
                     }
@@ -886,6 +903,27 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn await_shorthand_without_binding_counts_the_selected_state() {
+        for source in [
+            "{#await load() then}<p>done</p>{/await}",
+            "{#await load() catch}<p>failed</p>{/await}",
+        ] {
+            let complexity =
+                single_unit(source).expect("shorthand await block should have complexity");
+            assert_eq!(complexity.cyclomatic, 3, "{source}: {complexity:?}");
+            assert_eq!(complexity.cognitive, 2, "{source}: {complexity:?}");
+        }
+    }
+
+    #[test]
+    fn await_of_a_variable_named_then_is_not_a_shorthand() {
+        let complexity = single_unit("{#await then}<p>loading</p>{/await}")
+            .expect("await block should have complexity");
+
+        assert_eq!(complexity.cyclomatic, 2, "{complexity:?}");
     }
 
     #[test]
