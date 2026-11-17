@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use fallow_config::OutputFormat;
 
 use super::enum_helpers::{EnumDeclarationRange, removable_exported_enum_range};
-use super::export_declarations::SharedDeclarations;
+use super::export_declarations::{SharedDeclarations, remove_export_keyword_at};
 use super::export_list::{ExportListIndex, ExportListStatement, ListRewrite, ListRewriteOutcome};
 use fallow_engine::module_graph::NamedReExport;
 use fallow_types::output_dead_code::ReachabilityCaveat;
@@ -98,9 +98,14 @@ enum ExportEdit {
     /// several lines.
     List(ExportListStatement),
     /// Remove the `export` keyword of a declaration that exports more than
-    /// one name. The keyword is on `start_line`. The removal happens only
-    /// when every name of the declaration is removed too.
-    SharedDeclaration { start_line: usize, index: usize },
+    /// one name. The keyword is at byte `start_col` of `start_line`. The
+    /// removal happens only when every name of the declaration is removed
+    /// too.
+    SharedDeclaration {
+        start_line: usize,
+        start_col: usize,
+        index: usize,
+    },
 }
 
 impl ExportFix {
@@ -379,7 +384,7 @@ fn withhold_partial_shared_declarations(file_plan: &mut FileExportPlan<'_>) -> b
         })
         .filter(|index| {
             let names = &file_plan.declarations.get(*index).names;
-            names.is_empty() || !names.iter().all(|name| planned.contains(name.as_str()))
+            !names.iter().all(|name| planned.contains(name.as_str()))
         })
         .collect();
     drop(planned);
@@ -493,11 +498,13 @@ fn export_line_fix(
     let line_idx = export.line.saturating_sub(1) as usize;
     let line = *lines.get(line_idx)?;
     if let Some(index) = declarations.find(line_idx, &export.export_name) {
+        let declaration = declarations.get(index);
         return Some(ExportFix {
             line_idx,
             export_name: export.export_name.clone(),
             edit: ExportEdit::SharedDeclaration {
-                start_line: declarations.get(index).start_line,
+                start_line: declaration.start_line,
+                start_col: declaration.start_col,
                 index,
             },
         });
@@ -517,7 +524,10 @@ fn export_line_fix(
     }
 
     let after_export = after_export?;
-    if !is_removable_default_export(after_export) {
+    let indent = line.len() - trimmed.len();
+    if !is_removable_default_export(after_export)
+        || !declarations.allows_line_start_removal(line_idx, indent)
+    {
         return None;
     }
 
@@ -620,10 +630,23 @@ fn apply_export_line_group(
     rewrites: &mut FxHashMap<usize, ListRewriteOutcome>,
     edit_line: usize,
 ) {
-    let Some(edit) = line_fixes
-        .iter()
-        .find(|fix| fix.edit_line() == edit_line)
+    let on_line = || line_fixes.iter().filter(|fix| fix.edit_line() == edit_line);
+    // Several declarations can share a line. Each removal at a higher column
+    // goes first, so the columns of the others stay valid.
+    let mut columns: Vec<usize> = on_line()
+        .filter_map(|fix| match fix.edit {
+            ExportEdit::SharedDeclaration { start_col, .. } => Some(start_col),
+            ExportEdit::Keyword | ExportEdit::EnumDeclaration(_) | ExportEdit::List(_) => None,
+        })
+        .collect();
+    columns.sort_unstable_by(|a, b| b.cmp(a));
+    columns.dedup();
+    for col in columns {
+        new_lines[edit_line] = remove_export_keyword_at(&new_lines[edit_line], col);
+    }
+    let Some(edit) = on_line()
         .map(|fix| fix.edit)
+        .find(|edit| !matches!(edit, ExportEdit::SharedDeclaration { .. }))
     else {
         return;
     };
@@ -649,7 +672,8 @@ fn apply_export_line_group(
                 None => {}
             }
         }
-        ExportEdit::Keyword | ExportEdit::SharedDeclaration { .. } => {
+        ExportEdit::SharedDeclaration { .. } => {}
+        ExportEdit::Keyword => {
             let line = new_lines[edit_line].clone();
             let trimmed = line.trim_start();
             let after_export = trimmed.strip_prefix("export ").unwrap_or(trimmed);

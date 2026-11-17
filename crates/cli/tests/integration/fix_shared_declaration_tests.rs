@@ -233,3 +233,141 @@ fn fix_keeps_every_name_of_a_pattern_when_a_kept_re_export_names_one() {
     apply(root);
     assert!(read_store(root).contains("export const { useA, useB } = hooks;"));
 }
+
+/// Write `files` next to a `package.json` whose entry is `src/index.ts`.
+fn write_files(root: &Path, files: &[(&str, &str)]) {
+    write_project(root, "", "");
+    for (path, content) in files {
+        std::fs::write(root.join(path), content).unwrap();
+    }
+}
+
+#[test]
+fn fix_removes_the_keyword_of_a_declaration_that_does_not_start_its_line() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write_project(
+        root,
+        "const o = { a: 1, b: 2 };\nconst y = 1; export const { a, b } = o;\nexport const used = y;\n",
+        "import { used } from './store';\n\nused;\n",
+    );
+
+    let preview = preview(root);
+    assert_eq!(preview.planned, vec![entry(2, "a"), entry(2, "b")]);
+
+    let applied = run_fallow_in_root("fix", root, &["--yes", "--format", "json", "--quiet"]);
+    assert_eq!(applied.code, 0, "{}", applied.stderr);
+    assert_eq!(parse_json(&applied)["total_fixed"], 2);
+    assert_eq!(
+        read_store(root),
+        "const o = { a: 1, b: 2 };\nconst y = 1; const { a, b } = o;\nexport const used = y;\n"
+    );
+}
+
+#[test]
+fn fix_removes_the_keyword_of_the_declaration_after_a_used_export_on_one_line() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write_project(
+        root,
+        "const o = { a: 1, b: 2 };\nexport const z = 1; export const { a, b } = o;\n",
+        "import { z } from './store';\n\nz;\n",
+    );
+
+    let preview = preview(root);
+    assert_eq!(preview.planned, vec![entry(2, "a"), entry(2, "b")]);
+
+    apply(root);
+    assert_eq!(
+        read_store(root),
+        "const o = { a: 1, b: 2 };\nexport const z = 1; const { a, b } = o;\n"
+    );
+}
+
+#[test]
+fn fix_keeps_a_shared_declaration_at_the_line_start_for_another_name_on_the_line() {
+    // Only `z` is unused, but the `export` keyword at the line start belongs
+    // to the declaration of `a` and `b`.
+    assert_withheld(
+        "const o = { a: 1, b: 2 };\nexport const { a, b } = o; export const z = 1;\n",
+        "import { a, b } from './store';\n\na;\nb;\n",
+        &[],
+    );
+}
+
+#[test]
+fn fix_keeps_a_vue_declaration_with_several_declarators_while_one_name_is_in_use() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let store = "<script lang=\"ts\">\nexport const c = 1, d = 2;\n</script>\n\n<template><div /></template>\n";
+    write_files(
+        root,
+        &[
+            ("src/Store.vue", store),
+            ("src/index.ts", "import { c } from './Store.vue';\n\nc;\n"),
+        ],
+    );
+
+    let preview = preview(root);
+    assert_eq!(preview.planned, Vec::new());
+    assert_eq!(preview.withheld, vec![entry(2, "d")]);
+
+    apply(root);
+    assert_eq!(
+        std::fs::read_to_string(root.join("src/Store.vue")).unwrap(),
+        store
+    );
+}
+
+#[test]
+fn fix_keeps_an_astro_declaration_with_several_declarators_while_one_name_is_in_use() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    let store = "---\nexport const c = 1, d = 2;\n---\n<p>{c}</p>\n";
+    write_files(
+        root,
+        &[
+            ("src/Store.astro", store),
+            ("src/index.ts", "import { c } from './Store.astro';\n\nc;\n"),
+        ],
+    );
+
+    let preview = preview(root);
+    assert_eq!(preview.planned, Vec::new());
+    assert_eq!(preview.withheld, vec![entry(2, "d")]);
+
+    apply(root);
+    assert_eq!(
+        std::fs::read_to_string(root.join("src/Store.astro")).unwrap(),
+        store
+    );
+}
+
+#[test]
+fn fix_removes_the_export_of_a_single_name_pattern_in_a_vue_file() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write_files(
+        root,
+        &[
+            (
+                "src/Store.vue",
+                "<script lang=\"ts\">\nconst x = { a: 1 };\nexport const { a } = x;\nexport const used = 1;\n</script>\n",
+            ),
+            (
+                "src/index.ts",
+                "import { used } from './Store.vue';\n\nused;\n",
+            ),
+        ],
+    );
+
+    let preview = preview(root);
+    assert_eq!(preview.planned, vec![entry(3, "a")]);
+    assert_eq!(preview.withheld, Vec::new());
+
+    apply(root);
+    assert_eq!(
+        std::fs::read_to_string(root.join("src/Store.vue")).unwrap(),
+        "<script lang=\"ts\">\nconst x = { a: 1 };\nconst { a } = x;\nexport const used = 1;\n</script>\n"
+    );
+}

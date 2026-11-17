@@ -24,30 +24,70 @@ pub struct SharedExportDeclaration {
     pub names: Vec<String>,
 }
 
-/// The shared export declarations of the JavaScript or TypeScript file at
-/// `path`.
+/// The shared export declarations of the file at `path`.
 ///
-/// Returns `None` when the file is not a plain script file (for example a
-/// Vue or Svelte file), or when it does not parse cleanly. The caller then
-/// does not know the names that a declaration binds.
+/// A JavaScript or TypeScript file is parsed as a whole. A Vue or Svelte
+/// file is parsed per inline `<script>` block and an Astro file per
+/// frontmatter block. Each offset is an offset into `source`.
+///
+/// Returns `None` for another file type, or when a block does not parse
+/// cleanly. The caller then does not know the names that a declaration
+/// binds.
 #[must_use]
 pub fn shared_export_declarations(
     path: &Path,
     source: &str,
 ) -> Option<Vec<SharedExportDeclaration>> {
+    if fallow_extract::is_sfc_file(path) {
+        let scripts = fallow_extract::extract_sfc_scripts(source);
+        return parse_blocks(scripts.iter().filter(|script| script.src.is_none()));
+    }
+    if path
+        .extension()
+        .is_some_and(|extension| extension == "astro")
+    {
+        let frontmatter = fallow_extract::astro::extract_astro_frontmatter(source);
+        return parse_blocks(frontmatter.iter());
+    }
     let source_type = SourceType::from_path(path).ok()?;
+    parse_block(source, source_type, 0)
+}
+
+fn parse_blocks<'a>(
+    scripts: impl Iterator<Item = &'a fallow_extract::sfc::SfcScript>,
+) -> Option<Vec<SharedExportDeclaration>> {
+    let mut declarations = Vec::new();
+    for script in scripts {
+        let source_type = match (script.is_typescript, script.is_jsx) {
+            (true, true) => SourceType::tsx(),
+            (true, false) => SourceType::ts(),
+            (false, true) => SourceType::jsx(),
+            (false, false) => SourceType::mjs(),
+        };
+        let offset = u32::try_from(script.byte_offset).ok()?;
+        declarations.extend(parse_block(&script.body, source_type, offset)?);
+    }
+    Some(declarations)
+}
+
+/// Parse one block of script text that starts at byte `offset` of the file.
+fn parse_block(
+    source: &str,
+    source_type: SourceType,
+    offset: u32,
+) -> Option<Vec<SharedExportDeclaration>> {
     fallow_extract::parse_bounded(source, || {
         let allocator = oxc_allocator::Allocator::default();
         let parsed = oxc_parser::Parser::new(&allocator, source, source_type).parse();
         if parsed.fatal_error || parsed.diagnostics.has_errors() {
             return None;
         }
-        Some(collect(&parsed.program))
+        Some(collect(&parsed.program, offset))
     })
     .flatten()
 }
 
-fn collect(program: &Program<'_>) -> Vec<SharedExportDeclaration> {
+fn collect(program: &Program<'_>, offset: u32) -> Vec<SharedExportDeclaration> {
     program
         .body
         .iter()
@@ -73,8 +113,8 @@ fn collect(program: &Program<'_>) -> Vec<SharedExportDeclaration> {
                 .collect();
             let span = export.span();
             Some(SharedExportDeclaration {
-                start: span.start,
-                end: span.end,
+                start: span.start + offset,
+                end: span.end + offset,
                 names,
             })
         })
@@ -118,9 +158,52 @@ mod tests {
         );
     }
 
+    /// The text of each declaration that `source` holds.
+    fn texts(path: &str, source: &str) -> Vec<String> {
+        shared_export_declarations(Path::new(path), source)
+            .unwrap()
+            .into_iter()
+            .map(|declaration| {
+                source[declaration.start as usize..declaration.end as usize].to_owned()
+            })
+            .collect()
+    }
+
     #[test]
-    fn gives_none_for_a_file_that_is_not_script() {
-        assert_eq!(names("store.vue", "export const { a, b } = x;\n"), None);
+    fn reads_each_script_block_of_a_vue_file() {
+        let source = "<template><div /></template>\n<script lang=\"ts\">\nexport const c = 1, d = 2;\n</script>\n<script setup lang=\"ts\">\nconst e = 1;\n</script>\n";
+        assert_eq!(
+            texts("store.vue", source),
+            vec!["export const c = 1, d = 2;"]
+        );
+        assert_eq!(
+            names("store.vue", source),
+            Some(vec![vec!["c".to_owned(), "d".to_owned()]])
+        );
+    }
+
+    #[test]
+    fn reads_the_module_script_of_a_svelte_file() {
+        let source =
+            "<script context=\"module\">\n  export const { a, b } = x;\n</script>\n<p>hi</p>\n";
+        assert_eq!(
+            texts("store.svelte", source),
+            vec!["export const { a, b } = x;"]
+        );
+    }
+
+    #[test]
+    fn reads_the_frontmatter_of_an_astro_file() {
+        let source = "---\nexport const [a, b] = [1, 2];\n---\n<p>{a}</p>\n";
+        assert_eq!(
+            texts("page.astro", source),
+            vec!["export const [a, b] = [1, 2];"]
+        );
+    }
+
+    #[test]
+    fn gives_none_for_another_file_type() {
+        assert_eq!(names("notes.md", "export const { a, b } = x;\n"), None);
     }
 
     #[test]
