@@ -12,6 +12,26 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use super::super::walk::SOURCE_EXTENSIONS;
 use super::{CategorizedEntryPoints, relative_paths_for};
 
+impl CategorizedEntryPoints {
+    pub(crate) fn extend_runtime<I>(&mut self, entries: I)
+    where
+        I: IntoIterator<Item = EntryPoint>,
+    {
+        for entry in entries {
+            self.push_runtime(entry);
+        }
+    }
+
+    pub(crate) fn extend_support<I>(&mut self, entries: I)
+    where
+        I: IntoIterator<Item = EntryPoint>,
+    {
+        for entry in entries {
+            self.push_support(entry);
+        }
+    }
+}
+
 /// Discover entry points from plugin results (dynamic config parsing).
 ///
 /// Converts plugin-discovered patterns and setup files into concrete entry points
