@@ -473,3 +473,60 @@ fn negated_pattern_keeps_undeclared_diagnostic_for_other_folders() {
     assert_eq!(undeclared.len(), 1, "{undeclared:?}");
     assert!(undeclared[0].path.ends_with("tools/cli"), "{undeclared:?}");
 }
+
+/// A leading `./` names the same folders as the pattern without it, also for
+/// a recursive `**` pattern in `package.json`.
+#[test]
+fn recursive_glob_with_leading_dot_slash_finds_packages() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"root","private":true,"workspaces":["./packages/**"]}"#,
+    )
+    .unwrap();
+    write_package(&root.join("packages/a"), r#"{"name":"a"}"#);
+    write_package(&root.join("packages/b"), r#"{"name":"b"}"#);
+
+    let (workspaces, diagnostics) =
+        discover_workspaces_with_diagnostics(root, &crate::IgnorePatternSet::empty())
+            .expect("valid root");
+    let undeclared = find_undeclared_workspaces_with_ignores(
+        root,
+        &workspaces,
+        &crate::IgnorePatternSet::empty(),
+    );
+
+    assert_eq!(
+        relative_workspace_roots(root, &workspaces),
+        ["packages/a", "packages/b"]
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(undeclared.is_empty(), "{undeclared:?}");
+}
+
+/// The zero-folder match of `./pkgs/**` also accepts a leading `./`.
+#[test]
+fn recursive_glob_with_leading_dot_slash_includes_its_base_folder() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    write_root(root, "packages:\n  - \"./pkgs/**\"\n");
+    write_package(&root.join("pkgs"), r#"{"name":"pkgs-self"}"#);
+    write_package(&root.join("pkgs/sub"), r#"{"name":"sub"}"#);
+
+    let (workspaces, diagnostics) =
+        discover_workspaces_with_diagnostics(root, &crate::IgnorePatternSet::empty())
+            .expect("valid root");
+    let undeclared = find_undeclared_workspaces_with_ignores(
+        root,
+        &workspaces,
+        &crate::IgnorePatternSet::empty(),
+    );
+
+    assert_eq!(
+        relative_workspace_roots(root, &workspaces),
+        ["pkgs", "pkgs/sub"]
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(undeclared.is_empty(), "{undeclared:?}");
+}

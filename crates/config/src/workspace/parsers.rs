@@ -410,6 +410,12 @@ fn expand_recursive_workspace_pattern(
     expanded_pattern: &str,
     canonical_root: &Path,
 ) -> Vec<(PathBuf, PathBuf)> {
+    // The walk below collects normalized paths, which have no `./` segment.
+    // The matchers must see the same form, or `./packages/**` matches nothing.
+    let mut expanded_pattern = expanded_pattern;
+    while let Some(rest) = expanded_pattern.strip_prefix("./") {
+        expanded_pattern = rest;
+    }
     let full_pattern = root.join(expanded_pattern).to_string_lossy().to_string();
     let Ok(matcher) = glob::Pattern::new(&full_pattern) else {
         tracing::warn!("invalid workspace glob pattern '{raw_pattern}'");
