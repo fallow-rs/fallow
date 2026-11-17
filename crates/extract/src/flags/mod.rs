@@ -23,6 +23,7 @@ use fallow_types::extract::{
 };
 use oxc_semantic::ScopeFlags;
 
+mod receivers;
 mod sources;
 use sources::{is_flag_source, is_local_source, may_be_local_flag_source};
 
@@ -235,6 +236,9 @@ struct FlagVisitor<'a> {
     /// Names that the file declares at module level or imports from a
     /// module of the project that is not a flag module.
     local_names: FxHashSet<String>,
+    /// Bindings, in any scope, that hold a value of the file: an object
+    /// literal, or an instance of a class from `local_names`.
+    local_receivers: FxHashSet<String>,
 }
 
 impl<'a> FlagVisitor<'a> {
@@ -272,6 +276,7 @@ impl<'a> FlagVisitor<'a> {
             has_flag_import: false,
             unconfirmed_reads: Vec::new(),
             local_names: FxHashSet::default(),
+            local_receivers: FxHashSet::default(),
         }
     }
 
@@ -377,16 +382,6 @@ impl<'a> FlagVisitor<'a> {
         {
             self.unconfirmed_reads.push(flag_ref);
         }
-    }
-
-    /// Whether `call` calls a generic SDK name that the file itself declares
-    /// or imports from a module of the project, in a file without a flag
-    /// import. Such a call goes to project code, not to a flag SDK.
-    fn calls_local_generic_function(&self, call: &CallExpression<'_>, name: &str) -> bool {
-        matches!(&call.callee, Expression::Identifier(_))
-            && !self.has_flag_import
-            && self.is_generic_sdk_name(name)
-            && self.local_names.contains(name)
     }
 
     /// Whether `name` is a generic built-in SDK name that the user did not
@@ -1046,6 +1041,7 @@ impl<'a> Visit<'a> for FlagVisitor<'_> {
     }
 
     fn visit_variable_declarator(&mut self, decl: &VariableDeclarator<'a>) {
+        self.note_local_receiver(decl);
         let before = self.read_count();
         walk::walk_variable_declarator(self, decl);
         let BindingPattern::BindingIdentifier(id) = &decl.id else {

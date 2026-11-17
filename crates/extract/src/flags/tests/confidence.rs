@@ -245,6 +245,46 @@ fn a_file_local_generic_function_is_not_a_flag_site() {
 }
 
 #[test]
+fn a_method_of_a_file_local_receiver_is_not_a_flag_site() {
+    for source in [
+        "class Manager { isEnabled(n: string): boolean { return n.length > 0; } }\n\
+         const manager = new Manager();\n\
+         manager.isEnabled('ext-test');",
+        "import { Manager } from './extensionEnablement.js';\n\
+         let manager: Manager;\n\
+         manager = new Manager();\n\
+         manager.isEnabled('ext-test');",
+        "const form = { getValue: (_name: string): unknown => null };\n\
+         form.getValue('email');",
+        "class Manager { isEnabled(n: string): boolean { return n.length > 0; } }\n\
+         new Manager().isEnabled('ext-test');",
+    ] {
+        let flags = extract_from_source(source);
+        assert!(flags.is_empty(), "{source}: {flags:?}");
+    }
+}
+
+#[test]
+fn a_method_of_a_file_local_receiver_with_a_flag_import_still_reports() {
+    let flags = extract_from_source(
+        "import { initialize } from 'unleash-client';\n\
+         const form = { getValue: (_name: string): unknown => null };\n\
+         form.getValue('a');",
+    );
+    assert_eq!(unconfirmed(&flags), vec![false]);
+}
+
+#[test]
+fn a_method_of_an_unknown_receiver_stays_unconfirmed() {
+    let flags = extract_from_source(
+        "import { useForm } from '@lobehub/ui/form';\n\
+         const form = useForm();\n\
+         form.getValue('email');",
+    );
+    assert_eq!(unconfirmed(&flags), vec![true]);
+}
+
+#[test]
 fn a_file_local_generic_function_with_a_flag_import_still_reports() {
     let flags = extract_from_source(
         "import { initialize } from 'unleash-client';\n\
