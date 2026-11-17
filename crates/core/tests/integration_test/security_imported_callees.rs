@@ -76,3 +76,37 @@ fn callees_beyond_one_direct_hop_stay_sinks() {
         "prototype-pollution",
     );
 }
+
+fn pollution_lines_on(results: &AnalysisResults, suffix: &str) -> Vec<u32> {
+    let mut lines: Vec<u32> = results
+        .security_findings
+        .iter()
+        .filter(|finding| {
+            finding
+                .path
+                .to_string_lossy()
+                .replace('\\', "/")
+                .ends_with(suffix)
+                && finding.category.as_deref() == Some("prototype-pollution")
+        })
+        .map(|finding| finding.line)
+        .collect();
+    lines.sort_unstable();
+    lines.dedup();
+    lines
+}
+
+#[test]
+fn a_local_binding_that_shadows_the_import_stays_a_sink() {
+    let results = analyze();
+    assert_eq!(
+        pollution_lines_on(&results, "src/use/merge-shadow-local.ts"),
+        vec![9],
+        "only the call of the shadowing `const merge` is a candidate"
+    );
+    assert_eq!(
+        pollution_lines_on(&results, "src/use/merge-shadow-param.ts"),
+        vec![10],
+        "only the call of the shadowing parameter is a candidate"
+    );
+}

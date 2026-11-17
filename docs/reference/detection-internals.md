@@ -431,11 +431,14 @@ error by suppressing a downstream detector.
   confirms the evidence.
 - Some catalogue rows match a callee by name only (`request`, `*.merge`). A
   call of a project function with a shallow-safe body is not a sink. A body
-  is shallow-safe when it calls only the shallow `Object` builtins of
-  `SHALLOW_OBJECT_BUILTINS` (`Object.assign` only into a fresh object), and
-  writes a member only one level deep on a fresh local. A fresh local is a
-  binding that the function declares with an object literal,
-  `Object.assign({}, ...)` or `Object.create(null)`, and never reassigns. Any
+  is shallow-safe when it calls only the shallow builtins of the global
+  `Object` in `SHALLOW_OBJECT_BUILTINS` (`Object.assign` only into a fresh
+  object), and writes a member only one level deep on a fresh local. A
+  module that binds the name `Object` has no shallow-safe body. A fresh
+  local is a binding that the function declares in its own scope with an
+  object literal, `Object.assign({}, ...)` or `Object.create(null)`, and
+  never reassigns. The function has no other binding of that name, also not
+  in an inner block or a nested function. Any
   other call (also a recursive call), a deeper write, a write to a parameter
   or an outer binding, `new`, a tagged template, `import()` and `delete`
   keep the sink. Extraction applies this check to local functions and inline
@@ -443,8 +446,12 @@ error by suppressing a downstream detector.
   names of the shallow-safe module-scope functions in
   `ModuleInfo::inert_function_exports`. The tainted-sink analysis follows a
   static named or default `import` of a bare callee one hop to its target
-  module and reads that list. It does not follow a re-export, a namespace
-  import or a `require()`, and an external package has no module to read.
+  module and reads that list. The call must be in
+  `ModuleInfo::imported_call_sites`, which holds a call only when semantic
+  analysis resolves its root to the import binding, so a parameter or a
+  local of the same name keeps the sink. It does not follow a re-export, a
+  namespace import or a `require()`, and an external package has no module
+  to read.
 - The `client-server-leak` cone starts from `"use client"` files and from the
   client roots of the React Router plugin (`security/framework_roots.rs`).
   React Router removes the `loader`, `action`, `middleware` and `headers`

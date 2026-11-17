@@ -788,8 +788,11 @@ fn match_tainted_sink<'a>(
 /// with a shallow-safe body (see `ModuleInfo::inert_function_exports`). Only
 /// a bare callee that a static named or default `import` binds counts, and
 /// only one hop: a re-export module records no inert export, and an external
-/// package has no module in the graph. The check reads the facts that the
-/// extraction already cached, so it parses no file.
+/// package has no module in the graph. The callee must resolve to the import
+/// binding: `imported_call_sites` holds a call only when semantic analysis
+/// resolves its root to that binding, so a parameter or a local of the same
+/// name keeps the sink. The check reads the facts that the extraction already
+/// cached, so it parses no file.
 fn calls_imported_inert_function(
     run: &TaintedSinkRun<'_>,
     module: &ModuleInfo,
@@ -797,6 +800,14 @@ fn calls_imported_inert_function(
 ) -> bool {
     let local = sink.callee_path.as_str();
     if local.contains('.') {
+        return false;
+    }
+    let resolves_to_import = module.imported_call_sites.iter().any(|call| {
+        call.span_start == sink.span_start
+            && call.local_name == local
+            && call.member_path.is_empty()
+    });
+    if !resolves_to_import {
         return false;
     }
     let Some(import) = module

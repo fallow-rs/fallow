@@ -163,3 +163,41 @@ fn exports_with_effects_or_without_a_local_body_are_not_recorded() {
         vec!["configure"]
     );
 }
+
+#[test]
+fn a_fresh_local_in_an_inner_block_does_not_free_an_outer_write() {
+    assert_merge_sink(
+        "const target: Record<string, unknown> = {};\nfunction merge(key: string, value: unknown) {\n  {\n    const target = {};\n    void target;\n  }\n  target[key] = value;\n  return target;\n}\n",
+    );
+}
+
+#[test]
+fn a_fresh_local_in_a_nested_function_does_not_free_an_outer_write() {
+    assert_merge_sink(
+        "const target: Record<string, unknown> = {};\nfunction merge(key: string, value: unknown) {\n  const make = () => { const target = {}; return target; };\n  target[key] = value;\n  return make;\n}\n",
+    );
+}
+
+#[test]
+fn an_imported_object_binding_is_not_the_object_builtin() {
+    assert_merge_sink(&format!(
+        "import {{ Object }} from './fakeobj';\n{SHALLOW_COPY}"
+    ));
+}
+
+#[test]
+fn a_local_object_binding_is_not_the_object_builtin() {
+    assert_merge_sink(
+        "function merge(obj: object, subset: object, Object: any) {\n  const copy = Object.assign({}, obj);\n  for (const k in subset) { copy[k] = subset[k]; }\n  return copy;\n}\n",
+    );
+}
+
+#[test]
+fn an_imported_object_binding_records_no_inert_export() {
+    assert!(
+        inert_exports(&format!(
+            "import {{ Object }} from './fakeobj';\nexport {SHALLOW_COPY}"
+        ))
+        .is_empty()
+    );
+}

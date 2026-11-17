@@ -6,13 +6,14 @@
 //! request or pollute a prototype, so it is not a sink. A body is
 //! shallow-safe when it has no effect outside the function:
 //!
-//! - it calls only the shallow `Object` builtins of
+//! - it calls only the shallow builtins of the global `Object` in
 //!   [`SHALLOW_OBJECT_BUILTINS`], and `Object.assign` only into a fresh
-//!   object;
+//!   object. A module that binds the name `Object` has no shallow-safe body;
 //! - it writes a member only one level deep (`copy[key] = value`), and only
-//!   on a fresh local: a binding that the function declares with an object
-//!   literal, `Object.assign({}, ...)` or `Object.create(null)`, and never
-//!   reassigns;
+//!   on a fresh local: a binding that the function declares in its own scope
+//!   with an object literal, `Object.assign({}, ...)` or
+//!   `Object.create(null)`, and never reassigns. The function has no other
+//!   binding of that name, also not in an inner block or a nested function;
 //! - it has no `new`, no tagged template, no `import()` and no `delete`.
 //!
 //! Any other call keeps the name match, also a call of the function itself (a
@@ -32,8 +33,9 @@
 
 use oxc_ast::ast::*;
 use oxc_ast_visit::{Visit, walk};
-use oxc_semantic::ScopeFlags;
+use oxc_semantic::{ScopeFlags, ScopeId};
 use rustc_hash::{FxHashMap, FxHashSet};
+use std::cell::Cell;
 
 use super::super::super::ModuleInfoExtractor;
 use super::{SinkBinding, unwrap_static_expr};
@@ -95,15 +97,22 @@ fn is_fresh_object(value: &Expression<'_>) -> bool {
 }
 
 /// Collects the fresh locals of one function: the names whose every binding
-/// in the function is a declarator with a fresh object, and that no
-/// assignment or update targets. A parameter, a nested function or a catch
-/// parameter of the same name is a binding without a fresh object, so it
-/// removes the name.
+/// in the function is a declarator with a fresh object in the function scope
+/// itself, and that no assignment or update targets. A parameter, a nested
+/// function, a catch parameter or a declaration in an inner scope (a block,
+/// a loop or a nested function) of the same name removes the name.
+///
+/// The visitor runs before semantic analysis, so binding symbols are not
+/// available. The rule gives the same answer: when the function has only
+/// function-scope bindings of a name, every reference to that name inside
+/// the function resolves to one of them.
 #[derive(Default)]
 struct FreshLocals {
     /// Per name: the count of all bindings and the count of fresh declarators.
     bindings: FxHashMap<String, (u32, u32)>,
     reassigned: FxHashSet<String>,
+    /// The scope depth of the walk: 1 is the function scope.
+    depth: u32,
 }
 
 impl FreshLocals {
@@ -118,12 +127,21 @@ impl FreshLocals {
 }
 
 impl<'a> Visit<'a> for FreshLocals {
+    fn enter_scope(&mut self, _flags: ScopeFlags, _scope_id: &Cell<Option<ScopeId>>) {
+        self.depth += 1;
+    }
+
+    fn leave_scope(&mut self) {
+        self.depth -= 1;
+    }
+
     fn visit_binding_identifier(&mut self, id: &BindingIdentifier<'a>) {
         self.bindings.entry(id.name.to_string()).or_default().0 += 1;
     }
 
     fn visit_variable_declarator(&mut self, declarator: &VariableDeclarator<'a>) {
-        if let BindingPattern::BindingIdentifier(id) = &declarator.id
+        if self.depth == 1
+            && let BindingPattern::BindingIdentifier(id) = &declarator.id
             && declarator.init.as_ref().is_some_and(is_fresh_object)
         {
             self.bindings.entry(id.name.to_string()).or_default().1 += 1;
@@ -284,6 +302,10 @@ impl<'a> Visit<'a> for EffectFinder {
 struct WrittenRoots {
     names: FxHashSet<String>,
     in_target: bool,
+    /// Whether the module binds the name `Object` (an import, a declaration
+    /// or a parameter). `Object.assign` then can be a project function, so no
+    /// body of the module is shallow-safe.
+    binds_object: bool,
 }
 
 impl WrittenRoots {
@@ -302,6 +324,10 @@ impl WrittenRoots {
 }
 
 impl<'a> Visit<'a> for WrittenRoots {
+    fn visit_binding_identifier(&mut self, id: &BindingIdentifier<'a>) {
+        self.binds_object |= id.name == "Object";
+    }
+
     fn visit_identifier_reference(&mut self, id: &IdentifierReference<'a>) {
         if self.in_target {
             self.names.insert(id.name.to_string());
@@ -607,6 +633,9 @@ impl ModuleInfoExtractor {
         }
         let mut written = WrittenRoots::default();
         written.visit_program(program);
+        if written.binds_object {
+            return;
+        }
         self.inert_function_exports = exports
             .into_iter()
             .filter(|(_, local)| {
