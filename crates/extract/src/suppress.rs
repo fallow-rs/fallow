@@ -35,11 +35,11 @@ const RANGE_KIND: IssueKind = IssueKind::CodeDuplication;
 #[derive(Debug, Clone)]
 pub struct RangeMarker {
     /// `true` for `fallow-ignore-start`, `false` for `fallow-ignore-end`.
-    pub is_start: bool,
+    is_start: bool,
     /// 1-based line of the marker comment.
     pub comment_line: u32,
     /// 1-based line after the end of the marker comment.
-    pub next_line: u32,
+    next_line: u32,
     /// Byte offset of the marker text in the source.
     pub offset: u32,
     /// Whether the marker comment is the only content of its lines. A
