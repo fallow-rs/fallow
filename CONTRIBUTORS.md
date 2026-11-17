@@ -197,6 +197,7 @@ This list includes commit contributors and authors of open and closed issues and
 - [TiagoGranelli](https://github.com/TiagoGranelli)
 - [tilgovi](https://github.com/tilgovi)
 - [till](https://github.com/till)
+- [Tinoooo-envelio](https://github.com/Tinoooo-envelio)
 - [tkimia](https://github.com/tkimia)
 - [tmak](https://github.com/tmak)
 - [tris203](https://github.com/tris203)
