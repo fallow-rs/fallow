@@ -929,8 +929,8 @@ pub struct SinkSite {
     /// classify it syntactically. `None` for non-URL sinks and URL expressions
     /// whose shape is not visible at the sink.
     pub url_shape: Option<SecurityUrlShape>,
-    /// Options-object metadata of the call, on the command argument of a call
-    /// whose options position the extractor knows. `None` for every other
+    /// Options-object metadata of the call, on the command argument and the
+    /// argument array of a call whose options position the extractor knows. `None` for every other
     /// sink, which means that the options are unknown.
     pub call_options: Option<Box<SinkCallOptions>>,
 }
