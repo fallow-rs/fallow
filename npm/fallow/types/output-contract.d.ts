@@ -21283,8 +21283,9 @@ skipped_files: MutationSkippedFile[]
  */
 unmatched_paths: string[]
 /**
- * The reason for each entry of `unmatched_paths`, in the same order.
- * Absent when `unmatched_paths` is empty.
+ * The reason for each entry of `unmatched_paths`, at the same index.
+ * Each path is relative to the project root. Absent when
+ * `unmatched_paths` is empty.
  */
 unmatched_path_reasons?: MutationUnmatchedPath[]
 /**
@@ -21938,8 +21939,9 @@ reason: string
  */
 export interface MutationUnmatchedPath {
 /**
- * The path as given, with forward slashes. The same value is in
- * `unmatched_paths`.
+ * The path relative to the project root, with forward slashes. The
+ * entry at the same index of `unmatched_paths` holds the path as given,
+ * so match the two fields by index, not by value.
  */
 path: string
 /**
@@ -22350,8 +22352,9 @@ skipped_files: MutationSkippedFile[]
  */
 unmatched_paths: string[]
 /**
- * The reason for each entry of `unmatched_paths`, in the same order.
- * Absent when `unmatched_paths` is empty.
+ * The reason for each entry of `unmatched_paths`, at the same index.
+ * Each path is relative to the project root. Absent when
+ * `unmatched_paths` is empty.
  */
 unmatched_path_reasons?: MutationUnmatchedPath[]
 runner: MutationPlanRunner

@@ -758,8 +758,9 @@ pub struct MutationSkippedFile {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct MutationUnmatchedPath {
-    /// The path as given, with forward slashes. The same value is in
-    /// `unmatched_paths`.
+    /// The path relative to the project root, with forward slashes. The
+    /// entry at the same index of `unmatched_paths` holds the path as given,
+    /// so match the two fields by index, not by value.
     pub path: String,
     /// Why the path selects no file, kebab-case: `not-found` (the path does
     /// not exist), `ignored` (the ignore globs of the config exclude the
@@ -1092,8 +1093,9 @@ pub struct MutationReport {
     pub skipped_files: Vec<MutationSkippedFile>,
     /// The paths of a `paths` scope that select no file.
     pub unmatched_paths: Vec<String>,
-    /// The reason for each entry of `unmatched_paths`, in the same order.
-    /// Absent when `unmatched_paths` is empty.
+    /// The reason for each entry of `unmatched_paths`, at the same index.
+    /// Each path is relative to the project root. Absent when
+    /// `unmatched_paths` is empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unmatched_path_reasons: Vec<MutationUnmatchedPath>,
     /// The instrumented files that the runner never loaded.
@@ -1446,8 +1448,9 @@ pub struct MutationPlanOutput {
     pub skipped_files: Vec<MutationSkippedFile>,
     /// The paths of a `paths` scope that select no file.
     pub unmatched_paths: Vec<String>,
-    /// The reason for each entry of `unmatched_paths`, in the same order.
-    /// Absent when `unmatched_paths` is empty.
+    /// The reason for each entry of `unmatched_paths`, at the same index.
+    /// Each path is relative to the project root. Absent when
+    /// `unmatched_paths` is empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unmatched_path_reasons: Vec<MutationUnmatchedPath>,
     /// The selected test runner and the verdict on its installed version.

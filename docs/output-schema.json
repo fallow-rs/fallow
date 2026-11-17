@@ -33394,7 +33394,7 @@
           "items": {
             "$ref": "#/definitions/MutationUnmatchedPath"
           },
-          "description": "The reason for each entry of `unmatched_paths`, in the same order.\nAbsent when `unmatched_paths` is empty."
+          "description": "The reason for each entry of `unmatched_paths`, at the same index.\nEach path is relative to the project root. Absent when\n`unmatched_paths` is empty."
         },
         "unloaded_paths": {
           "type": "array",
@@ -33585,7 +33585,7 @@
           "items": {
             "$ref": "#/definitions/MutationUnmatchedPath"
           },
-          "description": "The reason for each entry of `unmatched_paths`, in the same order.\nAbsent when `unmatched_paths` is empty."
+          "description": "The reason for each entry of `unmatched_paths`, at the same index.\nEach path is relative to the project root. Absent when\n`unmatched_paths` is empty."
         },
         "runner": {
           "description": "The selected test runner and the verdict on its installed version.",
@@ -38456,7 +38456,7 @@
       "properties": {
         "path": {
           "type": "string",
-          "description": "The path as given, with forward slashes. The same value is in\n`unmatched_paths`."
+          "description": "The path relative to the project root, with forward slashes. The\nentry at the same index of `unmatched_paths` holds the path as given,\nso match the two fields by index, not by value."
         },
         "reason": {
           "type": "string",

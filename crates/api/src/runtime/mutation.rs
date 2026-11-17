@@ -1790,6 +1790,39 @@ mod tests {
     }
 
     #[test]
+    fn an_unmatched_path_reason_is_root_relative_at_the_index_of_its_path() {
+        use fallow_engine::mutation::{UnmatchedPath, UnmatchedReason};
+        let root = Path::new("/project");
+        let mut plan = empty_plan();
+        plan.unmatched_paths = vec![
+            UnmatchedPath {
+                path: "/project/pkg".to_owned(),
+                reason: UnmatchedReason::Ignored,
+            },
+            UnmatchedPath {
+                path: "./src/missing.ts".to_owned(),
+                reason: UnmatchedReason::NotFound,
+            },
+        ];
+        let paths = unmatched_paths(&plan);
+        let reasons = unmatched_path_reasons(&plan, root);
+        assert_eq!(paths, vec!["/project/pkg", "./src/missing.ts"]);
+        assert_eq!(
+            reasons,
+            vec![
+                MutationUnmatchedPath {
+                    path: "pkg".to_owned(),
+                    reason: "ignored".to_owned(),
+                },
+                MutationUnmatchedPath {
+                    path: "src/missing.ts".to_owned(),
+                    reason: "not-found".to_owned(),
+                },
+            ]
+        );
+    }
+
+    #[test]
     fn a_cache_dir_at_or_above_the_root_is_refused() {
         let dir = tempfile::tempdir().expect("dir");
         let root = dir.path().join("project");
