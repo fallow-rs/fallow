@@ -1743,13 +1743,19 @@ impl FallowConfig {
                 .unwrap_or_else(|| "src".to_owned());
             boundaries.expand(&source_root);
         }
+        let mut errors: Vec<ZoneValidationError> = boundaries
+            .validate_public_api_zones()
+            .into_iter()
+            .map(|zone_name| ZoneValidationError::PublicApiWithAutoDiscover { zone_name })
+            .collect();
         let _logical_groups = boundaries.expand_auto_discover(root);
 
-        let mut errors: Vec<ZoneValidationError> = boundaries
-            .validate_zone_references()
-            .into_iter()
-            .map(ZoneValidationError::UnknownZoneReference)
-            .collect();
+        errors.extend(
+            boundaries
+                .validate_zone_references()
+                .into_iter()
+                .map(ZoneValidationError::UnknownZoneReference),
+        );
         errors.extend(
             boundaries
                 .validate_root_prefixes()

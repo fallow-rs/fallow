@@ -3443,12 +3443,14 @@ fn validate_resolved_boundaries_passes_on_valid_config() {
                     patterns: vec!["src/components/**".to_string()],
                     auto_discover: vec![],
                     root: None,
+                    public_api: false,
                 },
                 crate::BoundaryZone {
                     name: "db".to_string(),
                     patterns: vec!["src/db/**".to_string()],
                     auto_discover: vec![],
                     root: None,
+                    public_api: false,
                 },
             ],
             rules: vec![crate::BoundaryRule {
@@ -3477,6 +3479,7 @@ fn validate_resolved_boundaries_aggregates_unknown_zone_refs() {
                 patterns: vec!["src/ui/**".to_string()],
                 auto_discover: vec![],
                 root: None,
+                public_api: false,
             }],
             rules: vec![
                 crate::BoundaryRule {
@@ -3534,6 +3537,7 @@ fn validate_resolved_boundaries_flags_redundant_root_prefix() {
                 patterns: vec!["packages/app/src/**".to_string()],
                 auto_discover: vec![],
                 root: Some("packages/app/".to_string()),
+                public_api: false,
             }],
             rules: vec![],
         },
@@ -3562,6 +3566,7 @@ fn validate_resolved_boundaries_aggregates_unknown_zones_and_root_prefixes() {
                 patterns: vec!["packages/app/src/**".to_string()],
                 auto_discover: vec![],
                 root: Some("packages/app/".to_string()),
+                public_api: false,
             }],
             rules: vec![crate::BoundaryRule {
                 from: "ui".to_string(),
@@ -4689,4 +4694,64 @@ fn parse_config_to_value_rejects_toml_nesting_that_evades_the_parser_limit() {
 
     let err = parse_config_to_value(&path).unwrap_err().to_string();
     assert!(err.contains("Failed to parse config file"), "{err}");
+}
+
+#[test]
+fn boundary_zone_parses_public_api_and_omits_it_when_false() {
+    let config: FallowConfig = serde_json::from_str(
+        r#"{"boundaries": {"zones": [
+            {"name": "billing-public", "patterns": ["src/billing/public.ts"], "publicApi": true},
+            {"name": "billing", "patterns": ["src/billing/**"]}
+        ]}}"#,
+    )
+    .expect("publicApi must parse");
+
+    let zones = &config.boundaries.zones;
+    assert!(zones[0].public_api);
+    assert!(!zones[1].public_api, "publicApi defaults to false");
+    let rendered = serde_json::to_string(&zones[1]).expect("zone serializes");
+    assert!(
+        !rendered.contains("publicApi"),
+        "a false publicApi is omitted, got {rendered}"
+    );
+}
+
+#[test]
+fn validate_resolved_boundaries_rejects_public_api_with_auto_discover() {
+    let dir = test_dir("boundaries-public-api-auto-discover");
+    std::fs::create_dir_all(dir.path().join("src/modules/billing")).unwrap();
+    let config: FallowConfig = serde_json::from_str(
+        r#"{"boundaries": {"zones": [
+            {"name": "modules", "autoDiscover": ["src/modules"], "publicApi": true}
+        ]}}"#,
+    )
+    .expect("config parses");
+
+    let errors = config
+        .validate_resolved_boundaries(dir.path())
+        .expect_err("publicApi with autoDiscover must fail");
+
+    let rendered: Vec<String> = errors.iter().map(ToString::to_string).collect();
+    assert_eq!(rendered.len(), 1, "got: {rendered:?}");
+    assert!(
+        rendered[0].contains("zone 'modules'")
+            && rendered[0].contains("publicApi")
+            && rendered[0].contains("autoDiscover"),
+        "got: {rendered:?}"
+    );
+}
+
+#[test]
+fn resolved_config_reports_public_api_zones() {
+    let config: crate::BoundaryConfig = serde_json::from_str(
+        r#"{"zones": [
+            {"name": "billing-public", "patterns": ["src/billing/public.ts"], "publicApi": true},
+            {"name": "billing", "patterns": ["src/billing/**"]}
+        ]}"#,
+    )
+    .expect("config parses");
+    let resolved = config.resolve();
+    assert!(resolved.is_public_api_zone("billing-public"));
+    assert!(!resolved.is_public_api_zone("billing"));
+    assert!(!resolved.is_public_api_zone("unknown"));
 }

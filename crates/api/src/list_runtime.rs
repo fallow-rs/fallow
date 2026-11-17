@@ -145,6 +145,8 @@ pub struct ZoneInfo {
     pub patterns: Vec<String>,
     /// Number of discovered files matching the zone.
     pub file_count: usize,
+    /// Whether the zone holds the public entry files of a module.
+    pub public_api: bool,
 }
 
 /// One configured boundary allow rule.
@@ -497,6 +499,7 @@ fn build_boundary_zones(
             name: zone.name.clone(),
             patterns: zone.matchers.iter().map(|m| m.glob().to_string()).collect(),
             file_count: file_counts.get(zone.name.as_str()).copied().unwrap_or(0),
+            public_api: zone.public_api,
         })
         .collect()
 }
@@ -608,6 +611,7 @@ pub fn boundary_data_to_output(data: &BoundaryData) -> BoundariesListing {
                 name: zone.name.clone(),
                 patterns: zone.patterns.clone(),
                 file_count: zone.file_count,
+                public_api: zone.public_api,
             })
             .collect(),
         rule_count: data.rules.len(),
@@ -706,6 +710,7 @@ mod tests {
                 })
                 .collect(),
             root: None,
+            public_api: false,
         }
     }
 
@@ -1095,6 +1100,7 @@ mod tests {
                 name: "features/auth".to_string(),
                 patterns: vec!["src/features/auth/**".to_string()],
                 file_count: 3,
+                public_api: false,
             }],
             rules: vec![],
             logical_groups: vec![LogicalGroupInfo {

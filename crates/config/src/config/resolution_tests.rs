@@ -1623,6 +1623,7 @@ fn resolve_boundary_preset_with_user_override() {
         patterns: vec!["src/core/**".to_string()],
         auto_discover: vec![],
         root: None,
+        public_api: false,
     }];
     let resolved = config.resolve(
         PathBuf::from("/project"),

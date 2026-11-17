@@ -5873,9 +5873,9 @@ export interface BoundaryViolationFinding {
  */
 from_path: string
 /**
- * The file being imported that violates the boundary. When the import
- * goes through a re-export chain, this is the origin module that
- * declares the imported symbol, not the barrel.
+ * The imported file that violates the boundary. Through a re-export chain,
+ * the origin module that declares the symbol, not the barrel; a chain
+ * stops at the first file of a `publicApi` zone, which it then names.
  */
 to_path: string
 /**
@@ -15060,6 +15060,12 @@ patterns: string[]
  * Number of analyzable files the zone matched.
  */
 file_count: number
+/**
+ * Whether the zone holds the public entry files of a module
+ * (`publicApi: true` in the boundary config). Omitted when false. This
+ * field is not related to the `public_api` field of dead-code exports.
+ */
+public_api?: boolean
 }
 /**
  * A boundary import rule, expanded to operate on concrete child zone

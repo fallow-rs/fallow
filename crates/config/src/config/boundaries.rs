@@ -80,6 +80,11 @@ pub enum ZoneValidationError {
     RedundantRootPrefix(RedundantRootPrefix),
     /// A forbidden-call entry carries an unusable callee pattern.
     InvalidForbiddenCallee(InvalidForbiddenCallee),
+    /// A zone sets `publicApi` together with `autoDiscover`.
+    PublicApiWithAutoDiscover {
+        /// The zone name as authored.
+        zone_name: String,
+    },
 }
 
 impl fmt::Display for ZoneValidationError {
@@ -103,6 +108,13 @@ impl fmt::Display for ZoneValidationError {
                 f,
                 "boundaries.calls.forbidden[{}].callee: pattern '{}' {}",
                 err.rule_index, err.pattern, err.reason,
+            ),
+            Self::PublicApiWithAutoDiscover { zone_name } => write!(
+                f,
+                "boundaries.zones: zone '{zone_name}' sets publicApi together with autoDiscover. \
+                 That makes every file of each discovered module public. Declare a separate \
+                 publicApi zone that lists only the entry files, for example \
+                 'src/modules/*/index.ts', before the autoDiscover zone.",
             ),
             Self::RedundantRootPrefix(err) => write!(
                 f,
@@ -196,6 +208,7 @@ impl BoundaryPreset {
             patterns: vec![format!("{source_root}/{name}/**")],
             auto_discover: vec![],
             root: None,
+            public_api: false,
         }
     }
 
@@ -261,7 +274,7 @@ impl BoundaryPreset {
                 name: "features".to_owned(),
                 patterns: vec![format!("{source_root}/features/**")],
                 auto_discover: vec![format!("{source_root}/features")],
-                root: None,
+                ..BoundaryZone::default()
             },
             BoundaryZone {
                 name: "shared".to_owned(),
@@ -280,8 +293,7 @@ impl BoundaryPreset {
                 .iter()
                 .map(|dir| format!("{source_root}/{dir}/**"))
                 .collect(),
-                auto_discover: vec![],
-                root: None,
+                ..BoundaryZone::default()
             },
             Self::zone("server", source_root),
         ];
@@ -395,7 +407,7 @@ impl ForbiddenCallee {
 }
 
 /// A zone grouping files by directory pattern.
-#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct BoundaryZone {
     /// Zone name.
@@ -410,6 +422,14 @@ pub struct BoundaryZone {
     /// Optional subtree scope.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub root: Option<String>,
+    /// Marks the files of this zone as the public API of a module.
+    ///
+    /// The boundary check follows a named or default import through
+    /// re-export chains to the file that declares the symbol. The walk stops
+    /// at the first file of a public-API zone, and the check judges the
+    /// import by that file. Only the boundary check reads this flag.
+    #[serde(default, skip_serializing_if = "is_false")]
+    pub public_api: bool,
 }
 
 /// An import rule between zones.
@@ -517,6 +537,8 @@ pub struct ResolvedZone {
     pub matchers: Vec<globset::GlobMatcher>,
     /// Normalized subtree scope.
     pub root: Option<String>,
+    /// Whether the zone holds the public entry files of a module.
+    pub public_api: bool,
 }
 
 /// A resolved boundary rule.
@@ -841,6 +863,7 @@ fn authored_rules_for_logical_groups<'a>(
 /// Merge a discovered zone into `zones[]` by name.
 fn merge_zone_by_name(expanded_zones: &mut Vec<BoundaryZone>, zone: BoundaryZone) {
     if let Some(existing) = expanded_zones.iter_mut().find(|z| z.name == zone.name) {
+        existing.public_api |= zone.public_api;
         for pattern in zone.patterns {
             if !existing.patterns.contains(&pattern) {
                 existing.patterns.push(pattern);
@@ -905,6 +928,18 @@ fn expand_rules_for_groups(
 }
 
 impl BoundaryConfig {
+    /// Names of the zones that set `publicApi` together with `autoDiscover`.
+    ///
+    /// Call this before `expand_auto_discover`, which clears `autoDiscover`.
+    #[must_use]
+    pub fn validate_public_api_zones(&self) -> Vec<String> {
+        self.zones
+            .iter()
+            .filter(|zone| zone.public_api && !zone.auto_discover.is_empty())
+            .map(|zone| zone.name.clone())
+            .collect()
+    }
+
     /// Validate that patterns do not repeat the zone root.
     #[must_use]
     pub fn validate_root_prefixes(&self) -> Vec<RedundantRootPrefix> {
@@ -1077,6 +1112,7 @@ impl BoundaryConfig {
                     patterns: zone.patterns.clone(),
                     matchers,
                     root,
+                    public_api: zone.public_api,
                 }
             })
             .collect()
@@ -1251,9 +1287,8 @@ impl ChildZoneAccumulator {
             .entry(zone_name.clone())
             .or_insert_with(|| BoundaryZone {
                 name: zone_name.clone(),
-                patterns: vec![],
-                auto_discover: vec![],
                 root: zone.root.clone(),
+                ..BoundaryZone::default()
             });
         if !entry
             .patterns
@@ -1493,6 +1528,15 @@ impl ResolvedBoundaryConfig {
             None => true,
             Some(r) => r.allowed_zones.iter().any(|z| z == to_zone),
         }
+    }
+
+    /// Whether the zone named `zone_name` holds the public entry files of a
+    /// module (`publicApi: true`).
+    #[must_use]
+    pub fn is_public_api_zone(&self, zone_name: &str) -> bool {
+        self.zones
+            .iter()
+            .any(|zone| zone.public_api && zone.name == zone_name)
     }
 
     /// Check whether a type-only import is allowed.
@@ -1736,14 +1780,12 @@ callee = ["console.*"]
                 BoundaryZone {
                     name: "app".to_string(),
                     patterns: vec!["src/app/**".to_string()],
-                    auto_discover: vec![],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
                 BoundaryZone {
                     name: "features".to_string(),
-                    patterns: vec![],
                     auto_discover: vec!["src/features".to_string()],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
             ],
             rules: vec![
@@ -1810,20 +1852,18 @@ callee = ["console.*"]
                 BoundaryZone {
                     name: "app".to_string(),
                     patterns: vec!["src/app/**".to_string()],
-                    auto_discover: vec![],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
                 BoundaryZone {
                     name: "features".to_string(),
                     patterns: vec!["src/features/**".to_string()],
                     auto_discover: vec!["src/features".to_string()],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
                 BoundaryZone {
                     name: "shared".to_string(),
                     patterns: vec!["src/shared/**".to_string()],
-                    auto_discover: vec![],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
             ],
             rules: vec![
@@ -1929,15 +1969,13 @@ callee = ["console.*"]
                 zones: vec![
                     BoundaryZone {
                         name: "features".to_string(),
-                        patterns: vec![],
                         auto_discover: vec!["src/features".to_string()],
-                        root: None,
+                        ..BoundaryZone::default()
                     },
                     BoundaryZone {
                         name: "shared".to_string(),
                         patterns: vec!["src/shared/**".to_string()],
-                        auto_discover: vec![],
-                        root: None,
+                        ..BoundaryZone::default()
                     },
                 ],
                 rules,
@@ -1980,14 +2018,12 @@ callee = ["console.*"]
                 BoundaryZone {
                     name: "app".to_string(),
                     patterns: vec!["src/app/**".to_string()],
-                    auto_discover: vec![],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
                 BoundaryZone {
                     name: "features".to_string(),
-                    patterns: vec![],
                     auto_discover: vec!["src/features".to_string()],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
             ],
             rules: vec![BoundaryRule {
@@ -2025,9 +2061,8 @@ callee = ["console.*"]
             preset: None,
             zones: vec![BoundaryZone {
                 name: "features".to_string(),
-                patterns: vec![],
                 auto_discover: vec!["./src/features/".to_string()],
-                root: None,
+                ..BoundaryZone::default()
             }],
             rules: vec![],
         };
@@ -2051,7 +2086,7 @@ callee = ["console.*"]
                 name: "features".to_string(),
                 patterns: vec!["src/features/**".to_string()],
                 auto_discover: vec!["src/features".to_string()],
-                root: None,
+                ..BoundaryZone::default()
             }],
             rules: vec![],
         };
@@ -2072,9 +2107,8 @@ callee = ["console.*"]
             preset: None,
             zones: vec![BoundaryZone {
                 name: "features".to_string(),
-                patterns: vec![],
                 auto_discover: vec!["src/features".to_string()],
-                root: None,
+                ..BoundaryZone::default()
             }],
             rules: vec![],
         };
@@ -2094,9 +2128,8 @@ callee = ["console.*"]
             preset: None,
             zones: vec![BoundaryZone {
                 name: "features".to_string(),
-                patterns: vec![],
                 auto_discover: vec!["src/features".to_string()],
-                root: None,
+                ..BoundaryZone::default()
             }],
             rules: vec![],
         };
@@ -2117,9 +2150,8 @@ callee = ["console.*"]
             preset: None,
             zones: vec![BoundaryZone {
                 name: "features".to_string(),
-                patterns: vec![],
                 auto_discover: vec!["src/features".to_string(), "src/modules".to_string()],
-                root: None,
+                ..BoundaryZone::default()
             }],
             rules: vec![],
         };
@@ -2144,21 +2176,18 @@ callee = ["console.*"]
             zones: vec![
                 BoundaryZone {
                     name: "zeta".to_string(),
-                    patterns: vec![],
                     auto_discover: vec!["src/zeta".to_string()],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
                 BoundaryZone {
                     name: "alpha".to_string(),
-                    patterns: vec![],
                     auto_discover: vec!["src/alpha".to_string()],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
                 BoundaryZone {
                     name: "mid".to_string(),
-                    patterns: vec![],
                     auto_discover: vec!["src/mid".to_string()],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
             ],
             rules: vec![],
@@ -2182,21 +2211,18 @@ callee = ["console.*"]
             zones: vec![
                 BoundaryZone {
                     name: "features".to_string(),
-                    patterns: vec![],
                     auto_discover: vec!["src/features".to_string()],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
                 BoundaryZone {
                     name: "other".to_string(),
                     patterns: vec!["src/other/**".to_string()],
-                    auto_discover: vec![],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
                 BoundaryZone {
                     name: "features".to_string(),
-                    patterns: vec![],
                     auto_discover: vec!["src/extra".to_string()],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
             ],
             rules: vec![],
@@ -2218,9 +2244,8 @@ callee = ["console.*"]
             preset: None,
             zones: vec![BoundaryZone {
                 name: "features".to_string(),
-                patterns: vec![],
                 auto_discover: vec!["src/features".to_string()],
-                root: None,
+                ..BoundaryZone::default()
             }],
             rules: vec![],
         };
@@ -2239,9 +2264,9 @@ callee = ["console.*"]
             preset: None,
             zones: vec![BoundaryZone {
                 name: "features".to_string(),
-                patterns: vec![],
                 auto_discover: vec!["src/features".to_string()],
                 root: Some("packages/app/".to_string()),
+                ..BoundaryZone::default()
             }],
             rules: vec![],
         };
@@ -2263,9 +2288,8 @@ callee = ["console.*"]
             preset: None,
             zones: vec![BoundaryZone {
                 name: "features".to_string(),
-                patterns: vec![],
                 auto_discover: vec!["src/features".to_string()],
-                root: None,
+                ..BoundaryZone::default()
             }],
             rules: vec![],
         };
@@ -2285,9 +2309,8 @@ callee = ["console.*"]
             preset: None,
             zones: vec![BoundaryZone {
                 name: "features".to_string(),
-                patterns: vec![],
                 auto_discover: vec!["src/features".to_string(), "src/modules".to_string()],
-                root: None,
+                ..BoundaryZone::default()
             }],
             rules: vec![],
         };
@@ -2311,9 +2334,8 @@ callee = ["console.*"]
             preset: None,
             zones: vec![BoundaryZone {
                 name: "features".to_string(),
-                patterns: vec![],
                 auto_discover: vec!["src/features".to_string()],
-                root: None,
+                ..BoundaryZone::default()
             }],
             rules: vec![],
         };
@@ -2334,15 +2356,13 @@ callee = ["console.*"]
             zones: vec![
                 BoundaryZone {
                     name: "features".to_string(),
-                    patterns: vec![],
                     auto_discover: vec!["src/features".to_string()],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
                 BoundaryZone {
                     name: "features".to_string(),
-                    patterns: vec![],
                     auto_discover: vec!["src/extra".to_string()],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
             ],
             rules: vec![],
@@ -2377,15 +2397,13 @@ callee = ["console.*"]
             zones: vec![
                 BoundaryZone {
                     name: "features".to_string(),
-                    patterns: vec![],
                     auto_discover: vec!["src/features".to_string()],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
                 BoundaryZone {
                     name: "features".to_string(),
-                    patterns: vec![],
                     auto_discover: vec!["src/extra".to_string()],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
             ],
             rules: vec![],
@@ -2413,15 +2431,13 @@ callee = ["console.*"]
             zones: vec![
                 BoundaryZone {
                     name: "features".to_string(),
-                    patterns: vec![],
                     auto_discover: vec!["src/features".to_string()],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
                 BoundaryZone {
                     name: "features".to_string(),
-                    patterns: vec![],
                     auto_discover: vec!["src/features".to_string()],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
             ],
             rules: vec![],
@@ -2452,8 +2468,7 @@ callee = ["console.*"]
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
                 patterns: vec!["src/components/**".to_string()],
-                auto_discover: vec![],
-                root: None,
+                ..BoundaryZone::default()
             }],
             rules: vec![],
         };
@@ -2472,9 +2487,8 @@ callee = ["console.*"]
             preset: None,
             zones: vec![BoundaryZone {
                 name: "features".to_string(),
-                patterns: vec![],
                 auto_discover: vec!["src/features".to_string()],
-                root: None,
+                ..BoundaryZone::default()
             }],
             rules: vec![],
         };
@@ -2495,15 +2509,11 @@ callee = ["console.*"]
             zones: vec![
                 BoundaryZone {
                     name: "ui".to_string(),
-                    patterns: vec![],
-                    auto_discover: vec![],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
                 BoundaryZone {
                     name: "db".to_string(),
-                    patterns: vec![],
-                    auto_discover: vec![],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
             ],
             rules: vec![BoundaryRule {
@@ -2523,9 +2533,7 @@ callee = ["console.*"]
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
-                patterns: vec![],
-                auto_discover: vec![],
-                root: None,
+                ..BoundaryZone::default()
             }],
             rules: vec![BoundaryRule {
                 from: "nonexistent".to_string(),
@@ -2548,9 +2556,7 @@ callee = ["console.*"]
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
-                patterns: vec![],
-                auto_discover: vec![],
-                root: None,
+                ..BoundaryZone::default()
             }],
             rules: vec![BoundaryRule {
                 from: "ui".to_string(),
@@ -2572,9 +2578,7 @@ callee = ["console.*"]
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
-                patterns: vec![],
-                auto_discover: vec![],
-                root: None,
+                ..BoundaryZone::default()
             }],
             rules: vec![BoundaryRule {
                 from: "ui".to_string(),
@@ -2598,14 +2602,12 @@ callee = ["console.*"]
                 BoundaryZone {
                     name: "ui".to_string(),
                     patterns: vec!["src/components/**".to_string()],
-                    auto_discover: vec![],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
                 BoundaryZone {
                     name: "db".to_string(),
                     patterns: vec!["src/db/**".to_string()],
-                    auto_discover: vec![],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
             ],
             rules: vec![],
@@ -2629,14 +2631,12 @@ callee = ["console.*"]
                 BoundaryZone {
                     name: "specific".to_string(),
                     patterns: vec!["src/shared/db-utils/**".to_string()],
-                    auto_discover: vec![],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
                 BoundaryZone {
                     name: "shared".to_string(),
                     patterns: vec!["src/shared/**".to_string()],
-                    auto_discover: vec![],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
             ],
             rules: vec![],
@@ -2660,9 +2660,7 @@ callee = ["console.*"]
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
-                patterns: vec![],
-                auto_discover: vec![],
-                root: None,
+                ..BoundaryZone::default()
             }],
             rules: vec![BoundaryRule {
                 from: "ui".to_string(),
@@ -2683,15 +2681,11 @@ callee = ["console.*"]
             zones: vec![
                 BoundaryZone {
                     name: "shared".to_string(),
-                    patterns: vec![],
-                    auto_discover: vec![],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
                 BoundaryZone {
                     name: "db".to_string(),
-                    patterns: vec![],
-                    auto_discover: vec![],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
             ],
             rules: vec![],
@@ -2709,21 +2703,15 @@ callee = ["console.*"]
             zones: vec![
                 BoundaryZone {
                     name: "ui".to_string(),
-                    patterns: vec![],
-                    auto_discover: vec![],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
                 BoundaryZone {
                     name: "db".to_string(),
-                    patterns: vec![],
-                    auto_discover: vec![],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
                 BoundaryZone {
                     name: "shared".to_string(),
-                    patterns: vec![],
-                    auto_discover: vec![],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
             ],
             rules: vec![BoundaryRule {
@@ -2746,15 +2734,11 @@ callee = ["console.*"]
             zones: vec![
                 BoundaryZone {
                     name: "isolated".to_string(),
-                    patterns: vec![],
-                    auto_discover: vec![],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
                 BoundaryZone {
                     name: "other".to_string(),
-                    patterns: vec![],
-                    auto_discover: vec![],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
             ],
             rules: vec![BoundaryRule {
@@ -2778,14 +2762,14 @@ callee = ["console.*"]
                 BoundaryZone {
                     name: "ui".to_string(),
                     patterns: vec!["src/**".to_string()],
-                    auto_discover: vec![],
                     root: Some("packages/app/".to_string()),
+                    ..BoundaryZone::default()
                 },
                 BoundaryZone {
                     name: "domain".to_string(),
                     patterns: vec!["src/**".to_string()],
-                    auto_discover: vec![],
                     root: Some("packages/core/".to_string()),
+                    ..BoundaryZone::default()
                 },
             ],
             rules: vec![],
@@ -2813,8 +2797,8 @@ callee = ["console.*"]
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
                 patterns: vec!["src/**".to_string()],
-                auto_discover: vec![],
                 root: Some("packages/app/".to_string()),
+                ..BoundaryZone::default()
             }],
             rules: vec![],
         };
@@ -2846,14 +2830,14 @@ callee = ["console.*"]
                 BoundaryZone {
                     name: "no-slash".to_string(),
                     patterns: vec!["src/**".to_string()],
-                    auto_discover: vec![],
                     root: Some("packages/app".to_string()),
+                    ..BoundaryZone::default()
                 },
                 BoundaryZone {
                     name: "dot-prefixed".to_string(),
                     patterns: vec!["src/**".to_string()],
-                    auto_discover: vec![],
                     root: Some("./packages/lib/".to_string()),
+                    ..BoundaryZone::default()
                 },
             ],
             rules: vec![],
@@ -2880,8 +2864,8 @@ callee = ["console.*"]
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
                 patterns: vec!["packages/app/src/**".to_string()],
-                auto_discover: vec![],
                 root: Some("packages/app/".to_string()),
+                ..BoundaryZone::default()
             }],
             rules: vec![],
         };
@@ -2914,8 +2898,8 @@ callee = ["console.*"]
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
                 patterns: vec!["./packages/app/src/**".to_string()],
-                auto_discover: vec![],
                 root: Some("packages/app".to_string()),
+                ..BoundaryZone::default()
             }],
             rules: vec![],
         };
@@ -2932,8 +2916,8 @@ callee = ["console.*"]
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
                 patterns: vec!["src/**".to_string()],
-                auto_discover: vec![],
                 root: Some("packages/app/".to_string()),
+                ..BoundaryZone::default()
             }],
             rules: vec![],
         };
@@ -2961,8 +2945,8 @@ callee = ["console.*"]
                 zones: vec![BoundaryZone {
                     name: "ui".to_string(),
                     patterns: vec!["src/**".to_string(), "lib/**".to_string()],
-                    auto_discover: vec![],
                     root: Some(raw_root.to_string()),
+                    ..BoundaryZone::default()
                 }],
                 rules: vec![],
             };
@@ -3283,8 +3267,7 @@ callee = ["console.*"]
             zones: vec![BoundaryZone {
                 name: "domain".to_string(),
                 patterns: vec!["src/core/**".to_string()],
-                auto_discover: vec![],
-                root: None,
+                ..BoundaryZone::default()
             }],
             rules: vec![],
         };
@@ -3303,8 +3286,7 @@ callee = ["console.*"]
             zones: vec![BoundaryZone {
                 name: "shared".to_string(),
                 patterns: vec!["src/shared/**".to_string()],
-                auto_discover: vec![],
-                root: None,
+                ..BoundaryZone::default()
             }],
             rules: vec![],
         };
@@ -3344,8 +3326,7 @@ callee = ["console.*"]
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
                 patterns: vec!["src/ui/**".to_string()],
-                auto_discover: vec![],
-                root: None,
+                ..BoundaryZone::default()
             }],
             rules: vec![],
         };
@@ -3402,8 +3383,7 @@ callee = ["console.*"]
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
                 patterns: vec!["src/ui/**".to_string()],
-                auto_discover: vec![],
-                root: None,
+                ..BoundaryZone::default()
             }],
             rules: vec![],
         };
@@ -3458,9 +3438,7 @@ callee = ["console.*"]
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
-                patterns: vec![],
-                auto_discover: vec![],
-                root: None,
+                ..BoundaryZone::default()
             }],
             rules: vec![],
         };
@@ -3480,8 +3458,7 @@ callee = ["console.*"]
                     "src/pages/**".to_string(),
                     "src/views/**".to_string(),
                 ],
-                auto_discover: vec![],
-                root: None,
+                ..BoundaryZone::default()
             }],
             rules: vec![],
         };
@@ -3506,9 +3483,7 @@ callee = ["console.*"]
             preset: None,
             zones: vec![BoundaryZone {
                 name: "ui".to_string(),
-                patterns: vec![],
-                auto_discover: vec![],
-                root: None,
+                ..BoundaryZone::default()
             }],
             rules: vec![
                 BoundaryRule {
@@ -3550,21 +3525,15 @@ callee = ["console.*"]
             zones: vec![
                 BoundaryZone {
                     name: "a".to_string(),
-                    patterns: vec![],
-                    auto_discover: vec![],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
                 BoundaryZone {
                     name: "b".to_string(),
-                    patterns: vec![],
-                    auto_discover: vec![],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
                 BoundaryZone {
                     name: "c".to_string(),
-                    patterns: vec![],
-                    auto_discover: vec![],
-                    root: None,
+                    ..BoundaryZone::default()
                 },
             ],
             rules: vec![BoundaryRule {
@@ -3613,11 +3582,32 @@ callee = ["console.*"]
             zones: vec![BoundaryZone {
                 name: "broken".to_string(),
                 patterns: vec!["[invalid".to_string()],
-                auto_discover: vec![],
-                root: None,
+                ..BoundaryZone::default()
             }],
             rules: vec![],
         };
         let _ = config.resolve();
+    }
+
+    fn zone_with(name: &str, pattern: &str, public_api: bool) -> BoundaryZone {
+        BoundaryZone {
+            name: name.to_string(),
+            patterns: vec![pattern.to_string()],
+            auto_discover: vec![],
+            root: None,
+            public_api,
+        }
+    }
+
+    #[test]
+    fn merging_zones_by_name_keeps_public_api() {
+        let mut zones = vec![zone_with("billing", "src/billing/index.ts", true)];
+        merge_zone_by_name(
+            &mut zones,
+            zone_with("billing", "src/billing/api.ts", false),
+        );
+        assert_eq!(zones.len(), 1);
+        assert!(zones[0].public_api, "one public declaration keeps the flag");
+        assert_eq!(zones[0].patterns.len(), 2);
     }
 }

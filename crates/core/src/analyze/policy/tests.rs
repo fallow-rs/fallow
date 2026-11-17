@@ -128,12 +128,14 @@ fn compiled_rules_honor_rule_zone_scope() {
                 patterns: vec!["src/domain/**".to_owned()],
                 auto_discover: Vec::new(),
                 root: None,
+                public_api: false,
             },
             fallow_config::BoundaryZone {
                 name: "app".to_owned(),
                 patterns: vec!["src/app/**".to_owned()],
                 auto_discover: Vec::new(),
                 root: None,
+                public_api: false,
             },
         ],
         ..fallow_config::BoundaryConfig::default()
@@ -449,12 +451,14 @@ fn banned_effect_honors_rule_zone_scope() {
                 patterns: vec!["src/domain/**".to_owned()],
                 auto_discover: Vec::new(),
                 root: None,
+                public_api: false,
             },
             fallow_config::BoundaryZone {
                 name: "app".to_owned(),
                 patterns: vec!["src/app/**".to_owned()],
                 auto_discover: Vec::new(),
                 root: None,
+                public_api: false,
             },
         ],
         ..fallow_config::BoundaryConfig::default()

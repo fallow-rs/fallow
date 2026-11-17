@@ -5752,7 +5752,7 @@
         },
         "to_path": {
           "type": "string",
-          "description": "The file being imported that violates the boundary. When the import\ngoes through a re-export chain, this is the origin module that\ndeclares the imported symbol, not the barrel."
+          "description": "The imported file that violates the boundary. Through a re-export chain,\nthe origin module that declares the symbol, not the barrel; a chain\nstops at the first file of a `publicApi` zone, which it then names."
         },
         "from_zone": {
           "type": "string",
@@ -9605,6 +9605,10 @@
         "file_count": {
           "type": "integer",
           "description": "Number of analyzable files the zone matched."
+        },
+        "public_api": {
+          "type": "boolean",
+          "description": "Whether the zone holds the public entry files of a module\n(`publicApi: true` in the boundary config). Omitted when false. This\nfield is not related to the `public_api` field of dead-code exports."
         }
       },
       "required": [
@@ -11910,7 +11914,7 @@
         },
         "to_path": {
           "type": "string",
-          "description": "The file being imported that violates the boundary. When the import\ngoes through a re-export chain, this is the origin module that\ndeclares the imported symbol, not the barrel."
+          "description": "The imported file that violates the boundary. Through a re-export chain,\nthe origin module that declares the symbol, not the barrel; a chain\nstops at the first file of a `publicApi` zone, which it then names."
         },
         "from_zone": {
           "type": "string",

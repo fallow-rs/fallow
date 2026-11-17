@@ -72,6 +72,7 @@ fn zone(name: &str, pattern: &str) -> BoundaryZone {
         patterns: vec![pattern.to_owned()],
         auto_discover: Vec::new(),
         root: None,
+        public_api: false,
     }
 }
 
