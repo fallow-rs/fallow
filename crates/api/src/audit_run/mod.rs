@@ -556,7 +556,8 @@ pub fn attribute<A: AuditAnalyses>(
 
     let (comparison, dupe_demotion_diff_source, (attribution, verdict, summary)) = {
         let view = analyses.view();
-        let mut comparison = compare(&view, base_snapshot.as_ref(), degrade_reason.is_some());
+        let degraded = degrade_reason.is_some();
+        let mut comparison = compare(&view, base_snapshot.as_ref(), degraded, changed_files);
         if worsened == AuditWorsened::Off {
             comparison.clear_worsened();
         }

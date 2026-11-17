@@ -45,6 +45,12 @@ fn class_with_run(class: &str, branches: usize) -> String {
 /// A repository with `src/index.js` holding `source` on the base commit, and a
 /// `head` branch checked out on top of it.
 fn fixture(source: &str) -> TempDir {
+    fixture_with_health_config(source, "")
+}
+
+/// [`fixture`] with `extra_config`, a list of top-level config members that
+/// each end with a comma.
+fn fixture_with_health_config(source: &str, extra_config: &str) -> TempDir {
     let tmp = TempDir::new().expect("failed to create temp dir");
     let dir = tmp.path();
     fs::create_dir_all(dir.join("src")).unwrap();
@@ -55,7 +61,9 @@ fn fixture(source: &str) -> TempDir {
     .unwrap();
     fs::write(
         dir.join(".fallowrc.json"),
-        r#"{"entry": ["src/*.js"], "health": {"maxCyclomatic": 15, "maxCognitive": 15, "maxCrap": 999999999, "maxUnitSize": 999999}}"#,
+        format!(
+            r#"{{{extra_config}"entry": ["src/*.js"], "health": {{"maxCyclomatic": 15, "maxCognitive": 15, "maxCrap": 999999999, "maxUnitSize": 999999}}}}"#
+        ),
     )
     .unwrap();
     fs::write(dir.join("src/index.js"), source).unwrap();
@@ -488,4 +496,99 @@ fn estimated_crap_does_not_hide_a_cognitive_finding() {
     let tangled = json_finding(&json, "tangled");
     assert_eq!(tangled["exceeded"], "all");
     assert_eq!(tangled["effective_severity"], "error");
+}
+
+/// A repository with three functions in `src/index.js`, for a change that
+/// splits the file. No new file holds half of the old file, so git reports no
+/// rename. The duplication limit is high: the three functions are clones of
+/// each other, and the audit reports a clone group across the new files as
+/// introduced.
+fn split_fixture() -> TempDir {
+    let source = format!(
+        "{}{}{}",
+        hotspot("first", 16),
+        hotspot("second", 18),
+        hotspot("third", 20)
+    );
+    fixture_with_health_config(&source, r#""duplicates": {"minLines": 1000},"#)
+}
+
+/// Delete `src/index.js` and write each `(file, source)` pair on the head
+/// branch.
+fn split_index(dir: &Path, files: &[(&str, String)]) {
+    fs::remove_file(dir.join("src/index.js")).unwrap();
+    for (file, source) in files {
+        fs::write(dir.join("src").join(file), source).unwrap();
+    }
+    commit_all(dir, "split");
+}
+
+#[test]
+fn function_moved_to_another_file_stays_inherited() {
+    let tmp = split_fixture();
+    let dir = tmp.path();
+    split_index(
+        dir,
+        &[
+            ("first.js", hotspot("first", 16)),
+            ("second.js", hotspot("second", 18)),
+            ("third.js", hotspot("third", 20)),
+        ],
+    );
+
+    assert_inherited(&audit(dir), 3);
+}
+
+#[test]
+fn function_moved_to_another_file_and_grown_is_worsened() {
+    let tmp = split_fixture();
+    let dir = tmp.path();
+    split_index(
+        dir,
+        &[
+            ("first.js", hotspot("first", 16)),
+            ("second.js", hotspot("second", 19)),
+            ("third.js", hotspot("third", 20)),
+        ],
+    );
+
+    assert_worsened(&audit(dir), 3, 1);
+}
+
+#[test]
+fn new_function_with_the_name_of_a_kept_function_is_introduced() {
+    let tmp = fixture(&hotspot("hotspot", 17));
+    let dir = tmp.path();
+    edit(dir, &format!("{}// edited file\n", hotspot("hotspot", 17)));
+    fs::write(dir.join("src/other.js"), hotspot("hotspot", 17)).unwrap();
+    commit_all(dir, "same-named function in a new file");
+
+    assert_introduced(&audit(dir), 1, 1);
+}
+
+#[test]
+fn one_moved_function_does_not_cover_two_same_named_functions() {
+    let tmp = split_fixture();
+    let dir = tmp.path();
+    split_index(
+        dir,
+        &[
+            ("first.js", hotspot("first", 16)),
+            ("second.js", hotspot("second", 18)),
+            ("third.js", hotspot("third", 20)),
+            ("copy.js", hotspot("third", 20)),
+        ],
+    );
+
+    assert_introduced(&audit(dir), 1, 3);
+}
+
+#[test]
+fn new_function_with_the_name_of_a_function_in_an_unchanged_file_is_introduced() {
+    let tmp = fixture(&hotspot("hotspot", 17));
+    let dir = tmp.path();
+    fs::write(dir.join("src/other.js"), hotspot("hotspot", 17)).unwrap();
+    commit_all(dir, "same-named function in a new file");
+
+    assert_introduced(&audit(dir), 1, 0);
 }

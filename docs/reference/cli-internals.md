@@ -369,6 +369,21 @@ line states exit code 0.
   `exceeded_metric_increased`, a CRAP score from estimated coverage does not
   make a finding introduced, and a base finding without a CRAP score is not
   growth. `--gate all` keeps the rule severity.
+- Moved functions under new-only: the identity key of a complexity finding
+  holds the path, and git reports a rename only for a whole file. A refactor
+  that splits a file gives each moved function a new key.
+  `classify_complexity_attribution_with_moves`
+  (`crates/api/src/audit_complexity.rs`) then gives a head finding without a
+  base finding the base finding of the same function name from another
+  changed or deleted file. The base health pass covers the whole project and
+  the head pass covers the changed files, so `audit_run::compare` passes the
+  changed files: a base finding in an unchanged file is no candidate. Equal
+  values pair first. One remaining head finding and one remaining base
+  finding of a name pair and compare their metrics, so a moved function that
+  grew is worsened. With more candidates of one name, the remaining head
+  findings are introduced. A placeholder name (`<arrow>`, `<anonymous>`)
+  needs equal cyclomatic and cognitive values and an equal line count.
+  Dead-code keys and clone-group keys have no such step.
 - Audit unused code outside the changed files: under `--gate new-only`, the
   head and base dead-code passes keep every unused file and unused export.
   They pass `ChangeScopeOwner::CallerKeepingUnusedCode`

@@ -1,18 +1,20 @@
 //! Comparison of the head run with the base snapshot, and the verdict.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use fallow_config::{AuditGate, AuditWorsened, ResolvedConfig, RulesConfig, Severity};
 
 use fallow_engine::changed_files::RenamedFile;
+use fallow_engine::module_graph::relative_key_path;
 use fallow_types::duplicates::CloneGroup;
+use rustc_hash::FxHashSet;
 
 use super::clone_containment::base_contained_dupe_group_keys;
 use super::{AuditAnalysesView, AuditKeySnapshot};
 use crate::audit_keys::{
     AuditComparison, AuditDomainLedger, DeadCodeAuditLedger,
-    classify_complexity_attribution_against_all, complexity_ledger_keys, dead_code_audit_ledger,
-    dupe_group_key, preexisting_dupe_group_keys, styling_ledger_keys,
+    classify_complexity_attribution_against_all_with_moves, complexity_ledger_keys,
+    dead_code_audit_ledger, dupe_group_key, preexisting_dupe_group_keys, styling_ledger_keys,
     styling_ledger_keys_with_diff,
 };
 use crate::diff_risk::clones::BaseCloneGroup;
@@ -60,11 +62,21 @@ pub struct SharedDiff<'a> {
 /// compares against the syntactic keys of the base, and a head finding that
 /// only semantic evidence produced stays advisory: it has no syntactic base
 /// counterpart to compare with.
+///
+/// `changed_files` holds the files that the change touched or deleted. A
+/// complexity finding of a function that the change moved between two of
+/// them compares with its base finding (see
+/// [`classify_complexity_attribution_against_all_with_moves`]).
 #[must_use]
+#[expect(
+    clippy::implicit_hasher,
+    reason = "fallow standardizes on FxHashSet across the workspace"
+)]
 pub fn compare(
     view: &AuditAnalysesView<'_>,
     base: Option<&AuditKeySnapshot>,
     syntactic_fallback: bool,
+    changed_files: &FxHashSet<PathBuf>,
 ) -> AuditComparison {
     let dead_code =
         view.dead_code
@@ -98,10 +110,15 @@ pub fn compare(
             .as_ref()
             .zip(base)
             .map_or_else(Vec::new, |(health, snapshot)| {
-                classify_complexity_attribution_against_all(
+                let changed_paths: FxHashSet<String> = changed_files
+                    .iter()
+                    .map(|path| relative_key_path(path, health.root))
+                    .collect();
+                classify_complexity_attribution_against_all_with_moves(
                     &health.report.findings,
                     health.root,
                     std::iter::once(&snapshot.health).chain(&snapshot.inherited_health),
+                    &changed_paths,
                 )
             });
     let health = view
