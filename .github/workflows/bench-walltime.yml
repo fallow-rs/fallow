@@ -29,6 +29,10 @@ env:
   CARGO_TERM_COLOR: always
   # Keep the symbol table so the CodSpeed flame graphs show function names.
   CARGO_PROFILE_RELEASE_STRIP: none
+  # The CLI runs the same commands as the CPU simulation lane. With
+  # suggestions off, fallow starts no git probe for the next steps, so the
+  # measured run starts no child process.
+  FALLOW_SUGGESTIONS: 'off'
 
 jobs:
   build-cli:

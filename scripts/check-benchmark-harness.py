@@ -207,7 +207,7 @@ def assert_codspeed_action_modes(text: str, type_aware_text: str) -> list[str]:
         errors.append(f"type-aware workflow is missing {TYPE_AWARE_JOB}")
     elif set(re.findall(r"mode:\s*([^\s]+)", type_aware_text)) != {TYPE_AWARE_MODE}:
         errors.append(f"the walltime workflow must use only {TYPE_AWARE_MODE} mode")
-    if TYPE_AWARE_JOB in text:
+    if f"  {TYPE_AWARE_JOB}:" in text:
         errors.append(
             f"{TYPE_AWARE_JOB} must stay out of the bench workflow: a CodSpeed run "
             "carries one instrument"

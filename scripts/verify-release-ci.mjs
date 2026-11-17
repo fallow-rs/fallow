@@ -56,8 +56,13 @@ const WORKFLOW_DIR = ".github/workflows/";
  */
 const IGNORED_EVENTS = new Set(["pull_request", "pull_request_target", "merge_group", "dynamic"]);
 
-/** The release workflows themselves. An earlier failed release attempt must not block a retry. */
-const IGNORED_FILES = new Set(["release.yml", "release-published.yml"]);
+/**
+ * The release workflows themselves: an earlier failed release attempt must not
+ * block a retry. And the nightly walltime benchmarks: their macro runner comes
+ * from a shared monthly minute pool and can stay queued, and a release must not
+ * wait on a measurement.
+ */
+const IGNORED_FILES = new Set(["release.yml", "release-published.yml", "bench-walltime.yml"]);
 
 const PASSING_CONCLUSIONS = new Set(["success", "skipped", "neutral"]);
 
