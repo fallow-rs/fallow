@@ -672,6 +672,9 @@ mod issue_1638_openlayers_dispatch;
 #[path = "integration_test/issue_1638_tostring_coercion.rs"]
 mod issue_1638_tostring_coercion;
 
+#[path = "integration_test/issue_4649_cloudflare_runtime_handlers.rs"]
+mod issue_4649_cloudflare_runtime_handlers;
+
 #[path = "integration_test/issue_1707_vue_vfor_class_member.rs"]
 mod issue_1707_vue_vfor_class_member;
 

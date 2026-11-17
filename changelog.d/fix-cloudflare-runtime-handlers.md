@@ -1,0 +1,4 @@
+### Fixed
+
+- **`fallow dead-code` no longer reports the Cloudflare Workers runtime handlers as unused class members.** The runtime calls these methods by name, so no project code calls them. A class that extends a base class of `cloudflare:workers` now gets credit for the handlers that the base class declares in `@cloudflare/workers-types`: `alarm`, `fetch`, `connect`, `webSocketMessage`, `webSocketClose` and `webSocketError` on `DurableObject`; `email`, `fetch`, `connect`, `queue`, `scheduled`, `tail`, `tailStream`, `test` and `trace` on `WorkerEntrypoint`; `run` on `WorkflowEntrypoint`. A local subclass of such a class gets the same credit. A base class with the same name from another module gets no credit, and other methods stay reported.
+  (Closes [#4649](https://github.com/fallow-rs/fallow/issues/4649))

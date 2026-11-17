@@ -1,0 +1,7 @@
+{
+  "name": "issue-4649-cloudflare-runtime-handlers-fixture",
+  "main": "src/index.ts",
+  "dependencies": {
+    "other-runtime": "^1.0.0"
+  }
+}

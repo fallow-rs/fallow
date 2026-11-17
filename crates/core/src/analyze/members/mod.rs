@@ -24,6 +24,7 @@ use fallow_types::extract::{
 use super::predicates::{is_angular_lifecycle_method, is_react_lifecycle_method};
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
+mod cloudflare_runtime;
 mod external_override;
 mod factory;
 mod fluent_chain;
@@ -34,6 +35,9 @@ mod namespace;
 mod playwright;
 mod typed_property;
 
+use cloudflare_runtime::{
+    build_cloudflare_runtime_subclass_handlers, is_cloudflare_runtime_handler,
+};
 use external_override::credit_external_override_members;
 use factory::*;
 use fluent_chain::*;
@@ -171,6 +175,7 @@ struct MemberSkipContext<'a> {
     ignore_decorators: &'a IgnoreDecoratorSet,
     error_subclass_keys: &'a FxHashSet<ExportKey>,
     ol_interaction_subclass_keys: &'a FxHashSet<ExportKey>,
+    cloudflare_runtime_handlers: &'a FxHashMap<ExportKey, &'static [&'static str]>,
     allowlist: &'a ClassMemberAllowlist<'a>,
     semantic_framework_candidates: &'a ClassMemberAllowlist<'a>,
     super_class: Option<&'a str>,
@@ -895,6 +900,7 @@ struct PreparedMemberScan<'a> {
     public_class_exports: FxHashSet<ExportKey>,
     error_subclass_keys: FxHashSet<ExportKey>,
     ol_interaction_subclass_keys: FxHashSet<ExportKey>,
+    cloudflare_runtime_handlers: FxHashMap<ExportKey, &'static [&'static str]>,
 }
 
 type MemberScanBuckets = (
@@ -1078,6 +1084,7 @@ impl MemberReportContext<'_, '_> {
                     ignore_decorators: self.ignore_decorators,
                     error_subclass_keys: &self.prepared.error_subclass_keys,
                     ol_interaction_subclass_keys: &self.prepared.ol_interaction_subclass_keys,
+                    cloudflare_runtime_handlers: &self.prepared.cloudflare_runtime_handlers,
                     allowlist: self.allowlist,
                     semantic_framework_candidates: self.semantic_framework_candidates,
                     super_class,
@@ -1181,6 +1188,9 @@ fn prepare_member_scan(input: UnusedMemberScanInput<'_>) -> PreparedMemberScan<'
     let ol_interaction_subclass_keys =
         build_ol_interaction_subclass_keys(input.resolved_modules, &parent_to_children);
 
+    let cloudflare_runtime_handlers =
+        build_cloudflare_runtime_subclass_handlers(input.resolved_modules, &parent_to_children);
+
     PreparedMemberScan {
         ambiguity: input.graph.ambiguity_participants(),
         heritage_context,
@@ -1190,6 +1200,7 @@ fn prepare_member_scan(input: UnusedMemberScanInput<'_>) -> PreparedMemberScan<'
         public_class_exports,
         error_subclass_keys,
         ol_interaction_subclass_keys,
+        cloudflare_runtime_handlers,
     }
 }
 
@@ -1698,6 +1709,11 @@ fn class_member_runtime_credit_applies(member: &MemberInfo, ctx: &MemberSkipCont
                 &member.name,
                 ctx.export_key,
                 ctx.ol_interaction_subclass_keys,
+            )
+            || is_cloudflare_runtime_handler(
+                &member.name,
+                ctx.export_key,
+                ctx.cloudflare_runtime_handlers,
             )
             || ctx.allowlist.matches(
                 member.name.as_str(),
