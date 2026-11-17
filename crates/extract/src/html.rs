@@ -10,13 +10,18 @@
 use std::path::Path;
 use std::sync::LazyLock;
 
-use oxc_span::Span;
+use oxc_allocator::Allocator;
+use oxc_ast_visit::Visit;
+use oxc_parser::Parser;
+use oxc_span::{SourceType, Span};
 
 use crate::asset_url::normalize_asset_url;
 use crate::sfc_template::angular;
+use crate::source_map::ExtractionResult;
+use crate::visitor::ModuleInfoExtractor;
 use crate::{
-    AngularTemplateMemberAccessFact, ImportInfo, ImportedName, MemberAccess, ModuleInfo,
-    SemanticFact,
+    AngularTemplateMemberAccessFact, DynamicImportInfo, DynamicImportPattern, ImportInfo,
+    ImportedName, MemberAccess, ModuleInfo, SemanticFact,
 };
 use fallow_types::discover::FileId;
 
@@ -52,7 +57,8 @@ static SRC_ATTRIBUTE_RE: LazyLock<regex::Regex> =
 
 /// `true` when the page has an inline script with a body. A module script can
 /// import any module, and a classic script can call `import()`. Extraction
-/// does not record the imports or calls of such a script.
+/// records the imports of such a script, but not the calls of the imported
+/// functions.
 fn has_inline_script(source: &str) -> bool {
     let without_comments = HTML_COMMENT_RE.replace_all(source, "");
     SCRIPT_PARTS_RE
@@ -64,6 +70,108 @@ fn has_inline_script(source: &str) -> bool {
                 && !SRC_ATTRIBUTE_RE.is_match(attributes)
                 && !body.trim().is_empty()
         })
+}
+
+/// The value of a `type` attribute, in double quotes, single quotes or bare.
+static TYPE_ATTRIBUTE_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
+    crate::static_regex(r#"(?i)(?:^|\s)type\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'>]+))"#)
+});
+
+/// `type` values of a classic script. The browser runs the body as JavaScript.
+const CLASSIC_SCRIPT_TYPES: &[&str] = &[
+    "",
+    "text/javascript",
+    "application/javascript",
+    "text/ecmascript",
+    "application/ecmascript",
+];
+
+/// The `type` value of a module script.
+const MODULE_SCRIPT_TYPE: &str = "module";
+
+/// The parse mode of an inline script body. A script with a `src` attribute
+/// does not run its body, and a script of another type holds data.
+fn inline_script_source_type(attributes: &str) -> Option<SourceType> {
+    if SRC_ATTRIBUTE_RE.is_match(attributes) {
+        return None;
+    }
+    let kind = TYPE_ATTRIBUTE_RE
+        .captures(attributes)
+        .and_then(|cap| cap.get(1).or_else(|| cap.get(2)).or_else(|| cap.get(3)))
+        .map_or("", |value| value.as_str().trim());
+    if kind.eq_ignore_ascii_case(MODULE_SCRIPT_TYPE) {
+        return Some(SourceType::mjs());
+    }
+    CLASSIC_SCRIPT_TYPES
+        .iter()
+        .any(|classic| kind.eq_ignore_ascii_case(classic))
+        .then(SourceType::script)
+}
+
+/// The imports of the inline scripts of a page, with spans in the page, and
+/// the uses of the imported bindings (`m.default` in
+/// `import("./a.js").then((m) => m.default)`).
+#[derive(Default)]
+struct InlineScriptFacts {
+    imports: Vec<ImportInfo>,
+    dynamic_imports: Vec<DynamicImportInfo>,
+    dynamic_import_patterns: Vec<DynamicImportPattern>,
+    member_accesses: Vec<MemberAccess>,
+    whole_object_uses: Vec<String>,
+    semantic_facts: Vec<SemanticFact>,
+}
+
+/// Parse each inline script body of the page. A module script can import
+/// modules, and a classic or module script can call `import()`. The browser
+/// loads these modules, so they are part of the graph of the page.
+fn collect_inline_script_facts(source: &str) -> InlineScriptFacts {
+    let mut scanned = source.to_owned();
+    for comment in HTML_COMMENT_RE.find_iter(source) {
+        blank(&mut scanned, comment.range());
+    }
+    let mut found = InlineScriptFacts::default();
+    for parts in SCRIPT_PARTS_RE.captures_iter(&scanned) {
+        let (Some(attributes), Some(body)) = (parts.get(1), parts.get(2)) else {
+            continue;
+        };
+        let Some(source_type) = inline_script_source_type(attributes.as_str()) else {
+            continue;
+        };
+        let body_text = &source[body.range()];
+        if body_text.trim().is_empty() {
+            continue;
+        }
+        let allocator = Allocator::default();
+        let parsed = Parser::new(&allocator, body_text, source_type).parse();
+        let mut extractor = ModuleInfoExtractor::new();
+        extractor.visit_program(&parsed.program);
+        let extraction = ExtractionResult::contiguous(body_text, body.start());
+        extractor.remap_spans_with(|span| extraction.remap_span(span));
+        let info = extractor.into_module_info(
+            FileId(0),
+            0,
+            crate::suppress::ParsedSuppressions::default(),
+        );
+        // A classic script with an `import` declaration is a syntax error in
+        // the browser, so only a module script gives static imports.
+        if source_type.is_module() {
+            found.imports.extend(info.imports);
+        }
+        found.dynamic_imports.extend(info.dynamic_imports);
+        found
+            .dynamic_import_patterns
+            .extend(info.dynamic_import_patterns);
+        found
+            .member_accesses
+            .extend(info.member_accesses.iter().cloned());
+        found
+            .whole_object_uses
+            .extend(info.whole_object_uses.iter().cloned());
+        found
+            .semantic_facts
+            .extend(info.semantic_facts.iter().cloned());
+    }
+    found
 }
 
 /// Regex to extract `src` attribute from `<script>` tags.
@@ -233,6 +341,8 @@ fn parse_html_to_module(file_id: FileId, source: &str, content_hash: u64) -> Mod
 /// struct is assembled.
 struct HtmlModuleParts {
     imports: Vec<ImportInfo>,
+    /// The facts of the inline scripts. Their imports are in `imports`.
+    inline_scripts: InlineScriptFacts,
     member_accesses: Vec<MemberAccess>,
     semantic_facts: Vec<SemanticFact>,
     security_sinks: Vec<fallow_types::extract::SinkSite>,
@@ -261,6 +371,8 @@ fn collect_html_module_parts(source: &str, need_complexity: bool) -> HtmlModuleP
 
     imports.sort_unstable_by(|a, b| a.source.cmp(&b.source));
     imports.dedup_by(|a, b| a.source == b.source);
+    let mut inline_scripts = collect_inline_script_facts(source);
+    imports.append(&mut inline_scripts.imports);
 
     let angular::AngularTemplateRefs {
         identifiers,
@@ -268,14 +380,16 @@ fn collect_html_module_parts(source: &str, need_complexity: bool) -> HtmlModuleP
         security_sinks,
     } = angular::collect_angular_template_refs(source);
     let identifiers: Vec<String> = identifiers.into_iter().collect();
-    let semantic_facts: Vec<SemanticFact> = identifiers
+    let mut semantic_facts: Vec<SemanticFact> = identifiers
         .iter()
         .cloned()
         .map(|member| {
             SemanticFact::AngularTemplateMemberAccess(AngularTemplateMemberAccessFact { member })
         })
         .collect();
-    let member_accesses = template_member_accesses;
+    semantic_facts.append(&mut inline_scripts.semantic_facts);
+    let mut member_accesses = template_member_accesses;
+    member_accesses.append(&mut inline_scripts.member_accesses);
 
     // Angular external template (`templateUrl`): harvest the custom element
     // selector tags rendered here so the Angular `unrendered-component` detector
@@ -294,6 +408,7 @@ fn collect_html_module_parts(source: &str, need_complexity: bool) -> HtmlModuleP
 
     HtmlModuleParts {
         imports,
+        inline_scripts,
         member_accesses,
         semantic_facts,
         security_sinks,
@@ -315,8 +430,9 @@ pub fn parse_html_to_module_with_complexity(
     html_module_info(file_id, content_hash, source, parsed_suppressions, parts)
 }
 
-/// Assemble the `ModuleInfo` for an HTML file from its computed parts; all
-/// JS-level fields stay empty since HTML carries no module structure.
+/// Assemble the `ModuleInfo` for an HTML file from its computed parts. The
+/// JS-level fields hold only the imports of the inline scripts and the uses
+/// of their bindings, because a page has no exports.
 fn html_module_info(
     file_id: FileId,
     content_hash: u64,
@@ -326,6 +442,7 @@ fn html_module_info(
 ) -> ModuleInfo {
     let HtmlModuleParts {
         imports,
+        inline_scripts,
         member_accesses,
         semantic_facts,
         security_sinks,
@@ -352,6 +469,9 @@ fn html_module_info(
         component_contracts: Some(Box::new(contracts)),
         function_contracts,
         imports,
+        dynamic_imports: inline_scripts.dynamic_imports,
+        dynamic_import_patterns: inline_scripts.dynamic_import_patterns,
+        whole_object_uses: inline_scripts.whole_object_uses.into(),
         member_accesses: member_accesses.into(),
         semantic_facts: semantic_facts.into(),
         content_hash,
@@ -490,6 +610,75 @@ mod tests {
             "<script type=\"text/x-template\"><p></p></script>",
         ] {
             assert!(!has_inline_script(source), "{source}");
+        }
+    }
+
+    #[test]
+    fn inline_module_script_imports_enter_the_graph() {
+        let source = "<!doctype html>\n<script type=\"module\">\n  import { x } from 'foo'\n  import './side.js'\n  console.log(x)\n</script>\n";
+        let info = parse_html_to_module(FileId(0), source, 0);
+        let foo = info
+            .imports
+            .iter()
+            .find(|import| import.source == "foo")
+            .expect("the inline script import of `foo`");
+        assert!(matches!(&foo.imported_name, ImportedName::Named(name) if name == "x"));
+        assert_eq!(
+            &source[foo.source_span.start as usize..foo.source_span.end as usize],
+            "'foo'"
+        );
+        assert!(
+            info.imports
+                .iter()
+                .any(|import| import.source == "./side.js")
+        );
+    }
+
+    #[test]
+    fn inline_classic_script_dynamic_import_enters_the_graph() {
+        let source = "<script>import('./lazy.js').then((m) => m.run());</script>";
+        let info = parse_html_to_module(FileId(0), source, 0);
+        let lazy = info
+            .dynamic_imports
+            .iter()
+            .find(|import| import.source == "./lazy.js")
+            .expect("the dynamic import of the classic script");
+        assert_eq!(
+            &source[lazy.span.start as usize..lazy.span.end as usize],
+            "import('./lazy.js')"
+        );
+    }
+
+    #[test]
+    fn inline_script_records_the_uses_of_imported_bindings() {
+        let source = "<script type=\"module\">\n  import('./dynamic.js').then((m) => m.default)\n  import * as ns from './ns.js'\n  ns.a\n</script>";
+        let info = parse_html_to_module(FileId(0), source, 0);
+        for (object, member) in [("m", "default"), ("ns", "a")] {
+            assert!(
+                info.member_accesses
+                    .iter()
+                    .any(|access| access.object == object && access.member == member),
+                "{object}.{member}: {:?}",
+                info.member_accesses
+            );
+        }
+    }
+
+    #[test]
+    fn inactive_inline_scripts_add_no_imports() {
+        for source in [
+            "<!-- <script type=\"module\">import 'foo'</script> -->",
+            "<script type=\"importmap\">{\"imports\":{\"foo\":\"./foo.js\"}}</script>",
+            "<script type=\"text/x-template\">import 'foo'</script>",
+            "<script type=\"module\" src=\"./main.js\">import 'foo'</script>",
+            "<script>import 'foo'</script>",
+        ] {
+            let info = parse_html_to_module(FileId(0), source, 0);
+            assert!(
+                info.imports.iter().all(|import| import.source != "foo"),
+                "{source}: {:?}",
+                info.imports
+            );
         }
     }
 
