@@ -649,7 +649,15 @@ impl EditorAnalysisSession {
                     ..fallow_engine::project_analysis::ProjectAnalysisArtifactOptions::default()
                 },
             )
-            .map(fallow_engine::project_analysis::ProjectAnalysisArtifacts::into_output)
+            .map(|mut artifacts| {
+                // No editor action names the duplication analysis, so
+                // `duplicates.enabled: false` leaves the editor without
+                // clone groups, as it leaves the bare `fallow` run.
+                if !duplicates_config.runs_by_default() {
+                    artifacts.duplication = fallow_types::duplicates::DuplicationReport::default();
+                }
+                artifacts.into_output()
+            })
             .map(EditorProjectAnalysisOutput::from_engine)
             .map(|output| self.with_resolved_rule_severities(output))
     }

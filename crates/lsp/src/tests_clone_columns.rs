@@ -33,6 +33,10 @@ async fn analyzed_server(root: &Path) -> LspService<FallowLspServer> {
 }
 
 fn write_project(root: &Path) -> (PathBuf, PathBuf) {
+    write_project_with_config(root, r#"{"duplicates":{"minTokens":5,"minLines":2}}"#)
+}
+
+fn write_project_with_config(root: &Path, config: &str) -> (PathBuf, PathBuf) {
     let source_dir = root.join("src");
     std::fs::create_dir_all(&source_dir).expect("create source dir");
     std::fs::write(
@@ -40,11 +44,7 @@ fn write_project(root: &Path) -> (PathBuf, PathBuf) {
         r#"{"name":"clone-columns","private":true,"main":"src/index.ts"}"#,
     )
     .expect("write package");
-    std::fs::write(
-        root.join(".fallowrc.json"),
-        r#"{"duplicates":{"minTokens":5,"minLines":2}}"#,
-    )
-    .expect("write config");
+    std::fs::write(root.join(".fallowrc.json"), config).expect("write config");
     std::fs::write(
         source_dir.join("index.ts"),
         "import { shared } from \"./a\";\nimport { shared as other } from \"./b\";\nconsole.log(shared(1), other(2));\n",
@@ -96,4 +96,38 @@ async fn clone_diagnostic_starts_at_the_clone_after_non_ascii_text() {
         related.location.range.start,
         Position::new(0, expected_character)
     );
+}
+
+/// `duplicates.enabled: false` turns the clone diagnostics off in the editor,
+/// as it turns the duplication analysis off in the bare `fallow` command.
+#[tokio::test(flavor = "current_thread")]
+async fn duplicates_enabled_false_gives_no_clone_diagnostics() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dunce::canonicalize(dir.path()).expect("canonical root");
+    let (a, b) = write_project_with_config(
+        &root,
+        r#"{"duplicates":{"enabled":false,"minTokens":5,"minLines":2}}"#,
+    );
+
+    let service = analyzed_server(&root).await;
+    let backend = service.inner();
+    backend.run_analysis().await;
+
+    let files: [PathBuf; 2] = (a, b).into();
+    let with_clone_diagnostic = {
+        let diagnostics = backend.cached_diagnostics.read().await;
+        files
+            .iter()
+            .filter(|file| {
+                let uri = Uri::from_file_path(file).expect("file URI");
+                diagnostics.get(&uri).is_some_and(|diagnostics| {
+                    diagnostics.iter().any(|diagnostic| {
+                        diagnostic.code
+                            == Some(NumberOrString::String("code-duplication".to_string()))
+                    })
+                })
+            })
+            .count()
+    };
+    assert_eq!(with_clone_diagnostic, 0);
 }

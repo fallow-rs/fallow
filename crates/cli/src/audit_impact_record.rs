@@ -85,5 +85,5 @@ fn duplication_is_off_in_config(opts: &AuditOptions<'_>) -> bool {
         },
         fallow_config::ProductionAnalysis::Dupes,
     )
-    .is_ok_and(|config| !config.duplicates.enabled)
+    .is_ok_and(|config| !config.duplicates.runs_by_default())
 }

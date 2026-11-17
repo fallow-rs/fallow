@@ -1080,6 +1080,33 @@ complete result.
 - The review brief and the walkthrough modes keep their own output
   contracts.
 
+## Duplication analysis selection
+
+`DuplicatesConfig::select` in `crates/config/src/config/duplicates_config.rs`
+is the one rule that decides whether a run executes the duplication analysis.
+Each command builds a `DuplicationRequest` and reads the `DuplicationSelection`
+that the rule returns:
+
+- `Named`: the run names the analysis (`--only dupes`, `--include-dupes`, the
+  `fallow dupes` command, an API option that is `true`). The analysis runs.
+- `Default`: the command runs the analysis by default. The config key of the
+  command decides (`audit.dupes`). Without that key, `duplicates.enabled`
+  decides.
+- `Excluded`: the run leaves the analysis out (`--skip dupes`, an `--only`
+  list without it, an API option that is `false`).
+
+The bare `fallow` command, `fallow audit`, `fallow_api::run_audit` and
+`fallow_api::run_combined` build the request from their flags and options. The
+health score and the editor analysis (`crates/api/src/editor.rs`) call
+`DuplicatesConfig::runs_by_default`, so they have no duplication data when
+`duplicates.enabled` is `false`. The flags of a run do not change that answer:
+`--only dupes,health` prints the clone groups and keeps the score without a
+duplication penalty, so the score does not depend on the selection of one run.
+
+Do not read the `enabled` field outside the config crate. The test
+`only_the_config_crate_reads_the_duplicates_enabled_field` in
+`crates/cli/src/cli_production.rs` fails when a command does.
+
 ## Audit cache maintenance
 
 `fallow audit-cache` maintains the reusable base-snapshot caches

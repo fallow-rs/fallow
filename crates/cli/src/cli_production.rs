@@ -63,17 +63,22 @@ fn load_config_production(
     )
 }
 
-/// The `duplicates.enabled` config key of the project. `true` without a
-/// config file.
-pub fn duplicates_enabled(
+/// The decision of the project config for a duplication `request`. A project
+/// without a config file has the default config. The config loads only when
+/// the decision depends on it.
+pub fn duplication_selection(
     cli: &Cli,
     root: &std::path::Path,
     output: OutputFormat,
-) -> Result<bool, ExitCode> {
-    Ok(
+    request: fallow_config::DuplicationRequest,
+) -> Result<fallow_config::DuplicationSelection, ExitCode> {
+    let duplicates = if request.reads_duplicates_enabled() {
         load_config_file(root, cli.config.as_ref(), output, cli.allow_remote_extends)?
-            .is_none_or(|config| config.duplicates.enabled),
-    )
+            .map(|config| config.duplicates)
+    } else {
+        None
+    };
+    Ok(duplicates.unwrap_or_default().select(request))
 }
 
 pub fn resolve_production_modes(
@@ -119,4 +124,33 @@ pub fn resolve_production_modes(
             "FALLOW_PRODUCTION_DUPES",
         ),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    /// `DuplicatesConfig::select` is the one rule that decides whether a run
+    /// executes the duplication analysis. A command that reads the
+    /// `duplicates.enabled` field itself can apply another precedence.
+    #[test]
+    fn only_the_config_crate_reads_the_duplicates_enabled_field() {
+        use crate::architecture_boundaries::{
+            read_source_without_line_comments, rust_sources_under,
+        };
+        let needle = concat!(".duplicates", ".enabled");
+        let offenders: Vec<String> = rust_sources_under(["crates"])
+            .into_iter()
+            .filter(|source_path| !source_path.starts_with("crates/config/"))
+            .filter(|source_path| {
+                read_source_without_line_comments(source_path)
+                    .unwrap_or_else(|error| panic!("read {source_path}: {error}"))
+                    .split_whitespace()
+                    .collect::<String>()
+                    .contains(needle)
+            })
+            .collect();
+        assert!(
+            offenders.is_empty(),
+            "decide the duplication analysis with DuplicatesConfig::select, not with the enabled field: {offenders:?}"
+        );
+    }
 }
