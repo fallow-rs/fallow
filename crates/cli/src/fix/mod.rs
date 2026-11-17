@@ -996,83 +996,92 @@ fn emit_fix_count_line(
 /// Every line here names a mutation fallow declined to make, so none of them
 /// honour `--quiet`. See [`emit_human_summary`].
 fn emit_residual_skip_warnings(input: &HumanSummaryInput<'_>) {
-    if input.catalog_skipped > 0 {
-        let entries_word = if input.catalog_skipped == 1 {
-            "entry"
-        } else {
-            "entries"
-        };
-        eprintln!(
-            "Skipped {} catalog {entries_word} with hardcoded consumers or other guards (run with --format json for details).",
-            input.catalog_skipped,
-        );
+    for warning in residual_skip_warnings(input) {
+        if let Some(line) = warning.render() {
+            eprintln!("{line}");
+        }
     }
-    if input.content_changed_count > 0 {
-        let files_word = if input.content_changed_count == 1 {
-            "file"
+}
+
+/// One residual skip line: `{prefix}{count} {noun}{suffix}`, printed only
+/// when `count` is above zero.
+struct SkipWarning {
+    count: usize,
+    prefix: &'static str,
+    singular: &'static str,
+    plural: &'static str,
+    suffix: &'static str,
+}
+
+impl SkipWarning {
+    fn render(&self) -> Option<String> {
+        if self.count == 0 {
+            return None;
+        }
+        let noun = if self.count == 1 {
+            self.singular
         } else {
-            "files"
+            self.plural
         };
-        eprintln!(
-            "Skipped {} {files_word} that changed since `fallow dead-code` ran. Re-run `fallow fix` to refresh the analysis.",
-            input.content_changed_count,
-        );
+        Some(format!(
+            "{}{} {noun}{}",
+            self.prefix, self.count, self.suffix
+        ))
     }
-    if input.mixed_line_endings_count > 0 {
-        let files_word = if input.mixed_line_endings_count == 1 {
-            "file"
-        } else {
-            "files"
-        };
-        eprintln!(
-            "Skipped {} {files_word} with mixed CRLF/LF line endings. Normalize each file (`dos2unix <path>` or `git config core.autocrlf input` + re-checkout) before re-running.",
-            input.mixed_line_endings_count,
-        );
-    }
-    if input.low_confidence_count > 0 {
-        let files_word = if input.low_confidence_count == 1 {
-            "file"
-        } else {
-            "files"
-        };
-        eprintln!(
-            "Kept unused exports in {} {files_word} where consumers may be invisible to fallow (test, mock, and fixture directories, files with unresolved imports, or files whose verdict rests on a source the run did not fully analyze). Still listed by `fallow dead-code`; remove by hand if you have confirmed they are unused.",
-            input.low_confidence_count,
-        );
-    }
-    if input.low_confidence_dependency_count > 0 {
-        let package_word = if input.low_confidence_dependency_count == 1 {
-            "package"
-        } else {
-            "packages"
-        };
-        eprintln!(
-            "Kept {} declared {package_word} whose only import may sit in a file this run did not fully read. Resolve the files named in the workspace diagnostics above, then re-run `fallow fix`.",
-            input.low_confidence_dependency_count,
-        );
-    }
-    if input.low_confidence_member_count > 0 {
-        let member_word = if input.low_confidence_member_count == 1 {
-            "enum member"
-        } else {
-            "enum members"
-        };
-        eprintln!(
-            "Kept {} unused {member_word} whose only reference may sit in a file this run did not fully analyze. Resolve the files reported above, then re-run `fallow fix`.",
-            input.low_confidence_member_count,
-        );
-    }
-    if input.kept_re_export_count > 0 {
-        let export_word = if input.kept_re_export_count == 1 {
-            "export"
-        } else {
-            "exports"
-        };
-        eprintln!(
-            "Kept {} unused {export_word} that a kept re-export still names. Removing them would break that re-export. Remove the re-export first (run with --format json for each entry), then re-run `fallow fix`.",
-            input.kept_re_export_count,
-        );
-    }
+}
+
+fn residual_skip_warnings(input: &HumanSummaryInput<'_>) -> [SkipWarning; 7] {
+    [
+        SkipWarning {
+            count: input.catalog_skipped,
+            prefix: "Skipped ",
+            singular: "catalog entry",
+            plural: "catalog entries",
+            suffix: " with hardcoded consumers or other guards (run with --format json for details).",
+        },
+        SkipWarning {
+            count: input.content_changed_count,
+            prefix: "Skipped ",
+            singular: "file",
+            plural: "files",
+            suffix: " that changed since `fallow dead-code` ran. Re-run `fallow fix` to refresh the analysis.",
+        },
+        SkipWarning {
+            count: input.mixed_line_endings_count,
+            prefix: "Skipped ",
+            singular: "file",
+            plural: "files",
+            suffix: " with mixed CRLF/LF line endings. Normalize each file (`dos2unix <path>` or `git config core.autocrlf input` + re-checkout) before re-running.",
+        },
+        SkipWarning {
+            count: input.low_confidence_count,
+            prefix: "Kept unused exports in ",
+            singular: "file",
+            plural: "files",
+            suffix: " where consumers may be invisible to fallow (test, mock, and fixture directories, files with unresolved imports, or files whose verdict rests on a source the run did not fully analyze). Still listed by `fallow dead-code`; remove by hand if you have confirmed they are unused.",
+        },
+        SkipWarning {
+            count: input.low_confidence_dependency_count,
+            prefix: "Kept ",
+            singular: "declared package",
+            plural: "declared packages",
+            suffix: " whose only import may sit in a file this run did not fully read. Resolve the files named in the workspace diagnostics above, then re-run `fallow fix`.",
+        },
+        SkipWarning {
+            count: input.low_confidence_member_count,
+            prefix: "Kept ",
+            singular: "unused enum member",
+            plural: "unused enum members",
+            suffix: " whose only reference may sit in a file this run did not fully analyze. Resolve the files reported above, then re-run `fallow fix`.",
+        },
+        SkipWarning {
+            count: input.kept_re_export_count,
+            prefix: "Kept ",
+            singular: "unused export",
+            plural: "unused exports",
+            suffix: " that a kept re-export still names. Removing them would break that re-export. Remove the re-export first (run with --format json for each entry), then re-run `fallow fix`.",
+        },
+    ]
 }
 
 #[cfg(test)]

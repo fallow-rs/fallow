@@ -2,28 +2,51 @@
 
 use super::*;
 
+/// The withholding counters of the fix envelope, with the clause each one
+/// adds to the headline: `, {before}{count}{after}`.
+const SKIP_CLAUSES: [(&str, &str, &str); 6] = [
+    (
+        "skipped_content_changed",
+        "skipped ",
+        " file(s) that changed since analysis",
+    ),
+    (
+        "skipped_mixed_line_endings",
+        "skipped ",
+        " file(s) with mixed line endings",
+    ),
+    (
+        "skipped_low_confidence_exports",
+        "kept exports in ",
+        " file(s) where consumers may be hidden from static analysis",
+    ),
+    (
+        "skipped_low_confidence_dependencies",
+        "kept ",
+        " declared package(s) whose only import may sit in a file this run did not fully read",
+    ),
+    (
+        "skipped_low_confidence_members",
+        "kept ",
+        " unused enum member(s) whose only reference may sit in a file this run did not fully analyze",
+    ),
+    (
+        "skipped_kept_re_exports",
+        "kept ",
+        " unused export(s) that a kept re-export still names",
+    ),
+];
+
 /// Port of `summary-fix.jq`.
 #[must_use]
 pub fn render_fix_summary(env: &Value) -> String {
     let exports = fix_entries(env, "remove_export");
     let dependencies = fix_entries(env, "remove_dependency");
     let fix_attempts = arr(env, "fixes").filter(|fix| !b(fix, "skipped")).count();
-    let content_changed = u(env, "skipped_content_changed") as usize;
-    let mixed_eol = u(env, "skipped_mixed_line_endings") as usize;
-    let low_confidence = u(env, "skipped_low_confidence_exports") as usize;
-    let low_confidence_deps = u(env, "skipped_low_confidence_dependencies") as usize;
-    let low_confidence_members = u(env, "skipped_low_confidence_members") as usize;
-    let kept_re_exports = u(env, "skipped_kept_re_exports") as usize;
+    let skip_counts = SKIP_CLAUSES.map(|(key, _, _)| u(env, key) as usize);
     let dry_run = b(env, "dry_run");
 
-    if fix_attempts == 0
-        && content_changed == 0
-        && mixed_eol == 0
-        && low_confidence == 0
-        && low_confidence_deps == 0
-        && low_confidence_members == 0
-        && kept_re_exports == 0
-    {
+    if fix_attempts == 0 && skip_counts.iter().all(|count| *count == 0) {
         return "## Fallow - Auto-fix\n\nNo fixable issues found.".to_owned();
     }
 
@@ -38,38 +61,10 @@ pub fn render_fix_summary(env: &Value) -> String {
     if !dry_run {
         let _ = write!(out, " ({} succeeded)", num(env, "total_fixed"));
     }
-    if content_changed > 0 {
-        let _ = write!(
-            out,
-            ", skipped {content_changed} file(s) that changed since analysis"
-        );
-    }
-    if mixed_eol > 0 {
-        let _ = write!(out, ", skipped {mixed_eol} file(s) with mixed line endings");
-    }
-    if low_confidence > 0 {
-        let _ = write!(
-            out,
-            ", kept exports in {low_confidence} file(s) where consumers may be hidden from static analysis"
-        );
-    }
-    if low_confidence_deps > 0 {
-        let _ = write!(
-            out,
-            ", kept {low_confidence_deps} declared package(s) whose only import may sit in a file this run did not fully read"
-        );
-    }
-    if low_confidence_members > 0 {
-        let _ = write!(
-            out,
-            ", kept {low_confidence_members} unused enum member(s) whose only reference may sit in a file this run did not fully analyze"
-        );
-    }
-    if kept_re_exports > 0 {
-        let _ = write!(
-            out,
-            ", kept {kept_re_exports} unused export(s) that a kept re-export still names"
-        );
+    for ((_, before, after), count) in SKIP_CLAUSES.iter().zip(skip_counts) {
+        if count > 0 {
+            let _ = write!(out, ", {before}{count}{after}");
+        }
     }
     out.push_str("\n\n| Type | Count |\n|------|-------|\n");
     if !exports.is_empty() {
@@ -78,9 +73,14 @@ pub fn render_fix_summary(env: &Value) -> String {
     if !dependencies.is_empty() {
         let _ = writeln!(out, "| Dependency removals | {} |", dependencies.len());
     }
+    push_fix_details(&mut out, &exports, &dependencies);
+    out
+}
+
+fn push_fix_details(out: &mut String, exports: &[&Value], dependencies: &[&Value]) {
     out.push_str("\n<details>\n<summary>View details</summary>\n\n");
     if !exports.is_empty() {
-        out.push_str(&fix_detail_block("Export removals", &exports, |it| {
+        out.push_str(&fix_detail_block("Export removals", exports, |it| {
             format!(
                 "- {} - {}",
                 markdown_code_span(&format!("{}:{}", s(it, "path"), num(it, "line"))),
@@ -92,7 +92,7 @@ pub fn render_fix_summary(env: &Value) -> String {
     if !dependencies.is_empty() {
         out.push_str(&fix_detail_block(
             "Dependency removals",
-            &dependencies,
+            dependencies,
             |it| {
                 format!(
                     "- {} from {} in {}",
@@ -105,5 +105,4 @@ pub fn render_fix_summary(env: &Value) -> String {
         out.push('\n');
     }
     out.push_str("\n\n</details>");
-    out
 }
