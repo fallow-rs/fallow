@@ -649,12 +649,6 @@ pub struct Cli {
 #[path = "cli_args_overrides.rs"]
 mod overrides;
 
-#[derive(Clone, Copy, Subcommand)]
-pub enum TypeAwareCli {
-    /// Report companion availability and version compatibility without analysis.
-    Status,
-}
-
 #[derive(Subcommand)]
 pub enum Command {
     /// Analyze project for unused code and dependency hygiene
@@ -2794,6 +2788,9 @@ pub use report_args::*;
 #[path = "cli_args_security.rs"]
 mod cli_args_security;
 pub use cli_args_security::SecuritySubcommand;
+#[path = "cli_args_type_aware.rs"]
+mod type_aware_args;
+pub use type_aware_args::TypeAwareCli;
 
 #[cfg(test)]
 #[path = "cli_args_report_tests.rs"]

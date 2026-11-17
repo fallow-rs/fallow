@@ -10,8 +10,90 @@ pub struct CommandOutput {
     pub code: i32,
 }
 
+/// How long one sweep of [`remove_orphaned_audit_caches`] holds for the later
+/// test processes. The scan reads the whole temp directory, so each test
+/// process must not repeat it.
+const ORPHAN_SWEEP_INTERVAL: std::time::Duration = std::time::Duration::from_mins(10);
+
+/// Remove the audit base worktrees that earlier test runs left in the system
+/// temp directory, at most once per [`ORPHAN_SWEEP_INTERVAL`].
+///
+/// `fallow audit` keeps a reusable base worktree in the temp directory, keyed
+/// by the repository. Each test audits its own short-lived repository, so
+/// each run leaves one worktree that no later run uses. The audit removes
+/// such an entry only after its age limit, so the entries collect (#4671).
+fn sweep_orphaned_audit_caches() {
+    static SWEPT: std::sync::Once = std::sync::Once::new();
+    SWEPT.call_once(|| {
+        let temp = std::env::temp_dir();
+        let marker = temp.join("fallow-cli-tests-orphan-sweep.stamp");
+        let recent = std::fs::metadata(&marker)
+            .and_then(|metadata| metadata.modified())
+            .ok()
+            .and_then(|stamped| stamped.elapsed().ok())
+            .is_some_and(|elapsed| elapsed < ORPHAN_SWEEP_INTERVAL);
+        if recent {
+            return;
+        }
+        let _ = std::fs::write(&marker, "");
+        remove_orphaned_audit_caches(&temp);
+    });
+}
+
+/// Remove each audit base worktree in `temp` whose owner repository was a
+/// directory below `temp` and is gone. Returns the number of removed entries.
+///
+/// The `.last-used` file next to an entry holds the path of the owner
+/// repository. Only a test makes a repository below the temp directory. An
+/// entry with an owner at another place stays, also when that owner is
+/// missing: it can be a repository on a volume that is not mounted now.
+pub fn remove_orphaned_audit_caches(temp: &Path) -> usize {
+    const PREFIX: &str = "fallow-audit-base-cache-";
+    const OWNER_SUFFIX: &str = ".last-used";
+
+    let Ok(entries) = std::fs::read_dir(temp) else {
+        return 0;
+    };
+    let canonical_temp = dunce::canonicalize(temp).unwrap_or_else(|_| temp.to_path_buf());
+    let mut removed = 0;
+    for entry in entries.flatten() {
+        let name = entry.file_name();
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        let Some(entry_name) = name.strip_suffix(OWNER_SUFFIX) else {
+            continue;
+        };
+        if !entry_name.starts_with(PREFIX) {
+            continue;
+        }
+        let Ok(owner) = std::fs::read_to_string(entry.path()) else {
+            continue;
+        };
+        let owner = Path::new(owner.trim());
+        let below_temp = owner.starts_with(&canonical_temp) || owner.starts_with(temp);
+        let gone = matches!(
+            std::fs::symlink_metadata(owner),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound
+        );
+        if !below_temp || !gone {
+            continue;
+        }
+        let _ = std::fs::remove_dir_all(temp.join(entry_name));
+        for suffix in [OWNER_SUFFIX, ".sha", ".lock"] {
+            let _ = std::fs::remove_file(temp.join(format!("{entry_name}{suffix}")));
+        }
+        removed += 1;
+    }
+    removed
+}
+
 /// Returns the path to the compiled `fallow` binary for testing.
+///
+/// The first call in a test process also removes the audit base worktrees
+/// that earlier test runs left behind (see [`sweep_orphaned_audit_caches`]).
 pub fn fallow_bin() -> PathBuf {
+    sweep_orphaned_audit_caches();
     std::env::var_os("CARGO_BIN_EXE_fallow").map_or_else(
         || {
             // Test binaries live in `<target>/<profile>/deps`, next to the

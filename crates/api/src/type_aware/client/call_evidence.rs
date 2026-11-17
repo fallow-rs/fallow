@@ -559,14 +559,6 @@ fn validate(request: &Request, response: &Response) -> Result<(), TypeAwareError
             response.protocol_version, response.operation
         )));
     }
-    if response.sidecar_version != env!("CARGO_PKG_VERSION") {
-        return Err(TypeAwareError::from(format!(
-            "type-aware companion version {} does not match Fallow {}. Install fallow-type-aware@{}",
-            response.sidecar_version,
-            env!("CARGO_PKG_VERSION"),
-            env!("CARGO_PKG_VERSION"),
-        )));
-    }
     selected_backend()
         .and_then(|backend| backend.check_reported(&response.backend, &response.backend_version))
         .map_err(TypeAwareError::from)?;

@@ -152,6 +152,32 @@ fn health_and_duplication_follow_the_config_and_the_options() {
 }
 
 #[test]
+fn duplicates_enabled_false_is_the_default_of_the_duplication_domain() {
+    // `repository` puts its argument after `"audit": `, so each text closes
+    // that section and adds the `duplicates` section.
+    let off = repository(r#"{}, "duplicates": {"enabled": false}"#);
+    let skipped = audit(&off.path().join("project"), None);
+    assert!(skipped.get("duplication").is_none(), "{skipped:#}");
+    assert_eq!(
+        skipped["summary"]["duplication_skipped"], true,
+        "{skipped:#}"
+    );
+
+    let from_option = audit_with(
+        &off.path().join("project"),
+        AuditOptions {
+            duplication: Some(true),
+            ..AuditOptions::default()
+        },
+    );
+    assert!(from_option.get("duplication").is_some(), "{from_option:#}");
+
+    let config = repository(r#"{"dupes": true}, "duplicates": {"enabled": false}"#);
+    let from_config = audit(&config.path().join("project"), None);
+    assert!(from_config.get("duplication").is_some(), "{from_config:#}");
+}
+
+#[test]
 fn a_selection_without_any_domain_is_an_error() {
     let dir = repository(r#"{"deadCode": false, "health": false, "dupes": false}"#);
     let root = dir.path().join("project");

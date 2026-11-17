@@ -63,7 +63,7 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
     let analysis = analysis_options_for_audit(options, &resolved_base.git_ref);
     let resolved = audit_section_context(&analysis)?;
     let config = load_programmatic_audit_config(&resolved)?;
-    let options = &options_with_audit_config(options, &config.audit);
+    let options = &options_with_audit_config(options, &config.audit, config.duplicates.enabled);
     let changed_files = changed_files_for_run(&resolved)?.unwrap_or_default();
     let changed_files_count = changed_files.len();
 
@@ -338,7 +338,9 @@ impl AuditAnalyses for ProgrammaticAuditAnalyses<'_> {
 /// precedence of `fallow audit`. `gate` and `css_deep` win over the config,
 /// as `--gate` and `--css-deep` / `--no-css-deep` do. `css` can only turn
 /// styling off, as `--no-css` does: the CLI has no flag that overrides
-/// `audit.css: false`.
+/// `audit.css: false`. `duplicates_enabled` is the `duplicates.enabled` config
+/// key, the default of the duplication domain when the options and
+/// `audit.dupes` do not select it.
 ///
 /// The destructure names every field, so a new `audit` key does not compile
 /// until the typed route applies it, rejects it, or states why it does not
@@ -346,6 +348,7 @@ impl AuditAnalyses for ProgrammaticAuditAnalyses<'_> {
 fn options_with_audit_config(
     options: &AuditOptions,
     config: &fallow_config::AuditConfig,
+    duplicates_enabled: bool,
 ) -> AuditOptions {
     let fallow_config::AuditConfig {
         gate,
@@ -377,7 +380,11 @@ fn options_with_audit_config(
                 .unwrap_or_else(|| dead_code.unwrap_or(true)),
         ),
         health: Some(options.health.unwrap_or_else(|| health.unwrap_or(true))),
-        duplication: Some(options.duplication.unwrap_or_else(|| dupes.unwrap_or(true))),
+        duplication: Some(
+            options
+                .duplication
+                .unwrap_or_else(|| dupes.unwrap_or(duplicates_enabled)),
+        ),
         css: Some(css),
         css_deep: Some(css_deep),
         ..options.clone()
@@ -391,7 +398,7 @@ fn reject_empty_selection(options: &AuditOptions) -> ProgrammaticResult<()> {
         && options.duplication == Some(false)
     {
         return Err(ProgrammaticError::new(
-            "this audit selects no domain: the options and the audit.deadCode, audit.health and audit.dupes config keys leave nothing to run",
+            "this audit selects no domain: the options, the audit.deadCode, audit.health and audit.dupes config keys, and duplicates.enabled leave nothing to run",
             2,
         )
         .with_code("FALLOW_AUDIT_NO_ANALYSIS")

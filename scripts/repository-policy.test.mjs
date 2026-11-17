@@ -496,7 +496,16 @@ test("type-aware manifest keeps every runtime and package surface in parity", ()
   ];
 
   assert.equal(manifest.schema_version, 1);
-  assert.equal(manifest.wire_protocol_version, 7);
+  // scripts/type-aware-protocol-contract.test.mjs ties this version to a hash
+  // of the wire contract, so a contract change must raise it.
+  assert.ok(
+    Number.isInteger(manifest.wire_protocol_version) && manifest.wire_protocol_version >= 8,
+  );
+  assert.equal(
+    JSON.parse(readFileSync("crates/api/type-aware-protocol-contract.json", "utf8"))
+      .wire_protocol_version,
+    manifest.wire_protocol_version,
+  );
   assert.equal(manifest.semantic_schema_version, 3);
   assert.equal(manifest.analysis_operation, "semantic-queries");
   assert.equal(manifest.status_operation, "status");
