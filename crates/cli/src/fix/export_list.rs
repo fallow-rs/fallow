@@ -10,6 +10,8 @@
 /// stops at this bound, so an unclosed brace cannot make it read a full file.
 const MAX_STATEMENT_LINES: usize = 2000;
 
+use rustc_hash::FxHashMap;
+
 /// The line range of one export list statement (both ends inclusive).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(super) struct ExportListStatement {
@@ -35,48 +37,110 @@ pub(super) struct ListRewriteOutcome {
     pub(super) rewrite: ListRewrite,
 }
 
-/// Find the export list statement that holds the specifier on `line_idx`.
-///
-/// The nearest line at or above `line_idx` that starts with `export` must
-/// open a list statement whose closing brace is at or below `line_idx`.
-pub(super) fn find_export_list_statement(
-    lines: &[&str],
-    line_idx: usize,
-) -> Option<ExportListStatement> {
-    let lower = line_idx.saturating_sub(MAX_STATEMENT_LINES);
-    for start in (lower..=line_idx).rev() {
-        if !starts_with_export_keyword(lines.get(start)?.trim_start()) {
-            continue;
-        }
-        let text = statement_text(lines, start);
-        let parsed = parse_list(&text, indent_len(lines[start]))?;
-        let end_line = start + text[..parsed.end].matches('\n').count();
-        return (end_line >= line_idx).then_some(ExportListStatement {
-            start_line: start,
-            end_line,
-        });
-    }
-    None
+/// The export list statements of one file. Each statement is joined and
+/// parsed once, however many of its names the analysis reports.
+#[derive(Default)]
+pub(super) struct ExportListIndex {
+    by_start_line: FxHashMap<usize, Option<ParsedStatement>>,
 }
 
-/// Remove the specifiers that export one of `names` from `statement`.
-///
-/// Returns `None` when the statement does not export any of `names`, or when
-/// no safe text edit exists (for example, other code follows the statement
-/// on its last line and every specifier must go).
-pub(super) fn rewrite_export_list(
-    lines: &[&str],
+struct ParsedStatement {
     statement: ExportListStatement,
-    names: &[&str],
-) -> Option<ListRewriteOutcome> {
-    let text = lines
-        .get(statement.start_line..=statement.end_line)?
-        .join("\n");
-    let parsed = parse_list(&text, indent_len(lines[statement.start_line]))?;
-    if text[parsed.end..].contains('\n') {
-        return None;
+    /// The statement lines, joined with `\n`.
+    text: String,
+    list: ParsedList,
+}
+
+impl ExportListIndex {
+    /// Find the export list statement that holds the specifier on `line_idx`.
+    ///
+    /// The nearest line at or above `line_idx` that starts with `export` must
+    /// open a list statement whose closing brace is at or below `line_idx`.
+    pub(super) fn statement_for_line(
+        &mut self,
+        lines: &[&str],
+        line_idx: usize,
+    ) -> Option<ExportListStatement> {
+        let lower = line_idx.saturating_sub(MAX_STATEMENT_LINES);
+        let start = (lower..=line_idx).rev().find(|start| {
+            lines
+                .get(*start)
+                .is_some_and(|line| starts_with_export_keyword(line.trim_start()))
+        })?;
+        let statement = self
+            .by_start_line
+            .entry(start)
+            .or_insert_with(|| parse_statement_at(lines, start))
+            .as_ref()?
+            .statement;
+        (statement.end_line >= line_idx).then_some(statement)
     }
-    let specifiers = &parsed.specifiers;
+
+    /// Remove the specifiers that export one of `names` from `statement`.
+    ///
+    /// Returns `None` when the statement does not export any of `names`, or
+    /// when no safe text edit exists (for example, other code follows the
+    /// statement on its last line and every specifier must go).
+    pub(super) fn rewrite(
+        &self,
+        statement: ExportListStatement,
+        names: &[&str],
+    ) -> Option<ListRewriteOutcome> {
+        let parsed = self
+            .by_start_line
+            .get(&statement.start_line)?
+            .as_ref()
+            .filter(|parsed| parsed.statement == statement)?;
+        rewrite_parsed(parsed, names)
+    }
+}
+
+/// Parse the list statement that starts on line `start`.
+///
+/// The text grows to the next line with a `}` until the parse succeeds, so a
+/// short statement never joins the rest of the file. A statement without `;`
+/// also needs the next code after it, because a `from` or `with` clause on a
+/// later line still belongs to the statement.
+fn parse_statement_at(lines: &[&str], start: usize) -> Option<ParsedStatement> {
+    let indent = indent_len(lines[start]);
+    let limit = lines.len().min(start + MAX_STATEMENT_LINES);
+    let mut last = start;
+    loop {
+        while last < limit && !lines[last].contains('}') {
+            last += 1;
+        }
+        if last >= limit {
+            return None;
+        }
+        let mut context_end = last;
+        let text = loop {
+            let text = lines[start..=context_end].join("\n");
+            let open_end = parse_list(&text, indent)
+                .is_some_and(|list| !list.closed && is_trivia_only(&text[list.end..]));
+            if !open_end || context_end + 1 >= lines.len() {
+                break text;
+            }
+            context_end += 1;
+        };
+        if let Some(list) = parse_list(&text, indent) {
+            let end_line = start + text[..list.end].matches('\n').count();
+            let text = lines[start..=end_line].join("\n");
+            return Some(ParsedStatement {
+                statement: ExportListStatement {
+                    start_line: start,
+                    end_line,
+                },
+                text,
+                list,
+            });
+        }
+        last += 1;
+    }
+}
+
+fn rewrite_parsed(parsed: &ParsedStatement, names: &[&str]) -> Option<ListRewriteOutcome> {
+    let text = parsed.text.as_str();
+    let specifiers = &parsed.list.specifiers;
     let matched: Vec<bool> = specifiers
         .iter()
         .map(|spec| names.contains(&spec.name.as_str()))
@@ -93,13 +157,13 @@ pub(super) fn rewrite_export_list(
     }
 
     if matched.iter().all(|m| *m) {
-        return is_trivia_only(&text[parsed.end..]).then_some(ListRewriteOutcome {
+        return is_trivia_only(&text[parsed.list.end..]).then_some(ListRewriteOutcome {
             removed,
             rewrite: ListRewrite::DeleteStatement,
         });
     }
 
-    let ranges = removal_ranges(&text, specifiers, &matched);
+    let ranges = removal_ranges(text, specifiers, &matched);
     let mut new_text = String::with_capacity(text.len());
     let mut cursor = 0;
     for (start, end) in ranges {
@@ -143,6 +207,15 @@ fn removal_ranges(text: &str, specifiers: &[Specifier], matched: &[bool]) -> Vec
         }
         idx = group_end + 1;
     }
+    let merged = merge_ranges(ranges);
+    let extended = merged
+        .into_iter()
+        .map(|range| extend_over_orphan_comments(text, range))
+        .collect();
+    merge_ranges(extended)
+}
+
+fn merge_ranges(mut ranges: Vec<(usize, usize)>) -> Vec<(usize, usize)> {
     ranges.sort_unstable();
     let mut merged: Vec<(usize, usize)> = Vec::with_capacity(ranges.len());
     for (start, end) in ranges {
@@ -152,6 +225,40 @@ fn removal_ranges(text: &str, specifiers: &[Specifier], matched: &[bool]) -> Vec
         }
     }
     merged
+}
+
+/// Widen a removal of full lines over the comment lines directly above it
+/// when those comments would describe nothing.
+///
+/// A comment line above a specifier can describe that specifier or a group
+/// of specifiers. The comments go only when the next line that stays is
+/// blank or closes the list. When a kept specifier follows, the comments
+/// stay, because they can be the header of the group of that specifier.
+fn extend_over_orphan_comments(text: &str, (start, end): (usize, usize)) -> (usize, usize) {
+    if start != line_start_of(text, start) || !text[..end].ends_with('\n') {
+        return (start, end);
+    }
+    let next_line_end = text[end..]
+        .find('\n')
+        .map_or(text.len(), |offset| end + offset);
+    let next_line = text[end..next_line_end].trim();
+    if !(next_line.is_empty() || next_line.starts_with('}')) {
+        return (start, end);
+    }
+    let mut new_start = start;
+    while new_start > 0 {
+        let previous_start = line_start_of(text, new_start - 1);
+        if previous_start == 0 {
+            break;
+        }
+        let previous = text[previous_start..new_start - 1].trim();
+        let is_comment = previous.starts_with("//") || previous.starts_with("/*");
+        if !is_comment || !is_trivia_only(previous) {
+            break;
+        }
+        new_start = previous_start;
+    }
+    (new_start, end)
 }
 
 /// The range of the full line that holds `group`, including its line break,
@@ -212,11 +319,6 @@ fn starts_with_export_keyword(trimmed: &str) -> bool {
         .is_some_and(|next| next.is_whitespace() || next == '{')
 }
 
-fn statement_text(lines: &[&str], start: usize) -> String {
-    let end = lines.len().min(start + MAX_STATEMENT_LINES);
-    lines[start..end].join("\n")
-}
-
 fn is_trivia_only(text: &str) -> bool {
     let mut cursor = Cursor { text, pos: 0 };
     cursor.skip_trivia() && cursor.pos == text.len()
@@ -237,6 +339,10 @@ struct ParsedList {
     specifiers: Vec<Specifier>,
     /// Byte offset just past the statement (after `;` when present).
     end: usize,
+    /// True when the statement ends with `;`, so no later text can still
+    /// belong to it. Without `;`, a `from` or `with` clause on a later line
+    /// is still part of the statement.
+    closed: bool,
 }
 
 /// Parse `export [type] { ... } [from '...' [with { ... }]] [;]` at `start`.
@@ -284,12 +390,14 @@ fn parse_list(text: &str, start: usize) -> Option<ParsedList> {
     }
     let before_semicolon = c.pos;
     c.skip_horizontal_space();
-    if !c.eat(';') {
+    let closed = c.eat(';');
+    if !closed {
         c.pos = before_semicolon;
     }
     Some(ParsedList {
         specifiers,
         end: c.pos,
+        closed,
     })
 }
 
@@ -478,12 +586,17 @@ mod tests {
         source.split('\n').collect()
     }
 
+    fn find(lines: &[&str], line_idx: usize) -> Option<ExportListStatement> {
+        ExportListIndex::default().statement_for_line(lines, line_idx)
+    }
+
     /// Apply the rewrite for `names` to the statement that holds `line_idx`
     /// and return the new source.
     fn rewrite(source: &str, line_idx: usize, names: &[&str]) -> Option<String> {
         let lines = lines(source);
-        let statement = find_export_list_statement(&lines, line_idx)?;
-        let outcome = rewrite_export_list(&lines, statement, names)?;
+        let mut index = ExportListIndex::default();
+        let statement = index.statement_for_line(&lines, line_idx)?;
+        let outcome = index.rewrite(statement, names)?;
         let mut out: Vec<String> = lines[..statement.start_line]
             .iter()
             .map(ToString::to_string)
@@ -507,29 +620,29 @@ mod tests {
             start_line: 1,
             end_line: 4,
         });
-        assert_eq!(find_export_list_statement(&lines, 2), expected);
-        assert_eq!(find_export_list_statement(&lines, 3), expected);
-        assert_eq!(find_export_list_statement(&lines, 1), expected);
+        assert_eq!(find(&lines, 2), expected);
+        assert_eq!(find(&lines, 3), expected);
+        assert_eq!(find(&lines, 1), expected);
         assert_eq!(
-            find_export_list_statement(&lines, 5),
+            find(&lines, 5),
             Some(ExportListStatement {
                 start_line: 5,
                 end_line: 5,
             })
         );
-        assert_eq!(find_export_list_statement(&lines, 0), None);
+        assert_eq!(find(&lines, 0), None);
     }
 
     #[test]
     fn does_not_claim_a_line_after_the_statement() {
         let source = "export { a };\nconst b = 1;\n";
-        assert_eq!(find_export_list_statement(&lines(source), 1), None);
+        assert_eq!(find(&lines(source), 1), None);
     }
 
     #[test]
     fn does_not_claim_a_line_of_a_declaration() {
         let source = "export const value = {\n  a: 1,\n};\n";
-        assert_eq!(find_export_list_statement(&lines(source), 1), None);
+        assert_eq!(find(&lines(source), 1), None);
     }
 
     #[test]
@@ -649,6 +762,43 @@ mod tests {
         assert_eq!(
             rewrite(source, 1, &["c"]).as_deref(),
             Some("export {\n  d,\n} from './mod';\n")
+        );
+    }
+
+    #[test]
+    fn removes_a_comment_that_would_describe_nothing() {
+        let source = "export {\n  kept,\n  // about b\n  /* more */\n  b,\n} from './mod';\n";
+        assert_eq!(
+            rewrite(source, 4, &["b"]).as_deref(),
+            Some("export {\n  kept,\n} from './mod';\n")
+        );
+        let grouped =
+            "export {\n  // group one\n  a,\n\n  // group two\n  kept,\n} from './mod';\n";
+        assert_eq!(
+            rewrite(grouped, 2, &["a"]).as_deref(),
+            Some("export {\n\n  // group two\n  kept,\n} from './mod';\n")
+        );
+    }
+
+    #[test]
+    fn keeps_a_comment_above_the_next_kept_name() {
+        let source = "export {\n  // group\n  a,\n  kept,\n} from './mod';\n";
+        assert_eq!(
+            rewrite(source, 2, &["a"]).as_deref(),
+            Some("export {\n  // group\n  kept,\n} from './mod';\n")
+        );
+    }
+
+    #[test]
+    fn reads_a_from_clause_on_a_later_line() {
+        let source = "export {\n  a,\n  kept\n}\nfrom './mod'\nconst x = 1;\n";
+        assert_eq!(
+            rewrite(source, 1, &["a", "kept"]).as_deref(),
+            Some("const x = 1;\n")
+        );
+        assert_eq!(
+            rewrite(source, 1, &["a"]).as_deref(),
+            Some("export {\n  kept\n}\nfrom './mod'\nconst x = 1;\n")
         );
     }
 

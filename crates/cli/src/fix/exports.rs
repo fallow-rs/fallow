@@ -4,9 +4,7 @@ use std::path::{Path, PathBuf};
 use fallow_config::OutputFormat;
 
 use super::enum_helpers::{EnumDeclarationRange, removable_exported_enum_range};
-use super::export_list::{
-    ExportListStatement, ListRewrite, find_export_list_statement, rewrite_export_list,
-};
+use super::export_list::{ExportListIndex, ExportListStatement, ListRewrite, ListRewriteOutcome};
 use fallow_engine::module_graph::NamedReExport;
 use fallow_types::output_dead_code::ReachabilityCaveat;
 
@@ -172,7 +170,11 @@ struct FileExportPlan<'a> {
     relative: &'a Path,
     content: String,
     meta: super::io::EncodingMetadata,
+    /// The parsed export list statements of the file.
+    lists: ExportListIndex,
     fixes: Vec<ExportFix>,
+    /// Removals withheld because a kept re-export still names the export.
+    withheld: Vec<ExportFix>,
 }
 
 /// Apply export fixes to source files, returning JSON fix entries.
@@ -200,11 +202,17 @@ pub(super) fn apply_export_fixes(input: &mut ExportFixInput<'_, '_>) {
     withhold_removals_behind_kept_re_exports(&mut file_plans, input.re_exports);
 
     for mut file_plan in file_plans {
+        file_plan
+            .withheld
+            .sort_by_key(|f| std::cmp::Reverse(f.line_idx));
+        for fix in &file_plan.withheld {
+            push_withheld_export_entry(input, file_plan.relative, fix);
+        }
         let lines: Vec<&str> = file_plan
             .content
             .split(file_plan.meta.line_ending)
             .collect();
-        retain_rewritable_list_fixes(&lines, &mut file_plan.fixes);
+        let rewrites = rewrite_list_statements(&file_plan.lists, &mut file_plan.fixes);
         if file_plan.fixes.is_empty() {
             continue;
         }
@@ -214,7 +222,6 @@ pub(super) fn apply_export_fixes(input: &mut ExportFixInput<'_, '_>) {
                 std::cmp::Reverse(f.line_idx),
             )
         });
-        let grouped = group_export_fixes_by_edit_line(&file_plan.fixes);
 
         if input.dry_run {
             push_dry_run_export_fixes(
@@ -234,7 +241,7 @@ pub(super) fn apply_export_fixes(input: &mut ExportFixInput<'_, '_>) {
                 meta: &file_plan.meta,
                 lines: &lines,
                 line_fixes: &file_plan.fixes,
-                grouped: &grouped,
+                rewrites,
             });
         }
     }
@@ -266,8 +273,10 @@ fn plan_export_fixes<'a>(input: &mut ExportFixInput<'a, '_>) -> Vec<FileExportPl
             continue;
         };
         let lines: Vec<&str> = content.split(meta.line_ending).collect();
-        let mut fixes = collect_export_line_fixes(&lines, file_exports);
-        retain_rewritable_list_fixes(&lines, &mut fixes);
+        let mut lists = ExportListIndex::default();
+        let mut fixes = collect_export_line_fixes(&lines, file_exports, &mut lists);
+        drop(lines);
+        rewrite_list_statements(&lists, &mut fixes);
         if fixes.is_empty() {
             continue;
         }
@@ -276,17 +285,23 @@ fn plan_export_fixes<'a>(input: &mut ExportFixInput<'a, '_>) -> Vec<FileExportPl
             relative,
             content,
             meta,
+            lists,
             fixes,
+            withheld: Vec::new(),
         });
     }
     file_plans
 }
 
-/// Drop each planned removal that a kept re-export still names.
+/// Withhold each planned removal that a kept re-export still names.
 ///
-/// A re-export is kept when the run does not remove it. Each dropped
+/// A re-export is kept when the run does not remove it. Each withheld
 /// removal of a re-export keeps that re-export too, so the loop runs until
 /// no removal changes.
+///
+/// The check sees only the re-exports in the module graph. A file that
+/// `ignorePatterns` excludes from the analysis is not in the graph, so a
+/// re-export in such a file cannot hold a removal back.
 fn withhold_removals_behind_kept_re_exports(
     file_plans: &mut [FileExportPlan<'_>],
     re_exports: &[NamedReExport],
@@ -316,12 +331,14 @@ fn withhold_removals_behind_kept_re_exports(
 
         let mut changed = false;
         for file_plan in file_plans.iter_mut() {
-            let before = file_plan.fixes.len();
             let path = file_plan.path;
-            file_plan
-                .fixes
-                .retain(|fix| !named_by_kept.contains(&(path, fix.export_name.as_str())));
-            changed |= file_plan.fixes.len() != before;
+            let (withheld, kept): (Vec<ExportFix>, Vec<ExportFix>) =
+                std::mem::take(&mut file_plan.fixes)
+                    .into_iter()
+                    .partition(|fix| named_by_kept.contains(&(path, fix.export_name.as_str())));
+            changed |= !withheld.is_empty();
+            file_plan.fixes = kept;
+            file_plan.withheld.extend(withheld);
         }
         if !changed {
             return;
@@ -329,12 +346,17 @@ fn withhold_removals_behind_kept_re_exports(
     }
 }
 
-/// Keep only the list fixes that the statement rewrite can apply.
+/// Rewrite each list statement for the names that its fixes remove, and
+/// keep only the list fixes that the rewrite applies.
 ///
 /// The rewrite matches the exported name of each specifier. A fix whose name
 /// the statement does not export, or a statement that has no safe text edit,
 /// is not planned, so the report never claims an edit that does not happen.
-fn retain_rewritable_list_fixes(lines: &[&str], fixes: &mut Vec<ExportFix>) {
+/// Returns the rewrite of each statement, keyed by its first line.
+fn rewrite_list_statements(
+    lists: &ExportListIndex,
+    fixes: &mut Vec<ExportFix>,
+) -> FxHashMap<usize, ListRewriteOutcome> {
     let mut names_by_statement: FxHashMap<usize, (ExportListStatement, Vec<&str>)> =
         FxHashMap::default();
     for fix in fixes.iter() {
@@ -346,39 +368,66 @@ fn retain_rewritable_list_fixes(lines: &[&str], fixes: &mut Vec<ExportFix>) {
                 .push(fix.export_name.as_str());
         }
     }
-    if names_by_statement.is_empty() {
-        return;
-    }
-    let removed_by_statement: FxHashMap<usize, Vec<String>> = names_by_statement
+    let rewrites: FxHashMap<usize, ListRewriteOutcome> = names_by_statement
         .into_iter()
-        .map(|(start, (statement, names))| {
-            let removed = rewrite_export_list(lines, statement, &names)
-                .map(|outcome| outcome.removed)
-                .unwrap_or_default();
-            (start, removed)
+        .filter_map(|(start, (statement, names))| {
+            lists
+                .rewrite(statement, &names)
+                .map(|outcome| (start, outcome))
         })
         .collect();
     fixes.retain(|fix| match fix.edit {
-        ExportEdit::List(statement) => removed_by_statement
+        ExportEdit::List(statement) => rewrites
             .get(&statement.start_line)
-            .is_some_and(|removed| removed.contains(&fix.export_name)),
+            .is_some_and(|outcome| outcome.removed.contains(&fix.export_name)),
         ExportEdit::Keyword | ExportEdit::EnumDeclaration(_) => true,
     });
+    rewrites
+}
+
+/// Emit the entry of an export removal that a kept re-export holds back.
+/// Withholding is per export, not per file rewrite, so the entry never
+/// reaches the per-file skip list of the plan.
+fn push_withheld_export_entry(
+    input: &mut ExportFixInput<'_, '_>,
+    relative: &Path,
+    fix: &ExportFix,
+) {
+    let relative_display = relative.to_string_lossy().replace('\\', "/");
+    if input.dry_run && !matches!(input.output, OutputFormat::Json) {
+        eprintln!(
+            "Would keep export in {relative_display}:{} `{}`: a re-export that this run keeps still names it",
+            fix.line_idx + 1,
+            fix.export_name,
+        );
+    }
+    input.fixes.push(serde_json::json!({
+        "type": "remove_export",
+        "path": relative_display,
+        "line": fix.line_idx + 1,
+        "name": fix.export_name,
+        "applied": false,
+        "skipped": true,
+        "skip_reason": SkipReason::KeptReExport.as_wire_str(),
+        "help": SkipReason::KeptReExport.help(),
+    }));
 }
 
 fn collect_export_line_fixes(
     lines: &[&str],
     file_exports: &[&fallow_types::results::UnusedExport],
+    lists: &mut ExportListIndex,
 ) -> Vec<ExportFix> {
     file_exports
         .iter()
-        .filter_map(|export| export_line_fix(lines, export))
+        .filter_map(|export| export_line_fix(lines, export, lists))
         .collect()
 }
 
 fn export_line_fix(
     lines: &[&str],
     export: &fallow_types::results::UnusedExport,
+    lists: &mut ExportListIndex,
 ) -> Option<ExportFix> {
     let line_idx = export.line.saturating_sub(1) as usize;
     let line = *lines.get(line_idx)?;
@@ -388,7 +437,7 @@ fn export_line_fix(
     // The specifier of a list over several lines is on its own line, so the
     // reported line does not start with `export`.
     if after_export.is_none_or(is_export_list) {
-        let statement = find_export_list_statement(lines, line_idx)?;
+        let statement = lists.statement_for_line(lines, line_idx)?;
         return Some(ExportFix {
             line_idx,
             export_name: export.export_name.clone(),
@@ -430,23 +479,6 @@ fn is_removable_default_export(after_export: &str) -> bool {
         || after_default.starts_with("abstract class ")
 }
 
-/// Group fixes that share an edit line. `line_fixes` must be sorted by edit
-/// line.
-fn group_export_fixes_by_edit_line(line_fixes: &[ExportFix]) -> Vec<(usize, Vec<String>)> {
-    let mut grouped: Vec<(usize, Vec<String>)> = Vec::new();
-    for fix in line_fixes {
-        let edit_line = fix.edit_line();
-        if let Some(last) = grouped.last_mut()
-            && last.0 == edit_line
-        {
-            last.1.push(fix.export_name.clone());
-            continue;
-        }
-        grouped.push((edit_line, vec![fix.export_name.clone()]));
-    }
-    grouped
-}
-
 fn push_dry_run_export_fixes(
     output: OutputFormat,
     fixes: &mut Vec<serde_json::Value>,
@@ -471,7 +503,8 @@ struct GroupedExportFixInput<'a> {
     meta: &'a super::io::EncodingMetadata,
     lines: &'a [&'a str],
     line_fixes: &'a [ExportFix],
-    grouped: &'a [(usize, Vec<String>)],
+    /// The rewrite of each list statement, keyed by its first line.
+    rewrites: FxHashMap<usize, ListRewriteOutcome>,
 }
 
 fn apply_grouped_export_fixes(input: GroupedExportFixInput<'_>) {
@@ -484,20 +517,21 @@ fn apply_grouped_export_fixes(input: GroupedExportFixInput<'_>) {
         meta,
         lines,
         line_fixes,
-        grouped,
+        mut rewrites,
     } = input;
 
     let mut new_lines: Vec<String> = lines.iter().map(ToString::to_string).collect();
     let mut lines_to_delete = Vec::new();
 
-    for (edit_line, names) in grouped {
+    let mut edit_lines: Vec<usize> = line_fixes.iter().map(ExportFix::edit_line).collect();
+    edit_lines.dedup();
+    for edit_line in edit_lines {
         apply_export_line_group(
             &mut new_lines,
             &mut lines_to_delete,
-            lines,
             line_fixes,
-            *edit_line,
-            names,
+            &mut rewrites,
+            edit_line,
         );
     }
 
@@ -511,10 +545,9 @@ fn apply_grouped_export_fixes(input: GroupedExportFixInput<'_>) {
 fn apply_export_line_group(
     new_lines: &mut [String],
     lines_to_delete: &mut Vec<usize>,
-    lines: &[&str],
     line_fixes: &[ExportFix],
+    rewrites: &mut FxHashMap<usize, ListRewriteOutcome>,
     edit_line: usize,
-    names: &[String],
 ) {
     let Some(edit) = line_fixes
         .iter()
@@ -528,8 +561,10 @@ fn apply_export_line_group(
             lines_to_delete.extend(range.start_line..=range.end_line);
         }
         ExportEdit::List(statement) => {
-            let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
-            match rewrite_export_list(lines, statement, &name_refs).map(|outcome| outcome.rewrite) {
+            match rewrites
+                .remove(&statement.start_line)
+                .map(|outcome| outcome.rewrite)
+            {
                 Some(ListRewrite::DeleteStatement) => {
                     lines_to_delete.extend(statement.start_line..=statement.end_line);
                 }

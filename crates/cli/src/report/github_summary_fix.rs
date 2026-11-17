@@ -13,6 +13,7 @@ pub fn render_fix_summary(env: &Value) -> String {
     let low_confidence = u(env, "skipped_low_confidence_exports") as usize;
     let low_confidence_deps = u(env, "skipped_low_confidence_dependencies") as usize;
     let low_confidence_members = u(env, "skipped_low_confidence_members") as usize;
+    let kept_re_exports = u(env, "skipped_kept_re_exports") as usize;
     let dry_run = b(env, "dry_run");
 
     if fix_attempts == 0
@@ -21,6 +22,7 @@ pub fn render_fix_summary(env: &Value) -> String {
         && low_confidence == 0
         && low_confidence_deps == 0
         && low_confidence_members == 0
+        && kept_re_exports == 0
     {
         return "## Fallow - Auto-fix\n\nNo fixable issues found.".to_owned();
     }
@@ -61,6 +63,12 @@ pub fn render_fix_summary(env: &Value) -> String {
         let _ = write!(
             out,
             ", kept {low_confidence_members} unused enum member(s) whose only reference may sit in a file this run did not fully analyze"
+        );
+    }
+    if kept_re_exports > 0 {
+        let _ = write!(
+            out,
+            ", kept {kept_re_exports} unused export(s) that a kept re-export still names"
         );
     }
     out.push_str("\n\n| Type | Count |\n|------|-------|\n");

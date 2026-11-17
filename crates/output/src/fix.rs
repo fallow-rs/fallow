@@ -22,6 +22,9 @@ pub struct FixJsonOutputInput<'a> {
     /// Enum- and class-member removals withheld because the finding carried a
     /// reachability caveat.
     pub skipped_low_confidence_members: usize,
+    /// Export removals withheld because a re-export that the run keeps still
+    /// names the export.
+    pub skipped_kept_re_exports: usize,
 }
 
 /// JSON root emitted by `fallow fix --format json`.
@@ -55,6 +58,12 @@ pub struct FixJsonOutput<'a> {
     /// folding it into either name would make that name lie. Intentional,
     /// exit-code-neutral, and `0` on a run that read every file it found.
     pub skipped_low_confidence_members: usize,
+    /// Export removals withheld because a re-export that the run keeps still
+    /// names the export: the removal would leave that re-export pointing at a
+    /// declaration that is no longer exported. Each withheld export is a
+    /// `remove_export` entry with `skip_reason: "kept_re_export"`, so this
+    /// counts exports, not files. Intentional and exit-code-neutral.
+    pub skipped_kept_re_exports: usize,
 }
 
 /// Count fix entries whose `applied` flag is true.
@@ -82,6 +91,7 @@ pub fn count_reported_fix_skips(fixes: &[Value]) -> usize {
                         | "low_confidence_off_graph"
                         | "low_confidence_unresolved_imports"
                         | "low_confidence_incomplete_analysis"
+                        | "kept_re_export"
                 )
             );
             is_skipped && !is_plan_skip
@@ -102,6 +112,7 @@ pub fn build_fix_json_output(input: FixJsonOutputInput<'_>) -> FixJsonOutput<'_>
         skipped_low_confidence_exports: input.skipped_low_confidence_exports,
         skipped_low_confidence_dependencies: input.skipped_low_confidence_dependencies,
         skipped_low_confidence_members: input.skipped_low_confidence_members,
+        skipped_kept_re_exports: input.skipped_kept_re_exports,
     }
 }
 
@@ -138,6 +149,12 @@ mod tests {
                 "skipped": true,
                 "skip_reason": "low_confidence_incomplete_analysis",
             }),
+            json!({
+                "type": "remove_export",
+                "applied": false,
+                "skipped": true,
+                "skip_reason": "kept_re_export",
+            }),
         ];
 
         let output = build_fix_json_output(FixJsonOutputInput {
@@ -148,6 +165,7 @@ mod tests {
             skipped_low_confidence_exports: 3,
             skipped_low_confidence_dependencies: 4,
             skipped_low_confidence_members: 5,
+            skipped_kept_re_exports: 6,
         });
 
         assert!(output.dry_run);
@@ -166,6 +184,11 @@ mod tests {
             "a withheld enum member belongs to its own counter too"
         );
         assert_eq!(output.skipped_low_confidence_members, 5);
+        assert_eq!(
+            output.skipped, 1,
+            "an export held back by a kept re-export belongs to its own counter"
+        );
+        assert_eq!(output.skipped_kept_re_exports, 6);
     }
 
     #[test]
@@ -179,12 +202,14 @@ mod tests {
             skipped_low_confidence_exports: 0,
             skipped_low_confidence_dependencies: 0,
             skipped_low_confidence_members: 0,
+            skipped_kept_re_exports: 0,
         })
         .expect("fix output serializes");
 
         assert_eq!(value["dry_run"], false);
         assert_eq!(value["total_fixed"], 1);
         assert_eq!(value["skipped"], 0);
+        assert_eq!(value["skipped_kept_re_exports"], 0);
         assert_eq!(value["fixes"][0]["type"], "unused-export");
     }
 }

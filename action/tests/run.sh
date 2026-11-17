@@ -1623,6 +1623,13 @@ OUT_MEMBER_WITHHELD=$(printf '%s' "$FIX_DEP_WITHHELD" \
 assert_not_contains "$OUT_MEMBER_WITHHELD" "No fixable issues found" "withheld enum member is not reported as clean"
 assert_contains "$OUT_MEMBER_WITHHELD" "kept 1 unused enum member(s)" "withheld enum member reaches the headline"
 
+OUT_KEPT_RE_EXPORT=$(printf '%s' "$FIX_DEP_WITHHELD" \
+  | jq '.skipped_low_confidence_dependencies = 0 | .skipped_kept_re_exports = 1 | .fixes = [{"type": "remove_export", "path": "src/mod.ts", "line": 1, "name": "a", "applied": false, "skipped": true, "skip_reason": "kept_re_export"}]' \
+  | jq -r -f "$JQ_DIR/summary-fix.jq" 2>&1)
+assert_not_contains "$OUT_KEPT_RE_EXPORT" "No fixable issues found" "export held back by a kept re-export is not reported as clean"
+assert_contains "$OUT_KEPT_RE_EXPORT" "kept 1 unused export(s) that a kept re-export still names" "export held back by a kept re-export reaches the headline"
+assert_not_contains "$OUT_KEPT_RE_EXPORT" "Export removals | 1" "export held back by a kept re-export is not counted as removed"
+
 echo "  summary-dupes.jq:"
 OUT=$(jq -r -f "$JQ_DIR/summary-dupes.jq" "$FIXTURES/dupes.json" 2>&1)
 assert_valid_markdown "$OUT" "produces output"

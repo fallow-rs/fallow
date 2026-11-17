@@ -1340,6 +1340,49 @@ fn fix_summary_does_not_report_a_withheld_dependency_as_removed() {
     );
 }
 
+/// An export removal that a kept re-export holds back is a `remove_export`
+/// entry with `skipped: true`. The summary states the withholding and does
+/// not list the export as removed.
+#[test]
+fn fix_summary_does_not_report_an_export_behind_a_kept_re_export_as_removed() {
+    let env = json!({
+        "dry_run": true,
+        "total_fixed": 0,
+        "skipped": 0,
+        "skipped_content_changed": 0,
+        "skipped_mixed_line_endings": 0,
+        "skipped_low_confidence_exports": 0,
+        "skipped_low_confidence_dependencies": 0,
+        "skipped_low_confidence_members": 0,
+        "skipped_kept_re_exports": 1,
+        "fixes": [
+            {
+                "type": "remove_export",
+                "path": "src/mod.ts",
+                "line": 1,
+                "name": "a",
+                "applied": false,
+                "skipped": true,
+                "skip_reason": "kept_re_export"
+            }
+        ]
+    });
+    let rendered = fallow_cli::report::github_summary::render_fix_summary(&env);
+
+    assert!(
+        !rendered.contains("No fixable issues found"),
+        "a withheld export is not a clean run: {rendered}"
+    );
+    assert!(
+        rendered.contains("kept 1 unused export(s) that a kept re-export still names"),
+        "the withholding has to be stated: {rendered}"
+    );
+    assert!(
+        !rendered.contains("src/mod.ts:1"),
+        "a withheld export must not be listed as removed: {rendered}"
+    );
+}
+
 /// The bundled action no-ops annotations for the fix command, so the native
 /// `EnvelopeKind::Fix` annotation renderer must emit nothing.
 #[test]

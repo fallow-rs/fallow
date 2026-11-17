@@ -44,6 +44,11 @@ pub(super) enum SkipReason {
     /// one cause, and the skip follows the caveat, so a new cause needs no
     /// wiring here.
     LowConfidenceIncompleteAnalysis,
+    /// An export removal withheld because a re-export that the run keeps
+    /// still names the export. The removal would leave that re-export
+    /// pointing at a declaration that is no longer exported. Recorded per
+    /// export entry, never on the per-file skip list.
+    KeptReExport,
 }
 
 impl SkipReason {
@@ -54,6 +59,7 @@ impl SkipReason {
             Self::LowConfidenceOffGraph => "low_confidence_off_graph",
             Self::LowConfidenceUnresolvedImports => "low_confidence_unresolved_imports",
             Self::LowConfidenceIncompleteAnalysis => "low_confidence_incomplete_analysis",
+            Self::KeptReExport => "kept_re_export",
         }
     }
 
@@ -75,6 +81,9 @@ impl SkipReason {
             Self::LowConfidenceIncompleteAnalysis => {
                 "Preserved because the import graph is incomplete. Resolve the workspace diagnostics, then run `fallow fix --dry-run` and review the new preview."
             }
+            Self::KeptReExport => {
+                "Preserved because a re-export that this run keeps still names this export. Remove that re-export first, then run `fallow fix --dry-run` and review the new preview."
+            }
         }
     }
 
@@ -85,6 +94,7 @@ impl SkipReason {
             Self::LowConfidenceOffGraph
                 | Self::LowConfidenceUnresolvedImports
                 | Self::LowConfidenceIncompleteAnalysis
+                | Self::KeptReExport
         )
     }
 
@@ -105,6 +115,9 @@ impl SkipReason {
             ),
             Self::LowConfidenceIncompleteAnalysis => format!(
                 "Kept unused export(s) in {display}: a source file was not fully analyzed, so this run flagged the verdict itself as resting on an incomplete import graph.",
+            ),
+            Self::KeptReExport => format!(
+                "Kept unused export(s) in {display}: a re-export that this run keeps still names them.",
             ),
         }
     }

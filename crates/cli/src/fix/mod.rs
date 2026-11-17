@@ -46,7 +46,7 @@ fn run_analyze(
     let session = fallow_engine::session::AnalysisSession::from_resolved_config(config.clone())
         .map_err(|e| crate::error::emit_input_error(&format!("Analysis error: {e}"), output))?;
     let output_struct = session
-        .analyze_dead_code_with_artifacts(false, true)
+        .analyze_dead_code_keeping_graph()
         .map_err(|e| crate::error::emit_input_error(&format!("Analysis error: {e}"), output))?;
     let mut results = output_struct.results;
     let re_exports = output_struct
@@ -304,6 +304,7 @@ fn finalize_fix_run(
             low_confidence_count: skip_counts.low_confidence,
             low_confidence_dependency_count: count_withheld_dependency_fixes(fixes),
             low_confidence_member_count: count_withheld_member_fixes(fixes),
+            kept_re_export_count: count_kept_re_export_fixes(fixes),
         })
     {
         return code;
@@ -420,6 +421,7 @@ fn emit_empty_fix_output(opts: &FixOptions<'_>) -> ExitCode {
             skipped_low_confidence_exports: 0,
             skipped_low_confidence_dependencies: 0,
             skipped_low_confidence_members: 0,
+            skipped_kept_re_exports: 0,
         }) {
             Ok(envelope) if matches!(opts.output, OutputFormat::GithubSummary) => {
                 return crate::report::github_summary::print_fix_summary(&envelope);
@@ -599,6 +601,7 @@ struct FixOutputInput<'a> {
     low_confidence_count: usize,
     low_confidence_dependency_count: usize,
     low_confidence_member_count: usize,
+    kept_re_export_count: usize,
 }
 
 struct CatalogFixTotals {
@@ -696,6 +699,18 @@ fn count_withheld_member_fixes(fixes: &[serde_json::Value]) -> usize {
         .count()
 }
 
+/// Count the export removals withheld because a kept re-export still names
+/// the export. Withheld per export, so they are read off the emitted entries.
+fn count_kept_re_export_fixes(fixes: &[serde_json::Value]) -> usize {
+    fixes
+        .iter()
+        .filter(|fix| {
+            fix.get("skip_reason").and_then(serde_json::Value::as_str)
+                == Some(plan::SkipReason::KeptReExport.as_wire_str())
+        })
+        .count()
+}
+
 fn apply_catalog_fixes(request: &mut CatalogFixRequest<'_>) -> CatalogFixTotals {
     let catalog_summary = catalog::apply_catalog_entry_fixes(
         request.root,
@@ -754,6 +769,7 @@ fn emit_fix_output(input: &FixOutputInput<'_>) -> Result<(), ExitCode> {
             skipped_low_confidence_exports: input.low_confidence_count,
             skipped_low_confidence_dependencies: input.low_confidence_dependency_count,
             skipped_low_confidence_members: input.low_confidence_member_count,
+            skipped_kept_re_exports: input.kept_re_export_count,
         }) {
             Ok(envelope) if matches!(input.output, OutputFormat::GithubSummary) => {
                 let _ = crate::report::github_summary::print_fix_summary(&envelope);
@@ -786,6 +802,7 @@ fn emit_fix_output(input: &FixOutputInput<'_>) -> Result<(), ExitCode> {
             low_confidence_count: input.low_confidence_count,
             low_confidence_dependency_count: input.low_confidence_dependency_count,
             low_confidence_member_count: input.low_confidence_member_count,
+            kept_re_export_count: input.kept_re_export_count,
         });
     }
     Ok(())
@@ -896,6 +913,7 @@ struct HumanSummaryInput<'a> {
     low_confidence_count: usize,
     low_confidence_dependency_count: usize,
     low_confidence_member_count: usize,
+    kept_re_export_count: usize,
 }
 
 /// Emit the human fix summary, split by what `--quiet` may drop.
@@ -1042,6 +1060,17 @@ fn emit_residual_skip_warnings(input: &HumanSummaryInput<'_>) {
         eprintln!(
             "Kept {} unused {member_word} whose only reference may sit in a file this run did not fully analyze. Resolve the files reported above, then re-run `fallow fix`.",
             input.low_confidence_member_count,
+        );
+    }
+    if input.kept_re_export_count > 0 {
+        let export_word = if input.kept_re_export_count == 1 {
+            "export"
+        } else {
+            "exports"
+        };
+        eprintln!(
+            "Kept {} unused {export_word} that a kept re-export still names. Removing them would break that re-export. Remove the re-export first (run with --format json for each entry), then re-run `fallow fix`.",
+            input.kept_re_export_count,
         );
     }
 }

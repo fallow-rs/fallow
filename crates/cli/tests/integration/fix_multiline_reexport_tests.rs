@@ -31,7 +31,9 @@ fn read(root: &Path, path: &str) -> String {
     std::fs::read_to_string(root.join(path)).unwrap()
 }
 
-/// `(path, line, name)` of every planned `remove_export` entry, sorted.
+/// `(path, line, name)` of every planned `remove_export` entry, sorted. A
+/// withheld removal is a `remove_export` entry with `skipped: true` and does
+/// not count.
 fn planned_removals(root: &Path) -> Vec<(String, u64, String)> {
     let preview = run_fallow_in_root("fix", root, &["--dry-run", "--format", "json", "--quiet"]);
     assert_eq!(preview.code, 0, "{}", preview.stderr);
@@ -39,7 +41,7 @@ fn planned_removals(root: &Path) -> Vec<(String, u64, String)> {
         .as_array()
         .unwrap()
         .iter()
-        .filter(|fix| fix["type"] == "remove_export")
+        .filter(|fix| fix["type"] == "remove_export" && fix["skipped"] != true)
         .map(|fix| {
             (
                 fix["path"].as_str().unwrap().to_owned(),
@@ -214,6 +216,140 @@ fn fix_keeps_a_source_export_while_a_kept_re_export_names_it() {
         "export {\n  a,\n  used,\n} from '../mod';\n"
     );
     assert!(read(root, "src/mod.ts").starts_with("export function a() {}\n"));
+}
+
+/// The `kept_re_export` entries of a `--dry-run` JSON run, as
+/// `(path, line, name)`, and the `skipped_kept_re_exports` counter.
+fn kept_re_export_entries(root: &Path) -> (Vec<(String, u64, String)>, u64) {
+    let preview = run_fallow_in_root("fix", root, &["--dry-run", "--format", "json", "--quiet"]);
+    assert_eq!(preview.code, 0, "{}", preview.stderr);
+    let envelope = parse_json(&preview);
+    let mut entries: Vec<(String, u64, String)> = envelope["fixes"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|fix| fix["skip_reason"] == "kept_re_export")
+        .map(|fix| {
+            assert_eq!(fix["type"], "remove_export");
+            assert_eq!(fix["applied"], false);
+            assert_eq!(fix["skipped"], true);
+            assert!(fix["help"].as_str().is_some_and(|help| !help.is_empty()));
+            (
+                fix["path"].as_str().unwrap().to_owned(),
+                fix["line"].as_u64().unwrap(),
+                fix["name"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect();
+    entries.sort();
+    let counter = envelope["skipped_kept_re_exports"]
+        .as_u64()
+        .expect("skipped_kept_re_exports is always present");
+    (entries, counter)
+}
+
+#[test]
+fn fix_reports_each_export_that_a_kept_re_export_holds_back() {
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write_project(
+        root,
+        &[
+            (
+                "src/index.ts",
+                "import { used } from './fixtures/barrel';\n\nused();\n",
+            ),
+            (
+                "src/fixtures/barrel.ts",
+                "export {\n  a,\n  used,\n} from '../mod';\n",
+            ),
+            ("src/mod.ts", MOD_TS),
+        ],
+    );
+
+    assert_eq!(
+        kept_re_export_entries(root),
+        (vec![removal("src/mod.ts", 1, "a")], 1)
+    );
+
+    let human = run_fallow_in_root("fix", root, &["--dry-run"]);
+    assert!(
+        human.stderr.contains(
+            "Would keep export in src/mod.ts:1 `a`: a re-export that this run keeps still names it"
+        ),
+        "{}",
+        human.stderr
+    );
+    assert!(
+        human
+            .stderr
+            .contains("Kept 1 unused export that a kept re-export still names."),
+        "{}",
+        human.stderr
+    );
+}
+
+#[test]
+fn fix_reports_an_export_behind_an_ignored_re_export() {
+    // `ignoreExports` hides the barrel names from the report, so `fix` keeps
+    // the re-export and must keep the source export with it.
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write_project(
+        root,
+        &[
+            (
+                "src/index.ts",
+                "import { used } from './barrel';\n\nused();\n",
+            ),
+            (
+                "src/barrel.ts",
+                "export {\n  a,\n  used,\n} from './mod';\n",
+            ),
+            ("src/mod.ts", MOD_TS),
+            (
+                ".fallowrc.json",
+                r#"{"ignoreExports": [{"file": "src/barrel.ts", "exports": ["*"]}]}"#,
+            ),
+        ],
+    );
+
+    assert_eq!(
+        kept_re_export_entries(root),
+        (vec![removal("src/mod.ts", 1, "a")], 1)
+    );
+    apply(root);
+    assert!(read(root, "src/mod.ts").starts_with("export function a() {}\n"));
+}
+
+#[test]
+fn fix_reports_an_export_behind_a_list_that_it_cannot_rewrite() {
+    // Other code follows the list on its last line, so no safe edit can
+    // delete the full statement.
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path();
+    write_project(
+        root,
+        &[
+            ("src/index.ts", "import './barrel';\n"),
+            (
+                "src/barrel.ts",
+                "export {\n  a\n} from './mod'; console.log(1);\n",
+            ),
+            ("src/mod.ts", "export function a() {}\n"),
+        ],
+    );
+
+    assert_eq!(
+        kept_re_export_entries(root),
+        (vec![removal("src/mod.ts", 1, "a")], 1)
+    );
+    apply(root);
+    assert_eq!(read(root, "src/mod.ts"), "export function a() {}\n");
+    assert_eq!(
+        read(root, "src/barrel.ts"),
+        "export {\n  a\n} from './mod'; console.log(1);\n"
+    );
 }
 
 #[test]
