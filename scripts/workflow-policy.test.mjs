@@ -1650,9 +1650,17 @@ test("push runs of the release commit are never cancelled", async () => {
     if (cancel === undefined || cancel === "false") continue;
     const concurrency = indentedBlock(workflow, "concurrency", 0);
     if (cancel === "${{ github.event_name == 'pull_request' }}") {
-      // Push runs never cancel. A group per commit also keeps a queued run
-      // from being dropped when a newer run of the group queues.
+      // Push runs never cancel a started run. A newer run of a shared group
+      // still drops the queued run, so the release commit needs a group of
+      // its own.
       assert.match(concurrency, /github\.(sha|run_id)/, `${file} needs a group per push run`);
+      if (/github\.event_name == 'push'/.test(concurrency)) {
+        assert.match(
+          concurrency.match(/^ {2}group: (.+)$/m)?.[1] ?? "",
+          /!startsWith\(github\.event\.head_commit\.message, 'chore: release v'\)/,
+          `${file} group must exempt the release commit`,
+        );
+      }
       continue;
     }
     for (const key of ["group", "cancel-in-progress"]) {
@@ -1665,25 +1673,52 @@ test("push runs of the release commit are never cancelled", async () => {
   }
 });
 
-test("every CI push run on main finishes so the README badge shows a result", async () => {
+test("a started CI run on main always finishes, and a queued one gives way", async () => {
   const { runInNewContext } = await import("node:vm");
   const concurrency = indentedBlock(readWorkflow(".github/workflows/ci.yml"), "concurrency", 0);
-  const group = concurrency.match(/^  group: (.+)$/m)[1];
+  const group = concurrency.match(/^  group: "(.+)"$/m)[1];
   const cancel = concurrency.match(/^  cancel-in-progress: \$\{\{ (.+) \}\}$/m)[1];
-  const evaluate = (event_name, run_id) => {
-    const github = { event_name, ref: "refs/heads/main", run_id };
+  const evaluate = (event_name, run_id, message = "fix: a change") => {
+    const github = {
+      event_name,
+      ref: event_name === "pull_request" ? "refs/pull/1/merge" : "refs/heads/main",
+      run_id,
+      event: { head_commit: { message } },
+    };
     return {
       group: group.replace(/\$\{\{ (.+?) \}\}/g, (_, expression) =>
-        runInNewContext(expression, { github }),
+        runInNewContext(expression, { github, startsWith: (a, b) => a.startsWith(b) }),
       ),
       cancel: runInNewContext(cancel, { github }),
     };
   };
   assert.equal(evaluate("pull_request", 100).cancel, true);
   assert.equal(evaluate("pull_request", 100).group, evaluate("pull_request", 101).group);
-  for (const event of ["push", "workflow_dispatch", "schedule"]) {
+  // The README badge shows the last CI run on main, and a cancelled run
+  // shows as failing, so a push run never cancels a started run.
+  assert.equal(evaluate("push", 100).cancel, false);
+  assert.equal(evaluate("push", 100).group, evaluate("push", 101).group);
+  assert.notEqual(evaluate("push", 100).group, evaluate("pull_request", 100).group);
+  const release = (id) => evaluate("push", id, "chore: release v1.2.3").group;
+  assert.notEqual(release(100), release(101));
+  assert.notEqual(release(100), evaluate("push", 100).group);
+  for (const event of ["workflow_dispatch", "schedule"]) {
     assert.equal(evaluate(event, 100).cancel, false);
     assert.notEqual(evaluate(event, 100).group, evaluate(event, 101).group);
+  }
+});
+
+test("main change detection reads the previous run through the Actions API", () => {
+  for (const file of ["ci.yml", "coverage.yml"]) {
+    const job = indentedBlock(readWorkflow(`.github/workflows/${file}`), "changes", 2);
+    // A replaced queued run leaves the previous commit without a result, so
+    // the prose-only skip must check that run.
+    assert.match(job, /^ {6}actions: read$/mu, file);
+    assert.match(
+      job,
+      /env:\n {10}GITHUB_TOKEN: \$\{\{ github\.token \}\}\n {8}run: node scripts\/ci-change-policy\.mjs/u,
+      file,
+    );
   }
 });
 
@@ -2255,7 +2290,7 @@ test("Miri allocation uses a trusted optional helper and routing edits trigger M
   const changes = indentedBlock(workflow, "changes", 2);
   assert.match(
     changes,
-    /permissions:\n      contents: read\n      pull-requests: read\n    outputs:/,
+    /permissions:\n      actions: read\n      contents: read\n      pull-requests: read\n    outputs:/,
   );
   assert.doesNotMatch(changes, /secrets\.|id-token:|actions: write|contents: write/);
   const checkout = changesStep(workflow, "Check out the runner selectors from main");
