@@ -427,3 +427,49 @@ fn root_level_recursive_glob_skips_the_project_root() {
 
     assert_eq!(relative_workspace_roots(root, &workspaces), ["packages/a"]);
 }
+
+/// A folder that a `!` pattern excludes is excluded on purpose, so it gives
+/// no diagnostic. See #4720.
+#[test]
+fn negated_pattern_silences_diagnostics_for_excluded_folders() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    write_root(
+        root,
+        "packages:\n  - apps/*\n  - \"!apps/api\"\n  - \"!apps/proxy\"\n",
+    );
+    write_package(&root.join("apps/web"), r#"{"name":"web"}"#);
+    write_package(&root.join("apps/api"), r#"{"name":"api"}"#);
+    std::fs::create_dir_all(root.join("apps/proxy")).unwrap();
+    std::fs::write(root.join("apps/proxy/Dockerfile"), "").unwrap();
+
+    let (workspaces, diagnostics) =
+        discover_workspaces_with_diagnostics(root, &crate::IgnorePatternSet::empty())
+            .expect("valid root");
+    let undeclared = find_undeclared_workspaces_with_ignores(
+        root,
+        &workspaces,
+        &crate::IgnorePatternSet::empty(),
+    );
+
+    assert_eq!(relative_workspace_roots(root, &workspaces), ["apps/web"]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(undeclared.is_empty(), "{undeclared:?}");
+}
+
+/// Only a negated pattern silences the undeclared scan. A folder that no
+/// pattern names is still reported.
+#[test]
+fn negated_pattern_keeps_undeclared_diagnostic_for_other_folders() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    write_root(root, "packages:\n  - apps/*\n  - \"!apps/api\"\n");
+    write_package(&root.join("apps/web"), r#"{"name":"web"}"#);
+    write_package(&root.join("tools/cli"), r#"{"name":"cli"}"#);
+
+    let workspaces = discover_workspaces(root);
+    let undeclared = find_undeclared_workspaces(root, &workspaces);
+
+    assert_eq!(undeclared.len(), 1, "{undeclared:?}");
+    assert!(undeclared[0].path.ends_with("tools/cli"), "{undeclared:?}");
+}
