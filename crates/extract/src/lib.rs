@@ -64,6 +64,7 @@ pub mod og_image;
 mod opaque_loads;
 mod parse;
 mod parse_degradation;
+mod parse_options;
 pub mod sfc;
 pub mod sfc_css;
 mod sfc_props;
