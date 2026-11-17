@@ -579,8 +579,8 @@ exits `2` with `FALLOW_MUTATION_BASELINE_FAILED`, the same code as a dry run
 that fails outside each test file. The failed tests cannot detect a mutant,
 so the run measured nothing.
 
-- A mutant has a test result when it is `killed`, `timeout`, `survived` or
-  `flaky`. A run with only `runtime_error`, `compile_error` and
+- A mutant has a test result when it is `killed`, `timeout`, `survived`,
+  `flaky` or `not_killed_by_target`. A run with only `runtime_error`, `compile_error` and
   `no_coverage` mutants and a baseline failure exits `2`.
 - A `pending` mutant keeps the exit code at `0`. The time budget,
   `--max-mutants` or `--mutants-per-line` stopped that run, so the baseline
@@ -715,7 +715,8 @@ select nothing for it. `--function-scope` (config key
 - `summary.coverage` reports the unreached mutants apart:
   `coverage = covered / (covered + no_coverage)` over the whole plan.
   `covered` counts each executed mutant (`killed`, `timeout`, `survived`,
-  `runtime_error`, `flaky`, `compile_error`) with a covering test, and each
+  `runtime_error`, `flaky`, `compile_error`, `not_killed_by_target`) with a
+  covering test, and each
   `pending` mutant
   that a passing dry-run test covers. The dry run loads each mutant of the
   plan, also a mutant after the `--max-mutants` limit. A test covers a
@@ -729,8 +730,9 @@ select nothing for it. `--function-scope` (config key
 - `no_coverage` never enters the score. A capped run of 200
   mutants in a project with 20000 unreached mutants still gets a score that
   describes the 200 tested mutants.
-- `pending`, `equivalent`, `flaky`, `runtime_error`, `pruned` and
-  `compile_error` mutants never count in the score. `equivalent` and `pruned`
+- `pending`, `equivalent`, `flaky`, `runtime_error`, `pruned`,
+  `compile_error` and `not_killed_by_target` mutants never count in the
+  score. `equivalent` and `pruned`
   mutants never count in the coverage.
 - Both values are fractions from 0 to 1 in JSON. `--min-score` and
   `mutation.minScore` use percent.
@@ -875,11 +877,25 @@ fallow mutation src/math.ts \
   the score, the coverage, or the `--max-mutants` limit. The score therefore
   describes only the mutants that the targets cover.
 - Fallow runs each other mutant against its covering target tests, with bail
-  disabled. After a kill or a survivor, it runs the other covering tests
-  with bail enabled. The first other test that fails stops that run. A
-  timeout or an error of the target run ends the attempt.
-- The mutant status has the same meaning as in normal mode: `killed` when any
-  covering test kills the mutant.
+  disabled. A timeout or an error of the target run ends the attempt. The
+  next step depends on the mode. `kill_matrix.target_mode` names the mode:
+
+  | Mode | When no target kills the mutant | After a target kill | Retry |
+  |---|---|---|---|
+  | `target-first` (default) | The mutant is `not_killed_by_target`. No other test runs. | The other covering tests run fastest first, with bail. The first other test that fails stops that run. | Only a kill by exactly one target test and no other test: a unique kill. |
+  | `full` (`--kill-matrix-full`) | The other covering tests run with bail, as after a kill. | As in `target-first`. | Each survivor and each timeout, as in normal mode. A target kill gets no retry. |
+
+- A `not_killed_by_target` mutant has no final status: other tests can kill
+  it, or it can survive. It does not count in the score. Its evidence is
+  complete, because the target run gave an exact result for each target
+  test. Use `--kill-matrix-full` when you also want the score of these
+  mutants.
+- In the `target-first` mode, a retry of a unique kill that does not kill the
+  mutant again makes the mutant `flaky`, and its evidence becomes incomplete.
+  A retry that kills again keeps the killers of both runs. A target test that
+  kills only in the retry therefore makes the kill shared.
+- In the `full` mode, the mutant status has the same meaning as in normal
+  mode: `killed` when any covering test kills the mutant.
 - `killing_tests` of a mutant holds each target test that kills it, and the
   first other test that kills it. `kill_matrix_complete` is true when the
   target run gave an exact result for each target test and, after a target
@@ -943,13 +959,26 @@ each entry, one of the `targets` of that entry. A change that adds several
 equal tests makes each of them a candidate. Keep one test of each shared
 kill.
 
+The two modes give the same `kills`, `unique_kills` and `target_only_kills`
+for each target:
+
+- A mutant that no target test kills is in the `kills` of no target, so it
+  can change no count of a target. The `target-first` mode skips only the
+  other tests of such a mutant.
+- After a target kill, both modes run the other tests with bail. Only the
+  first other killer matters: one other killer is enough to make the kill
+  shared, and a shared kill is in no `unique_kills` and no
+  `target_only_kills`. With no other killer, each other test ran and passed,
+  so the kill is unique or target-only in both modes.
+
 The evidence covers the planned mutants only. A test can have a unique kill
 outside the scope of the run, for example outside the changed code. Use a
 scope that holds each source file that the targets test.
 
-The cache key and the journal header include the targets. A normal or full
-matrix result never supplies target evidence, and `--resume` with other
-targets is a mismatch. The order of the targets does not matter.
+The cache key and the journal header include the targets and the mode. A
+normal or full matrix result never supplies target evidence, a result of one
+target mode never supplies the other mode, and `--resume` with other targets
+or another mode is a mismatch. The order of the targets does not matter.
 
 ## Timeouts
 
@@ -2464,6 +2493,7 @@ that a mutant counts as killed or survived only when the run showed it:
 | `pruned` | `Ignored` | `Pruned:` the static rule |
 | `equivalent` | `Ignored` | `Equivalent:` a verdict marks the mutant |
 | `pending` | `Pending` | the mutant did not run |
+| `not_killed_by_target` | `Ignored` | `Not killed by a target:` the other covering tests did not run |
 
 The schema score leaves out `Ignored`, `Pending`, `CompileError` and
 `RuntimeError`, the same as the Fallow score. `NoCoverage` counts in the
@@ -2670,8 +2700,8 @@ reads files only. It runs no test.
 - The header says `(ran the project tests)` only when a companion started or a
   mutant has a tested result. Otherwise it says `(no test ran)`.
 - The score line: the score, killed, survived, timeout, and the completion
-  status. The line adds `pending`, `equivalent`, `runtime error`, `flaky` and
-  `compile error` only when the count is not zero. A run with
+  status. The line adds `pending`, `equivalent`, `runtime error`, `flaky`,
+  `compile error` and `not killed by target` only when the count is not zero. A run with
   `--mutants-per-line` shows the left-out part of the `pending` count as
   `pending 12 (10 sampled out)`.
 - The scope line shows a full 40-character base SHA as its first 12
@@ -3013,7 +3043,7 @@ Other rules of the section:
 - The score shows with one decimal and is rounded down, so a score just below
   the minimum never shows as equal to it.
 - Killed counts `killed` and `timeout`. Not measured counts `pending`,
-  `runtime_error`, `flaky` and `compile_error`.
+  `runtime_error`, `flaky`, `compile_error` and `not_killed_by_target`.
 - The partial-run line comes before the headline. The result-cache sentence
   shows only for the `time-budget` reason.
 - `N survived mutants are not shown because their file changed after the run.`

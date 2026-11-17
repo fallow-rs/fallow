@@ -232,8 +232,9 @@ fn mutant_result(
 }
 
 /// The schema status of a Fallow status, with the reason for each status that
-/// the schema has no exact name for. `flaky`, `pruned` and `equivalent` are
-/// `Ignored`, so they never count as a kill or a survivor.
+/// the schema has no exact name for. `flaky`, `pruned`, `equivalent` and
+/// `not_killed_by_target` are `Ignored`, so they never count as a kill or a
+/// survivor.
 fn schema_status(mutant: &SavedMutant, status: MutantStatus) -> (&'static str, Option<String>) {
     match status {
         MutantStatus::Killed => ("Killed", None),
@@ -262,6 +263,13 @@ fn schema_status(mutant: &SavedMutant, status: MutantStatus) -> (&'static str, O
                 )),
             )
         }
+        MutantStatus::NotKilledByTarget => (
+            "Ignored",
+            Some(
+                "Not killed by a target: each target test passed, and the other covering tests did not run."
+                    .to_owned(),
+            ),
+        ),
         MutantStatus::Flaky => (
             "Ignored",
             Some("Flaky: a second run changed whether the tests detect the mutant.".to_owned()),

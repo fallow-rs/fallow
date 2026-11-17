@@ -42,7 +42,7 @@ use super::scheduler::{CachedResult, ResultLookup, ScheduleOutcome, ScheduledMut
 pub const RESULT_CACHE_FILE: &str = "results.json";
 /// The version of the key and of the file format. A change to the key
 /// parts or to the file shape needs a new version.
-const FORMAT_VERSION: u32 = 5;
+const FORMAT_VERSION: u32 = 6;
 /// The most entries that the file keeps.
 pub const MAX_ENTRIES: usize = 20_000;
 /// The inputs of a test that the key does not hash.
@@ -242,7 +242,10 @@ struct CacheFile {
 /// True for a status that the cache stores. A timeout depends on the load
 /// of the machine, and a flaky or runtime error result asks for a new run.
 const fn is_cacheable(status: MutantStatus) -> bool {
-    matches!(status, MutantStatus::Killed | MutantStatus::Survived)
+    matches!(
+        status,
+        MutantStatus::Killed | MutantStatus::Survived | MutantStatus::NotKilledByTarget
+    )
 }
 
 /// The files that the key reads, from the mutation plan.
@@ -409,7 +412,9 @@ impl ResultCache {
             if result.cached
                 || !is_cacheable(result.status)
                 || outcome.unretried.contains(id)
-                || ((key.starts_with("matrix:") || key.starts_with("targets:"))
+                || ((key.starts_with("matrix:")
+                    || key.starts_with("targets:")
+                    || key.starts_with("targets-first:"))
                     && !result.kill_matrix_complete)
             {
                 continue;

@@ -53,9 +53,10 @@ const fn effect(status: MutantStatus) -> Effect {
         MutantStatus::Killed | MutantStatus::Timeout | MutantStatus::CompileError => {
             Effect::Contradicted
         }
-        MutantStatus::Pending | MutantStatus::RuntimeError | MutantStatus::Pruned => {
-            Effect::Deferred
-        }
+        MutantStatus::Pending
+        | MutantStatus::RuntimeError
+        | MutantStatus::Pruned
+        | MutantStatus::NotKilledByTarget => Effect::Deferred,
     }
 }
 
@@ -93,6 +94,7 @@ const fn count_of(counts: &MutationStatusCounts, status: MutantStatus) -> usize 
         MutantStatus::Pending => counts.pending,
         MutantStatus::Equivalent => counts.equivalent,
         MutantStatus::CompileError => counts.compile_error,
+        MutantStatus::NotKilledByTarget => counts.not_killed_by_target,
     }
 }
 

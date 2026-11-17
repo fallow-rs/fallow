@@ -173,6 +173,7 @@ pub fn build(
         candidates,
         coverage_without_kills,
         targets: Some(targets),
+        target_mode: None,
     }
 }
 

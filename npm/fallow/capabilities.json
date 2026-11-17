@@ -1419,7 +1419,17 @@
           "name": "--kill-matrix-for",
           "type": "string",
           "required": false,
-          "description": "Check whether this test is redundant: a test file (each test in it) or a test id (`file::name`). Repeat the flag for more targets. Only the mutants that a target covers run: first the target tests without a stop at a failure, then the other covering tests up to the first failure"
+          "description": "Check whether this test is redundant: a test file (each test in it) or a test id (`file::name`). Repeat the flag for more targets. Only the mutants that a target covers run. The target tests run first. A mutant that no target kills is `not_killed_by_target` and runs no other test. After a target kill, the other covering tests run up to the first failure"
+        },
+        {
+          "name": "--kill-matrix-full",
+          "type": "bool",
+          "required": false,
+          "description": "With `--kill-matrix-for`: also run the other covering tests of a mutant that no target kills, and retry each survivor. Each mutant then gets a final status and the score counts it. Slower",
+          "possible_values": [
+            "true",
+            "false"
+          ]
         },
         {
           "name": "--recheck",

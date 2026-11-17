@@ -559,7 +559,8 @@ fn count_table(view: &MutationCiView) -> String {
         .pending
         .saturating_add(counts.runtime_error)
         .saturating_add(counts.flaky)
-        .saturating_add(counts.compile_error);
+        .saturating_add(counts.compile_error)
+        .saturating_add(counts.not_killed_by_target);
     let score = view.score.map_or_else(|| "-".to_owned(), score_percent);
     format!(
         "| Killed | Survived | No coverage | Not measured | Score |\n\

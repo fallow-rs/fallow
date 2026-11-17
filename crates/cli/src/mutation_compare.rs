@@ -203,6 +203,7 @@ const fn status_name(status: MutantStatus) -> &'static str {
         MutantStatus::Pending => "pending",
         MutantStatus::Equivalent => "equivalent",
         MutantStatus::CompileError => "compile_error",
+        MutantStatus::NotKilledByTarget => "not_killed_by_target",
     }
 }
 

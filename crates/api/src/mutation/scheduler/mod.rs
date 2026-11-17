@@ -21,7 +21,7 @@ use super::protocol::{
 use super::transport::{CompanionLink, CompanionSpawner, SpawnFailure};
 use super::{MutationProgress, MutationProgressSink};
 use reserve::PhaseDeadline;
-use retry_set::{confirmation_tests, fastest_first, retry_extra_ms, whole_files};
+use retry_set::{confirmation_tests, fastest_first, retried_status, retry_extra_ms, whole_files};
 
 mod classification;
 pub mod clock;
@@ -34,7 +34,9 @@ mod window;
 use classification::{attempt_record, classify, is_load_kill, kill_kind, matrix_evidence};
 use dry_facts::{DryRunFacts, covering_tests, read_dry_run, record_dry_run, reported_duplicates};
 use issues::{no_covering_test_message, static_map_miss_issue, undiscovered_issue};
-use targets::{TargetFiles, check_targets, config_targets, job_targets};
+use targets::{
+    TargetFiles, check_targets, config_targets, confirmed_kill, job_targets, retries_unique_kill,
+};
 use window::{loop_budget_ms, round_ms, scaled_ms, settles_loop_timeout, timeout_ms};
 mod stored;
 
@@ -104,6 +106,11 @@ pub struct ScheduleConfig {
     /// outside target mode. In target mode, a mutant runs its covering target
     /// tests without bail, then its other covering tests with bail.
     pub targets: Vec<String>,
+    /// In target mode, run the other covering tests also after a target
+    /// survivor, and retry each survivor. Without it, a mutant that no
+    /// target kills is `not_killed_by_target`, and only a unique target kill
+    /// gets a retry.
+    pub target_full: bool,
     /// The timeout of `init` and the first `dry_run`. It is also the minimum
     /// dry-run timeout of a respawned companion.
     pub runner_timeout: Duration,
@@ -1039,6 +1046,8 @@ fn version_error(range: &RunnerRange, version: &str) -> ScheduleError {
 struct JobContext<'a> {
     dry_files: &'a [String],
     kill_matrix: bool,
+    /// True for the full mode of `--kill-matrix-for` (`--kill-matrix-full`).
+    target_full: bool,
     /// The dry-run test ids that the `--kill-matrix-for` targets select.
     /// `None` outside target mode.
     targets: Option<&'a FxHashSet<String>>,
@@ -1552,27 +1561,10 @@ fn mark_unreached_pending(
     }
 }
 
-/// Gives the final status from the first and the retry status. A retry that
-/// changes whether the tests detect the mutant gives `flaky`. A timeout with
-/// a killed retry stays detected and is `killed`. A survivor with a timed-out
-/// retry stays `survived`: the first run finished all tests with the mutant
-/// active, and host load alone can make the retry time out.
-const fn retried_status(first: MutantStatus, retry: MutantStatus) -> MutantStatus {
-    match (first, retry) {
-        (_, MutantStatus::RuntimeError) => MutantStatus::RuntimeError,
-        (_, MutantStatus::NoCoverage) => MutantStatus::NoCoverage,
-        (MutantStatus::Survived, MutantStatus::Survived | MutantStatus::Timeout) => {
-            MutantStatus::Survived
-        }
-        (MutantStatus::Timeout, MutantStatus::Timeout) => MutantStatus::Timeout,
-        (MutantStatus::Timeout, MutantStatus::Killed) => MutantStatus::Killed,
-        _ => MutantStatus::Flaky,
-    }
-}
-
 /// Records the first run of each mutant. Gives the survivors and the
 /// timeouts to run again, and the evidence of their first run.
 fn record_first_runs(
+    config: &ScheduleConfig,
     outcome: &mut ScheduleOutcome,
     facts: &DryRunFacts,
     memo: &ControlMemo,
@@ -1584,6 +1576,9 @@ fn record_first_runs(
         let suspect = match attempt.status {
             MutantStatus::Survived => Some(job.clone().for_confirmation()),
             MutantStatus::Timeout if !attempt.settled => Some(job.clone().with_doubled_timeout()),
+            MutantStatus::Killed if retries_unique_kill(config, &job, &attempt) => {
+                Some(job.clone())
+            }
             _ => None,
         };
         if let Some(suspect) = suspect {
@@ -1641,6 +1636,12 @@ fn retry_suspects(
         let first = outcome.results.get(&job.id);
         let first_status = first.map_or(MutantStatus::Survived, |first| first.status);
         let status = retry_status(first_status, &job, &attempt);
+        let attempt = match first {
+            Some(first) if first_status == MutantStatus::Killed => {
+                confirmed_kill(first, status, attempt)
+            }
+            _ => attempt,
+        };
         // A kill reports the run that killed the mutant. Each other status
         // keeps the first run, so a retry never shortens a timeout.
         let duration_ms = if status == MutantStatus::Killed {
@@ -1940,6 +1941,7 @@ pub fn run_schedule_with_progress(
     let context = JobContext {
         dry_files: &dry_files,
         kill_matrix: config.kill_matrix,
+        target_full: config.target_full,
         targets: target_ids.as_ref(),
         ready: &ready,
         cache: config.cache.as_deref(),
@@ -1964,7 +1966,7 @@ pub fn run_schedule_with_progress(
         .now()
         .saturating_duration_since(mutants_started);
     note_control_failures(&mut outcome, &facts, &memo);
-    let (suspects, first_runs) = record_first_runs(&mut outcome, &facts, &memo, attempts);
+    let (suspects, first_runs) = record_first_runs(config, &mut outcome, &facts, &memo, attempts);
     if !suspects.is_empty() {
         let retry_started = config.clock.now();
         retry_suspects(runner, &facts, suspects, first_runs, &mut outcome)?;

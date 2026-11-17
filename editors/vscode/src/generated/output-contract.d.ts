@@ -1870,13 +1870,17 @@ export type MutationKillMatrixStatus = ("complete" | "incomplete" | "unavailable
  */
 export type MutationKillMatrixTargetStatus = ("complete" | "incomplete")
 /**
+ * How a `--kill-matrix-for` run selects the tests of each mutant.
+ */
+export type MutationKillMatrixTargetMode = ("target-first" | "full")
+/**
  * Which code a run mutates.
  */
 export type MutationScopeKind = ("changed" | "all" | "paths")
 /**
  * The result of one mutant.
  */
-export type MutantStatus = ("killed" | "timeout" | "survived" | "no_coverage" | "runtime_error" | "flaky" | "pruned" | "pending" | "equivalent" | "compile_error")
+export type MutantStatus = ("killed" | "timeout" | "survived" | "no_coverage" | "runtime_error" | "flaky" | "pruned" | "pending" | "equivalent" | "compile_error" | "not_killed_by_target")
 /**
  * How a run detected a mutant.
  */
@@ -9057,6 +9061,12 @@ equivalent: number
  * before `--typecheck` has no such field, so it reads as 0.
  */
 compile_error?: number
+/**
+ * Mutants that no target test kills in the target-first mode of
+ * `--kill-matrix-for`. A report from a version before this mode has no
+ * such field, so it reads as 0.
+ */
+not_killed_by_target?: number
 }
 /**
  * Component-level aggregate attached to a template complexity finding,
@@ -21297,6 +21307,11 @@ coverage_without_kills: string[]
  * `subsuming_tests` is empty, because bail hides the other killers.
  */
 targets?: (MutationKillMatrixTarget[] | null)
+/**
+ * How the `--kill-matrix-for` run selected the tests of each mutant.
+ * Absent outside target mode.
+ */
+target_mode?: (MutationKillMatrixTargetMode | null)
 }
 /**
  * The observed mutant kills of one eligible test.

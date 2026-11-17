@@ -698,6 +698,22 @@ fn a_run_with_only_runtime_errors_and_baseline_failures_exits_2() {
 }
 
 #[test]
+fn a_baseline_failure_does_not_fail_a_run_whose_targets_ran() {
+    let mut targeted = report(
+        vec![
+            mutant("m1", "src/a.ts", 1, MutantStatus::NotKilledByTarget),
+            mutant("m2", "src/a.ts", 2, MutantStatus::NoCoverage),
+        ],
+        vec![MutationIncompleteReason::BaselineFailure],
+    );
+    targeted.baseline_failures = vec![baseline_failure(Some("test/env.test.ts::loads"), None)];
+    assert!(
+        baseline_blocked_run_error(&targeted).is_none(),
+        "the target tests ran against the mutant and passed"
+    );
+}
+
+#[test]
 fn a_run_with_only_no_coverage_mutants_and_no_baseline_failure_exits_0() {
     let unreached = report(
         vec![mutant("m1", "src/a.ts", 1, MutantStatus::NoCoverage)],
@@ -2183,6 +2199,7 @@ fn kill_matrix_fixture() -> fallow_output::MutationKillMatrix {
             },
         ],
         targets: None,
+        target_mode: None,
     }
 }
 

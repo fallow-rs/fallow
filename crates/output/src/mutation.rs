@@ -81,6 +81,10 @@ pub enum MutantStatus {
     /// Only a run with the type check of survivors gives this status. The
     /// mutant does not count in the score.
     CompileError,
+    /// Each covering `--kill-matrix-for` target test passed, and the
+    /// target-first mode ran no other test. The other tests can kill the
+    /// mutant or let it survive. The mutant does not count in the score.
+    NotKilledByTarget,
 }
 
 /// The `pending_reason` of a mutant that the `--mutants-per-line` limit left
@@ -116,11 +120,17 @@ pub struct MutationStatusCounts {
     /// before `--typecheck` has no such field, so it reads as 0.
     #[serde(default)]
     pub compile_error: usize,
+    /// Mutants that no target test kills in the target-first mode of
+    /// `--kill-matrix-for`. A report from a version before this mode has no
+    /// such field, so it reads as 0.
+    #[serde(default)]
+    pub not_killed_by_target: usize,
 }
 
 impl MutationStatusCounts {
     /// The mutants that ran against the tests: `killed`, `timeout`,
-    /// `survived`, `runtime_error`, `flaky` and `compile_error`.
+    /// `survived`, `runtime_error`, `flaky`, `compile_error` and
+    /// `not_killed_by_target`.
     #[must_use]
     pub const fn executed(&self) -> usize {
         self.killed
@@ -129,6 +139,7 @@ impl MutationStatusCounts {
             .saturating_add(self.runtime_error)
             .saturating_add(self.flaky)
             .saturating_add(self.compile_error)
+            .saturating_add(self.not_killed_by_target)
     }
 
     /// Adds one mutant with `status`.
@@ -145,6 +156,7 @@ impl MutationStatusCounts {
             MutantStatus::Pending => self.pending += 1,
             MutantStatus::Equivalent => self.equivalent += 1,
             MutantStatus::CompileError => self.compile_error += 1,
+            MutantStatus::NotKilledByTarget => self.not_killed_by_target += 1,
         }
     }
 
@@ -161,6 +173,7 @@ impl MutationStatusCounts {
             MutantStatus::Pending => &mut self.pending,
             MutantStatus::Equivalent => &mut self.equivalent,
             MutantStatus::CompileError => &mut self.compile_error,
+            MutantStatus::NotKilledByTarget => &mut self.not_killed_by_target,
         };
         if *count > 0 {
             *count -= 1;
@@ -174,7 +187,8 @@ impl MutationStatusCounts {
     ///
     /// `no_coverage` mutants stay out of the score;
     /// [`MutationSummary::coverage`] reports them. Runtime errors, flaky, pruned,
-    /// pending, equivalent and compile-error mutants never count.
+    /// pending, equivalent, compile-error and not-killed-by-target mutants
+    /// never count.
     #[must_use]
     #[expect(
         clippy::cast_precision_loss,
@@ -674,6 +688,7 @@ impl MutationSummary {
                 | MutantStatus::RuntimeError
                 | MutantStatus::Flaky
                 | MutantStatus::CompileError
+                | MutantStatus::NotKilledByTarget
                     if !result.covering_tests.is_empty() || result.static_mutant =>
                 {
                     covered += 1;
@@ -969,6 +984,24 @@ pub struct MutationKillMatrix {
     /// `subsuming_tests` is empty, because bail hides the other killers.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub targets: Option<Vec<MutationKillMatrixTarget>>,
+    /// How the `--kill-matrix-for` run selected the tests of each mutant.
+    /// Absent outside target mode.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub target_mode: Option<MutationKillMatrixTargetMode>,
+}
+
+/// How a `--kill-matrix-for` run selects the tests of each mutant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum MutationKillMatrixTargetMode {
+    /// The target tests run first. A mutant that no target kills is
+    /// `not_killed_by_target` and runs no other test. After a target kill,
+    /// the other covering tests run until the first kill.
+    TargetFirst,
+    /// Each mutant runs its target tests and then its other covering tests,
+    /// and each survivor gets a retry (`--kill-matrix-full`).
+    Full,
 }
 
 impl Default for MutationKillMatrix {
@@ -980,6 +1013,7 @@ impl Default for MutationKillMatrix {
             candidates: Vec::new(),
             coverage_without_kills: Vec::new(),
             targets: None,
+            target_mode: None,
         }
     }
 }

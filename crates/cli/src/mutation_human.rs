@@ -14,12 +14,12 @@ use fallow_api::mutation::split_control_run_failure;
 use fallow_output::{
     DUPLICATE_TEST_IDS_CODE, MutantEquivalenceHint, MutantResult, MutantStatus,
     MutationCompletionStatus, MutationInspectOutput, MutationInspectStatus, MutationKillMatrix,
-    MutationKillMatrixStatus, MutationKillMatrixTargetStatus, MutationPlanDisposition,
-    MutationPlanOutput, MutationReplayCall, MutationReplayOutcome, MutationReplayOutput,
-    MutationReplaySide, MutationReplayVerdict, MutationReport, MutationResumeOutput,
-    MutationScopeKind, MutationScopeOutput, MutationSkippedFile, MutationStaleReason,
-    MutationTargetOnlyKill, MutationTestKillRow, MutationTypecheckOutput, SKIPPED_TESTS_CODE,
-    TestReachClass,
+    MutationKillMatrixStatus, MutationKillMatrixTargetMode, MutationKillMatrixTargetStatus,
+    MutationPlanDisposition, MutationPlanOutput, MutationReplayCall, MutationReplayOutcome,
+    MutationReplayOutput, MutationReplaySide, MutationReplayVerdict, MutationReport,
+    MutationResumeOutput, MutationScopeKind, MutationScopeOutput, MutationSkippedFile,
+    MutationStaleReason, MutationTargetOnlyKill, MutationTestKillRow, MutationTypecheckOutput,
+    SKIPPED_TESTS_CODE, TestReachClass,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
@@ -285,6 +285,7 @@ fn summary_line(report: &MutationReport) -> String {
         ("runtime error", counts.runtime_error),
         ("flaky", counts.flaky),
         ("compile error", counts.compile_error),
+        ("not killed by target", counts.not_killed_by_target),
     ] {
         if count > 0 {
             let _ = write!(line, "  {label} {count}");
@@ -946,6 +947,9 @@ fn render_kill_matrix(out: &mut String, matrix: &MutationKillMatrix) {
         "\nTest kill evidence: {}",
         kill_matrix_status(matrix.status)
     );
+    if matrix.target_mode == Some(MutationKillMatrixTargetMode::TargetFirst) {
+        out.push_str("  Target-first: a mutant that no target kills ran no other test. Pass --kill-matrix-full for the status of each mutant.\n");
+    }
     for target in matrix.targets.iter().flatten() {
         let _ = write!(
             out,
