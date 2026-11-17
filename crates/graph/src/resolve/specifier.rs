@@ -33,9 +33,7 @@ use super::path_info::{
 use super::react_native::{build_condition_names, build_extensions};
 use super::tsconfig_scope::{glob_values_match, resolve_tsconfig_relative_path};
 use super::types::{DenoImportMapEntry, ResolveContext, ResolveResult};
-use super::url_suffix::{
-    resolve_failed_bare_asset_query_specifier, strip_url_suffix, strip_vite_asset_query,
-};
+use super::url_suffix::{resolve_failed_bare_query_specifier, strip_bare_query, strip_url_suffix};
 use super::workspace_alias::{
     resolve_failed_bare_package_specifier, try_aliased_workspace_package_fallback,
 };
@@ -1834,8 +1832,8 @@ fn resolve_failed_regular_specifier(
     if is_plain_css_file(from_file) && is_bare_style_subpath(specifier) {
         return ResolveResult::Unresolvable(specifier.to_string());
     }
-    if is_bare && let Some(base) = strip_vite_asset_query(specifier) {
-        return resolve_failed_bare_asset_query_specifier(
+    if is_bare && let Some(base) = strip_bare_query(specifier) {
+        return resolve_failed_bare_query_specifier(
             ctx,
             from_file,
             specifier,
