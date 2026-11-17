@@ -504,7 +504,7 @@ fn lefthook_job_propagates_project_local_fallow_failure() {
 
 #[cfg(unix)]
 #[test]
-fn lefthook_job_prefers_fallow_on_path() {
+fn lefthook_job_prefers_the_project_local_fallow() {
     let fixture = LefthookExecutionFixture::new();
     let source_file = fixture.root.join("fallow-source");
     let args_file = fixture.root.join("fallow-args");
@@ -512,12 +512,12 @@ fn lefthook_job_prefers_fallow_on_path() {
     write_test_executable(
         &fixture.root.join("node_modules/.bin/fallow"),
         &fixture.shell,
-        "if [ \"$1\" = --version ]; then echo 'fallow 9.0.0'; exit 0; fi\nprintf '%s\\n' local > \"$FALLOW_TEST_SOURCE\"",
+        "if [ \"$1\" = --version ]; then echo 'fallow 9.0.0'; exit 0; fi\nprintf '%s\\n' local > \"$FALLOW_TEST_SOURCE\"\nprintf '%s\\n' \"$@\" > \"$FALLOW_TEST_ARGS\"",
     );
     write_test_executable(
         &fixture.restricted_bin.join("fallow"),
         &fixture.shell,
-        "if [ \"$1\" = --version ]; then echo 'fallow 9.0.0'; exit 0; fi\nprintf '%s\\n' path > \"$FALLOW_TEST_SOURCE\"\nprintf '%s\\n' \"$@\" > \"$FALLOW_TEST_ARGS\"",
+        "if [ \"$1\" = --version ]; then echo 'fallow 9.0.0'; exit 0; fi\nprintf '%s\\n' path > \"$FALLOW_TEST_SOURCE\"",
     );
 
     assert!(
@@ -528,7 +528,7 @@ fn lefthook_job_prefers_fallow_on_path() {
             ])
             .success()
     );
-    assert_eq!(fs::read_to_string(source_file).unwrap(), "path\n");
+    assert_eq!(fs::read_to_string(source_file).unwrap(), "local\n");
     assert_eq!(
         fs::read_to_string(args_file).unwrap(),
         "audit\n--staged\n--quiet\n--gate-marker\npre-commit\n"
