@@ -84,7 +84,7 @@ test("either embedded consumer fails with its named surface", () => {
       assertSigningKeyParity(
         surfaces({ rustProviderSource: rustConstant("RELEASE_BINARY_SIGNING_KEY", changed) }),
       ),
-    /similar-code Rust provider check: embedded public key differs from VS Code/u,
+    /Rust release signature check: embedded public key differs from VS Code/u,
   );
 });
 

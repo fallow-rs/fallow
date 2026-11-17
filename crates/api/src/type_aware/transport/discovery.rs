@@ -38,24 +38,49 @@ impl From<String> for DiscoveryError {
     }
 }
 
+/// A companion that discovery found, and where.
+#[derive(Debug)]
+pub(super) struct Discovered {
+    pub(super) path: PathBuf,
+    /// True when the companion comes from the `fallow type-aware setup`
+    /// directory.
+    pub(super) from_setup_directory: bool,
+}
+
 pub(super) fn discover_type_aware_sidecar(root: &Path) -> Result<PathBuf, DiscoveryError> {
+    discover_type_aware_sidecar_with_source(root).map(|found| found.path)
+}
+
+pub(super) fn discover_type_aware_sidecar_with_source(
+    root: &Path,
+) -> Result<Discovered, DiscoveryError> {
     let current_exe = std::env::current_exe().ok();
+    let store = crate::type_aware::setup_store::store_root();
     discover_type_aware_sidecar_from(
         non_empty_env("FALLOW_TYPE_AWARE_BIN").as_deref(),
         current_exe.as_deref(),
+        store.as_deref(),
         Some(root),
     )
 }
 
+/// Discovery order: `FALLOW_TYPE_AWARE_BIN`, then the sibling of the active
+/// executable, then the `fallow type-aware setup` directory.
 pub(super) fn discover_type_aware_sidecar_from(
     override_value: Option<&str>,
     current_exe: Option<&Path>,
+    setup_store: Option<&Path>,
     project_root: Option<&Path>,
-) -> Result<PathBuf, DiscoveryError> {
+) -> Result<Discovered, DiscoveryError> {
     if let Some(value) = override_value {
         let path = PathBuf::from(value);
         if path.is_file() {
-            return canonical_sidecar_path(&path).map_err(DiscoveryError::from);
+            return canonical_sidecar_path(&path)
+                .map(|path| Discovered {
+                    path,
+                    from_setup_directory: false,
+                })
+                .map_err(DiscoveryError::from);
         }
         return Err(DiscoveryError::not_found(format!(
             "FALLOW_TYPE_AWARE_BIN is set to {value}, but no file exists there. Point it at a trusted {SIDECAR_BINARY} executable."
@@ -63,13 +88,38 @@ pub(super) fn discover_type_aware_sidecar_from(
     }
 
     if let Some(path) = current_exe.and_then(find_installed_sidecar) {
-        return Ok(path);
+        return Ok(Discovered {
+            path,
+            from_setup_directory: false,
+        });
+    }
+
+    if let Some(path) = setup_store.and_then(crate::type_aware::setup_store::find_setup_companion) {
+        return Ok(Discovered {
+            path,
+            from_setup_directory: true,
+        });
     }
 
     Err(DiscoveryError::not_found(format!(
-        "Type-aware sidecar `{SIDECAR_BINARY}` was not found next to the active Fallow executable. {} The Fallow binary itself does not search project node_modules or PATH. The normal command still works without --type-aware.",
+        "Type-aware sidecar `{SIDECAR_BINARY}` was not found next to the active Fallow executable or in the `fallow type-aware setup` directory. {} The Fallow binary itself does not search project node_modules or PATH. The normal command still works without --type-aware.",
         missing_sidecar_install_hint(project_root, current_exe)
     )))
+}
+
+/// How to get a companion that speaks the protocol of this Fallow build.
+pub fn protocol_mismatch_hint() -> String {
+    let current_exe = std::env::current_exe().ok();
+    if crate::companion_install::is_standalone_fallow_binary(current_exe.as_deref())
+        && !cfg!(windows)
+    {
+        return "Run `fallow type-aware setup` to install the companion of this Fallow version."
+            .to_owned();
+    }
+    format!(
+        "Install `{SIDECAR_BINARY}@{}`, or run `fallow type-aware setup`.",
+        env!("CARGO_PKG_VERSION")
+    )
 }
 
 /// How to install the exact-version companion for each way to run Fallow.
@@ -95,7 +145,8 @@ pub(super) fn missing_sidecar_install_hint(
 }
 
 /// On Windows the npm launcher starts the companion through Node with a
-/// script path, so the hint names only the npm install of Fallow there.
+/// script path, and `fallow type-aware setup` has no Windows bundle, so the
+/// hint names only the npm install of Fallow there.
 pub(super) fn standalone_install_hint(windows: bool) -> String {
     let version = env!("CARGO_PKG_VERSION");
     let intro = "This Fallow binary is not the npm install (for example Homebrew or `cargo install`). No npm launcher passes the companion to it.";
@@ -106,7 +157,7 @@ pub(super) fn standalone_install_hint(windows: bool) -> String {
         );
     }
     format!(
-        "{intro} Install the companion: `npm install --global {SIDECAR_BINARY}@{version}`. Then set FALLOW_TYPE_AWARE_BIN in the environment that starts Fallow, such as your shell or your editor: `export FALLOW_TYPE_AWARE_BIN=\"$(npm prefix --global)/bin/{SIDECAR_BINARY}\"`. Or install Fallow and the companion from npm: {npm_install}."
+        "{intro} Run `fallow type-aware setup` to download the signed companion of this version into your user directory. The companion needs Node.js 20 or later on PATH. Or set FALLOW_TYPE_AWARE_BIN to a trusted `{SIDECAR_BINARY}` executable."
     )
 }
 
@@ -126,13 +177,19 @@ pub(super) fn non_empty_env(key: &str) -> Option<String> {
     })
 }
 
+pub(super) fn find_installed_sidecar(current_exe: &Path) -> Option<PathBuf> {
+    let current_exe = dunce::canonicalize(current_exe).ok()?;
+    find_sidecar_in(current_exe.parent()?)
+}
+
+/// The companion executable directly inside `dir`: a regular file whose real
+/// path stays in `dir`, so a link cannot point discovery somewhere else.
 #[expect(
     clippy::filetype_is_file,
     reason = "security-sensitive sidecar discovery accepts regular files only"
 )]
-pub(super) fn find_installed_sidecar(current_exe: &Path) -> Option<PathBuf> {
-    let current_exe = dunce::canonicalize(current_exe).ok()?;
-    let install_dir = current_exe.parent()?;
+pub fn find_sidecar_in(dir: &Path) -> Option<PathBuf> {
+    let install_dir = dunce::canonicalize(dir).ok()?;
     binary_names(SIDECAR_BINARY).into_iter().find_map(|name| {
         let candidate = install_dir.join(name);
         let metadata = candidate.symlink_metadata().ok()?;
@@ -140,7 +197,7 @@ pub(super) fn find_installed_sidecar(current_exe: &Path) -> Option<PathBuf> {
             return None;
         }
         let canonical = dunce::canonicalize(candidate).ok()?;
-        (canonical.parent() == Some(install_dir)).then_some(canonical)
+        (canonical.parent() == Some(install_dir.as_path())).then_some(canonical)
     })
 }
 
