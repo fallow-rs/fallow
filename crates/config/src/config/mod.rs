@@ -907,7 +907,7 @@ pub struct AuditConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health: Option<bool>,
 
-    /// Toggles the duplication sub-analysis in `fallow audit`. Defaults to on when unset; set `false` to leave clone groups out of the verdict, summary and attribution, on the head and on the base snapshot. `fallow audit --skip dupes` turns it off for one run and `--only` replaces this selection.
+    /// Toggles the duplication sub-analysis in `fallow audit`. Defaults to the value of `duplicates.enabled` when unset, which is on by default; set `false` to leave clone groups out of the verdict, summary and attribution, on the head and on the base snapshot. `fallow audit --skip dupes` turns it off for one run and `--only` replaces this selection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dupes: Option<bool>,
 

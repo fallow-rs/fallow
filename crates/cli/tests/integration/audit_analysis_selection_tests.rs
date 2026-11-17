@@ -395,3 +395,46 @@ fn an_audit_without_changes_still_marks_skipped_sub_analyses() {
         "{json:#}"
     );
 }
+
+/// `BASE_CONFIG` with duplication detection turned off, and an optional
+/// `audit` section.
+fn config_without_duplicates(audit: Option<&str>) -> String {
+    let config = audit.map_or_else(|| BASE_CONFIG.to_string(), config_with_audit);
+    config.replacen('{', r#"{"duplicates": {"enabled": false},"#, 1)
+}
+
+#[test]
+fn duplicates_enabled_false_skips_the_duplication_sub_analysis() {
+    let tmp = fixture(&config_without_duplicates(None));
+    let json = report(&audit(tmp.path(), &[]));
+
+    assert_eq!(sections(&json), [true, true, false], "{json:#}");
+    assert_eq!(json["summary"]["duplication_clone_groups"], 0, "{json:#}");
+    assert_eq!(json["attribution"]["duplication_introduced"], 0, "{json:#}");
+}
+
+#[test]
+fn an_explicit_selection_runs_duplication_with_duplicates_enabled_false() {
+    let tmp = fixture(&config_without_duplicates(Some(r#"{"dupes": true}"#)));
+    let json = report(&audit(tmp.path(), &[]));
+    assert_eq!(sections(&json), [true, true, true], "{json:#}");
+    assert!(count(&json, "duplication", "clone_groups") >= 1, "{json:#}");
+
+    let tmp = fixture(&config_without_duplicates(None));
+    let json = report(&audit(tmp.path(), &["--only", "dupes"]));
+    assert_eq!(sections(&json), [false, false, true], "{json:#}");
+    assert!(count(&json, "duplication", "clone_groups") >= 1, "{json:#}");
+}
+
+#[test]
+fn a_dupes_baseline_flag_is_dropped_with_duplicates_enabled_false() {
+    let tmp = fixture(&config_without_duplicates(None));
+    let baseline = tmp.path().join("dupes-baseline.json");
+    let output = audit(
+        tmp.path(),
+        &["--dupes-baseline", baseline.to_str().unwrap()],
+    );
+    let json = report(&output);
+
+    assert_eq!(sections(&json), [true, true, false], "{json:#}");
+}

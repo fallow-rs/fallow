@@ -101,7 +101,7 @@ const fn default_min_corpus_size_for_token_cache() -> usize {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DuplicatesConfig {
-    /// Whether duplication detection is enabled.
+    /// Whether duplication detection is enabled. `false` turns off the duplication cross-reference of `--include-dupes` and the duplication sub-analysis of `fallow audit`, unless `audit.dupes` or `fallow audit --only` selects it. The `fallow dupes` command and the bare `fallow` command do not read this key.
     #[serde(default = "default_true")]
     pub enabled: bool,
 

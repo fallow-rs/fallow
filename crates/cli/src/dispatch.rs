@@ -2040,32 +2040,6 @@ fn note_inert_health_flags(args: &AuditDispatchArgs, analyses: audit::AuditAnaly
 /// semantics. `--only` replaces the `audit.*` selection and `--skip` removes
 /// from it. The review brief keeps every sub-analysis, because it reads the
 /// module graph and all three sections.
-fn resolve_audit_analyses(
-    config: &fallow_config::AuditConfig,
-    args: &AuditDispatchArgs,
-) -> audit::AuditAnalysisSelection {
-    if audit_renders_brief(args) {
-        return audit::AuditAnalysisSelection::ALL;
-    }
-    let architecture = combined::resolve_architecture_selection(&args.only, &args.skip);
-    if !args.only.is_empty() {
-        let (dead_code, dupes, health) = combined::resolve_analyses(&args.only, &[]);
-        return audit::AuditAnalysisSelection {
-            dead_code,
-            health,
-            dupes,
-            architecture,
-        };
-    }
-    let (dead_code, dupes, health) = combined::resolve_analyses(&[], &args.skip);
-    audit::AuditAnalysisSelection {
-        dead_code: dead_code && config.dead_code.unwrap_or(true),
-        health: health && config.health.unwrap_or(true),
-        dupes: dupes && config.dupes.unwrap_or(true),
-        architecture,
-    }
-}
-
 fn audit_css_enabled(config: &fallow_config::AuditConfig, args: &AuditDispatchArgs) -> bool {
     !args.no_css && config.css.unwrap_or(true)
 }

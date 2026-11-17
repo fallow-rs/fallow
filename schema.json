@@ -993,7 +993,7 @@
       "type": "object",
       "properties": {
         "enabled": {
-          "description": "Whether duplication detection is enabled.",
+          "description": "Whether duplication detection is enabled. `false` turns off the duplication cross-reference of `--include-dupes` and the duplication sub-analysis of `fallow audit`, unless `audit.dupes` or `fallow audit --only` selects it. The `fallow dupes` command and the bare `fallow` command do not read this key.",
           "type": "boolean",
           "default": true
         },
@@ -3773,7 +3773,7 @@
           ]
         },
         "dupes": {
-          "description": "Toggles the duplication sub-analysis in `fallow audit`. Defaults to on when unset; set `false` to leave clone groups out of the verdict, summary and attribution, on the head and on the base snapshot. `fallow audit --skip dupes` turns it off for one run and `--only` replaces this selection.",
+          "description": "Toggles the duplication sub-analysis in `fallow audit`. Defaults to the value of `duplicates.enabled` when unset, which is on by default; set `false` to leave clone groups out of the verdict, summary and attribution, on the head and on the base snapshot. `fallow audit --skip dupes` turns it off for one run and `--only` replaces this selection.",
           "type": [
             "boolean",
             "null"
