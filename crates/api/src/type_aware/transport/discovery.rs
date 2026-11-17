@@ -102,9 +102,20 @@ pub(super) fn discover_type_aware_sidecar_from(
     }
 
     Err(DiscoveryError::not_found(format!(
-        "Type-aware sidecar `{SIDECAR_BINARY}` was not found next to the active Fallow executable or in the `fallow type-aware setup` directory. {} The Fallow binary itself does not search project node_modules or PATH. The normal command still works without --type-aware.",
+        "Type-aware sidecar `{SIDECAR_BINARY}` was not found {}. {} The Fallow binary itself does not search project node_modules or PATH. The normal command still works without --type-aware.",
+        searched_locations(cfg!(windows)),
         missing_sidecar_install_hint(project_root, current_exe)
     )))
+}
+
+/// The locations that discovery names in its error. No setup bundle exists
+/// for Windows, so the Windows text does not point to the setup directory.
+pub(super) fn searched_locations(windows: bool) -> &'static str {
+    if windows {
+        "next to the active Fallow executable"
+    } else {
+        "next to the active Fallow executable or in the `fallow type-aware setup` directory"
+    }
 }
 
 /// How to get a companion that speaks the protocol of this Fallow build.

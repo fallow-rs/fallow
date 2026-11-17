@@ -711,6 +711,14 @@ mod tests {
     }
 
     #[test]
+    fn the_windows_search_text_names_no_setup_directory() {
+        assert!(!discovery::searched_locations(true).contains("type-aware setup"));
+        assert!(
+            discovery::searched_locations(false).contains("`fallow type-aware setup` directory")
+        );
+    }
+
+    #[test]
     fn the_unix_standalone_hint_names_the_setup_command() {
         let hint = discovery::standalone_install_hint(false);
         for text in [
