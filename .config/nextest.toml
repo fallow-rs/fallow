@@ -32,8 +32,7 @@ path = "junit.xml"
 
 # Nextest starts tests in binary and name order. A slow test that sorts late
 # then runs alone at the end of a partition, and the partition waits for it:
-# the surface differential test ended the second CI partition in each sampled
-# run. These tests take 25 seconds or more each, so they start first.
+# the surface differential test ended a CI partition in each sampled run. These tests take 25 seconds or more each, so they start first.
 [[profile.ci.overrides]]
 filter = """
 test(/^permutation::oracle::/)

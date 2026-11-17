@@ -29,8 +29,8 @@ const normalTestCommand = "cargo test --workspace --lib --bins --tests --example
 // CI runs the same target set through cargo-nextest with the `ci` profile.
 const ciNextestCommand =
   "cargo nextest run --profile ci --workspace --lib --bins --tests --examples";
-// CI splits the same target set over two Check jobs.
-const ciPartitionedNextestCommand = `${ciNextestCommand} --partition hash:\${{ matrix.partition }}/2`;
+// CI splits the same target set over three Check jobs.
+const ciPartitionedNextestCommand = `${ciNextestCommand} --partition hash:\${{ matrix.partition }}/3`;
 const benchCompileCommand = "cargo check --workspace --benches";
 
 const guardedToolCommand = (script, dependency, executable) => {
