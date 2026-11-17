@@ -482,11 +482,6 @@
     {
       "check": "complexity",
       "rule": "complexity",
-      "id": "a1ef5b98c379ba04"
-    },
-    {
-      "check": "complexity",
-      "rule": "complexity",
       "id": "a354c674bd9ca7de"
     },
     {
@@ -498,11 +493,6 @@
       "check": "complexity",
       "rule": "complexity",
       "id": "adc4953eee516a2b"
-    },
-    {
-      "check": "complexity",
-      "rule": "complexity",
-      "id": "b155774ef4550fa6"
     },
     {
       "check": "complexity",
@@ -543,11 +533,6 @@
       "check": "complexity",
       "rule": "complexity",
       "id": "c5271bd8216eca47"
-    },
-    {
-      "check": "complexity",
-      "rule": "complexity",
-      "id": "c6c488f7eb93a3b3"
     },
     {
       "check": "complexity",
