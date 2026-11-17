@@ -137,7 +137,20 @@ const CI_ENV_VARS: [&str; 3] = ["CI", "GITHUB_ACTIONS", "GITLAB_CI"];
 /// Record counts of the store after one `fallow audit` and one bare `fallow`
 /// run on a committed git project at `root`: `(records, project_records)`.
 fn record_counts_after_runs(home: &Path, root: &Path) -> (usize, usize) {
+    record_counts_after_runs_with_config(home, root, None)
+}
+
+/// [`record_counts_after_runs`] on a project with `config` as its
+/// `.fallowrc.json`.
+fn record_counts_after_runs_with_config(
+    home: &Path,
+    root: &Path,
+    config: Option<&str>,
+) -> (usize, usize) {
     std::fs::create_dir_all(root.join("src")).expect("create src");
+    if let Some(config) = config {
+        std::fs::write(root.join(".fallowrc.json"), config).expect("write config");
+    }
     std::fs::write(
         root.join("package.json"),
         r#"{"name":"impact-temp-root","main":"src/index.ts"}"#,
@@ -214,6 +227,35 @@ fn runs_outside_temp_folder_record_impact() {
 
     assert_eq!(
         record_counts_after_runs(home.path(), project.path()),
+        (1, 1)
+    );
+}
+
+/// `duplicates.enabled: false` turns the duplication analysis off in both
+/// commands. That is no narrowing of one run, so both runs still record.
+#[test]
+fn runs_with_duplication_off_in_the_config_record_impact() {
+    let target_tmp = Path::new(env!("CARGO_TARGET_TMPDIR"));
+    let temp = std::env::temp_dir();
+    let canonical = |path: &Path| dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    if canonical(target_tmp).starts_with(canonical(&temp))
+        || (cfg!(unix) && canonical(target_tmp).starts_with(canonical(Path::new("/tmp"))))
+    {
+        // The gate skips every project in this target folder.
+        return;
+    }
+    let home = tempfile::tempdir().expect("home tempdir");
+    let project = tempfile::Builder::new()
+        .prefix("impact-no-duplication-")
+        .tempdir_in(target_tmp)
+        .expect("project dir in target tmp");
+
+    assert_eq!(
+        record_counts_after_runs_with_config(
+            home.path(),
+            project.path(),
+            Some(r#"{"duplicates": {"enabled": false}}"#),
+        ),
         (1, 1)
     );
 }

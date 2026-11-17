@@ -101,7 +101,7 @@ const fn default_min_corpus_size_for_token_cache() -> usize {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DuplicatesConfig {
-    /// Whether duplication detection is enabled. `false` turns off the duplication analysis of the bare `fallow` command, the duplication sub-analysis of `fallow audit` and the duplication cross-reference of `--include-dupes`. A command line that names the analysis still runs it: `--only dupes`, `audit.dupes: true` and the `fallow dupes` command.
+    /// Whether duplication detection is enabled. `false` turns off the duplication analysis of the bare `fallow` command, the duplication sub-analysis of `fallow audit` and the duplication cross-reference of `--include-dupes`. A command line that names the analysis still runs it: `--only dupes`, `audit.dupes: true` and the `fallow dupes` command. The health score has its own duplication pass, which this key does not turn off.
     #[serde(default = "default_true")]
     pub enabled: bool,
 

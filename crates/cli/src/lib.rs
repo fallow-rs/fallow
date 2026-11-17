@@ -1052,11 +1052,10 @@ fn regression_save_targets(cli: &Cli) -> (Option<std::path::PathBuf>, bool) {
 
 fn dispatch_bare_command(dispatch: &DispatchContext<'_>) -> ExitCode {
     let cli = dispatch.cli;
-    let (run_check, run_dupes, run_health) =
-        match combined::resolve_bare_analyses(cli, dispatch.root, dispatch.output) {
-            Ok(analyses) => analyses,
-            Err(code) => return code,
-        };
+    let analyses = match combined::resolve_bare_analyses(cli, dispatch.root, dispatch.output) {
+        Ok(analyses) => analyses,
+        Err(code) => return code,
+    };
     let production = match dispatch.production_modes(
         cli.production_dead_code,
         cli.production_health,
@@ -1069,7 +1068,7 @@ fn dispatch_bare_command(dispatch: &DispatchContext<'_>) -> ExitCode {
     // winning root. A bare run that excludes health (`--only check`,
     // `--skip health`) must neither load config for coverage nor reject a
     // relative `health.coverageRoot` it never reads.
-    let coverage_inputs = if run_health {
+    let coverage_inputs = if analyses.run_health {
         match resolve_health_coverage_inputs(
             dispatch,
             cli.coverage.as_deref(),
@@ -1081,24 +1080,7 @@ fn dispatch_bare_command(dispatch: &DispatchContext<'_>) -> ExitCode {
     } else {
         ResolvedHealthCoverageInputs::default()
     };
-    run_bare_combined(
-        dispatch,
-        production,
-        &coverage_inputs,
-        BareAnalyses {
-            run_check,
-            run_dupes,
-            run_health,
-        },
-    )
-}
-
-/// Which analyses the bare `fallow` run executes (resolved from `--only`/`--skip`).
-#[derive(Clone, Copy)]
-struct BareAnalyses {
-    run_check: bool,
-    run_dupes: bool,
-    run_health: bool,
+    run_bare_combined(dispatch, production, &coverage_inputs, analyses)
 }
 
 /// Build `CombinedOptions` for a bare `fallow` invocation and run the combined
@@ -1107,7 +1089,7 @@ fn run_bare_combined(
     dispatch: &DispatchContext<'_>,
     production: ProductionModes,
     coverage_inputs: &ResolvedHealthCoverageInputs,
-    analyses: BareAnalyses,
+    analyses: combined::BareAnalyses,
 ) -> ExitCode {
     let cli = dispatch.cli;
     let output = dispatch.output;
@@ -1153,7 +1135,7 @@ fn run_combined_scoped(
     dispatch: &DispatchContext<'_>,
     production: ProductionModes,
     coverage_inputs: &ResolvedHealthCoverageInputs,
-    analyses: BareAnalyses,
+    analyses: combined::BareAnalyses,
     scope: Option<PathBuf>,
 ) -> ExitCode {
     let cli = dispatch.cli;
@@ -1201,6 +1183,7 @@ fn run_combined_scoped(
         run_check: analyses.run_check,
         run_dupes: analyses.run_dupes,
         run_health: analyses.run_health,
+        dupes_off_by_config: analyses.dupes_off_by_config,
         architecture,
         dupes: cli.dupes_overrides(),
         score: cli.score || cli.trend || cli.trend_from.is_some(),

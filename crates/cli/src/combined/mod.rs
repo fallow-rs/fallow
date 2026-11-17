@@ -69,6 +69,9 @@ pub struct CombinedOptions<'a> {
     pub run_check: bool,
     pub run_dupes: bool,
     pub run_health: bool,
+    /// `duplicates.enabled: false` in the config turned duplication off, and
+    /// no `--skip` did. The run is then still a whole-project run.
+    pub dupes_off_by_config: bool,
     /// Which dead-code findings the run reports (`--only architecture`,
     /// `--skip architecture`).
     pub architecture: ArchitectureSelection,
@@ -123,8 +126,18 @@ pub fn resolve_analyses(only: &[AnalysisKind], skip: &[AnalysisKind]) -> (bool, 
 /// key, so a CI script that passes it must keep its exit code.
 pub const INERT_DUPES_BASELINE_NOTE: &str = "Note: --dupes-baseline has no effect: duplicates.enabled is false in the config, so the duplication analysis does not run.";
 
-/// Resolve which analyses the bare `fallow` run executes, as `(dead code,
-/// duplication, health)`.
+/// Which analyses the bare `fallow` run executes.
+#[derive(Clone, Copy)]
+pub struct BareAnalyses {
+    pub run_check: bool,
+    pub run_dupes: bool,
+    pub run_health: bool,
+    /// `duplicates.enabled: false` in the config turned duplication off, and
+    /// no `--skip` did.
+    pub dupes_off_by_config: bool,
+}
+
+/// Resolve which analyses the bare `fallow` run executes.
 ///
 /// `--only` and `--skip` select as in [`resolve_analyses`]. Without `--only`,
 /// `duplicates.enabled: false` in the config also turns duplication off, so a
@@ -134,7 +147,7 @@ pub fn resolve_bare_analyses(
     cli: &crate::Cli,
     root: &std::path::Path,
     output: OutputFormat,
-) -> Result<(bool, bool, bool), ExitCode> {
+) -> Result<BareAnalyses, ExitCode> {
     let (run_check, mut run_dupes, run_health) = resolve_analyses(&cli.only, &cli.skip);
     let mut disabled_by_config = false;
     if run_dupes
@@ -148,7 +161,12 @@ pub fn resolve_bare_analyses(
         }
     }
     if run_check || run_dupes || run_health {
-        return Ok((run_check, run_dupes, run_health));
+        return Ok(BareAnalyses {
+            run_check,
+            run_dupes,
+            run_health,
+            dupes_off_by_config: disabled_by_config,
+        });
     }
     Err(crate::error::emit_input_error(
         if disabled_by_config {
@@ -1031,6 +1049,7 @@ mod tests {
             run_check: true,
             run_dupes: true,
             run_health: true,
+            dupes_off_by_config: false,
             architecture: crate::check::ArchitectureSelection::All,
             dupes: DupesOverrides::default(),
             score: false,
