@@ -376,9 +376,37 @@ fn apply_partial_all_none_changes_nothing() {
     );
 }
 
+/// A `RulesConfig` with every rule at `severity`.
+fn rules_all_at(severity: &str) -> RulesConfig {
+    let mut value = serde_json::to_value(RulesConfig::default()).expect("RulesConfig serializes");
+    for rule in value
+        .as_object_mut()
+        .expect("RulesConfig serializes to an object")
+        .values_mut()
+    {
+        *rule = severity.into();
+    }
+    serde_json::from_value(value).expect("RulesConfig deserializes")
+}
+
+/// The rule names whose severity is not `severity`.
+fn rules_not_at(rules: &RulesConfig, severity: &str) -> Vec<String> {
+    let value = serde_json::to_value(rules).expect("RulesConfig serializes");
+    value
+        .as_object()
+        .expect("RulesConfig serializes to an object")
+        .iter()
+        .filter(|(_, rule)| rule.as_str() != Some(severity))
+        .map(|(name, _)| name.clone())
+        .collect()
+}
+
 #[test]
 fn apply_partial_all_fields_set() {
-    let mut rules = RulesConfig::default();
+    // Every rule starts at `error`, so a field that `apply_partial` misses
+    // stays `error` also for a rule that defaults to `off`.
+    let mut rules = rules_all_at("error");
+    assert!(rules_not_at(&rules, "error").is_empty());
     let partial = PartialRulesConfig {
         unused_files: Some(Severity::Off),
         unused_exports: Some(Severity::Off),
@@ -456,14 +484,7 @@ fn apply_partial_all_fields_set() {
         added_dependency: Some(Severity::Off),
     };
     rules.apply_partial(&partial);
-    let serialized = serde_json::to_value(&rules).expect("RulesConfig serializes");
-    let not_off: Vec<&String> = serialized
-        .as_object()
-        .expect("RulesConfig serializes to an object")
-        .iter()
-        .filter(|(_, severity)| severity.as_str() != Some("off"))
-        .map(|(name, _)| name)
-        .collect();
+    let not_off = rules_not_at(&rules, "off");
     assert!(not_off.is_empty(), "rules not set to off: {not_off:?}");
 }
 

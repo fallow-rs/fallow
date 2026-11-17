@@ -563,7 +563,9 @@ line states exit code 0.
   counts. `error` fails the verdict, `warn` (the default) gives `warn`, and
   `off` removes the group from the verdict but keeps it in the report. With
   `overrides`, the rule resolves for each instance file and the most severe
-  result applies. The `duplicates.threshold` gate stays independent: it
+  result applies. So an override cannot exempt a clone group that has a copy
+  outside the override. For generated code, use `duplicates.ignore` or
+  `ignorePatterns`. The `duplicates.threshold` gate stays independent: it
   reads the same counted groups and also fails a run where the rule is
   `off`. The rule adds no suppression token; `code-duplication` suppresses a
   clone instance before attribution.
