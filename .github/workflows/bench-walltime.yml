@@ -51,7 +51,9 @@ jobs:
       - uses: ./.github/actions/setup-rust
         with:
           cache-key: bench-walltime-cli
-          save-if: 'true'
+          # A scheduled run must not save: the repository cache is over its limit,
+          # and the entry would push out the caches that pull request jobs restore.
+          save-if: 'false'
 
       - name: Build fallow
         run: cargo build --release -p fallow-cli
