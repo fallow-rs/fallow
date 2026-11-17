@@ -341,6 +341,7 @@ message = "{path} calls a parser outside the listed sites. Run the parse inside 
 allow = [
     { path = "crates/core/src/plugins/config_parser.rs", max = 1, require = ["parse_bounded("] },
     { path = "crates/engine/src/duplication_detector/tokenize/mod.rs", max = 4, require = ["parse_bounded("] },
+    { path = "crates/engine/src/export_declarations.rs", max = 1, require = ["parse_bounded("] },
     { path = "crates/engine/src/search_visibility.rs", max = 2, require = ["parse_bounded("] },
     { path = "crates/extract/src/alchemy.rs", max = 1 },
     { path = "crates/extract/src/astro/mod.rs", max = 3 },

@@ -22,10 +22,11 @@
 ((.skipped_low_confidence_dependencies // 0) | tonumber) as $low_confidence_deps |
 ((.skipped_low_confidence_members // 0) | tonumber) as $low_confidence_members |
 ((.skipped_kept_re_exports // 0) | tonumber) as $kept_re_exports |
+((.skipped_shared_declarations // 0) | tonumber) as $shared_declarations |
 
 if $fix_attempts == 0 and $content_changed == 0 and $mixed_eol == 0 and $low_confidence == 0
   and $low_confidence_deps == 0 and $low_confidence_members == 0
-  and $kept_re_exports == 0 then
+  and $kept_re_exports == 0 and $shared_declarations == 0 then
   "## Fallow - Auto-fix\n\nNo fixable issues found."
 else
   "## Fallow - Auto-fix\n\n" +
@@ -49,6 +50,9 @@ else
   else "" end) +
   (if $kept_re_exports > 0 then
     ", kept \($kept_re_exports) unused export(s) that a kept re-export still names"
+  else "" end) +
+  (if $shared_declarations > 0 then
+    ", kept \($shared_declarations) unused export(s) whose `export` keyword also exports a name that is in use"
   else "" end) + "\n\n" +
   "| Type | Count |\n|------|-------|\n" +
   (if $exports > 0 then "| Export removals | \($exports) |\n" else "" end) +

@@ -1633,6 +1633,13 @@ assert_not_contains "$OUT_KEPT_RE_EXPORT" "No fixable issues found" "export held
 assert_contains "$OUT_KEPT_RE_EXPORT" "kept 1 unused export(s) that a kept re-export still names" "export held back by a kept re-export reaches the headline"
 assert_not_contains "$OUT_KEPT_RE_EXPORT" "Export removals | 1" "export held back by a kept re-export is not counted as removed"
 
+OUT_SHARED_DECLARATION=$(printf '%s' "$FIX_DEP_WITHHELD" \
+  | jq '.skipped_low_confidence_dependencies = 0 | .skipped_shared_declarations = 1 | .fixes = [{"type": "remove_export", "path": "src/store.ts", "line": 2, "name": "b", "applied": false, "skipped": true, "skip_reason": "shared_declaration_in_use"}]' \
+  | jq -r -f "$JQ_DIR/summary-fix.jq" 2>&1)
+assert_not_contains "$OUT_SHARED_DECLARATION" "No fixable issues found" "export held back by its shared declaration is not reported as clean"
+assert_contains "$OUT_SHARED_DECLARATION" "kept 1 unused export(s) whose \`export\` keyword also exports a name that is in use" "export held back by its shared declaration reaches the headline"
+assert_not_contains "$OUT_SHARED_DECLARATION" "Export removals | 1" "export held back by its shared declaration is not counted as removed"
+
 echo "  summary-dupes.jq:"
 OUT=$(jq -r -f "$JQ_DIR/summary-dupes.jq" "$FIXTURES/dupes.json" 2>&1)
 assert_valid_markdown "$OUT" "produces output"

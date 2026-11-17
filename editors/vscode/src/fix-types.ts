@@ -68,8 +68,13 @@ export interface FixAction {
    * - `kept_re_export` (#4636: a `remove_export` entry whose removal is
    *   withheld because a re-export that the run keeps still names the
    *   export. Counted by `skipped_kept_re_exports`).
+   * - `shared_declaration_in_use` (#4659: a `remove_export` entry whose
+   *   removal is withheld because the same `export` keyword also exports a
+   *   name that is in use, as in `export const { a, b } = x;`. Counted by
+   *   `skipped_shared_declarations`).
    *
-   * The three `low_confidence_*` reasons and `kept_re_export` are
+   * The three `low_confidence_*` reasons, `kept_re_export` and
+   * `shared_declaration_in_use` are
    * INTENTIONAL skips: they do NOT cause a non-zero exit code (unlike
    * `content_changed` / `mixed_line_endings`).
    */
@@ -143,4 +148,12 @@ export interface FallowFixResult {
    * exit code.
    */
   readonly skipped_kept_re_exports?: number;
+  /**
+   * Count of `remove_export` entries withheld with
+   * `skip_reason: "shared_declaration_in_use"`: the same `export` keyword
+   * also exports a name that is in use, so the removal of the keyword would
+   * remove that export too. Counts exports, not files. Always present;
+   * defaults to 0. Does NOT change the exit code.
+   */
+  readonly skipped_shared_declarations?: number;
 }

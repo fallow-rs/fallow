@@ -1383,6 +1383,45 @@ fn fix_summary_does_not_report_an_export_behind_a_kept_re_export_as_removed() {
     );
 }
 
+/// An export removal that its shared declaration holds back is stated in the
+/// summary and not listed as removed.
+#[test]
+fn fix_summary_does_not_report_an_export_behind_a_shared_declaration_as_removed() {
+    let env = json!({
+        "dry_run": true,
+        "total_fixed": 0,
+        "skipped": 0,
+        "skipped_shared_declarations": 1,
+        "fixes": [
+            {
+                "type": "remove_export",
+                "path": "src/store.ts",
+                "line": 2,
+                "name": "b",
+                "applied": false,
+                "skipped": true,
+                "skip_reason": "shared_declaration_in_use"
+            }
+        ]
+    });
+    let rendered = fallow_cli::report::github_summary::render_fix_summary(&env);
+
+    assert!(
+        !rendered.contains("No fixable issues found"),
+        "a withheld export is not a clean run: {rendered}"
+    );
+    assert!(
+        rendered.contains(
+            "kept 1 unused export(s) whose `export` keyword also exports a name that is in use"
+        ),
+        "the withholding has to be stated: {rendered}"
+    );
+    assert!(
+        !rendered.contains("src/store.ts:2"),
+        "a withheld export must not be listed as removed: {rendered}"
+    );
+}
+
 /// The bundled action no-ops annotations for the fix command, so the native
 /// `EnvelopeKind::Fix` annotation renderer must emit nothing.
 #[test]

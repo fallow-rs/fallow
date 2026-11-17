@@ -25,6 +25,9 @@ pub struct FixJsonOutputInput<'a> {
     /// Export removals withheld because a re-export that the run keeps still
     /// names the export.
     pub skipped_kept_re_exports: usize,
+    /// Export removals withheld because the same `export` keyword also
+    /// exports a name that the run keeps.
+    pub skipped_shared_declarations: usize,
 }
 
 /// JSON root emitted by `fallow fix --format json`.
@@ -64,6 +67,13 @@ pub struct FixJsonOutput<'a> {
     /// `remove_export` entry with `skip_reason: "kept_re_export"`, so this
     /// counts exports, not files. Intentional and exit-code-neutral.
     pub skipped_kept_re_exports: usize,
+    /// Export removals withheld because the same `export` keyword also
+    /// exports a name that the run keeps, as in `export const { a, b } = x;`
+    /// with only `b` unused: the removal of the keyword would remove the
+    /// export of `a` too. Each withheld export is a `remove_export` entry
+    /// with `skip_reason: "shared_declaration_in_use"`, so this counts
+    /// exports, not files. Intentional and exit-code-neutral.
+    pub skipped_shared_declarations: usize,
 }
 
 /// Count fix entries whose `applied` flag is true.
@@ -92,6 +102,7 @@ pub fn count_reported_fix_skips(fixes: &[Value]) -> usize {
                         | "low_confidence_unresolved_imports"
                         | "low_confidence_incomplete_analysis"
                         | "kept_re_export"
+                        | "shared_declaration_in_use"
                 )
             );
             is_skipped && !is_plan_skip
@@ -113,6 +124,7 @@ pub fn build_fix_json_output(input: FixJsonOutputInput<'_>) -> FixJsonOutput<'_>
         skipped_low_confidence_dependencies: input.skipped_low_confidence_dependencies,
         skipped_low_confidence_members: input.skipped_low_confidence_members,
         skipped_kept_re_exports: input.skipped_kept_re_exports,
+        skipped_shared_declarations: input.skipped_shared_declarations,
     }
 }
 
@@ -155,6 +167,12 @@ mod tests {
                 "skipped": true,
                 "skip_reason": "kept_re_export",
             }),
+            json!({
+                "type": "remove_export",
+                "applied": false,
+                "skipped": true,
+                "skip_reason": "shared_declaration_in_use",
+            }),
         ];
 
         let output = build_fix_json_output(FixJsonOutputInput {
@@ -166,6 +184,7 @@ mod tests {
             skipped_low_confidence_dependencies: 4,
             skipped_low_confidence_members: 5,
             skipped_kept_re_exports: 6,
+            skipped_shared_declarations: 7,
         });
 
         assert!(output.dry_run);
@@ -189,6 +208,11 @@ mod tests {
             "an export held back by a kept re-export belongs to its own counter"
         );
         assert_eq!(output.skipped_kept_re_exports, 6);
+        assert_eq!(
+            output.skipped, 1,
+            "an export held back by its shared declaration belongs to its own counter"
+        );
+        assert_eq!(output.skipped_shared_declarations, 7);
     }
 
     #[test]
@@ -203,6 +227,7 @@ mod tests {
             skipped_low_confidence_dependencies: 0,
             skipped_low_confidence_members: 0,
             skipped_kept_re_exports: 0,
+            skipped_shared_declarations: 0,
         })
         .expect("fix output serializes");
 
@@ -210,6 +235,7 @@ mod tests {
         assert_eq!(value["total_fixed"], 1);
         assert_eq!(value["skipped"], 0);
         assert_eq!(value["skipped_kept_re_exports"], 0);
+        assert_eq!(value["skipped_shared_declarations"], 0);
         assert_eq!(value["fixes"][0]["type"], "unused-export");
     }
 }
