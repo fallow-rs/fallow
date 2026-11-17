@@ -81,14 +81,16 @@ fn run_targets(
 #[test]
 fn targets_run_without_bail_then_the_other_tests_run_with_bail() {
     let (outcome, spawner) = run_targets(&[tid("t2")], &["t2"]);
+    let first = [
+        (Some("m2".to_owned()), vec![tid("t2")], false),
+        (Some("m2".to_owned()), vec![tid("t1")], true),
+    ];
     assert_eq!(
         mutant_runs(&spawner),
-        [
-            (Some("m2".to_owned()), vec![tid("t2")], false),
-            (Some("m2".to_owned()), vec![tid("t1")], true),
-        ],
-        "only the mutant that a target covers runs"
+        [first.clone(), first].concat(),
+        "only the mutant that a target covers runs, and its unique target kill gets one retry"
     );
+    assert!(outcome.results["m2"].retried);
     let m2 = &outcome.results["m2"];
     assert_eq!(m2.status, MutantStatus::Killed);
     assert_eq!(m2.killed_by, Some(tid("t2")));
@@ -152,8 +154,14 @@ fn an_other_killer_that_fails_without_the_mutant_leaves_incomplete_evidence() {
 }
 
 #[test]
-fn a_target_survivor_gets_its_status_from_the_other_tests() {
-    let (outcome, _) = run_targets(&[tid("t2")], &["t1"]);
+fn a_target_survivor_gets_its_status_from_the_other_tests_in_the_full_mode() {
+    let spawner = FakeSpawner::new(script(
+        |_| standard_dry(),
+        |_, run| Ok(killed_by_each(run, &[tid("t1")])),
+    ));
+    let mut config = target_config(&[tid("t2")]);
+    config.target_full = true;
+    let outcome = run_schedule(&spawner, &plan(&["m1", "m2"]), &config).expect("schedule");
     let m2 = &outcome.results["m2"];
     assert_eq!(m2.status, MutantStatus::Killed);
     assert_eq!(m2.killed_by, Some(tid("t1")));
@@ -169,7 +177,9 @@ fn a_file_target_selects_each_test_of_the_file_and_needs_no_other_run() {
         [
             (Some("m1".to_owned()), vec![tid("t1")], false),
             (Some("m2".to_owned()), vec![tid("t1"), tid("t2")], false),
-        ]
+            (Some("m1".to_owned()), vec![tid("t1")], false),
+        ],
+        "only the unique kill of m1 gets a retry"
     );
     assert_eq!(outcome.results["m2"].killing_tests, [tid("t1"), tid("t2")]);
     assert!(outcome.results["m2"].kill_matrix_complete);

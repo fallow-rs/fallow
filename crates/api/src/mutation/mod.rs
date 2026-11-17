@@ -180,10 +180,16 @@ pub struct MutationRunOptions {
     /// Execute all covering tests and retain complete killing test sets.
     pub kill_matrix: bool,
     /// The `--kill-matrix-for` targets: test files or runner test ids. Each
-    /// mutant that a target test covers runs its target tests without bail
-    /// and its other covering tests with bail. The other mutants are
-    /// `pruned`. Exclusive with `kill_matrix`.
+    /// mutant that a target test covers runs its target tests without bail.
+    /// After a target kill, its other covering tests run with bail. A mutant
+    /// that no target kills is `not_killed_by_target`, unless
+    /// `kill_matrix_full` is set. The other mutants are `pruned`. Exclusive
+    /// with `kill_matrix`.
     pub kill_matrix_targets: Vec<String>,
+    /// Run the other covering tests of each target mutant also when no target
+    /// kills it, and retry each survivor (`--kill-matrix-full`). Each mutant
+    /// then gets a final status. Needs `kill_matrix_targets`.
+    pub kill_matrix_full: bool,
     /// The maximum number of covered mutants to run, in rank order. A
     /// mutant that no dry-run test covers is `no_coverage` and does not
     /// count. The others become `pending`.

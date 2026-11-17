@@ -8,7 +8,7 @@ use rustc_hash::FxHashMap;
 use super::super::protocol::Ready;
 use super::{
     Attempt, Job, JobContext, MutantOutcome, ScheduleConfig, ScheduleOutcome, ScheduledMutant,
-    retry_status,
+    retries_unique_kill, retry_status,
 };
 
 /// A result of an earlier run.
@@ -116,7 +116,9 @@ fn stored_outcome(
 /// The key of `mutant` with these tests. The cache and the journal compute
 /// the same key. `None` without a cache and without a journal.
 /// A target-mode key also covers the target tests of the mutant, so a result
-/// with other targets never gives target evidence.
+/// with other targets never gives target evidence. The target-first mode and
+/// the full mode have their own keys, because a `not_killed_by_target` result
+/// has no status for the full mode.
 pub(super) fn job_key(
     context: &JobContext<'_>,
     mutant: &ScheduledMutant,
@@ -129,8 +131,10 @@ pub(super) fn job_key(
         (None, None) => None,
     }
     .map(|key| {
-        if context.targets.is_some() {
+        if context.targets.is_some() && context.target_full {
             format!("targets:{}:{key}", targets_digest(targets))
+        } else if context.targets.is_some() {
+            format!("targets-first:{}:{key}", targets_digest(targets))
         } else if context.kill_matrix {
             format!("matrix:{key}")
         } else {
@@ -193,18 +197,23 @@ fn journal_result(config: &ScheduleConfig, job: &Job, result: &CachedResult) {
     }
 }
 
-/// Journals the first run of a job when its status is final: a kill. A
-/// survivor and a timeout get a retry, and each other status runs again in a
-/// later run.
+/// Journals the first run of a job when its status is final: a kill, or a
+/// mutant that no target kills. A survivor, a timeout and a unique target
+/// kill get a retry, and each other status runs again in a later run.
 pub(super) fn journal_first_run(config: &ScheduleConfig, job: &Job, attempt: &Attempt) {
-    if attempt.status != MutantStatus::Killed {
+    let final_status = match attempt.status {
+        MutantStatus::Killed => !retries_unique_kill(config, job, attempt),
+        MutantStatus::NotKilledByTarget => true,
+        _ => false,
+    };
+    if !final_status {
         return;
     }
     journal_result(
         config,
         job,
         &CachedResult {
-            status: MutantStatus::Killed,
+            status: attempt.status,
             killing_tests: attempt.killing_tests.clone(),
             kill_matrix_complete: attempt.kill_matrix_complete,
             killed_by: attempt.killed_by.clone(),
@@ -213,8 +222,16 @@ pub(super) fn journal_first_run(config: &ScheduleConfig, job: &Job, attempt: &At
     );
 }
 
-/// The status and the duration of the first run of each retried mutant.
-pub(super) type FirstRuns = FxHashMap<String, (MutantStatus, Option<u64>)>;
+/// The first run of a retried mutant: its status, duration and killing
+/// tests.
+pub(super) struct FirstRun {
+    pub(super) status: MutantStatus,
+    pub(super) duration_ms: Option<u64>,
+    pub(super) killing_tests: Vec<String>,
+}
+
+/// The first run of each retried mutant.
+pub(super) type FirstRuns = FxHashMap<String, FirstRun>;
 
 /// Journals a retried job when the retry makes it final: a kill, or a
 /// survivor that the retry confirmed without a dropped covering test. The
@@ -227,8 +244,31 @@ pub(super) fn journal_retry(
 ) {
     let (first, first_ms) = firsts
         .get(&job.id)
-        .copied()
-        .unwrap_or((MutantStatus::Survived, None));
+        .map_or((MutantStatus::Survived, None), |first| {
+            (first.status, first.duration_ms)
+        });
+    // A retried unique target kill is final only when the retry kills with
+    // the same tests (see `confirmed_kill`). The first run was complete, so
+    // the retry alone gives the evidence.
+    if first == MutantStatus::Killed {
+        let same_killers = firsts
+            .get(&job.id)
+            .is_some_and(|first| sorted(&first.killing_tests) == sorted(&retry.killing_tests));
+        if retry.status == MutantStatus::Killed && same_killers {
+            journal_result(
+                config,
+                job,
+                &CachedResult {
+                    status: MutantStatus::Killed,
+                    killing_tests: retry.killing_tests.clone(),
+                    kill_matrix_complete: retry.kill_matrix_complete,
+                    killed_by: retry.killed_by.clone(),
+                    duration_ms: retry.duration_ms,
+                },
+            );
+        }
+        return;
+    }
     let result = match retry_status(first, job, retry) {
         MutantStatus::Killed => CachedResult {
             status: MutantStatus::Killed,
@@ -247,4 +287,11 @@ pub(super) fn journal_retry(
         _ => return,
     };
     journal_result(config, job, &result);
+}
+
+fn sorted(tests: &[String]) -> Vec<&String> {
+    let mut tests: Vec<&String> = tests.iter().collect();
+    tests.sort_unstable();
+    tests.dedup();
+    tests
 }

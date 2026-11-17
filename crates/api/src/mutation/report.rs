@@ -447,10 +447,11 @@ pub fn baseline_blocked_run_error(report: &MutationReport) -> Option<Programmati
     )
 }
 
-/// True when a mutant got a test result: `killed`, `timeout`, `survived` or
-/// `flaky`.
+/// True when a mutant got a test result: `killed`, `timeout`, `survived`,
+/// `flaky` or `not_killed_by_target`.
 const fn has_test_result(counts: &MutationStatusCounts) -> bool {
-    counts.killed + counts.timeout + counts.survived + counts.flaky > 0
+    counts.killed + counts.timeout + counts.survived + counts.flaky + counts.not_killed_by_target
+        > 0
 }
 
 /// The first line of a failure message that has text, trimmed.

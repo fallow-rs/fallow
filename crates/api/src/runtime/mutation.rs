@@ -99,6 +99,12 @@ fn validate(options: &MutationRunOptions) -> ProgrammaticResult<()> {
             "the full kill matrix and the kill matrix for targets are exclusive; pass only one of them",
         ));
     }
+    if options.kill_matrix_full && options.kill_matrix_targets.is_empty() {
+        return Err(mutation_error(
+            "FALLOW_INVALID_MUTATION_OPTIONS",
+            "--kill-matrix-full needs at least one --kill-matrix-for target",
+        ));
+    }
     if options
         .kill_matrix_targets
         .iter()
@@ -206,6 +212,7 @@ fn kill_matrix_mode<'a>(
         return Mode::Targets {
             requested: &options.kill_matrix_targets,
             resolved: outcome.map_or(&[], |outcome| outcome.targets.as_slice()),
+            full: options.kill_matrix_full,
         };
     }
     if options.kill_matrix {
@@ -1057,6 +1064,7 @@ fn open_stores(
         allow_side_effects: options.allow_side_effects,
         kill_matrix: options.kill_matrix,
         kill_matrix_targets: sorted_targets(&options.kill_matrix_targets),
+        kill_matrix_full: options.kill_matrix_full,
     };
     let run_journal = start_journal(options, planned, mutation_cache, &header, keys)?;
     Ok((result_cache, run_journal))
@@ -1281,6 +1289,7 @@ fn execute(
         runner: range.clone(),
         kill_matrix: options.kill_matrix,
         targets: options.kill_matrix_targets.clone(),
+        target_full: options.kill_matrix_full,
         concurrency: options.concurrency.unwrap_or_else(default_concurrency),
         runner_timeout: options.runner_timeout.unwrap_or(DEFAULT_RUNNER_TIMEOUT),
         deadline,
@@ -1496,7 +1505,7 @@ pub fn run_mutation_with_progress(
     let mut errors = run_issues(plan, outcome, &changed_paths, check_error);
     errors.extend(typecheck.issue);
     let timings = run_timings(outcome, execution.setup_ms, plan_ms, typecheck_ms);
-    Ok(MutationReport {
+    let mut report = MutationReport {
         schema_version: MutationSchemaVersion::V2,
         version: tool_version(),
         elapsed_ms: ElapsedMs(millis(started.elapsed())),
@@ -1533,7 +1542,9 @@ pub fn run_mutation_with_progress(
         compare: None,
         gate_outcomes: None,
         recording,
-    })
+    };
+    report.withhold_target_first_scores();
+    Ok(report)
 }
 
 #[cfg(test)]

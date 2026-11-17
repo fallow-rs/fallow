@@ -4,6 +4,7 @@
 
 use std::collections::BTreeSet;
 
+use fallow_output::MutantStatus;
 use rustc_hash::FxHashSet;
 
 use super::DryRunFacts;
@@ -67,4 +68,24 @@ pub(super) fn confirmation_tests(
 pub(super) fn retry_extra_ms(retry_total: f64, first_total: f64) -> u64 {
     let extra = (retry_total - first_total).max(0.0).ceil();
     if extra.is_finite() { extra as u64 } else { 0 }
+}
+
+/// Gives the final status from the first and the retry status. A retry that
+/// changes whether the tests detect the mutant gives `flaky`. A timeout or a
+/// kill with a killed retry stays detected and is `killed`. A survivor with a timed-out
+/// retry stays `survived`: the first run finished all tests with the mutant
+/// active, and host load alone can make the retry time out.
+pub(super) const fn retried_status(first: MutantStatus, retry: MutantStatus) -> MutantStatus {
+    match (first, retry) {
+        (_, MutantStatus::RuntimeError) => MutantStatus::RuntimeError,
+        (_, MutantStatus::NoCoverage) => MutantStatus::NoCoverage,
+        (MutantStatus::Survived, MutantStatus::Survived | MutantStatus::Timeout) => {
+            MutantStatus::Survived
+        }
+        (MutantStatus::Timeout, MutantStatus::Timeout) => MutantStatus::Timeout,
+        (MutantStatus::Timeout | MutantStatus::Killed, MutantStatus::Killed) => {
+            MutantStatus::Killed
+        }
+        _ => MutantStatus::Flaky,
+    }
 }

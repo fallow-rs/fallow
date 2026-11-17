@@ -69,6 +69,9 @@ pub struct JournalHeader {
     /// The `--kill-matrix-for` targets. Empty outside target mode.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub kill_matrix_targets: Vec<String>,
+    /// True for `--kill-matrix-full`.
+    #[serde(default)]
+    pub kill_matrix_full: bool,
 }
 
 impl JournalHeader {
@@ -122,6 +125,11 @@ impl JournalHeader {
                 "kill matrix targets",
                 targets(&self.kill_matrix_targets),
                 targets(&current.kill_matrix_targets),
+            ),
+            (
+                "kill matrix full",
+                self.kill_matrix_full.to_string(),
+                current.kill_matrix_full.to_string(),
             ),
             (
                 "operators",

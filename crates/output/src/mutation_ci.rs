@@ -534,6 +534,17 @@ fn headline(view: &MutationCiView) -> String {
     if view.counts.total == 0 {
         return "The scope has no mutant.".to_owned();
     }
+    let detected = view.counts.killed.saturating_add(view.counts.timeout);
+    if view.score.is_none() && (detected > 0 || view.counts.not_killed_by_target > 0) {
+        // Only the target-first mode of `--kill-matrix-for` reports tested
+        // mutants with no score.
+        let missed = view.counts.not_killed_by_target;
+        return format!(
+            "**The target-first kill matrix has no score.** {} {} not killed by a target; pass `--kill-matrix-full` to score each mutant.",
+            count_noun(missed, "mutant", "mutants"),
+            if missed == 1 { "was" } else { "were" }
+        );
+    }
     let Some(score) = view.score else {
         return if gate.is_some() {
             "**No mutant was counted.** The score gate was skipped.".to_owned()
@@ -559,7 +570,8 @@ fn count_table(view: &MutationCiView) -> String {
         .pending
         .saturating_add(counts.runtime_error)
         .saturating_add(counts.flaky)
-        .saturating_add(counts.compile_error);
+        .saturating_add(counts.compile_error)
+        .saturating_add(counts.not_killed_by_target);
     let score = view.score.map_or_else(|| "-".to_owned(), score_percent);
     format!(
         "| Killed | Survived | No coverage | Not measured | Score |\n\

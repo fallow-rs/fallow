@@ -698,6 +698,22 @@ fn a_run_with_only_runtime_errors_and_baseline_failures_exits_2() {
 }
 
 #[test]
+fn a_baseline_failure_does_not_fail_a_run_whose_targets_ran() {
+    let mut targeted = report(
+        vec![
+            mutant("m1", "src/a.ts", 1, MutantStatus::NotKilledByTarget),
+            mutant("m2", "src/a.ts", 2, MutantStatus::NoCoverage),
+        ],
+        vec![MutationIncompleteReason::BaselineFailure],
+    );
+    targeted.baseline_failures = vec![baseline_failure(Some("test/env.test.ts::loads"), None)];
+    assert!(
+        baseline_blocked_run_error(&targeted).is_none(),
+        "the target tests ran against the mutant and passed"
+    );
+}
+
+#[test]
 fn a_run_with_only_no_coverage_mutants_and_no_baseline_failure_exits_0() {
     let unreached = report(
         vec![mutant("m1", "src/a.ts", 1, MutantStatus::NoCoverage)],
@@ -2183,6 +2199,7 @@ fn kill_matrix_fixture() -> fallow_output::MutationKillMatrix {
             },
         ],
         targets: None,
+        target_mode: None,
     }
 }
 
@@ -2415,3 +2432,47 @@ fn a_hinted_survivor_shows_the_advisory_note() {
 
 #[path = "mutation_cli_kill_matrix_tests.rs"]
 mod kill_matrix_targets;
+
+#[test]
+fn min_score_flag_with_the_target_first_mode_is_an_input_error() {
+    let root = Path::new("/project");
+    let target_first = MutationArgs {
+        min_score: Some(80.0),
+        kill_matrix_for: vec!["test/a.test.ts".to_owned()],
+        ..MutationArgs::default()
+    };
+    let error = min_score(&input(
+        root,
+        target_first.clone(),
+        MutationConfig::default(),
+    ))
+    .expect_err("the target-first mode has no score");
+    assert_eq!(error.exit_code, 2);
+    assert!(
+        error.message.contains("--kill-matrix-full"),
+        "{}",
+        error.message
+    );
+
+    let full = MutationArgs {
+        kill_matrix_full: true,
+        ..target_first
+    };
+    assert_eq!(
+        min_score(&input(root, full, MutationConfig::default())).unwrap(),
+        Some(80.0)
+    );
+    let configured = MutationConfig {
+        min_score: Some(80.0),
+        ..MutationConfig::default()
+    };
+    let targets_only = MutationArgs {
+        kill_matrix_for: vec!["test/a.test.ts".to_owned()],
+        ..MutationArgs::default()
+    };
+    assert_eq!(
+        min_score(&input(root, targets_only, configured)).unwrap(),
+        Some(80.0),
+        "the project minScore skips the gate instead of failing the run"
+    );
+}

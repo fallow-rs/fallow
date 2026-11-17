@@ -33820,6 +33820,11 @@
           "type": "string",
           "const": "compile_error",
           "description": "Each covering test passed, but the mutated file does not type-check.\nOnly a run with the type check of survivors gives this status. The\nmutant does not count in the score."
+        },
+        {
+          "type": "string",
+          "const": "not_killed_by_target",
+          "description": "Each covering `--kill-matrix-for` target test passed, and the\ntarget-first mode ran no other test. It is a final status of that\nmode, but it says nothing about the other tests: they can kill the\nmutant or let it survive. The mode has no score."
         }
       ],
       "description": "The result of one mutant."
@@ -33870,6 +33875,10 @@
         "compile_error": {
           "type": "integer",
           "description": "Survived mutants that do not type-check. A report from a version\nbefore `--typecheck` has no such field, so it reads as 0."
+        },
+        "not_killed_by_target": {
+          "type": "integer",
+          "description": "Mutants that no target test kills in the target-first mode of\n`--kill-matrix-for`. A report from a version before this mode has no\nsuch field, so it reads as 0."
         }
       },
       "required": [
@@ -33912,7 +33921,7 @@
         {
           "type": "string",
           "const": "complete",
-          "description": "Each planned mutant has a final status. An empty survivor list is\nconclusive."
+          "description": "Each planned mutant has a final status. `not_killed_by_target` is a\nfinal status of the target-first mode. An empty survivor list is\nconclusive."
         },
         {
           "type": "string",
@@ -34328,7 +34337,7 @@
             "number",
             "null"
           ],
-          "description": "The mutation score of the function."
+          "description": "The mutation score of the function. `null` in the target-first mode\nof `--kill-matrix-for`."
         },
         "survived": {
           "type": "array",
@@ -34357,7 +34366,7 @@
             "number",
             "null"
           ],
-          "description": "The mutation score over the executed mutants, a fraction from 0 to 1:\n`(killed + timeout) / (killed + timeout + survived)`. `null` when no\nmutant ran to a tested result. `--min-score` and `mutation.minScore`\ncompare this value in percent."
+          "description": "The mutation score over the executed mutants, a fraction from 0 to 1:\n`(killed + timeout) / (killed + timeout + survived)`. `null` when no\nmutant ran to a tested result, and in the target-first mode of\n`--kill-matrix-for`, which has no survivors. `--min-score` and\n`mutation.minScore` compare this value in percent."
         },
         "coverage": {
           "type": [
@@ -35703,6 +35712,17 @@
             "$ref": "#/definitions/MutationKillMatrixTarget"
           },
           "description": "The `--kill-matrix-for` targets, in the given order. Absent outside\ntarget mode. In target mode, `tests` has only target tests, and\n`subsuming_tests` is empty, because bail hides the other killers."
+        },
+        "target_mode": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/MutationKillMatrixTargetMode"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "How the `--kill-matrix-for` run selected the tests of each mutant.\nAbsent outside target mode."
         }
       },
       "required": [
@@ -38259,6 +38279,21 @@
         "actions"
       ],
       "description": "Wire-shape envelope for an [`UnusedMember`] finding consumed under the\n`unused_protected_class_members` key (a `protected` class method or\nproperty that neither its class nor a subclass reads). Emits only a\nline-level suppress action: a subclass outside the project can read the\nmember, so removal is a decision for the user."
+    },
+    "MutationKillMatrixTargetMode": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "target-first",
+          "description": "The target tests run first. A mutant that no target kills is\n`not_killed_by_target` and runs no other test. After a target kill,\nthe other covering tests run until the first kill."
+        },
+        {
+          "type": "string",
+          "const": "full",
+          "description": "Each mutant runs its target tests and then its other covering tests,\nand each survivor gets a retry (`--kill-matrix-full`)."
+        }
+      ],
+      "description": "How a `--kill-matrix-for` run selects the tests of each mutant."
     }
   }
 }

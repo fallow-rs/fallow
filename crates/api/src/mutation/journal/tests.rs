@@ -14,6 +14,7 @@ fn header() -> JournalHeader {
         allow_side_effects: false,
         kill_matrix: false,
         kill_matrix_targets: Vec::new(),
+        kill_matrix_full: false,
     }
 }
 
@@ -131,6 +132,26 @@ fn a_changed_key_is_rejected_and_counted_once() {
     assert_eq!(journal.resumed("m1", "another-key"), None);
     assert_eq!(journal.rejected(), 1);
     assert_eq!(journal.resumed("m1", "k1"), Some(killed("t1")));
+}
+
+#[test]
+fn a_resume_in_the_other_target_mode_is_refused() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut target_first = header();
+    target_first.kill_matrix_targets = vec!["test/a.test.ts".to_owned()];
+    drop(open(dir.path(), &target_first, false).unwrap());
+
+    let full = JournalHeader {
+        kill_matrix_full: true,
+        ..target_first
+    };
+    let Err(mismatch) = open(dir.path(), &full, true) else {
+        panic!("a target-first journal never resumes a full run");
+    };
+    assert_eq!(
+        mismatch.differences,
+        vec!["kill matrix full (journal: false, this run: true)".to_owned()]
+    );
 }
 
 #[test]

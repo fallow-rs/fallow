@@ -5,7 +5,8 @@ use std::collections::{BTreeMap, BTreeSet};
 use fallow_engine::mutation::PlannedMutant;
 use fallow_output::{
     MutantResult, MutantStatus, MutationBaselineFailure, MutationCompletion,
-    MutationCompletionStatus, MutationKillMatrix, MutationKillMatrixStatus, MutationTestKillRow,
+    MutationCompletionStatus, MutationKillMatrix, MutationKillMatrixStatus,
+    MutationKillMatrixTargetMode, MutationTestKillRow,
 };
 use rustc_hash::FxHashMap;
 
@@ -36,6 +37,8 @@ pub enum Mode<'a> {
     Targets {
         requested: &'a [String],
         resolved: &'a [ResolvedTarget],
+        /// True for `--kill-matrix-full`.
+        full: bool,
     },
 }
 
@@ -55,13 +58,21 @@ pub fn build(
         Mode::Targets {
             requested,
             resolved,
-        } => targets::build(
-            &targets::Selection::new(requested, resolved),
-            results,
-            baseline,
-            completion,
-            test_files,
-        ),
+            full,
+        } => MutationKillMatrix {
+            target_mode: Some(if *full {
+                MutationKillMatrixTargetMode::Full
+            } else {
+                MutationKillMatrixTargetMode::TargetFirst
+            }),
+            ..targets::build(
+                &targets::Selection::new(requested, resolved),
+                results,
+                baseline,
+                completion,
+                test_files,
+            )
+        },
     }
 }
 
@@ -109,6 +120,7 @@ fn build_full(
         candidates,
         coverage_without_kills,
         targets: None,
+        target_mode: None,
     }
 }
 

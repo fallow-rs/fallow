@@ -295,6 +295,7 @@ fn config(concurrency: usize) -> ScheduleConfig {
         concurrency,
         kill_matrix: false,
         targets: Vec::new(),
+        target_full: false,
         runner_timeout: Duration::from_secs(5),
         deadline: None,
         clock: Arc::new(SystemClock),
@@ -3411,6 +3412,9 @@ mod matrix_tests;
 
 #[path = "target_tests.rs"]
 mod target_tests;
+
+#[path = "target_first_tests.rs"]
+mod target_first_tests;
 
 #[path = "concurrency_tests.rs"]
 mod concurrency_tests;

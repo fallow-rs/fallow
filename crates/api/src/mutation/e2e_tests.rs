@@ -1792,6 +1792,15 @@ mod end_to_end {
         assert_eq!(one.kill_matrix.candidates, ["test/math.test.ts::A"]);
         assert_eq!(one.kill_matrix.tests.len(), 1);
         assert_eq!(
+            one.summary.score, None,
+            "the target-first mode has no survivors, so it has no score"
+        );
+        assert!(
+            one.functions
+                .iter()
+                .all(|function| function.score.is_none())
+        );
+        assert_eq!(
             one.kill_matrix.tests[0].target_only_kills,
             Some(Vec::new()),
             "B also kills each add mutant"

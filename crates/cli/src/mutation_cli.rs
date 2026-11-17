@@ -209,11 +209,18 @@ pub struct MutationArgs {
     pub kill_matrix: bool,
     /// Check whether this test is redundant: a test file (each test in it) or
     /// a test id (`file::name`). Repeat the flag for more targets. Only the
-    /// mutants that a target covers run: first the target tests without a
-    /// stop at a failure, then the other covering tests up to the first
-    /// failure.
+    /// mutants that a target covers run. The target tests run first. A
+    /// mutant that no target kills is `not_killed_by_target` and runs no
+    /// other test. After a target kill, the other covering tests run up to
+    /// the first failure.
     #[arg(long, value_name = "TARGET", conflicts_with = "kill_matrix")]
     pub kill_matrix_for: Vec<String>,
+    /// With `--kill-matrix-for`: also run the other covering tests of a
+    /// mutant that no target kills, and retry each survivor. Each mutant
+    /// then gets a normal status, and the run has a score. Without this
+    /// flag, the run has no score and `--min-score` is an error. Slower.
+    #[arg(long, requires = "kill_matrix_for")]
+    pub kill_matrix_full: bool,
     /// Rerun the open tasks of a saved report (its `survived` and
     /// `no_coverage` mutants) against the current tests. The worktree may
     /// change test files only. The report keeps the earlier result of each
@@ -366,6 +373,15 @@ fn min_score(input: &MutationCliInput<'_>) -> Result<Option<f64>, ProgrammaticEr
             "mutation.minScore",
         ));
     }
+    if input.args.min_score.is_some()
+        && !input.args.kill_matrix_for.is_empty()
+        && !input.args.kill_matrix_full
+    {
+        return Err(input_error(
+            "--min-score needs a score, and the target-first mode of --kill-matrix-for has none; pass --kill-matrix-full to score each mutant",
+            "mutation.minScore",
+        ));
+    }
     Ok(value)
 }
 
@@ -457,6 +473,7 @@ pub fn run_options(input: &MutationCliInput<'_>) -> Result<MutationRunOptions, P
         resume: input.args.resume,
         kill_matrix: input.args.kill_matrix,
         kill_matrix_targets: input.args.kill_matrix_for.clone(),
+        kill_matrix_full: input.args.kill_matrix_full,
         mutant_ids: Vec::new(),
         test_changes_only: false,
         record_args: match input.args.record_args {

@@ -135,8 +135,10 @@ impl Worker<'_> {
     /// Runs the target tests of `job` without bail, so each target test that
     /// kills the mutant is known. After a terminal result, runs the other
     /// covering tests with bail: the first other killer shows that the kills
-    /// of the targets are not unique, and a survivor of the targets gets the
-    /// same status as in normal mode.
+    /// of the targets are not unique. In the target-first mode, a survivor of
+    /// the targets is `not_killed_by_target` and runs no other test: it
+    /// cannot add a kill to a target. With `target_full`, a survivor of the
+    /// targets gets the same status as in normal mode.
     pub(super) fn attempt_targets(
         &mut self,
         job: &Job,
@@ -147,6 +149,12 @@ impl Worker<'_> {
             ..job.clone()
         };
         let first = self.attempt_tests(&targets, caps, false)?;
+        if first.status == MutantStatus::Survived && !self.config.target_full {
+            return Ok(Attempt {
+                status: MutantStatus::NotKilledByTarget,
+                ..first
+            });
+        }
         let terminal = match first.status {
             MutantStatus::Killed => first.kill_matrix_complete,
             MutantStatus::Survived => true,
@@ -262,6 +270,18 @@ fn merge_target_phases(targets: Attempt, others: Attempt) -> Attempt {
     }
 }
 
+/// True when the target-first mode retries the first run of `job`: exactly
+/// one target test killed the mutant and no other test did. That kill is a
+/// unique kill of the target, and one flaky run must not decide that a test
+/// is not redundant. A shared kill, a kill of two or more target tests and
+/// each result of the full mode get no such retry.
+pub(super) fn retries_unique_kill(config: &ScheduleConfig, job: &Job, attempt: &Attempt) -> bool {
+    !config.target_full
+        && attempt.status == MutantStatus::Killed
+        && attempt.kill_matrix_complete
+        && matches!(attempt.killing_tests.as_slice(), [test] if job.targets.contains(test))
+}
+
 /// The target tests of `tests`, in the same order. Empty outside target mode.
 pub(super) fn job_targets(context: &JobContext<'_>, tests: &[String]) -> Vec<String> {
     context.targets.map_or_else(Vec::new, |targets| {
@@ -368,4 +388,40 @@ pub(super) fn resolve_targets(
         });
     }
     Ok((resolved, ids))
+}
+
+/// The status and the evidence of a retried target kill (see
+/// [`retries_unique_kill`]). The kill is confirmed only when the retry kills
+/// the mutant with the same tests. A retry with other killers, for example
+/// an other test that passed in the first run and fails now, makes the
+/// mutant `flaky`: one run would make the kill shared and the other unique.
+/// Each result other than a confirmed kill leaves the evidence incomplete.
+pub(super) fn confirmed_kill(
+    first: &MutantOutcome,
+    status: MutantStatus,
+    retry: Attempt,
+) -> (MutantStatus, Attempt) {
+    let killers = |tests: &[String]| -> BTreeSet<String> { tests.iter().cloned().collect() };
+    let same_killers = killers(&first.killing_tests) == killers(&retry.killing_tests);
+    if status != MutantStatus::Killed || !same_killers {
+        let status = if status == MutantStatus::Killed {
+            MutantStatus::Flaky
+        } else {
+            status
+        };
+        return (
+            status,
+            Attempt {
+                kill_matrix_complete: false,
+                ..retry
+            },
+        );
+    }
+    (
+        status,
+        Attempt {
+            kill_matrix_complete: first.kill_matrix_complete && retry.kill_matrix_complete,
+            ..retry
+        },
+    )
 }
