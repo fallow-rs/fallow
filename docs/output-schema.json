@@ -32774,7 +32774,7 @@
         },
         "path": {
           "type": "string",
-          "description": "Root-relative path of the changed file, with forward slashes."
+          "description": "Root-relative path of the changed file, with forward slashes. A\nfinding on a Fallow config file in a parent directory of the root has\na path that starts with `../`."
         },
         "line": {
           "type": [
@@ -32892,6 +32892,11 @@
           "type": "string",
           "const": "rule-severity",
           "description": "A rule severity in a Fallow config that the change made less strict."
+        },
+        {
+          "type": "string",
+          "const": "ignore-pattern",
+          "description": "A new or broader `ignorePatterns` or `ignoreFindings` entry in a\nFallow config, or a removed `!` exception."
         }
       ],
       "description": "How a `weakened-tests` finding weakened the tests."

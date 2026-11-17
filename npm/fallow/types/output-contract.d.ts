@@ -1293,7 +1293,7 @@ export type DiffRiskRule = ("weakened-tests" | "added-suppression" | "test-only-
 /**
  * How a `weakened-tests` finding weakened the tests.
  */
-export type WeakenedTestsKind = ("skip-only" | "removed-tests" | "assertion-drop" | "coverage-threshold" | "rule-severity")
+export type WeakenedTestsKind = ("skip-only" | "removed-tests" | "assertion-drop" | "coverage-threshold" | "rule-severity" | "ignore-pattern")
 /**
  * The severity of a diff-risk finding, from its rule.
  */
@@ -12885,7 +12885,9 @@ rule: DiffRiskRule
  */
 kind?: (WeakenedTestsKind | null)
 /**
- * Root-relative path of the changed file, with forward slashes.
+ * Root-relative path of the changed file, with forward slashes. A
+ * finding on a Fallow config file in a parent directory of the root has
+ * a path that starts with `../`.
  */
 path: string
 /**
