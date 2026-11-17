@@ -1182,7 +1182,7 @@ dependencies = [
  "sha2",
  "signal-hook",
  "similar 3.2.1",
- "srcmap-sourcemap 0.4.0",
+ "srcmap-sourcemap 0.6.0",
  "syn 3.0.10",
  "tempfile",
  "toml",
@@ -1303,7 +1303,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "srcmap-sourcemap 0.4.0",
+ "srcmap-sourcemap 0.6.0",
  "tempfile",
  "toml",
  "tracing",
@@ -4306,9 +4306,9 @@ dependencies = [
 
 [[package]]
 name = "srcmap-codec"
-version = "0.4.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cae7e00ed3a2a08f47e8265db91cf082c759d2e78d8328414208c02340950f14"
+checksum = "269a035c8b4f99bf777218fb999d20ec7c1014c17c4e19e02e622490fcfe1562"
 dependencies = [
  "memchr",
 ]
@@ -4346,11 +4346,11 @@ dependencies = [
 
 [[package]]
 name = "srcmap-scopes"
-version = "0.4.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22a332e089bd164c5a0cc21182ffd98a9051f59b771f21c26c0d4e63a432e739"
+checksum = "74ef86be6747c127768b1e0efaceb412ed93a0717167f3ca9a11042e275cba3d"
 dependencies = [
- "srcmap-codec 0.4.0",
+ "srcmap-codec 0.6.0",
 ]
 
 [[package]]
@@ -4368,15 +4368,15 @@ dependencies = [
 
 [[package]]
 name = "srcmap-sourcemap"
-version = "0.4.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e7081eae3039de3ddeb2f0ad5ee05a39c5c973346f0d580fdef7d32007a4786"
+checksum = "d3c614ebc80728502c4a0ef39f5110bc086bd5bdfdeb7cf97afccf64d7c85d7a"
 dependencies = [
  "memchr",
  "serde",
  "serde_json",
- "srcmap-codec 0.4.0",
- "srcmap-scopes 0.4.0",
+ "srcmap-codec 0.6.0",
+ "srcmap-scopes 0.6.0",
  "url",
 ]
 
