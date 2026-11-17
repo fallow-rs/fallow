@@ -1744,26 +1744,6 @@ impl ImportLoadKind {
     }
 }
 
-/// A dynamic import with a partially resolved pattern.
-#[derive(Debug, Clone)]
-pub struct DynamicImportPattern {
-    /// Glob prefix of the import path (e.g., "./locales/"). An
-    /// `import.meta.glob` pattern is the full glob. For a template literal, a
-    /// string concatenation, or `require.context`, each glob metacharacter of
-    /// the literal text is escaped as a one-character class, such as `[[]`.
-    pub prefix: String,
-    /// Glob suffix of the import path (e.g., ".json"), if any.
-    pub suffix: Option<String>,
-    /// Globs of the files that the pattern does not load. Vite reads a
-    /// negative `import.meta.glob` array entry, such as `'!./a/skip.js'`, as
-    /// an exclude for every positive entry of the same call.
-    pub excludes: Vec<String>,
-    /// Source span in the original file.
-    pub span: Span,
-    /// Runtime mechanism used to load modules matching this pattern.
-    pub mechanism: ModuleLoadMechanism,
-}
-
 /// Visibility tag from JSDoc/TSDoc comments that suppresses unused-export detection.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -3481,7 +3461,7 @@ pub struct ImportInfo {
 }
 
 /// How a symbol is imported.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ImportedName {
     /// A named import (e.g., `import { foo }`).
     Named(String),
@@ -3517,6 +3497,10 @@ const _: () = assert!(std::mem::size_of::<TypeMemberTypeEntry>() == 72);
 #[path = "extract_re_export.rs"]
 mod re_export;
 pub use re_export::ReExportInfo;
+
+#[path = "extract_dynamic_pattern.rs"]
+mod dynamic_pattern;
+pub use dynamic_pattern::DynamicImportPattern;
 
 /// A dynamic `import()` call.
 #[derive(Debug, Clone)]

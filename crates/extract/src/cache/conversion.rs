@@ -87,17 +87,30 @@ fn cached_exports_to_module(exports: &[CachedExport]) -> Vec<crate::ExportInfo> 
         .collect()
 }
 
+fn cached_to_imported_name(kind: u8, name: &str) -> crate::ImportedName {
+    match kind {
+        IMPORT_KIND_DEFAULT => crate::ImportedName::Default,
+        IMPORT_KIND_NAMESPACE => crate::ImportedName::Namespace,
+        IMPORT_KIND_SIDE_EFFECT => crate::ImportedName::SideEffect,
+        _ => crate::ImportedName::Named(name.to_owned()),
+    }
+}
+
+fn imported_name_to_cached(imported_name: &crate::ImportedName) -> (u8, String) {
+    match imported_name {
+        crate::ImportedName::Named(name) => (IMPORT_KIND_NAMED, name.clone()),
+        crate::ImportedName::Default => (IMPORT_KIND_DEFAULT, String::new()),
+        crate::ImportedName::Namespace => (IMPORT_KIND_NAMESPACE, String::new()),
+        crate::ImportedName::SideEffect => (IMPORT_KIND_SIDE_EFFECT, String::new()),
+    }
+}
+
 fn cached_imports_to_module(imports: &[CachedImport]) -> Vec<crate::ImportInfo> {
     imports
         .iter()
         .map(|import| crate::ImportInfo {
             source: import.source.clone(),
-            imported_name: match import.kind {
-                IMPORT_KIND_DEFAULT => crate::ImportedName::Default,
-                IMPORT_KIND_NAMESPACE => crate::ImportedName::Namespace,
-                IMPORT_KIND_SIDE_EFFECT => crate::ImportedName::SideEffect,
-                _ => crate::ImportedName::Named(import.imported_name.clone()),
-            },
+            imported_name: cached_to_imported_name(import.kind, &import.imported_name),
             local_name: import.local_name.clone(),
             is_type_only: import.is_type_only,
             is_type_only_star: import.is_type_only_star,
@@ -181,6 +194,7 @@ fn cached_dynamic_patterns_to_module(
             excludes: pattern.excludes.clone(),
             span: Span::new(pattern.span_start, pattern.span_end),
             mechanism: pattern.mechanism,
+            imported_name: cached_to_imported_name(pattern.import_kind, &pattern.imported_name),
         })
         .collect()
 }
@@ -312,12 +326,7 @@ fn module_imports_to_cached(imports: &[crate::ImportInfo]) -> Vec<CachedImport> 
     imports
         .iter()
         .map(|import| {
-            let (kind, imported_name) = match &import.imported_name {
-                crate::ImportedName::Named(name) => (IMPORT_KIND_NAMED, name.clone()),
-                crate::ImportedName::Default => (IMPORT_KIND_DEFAULT, String::new()),
-                crate::ImportedName::Namespace => (IMPORT_KIND_NAMESPACE, String::new()),
-                crate::ImportedName::SideEffect => (IMPORT_KIND_SIDE_EFFECT, String::new()),
-            };
+            let (kind, imported_name) = imported_name_to_cached(&import.imported_name);
             CachedImport {
                 source: import.source.clone(),
                 imported_name,
@@ -396,13 +405,18 @@ fn module_dynamic_patterns_to_cached(
 ) -> Vec<CachedDynamicImportPattern> {
     dynamic_import_patterns
         .iter()
-        .map(|pattern| CachedDynamicImportPattern {
-            prefix: pattern.prefix.clone(),
-            suffix: pattern.suffix.clone(),
-            excludes: pattern.excludes.clone(),
-            span_start: pattern.span.start,
-            span_end: pattern.span.end,
-            mechanism: pattern.mechanism,
+        .map(|pattern| {
+            let (import_kind, imported_name) = imported_name_to_cached(&pattern.imported_name);
+            CachedDynamicImportPattern {
+                prefix: pattern.prefix.clone(),
+                suffix: pattern.suffix.clone(),
+                excludes: pattern.excludes.clone(),
+                span_start: pattern.span.start,
+                span_end: pattern.span.end,
+                mechanism: pattern.mechanism,
+                import_kind,
+                imported_name,
+            }
         })
         .collect()
 }

@@ -382,6 +382,7 @@ fn release_resolution_payload_drops_copied_vectors_only() {
             span: span(),
             mechanism: ModuleLoadMechanism::EsModule,
             excludes: Vec::new(),
+            imported_name: crate::extract::ImportedName::Namespace,
         }],
         require_calls: vec![RequireCallInfo {
             source: "./required".to_string(),

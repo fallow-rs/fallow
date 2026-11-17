@@ -378,21 +378,38 @@ fn collect_edges_for_module(
     //
     // The load kind is part of the key too: an eager `import.meta.glob` and a
     // lazy template `import()` that match the same file must both stay, so the
-    // eager match keeps the target on the startup path.
-    let mut credited_pattern_targets: FxHashSet<(FileId, ModuleLoadMechanism, ImportLoadKind)> =
-        FxHashSet::default();
+    // eager match keeps the target on the startup path. The imported name is
+    // part of the key because a raw glob and a module glob of the same file
+    // credit different exports.
+    let mut credited_pattern_targets: FxHashSet<(
+        FileId,
+        ModuleLoadMechanism,
+        ImportLoadKind,
+        &ImportedName,
+    )> = FxHashSet::default();
     for (pattern, matched_ids) in &resolved.resolved_dynamic_patterns {
         let load_kind = pattern_load_kind(pattern, &load_kind_overrides);
         for target_id in matched_ids {
-            if !credited_pattern_targets.insert((*target_id, pattern.mechanism, load_kind)) {
+            if !credited_pattern_targets.insert((
+                *target_id,
+                pattern.mechanism,
+                load_kind,
+                &pattern.imported_name,
+            )) {
                 continue;
             }
-            record_namespace_import(*target_id, &mut acc.namespace_imported, acc.total_capacity);
+            if matches!(pattern.imported_name, ImportedName::Namespace) {
+                record_namespace_import(
+                    *target_id,
+                    &mut acc.namespace_imported,
+                    acc.total_capacity,
+                );
+            }
             edges_by_target
                 .entry(*target_id)
                 .or_default()
                 .push(ImportedSymbol {
-                    imported_name: ImportedName::Namespace,
+                    imported_name: pattern.imported_name.clone(),
                     local_name: String::new(),
                     import_span: oxc_span::Span::new(0, 0),
                     is_type_only: false,
@@ -1568,6 +1585,7 @@ mod tests {
             span: oxc_span::Span::new(0, 10),
             mechanism: ModuleLoadMechanism::EsModule,
             excludes: Vec::new(),
+            imported_name: fallow_types::extract::ImportedName::Namespace,
         };
         let resolved = ResolvedModule {
             file_id: FileId(0),
@@ -1595,6 +1613,7 @@ mod tests {
             span: oxc_span::Span::new(0, 1),
             mechanism: ModuleLoadMechanism::EsModule,
             excludes: Vec::new(),
+            imported_name: fallow_types::extract::ImportedName::Namespace,
         };
         let resolved = ResolvedModule {
             file_id: FileId(0),
@@ -1635,6 +1654,7 @@ mod tests {
             span: oxc_span::Span::new(0, 1),
             mechanism: ModuleLoadMechanism::EsModule,
             excludes: Vec::new(),
+            imported_name: fallow_types::extract::ImportedName::Namespace,
         };
         let importer_a = ResolvedModule {
             file_id: FileId(0),
@@ -1674,6 +1694,7 @@ mod tests {
             span: oxc_span::Span::new(0, 1),
             mechanism,
             excludes: Vec::new(),
+            imported_name: fallow_types::extract::ImportedName::Namespace,
         };
         let resolved = ResolvedModule {
             file_id: FileId(0),
@@ -1701,6 +1722,50 @@ mod tests {
                 ModuleLoadMechanism::CommonJsRequire,
             ])
         );
+    }
+
+    #[test]
+    fn collect_edges_dynamic_patterns_keep_each_imported_name() {
+        let pattern = |imported_name| fallow_types::extract::DynamicImportPattern {
+            prefix: "./modules/".to_string(),
+            suffix: None,
+            span: oxc_span::Span::new(0, 1),
+            mechanism: ModuleLoadMechanism::EsModule,
+            excludes: Vec::new(),
+            imported_name,
+        };
+        let resolved = ResolvedModule {
+            file_id: FileId(0),
+            path: std::path::PathBuf::from("/project/loader.ts"),
+            resolved_dynamic_patterns: vec![
+                (pattern(ImportedName::SideEffect), vec![FileId(1)]),
+                (pattern(ImportedName::Namespace), vec![FileId(1)]),
+                (pattern(ImportedName::SideEffect), vec![FileId(2)]),
+            ],
+            ..Default::default()
+        };
+        let mut acc = make_acc(3);
+
+        let edges = collect_edges_for_module(&resolved, FileId(0), &mut acc);
+        let names: Vec<Vec<ImportedName>> = edges
+            .iter()
+            .map(|(_, symbols)| {
+                symbols
+                    .iter()
+                    .map(|symbol| symbol.imported_name.clone())
+                    .collect()
+            })
+            .collect();
+
+        assert_eq!(
+            names,
+            vec![
+                vec![ImportedName::SideEffect, ImportedName::Namespace],
+                vec![ImportedName::SideEffect],
+            ]
+        );
+        assert!(acc.namespace_imported.contains(1));
+        assert!(!acc.namespace_imported.contains(2));
     }
 
     #[test]

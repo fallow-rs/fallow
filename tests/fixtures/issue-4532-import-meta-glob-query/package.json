@@ -1,0 +1,1 @@
+{"name": "issue-4532-import-meta-glob-query", "main": "src/main.ts", "dependencies": {"vite": "^5.0.0"}}

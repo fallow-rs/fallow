@@ -1295,6 +1295,7 @@ mod tests {
             span: Span::new(0, 1),
             mechanism: ModuleLoadMechanism::EsModule,
             excludes: Vec::new(),
+            imported_name: fallow_types::extract::ImportedName::Namespace,
         };
         let module = ModuleInfo {
             dynamic_import_patterns: vec![pattern.clone()],
