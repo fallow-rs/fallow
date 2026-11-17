@@ -228,6 +228,20 @@ test(
     assert.equal(other.status, 2);
     assert.equal(other.stdout, "");
     assert.match(other.stderr, new RegExp(`${manifest.platform}-${otherArch}`, "u"));
+    assert.match(other.stderr, /the node on PATH/u);
     assert.match(other.stderr, /fallow type-aware setup/u);
+
+    for (const broken of [undefined, "{not json"]) {
+      if (broken === undefined) {
+        rmSync(manifestPath);
+      } else {
+        writeFileSync(manifestPath, broken);
+      }
+      const unreadable = launch();
+      assert.equal(unreadable.status, 2, unreadable.stderr);
+      assert.match(unreadable.stderr, /cannot read bundle\.json/u);
+      assert.match(unreadable.stderr, /fallow type-aware setup/u);
+      assert.doesNotMatch(unreadable.stderr, /\n\s+at /u, "no stack trace");
+    }
   },
 );

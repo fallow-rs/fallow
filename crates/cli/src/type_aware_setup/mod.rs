@@ -11,6 +11,7 @@
 mod archive;
 mod node;
 
+use std::fmt::Write as _;
 use std::io::{IsTerminal as _, Write as _};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
@@ -36,6 +37,9 @@ const DOWNLOAD_TIMEOUT_SECS: u64 = 600;
 const PARTIAL_PREFIX: &str = ".partial-";
 /// Prefix of a previous install while a new one moves into its place.
 const PREVIOUS_PREFIX: &str = ".previous-";
+/// Lock file that a running setup holds, so cleanup keeps its temporary
+/// directories.
+const SETUP_LOCK: &str = ".setup.lock";
 
 /// Public key that checks a bundle signature: the release key, or under the
 /// `test-sidecar-key` feature the key of the public test seed `[0xAA; 32]`.
@@ -272,6 +276,7 @@ fn install(request: &InstallRequest<'_>) -> Result<PathBuf, String> {
 
     std::fs::create_dir_all(request.store)
         .map_err(|error| format!("cannot create {}: {error}", request.store.display()))?;
+    let _lock = lock_store(request.store)?;
     let partial = request.store.join(format!(
         "{PARTIAL_PREFIX}{}-{}",
         request.version,
@@ -291,17 +296,27 @@ fn install(request: &InstallRequest<'_>) -> Result<PathBuf, String> {
 }
 
 /// Move the unpacked `partial` directory to `target`. A previous install
-/// moves aside first and is deleted only after the new one is in place, so
-/// an error or a crash never leaves the user with no install. When the new
-/// directory cannot move in, the previous install moves back.
+/// moves aside first and is deleted only after the new one is in place. When
+/// the new directory cannot move in, the previous install moves back, and an
+/// error names it when that move also fails. A crash between the two moves
+/// leaves the previous install in `.previous-<version>-<pid>`; the next setup
+/// installs the version again and cleanup removes that directory.
 fn replace_install(partial: &Path, target: &Path) -> Result<(), String> {
+    replace_install_with(partial, target, |from, to| std::fs::rename(from, to))
+}
+
+fn replace_install_with(
+    partial: &Path,
+    target: &Path,
+    rename: impl Fn(&Path, &Path) -> std::io::Result<()>,
+) -> Result<(), String> {
     let name = target
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
         .unwrap_or_default();
     let previous = target.with_file_name(format!("{PREVIOUS_PREFIX}{name}-{}", std::process::id()));
     remove_dir_if_present(&previous)?;
-    let moved_aside = match std::fs::rename(target, &previous) {
+    let moved_aside = match rename(target, &previous) {
         Ok(()) => true,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
         Err(error) => {
@@ -311,14 +326,16 @@ fn replace_install(partial: &Path, target: &Path) -> Result<(), String> {
             ));
         }
     };
-    if let Err(error) = std::fs::rename(partial, target) {
-        if moved_aside {
-            let _ = std::fs::rename(&previous, target);
+    if let Err(error) = rename(partial, target) {
+        let mut message = format!("cannot move the companion to {}: {error}", target.display());
+        if moved_aside && let Err(restore) = rename(&previous, target) {
+            let _ = write!(
+                message,
+                "; cannot restore the previous install, which stays at {}: {restore}",
+                previous.display()
+            );
         }
-        return Err(format!(
-            "cannot move the companion to {}: {error}",
-            target.display()
-        ));
+        return Err(message);
     }
     if moved_aside {
         let _ = std::fs::remove_dir_all(&previous);
@@ -392,7 +409,8 @@ pub struct CleanupInput {
 
 /// Run `fallow type-aware cleanup`: remove every install in the setup
 /// directory except the one that discovery uses, and the temporary and
-/// previous directories of an interrupted setup.
+/// previous directories of an interrupted setup. While a setup runs, its
+/// directories stay.
 pub fn run_cleanup(input: &CleanupInput) -> ExitCode {
     let fail = |message: &str, code| failure(message, code, input.output, input.json_style);
     if !matches!(input.output, OutputFormat::Human) {
@@ -446,6 +464,9 @@ pub fn run_cleanup(input: &CleanupInput) -> ExitCode {
 /// interrupted setup.
 fn cleanup_targets(store: &Path) -> CleanupPlan {
     let mut plan = cleanup_plan(store);
+    if setup_is_running(store) {
+        return plan;
+    }
     if let Ok(entries) = std::fs::read_dir(store) {
         plan.remove.extend(
             entries
@@ -461,6 +482,58 @@ fn cleanup_targets(store: &Path) -> CleanupPlan {
     }
     plan.remove.sort();
     plan
+}
+
+/// Hold the setup lock of `store` until the returned file drops.
+fn lock_store(store: &Path) -> Result<std::fs::File, String> {
+    let path = store.join(SETUP_LOCK);
+    let file = std::fs::OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .write(true)
+        .open(&path)
+        .map_err(|error| format!("cannot open {}: {error}", path.display()))?;
+    match try_lock_briefly(&file) {
+        Ok(true) => Ok(file),
+        Ok(false) => Err(format!(
+            "another `fallow type-aware setup` runs for {}; wait until it ends",
+            store.display()
+        )),
+        Err(error) => Err(format!("cannot lock {}: {error}", path.display())),
+    }
+}
+
+/// True when a setup holds the lock of `store`. An unknown state counts as
+/// running, so cleanup never removes a directory that a setup still uses.
+fn setup_is_running(store: &Path) -> bool {
+    let Ok(file) = std::fs::OpenOptions::new()
+        .read(true)
+        .open(store.join(SETUP_LOCK))
+    else {
+        return false;
+    };
+    !matches!(try_lock_briefly(&file), Ok(true))
+}
+
+/// Try the lock a few times. A child process that another thread forks while
+/// a lock file is open keeps that lock until it starts its program, so a busy
+/// lock is checked again for a short time. A real setup holds the lock for
+/// seconds.
+fn try_lock_briefly(file: &std::fs::File) -> std::io::Result<bool> {
+    const ATTEMPTS: u32 = 10;
+    const PAUSE: Duration = Duration::from_millis(20);
+    for attempt in 1..=ATTEMPTS {
+        match file.try_lock() {
+            Ok(()) => return Ok(true),
+            Err(std::fs::TryLockError::WouldBlock) => {
+                if attempt < ATTEMPTS {
+                    std::thread::sleep(PAUSE);
+                }
+            }
+            Err(std::fs::TryLockError::Error(error)) => return Err(error),
+        }
+    }
+    Ok(false)
 }
 
 fn remove_all(dirs: &[PathBuf]) -> Result<(), String> {

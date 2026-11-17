@@ -948,6 +948,52 @@ mod tests {
         assert!(error.contains("exceeded the 64-byte limit"));
     }
 
+    /// A companion of an older protocol refuses the request on stderr and
+    /// exits 2, so the version check never sees a response. The error must
+    /// still name the way to a companion of this protocol.
+    #[cfg(unix)]
+    #[test]
+    fn an_older_protocol_companion_gets_the_install_hint() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+
+        let _lifecycle_lock = lock_sidecar_lifecycle_tests();
+        let root = tempfile::tempdir().expect("temporary sidecar root");
+        let sidecar = root.path().join("protocol-7-sidecar.sh");
+        fs::write(
+            &sidecar,
+            format!(
+                "#!/bin/sh\ncat >/dev/null\necho 'fallow-type-aware: unsupported protocol_version {TYPE_AWARE_PROTOCOL_VERSION}' >&2\nexit 2\n"
+            ),
+        )
+        .expect("write sidecar");
+        let mut permissions = fs::metadata(&sidecar)
+            .expect("sidecar metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&sidecar, permissions).expect("make sidecar executable");
+
+        let request = StatusRequest {
+            protocol_version: TYPE_AWARE_PROTOCOL_VERSION,
+            operation: "status",
+        };
+        let error = run_sidecar_json::<_, StatusResponse>(
+            &sidecar,
+            root.path(),
+            &request,
+            Duration::from_secs(20),
+            MAX_RESPONSE_BYTES,
+        )
+        .expect_err("an older companion refuses the request");
+
+        assert!(error.contains("unsupported protocol_version"), "{error}");
+        assert!(error.contains("`fallow type-aware setup`"), "{error}");
+        assert!(
+            error.contains(&format!("fallow-type-aware@{}", env!("CARGO_PKG_VERSION"))),
+            "{error}"
+        );
+    }
+
     #[cfg(unix)]
     #[test]
     fn timeout_covers_blocked_stdin() {

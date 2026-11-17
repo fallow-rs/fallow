@@ -77,10 +77,14 @@ The command does these steps:
    binary holds, before it reads the archive. Then it checks that the bundle
    manifest names this Fallow version, the Node platform and the wire protocol
    of this Fallow build.
-5. It unpacks the bundle into a temporary directory. A previous install of the
-   same version moves aside, the new one moves into place, and only then is
-   the previous one deleted. When the move fails, the previous install moves
-   back. The directory has the Fallow version in its name:
+5. It holds a lock file (`.setup.lock`) in the setup directory, so a second
+   setup stops, and unpacks the bundle into a temporary directory. A previous
+   install of the same version moves aside, the new one moves into place, and
+   only then is the previous one deleted. When the move fails, the previous
+   install moves back, and the error names its directory when that also
+   fails. A crash between the two moves leaves the previous install in
+   `.previous-<version>-<pid>`: run the setup again. The directory has the
+   Fallow version in its name:
 
    | Platform | Directory |
    | --- | --- |
@@ -98,18 +102,24 @@ shorter `PATH` than your shell. When the companion finds no `node`, it reports
 that Node.js 20 or later must be on `PATH`. At each start, the launcher also
 compares `process.platform` and `process.arch` of that `node` with
 `bundle.json`. A different Node (for example an x64 Node after setup with an
-arm64 Node) stops with a message that names `fallow type-aware setup`.
+arm64 Node) stops with a message that names the node on `PATH` and
+`fallow type-aware setup`. A missing or damaged `bundle.json` stops with a
+message too.
 
 After a Fallow upgrade, the installed companion stays in use while it speaks
 the same wire protocol (`wire_protocol_version` in
 `crates/api/type-aware-protocol.json`). Discovery prefers the install of the
 running Fallow version. Otherwise it takes the newest install with the same
 protocol, by semantic version precedence (a release before its prereleases),
-so the order of the directories does not change the choice. When the protocol changes, `type-aware status` names
-`fallow type-aware setup` again. `fallow type-aware cleanup` removes every
-install except the one that Fallow uses now, and the `.partial-` and
-`.previous-` directories that an interrupted setup leaves. It also asks for approval, or
-needs `--yes`.
+so the order of the directories does not change the choice. When the
+protocol changes, `type-aware status` names `fallow type-aware setup` again.
+A companion of an older protocol refuses the request with
+`unsupported protocol_version` before it answers, and Fallow then adds the
+same hint: run `fallow type-aware setup`, or install the companion of this
+version from npm. `fallow type-aware cleanup` removes every install except
+the one that Fallow uses now, and the `.partial-` and `.previous-`
+directories that an interrupted setup leaves. It keeps those directories
+while a setup holds the lock. It also asks for approval, or needs `--yes`.
 
 Windows has no setup bundle. There, the npm launcher starts the companion
 through Node, so install `fallow` and the companion from npm. On every
@@ -134,13 +144,21 @@ must raise that version. `crates/api/type-aware-protocol-contract.json` pins a
 SHA-256 of the contract sources to the version: the manifest, the request and
 response modules of the sidecar (`protocol.mjs`, `cli.mjs`,
 `response-normalization.mjs`), and the serde wire types of the Rust client,
-with the shared `fallow-types` and `fallow-output` types that they use.
-Comments and test modules do not count.
+with the shared `fallow-types` and `fallow-output` types that they use,
+transitively. A field type that no listed source defines stops the hash, so
+a new wire type cannot drop out of it. Comments, whitespace, an external
+test module file and the inline `mod tests` do not count. The response values
+that other sidecar modules build, for example `call-evidence.mjs`, count only
+through the Rust types that parse them: a response that a new Fallow cannot
+parse changes those types and therefore the hash.
 `node --test scripts/type-aware-protocol-contract.test.mjs` fails when the
-contract changes without a new version. Raise the version, run
-`npm run generate:contracts`, then run
-`node scripts/type-aware-protocol-contract.mjs --write`, which refuses a
-changed contract at the old version. Fallow only changes a finding when the checker
+contract changes without a new version, and when the pin differs from the
+pin on `origin/main` without a version above it (the base check skips when
+that ref does not exist). Raise the version, run `npm run generate:contracts`,
+then run `node scripts/type-aware-protocol-contract.mjs --write`. The writer
+refuses a changed contract at the pinned version and a version below it. The
+pin also records `hash_method`; a change of the hash computation raises it,
+and only then may the writer record a new hash at the same version. Fallow only changes a finding when the checker
 resolves an exact declaration identity. Name-only matches are never enough.
 
 ### Experimental tsrs backend

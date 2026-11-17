@@ -78,11 +78,13 @@ fn installs_a_signed_bundle_into_the_versioned_directory() {
 
     // A second setup replaces the install and leaves no temporary directory.
     install(&request(&bytes, &signature, &key, store.path())).expect("reinstall");
-    let names = std::fs::read_dir(store.path())
+    let directories = std::fs::read_dir(store.path())
         .expect("list store")
-        .map(|entry| entry.expect("entry").file_name())
+        .map(|entry| entry.expect("entry"))
+        .filter(|entry| entry.file_type().is_ok_and(|kind| kind.is_dir()))
+        .map(|entry| entry.file_name())
         .collect::<Vec<_>>();
-    assert_eq!(names, vec![std::ffi::OsString::from(VERSION)]);
+    assert_eq!(directories, vec![std::ffi::OsString::from(VERSION)]);
 }
 
 #[test]
@@ -312,4 +314,69 @@ fn a_replace_swaps_the_install_and_removes_the_previous_one() {
         .map(|entry| entry.expect("entry").file_name())
         .collect::<Vec<_>>();
     assert_eq!(names, vec![std::ffi::OsString::from(VERSION)]);
+}
+
+#[test]
+fn a_failed_rollback_names_where_the_previous_install_is() {
+    let store = tempfile::tempdir().expect("store");
+    let target = store.path().join(VERSION);
+    std::fs::create_dir_all(&target).expect("create the previous install");
+    let partial = store.path().join(format!("{PARTIAL_PREFIX}{VERSION}-1"));
+    std::fs::create_dir_all(&partial).expect("create the new install");
+    let calls = std::cell::Cell::new(0);
+    let rename = |from: &Path, to: &Path| {
+        calls.set(calls.get() + 1);
+        if calls.get() == 1 {
+            std::fs::rename(from, to)
+        } else {
+            Err(std::io::Error::other("injected rename failure"))
+        }
+    };
+
+    let error = replace_install_with(&partial, &target, rename).expect_err("both moves fail");
+
+    let previous = store
+        .path()
+        .join(format!("{PREVIOUS_PREFIX}{VERSION}-{}", std::process::id()));
+    assert!(previous.is_dir(), "the previous install stays aside");
+    assert!(error.contains("cannot move the companion"), "{error}");
+    assert!(error.contains("cannot restore"), "{error}");
+    assert!(
+        error.contains(&previous.display().to_string()),
+        "the error names the previous install: {error}"
+    );
+}
+
+#[test]
+fn cleanup_keeps_the_temporary_directories_of_a_running_setup() {
+    let store = tempfile::tempdir().expect("store");
+    let partial = store.path().join(format!("{PARTIAL_PREFIX}{VERSION}-1"));
+    let previous = store.path().join(format!("{PREVIOUS_PREFIX}{VERSION}-1"));
+    std::fs::create_dir_all(&partial).expect("create partial directory");
+    std::fs::create_dir_all(&previous).expect("create previous directory");
+    let older = store.path().join("0.0.1");
+    let lock = std::fs::File::create(store.path().join(".setup.lock")).expect("create lock file");
+    lock.lock().expect("hold the setup lock");
+
+    let plan = cleanup_targets(store.path());
+    assert!(!plan.remove.contains(&partial), "{:?}", plan.remove);
+    assert!(!plan.remove.contains(&previous), "{:?}", plan.remove);
+    assert!(!plan.remove.contains(&older));
+
+    lock.unlock().expect("release the setup lock");
+    let plan = cleanup_targets(store.path());
+    assert_eq!(plan.remove, vec![partial, previous]);
+}
+
+#[test]
+fn a_second_setup_waits_for_the_lock_of_a_running_one() {
+    let store = tempfile::tempdir().expect("store");
+    let held = lock_store(store.path()).expect("the first setup takes the lock");
+    let error = lock_store(store.path()).expect_err("a second setup must not run at once");
+    assert!(
+        error.contains("another `fallow type-aware setup` runs"),
+        "{error}"
+    );
+    drop(held);
+    lock_store(store.path()).expect("the lock is free after the first setup");
 }

@@ -55,14 +55,22 @@ export const PLATFORM_CHECK = `"use strict";
 const { readFileSync } = require("node:fs");
 const { join } = require("node:path");
 
-const bundle = JSON.parse(readFileSync(join(__dirname, "bundle.json"), "utf8"));
-if (bundle.platform !== process.platform || bundle.arch !== process.arch) {
-  process.stderr.write(
-    \`fallow-type-aware: this companion is for Node on \${bundle.platform}-\${bundle.arch}, \` +
-      \`but the node on PATH runs on \${process.platform}-\${process.arch}. \` +
-      "Run \`fallow type-aware setup\` again with the node that starts Fallow.\\n",
-  );
+const stop = (message) => {
+  process.stderr.write(\`fallow-type-aware: \${message} Run \\\`fallow type-aware setup\\\` again.\\n\`);
   process.exit(2);
+};
+
+let bundle;
+try {
+  bundle = JSON.parse(readFileSync(join(__dirname, "bundle.json"), "utf8"));
+} catch (error) {
+  stop(\`cannot read bundle.json of this companion (\${error instanceof Error ? error.message : String(error)}).\`);
+}
+if (bundle.platform !== process.platform || bundle.arch !== process.arch) {
+  stop(
+    \`this companion is for Node on \${bundle.platform}-\${bundle.arch}, \` +
+      \`but the node on PATH runs on \${process.platform}-\${process.arch}.\`,
+  );
 }
 `;
 

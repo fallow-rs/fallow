@@ -109,15 +109,8 @@ pub(super) fn discover_type_aware_sidecar_from(
 
 /// How to get a companion that speaks the protocol of this Fallow build.
 pub fn protocol_mismatch_hint() -> String {
-    let current_exe = std::env::current_exe().ok();
-    if crate::companion_install::is_standalone_fallow_binary(current_exe.as_deref())
-        && !cfg!(windows)
-    {
-        return "Run `fallow type-aware setup` to install the companion of this Fallow version."
-            .to_owned();
-    }
     format!(
-        "Install `{SIDECAR_BINARY}@{}`, or run `fallow type-aware setup`.",
+        "Run `fallow type-aware setup` to install the companion of this Fallow version, or install `{SIDECAR_BINARY}@{}` from npm.",
         env!("CARGO_PKG_VERSION")
     )
 }
