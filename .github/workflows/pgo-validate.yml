@@ -47,9 +47,36 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
+  # Most pull request edits of Cargo.toml and release.yml cannot change a PGO
+  # build, and the comparison takes more than an hour on macOS.
+  # scripts/pgo-validate-inputs.mjs keeps the run for a release profile change
+  # or a change of the release jobs that train and use the profile.
+  changes:
+    name: Detect PGO inputs
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      run: ${{ steps.inputs.outputs.run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26'
+      - name: Decide whether the pull request changes a PGO input
+        id: inputs
+        run: node scripts/pgo-validate-inputs.mjs
+
   train:
     name: Train PGO profile (${{ matrix.target }})
-    if: ${{ !startsWith(github.head_ref, 'dependabot/cargo/') }}
+    needs: changes
+    # A failed detector job leaves the output empty, so the comparison runs.
+    if: ${{ always() && !cancelled() && needs.changes.outputs.run != 'false' && !startsWith(github.head_ref, 'dependabot/cargo/') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     # The same runners and container as the pgo-profile job in release.yml.

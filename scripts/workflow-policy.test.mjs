@@ -2118,7 +2118,7 @@ test("no PGO workflow sets a global RUSTFLAGS that drops the Windows stack flags
   }
 });
 
-test("pgo-validate gates PGO on the held-out fixtures for the PGO paths", () => {
+test("pgo-validate gates PGO on the held-out fixtures for the PGO paths", async () => {
   const workflow = readWorkflow(".github/workflows/pgo-validate.yml");
   const release = readWorkflow(".github/workflows/release.yml");
   const pullRequest = indentedBlock(workflow, "pull_request", 2);
@@ -2140,10 +2140,18 @@ test("pgo-validate gates PGO on the held-out fixtures for the PGO paths", () => 
     "rust-toolchain.toml",
   ]);
   assert.match(workflow, /^ {2}schedule:\n {4}- cron: '40 3 \* \* 0'$/mu);
+  // A failed detector leaves the output empty, so only a proven "false" skips.
   assert.match(
     train,
-    /^ {4}if: \$\{\{ !startsWith\(github\.head_ref, 'dependabot\/cargo\/'\) \}\}$/mu,
+    /^ {4}if: \$\{\{ always\(\) && !cancelled\(\) && needs\.changes\.outputs\.run != 'false' && !startsWith\(github\.head_ref, 'dependabot\/cargo\/'\) \}\}$/mu,
   );
+  assert.match(train, /^ {4}needs: changes$/mu);
+  assert.match(
+    indentedBlock(workflow, "changes", 2),
+    /fetch-depth: 0[\s\S]*run: node scripts\/pgo-validate-inputs\.mjs/u,
+  );
+  const { PGO_PATHS } = await import("./pgo-validate-inputs.mjs");
+  assert.deepEqual(listedPaths(pullRequest), PGO_PATHS, "the detector lists the same paths");
   assert.match(workflow, /^ {2}workflow_dispatch:$/mu);
   assert.match(workflow, /^permissions: \{\}$/mu);
   assert.match(train, /scripts\/pgo-train\.sh/u);
