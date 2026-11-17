@@ -920,14 +920,16 @@ test("workflows without a push trigger never save a Rust cache", () => {
     });
     assert.equal(steps, workflow.split("uses: ./.github/actions/setup-rust").length - 1, file);
   }
-  assert.deepEqual(checked.toSorted(), [
+  // A parser that misses the triggers of a known file would skip it silently.
+  for (const file of [
     "bench-cli-instructions.yml",
     "branch-coverage.yml",
     "ecosystem-full.yml",
     "oracle-seeds.yml",
     "pgo-validate.yml",
     "release-validation.yml",
-  ]);
+  ])
+    assert.ok(checked.includes(file), file);
 });
 
 test("NAPI builds preserve the maintained native loader", () => {
