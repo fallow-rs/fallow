@@ -362,7 +362,12 @@ On pull requests:
   `.github/scripts/pgo-compare.mjs`, `.github/scripts/pgo-profile-match.mjs`,
   `benchmarks/download-fixtures.mjs`, `.github/actions/setup-rust/**`,
   `.cargo/config.toml`, `release.yml`, `pgo-validate.yml`, `Cargo.toml`, or
-  `rust-toolchain.toml` changes. It skips Dependabot Cargo branches. It
+  `rust-toolchain.toml` changes. It skips Dependabot Cargo branches. For
+  `Cargo.toml`, it runs only when a `[profile.release]` or
+  `[profile.release.package.*]` section changes. For `release.yml`, it runs
+  only when the top-level `env` or the `pgo-profile` or `build` job changes.
+  `scripts/pgo-validate-inputs.mjs` makes this decision and runs the
+  comparison when it cannot read the diff. It
   compares a PGO build with a base build of the same pull request. A weekly
   run on `main` covers dependency changes.
 - `Test GitHub Action`, when its own paths change.
