@@ -24,16 +24,18 @@ impl ProductionModes {
     }
 }
 
-fn load_config_production(
+/// Load the config of `root`, or the file at `config_path`. `None` when the
+/// project has no config file.
+fn load_config_file(
     root: &std::path::Path,
     config_path: Option<&PathBuf>,
     output: OutputFormat,
     allow_remote_extends: bool,
-) -> Result<ProductionConfig, ExitCode> {
+) -> Result<Option<fallow_config::FallowConfig>, ExitCode> {
     let load_options = fallow_config::ConfigLoadOptions {
         allow_remote_extends,
     };
-    let loaded = if let Some(path) = config_path {
+    if let Some(path) = config_path {
         fallow_config::FallowConfig::load_with_options(path, load_options)
             .map(Some)
             .map_err(|e| {
@@ -41,17 +43,37 @@ fn load_config_production(
                     &format!("failed to load config '{}': {e}", path.display()),
                     output,
                 )
-            })?
+            })
     } else {
         fallow_config::FallowConfig::find_and_load_with_options(root, load_options)
             .map(|found| found.map(|(config, _)| config))
-            .map_err(|e| emit_input_error(&e, output))?
-    };
+            .map_err(|e| emit_input_error(&e, output))
+    }
+}
 
-    Ok(match loaded {
-        Some(config) => config.production,
-        None => ProductionConfig::default(),
-    })
+fn load_config_production(
+    root: &std::path::Path,
+    config_path: Option<&PathBuf>,
+    output: OutputFormat,
+    allow_remote_extends: bool,
+) -> Result<ProductionConfig, ExitCode> {
+    Ok(
+        load_config_file(root, config_path, output, allow_remote_extends)?
+            .map_or_else(ProductionConfig::default, |config| config.production),
+    )
+}
+
+/// The `duplicates.enabled` config key of the project. `true` without a
+/// config file.
+pub fn duplicates_enabled(
+    cli: &Cli,
+    root: &std::path::Path,
+    output: OutputFormat,
+) -> Result<bool, ExitCode> {
+    Ok(
+        load_config_file(root, cli.config.as_ref(), output, cli.allow_remote_extends)?
+            .is_none_or(|config| config.duplicates.enabled),
+    )
 }
 
 pub fn resolve_production_modes(

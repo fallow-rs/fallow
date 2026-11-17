@@ -993,7 +993,7 @@
       "type": "object",
       "properties": {
         "enabled": {
-          "description": "Whether duplication detection is enabled. `false` turns off the duplication cross-reference of `--include-dupes` and the duplication sub-analysis of `fallow audit`, unless `audit.dupes` or `fallow audit --only` selects it. The `fallow dupes` command and the bare `fallow` command do not read this key.",
+          "description": "Whether duplication detection is enabled. `false` turns off the duplication analysis of the bare `fallow` command, the duplication sub-analysis of `fallow audit` and the duplication cross-reference of `--include-dupes`. A command line that names the analysis still runs it: `--only dupes`, `audit.dupes: true` and the `fallow dupes` command. The health score has its own duplication pass, which this key does not turn off.",
           "type": "boolean",
           "default": true
         },

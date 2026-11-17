@@ -69,6 +69,9 @@ pub struct CombinedOptions<'a> {
     pub run_check: bool,
     pub run_dupes: bool,
     pub run_health: bool,
+    /// `duplicates.enabled: false` in the config turned duplication off, and
+    /// no `--skip` did. The run is then still a whole-project run.
+    pub dupes_off_by_config: bool,
     /// Which dead-code findings the run reports (`--only architecture`,
     /// `--skip architecture`).
     pub architecture: ArchitectureSelection,
@@ -115,6 +118,64 @@ pub fn resolve_analyses(only: &[AnalysisKind], skip: &[AnalysisKind]) -> (bool, 
     } else {
         (true, true, true)
     }
+}
+
+/// The note for a `--dupes-baseline` flag that reads no baseline, because
+/// `duplicates.enabled: false` turned the duplication analysis off. The run
+/// does not fail on the flag: it had an effect before the command read that
+/// key, so a CI script that passes it must keep its exit code.
+pub const INERT_DUPES_BASELINE_NOTE: &str = "Note: --dupes-baseline has no effect: duplicates.enabled is false in the config, so the duplication analysis does not run.";
+
+/// Which analyses the bare `fallow` run executes.
+#[derive(Clone, Copy)]
+pub struct BareAnalyses {
+    pub run_check: bool,
+    pub run_dupes: bool,
+    pub run_health: bool,
+    /// `duplicates.enabled: false` in the config turned duplication off, and
+    /// no `--skip` did.
+    pub dupes_off_by_config: bool,
+}
+
+/// Resolve which analyses the bare `fallow` run executes.
+///
+/// `--only` and `--skip` select as in [`resolve_analyses`]. Without `--only`,
+/// `duplicates.enabled: false` in the config also turns duplication off, so a
+/// project that turned duplication detection off gets no clone groups from
+/// the bare run. `--only dupes` names the analysis and runs it.
+pub fn resolve_bare_analyses(
+    cli: &crate::Cli,
+    root: &std::path::Path,
+    output: OutputFormat,
+) -> Result<BareAnalyses, ExitCode> {
+    let (run_check, mut run_dupes, run_health) = resolve_analyses(&cli.only, &cli.skip);
+    let mut disabled_by_config = false;
+    if run_dupes
+        && cli.only.is_empty()
+        && !crate::cli_production::duplicates_enabled(cli, root, output)?
+    {
+        run_dupes = false;
+        disabled_by_config = true;
+        if cli.dupes_baseline.is_some() {
+            eprintln!("{INERT_DUPES_BASELINE_NOTE}");
+        }
+    }
+    if run_check || run_dupes || run_health {
+        return Ok(BareAnalyses {
+            run_check,
+            run_dupes,
+            run_health,
+            dupes_off_by_config: disabled_by_config,
+        });
+    }
+    Err(crate::error::emit_input_error(
+        if disabled_by_config {
+            "--skip leaves no analysis to run: duplicates.enabled is false in the config, so dupes does not run. Keep dead-code or health, or pass --only dupes"
+        } else {
+            "--skip leaves no analysis to run: pass at most two of dead-code, dupes and health"
+        },
+        output,
+    ))
 }
 
 /// Resolve which dead-code findings the bare run reports from `--only` and
@@ -988,6 +1049,7 @@ mod tests {
             run_check: true,
             run_dupes: true,
             run_health: true,
+            dupes_off_by_config: false,
             architecture: crate::check::ArchitectureSelection::All,
             dupes: DupesOverrides::default(),
             score: false,

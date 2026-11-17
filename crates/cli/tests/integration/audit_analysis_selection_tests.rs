@@ -437,4 +437,11 @@ fn a_dupes_baseline_flag_is_dropped_with_duplicates_enabled_false() {
     let json = report(&output);
 
     assert_eq!(sections(&json), [true, true, false], "{json:#}");
+    assert!(
+        output
+            .stderr
+            .contains("--dupes-baseline has no effect: duplicates.enabled is false"),
+        "stderr: {}",
+        output.stderr
+    );
 }
