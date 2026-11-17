@@ -559,12 +559,12 @@ jobs:
 
   # Check, Lint and contracts, and NAPI package share no step, so they run in
   # parallel, and each one ends with its own check for uncommitted changes.
-  # Check splits the nextest run over two jobs. The Blacksmith credit model in
+  # Check splits the nextest run over three jobs. The Blacksmith credit model in
   # scripts/select-heavy-runner.mjs reserves one Check job and Lint and
   # contracts, so only partition 1 and Lint and contracts may use the runner
   # that the heavy-runner step selects.
   check:
-    name: Check (${{ matrix.partition }}/2)
+    name: Check (${{ matrix.partition }}/3)
     needs: changes
     if: always() && !cancelled() && (needs.changes.outputs.rust == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false'))
     runs-on: ${{ matrix.partition == 1 && github.run_attempt == 1 && needs.changes.outputs.heavy-runner == 'blacksmith-4vcpu-ubuntu-2404' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-26.04' }}
@@ -574,7 +574,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        partition: [1, 2]
+        partition: [1, 2, 3]
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -608,12 +608,15 @@ jobs:
         # process, which spreads the large integration binaries over all
         # cores. It selects the same targets as `cargo test` with these flags;
         # neither runs doctests. The `ci` profile is in .config/nextest.toml.
-        # Each partition builds every test binary and runs half of the tests.
+        # Each partition builds every test binary and runs a third of the
+        # tests. The build takes about 3 minutes and the whole suite about 10
+        # minutes of test time on these runners, so a third partition cuts the
+        # slowest Check job by more than the build that it repeats.
         # FALLOW_MUTATION_E2E_REQUIRED makes a missing runner dependency fail
         # the end-to-end mutation tests instead of a skip.
         env:
           FALLOW_MUTATION_E2E_REQUIRED: '1'
-        run: cargo nextest run --profile ci --workspace --lib --bins --tests --examples --partition hash:${{ matrix.partition }}/2
+        run: cargo nextest run --profile ci --workspace --lib --bins --tests --examples --partition hash:${{ matrix.partition }}/3
 
       - name: Upload test report
         if: always()
@@ -636,6 +639,7 @@ jobs:
 
       # Partition 2 runs these tests and partition 1 runs the other two extra
       # steps. Partition 1 took about 3 minutes longer when it ran all three.
+      # Partition 3 runs no extra step.
       - name: Run runtime-coverage integration tests (feature-gated stub sidecar)
         if: matrix.partition == 2
         run: cargo test -p fallow-cli --features test-sidecar-key --test runtime_coverage_tests --test audit_brief_runtime_focus_tests

@@ -545,12 +545,13 @@ checks this rule.
 
 The slowest `CI` jobs have parts that run in parallel:
 
-- `Check (1/2)` and `Check (2/2)` each build every test binary and run half
-  of the nextest suite (`--partition hash:N/2`). The suite uses about 29
-  CPU-minutes, so one 4-vCPU runner needs more than 7 minutes for it.
-  `Check (1/2)` also runs the schema drift gate and the coverage producer
-  conformance check. `Check (2/2)` also runs the runtime-coverage feature
-  tests. The two partitions then take about the same time.
+- `Check (1/3)`, `Check (2/3)` and `Check (3/3)` each build every test binary
+  and run a third of the nextest suite (`--partition hash:N/3`). The build
+  takes about 3 minutes, and the suite uses about 48 CPU-minutes. With two
+  partitions, the slowest `Check` job was the last job of most pull request
+  runs. `Check (1/3)` also runs the schema drift gate and the coverage
+  producer conformance check. `Check (2/3)` also runs the runtime-coverage
+  feature tests. `Check (3/3)` runs no extra step.
 - `Lint and contracts` runs both Clippy passes, `cargo fmt --check`, the
   contract bundle drift gate and the staged subgenerator tests.
 - `NAPI package` runs the NAPI build and smoke test. On `main` the build uses
@@ -576,7 +577,7 @@ The slowest `CI` jobs have parts that run in parallel:
   `.github/workflows/ci.yml`.
 
 `Check`, `Lint and contracts` and `NAPI package` have the same trigger. Only
-`Check (1/2)` and `Lint and contracts` may use the runner that the
+`Check (1/3)` and `Lint and contracts` may use the runner that the
 `heavy-runner` selector step picks, because the Blacksmith credit model
 reserves those two jobs. Each split job uses one more runner slot in a run. `scripts/workflow-policy.test.mjs` asserts that each moved step runs in
 exactly one of these jobs.

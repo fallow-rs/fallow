@@ -3081,7 +3081,7 @@ test("the Check, Lint and contracts, and Windows jobs run each step exactly once
   }
   assert.equal(
     indentedBlock(workflow, "check", 2).match(/^    name: (.+)$/m)?.[1],
-    "Check (${{ matrix.partition }}/2)",
+    "Check (${{ matrix.partition }}/3)",
   );
   assert.equal(
     indentedBlock(workflow, "windows-rust", 2).match(/^    name: (.+)$/m)?.[1],
@@ -3093,10 +3093,10 @@ test("the Check, Lint and contracts, and Windows jobs run each step exactly once
   assert.doesNotMatch(lint, /cargo nextest run|cargo test /);
   const napi = indentedBlock(workflow, "napi", 2);
   assert.doesNotMatch(lint, /napi build/);
-  assert.match(check, /--partition hash:\$\{\{ matrix\.partition \}\}\/2/);
+  assert.match(check, /--partition hash:\$\{\{ matrix\.partition \}\}\/3/);
   // Partition 1 runs the producer check and the schema drift gate, and
-  // partition 2 runs the runtime-coverage tests. The two partitions then take
-  // about the same time.
+  // partition 2 runs the runtime-coverage tests. Partition 3 runs no extra
+  // step.
   for (const [step, partition] of [
     ["Run coverage producer conformance", 1],
     ["Run runtime-coverage integration tests (feature-gated stub sidecar)", 2],
@@ -3109,7 +3109,7 @@ test("the Check, Lint and contracts, and Windows jobs run each step exactly once
       `"${step}" must run in partition ${partition}`,
     );
   }
-  assert.match(check, /partition: \[1, 2\]/);
+  assert.match(check, /partition: \[1, 2, 3\]/);
   for (const job of [check, lint, napi]) {
     assert.match(job, /^    needs: changes$/m);
     assert.equal(job.match(/^    if: (.+)$/m)?.[1], check.match(/^    if: (.+)$/m)?.[1]);
