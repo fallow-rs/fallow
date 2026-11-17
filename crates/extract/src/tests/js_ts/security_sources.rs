@@ -409,6 +409,58 @@ fn graphql_resolver_destructured_args_param_records_source() {
 }
 
 #[test]
+fn graphql_type_resolver_args_param_records_source() {
+    let info = parse_ts(
+        r"
+        export const resolvers = {
+            Query: {
+                user(_parent, args) {
+                    return args.id;
+                },
+            },
+            User: {
+                posts(_parent, { filter }) {
+                    eval(filter);
+                },
+            },
+        };
+        ",
+    );
+    let binding = info
+        .tainted_bindings
+        .iter()
+        .find(|b| b.local == "filter")
+        .expect("GraphQL type resolver args source");
+    assert_eq!(binding.source_path, "graphql.args");
+}
+
+#[test]
+fn plain_object_method_with_destructured_second_param_is_not_a_resolver() {
+    let info = parse_ts(
+        r"
+        const dispatchers = {
+            removeItem(state, { path }) {
+                console.log(path);
+            },
+        };
+        const handlers = {
+            Query: 1,
+            run(_ctx, args) {
+                console.log(args);
+            },
+        };
+        ",
+    );
+    assert!(
+        info.tainted_bindings
+            .iter()
+            .all(|b| b.source_path != "graphql.args"),
+        "{:?}",
+        info.tainted_bindings
+    );
+}
+
+#[test]
 fn trpc_procedure_destructured_input_records_source() {
     let info = parse_ts(
         r"

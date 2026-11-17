@@ -16,6 +16,9 @@ use super::{
     last_callback_params, route_callback_params, source_returning_helper, unwrap_parens,
 };
 
+/// The root operation types of a GraphQL schema.
+const GRAPHQL_ROOT_TYPES: [&str; 3] = ["Query", "Mutation", "Subscription"];
+
 impl ModuleInfoExtractor {
     /// Record a tainted binding together with its chain-hop depth, deduped on
     /// `(local, source_path)`. On a duplicate the existing record keeps its
@@ -273,7 +276,41 @@ impl ModuleInfoExtractor {
         }
     }
 
-    pub(super) fn record_graphql_resolver_args_source(&mut self, expr: &Expression<'_>) {
+    /// Record the resolver args of a GraphQL resolver map: an object with a
+    /// `Query`, `Mutation` or `Subscription` key whose value is an object.
+    ///
+    /// Each object value under a type-name key (`Query`, `User`) holds the
+    /// resolvers of that type. A plain object method with a destructured
+    /// second parameter, such as a store dispatcher, is not a resolver.
+    pub(super) fn record_graphql_resolver_map_sources(&mut self, obj: &ObjectExpression<'_>) {
+        let type_maps = || {
+            obj.properties.iter().filter_map(|prop| {
+                let ObjectPropertyKind::ObjectProperty(prop) = prop else {
+                    return None;
+                };
+                let Expression::ObjectExpression(resolvers) = unwrap_parens(&prop.value) else {
+                    return None;
+                };
+                let key = crate::js_text::static_name_text(prop.key.static_name()?);
+                Some((key, resolvers))
+            })
+        };
+        if !type_maps().any(|(key, _)| GRAPHQL_ROOT_TYPES.contains(&key.as_ref())) {
+            return;
+        }
+        for (key, resolvers) in type_maps() {
+            if !key.starts_with(|c: char| c.is_ascii_uppercase()) {
+                continue;
+            }
+            for resolver in &resolvers.properties {
+                if let ObjectPropertyKind::ObjectProperty(resolver) = resolver {
+                    self.record_graphql_resolver_args_source(&resolver.value);
+                }
+            }
+        }
+    }
+
+    fn record_graphql_resolver_args_source(&mut self, expr: &Expression<'_>) {
         let Some(params) = function_like_params(expr) else {
             return;
         };
