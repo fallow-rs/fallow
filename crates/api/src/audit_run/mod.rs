@@ -43,8 +43,9 @@ pub use base_ref::{
     AuditBaseError, AuditBaseOrigin, parse_audit_base_override, resolve_audit_base,
 };
 pub use outcome::{
-    DupeBase, DupeDemotionDiffSource, SharedDiff, compare, demote_preexisting_dupe_introductions,
-    outcome, realign_styling_introductions, styling_finding_gates, styling_rule_severity,
+    DupeBase, DupeDemotionDiffSource, RunChange, SharedDiff, compare,
+    demote_preexisting_dupe_introductions, outcome, realign_styling_introductions,
+    styling_finding_gates, styling_rule_severity,
 };
 pub use own_config::{config_path_under_root, own_config_unused_code_keys};
 pub use scope::{
@@ -556,11 +557,10 @@ pub fn attribute<A: AuditAnalyses>(
 
     let (comparison, dupe_demotion_diff_source, (attribution, verdict, summary)) = {
         let view = analyses.view();
+        let change = RunChange::new(root, base_ref, shared_diff, changed_files);
         let degraded = degrade_reason.is_some();
-        let mut comparison = compare(&view, base_snapshot.as_ref(), degraded, changed_files);
-        if worsened == AuditWorsened::Off {
-            comparison.clear_worsened();
-        }
+        let mut comparison = compare(&view, base_snapshot.as_ref(), degraded, &change);
+        comparison.clear_worsened_when_off(worsened);
         let source = demote_preexisting_dupe_introductions(
             &mut comparison,
             &view,

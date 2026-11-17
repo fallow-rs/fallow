@@ -386,7 +386,26 @@ line states exit code 0.
   take it. With more candidates of one name, the remaining head findings are
   introduced. A placeholder name (`<arrow>`, `<anonymous>`)
   needs equal cyclomatic and cognitive values and an equal line count.
-  Dead-code keys and clone-group keys have no such step.
+- Moved unused code and moved clone groups under new-only:
+  `crates/api/src/audit_moved.rs` finds the base key that a moved finding
+  left behind, and `audit_run::compare` then makes the head finding
+  inherited. A base key is a candidate when no head finding has it and its
+  path is a changed or deleted file. Each base key covers one head finding,
+  so a copy of moved code is introduced.
+  - Dead code: the base key has the same rule and the same parts as the head
+    key, with another changed path. Only the rules in `MOVABLE_RULES` take
+    part: their key names a symbol that the file declares. A dependency, a
+    suppression comment or a boundary target is not code of the file, so
+    such a finding never matches. The diff of the run must add a line with
+    the symbol to the head file. Without that line, the change made existing
+    code unused, and the finding stays introduced. When two findings compete
+    for one base key, the finding with the lower severity is inherited. The
+    step does not compare the code.
+  - Clone groups: the base key has the same token count, line count and
+    fragment hash as the head key, under other files that are all changed
+    paths. The fragment hash covers the text of each instance and does not
+    depend on the instance order, so only a group with unchanged text
+    matches.
 - Audit unused code outside the changed files: under `--gate new-only`, the
   head and base dead-code passes keep every unused file and unused export.
   They pass `ChangeScopeOwner::CallerKeepingUnusedCode`
