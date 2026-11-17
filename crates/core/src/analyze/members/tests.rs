@@ -165,6 +165,7 @@ fn make_member(name: &str, kind: MemberKind) -> MemberInfo {
         is_self_returning: false,
         override_base: None,
         is_protected: false,
+        is_static: false,
     }
 }
 
@@ -1416,6 +1417,7 @@ fn decorated_class_member_not_flagged() {
                 is_self_returning: false,
                 override_base: None,
                 is_protected: false,
+                is_static: false,
             }],
             Some(0),
         )],

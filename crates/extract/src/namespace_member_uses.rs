@@ -14,8 +14,9 @@
 //!
 //! The analysis does not know at extraction time which binding is a
 //! namespace or an enum, so the pass records these uses for every import
-//! binding. Analysis reads them for namespace members, and reads the
-//! escape of a whole enum (`use(E)`) for enum members.
+//! binding. Analysis reads them for namespace members, reads the escape of
+//! a whole enum (`use(E)`) for enum members, and reads the escape of a
+//! class value (`use(C)`) and `C.prototype.member` for class members.
 
 use fallow_types::extract::{
     ExportInfo, ImportInfo, ImportedName, MemberKind, NamespaceMemberUseFact,
@@ -96,13 +97,17 @@ pub fn collect(
             .members
             .iter()
             .any(|member| member.kind == MemberKind::NamespaceMember);
-        // An enum that the module declares can escape in the same module
-        // (`takesEnum(Shape)`), as an imported enum can.
-        let is_enum = export
-            .members
-            .iter()
-            .any(|member| member.kind == MemberKind::EnumMember);
-        if !is_namespace && !is_enum {
+        // An enum or a class that the module declares can escape in the
+        // same module (`takesEnum(Shape)`, `register(Adapter)`), as an
+        // imported one can. A class can also have a member read through
+        // `Class.prototype.member`.
+        let has_value_members = export.members.iter().any(|member| {
+            matches!(
+                member.kind,
+                MemberKind::EnumMember | MemberKind::ClassMethod | MemberKind::ClassProperty
+            )
+        });
+        if !is_namespace && !has_value_members {
             continue;
         }
         let Some(local) = export.local_name.as_deref() else {
@@ -490,6 +495,11 @@ fn classify(nodes: &AstNodes<'_>, chain: &Chain) -> ChainUse {
     }
     match nodes.kind(parent) {
         AstKind::CallExpression(call) if call.callee.span() == outer_span => ChainUse::Access,
+        // `class Sub extends mixin(Base) {}`: the class factory builds the
+        // superclass from `Base`. It does not give the value to other code.
+        AstKind::CallExpression(call) if is_superclass_call(nodes, parent, call.span) => {
+            ChainUse::Access
+        }
         AstKind::NewExpression(new) if new.callee.span() == outer_span => ChainUse::Access,
         AstKind::TaggedTemplateExpression(tagged) if tagged.tag.span() == outer_span => {
             ChainUse::Access
@@ -523,6 +533,15 @@ fn classify(nodes: &AstNodes<'_>, chain: &Chain) -> ChainUse {
         }
         _ => ChainUse::Escape,
     }
+}
+
+/// Whether the call at `call_id` is the `extends` expression of a class.
+fn is_superclass_call(nodes: &AstNodes<'_>, call_id: NodeId, call_span: Span) -> bool {
+    matches!(
+        nodes.parent_kind(call_id),
+        AstKind::Class(class)
+            if class.heritage.as_ref().map(|heritage| heritage.expression.span()) == Some(call_span)
+    )
 }
 
 /// The keys of `const { a, b: c } = ...` when every key is static and the

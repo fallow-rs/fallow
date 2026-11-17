@@ -734,6 +734,8 @@ pub(crate) mod member_serde {
         is_self_returning: bool,
         #[serde(default)]
         is_protected: bool,
+        #[serde(default)]
+        is_static: bool,
     }
 
     impl From<&MemberInfo> for CachedMemberInfo {
@@ -747,6 +749,7 @@ pub(crate) mod member_serde {
                 is_instance_returning_static: member.is_instance_returning_static,
                 is_self_returning: member.is_self_returning,
                 is_protected: member.is_protected,
+                is_static: member.is_static,
             }
         }
     }
@@ -763,6 +766,7 @@ pub(crate) mod member_serde {
                 is_self_returning: cached.is_self_returning,
                 override_base: None,
                 is_protected: cached.is_protected,
+                is_static: cached.is_static,
             }
         }
     }

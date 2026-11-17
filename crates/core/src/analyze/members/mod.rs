@@ -45,8 +45,8 @@ use heritage::*;
 use instance::*;
 use member_probe::propagate_member_name_probe_accesses;
 use namespace::{
-    credit_namespace_member_uses, drop_members_of_unused_namespaces, enum_member_credited,
-    namespace_member_credited,
+    class_member_credited_by_value_use, credit_namespace_member_uses,
+    drop_members_of_unused_namespaces, enum_member_credited, namespace_member_credited,
 };
 use playwright::*;
 use typed_property::*;
@@ -1622,6 +1622,15 @@ fn should_skip_member_for_unused_report(member: &MemberInfo, ctx: &MemberSkipCon
             .accessed_members
             .get(ctx.export_key)
             .is_some_and(|accessed| enum_member_credited(accessed, &member.name))
+    {
+        return true;
+    }
+
+    if is_class_member_kind(member.kind)
+        && ctx
+            .accessed_members
+            .get(ctx.export_key)
+            .is_some_and(|accessed| class_member_credited_by_value_use(accessed, member))
     {
         return true;
     }

@@ -652,6 +652,8 @@ pub struct CachedMember {
     pub(crate) override_base: Option<String>,
     /// True for a class member with the `protected` modifier.
     pub(crate) is_protected: bool,
+    /// True for a class member with the `static` modifier.
+    pub(crate) is_static: bool,
 }
 
 /// Cached dynamic import pattern data (template literals, `import.meta.glob`).

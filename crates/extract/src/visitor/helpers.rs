@@ -957,6 +957,7 @@ fn build_method_member(
         is_self_returning,
         override_base: None,
         is_protected: matches!(method.accessibility, Some(TSAccessibility::Protected)),
+        is_static: method.r#static,
     })
 }
 
@@ -994,6 +995,7 @@ fn build_property_member(
         is_self_returning: false,
         override_base: None,
         is_protected: matches!(prop.accessibility, Some(TSAccessibility::Protected)),
+        is_static: prop.r#static,
     })
 }
 
