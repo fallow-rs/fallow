@@ -179,8 +179,8 @@ fn expand_workspace_glob(
 /// back-compat wrapper above).
 ///
 /// Emits [`WorkspaceDiagnosticKind::GlobMatchedNoPackageJson`] when a glob match
-/// resolves to a directory that contains no `package.json`, with two filters
-/// applied first:
+/// a non-recursive glob resolves to a directory that contains no
+/// `package.json`, with two filters applied first:
 /// 1. The directory's leaf name is checked against [`is_skip_listed_dir`]
 ///    (build artifacts, tooling caches, hidden directories). pnpm/npm/yarn
 ///    silently filter the same set; fallow follows suit.
@@ -204,8 +204,6 @@ pub(super) fn expand_workspace_glob_with_diagnostics(
             raw_pattern,
             expanded_pattern,
             canonical_root,
-            ignore_patterns,
-            diagnostics,
         );
     }
 
@@ -402,13 +400,15 @@ fn maybe_emit_glob_no_pkg_diag(
 ///
 /// This avoids the `glob` crate's O(n) expansion where n includes all files
 /// inside `node_modules/` (catastrophic with pnpm's deep symlink trees).
+///
+/// A matched directory without a package manifest gives no diagnostic. pnpm
+/// skips such a directory when it expands `**`, and with `packages/**` every
+/// source directory below a workspace matches.
 fn expand_recursive_workspace_pattern(
     root: &Path,
     raw_pattern: &str,
     expanded_pattern: &str,
     canonical_root: &Path,
-    ignore_patterns: &crate::IgnorePatternSet,
-    diagnostics: &mut Vec<WorkspaceDiagnostic>,
 ) -> Vec<(PathBuf, PathBuf)> {
     let full_pattern = root.join(expanded_pattern).to_string_lossy().to_string();
     let Ok(matcher) = glob::Pattern::new(&full_pattern) else {
@@ -423,36 +423,26 @@ fn expand_recursive_workspace_pattern(
 
     let mut results = Vec::new();
     walk_workspace_dirs(
-        raw_pattern,
         &base_dir,
         &mut WorkspaceDirWalkInput {
-            root,
             matcher: &matcher,
             canonical_root,
-            ignore_patterns,
             results: &mut results,
-            diagnostics,
         },
     );
     results
 }
 
-/// Recursively walk directories, skipping `node_modules` and `.git`, collecting
-/// directories that match the glob pattern and contain a `package.json`.
-///
-/// Glob-matched directories without `package.json` are surfaced as
-/// `glob-matched-no-package-json` diagnostics unless they are in the
-/// conventional skip list or covered by `ignore_patterns`.
+/// Borrowed inputs of the recursive workspace directory walk.
 struct WorkspaceDirWalkInput<'a> {
-    root: &'a Path,
     matcher: &'a glob::Pattern,
     canonical_root: &'a Path,
-    ignore_patterns: &'a crate::IgnorePatternSet,
     results: &'a mut Vec<(PathBuf, PathBuf)>,
-    diagnostics: &'a mut Vec<WorkspaceDiagnostic>,
 }
 
-fn walk_workspace_dirs(raw_pattern: &str, dir: &Path, input: &mut WorkspaceDirWalkInput<'_>) {
+/// Recursively walk directories, skipping `node_modules` and `.git`, collecting
+/// directories that match the glob pattern and contain a package manifest.
+fn walk_workspace_dirs(dir: &Path, input: &mut WorkspaceDirWalkInput<'_>) {
     let Ok(entries) = std::fs::read_dir(dir) else {
         return;
     };
@@ -465,24 +455,14 @@ fn walk_workspace_dirs(raw_pattern: &str, dir: &Path, input: &mut WorkspaceDirWa
         if name == "node_modules" || name == ".git" {
             continue;
         }
-        if input.matcher.matches_path(&path) {
-            if dir_has_package_manifest(&path) {
-                if let Ok(cp) = dunce::canonicalize(&path)
-                    && cp.starts_with(input.canonical_root)
-                {
-                    input.results.push((path.clone(), cp));
-                }
-            } else {
-                maybe_emit_glob_no_pkg_diag(
-                    input.root,
-                    raw_pattern,
-                    &path,
-                    input.ignore_patterns,
-                    input.diagnostics,
-                );
-            }
+        if input.matcher.matches_path(&path)
+            && dir_has_package_manifest(&path)
+            && let Ok(cp) = dunce::canonicalize(&path)
+            && cp.starts_with(input.canonical_root)
+        {
+            input.results.push((path.clone(), cp));
         }
-        walk_workspace_dirs(raw_pattern, &path, input);
+        walk_workspace_dirs(&path, input);
     }
 }
 

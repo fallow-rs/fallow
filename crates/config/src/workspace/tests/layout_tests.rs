@@ -336,3 +336,52 @@ fn nested_pnpm_project_members_with_config_pattern() {
     names.sort_unstable();
     assert_eq!(names, ["site", "site-web"]);
 }
+
+fn write_root(root: &Path, pnpm_workspace: &str) {
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"root","private":true}"#,
+    )
+    .unwrap();
+    std::fs::write(root.join("pnpm-workspace.yaml"), pnpm_workspace).unwrap();
+}
+
+fn relative_workspace_roots(root: &Path, workspaces: &[WorkspaceInfo]) -> Vec<String> {
+    let canonical_root = dunce::canonicalize(root).unwrap();
+    let mut roots: Vec<String> = workspaces
+        .iter()
+        .map(|ws| {
+            let canonical = dunce::canonicalize(&ws.root).unwrap();
+            canonical
+                .strip_prefix(&canonical_root)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect();
+    roots.sort();
+    roots
+}
+
+/// pnpm skips a folder without a `package.json` when it expands `**`, so a
+/// source folder below a workspace is not a missing package. See #4719.
+#[test]
+fn recursive_glob_reports_no_diagnostic_for_source_folders() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    write_root(root, "packages:\n  - packages/**\n");
+    write_package(&root.join("packages/a"), r#"{"name":"a"}"#);
+    write_package(&root.join("packages/b"), r#"{"name":"b"}"#);
+    std::fs::create_dir_all(root.join("packages/a/src/deep")).unwrap();
+    std::fs::create_dir_all(root.join("packages/b/src")).unwrap();
+
+    let (workspaces, diagnostics) =
+        discover_workspaces_with_diagnostics(root, &crate::IgnorePatternSet::empty())
+            .expect("valid root");
+
+    assert_eq!(
+        relative_workspace_roots(root, &workspaces),
+        ["packages/a", "packages/b"]
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+}
