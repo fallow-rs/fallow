@@ -265,6 +265,31 @@ fn a_method_of_a_file_local_receiver_is_not_a_flag_site() {
 }
 
 #[test]
+fn a_local_receiver_of_another_function_does_not_hide_an_sdk_call() {
+    for source in [
+        "function a() { const client = {}; return client; }\n\
+         function b() { const client = getClient(); return client.isEnabled('new-checkout'); }",
+        "const client = {};\n\
+         function b() { const client = getClient(); return client.isEnabled('new-checkout'); }",
+        "const client = {};\n\
+         const b = (client) => client.isEnabled('new-checkout');",
+    ] {
+        let flags = extract_from_source(source);
+        assert_eq!(flags.len(), 1, "{source}: {flags:?}");
+        assert_eq!(flags[0].flag_name, "new-checkout", "{source}");
+    }
+}
+
+#[test]
+fn a_local_receiver_of_an_outer_scope_still_skips_the_call() {
+    let flags = extract_from_source(
+        "const form = { getValue: (_name: string): unknown => null };\n\
+         function read() { return form.getValue('email'); }",
+    );
+    assert!(flags.is_empty(), "{flags:?}");
+}
+
+#[test]
 fn a_method_of_a_file_local_receiver_with_a_flag_import_still_reports() {
     let flags = extract_from_source(
         "import { initialize } from 'unleash-client';\n\

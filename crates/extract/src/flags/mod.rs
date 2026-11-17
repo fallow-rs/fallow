@@ -236,9 +236,9 @@ struct FlagVisitor<'a> {
     /// Names that the file declares at module level or imports from a
     /// module of the project that is not a flag module.
     local_names: FxHashSet<String>,
-    /// Bindings, in any scope, that hold a value of the file: an object
-    /// literal, or an instance of a class from `local_names`.
-    local_receivers: FxHashSet<String>,
+    /// Per function scope, innermost last: `true` for a binding that holds an object literal or an
+    /// instance of a class from `local_names`, `false` for a binding that shadows one.
+    local_receivers: Vec<FxHashMap<String, bool>>,
 }
 
 impl<'a> FlagVisitor<'a> {
@@ -276,7 +276,7 @@ impl<'a> FlagVisitor<'a> {
             has_flag_import: false,
             unconfirmed_reads: Vec::new(),
             local_names: FxHashSet::default(),
-            local_receivers: FxHashSet::default(),
+            local_receivers: vec![FxHashMap::default()],
         }
     }
 
@@ -889,7 +889,7 @@ impl<'a> FlagVisitor<'a> {
     fn visit_function_scope(&mut self, walk_scope: impl FnOnce(&mut Self)) {
         self.binding_scopes.push(FxHashMap::default());
         self.shadowed_registries.push(FxHashSet::default());
-        walk_scope(self);
+        self.with_receiver_scope(walk_scope);
         self.shadowed_registries.pop();
         self.binding_scopes.pop();
     }
@@ -1079,7 +1079,7 @@ impl<'a> Visit<'a> for FlagVisitor<'_> {
     }
 
     fn visit_binding_identifier(&mut self, ident: &BindingIdentifier<'a>) {
-        self.note_binding(ident.name.as_str());
+        self.note_binding_shadows(ident.name.as_str());
     }
 }
 

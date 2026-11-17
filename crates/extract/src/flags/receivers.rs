@@ -5,6 +5,8 @@ use oxc_ast::ast::{
     BindingPattern, CallExpression, Expression, TSType, TSTypeName, VariableDeclarator,
 };
 
+use rustc_hash::FxHashMap;
+
 use super::{FlagVisitor, unwrap_value};
 
 impl FlagVisitor<'_> {
@@ -26,9 +28,7 @@ impl FlagVisitor<'_> {
         match &call.callee {
             Expression::Identifier(_) => self.local_names.contains(name),
             Expression::StaticMemberExpression(member) => match unwrap_value(&member.object) {
-                Expression::Identifier(object) => {
-                    self.local_receivers.contains(object.name.as_str())
-                }
+                Expression::Identifier(object) => self.is_local_receiver(object.name.as_str()),
                 object => self.is_local_instance(object),
             },
             _ => false,
@@ -70,8 +70,45 @@ impl FlagVisitor<'_> {
                     )
             )
         });
-        if from_init || from_type {
-            self.local_receivers.insert(id.name.to_string());
+        if (from_init || from_type)
+            && let Some(scope) = self.local_receivers.last_mut()
+        {
+            scope.insert(id.name.to_string(), true);
+        }
+    }
+
+    /// Whether the innermost binding of `name` holds a value of the file.
+    fn is_local_receiver(&self, name: &str) -> bool {
+        self.local_receivers
+            .iter()
+            .rev()
+            .find_map(|scope| scope.get(name))
+            .copied()
+            .unwrap_or(false)
+    }
+
+    /// Walk a function scope with its own local receivers.
+    pub(super) fn with_receiver_scope(&mut self, walk_scope: impl FnOnce(&mut Self)) {
+        self.local_receivers.push(FxHashMap::default());
+        walk_scope(self);
+        self.local_receivers.pop();
+    }
+
+    /// Note a parameter or a local binding that shadows a registry or a
+    /// local receiver of an outer scope.
+    pub(super) fn note_binding_shadows(&mut self, name: &str) {
+        self.note_binding(name);
+        self.note_receiver_shadow(name);
+    }
+
+    /// Mark a binding that shadows a local receiver of an outer scope. A
+    /// receiver of the current scope keeps its mark.
+    fn note_receiver_shadow(&mut self, name: &str) {
+        if !self.is_local_receiver(name) {
+            return;
+        }
+        if let Some(scope) = self.local_receivers.last_mut() {
+            scope.entry(name.to_string()).or_insert(false);
         }
     }
 }
