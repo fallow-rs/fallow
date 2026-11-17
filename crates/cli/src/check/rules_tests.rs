@@ -296,6 +296,7 @@ fn apply_rules_all_off_clears_everything() {
         added_suppression: Severity::Warn,
         test_only_branch: Severity::Warn,
         diverged_clone_sibling: Severity::Warn,
+        introduced_clone_group: Severity::Warn,
         added_dependency: Severity::Warn,
     };
     let config = config_with_rules(rules);
@@ -464,6 +465,7 @@ fn warn_severity_with_issues_returns_false() {
         added_suppression: Severity::Warn,
         test_only_branch: Severity::Warn,
         diverged_clone_sibling: Severity::Warn,
+        introduced_clone_group: Severity::Warn,
         added_dependency: Severity::Warn,
     };
     assert!(!has_error_severity_issues(&results, &rules, None, false));
@@ -551,6 +553,7 @@ fn mixed_severity_returns_true_for_error_with_issues() {
         added_suppression: Severity::Warn,
         test_only_branch: Severity::Warn,
         diverged_clone_sibling: Severity::Warn,
+        introduced_clone_group: Severity::Warn,
         added_dependency: Severity::Warn,
     };
     assert!(!has_error_severity_issues(&results, &rules, None, false));
@@ -1167,6 +1170,7 @@ fn promote_warns_to_errors_promotes_all_warns() {
         added_suppression: Severity::Warn,
         test_only_branch: Severity::Warn,
         diverged_clone_sibling: Severity::Warn,
+        introduced_clone_group: Severity::Warn,
         added_dependency: Severity::Warn,
     };
     promote_warns_to_errors(&mut rules);
@@ -1268,6 +1272,7 @@ fn promote_warns_to_errors_preserves_off() {
         added_suppression: Severity::Warn,
         test_only_branch: Severity::Warn,
         diverged_clone_sibling: Severity::Warn,
+        introduced_clone_group: Severity::Warn,
         added_dependency: Severity::Warn,
     };
     promote_warns_to_errors(&mut rules);
@@ -3317,6 +3322,7 @@ fn default_file_scoped_stale_suppression_missing_reason_warn_not_error() {
         added_suppression: Severity::Warn,
         test_only_branch: Severity::Warn,
         diverged_clone_sibling: Severity::Warn,
+        introduced_clone_group: Severity::Warn,
         added_dependency: Severity::Warn,
     };
     assert!(!has_error_severity_issues(&results, &all_warn, None, false));

@@ -304,7 +304,8 @@
         "added-suppression": "warn",
         "test-only-branch": "warn",
         "diverged-clone-sibling": "off",
-        "added-dependency": "off"
+        "added-dependency": "off",
+        "introduced-clone-group": "warn"
       }
     },
     "unusedComponentProps": {
@@ -2109,6 +2110,11 @@
           "description": "An audit diff that adds a dependency to a `package.json`. `fallow\naudit` only. Opt-in; defaults to `off`.",
           "$ref": "#/$defs/Severity",
           "default": "off"
+        },
+        "introduced-clone-group": {
+          "description": "A clone group that `fallow audit` attributes to the change. `error`\nfails the audit verdict, `warn` gives `warn`, and `off` removes the\ngroup from the verdict. Under `--gate all`, every clone group in the\nchanged files follows this rule. Overrides resolve per instance file,\nand the most severe result applies. `fallow audit` only. Defaults to\n`warn`.",
+          "$ref": "#/$defs/Severity",
+          "default": "warn"
         }
       }
     },
@@ -3401,6 +3407,17 @@
         },
         "added-dependency": {
           "description": "Optional override for [`RulesConfig::added_dependency`].",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "introduced-clone-group": {
+          "description": "Optional override for [`RulesConfig::introduced_clone_group`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

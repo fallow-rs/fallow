@@ -527,6 +527,14 @@ pub struct RulesConfig {
     /// audit` only. Opt-in; defaults to `off`.
     #[serde(default = "Severity::default_off", alias = "added-dependencies")]
     pub added_dependency: Severity,
+    /// A clone group that `fallow audit` attributes to the change. `error`
+    /// fails the audit verdict, `warn` gives `warn`, and `off` removes the
+    /// group from the verdict. Under `--gate all`, every clone group in the
+    /// changed files follows this rule. Overrides resolve per instance file,
+    /// and the most severe result applies. `fallow audit` only. Defaults to
+    /// `warn`.
+    #[serde(default = "Severity::default_warn", alias = "introduced-clone-groups")]
+    pub introduced_clone_group: Severity,
 }
 
 impl Default for RulesConfig {
@@ -606,6 +614,7 @@ impl Default for RulesConfig {
             test_only_branch: Severity::Warn,
             diverged_clone_sibling: Severity::Off,
             added_dependency: Severity::Off,
+            introduced_clone_group: Severity::Warn,
         }
     }
 }
@@ -827,6 +836,7 @@ impl RulesConfig {
                 test_only_branch,
                 diverged_clone_sibling,
                 added_dependency,
+                introduced_clone_group,
             ]
         );
     }
@@ -1415,6 +1425,13 @@ pub struct PartialRulesConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub added_dependency: Option<Severity>,
+    /// Optional override for [`RulesConfig::introduced_clone_group`].
+    #[serde(
+        default,
+        alias = "introduced-clone-groups",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub introduced_clone_group: Option<Severity>,
 }
 
 /// Every rule name accepted by `RulesConfig` deserialization, in kebab-case.
@@ -1565,6 +1582,8 @@ pub const KNOWN_RULE_NAMES: &[&str] = &[
     "diverged-clone-siblings",
     "added-dependency",
     "added-dependencies",
+    "introduced-clone-group",
+    "introduced-clone-groups",
 ];
 
 /// Find the closest known rule name to `input` when it is plausibly a typo.

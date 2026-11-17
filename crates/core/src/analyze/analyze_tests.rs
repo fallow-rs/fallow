@@ -232,6 +232,7 @@ mod orchestration {
         added_suppression: Severity::Off,
         test_only_branch: Severity::Off,
         diverged_clone_sibling: Severity::Off,
+        introduced_clone_group: Severity::Off,
         added_dependency: Severity::Off,
     };
 

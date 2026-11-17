@@ -91,6 +91,9 @@ pub struct DuplicationView<'a> {
     /// Duplication percentage above which an introduced group fails the
     /// audit; `0.0` turns the threshold off.
     pub threshold: f64,
+    /// Config whose `introduced-clone-group` rule and `overrides` decide how
+    /// a clone group takes part in the verdict.
+    pub config: &'a ResolvedConfig,
 }
 
 /// The health analysis of one audit side, as the audit reads it.

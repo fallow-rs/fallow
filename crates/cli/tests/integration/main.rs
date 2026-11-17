@@ -28,6 +28,7 @@ mod audit_clone_containment_tests;
 mod audit_complexity_attribution_tests;
 mod audit_diff_risk_tests;
 mod audit_focus_components_tests;
+mod audit_introduced_clone_rule_tests;
 mod audit_orphaned_code_tests;
 mod audit_quiet_tests;
 mod audit_review_attribution_tests;

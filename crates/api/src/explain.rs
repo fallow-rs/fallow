@@ -700,7 +700,11 @@ fn health_alias_id(normalized: &str) -> Option<&'static str> {
         "long-file" | "file-lines" | "max-file-lines" | "complexity-file-lines" => {
             Some("fallow/long-file")
         }
-        "duplication" | "dupes" | "code-duplication" => Some("fallow/code-duplication"),
+        "duplication"
+        | "dupes"
+        | "code-duplication"
+        | "introduced-clone-group"
+        | "introduced-clone-groups" => Some("fallow/code-duplication"),
         "feature-flag" | "feature-flags" | "flags" => Some("fallow/feature-flag"),
         "flag-retirement" | "flag-retirement-candidate" | "retirement" => {
             Some("fallow/flag-retirement-candidate")
@@ -1035,7 +1039,7 @@ fn duplication_rule_guide(id: &str) -> Option<RuleGuide> {
     Some(match id {
         "fallow/code-duplication" => RuleGuide {
             example: "Two files contain the same normalized token sequence across a multi-line block.",
-            how_to_fix: "Extract the shared logic when the duplicated behavior should evolve together. Leave it duplicated when the similarity is accidental and likely to diverge.",
+            how_to_fix: "Extract the shared logic when the duplicated behavior should evolve together. Leave it duplicated when the similarity is accidental and likely to diverge. To keep one intended copy out of the report, suppress it with `// fallow-ignore-next-line code-duplication`. To make a new copy fail `fallow audit`, set the `introduced-clone-group` rule to `error`.",
         },
         _ => return None,
     })
@@ -1361,7 +1365,7 @@ pub const DUPES_RULES: &[RuleDef] = &[RuleDef {
     category: "Duplication",
     name: "Code Duplication",
     short: "Duplicated code block",
-    full: "A block of code that appears in multiple locations with identical or near-identical token sequences. Clone detection uses normalized token comparison, abstracting identifiers and literals in non-strict modes. Duplicated line counts and percentages include every instance, including the first. Overlapping line ranges in the same file count once. Redundant token counts exclude one retained copy per clone group.",
+    full: "A block of code that appears in multiple locations with identical or near-identical token sequences. Clone detection uses normalized token comparison, abstracting identifiers and literals in non-strict modes. Duplicated line counts and percentages include every instance, including the first. Overlapping line ranges in the same file count once. Redundant token counts exclude one retained copy per clone group. In `fallow audit`, the `introduced-clone-group` rule sets how a clone group takes part in the verdict: `warn` (the default) gives `warn`, `error` fails the audit, and `off` removes the group from the verdict. Under `--gate new-only`, only a group that the change introduced counts. Under `--gate all`, every clone group in the changed files counts. With `overrides`, the most severe result over the instance files applies. The `duplicates.threshold` gate is independent of the rule.",
     docs_path: "explanations/duplication#clone-groups",
 }];
 

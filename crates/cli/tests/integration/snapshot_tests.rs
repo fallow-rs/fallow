@@ -956,6 +956,7 @@ fn sarif_mixed_severity_snapshot() {
         added_suppression: fallow_config::Severity::Warn,
         test_only_branch: fallow_config::Severity::Warn,
         diverged_clone_sibling: fallow_config::Severity::Warn,
+        introduced_clone_group: fallow_config::Severity::Warn,
         added_dependency: fallow_config::Severity::Warn,
     };
     let sarif = build_sarif(&results, &root, &rules);
@@ -1921,6 +1922,7 @@ fn codeclimate_mixed_severity_snapshot() {
         added_suppression: fallow_config::Severity::Warn,
         test_only_branch: fallow_config::Severity::Warn,
         diverged_clone_sibling: fallow_config::Severity::Warn,
+        introduced_clone_group: fallow_config::Severity::Warn,
         added_dependency: fallow_config::Severity::Warn,
     };
     let cc = codeclimate_issues_to_value(&build_codeclimate(&results, &root, &rules));
