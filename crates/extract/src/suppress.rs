@@ -42,6 +42,9 @@ pub struct RangeMarker {
     pub next_line: u32,
     /// Byte offset of the marker text in the source.
     pub offset: u32,
+    /// Whether the marker comment is the only content of its lines. A
+    /// marker that shares its line with code has no effect.
+    own_line: bool,
     /// Whether the marker names `code-duplication`.
     has_range_kind: bool,
     /// Whether the marker names no kind at all.
@@ -66,6 +69,10 @@ impl ParsedSuppressions {
         markers.sort_by_key(|marker| marker.comment_line);
         let mut open: Option<RangeMarker> = None;
         for marker in markers {
+            if !marker.own_line {
+                self.push_range_problem(marker.comment_line, RangeMarkerProblemKind::NotOwnLine);
+                continue;
+            }
             self.push_kind_problems(&marker);
             if !marker.has_range_kind {
                 continue;
@@ -249,6 +256,7 @@ fn push_range_marker(parsed: &mut ParsedSuppressions, marker: RangeMarkerAt<'_>)
         comment_line: marker.comment_line,
         next_line: marker.next_line,
         offset: marker.offset,
+        own_line: marker.own_line,
         has_range_kind,
         is_blanket: rest.is_empty(),
         unsupported,
@@ -260,6 +268,7 @@ fn push_range_marker(parsed: &mut ParsedSuppressions, marker: RangeMarkerAt<'_>)
 #[derive(Clone, Copy)]
 struct RangeMarkerAt<'a> {
     is_start: bool,
+    own_line: bool,
     rest: &'a str,
     comment_line: u32,
     next_line: u32,
@@ -438,20 +447,17 @@ fn push_marker(
     match marker {
         Marker::File(rest) => push_suppressions(parsed, 0, comment_line, rest),
         Marker::NextLine(rest) => push_suppressions(parsed, suppressed_line, comment_line, rest),
-        Marker::RangeStart(rest) | Marker::RangeEnd(rest) => {
-            if site.own_line {
-                push_range_marker(
-                    parsed,
-                    RangeMarkerAt {
-                        is_start: matches!(marker, Marker::RangeStart(_)),
-                        rest,
-                        comment_line,
-                        next_line: suppressed_line,
-                        offset: site.offset_of(rest),
-                    },
-                );
-            }
-        }
+        Marker::RangeStart(rest) | Marker::RangeEnd(rest) => push_range_marker(
+            parsed,
+            RangeMarkerAt {
+                is_start: matches!(marker, Marker::RangeStart(_)),
+                own_line: site.own_line,
+                rest,
+                comment_line,
+                next_line: suppressed_line,
+                offset: site.offset_of(rest),
+            },
+        ),
     }
 }
 
@@ -507,6 +513,10 @@ pub fn scan_suppressions_from_source(source: &str) -> ParsedSuppressions {
         source,
         own_line: true,
     };
+    let shared_line = MarkerSite {
+        source,
+        own_line: false,
+    };
 
     let mut idx = 0;
     while idx < lines.len() {
@@ -520,14 +530,57 @@ pub fn scan_suppressions_from_source(source: &str) -> ParsedSuppressions {
         } else if let Some(rest) = trimmed.strip_prefix("<!--") {
             if let Some(marker) = rest.strip_suffix("-->").and_then(match_line_marker) {
                 push_marker(&mut parsed, &site, marker, comment_line, comment_line + 1);
+            } else {
+                push_shared_line_range_marker(&mut parsed, &shared_line, trimmed, comment_line);
             }
         } else if let Some(rest) = trimmed.strip_prefix("/*") {
+            if rest
+                .find("*/")
+                .is_some_and(|end| end + "*/".len() != rest.len())
+            {
+                push_shared_line_range_marker(&mut parsed, &shared_line, trimmed, comment_line);
+            }
             idx = scan_source_block(&mut parsed, &site, &lines, idx, rest);
+        } else {
+            push_shared_line_range_marker(&mut parsed, &shared_line, trimmed, comment_line);
         }
         idx += 1;
     }
 
     parsed
+}
+
+/// Record a range marker in a comment that shares its line with code, such as
+/// `foo(); // fallow-ignore-start code-duplication`.
+///
+/// Such a marker has no effect. The scan records it so that the pairing
+/// reports it, instead of a silent drop that leaves only an unmatched end.
+fn push_shared_line_range_marker(
+    parsed: &mut ParsedSuppressions,
+    site: &MarkerSite<'_>,
+    line: &str,
+    comment_line: u32,
+) {
+    let Some(idx) = line.find(MARKER_PREFIX) else {
+        return;
+    };
+    let before = line[..idx].trim_end();
+    if !["//", "/*", "/**", "<!--"]
+        .iter()
+        .any(|opener| before.ends_with(opener))
+    {
+        return;
+    }
+    let text = &line[idx..];
+    let text = text
+        .find("*/")
+        .or_else(|| text.find("-->"))
+        .map_or(text, |end| &text[..end]);
+    if let Some(marker @ (Marker::RangeStart(_) | Marker::RangeEnd(_))) =
+        split_marker(text.trim_end())
+    {
+        push_marker(parsed, site, marker, comment_line, comment_line + 1);
+    }
 }
 
 /// Record the markers of a `/*` comment that starts line `idx` of the source

@@ -151,7 +151,9 @@ fn write_malformed(root: &Path) {
     std::fs::write(root.join("a.ts"), &body).unwrap();
     std::fs::write(
         root.join("b.ts"),
-        format!("{END}\n// fallow-ignore-start unused-export\n{START}\n{body}"),
+        format!(
+            "{END}\n// fallow-ignore-start unused-export\n{START}\n{body}const zz = 1; {END}\n"
+        ),
     )
     .unwrap();
 }
@@ -169,6 +171,7 @@ fn dupes_reports_malformed_range_markers() {
             {"path": "b.ts", "line": 1, "problem": "unmatched_end"},
             {"path": "b.ts", "line": 2, "problem": "unsupported_kind", "token": "unused-export"},
             {"path": "b.ts", "line": 3, "problem": "unclosed_start"},
+            {"path": "b.ts", "line": 17, "problem": "not_own_line"},
         ])
     );
     assert_eq!(
@@ -225,11 +228,7 @@ fn audit_carries_the_range_marker_problems_of_changed_files() {
         .iter()
         .map(|p| p["path"].as_str().unwrap())
         .collect();
-    assert_eq!(
-        paths,
-        vec!["b.ts", "b.ts", "b.ts"],
-        "only the changed file: {paths:?}"
-    );
+    assert_eq!(paths, vec!["b.ts"; 4], "only the changed file: {paths:?}");
 }
 
 #[test]
@@ -285,6 +284,7 @@ fn suppressions_inventory_lists_ranges_and_marks_malformed_markers() {
             (1, "unmatched_end".to_string()),
             (2, "unsupported_kind".to_string()),
             (3, "unclosed_start".to_string()),
+            (17, "not_own_line".to_string()),
         ]
     );
 }

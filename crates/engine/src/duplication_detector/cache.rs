@@ -711,6 +711,73 @@ mod tests {
         assert!(loaded.get(&file, &metadata, mode()).is_none());
     }
 
+    /// A token cache that the previous version wrote holds no range data. A
+    /// run that reads it would report the clone inside the range.
+    #[test]
+    fn range_run_does_not_read_the_previous_version_cache() {
+        use crate::discover::{DiscoveredFile, FileId};
+        use crate::duplicates::DuplicatesConfig;
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let cache_root = tempfile::tempdir().expect("cache root");
+        let body = "export function shared(items: number[], factor: number): number {\n  let total = 0;\n  for (const item of items) {\n    if (item > 1) {\n      total += item * factor;\n    } else {\n      total -= item;\n    }\n  }\n  const scaled = total / items.length;\n  console.log(\"result\", scaled, factor);\n  return Math.round(scaled * 100) / 100;\n}\n";
+        let wrapped = format!(
+            "// fallow-ignore-start code-duplication -- kept\n{body}// fallow-ignore-end code-duplication\n"
+        );
+        let files: Vec<DiscoveredFile> = [("a.ts", body.to_string()), ("b.ts", wrapped)]
+            .into_iter()
+            .enumerate()
+            .map(|(index, (name, content))| {
+                let path = dir.path().join(name);
+                std::fs::write(&path, &content).expect("write source");
+                DiscoveredFile {
+                    id: FileId(u32::try_from(index).expect("small index")),
+                    path,
+                    size_bytes: content.len() as u64,
+                }
+            })
+            .collect();
+        let config = DuplicatesConfig {
+            min_corpus_size_for_token_cache: 0,
+            ..DuplicatesConfig::default()
+        };
+        let run = || {
+            super::super::detect_duplicates(
+                dir.path(),
+                &files,
+                &config,
+                None,
+                Some(cache_root.path()),
+            )
+            .report
+        };
+        assert!(
+            run().clone_groups.is_empty(),
+            "the range applies on a cold run"
+        );
+
+        // Rewrite the cache as the previous version stored it: its own
+        // directory and version, and no range in the suppressions.
+        let cache_dir = cache_root.path().join("cache");
+        let current = cache_dir.join(format!("dupes-tokens-v{DUPES_CACHE_VERSION}"));
+        let previous = cache_dir.join(format!("dupes-tokens-v{}", DUPES_CACHE_VERSION - 1));
+        let bytes = std::fs::read(current.join("cache.bin")).expect("read cache");
+        let mut store: CacheStore = bitcode::decode(&bytes).expect("decode cache");
+        store.version = DUPES_CACHE_VERSION - 1;
+        for entry in store.entries.values_mut() {
+            entry.suppressions.clear();
+            entry.range_problems.clear();
+        }
+        std::fs::create_dir_all(&previous).expect("previous cache dir");
+        std::fs::write(previous.join("cache.bin"), bitcode::encode(&store)).expect("write cache");
+        std::fs::remove_dir_all(&current).expect("remove current cache");
+
+        assert!(
+            run().clone_groups.is_empty(),
+            "a range run must not read the previous version cache"
+        );
+    }
+
     #[test]
     fn token_cache_still_hits_when_only_the_timestamps_moved() {
         let dir = tempfile::tempdir().expect("temp dir");

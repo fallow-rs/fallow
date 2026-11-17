@@ -832,6 +832,9 @@ pub enum RangeMarkerProblemKind {
     /// A range marker names an issue kind other than `code-duplication`.
     /// The `code-duplication` part of the same marker still applies.
     UnsupportedKind,
+    /// A range marker shares its line with code. A range marker must be on
+    /// its own line.
+    NotOwnLine,
 }
 
 impl RangeMarkerProblemKind {
@@ -844,6 +847,7 @@ impl RangeMarkerProblemKind {
             Self::NestedStart => 3,
             Self::MissingKind => 4,
             Self::UnsupportedKind => 5,
+            Self::NotOwnLine => 6,
         }
     }
 
@@ -856,6 +860,7 @@ impl RangeMarkerProblemKind {
             3 => Some(Self::NestedStart),
             4 => Some(Self::MissingKind),
             5 => Some(Self::UnsupportedKind),
+            6 => Some(Self::NotOwnLine),
             _ => None,
         }
     }
@@ -867,7 +872,9 @@ impl RangeMarkerProblemKind {
             Self::UnclosedStart => {
                 "fallow-ignore-start has no fallow-ignore-end, so it suppresses nothing"
             }
-            Self::UnmatchedEnd => "fallow-ignore-end has no fallow-ignore-start before it",
+            Self::UnmatchedEnd => {
+                "fallow-ignore-end has no fallow-ignore-start before it (each range marker must be on its own line)"
+            }
             Self::NestedStart => {
                 "fallow-ignore-start is inside an open range; the outer range applies"
             }
@@ -876,6 +883,9 @@ impl RangeMarkerProblemKind {
             }
             Self::UnsupportedKind => {
                 "range markers support only code-duplication; this kind is not suppressed"
+            }
+            Self::NotOwnLine => {
+                "range marker shares its line with code, so it suppresses nothing; put it on its own line"
             }
         }
     }

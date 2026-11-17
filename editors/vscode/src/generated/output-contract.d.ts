@@ -971,7 +971,7 @@ export type CloneFamilyActionType = ("extract-shared" | "apply-suggestion" | "su
  * What is wrong with one `fallow-ignore-start` or `fallow-ignore-end`
  * marker. A marker with a problem has no effect.
  */
-export type RangeMarkerProblemKind = ("unclosed_start" | "unmatched_end" | "nested_start" | "missing_kind" | "unsupported_kind")
+export type RangeMarkerProblemKind = ("unclosed_start" | "unmatched_end" | "nested_start" | "missing_kind" | "unsupported_kind" | "not_own_line")
 /**
  * Which complexity threshold was exceeded.
  */

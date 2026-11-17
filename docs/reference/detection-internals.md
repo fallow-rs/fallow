@@ -1407,6 +1407,9 @@ code-duplication` suppress clones in a range of lines (issue #4706).
   kind, and a kind other than `code-duplication` become a
   `RangeMarkerProblem` with no effect. In a mixed kind list the
   `code-duplication` part applies. A range marker must be on its own line.
+  A marker that shares its line with code has no effect and becomes a
+  `not_own_line` problem, so the user sees it on the marker line, not only
+  as an unmatched end.
 - Clone detection uses the line scanner that it already runs. It drops a
   range marker whose offset is inside a string or template literal token,
   then pairs the rest (`range_mask::pair_ranges_outside_strings`).

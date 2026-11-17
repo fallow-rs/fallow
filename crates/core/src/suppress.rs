@@ -410,7 +410,8 @@ fn range_problem_kind_token(problem: &RangeMarkerProblem) -> Option<String> {
         RangeMarkerProblemKind::MissingKind => None,
         RangeMarkerProblemKind::UnclosedStart
         | RangeMarkerProblemKind::UnmatchedEnd
-        | RangeMarkerProblemKind::NestedStart => {
+        | RangeMarkerProblemKind::NestedStart
+        | RangeMarkerProblemKind::NotOwnLine => {
             Some(issue_kind_to_kebab(IssueKind::CodeDuplication).to_string())
         }
     }

@@ -18,6 +18,7 @@ use std::process::ExitCode;
 
 use fallow_output::{CodeClimateIssue, MutationCiView, PrDecisionAnnotationLevel};
 use fallow_types::output_dead_code::caveat_labels_for_tokens;
+use fallow_types::suppress::RangeMarkerProblemKind;
 use serde_json::Value;
 
 use crate::report::ci::pr_comment::MutationSurface;
@@ -1249,7 +1250,9 @@ fn collect_check_component_wiring(env: &Value, out: &mut Vec<Annotation>) {
 
 fn stale_suppression_message(item: &Value) -> (String, String) {
     let origin = item.get("origin").cloned().unwrap_or(Value::Null);
-    let comment_form = if b(&origin, "is_file_level") {
+    let comment_form = if b(&origin, "is_range") {
+        "fallow-ignore-start"
+    } else if b(&origin, "is_file_level") {
         "fallow-ignore-file"
     } else {
         "fallow-ignore-next-line"
@@ -1451,6 +1454,39 @@ fn collect_dupes(env: &Value, out: &mut Vec<Annotation>) {
                 introduced: group.get("introduced").and_then(Value::as_bool),
             });
         }
+    }
+    collect_range_marker_problems(env, out);
+}
+
+/// One annotation per `fallow-ignore-start` / `fallow-ignore-end` marker with
+/// a problem. Such a marker suppresses nothing.
+fn collect_range_marker_problems(env: &Value, out: &mut Vec<Annotation>) {
+    for problem in arr(env, "range_marker_problems") {
+        let Some(kind) = problem
+            .get("problem")
+            .cloned()
+            .and_then(|kind| serde_json::from_value::<RangeMarkerProblemKind>(kind).ok())
+        else {
+            continue;
+        };
+        let token = problem
+            .get("token")
+            .and_then(Value::as_str)
+            .map(|token| format!(" (`{token}`)"))
+            .unwrap_or_default();
+        out.push(Annotation {
+            level: AnnotationLevel::Warning,
+            path: s(problem, "path").to_owned(),
+            line: Some(u(problem, "line")),
+            end_line: None,
+            col: None,
+            title: "Range suppression marker".to_owned(),
+            message: format!(
+                "{}{token}.\n\nFix the marker: a range needs `// fallow-ignore-start code-duplication` and `// fallow-ignore-end code-duplication`, each on its own line.",
+                kind.description(),
+            ),
+            introduced: None,
+        });
     }
 }
 
@@ -1826,6 +1862,41 @@ mod tests {
             "kind": "dead-code",
             "unused_files": [{ "path": "src/zz-dead.ts" }]
         })
+    }
+
+    #[test]
+    fn range_markers_get_their_own_annotations_and_directive() {
+        let dupes = serde_json::json!({
+            "kind": "dupes",
+            "clone_groups": [],
+            "range_marker_problems": [
+                { "path": "src/a.ts", "line": 4, "problem": "not_own_line" },
+                { "path": "src/a.ts", "line": 9, "problem": "unsupported_kind", "token": "unused-export" },
+            ]
+        });
+        let annotations = collect_annotations(EnvelopeKind::Dupes, &dupes, PackageManager::Npm);
+        let lines: Vec<(&str, Option<u64>, &str)> = annotations
+            .iter()
+            .map(|a| (a.path.as_str(), a.line, a.title.as_str()))
+            .collect();
+        assert_eq!(
+            lines,
+            vec![
+                ("src/a.ts", Some(4), "Range suppression marker"),
+                ("src/a.ts", Some(9), "Range suppression marker"),
+            ]
+        );
+        assert!(annotations[0].message.contains("put it on its own line"));
+        assert!(annotations[1].message.contains("(`unused-export`)"));
+
+        let stale = serde_json::json!({
+            "origin": { "type": "comment", "issue_kind": "code-duplication", "is_file_level": false, "is_range": true }
+        });
+        assert!(
+            stale_suppression_message(&stale)
+                .1
+                .contains("'fallow-ignore-start'")
+        );
     }
 
     #[test]

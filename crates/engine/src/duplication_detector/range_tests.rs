@@ -425,8 +425,37 @@ fn warm_token_cache_keeps_ranges_and_problems() {
 }
 
 #[test]
-fn token_cache_version_is_above_the_version_without_ranges() {
-    const VERSION_WITHOUT_RANGES: u32 = 23;
-    let current = fallow_extract::cache::DUPES_CACHE_VERSION;
-    assert!(current > VERSION_WITHOUT_RANGES);
+fn trailing_range_marker_is_reported_on_its_line() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let body = function("shared", 1);
+    let trailing = format!("const zz = 1; // fallow-ignore-start code-duplication\n{body}{END}\n");
+    let files = write_files(dir.path(), &[("a.ts", &body), ("b.ts", &trailing)]);
+
+    let report = default_report(dir.path(), &files);
+
+    assert_eq!(
+        report.clone_groups.len(),
+        1,
+        "a trailing marker masks nothing"
+    );
+    assert_eq!(
+        problems(&report),
+        vec![
+            (1, RangeMarkerProblemKind::NotOwnLine, None),
+            (15, RangeMarkerProblemKind::UnmatchedEnd, None),
+        ]
+    );
+}
+
+#[test]
+fn trailing_marker_text_in_a_string_is_not_reported() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let body = function("shared", 1);
+    let quoted =
+        format!("export const hint = \"x // fallow-ignore-start code-duplication\";\n{body}");
+    let files = write_files(dir.path(), &[("a.ts", &body), ("b.ts", &quoted)]);
+
+    let report = default_report(dir.path(), &files);
+
+    assert!(problems(&report).is_empty(), "{:?}", problems(&report));
 }

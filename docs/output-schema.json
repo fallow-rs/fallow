@@ -38428,6 +38428,11 @@
           "type": "string",
           "const": "unsupported_kind",
           "description": "A range marker names an issue kind other than `code-duplication`.\nThe `code-duplication` part of the same marker still applies."
+        },
+        {
+          "type": "string",
+          "const": "not_own_line",
+          "description": "A range marker shares its line with code. A range marker must be on\nits own line."
         }
       ],
       "description": "What is wrong with one `fallow-ignore-start` or `fallow-ignore-end`\nmarker. A marker with a problem has no effect."

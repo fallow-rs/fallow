@@ -82,17 +82,6 @@ fn block_and_html_comment_markers() {
 }
 
 #[test]
-fn trailing_range_marker_is_not_a_marker() {
-    let source = "const a = 1; // fallow-ignore-start code-duplication\nconst b = 2;\n// fallow-ignore-end code-duplication\n";
-    let parsed = parse_oxc(source);
-    assert!(ranges(&parsed).is_empty());
-    assert_eq!(
-        problems(&parsed),
-        vec![(3, RangeMarkerProblemKind::UnmatchedEnd)]
-    );
-}
-
-#[test]
 fn marker_word_must_end_at_whitespace() {
     let source = "// fallow-ignore-starter code-duplication\nconst a = 1;\n";
     for parsed in both(source) {
@@ -159,4 +148,48 @@ fn scan_keeps_markers_unpaired_with_offsets() {
     let offset = parsed.range_markers[0].offset as usize;
     assert!(source[..offset].ends_with("// fallow-ignore-start "));
     assert!(parsed.range_problems.is_empty());
+}
+
+#[test]
+fn range_marker_that_shares_its_line_with_code_is_reported() {
+    let sources = [
+        "/* fallow-ignore-start code-duplication */ const zz = 1;\nconst a = 1;\n// fallow-ignore-end code-duplication\n",
+        "const zz = 1; // fallow-ignore-start code-duplication\nconst a = 1;\n// fallow-ignore-end code-duplication\n",
+    ];
+    for source in sources {
+        for parsed in both(source) {
+            assert!(ranges(&parsed).is_empty(), "{source:?}");
+            assert_eq!(
+                problems(&parsed),
+                vec![
+                    (1, RangeMarkerProblemKind::NotOwnLine),
+                    (3, RangeMarkerProblemKind::UnmatchedEnd),
+                ],
+                "{source:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn html_range_marker_that_shares_its_line_with_markup_is_reported() {
+    let source = "<template>\n  <!-- fallow-ignore-start code-duplication --> <p>a</p>\n  <!-- fallow-ignore-end code-duplication -->\n</template>\n";
+    let parsed = parse_suppressions_from_source(source);
+    assert!(ranges(&parsed).is_empty());
+    assert_eq!(
+        problems(&parsed),
+        vec![
+            (2, RangeMarkerProblemKind::NotOwnLine),
+            (3, RangeMarkerProblemKind::UnmatchedEnd),
+        ]
+    );
+}
+
+#[test]
+fn unmatched_end_message_names_the_own_line_rule() {
+    assert!(
+        RangeMarkerProblemKind::UnmatchedEnd
+            .description()
+            .contains("own line")
+    );
 }
