@@ -37,7 +37,7 @@ These causes repeat. Check them first.
 | `JS Lint and Format`, step `Script tests` | `scripts/*.test.mjs` asserts the exact SHA or version of a pinned action or package. | `git grep` the old SHA or version. Replace it with the new value from the diff in the test file. Run `node --test scripts/<file>.test.mjs`. |
 | `JS Lint and Format` or `npm Package` on `@tanstack/intent` | The root `package.json` and `npm/fallow/package.json` must pin the same version, and `scripts/workflow-policy.test.mjs` asserts it. | Bump both manifests. Update the root lockfile. Update the version literals in the test. |
 | `Viz frontend` with `git diff --exit-code crates/cli/viz-assets` | A bundler update, or a repair that edits `viz-frontend/src/`, changes the committed viz bundle. | Run the `viz-frontend/` install and build. Commit `crates/cli/viz-assets/` in the same commit as the source edit. |
-| `Check (n/2)` on the coverage producer corpus | `tests/coverage-producer-corpus/manifest.json` pins the producer dependency graph by digest. | Run `npm run refresh:coverage-producers`. Commit only version and digest changes. If `node_pin` changes, revert that line. |
+| `Check (1/3)` on the coverage producer corpus | `tests/coverage-producer-corpus/manifest.json` pins the producer dependency graph by digest. | Run `npm run refresh:coverage-producers`. Commit only version and digest changes. If `node_pin` changes, revert that line. |
 | Runtime lock digest check in `tests/semantic-clone-corpus` | The corpus evidence pins the model runtime. New evidence changes similarity values, and a maintainer must review that shift. | Report "not fixed" with the failing case names. |
 | `npm ci` fails with `Missing: <package> from lock file` | Dependabot pruned a nested lockfile entry. | Regenerate that lockfile. The diff must contain only version, resolved and integrity lines. |
 | `Lint and contracts`, step `Clippy`, with a removed or renamed API | A semver-compatible update deprecated or changed an API. | Change the call sites in the affected crate. Run `cargo clippy -p <crate> --all-targets -- -D warnings`. |
@@ -53,7 +53,7 @@ These causes repeat. Check them first.
 - `npm Package`: the root install, then `node --test .github/scripts/*.test.mjs`.
 - `Lint and contracts`: `cargo clippy --workspace --all-targets -- -D warnings`
   and `npm run generate:contracts:check`.
-- `Check (n/2)`: run only the failed test with
+- `Check (n/3)`: run only the failed test with
   `cargo nextest run -p <crate> <test name>`, or `cargo test -p <crate> <test name>`.
 - `Typos`: `typos` on the changed files.
 

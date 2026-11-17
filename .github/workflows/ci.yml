@@ -609,9 +609,9 @@ jobs:
         # cores. It selects the same targets as `cargo test` with these flags;
         # neither runs doctests. The `ci` profile is in .config/nextest.toml.
         # Each partition builds every test binary and runs a third of the
-        # tests. The build takes about 3 minutes and the whole suite about 10
-        # minutes of test time on these runners, so a third partition cuts the
-        # slowest Check job by more than the build that it repeats.
+        # tests. The third partition adds a build that runs in parallel, and
+        # it cuts the test time of each job from a half to a third of the
+        # suite, about 48 CPU-minutes.
         # FALLOW_MUTATION_E2E_REQUIRED makes a missing runner dependency fail
         # the end-to-end mutation tests instead of a skip.
         env:
@@ -637,15 +637,15 @@ jobs:
         # the `git diff --exit-code` step at the end of this job checks.
         run: npm run check:coverage-producers
 
-      # Partition 2 runs these tests and partition 1 runs the other two extra
-      # steps. Partition 1 took about 3 minutes longer when it ran all three.
-      # Partition 3 runs no extra step.
+      # Each partition runs one extra step: partition 1 the coverage producer
+      # check, partition 2 these tests and partition 3 the schema drift gate.
+      # Partition 1 took about 3 minutes longer when it ran all three.
       - name: Run runtime-coverage integration tests (feature-gated stub sidecar)
         if: matrix.partition == 2
         run: cargo test -p fallow-cli --features test-sidecar-key --test runtime_coverage_tests --test audit_brief_runtime_focus_tests
 
       - name: Run schema drift gate (feature-gated schema-emit binary)
-        if: matrix.partition == 1
+        if: matrix.partition == 3
         run: cargo test -p fallow-cli --features schema-emit --bin fallow-schema-emit
 
       - name: Check for uncommitted changes

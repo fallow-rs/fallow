@@ -3094,13 +3094,13 @@ test("the Check, Lint and contracts, and Windows jobs run each step exactly once
   const napi = indentedBlock(workflow, "napi", 2);
   assert.doesNotMatch(lint, /napi build/);
   assert.match(check, /--partition hash:\$\{\{ matrix\.partition \}\}\/3/);
-  // Partition 1 runs the producer check and the schema drift gate, and
-  // partition 2 runs the runtime-coverage tests. Partition 3 runs no extra
-  // step.
+  // Each partition runs one extra step: partition 1 the producer check,
+  // partition 2 the runtime-coverage tests and partition 3 the schema drift
+  // gate.
   for (const [step, partition] of [
     ["Run coverage producer conformance", 1],
     ["Run runtime-coverage integration tests (feature-gated stub sidecar)", 2],
-    ["Run schema drift gate (feature-gated schema-emit binary)", 1],
+    ["Run schema drift gate (feature-gated schema-emit binary)", 3],
   ]) {
     const escaped = escapeRegExp(step);
     assert.match(

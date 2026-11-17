@@ -549,9 +549,9 @@ The slowest `CI` jobs have parts that run in parallel:
   and run a third of the nextest suite (`--partition hash:N/3`). The build
   takes about 3 minutes, and the suite uses about 48 CPU-minutes. With two
   partitions, the slowest `Check` job was the last job of most pull request
-  runs. `Check (1/3)` also runs the schema drift gate and the coverage
-  producer conformance check. `Check (2/3)` also runs the runtime-coverage
-  feature tests. `Check (3/3)` runs no extra step.
+  runs. `Check (1/3)` also runs the coverage producer conformance check,
+  `Check (2/3)` the runtime-coverage feature tests, and `Check (3/3)` the
+  schema drift gate.
 - `Lint and contracts` runs both Clippy passes, `cargo fmt --check`, the
   contract bundle drift gate and the staged subgenerator tests.
 - `NAPI package` runs the NAPI build and smoke test. On `main` the build uses
