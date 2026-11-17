@@ -42,7 +42,6 @@ export const REQUIRED_WORKFLOWS = Object.freeze([
   { name: "Cross-Architecture", file: "cross-arch.yml" },
   { name: "Fuzz Smoke", file: "fuzz-smoke.yml" },
   { name: "Benchmarks", file: "bench.yml" },
-  { name: "Type-aware Benchmarks", file: "bench-type-aware.yml" },
   { name: "Protocol parity", file: "protocol-parity.yml" },
   { name: "Scorecard", file: "scorecard.yml" },
   { name: "osv-scanner ignores", file: "osv-ignores.yml" },
@@ -57,8 +56,13 @@ const WORKFLOW_DIR = ".github/workflows/";
  */
 const IGNORED_EVENTS = new Set(["pull_request", "pull_request_target", "merge_group", "dynamic"]);
 
-/** The release workflows themselves. An earlier failed release attempt must not block a retry. */
-const IGNORED_FILES = new Set(["release.yml", "release-published.yml"]);
+/**
+ * The release workflows themselves: an earlier failed release attempt must not
+ * block a retry. And the nightly walltime benchmarks: their macro runner comes
+ * from a shared monthly minute pool and can stay queued, and a release must not
+ * wait on a measurement.
+ */
+const IGNORED_FILES = new Set(["release.yml", "release-published.yml", "bench-walltime.yml"]);
 
 const PASSING_CONCLUSIONS = new Set(["success", "skipped", "neutral"]);
 

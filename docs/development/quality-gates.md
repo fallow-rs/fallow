@@ -356,7 +356,6 @@ On pull requests:
 
 - `CI` (`ci.yml`). Its jobs include the required status checks on `main`.
 - `Commitlint` (job `Commit messages`).
-- `Type-aware Benchmarks`, when `tools/type-aware-sidecar/**` changes.
 - `Protocol parity`, when `crates/cli/Cargo.toml` or `Cargo.lock` changes.
 - `PGO Validate`, when `scripts/pgo-train.sh`,
   `.github/scripts/pgo-compare.mjs`, `.github/scripts/pgo-profile-match.mjs`,

@@ -41,3 +41,5 @@ When adding a test fixture:
 - Criterion benchmarks in `benches/`
 - `bench-cli-instructions.yml` runs the release CLI under CPU simulation on
   pinned public projects (daily, and on pull requests with the `ci:perf` label)
+- `bench-walltime.yml` runs the same CLI corpus and the type-aware companion
+  under walltime on a CodSpeed macro runner (nightly, or by hand)

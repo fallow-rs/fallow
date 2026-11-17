@@ -1,0 +1,127 @@
+name: Walltime Benchmarks
+
+# Walltime benchmarks on a CodSpeed Macro Runner, a dedicated bare-metal
+# ARM64 (Graviton) machine. The CPU simulation in bench.yml and
+# bench-cli-instructions.yml does not measure system calls or the Node.js
+# type-aware companion. This lane measures that cost on the same hardware each
+# night. CodSpeed marks walltime from a shared GitHub-hosted runner as
+# unreliable, so walltime runs only here.
+#
+# The fallow-rs organization shares 600 free macro runner minutes per month.
+# To stay inside them, the lane runs once a night on main, and the release
+# build runs on a free GitHub ARM64 runner. The macro runner jobs only measure.
+#
+# Each CodSpeed run carries one instrument (issue #2024), so this workflow
+# uploads only walltime results.
+on:
+  schedule:
+    # After the CLI instruction counts at 07:30 UTC.
+    - cron: '0 8 * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  CARGO_TERM_COLOR: always
+  # Keep the symbol table so the CodSpeed flame graphs show function names.
+  CARGO_PROFILE_RELEASE_STRIP: none
+  # The CLI runs the same commands as the CPU simulation lane. With
+  # suggestions off, fallow starts no git probe for the next steps, so the
+  # measured run starts no child process.
+  FALLOW_SUGGESTIONS: 'off'
+
+jobs:
+  build-cli:
+    name: Build fallow for the macro runner
+    # The macro runner image is Ubuntu 22.04. A build on the same release keeps
+    # the binary inside the glibc version of the runner.
+    runs-on: ubuntu-22.04-arm
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: ./.github/actions/setup-rust
+        with:
+          cache-key: bench-walltime-cli
+          # A scheduled run must not save: the repository cache is over its limit,
+          # and the entry would push out the caches that pull request jobs restore.
+          save-if: 'false'
+
+      - name: Build fallow
+        run: cargo build --release -p fallow-cli
+
+      - name: Upload fallow binary
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: bench-walltime-fallow
+          path: target/release/fallow
+          if-no-files-found: error
+          retention-days: 1
+
+  cli:
+    name: CodSpeed walltime (CLI on pinned projects)
+    needs: build-cli
+    runs-on: codspeed-macro-arm64-graviton-ubuntu-22-04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: bench-walltime-fallow
+          path: target/release
+
+      - name: Prepare the pinned corpus
+        run: |
+          chmod +x target/release/fallow
+          benchmarks/cli-instructions.sh prepare --fallow-bin target/release/fallow
+
+      - name: Write the CodSpeed config
+        run: benchmarks/cli-instructions.sh config --fallow-bin target/release/fallow > target/cli-instructions/codspeed.yml
+
+      - name: Run the walltime benchmarks
+        uses: CodSpeedHQ/action@af75f77f17a054769abefaa42fe8dc2975469b5f # v5.6.3
+        with:
+          mode: walltime
+          config: target/cli-instructions/codspeed.yml
+
+  type-aware:
+    name: CodSpeed walltime (type-aware cold and warm)
+    runs-on: codspeed-macro-arm64-graviton-ubuntu-22-04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+          cache: npm
+          cache-dependency-path: tools/type-aware-sidecar/package-lock.json
+
+      - name: Install type-aware benchmark dependencies
+        run: npm ci --no-audit --no-fund --ignore-scripts
+        working-directory: tools/type-aware-sidecar
+
+      - name: Run type-aware benchmarks
+        uses: CodSpeedHQ/action@af75f77f17a054769abefaa42fe8dc2975469b5f # v5.6.3
+        with:
+          mode: walltime
+          run: npm run bench --prefix tools/type-aware-sidecar

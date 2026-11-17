@@ -2,4 +2,5 @@ self-hosted-runner:
   labels:
     # GitHub-hosted Ubuntu 26.04 is ahead of actionlint 1.7.12's runner catalog.
     - ubuntu-26.04
-    - codspeed-macro
+    # CodSpeed Macro Runner (bare-metal Graviton) for walltime benchmarks.
+    - codspeed-macro-arm64-graviton-ubuntu-22-04
