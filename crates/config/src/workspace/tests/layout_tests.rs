@@ -385,3 +385,45 @@ fn recursive_glob_reports_no_diagnostic_for_source_folders() {
     );
     assert!(diagnostics.is_empty(), "{diagnostics:?}");
 }
+
+/// pnpm reads `**` as zero or more folders, so `pkgs/**` also declares
+/// `pkgs` itself. See #4721.
+#[test]
+fn recursive_glob_includes_its_base_folder() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    write_root(root, "packages:\n  - \"pkgs/**\"\n");
+    write_package(&root.join("pkgs"), r#"{"name":"pkgs-self"}"#);
+    write_package(&root.join("pkgs/sub"), r#"{"name":"sub"}"#);
+
+    let (workspaces, diagnostics) =
+        discover_workspaces_with_diagnostics(root, &crate::IgnorePatternSet::empty())
+            .expect("valid root");
+    let undeclared = find_undeclared_workspaces_with_ignores(
+        root,
+        &workspaces,
+        &crate::IgnorePatternSet::empty(),
+    );
+
+    assert_eq!(
+        relative_workspace_roots(root, &workspaces),
+        ["pkgs", "pkgs/sub"]
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(undeclared.is_empty(), "{undeclared:?}");
+}
+
+/// A root-level `**` pattern never makes the project root a workspace.
+#[test]
+fn root_level_recursive_glob_skips_the_project_root() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    write_root(root, "packages:\n  - \"**\"\n");
+    write_package(&root.join("packages/a"), r#"{"name":"a"}"#);
+
+    let (workspaces, _) =
+        discover_workspaces_with_diagnostics(root, &crate::IgnorePatternSet::empty())
+            .expect("valid root");
+
+    assert_eq!(relative_workspace_roots(root, &workspaces), ["packages/a"]);
+}

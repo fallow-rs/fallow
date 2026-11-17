@@ -416,26 +416,38 @@ fn expand_recursive_workspace_pattern(
         return Vec::new();
     };
 
-    let base_dir = match expanded_pattern.find('*') {
+    // pnpm reads `**` as zero or more folders, so `pkgs/**` also matches
+    // `pkgs` itself. `glob::Pattern` needs at least one folder for a trailing
+    // `**`, so the pattern without that segment matches the zero-folder case.
+    let zero_depth_matcher = expanded_pattern
+        .strip_suffix("/**")
+        .and_then(|prefix| glob::Pattern::new(&root.join(prefix).to_string_lossy()).ok());
+
+    let base_dir: PathBuf = match expanded_pattern.find('*') {
         Some(idx) => root.join(&expanded_pattern[..idx]),
         None => root.join(expanded_pattern),
-    };
+    }
+    .components()
+    .collect();
 
     let mut results = Vec::new();
-    walk_workspace_dirs(
-        &base_dir,
-        &mut WorkspaceDirWalkInput {
-            matcher: &matcher,
-            canonical_root,
-            results: &mut results,
-        },
-    );
+    let mut input = WorkspaceDirWalkInput {
+        matcher: &matcher,
+        zero_depth_matcher: zero_depth_matcher.as_ref(),
+        canonical_root,
+        results: &mut results,
+    };
+    if base_dir.is_dir() {
+        collect_matched_workspace_dir(&base_dir, &mut input);
+    }
+    walk_workspace_dirs(&base_dir, &mut input);
     results
 }
 
 /// Borrowed inputs of the recursive workspace directory walk.
 struct WorkspaceDirWalkInput<'a> {
     matcher: &'a glob::Pattern,
+    zero_depth_matcher: Option<&'a glob::Pattern>,
     canonical_root: &'a Path,
     results: &'a mut Vec<(PathBuf, PathBuf)>,
 }
@@ -455,14 +467,24 @@ fn walk_workspace_dirs(dir: &Path, input: &mut WorkspaceDirWalkInput<'_>) {
         if name == "node_modules" || name == ".git" {
             continue;
         }
-        if input.matcher.matches_path(&path)
-            && dir_has_package_manifest(&path)
-            && let Ok(cp) = dunce::canonicalize(&path)
-            && cp.starts_with(input.canonical_root)
-        {
-            input.results.push((path.clone(), cp));
-        }
+        collect_matched_workspace_dir(&path, input);
         walk_workspace_dirs(&path, input);
+    }
+}
+
+/// Collect `path` when the pattern matches it and it has a package manifest
+/// inside the project root.
+fn collect_matched_workspace_dir(path: &Path, input: &mut WorkspaceDirWalkInput<'_>) {
+    let matches = input.matcher.matches_path(path)
+        || input
+            .zero_depth_matcher
+            .is_some_and(|matcher| matcher.matches_path(path));
+    if matches
+        && dir_has_package_manifest(path)
+        && let Ok(cp) = dunce::canonicalize(path)
+        && cp.starts_with(input.canonical_root)
+    {
+        input.results.push((path.to_path_buf(), cp));
     }
 }
 
