@@ -17,6 +17,7 @@
 
 mod auto_imports;
 mod dynamic_imports;
+mod extension_alias;
 pub(crate) mod fallbacks;
 mod file_attempt;
 mod inline_loaders;
