@@ -876,6 +876,7 @@ pub fn extract_class_members(
                 }
                 if let Some(mut member) = build_method_member(method, class_name) {
                     member.override_base = override_base(method.r#override);
+                    merge_overload_return_flags(class, method, class_name, &mut member);
                     members.push(member);
                 }
             }
@@ -923,6 +924,47 @@ fn is_member_slot_of_method(
         )
     });
     !has_implementation && overload_slots.insert((method.r#static, name.text().into_owned()))
+}
+
+/// Give the kept member of an overload set the return flags of every
+/// declaration in the set.
+///
+/// A signature can declare the class as return type while the implementation
+/// returns `any`. The call result is still a class instance, so the members
+/// read on it must stay credited.
+fn merge_overload_return_flags(
+    class: &Class<'_>,
+    method: &oxc_ast::ast::MethodDefinition<'_>,
+    class_name: Option<&str>,
+    member: &mut MemberInfo,
+) {
+    if method.kind != MethodDefinitionKind::Method {
+        return;
+    }
+    let Some(name) = method.key.static_name() else {
+        return;
+    };
+    for element in &class.body.body {
+        let ClassElement::MethodDefinition(other) = element else {
+            continue;
+        };
+        if std::ptr::eq(other.as_ref(), method)
+            || other.kind != MethodDefinitionKind::Method
+            || other.r#static != method.r#static
+            || other
+                .key
+                .static_name()
+                .is_none_or(|other_name| other_name != name)
+        {
+            continue;
+        }
+        if method.r#static {
+            member.is_instance_returning_static |=
+                is_instance_returning_static_method(other, class_name);
+        } else {
+            member.is_self_returning |= is_self_returning_instance_method(other, class_name);
+        }
+    }
 }
 
 /// Build a `MemberInfo` for a non-constructor, non-private method. A

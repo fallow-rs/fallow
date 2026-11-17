@@ -444,6 +444,39 @@ export class Svc {
     assert_eq!(method_member_starts(source, "Svc", "make").len(), 2);
 }
 
+fn method_member<'a>(
+    info: &'a crate::ModuleInfo,
+    class: &str,
+    member: &str,
+) -> &'a crate::MemberInfo {
+    info.exports
+        .iter()
+        .find(|e| e.name.matches_str(class))
+        .expect("class export expected")
+        .members
+        .iter()
+        .find(|m| m.name == member)
+        .expect("member expected")
+}
+
+#[test]
+fn overload_signature_return_type_marks_the_kept_member() {
+    // Only the signatures name the class as return type. The implementation
+    // returns `any`, so the kept member must take the flags of the signatures.
+    let source = r"
+export class Foo {
+  static from(x: string): Foo
+  static from(x: number): Foo
+  static from(x: unknown): any { return build(x) }
+  chain(x: string): Foo
+  chain(x: unknown): any { return x }
+}
+";
+    let info = crate::tests::parse_ts(source);
+    assert!(method_member(&info, "Foo", "from").is_instance_returning_static);
+    assert!(method_member(&info, "Foo", "chain").is_self_returning);
+}
+
 // --- build_property_member: angular signal initializer (lines 592-597) ---
 
 #[test]
