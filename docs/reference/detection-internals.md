@@ -429,6 +429,22 @@ error by suppressing a downstream detector.
   version to move with the changed semantics.
 - Security findings are verification candidates until an agent or human
   confirms the evidence.
+- Some catalogue rows match a callee by name only (`request`, `*.merge`). A
+  call of a project function with a shallow-safe body is not a sink. A body
+  is shallow-safe when it calls only the shallow `Object` builtins of
+  `SHALLOW_OBJECT_BUILTINS` (`Object.assign` only into a fresh object), and
+  writes a member only one level deep on a fresh local. A fresh local is a
+  binding that the function declares with an object literal,
+  `Object.assign({}, ...)` or `Object.create(null)`, and never reassigns. Any
+  other call (also a recursive call), a deeper write, a write to a parameter
+  or an outer binding, `new`, a tagged template, `import()` and `delete`
+  keep the sink. Extraction applies this check to local functions and inline
+  methods (`visit_impl_security_local_callees.rs`), and records the export
+  names of the shallow-safe module-scope functions in
+  `ModuleInfo::inert_function_exports`. The tainted-sink analysis follows a
+  static named or default `import` of a bare callee one hop to its target
+  module and reads that list. It does not follow a re-export, a namespace
+  import or a `require()`, and an external package has no module to read.
 - The `client-server-leak` cone starts from `"use client"` files and from the
   client roots of the React Router plugin (`security/framework_roots.rs`).
   React Router removes the `loader`, `action`, `middleware` and `headers`

@@ -175,6 +175,12 @@ pub struct ModuleInfo {
     /// output can explain where the blind spots are concentrated without source
     /// snippets.
     pub security_unresolved_callee_sites: Vec<SkippedSecurityCalleeSite>,
+    /// Export names (`default` for a default export) of the module-scope
+    /// functions whose body is shallow-safe: it calls only shallow `Object`
+    /// builtins and writes only one level deep into a fresh local object. The
+    /// security analysis follows a direct import of such a function one hop
+    /// and does not report its call as a name-only library sink.
+    pub inert_function_exports: Vec<String>,
     /// Local bindings whose initializer (or destructured object) is a flattened
     /// member-access path. Used by the security `tainted_sink` detector to
     /// back-trace a sink argument to a known untrusted source: the analyze layer
@@ -487,6 +493,7 @@ impl ModuleInfo {
             security_sinks: Vec::new(),
             security_sinks_skipped: 0,
             security_unresolved_callee_sites: Vec::new(),
+            inert_function_exports: Vec::new(),
             tainted_bindings: Vec::new(),
             sanitized_sink_args: Vec::new(),
             security_control_sites: Vec::new(),
@@ -841,31 +848,9 @@ pub enum SinkArgKind {
     Other,
 }
 
-/// Static URL construction shape captured for URL-shaped security sinks.
-#[derive(
-    Debug,
-    Clone,
-    Copy,
-    PartialEq,
-    Eq,
-    serde::Serialize,
-    serde::Deserialize,
-    bitcode::Encode,
-    bitcode::Decode,
-)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-#[serde(rename_all = "kebab-case")]
-pub enum SecurityUrlShape {
-    /// The sink target has a fixed origin, scheme, or relative root while only
-    /// path or query components are dynamic.
-    FixedOriginDynamicPath,
-    /// The sink target's scheme or origin is dynamic or opaque.
-    DynamicOrigin,
-}
-
 #[path = "extract_sink_values.rs"]
 mod sink_values;
-pub use sink_values::{SinkCallOptions, SinkLiteralValue, SinkObjectProperty};
+pub use sink_values::{SecurityUrlShape, SinkCallOptions, SinkLiteralValue, SinkObjectProperty};
 
 /// A captured sink site. The visitor records every existing non-literal call /
 /// member-assign / member-call / tagged-template / jsx-attr sink site, and a
@@ -3523,7 +3508,7 @@ const _: () = assert!(std::mem::size_of::<SemanticFact>() == 80);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 224);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1504);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1528);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ImportBindingReference>() == 64);
 #[cfg(target_pointer_width = "64")]
