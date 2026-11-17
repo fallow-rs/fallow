@@ -1941,35 +1941,6 @@ pub struct FactoryReturnObjectShapeExport {
     pub properties: Box<[FactoryReturnObjectProperty]>,
 }
 
-/// A named-type property whose declared type is a named type reference.
-///
-/// `interface Opts { c: OptDep }` (or `type Opts = { c: OptDep }`) records
-/// `TypeMemberTypeEntry { type_name: "Opts", property: "c", property_type: "OptDep" }`.
-/// Both `type_name` and `property_type` are the DECLARING module's own local
-/// names; resolution through that module's imports/exports is deferred to
-/// analyze time, mirroring `FactoryReturnExport.class_local_name`. Consumed by
-/// the `unused-class-member` typed-property-hop join so a consumer's
-/// `this.opts.c.optM()` credits `OptDep.optM` across module boundaries.
-/// See issue #1785.
-#[derive(
-    Debug,
-    Clone,
-    serde::Serialize,
-    serde::Deserialize,
-    bitcode::Encode,
-    bitcode::Decode,
-    PartialEq,
-    Eq,
-)]
-pub struct TypeMemberTypeEntry {
-    /// Local interface or type-alias name declaring the property.
-    pub type_name: String,
-    /// Property name declared on the type.
-    pub property: String,
-    /// The property's declared type name (local to the declaring module).
-    pub property_type: String,
-}
-
 /// A module-scope declaration that can be used as a TypeScript type.
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
 pub struct LocalTypeDeclaration {
@@ -3719,6 +3690,9 @@ pub use factory::*;
 #[path = "extract_component_contracts.rs"]
 mod component_contracts;
 pub use component_contracts::*;
+#[path = "extract_type_members.rs"]
+mod type_members;
+pub use type_members::*;
 
 #[path = "extract_template_members.rs"]
 mod extract_template_members;

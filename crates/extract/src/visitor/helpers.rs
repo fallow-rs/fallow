@@ -8,7 +8,7 @@ use oxc_span::{GetSpan, Span};
 use rustc_hash::{FxHashMap, FxHashSet};
 
 #[path = "helpers_heritage_names.rs"]
-mod heritage_names;
+pub(in crate::visitor) mod heritage_names;
 #[path = "helpers_heritage_root.rs"]
 mod heritage_root;
 #[path = "helpers_host_refs.rs"]
