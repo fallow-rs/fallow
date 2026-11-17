@@ -113,8 +113,10 @@ impl<'a> WorkersImports<'a> {
 ///
 /// A direct subclass is found through the `super_class` local name and the
 /// imports of its module. A class that extends a base class that its module
-/// declares but does not export is found through the `extends` target after
-/// the fold of such bases (`binding_super_class`). A local subclass of a
+/// declares but does not export is found through the first `extends` target
+/// past such bases (`extends_root`), also through a generic base. The heritage
+/// is keyed by the export name, so a default export and a renamed export
+/// (`export { Inner as Outer }`) find it too. A local subclass of a
 /// credited exported class inherits the same handlers through
 /// `parent_to_children`.
 pub(super) fn build_cloudflare_runtime_subclass_handlers(
@@ -133,13 +135,15 @@ pub(super) fn build_cloudflare_runtime_subclass_handlers(
         if imports.is_empty() {
             continue;
         }
-        let folded_base_by_export: FxHashMap<&str, &str> = module_by_id
+        let extends_root_by_export: FxHashMap<&str, &str> = module_by_id
             .get(&resolved.file_id)
             .into_iter()
             .flat_map(|module| module.class_heritage.iter())
             .filter_map(|heritage| {
-                let (outer, _) = heritage.binding_super_class.as_ref()?;
-                Some((heritage.export_name.as_str(), outer.as_str()))
+                Some((
+                    heritage.export_name.as_str(),
+                    heritage.extends_root.as_deref()?,
+                ))
             })
             .collect();
 
@@ -147,15 +151,12 @@ pub(super) fn build_cloudflare_runtime_subclass_handlers(
             let Some(super_class) = export.super_class.as_deref() else {
                 continue;
             };
-            let handlers = imports.handlers_of(super_class).or_else(|| {
-                let local_name = export.local_name.as_deref()?;
-                imports.handlers_of(folded_base_by_export.get(local_name)?)
-            });
+            let export_name = export.name.to_string();
+            let handlers = imports
+                .handlers_of(super_class)
+                .or_else(|| imports.handlers_of(extends_root_by_export.get(export_name.as_str())?));
             if let Some(handlers) = handlers {
-                handlers_by_key.insert(
-                    ExportKey::new(resolved.file_id, export.name.to_string()),
-                    handlers,
-                );
+                handlers_by_key.insert(ExportKey::new(resolved.file_id, export_name), handlers);
             }
         }
     }

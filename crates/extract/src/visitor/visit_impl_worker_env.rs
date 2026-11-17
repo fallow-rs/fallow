@@ -9,6 +9,12 @@
 //!   or a variable annotation), the untyped `env` parameter of a handler has
 //!   the type `E`.
 //!
+//!   The match reads the type name `ExportedHandler`, the global type of
+//!   `@cloudflare/workers-types`, and does not check for a local type of the
+//!   same name. Only a handler that the object literal declares (a method, a
+//!   function or an arrow function) gets the type. A shorthand property that
+//!   names a separate function (`{ fetch }`) gets no type.
+//!
 //! The structural collector tracks each receiver as a typed parameter, so a
 //! Durable Object stub of a binding (`env.ROOM.getByName(name)`) credits the
 //! method on the class of the binding.

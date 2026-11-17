@@ -588,6 +588,7 @@ mod tests {
             ],
             generic_instance_bindings: Vec::new(),
             binding_super_class: None,
+            extends_root: None,
         };
         let concrete_file = FileId(7);
         let parent_file = FileId(3);

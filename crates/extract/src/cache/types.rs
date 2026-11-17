@@ -94,7 +94,7 @@ assert_cached_type_size!(fallow_types::extract::SinkSite, 224);
 assert_cached_type_size!(fallow_types::extract::FunctionComplexity, 104);
 assert_cached_type_size!(fallow_types::extract::ComplexityContribution, 16);
 assert_cached_type_size!(fallow_types::extract::FlagUse, 80);
-assert_cached_type_size!(fallow_types::extract::ClassHeritageInfo, 216);
+assert_cached_type_size!(fallow_types::extract::ClassHeritageInfo, 240);
 assert_cached_type_size!(fallow_types::extract::FactoryReturnExport, 56);
 assert_cached_type_size!(fallow_types::extract::TypeMemberTypeEntry, 72);
 assert_cached_type_size!(fallow_types::extract::LoadReturnKey, 32);

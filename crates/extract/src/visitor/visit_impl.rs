@@ -3987,7 +3987,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                 instance_bindings,
                 super_class_type_args,
                 generic_instance_bindings,
-                binding_super_class: None,
+                ..Default::default()
             });
         }
         self.exports.push(ExportInfo {
