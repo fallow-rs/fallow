@@ -1,0 +1,53 @@
+name: CodSpeed mixed instrument probe
+
+# Temporary probe: one workflow run uploads simulation and walltime results
+# for the same commit. It checks whether CodSpeed still fails to build the
+# report for such a run (issue #2024). Not for merge.
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/codspeed-mixed-probe.yml'
+
+permissions: {}
+
+jobs:
+  simulation:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+      - run: npm ci --no-audit --no-fund --ignore-scripts
+        working-directory: tools/type-aware-sidecar
+      - uses: CodSpeedHQ/action@af75f77f17a054769abefaa42fe8dc2975469b5f # v5.6.3
+        with:
+          mode: simulation
+          run: npm run bench --prefix tools/type-aware-sidecar
+
+  walltime:
+    runs-on: codspeed-macro-arm64-graviton-ubuntu-22-04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 26
+      - run: npm ci --no-audit --no-fund --ignore-scripts
+        working-directory: tools/type-aware-sidecar
+      - uses: CodSpeedHQ/action@af75f77f17a054769abefaa42fe8dc2975469b5f # v5.6.3
+        with:
+          mode: walltime
+          run: npm run bench --prefix tools/type-aware-sidecar
