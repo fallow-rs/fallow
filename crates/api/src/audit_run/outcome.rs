@@ -2,9 +2,10 @@
 
 use std::path::Path;
 
-use fallow_config::{AuditGate, AuditWorsened, RulesConfig, Severity};
+use fallow_config::{AuditGate, AuditWorsened, ResolvedConfig, RulesConfig, Severity};
 
 use fallow_engine::changed_files::RenamedFile;
+use fallow_types::duplicates::CloneGroup;
 
 use super::clone_containment::base_contained_dupe_group_keys;
 use super::{AuditAnalysesView, AuditKeySnapshot};
@@ -271,6 +272,32 @@ pub fn styling_finding_gates(rules: &RulesConfig, code: &str) -> bool {
     styling_rule_severity(rules, code) == Severity::Error
 }
 
+/// The `introduced-clone-group` severity of one clone group.
+///
+/// With `overrides`, the rule resolves for the file of each instance, and
+/// the most severe result applies. So an override that raises the rule for
+/// one copy gates the group, and `off` applies only when it matches every
+/// copy.
+fn clone_group_severity(config: &ResolvedConfig, group: &CloneGroup) -> Severity {
+    if config.overrides.is_empty() {
+        return config.rules.introduced_clone_group;
+    }
+    group
+        .instances
+        .iter()
+        .map(|instance| {
+            config
+                .resolve_rules_for_path(&instance.file)
+                .introduced_clone_group
+        })
+        .max_by_key(|severity| match severity {
+            Severity::Error => 2,
+            Severity::Warn => 1,
+            Severity::Off => 0,
+        })
+        .unwrap_or(config.rules.introduced_clone_group)
+}
+
 /// Attribution counts, verdict and summary of one comparison.
 #[must_use]
 pub fn outcome(
@@ -329,6 +356,35 @@ fn complexity_verdict_flags(
     (errors, warnings)
 }
 
+/// How the clone groups take part in the verdict: `(gates, warns)`.
+///
+/// Under `new-only`, only an introduced group counts. Under `all`, every
+/// group counts. The `introduced-clone-group` rule gives the severity of a
+/// group that counts.
+fn duplication_verdict_flags(
+    new_only: bool,
+    view: &AuditAnalysesView<'_>,
+    comparison: &AuditComparison,
+) -> (bool, bool) {
+    let Some(duplication) = view.duplication.as_ref() else {
+        return (false, false);
+    };
+    let introduced: Vec<bool> = comparison.dupes.introduced().collect();
+    let mut errors = false;
+    let mut warnings = false;
+    for (index, group) in duplication.clone_groups.iter().enumerate() {
+        if new_only && !introduced.get(index).copied().unwrap_or(false) {
+            continue;
+        }
+        match clone_group_severity(duplication.config, group) {
+            Severity::Error => errors = true,
+            Severity::Warn => warnings = true,
+            Severity::Off => {}
+        }
+    }
+    (errors, warnings)
+}
+
 fn verdict(
     gate: AuditGate,
     worsened: AuditWorsened,
@@ -366,6 +422,9 @@ fn verdict(
                 (!new_only || introduced) && styling_finding_gates(health.rules, &finding.code)
             })
     });
+    let (clone_errors, clone_warnings) = duplication_verdict_flags(new_only, view, comparison);
+    // The threshold reads every counted group, also a group that the
+    // `introduced-clone-group` rule turns off: the two gates are independent.
     let duplication_findings = if new_only {
         comparison.dupes.introduced_count()
     } else {
@@ -376,9 +435,10 @@ fn verdict(
             && duplication.threshold > 0.0
             && duplication.duplication_percentage > duplication.threshold
     });
-    if dead_code_errors || complexity_errors || styling_errors || duplication_errors {
+    if dead_code_errors || complexity_errors || styling_errors || duplication_errors || clone_errors
+    {
         AuditVerdict::Fail
-    } else if dead_code_warnings || complexity_warnings || duplication_findings > 0 {
+    } else if dead_code_warnings || complexity_warnings || clone_warnings {
         AuditVerdict::Warn
     } else {
         AuditVerdict::Pass

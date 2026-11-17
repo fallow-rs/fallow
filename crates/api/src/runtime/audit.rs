@@ -295,6 +295,7 @@ impl AuditAnalyses for ProgrammaticAuditAnalyses<'_> {
                 root: &duplication.root,
                 duplication_percentage: duplication.output.report.stats.duplication_percentage,
                 threshold: duplication.threshold,
+                config: self.config,
             }),
             health: complexity.as_ref().map(|complexity| HealthView {
                 report: &complexity.report,

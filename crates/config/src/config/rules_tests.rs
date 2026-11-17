@@ -452,32 +452,19 @@ fn apply_partial_all_fields_set() {
         added_suppression: Some(Severity::Off),
         test_only_branch: Some(Severity::Off),
         diverged_clone_sibling: Some(Severity::Off),
+        introduced_clone_group: Some(Severity::Off),
         added_dependency: Some(Severity::Off),
     };
     rules.apply_partial(&partial);
-    assert_eq!(rules.unused_files, Severity::Off);
-    assert_eq!(rules.private_type_leaks, Severity::Off);
-    assert_eq!(rules.circular_dependencies, Severity::Off);
-    assert_eq!(rules.type_only_dependencies, Severity::Off);
-    assert_eq!(rules.test_only_dependencies, Severity::Off);
-    assert_eq!(rules.boundary_violation, Severity::Off);
-    assert_eq!(rules.coverage_gaps, Severity::Off);
-    assert_eq!(rules.feature_flags, Severity::Off);
-    assert_eq!(rules.stale_suppressions, Severity::Off);
-    assert_eq!(rules.require_suppression_reason, Severity::Off);
-    assert_eq!(rules.security_sink, Severity::Off);
-    assert_eq!(rules.policy_violation, Severity::Off);
-    assert_eq!(rules.invalid_client_export, Severity::Off);
-    assert_eq!(rules.mixed_client_server_barrel, Severity::Off);
-    assert_eq!(rules.misplaced_directive, Severity::Off);
-    assert_eq!(rules.unrendered_components, Severity::Off);
-    assert_eq!(rules.unused_component_props, Severity::Off);
-    assert_eq!(rules.unused_component_emits, Severity::Off);
-    assert_eq!(rules.unused_component_inputs, Severity::Off);
-    assert_eq!(rules.unused_component_outputs, Severity::Off);
-    assert_eq!(rules.unused_svelte_events, Severity::Off);
-    assert_eq!(rules.route_collision, Severity::Off);
-    assert_eq!(rules.dynamic_segment_name_conflict, Severity::Off);
+    let serialized = serde_json::to_value(&rules).expect("RulesConfig serializes");
+    let not_off: Vec<&String> = serialized
+        .as_object()
+        .expect("RulesConfig serializes to an object")
+        .iter()
+        .filter(|(_, severity)| severity.as_str() != Some("off"))
+        .map(|(name, _)| name)
+        .collect();
+    assert!(not_off.is_empty(), "rules not set to off: {not_off:?}");
 }
 
 #[test]
@@ -487,6 +474,7 @@ fn diff_risk_rules_default_and_parse_from_kebab_keys() {
     assert_eq!(rules.added_suppression, Severity::Warn);
     assert_eq!(rules.test_only_branch, Severity::Warn);
     assert_eq!(rules.diverged_clone_sibling, Severity::Off);
+    assert_eq!(rules.introduced_clone_group, Severity::Warn);
     assert_eq!(rules.added_dependency, Severity::Off);
 
     let json = r#"{"weakened-tests": "error", "added-dependency": "warn"}"#;
@@ -545,7 +533,7 @@ fn severity_from_str_invalid_returns_error() {
 /// more. See the note on [`KNOWN_RULE_NAMES`].
 #[test]
 fn known_rule_names_list_length_is_pinned() {
-    assert_eq!(KNOWN_RULE_NAMES.len(), 133);
+    assert_eq!(KNOWN_RULE_NAMES.len(), 135);
 }
 
 /// The reverse of `known_rule_names_covers_every_struct_field`. That one
@@ -613,8 +601,8 @@ fn known_rule_names_covers_every_serde_alias_in_source() {
 
     assert_eq!(
         aliases_found.len(),
-        136,
-        "expected 136 source-level alias attrs (68 per struct); got {}: {:?}",
+        138,
+        "expected 138 source-level alias attrs (69 per struct); got {}: {:?}",
         aliases_found.len(),
         aliases_found
     );

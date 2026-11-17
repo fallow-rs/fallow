@@ -556,6 +556,17 @@ line states exit code 0.
   pasted copy stays introduced. At least one instance must hold no added
   line: when every copy holds an added line, the change wrote the same text
   into each copy, and the group stays introduced.
+- Audit clone-group gate: the `introduced-clone-group` rule decides how a
+  clone group takes part in the verdict (`duplication_verdict_flags` in
+  `crates/api/src/audit_run/outcome.rs`). Under `new-only`, only an
+  introduced group counts; under `all`, every group in the changed files
+  counts. `error` fails the verdict, `warn` (the default) gives `warn`, and
+  `off` removes the group from the verdict but keeps it in the report. With
+  `overrides`, the rule resolves for each instance file and the most severe
+  result applies. The `duplicates.threshold` gate stays independent: it
+  reads the same counted groups and also fails a run where the rule is
+  `off`. The rule adds no suppression token; `code-duplication` suppresses a
+  clone instance before attribution.
 - Audit diff-risk rules: `crates/api/src/diff_risk/` computes `weakened-tests`,
   `added-suppression`, `test-only-branch`, `diverged-clone-sibling` and
   `added-dependency` inside `audit_run::run`, so the CLI, the MCP `audit` tool

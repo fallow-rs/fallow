@@ -431,8 +431,7 @@ struct HeadAnalyses {
     check: Option<CheckResult>,
     dupes: Option<DupesResult>,
     health: Option<HealthResult>,
-    /// The diff evidence that the brief pass read on the HEAD side. The brief
-    /// data reuses it, so the run reads the diff one time.
+    /// The HEAD diff evidence of the brief pass, which the brief data reuses.
     brief_diff_evidence: Option<BriefDiffEvidence>,
     /// Unused-code keys of a base side under the config of the base commit.
     own_config_unused_code: Option<FxHashSet<String>>,
@@ -491,6 +490,7 @@ fn analyses_view<'a>(
             root: &dupes.config.root,
             duplication_percentage: dupes.report.stats.duplication_percentage,
             threshold: dupes.threshold,
+            config: &dupes.config,
         }),
         health: health.map(|health| HealthView {
             report: &health.report,
