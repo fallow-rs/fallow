@@ -13,7 +13,7 @@ use std::path::PathBuf;
 /// categories. A present-but-stale marker is harmless because impact keys on a
 /// suppression that newly appeared between two recorded runs. It is internal:
 /// never serialized into the public JSON output schema (the field on
-/// [`AnalysisResults`] is `#[serde(skip)]`), only read in-process by
+/// [`AnalysisResults`](crate::results::AnalysisResults) is `#[serde(skip)]`), only read in-process by
 /// `fallow impact`.
 #[derive(Debug, Clone)]
 pub struct ActiveSuppression {
