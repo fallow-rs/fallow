@@ -82,6 +82,8 @@ pub enum WeakenedTestsKind {
     AssertionDrop,
     /// A coverage threshold that the change made less strict.
     CoverageThreshold,
+    /// A rule severity in a Fallow config that the change made less strict.
+    RuleSeverity,
 }
 
 impl WeakenedTestsKind {
@@ -93,6 +95,7 @@ impl WeakenedTestsKind {
             Self::RemovedTests => "removed-tests",
             Self::AssertionDrop => "assertion-drop",
             Self::CoverageThreshold => "coverage-threshold",
+            Self::RuleSeverity => "rule-severity",
         }
     }
 }
@@ -246,6 +249,7 @@ mod tests {
             WeakenedTestsKind::RemovedTests,
             WeakenedTestsKind::AssertionDrop,
             WeakenedTestsKind::CoverageThreshold,
+            WeakenedTestsKind::RuleSeverity,
         ] {
             assert_eq!(serde_json::json!(kind), kind.code());
         }

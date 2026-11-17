@@ -18,7 +18,8 @@ pub use fallow_output::{WeakeningKind, WeakeningSignal};
 /// Project the findings of a diff-risk report onto weakening signals.
 ///
 /// - `weakened-tests` maps to `test-weakened`, except a less strict coverage
-///   threshold, which maps to `threshold-lowered`.
+///   threshold or a less strict rule severity, which map to
+///   `threshold-lowered`.
 /// - `added-suppression` maps to `suppression-added`.
 ///
 /// The other diff-risk rules are not weakening signals.
@@ -29,9 +30,10 @@ pub fn signals_from_diff_risk(report: &DiffRiskReport) -> Vec<WeakeningSignal> {
         .iter()
         .filter_map(|finding| {
             let (kind, evidence) = match (finding.rule, finding.kind) {
-                (DiffRiskRule::WeakenedTests, Some(WeakenedTestsKind::CoverageThreshold)) => {
-                    (WeakeningKind::ThresholdLowered, finding.evidence.clone())
-                }
+                (
+                    DiffRiskRule::WeakenedTests,
+                    Some(WeakenedTestsKind::CoverageThreshold | WeakenedTestsKind::RuleSeverity),
+                ) => (WeakeningKind::ThresholdLowered, finding.evidence.clone()),
                 (DiffRiskRule::WeakenedTests, Some(WeakenedTestsKind::SkipOnly)) => (
                     WeakeningKind::TestWeakened,
                     format!("{} added", finding.evidence),
@@ -181,6 +183,12 @@ mod tests {
                 "vitest.config.ts",
                 "lines: 90 -> 70",
             ),
+            finding(
+                DiffRiskRule::WeakenedTests,
+                Some(WeakenedTestsKind::RuleSeverity),
+                ".fallowrc.json",
+                "weakened-tests: error -> off",
+            ),
         ]);
         assert_eq!(
             signals,
@@ -200,6 +208,11 @@ mod tests {
                     WeakeningKind::ThresholdLowered,
                     "vitest.config.ts",
                     "lines: 90 -> 70"
+                ),
+                signal(
+                    WeakeningKind::ThresholdLowered,
+                    ".fallowrc.json",
+                    "weakened-tests: error -> off"
                 ),
             ]
         );

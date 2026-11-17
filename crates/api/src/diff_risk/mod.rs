@@ -6,8 +6,8 @@
 //! the base ref and `HEAD`.
 //!
 //! - `weakened-tests`: a new skip or focus marker, fewer test cases across the
-//!   changed test files, fewer assertions in a test file, or a less strict
-//!   coverage threshold.
+//!   changed test files, fewer assertions in a test file, a less strict
+//!   coverage threshold, or a less strict rule severity in a Fallow config.
 //! - `added-suppression`: a new lint, type-check, coverage or Fallow
 //!   suppression comment.
 //! - `test-only-branch`: a new test-environment branch in a non-test source
@@ -17,6 +17,7 @@
 //! - `added-dependency`: a new `package.json` dependency. Off by default.
 
 pub mod clones;
+pub mod rule_severity;
 pub mod text;
 
 use std::path::{Path, PathBuf};
@@ -116,6 +117,9 @@ struct RawFinding {
     message: String,
     evidence: String,
     related: Vec<DiffRiskLocation>,
+    /// The lowest severity of the finding. A change that lowers the severity
+    /// of a rule must not turn off the finding that reports that change.
+    min_severity: Option<Severity>,
 }
 
 /// Run every diff-risk rule over the changed files.
@@ -142,6 +146,9 @@ pub fn detect(input: &DiffRiskInput<'_>) -> DiffRiskReport {
     for file in &files {
         let rules = input.rules.for_path(&file.abs);
         detect_file(input.root, file, &rules, &mut raw);
+        if rule_severity::is_fallow_config_path(&file.rel) {
+            detect_weakened_rules(file, &mut raw);
+        }
     }
     detect_removed_tests(input.root, &files, &mut raw);
     if let Some(base_groups) = input.base_clone_groups {
@@ -331,6 +338,27 @@ fn is_tool_config(rel: &str) -> bool {
     name.contains(".config.") || name.contains(".conf.") || dot_rc
 }
 
+/// Rule severities that the change lowered in a Fallow config file. The
+/// finding keeps the base `weakened-tests` severity as its lowest severity,
+/// so a change that turns off `weakened-tests` still reports.
+fn detect_weakened_rules(file: &FileTexts, raw: &mut Vec<RawFinding>) {
+    let base = file.base.as_deref().unwrap_or("");
+    let head = file.head.as_deref().unwrap_or("");
+    let min_severity = rule_severity::weakened_tests_severity(base);
+    for hit in rule_severity::weakened_rule_hits(base, head) {
+        raw.push(RawFinding {
+            rule: DiffRiskRule::WeakenedTests,
+            kind: Some(WeakenedTestsKind::RuleSeverity),
+            path: file.rel.clone(),
+            line: (hit.line > 0).then_some(hit.line),
+            message: format!("The change makes a rule less strict ({})", hit.evidence),
+            evidence: hit.evidence,
+            related: Vec::new(),
+            min_severity,
+        });
+    }
+}
+
 fn detect_file(root: &Path, file: &FileTexts, rules: &RulesConfig, raw: &mut Vec<RawFinding>) {
     let base = file.base.as_deref().unwrap_or("");
     let Some(head) = file.head.as_deref() else {
@@ -353,6 +381,7 @@ fn detect_file(root: &Path, file: &FileTexts, rules: &RulesConfig, raw: &mut Vec
                     ),
                     evidence: hit.evidence,
                     related: Vec::new(),
+                    min_severity: None,
                 });
             }
         }
@@ -369,6 +398,7 @@ fn detect_file(root: &Path, file: &FileTexts, rules: &RulesConfig, raw: &mut Vec
                     ),
                     evidence: hit.evidence,
                     related: Vec::new(),
+                    min_severity: None,
                 });
             }
         }
@@ -392,6 +422,7 @@ fn detect_file(root: &Path, file: &FileTexts, rules: &RulesConfig, raw: &mut Vec
                 message: format!("The change adds a `{}` suppression comment", hit.evidence),
                 evidence: hit.evidence,
                 related: Vec::new(),
+                min_severity: None,
             });
         }
     }
@@ -413,6 +444,7 @@ fn detect_file(root: &Path, file: &FileTexts, rules: &RulesConfig, raw: &mut Vec
                 ),
                 evidence: hit.evidence,
                 related: Vec::new(),
+                min_severity: None,
             });
         }
     }
@@ -429,6 +461,7 @@ fn detect_file(root: &Path, file: &FileTexts, rules: &RulesConfig, raw: &mut Vec
                 message: format!("The change adds the dependency `{}`", added.name),
                 evidence,
                 related: Vec::new(),
+                min_severity: None,
             });
         }
     }
@@ -693,6 +726,7 @@ fn detect_removed_tests(root: &Path, files: &[FileTexts], raw: &mut Vec<RawFindi
                 message: format!("The change removes test cases ({evidence})"),
                 evidence,
                 related: Vec::new(),
+                min_severity: None,
             });
         } else if asserts_dropped
             && count.assertions_led
@@ -711,6 +745,7 @@ fn detect_removed_tests(root: &Path, files: &[FileTexts], raw: &mut Vec<RawFindi
                 message: format!("The change removes assertions ({evidence})"),
                 evidence,
                 related: Vec::new(),
+                min_severity: None,
             });
         }
     }
@@ -791,6 +826,7 @@ fn detect_diverged_clones(
             ),
             evidence: format!("unchanged copies: {evidence}"),
             related,
+            min_severity: None,
         });
     }
 }
@@ -807,6 +843,13 @@ const fn issue_kind(rule: DiffRiskRule) -> IssueKind {
 
 const fn rule_severity(rules: &RulesConfig, rule: DiffRiskRule) -> Severity {
     rules.severity_for_kind(issue_kind(rule))
+}
+
+fn stricter(severity: Severity, min_severity: Option<Severity>) -> Severity {
+    match min_severity {
+        Some(min) if rule_severity::strictness(min) > rule_severity::strictness(severity) => min,
+        _ => severity,
+    }
 }
 
 /// Whether a head suppression covers the finding. An `added-suppression`
@@ -895,20 +938,31 @@ fn finalize(
         .into_iter()
         .filter_map(|finding| {
             let rules = input.rules.for_path(&input.root.join(&finding.path));
-            let severity = match rule_severity(&rules, finding.rule) {
+            let severity = stricter(rule_severity(&rules, finding.rule), finding.min_severity);
+            let severity = match severity {
                 Severity::Off => return None,
                 Severity::Warn => DiffRiskSeverity::Warn,
                 Severity::Error => DiffRiskSeverity::Error,
             };
+            // A finding with a base severity floor reports a change of the
+            // config that judges it. A head comment or a head override cannot
+            // hide it, so it offers no suppression action.
+            let fixed_by_base = finding.min_severity.is_some();
             let head_list = suppressions.get(finding.path.as_str());
-            if head_list.is_some_and(|list| is_suppressed(list, finding.rule, finding.line)) {
+            if !fixed_by_base
+                && head_list.is_some_and(|list| is_suppressed(list, finding.rule, finding.line))
+            {
                 return None;
             }
             let exists = head_exists
                 .get(finding.path.as_str())
                 .copied()
                 .unwrap_or(true);
-            let actions = suppression_actions(finding.rule, &finding.path, finding.line, exists);
+            let actions = if fixed_by_base {
+                Vec::new()
+            } else {
+                suppression_actions(finding.rule, &finding.path, finding.line, exists)
+            };
             let suppression = head_list.and_then(|list| added_fallow_ignore(list, &finding));
             let message = if suppression
                 .as_ref()
@@ -1392,6 +1446,7 @@ mod tests {
             message: String::new(),
             evidence: evidence.to_owned(),
             related: Vec::new(),
+            min_severity: None,
         }
     }
 
