@@ -1052,13 +1052,11 @@ fn regression_save_targets(cli: &Cli) -> (Option<std::path::PathBuf>, bool) {
 
 fn dispatch_bare_command(dispatch: &DispatchContext<'_>) -> ExitCode {
     let cli = dispatch.cli;
-    let (run_check, run_dupes, run_health) = combined::resolve_analyses(&cli.only, &cli.skip);
-    if !(run_check || run_dupes || run_health) {
-        return emit_input_error(
-            "--skip leaves no analysis to run: pass at most two of dead-code, dupes and health",
-            dispatch.output,
-        );
-    }
+    let (run_check, run_dupes, run_health) =
+        match combined::resolve_bare_analyses(cli, dispatch.root, dispatch.output) {
+            Ok(analyses) => analyses,
+            Err(code) => return code,
+        };
     let production = match dispatch.production_modes(
         cli.production_dead_code,
         cli.production_health,

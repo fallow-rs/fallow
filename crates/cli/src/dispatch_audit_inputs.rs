@@ -69,9 +69,13 @@ pub(super) fn resolve_audit_inputs(
     )?;
     // `duplicates.enabled: false` alone turns the sub-analysis off here. A
     // `--dupes-baseline` flag is then no mistake of this command line: the
-    // flag had an effect before the audit read that key, so it is dropped.
+    // flag had an effect before the audit read that key, so it gets a note
+    // and the run goes on.
     let dupes_off_by_duplicates_enabled =
         !analyses.dupes && resolve_audit_analyses(&audit_cfg, true, args).dupes;
+    if dupes_off_by_duplicates_enabled && args.dupes_baseline.is_some() {
+        eprintln!("{}", combined::INERT_DUPES_BASELINE_NOTE);
+    }
     let resolved_dupes_baseline = baseline(
         analyses.dupes,
         "--dupes-baseline",

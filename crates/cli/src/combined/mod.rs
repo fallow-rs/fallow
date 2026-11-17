@@ -117,6 +117,49 @@ pub fn resolve_analyses(only: &[AnalysisKind], skip: &[AnalysisKind]) -> (bool, 
     }
 }
 
+/// The note for a `--dupes-baseline` flag that reads no baseline, because
+/// `duplicates.enabled: false` turned the duplication analysis off. The run
+/// does not fail on the flag: it had an effect before the command read that
+/// key, so a CI script that passes it must keep its exit code.
+pub const INERT_DUPES_BASELINE_NOTE: &str = "Note: --dupes-baseline has no effect: duplicates.enabled is false in the config, so the duplication analysis does not run.";
+
+/// Resolve which analyses the bare `fallow` run executes, as `(dead code,
+/// duplication, health)`.
+///
+/// `--only` and `--skip` select as in [`resolve_analyses`]. Without `--only`,
+/// `duplicates.enabled: false` in the config also turns duplication off, so a
+/// project that turned duplication detection off gets no clone groups from
+/// the bare run. `--only dupes` names the analysis and runs it.
+pub fn resolve_bare_analyses(
+    cli: &crate::Cli,
+    root: &std::path::Path,
+    output: OutputFormat,
+) -> Result<(bool, bool, bool), ExitCode> {
+    let (run_check, mut run_dupes, run_health) = resolve_analyses(&cli.only, &cli.skip);
+    let mut disabled_by_config = false;
+    if run_dupes
+        && cli.only.is_empty()
+        && !crate::cli_production::duplicates_enabled(cli, root, output)?
+    {
+        run_dupes = false;
+        disabled_by_config = true;
+        if cli.dupes_baseline.is_some() {
+            eprintln!("{INERT_DUPES_BASELINE_NOTE}");
+        }
+    }
+    if run_check || run_dupes || run_health {
+        return Ok((run_check, run_dupes, run_health));
+    }
+    Err(crate::error::emit_input_error(
+        if disabled_by_config {
+            "--skip leaves no analysis to run: duplicates.enabled is false in the config, so dupes does not run. Keep dead-code or health, or pass --only dupes"
+        } else {
+            "--skip leaves no analysis to run: pass at most two of dead-code, dupes and health"
+        },
+        output,
+    ))
+}
+
 /// Resolve which dead-code findings the bare run reports from `--only` and
 /// `--skip`.
 ///
