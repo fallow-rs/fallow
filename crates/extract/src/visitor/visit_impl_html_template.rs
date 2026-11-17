@@ -6,11 +6,12 @@
 
 use oxc_ast::ast::{
     Argument, Declaration, Expression, ImportDeclarationSpecifier, Program, Statement,
-    VariableDeclarator,
+    TemplateElement, VariableDeclarator,
 };
+use oxc_span::Span;
 
 use crate::asset_url::normalize_asset_url;
-use crate::html::is_remote_url;
+use crate::html::collect_asset_ref_spans;
 use crate::js_text::JsText;
 use crate::visitor::ModuleInfoExtractor;
 use crate::{ImportInfo, ImportedName};
@@ -34,25 +35,38 @@ impl ModuleInfoExtractor {
     }
 
     /// Push the asset references of one template quasi onto `imports`, with
-    /// the remote-url filter and the normalization of the HTML parser.
-    pub(super) fn push_html_template_asset_imports(&mut self, text: &str) {
+    /// the remote-url filter and the normalization of the HTML parser. Each
+    /// import points at its quoted attribute value. When an escape makes the
+    /// cooked text differ from the source text, the offsets do not match the
+    /// source, so the import points at the start of the template text.
+    pub(super) fn push_html_template_asset_imports(
+        &mut self,
+        quasi: &TemplateElement<'_>,
+        text: &str,
+    ) {
         if self.html_tag_is_project_value {
             return;
         }
-        for raw in crate::html::collect_asset_refs(text) {
-            let trimmed = raw.trim();
-            if trimmed.is_empty() || is_remote_url(trimmed) {
-                continue;
-            }
+        let exact = quasi.value.raw.as_str() == text;
+        for asset in collect_asset_ref_spans(text) {
+            let (span, source_span) = if exact {
+                let quoted = Span::new(
+                    quasi.span.start + to_u32(asset.quoted.start),
+                    quasi.span.start + to_u32(asset.quoted.end),
+                );
+                (quoted, quoted)
+            } else {
+                (Span::empty(quasi.span.start), Span::default())
+            };
             self.imports.push(ImportInfo {
-                source: normalize_asset_url(trimmed),
+                source: normalize_asset_url(&asset.value),
                 imported_name: ImportedName::SideEffect,
                 local_name: String::new(),
                 is_type_only: false,
                 is_type_only_star: false,
                 from_style: false,
-                span: oxc_span::Span::default(),
-                source_span: oxc_span::Span::default(),
+                span,
+                source_span,
             });
         }
     }
@@ -130,4 +144,10 @@ fn requires_package(init: Option<&Expression<'_>>) -> bool {
 /// A relative or absolute path names a file of the project, not a package.
 fn is_project_specifier(source: &str) -> bool {
     source.starts_with('.') || source.starts_with('/')
+}
+
+/// A template quasi is part of a source file, and a source file is shorter
+/// than `u32::MAX` bytes.
+fn to_u32(offset: usize) -> u32 {
+    u32::try_from(offset).unwrap_or(u32::MAX)
 }

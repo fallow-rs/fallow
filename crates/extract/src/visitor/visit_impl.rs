@@ -5092,7 +5092,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     .value
                     .cooked
                     .map_or_else(|| quasi.value.raw.as_str().into(), JsText::text);
-                self.push_html_template_asset_imports(&text);
+                self.push_html_template_asset_imports(quasi, &text);
                 // Record custom-element tags rendered in the template
                 // (`<x-foo>`), feeding the Lit `unrendered-component` arm's
                 // project-wide rendered-tag union.

@@ -390,3 +390,44 @@ fn html_tag_from_package_is_markup() {
         );
     }
 }
+
+#[test]
+fn html_tagged_template_asset_span_is_the_quoted_attribute_value() {
+    let source = r#"import { html } from 'hono/html'
+
+export const layout = () => html`
+  <!-- <script src="./old.js"></script> -->
+  <script type="module" src="./src/main.js"></script>
+  <link rel="stylesheet" href="./src/index.css" />
+`"#;
+    let info = parse_ts(source);
+    for specifier in ["./src/main.js", "./src/index.css"] {
+        let import = info
+            .imports
+            .iter()
+            .find(|import| import.source == specifier)
+            .expect("asset import");
+        let quoted = format!("\"{specifier}\"");
+        let span = import.source_span;
+        assert_eq!(
+            &source[span.start as usize..span.end as usize],
+            quoted,
+            "{specifier}"
+        );
+        assert_eq!(import.span, span, "{specifier}");
+    }
+}
+
+#[test]
+fn html_tagged_template_with_escape_anchors_asset_at_template_text() {
+    let source = "import { html } from 'hono/html'\nexport const layout = () => html`\\u0020<script src=\"./app.js\"></script>`";
+    let info = parse_ts(source);
+    let import = info
+        .imports
+        .iter()
+        .find(|import| import.source == "./app.js")
+        .expect("asset import");
+    let template_text = source.find("\\u0020").expect("template text") as u32;
+    assert_eq!(import.span.start, template_text);
+    assert!(import.source_span.is_empty());
+}

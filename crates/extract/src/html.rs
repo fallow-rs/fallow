@@ -131,39 +131,70 @@ pub fn is_template_placeholder(value: &str) -> bool {
 /// literal override so `` html`<script src="...">` `` in Hono/lit-html/htm
 /// layouts emits the same asset edges as a real `.html` file.
 pub fn collect_asset_refs(source: &str) -> Vec<String> {
-    let without_comments = HTML_COMMENT_RE.replace_all(source, "");
+    collect_asset_ref_spans(source)
+        .into_iter()
+        .map(|asset| asset.value)
+        .collect()
+}
+
+/// One asset reference and the byte range of its quoted value in the source.
+pub struct AssetRef {
+    pub value: String,
+    /// Starts at the opening quote and ends after the closing quote.
+    pub quoted: std::ops::Range<usize>,
+}
+
+/// [`collect_asset_refs`] with the location of each value. Comments and inline
+/// script bodies become blanks of the same byte length, so an offset in the
+/// scanned text is an offset in `source`.
+pub fn collect_asset_ref_spans(source: &str) -> Vec<AssetRef> {
+    let mut scanned = source.to_owned();
+    for comment in HTML_COMMENT_RE.find_iter(source) {
+        blank(&mut scanned, comment.range());
+    }
     // Keep the opening tag so `<script src="...">` still matches, but drop the
     // inline body: markup inside it is script text, not document markup.
-    let stripped = SCRIPT_ELEMENT_RE.replace_all(&without_comments, "$1$2");
-    let mut refs: Vec<String> = Vec::new();
-
-    for cap in SCRIPT_SRC_RE.captures_iter(&stripped) {
-        if let Some(m) = cap.get(1) {
-            let src = m.as_str().trim();
-            if !src.is_empty() && !is_remote_url(src) && !is_template_placeholder(src) {
-                refs.push(src.to_string());
-            }
-        }
+    let bodies: Vec<std::ops::Range<usize>> = SCRIPT_ELEMENT_RE
+        .captures_iter(&scanned)
+        .filter_map(|element| Some(element.get(1)?.end()..element.get(2)?.start()))
+        .collect();
+    for body in bodies {
+        blank(&mut scanned, body);
     }
 
-    for cap in LINK_HREF_RE.captures_iter(&stripped) {
-        if let Some(m) = cap.get(2) {
-            let href = m.as_str().trim();
-            if !href.is_empty() && !is_remote_url(href) && !is_template_placeholder(href) {
-                refs.push(href.to_string());
-            }
+    let mut refs: Vec<AssetRef> = Vec::new();
+    let mut push = |value: Option<regex::Match<'_>>| {
+        let Some(value) = value else {
+            return;
+        };
+        let trimmed = value.as_str().trim();
+        if !trimmed.is_empty() && !is_remote_url(trimmed) && !is_template_placeholder(trimmed) {
+            refs.push(AssetRef {
+                value: trimmed.to_string(),
+                quoted: value.start() - 1..value.end() + 1,
+            });
         }
+    };
+    for cap in SCRIPT_SRC_RE.captures_iter(&scanned) {
+        push(cap.get(1));
     }
-    for cap in LINK_HREF_REVERSE_RE.captures_iter(&stripped) {
-        if let Some(m) = cap.get(1) {
-            let href = m.as_str().trim();
-            if !href.is_empty() && !is_remote_url(href) && !is_template_placeholder(href) {
-                refs.push(href.to_string());
-            }
-        }
+    for cap in LINK_HREF_RE.captures_iter(&scanned) {
+        push(cap.get(2));
     }
-
+    for cap in LINK_HREF_REVERSE_RE.captures_iter(&scanned) {
+        push(cap.get(1));
+    }
     refs
+}
+
+/// Replace a byte range with spaces and keep its line breaks, so the byte
+/// offsets and the line numbers of the text after it do not change.
+fn blank(text: &mut String, range: std::ops::Range<usize>) {
+    let replacement: String = text[range.clone()]
+        .bytes()
+        .map(|byte| if byte == b'\n' { '\n' } else { ' ' })
+        .collect();
+    text.replace_range(range, &replacement);
 }
 
 /// Regex matching an opening or closing custom-element tag. The HTML spec
