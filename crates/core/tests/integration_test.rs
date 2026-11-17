@@ -61,6 +61,8 @@ mod css_in_js_styled;
 mod css_modules;
 #[path = "integration_test/css_url_package_credit.rs"]
 mod css_url_package_credit;
+#[path = "integration_test/cycles_allow.rs"]
+mod cycles_allow;
 #[path = "integration_test/cycles_ignore_lazy_imports.rs"]
 mod cycles_ignore_lazy_imports;
 #[path = "integration_test/declaration_runtime_sibling.rs"]
@@ -356,6 +358,8 @@ mod security_framework_sinks;
 mod security_hardcoded_secret;
 #[path = "integration_test/security_multihop_taint.rs"]
 mod security_multihop_taint;
+#[path = "integration_test/security_react_router_client_roots.rs"]
+mod security_react_router_client_roots;
 #[path = "integration_test/security_request_receivers.rs"]
 mod security_request_receivers;
 #[path = "integration_test/security_secret_to_network.rs"]
@@ -396,6 +400,8 @@ mod unused_enum_members;
 mod unused_load_data_keys;
 #[path = "integration_test/unused_namespace_members.rs"]
 mod unused_namespace_members;
+#[path = "integration_test/unused_protected_class_members.rs"]
+mod unused_protected_class_members;
 #[path = "integration_test/unused_react_props.rs"]
 mod unused_react_props;
 #[path = "integration_test/unused_server_actions.rs"]
@@ -639,6 +645,8 @@ mod issue_956_playwright_pnpm_exec;
 mod lexical_nodes;
 #[path = "integration_test/playwright_bare_package.rs"]
 mod playwright_bare_package;
+#[path = "integration_test/playwright_reporter_global_setup.rs"]
+mod playwright_reporter_global_setup;
 #[path = "integration_test/playwright_test_dir.rs"]
 mod playwright_test_dir;
 #[path = "integration_test/script_multiplexers.rs"]
@@ -754,10 +762,14 @@ mod issue_4313_function_array_return_element_member;
 mod issue_4351_nested_function_this_member;
 #[path = "integration_test/issue_4352_for_of_element_binding_scope.rs"]
 mod issue_4352_for_of_element_binding_scope;
+#[path = "integration_test/issue_4498_production_excluded_import.rs"]
+mod issue_4498_production_excluded_import;
 #[path = "integration_test/issue_4552_method_call_result_local.rs"]
 mod issue_4552_method_call_result_local;
 #[path = "integration_test/issue_4578_enum_member_alias.rs"]
 mod issue_4578_enum_member_alias;
+#[path = "integration_test/issue_4603_nested_class_binding_shadow.rs"]
+mod issue_4603_nested_class_binding_shadow;
 #[path = "integration_test/issue_609_velite.rs"]
 mod issue_609_velite;
 #[path = "integration_test/issue_704_auto_import_components.rs"]

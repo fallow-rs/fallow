@@ -178,6 +178,11 @@ where
                 .unused_namespace_members
                 .push(item.clone());
         }
+        for item in &results.unused_protected_class_members {
+            self.entry_for_path(&item.member.path)
+                .unused_protected_class_members
+                .push(item.clone());
+        }
         for item in &results.unresolved_imports {
             self.entry_for_path(&item.import.path)
                 .unresolved_imports

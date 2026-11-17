@@ -8,13 +8,16 @@
 //! (an entry point), each of these exports would report as unused.
 //!
 //! [`declaration_sibling_credit`] collects, for each such declaration file,
-//! the export names that the importers of its JS sibling use.
+//! the export names that the importers of its JS sibling use. A member read on
+//! a namespace import of the sibling (`ns.Opts`) uses the name of the member.
+//! A `usedExports` rule on the path of the sibling also credits the
+//! declaration file, through [`runtime_sibling_path`].
 
 use std::path::{Path, PathBuf};
 
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use fallow_types::extract::ImportedName;
+use fallow_types::extract::{ImportedName, ModuleInfo};
 
 use crate::discover::FileId;
 use crate::graph::{ModuleGraph, ModuleNode};
@@ -32,9 +35,17 @@ pub(super) type DeclarationSiblingCredit = FxHashMap<FileId, FxHashSet<String>>;
 /// that the reachable importers of that sibling use.
 ///
 /// A name counts when a reachable importer imports it from the sibling by
-/// name or as the default, or when the export of the sibling with that name
-/// has a reachable reference.
-pub(super) fn declaration_sibling_credit(graph: &ModuleGraph) -> DeclarationSiblingCredit {
+/// name or as the default, reads it as a member of a namespace import of the
+/// sibling, or when the export of the sibling with that name has a reachable
+/// reference.
+///
+/// `infos_by_id` is the `FileId` map of `modules` when the caller has one;
+/// otherwise the function builds it, and only when a declaration pair exists.
+pub(super) fn declaration_sibling_credit(
+    graph: &ModuleGraph,
+    modules: &[ModuleInfo],
+    infos_by_id: Option<&FxHashMap<FileId, &ModuleInfo>>,
+) -> DeclarationSiblingCredit {
     let pairs: Vec<(FileId, PathBuf)> = graph
         .modules
         .iter()
@@ -48,11 +59,18 @@ pub(super) fn declaration_sibling_credit(graph: &ModuleGraph) -> DeclarationSibl
         .iter()
         .map(|module| (module.path.as_path(), module.file_id))
         .collect();
+    let built: FxHashMap<FileId, &ModuleInfo>;
+    let infos = if let Some(infos) = infos_by_id {
+        infos
+    } else {
+        built = modules.iter().map(|info| (info.file_id, info)).collect();
+        &built
+    };
     pairs
         .into_iter()
         .filter_map(|(declaration, sibling)| {
             let runtime = *by_path.get(sibling.as_path())?;
-            let names = used_names_of(graph, runtime);
+            let names = used_names_of(graph, infos, runtime);
             (!names.is_empty()).then_some((declaration, names))
         })
         .collect()
@@ -60,7 +78,7 @@ pub(super) fn declaration_sibling_credit(graph: &ModuleGraph) -> DeclarationSibl
 
 /// The path of the JS module that the declaration file at `path` types, or
 /// `None` when `path` is no declaration file.
-fn runtime_sibling_path(path: &Path) -> Option<PathBuf> {
+pub(super) fn runtime_sibling_path(path: &Path) -> Option<PathBuf> {
     let name = path.file_name()?.to_str()?;
     DECLARATION_RUNTIME_PAIRS.iter().find_map(|(suffix, ext)| {
         let stem = name.strip_suffix(suffix)?;
@@ -68,7 +86,11 @@ fn runtime_sibling_path(path: &Path) -> Option<PathBuf> {
     })
 }
 
-fn used_names_of(graph: &ModuleGraph, runtime: FileId) -> FxHashSet<String> {
+fn used_names_of(
+    graph: &ModuleGraph,
+    infos: &FxHashMap<FileId, &ModuleInfo>,
+    runtime: FileId,
+) -> FxHashSet<String> {
     let mut names = FxHashSet::default();
     let mut seen_importers = FxHashSet::default();
     for &importer in graph.importers_of(runtime) {
@@ -87,7 +109,12 @@ fn used_names_of(graph: &ModuleGraph, runtime: FileId) -> FxHashSet<String> {
                     ImportedName::Default => {
                         names.insert("default".to_string());
                     }
-                    ImportedName::Namespace | ImportedName::SideEffect => {}
+                    ImportedName::Namespace => {
+                        if let Some(info) = infos.get(&importer) {
+                            names.extend(namespace_members_read(info, &symbol.local_name));
+                        }
+                    }
+                    ImportedName::SideEffect => {}
                 }
             }
         }
@@ -102,6 +129,19 @@ fn used_names_of(graph: &ModuleGraph, runtime: FileId) -> FxHashSet<String> {
         );
     }
     names
+}
+
+/// The members that `info` reads on the namespace local `local`
+/// (`ns.Opts` reads `Opts`). An empty local is a whole-module edge with no
+/// binding to read through.
+fn namespace_members_read<'a>(
+    info: &'a ModuleInfo,
+    local: &'a str,
+) -> impl Iterator<Item = String> + 'a {
+    info.member_accesses
+        .iter()
+        .filter(move |access| !local.is_empty() && access.object == local)
+        .map(|access| access.member.clone())
 }
 
 fn is_reachable_module(graph: &ModuleGraph, file_id: FileId) -> bool {

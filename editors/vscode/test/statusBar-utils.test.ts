@@ -1,8 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildAnalysisSummaryLines,
   buildParamsFromCli,
-  buildStatusBarPartsFromLsp,
-  buildStatusBarTooltipMarkdown,
   formatChangedSinceRefForStatusBar,
   getDuplicationPercentage,
   renderStatusBarText,
@@ -54,19 +53,12 @@ describe("getDuplicationPercentage", () => {
   });
 });
 
-describe("buildStatusBarPartsFromLsp", () => {
-  it("builds issue and duplication summary parts", () => {
-    expect(
-      buildStatusBarPartsFromLsp(
-        baseParams({ totalIssues: 3, duplicationPercentage: 1.234 })
-      )
-    ).toEqual(["3 issues", "1.2% duplication"]);
-  });
-});
+const summary = (params: AnalysisCompleteParams, changedSinceRef?: string): string =>
+  buildAnalysisSummaryLines(params, changedSinceRef).join("\n\n");
 
-describe("buildStatusBarTooltipMarkdown", () => {
-  it("includes only present issue categories and action links", () => {
-    const markdown = buildStatusBarTooltipMarkdown(
+describe("buildAnalysisSummaryLines", () => {
+  it("includes only present issue categories", () => {
+    const markdown = summary(
       baseParams({
         totalIssues: 4,
         unusedFiles: 1,
@@ -76,27 +68,24 @@ describe("buildStatusBarTooltipMarkdown", () => {
       })
     );
 
-    expect(markdown).toContain("**Fallow** - Analysis Results");
     expect(markdown).toContain("$(error) 2 unresolved imports");
     expect(markdown).toContain("$(warning) 1 unused files");
-    expect(markdown).toContain("$(copy) 1 clone groups (3.3% duplication)");
-    expect(markdown).toContain("command:fallow.analyze");
     expect(markdown).not.toContain("unused exports");
   });
 
-  it("shows a success message when no issues or clones exist", () => {
-    const markdown = buildStatusBarTooltipMarkdown(baseParams());
+  it("shows a success message when no issues exist", () => {
+    const markdown = summary(baseParams());
 
     expect(markdown).toContain("$(check) No issues found");
   });
 
   it("surfaces the changedSince ref when scoped", () => {
-    const markdown = buildStatusBarTooltipMarkdown(baseParams(), "fallow-baseline");
+    const markdown = summary(baseParams(), "fallow-baseline");
     expect(markdown).toContain("Scoped to changes since fallow\\-baseline");
   });
 
   it("lists package refs and explains the remaining full scope", () => {
-    const markdown = buildStatusBarTooltipMarkdown(
+    const markdown = summary(
       baseParams({
         packageBaselines: [
           { workspace_root: "packages/web", reference: "main" },
@@ -115,14 +104,14 @@ describe("buildStatusBarTooltipMarkdown", () => {
     const params = baseParams({
       packageBaselines: [{ workspace_root: "packages/web", reference: "main" }],
     });
-    expect(buildStatusBarTooltipMarkdown(params, "new-global-ref"))
+    expect(summary(params, "new-global-ref"))
       .toContain("packages/web: main");
     expect(renderStatusBarText("$(search) Fallow", "new-global-ref", undefined, params.packageBaselines))
       .toBe("$(search) Fallow (package baselines)");
   });
 
   it("uses the server-applied changedSince scope when present", () => {
-    const markdown = buildStatusBarTooltipMarkdown(
+    const markdown = summary(
       baseParams({
         changedSinceScope: {
           requestedRef: "origin/main",
@@ -137,7 +126,7 @@ describe("buildStatusBarTooltipMarkdown", () => {
   });
 
   it("warns that dropped changedSince results are full-scope", () => {
-    const markdown = buildStatusBarTooltipMarkdown(
+    const markdown = summary(
       baseParams({
         changedSinceScope: {
           requestedRef: "missing-ref",
@@ -155,7 +144,7 @@ describe("buildStatusBarTooltipMarkdown", () => {
   });
 
   it("escapes changedSince markdown in trusted tooltip text", () => {
-    const markdown = buildStatusBarTooltipMarkdown(
+    const markdown = summary(
       baseParams(),
       "base` [open](command:workbench.action.openSettings)"
     );
@@ -165,7 +154,7 @@ describe("buildStatusBarTooltipMarkdown", () => {
   });
 
   it("omits the scope line when no changedSince ref is given", () => {
-    const markdown = buildStatusBarTooltipMarkdown(baseParams());
+    const markdown = summary(baseParams());
     expect(markdown).not.toContain("Scoped to changes since");
   });
 });
@@ -330,7 +319,7 @@ describe("buildParamsFromCli", () => {
     expect(
       renderStatusBarText("$(search) Fallow", null, params.changedSinceScope, params.packageBaselines),
     ).toBe("$(search) Fallow (package baselines)");
-    expect(buildStatusBarTooltipMarkdown(params)).toContain("packages/web: main");
+    expect(summary(params)).toContain("packages/web: main");
 
     const dropped = buildParamsFromCli(emptyCheck(), null, {
       request_outcomes: {
@@ -345,7 +334,7 @@ describe("buildParamsFromCli", () => {
     });
     expect(renderStatusBarText("$(search) Fallow", "missing-ref", dropped.changedSinceScope))
       .toBe("$(search) Fallow (since missing-ref: scope dropped)");
-    expect(buildStatusBarTooltipMarkdown(dropped, "missing-ref"))
+    expect(summary(dropped, "missing-ref"))
       .toContain("The Git ref was not found\\.");
   });
 

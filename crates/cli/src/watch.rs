@@ -79,9 +79,14 @@ fn has_disallowed_hidden_dir(relative: &Path) -> bool {
     })
 }
 
-fn build_production_glob_set() -> Option<globset::GlobSet> {
+fn build_production_glob_set(user_patterns: &[String]) -> Option<globset::GlobSet> {
     let mut builder = globset::GlobSetBuilder::new();
-    for pattern in fallow_engine::discover::PRODUCTION_EXCLUDE_PATTERNS {
+    let user_patterns = user_patterns.iter().map(String::as_str);
+    for pattern in fallow_engine::discover::PRODUCTION_EXCLUDE_PATTERNS
+        .iter()
+        .copied()
+        .chain(user_patterns)
+    {
         if let Ok(glob) = globset::GlobBuilder::new(pattern)
             .literal_separator(true)
             .build()
@@ -115,7 +120,10 @@ impl WatchFilter {
         Self {
             root: config.root.clone(),
             ignore_patterns: config.ignore_patterns.clone(),
-            production_excludes: config.production.then(build_production_glob_set).flatten(),
+            production_excludes: config
+                .production
+                .then(|| build_production_glob_set(&config.production_ignore))
+                .flatten(),
             gitignores,
             global_gitignore,
         }
@@ -382,9 +390,7 @@ fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOption
             &mut analysis.results,
             &projects,
             &entry_points,
-            config.rules.unused_exports != fallow_config::Severity::Off
-                || config.rules.unused_types != fallow_config::Severity::Off
-                || config.rules.unused_class_members != fallow_config::Severity::Off,
+            fallow_config::any_symbol_use_rule_active(&config.rules),
             config.rules.private_type_leaks != fallow_config::Severity::Off,
             false,
         ) {
@@ -394,8 +400,11 @@ fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOption
                     eprintln!("Type-aware analysis failed: {error}");
                     return exit_invalid_input();
                 }
-                let message =
-                    crate::type_aware_degrade::degraded_message(&config.root, &error.to_string());
+                let message = crate::type_aware_degrade::degraded_message(
+                    &config.root,
+                    &error.to_string(),
+                    false,
+                );
                 eprintln!("Warning: {message}");
                 Some(crate::type_aware_degrade::degraded_meta(
                     message,
@@ -1130,6 +1139,32 @@ mod tests {
                 .drain_ready(start + DEBOUNCE_WINDOW, DEBOUNCE_WINDOW)
                 .is_some()
         );
+    }
+
+    #[test]
+    fn watch_filter_applies_production_ignore_only_in_production_mode() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let root = temp.path().to_path_buf();
+        let mut config = make_config(&root, OutputFormat::Human, 1, true);
+        config.production_ignore = vec!["scripts/**".to_string()];
+        let seed = root.join("scripts/seed.ts");
+        let index = root.join("src/index.ts");
+
+        let default_filter =
+            WatchFilter::new_with_global_gitignore(&config, ignore::gitignore::Gitignore::empty());
+        assert!(
+            default_filter.allows(&seed),
+            "the default run watches scripts/"
+        );
+
+        config.production = true;
+        let production_filter =
+            WatchFilter::new_with_global_gitignore(&config, ignore::gitignore::Gitignore::empty());
+        assert!(
+            !production_filter.allows(&seed),
+            "production mode drops scripts/"
+        );
+        assert!(production_filter.allows(&index));
     }
 
     #[test]

@@ -1,0 +1,11 @@
+{
+  "name": "unused-protected-class-members",
+  "main": "src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./public-api": "./src/public-api.ts"
+  },
+  "devDependencies": {
+    "vitest": "^3.0.0"
+  }
+}

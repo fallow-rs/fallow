@@ -43,6 +43,7 @@ impl ModuleInfoExtractor {
         body: BodyRef<'_, '_>,
         inferred_param_types: Option<&[Option<String>]>,
         return_type: Option<&TSTypeAnnotation<'_>>,
+        implicit_receivers: Vec<(String, String)>,
     ) -> ScopedStructuralUses {
         let mut typed_params: Vec<(usize, String, String)> = params
             .items
@@ -83,13 +84,15 @@ impl ModuleInfoExtractor {
             let subject_name = subject.name.to_string();
             typed_params.push((index, subject_name, type_name));
         }
-        if typed_params.is_empty() {
+        if typed_params.is_empty() && implicit_receivers.is_empty() {
             return ScopedStructuralUses::default();
         }
 
         let target_params = typed_params
             .iter()
-            .map(|(_, param_name, _)| param_name.clone())
+            .map(|(_, param_name, _)| param_name)
+            .chain(implicit_receivers.iter().map(|(receiver, _)| receiver))
+            .cloned()
             .collect();
         let mut collector = StructuralParamMemberCollector::new(target_params);
         collector.collect_function_body(body);
@@ -108,6 +111,15 @@ impl ModuleInfoExtractor {
                 );
             }
             if let Some(property_members) = collector.property_members.remove(param_name.as_str()) {
+                uses.typed_property_accesses.extend(
+                    property_members
+                        .into_iter()
+                        .map(|(property_path, member)| (type_name.clone(), property_path, member)),
+                );
+            }
+        }
+        for (receiver, type_name) in implicit_receivers {
+            if let Some(property_members) = collector.property_members.remove(receiver.as_str()) {
                 uses.typed_property_accesses.extend(
                     property_members
                         .into_iter()
@@ -176,7 +188,14 @@ impl ModuleInfoExtractor {
         {
             return;
         }
-        let uses = Self::collect_structural_parameter_uses(params, body, None, return_type);
+        let implicit_receivers = self.implicit_env_receivers(params, body);
+        let uses = Self::collect_structural_parameter_uses(
+            params,
+            body,
+            None,
+            return_type,
+            implicit_receivers,
+        );
         self.record_scoped_parameter_member_accesses(&uses);
     }
 
@@ -211,11 +230,13 @@ impl ModuleInfoExtractor {
         let Some(body) = body else {
             return ScopedStructuralUses::default();
         };
+        let implicit_receivers = self.implicit_env_receivers(params, body);
         let mut uses = Self::collect_structural_parameter_uses(
             params,
             body,
             inferred_param_types,
             return_type,
+            implicit_receivers,
         );
         self.scoped_typed_parameter_body_spans.insert(body.span());
         if !uses.params.is_empty() || !uses.typed_property_accesses.is_empty() {

@@ -2512,7 +2512,7 @@ fn destructured_class_member_opaque_patterns_credit_whole_instance() {
 }
 
 #[test]
-fn skips_private_and_protected_members() {
+fn skips_private_members_and_marks_protected_members() {
     let info = parse(
         r"
             export class Foo {
@@ -2534,8 +2534,10 @@ fn skips_private_and_protected_members() {
         "private members should be skipped"
     );
     assert!(
-        !members.iter().any(|m| m.name == "internal"),
-        "protected members should be skipped"
+        members
+            .iter()
+            .any(|m| m.name == "internal" && m.is_protected),
+        "protected members should carry the protected marker"
     );
     assert!(
         !members.iter().any(|m| m.name == "runtimePrivate"),
@@ -9089,7 +9091,7 @@ fn class_skips_private_members() {
 }
 
 #[test]
-fn class_skips_protected_members() {
+fn class_marks_protected_members() {
     let info = parse(
         r"
         export class Foo {
@@ -9099,8 +9101,12 @@ fn class_skips_protected_members() {
         ",
     );
     let members = &info.exports[0].members;
-    assert!(!members.iter().any(|m| m.name == "internal"));
-    assert!(members.iter().any(|m| m.name == "open"));
+    assert!(
+        members
+            .iter()
+            .any(|m| m.name == "internal" && m.is_protected)
+    );
+    assert!(members.iter().any(|m| m.name == "open" && !m.is_protected));
 }
 
 #[test]
@@ -18787,5 +18793,90 @@ fn object_literal_getter_this_is_not_the_class_instance() {
             .any(|access| access.object == "Service" && access.member == "dead"),
         "the getter `this` is the object literal: {:?}",
         info.member_accesses
+    );
+}
+
+/// Issue #4603: a member read at module scope resolves through the binding of
+/// module scope, not through a class binding of the same name that only a
+/// function body declares. Both orders of the read and the function hold.
+#[test]
+fn module_scope_read_skips_nested_class_binding_of_same_name() {
+    let accesses = |source: &str| {
+        parse(source)
+            .member_accesses
+            .iter()
+            .map(|access| format!("{}.{}", access.object, access.member))
+            .collect::<Vec<_>>()
+    };
+    let after = accesses(
+        "import { E } from './e';\nimport { Foo } from './f';\nexport function setup(): void { const Alias = new Foo(); void Alias; }\nconst Alias = E;\nconsole.log(Alias.One);",
+    );
+    assert!(after.iter().any(|a| a == "E.One"), "{after:?}");
+    assert!(!after.iter().any(|a| a == "Foo.One"), "{after:?}");
+    let before = accesses(
+        "import { E } from './e';\nimport { Foo } from './f';\nconst Alias = E;\nconsole.log(Alias.One);\nexport function setup(): void { const Alias = new Foo(); void Alias; }",
+    );
+    assert!(before.iter().any(|a| a == "E.One"), "{before:?}");
+    assert!(!before.iter().any(|a| a == "Foo.One"), "{before:?}");
+    let global = accesses(
+        "import { Foo } from './f';\nexport function setup(): void { const Alias = new Foo(); void Alias; }\nconsole.log(Alias.One);",
+    );
+    assert!(!global.iter().any(|a| a == "Foo.One"), "{global:?}");
+    let assigned = accesses(
+        "import { Foo } from './f';\nlet svc: Foo | undefined;\nexport function init(): void { svc = new Foo(); }\nsvc?.run();",
+    );
+    assert!(
+        assigned.iter().any(|a| a == "Foo.run"),
+        "an assignment in a function to a module binding keeps its credit: {assigned:?}"
+    );
+    let nested = accesses(
+        "import { H } from './h';\ndescribe('x', () => {\n  test('a', async ({ page }) => {\n    const d = new H(page);\n    await d.m();\n  });\n});",
+    );
+    assert!(
+        nested.iter().any(|a| a == "H.m"),
+        "a read in the scope of the nested binding keeps its credit: {nested:?}"
+    );
+}
+
+/// Issue #4603: a `var` in a block of module scope hoists to module scope, so
+/// a module-scope read of it keeps the credit of its class binding. A
+/// module-scope binding of another kind with the name of a nested class
+/// binding also keeps its credit.
+#[test]
+fn module_scope_read_keeps_class_binding_of_hoisted_block_var() {
+    let accesses = |source: &str| {
+        parse(source)
+            .member_accesses
+            .iter()
+            .map(|access| format!("{}.{}", access.object, access.member))
+            .collect::<Vec<_>>()
+    };
+    for source in [
+        "import { Foo } from './f';\nif (globalThis.x) { var svc = new Foo(); }\nsvc.run();",
+        "import { Foo } from './f';\ntry { var svc = new Foo(); } catch {}\nsvc.run();",
+        "import { Foo } from './f';\ndeclare function make(): Foo;\n{ var svc: Foo = make(); }\nsvc.run();",
+        "import { Foo } from './f';\nsvc.run();\nif (globalThis.x) { var svc = new Foo(); }",
+    ] {
+        let found = accesses(source);
+        assert!(found.iter().any(|a| a == "Foo.run"), "{source}: {found:?}");
+    }
+    let lexical = accesses(
+        "import { Foo } from './f';\nif (globalThis.x) { const svc = new Foo(); void svc; }\nsvc.run();",
+    );
+    assert!(
+        !lexical.iter().any(|a| a == "Foo.run"),
+        "a lexical binding of a block stays nested: {lexical:?}"
+    );
+    let typed = accesses(
+        "import { Foo } from './f';\nimport { Bar } from './b';\nexport function setup(): void { const svc = new Foo(); void svc; }\nlet svc: Bar;\nsvc.run();",
+    );
+    assert!(typed.iter().any(|a| a == "Bar.run"), "{typed:?}");
+    assert!(!typed.iter().any(|a| a == "Foo.run"), "{typed:?}");
+    let destructured = accesses(
+        "import { Foo } from './f';\nimport { Bar } from './b';\nexport function setup(): void { const svc = new Foo(); void svc; }\nconst { svc }: { svc: Bar } = load();\nsvc.run();",
+    );
+    assert!(
+        !destructured.iter().any(|a| a == "Foo.run"),
+        "{destructured:?}"
     );
 }

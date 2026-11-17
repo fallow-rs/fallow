@@ -21,6 +21,7 @@ pub(super) fn classify_ignore_findings_fields(results: &AnalysisResults) {
         unused_enum_members: _unused_enum_members,
         unused_class_members: _unused_class_members,
         unused_namespace_members: _unused_namespace_members,
+        unused_protected_class_members: _unused_protected_class_members,
         unused_store_members: _unused_store_members,
         unresolved_imports: _unresolved_imports,
         unlisted_dependencies: _unlisted_dependencies,

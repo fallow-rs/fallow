@@ -55,7 +55,7 @@ impl TypeAwareSessionProcess {
             ));
         }
         let termination_epoch = SIDECAR_TERMINATION_EPOCH.load(Ordering::SeqCst);
-        let mut command = sidecar_command(sidecar, root).map_err(TypeAwareError)?;
+        let mut command = sidecar_command(sidecar, root).map_err(TypeAwareError::from)?;
         command.arg("--session");
         let mut child =
             fallow_process::ScopedChild::spawn_process_tree(&mut command).map_err(|error| {
@@ -256,7 +256,7 @@ impl TypeAwareSession {
                     "failed to read persistent type-aware response: {error}"
                 ))
             })?;
-        timeout.finish().map_err(TypeAwareError)?;
+        timeout.finish().map_err(TypeAwareError::from)?;
         if response_bytes.is_empty() {
             return Err(TypeAwareError::from(
                 "persistent type-aware sidecar closed without a response".to_string(),

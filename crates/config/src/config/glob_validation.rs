@@ -81,6 +81,14 @@ pub enum GlobValidationError {
         /// The offending key as written in the config.
         pattern: String,
     },
+    /// A pattern starts with `!` or `./` in a list that supports neither
+    /// form, so the pattern matches no path.
+    UnmatchablePrefix {
+        /// Config field the pattern came from, named in the error.
+        field: &'static str,
+        /// The offending pattern as written in the config.
+        pattern: String,
+    },
     /// Pattern is longer than [`MAX_GLOB_BYTES`].
     TooLong {
         /// Config field the pattern came from, named in the error.
@@ -145,6 +153,18 @@ impl fmt::Display for GlobValidationError {
                  project root with '/' separators, as `fallow list --workspaces` prints it \
                  (e.g. 'packages/web')"
             ),
+            Self::UnmatchablePrefix { field, pattern } => match pattern.strip_prefix("./") {
+                Some(rest) => write!(
+                    f,
+                    "{field}: '{pattern}' starts with './' and matches no path; \
+                     write it relative to the project root without './' (e.g. '{rest}')"
+                ),
+                None => write!(
+                    f,
+                    "{field}: '{pattern}' is a negated pattern, which this list does not \
+                     support, so it matches no path; list only the paths to exclude"
+                ),
+            },
             Self::TooLong { field, start } => write!(
                 f,
                 "{field}: '{start}...' is longer than {MAX_GLOB_BYTES} bytes; shorten the pattern"
@@ -168,6 +188,7 @@ impl std::error::Error for GlobValidationError {
             | Self::EmptyNegation { .. }
             | Self::UnliftableNegation { .. }
             | Self::InexactWorkspaceRoot { .. }
+            | Self::UnmatchablePrefix { .. }
             | Self::TooLong { .. } => None,
         }
     }
@@ -360,6 +381,26 @@ pub fn validate_user_globs(
     for pattern in patterns {
         if let Err(e) = compile_user_glob(pattern, field) {
             errors.push(e);
+        }
+    }
+}
+
+/// Validate globs of a list that supports no negation and no `./` prefix,
+/// such as `production.ignore`. Both forms match no path, so each one is an
+/// error.
+pub fn validate_user_plain_globs(
+    patterns: &[String],
+    field: &'static str,
+    errors: &mut Vec<GlobValidationError>,
+) {
+    for pattern in patterns {
+        if pattern.starts_with('!') || pattern.starts_with("./") {
+            errors.push(GlobValidationError::UnmatchablePrefix {
+                field,
+                pattern: pattern.clone(),
+            });
+        } else if let Err(error) = compile_user_glob(pattern, field) {
+            errors.push(error);
         }
     }
 }

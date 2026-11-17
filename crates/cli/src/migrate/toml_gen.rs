@@ -25,7 +25,9 @@ pub(super) fn generate_toml(result: &MigrationResult) -> String {
     write_ignore_exports_used_in_file(&mut output, obj);
     write_boolean_section(&mut output, obj, "audit");
     write_string_section(&mut output, obj, "rules");
-    write_duplicates_section(&mut output, obj);
+    write_scalar_section(&mut output, obj, "duplicates");
+    write_scalar_section(&mut output, obj, "production");
+    write_circular_dependencies_section(&mut output, obj);
 
     output
 }
@@ -130,21 +132,27 @@ fn write_string_section(
     }
 }
 
-fn write_duplicates_section(output: &mut String, obj: &serde_json::Map<String, serde_json::Value>) {
-    let Some(dupes_obj) = obj.get("duplicates").and_then(serde_json::Value::as_object) else {
+/// Write a section whose values are numbers, booleans, strings or string
+/// arrays.
+fn write_scalar_section(
+    output: &mut String,
+    obj: &serde_json::Map<String, serde_json::Value>,
+    section: &str,
+) {
+    let Some(section_obj) = obj.get(section).and_then(serde_json::Value::as_object) else {
         return;
     };
-    if dupes_obj.is_empty() {
+    if section_obj.is_empty() {
         return;
     }
 
-    output.push_str("\n[duplicates]\n");
-    for (key, value) in dupes_obj {
-        write_duplicates_value(output, key, value);
+    let _ = writeln!(output, "\n[{section}]");
+    for (key, value) in section_obj {
+        write_scalar_value(output, key, value);
     }
 }
 
-fn write_duplicates_value(output: &mut String, key: &str, value: &serde_json::Value) {
+fn write_scalar_value(output: &mut String, key: &str, value: &serde_json::Value) {
     match value {
         serde_json::Value::Number(n) => {
             let _ = writeln!(output, "{key} = {n}");
@@ -160,6 +168,33 @@ fn write_duplicates_value(output: &mut String, key: &str, value: &serde_json::Va
         }
         _ => {}
     }
+}
+
+/// Write the `circularDependencies.allow` file lists as an array of arrays.
+fn write_circular_dependencies_section(
+    output: &mut String,
+    obj: &serde_json::Map<String, serde_json::Value>,
+) {
+    let Some(allow) = obj
+        .get("circularDependencies")
+        .and_then(|section| section.get("allow"))
+        .and_then(serde_json::Value::as_array)
+    else {
+        return;
+    };
+    let entries: Vec<String> = allow
+        .iter()
+        .filter_map(serde_json::Value::as_array)
+        .map(|files| format!("[{}]", quoted_items(files).join(", ")))
+        .collect();
+    if entries.is_empty() {
+        return;
+    }
+    let _ = writeln!(
+        output,
+        "\n[circularDependencies]\nallow = [{}]",
+        entries.join(", ")
+    );
 }
 
 fn quoted_items(arr: &[serde_json::Value]) -> Vec<String> {

@@ -191,6 +191,19 @@ pub const ISSUE_KIND_META: &[IssueKindMeta] = &[
         docs_category: "source",
     },
     IssueKindMeta {
+        kind: Some(IssueKind::UnusedProtectedClassMember),
+        code: "unused-protected-class-member",
+        aliases: &["unused-protected-class-members"],
+        label: "Unused Protected Class Members",
+        config_key: Some("unused-protected-class-members"),
+        filter_flag: Some("--unused-protected-class-members"),
+        mcp_issue_type: Some("unused-protected-class-members"),
+        suppress_token: Some("unused-protected-class-member"),
+        suppress_file_level: false,
+        lsp: true,
+        docs_category: "source",
+    },
+    IssueKindMeta {
         kind: Some(IssueKind::UnusedNamespaceMember),
         code: "unused-namespace-member",
         aliases: &["unused-namespace-members"],
@@ -1117,6 +1130,13 @@ pub const ISSUE_TS_ALIAS_META: &[IssueTsAliasMeta] = &[
         },
     },
     IssueTsAliasMeta {
+        code: "unused-protected-class-member",
+        alias: TsAliasMeta {
+            name: "UnusedMember",
+            parent: "UnusedProtectedClassMemberFinding",
+        },
+    },
+    IssueTsAliasMeta {
         code: "unused-namespace-member",
         alias: TsAliasMeta {
             name: "UnusedMember",
@@ -1361,6 +1381,17 @@ pub const ISSUE_RESULT_META: &[IssueResultMeta] = &[
         summary_label: "Unused class members",
         docs_anchor: "unused-class-members",
         result_key: "unused_class_members",
+        counts_in_total: true,
+    },
+    IssueResultMeta {
+        code: "unused-protected-class-member",
+        sarif_description: "Protected class member is never referenced",
+        meta_description: "Protected class methods and properties that neither the class nor a subclass references.",
+        meta_docs_path: "explanations/dead-code#unused-protected-class-members",
+        meta_name: "Unused Protected Class Members",
+        summary_label: "Unused protected class members",
+        docs_anchor: "unused-protected-class-members",
+        result_key: "unused_protected_class_members",
         counts_in_total: true,
     },
     IssueResultMeta {
@@ -1880,48 +1911,6 @@ pub static CODECLIMATE_RESULT_CODES: LazyLock<Vec<&'static str>> =
 #[must_use]
 pub fn issue_meta_by_code(code: &str) -> Option<&'static IssueKindMeta> {
     ISSUE_KIND_META.iter().find(|meta| meta.code == code)
-}
-
-/// Lookup metadata by canonical code or alias.
-#[must_use]
-pub fn issue_meta_for_token(token: &str) -> Option<&'static IssueKindMeta> {
-    ISSUE_KIND_META
-        .iter()
-        .find(|meta| meta.code == token || meta.aliases.contains(&token))
-}
-
-/// Lookup metadata by any shared contract token: canonical code, alias,
-/// config key, MCP selector, suppression token, or CLI filter flag.
-#[must_use]
-pub fn issue_meta_for_contract_token(token: &str) -> Option<&'static IssueKindMeta> {
-    let normalized = token.trim().trim_start_matches("--").replace('_', "-");
-    ISSUE_KIND_META
-        .iter()
-        .find(|meta| issue_meta_matches_contract_token(meta, &normalized))
-}
-
-/// Whether a metadata row owns the provided shared contract token.
-#[must_use]
-pub fn issue_meta_matches_contract_token(meta: &IssueKindMeta, token: &str) -> bool {
-    let normalized = token.trim().trim_start_matches("--").replace('_', "-");
-    meta.code == normalized
-        || meta.aliases.contains(&normalized.as_str())
-        || meta.config_key == Some(normalized.as_str())
-        || meta.mcp_issue_type == Some(normalized.as_str())
-        || meta.suppress_token == Some(normalized.as_str())
-        || meta.filter_flag.map(|flag| flag.trim_start_matches("--")) == Some(normalized.as_str())
-}
-
-/// Lookup metadata by backing issue kind.
-#[must_use]
-pub fn issue_meta_by_kind(kind: IssueKind) -> Option<&'static IssueKindMeta> {
-    ISSUE_KIND_META.iter().find(|meta| meta.kind == Some(kind))
-}
-
-/// Lookup serialized result metadata by canonical issue code.
-#[must_use]
-pub fn issue_result_meta_by_code(code: &str) -> Option<&'static IssueResultMeta> {
-    ISSUE_RESULT_META.iter().find(|meta| meta.code == code)
 }
 
 /// Short SARIF rule description for a rule id emitted by dead-code output.

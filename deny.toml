@@ -6,7 +6,12 @@
 # (often the first signal of a compromised or withdrawn release) is treated the
 # same way. Every entry added to `ignore` must carry a one-line justification so
 # the suppression is auditable, not a silent hole.
-ignore = []
+ignore = [
+  # chrono is unmaintained but has no known vulnerability. rmcp and the
+  # schemars `chrono04` feature that rmcp needs pull it in, so it stays until
+  # those crates move to another date library.
+  { id = "RUSTSEC-2026-0543", reason = "unmaintained only; required by rmcp and schemars chrono04" },
+]
 yanked = "deny"
 
 [licenses]

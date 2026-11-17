@@ -8,12 +8,11 @@ import {
   buildWorkspaceQuickPickItems,
   clearedScopeToast,
   partitionWorkspaces,
-  renderWorkspaceStatusBarText,
-  renderWorkspaceStatusBarTooltip,
   resolveWorkspaceScope,
   shouldShowWorkspacePicker,
 } from "./workspacePicker-utils.js";
 import type { WorkspaceQuickPickItem } from "./workspacePicker-utils.js";
+import { setStatusBarWorkspace } from "./statusBar.js";
 import type { WorkspacesOutput } from "./types.js";
 
 export { parseWorkspacesOutput } from "./workspacePicker-utils.js";
@@ -25,12 +24,10 @@ export { parseWorkspacesOutput } from "./workspacePicker-utils.js";
  */
 const WORKSPACE_STATE_KEY = "fallow.workspaceScope";
 
-let pickerItem: vscode.StatusBarItem | null = null;
-
 /**
- * The most recent `fallow workspaces` output observed this session, used to
- * decide whether the picker is worth showing (hidden on single-package repos,
- * n2). `null` means "not yet probed" and keeps the item shown so it stays
+ * The most recent `fallow workspaces` output observed this session. It decides
+ * whether the status bar item shows the workspace entry (not on single-package
+ * repos, n2). `null` means "not yet probed" and keeps the entry, so it stays
  * reachable until a probe resolves.
  */
 let lastWorkspacesOutput: WorkspacesOutput | null = null;
@@ -78,55 +75,27 @@ export const cacheWorkspacesOutput = (
 export const getCachedWorkspacesOutput = (binaryPath: string): WorkspacesOutput | undefined =>
   workspacesCache.get(binaryPath);
 
-export const createWorkspacePicker = (context: vscode.ExtensionContext): vscode.StatusBarItem => {
-  // Priority 49 sits just to the right of the main Fallow status item (50).
-  pickerItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 49);
-  pickerItem.command = "fallow.selectWorkspace";
-  refreshWorkspacePicker(context);
-  return pickerItem;
-};
-
 /**
- * Show or hide the picker based on the resolved workspaces list. A
- * single-package repo (or one whose workspaces could not be listed) gets no
- * picker, since scoping is meaningless there. `null` keeps it shown (the list
- * was not probed, e.g. older CLI). Called after a lazy `fallow workspaces`
- * probe so the picker never appears on a repo that can never use it (n2).
+ * Show the workspace state in the status bar item. A single-package repo (or
+ * one whose workspaces could not be listed) gets no workspace entry, since
+ * scoping is meaningless there. `null` keeps the entry (the list was not
+ * probed, for example on an older CLI). Called after a lazy `fallow workspaces`
+ * probe (n2).
  */
-export const applyWorkspaceVisibility = (output: WorkspacesOutput | null): void => {
+export const applyWorkspaceVisibility = (
+  context: vscode.ExtensionContext,
+  output: WorkspacesOutput | null,
+): void => {
   lastWorkspacesOutput = output;
-  if (!pickerItem) {
-    return;
-  }
-  if (shouldShowWorkspacePicker(output)) {
-    pickerItem.show();
-  } else {
-    pickerItem.hide();
-  }
+  refreshWorkspacePicker(context);
 };
 
-/** Re-render the picker status-bar item from the current resolved scope. */
+/** Re-render the workspace state of the status bar item from the resolved scope. */
 export const refreshWorkspacePicker = (context: vscode.ExtensionContext): void => {
-  if (!pickerItem) {
-    return;
-  }
-  const active = resolveActiveWorkspaceScope(context);
-  pickerItem.text = renderWorkspaceStatusBarText(active);
-  pickerItem.tooltip = renderWorkspaceStatusBarTooltip(active);
-  // Re-apply visibility so a re-render does not resurrect a hidden picker on a
-  // single-package repo.
-  if (shouldShowWorkspacePicker(lastWorkspacesOutput)) {
-    pickerItem.show();
-  } else {
-    pickerItem.hide();
-  }
-};
-
-export const disposeWorkspacePicker = (): void => {
-  if (pickerItem) {
-    pickerItem.dispose();
-    pickerItem = null;
-  }
+  setStatusBarWorkspace({
+    pickerAvailable: shouldShowWorkspacePicker(lastWorkspacesOutput),
+    active: resolveActiveWorkspaceScope(context),
+  });
 };
 
 interface WorkspaceScopeQuickPick extends vscode.QuickPickItem {
@@ -148,7 +117,7 @@ const toQuickPickItems = (rows: ReadonlyArray<WorkspaceQuickPickItem>): Workspac
  * Show the workspace-scope QuickPick and persist the user's choice to
  * `workspaceState`. `loadWorkspaces` performs the (cached) `fallow workspaces`
  * probe; `onScopeChange` is invoked after a real change so the caller can
- * re-render the picker and re-run analysis. Returns the chosen scope, or
+ * re-render the status bar item and re-run analysis. Returns the chosen scope, or
  * undefined when the user dismissed the picker without changing anything.
  */
 export const showWorkspacePicker = async (

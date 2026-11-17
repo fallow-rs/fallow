@@ -26,8 +26,9 @@ use crate::output_dead_code::{
     UnusedComponentInputFinding, UnusedComponentOutputFinding, UnusedComponentPropFinding,
     UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
     UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding, UnusedLoadDataKeyFinding,
-    UnusedNamespaceMemberFinding, UnusedOptionalDependencyFinding, UnusedServerActionFinding,
-    UnusedStoreMemberFinding, UnusedSvelteEventFinding, UnusedTypeFinding,
+    UnusedNamespaceMemberFinding, UnusedOptionalDependencyFinding,
+    UnusedProtectedClassMemberFinding, UnusedServerActionFinding, UnusedStoreMemberFinding,
+    UnusedSvelteEventFinding, UnusedTypeFinding,
 };
 pub use crate::output_dead_code::{
     UnproducedCatchTagFinding, UnusedEffectLayerFinding, UnusedTaggedErrorFinding,
@@ -309,6 +310,12 @@ pub struct AnalysisResults {
     /// dotted path from the exported namespace (`Inner.x`).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub unused_namespace_members: Vec<UnusedNamespaceMemberFinding>,
+    /// `protected` class members that neither the class nor a subclass
+    /// reads. Wrapped in [`UnusedProtectedClassMemberFinding`]: same inner
+    /// [`UnusedMember`] struct as `unused_class_members`. The rule is `off`
+    /// by default, so this array is empty unless a config turns it on.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub unused_protected_class_members: Vec<UnusedProtectedClassMemberFinding>,
     /// Store members (Pinia `state` / `getters` / `actions` key, or a
     /// setup-store returned key) declared but never accessed by any consumer
     /// project-wide. Wrapped in [`UnusedStoreMemberFinding`]: same inner
@@ -745,20 +752,6 @@ impl CascadeHiddenFindings {
     }
 }
 
-/// Move each finding that `covered` selects from `findings` to `hidden`.
-fn move_covered<T>(
-    findings: &mut Vec<T>,
-    hidden: &mut Vec<T>,
-    path_of: impl Fn(&T) -> &Path,
-    covered: &dyn Fn(&Path) -> bool,
-) {
-    let (moved, kept): (Vec<T>, Vec<T>) = std::mem::take(findings)
-        .into_iter()
-        .partition(|finding| covered(path_of(finding)));
-    *findings = kept;
-    hidden.extend(moved);
-}
-
 struct AnalysisResultsCoreMergeParts {
     unused_files: Vec<UnusedFileFinding>,
     unused_exports: Vec<UnusedExportFinding>,
@@ -768,6 +761,7 @@ struct AnalysisResultsCoreMergeParts {
     unused_enum_members: Vec<UnusedEnumMemberFinding>,
     unused_class_members: Vec<UnusedClassMemberFinding>,
     unused_namespace_members: Vec<UnusedNamespaceMemberFinding>,
+    unused_protected_class_members: Vec<UnusedProtectedClassMemberFinding>,
     unused_store_members: Vec<UnusedStoreMemberFinding>,
     unresolved_imports: Vec<UnresolvedImportFinding>,
     boundary_violations: Vec<BoundaryViolationFinding>,
@@ -864,6 +858,7 @@ macro_rules! counted_analysis_result_fields {
             unused_enum_members => "unused_enum_members",
             unused_class_members => "unused_class_members",
             unused_namespace_members => "unused_namespace_members",
+            unused_protected_class_members => "unused_protected_class_members",
             unused_store_members => "unused_store_members",
             unresolved_imports => "unresolved_imports",
             unlisted_dependencies => "unlisted_dependencies",
@@ -937,6 +932,7 @@ impl_single_source_dead_code! {
     UnusedEnumMemberFinding => member.path,
     UnusedClassMemberFinding => member.path,
     UnusedNamespaceMemberFinding => member.path,
+    UnusedProtectedClassMemberFinding => member.path,
     UnusedStoreMemberFinding => member.path,
     UnresolvedImportFinding => import.path,
     UnprovidedInjectFinding => inject.path,
@@ -995,16 +991,6 @@ impl_never_ignored_finding! {
     MisplacedDirectiveFinding,
     RouteCollisionFinding,
     DynamicSegmentNameConflictFinding,
-}
-
-fn all_nonempty_paths_match<'a>(
-    mut paths: impl Iterator<Item = &'a PathBuf>,
-    predicate: &mut impl FnMut(&Path) -> bool,
-) -> bool {
-    let Some(first) = paths.next() else {
-        return false;
-    };
-    predicate(first) && paths.all(|path| predicate(path))
 }
 
 impl FindingIgnorePolicy for UnlistedDependencyFinding {
@@ -1248,6 +1234,8 @@ impl AnalysisResults {
         self.unused_class_members.extend(parts.unused_class_members);
         self.unused_namespace_members
             .extend(parts.unused_namespace_members);
+        self.unused_protected_class_members
+            .extend(parts.unused_protected_class_members);
         self.unused_store_members.extend(parts.unused_store_members);
         self.unresolved_imports.extend(parts.unresolved_imports);
         self.boundary_violations.extend(parts.boundary_violations);
@@ -1430,6 +1418,15 @@ impl AnalysisResults {
         });
 
         self.unused_class_members.sort_by(|a, b| {
+            a.member
+                .path
+                .cmp(&b.member.path)
+                .then(a.member.line.cmp(&b.member.line))
+                .then(a.member.parent_name.cmp(&b.member.parent_name))
+                .then(a.member.member_name.cmp(&b.member.member_name))
+        });
+
+        self.unused_protected_class_members.sort_by(|a, b| {
             a.member
                 .path
                 .cmp(&b.member.path)
@@ -1914,15 +1911,6 @@ impl AnalysisResults {
                 .then(a.line.cmp(&b.line))
                 .then(a.export_name.cmp(&b.export_name))
         });
-    }
-}
-
-/// Sort key for catalog names: the default catalog ("default") sorts before any named catalog.
-fn catalog_sort_key(name: &str) -> (u8, &str) {
-    if name == "default" {
-        (0, name)
-    } else {
-        (1, name)
     }
 }
 
@@ -4339,6 +4327,10 @@ pub struct ReferenceLocation {
     /// 0-based byte column offset.
     pub col: u32,
 }
+
+#[path = "results_helpers.rs"]
+mod results_helpers;
+use results_helpers::{all_nonempty_paths_match, catalog_sort_key, move_covered};
 
 #[cfg(test)]
 #[path = "results_tests.rs"]

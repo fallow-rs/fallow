@@ -54,6 +54,7 @@ mod changed_workspaces_tests;
 mod check_tests;
 mod ci_command_routing_tests;
 mod ci_template_tests;
+mod circular_dependencies_allow_tests;
 mod claude_code_hint_tests;
 #[cfg(target_os = "linux")]
 mod cloud_login_linux_keychain_tests;
@@ -130,6 +131,7 @@ mod peer_dependency_credit_tests;
 mod permutation;
 mod platform;
 mod plugin_diagnostic_tests;
+mod production_ignore_tests;
 mod production_support_entries_tests;
 mod production_workspace_tests;
 mod quiet_stderr_tests;

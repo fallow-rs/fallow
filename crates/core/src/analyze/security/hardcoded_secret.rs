@@ -24,6 +24,8 @@ pub const CATEGORY_ID: &str = fallow_security::HARDCODED_SECRET_CATEGORY_ID;
 const CWE_ID: u32 = 798;
 const MIN_ENTROPY_LENGTH: usize = 20;
 const MIN_ENTROPY_BITS_PER_CHAR: f64 = 4.0;
+/// The number of words from which an entropy candidate reads as a sentence.
+const MIN_PROSE_WORDS: usize = 3;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SecretSignal {
@@ -226,10 +228,59 @@ fn classify_secret_literal(context_name: &str, value: &str) -> Option<SecretSign
     if let Some(provider) = provider_secret_family(value) {
         return Some(SecretSignal::Provider(provider));
     }
-    if is_secret_shaped_identifier(context_name) && has_high_entropy(value) {
+    if is_secret_shaped_identifier(context_name)
+        && !is_prose(value)
+        && !is_public_url(value)
+        && has_high_entropy(value)
+    {
         return Some(SecretSignal::EntropyWithIdentifier);
     }
     None
+}
+
+/// Whether the value reads as a sentence: three or more words, and no word that
+/// looks like a token. A message such as "The personal access token is
+/// unexpectedly long." has a high character entropy, but it is not a
+/// credential. A header value such as `Authorization: Bearer <token>` or a
+/// base64 key wrapped over lines keeps a token word, so it stays a candidate.
+/// Two words stay a candidate in all cases.
+fn is_prose(value: &str) -> bool {
+    value.split_whitespace().nth(MIN_PROSE_WORDS - 1).is_some()
+        && !value.split_whitespace().any(is_token_word)
+}
+
+/// Whether one word uses only token characters (letters, digits and the
+/// base64 and URL-safe symbols) and passes the length and entropy test. A
+/// piece of a regular expression or of code has other symbols, so it is not a
+/// token word.
+fn is_token_word(word: &str) -> bool {
+    word.chars().all(|ch| {
+        ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.' | '/' | '+' | '=' | ':')
+    }) && has_high_shannon_entropy(word)
+}
+
+/// Whether the value is an `http` or `https` URL that carries no credential: no
+/// user information, no query, no fragment and no piece that passes the entropy
+/// check by itself. A documentation link under a name such as `TOKEN_HELP` is
+/// not a credential. A URL with `user:pass@`, a `?token=` query or a webhook
+/// secret in the path stays a candidate.
+fn is_public_url(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    let Some(rest) = lower
+        .strip_prefix("https://")
+        .or_else(|| lower.strip_prefix("http://"))
+    else {
+        return false;
+    };
+    let authority = rest.split('/').next().unwrap_or(rest);
+    let scheme_len = value.len() - rest.len();
+    !authority.is_empty()
+        && !authority.contains('@')
+        && !rest.contains(['?', '#'])
+        && !rest.chars().any(char::is_whitespace)
+        && !value[scheme_len..]
+            .split(['/', '-', '_', '.', ':'])
+            .any(has_high_shannon_entropy)
 }
 
 fn redacted_evidence(signal: SecretSignal, context_name: &str) -> String {
@@ -426,6 +477,13 @@ fn is_secret_shaped_identifier(name: &str) -> bool {
 }
 
 fn has_high_entropy(value: &str) -> bool {
+    has_high_shannon_entropy(value) && has_mixed_secret_charset(value)
+}
+
+/// The length and entropy part of [`has_high_entropy`], without the character
+/// class test. A piece of a larger value loses its separator symbols, so the
+/// class test applies only to the full value.
+fn has_high_shannon_entropy(value: &str) -> bool {
     let chars: Vec<char> = value.chars().collect();
     if chars.len() < MIN_ENTROPY_LENGTH {
         return false;
@@ -439,7 +497,7 @@ fn has_high_entropy(value: &str) -> bool {
         let p = *count as f64 / len;
         p.mul_add(-p.log2(), acc)
     });
-    entropy >= MIN_ENTROPY_BITS_PER_CHAR && has_mixed_secret_charset(value)
+    entropy >= MIN_ENTROPY_BITS_PER_CHAR
 }
 
 fn has_mixed_secret_charset(value: &str) -> bool {
@@ -539,6 +597,127 @@ mod tests {
         assert_eq!(
             classify_secret_literal("apiKey", "mF9a7Qp2Lx8Nz4Rv6Ts0"),
             Some(SecretSignal::EntropyWithIdentifier)
+        );
+    }
+
+    #[test]
+    fn entropy_skips_prose_messages() {
+        assert_eq!(
+            classify_secret_literal(
+                "error.credentials.too-long",
+                "The personal access token is unexpectedly long."
+            ),
+            None
+        );
+        assert_eq!(
+            classify_secret_literal(
+                "error.credentials.platform",
+                "The operating system credential prompt failed."
+            ),
+            None
+        );
+        assert_eq!(
+            classify_secret_literal("authToken", "Bearer mF9a7Qp2Lx8Nz4Rv6Ts0"),
+            Some(SecretSignal::EntropyWithIdentifier)
+        );
+    }
+
+    #[test]
+    fn entropy_skips_public_urls_but_keeps_credential_urls() {
+        assert_eq!(
+            classify_secret_literal(
+                "DATA_CENTER_TOKEN_HELP",
+                "https://confluence.atlassian.com/enterprise/using-personal-access-tokens-1026032365.html"
+            ),
+            None
+        );
+        assert_eq!(
+            classify_secret_literal(
+                "dbPassword",
+                "https://admin:mF9a7Qp2Lx8Nz4Rv6Ts0@db.internal.test/app"
+            ),
+            Some(SecretSignal::EntropyWithIdentifier)
+        );
+        assert_eq!(
+            classify_secret_literal(
+                "webhookToken",
+                "https://hooks.internal.test/x?token=mF9a7Qp2Lx8Nz4Rv6Ts0"
+            ),
+            Some(SecretSignal::EntropyWithIdentifier)
+        );
+    }
+
+    #[test]
+    fn entropy_keeps_url_with_secret_path_segment() {
+        // The URLs are built at run time, so the source holds no complete
+        // webhook URL that a secret scanner reads as a real credential.
+        let token = "mF9a7Qp2Lx8Nz4Rv6Ts0Kq1W";
+        for (name, value) in [
+            (
+                "SLACK_WEBHOOK_TOKEN",
+                format!(
+                    "https://hooks.{}.com/services/T01QWERTY/B02ASDFGH/{token}",
+                    "slack"
+                ),
+            ),
+            (
+                "DISCORD_WEBHOOK_SECRET",
+                format!(
+                    "https://{}.com/api/webhooks/1188776655443322110/{token}zX3c_Vb7Nm-Lk9Jh",
+                    "discord"
+                ),
+            ),
+            (
+                "telegramBotToken",
+                format!(
+                    "https://api.{}.org/bot1234567890:AAH8{token}zX3c/sendMessage",
+                    "telegram"
+                ),
+            ),
+        ] {
+            assert_eq!(
+                classify_secret_literal(name, &value),
+                Some(SecretSignal::EntropyWithIdentifier),
+                "{name}"
+            );
+        }
+    }
+
+    #[test]
+    fn entropy_keeps_multi_word_value_with_a_secret_word() {
+        assert_eq!(
+            classify_secret_literal(
+                "authToken",
+                "Authorization: Bearer mF9a7Qp2Lx8Nz4Rv6Ts0Kq1W"
+            ),
+            Some(SecretSignal::EntropyWithIdentifier)
+        );
+        assert_eq!(
+            classify_secret_literal(
+                "privateKey",
+                "MIIEvQIBADANBgkqhkiG9w0BAQEFAASC\nBKcwggSjAgEAAoIBAQC7mF9a7Qp2Lx8N\nz4Rv6Ts0Kq1WzX3c_Vb7Nm+Lk9Jh/QwE="
+            ),
+            Some(SecretSignal::EntropyWithIdentifier)
+        );
+    }
+
+    #[test]
+    fn entropy_skips_multi_word_regex_source() {
+        assert_eq!(
+            classify_secret_literal(
+                "SECRET_KEY",
+                "(?:api[-_]?key|secret(?:[-_]?key)?|(?<![A-Za-z])(?:pwd|sig)|(?<=[?&]|(?:^|[\\r\\n])[ \\t]{0,8}-[ \\t]{1,8})key)"
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn provider_prefix_ignores_the_prose_and_url_filters() {
+        let pem = "-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIB...\n-----END RSA PRIVATE KEY-----";
+        assert_eq!(
+            classify_secret_literal("helpText", pem),
+            Some(SecretSignal::Provider("PEM private key"))
         );
     }
 

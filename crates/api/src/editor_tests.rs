@@ -9,7 +9,8 @@ use super::editor_results::{
     UnlistedDependencyFinding, UnusedClassMemberFinding, UnusedDependency, UnusedDependencyFinding,
     UnusedDevDependencyFinding, UnusedEnumMemberFinding, UnusedExport, UnusedExportFinding,
     UnusedFile, UnusedFileFinding, UnusedMember, UnusedNamespaceMemberFinding,
-    UnusedOptionalDependencyFinding, UnusedStoreMemberFinding, UnusedTypeFinding,
+    UnusedOptionalDependencyFinding, UnusedProtectedClassMemberFinding, UnusedStoreMemberFinding,
+    UnusedTypeFinding,
 };
 
 #[test]
@@ -447,6 +448,7 @@ fn merge_results_covers_all_fields() {
     assert_eq!(target.unused_enum_members.len(), 1);
     assert_eq!(target.unused_class_members.len(), 1);
     assert_eq!(target.unused_namespace_members.len(), 1);
+    assert_eq!(target.unused_protected_class_members.len(), 1);
     assert_eq!(target.unused_store_members.len(), 1);
     assert_eq!(target.unresolved_imports.len(), 1);
     assert_eq!(target.unlisted_dependencies.len(), 1);
@@ -704,6 +706,9 @@ pub fn merge_test_source_with_all_fields() -> EditorAnalysisResults {
                 super::editor_extract::MemberKind::NamespaceMember,
                 7,
             ),
+        )],
+        unused_protected_class_members: vec![UnusedProtectedClassMemberFinding::with_actions(
+            merge_test_unused_member("P", "h", super::editor_extract::MemberKind::ClassMethod, 7),
         )],
         unresolved_imports: vec![
             super::editor_results::UnresolvedImportFinding::with_actions(

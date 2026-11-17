@@ -2190,8 +2190,8 @@ mod tests {
         let toml = DuplicatesConfig {
             normalization: NormalizationConfig {
                 ignore_identifiers: Some(true),
-                ignore_string_values: None,
                 ignore_numeric_values: Some(false),
+                ..NormalizationConfig::default()
             },
             ..DuplicatesConfig::default()
         };

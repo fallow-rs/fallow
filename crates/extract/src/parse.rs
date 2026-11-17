@@ -34,6 +34,7 @@ use fallow_types::extract::{FlagPatterns, FunctionComplexity, ImportInfo, Import
 
 use crate::flags::ExtractedFlags;
 use crate::parse_degradation::ParseDegradation;
+use crate::parse_options::{JSX_RETRY_SKIP_CLEAN_MAX_LEN, parse_options_for};
 
 struct JsxRetryParse {
     extractor: ModuleInfoExtractor,
@@ -285,7 +286,9 @@ fn parse_source_to_module_inner(
     let parser_source = stripped_glimmer_source.as_deref().unwrap_or(source);
     let source_type = source_type_for_path(path);
     let allocator = Allocator::default();
-    let parser_return = Parser::new(&allocator, parser_source, source_type).parse();
+    let parser_return = Parser::new(&allocator, parser_source, source_type)
+        .with_options(parse_options_for(source_type))
+        .parse();
     let mut degradation = ParseDegradation::from_parser(&parser_return);
 
     let mut parsed_suppressions =
@@ -446,6 +449,7 @@ fn apply_jsx_retry_or_jsdoc(input: &JsxRetryOrJsdocInput<'_>, outputs: &mut Pars
         line_offsets: input.line_offsets,
         flag_patterns: input.flag_patterns,
         mode: input.mode,
+        primary_error_count: outputs.degradation.error_count,
     };
     let Some(retry) = parse_with_jsx_retry(&retry_input) else {
         apply_jsdoc_tags_to_extractor(
@@ -581,10 +585,14 @@ struct JsxRetryInput<'a> {
     line_offsets: &'a [u32],
     flag_patterns: &'a FlagPatterns,
     mode: fallow_types::shared_state::ExtractionMode,
+    primary_error_count: u32,
 }
 
 fn parse_with_jsx_retry(input: &JsxRetryInput<'_>) -> Option<JsxRetryParse> {
-    if input.total_extracted != 0 || input.source.len() <= 100 || input.source_type.is_jsx() {
+    // A small file with parse errors can still be a JSX component.
+    let small_and_clean =
+        input.source.len() <= JSX_RETRY_SKIP_CLEAN_MAX_LEN && input.primary_error_count == 0;
+    if input.total_extracted != 0 || small_and_clean || input.source_type.is_jsx() {
         return None;
     }
 
@@ -594,7 +602,9 @@ fn parse_with_jsx_retry(input: &JsxRetryInput<'_>) -> Option<JsxRetryParse> {
         SourceType::jsx()
     };
     let allocator = Allocator::default();
-    let retry_return = Parser::new(&allocator, input.parser_source, jsx_type).parse();
+    let retry_return = Parser::new(&allocator, input.parser_source, jsx_type)
+        .with_options(parse_options_for(input.source_type))
+        .parse();
     let degradation = ParseDegradation::from_parser(&retry_return);
     let mut extractor = ModuleInfoExtractor::new();
     extractor.set_route_load_harvest_mode(route_load_harvest_mode_for_path(input.path));

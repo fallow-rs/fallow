@@ -20,6 +20,9 @@ use super::{
 };
 use crate::js_text::JsText;
 
+#[path = "visit_impl_security_local_callees.rs"]
+mod local_callees;
+
 struct ArgSinkSiteInput<'site, 'ast> {
     callee_path: &'site str,
     sink_shape: SinkShape,
@@ -60,6 +63,11 @@ enum SinkBinding {
     NodeModuleMember(String),
     /// A `<script>` element (`document.createElement("script")`).
     ScriptElement,
+    /// A local function whose body runs no call and writes no member. A call
+    /// of it cannot reach a library sink of the same name.
+    InertFunction,
+    /// An object literal, valued by the names of its inert inline methods.
+    InertMethods(Vec<String>),
 }
 
 /// Properties of a `<script>` element whose value the browser loads or runs
@@ -106,6 +114,9 @@ pub(in crate::visitor) struct SinkAliasState {
     /// JSX sink props of locals bound to an object literal, keyed by the local
     /// name. A JSX spread of the local (`<div {...props} />`) emits them.
     jsx_spread_object_sinks: FxHashMap<String, Vec<SinkSite>>,
+    /// Sink sites of calls of inert local callees, dropped after the walk
+    /// when the module never writes the callee root.
+    inert_callee_sinks: Vec<local_callees::InertCalleeSinks>,
 }
 
 /// Flatten an `Identifier` or `StaticMemberExpression` callee to a dotted path.
@@ -437,13 +448,42 @@ fn is_metadata_service_literal(value: &str) -> bool {
     value.contains("169.254.169.254") || value.contains("metadata.google.internal")
 }
 
-/// Whether the callee is `spawn(command, args?, options?)` or its sync form.
+/// Whether the callee takes `(command, args?, options?)`: `spawn`, `execFile`
+/// or a sync form. `execFile` can also take a trailing callback.
 fn is_spawn_callee(callee_path: &str) -> bool {
     let name = callee_path.rsplit('.').next().unwrap_or(callee_path);
-    matches!(name, "spawn" | "spawnSync")
+    matches!(name, "spawn" | "spawnSync" | "execFile" | "execFileSync")
 }
 
-/// The options object of a `spawn(command, args?, options?)` call. An object
+/// Whether the second argument of a `spawn` or `execFile` call gets the call
+/// options, so that the shell-argument rows can read it. An object literal in
+/// that position is the options object itself, not an argument array. A `spawn`
+/// call with a non-literal command already matches the command row whenever
+/// the options can enable a shell, so its argument array gets no options and
+/// the call gives one candidate.
+fn argument_array_gets_options(callee_path: &str, arguments: &[Argument<'_>]) -> bool {
+    let Some(second) = arguments.get(1).and_then(Argument::as_expression) else {
+        return false;
+    };
+    if matches!(unwrap_static_expr(second), Expression::ObjectExpression(_)) {
+        return false;
+    }
+    let name = callee_path.rsplit('.').next().unwrap_or(callee_path);
+    if !matches!(name, "spawn" | "spawnSync") {
+        return true;
+    }
+    arguments
+        .first()
+        .and_then(Argument::as_expression)
+        .is_some_and(|command| match unwrap_static_expr(command) {
+            Expression::StringLiteral(_) => true,
+            Expression::TemplateLiteral(tpl) => tpl.expressions.is_empty(),
+            _ => false,
+        })
+}
+
+/// The options object of a `spawn(command, args?, options?)` or an
+/// `execFile(file, args?, options?, callback?)` call. An object
 /// literal in the second position is the options object. A second argument
 /// that is not an array or an object literal can be either, so the options
 /// stay unknown when no third argument follows it. An options object with a
@@ -961,6 +1001,8 @@ impl ModuleInfoExtractor {
             return;
         };
         self.capture_security_control_call(&callee_path, expr.span);
+        let inert_root = self.inert_local_callee_root(&expr.callee);
+        let sinks_before = self.security_sinks.len();
         let sink_shape = if callee_path.contains('.') {
             SinkShape::MemberCall
         } else {
@@ -996,6 +1038,9 @@ impl ModuleInfoExtractor {
                 call_options: None,
             });
         }
+        if let Some(root) = inert_root {
+            self.defer_inert_callee_sinks(root, sinks_before);
+        }
     }
 
     fn record_unresolved_call_sink(&mut self, expr: &CallExpression<'_>) {
@@ -1021,6 +1066,8 @@ impl ModuleInfoExtractor {
         let url_arg_literal = call_url_arg_literal(expr);
         let mut call_options =
             is_spawn_callee(callee_path).then(|| Box::new(spawn_call_options(&expr.arguments)));
+        let args_get_options =
+            call_options.is_some() && argument_array_gets_options(callee_path, &expr.arguments);
         for (index, arg) in expr.arguments.iter().enumerate() {
             let Some(arg_expr) = arg.as_expression() else {
                 continue;
@@ -1043,10 +1090,15 @@ impl ModuleInfoExtractor {
                 url_arg_literal: url_arg_literal.clone(),
                 span: expr.span,
             });
-            if arg_index == 0
-                && let Some(site) = self.security_sinks.get_mut(pushed_before)
-            {
-                site.call_options = call_options.take();
+            // The command and the argument array both get the options: with
+            // `shell: true`, the shell also parses each argument.
+            let gets_options = arg_index == 0 || (arg_index == 1 && args_get_options);
+            if gets_options && let Some(site) = self.security_sinks.get_mut(pushed_before) {
+                site.call_options = if arg_index == 0 {
+                    call_options.clone()
+                } else {
+                    call_options.take()
+                };
             }
         }
     }
@@ -1651,10 +1703,14 @@ impl ModuleInfoExtractor {
 
     /// The sink binding that a value gives to `name`: an alias of a
     /// code-executing global or of a Node.js module binding, a `require()` of
-    /// a module in [`NODE_BINDING_MODULES`](fallow_types::security_sinks::NODE_BINDING_MODULES), or a new `<script>` element.
+    /// a module in [`NODE_BINDING_MODULES`](fallow_types::security_sinks::NODE_BINDING_MODULES), a new `<script>` element, or an
+    /// inert local function or object.
     fn sink_binding_of_value(&self, name: &str, value: &Expression<'_>) -> Option<SinkBinding> {
         if is_create_script_element_call(value) {
             return Some(SinkBinding::ScriptElement);
+        }
+        if let Some(binding) = local_callees::inert_value_binding(value) {
+            return Some(binding);
         }
         if let Some(module) = self.node_binding_module_of_require(value) {
             return Some(SinkBinding::NodeModule(module));

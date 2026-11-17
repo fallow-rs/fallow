@@ -208,6 +208,9 @@ pub struct ResolvedConfig {
     /// entry source declares, in the latest entry point discovery (issue
     /// #3824).
     pub entry_pattern_effect: EntryEffectRecord,
+    /// Which `circularDependencies.allow` entries matched a cycle in the
+    /// latest cycle detection (issue #4623).
+    pub circular_dependencies_allow_effect: EntryEffectRecord,
     /// Post-analysis finding-path matcher built from `ignoreFindings`; hides
     /// findings without removing files from the module graph.
     pub ignore_findings: FindingIgnoreMatcher,
@@ -306,6 +309,9 @@ pub struct ResolvedConfig {
     /// global `production` bool ([`super::ProductionConfig::global`]); the
     /// per-analysis object form and CLI/env overrides are applied post-resolve.
     pub production: bool,
+    /// The `production.ignore` globs: project-root-relative paths that
+    /// discovery drops only when [`Self::production`] is set.
+    pub production_ignore: Vec<String>,
     /// Quiet mode from the CLI: suppress non-essential progress and warning
     /// output.
     pub quiet: bool,
@@ -322,6 +328,11 @@ pub struct ResolvedConfig {
     pub markup_extensions: Vec<String>,
     /// Per-file severity overrides with globs pre-compiled, in config order.
     pub overrides: Vec<ResolvedOverride>,
+    /// The run lowered the rules of [`super::SEMANTIC_REFINABLE_KINDS`] to
+    /// `warn` because the type-aware pass was requested and no sidecar was
+    /// found. The cap then also wins over the `--fail-on-issues` promotion
+    /// of these rules. Set only by [`Self::cap_semantic_refinable_rules`].
+    pub semantic_refinable_capped: bool,
     /// Authored Git baseline refs keyed by workspace root; validated against
     /// discovered packages when an analysis requests package-scoped changes.
     pub workspace_changed_since: BTreeMap<String, String>,
@@ -854,6 +865,17 @@ struct ResolvedPluginSettings {
     rule_pack_sources: Vec<PathBuf>,
 }
 
+/// The digest of the detection config plus the external plugins (sorted by
+/// name) and the rule packs.
+fn detection_config_digest(config_json: &str, plugins: &ResolvedPluginSettings) -> String {
+    fallow_types::identity::fnv1a64_parts(&[
+        "config",
+        config_json,
+        &canonical_json_string(&sorted_by_name(&plugins.external_plugins)),
+        &canonical_json_string(&plugins.rule_packs),
+    ])
+}
+
 fn resolve_plugin_settings(
     root: &Path,
     configured_plugins: &[String],
@@ -895,7 +917,7 @@ struct ResolvedProductionRules {
 }
 
 fn resolve_production_rules(
-    production_config: ProductionConfig,
+    production_config: &ProductionConfig,
     rules: RulesConfig,
 ) -> ResolvedProductionRules {
     let production = production_config.global();
@@ -1014,7 +1036,8 @@ impl FallowConfig {
         let compiled_ignores = compile_ignore_settings(&self);
         let config_json = detection_config_json(&self);
 
-        let production_rules = resolve_production_rules(self.production, self.rules);
+        let production_ignore = self.production.ignore().to_vec();
+        let production_rules = resolve_production_rules(&self.production, self.rules);
 
         let plugins =
             resolve_plugin_settings(&root, &self.plugins, self.framework, &self.rule_packs);
@@ -1028,16 +1051,7 @@ impl FallowConfig {
             || cache_config_hash(&plugins.external_plugins, &self.flags),
         );
 
-        let detection_config_digest = fallow_types::identity::fnv1a64_parts(&[
-            "config",
-            &config_json,
-            &canonical_json_string(&{
-                let mut sorted: Vec<&ExternalPluginDef> = plugins.external_plugins.iter().collect();
-                sorted.sort_by(|a, b| a.name.cmp(&b.name));
-                sorted
-            }),
-            &canonical_json_string(&plugins.rule_packs),
-        ]);
+        let detection_config_digest = detection_config_digest(&config_json, &plugins);
 
         super::legacy_glob::extend_legacy_glob_groups(
             &mut legacy_glob_groups,
@@ -1056,6 +1070,7 @@ impl FallowConfig {
             ignore_patterns: compiled_ignores.patterns,
             user_ignore_pattern_count: compiled_ignores.user_pattern_count,
             entry_pattern_effect: EntryEffectRecord::default(),
+            circular_dependencies_allow_effect: EntryEffectRecord::default(),
             ignore_findings: compiled_ignores.findings,
             output,
             cache_dir: cache.dir,
@@ -1093,11 +1108,13 @@ impl FallowConfig {
             rule_packs: plugins.rule_packs,
             rule_pack_sources: plugins.rule_pack_sources,
             production: production_rules.production,
+            production_ignore,
             quiet,
             external_plugins: plugins.external_plugins,
             dynamically_loaded: self.dynamically_loaded,
             markup_extensions: super::resolve_markup_extensions(&self.markup_extensions),
             overrides: path_policy.overrides,
+            semantic_refinable_capped: false,
             workspace_changed_since,
             workspace_patterns,
             regression: self.regression,
@@ -1120,7 +1137,36 @@ impl FallowConfig {
     }
 }
 
+/// The external plugins in name order, for a digest that does not depend on
+/// the discovery order.
+fn sorted_by_name(plugins: &[ExternalPluginDef]) -> Vec<&ExternalPluginDef> {
+    let mut sorted: Vec<&ExternalPluginDef> = plugins.iter().collect();
+    sorted.sort_by(|a, b| a.name.cmp(&b.name));
+    sorted
+}
+
 impl ResolvedConfig {
+    /// Lower every `error` rule of [`super::SEMANTIC_REFINABLE_KINDS`] to
+    /// `warn`, in the base rules and in each override, for a run whose
+    /// type-aware pass found no sidecar. See
+    /// [`Self::semantic_refinable_capped`].
+    pub fn cap_semantic_refinable_rules(&mut self) {
+        self.rules.cap_semantic_refinable_at_warn();
+        for entry in &mut self.overrides {
+            entry.rules.cap_semantic_refinable_at_warn();
+        }
+        self.semantic_refinable_capped = true;
+    }
+
+    /// Lower the refinable rules of `rules` to `warn` again when the cap of
+    /// [`Self::cap_semantic_refinable_rules`] is on. Call it after a
+    /// `--fail-on-issues` promotion of `rules`, so the cap wins.
+    pub fn apply_semantic_refinable_cap(&self, rules: &mut super::RulesConfig) {
+        if self.semantic_refinable_capped {
+            rules.cap_semantic_refinable_at_warn();
+        }
+    }
+
     /// Turn `includeEntryExports` on in every workspace for this run, the
     /// way the `--include-entry-exports` flag does. It wins over a
     /// `workspaces.settings` value of `false`.

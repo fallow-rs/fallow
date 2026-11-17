@@ -203,18 +203,6 @@ export const auditScopeSummary = (audit: AuditOutput): string => {
   return `${audit.changed_files_count} changed ${fileWord} vs ${base}`;
 };
 
-/**
- * The trailing ` (N)` gating-count suffix for the status-bar verdict label.
- * Shown for any non-zero gating count regardless of verdict, so a `warn`
- * verdict's glance matches the tooltip's own `count > 0` branch (a `warn` that
- * suppressed the count read as a clean pass at a glance). Empty when nothing is
- * gating. Pure so the rule is unit-tested without a status-bar mock.
- */
-export const auditGatingSuffix = (audit: AuditOutput): string => {
-  const count = gatingCount(audit);
-  return count > 0 ? ` (${count})` : "";
-};
-
 interface GatingRow {
   readonly count: number;
   readonly icon: string;
@@ -259,35 +247,27 @@ const gatingRows = (audit: AuditOutput): readonly GatingRow[] => {
 };
 
 /**
- * Trusted-markdown tooltip for the audit status-bar item.
+ * Trusted-markdown hover lines for a completed audit in the Fallow status bar
+ * item: the verdict with its gating count, the scope (changed-file count vs
+ * base ref), the per-category gating breakdown (non-zero rows only) and the
+ * candidate framing.
  *
- * Lists the scope (changed-file count vs base ref), the verdict, the per-
- * category gating breakdown (non-zero rows only), and command-link footer.
  * Finding-level wording uses "candidate" framing (#903), never "defects" or
  * "problems"; the verdict words pass/warn/fail are the CLI's own gate language
  * and are kept verbatim. The `base_ref` and `base_description` are
  * markdown-escaped because they can carry user-supplied refs containing
  * markdown metacharacters.
  */
-export const buildAuditTooltipMarkdown = (
-  audit: AuditOutput,
-  changedSinceRef: string | null = null,
-): string => {
+export const buildAuditSummaryLines = (audit: AuditOutput): string[] => {
   const presentation = auditVerdictPresentation(audit.verdict);
   const count = gatingCount(audit);
-  const lines: string[] = [`**Fallow Audit** - ${AUDIT_CANDIDATE_HEADER}\n`];
-
+  const gating = count > 0 ? ` (${count} gating ${count === 1 ? "candidate" : "candidates"})` : "";
   const base = formatAuditBase(audit, escapeMarkdownText);
   const fileWord = audit.changed_files_count === 1 ? "file" : "files";
-  lines.push(`$(git-branch) ${audit.changed_files_count} changed ${fileWord} vs ${base}`);
-
-  if (changedSinceRef) {
-    lines.push(`$(history) Scoped to changes since ${escapeMarkdownText(changedSinceRef)}`);
-  }
-
-  lines.push(
-    `${presentation.icon} Verdict: ${presentation.label}${count > 0 ? ` (${count} gating ${count === 1 ? "candidate" : "candidates"})` : ""}`,
-  );
+  const lines: string[] = [
+    `${presentation.icon} Audit: ${presentation.label}${gating}`,
+    `$(git-branch) ${audit.changed_files_count} changed ${fileWord} vs ${base}`,
+  ];
 
   for (const row of gatingRows(audit)) {
     if (row.count > 0) {
@@ -295,16 +275,12 @@ export const buildAuditTooltipMarkdown = (
     }
   }
 
-  if (count === 0) {
-    lines.push("$(check) No gating candidates in the current change set");
-  }
-
-  lines.push("\n---\n");
   lines.push(
-    "[$(sync) Re-run](command:fallow.audit) · [$(output) Details](command:fallow.showOutput)",
+    count === 0
+      ? "$(check) No gating candidates in the current change set"
+      : AUDIT_CANDIDATE_HEADER,
   );
-
-  return lines.join("\n\n");
+  return lines;
 };
 
 /**

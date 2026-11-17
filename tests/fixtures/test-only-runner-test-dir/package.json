@@ -1,0 +1,18 @@
+{
+  "name": "test-only-runner-test-dir",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "seed": "tsx src/seed.ts"
+  },
+  "dependencies": {
+    "chalk": "^5.0.0",
+    "left-pad": "1.3.0",
+    "lodash": "^4.0.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.55.0",
+    "tsx": "^4.0.0"
+  }
+}

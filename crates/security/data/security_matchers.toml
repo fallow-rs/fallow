@@ -70,6 +70,9 @@
 # Optional options_may_enable matches unless the extractor proved that each
 # listed call option is absent or boolean false (the `shell` option of
 # `child_process.spawn`).
+# Optional options_enabled is the strict form: it matches only when the
+# extractor read a complete options object literal in which a listed option is
+# `true` or a non-empty string.
 # Optional context_keywords matches zero-arg sinks that were captured only
 # because the surrounding variable or property name is security sensitive.
 #
@@ -226,6 +229,37 @@ callee_patterns = ["shell.exec", "shelljs.exec"]
 arg_index = 0
 import_provenance = "shelljs"
 evidence_template = "Non-literal command passed to {callee}(). Candidate for verification: confirm the command/args are not attacker-controlled."
+
+# With `shell: true` (or a shell path), Node joins the command and the
+# argument array into one shell command line, so the shell also parses each
+# argument. These rows read the argument array (position 1) and need proof:
+# a complete options object literal that turns the shell on, and untrusted
+# input in the array.
+[[matcher]]
+id = "command-injection"
+cwe = 78
+title = "OS command injection sink"
+effect = "shell"
+sink_shape = "member-call"
+callee_patterns = ["child_process.execFile", "child_process.execFileSync", "child_process.spawn", "child_process.spawnSync"]
+arg_index = 1
+import_provenance = "node:child_process"
+options_enabled = ["shell"]
+requires_source = true
+evidence_template = "Untrusted argument passed to {callee}() with the shell option on. Candidate for verification: the shell parses each argument, so drop the shell option or escape the arguments."
+
+[[matcher]]
+id = "command-injection"
+cwe = 78
+title = "OS command injection sink"
+effect = "shell"
+sink_shape = "member-call"
+callee_patterns = ["node:child_process.execFile", "node:child_process.execFileSync", "node:child_process.spawn", "node:child_process.spawnSync"]
+arg_index = 1
+import_provenance = "node:child_process"
+options_enabled = ["shell"]
+requires_source = true
+evidence_template = "Untrusted argument passed to {callee}() with the shell option on. Candidate for verification: the shell parses each argument, so drop the shell option or escape the arguments."
 
 # `execFile`, and `spawn` without the `shell` option, run no shell. Tooling
 # code runs computed binary paths all the time. These rows therefore need

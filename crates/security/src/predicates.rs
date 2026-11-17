@@ -99,6 +99,30 @@ impl Matcher {
         })
     }
 
+    /// Whether the call options of a sink prove that one of this row's
+    /// `options_enabled` options is on: a complete options object literal
+    /// sets it to `true` or to a non-empty string (a shell path). Unknown
+    /// options do not satisfy the gate.
+    #[must_use]
+    pub fn options_enabled_satisfied(&self, options: Option<&SinkCallOptions>) -> bool {
+        if self.options_enabled.is_empty() {
+            return true;
+        }
+        let Some(options) = options.filter(|options| options.keys_complete) else {
+            return false;
+        };
+        self.options_enabled.iter().any(|key| {
+            options.properties.iter().any(|property| {
+                property.key == *key
+                    && match &property.value {
+                        SinkLiteralValue::Boolean(value) => *value,
+                        SinkLiteralValue::String(value) => !value.is_empty(),
+                        SinkLiteralValue::Integer(_) | SinkLiteralValue::Null => false,
+                    }
+            })
+        })
+    }
+
     /// Whether captured context names satisfy this row's context keyword gate.
     #[must_use]
     pub fn context_satisfied(&self, context_names: &[String]) -> bool {
@@ -172,5 +196,51 @@ mod tests {
             vec![shell(SinkLiteralValue::Boolean(false))],
             true,
         ))));
+    }
+
+    #[test]
+    fn options_enabled_needs_proof_that_the_option_is_on() {
+        let shell_args = catalogue()
+            .matchers()
+            .iter()
+            .find(|m| m.options_enabled == ["shell"])
+            .expect("shell argument row present");
+        let options = |properties: Vec<SinkObjectProperty>, complete: bool| SinkCallOptions {
+            keys: properties.iter().map(|p| p.key.clone()).collect(),
+            properties,
+            keys_complete: complete,
+        };
+        let shell = |value: SinkLiteralValue| SinkObjectProperty {
+            key: "shell".to_string(),
+            value,
+        };
+
+        assert_eq!(shell_args.arg_index, 1);
+        assert!(shell_args.requires_source);
+        assert!(shell_args.options_enabled_satisfied(Some(&options(
+            vec![shell(SinkLiteralValue::Boolean(true))],
+            true,
+        ))));
+        assert!(shell_args.options_enabled_satisfied(Some(&options(
+            vec![shell(SinkLiteralValue::String("/bin/sh".to_string()))],
+            true,
+        ))));
+        assert!(!shell_args.options_enabled_satisfied(None));
+        assert!(!shell_args.options_enabled_satisfied(Some(&options(vec![], true))));
+        assert!(!shell_args.options_enabled_satisfied(Some(&options(
+            vec![shell(SinkLiteralValue::Boolean(false))],
+            true,
+        ))));
+        assert!(!shell_args.options_enabled_satisfied(Some(&options(
+            vec![shell(SinkLiteralValue::String(String::new()))],
+            true,
+        ))));
+        assert!(
+            !shell_args.options_enabled_satisfied(Some(&options(
+                vec![shell(SinkLiteralValue::Boolean(true))],
+                false,
+            ))),
+            "a spread or a duplicate key can turn the shell off again"
+        );
     }
 }

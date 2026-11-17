@@ -215,6 +215,18 @@ impl StructuralParamMemberCollector {
         (id_namespace.as_ref() == Some(&namespace)).then_some((namespace, true))
     }
 
+    /// The namespace receiver of an inline stub call, such as
+    /// `env.NS.getByName(name)` in `env.NS.getByName(name).method()`.
+    pub(super) fn inline_stub_receiver(&self, object: &Expression<'_>) -> Option<ResolvedReceiver> {
+        let (namespace, id) = durable_object_stub_call(object)?;
+        let ((param, path), _) = self.stub_namespace(namespace, &id)?;
+        Some(ResolvedReceiver {
+            param,
+            path,
+            via_stub: true,
+        })
+    }
+
     /// Records the access of `member` on `receiver`.
     pub(super) fn record_member_access(&mut self, receiver: ResolvedReceiver, member: String) {
         if !receiver.via_stub && is_namespace_method(&member) {

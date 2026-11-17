@@ -105,7 +105,7 @@ impl ProductionFlags {
     pub const fn effective(
         self,
         analysis: ProductionAnalysis,
-        config: fallow_config::ProductionConfig,
+        config: &fallow_config::ProductionConfig,
     ) -> bool {
         match self.override_for(analysis) {
             Some(value) => value,
@@ -115,7 +115,10 @@ impl ProductionFlags {
 
     /// The effective production mode of each analysis.
     #[must_use]
-    pub const fn effective_modes(self, config: fallow_config::ProductionConfig) -> ProductionModes {
+    pub const fn effective_modes(
+        self,
+        config: &fallow_config::ProductionConfig,
+    ) -> ProductionModes {
         ProductionModes {
             dead_code: self.effective(ProductionAnalysis::DeadCode, config),
             health: self.effective(ProductionAnalysis::Health, config),
@@ -232,10 +235,8 @@ pub fn config_for_project_with_load_options(
         None => (FallowConfig::default(), None),
     };
     if path.is_some() {
-        config.production = config
-            .production
-            .for_analysis(ProductionAnalysis::DeadCode)
-            .into();
+        let dead_code = config.production.for_analysis(ProductionAnalysis::DeadCode);
+        config.production = config.production.for_run(dead_code);
         validate_boundaries_and_rule_packs(root, &config)?;
     }
     let threads = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
@@ -367,8 +368,8 @@ fn resolve_project_config_analysis(
             global: options.production_override,
             ..ProductionFlags::default()
         }
-        .effective(options.analysis, config.production);
-        config.production = production.into();
+        .effective(options.analysis, &config.production);
+        config.production = config.production.for_run(production);
     }
     validate_config(root, &config)?;
     let configured_plugin_paths = config.plugins.clone();

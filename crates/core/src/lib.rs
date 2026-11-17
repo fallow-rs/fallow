@@ -1732,6 +1732,7 @@ fn build_analysis_graph(input: &mut BuildAnalysisGraphInput<'_>) -> graph::Modul
         input.files,
         input.unseeded_declaration_files,
     );
+    graph.set_support_entry_points(&input.entry_points.support);
     credit_package_path_references(&mut graph, input.modules, input.excluded);
     credit_workspace_package_usage(&mut graph, &input.project.modules, input.workspaces);
 
@@ -1746,10 +1747,9 @@ fn build_analysis_graph(input: &mut BuildAnalysisGraphInput<'_>) -> graph::Modul
             resolved_project,
         };
         store.save(input.config.cache_target());
-        // `save` borrows the store, so the freshly built graph is moved back out
-        // and returned in-memory. The warm path loads-and-reconstructs an
-        // identical graph from this same persisted blob (proven by the
-        // cold-vs-warm correctness gate).
+        // `save` borrows the store, so the built graph moves back out. The
+        // warm path loads an identical graph from the same blob (the
+        // cold-vs-warm correctness gate proves this).
         return store.graph;
     }
 
@@ -2958,7 +2958,7 @@ fn resolve_user_config(
     let dead_code_production = config
         .production
         .for_analysis(fallow_config::ProductionAnalysis::DeadCode);
-    config.production = dead_code_production.into();
+    config.production = config.production.for_run(dead_code_production);
     config
         .validate_resolved_boundaries(root)
         .map_err(|errors| {
@@ -3011,11 +3011,11 @@ fn resolve_user_config(
 /// `analyze_project` is the dead-code entry point used by the LSP and other
 /// programmatic embedders. When the loaded config uses the per-analysis
 /// production form (`production: { deadCode: true, ... }`), the production
-/// flag must be flattened to the dead-code analysis here. Otherwise
-/// `ResolvedConfig::resolve` calls `.global()` which returns false for the
-/// per-analysis variant and the production-mode rule overrides
-/// (`unused_dev_dependencies: off`, etc.) plus `resolved.production = true`
-/// are silently dropped.
+/// flag must be flattened to the dead-code analysis here with `for_run`.
+/// Otherwise `ResolvedConfig::resolve` calls `.global()`, which is true for
+/// the per-analysis variant only when every analysis is on, and the
+/// production-mode rule overrides (`unused_dev_dependencies: off`, etc.) plus
+/// `resolved.production = true` are silently dropped.
 #[cfg_attr(
     not(test),
     expect(

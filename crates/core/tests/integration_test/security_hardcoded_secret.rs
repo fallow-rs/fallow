@@ -90,3 +90,10 @@ fn hardcoded_secret_evidence_redacts_literal_values() {
     assert!(!joined.contains("mF9a7Qp2Lx8Nz4Rv6Ts0"));
     assert!(!joined.contains("n7Pq4Zx9Lm2Qa8Rt5Vb3"));
 }
+
+#[test]
+fn hardcoded_secret_skips_prose_messages_and_public_urls() {
+    let results = analyze_with_category(true, false);
+    assert!(anchored_on(&results, "src/entropy.ts"));
+    assert!(!anchored_on(&results, "src/prose.ts"));
+}

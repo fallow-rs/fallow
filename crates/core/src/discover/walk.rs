@@ -1406,23 +1406,6 @@ fn build_source_walk_builder(
     walk_builder
 }
 
-/// Compile the production-mode exclude glob set, or `None` outside production mode.
-fn build_production_excludes(config: &ResolvedConfig) -> Option<globset::GlobSet> {
-    if !config.production {
-        return None;
-    }
-    let mut builder = globset::GlobSetBuilder::new();
-    for pattern in PRODUCTION_EXCLUDE_PATTERNS {
-        if let Ok(glob) = globset::GlobBuilder::new(pattern)
-            .literal_separator(true)
-            .build()
-        {
-            builder.add(glob);
-        }
-    }
-    builder.build().ok()
-}
-
 /// Discover all source files in the project, with package-scoped hidden dirs.
 ///
 /// # Panics
@@ -1503,7 +1486,7 @@ pub fn discover_files_config_candidates_and_diagnostics(
         capture_config,
         &skipped_dotdirs,
     );
-    let production_excludes = build_production_excludes(config);
+    let production_excludes = super::production_excludes::build_production_excludes(config);
     let canonical_root = config.root.canonicalize().ok();
 
     let collected: Mutex<Vec<(std::path::PathBuf, u64)>> = Mutex::new(Vec::new());
@@ -2039,7 +2022,8 @@ mod tests {
             true,
             None,
         );
-        build_production_excludes(&config).expect("production mode builds an exclude set")
+        super::super::production_excludes::build_production_excludes(&config)
+            .expect("production mode builds an exclude set")
     }
 
     /// `build_production_excludes` drops a pattern that does not compile, so a

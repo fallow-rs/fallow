@@ -2,11 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   AUDIT_CANDIDATE_HEADER,
   AUDIT_WORSENED_MIN_CLI_VERSION,
-  auditGatingSuffix,
   auditScopeSummary,
   auditVerdictPresentation,
   buildAuditArgs,
-  buildAuditTooltipMarkdown,
+  buildAuditSummaryLines,
   gatingCount,
   parseAuditOutput,
 } from "../src/audit-utils.js";
@@ -382,49 +381,6 @@ describe("gatingCount with diff risk", () => {
   });
 });
 
-describe("auditGatingSuffix", () => {
-  it("is empty when nothing is gating", () => {
-    expect(auditGatingSuffix(passAudit)).toBe("");
-  });
-
-  it("shows the count for a warn verdict with gating findings (not just fail)", () => {
-    // Regression for #908 C2: a warn verdict previously suppressed the count,
-    // so a warn read as a clean pass at a glance. The suffix is verdict-agnostic.
-    const warnAudit: AuditOutput = {
-      ...passAudit,
-      verdict: "warn",
-      attribution: {
-        gate: "new-only",
-        dead_code_introduced: 2,
-        dead_code_inherited: 0,
-        complexity_introduced: 1,
-        complexity_inherited: 0,
-        duplication_introduced: 0,
-        duplication_inherited: 0,
-        styling_introduced: 0,
-        styling_inherited: 0,
-        duplication_demoted: 0,
-        diff_risk_introduced: 0,
-      },
-    };
-    expect(auditGatingSuffix(warnAudit)).toBe(" (3)");
-  });
-
-  it("shows the count for a fail verdict", () => {
-    const audit: AuditOutput = {
-      ...failAudit,
-      summary: {
-        dead_code_issues: 4,
-        dead_code_has_errors: true,
-        complexity_findings: 0,
-        max_cyclomatic: null,
-        duplication_clone_groups: 0,
-      },
-    };
-    expect(auditGatingSuffix(audit)).toBe(" (4)");
-  });
-});
-
 describe("auditScopeSummary", () => {
   it("singularizes a single changed file", () => {
     expect(auditScopeSummary({ ...failAudit, changed_files_count: 1, base_ref: "main" })).toBe(
@@ -461,20 +417,22 @@ describe("auditScopeSummary", () => {
   });
 });
 
-describe("buildAuditTooltipMarkdown", () => {
+const auditSummary = (audit: AuditOutput): string => buildAuditSummaryLines(audit).join("\n\n");
+
+describe("buildAuditSummaryLines", () => {
   it("includes the scope line with changed file count and base ref", () => {
-    const md = buildAuditTooltipMarkdown(failAudit);
+    const md = auditSummary(failAudit);
     expect(md).toContain("1 changed file vs main");
   });
 
   it("abbreviates a merge-base SHA and shows provenance in the scope line", () => {
-    const md = buildAuditTooltipMarkdown({
+    const md = auditSummary({
       ...failAudit,
       changed_files_count: 1,
       base_ref: "611d151e8250146426ff3178e94207f8a8d3cc7b",
       base_description: "merge-base with origin/main",
     });
-    // The tooltip is trusted markdown, so the hyphen in "merge-base" is escaped.
+    // The hover is trusted markdown, so the hyphen in "merge-base" is escaped.
     expect(md).toContain("1 changed file vs 611d151e8250 (merge\\-base with origin/main)");
     expect(md).not.toContain("611d151e8250146426ff3178e94207f8a8d3cc7b");
   });
@@ -490,7 +448,7 @@ describe("buildAuditTooltipMarkdown", () => {
         duplication_clone_groups: 0,
       },
     };
-    const md = buildAuditTooltipMarkdown(audit);
+    const md = auditSummary(audit);
     expect(md).toContain("3 dead-code candidates");
     expect(md).not.toContain("complexity candidates");
     expect(md).not.toContain("duplication candidates");
@@ -507,7 +465,7 @@ describe("buildAuditTooltipMarkdown", () => {
       },
       complexity: stylingHealth("error"),
     };
-    const md = buildAuditTooltipMarkdown(audit);
+    const md = auditSummary(audit);
     expect(md).toContain("1 styling candidate");
   });
 
@@ -517,18 +475,17 @@ describe("buildAuditTooltipMarkdown", () => {
       verdict: "warn",
       attribution: { ...passAudit.attribution, diff_risk_introduced: 2 },
     };
-    const md = buildAuditTooltipMarkdown(audit);
+    const md = auditSummary(audit);
     expect(md).toContain("2 diff-risk findings");
   });
 
-  it("includes both command links", () => {
-    const md = buildAuditTooltipMarkdown(passAudit);
-    expect(md).toContain("command:fallow.audit");
-    expect(md).toContain("command:fallow.showOutput");
+  it("states the verdict with the gating count", () => {
+    expect(buildAuditSummaryLines(failAudit)[0]).toMatch(/^\$\(error\) Audit: fail \(\d+ gating candidates?\)$/);
+    expect(buildAuditSummaryLines(passAudit)[0]).toBe("$(pass) Audit: pass");
   });
 
-  it("includes the candidate-framing header (never defect/vulnerability wording)", () => {
-    const md = buildAuditTooltipMarkdown(passAudit);
+  it("includes the candidate framing (never defect/vulnerability wording)", () => {
+    const md = auditSummary(failAudit);
     expect(md).toContain(AUDIT_CANDIDATE_HEADER);
     const lower = md.toLowerCase();
     expect(lower).not.toContain("vulnerability");
@@ -538,12 +495,12 @@ describe("buildAuditTooltipMarkdown", () => {
 
   it("escapes markdown metacharacters in the base ref", () => {
     const audit: AuditOutput = { ...passAudit, base_ref: "feature/x_(y)" };
-    const md = buildAuditTooltipMarkdown(audit);
+    const md = auditSummary(audit);
     expect(md).toContain("feature/x\\_\\(y\\)");
   });
 
   it("shows a no-candidates line when nothing is gating", () => {
-    const md = buildAuditTooltipMarkdown(passAudit);
+    const md = auditSummary(passAudit);
     expect(md).toContain("No gating candidates");
   });
 });

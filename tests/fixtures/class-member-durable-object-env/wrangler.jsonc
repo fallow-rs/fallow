@@ -1,0 +1,7 @@
+{
+  "name": "worker",
+  "main": "src/index.ts",
+  "durable_objects": {
+    "bindings": [{ "name": "ROOM", "class_name": "Room" }]
+  }
+}

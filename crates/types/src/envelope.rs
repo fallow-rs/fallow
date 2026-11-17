@@ -142,6 +142,10 @@ pub struct CheckSummary {
     /// Unused namespace members.
     #[serde(default)]
     pub unused_namespace_members: usize,
+    /// Unused protected class members. Omitted when zero, because the rule
+    /// is `off` by default.
+    #[serde(default, skip_serializing_if = "zero_count")]
+    pub unused_protected_class_members: usize,
     /// Unused store members.
     #[serde(default)]
     pub unused_store_members: usize,

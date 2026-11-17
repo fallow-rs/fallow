@@ -143,6 +143,14 @@ pub const CHECK_RULES: &[RuleDef] = &[
         docs_path: "explanations/dead-code#unused-store-members",
     },
     RuleDef {
+        id: "fallow/unused-protected-class-member",
+        category: "Dead code",
+        name: "Unused Protected Class Members",
+        short: "Protected class member is never referenced",
+        full: "Class methods and properties with the `protected` modifier that neither the class nor a subclass reads. A read through `this` or `super` in the class or in a subclass counts as a use. A subclass override counts as used when the base class calls the member. Classes of the public API of a package are not checked, because a consumer can subclass them. Production mode ignores reads in test files. Defaults to off. Known limits: a read through a string key (`this[\"member\"]()`) gives no credit, and a constructor parameter property (`constructor(protected readonly x: X)`) is not checked.",
+        docs_path: "explanations/dead-code#unused-protected-class-members",
+    },
+    RuleDef {
         id: "fallow/unused-namespace-member",
         category: "Dead code",
         name: "Unused Namespace Members",
@@ -820,6 +828,10 @@ fn member_rule_guide(id: &str) -> Option<RuleGuide> {
         "fallow/unused-store-member" => RuleGuide {
             example: "useCartStore declares a discountTotal getter that no component, composable, or other store ever reads.",
             how_to_fix: "Remove the unused state property, getter, or action. If it is consumed reflectively (a Pinia plugin, $onAction, or dynamic dispatch), suppress the line with // fallow-ignore-next-line unused-store-member.",
+        },
+        "fallow/unused-protected-class-member" => RuleGuide {
+            example: "class Shape declares protected unusedHelper(), and neither Shape nor a subclass calls this.unusedHelper() or super.unusedHelper().",
+            how_to_fix: "Remove the member, or make it private when only the class reads it. If a subclass outside the project reads it, suppress the line with // fallow-ignore-next-line unused-protected-class-member.",
         },
         "fallow/unused-namespace-member" => RuleGuide {
             example: "src/lib/legacy.ts exports namespace Legacy with a member unusedInner that no file reads as Legacy.unusedInner.",

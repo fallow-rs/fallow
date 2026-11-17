@@ -21,6 +21,7 @@ macro_rules! for_each_ledger_collection {
                 unused_enum_members,
                 unused_class_members,
                 unused_namespace_members,
+                unused_protected_class_members,
                 unused_store_members,
                 unresolved_imports,
                 unlisted_dependencies,
@@ -99,6 +100,10 @@ macro_rules! for_each_ledger_collection {
             $apply!(unused_enum_members, "unused_enum_members");
             $apply!(unused_class_members, "unused_class_members");
             $apply!(unused_namespace_members, "unused_namespace_members");
+            $apply!(
+                unused_protected_class_members,
+                "unused_protected_class_members"
+            );
             $apply!(unused_store_members, "unused_store_members");
             $apply!(unresolved_imports, "unresolved_imports");
             $apply!(unlisted_dependencies, "unlisted_dependencies");

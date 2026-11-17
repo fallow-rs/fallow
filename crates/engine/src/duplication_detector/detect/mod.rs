@@ -6,6 +6,7 @@
 
 mod boundary;
 mod concatenation;
+mod consistency;
 mod extraction;
 mod filtering;
 mod lcp;
@@ -57,6 +58,8 @@ pub struct CloneDetector {
     min_lines: usize,
     /// Only report cross-directory duplicates.
     skip_local: bool,
+    /// Require a one-to-one identifier mapping between clone instances.
+    consistent_identifiers: bool,
 }
 
 impl CloneDetector {
@@ -67,7 +70,16 @@ impl CloneDetector {
             min_tokens,
             min_lines,
             skip_local,
+            consistent_identifiers: false,
         }
+    }
+
+    /// Require a one-to-one mapping between the identifier names of the
+    /// instances of each clone. See `consistency` for the split rule.
+    #[must_use]
+    pub const fn with_consistent_identifiers(mut self, enabled: bool) -> Self {
+        self.consistent_identifiers = enabled;
+        self
     }
 
     /// Run clone detection across all files.
@@ -142,6 +154,7 @@ impl CloneDetector {
                     skip_local: self.skip_local,
                     totals,
                     may_have_boundaries: boundary_summary.has_any_boundary,
+                    consistent_identifiers: self.consistent_identifiers,
                 });
             }
         }
@@ -154,6 +167,11 @@ impl CloneDetector {
 
         let (raw_groups, sa_time, lcp_time, extract_time) =
             self.extract_raw_groups(&text, &file_of, &file_offsets, files, focus_file_ids);
+        let raw_groups = if self.consistent_identifiers {
+            consistency::refine_groups(raw_groups, files, self.min_tokens)
+        } else {
+            raw_groups
+        };
 
         let t0 = std::time::Instant::now();
         let clone_groups =

@@ -514,7 +514,20 @@ impl<'a> Visit<'a> for TokenExtractor<'_> {
     }
 
     fn visit_template_literal(&mut self, lit: &TemplateLiteral<'a>) {
-        self.push(TokenKind::TemplateLiteral, lit.span);
+        // The cooked value matches the value of a string literal, so escapes
+        // compare the same way. A quasi with an invalid escape has no cooked
+        // value and uses the raw text.
+        let mut text = String::new();
+        for (index, quasi) in lit.quasis.iter().enumerate() {
+            if index > 0 {
+                text.push_str("${}");
+            }
+            match &quasi.value.cooked {
+                Some(cooked) => text.push_str(&cooked.text()),
+                None => text.push_str(quasi.value.raw.as_str()),
+            }
+        }
+        self.push(TokenKind::TemplateLiteral(text), lit.span);
         walk::walk_template_literal(self, lit);
     }
 

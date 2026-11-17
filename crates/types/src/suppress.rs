@@ -248,6 +248,8 @@ pub enum IssueKind {
     SharedState,
     /// A parameter that each visible call of its function passes in one way.
     ConstantParameter,
+    /// A `protected` class member that neither its class nor a subclass reads.
+    UnusedProtectedClassMember,
 }
 
 impl IssueKind {
@@ -322,6 +324,7 @@ impl IssueKind {
         Self::UnusedNamespaceMember,
         Self::SharedState,
         Self::ConstantParameter,
+        Self::UnusedProtectedClassMember,
     ];
 
     /// Parse an issue kind from the string tokens used in CLI output and suppression comments.
@@ -403,6 +406,7 @@ impl IssueKind {
             Self::UnusedNamespaceMember => 67,
             Self::SharedState => 68,
             Self::ConstantParameter => 69,
+            Self::UnusedProtectedClassMember => 70,
         }
     }
 
@@ -479,6 +483,7 @@ impl IssueKind {
             67 => Some(Self::UnusedNamespaceMember),
             68 => Some(Self::SharedState),
             69 => Some(Self::ConstantParameter),
+            70 => Some(Self::UnusedProtectedClassMember),
             _ => None,
         }
     }
@@ -918,6 +923,7 @@ mod tests {
             (66, IssueKind::UnlistedBinary),
             (67, IssueKind::UnusedNamespaceMember),
             (69, IssueKind::ConstantParameter),
+            (70, IssueKind::UnusedProtectedClassMember),
         ];
         for &(discriminant, kind) in cases {
             assert_eq!(kind.to_discriminant(), discriminant, "{kind:?} drifted");

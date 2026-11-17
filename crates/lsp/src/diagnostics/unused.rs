@@ -651,8 +651,8 @@ pub fn push_member_diagnostics(
     results: &AnalysisResults,
     mapper: &mut PositionMapper,
 ) {
-    // All three member kinds carry caveats off the same reachability-free
-    // access walk, so all three render the same qualifier. A store member has
+    // All member kinds carry caveats off the same reachability-free access
+    // walk, so all of them render the same qualifier. A store member has
     // no quick fix to withhold, which makes the caveat disclosure only: the
     // reader deciding by hand still has to be told what the run did not see.
     let enum_iter = results
@@ -669,6 +669,10 @@ pub fn push_member_diagnostics(
         .map(|f| (&f.member, f.reachability_caveats(), f.finding_id.as_deref()));
     let namespace_iter = results
         .unused_namespace_members
+        .iter()
+        .map(|f| (&f.member, f.reachability_caveats(), f.finding_id.as_deref()));
+    let protected_iter = results
+        .unused_protected_class_members
         .iter()
         .map(|f| (&f.member, f.reachability_caveats(), f.finding_id.as_deref()));
     type MemberRows<'a> = Box<
@@ -700,6 +704,11 @@ pub fn push_member_diagnostics(
             Box::new(namespace_iter) as MemberRows<'_>,
             "unused-namespace-member",
             "Namespace member",
+        ),
+        (
+            Box::new(protected_iter) as MemberRows<'_>,
+            "unused-protected-class-member",
+            "Protected class member",
         ),
     ] {
         for (member, caveats, finding_id) in members {

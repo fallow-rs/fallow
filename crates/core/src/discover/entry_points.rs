@@ -92,6 +92,7 @@ pub struct CategorizedEntryPoints {
     pub(crate) all: Vec<EntryPoint>,
     pub(crate) runtime: Vec<EntryPoint>,
     pub(crate) test: Vec<EntryPoint>,
+    pub(crate) support: Vec<EntryPoint>,
     /// Production mode only: files that only a user `support` entry rule
     /// matches. They are not entry points and take no part in the analysis,
     /// like a test file in production mode. `dedup` drops each path that a
@@ -111,25 +112,8 @@ impl CategorizedEntryPoints {
     }
 
     fn push_support(&mut self, entry: EntryPoint) {
+        self.support.push(entry.clone());
         self.all.push(entry);
-    }
-
-    pub(crate) fn extend_runtime<I>(&mut self, entries: I)
-    where
-        I: IntoIterator<Item = EntryPoint>,
-    {
-        for entry in entries {
-            self.push_runtime(entry);
-        }
-    }
-
-    pub(crate) fn extend_support<I>(&mut self, entries: I)
-    where
-        I: IntoIterator<Item = EntryPoint>,
-    {
-        for entry in entries {
-            self.push_support(entry);
-        }
     }
 
     /// Add the entry points of the root package. Returns the runtime entry
@@ -148,6 +132,7 @@ impl CategorizedEntryPoints {
         self.all.extend(other.all);
         self.runtime.extend(other.runtime);
         self.test.extend(other.test);
+        self.support.extend(other.support);
         self.production_excluded.extend(other.production_excluded);
     }
 
@@ -156,6 +141,7 @@ impl CategorizedEntryPoints {
         dedup_entry_paths(&mut self.all);
         dedup_entry_paths(&mut self.runtime);
         dedup_entry_paths(&mut self.test);
+        dedup_entry_paths(&mut self.support);
         if !self.production_excluded.is_empty() {
             let seeded: FxHashSet<&Path> = self.all.iter().map(|ep| ep.path.as_path()).collect();
             self.production_excluded

@@ -34,7 +34,7 @@ fn has_method(export: &ExportInfo) -> bool {
         && export
             .members
             .iter()
-            .any(|member| member.kind == MemberKind::ClassMethod)
+            .any(|member| member.kind == MemberKind::ClassMethod && !member.is_protected)
 }
 
 /// Each exported class of a module with a method, once for each local name.
@@ -230,6 +230,7 @@ impl Gate<'_> {
                 let mut methods: Vec<String> = Vec::new();
                 for member in &class.export.members {
                     if member.kind == MemberKind::ClassMethod
+                        && !member.is_protected
                         && !member.has_decorator
                         && !methods.contains(&member.name)
                     {

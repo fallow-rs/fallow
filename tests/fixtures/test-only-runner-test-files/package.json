@@ -1,0 +1,13 @@
+{
+  "name": "test-only-runner-test-files",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts",
+  "dependencies": {
+    "left-pad": "1.3.0",
+    "lodash": "^4.0.0"
+  },
+  "devDependencies": {
+    "vitest": "^4.0.0"
+  }
+}

@@ -1,6 +1,6 @@
 ---
 source: crates/cli/tests/integration/snapshot_tests.rs
-assertion_line: 1301
+assertion_line: 1305
 expression: redact_sarif_version(&json_str)
 ---
 {
@@ -142,6 +142,19 @@ expression: redact_sarif_version(&json_str)
               "helpUri": "https://fallow.tools/docs/explanations/dead-code/#unused-class-members",
               "defaultConfiguration": {
                 "level": "error"
+              }
+            },
+            {
+              "id": "fallow/unused-protected-class-member",
+              "shortDescription": {
+                "text": "Protected class member is never referenced"
+              },
+              "fullDescription": {
+                "text": "Class methods and properties with the `protected` modifier that neither the class nor a subclass reads. A read through `this` or `super` in the class or in a subclass counts as a use. A subclass override counts as used when the base class calls the member. Classes of the public API of a package are not checked, because a consumer can subclass them. Production mode ignores reads in test files. Defaults to off. Known limits: a read through a string key (`this[\"member\"]()`) gives no credit, and a constructor parameter property (`constructor(protected readonly x: X)`) is not checked."
+              },
+              "helpUri": "https://fallow.tools/docs/explanations/dead-code/#unused-protected-class-members",
+              "defaultConfiguration": {
+                "level": "none"
               }
             },
             {

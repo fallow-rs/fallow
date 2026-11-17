@@ -82,6 +82,30 @@ Do not duplicate the full setting list in durable prose.
   bump `editors/vscode/package.json` for a release.
 - `fallow/analysisComplete` notifications update editor status without requiring
   another CLI analysis. Keep this notification contract synchronized with LSP.
+- The extension shows one status bar item (`fallow.status`), owned by
+  `src/statusBar.ts`. `src/statusBar-model.ts` renders its text, hover,
+  accessibility label, background and click menu from one pure model, so unit
+  tests cover each state without a VS Code host. The audit, license, workspace
+  picker and diagnostic filter modules update that model; they own no status
+  bar item. The item reads `fallow.health.statusBar`,
+  `fallow.audit.statusBar.enabled`, `fallow.license.showStatusBar` and
+  `fallow.changedSince` on each render.
+- A click on the item runs `fallow.showStatusMenu`. Each menu row runs an
+  existing command (`fallow.analyze`, `fallow.toggleAllDiagnostics`,
+  `fallow.audit`, `fallow.selectWorkspace`, the license commands and
+  `fallow.openSettings`). Do not rename these command ids.
+- A failed audit (`fail` or a failed run) gives the error background. A
+  `warn` verdict or a blocked license (`hard_fail`) gives the warning
+  background. The error background wins when both apply.
+- The item text shows the license only when it expires within 14 days, has
+  expired, or is not valid (`missing` while license material is present). The
+  hover and the menu offer a refresh also when the CLI sets
+  `refresh_suggested`. A machine with no license material shows no license
+  state.
+- Hidden findings always show the closed-eye icon, also next to a progress,
+  error or warning icon.
+- In a multi-root window the hover names the first folder: the CLI and the
+  LSP analyze that folder.
 - The status bar shows `package baselines` for a mixed package scope and lists
   each workspace root and ref in its tooltip. A global `fallow.changedSince`
   setting takes precedence, including when its ref is dropped. The Set Baseline

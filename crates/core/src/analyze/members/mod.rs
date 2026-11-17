@@ -746,6 +746,8 @@ pub struct UnusedMemberResults {
     pub store_members: Vec<UnusedMember>,
     /// Unused members of exported TypeScript namespaces.
     pub namespace_members: Vec<UnusedMember>,
+    /// Unused `protected` class methods / properties.
+    pub protected_class_members: Vec<UnusedMember>,
 }
 
 /// A class-member candidate plus whether it only exists for semantic
@@ -772,7 +774,34 @@ struct MemberPassIndexes<'a> {
     module_by_id: FxHashMap<FileId, &'a ResolvedModule>,
     local_keys_by_file: FxHashMap<FileId, FxHashMap<&'a str, Vec<ExportKey>>>,
     exported_object_classes_by_property: FxHashMap<(FileId, &'a str, &'a str), Vec<&'a str>>,
+    /// Named types with a property map in a global declaration file, keyed
+    /// by type name. See [`is_global_declaration_file`].
+    global_typed_property_modules: FxHashMap<&'a str, Vec<&'a ResolvedModule>>,
     empty: FxHashMap<&'a str, Vec<ExportKey>>,
+}
+
+/// A declaration file (`.d.ts`, `.d.mts`, `.d.cts`) without exports and
+/// without an import declaration is a global script: each top-level type in
+/// it is visible in every file without an import. `wrangler types` writes the
+/// Worker `Env` in such a file. A type reference such as `import("./room")`
+/// has no local name and keeps the file global.
+fn is_global_declaration_file(module: &ResolvedModule) -> bool {
+    let is_declaration_file = module
+        .path
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(|name| {
+            [".d.ts", ".d.mts", ".d.cts"]
+                .iter()
+                .any(|suffix| name.ends_with(suffix))
+        });
+    is_declaration_file
+        && module.exports.is_empty()
+        && module.re_exports.is_empty()
+        && module
+            .resolved_imports
+            .iter()
+            .all(|import| import.info.local_name.is_empty())
 }
 
 impl<'a> MemberPassIndexes<'a> {
@@ -784,8 +813,24 @@ impl<'a> MemberPassIndexes<'a> {
         let mut local_keys_by_file: FxHashMap<FileId, FxHashMap<&'a str, Vec<ExportKey>>> =
             FxHashMap::default();
         let mut exported_object_classes_by_property = FxHashMap::default();
+        let mut global_typed_property_modules: FxHashMap<&'a str, Vec<&'a ResolvedModule>> =
+            FxHashMap::default();
         for module in resolved_modules {
             module_by_id.insert(module.file_id, module);
+            if is_global_declaration_file(module) {
+                let mut type_names: Vec<&str> = module
+                    .type_member_types
+                    .iter()
+                    .map(|entry| entry.type_name.as_str())
+                    .collect();
+                type_names.dedup();
+                for type_name in type_names {
+                    global_typed_property_modules
+                        .entry(type_name)
+                        .or_default()
+                        .push(module);
+                }
+            }
             local_keys_by_file.insert(module.file_id, build_local_to_export_keys(module));
             for property in exported_object_instance_properties(module) {
                 exported_object_classes_by_property
@@ -802,6 +847,7 @@ impl<'a> MemberPassIndexes<'a> {
             module_by_id,
             local_keys_by_file,
             exported_object_classes_by_property,
+            global_typed_property_modules,
             empty: FxHashMap::default(),
         }
     }
@@ -856,6 +902,7 @@ type MemberScanBuckets = (
     Vec<UnusedClassMemberCandidate>,
     Vec<UnusedMember>,
     Vec<UnusedMember>,
+    Vec<UnusedMember>,
 );
 
 struct MemberReportContext<'a, 'scan> {
@@ -873,6 +920,7 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
     let mut unused_class_members = Vec::new();
     let mut unused_store_members = Vec::new();
     let mut unused_namespace_members = Vec::new();
+    let mut unused_protected_class_members = Vec::new();
     let allowlist = ClassMemberAllowlist::from_rules(input.user_class_member_allowlist);
     let semantic_framework_candidates =
         ClassMemberAllowlist::from_rules(input.semantic_framework_candidates);
@@ -890,11 +938,14 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
     }
     .collect();
 
-    for (enum_members, class_members, store_members, namespace_members) in member_results {
+    for (enum_members, class_members, store_members, namespace_members, protected_members) in
+        member_results
+    {
         unused_enum_members.extend(enum_members);
         unused_class_members.extend(class_members);
         unused_store_members.extend(store_members);
         unused_namespace_members.extend(namespace_members);
+        unused_protected_class_members.extend(protected_members);
     }
 
     if input.report_unmatched_patterns {
@@ -907,6 +958,7 @@ pub(super) fn find_unused_members_with_public_api_entry_points(
         class_members: unused_class_members,
         store_members: unused_store_members,
         namespace_members: drop_members_of_unused_namespaces(unused_namespace_members),
+        protected_class_members: unused_protected_class_members,
     }
 }
 
@@ -921,7 +973,7 @@ impl MemberReportContext<'_, '_> {
     }
 
     fn collect_module(&self, module: &crate::graph::ModuleNode) -> MemberScanBuckets {
-        let mut buckets = (Vec::new(), Vec::new(), Vec::new(), Vec::new());
+        let mut buckets = (Vec::new(), Vec::new(), Vec::new(), Vec::new(), Vec::new());
         if !module.is_reachable() {
             return buckets;
         }
@@ -1068,6 +1120,10 @@ impl MemberReportContext<'_, '_> {
             skip_context.super_class,
             skip_context.implemented_interfaces,
         );
+        if member.is_protected {
+            buckets.4.push(unused);
+            return;
+        }
         push_unused_member(buckets, unused, member.kind, semantic_only);
     }
 }
@@ -1516,6 +1572,9 @@ fn build_unsuppressed_unused_member(
 ) -> Option<UnusedMember> {
     let (line, col) = byte_offset_to_line_col(line_offsets_by_file, file_id, member.span.start);
     let issue_kind = match member.kind {
+        MemberKind::ClassMethod | MemberKind::ClassProperty if member.is_protected => {
+            IssueKind::UnusedProtectedClassMember
+        }
         MemberKind::EnumMember => IssueKind::UnusedEnumMember,
         MemberKind::ClassMethod | MemberKind::ClassProperty => IssueKind::UnusedClassMember,
         MemberKind::StoreMember => IssueKind::UnusedStoreMember,

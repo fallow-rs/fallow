@@ -126,6 +126,25 @@ error by suppressing a downstream detector.
   a separate typed property fact that the member pass joins through named and
   re-exported imports; ordinary dotted member accesses are not treated as
   namespace constructors.
+- A typed property fact whose type name the module neither declares nor
+  imports resolves to a global declaration file: a `.d.ts`, `.d.mts` or
+  `.d.cts` file without exports and without an import declaration. When more
+  than one such file declares the type, only the nearest files count: the
+  files that share the longest directory prefix with the module. Thus each
+  Worker package of a monorepo uses its own `Env`. The type map of an
+  interface includes the properties of each local interface that it extends,
+  also through a qualified name such as `Cloudflare.Env`. Declarations of one
+  interface name merge their properties. A property typed by a
+  type import (`import("./room").Room`) keeps the import as its type, and the
+  member pass resolves it through the type import edge of the declaring file.
+  This is how a Cloudflare Worker `Env` from `wrangler types` reaches the
+  Durable Object class of a binding. The extractor reads the `env` import of
+  `cloudflare:workers` as a receiver of the type `Env`, and `this.env` in a
+  subclass of `DurableObject<E>`, `WorkerEntrypoint<E>` or
+  `WorkflowEntrypoint<E>` of `cloudflare:workers` as a receiver of the type
+  `E` (issue #4548). Known limit: only code in a function body reads these
+  receivers. A stub at the top level of a module
+  (`const stub = env.ROOM.getByName("x")`) gives no credit.
 - A member name probe (`"name" in value` or `Reflect.has(value, "name")` with
   a static name) is a `MemberNameProbe` fact. The member pass credits class
   members with that name only in the probe module and in its direct import
@@ -382,6 +401,17 @@ error by suppressing a downstream detector.
   function-like spans with semantic shingles while retaining exact results from
   the configured mode. Candidate generation is deterministically bounded and
   reports skipped comparisons instead of hiding incomplete work.
+- Template literal tokens carry their static text, cooked as for string
+  literals, and string normalization (`ignoreStringValues`) controls that text
+  as it controls string literals.
+- `normalization.consistentIdentifiers` keeps the token hashes blind to
+  names. Both exact detectors pass their raw groups through
+  `detect/consistency.rs` before subset removal. That step keeps a group of
+  the full length for each class of instances whose names map one-to-one.
+  For each pair of classes it then finds every maximal window that maps
+  one-to-one, and merges the pairs that share a window. Each window of
+  `minTokens` or more tokens stays a clone. The `near` pass does not use the
+  check.
 - Near groups carry a required similarity inside the engine and convert to the
   shared output type only at the detector boundary. `CloneGroup::kind()` is the
   canonical way to distinguish exact and near groups after that conversion.
@@ -399,6 +429,24 @@ error by suppressing a downstream detector.
   version to move with the changed semantics.
 - Security findings are verification candidates until an agent or human
   confirms the evidence.
+- The `client-server-leak` cone starts from `"use client"` files and from the
+  client roots of the React Router plugin (`security/framework_roots.rs`).
+  React Router removes the `loader`, `action`, `middleware` and `headers`
+  exports from a route file wherever it is imported, and then runs dead-code
+  elimination. So at each route module, the root included, the scan skips
+  the imports, the re-exports and the static env reads
+  (`process.env.X`, `import.meta.env.X`) that only those exports use.
+  Extraction does not keep statement-level references, so
+  `security/route_module_split.rs` parses the route modules again, and only
+  those. An env read in another form, such as a destructure of
+  `process.env`, stays counted for the whole module.
+- A route module is a file that the route config names, the root route, a
+  file directly in a route directory, a `route.*` file, or a deeper file
+  that exports a route module export and is not in a folder with a
+  `route.*` file. A helper next to a `route.*` file is not a root. Test files
+  are not roots. The `.client` and `.server` markers apply only in the
+  packages where the plugin is active
+  (`AggregatedPluginResult::active_plugin_scopes`).
 - The load kind of an edge (`ImportLoadKind`) is the one model for when and
   whether the edge runs its target. `PathReference` (`require.resolve`) and
   `AssetReference` (a webpack asset loader request) keep the target in use,
@@ -963,6 +1011,46 @@ does not read the files of that member, so the run cannot prove that its
 dependencies are unused. The unused-dependency pass skips each member that the
 source walk does not reach (`source_walked_workspaces`). This agrees with the
 audit base snapshot, which does not hold the gitignored member.
+
+## Production patterns that drop an imported file
+
+In production mode the walk drops each file that matches
+`PRODUCTION_EXCLUDE_PATTERNS`. A directory pattern such as `**/test/**` also
+matches production source in a directory with that name (issue #4498). The
+patterns do not change, and `ignorePatterns` exceptions cannot lift them.
+
+The dead-code pass reports the case where a production file imports a dropped
+file. `analyze/production_excluded_imports.rs` reads the resolved imports,
+dynamic imports and re-exports of each analyzed file. A dropped file has no
+`FileId`, so an import of it resolves to `ResolveResult::ExternalFile`. The
+pass matches each such target with a source extension against the production
+patterns and attributes it to the first matching pattern in built-in order. It
+reads no dropped file and runs no second analysis.
+
+An import of a workspace package resolves to `NpmPackage` or to a fallback
+`InternalModule`, so its result keeps no file path. For an import whose
+specifier names a workspace package, the pass reads the entry fields of that
+package manifest: `main`, `module`, `source` and `exports["."]` for the bare
+name, and `exports["./<subpath>"]` for a subpath. Each entry file that exists
+goes through the same match. A subpath that the `exports` map does not name is
+not checked, because the pass does not repeat the resolver.
+
+Preserve these properties:
+
+- One `production-excluded-file-imported` entry per pattern, with an exact
+  `file_count` and a sample of at most five files in path order. `path` is the
+  first file.
+- The pass counts a file once by its root-relative path, also when two
+  imports reach it through two spellings of the root (`/tmp` and
+  `/private/tmp` on macOS).
+- A file that `ignorePatterns` matches is not counted. The project chose that
+  exclusion.
+- A support-only file (the `excluded` set of the pass) does not count as an
+  importer, because it takes no part in a production run.
+- The kind is analysis-stage, so each dead-code pass clears and re-records it.
+  It warns on stderr and sets `degrades_analysis`. It is not a
+  `source_never_analyzed` kind, so no finding gets a caveat and `fallow fix`
+  keeps its actions.
 
 ## The plugin stage as a diagnostic stage
 

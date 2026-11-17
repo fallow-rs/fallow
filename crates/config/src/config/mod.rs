@@ -70,7 +70,8 @@ pub use resolution::{
 };
 pub use resolve::ResolveConfig;
 pub use rules::{
-    KNOWN_RULE_NAMES, PartialRulesConfig, RulesConfig, Severity, closest_known_rule_name,
+    KNOWN_RULE_NAMES, PartialRulesConfig, RulesConfig, SEMANTIC_REFINABLE_KINDS,
+    SYMBOL_USE_REFINABLE_KINDS, Severity, any_symbol_use_rule_active, closest_known_rule_name,
     default_severity_for_kind, is_opt_in_kind,
 };
 pub use similar_code::SimilarCodeConfig;
@@ -188,7 +189,7 @@ impl UnusedComponentPropsConfig {
 ///
 /// The default leaves the rule unchanged: every runtime import edge takes
 /// part in cycle detection, and only type-only edges are skipped.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "camelCase")]
 pub struct CircularDependenciesConfig {
     /// Skip import edges that load their target on demand or on another
@@ -200,13 +201,70 @@ pub struct CircularDependenciesConfig {
     /// An edge that also carries a static import stays. Default `false`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ignore_lazy_imports: bool,
+    /// Accepted cycles. Each entry is the list of files of one cycle, in
+    /// import order, without the repeat of the first file at the end. An
+    /// entry accepts a cycle that has exactly these files in this order, from
+    /// any start file: `["src/a.ts", "src/b.ts", "src/c.ts"]` also accepts
+    /// `src/b.ts -> src/c.ts -> src/a.ts`. A cycle with another set of files
+    /// stays reported, also when it shares an import with an accepted cycle.
+    ///
+    /// Each path is relative to the project root, also in a monorepo: write
+    /// `packages/app/src/a.ts`, not a path relative to the workspace. The
+    /// match is case-sensitive on every platform. Globs are not supported.
+    /// An entry needs at least 2 files and lists each file once.
+    ///
+    /// An entry that matches no cycle in a run gives a
+    /// `circular-dependencies-allow-unmatched` diagnostic. The detector lists
+    /// at most 20 cycles per group of files that import each other, and no
+    /// cycle with more than 12 files. An accepted cycle does not count toward
+    /// the 20. An entry with more than 12 files, or with all files in a group
+    /// that reached the limit, gives no diagnostic, because the detector
+    /// cannot prove that it matches no cycle.
+    ///
+    /// A `fallow-ignore-next-line circular-dependency` comment on an accepted
+    /// cycle becomes a stale suppression: remove the comment when you add the
+    /// entry. Default `[]`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(inner(length(min = 2)))]
+    pub allow: Vec<Vec<String>>,
 }
 
 impl CircularDependenciesConfig {
     /// True when no option is set, so serialization can omit the section.
     #[must_use]
     pub const fn is_default(&self) -> bool {
-        !self.ignore_lazy_imports
+        !self.ignore_lazy_imports && self.allow.is_empty()
+    }
+
+    /// The `allow` entries that can never match a cycle: an entry with fewer
+    /// than 2 files, and an entry that lists one file more than once. A
+    /// leading `./` does not make two paths different.
+    #[must_use]
+    pub fn allow_errors(&self) -> Vec<String> {
+        let mut errors = Vec::new();
+        for (index, entry) in self.allow.iter().enumerate() {
+            if entry.len() < 2 {
+                let noun = if entry.len() == 1 { "file" } else { "files" };
+                errors.push(format!(
+                    "circularDependencies.allow[{index}] lists {} {noun}; an entry lists the 2 or \
+                     more files of one cycle",
+                    entry.len()
+                ));
+                continue;
+            }
+            let mut seen = rustc_hash::FxHashSet::default();
+            if let Some(repeated) = entry
+                .iter()
+                .map(|file| file.trim_start_matches("./"))
+                .find(|file| !seen.insert(*file))
+            {
+                errors.push(format!(
+                    "circularDependencies.allow[{index}] lists '{repeated}' more than once; a \
+                     cycle has each file once"
+                ));
+            }
+        }
+        errors
     }
 }
 
@@ -435,7 +493,7 @@ pub struct FallowConfig {
     #[serde(default)]
     pub used_class_members: Vec<UsedClassMemberRule>,
 
-    /// Configures clone detection: `enabled` (default true), `mode` (`strict`, `mild` default, `weak`, `semantic`, from least to most identifier/literal blinding; `strict` and `mild` are equivalent under fallow's AST tokenizer, `weak` blinds string literals, `semantic` blinds all identifiers and literals for Type-2 renamed-variable detection), `near` (false, add bounded function-scoped near-miss detection), `minTokens` (50), `minLines` (5), `minOccurrences` (integer >= 2, deserialization fails below 2), `threshold` (max duplication percentage, 0 = no limit), `ignore` globs, `ignoredClones` (reviewed clone keys to hide until their content or occurrence count changes), `ignoreDefaults` (true, merge built-in generated-file ignores), `skipLocal` (only report cross-directory clones), `ignoreSymlinks` (false, omit clone instances whose path is a symlink or lies under a symlinked directory), `crossLanguage` (strip TS type annotations to match .ts against .js), `ignoreImports` (true, strip ES import/re-export/top-level require wiring from the token stream), and `normalization` (per-flag `ignoreIdentifiers`/`ignoreStringValues`/`ignoreNumericValues` overrides on top of `mode`). Raise `minOccurrences` to focus on widespread copy-paste, enable `near` for gapped structural clones, or set `mode` to `semantic` to catch renamed-variable exact clones.
+    /// Configures clone detection: `enabled` (default true), `mode` (`strict`, `mild` default, `weak`, `semantic`, from least to most identifier/literal blinding; `strict` and `mild` are equivalent under fallow's AST tokenizer, `weak` blinds string literals, `semantic` blinds all identifiers and literals for Type-2 renamed-variable detection), `near` (false, add bounded function-scoped near-miss detection), `minTokens` (50), `minLines` (5), `minOccurrences` (integer >= 2, deserialization fails below 2), `threshold` (max duplication percentage, 0 = no limit), `ignore` globs, `ignoredClones` (reviewed clone keys to hide until their content or occurrence count changes), `ignoreDefaults` (true, merge built-in generated-file ignores), `skipLocal` (only report cross-directory clones), `ignoreSymlinks` (false, omit clone instances whose path is a symlink or lies under a symlinked directory), `crossLanguage` (strip TS type annotations to match .ts against .js), `ignoreImports` (true, strip ES import/re-export/top-level require wiring from the token stream), and `normalization` (per-flag `ignoreIdentifiers`/`ignoreStringValues`/`ignoreNumericValues` overrides on top of `mode`, plus `consistentIdentifiers`, which with `ignoreIdentifiers` requires a one-to-one name mapping between clone instances). Raise `minOccurrences` to focus on widespread copy-paste, enable `near` for gapped structural clones, or set `mode` to `semantic` to catch renamed-variable exact clones.
     #[serde(default)]
     pub duplicates: DuplicatesConfig,
 
@@ -509,7 +567,7 @@ pub struct FallowConfig {
     #[serde(default)]
     pub resolve: ResolveConfig,
 
-    /// Enables production mode, which excludes test/spec/story/dev files from discovery and forces `unused-dev-dependencies` and `unused-optional-dependencies` to `off`. Accepts a boolean (default false) applied to all analyses, or a per-analysis object `{ deadCode?, health?, dupes? }` (each boolean, default false) that scopes production mode to individual analyses in combined `fallow` and `fallow audit`. Set it to analyze only shipped code; the `--production`/`--no-production` and `--production-{dead-code,health,dupes}` CLI flags and `FALLOW_PRODUCTION*` env vars override this value (CLI flags win, then per-analysis env, then global env, then config).
+    /// Enables production mode, which excludes test/spec/story/dev files from discovery and forces `unused-dev-dependencies` and `unused-optional-dependencies` to `off`. Accepts a boolean (default false) applied to all analyses, or a per-analysis object `{ deadCode?, health?, dupes?, ignore? }` that scopes production mode to individual analyses in combined `fallow` and `fallow audit` (each analysis key a boolean, default false). The object key `ignore` is a glob array of extra paths that discovery drops in production mode only. Set it to analyze only shipped code; the `--production`/`--no-production` and `--production-{dead-code,health,dupes}` CLI flags and `FALLOW_PRODUCTION*` env vars override this value (CLI flags win, then per-analysis env, then global env, then config).
     #[serde(default)]
     pub production: ProductionConfig,
 
@@ -678,13 +736,13 @@ pub enum ProductionAnalysis {
 
 /// Value of the `production` config key: excludes test/spec/story/dev files
 /// from discovery, either globally or per analysis family.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, JsonSchema)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, JsonSchema)]
 #[serde(untagged)]
 pub enum ProductionConfig {
     /// Boolean form applying to every analysis. The default is `false`.
     Global(bool),
-    /// Object form (`{ deadCode?, health?, dupes? }`) scoping production mode
-    /// per analysis family.
+    /// Object form (`{ deadCode?, health?, dupes?, ignore? }`) scoping
+    /// production mode per analysis family.
     PerAnalysis(PerAnalysisProductionConfig),
 }
 
@@ -744,12 +802,20 @@ impl Not for ProductionConfig {
     }
 }
 
+impl Not for &ProductionConfig {
+    type Output = bool;
+
+    fn not(self) -> Self::Output {
+        !self.any_enabled()
+    }
+}
+
 impl ProductionConfig {
     /// Whether production mode applies to `analysis` under this config.
     #[must_use]
-    pub const fn for_analysis(self, analysis: ProductionAnalysis) -> bool {
+    pub const fn for_analysis(&self, analysis: ProductionAnalysis) -> bool {
         match self {
-            Self::Global(value) => value,
+            Self::Global(value) => *value,
             Self::PerAnalysis(config) => match analysis {
                 ProductionAnalysis::DeadCode => config.dead_code,
                 ProductionAnalysis::Health => config.health,
@@ -758,29 +824,55 @@ impl ProductionConfig {
         }
     }
 
-    /// The boolean form's value; `false` for the per-analysis form, which has
-    /// no global toggle.
+    /// The boolean form's value. The per-analysis form counts as global
+    /// production mode only when it turns on every analysis family.
     #[must_use]
-    pub const fn global(self) -> bool {
+    pub const fn global(&self) -> bool {
         match self {
-            Self::Global(value) => value,
-            Self::PerAnalysis(_) => false,
+            Self::Global(value) => *value,
+            Self::PerAnalysis(config) => config.dead_code && config.health && config.dupes,
         }
     }
 
     /// Whether production mode is enabled for at least one analysis family.
     #[must_use]
-    pub const fn any_enabled(self) -> bool {
+    pub const fn any_enabled(&self) -> bool {
         match self {
-            Self::Global(value) => value,
+            Self::Global(value) => *value,
             Self::PerAnalysis(config) => config.dead_code || config.health || config.dupes,
         }
+    }
+
+    /// The `ignore` globs of the object form. The boolean form has none.
+    #[must_use]
+    pub fn ignore(&self) -> &[String] {
+        match self {
+            Self::Global(_) => &[],
+            Self::PerAnalysis(config) => &config.ignore,
+        }
+    }
+
+    /// The config of one run, with production mode set to `enabled` for every
+    /// analysis family. The `ignore` globs stay, so a run in production mode
+    /// still drops them when a CLI flag or one analysis selects the mode.
+    #[must_use]
+    pub fn for_run(&self, enabled: bool) -> Self {
+        let ignore = self.ignore();
+        if ignore.is_empty() {
+            return Self::Global(enabled);
+        }
+        Self::PerAnalysis(PerAnalysisProductionConfig {
+            dead_code: enabled,
+            health: enabled,
+            dupes: enabled,
+            ignore: ignore.to_vec(),
+        })
     }
 }
 
 /// Object form of the `production` config key, scoping production mode to
 /// individual analysis families in combined `fallow` and `fallow audit`.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "camelCase")]
 pub struct PerAnalysisProductionConfig {
     /// When `production` is a per-analysis object, enables production mode for dead-code analysis only (boolean, default false): unused-files/exports/dependencies detection excludes test/spec/story/dev files and forces `unused-dev-dependencies`/`unused-optional-dependencies` to `off`, while health and dupes stay on the full tree. Set it to scope production analysis to dead code independently.
@@ -789,6 +881,9 @@ pub struct PerAnalysisProductionConfig {
     pub health: bool,
     /// When `production` is a per-analysis object, enables production mode for duplication analysis only (boolean, default false), so clone detection runs on shipped code only (test/spec/story/dev files excluded) while dead-code and health stay on the full tree. Set it to scope production analysis to dupes independently.
     pub dupes: bool,
+    /// When `production` is a per-analysis object, an array of project-root-relative glob patterns for paths that discovery drops in production mode only, in addition to the built-in test/spec/story/dev patterns (default empty). The default run keeps these paths. The globs apply to each analysis that runs in production mode, also when the `--production` flag or a `FALLOW_PRODUCTION*` env var selects the mode. Set it for tooling, CI scripts, seeds and test harnesses that never ship (e.g. `["scripts/**"]`). A single `*` stays within one path segment; use `**` to match across directories.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub ignore: Vec<String>,
 }
 
 /// The `audit` config section: in-repo defaults for `fallow audit`, each
@@ -1181,6 +1276,48 @@ mod tests {
         assert!(!config.production.for_analysis(ProductionAnalysis::DeadCode));
         assert!(config.production.for_analysis(ProductionAnalysis::Health));
         assert!(!config.production.for_analysis(ProductionAnalysis::Dupes));
+    }
+
+    #[test]
+    fn deserialize_json_production_ignore() {
+        let config: FallowConfig =
+            serde_json::from_str(r#"{"production": {"deadCode": true, "ignore": ["scripts/**"]}}"#)
+                .unwrap();
+        assert!(config.production.for_analysis(ProductionAnalysis::DeadCode));
+        assert_eq!(config.production.ignore(), ["scripts/**".to_string()]);
+        assert!(
+            ProductionConfig::Global(true).ignore().is_empty(),
+            "the boolean form has no ignore globs"
+        );
+    }
+
+    #[test]
+    fn production_for_run_keeps_ignore_globs() {
+        let config: FallowConfig =
+            serde_json::from_str(r#"{"production": {"ignore": ["scripts/**"]}}"#).unwrap();
+        let on = config.production.for_run(true);
+        assert!(on.global());
+        assert_eq!(on.ignore(), ["scripts/**".to_string()]);
+        let off = config.production.for_run(false);
+        assert!(!off.any_enabled());
+        assert_eq!(off.ignore(), ["scripts/**".to_string()]);
+        assert_eq!(
+            ProductionConfig::Global(false).for_run(true),
+            ProductionConfig::Global(true),
+            "a config without ignore globs keeps the boolean form"
+        );
+    }
+
+    #[test]
+    fn production_global_needs_every_analysis_in_the_object_form() {
+        let partial: FallowConfig =
+            serde_json::from_str(r#"{"production": {"deadCode": true, "health": true}}"#).unwrap();
+        assert!(!partial.production.global());
+        let all: FallowConfig = serde_json::from_str(
+            r#"{"production": {"deadCode": true, "health": true, "dupes": true}}"#,
+        )
+        .unwrap();
+        assert!(all.production.global());
     }
 
     #[test]

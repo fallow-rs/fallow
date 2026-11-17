@@ -14,8 +14,12 @@ mod this_scope;
 
 use requirements::{BindingRequirements, RequirementArena};
 use std::cell::{Cell, RefCell};
+#[path = "visit_impl_interface_types.rs"]
+mod interface_types;
 pub(crate) mod react;
 mod visit_impl;
+#[path = "visit_impl_worker_env.rs"]
+mod worker_env;
 pub(crate) use semantic_calls::mark_template_callers;
 pub(crate) use ssr_load_module::{ssr_load_module_call, ssr_load_module_source};
 pub(crate) use visit_impl::push_member_tag_accesses;
@@ -35,7 +39,7 @@ use crate::{
     ImportInfo, ImportedName, InstanceExportBindingFact, MemberAccess, MemberInfo, MemberKind,
     ModuleInfo, PlaywrightFixtureDefinitionFact, PlaywrightTestBindingFact,
     QualifiedClassMemberAccessFact, ReExportInfo, RequireCallInfo, SemanticFact,
-    TypeMemberTypeEntry, TypedPropertyMemberAccessFact, VisibilityTag,
+    TypedPropertyMemberAccessFact, VisibilityTag,
 };
 use crate::{js_text::JsText, suppress::ParsedSuppressions};
 use fallow_types::extract::{
@@ -48,6 +52,8 @@ use fallow_types::extract::{
 };
 use helpers::LitCustomElementDecorator;
 use helpers::array_element_type_from_type;
+use interface_types::InterfaceTypeLinks;
+use worker_env::WorkerEnvBodies;
 mod static_imports;
 use static_imports::collect_static_import_specifiers;
 
@@ -738,6 +744,8 @@ pub(crate) struct ModuleInfoExtractor {
     /// exit. Other snapshots only credit bindings that eventually become ambiguous.
     walk_order_member_accesses: Vec<(Option<String>, String, String)>,
     interface_property_types: FxHashMap<String, FxHashMap<String, TypePropertyTarget>>,
+    interface_type_links: InterfaceTypeLinks,
+    worker_env_bodies: WorkerEnvBodies,
     pending_typed_destructures: Vec<(String, String, String)>,
     iterable_element_types: FxHashMap<String, String>,
     /// Module-scope value bindings whose type is an array (or Vue reactive array)
@@ -1816,7 +1824,7 @@ impl ModuleInfoExtractor {
             prefix = parent;
         }
         if let Some(class) = self.walk_order_class_bindings.get(object)
-            && !self.class_binding_root_is_shadowed(object)
+            && !self.walk_read_is_shadowed(object)
         {
             self.walk_order_member_accesses.push((
                 Some(object.to_string()),
@@ -2923,29 +2931,6 @@ impl ModuleInfoExtractor {
             }
         }
         out
-    }
-
-    /// Flatten this file's named-type property maps into the persisted
-    /// `ModuleInfo.type_member_types` entries, sorted for deterministic
-    /// output. Names stay local to this module; resolution is deferred to
-    /// the analyze-layer join. See issue #1785.
-    fn collect_type_member_types(&self) -> Vec<TypeMemberTypeEntry> {
-        let mut entries: Vec<TypeMemberTypeEntry> = self
-            .interface_property_types
-            .iter()
-            .flat_map(|(type_name, properties)| {
-                properties
-                    .iter()
-                    .map(|(property, property_type)| TypeMemberTypeEntry {
-                        type_name: type_name.clone(),
-                        property: property.clone(),
-                        property_type: property_type.name.clone(),
-                    })
-            })
-            .collect();
-        entries
-            .sort_unstable_by(|a, b| (&a.type_name, &a.property).cmp(&(&b.type_name, &b.property)));
-        entries
     }
 
     pub(crate) fn resolve_typed_destructure_bindings(&mut self) {

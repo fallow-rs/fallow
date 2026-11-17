@@ -628,6 +628,9 @@ fn filter_workspace_source_findings(
         .unused_namespace_members
         .retain(|finding| any_under(&finding.member.path));
     results
+        .unused_protected_class_members
+        .retain(|finding| any_under(&finding.member.path));
+    results
         .unprovided_injects
         .retain(|finding| any_under(&finding.inject.path));
     results
@@ -990,6 +993,12 @@ fn apply_core_dead_code_override_rules(results: &mut AnalysisResults, config: &R
             .unused_namespace_members
             != Severity::Off
     });
+    results.unused_protected_class_members.retain(|m| {
+        config
+            .resolve_rules_for_path(&m.member.path)
+            .unused_protected_class_members
+            != Severity::Off
+    });
     results.unprovided_injects.retain(|f| {
         config
             .resolve_rules_for_path(&f.inject.path)
@@ -1206,6 +1215,9 @@ fn clear_base_core_dead_code(results: &mut AnalysisResults, rules: &RulesConfig)
     }
     if rules.unused_namespace_members == Severity::Off {
         results.unused_namespace_members.clear();
+    }
+    if rules.unused_protected_class_members == Severity::Off {
+        results.unused_protected_class_members.clear();
     }
     if rules.unprovided_injects == Severity::Off {
         results.unprovided_injects.clear();

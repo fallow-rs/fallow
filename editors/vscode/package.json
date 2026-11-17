@@ -193,6 +193,11 @@
         "icon": "$(eye-closed)"
       },
       {
+        "command": "fallow.showStatusMenu",
+        "title": "Fallow: Show Status Menu",
+        "icon": "$(list-selection)"
+      },
+      {
         "command": "fallow.manageDiagnosticMutes",
         "title": "Fallow: Manage Hidden Findings...",
         "icon": "$(filter)"
@@ -304,6 +309,7 @@
             "unused-optional-dependencies": true,
             "unused-enum-members": true,
             "unused-class-members": true,
+            "unused-protected-class-members": true,
             "unused-namespace-members": true,
             "unused-store-members": true,
             "unresolved-imports": true,
@@ -375,6 +381,9 @@
               "type": "boolean"
             },
             "unused-class-members": {
+              "type": "boolean"
+            },
+            "unused-protected-class-members": {
               "type": "boolean"
             },
             "unused-namespace-members": {
@@ -703,7 +712,7 @@
         "fallow.audit.statusBar.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Show the audit verdict (pass/warn/fail) for the current change set in the status bar."
+          "description": "Show the audit verdict (pass/warn/fail) for the current change set in the Fallow status bar item: a warning or error background, an icon and a hover line. When off, the audit command reports its verdict in a message."
         },
         "fallow.audit.runOnSave": {
           "type": "boolean",
@@ -713,7 +722,8 @@
         "fallow.diagnostics.statusBar": {
           "type": "boolean",
           "default": true,
-          "markdownDescription": "Show the **Fallow** eye button in the status bar to hide or show all Fallow squiggles in the editor with one click. Editor-only; CI and `fallow check` still report every finding. Turn this off to remove the button (the **Fallow: Toggle Hide All Findings** command still works and can be bound to a key)."
+          "markdownDescription": "Has no effect. The separate eye button is gone: use **Hide findings in the editor** in the menu of the **Fallow** status bar item, or the **Fallow: Toggle Hide All Findings** command.",
+          "markdownDeprecationMessage": "The Fallow status bar is now one item. Use **Hide findings in the editor** in its menu, or the **Fallow: Toggle Hide All Findings** command."
         },
         "fallow.diagnostics.severity": {
           "type": "string",
@@ -758,7 +768,7 @@
         "fallow.license.showStatusBar": {
           "type": "boolean",
           "default": true,
-          "description": "Show a Fallow license indicator in the status bar, but only when license material is present (active, in grace, or expired). Machines with no license never show the indicator. Disable to remove it entirely and skip the license status probe on activation."
+          "description": "Show the license state in the Fallow status bar item, but only when license material is present. The hover always shows it; the item text shows it only when the license expires within 14 days, has expired, or is not valid. Machines with no license never show it. Disable to remove it and skip the license status probe on activation."
         },
         "fallow.license.refreshOnStartup": {
           "type": "boolean",

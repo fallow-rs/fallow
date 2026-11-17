@@ -253,7 +253,10 @@ fn detect_and_postprocess(
             .map(|file| (file.path, file.hashed_tokens, file.file_tokens))
             .collect();
 
-    let detector = CloneDetector::new(config.min_tokens, config.min_lines, config.skip_local);
+    let normalization =
+        fallow_config::ResolvedNormalization::resolve(config.mode, &config.normalization);
+    let detector = CloneDetector::new(config.min_tokens, config.min_lines, config.skip_local)
+        .with_consistent_identifiers(normalization.consistent_identifiers);
     let mut report = if let Some(focus_files) = focus_files {
         detector.detect_touching_files(detector_data, focus_files)
     } else {

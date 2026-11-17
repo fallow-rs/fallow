@@ -336,6 +336,28 @@ fn handle_impact_closure_trace(
     }
 }
 
+/// Write the `--sarif-file` report when the run requested one. See
+/// [`write_sarif_file`].
+pub fn write_requested_sarif_file(
+    opts: &super::CheckOptions<'_>,
+    config: &ResolvedConfig,
+    results: &fallow_types::results::AnalysisResults,
+    type_aware: Option<&fallow_types::envelope::TypeAwareMeta>,
+    workspace_diagnostics: &[fallow_config::WorkspaceDiagnostic],
+) {
+    let Some(sarif_path) = opts.sarif_file else {
+        return;
+    };
+    write_sarif_file(&SarifFileInput {
+        results,
+        config,
+        sarif_path,
+        quiet: opts.quiet,
+        type_aware,
+        workspace_diagnostics,
+    });
+}
+
 /// What `--sarif-file` writes, and where.
 pub struct SarifFileInput<'a> {
     pub results: &'a fallow_types::results::AnalysisResults,
@@ -593,6 +615,7 @@ mod tests {
             support_entry_patterns: vec![],
             workspace_settings: fallow_config::ResolvedWorkspaceSettings::default(),
             entry_pattern_effect: fallow_config::EntryEffectRecord::default(),
+            circular_dependencies_allow_effect: fallow_config::EntryEffectRecord::default(),
             ignore_patterns: fallow_config::IgnorePatternSet::empty(),
             user_ignore_pattern_count: 0,
             ignore_findings: fallow_config::FindingIgnoreMatcher::default(),
@@ -623,6 +646,7 @@ mod tests {
             rules: fallow_config::RulesConfig::default(),
             boundaries: fallow_config::ResolvedBoundaryConfig::default(),
             production: false,
+            production_ignore: Vec::new(),
             quiet: true,
             external_plugins: vec![],
             rule_packs: vec![],
@@ -630,6 +654,7 @@ mod tests {
             dynamically_loaded: vec![],
             markup_extensions: vec![],
             overrides: vec![],
+            semantic_refinable_capped: false,
             workspace_changed_since: std::collections::BTreeMap::default(),
             workspace_patterns: Vec::new(),
             regression: None,

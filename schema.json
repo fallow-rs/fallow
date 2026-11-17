@@ -157,7 +157,7 @@
       "default": []
     },
     "duplicates": {
-      "description": "Configures clone detection: `enabled` (default true), `mode` (`strict`, `mild` default, `weak`, `semantic`, from least to most identifier/literal blinding; `strict` and `mild` are equivalent under fallow's AST tokenizer, `weak` blinds string literals, `semantic` blinds all identifiers and literals for Type-2 renamed-variable detection), `near` (false, add bounded function-scoped near-miss detection), `minTokens` (50), `minLines` (5), `minOccurrences` (integer >= 2, deserialization fails below 2), `threshold` (max duplication percentage, 0 = no limit), `ignore` globs, `ignoredClones` (reviewed clone keys to hide until their content or occurrence count changes), `ignoreDefaults` (true, merge built-in generated-file ignores), `skipLocal` (only report cross-directory clones), `ignoreSymlinks` (false, omit clone instances whose path is a symlink or lies under a symlinked directory), `crossLanguage` (strip TS type annotations to match .ts against .js), `ignoreImports` (true, strip ES import/re-export/top-level require wiring from the token stream), and `normalization` (per-flag `ignoreIdentifiers`/`ignoreStringValues`/`ignoreNumericValues` overrides on top of `mode`). Raise `minOccurrences` to focus on widespread copy-paste, enable `near` for gapped structural clones, or set `mode` to `semantic` to catch renamed-variable exact clones.",
+      "description": "Configures clone detection: `enabled` (default true), `mode` (`strict`, `mild` default, `weak`, `semantic`, from least to most identifier/literal blinding; `strict` and `mild` are equivalent under fallow's AST tokenizer, `weak` blinds string literals, `semantic` blinds all identifiers and literals for Type-2 renamed-variable detection), `near` (false, add bounded function-scoped near-miss detection), `minTokens` (50), `minLines` (5), `minOccurrences` (integer >= 2, deserialization fails below 2), `threshold` (max duplication percentage, 0 = no limit), `ignore` globs, `ignoredClones` (reviewed clone keys to hide until their content or occurrence count changes), `ignoreDefaults` (true, merge built-in generated-file ignores), `skipLocal` (only report cross-directory clones), `ignoreSymlinks` (false, omit clone instances whose path is a symlink or lies under a symlinked directory), `crossLanguage` (strip TS type annotations to match .ts against .js), `ignoreImports` (true, strip ES import/re-export/top-level require wiring from the token stream), and `normalization` (per-flag `ignoreIdentifiers`/`ignoreStringValues`/`ignoreNumericValues` overrides on top of `mode`, plus `consistentIdentifiers`, which with `ignoreIdentifiers` requires a one-to-one name mapping between clone instances). Raise `minOccurrences` to focus on widespread copy-paste, enable `near` for gapped structural clones, or set `mode` to `semantic` to catch renamed-variable exact clones.",
       "$ref": "#/$defs/DuplicatesConfig",
       "default": {
         "enabled": true,
@@ -243,6 +243,7 @@
         "unused-enum-members": "error",
         "unused-class-members": "error",
         "unused-namespace-members": "warn",
+        "unused-protected-class-members": "off",
         "unused-store-members": "warn",
         "unprovided-injects": "warn",
         "unrendered-components": "warn",
@@ -365,7 +366,7 @@
       "default": {}
     },
     "production": {
-      "description": "Enables production mode, which excludes test/spec/story/dev files from discovery and forces `unused-dev-dependencies` and `unused-optional-dependencies` to `off`. Accepts a boolean (default false) applied to all analyses, or a per-analysis object `{ deadCode?, health?, dupes? }` (each boolean, default false) that scopes production mode to individual analyses in combined `fallow` and `fallow audit`. Set it to analyze only shipped code; the `--production`/`--no-production` and `--production-{dead-code,health,dupes}` CLI flags and `FALLOW_PRODUCTION*` env vars override this value (CLI flags win, then per-analysis env, then global env, then config).",
+      "description": "Enables production mode, which excludes test/spec/story/dev files from discovery and forces `unused-dev-dependencies` and `unused-optional-dependencies` to `off`. Accepts a boolean (default false) applied to all analyses, or a per-analysis object `{ deadCode?, health?, dupes?, ignore? }` that scopes production mode to individual analyses in combined `fallow` and `fallow audit` (each analysis key a boolean, default false). The object key `ignore` is a glob array of extra paths that discovery drops in production mode only. Set it to analyze only shipped code; the `--production`/`--no-production` and `--production-{dead-code,health,dupes}` CLI flags and `FALLOW_PRODUCTION*` env vars override this value (CLI flags win, then per-analysis env, then global env, then config).",
       "$ref": "#/$defs/ProductionConfig",
       "default": false
     },
@@ -1144,6 +1145,13 @@
             "boolean",
             "null"
           ]
+        },
+        "consistentIdentifiers": {
+          "description": "Require a one-to-one mapping between the identifier names of clone\ninstances. Takes effect only when `ignoreIdentifiers` is on: `a = b + c`\nthen matches `x = y + z`, but not `x = x + x`. A clone that breaks the\nmapping keeps each maximal part that maps one-to-one.\nDefault: `false` in every mode.",
+          "type": [
+            "boolean",
+            "null"
+          ]
         }
       }
     },
@@ -1792,6 +1800,11 @@
           "$ref": "#/$defs/Severity",
           "default": "warn"
         },
+        "unused-protected-class-members": {
+          "description": "A `protected` class member that neither its class nor a subclass\nreads through `this` or `super`. Classes of the public API of a\npackage are not checked, because a consumer can subclass them.\nDefaults to `off`, so the default output does not change. Known\nlimits: a read through a string key (`this[\"member\"]()`) gives no\ncredit, and a constructor parameter property\n(`constructor(protected readonly x: X)`) is not checked.",
+          "$ref": "#/$defs/Severity",
+          "default": "off"
+        },
         "unused-store-members": {
           "description": "Store members (Pinia `state` / `getters` / `actions` key, or a\nsetup-store returned key) declared but never accessed by any consumer\nproject-wide. Defaults to `warn`, not `error` like the closed-set\nclass/enum member rules: a store has an OPEN declaration surface\n(plugins, `$onAction`, dynamic dispatch) so analyzer confidence is\ngenuinely lower. A `warn` finding does not change the CLI exit code\nunless `--fail-on-issues` is set. The dead-code count gate of the GitHub\nAction counts it unless `fail-on-issues` is `false`. Promotable to\n`error` once validated on a codebase.",
           "$ref": "#/$defs/Severity",
@@ -2140,6 +2153,17 @@
         "ignoreLazyImports": {
           "description": "Skip import edges that load their target on demand or on another\nthread when fallow looks for cycles. A literal `import()` inside a\nfunction, a template `import()`, a lazy `import.meta.glob`, a worker\nURL and a webpack worker loader request (`worker-loader!./work.js`)\nare lazy edges. A top-level `await import()`, `require()` and an\neager `import.meta.glob` load before the module finishes, so they stay.\nAn edge that also carries a static import stays. Default `false`.",
           "type": "boolean"
+        },
+        "allow": {
+          "description": "Accepted cycles. Each entry is the list of files of one cycle, in\nimport order, without the repeat of the first file at the end. An\nentry accepts a cycle that has exactly these files in this order, from\nany start file: `[\"src/a.ts\", \"src/b.ts\", \"src/c.ts\"]` also accepts\n`src/b.ts -> src/c.ts -> src/a.ts`. A cycle with another set of files\nstays reported, also when it shares an import with an accepted cycle.\n\nEach path is relative to the project root, also in a monorepo: write\n`packages/app/src/a.ts`, not a path relative to the workspace. The\nmatch is case-sensitive on every platform. Globs are not supported.\nAn entry needs at least 2 files and lists each file once.\n\nAn entry that matches no cycle in a run gives a\n`circular-dependencies-allow-unmatched` diagnostic. The detector lists\nat most 20 cycles per group of files that import each other, and no\ncycle with more than 12 files. An accepted cycle does not count toward\nthe 20. An entry with more than 12 files, or with all files in a group\nthat reached the limit, gives no diagnostic, because the detector\ncannot prove that it matches no cycle.\n\nA `fallow-ignore-next-line circular-dependency` comment on an accepted\ncycle becomes a stale suppression: remove the comment when you add the\nentry. Default `[]`.",
+          "type": "array",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "minItems": 2
+          }
         }
       },
       "additionalProperties": false
@@ -2523,7 +2547,7 @@
           "type": "boolean"
         },
         {
-          "description": "Object form (`{ deadCode?, health?, dupes? }`) scoping production mode\nper analysis family.",
+          "description": "Object form (`{ deadCode?, health?, dupes?, ignore? }`) scoping\nproduction mode per analysis family.",
           "$ref": "#/$defs/PerAnalysisProductionConfig"
         }
       ]
@@ -2546,6 +2570,13 @@
           "description": "When `production` is a per-analysis object, enables production mode for duplication analysis only (boolean, default false), so clone detection runs on shipped code only (test/spec/story/dev files excluded) while dead-code and health stay on the full tree. Set it to scope production analysis to dupes independently.",
           "type": "boolean",
           "default": false
+        },
+        "ignore": {
+          "description": "When `production` is a per-analysis object, an array of project-root-relative glob patterns for paths that discovery drops in production mode only, in addition to the built-in test/spec/story/dev patterns (default empty). The default run keeps these paths. The globs apply to each analysis that runs in production mode, also when the `--production` flag or a `FALLOW_PRODUCTION*` env var selects the mode. Set it for tooling, CI scripts, seeds and test harnesses that never ship (e.g. `[\"scripts/**\"]`). A single `*` stays within one path segment; use `**` to match across directories.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "additionalProperties": false
@@ -2688,6 +2719,17 @@
         },
         "unused-namespace-members": {
           "description": "Optional override for [`RulesConfig::unused_namespace_members`].",
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Severity"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unused-protected-class-members": {
+          "description": "Optional override for [`RulesConfig::unused_protected_class_members`].",
           "anyOf": [
             {
               "$ref": "#/$defs/Severity"

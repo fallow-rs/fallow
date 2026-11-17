@@ -1,6 +1,6 @@
 use super::*;
 use fallow_config::{RulesConfig, Severity};
-use fallow_engine::error_severity::has_error_severity_issues;
+use fallow_engine::error_severity::{has_error_severity_issues, promote_warns_to_errors};
 
 type RuleFieldSetter = fn(&mut RulesConfig);
 type ResultFieldCheck = fn(&AnalysisResults) -> bool;
@@ -235,6 +235,7 @@ fn apply_rules_all_off_clears_everything() {
         unused_enum_members: Severity::Off,
         unused_class_members: Severity::Off,
         unused_namespace_members: Severity::Off,
+        unused_protected_class_members: Severity::Off,
         unused_store_members: Severity::Off,
         unprovided_injects: Severity::Off,
         unrendered_components: Severity::Off,
@@ -402,6 +403,7 @@ fn warn_severity_with_issues_returns_false() {
         unused_enum_members: Severity::Warn,
         unused_class_members: Severity::Warn,
         unused_namespace_members: Severity::Warn,
+        unused_protected_class_members: Severity::Off,
         unused_store_members: Severity::Warn,
         unprovided_injects: Severity::Warn,
         unrendered_components: Severity::Warn,
@@ -488,6 +490,7 @@ fn mixed_severity_returns_true_for_error_with_issues() {
         unused_enum_members: Severity::Warn,
         unused_class_members: Severity::Warn,
         unused_namespace_members: Severity::Warn,
+        unused_protected_class_members: Severity::Off,
         unused_store_members: Severity::Warn,
         unprovided_injects: Severity::Warn,
         unrendered_components: Severity::Warn,
@@ -1103,6 +1106,7 @@ fn promote_warns_to_errors_promotes_all_warns() {
         unused_enum_members: Severity::Warn,
         unused_class_members: Severity::Warn,
         unused_namespace_members: Severity::Warn,
+        unused_protected_class_members: Severity::Off,
         unused_store_members: Severity::Warn,
         unprovided_injects: Severity::Warn,
         unrendered_components: Severity::Warn,
@@ -1203,6 +1207,7 @@ fn promote_warns_to_errors_preserves_off() {
         unused_enum_members: Severity::Off,
         unused_class_members: Severity::Off,
         unused_namespace_members: Severity::Off,
+        unused_protected_class_members: Severity::Off,
         unused_store_members: Severity::Off,
         unprovided_injects: Severity::Off,
         unrendered_components: Severity::Off,
@@ -3251,6 +3256,7 @@ fn default_file_scoped_stale_suppression_missing_reason_warn_not_error() {
         unused_enum_members: Severity::Warn,
         unused_class_members: Severity::Warn,
         unused_namespace_members: Severity::Warn,
+        unused_protected_class_members: Severity::Warn,
         unused_store_members: Severity::Warn,
         unprovided_injects: Severity::Warn,
         unrendered_components: Severity::Warn,

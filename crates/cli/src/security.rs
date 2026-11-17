@@ -3416,8 +3416,8 @@ mod tests {
         let out = render_human(&output_without_client_roots());
         assert!(
             out.contains(
-                "Blind spot: no file has a top-level \"use client\" directive, so the \
-                 client-server-leak rule had no starting point."
+                "Blind spot: no file has a top-level \"use client\" directive and no \
+                 framework plugin supplies a client root, so the client-server-leak rule"
             ),
             "got: {out}"
         );

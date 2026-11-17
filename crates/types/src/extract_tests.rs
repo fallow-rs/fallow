@@ -1010,3 +1010,16 @@ fn dynamic_custom_element_render_helper_prefers_typed_fact() {
 
     assert!(has_dynamic_custom_element_render(&module));
 }
+
+#[test]
+fn import_type_reference_round_trips() {
+    let reference = import_type_reference("./src/room", "Room");
+    assert_eq!(reference, r#"import("./src/room").Room"#);
+    assert_eq!(
+        parse_import_type_reference(&reference),
+        Some(("./src/room", "Room"))
+    );
+    for plain in ["Room", "ns.Room", r#"import("").Room"#, r#"import("./a")."#] {
+        assert_eq!(parse_import_type_reference(plain), None, "{plain}");
+    }
+}

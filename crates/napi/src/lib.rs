@@ -46,6 +46,7 @@ pub struct DeadCodeOptions {
     pub unused_enum_members: Option<bool>,
     pub unused_class_members: Option<bool>,
     pub unused_namespace_members: Option<bool>,
+    pub unused_protected_class_members: Option<bool>,
     pub unused_store_members: Option<bool>,
     pub unprovided_injects: Option<bool>,
     pub unrendered_components: Option<bool>,
@@ -431,6 +432,9 @@ impl TryFrom<DeadCodeOptions> for api::DeadCodeOptions {
                 unused_enum_members: value.unused_enum_members.unwrap_or(false),
                 unused_class_members: value.unused_class_members.unwrap_or(false),
                 unused_namespace_members: value.unused_namespace_members.unwrap_or(false),
+                unused_protected_class_members: value
+                    .unused_protected_class_members
+                    .unwrap_or(false),
                 unused_store_members: value.unused_store_members.unwrap_or(false),
                 unprovided_injects: value.unprovided_injects.unwrap_or(false),
                 unrendered_components: value.unrendered_components.unwrap_or(false),
@@ -1049,6 +1053,7 @@ mod tests {
             unused_enum_members: Some(true),
             unused_class_members: Some(true),
             unused_namespace_members: Some(true),
+            unused_protected_class_members: Some(true),
             unused_store_members: Some(true),
             unprovided_injects: Some(true),
             unrendered_components: Some(true),

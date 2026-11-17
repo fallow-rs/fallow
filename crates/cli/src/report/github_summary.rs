@@ -337,6 +337,11 @@ const DEAD_CODE_CATEGORIES: &[(&str, &str, &str)] = &[
         "unused-namespace-members",
     ),
     (
+        "Unused protected class members",
+        "unused_protected_class_members",
+        "unused-protected-class-members",
+    ),
+    (
         "Unresolved imports",
         "unresolved_imports",
         "unresolved-imports",
@@ -773,6 +778,12 @@ fn check_sections_core() -> Vec<SectionSpec> {
             name: "Unused store members",
             key: "unused_store_members",
             header: "Pinia store members (state, getter, action) never accessed by any consumer.\n\n| File | Line | Store | Member |\n|------|-----:|-------|--------|\n",
+            row: member_row,
+        },
+        SectionSpec {
+            name: "Unused protected class members",
+            key: "unused_protected_class_members",
+            header: "Protected class members that neither the class nor a subclass reads.\n\n| File | Line | Class | Member |\n|------|-----:|-------|--------|\n",
             row: member_row,
         },
         SectionSpec {
@@ -1795,6 +1806,11 @@ const AUDIT_EXPORT_DEP_ROWS: &[AuditRowSpec] = &[
         "unused_namespace_members",
         member_item,
     ),
+    (
+        "Unused protected class member",
+        "unused_protected_class_members",
+        member_item,
+    ),
     ("Unused store member", "unused_store_members", member_item),
     ("Unresolved import", "unresolved_imports", |it| {
         code_cell(it, "specifier")
@@ -1968,95 +1984,6 @@ fn first_import_site(it: &Value) -> String {
             ))
         },
     )
-}
-
-/// jq order positions 12-15: unlisted dependencies, duplicate exports,
-/// circular dependencies, re-export cycles.
-fn audit_rows_graph(dead_code: &Value, rows: &mut Vec<AuditRow>) {
-    for it in arr(dead_code, "unlisted_dependencies") {
-        rows.push(audit_row(
-            "Unlisted dependency",
-            first_import_site(it),
-            code_cell(it, "package_name"),
-            it,
-        ));
-    }
-    for it in arr(dead_code, "unlisted_binaries") {
-        let site = arr(it, "used_in").next().map_or_else(String::new, |site| {
-            markdown_table_code_span(&format!(
-                "{}:{}",
-                rel_path_absolute_only(s(site, "path")),
-                num(site, "line"),
-            ))
-        });
-        rows.push(audit_row(
-            "Unlisted binary",
-            site,
-            code_cell(it, "binary_name"),
-            it,
-        ));
-    }
-    for it in arr(dead_code, "duplicate_exports") {
-        let location = arr(it, "locations")
-            .take(3)
-            .map(|loc| {
-                markdown_table_code_span(&format!(
-                    "{}:{}",
-                    rel_path_absolute_only(s(loc, "path")),
-                    num(loc, "line")
-                ))
-            })
-            .collect::<Vec<_>>()
-            .join(", ");
-        rows.push(audit_row(
-            "Duplicate export",
-            location,
-            code_cell(it, "export_name"),
-            it,
-        ));
-    }
-    for it in arr(dead_code, "circular_dependencies") {
-        let location = arr(it, "files")
-            .filter_map(Value::as_str)
-            .map(|file| markdown_table_code_span(&rel_path_absolute_only(file)))
-            .collect::<Vec<_>>()
-            .join(" -> ");
-        rows.push(audit_row(
-            "Circular dependency",
-            location,
-            "cycle".to_owned(),
-            it,
-        ));
-    }
-    for it in arr(dead_code, "re_export_cycles") {
-        let location = arr(it, "files")
-            .filter_map(Value::as_str)
-            .map(|file| markdown_table_code_span(&rel_path_absolute_only(file)))
-            .collect::<Vec<_>>()
-            .join(" <-> ");
-        rows.push(audit_row(
-            "Re-export cycle",
-            location,
-            markdown_table_text(str_or(it, "kind", "cycle")),
-            it,
-        ));
-    }
-    for it in arr(dead_code, "package_cycles") {
-        let location = arr(it, "packages")
-            .filter_map(Value::as_str)
-            .map(markdown_table_code_span)
-            .collect::<Vec<_>>()
-            .join(" -> ");
-        let detail = if it.get("group_truncated").and_then(Value::as_bool) == Some(true) {
-            format!(
-                "cycle ({})",
-                fallow_types::results::PackageCycle::GROUP_TRUNCATED_NOTE
-            )
-        } else {
-            "cycle".to_owned()
-        };
-        rows.push(audit_row("Package cycle", location, detail, it));
-    }
 }
 
 /// jq order positions 16-19: boundary and policy kinds.
@@ -3176,6 +3103,10 @@ fn render_combined_summary(env: &Value, links: &LinkContext) -> String {
         combined_tips(env),
     )
 }
+
+#[path = "github_summary_audit_rows.rs"]
+mod github_summary_audit_rows;
+use github_summary_audit_rows::audit_rows_graph;
 
 #[cfg(test)]
 #[path = "github_summary_tests.rs"]

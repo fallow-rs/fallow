@@ -903,6 +903,33 @@ fn unused_namespace_member_results(root: &Path) -> AnalysisResults {
     results
 }
 
+fn unused_protected_class_member_results(root: &Path) -> AnalysisResults {
+    let mut results = AnalysisResults::default();
+    results
+        .unused_protected_class_members
+        .push(UnusedProtectedClassMemberFinding::with_actions(
+            UnusedMember {
+                path: root.join("src/shapes.ts"),
+                parent_name: "Shape".to_string(),
+                member_name: "unusedHelper".to_string(),
+                kind: MemberKind::ClassMethod,
+                line: 12,
+                col: 2,
+            },
+        ));
+    results
+}
+
+#[test]
+fn dead_code_keys_cover_unused_protected_class_member() {
+    let root = root();
+    let keys = dead_code_keys(&unused_protected_class_member_results(&root), &root);
+    assert!(
+        keys.contains("unused-protected-class-member:src/shapes.ts:Shape:unusedHelper"),
+        "{keys:?}"
+    );
+}
+
 #[test]
 fn dead_code_keys_cover_unused_namespace_member() {
     let root = root();
@@ -2070,6 +2097,7 @@ fn audit_ledger_errors_match_the_exit_code_rule_for_every_collection() {
         angular_input_output_and_policy_results(&root),
         unused_store_member_results(&root),
         unused_namespace_member_results(&root),
+        unused_protected_class_member_results(&root),
         production_and_directive_results(&root),
         AnalysisResults {
             prop_drilling_chains: vec![PropDrillingChainFinding::with_actions(PropDrillingChain {

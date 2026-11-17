@@ -137,26 +137,26 @@ fn class_protected_members_excluded() {
         r"export class Base {
             protected internalMethod() {}
             protected internalProp: number = 0;
+            private privateMethod() {}
             publicMethod() {}
         }",
     );
     assert_eq!(info.exports.len(), 1);
-    let names: Vec<&str> = info.exports[0]
+    let members: Vec<(&str, bool)> = info.exports[0]
         .members
         .iter()
-        .map(|m| m.name.as_str())
+        .map(|m| (m.name.as_str(), m.is_protected))
         .collect();
-    assert!(
-        !names.contains(&"internalMethod"),
-        "Protected method should be excluded"
-    );
-    assert!(
-        !names.contains(&"internalProp"),
-        "Protected property should be excluded"
-    );
-    assert!(
-        names.contains(&"publicMethod"),
-        "Public method should be included"
+    // Protected members carry the marker, so `unused-class-members` skips them
+    // and only `unused-protected-class-members` checks them. Private members
+    // are not extracted.
+    assert_eq!(
+        members,
+        [
+            ("internalMethod", true),
+            ("internalProp", true),
+            ("publicMethod", false),
+        ]
     );
 }
 
@@ -963,8 +963,8 @@ fn class_mixed_members_comprehensive() {
         "Private property should be excluded"
     );
     assert!(
-        !names.contains(&"logger"),
-        "Protected property should be excluded"
+        members.iter().any(|m| m.name == "logger" && m.is_protected),
+        "Protected property should carry the protected marker"
     );
     assert!(
         !names.contains(&"constructor"),
@@ -975,8 +975,8 @@ fn class_mixed_members_comprehensive() {
         "Private method should be excluded"
     );
     assert!(
-        !names.contains(&"log"),
-        "Protected method should be excluded"
+        members.iter().any(|m| m.name == "log" && m.is_protected),
+        "Protected method should carry the protected marker"
     );
 
     let health_check = members.iter().find(|m| m.name == "healthCheck").unwrap();

@@ -1426,6 +1426,13 @@ impl FallowConfig {
                 health_errors.join("\n  - ")
             ));
         }
+        let allow_errors = config.circular_dependencies.allow_errors();
+        if !allow_errors.is_empty() {
+            return Err(miette::miette!(
+                "invalid config:\n  - {}",
+                allow_errors.join("\n  - ")
+            ));
+        }
         if let Some(pattern) = &config.unused_component_props.ignore_pattern
             && let Err(e) = regex::Regex::new(pattern)
         {
@@ -1519,6 +1526,11 @@ impl FallowConfig {
         validate_user_ignore_pattern_globs(&self.ignore_patterns, "ignorePatterns", errors);
         validate_user_finding_ignore_globs(&self.ignore_findings, "ignoreFindings", errors);
         validate_user_globs(&self.dynamically_loaded, "dynamicallyLoaded", errors);
+        super::glob_validation::validate_user_plain_globs(
+            self.production.ignore(),
+            "production.ignore",
+            errors,
+        );
         validate_user_dependency_globs(&self.ignore_dependencies, "ignoreDependencies", errors);
         validate_user_dependency_globs(&self.ignore_binaries, "ignoreBinaries", errors);
         validate_user_specifier_globs(

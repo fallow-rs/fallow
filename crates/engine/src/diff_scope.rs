@@ -112,6 +112,9 @@ fn filter_source_findings(
         .unused_namespace_members
         .retain(|finding| line_in_diff(&finding.member.path, finding.member.line));
     results
+        .unused_protected_class_members
+        .retain(|finding| line_in_diff(&finding.member.path, finding.member.line));
+    results
         .unprovided_injects
         .retain(|finding| line_in_diff(&finding.inject.path, finding.inject.line));
     results

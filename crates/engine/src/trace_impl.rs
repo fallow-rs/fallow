@@ -698,7 +698,7 @@ pub fn trace_class_member(
     // Find the export that declares this member. When several declare a member
     // of the same name (rare), prefer a used, non-type-only owner so the trace
     // reports the reachable one.
-    let (owner, member_kind) = module
+    let (owner, member_kind, is_protected) = module
         .exports
         .iter()
         .filter_map(|export| {
@@ -706,9 +706,9 @@ pub fn trace_class_member(
                 .members
                 .iter()
                 .find(|member| member.name == member_name)
-                .map(|member| (export, member.kind))
+                .map(|member| (export, member.kind, member.is_protected))
         })
-        .max_by_key(|(export, _)| (!export.references.is_empty(), !export.is_type_only))?;
+        .max_by_key(|(export, _, _)| (!export.references.is_empty(), !export.is_type_only))?;
 
     let owner_name = owner.name.to_string();
     // Reuse the export trace to compute the owner's reachability / usage /
@@ -719,9 +719,14 @@ pub fn trace_class_member(
     // inconsistency.
     let owner_trace = trace_export(graph, root, file_path, &owner_name)?;
 
+    let class_filter = if is_protected {
+        "--unused-protected-class-members"
+    } else {
+        "--unused-class-members"
+    };
     let (kind_str, filter_flag) = match member_kind {
-        MemberKind::ClassMethod => ("class-method", Some("--unused-class-members")),
-        MemberKind::ClassProperty => ("class-property", Some("--unused-class-members")),
+        MemberKind::ClassMethod => ("class-method", Some(class_filter)),
+        MemberKind::ClassProperty => ("class-property", Some(class_filter)),
         MemberKind::EnumMember => ("enum-member", Some("--unused-enum-members")),
         MemberKind::StoreMember => ("store-member", Some("--unused-store-members")),
         MemberKind::NamespaceMember => ("namespace-member", Some("--unused-namespace-members")),
@@ -1203,101 +1208,6 @@ fn import_path_endpoint_index(
     }
 }
 
-/// Trace the shortest import path from one module to another.
-///
-/// Exact paths take priority over abbreviated suffixes. Returns the unresolved
-/// endpoint when either side names no module or an ambiguous suffix, so the
-/// caller can name which half of the request was wrong.
-///
-/// # Errors
-///
-/// Returns the endpoint that did not resolve to exactly one module in the graph.
-pub fn trace_import_path(
-    graph: &ModuleGraph,
-    root: &Path,
-    from_path: &str,
-    to_path: &str,
-    eager_only: bool,
-) -> Result<ImportPathTrace, ImportPathEndpoint> {
-    let from_index = import_path_endpoint_index(
-        graph,
-        root,
-        from_path,
-        ImportPathEndpoint::From,
-        ImportPathEndpoint::AmbiguousFrom,
-    )?;
-    let to_index = import_path_endpoint_index(
-        graph,
-        root,
-        to_path,
-        ImportPathEndpoint::To,
-        ImportPathEndpoint::AmbiguousTo,
-    )?;
-    let from = &graph.modules[from_index];
-    let to = &graph.modules[to_index];
-
-    let from_rel = relativize(&from.path, root);
-    let to_rel = relativize(&to.path, root);
-
-    let route = if eager_only {
-        graph.shortest_eager_import_path(from.file_id, to.file_id)
-    } else {
-        graph.shortest_import_path(from.file_id, to.file_id)
-    };
-    let Some(hops) = route else {
-        let kind = if eager_only {
-            "eager import path"
-        } else {
-            "import path"
-        };
-        return Ok(ImportPathTrace {
-            schema_version: ImportPathTraceSchemaVersion::V1,
-            reason: format!("no {kind} from {from_rel} to {to_rel}"),
-            from: from_rel,
-            to: to_rel,
-            reachable: false,
-            hops: 0,
-            path: Vec::new(),
-        });
-    };
-
-    if hops.is_empty() {
-        return Ok(ImportPathTrace {
-            schema_version: ImportPathTraceSchemaVersion::V1,
-            reason: format!("{from_rel} is the same module as {to_rel}"),
-            from: from_rel,
-            to: to_rel,
-            reachable: true,
-            hops: 0,
-            path: Vec::new(),
-        });
-    }
-
-    let path = resolve_import_path_hops(graph, root, &hops);
-    let hop_count = path.len();
-    let plural = if hop_count == 1 { "hop" } else { "hops" };
-    // A route whose every hop is type-only is erased at build time. Saying so is
-    // the difference between "these modules ship coupled" and "the coupling only
-    // exists for the type checker".
-    let reason = if path.iter().all(|hop| hop.type_only) {
-        format!(
-            "{from_rel} reaches {to_rel} in {hop_count} type-only {plural}, erased at build time"
-        )
-    } else {
-        format!("{from_rel} reaches {to_rel} in {hop_count} {plural}")
-    };
-
-    Ok(ImportPathTrace {
-        schema_version: ImportPathTraceSchemaVersion::V1,
-        from: from_rel,
-        to: to_rel,
-        reachable: true,
-        hops: hop_count,
-        path,
-        reason,
-    })
-}
-
 /// Resolve graph-level hops to the wire shape, turning each import span into a
 /// 1-based line. Each source file is read at most once per trace; a file that
 /// cannot be read yields `import_line: None` rather than a guessed line.
@@ -1459,6 +1369,10 @@ fn relativize_instance(inst: &CloneInstance, root: &Path) -> CloneInstance {
         ..inst.clone()
     }
 }
+
+#[path = "trace_import_path.rs"]
+mod trace_import_path;
+pub use trace_import_path::trace_import_path;
 
 #[cfg(test)]
 #[path = "trace_impl_dependency_tests.rs"]
@@ -2431,6 +2345,7 @@ mod tests {
             is_instance_returning_static: false,
             is_self_returning: false,
             override_base: None,
+            is_protected: false,
         }];
         let graph = source_consumer_graph(vec![owner], true, false, Vec::new());
 
@@ -2596,6 +2511,7 @@ mod tests {
             is_instance_returning_static: false,
             is_self_returning: false,
             override_base: None,
+            is_protected: false,
         };
         let resolved_modules = vec![
             ResolvedModule {
@@ -2690,6 +2606,7 @@ mod tests {
             is_instance_returning_static: false,
             is_self_returning: false,
             override_base: None,
+            is_protected: false,
         };
         let files = vec![DiscoveredFile {
             id: FileId(0),
@@ -2856,6 +2773,7 @@ mod tests {
             is_instance_returning_static: false,
             is_self_returning: false,
             override_base: None,
+            is_protected: false,
         };
         let resolved_modules = vec![
             ResolvedModule {
@@ -2938,6 +2856,7 @@ mod tests {
             is_instance_returning_static: false,
             is_self_returning: false,
             override_base: None,
+            is_protected: false,
         };
         let resolved_modules = vec![
             ResolvedModule {

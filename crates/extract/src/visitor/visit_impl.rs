@@ -64,7 +64,7 @@ pub(super) use visit_for_of_bindings::ITERABLE_ELEMENT_CALLBACK_METHODS;
 #[path = "visit_impl_function_returns.rs"]
 mod visit_function_returns;
 #[path = "visit_impl_helpers.rs"]
-mod visit_helpers;
+pub(super) mod visit_helpers;
 #[path = "visit_impl_jsx_runtime.rs"]
 mod visit_jsx_runtime;
 #[path = "visit_impl_member_destructuring.rs"]
@@ -1540,14 +1540,7 @@ impl ModuleInfoExtractor {
         let refs = Self::collect_interface_signature_refs(iface);
         self.record_local_signature_refs(&iface.id.name, refs);
         self.record_required_type_members(&iface.id.name, &iface.body.body);
-        let mut properties = collect_object_type_property_types(&iface.body.body);
-        for target in properties.values_mut() {
-            target.owner_span = Some(iface.id.span);
-        }
-        if !properties.is_empty() {
-            self.interface_property_types
-                .insert(iface.id.name.to_string(), properties);
-        }
+        self.record_interface_property_types(iface);
         // React props harvest (Feature A): a plain `interface X { a; b }` with no
         // `extends` heritage and no type parameters can back a
         // `(props: X) => props.a` component. An `interface X extends Y` or a
@@ -1631,14 +1624,6 @@ impl ModuleInfoExtractor {
                 }
             }
             _ => {}
-        }
-    }
-
-    fn preseed_nested_declarations(&mut self, statements: &[Statement<'_>]) {
-        for statement in statements {
-            if let Some(declaration) = statement.as_declaration() {
-                self.record_nested_declaration(declaration);
-            }
         }
     }
 
@@ -2305,7 +2290,7 @@ impl<'a> ModuleInfoExtractor {
         if self.namespace_depth == 0 {
             self.scoped_array_binding_element_types
                 .push(FxHashMap::default());
-            self.preseed_nested_declarations(statements);
+            self.preseed_scope_declarations(statements);
         }
         self.preseed_direct_object_binding_targets(statements);
         match body {
@@ -3470,12 +3455,13 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.record_program_spy_api_locals(program);
         self.record_program_type_aliases(program);
         self.record_program_prologue(program);
-        self.record_program_sanitizer_functions(program);
+        self.record_program_function_facts(program);
         self.record_local_function_return_types(program);
         self.preseed_direct_object_binding_targets(&program.body);
+        self.record_module_vars(&program.body);
         self.record_program_local_import_loaders(program);
         self.record_program_component_loader_imports(program);
-        walk::walk_program(self, program);
+        self.walk_program_and_drop_inert_callee_sinks(program);
         self.finish_local_import_loaders();
         self.finish_promise_import_bindings();
         self.finish_register_loader_new_urls();
@@ -3622,7 +3608,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.preseed_direct_object_binding_scope_roots(&stmt.body);
         if self.namespace_depth == 0 {
             self.push_nested_scope_frames();
-            self.preseed_nested_declarations(&stmt.body);
+            self.preseed_scope_declarations(&stmt.body);
         }
         self.preseed_direct_object_binding_targets(&stmt.body);
         for statement in &stmt.body {
@@ -5088,6 +5074,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         let type_scope_pushed =
             self.push_class_type_scope(class.id.as_ref(), class.type_parameters.as_deref());
         self.record_lit_custom_element(class);
+        self.record_worker_env_bodies(class);
 
         if let Some(meta) = extract_angular_component_metadata(class) {
             self.record_angular_selector(class, &meta);

@@ -1,5 +1,7 @@
 mod absent_component_prop;
 mod constant_parameter;
+mod cycle_allow;
+mod cycle_finding;
 pub(crate) use constant_parameter::release_resolution_payloads;
 mod boundary;
 mod boundary_calls;
@@ -29,6 +31,7 @@ mod package_manager;
 mod plugin_slices;
 mod policy;
 mod predicates;
+mod production_excluded_imports;
 mod production_only_suppressions;
 mod prop_drilling;
 mod re_export_cycles;
@@ -57,6 +60,9 @@ mod unused_load_data_key;
 mod unused_overrides;
 mod unused_server_action;
 mod unused_svelte_event;
+
+mod member_detectors;
+use member_detectors::run_member_detectors;
 
 #[cfg(test)]
 mod test_support;
@@ -90,13 +96,13 @@ use fallow_types::output_dead_code::{
     UnusedDependencyFinding, UnusedDependencyOverrideFinding, UnusedDevDependencyFinding,
     UnusedEffectLayerFinding, UnusedEnumMemberFinding, UnusedExportFinding, UnusedFileFinding,
     UnusedLoadDataKeyFinding, UnusedNamespaceMemberFinding, UnusedOptionalDependencyFinding,
-    UnusedStoreMemberFinding, UnusedSvelteEventFinding, UnusedTaggedErrorFinding,
-    UnusedTypeFinding,
+    UnusedProtectedClassMemberFinding, UnusedStoreMemberFinding, UnusedSvelteEventFinding,
+    UnusedTaggedErrorFinding, UnusedTypeFinding,
 };
 
 use crate::results::{
-    AnalysisResults, CircularDependency, CircularDependencyEdge, StaleSuppression,
-    UnusedDependency, UnusedExport, UnusedMember,
+    AnalysisResults, CircularDependency, StaleSuppression, UnusedDependency, UnusedExport,
+    UnusedMember,
 };
 use crate::suppress::{IssueKind, SuppressionContext};
 use unconfigured_check::record_unconfigured_check;
@@ -160,6 +166,7 @@ struct SecurityDetectionContext<'a, 'm> {
     line_offsets_by_file: &'a LineOffsetsMap<'m>,
     declared_deps: &'a FxHashSet<String>,
     request_receivers: &'a FxHashSet<String>,
+    plugin_result: Option<&'a crate::plugins::AggregatedPluginResult>,
 }
 
 /// Convert a byte offset to (line, col) using pre-computed line offsets.
@@ -435,29 +442,32 @@ fn add_workspace_public_api_entry_points(
     }
 }
 
+/// The cycles of `graph`, without the cycles that
+/// `circularDependencies.allow` accepts and the suppressed cycles. The
+/// allow-list runs first, so an inline suppression of an accepted cycle is
+/// stale.
 fn find_circular_dependencies(
     graph: &ModuleGraph,
-    options: fallow_config::CircularDependenciesConfig,
+    config: &ResolvedConfig,
     line_offsets_map: &LineOffsetsMap<'_>,
     suppressions: &crate::suppress::SuppressionContext<'_>,
     workspaces: &[fallow_config::WorkspaceInfo],
 ) -> Vec<CircularDependency> {
-    let cycles = graph.find_cycles_with(crate::graph::CycleOptions {
-        ignore_lazy_imports: options.ignore_lazy_imports,
-    });
-    let mut dependencies: Vec<CircularDependency> = cycles
-        .into_iter()
-        .filter_map(|cycle| {
-            if is_circular_dependency_suppressed(graph, line_offsets_map, suppressions, &cycle) {
-                return None;
-            }
-            Some(circular_dependency_from_cycle(
-                graph,
-                line_offsets_map,
-                &cycle,
-            ))
-        })
-        .collect();
+    let mut dependencies: Vec<CircularDependency> =
+        cycle_allow::find_unaccepted_cycles(graph, config)
+            .into_iter()
+            .filter_map(|cycle| {
+                if is_circular_dependency_suppressed(graph, line_offsets_map, suppressions, &cycle)
+                {
+                    return None;
+                }
+                Some(cycle_finding::circular_dependency_from_cycle(
+                    graph,
+                    line_offsets_map,
+                    &cycle,
+                ))
+            })
+            .collect();
 
     if !workspaces.is_empty() {
         for dep in &mut dependencies {
@@ -466,44 +476,6 @@ fn find_circular_dependencies(
     }
 
     dependencies
-}
-
-fn circular_dependency_from_cycle(
-    graph: &ModuleGraph,
-    line_offsets_map: &LineOffsetsMap<'_>,
-    cycle: &[FileId],
-) -> CircularDependency {
-    // One anchor per hop in cycle order: `edges[i]` is the import in
-    // `cycle[i]` pointing to `cycle[i + 1]`. Always populated for every
-    // hop (fallback `(1, 0)` if the span is somehow missing) so
-    // `edges.len() == files.len()` regardless of URL-resolvability on
-    // the consumer side. The LSP renders one squiggly per edge.
-    let edges: Vec<CircularDependencyEdge> = (0..cycle.len())
-        .map(|edge_index| {
-            let from = cycle[edge_index];
-            let (line, col) =
-                cycle_edge_line_col(graph, line_offsets_map, cycle, edge_index).unwrap_or((1, 0));
-            CircularDependencyEdge {
-                path: graph.modules[from.0 as usize].path.clone(),
-                line,
-                col,
-            }
-        })
-        .collect();
-
-    let files: Vec<std::path::PathBuf> = edges.iter().map(|edge| edge.path.clone()).collect();
-    let length = files.len();
-    // Top-level `line`/`col` remain the first hop's anchor for backward
-    // compatibility with consumers that predate `edges`.
-    let (line, col) = edges.first().map_or((1, 0), |edge| (edge.line, edge.col));
-    CircularDependency {
-        files,
-        length,
-        line,
-        col,
-        edges,
-        is_cross_package: false,
-    }
 }
 
 /// Thin wrapper around [`find_circular_dependencies`] that gates on
@@ -518,11 +490,12 @@ fn run_circular_dep_detector(
     workspaces: &[fallow_config::WorkspaceInfo],
 ) -> Vec<CircularDependencyFinding> {
     if config.rules.circular_dependencies == Severity::Off {
+        cycle_allow::record_all_matched(config);
         return Vec::new();
     }
     find_circular_dependencies(
         graph,
-        config.circular_dependencies,
+        config,
         line_offsets_by_file,
         suppressions,
         workspaces,
@@ -682,32 +655,6 @@ fn run_export_usages_collector(
     }
 }
 
-/// Collect every package name declared across the root `package.json` and each
-/// workspace `package.json`. This is the dependency universe the plugin system
-/// activates on, reused by the framework-scoped security catalogue rows (#861) to
-/// gate a row on the active framework. Missing or malformed manifests contribute
-/// nothing (a framework row simply stays inert), matching the conservative
-/// false-negatives-over-false-positives posture.
-fn collect_declared_dependency_names(
-    config: &ResolvedConfig,
-    root_pkg: Option<&PackageJson>,
-    workspaces: &[fallow_config::WorkspaceInfo],
-) -> FxHashSet<String> {
-    let mut deps: FxHashSet<String> = FxHashSet::default();
-    if let Some(pkg) = root_pkg {
-        deps.extend(pkg.all_dependency_names());
-    }
-    for ws in workspaces {
-        if ws.root == config.root {
-            continue; // already covered by root_pkg
-        }
-        if let Some(pkg) = fallow_config::load_dir_package_json(&ws.root) {
-            deps.extend(pkg.all_dependency_names());
-        }
-    }
-    deps
-}
-
 struct DeadCodeRunContext<'a> {
     suppressions: SuppressionContext<'a>,
     line_offsets_by_file: LineOffsetsMap<'a>,
@@ -732,7 +679,8 @@ fn build_dead_code_run_context<'a>(
     let pkg = fallow_config::load_dir_package_json(&config.root);
     let public_api_entry_points =
         public_api_package_entry_points(graph, config, pkg.as_ref(), workspaces);
-    let declared_deps = collect_declared_dependency_names(config, pkg.as_ref(), workspaces);
+    let declared_deps =
+        package_json_utils::collect_declared_dependency_names(config, pkg.as_ref(), workspaces);
 
     DeadCodeRunContext {
         suppressions,
@@ -770,6 +718,10 @@ pub(crate) fn find_dead_code_full(
     // describe this pass only. `ignoreFindings` is consulted by the engine
     // right after this pass, so this is its start as well.
     config.begin_dead_code_pass(workspaces);
+    fallow_config::record_workspace_diagnostics(
+        &config.root,
+        production_excluded_imports::diagnostics(config, resolved_modules, workspaces, excluded),
+    );
 
     let run_context = build_dead_code_run_context(graph, config, workspaces, modules);
     let class_member_rules = ClassMemberRules::new(config, plugin_result);
@@ -1003,6 +955,7 @@ fn populate_configured_security_findings(input: &mut PostDetectionInput<'_, '_>)
             line_offsets_by_file: input.line_offsets_by_file,
             declared_deps: input.declared_deps,
             request_receivers: &request_receivers,
+            plugin_result: input.plugin_result,
         },
         input.results,
     );
@@ -1706,6 +1659,7 @@ impl ParallelDeadCodeDetectorResults {
             unused_class_members: self.member_results.unused_class_members,
             unused_store_members: self.member_results.unused_store_members,
             unused_namespace_members: self.member_results.unused_namespace_members,
+            unused_protected_class_members: self.member_results.unused_protected_class_members,
             unused_dependencies: self.dependency_results.unused_dependencies,
             unused_dev_dependencies: self.dependency_results.unused_dev_dependencies,
             unused_optional_dependencies: self.dependency_results.unused_optional_dependencies,
@@ -1977,6 +1931,11 @@ fn filter_public_workspace_results(
             .iter()
             .any(|root| e.member.path.starts_with(root))
     });
+    results.unused_protected_class_members.retain(|e| {
+        !public_roots
+            .iter()
+            .any(|root| e.member.path.starts_with(root))
+    });
 }
 
 fn populate_pnpm_catalog_findings(
@@ -2050,12 +2009,7 @@ fn populate_security_findings(
     results: &mut AnalysisResults,
 ) {
     if ctx.config.rules.security_client_server_leak != Severity::Off {
-        let (security_findings, stats) = security::find_security_findings(
-            ctx.graph,
-            ctx.modules,
-            ctx.suppressions,
-            ctx.line_offsets_by_file,
-        );
+        let (security_findings, stats) = security::find_security_findings(ctx);
         results.security_findings = security_findings;
         results.security_unresolved_edge_files = stats.client_files_with_unresolved_edges;
         if stats.client_roots == 0 {
@@ -2293,43 +2247,6 @@ struct MemberDetectorInput<'a> {
     declared_deps: &'a FxHashSet<String>,
 }
 
-fn run_member_detectors(input: MemberDetectorInput<'_>) -> AnalysisResults {
-    let mut results = AnalysisResults::default();
-    let store_members_active = store_member_rule_is_active(input.config, input.declared_deps);
-    if member_rules_are_disabled(input.config, store_members_active) {
-        return results;
-    }
-
-    let member_results = find_unused_members_with_public_api_entry_points(UnusedMemberScanInput {
-        graph: input.graph,
-        resolved_modules: input.resolved_modules,
-        modules: input.modules,
-        suppressions: input.suppressions,
-        line_offsets_by_file: input.line_offsets_by_file,
-        user_class_member_allowlist: input.user_class_members,
-        semantic_framework_candidates: input.semantic_framework_candidates,
-        ignore_decorators: &input.config.ignore_decorators,
-        public_api_entry_points: input.public_api_entry_points,
-        lit_active: lit_is_declared(input.declared_deps),
-        report_unmatched_patterns: true,
-    });
-    populate_unused_enum_member_findings(&mut results, input.config, member_results.enum_members);
-    populate_unused_class_member_findings(&mut results, input.config, member_results.class_members);
-    populate_unused_store_member_findings(
-        &mut results,
-        store_members_active,
-        member_results.store_members,
-    );
-    if input.config.rules.unused_namespace_members != Severity::Off {
-        results.unused_namespace_members = member_results
-            .namespace_members
-            .into_iter()
-            .map(UnusedNamespaceMemberFinding::with_actions)
-            .collect();
-    }
-    results
-}
-
 fn lit_is_declared(declared_deps: &FxHashSet<String>) -> bool {
     declared_deps.contains("lit")
         || declared_deps.contains("lit-element")
@@ -2340,6 +2257,7 @@ fn member_rules_are_disabled(config: &ResolvedConfig, store_members_active: bool
     config.rules.unused_enum_members == Severity::Off
         && config.rules.unused_class_members == Severity::Off
         && config.rules.unused_namespace_members == Severity::Off
+        && config.rules.unused_protected_class_members == Severity::Off
         && !store_members_active
 }
 

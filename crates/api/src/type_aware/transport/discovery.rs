@@ -4,14 +4,41 @@ use super::*;
 
 pub(super) fn canonicalize_root(root: &Path) -> Result<PathBuf, TypeAwareError> {
     dunce::canonicalize(root).map_err(|err| {
-        TypeAwareError(format!(
+        TypeAwareError::from(format!(
             "failed to resolve project root {}: {err}",
             root.display()
         ))
     })
 }
 
-pub(super) fn discover_type_aware_sidecar(root: &Path) -> Result<PathBuf, String> {
+/// A failed sidecar discovery.
+#[derive(Debug)]
+pub(super) struct DiscoveryError {
+    pub(super) message: String,
+    /// True when no sidecar file exists where discovery looked. False when a
+    /// file exists but its path does not resolve.
+    pub(super) not_found: bool,
+}
+
+impl DiscoveryError {
+    fn not_found(message: String) -> Self {
+        Self {
+            message,
+            not_found: true,
+        }
+    }
+}
+
+impl From<String> for DiscoveryError {
+    fn from(message: String) -> Self {
+        Self {
+            message,
+            not_found: false,
+        }
+    }
+}
+
+pub(super) fn discover_type_aware_sidecar(root: &Path) -> Result<PathBuf, DiscoveryError> {
     let current_exe = std::env::current_exe().ok();
     discover_type_aware_sidecar_from(
         non_empty_env("FALLOW_TYPE_AWARE_BIN").as_deref(),
@@ -24,25 +51,25 @@ pub(super) fn discover_type_aware_sidecar_from(
     override_value: Option<&str>,
     current_exe: Option<&Path>,
     project_root: Option<&Path>,
-) -> Result<PathBuf, String> {
+) -> Result<PathBuf, DiscoveryError> {
     if let Some(value) = override_value {
         let path = PathBuf::from(value);
         if path.is_file() {
-            return canonical_sidecar_path(&path);
+            return canonical_sidecar_path(&path).map_err(DiscoveryError::from);
         }
-        return Err(format!(
+        return Err(DiscoveryError::not_found(format!(
             "FALLOW_TYPE_AWARE_BIN is set to {value}, but no file exists there. Point it at a trusted {SIDECAR_BINARY} executable."
-        ));
+        )));
     }
 
     if let Some(path) = current_exe.and_then(find_installed_sidecar) {
         return Ok(path);
     }
 
-    Err(format!(
+    Err(DiscoveryError::not_found(format!(
         "Type-aware sidecar `{SIDECAR_BINARY}` was not found next to the active Fallow executable. {} The Fallow binary itself does not search project node_modules or PATH. The normal command still works without --type-aware.",
         missing_sidecar_install_hint(project_root, current_exe)
-    ))
+    )))
 }
 
 /// How to install the exact-version companion for each way to run Fallow.

@@ -74,6 +74,7 @@ macro_rules! with_baseline_fields {
             unused_class_members,
             unused_store_members,
             unused_namespace_members,
+            unused_protected_class_members,
             unprovided_injects,
             unrendered_components,
             unused_component_props,
@@ -123,6 +124,9 @@ mod install_state;
 
 use finding_counts::{baseline_finding_count, cascade_hidden_matches};
 mod caller_review_keys;
+mod identity_counts;
+use identity_counts::identity_counts_with_placeholder_allowance;
+
 #[cfg(test)]
 mod legacy_key_builders;
 use caller_review_keys::{absent_component_prop_baseline_keys, constant_parameter_baseline_keys};
@@ -618,6 +622,9 @@ pub struct BaselineData {
     /// Unused namespace members, keyed by `file:parent.member`.
     #[serde(default)]
     unused_namespace_members: Vec<String>,
+    /// Unused protected class members, keyed by `file:parent.member`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    unused_protected_class_members: Vec<String>,
     /// Unprovided injects, keyed by `file:key_name`.
     #[serde(default)]
     unprovided_injects: Vec<String>,
@@ -826,6 +833,7 @@ impl BaselineData {
             unused_class_members: member_imports.unused_class_members,
             unused_store_members: member_imports.unused_store_members,
             unused_namespace_members: member_imports.unused_namespace_members,
+            unused_protected_class_members: member_imports.unused_protected_class_members,
             unprovided_injects: member_imports.unprovided_injects,
             unrendered_components: member_imports.unrendered_components,
             unused_component_props: member_imports.unused_component_props,
@@ -892,6 +900,7 @@ impl BaselineData {
             + self.unused_class_members.len()
             + self.unused_store_members.len()
             + self.unused_namespace_members.len()
+            + self.unused_protected_class_members.len()
             + self.unprovided_injects.len()
             + self.unrendered_components.len()
             + self.unused_component_props.len()
@@ -955,6 +964,7 @@ struct BaselineMemberImportKeys {
     unused_class_members: Vec<String>,
     unused_store_members: Vec<String>,
     unused_namespace_members: Vec<String>,
+    unused_protected_class_members: Vec<String>,
     unprovided_injects: Vec<String>,
     unrendered_components: Vec<String>,
     unused_component_props: Vec<String>,
@@ -1355,6 +1365,21 @@ impl BaselineFilterContext<'_> {
                 member.member.member_name
             );
             !baseline_namespace_members.contains(key.as_str())
+        });
+        let baseline_protected_class_members: FxHashSet<&str> = self
+            .baseline
+            .unused_protected_class_members
+            .iter()
+            .map(String::as_str)
+            .collect();
+        results.unused_protected_class_members.retain(|member| {
+            let key = format!(
+                "{}:{}.{}",
+                relative_path(&member.member.path, self.root),
+                member.member.parent_name,
+                member.member.member_name
+            );
+            !baseline_protected_class_members.contains(key.as_str())
         });
     }
 
@@ -2485,89 +2510,6 @@ fn moved_identity_bucket_remaps(
 
 /// A current identity bucket with a function name: the key and its counts.
 type NamedBucket<'a> = (&'a String, &'a BTreeMap<String, HealthBaselineCount>);
-
-/// Baseline identity counts where a placeholder bucket (`<anonymous>`,
-/// `<arrow>`) gives its unused allowance to new function names in the same
-/// file.
-///
-/// A function without a declared name can get a context name in a later
-/// version (`Command.make("setup")`, an `Effect.fn` span name). Its findings
-/// then move from the placeholder bucket to a named bucket that has no
-/// allowance for them. This transfer keeps such a baseline valid. The
-/// allowance moves per category, only to named buckets in the same file whose
-/// current count is above their own allowance, and only up to the count that
-/// the placeholder bucket no longer uses. After a re-save, a placeholder bucket has unused allowance only when
-/// an unnamed finding was fixed. Count mode has the same tolerance per file.
-///
-/// Returns `None` when no allowance moves, so callers can keep borrowing the
-/// original map.
-fn identity_counts_with_placeholder_allowance(
-    baseline_counts: &HealthFindingCountMap,
-    current_counts: &HealthFindingCountMap,
-) -> Option<HealthFindingCountMap> {
-    let mut named_by_path: FxHashMap<&str, Vec<NamedBucket<'_>>> = FxHashMap::default();
-    for (key, counts) in current_counts {
-        if let Some((path, name)) = identity_bucket_parts(key)
-            && !is_anonymous_function_name(name)
-        {
-            named_by_path.entry(path).or_default().push((key, counts));
-        }
-    }
-    let mut transferred: HealthFindingCountMap = BTreeMap::new();
-    for (key, placeholder_counts) in baseline_counts {
-        let Some((path, name)) = identity_bucket_parts(key) else {
-            continue;
-        };
-        if !is_anonymous_function_name(name) {
-            continue;
-        }
-        let Some(recipients) = named_by_path.get(path) else {
-            continue;
-        };
-        for (category, placeholder_count) in placeholder_counts {
-            let mut unused = placeholder_count
-                .count
-                .saturating_sub(bucket_category_count(current_counts, key, category));
-            for (recipient_key, recipient_counts) in recipients {
-                if unused == 0 {
-                    break;
-                }
-                let current = recipient_counts
-                    .get(category)
-                    .map_or(0, |entry| entry.count);
-                let own_allowance = bucket_category_count(baseline_counts, recipient_key, category);
-                let given = transferred
-                    .entry((*recipient_key).clone())
-                    .or_default()
-                    .entry(category.clone())
-                    .or_insert(HealthBaselineCount { count: 0 });
-                let take = current
-                    .saturating_sub(own_allowance + given.count)
-                    .min(unused);
-                given.count += take;
-                unused -= take;
-            }
-        }
-    }
-    transferred.retain(|_, counts| {
-        counts.retain(|_, entry| entry.count > 0);
-        !counts.is_empty()
-    });
-    if transferred.is_empty() {
-        return None;
-    }
-    let mut effective = baseline_counts.clone();
-    for (key, counts) in transferred {
-        let bucket = effective.entry(key).or_default();
-        for (category, given) in counts {
-            bucket
-                .entry(category)
-                .and_modify(|entry| entry.count += given.count)
-                .or_insert(given);
-        }
-    }
-    Some(effective)
-}
 
 fn bucket_category_count(counts: &HealthFindingCountMap, key: &str, category: &str) -> usize {
     counts

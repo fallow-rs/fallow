@@ -526,6 +526,7 @@ fn known_gate_label(name: &str) -> Option<&'static str> {
         "security-advisory" => "Security advisory",
         "audit-verdict" => "Audit verdict",
         "type-aware-require" => "Type-aware completeness",
+        "type-aware-fallback" => "Type-aware sidecar not found",
         "parse-error" => "Parse errors",
         "mutation-min-score" => "Mutation score",
         _ => return None,

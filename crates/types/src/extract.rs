@@ -929,8 +929,8 @@ pub struct SinkSite {
     /// classify it syntactically. `None` for non-URL sinks and URL expressions
     /// whose shape is not visible at the sink.
     pub url_shape: Option<SecurityUrlShape>,
-    /// Options-object metadata of the call, on the command argument of a call
-    /// whose options position the extractor knows. `None` for every other
+    /// Options-object metadata of the call, on the command argument and the
+    /// argument array of a call whose options position the extractor knows. `None` for every other
     /// sink, which means that the options are unknown.
     pub call_options: Option<Box<SinkCallOptions>>,
 }
@@ -1941,35 +1941,6 @@ pub struct FactoryReturnObjectShapeExport {
     pub properties: Box<[FactoryReturnObjectProperty]>,
 }
 
-/// A named-type property whose declared type is a named type reference.
-///
-/// `interface Opts { c: OptDep }` (or `type Opts = { c: OptDep }`) records
-/// `TypeMemberTypeEntry { type_name: "Opts", property: "c", property_type: "OptDep" }`.
-/// Both `type_name` and `property_type` are the DECLARING module's own local
-/// names; resolution through that module's imports/exports is deferred to
-/// analyze time, mirroring `FactoryReturnExport.class_local_name`. Consumed by
-/// the `unused-class-member` typed-property-hop join so a consumer's
-/// `this.opts.c.optM()` credits `OptDep.optM` across module boundaries.
-/// See issue #1785.
-#[derive(
-    Debug,
-    Clone,
-    serde::Serialize,
-    serde::Deserialize,
-    bitcode::Encode,
-    bitcode::Decode,
-    PartialEq,
-    Eq,
-)]
-pub struct TypeMemberTypeEntry {
-    /// Local interface or type-alias name declaring the property.
-    pub type_name: String,
-    /// Property name declared on the type.
-    pub property: String,
-    /// The property's declared type name (local to the declaring module).
-    pub property_type: String,
-}
-
 /// A module-scope declaration that can be used as a TypeScript type.
 #[derive(Debug, Clone, serde::Serialize, PartialEq, Eq)]
 pub struct LocalTypeDeclaration {
@@ -2045,6 +2016,11 @@ pub struct MemberInfo {
     /// project, because that code calls the overridden member.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub override_base: Option<String>,
+    /// True for a class member with the TypeScript `protected` modifier. Only
+    /// the `unused-protected-class-members` rule checks these members. Every
+    /// other consumer that checks class members skips them.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_protected: bool,
 }
 
 /// The kind of member.
@@ -2254,19 +2230,6 @@ pub struct FederationRuntimeRemoteFact {
     pub call: FederationRuntimeCall,
     /// The remote alias the call names, or `None` for a non-literal argument.
     pub remote: Option<String>,
-}
-
-/// Iterate Angular template member names from typed semantic facts.
-fn angular_template_member_names_from_parts(
-    semantic_facts: &[SemanticFact],
-) -> impl Iterator<Item = &str> {
-    semantic_facts.iter().filter_map(|fact| {
-        if let SemanticFact::AngularTemplateMemberAccess(access) = fact {
-            Some(access.member.as_str())
-        } else {
-            None
-        }
-    })
 }
 
 /// Iterate Angular template member names from a module's typed facts.
@@ -3727,6 +3690,13 @@ pub use factory::*;
 #[path = "extract_component_contracts.rs"]
 mod component_contracts;
 pub use component_contracts::*;
+#[path = "extract_type_members.rs"]
+mod type_members;
+pub use type_members::*;
+
+#[path = "extract_template_members.rs"]
+mod extract_template_members;
+use extract_template_members::angular_template_member_names_from_parts;
 
 #[cfg(test)]
 #[path = "extract_tests.rs"]
