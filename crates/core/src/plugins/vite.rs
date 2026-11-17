@@ -300,6 +300,12 @@ define_plugin!(
             }
         }
 
+        super::test_alias::credit_regex_alias_packages(
+            &mut result,
+            source,
+            config_path,
+            &["resolve", "alias"],
+        );
         super::test_alias::apply_test_block_aliases(&mut result, source, config_path, root);
 
         add_root_entry_patterns(&mut result, source, config_path, root);

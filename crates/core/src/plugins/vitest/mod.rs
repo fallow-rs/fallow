@@ -237,6 +237,7 @@ fn apply_vitest_aliases(result: &mut PluginResult, source: &str, config_path: &P
     {
         test_alias::process_test_alias(result, &find, &replacement, is_bare, config_path, root);
     }
+    test_alias::credit_regex_alias_packages(result, source, config_path, &["resolve", "alias"]);
     test_alias::apply_workspace_array_aliases(result, source, config_path, root);
     test_alias::debug_unreachable_config(source, config_path);
 }

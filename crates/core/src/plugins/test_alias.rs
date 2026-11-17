@@ -58,6 +58,23 @@ pub(super) fn process_test_alias(
     tracing::debug!(find, target = %normalized, "test alias extracted");
 }
 
+/// Credit the packages that regex alias entries at `prop_path` name as their
+/// replacement.
+pub(super) fn credit_regex_alias_packages(
+    result: &mut PluginResult,
+    source: &str,
+    config_path: &Path,
+    prop_path: &[&str],
+) {
+    result.referenced_dependencies.extend(
+        config_parser::alias_entry::extract_config_regex_alias_packages(
+            source,
+            config_path,
+            prop_path,
+        ),
+    );
+}
+
 /// Extract and apply the Vitest test-block aliases shared by the Vitest and Vite plugins.
 pub(super) fn apply_test_block_aliases(
     result: &mut PluginResult,
@@ -70,6 +87,7 @@ pub(super) fn apply_test_block_aliases(
     {
         process_test_alias(result, &find, &replacement, is_bare, config_path, root);
     }
+    credit_regex_alias_packages(result, source, config_path, &["test", "alias"]);
     for (find, replacement, is_bare) in config_parser::extract_config_array_nested_aliases_kinded(
         source,
         config_path,
