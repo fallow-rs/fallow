@@ -316,6 +316,7 @@ define_plugin!(
             &["build", "rollupOptions", "input"],
         );
         result.extend_entry_patterns_and_dependencies(rollup_input, root);
+        add_environment_rollup_inputs(&mut result, source, config_path, root);
 
         let lib_entry = config_parser::extract_config_string_or_array(
             source,
@@ -354,6 +355,26 @@ define_plugin!(
         result
     },
 );
+
+/// Register the `build.rollupOptions.input` entries of each Vite environment.
+///
+/// Vite 6 and later read the build options of each environment from
+/// `environments.<name>.build`, in addition to the top-level `build`.
+fn add_environment_rollup_inputs(
+    result: &mut PluginResult,
+    source: &str,
+    config_path: &std::path::Path,
+    root: &std::path::Path,
+) {
+    for name in config_parser::extract_config_object_keys(source, config_path, &["environments"]) {
+        let input = config_parser::extract_config_string_or_array(
+            source,
+            config_path,
+            &["environments", &name, "build", "rollupOptions", "input"],
+        );
+        result.extend_entry_patterns_and_dependencies(input, root);
+    }
+}
 
 #[cfg(test)]
 mod tests {
@@ -857,6 +878,49 @@ mod tests {
                 .any(|rule| rule.pattern == "bulma"),
             "bare package imports should not be seeded as project entry globs"
         );
+    }
+
+    #[test]
+    fn resolve_config_reads_rollup_input_of_each_environment() {
+        let source = r#"
+            import path from "path";
+            import { defineConfig } from "vite";
+
+            export default defineConfig({
+                environments: {
+                    client: {
+                        build: {
+                            rollupOptions: {
+                                input: {
+                                    index: path.resolve(__dirname, "index.html"),
+                                    second: path.resolve(__dirname, "second.html"),
+                                },
+                            },
+                        },
+                    },
+                    sw: {
+                        consumer: "client",
+                        build: { rollupOptions: { input: "src/sw-main.ts" } },
+                    },
+                },
+            });
+        "#;
+        let result = VitePlugin.resolve_config(
+            Path::new("/project/vite.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+        let patterns: Vec<&str> = result
+            .entry_patterns
+            .iter()
+            .map(|rule| rule.pattern.as_str())
+            .collect();
+        for expected in ["index.html", "second.html", "src/sw-main.ts"] {
+            assert!(
+                patterns.contains(&expected),
+                "environment input {expected} should be an entry: {patterns:?}"
+            );
+        }
     }
 
     #[test]
