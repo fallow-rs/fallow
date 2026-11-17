@@ -11,9 +11,10 @@ permissions: {}
 
 # A newer run of a pull request cancels the older one. Pushes to main share
 # one group and never cancel: a started run always finishes, and a newer push
-# replaces only the run that waits in the queue. A cancelled main run turns the
-# README badge red, and Miri takes longer than the gap between most merges, so
-# a cancelling main group left no finished run on main. The release commit and
+# replaces only the run that waits in the queue. Miri takes longer than the gap
+# between most merges, so a group that cancelled started runs left no finished
+# run on main. A replaced queued run shows as cancelled, and the README badge
+# can show it until the next run finishes. The release commit and
 # manual or scheduled runs get a group of their own, because
 # scripts/verify-release-ci.mjs needs a finished run on the release commit.
 concurrency:

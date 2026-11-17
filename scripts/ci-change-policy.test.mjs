@@ -90,7 +90,9 @@ test("the executable reads the entire pushed range and falls back on invalid ref
     const url = new URL(request.url, "http://localhost");
     requests.push({ path: url.pathname, auth: request.headers.authorization });
     const sha = url.searchParams.get("head_sha");
-    const ok = url.pathname === "/repos/owner/repo/actions/workflows/ci.yml/runs";
+    const ok =
+      url.pathname === "/repos/owner/repo/actions/workflows/ci.yml/runs" &&
+      url.searchParams.get("event") === "push";
     response.writeHead(ok ? 200 : 404, { "content-type": "application/json" });
     const runs = conclusions.has(sha) ? [{ head_sha: sha, conclusion: conclusions.get(sha) }] : [];
     response.end(JSON.stringify(ok ? { workflow_runs: runs } : {}));

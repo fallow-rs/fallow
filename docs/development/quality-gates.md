@@ -346,7 +346,8 @@ run shows as failing. Miri takes longer than the gap between most merges, so a
 cancelling group left no finished `CI` run on `main`. The push runs of `CI`
 still share one group, so a newer push replaces a run that waits in the queue.
 In a burst of merges, `CI` then tests the newest commit and skips the queued
-ones between.
+ones between. A replaced queued run shows as cancelled, and the README badge
+can show that state until the next run finishes.
 The release commit, with a message that starts with `chore: release v`, and
 manual or scheduled runs get a concurrency group of their own. Nothing cancels
 them, so the release gate always gets a result for the release commit.
