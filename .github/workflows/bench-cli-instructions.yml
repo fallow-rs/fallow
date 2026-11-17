@@ -55,6 +55,7 @@ jobs:
 
       - uses: ./.github/actions/setup-rust
         with:
+          save-if: 'false'
           cache-key: bench-cli-instructions
 
       - name: Build fallow

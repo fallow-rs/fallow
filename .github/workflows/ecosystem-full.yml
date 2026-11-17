@@ -28,6 +28,7 @@ jobs:
 
       - uses: ./.github/actions/setup-rust
         with:
+          save-if: 'false'
           cache-key: ecosystem-full
 
       - name: Install pnpm

@@ -99,6 +99,7 @@ jobs:
 
       - uses: ./.github/actions/setup-rust
         with:
+          save-if: 'false'
           targets: ${{ matrix.target }}
           components: llvm-tools
           cache-key: pgo-validate-instrumented-${{ matrix.target }}
@@ -112,12 +113,10 @@ jobs:
           # pnpm 10 and later switch to the packageManager version of each project.
           version: 12.6.0
 
-      - name: Cache training fixtures
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: benchmarks/fixtures/real-world
-          key: pgo-train-fixtures-v1-${{ runner.os }}-${{ hashFiles('benchmarks/download-fixtures.mjs') }}
 
+      # The fixtures are not cached: GitHub evicts the repository caches
+      # within hours, so a weekly or pull request save is gone before the
+      # next run and only evicts the caches that pull request jobs restore.
       - name: Fetch training fixtures
         shell: bash
         run: node benchmarks/download-fixtures.mjs --only preact,fastify,zod,vue-core,svelte
@@ -183,6 +182,7 @@ jobs:
 
       - uses: ./.github/actions/setup-rust
         with:
+          save-if: 'false'
           targets: ${{ matrix.target }}
           components: llvm-tools
           cache-key: pgo-validate-${{ matrix.target }}
@@ -280,11 +280,6 @@ jobs:
             exit 1
           fi
 
-      - name: Cache held-out fixtures
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: benchmarks/fixtures/real-world
-          key: pgo-heldout-fixtures-v1-${{ runner.os }}-${{ hashFiles('benchmarks/download-fixtures.mjs') }}
 
       - name: Fetch held-out fixtures
         run: node benchmarks/download-fixtures.mjs --only query,vite,astro
