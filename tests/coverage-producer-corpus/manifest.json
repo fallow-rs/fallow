@@ -5,7 +5,7 @@
     "platform": "linux-x64",
     "coverage_root": "/fallow/corpus",
     "producers_lock_file": "producers/package-lock.json",
-    "producers_lock_sha256": "8d9cb7c2cb105a66406b2bfe1b8305442617d6507516c6429d6f46f861ca1138"
+    "producers_lock_sha256": "059e65ed2784fa16b4e8526598de71f890cdd3d8c99784a49a267ffc735ba088"
   },
   "invariants": [
     {
@@ -78,7 +78,7 @@
     {
       "id": "ast-v8-to-istanbul",
       "package": "ast-v8-to-istanbul",
-      "version": "1.0.7",
+      "version": "1.0.8",
       "profile": "default",
       "driver": "producers/drivers/ast-v8-to-istanbul.mjs",
       "consumers": "vitest default v8 provider",
@@ -297,7 +297,7 @@
       "producer": "ast-v8-to-istanbul",
       "fixture": "accessors",
       "file": "maps/ast-v8-to-istanbul/accessors.json",
-      "sha256": "dd39a83225146ae751db856f9c0d011a50242e40be45f1b7833d91a04e3f7c94"
+      "sha256": "a6753e7aae4854bb9417a84d5ba537f9fa70cb37b34643f35fe06aa3ae02db52"
     },
     {
       "producer": "ast-v8-to-istanbul",
