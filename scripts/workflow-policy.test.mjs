@@ -883,7 +883,14 @@ test("workflows without a push trigger never save a Rust cache", () => {
   // weekly run saves is gone before its next run, and it evicts the caches
   // that pull request jobs restore. A release keeps its caches, because a
   // re-run of a failed release job reuses them within minutes.
-  const KEEPS_CACHE = new Set(["release.yml", "release-validation.yml"]);
+  // release-validation.yml also runs every week; that run saves nothing.
+  const KEEPS_CACHE = new Set(["release.yml"]);
+  const SAVE_IF = new Map([
+    [
+      "release-validation.yml",
+      "${{ github.event_name != 'schedule' && github.ref == 'refs/heads/main' }}",
+    ],
+  ]);
   const checked = [];
   for (const file of readdirSync(".github/workflows").filter((name) => name.endsWith(".yml"))) {
     const workflow = readWorkflow(join(".github/workflows", file));
@@ -893,10 +900,13 @@ test("workflows without a push trigger never save a Rust cache", () => {
     );
     if (triggers.includes("push") || KEEPS_CACHE.has(file)) continue;
     checked.push(file);
+    const expected = SAVE_IF.get(file) ?? "'false'";
     const lines = workflow.split("\n");
+    let steps = 0;
     lines.forEach((line, index) => {
-      const step = /^( *)(- )?uses: \.\/\.github\/actions\/setup-rust$/u.exec(line);
+      const step = /^( *)(- )?uses: \.\/\.github\/actions\/setup-rust\b/u.exec(line);
       if (!step) return;
+      steps += 1;
       // The indent of the list item that holds this `uses:` key.
       const item = step[2] ? step[1].length : step[1].length - 2;
       const body = [];
@@ -904,8 +914,11 @@ test("workflows without a push trigger never save a Rust cache", () => {
         if (next.trim() !== "" && next.search(/\S/u) <= item) break;
         body.push(next);
       }
-      assert.match(body.join("\n"), /^ +save-if: 'false'$/mu, `${file}:${index + 1}`);
+      // The input sits in the `with:` block, two levels below the list item.
+      const input = `${" ".repeat(item + 4)}save-if: ${expected}`;
+      assert.ok(body.includes(input), `${file}:${index + 1} needs ${input.trim()}`);
     });
+    assert.equal(steps, workflow.split("uses: ./.github/actions/setup-rust").length - 1, file);
   }
   assert.deepEqual(checked.toSorted(), [
     "bench-cli-instructions.yml",
@@ -913,6 +926,7 @@ test("workflows without a push trigger never save a Rust cache", () => {
     "ecosystem-full.yml",
     "oracle-seeds.yml",
     "pgo-validate.yml",
+    "release-validation.yml",
   ]);
 });
 

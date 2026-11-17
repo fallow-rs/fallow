@@ -535,9 +535,11 @@ so GitHub evicts the oldest entries within hours. A cache that a daily or
 weekly run saves is gone before its next run, and it evicts the caches that
 pull request jobs restore. On pull requests, a cache miss made `Windows path
 and subprocess handling` about 4 minutes slower. Each workflow without a push
-trigger therefore passes `save-if: 'false'`. `release.yml` and
-`release-validation.yml` keep their caches, because a re-run of a failed
-release job reuses them. `scripts/workflow-policy.test.mjs` checks this rule.
+trigger therefore passes `save-if: 'false'`. `release.yml` keeps its caches,
+because a re-run of a failed release job reuses them. `release-validation.yml`
+saves only for a release or a manual run on `main`, not for its weekly run.
+`PGO Validate` does not cache its fixtures. `scripts/workflow-policy.test.mjs`
+checks this rule.
 
 ### Parallel heavy jobs
 
