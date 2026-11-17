@@ -1,0 +1,4 @@
+### Fixed
+
+- **`fallow audit` reports a rule severity that a change makes less strict.** A change to the Fallow config file at the analysis root that lowers a rule severity now gives a `weakened-tests` finding with `kind: "rule-severity"`. Examples are `error` to `warn`, `warn` to `off`, a removed rule whose default is weaker, a new `overrides` entry that turns a rule off for some paths, and a new or deleted config file. A new config compares with the default severities. The finding takes the stricter of the base and the head `weakened-tests` severity. Thus a change that sets `weakened-tests` to `off` and adds `it.skip` no longer passes the audit. The head config still sets the severities of all other findings. The audit brief shows the finding as a `threshold-lowered` signal.
+  (Closes [#4668](https://github.com/fallow-rs/fallow/issues/4668))

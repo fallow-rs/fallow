@@ -1293,7 +1293,7 @@ export type DiffRiskRule = ("weakened-tests" | "added-suppression" | "test-only-
 /**
  * How a `weakened-tests` finding weakened the tests.
  */
-export type WeakenedTestsKind = ("skip-only" | "removed-tests" | "assertion-drop" | "coverage-threshold")
+export type WeakenedTestsKind = ("skip-only" | "removed-tests" | "assertion-drop" | "coverage-threshold" | "rule-severity")
 /**
  * The severity of a diff-risk finding, from its rule.
  */

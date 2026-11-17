@@ -32887,6 +32887,11 @@
           "type": "string",
           "const": "coverage-threshold",
           "description": "A coverage threshold that the change made less strict."
+        },
+        {
+          "type": "string",
+          "const": "rule-severity",
+          "description": "A rule severity in a Fallow config that the change made less strict."
         }
       ],
       "description": "How a `weakened-tests` finding weakened the tests."

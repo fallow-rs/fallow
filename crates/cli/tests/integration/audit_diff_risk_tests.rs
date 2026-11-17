@@ -569,3 +569,142 @@ fn review_brief_names_a_reasonless_security_suppression() {
         "{weakening:?}"
     );
 }
+
+#[test]
+fn turning_off_weakened_tests_reports_at_the_base_severity() {
+    let tmp = fixture(Some(
+        "{\n  \"rules\": {\n    \"weakened-tests\": \"error\"\n  }\n}\n",
+    ));
+    let dir = tmp.path();
+    fs::write(
+        dir.join(".fallowrc.json"),
+        "{\n  \"rules\": {\n    \"weakened-tests\": \"off\"\n  }\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join("src/index.test.ts"),
+        "import { price } from './index';\n\nit.skip('doubles', () => {\n  expect(price(1)).toBe(2);\n});\n\nit('keeps zero', () => {\n  expect(price(0)).toBe(0);\n});\n",
+    )
+    .unwrap();
+
+    let (code, json) = audit_json(dir, &[]);
+    assert_eq!(json["verdict"], "fail", "{json}");
+    assert_eq!(code, 1);
+    assert_eq!(
+        rule_lines(&json),
+        vec![rule(
+            "weakened-tests",
+            Some("rule-severity"),
+            ".fallowrc.json",
+            Some(3)
+        )]
+    );
+    let found = findings(&json);
+    assert_eq!(found[0]["evidence"], "weakened-tests: error -> off");
+    assert_eq!(found[0]["severity"], "error");
+    assert_eq!(found[0]["actions"], serde_json::json!([]));
+}
+
+#[test]
+fn a_head_comment_does_not_hide_a_lowered_weakened_tests_rule() {
+    let tmp = fixture(None);
+    let dir = tmp.path();
+    fs::write(
+        dir.join(".fallowrc.jsonc"),
+        "{\n  \"rules\": {\n    \"weakened-tests\": \"error\"\n  }\n}\n",
+    )
+    .unwrap();
+    commit_all(dir, "config");
+    fs::write(
+        dir.join(".fallowrc.jsonc"),
+        "// fallow-ignore-file weakened-tests\n{\n  \"rules\": {\n    \"weakened-tests\": \"warn\"\n  }\n}\n",
+    )
+    .unwrap();
+    let (_, json) = audit_json(dir, &[]);
+    assert_eq!(
+        rule_lines(&json),
+        vec![rule(
+            "weakened-tests",
+            Some("rule-severity"),
+            ".fallowrc.jsonc",
+            Some(4)
+        )],
+        "{json}"
+    );
+    assert_eq!(findings(&json)[0]["severity"], "error");
+}
+
+#[test]
+fn weaker_rule_severities_and_override_entries_report() {
+    let tmp = fixture(Some(
+        "{\n  \"rules\": {\n    \"unused-exports\": \"error\",\n    \"unused-files\": \"error\"\n  }\n}\n",
+    ));
+    let dir = tmp.path();
+    fs::write(
+        dir.join(".fallowrc.json"),
+        "{\n  \"rules\": {\n    \"unused-exports\": \"warn\",\n    \"unused-types\": \"error\"\n  },\n  \"overrides\": [\n    {\n      \"files\": [\"src/legacy/**\"],\n      \"rules\": {\n        \"unused-files\": \"off\"\n      }\n    }\n  ]\n}\n",
+    )
+    .unwrap();
+
+    let (_, json) = audit_json(dir, &[]);
+    let evidence: Vec<String> = findings(&json)
+        .iter()
+        .filter(|finding| finding["kind"] == "rule-severity")
+        .map(|finding| finding["evidence"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(
+        evidence,
+        vec![
+            "unused-exports: error -> warn".to_owned(),
+            "unused-files: error -> off for src/legacy/**".to_owned(),
+        ],
+        "{json}"
+    );
+}
+
+#[test]
+fn a_stricter_rule_severity_does_not_report() {
+    let tmp = fixture(Some(
+        "{\n  \"rules\": {\n    \"unused-exports\": \"warn\"\n  }\n}\n",
+    ));
+    let dir = tmp.path();
+    fs::write(
+        dir.join(".fallowrc.json"),
+        "{\n  \"rules\": {\n    \"unused-exports\": \"error\",\n    \"weakened-tests\": \"error\"\n  }\n}\n",
+    )
+    .unwrap();
+    let (_, json) = audit_json(dir, &[]);
+    assert!(
+        findings(&json)
+            .iter()
+            .all(|finding| finding["kind"] != "rule-severity"),
+        "{json}"
+    );
+}
+
+#[test]
+fn a_new_config_that_turns_off_weakened_tests_still_reports() {
+    let tmp = fixture(None);
+    let dir = tmp.path();
+    fs::write(
+        dir.join(".fallowrc.json"),
+        "{\n  \"rules\": {\n    \"weakened-tests\": \"off\"\n  }\n}\n",
+    )
+    .unwrap();
+    let (_, json) = audit_json(dir, &[]);
+    assert_eq!(
+        rule_lines(&json),
+        vec![rule(
+            "weakened-tests",
+            Some("rule-severity"),
+            ".fallowrc.json",
+            Some(3)
+        )],
+        "{json}"
+    );
+    assert_eq!(
+        findings(&json)[0]["evidence"],
+        "weakened-tests: warn -> off"
+    );
+    assert_eq!(findings(&json)[0]["severity"], "warn");
+}
