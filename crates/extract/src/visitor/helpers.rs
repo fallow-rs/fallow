@@ -867,9 +867,13 @@ pub fn extract_class_members(
         .and_then(|heritage| heritage_root_name(&heritage.expression, plain_object_names));
     let override_base = |is_override: bool| heritage_root.clone().filter(|_| is_override);
     let mut members = Vec::new();
+    let mut overload_slots: FxHashSet<(bool, String)> = FxHashSet::default();
     for element in &class.body.body {
         match element {
             ClassElement::MethodDefinition(method) => {
+                if !is_member_slot_of_method(class, method, &mut overload_slots) {
+                    continue;
+                }
                 if let Some(mut member) = build_method_member(method, class_name) {
                     member.override_base = override_base(method.r#override);
                     members.push(member);
@@ -885,6 +889,40 @@ pub fn extract_class_members(
         }
     }
     members
+}
+
+/// Whether `method` is the one declaration that stands for its overload set.
+///
+/// TypeScript declares an overloaded method as bodyless signatures plus one
+/// implementation with a body. They are one runtime member, so one finding
+/// must cover them. The implementation stands for the set. A set with no
+/// implementation (abstract or ambient signatures) keeps its first signature.
+/// Getters and setters are not overloads and keep their own entries.
+fn is_member_slot_of_method(
+    class: &Class<'_>,
+    method: &oxc_ast::ast::MethodDefinition<'_>,
+    overload_slots: &mut FxHashSet<(bool, String)>,
+) -> bool {
+    if method.kind != MethodDefinitionKind::Method {
+        return true;
+    }
+    let Some(name) = method.key.static_name() else {
+        return true;
+    };
+    if method.value.body.is_some() {
+        return true;
+    }
+    let has_implementation = class.body.body.iter().any(|element| {
+        matches!(
+            element,
+            ClassElement::MethodDefinition(other)
+                if other.kind == MethodDefinitionKind::Method
+                    && other.r#static == method.r#static
+                    && other.value.body.is_some()
+                    && other.key.static_name().is_some_and(|other_name| other_name == name)
+        )
+    });
+    !has_implementation && overload_slots.insert((method.r#static, name.text().into_owned()))
 }
 
 /// Build a `MemberInfo` for a non-constructor, non-private method. A
