@@ -4339,8 +4339,8 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.record_callee_use(&expr.callee, expr.span.start, false);
         self.record_imported_call_site(expr);
         self.record_this_binding_call(expr);
-
         walk::walk_call_expression(self, expr);
+        self.react_record_memo_comparator(expr);
     }
 
     fn visit_for_statement(&mut self, stmt: &ForStatement<'a>) {

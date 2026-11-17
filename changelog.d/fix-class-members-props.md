@@ -6,3 +6,5 @@
   (Closes [#4723](https://github.com/fallow-rs/fallow/issues/4723))
 - **A read through `Class.prototype.member` is a use of the instance member.** `WebSocketTransport.prototype.handlesUpgrades` now counts as a use of `handlesUpgrades`. A read through a computed holder, for example `transports[name].prototype.handlesUpgrades`, is still not followed.
   (Refs [#4724](https://github.com/fallow-rs/fallow/issues/4724))
+- **`unused-component-props` does not check a component that `memo` wraps with a comparator.** The comparator of `React.memo(Component, areEqual)` decides when the component renders again, so it can read a prop that the component body does not read. Fallow does not follow the comparator, so it no longer reports the props of such a component. `memo(Component)` without a comparator is still checked.
+  (Closes [#4725](https://github.com/fallow-rs/fallow/issues/4725))
