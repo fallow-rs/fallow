@@ -16,13 +16,14 @@ use super::tokenize::{FileTokens, TokenKind};
 use super::types::DuplicationReport;
 use crate::suppress::Suppression;
 
-/// Drop the range markers whose text is inside a string or template literal
-/// token, then pair the rest.
+/// Drop the markers whose text is inside a string or template literal
+/// token, then pair the range markers that are left.
 ///
 /// The source scan does not know string context, so a marker in a template
-/// literal would otherwise open or close a range.
-pub(super) fn pair_ranges_outside_strings(parsed: &mut ParsedSuppressions, tokens: &FileTokens) {
-    if parsed.range_markers.is_empty() {
+/// literal would otherwise suppress the file, a line, or open or close a
+/// range.
+pub(super) fn drop_markers_in_strings(parsed: &mut ParsedSuppressions, tokens: &FileTokens) {
+    if parsed.range_markers.is_empty() && parsed.line_markers.is_empty() {
         return;
     }
     let literal_spans: Vec<(u32, u32)> = tokens
@@ -36,11 +37,21 @@ pub(super) fn pair_ranges_outside_strings(parsed: &mut ParsedSuppressions, token
         })
         .map(|token| (token.span.start, token.span.end))
         .collect();
-    parsed.range_markers.retain(|marker| {
-        !literal_spans
+    let in_literal = |offset: u32| {
+        literal_spans
             .iter()
-            .any(|&(start, end)| start < marker.offset && marker.offset < end)
-    });
+            .any(|&(start, end)| start < offset && offset < end)
+    };
+    parsed
+        .range_markers
+        .retain(|marker| !in_literal(marker.offset));
+    let literal_lines: Vec<u32> = parsed
+        .line_markers
+        .iter()
+        .filter(|marker| in_literal(marker.offset))
+        .map(|marker| marker.comment_line)
+        .collect();
+    parsed.drop_line_markers(&literal_lines);
     parsed.pair_ranges();
 }
 

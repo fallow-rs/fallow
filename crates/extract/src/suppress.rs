@@ -26,6 +26,18 @@ pub struct ParsedSuppressions {
     pub range_markers: Vec<RangeMarker>,
     /// Range markers with a problem. A marker with a problem has no effect.
     pub range_problems: Vec<RangeMarkerProblem>,
+    /// Where each `fallow-ignore-file` and `fallow-ignore-next-line` marker
+    /// is, so that a caller with token spans can drop a marker in a string.
+    pub line_markers: Vec<LineMarkerAt>,
+}
+
+/// The place of one `fallow-ignore-file` or `fallow-ignore-next-line` marker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LineMarkerAt {
+    /// 1-based line of the marker comment.
+    pub comment_line: u32,
+    /// Byte offset of the marker targets in the source.
+    pub offset: u32,
 }
 
 /// The only issue kind that a range marker supports.
@@ -110,6 +122,22 @@ impl ParsedSuppressions {
             self.push_range_problem(start.comment_line, RangeMarkerProblemKind::UnclosedStart);
         }
         self.range_problems.sort_by_key(|problem| problem.line);
+    }
+
+    /// Remove the file and next-line suppressions, and the unknown kinds, of
+    /// the markers on `comment_lines`.
+    pub fn drop_line_markers(&mut self, comment_lines: &[u32]) {
+        if comment_lines.is_empty() {
+            return;
+        }
+        self.suppressions.retain(|suppression| {
+            matches!(suppression.scope, SuppressionScope::Range { .. })
+                || !comment_lines.contains(&suppression.comment_line)
+        });
+        self.unknown_kinds
+            .retain(|unknown| !comment_lines.contains(&unknown.comment_line));
+        self.line_markers
+            .retain(|marker| !comment_lines.contains(&marker.comment_line));
     }
 
     fn push_kind_problems(&mut self, marker: &RangeMarker) {
@@ -444,6 +472,12 @@ fn push_marker(
     comment_line: u32,
     suppressed_line: u32,
 ) {
+    if let Marker::File(rest) | Marker::NextLine(rest) = marker {
+        parsed.line_markers.push(LineMarkerAt {
+            comment_line,
+            offset: site.offset_of(rest),
+        });
+    }
     match marker {
         Marker::File(rest) => push_suppressions(parsed, 0, comment_line, rest),
         Marker::NextLine(rest) => push_suppressions(parsed, suppressed_line, comment_line, rest),
@@ -497,7 +531,9 @@ pub fn parse_suppressions_from_source(source: &str) -> ParsedSuppressions {
 /// leave the range markers unpaired in `range_markers`.
 ///
 /// The scan does not know string context. A caller with token spans can drop
-/// range markers whose offset is inside a string, then call
+/// the markers whose offset is inside a string: range markers from
+/// `range_markers`, and file and next-line markers with
+/// [`ParsedSuppressions::drop_line_markers`]. Then it calls
 /// [`ParsedSuppressions::pair_ranges`].
 #[must_use]
 #[expect(
