@@ -65,8 +65,15 @@ gate_json_anchor() {
   command -v npx >/dev/null 2>&1 && gate_try_json_runner "$anchor" npx --no-install fallow
 }
 
+# The reader uses the order of the audit runner below: the project-local
+# launcher first, then the fallow on PATH, then the launchers of the parent
+# directories and of the script root.
 gate_find_json_runner() {
   local anchor
+  if [ -x ./node_modules/.bin/fallow ] &&
+    gate_try_json_runner "$PWD" "$PWD/node_modules/.bin/fallow"; then
+    return 0
+  fi
   if command -v fallow >/dev/null 2>&1 && gate_try_json_runner "$PWD" fallow; then
     return 0
   fi
@@ -835,12 +842,14 @@ run_audit() {
   # in version and in packaging. Keep this order in step with the Git hook
   # and the Lefthook job that `fallow hooks install --target git` writes, and
   # with the plugin gate of fallow-skills: they must resolve the same installs.
+  BIN_FIX="update the fallow devDependency of the project (for example npm install -D fallow@latest)"
   if [ -x ./node_modules/.bin/fallow ] && fallow_runs ./node_modules/.bin/fallow ./node_modules/.bin/fallow; then
     RUNNER=(./node_modules/.bin/fallow)
     BIN_DESC="./node_modules/.bin/fallow"
   elif command -v fallow >/dev/null 2>&1 && fallow_runs "$(command -v fallow)" fallow; then
     RUNNER=(fallow)
     BIN_DESC="$(command -v fallow)"
+    BIN_FIX="upgrade the fallow on PATH (for example npm install -g fallow@latest or cargo install fallow-cli)"
   elif command -v yarn >/dev/null 2>&1 && YARN_BIN="$(yarn bin fallow 2>/dev/null)" && [ -n "$YARN_BIN" ] && fallow_runs "yarn exec fallow" yarn exec fallow --; then
     # Yarn Plug'n'Play has no node_modules/.bin at all, so neither the launcher
     # check above nor npx can see the install.
@@ -873,8 +882,8 @@ run_audit() {
         echo "fallow-gate: blocked: $BIN_DESC is fallow $VERSION, below required $MIN_VERSION."
         echo "fallow-gate: older binaries reject the --gate-marker flag this gate passes"
         echo "fallow-gate: (added in fallow v2.85.0), so the audit cannot run."
-        echo "fallow-gate: upgrade the fallow on PATH (e.g. npm install -g fallow@latest or"
-        echo "fallow-gate: cargo install fallow-cli), or set FALLOW_GATE_MIN_VERSION= to disable."
+        echo "fallow-gate: $BIN_FIX,"
+        echo "fallow-gate: or set FALLOW_GATE_MIN_VERSION= to disable."
       } >&2
       exit 2
     fi

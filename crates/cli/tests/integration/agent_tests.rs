@@ -566,6 +566,15 @@ fn status_reports_path_drift_only_when_the_gate_runs_the_path_fallow() {
     write_stub(&dir.join("node_modules/.bin/fallow"));
     assert!(!status(), "the gate runs the project-local fallow");
 
+    // The gate checks `-x`, so a launcher without the executable bit does not
+    // run and the gate falls back to the fallow on PATH.
+    fs::set_permissions(
+        dir.join("node_modules/.bin/fallow"),
+        fs::Permissions::from_mode(0o644),
+    )
+    .unwrap();
+    assert!(status(), "a launcher that is not executable does not run");
+
     fs::remove_file(dir.join("node_modules/.bin/fallow")).unwrap();
     assert!(status(), "the gate runs the fallow on PATH");
     let _ = fs::remove_dir_all(&dir);

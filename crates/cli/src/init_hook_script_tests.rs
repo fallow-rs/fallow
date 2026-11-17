@@ -99,12 +99,15 @@ fn prune_baselines_hints_carry_the_prune_block() {
     assert!(!lefthook_hint(false).contains("baselines prune"));
 }
 
-/// A project pins its fallow version in its dependencies. A global install
-/// on `PATH` can have another version and another packaging, so the hook
-/// must run the project-local launcher first.
+/// Runs the resolution block in `project` with `PATH` reduced to
+/// `project/bin` plus the system directories. Each stub prints the given
+/// `fallow --version` line. The script prints the version of the runner that
+/// the block selected.
 #[cfg(unix)]
-#[test]
-fn resolution_block_prefers_the_project_local_launcher_over_path() {
+fn run_resolution_block(
+    path_version: Option<&str>,
+    local_version: Option<&str>,
+) -> std::process::Output {
     use std::os::unix::fs::PermissionsExt;
 
     let write_stub = |path: &std::path::Path, version: &str| {
@@ -114,8 +117,13 @@ fn resolution_block_prefers_the_project_local_launcher_over_path() {
     };
     let tmp = tempfile::tempdir().unwrap();
     let project = tmp.path();
-    write_stub(&project.join("bin/fallow"), "1.0.0-path");
-    write_stub(&project.join("node_modules/.bin/fallow"), "2.0.0-local");
+    std::fs::create_dir_all(project.join("bin")).unwrap();
+    if let Some(version) = path_version {
+        write_stub(&project.join("bin/fallow"), version);
+    }
+    if let Some(version) = local_version {
+        write_stub(&project.join("node_modules/.bin/fallow"), version);
+    }
     let script = project.join("resolve.sh");
     std::fs::write(
         &script,
@@ -123,7 +131,7 @@ fn resolution_block_prefers_the_project_local_launcher_over_path() {
     )
     .unwrap();
 
-    let output = std::process::Command::new("sh")
+    std::process::Command::new("sh")
         .arg(&script)
         .current_dir(project)
         .env(
@@ -131,8 +139,65 @@ fn resolution_block_prefers_the_project_local_launcher_over_path() {
             format!("{}:/usr/bin:/bin", project.join("bin").display()),
         )
         .output()
-        .expect("spawn sh");
+        .expect("spawn sh")
+}
+
+/// A project pins its fallow version in its dependencies. A global install
+/// on `PATH` can have another version and another packaging, so the hook
+/// must run the project-local launcher first.
+#[cfg(unix)]
+#[test]
+fn resolution_block_prefers_the_project_local_launcher_over_path() {
+    let output = run_resolution_block(Some("9.0.0"), Some("9.1.0"));
 
     let stdout = String::from_utf8_lossy(&output.stdout);
-    assert_eq!(stdout.trim(), "fallow 2.0.0-local", "{output:?}");
+    assert_eq!(stdout.trim(), "fallow 9.1.0", "{output:?}");
+}
+
+/// `audit --staged` exists since fallow 3.43.0. An older fallow rejects the
+/// flag with a parser error, so the hook blocks with a message that names
+/// the runner and the fix.
+#[cfg(unix)]
+#[test]
+fn resolution_block_blocks_a_local_fallow_below_the_hook_floor() {
+    let output = run_resolution_block(Some("9.0.0"), Some("3.42.9"));
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(
+        stderr.contains(
+            "fallow-hook: blocked: ./node_modules/.bin/fallow is fallow 3.42.9, below the required 3.43.0."
+        ),
+        "{stderr}"
+    );
+    assert!(
+        stderr.contains("update the fallow devDependency"),
+        "{stderr}"
+    );
+}
+
+/// A fallow on `PATH` below the floor gets the hint to upgrade that install.
+#[cfg(unix)]
+#[test]
+fn resolution_block_blocks_a_path_fallow_below_the_hook_floor() {
+    let output = run_resolution_block(Some("2.85.0"), None);
+
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert_eq!(output.status.code(), Some(1), "{output:?}");
+    assert!(
+        stderr.contains("is fallow 2.85.0, below the required 3.43.0."),
+        "{stderr}"
+    );
+    assert!(stderr.contains("upgrade the fallow on PATH"), "{stderr}");
+}
+
+/// The floor itself and a newer major version pass.
+#[cfg(unix)]
+#[test]
+fn resolution_block_accepts_a_fallow_at_or_above_the_hook_floor() {
+    for version in ["3.43.0", "4.0.0"] {
+        let output = run_resolution_block(None, Some(version));
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        assert_eq!(stdout.trim(), format!("fallow {version}"), "{output:?}");
+    }
 }
