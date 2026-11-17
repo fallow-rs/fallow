@@ -329,3 +329,64 @@ export const render = (tag) => html`<${tag}></${tag}>`;"#,
         info.used_custom_element_tags
     );
 }
+
+const PROJECT_TAG_FIXTURE: &str = r#"export const fixture = {
+  'index.html': html`
+    <script type="module" src="./src/main.js"></script>
+    <link rel="stylesheet" href="./src/index.css" />
+  `,
+}"#;
+
+fn asset_sources(info: &fallow_types::extract::ModuleInfo) -> Vec<&str> {
+    info.imports
+        .iter()
+        .map(|import| import.source.as_str())
+        .filter(|source| source.starts_with("./src/"))
+        .collect()
+}
+
+#[test]
+fn html_tag_imported_from_project_file_is_plain_text() {
+    let info = parse_ts(&format!(
+        "import {{ html }} from './utils'\n{PROJECT_TAG_FIXTURE}"
+    ));
+    assert!(
+        asset_sources(&info).is_empty(),
+        "{:?}",
+        asset_sources(&info)
+    );
+}
+
+#[test]
+fn html_tag_declared_in_module_is_plain_text() {
+    for declaration in [
+        "const html = String.raw",
+        "export const html = String.raw",
+        "function html(strings) { return strings.join('') }",
+        "const html = require('./utils').html",
+        "const { html } = require('../utils')",
+    ] {
+        let info = parse_ts(&format!("{declaration}\n{PROJECT_TAG_FIXTURE}"));
+        assert!(
+            asset_sources(&info).is_empty(),
+            "{declaration}: {:?}",
+            asset_sources(&info)
+        );
+    }
+}
+
+#[test]
+fn html_tag_from_package_is_markup() {
+    for declaration in [
+        "import { html } from 'lit'",
+        "import { html } from 'hono/html'",
+        "const { html } = require('lit-html')",
+    ] {
+        let info = parse_ts(&format!("{declaration}\n{PROJECT_TAG_FIXTURE}"));
+        assert_eq!(
+            asset_sources(&info),
+            vec!["./src/main.js", "./src/index.css"],
+            "{declaration}"
+        );
+    }
+}
