@@ -57,7 +57,9 @@ pub(super) fn merge_script_into_module(input: &mut SfcScriptMergeInput<'_>) {
             }),
         );
     }
-    input.shared_scope_references.record(&mut semantic_usage);
+    input
+        .shared_scope_references
+        .record(input.kind, input.script, &extractor, &mut semantic_usage);
     let extraction = ExtractionResult::contiguous(&input.script.body, input.script.byte_offset);
     extractor.remap_spans_with(|span| extraction.remap_span(span));
     extractor.resolve_typed_destructure_bindings();
@@ -117,53 +119,92 @@ pub(super) fn merge_script_into_module(input: &mut SfcScriptMergeInput<'_>) {
 
 /// The SFC compilers put the top level of every script block into one module
 /// scope: Vue joins `<script>` and `<script setup>`, Svelte joins the module
-/// script and the instance script. Each block is parsed alone, so a name that
-/// one block imports and another block uses is an unresolved reference in the
-/// block that uses it. This set collects those names over all blocks.
+/// script and the instance script. The scope is visible in one direction only:
+/// `<script setup>` sees the plain `<script>` block, and the Svelte instance
+/// script sees the module script. Each block is parsed alone, so a name that
+/// the seeing block uses and the seen block imports is an unresolved reference
+/// in the seeing block. This set collects those names and the imports of the
+/// seen block.
 #[derive(Default)]
 pub(super) struct SharedScopeReferences {
     values: FxHashSet<String>,
     types: FxHashSet<String>,
+    visible_imports: FxHashSet<String>,
 }
 
 impl SharedScopeReferences {
-    fn record(&mut self, semantic_usage: &mut crate::parse::SemanticUsage) {
-        self.values
-            .extend(semantic_usage.auto_import_candidates.iter().cloned());
+    fn record(
+        &mut self,
+        kind: SfcKind,
+        script: &SfcScript,
+        extractor: &ModuleInfoExtractor,
+        semantic_usage: &mut crate::parse::SemanticUsage,
+    ) {
+        if !is_template_visible_script(kind, script) {
+            self.visible_imports.extend(
+                extractor
+                    .imports
+                    .iter()
+                    .map(|import| &import.local_name)
+                    .chain(&extractor.import_equals_bindings)
+                    .filter(|name| !name.is_empty())
+                    .cloned(),
+            );
+            return;
+        }
+        self.record_references(kind, semantic_usage);
+    }
+
+    /// Record the names that a seeing block uses but does not declare. The
+    /// Vue `generic="..."` probe of `<script setup>` passes its names here too.
+    pub(super) fn record_references(
+        &mut self,
+        kind: SfcKind,
+        semantic_usage: &mut crate::parse::SemanticUsage,
+    ) {
+        for name in &semantic_usage.auto_import_candidates {
+            // A Svelte `$name` reference subscribes to the store `name`.
+            if kind == SfcKind::Svelte
+                && let Some(store) = name.strip_prefix('$').filter(|store| !store.is_empty())
+            {
+                self.values.insert(store.to_string());
+            }
+            self.values.insert(name.clone());
+        }
         self.types
             .extend(std::mem::take(&mut semantic_usage.unresolved_type_names));
     }
 }
 
-/// Credit each import binding of the SFC that another script block of the same
-/// SFC references. Such a binding is not unused, and it gets the value or type
-/// classification of the references.
+/// Credit each import of the seen script block that the seeing block uses.
+/// Such a binding is not unused, and it gets the value or type classification
+/// of the references.
 pub(super) fn credit_shared_scope_references(
     references: &SharedScopeReferences,
     combined: &mut ModuleInfo,
 ) {
-    let is_referenced =
-        |name: &String| references.values.contains(name) || references.types.contains(name);
-    let mut names: Vec<String> = combined
-        .imports
+    let mut names: Vec<&String> = references
+        .visible_imports
         .iter()
-        .map(|import| &import.local_name)
-        .filter(|name| !name.is_empty() && is_referenced(name))
-        .cloned()
+        .filter(|name| references.values.contains(*name) || references.types.contains(*name))
         .collect();
-    combined.unused_import_bindings.retain(|name| {
-        if !is_referenced(name) {
-            return true;
-        }
-        names.push(name.clone());
-        false
-    });
+    if names.is_empty() {
+        return;
+    }
+    names.sort_unstable();
+    combined
+        .unused_import_bindings
+        .retain(|name| names.binary_search(&name).is_err());
     for name in names {
-        if references.types.contains(&name) {
+        if references.types.contains(name)
+            && !combined.type_referenced_import_bindings.contains(name)
+        {
             combined.type_referenced_import_bindings.push(name.clone());
         }
-        if references.values.contains(&name) {
-            combined.value_referenced_import_bindings.push(name);
+        if references.values.contains(name)
+            && !combined.value_referenced_import_bindings.contains(name)
+        {
+            combined.value_referenced_import_bindings.push(name.clone());
         }
     }
 }

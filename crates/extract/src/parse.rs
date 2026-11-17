@@ -1956,12 +1956,15 @@ const fn compatible_merge(left: MergeDeclarationKind, right: MergeDeclarationKin
 /// without them the require-derived lane would be absent on this path and such
 /// a binding would keep crediting its target on a script the caller re-parses
 /// (a Vue `generic="..."` block). Pass `&[]` when the program has none.
+///
+/// The result also carries the names that the program uses but does not
+/// declare, so an SFC can credit the imports of another script block.
 pub fn compute_import_binding_usage(
     program: &Program<'_>,
     imports: &[ImportInfo],
     import_equals_bindings: &[String],
     template_used: &rustc_hash::FxHashSet<String>,
-) -> ImportBindingUsage {
+) -> SemanticUsage {
     let mut semantic_usage = compute_semantic_usage_with_candidates(
         program,
         imports,
@@ -1982,7 +1985,7 @@ pub fn compute_import_binding_usage(
     // `export import X = require('./x')` is not a `<script setup>` spelling: no
     // name is exempted here.
     report_unreferenced_import_equals_bindings(&mut semantic_usage, &[]);
-    semantic_usage.import_binding_usage
+    semantic_usage
 }
 
 #[cfg(test)]

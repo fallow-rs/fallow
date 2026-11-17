@@ -623,26 +623,23 @@ fn merge_script_binding_usage(
     semantic_usage: crate::parse::SemanticUsage,
 ) {
     let augmented_body = build_generic_attr_probe_source(input.script);
-    let empty_template_used = FxHashSet::default();
-    let (binding_usage, auto_import_candidates) = if let Some(augmented) = augmented_body.as_deref()
-    {
+    let binding_usage = if let Some(augmented) = augmented_body.as_deref() {
         let augmented_return =
             Parser::new(allocator, augmented, source_type_for_script(input.script)).parse();
-        (
-            compute_import_binding_usage(
-                &augmented_return.program,
-                imports,
-                import_equals_bindings,
-                &empty_template_used,
-            ),
-            semantic_usage.auto_import_candidates,
-        )
+        let mut probe = compute_import_binding_usage(
+            &augmented_return.program,
+            imports,
+            import_equals_bindings,
+            &FxHashSet::default(),
+        );
+        input
+            .shared_scope_references
+            .record_references(input.kind, &mut probe);
+        probe.import_binding_usage
     } else {
-        (
-            semantic_usage.import_binding_usage,
-            semantic_usage.auto_import_candidates,
-        )
+        semantic_usage.import_binding_usage
     };
+    let auto_import_candidates = semantic_usage.auto_import_candidates;
     crate::parse::append_declaration_merge_facts(
         &mut input.combined.semantic_facts,
         semantic_usage.declaration_merges,
