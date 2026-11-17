@@ -19,6 +19,27 @@ use super::{
 /// The root operation types of a GraphQL schema.
 const GRAPHQL_ROOT_TYPES: [&str; 3] = ["Query", "Mutation", "Subscription"];
 
+/// The function keys of a field config object (`postAdded: { subscribe }`).
+const GRAPHQL_FIELD_CONFIG_FUNCTIONS: [&str; 2] = ["subscribe", "resolve"];
+
+/// The type-name suffix of a codegen resolver type (`QueryResolvers`).
+const GRAPHQL_RESOLVERS_TYPE_SUFFIX: &str = "Resolvers";
+
+/// The codegen type of a full resolver map.
+const GRAPHQL_RESOLVERS_TYPE: &str = "Resolvers";
+
+/// The last identifier of a type reference (`QueryResolvers`, `gql.Resolvers`).
+fn type_reference_last_name<'a>(ty: &'a TSType<'_>) -> Option<&'a str> {
+    let TSType::TSTypeReference(type_ref) = ty else {
+        return None;
+    };
+    match &type_ref.type_name {
+        TSTypeName::IdentifierReference(ident) => Some(ident.name.as_str()),
+        TSTypeName::QualifiedName(name) => Some(name.right.name.as_str()),
+        TSTypeName::ThisExpression(_) => None,
+    }
+}
+
 impl ModuleInfoExtractor {
     /// Record a tainted binding together with its chain-hop depth, deduped on
     /// `(local, source_path)`. On a duplicate the existing record keeps its
@@ -283,28 +304,96 @@ impl ModuleInfoExtractor {
     /// resolvers of that type. A plain object method with a destructured
     /// second parameter, such as a store dispatcher, is not a resolver.
     pub(super) fn record_graphql_resolver_map_sources(&mut self, obj: &ObjectExpression<'_>) {
-        let type_maps = || {
-            obj.properties.iter().filter_map(|prop| {
-                let ObjectPropertyKind::ObjectProperty(prop) = prop else {
-                    return None;
-                };
-                let Expression::ObjectExpression(resolvers) = unwrap_parens(&prop.value) else {
-                    return None;
-                };
-                let key = crate::js_text::static_name_text(prop.key.static_name()?);
-                Some((key, resolvers))
-            })
-        };
-        if !type_maps().any(|(key, _)| GRAPHQL_ROOT_TYPES.contains(&key.as_ref())) {
+        let has_root_type = obj.properties.iter().any(|prop| {
+            let ObjectPropertyKind::ObjectProperty(prop) = prop else {
+                return false;
+            };
+            matches!(unwrap_parens(&prop.value), Expression::ObjectExpression(_))
+                && prop.key.static_name().is_some_and(|key| {
+                    GRAPHQL_ROOT_TYPES.contains(&crate::js_text::static_name_text(key).as_ref())
+                })
+        });
+        if !has_root_type {
             return;
         }
-        for (key, resolvers) in type_maps() {
-            if !key.starts_with(|c: char| c.is_ascii_uppercase()) {
+        self.record_graphql_type_maps(obj);
+    }
+
+    /// Record the handler parameters of an object-literal declarator: the
+    /// handlers of a Worker `ExportedHandler` and the resolvers of a GraphQL
+    /// resolver map.
+    pub(super) fn record_handler_object_declarator(&mut self, declarator: &VariableDeclarator<'_>) {
+        self.record_exported_handler_declarator(declarator);
+        self.record_graphql_resolver_declarator(declarator);
+    }
+
+    /// Record the resolver args of a declarator that holds a split part of a
+    /// resolver map: `const Query = {...}`, `const Query: QueryResolvers =
+    /// {...}`, or `const resolvers: Resolvers = {...}`.
+    fn record_graphql_resolver_declarator(&mut self, declarator: &VariableDeclarator<'_>) {
+        let Some(Expression::ObjectExpression(obj)) = declarator.init.as_ref().map(unwrap_parens)
+        else {
+            return;
+        };
+        let type_name = declarator
+            .type_annotation
+            .as_deref()
+            .and_then(|annotation| type_reference_last_name(&annotation.type_annotation));
+        if type_name == Some(GRAPHQL_RESOLVERS_TYPE) {
+            self.record_graphql_type_maps(obj);
+            return;
+        }
+        let is_root_binding = matches!(
+            &declarator.id,
+            BindingPattern::BindingIdentifier(id) if GRAPHQL_ROOT_TYPES.contains(&id.name.as_str())
+        );
+        if is_root_binding
+            || type_name.is_some_and(|name| name.ends_with(GRAPHQL_RESOLVERS_TYPE_SUFFIX))
+        {
+            self.record_graphql_type_map(obj);
+        }
+    }
+
+    /// Record the resolvers under each type-name key (`Query`, `User`) of a
+    /// resolver map.
+    fn record_graphql_type_maps(&mut self, obj: &ObjectExpression<'_>) {
+        for prop in &obj.properties {
+            let ObjectPropertyKind::ObjectProperty(prop) = prop else {
                 continue;
+            };
+            let Expression::ObjectExpression(resolvers) = unwrap_parens(&prop.value) else {
+                continue;
+            };
+            let is_type_name = prop.key.static_name().is_some_and(|key| {
+                crate::js_text::static_name_text(key).starts_with(|c: char| c.is_ascii_uppercase())
+            });
+            if is_type_name {
+                self.record_graphql_type_map(resolvers);
             }
-            for resolver in &resolvers.properties {
-                if let ObjectPropertyKind::ObjectProperty(resolver) = resolver {
-                    self.record_graphql_resolver_args_source(&resolver.value);
+        }
+    }
+
+    /// Record the resolvers of one type. A field value is a resolver function
+    /// or a field config object with a `subscribe` or `resolve` function.
+    fn record_graphql_type_map(&mut self, resolvers: &ObjectExpression<'_>) {
+        for resolver in &resolvers.properties {
+            let ObjectPropertyKind::ObjectProperty(resolver) = resolver else {
+                continue;
+            };
+            let Expression::ObjectExpression(config) = unwrap_parens(&resolver.value) else {
+                self.record_graphql_resolver_args_source(&resolver.value);
+                continue;
+            };
+            for field in &config.properties {
+                let ObjectPropertyKind::ObjectProperty(field) = field else {
+                    continue;
+                };
+                let is_config_function = field.key.static_name().is_some_and(|key| {
+                    GRAPHQL_FIELD_CONFIG_FUNCTIONS
+                        .contains(&crate::js_text::static_name_text(key).as_ref())
+                });
+                if is_config_function {
+                    self.record_graphql_resolver_args_source(&field.value);
                 }
             }
         }

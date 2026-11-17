@@ -434,6 +434,93 @@ fn graphql_type_resolver_args_param_records_source() {
     assert_eq!(binding.source_path, "graphql.args");
 }
 
+fn graphql_args_locals(source: &str) -> Vec<String> {
+    parse_ts(source)
+        .tainted_bindings
+        .iter()
+        .filter(|b| b.source_path == "graphql.args")
+        .map(|b| b.local.clone())
+        .collect()
+}
+
+#[test]
+fn graphql_subscription_field_config_args_records_source() {
+    let locals = graphql_args_locals(
+        r"
+        export const resolvers = {
+            Subscription: {
+                postAdded: {
+                    subscribe: (_parent, args) => eval(args.channel),
+                },
+                commentAdded: {
+                    resolve(_parent, { postId }) {
+                        eval(postId);
+                    },
+                },
+            },
+        };
+        ",
+    );
+    assert!(locals.iter().any(|l| l == "args"), "{locals:?}");
+    assert!(locals.iter().any(|l| l == "postId"), "{locals:?}");
+}
+
+#[test]
+fn graphql_split_resolver_map_binding_records_source() {
+    let locals = graphql_args_locals(
+        r"
+        const Query = {
+            user(_parent, args) {
+                eval(args.id);
+            },
+        };
+        export const resolvers = { Query };
+        ",
+    );
+    assert_eq!(locals, ["args"]);
+}
+
+#[test]
+fn graphql_codegen_typed_resolver_bindings_record_source() {
+    let locals = graphql_args_locals(
+        r"
+        export const UserFields: UserResolvers = {
+            posts: (_parent, { filter }) => eval(filter),
+        };
+        export const resolvers: Resolvers = {
+            Post: {
+                author(_parent, args) {
+                    eval(args.id);
+                },
+            },
+        };
+        ",
+    );
+    assert!(locals.iter().any(|l| l == "filter"), "{locals:?}");
+    assert!(locals.iter().any(|l| l == "args"), "{locals:?}");
+}
+
+#[test]
+fn graphql_field_config_outside_resolver_map_is_not_a_resolver() {
+    let locals = graphql_args_locals(
+        r"
+        const handlers = {
+            onEvent: {
+                resolve(_ctx, { path }) {
+                    console.log(path);
+                },
+            },
+        };
+        const settings: SettingsStore = {
+            save(_state, args) {
+                console.log(args);
+            },
+        };
+        ",
+    );
+    assert!(locals.is_empty(), "{locals:?}");
+}
+
 #[test]
 fn plain_object_method_with_destructured_second_param_is_not_a_resolver() {
     let info = parse_ts(

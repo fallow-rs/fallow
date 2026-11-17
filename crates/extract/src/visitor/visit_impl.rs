@@ -4199,7 +4199,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         for declarator in &decl.declarations {
             self.record_variable_declarator(decl, declarator);
             self.record_declarator_function_name(declarator);
-            self.record_exported_handler_declarator(declarator);
+            self.record_handler_object_declarator(declarator);
         }
         walk::walk_variable_declaration(self, decl);
     }
