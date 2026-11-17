@@ -1859,75 +1859,53 @@ mod tests {
         );
     }
 
-    #[test]
-    fn make_glob_prefix_only_no_suffix() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
-            prefix: "./locales/".to_string(),
-            suffix: None,
+    fn glob_pattern(
+        prefix: &str,
+        suffix: Option<&str>,
+    ) -> fallow_types::extract::DynamicImportPattern {
+        fallow_types::extract::DynamicImportPattern {
+            prefix: prefix.to_string(),
+            suffix: suffix.map(str::to_string),
             span: oxc_span::Span::default(),
             mechanism: ModuleLoadMechanism::EsModule,
             excludes: Vec::new(),
-        };
+            imported_name: fallow_types::extract::ImportedName::Namespace,
+        }
+    }
+
+    #[test]
+    fn make_glob_prefix_only_no_suffix() {
+        let pattern = glob_pattern("./locales/", None);
         assert_eq!(make_glob_from_pattern(&pattern), "./locales/*");
     }
 
     #[test]
     fn make_glob_passthrough_extglob_group() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
-            prefix: "./locales/@(en|nl).js".to_string(),
-            suffix: None,
-            span: oxc_span::Span::default(),
-            mechanism: ModuleLoadMechanism::EsModule,
-            excludes: Vec::new(),
-        };
+        let pattern = glob_pattern("./locales/@(en|nl).js", None);
         assert_eq!(make_glob_from_pattern(&pattern), "./locales/@(en|nl).js");
     }
 
     #[test]
     fn make_glob_keeps_suffix_after_escaped_metacharacters() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
-            prefix: "./[{]group[}]/[*]/".to_string(),
-            suffix: Some(".js".to_string()),
-            span: oxc_span::Span::default(),
-            mechanism: ModuleLoadMechanism::EsModule,
-            excludes: Vec::new(),
-        };
+        let pattern = glob_pattern("./[{]group[}]/[*]/", Some(".js"));
         assert_eq!(make_glob_from_pattern(&pattern), "./[{]group[}]/[*]/*.js");
     }
 
     #[test]
     fn make_glob_prefix_with_suffix() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
-            prefix: "./locales/".to_string(),
-            suffix: Some(".json".to_string()),
-            span: oxc_span::Span::default(),
-            mechanism: ModuleLoadMechanism::EsModule,
-            excludes: Vec::new(),
-        };
+        let pattern = glob_pattern("./locales/", Some(".json"));
         assert_eq!(make_glob_from_pattern(&pattern), "./locales/*.json");
     }
 
     #[test]
     fn make_glob_passthrough_star() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
-            prefix: "./pages/**/*.tsx".to_string(),
-            suffix: None,
-            span: oxc_span::Span::default(),
-            mechanism: ModuleLoadMechanism::EsModule,
-            excludes: Vec::new(),
-        };
+        let pattern = glob_pattern("./pages/**/*.tsx", None);
         assert_eq!(make_glob_from_pattern(&pattern), "./pages/**/*.tsx");
     }
 
     #[test]
     fn make_glob_passthrough_brace() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
-            prefix: "./i18n/{en,de,fr}.json".to_string(),
-            suffix: None,
-            span: oxc_span::Span::default(),
-            mechanism: ModuleLoadMechanism::EsModule,
-            excludes: Vec::new(),
-        };
+        let pattern = glob_pattern("./i18n/{en,de,fr}.json", None);
         assert_eq!(make_glob_from_pattern(&pattern), "./i18n/{en,de,fr}.json");
     }
 
@@ -1939,6 +1917,7 @@ mod tests {
             span: oxc_span::Span::default(),
             mechanism: ModuleLoadMechanism::EsModule,
             excludes: Vec::new(),
+            imported_name: fallow_types::extract::ImportedName::Namespace,
         };
         assert_eq!(make_glob_from_pattern(&pattern), "*");
     }
@@ -1951,55 +1930,32 @@ mod tests {
             span: oxc_span::Span::default(),
             mechanism: ModuleLoadMechanism::EsModule,
             excludes: Vec::new(),
+            imported_name: fallow_types::extract::ImportedName::Namespace,
         };
         assert_eq!(make_glob_from_pattern(&pattern), "*.ts");
     }
 
     #[test]
     fn make_glob_template_literal_prefix_only() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
-            prefix: "./pages/".to_string(),
-            suffix: None,
-            span: oxc_span::Span::default(),
-            mechanism: ModuleLoadMechanism::EsModule,
-            excludes: Vec::new(),
-        };
+        let pattern = glob_pattern("./pages/", None);
         assert_eq!(make_glob_from_pattern(&pattern), "./pages/*");
     }
 
     #[test]
     fn make_glob_template_literal_deep_prefix() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
-            prefix: "./modules/".to_string(),
-            suffix: None,
-            span: oxc_span::Span::default(),
-            mechanism: ModuleLoadMechanism::EsModule,
-            excludes: Vec::new(),
-        };
+        let pattern = glob_pattern("./modules/", None);
         assert_eq!(make_glob_from_pattern(&pattern), "./modules/*");
     }
 
     #[test]
     fn make_glob_string_concat_with_extension() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
-            prefix: "./views/".to_string(),
-            suffix: Some(".vue".to_string()),
-            span: oxc_span::Span::default(),
-            mechanism: ModuleLoadMechanism::EsModule,
-            excludes: Vec::new(),
-        };
+        let pattern = glob_pattern("./views/", Some(".vue"));
         assert_eq!(make_glob_from_pattern(&pattern), "./views/*.vue");
     }
 
     #[test]
     fn make_glob_import_meta_glob_recursive() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
-            prefix: "./components/**/*.vue".to_string(),
-            suffix: None,
-            span: oxc_span::Span::default(),
-            mechanism: ModuleLoadMechanism::EsModule,
-            excludes: Vec::new(),
-        };
+        let pattern = glob_pattern("./components/**/*.vue", None);
         assert_eq!(
             make_glob_from_pattern(&pattern),
             "./components/**/*.vue",
@@ -2009,13 +1965,7 @@ mod tests {
 
     #[test]
     fn make_glob_import_meta_glob_brace_expansion() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
-            prefix: "./plugins/{auth,analytics}.ts".to_string(),
-            suffix: None,
-            span: oxc_span::Span::default(),
-            mechanism: ModuleLoadMechanism::EsModule,
-            excludes: Vec::new(),
-        };
+        let pattern = glob_pattern("./plugins/{auth,analytics}.ts", None);
         assert_eq!(
             make_glob_from_pattern(&pattern),
             "./plugins/{auth,analytics}.ts",
@@ -2025,13 +1975,7 @@ mod tests {
 
     #[test]
     fn make_glob_import_meta_glob_star_with_brace() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
-            prefix: "./routes/**/*.{ts,tsx}".to_string(),
-            suffix: None,
-            span: oxc_span::Span::default(),
-            mechanism: ModuleLoadMechanism::EsModule,
-            excludes: Vec::new(),
-        };
+        let pattern = glob_pattern("./routes/**/*.{ts,tsx}", None);
         assert_eq!(
             make_glob_from_pattern(&pattern),
             "./routes/**/*.{ts,tsx}",
@@ -2041,13 +1985,7 @@ mod tests {
 
     #[test]
     fn make_glob_import_meta_glob_ignores_suffix_when_star_present() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
-            prefix: "./*.ts".to_string(),
-            suffix: Some(".extra".to_string()),
-            span: oxc_span::Span::default(),
-            mechanism: ModuleLoadMechanism::EsModule,
-            excludes: Vec::new(),
-        };
+        let pattern = glob_pattern("./*.ts", Some(".extra"));
         assert_eq!(
             make_glob_from_pattern(&pattern),
             "./*.ts",
@@ -2057,37 +1995,19 @@ mod tests {
 
     #[test]
     fn make_glob_single_dot_prefix() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
-            prefix: "./".to_string(),
-            suffix: None,
-            span: oxc_span::Span::default(),
-            mechanism: ModuleLoadMechanism::EsModule,
-            excludes: Vec::new(),
-        };
+        let pattern = glob_pattern("./", None);
         assert_eq!(make_glob_from_pattern(&pattern), "./*");
     }
 
     #[test]
     fn make_glob_prefix_without_trailing_slash() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
-            prefix: "./config".to_string(),
-            suffix: None,
-            span: oxc_span::Span::default(),
-            mechanism: ModuleLoadMechanism::EsModule,
-            excludes: Vec::new(),
-        };
+        let pattern = glob_pattern("./config", None);
         assert_eq!(make_glob_from_pattern(&pattern), "./config*");
     }
 
     #[test]
     fn make_glob_prefix_with_dotdot() {
-        let pattern = fallow_types::extract::DynamicImportPattern {
-            prefix: "../shared/".to_string(),
-            suffix: Some(".ts".to_string()),
-            span: oxc_span::Span::default(),
-            mechanism: ModuleLoadMechanism::EsModule,
-            excludes: Vec::new(),
-        };
+        let pattern = glob_pattern("../shared/", Some(".ts"));
         assert_eq!(make_glob_from_pattern(&pattern), "../shared/*.ts");
     }
 

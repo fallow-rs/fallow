@@ -1101,6 +1101,7 @@ fn dynamic_patterns_matches_files_in_dir() {
         span: dummy_span(),
         mechanism: ModuleLoadMechanism::EsModule,
         excludes: Vec::new(),
+        imported_name: fallow_types::extract::ImportedName::Namespace,
     }];
     let canonical_paths = vec![
         PathBuf::from("/project/src/locales/en.json"),
@@ -1150,6 +1151,7 @@ fn dynamic_patterns_no_matches_preserves_empty_target_row() {
             span: dummy_span(),
             mechanism: ModuleLoadMechanism::EsModule,
             excludes: Vec::new(),
+            imported_name: fallow_types::extract::ImportedName::Namespace,
         },
         DynamicImportPattern {
             prefix: "./[".into(),
@@ -1157,6 +1159,7 @@ fn dynamic_patterns_no_matches_preserves_empty_target_row() {
             span: dummy_span(),
             mechanism: ModuleLoadMechanism::EsModule,
             excludes: Vec::new(),
+            imported_name: fallow_types::extract::ImportedName::Namespace,
         },
     ];
     let canonical_paths = vec![PathBuf::from("/project/src/utils.ts")];
@@ -1227,6 +1230,7 @@ fn dynamic_patterns_apply_excludes_and_escaped_literals() {
             span: dummy_span(),
             mechanism: ModuleLoadMechanism::EsModule,
             excludes: vec!["./pages/skip.js".into(), "**/draft.js".into()],
+            imported_name: fallow_types::extract::ImportedName::Namespace,
         },
         DynamicImportPattern {
             prefix: "./[[]id[]]/".into(),
@@ -1234,6 +1238,7 @@ fn dynamic_patterns_apply_excludes_and_escaped_literals() {
             span: dummy_span(),
             mechanism: ModuleLoadMechanism::EsModule,
             excludes: Vec::new(),
+            imported_name: fallow_types::extract::ImportedName::Namespace,
         },
     ];
 
@@ -1259,6 +1264,7 @@ fn dynamic_patterns_glob_prefix_passthrough() {
         span: dummy_span(),
         mechanism: ModuleLoadMechanism::EsModule,
         excludes: Vec::new(),
+        imported_name: fallow_types::extract::ImportedName::Namespace,
     }];
     let canonical_paths = vec![
         PathBuf::from("/project/src/utils.ts"),
@@ -1470,6 +1476,7 @@ fn dynamic_patterns_prefix_without_suffix() {
         span: dummy_span(),
         mechanism: ModuleLoadMechanism::EsModule,
         excludes: Vec::new(),
+        imported_name: fallow_types::extract::ImportedName::Namespace,
     }];
     let canonical_paths = vec![
         PathBuf::from("/project/src/pages/Home.tsx"),
@@ -1518,6 +1525,7 @@ fn dynamic_patterns_empty_canonical_paths() {
         span: dummy_span(),
         mechanism: ModuleLoadMechanism::EsModule,
         excludes: Vec::new(),
+        imported_name: fallow_types::extract::ImportedName::Namespace,
     }];
 
     let result = resolve_dynamic_patterns(
@@ -1554,6 +1562,7 @@ fn parent_pattern(prefix: &str, excludes: &[&str]) -> DynamicImportPattern {
             .iter()
             .map(|exclude| (*exclude).to_string())
             .collect(),
+        imported_name: fallow_types::extract::ImportedName::Namespace,
     }
 }
 

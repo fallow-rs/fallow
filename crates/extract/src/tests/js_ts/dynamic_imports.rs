@@ -2677,3 +2677,90 @@ fn a_pattern_branch_of_a_conditional_import_gives_a_pattern() {
         info.dynamic_import_patterns
     );
 }
+
+fn glob_imported_names(source: &str) -> Vec<crate::ImportedName> {
+    parse_source(source)
+        .dynamic_import_patterns
+        .into_iter()
+        .map(|pattern| pattern.imported_name)
+        .collect()
+}
+
+#[test]
+fn import_meta_glob_asset_queries_import_nothing() {
+    for options in [
+        "{ query: '?raw' }",
+        "{ query: '?url' }",
+        "{ query: '?inline' }",
+        "{ query: '?url&inline' }",
+        "{ query: '?raw', import: 'default', eager: true }",
+        "{ as: 'raw' }",
+        "{ as: 'url' }",
+    ] {
+        assert_eq!(
+            glob_imported_names(&format!("import.meta.glob('./src/*.ts', {options});")),
+            vec![crate::ImportedName::SideEffect],
+            "options {options}"
+        );
+    }
+}
+
+#[test]
+fn import_meta_glob_import_option_selects_one_export() {
+    assert_eq!(
+        glob_imported_names("import.meta.glob('./src/*.ts', { import: 'default' });"),
+        vec![crate::ImportedName::Default]
+    );
+    assert_eq!(
+        glob_imported_names("import.meta.glob('./src/*.ts', { import: 'setup', eager: true });"),
+        vec![crate::ImportedName::Named("setup".to_string())]
+    );
+}
+
+#[test]
+fn import_meta_glob_module_shapes_import_the_namespace() {
+    for source in [
+        "import.meta.glob('./src/*.ts');",
+        "import.meta.glob('./src/*.ts', { eager: true });",
+        "import.meta.glob('./src/*.ts', { import: '*' });",
+        "import.meta.glob('./src/*.ts', { query: '?custom', import: 'default' });",
+        "import.meta.glob('./src/*.ts', { query: '?raw=true' });",
+        "import.meta.glob('./src/*.ts', { query: { raw: true } });",
+        "import.meta.glob('./src/*.ts', { as: 'worker' });",
+        "import.meta.glob('./src/*.ts', options);",
+        "import.meta.glob('./src/*.ts', { ...options, query: '?raw' });",
+        "import.meta.glob('./src/*.ts', { import: name });",
+    ] {
+        assert_eq!(
+            glob_imported_names(source),
+            vec![crate::ImportedName::Namespace],
+            "source {source}"
+        );
+    }
+}
+
+#[test]
+fn import_meta_glob_array_keeps_excludes_with_a_raw_query() {
+    let info = parse_source(
+        "import.meta.glob(['./src/*.ts', '!./src/*.test.ts'], { query: '?raw', import: 'default' });",
+    );
+    let patterns: Vec<(&str, Vec<&str>, &crate::ImportedName)> = info
+        .dynamic_import_patterns
+        .iter()
+        .map(|pattern| {
+            (
+                pattern.prefix.as_str(),
+                pattern.excludes.iter().map(String::as_str).collect(),
+                &pattern.imported_name,
+            )
+        })
+        .collect();
+    assert_eq!(
+        patterns,
+        vec![(
+            "./src/*.ts",
+            vec!["./src/*.test.ts"],
+            &crate::ImportedName::SideEffect
+        )]
+    );
+}

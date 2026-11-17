@@ -1272,6 +1272,7 @@ fn module_to_cached_roundtrip_dynamic_import_patterns() {
                 span: Span::new(0, 50),
                 mechanism: crate::ModuleLoadMechanism::EsModule,
                 excludes: vec!["./components/skip.vue".to_string()],
+                imported_name: crate::ImportedName::Named("setup".to_string()),
             },
             crate::DynamicImportPattern {
                 prefix: "./pages/**/".to_string(),
@@ -1279,6 +1280,7 @@ fn module_to_cached_roundtrip_dynamic_import_patterns() {
                 span: Span::new(60, 100),
                 mechanism: crate::ModuleLoadMechanism::CommonJsRequire,
                 excludes: Vec::new(),
+                imported_name: crate::ImportedName::Namespace,
             },
         ],
         ..ModuleInfo::empty(FileId(0))
@@ -1288,6 +1290,14 @@ fn module_to_cached_roundtrip_dynamic_import_patterns() {
     let restored = cached_to_module(&cached, FileId(0));
 
     assert_eq!(restored.dynamic_import_patterns.len(), 2);
+    assert_eq!(
+        restored.dynamic_import_patterns[0].imported_name,
+        crate::ImportedName::Named("setup".to_string())
+    );
+    assert_eq!(
+        restored.dynamic_import_patterns[1].imported_name,
+        crate::ImportedName::Namespace
+    );
     assert_eq!(restored.dynamic_import_patterns[0].prefix, "./components/");
     assert_eq!(
         restored.dynamic_import_patterns[0].suffix,

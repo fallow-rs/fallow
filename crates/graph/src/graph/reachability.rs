@@ -817,16 +817,15 @@ mod tests {
                     .iter()
                     .copied()
                     .map(|mechanism| {
-                        (
-                            fallow_types::extract::DynamicImportPattern {
-                                prefix: "./modules/".to_string(),
-                                suffix: None,
-                                span: oxc_span::Span::new(0, 10),
-                                mechanism,
-                                excludes: Vec::new(),
-                            },
-                            vec![FileId(1)],
-                        )
+                        let pattern = fallow_types::extract::DynamicImportPattern {
+                            prefix: "./modules/".to_string(),
+                            suffix: None,
+                            span: oxc_span::Span::new(0, 10),
+                            mechanism,
+                            excludes: Vec::new(),
+                            imported_name: fallow_types::extract::ImportedName::Namespace,
+                        };
+                        (pattern, vec![FileId(1)])
                     })
                     .collect(),
                 ..ResolvedModule::default()

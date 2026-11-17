@@ -83,7 +83,7 @@ assert_cached_type_size!(CachedDynamicImport, 88);
 assert_cached_type_size!(CachedRequireCall, 120);
 assert_cached_type_size!(CachedReExport, 128);
 assert_cached_type_size!(CachedMember, 88);
-assert_cached_type_size!(CachedDynamicImportPattern, 88);
+assert_cached_type_size!(CachedDynamicImportPattern, 112);
 assert_cached_type_size!(crate::MemberAccess, 48);
 assert_cached_type_size!(fallow_types::extract::SemanticFact, 80);
 assert_cached_type_size!(fallow_types::extract::CalleeUse, 56);
@@ -653,4 +653,9 @@ pub struct CachedDynamicImportPattern {
     pub(crate) span_end: u32,
     /// Runtime mechanism used to load modules matching this pattern.
     pub(crate) mechanism: crate::ModuleLoadMechanism,
+    /// Import kind discriminant of what each match gives the importer
+    /// (see `IMPORT_KIND_*`).
+    pub(crate) import_kind: u8,
+    /// Export name for a named import kind, empty otherwise.
+    pub(crate) imported_name: String,
 }

@@ -519,6 +519,8 @@ mod issue_3489_import_meta_glob_extglob;
 mod issue_3886_shell_helper_scripts;
 #[path = "integration_test/issue_4672_sfc_module_script_imports.rs"]
 mod issue_4672_sfc_module_script_imports;
+#[path = "integration_test/issue_4532_import_meta_glob_query.rs"]
+mod issue_4532_import_meta_glob_query;
 #[path = "integration_test/issue_604_vite_rollup_path_helpers.rs"]
 mod issue_604_vite_rollup_path_helpers;
 #[path = "integration_test/issue_605_new_class_member.rs"]
