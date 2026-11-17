@@ -9,13 +9,15 @@ on:
 # Deny all permissions by default, grant per-job as needed
 permissions: {}
 
-# A newer run of a pull request cancels the older one. Every other run gets a
-# group of its own and is never cancelled. A cancelled main run turns the
-# README badge red, and Miri takes longer than the gap between most merges,
-# so a cancelling main group left no finished run on main.
-# scripts/verify-release-ci.mjs also needs a finished run on the release commit.
+# A newer run of a pull request cancels the older one. Pushes to main share
+# one group and never cancel: a started run always finishes, and a newer push
+# replaces only the run that waits in the queue. A cancelled main run turns the
+# README badge red, and Miri takes longer than the gap between most merges, so
+# a cancelling main group left no finished run on main. The release commit and
+# manual or scheduled runs get a group of their own, because
+# scripts/verify-release-ci.mjs needs a finished run on the release commit.
 concurrency:
-  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  group: "ci-${{ (github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'chore: release v'))) && github.ref || github.run_id }}"
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -34,6 +36,7 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
+      actions: read
       contents: read
       pull-requests: read
     outputs:
@@ -73,6 +76,8 @@ jobs:
       - name: Decide whether main requires full checks
         id: policy
         if: github.event_name == 'push'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/ci-change-policy.mjs
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
