@@ -2531,42 +2531,27 @@ test("CodSpeed simulation keeps its compatible runner without downgrading wallti
   for (const name of ["benchmark-harness", "determine-matrix"]) {
     assert.match(indentedBlock(benchmark, name, 2), /runs-on: ubuntu-26\.04/u);
   }
-  const walltime = readWorkflow(".github/workflows/bench-type-aware.yml");
-  assert.match(walltime, /mode: walltime/u);
-  assert.match(walltime, /runs-on: ubuntu-26\.04/u);
+  const walltime = readWorkflow(".github/workflows/bench-walltime.yml");
+  for (const name of ["cli", "type-aware"]) {
+    const job = indentedBlock(walltime, name, 2);
+    assert.match(job, /mode: walltime/u);
+    assert.match(job, /^    runs-on: codspeed-macro-arm64-graviton-ubuntu-22-04$/mu);
+  }
+  assert.doesNotMatch(walltime, /mode: (?:simulation|memory)/u);
 });
 
-test("type-aware benchmarks supersede only the same pull request", async () => {
-  const { runInNewContext } = await import("node:vm");
-  const concurrency = indentedBlock(
-    readWorkflow(".github/workflows/bench-type-aware.yml"),
-    "concurrency",
-    0,
+test("walltime benchmarks run only nightly or on demand", () => {
+  const walltime = readWorkflow(".github/workflows/bench-walltime.yml");
+  const triggers = [...indentedBlock(walltime, "on", 0).matchAll(/^ {2}(\w+):/gmu)].map(
+    (match) => match[1],
   );
-  const group = concurrency.match(/^  group: (.+)$/m)[1];
-  const cancel = concurrency.match(/^  cancel-in-progress: \$\{\{ (.+) \}\}$/m)[1];
-  const evaluate = (event_name, number, run_id) => {
-    const github = {
-      workflow: "Type-aware Benchmarks",
-      event_name,
-      event: { pull_request: { number } },
-      run_id,
-    };
-    return {
-      group: group.replace(/\$\{\{ (.+?) \}\}/g, (_, expression) =>
-        runInNewContext(expression, { github }),
-      ),
-      cancel: runInNewContext(cancel, { github }),
-    };
-  };
-  assert.deepEqual(evaluate("pull_request", 42, 100), evaluate("pull_request", 42, 101));
-  assert.notEqual(evaluate("pull_request", 42, 100).group, evaluate("pull_request", 43, 101).group);
-  assert.equal(evaluate("pull_request", 42, 100).cancel, true);
-  for (const event of ["push", "workflow_dispatch"]) {
-    assert.equal(evaluate(event, undefined, 100).cancel, false);
-    assert.notEqual(evaluate(event, undefined, 100).group, evaluate(event, undefined, 101).group);
-    assert.notEqual(evaluate(event, undefined, 100).group, evaluate("pull_request", 42, 100).group);
-  }
+  // The organization shares 600 free macro runner minutes per month.
+  assert.deepEqual(triggers, ["schedule", "workflow_dispatch"]);
+  // The release build runs on a free GitHub runner, so the macro runner only
+  // measures. Its Ubuntu release must match the macro runner image for glibc.
+  const build = indentedBlock(walltime, "build-cli", 2);
+  assert.match(build, /^    runs-on: ubuntu-22\.04-arm$/mu);
+  assert.match(indentedBlock(walltime, "cli", 2), /^    needs: build-cli$/mu);
 });
 
 test("failed selector steps discard partial Blacksmith output despite continue-on-error", async () => {
@@ -3228,7 +3213,7 @@ test("root npm installs disable lifecycle scripts by default", (t) => {
 });
 
 test("ordinary workflow npm installs suppress dependency lifecycle scripts", () => {
-  for (const path of ["bench-type-aware.yml", "ci.yml"]) {
+  for (const path of ["bench-walltime.yml", "ci.yml"]) {
     const workflow = readWorkflow(`.github/workflows/${path}`);
     const installs = workflow
       .split("\n")
@@ -3740,7 +3725,6 @@ test("optional Marketplace publisher proof installs only the frozen CLI before A
 // new workflows" in docs/development/quality-gates.md before it joins this list.
 const PULL_REQUEST_WORKFLOWS = [
   "bench-cli-instructions.yml",
-  "bench-type-aware.yml",
   "bench.yml",
   "ci.yml",
   "codeql.yml",

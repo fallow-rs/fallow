@@ -21,14 +21,16 @@ REPO_ROOT = Path(__file__).resolve().parent.parent
 BENCH_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "bench.yml"
 # The walltime instrument lives in its own workflow so each CodSpeed run carries
 # a single instrument; see issue #2024.
-TYPE_AWARE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "bench-type-aware.yml"
+TYPE_AWARE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "bench-walltime.yml"
 MATRIX_SCRIPT = REPO_ROOT / ".github" / "scripts" / "generate-benchmark-matrix.mjs"
 
 FAST_JOB = "benchmark"
 FULL_JOB = "benchmark-full"
 EXPECTED_MODE = "simulation"
-TYPE_AWARE_JOB = "benchmark-type-aware"
+TYPE_AWARE_JOB = "type-aware"
 TYPE_AWARE_MODE = "walltime"
+# CodSpeed marks walltime from a shared GitHub-hosted runner as unreliable.
+MACRO_RUNNER = "codspeed-macro-arm64-graviton-ubuntu-22-04"
 TYPE_AWARE_BENCH = REPO_ROOT / "tools" / "type-aware-sidecar" / "bench" / "session.mjs"
 TYPE_AWARE_MANIFEST = REPO_ROOT / "tools" / "type-aware-sidecar" / "package.json"
 MAX_BENCHES_PER_SHARD = 1_000
@@ -203,8 +205,8 @@ def assert_codspeed_action_modes(text: str, type_aware_text: str) -> list[str]:
 
     if f"  {TYPE_AWARE_JOB}:" not in type_aware_text:
         errors.append(f"type-aware workflow is missing {TYPE_AWARE_JOB}")
-    elif re.findall(r"mode:\s*([^\s]+)", type_aware_text) != [TYPE_AWARE_MODE]:
-        errors.append(f"{TYPE_AWARE_JOB} must use {TYPE_AWARE_MODE} mode")
+    elif set(re.findall(r"mode:\s*([^\s]+)", type_aware_text)) != {TYPE_AWARE_MODE}:
+        errors.append(f"the walltime workflow must use only {TYPE_AWARE_MODE} mode")
     if TYPE_AWARE_JOB in text:
         errors.append(
             f"{TYPE_AWARE_JOB} must stay out of the bench workflow: a CodSpeed run "
@@ -244,8 +246,8 @@ def validate_type_aware_benchmark(text: str) -> list[str]:
         errors.append("type-aware benchmark must use CodSpeed's walltime-compatible Tinybench plugin")
     if "npm run bench --prefix tools/type-aware-sidecar" not in text:
         errors.append("type-aware CodSpeed job does not run the package benchmark")
-    if "tools/type-aware-sidecar/**" not in text:
-        errors.append("type-aware benchmark paths do not trigger the benchmark workflow")
+    if f"runs-on: {MACRO_RUNNER}" not in text:
+        errors.append(f"type-aware walltime benchmarks must run on {MACRO_RUNNER}")
     return errors
 
 
