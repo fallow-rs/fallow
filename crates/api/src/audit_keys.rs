@@ -23,8 +23,8 @@ use fallow_types::envelope::AuditIntroduced;
 use fallow_types::identity::{IdentifiedFinding, IdentityPaths, dead_code_occurrence_keys};
 
 pub use crate::audit_complexity::{
-    ComplexityBaseline, ComplexityClass, ComplexityMetrics, classify_complexity_attribution,
-    classify_complexity_attribution_against_all,
+    ChangedPaths, ComplexityBaseline, ComplexityClass, ComplexityMetrics,
+    classify_complexity_attribution, classify_complexity_attribution_against_all,
     classify_complexity_attribution_against_all_with_moves,
     classify_complexity_attribution_with_moves, classify_complexity_findings,
     classify_complexity_findings_against_all, complexity_baseline, complexity_baseline_keys,

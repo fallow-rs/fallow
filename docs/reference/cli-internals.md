@@ -379,9 +379,12 @@ line states exit code 0.
   the head pass covers the changed files, so `audit_run::compare` passes the
   changed files: a base finding in an unchanged file is no candidate. Equal
   values pair first. One remaining head finding and one remaining base
-  finding of a name pair and compare their metrics, so a moved function that
-  grew is worsened. With more candidates of one name, the remaining head
-  findings are introduced. A placeholder name (`<arrow>`, `<anonymous>`)
+  finding of a deleted file pair and compare their metrics, so a moved
+  function that grew is worsened. The pair needs a deleted file: in a file
+  that still exists, a base finding without a head finding can be a function
+  that the change made simpler, and a new function of the same name must not
+  take it. With more candidates of one name, the remaining head findings are
+  introduced. A placeholder name (`<arrow>`, `<anonymous>`)
   needs equal cyclomatic and cognitive values and an equal line count.
   Dead-code keys and clone-group keys have no such step.
 - Audit unused code outside the changed files: under `--gate new-only`, the

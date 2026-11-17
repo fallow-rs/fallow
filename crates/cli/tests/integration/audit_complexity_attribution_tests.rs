@@ -592,3 +592,17 @@ fn new_function_with_the_name_of_a_function_in_an_unchanged_file_is_introduced()
 
     assert_introduced(&audit(dir), 1, 0);
 }
+
+#[test]
+fn new_function_with_the_name_of_a_simplified_function_is_introduced() {
+    let tmp = fixture(&hotspot("hotspot", 17));
+    let dir = tmp.path();
+    edit(dir, &hotspot("hotspot", 2));
+    fs::write(dir.join("src/other.js"), hotspot("hotspot", 16)).unwrap();
+    commit_all(
+        dir,
+        "simpler function, and a same-named function in a new file",
+    );
+
+    assert_introduced(&audit(dir), 1, 0);
+}

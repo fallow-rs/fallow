@@ -12,7 +12,7 @@ use rustc_hash::FxHashSet;
 use super::clone_containment::base_contained_dupe_group_keys;
 use super::{AuditAnalysesView, AuditKeySnapshot};
 use crate::audit_keys::{
-    AuditComparison, AuditDomainLedger, DeadCodeAuditLedger,
+    AuditComparison, AuditDomainLedger, ChangedPaths, DeadCodeAuditLedger,
     classify_complexity_attribution_against_all_with_moves, complexity_ledger_keys,
     dead_code_audit_ledger, dupe_group_key, preexisting_dupe_group_keys, styling_ledger_keys,
     styling_ledger_keys_with_diff,
@@ -110,10 +110,7 @@ pub fn compare(
             .as_ref()
             .zip(base)
             .map_or_else(Vec::new, |(health, snapshot)| {
-                let changed_paths: FxHashSet<String> = changed_files
-                    .iter()
-                    .map(|path| relative_key_path(path, health.root))
-                    .collect();
+                let changed_paths = changed_paths_of(changed_files, health.root);
                 classify_complexity_attribution_against_all_with_moves(
                     &health.report.findings,
                     health.root,
@@ -156,6 +153,19 @@ pub fn compare(
         dupes,
         styling,
     }
+}
+
+/// The changed files as key paths, with the files that the head does not have.
+fn changed_paths_of(changed_files: &FxHashSet<PathBuf>, root: &Path) -> ChangedPaths {
+    let mut paths = ChangedPaths::default();
+    for path in changed_files {
+        let key = relative_key_path(path, root);
+        if !path.exists() {
+            paths.deleted.insert(key.clone());
+        }
+        paths.changed.insert(key);
+    }
+    paths
 }
 
 /// The base data that the clone group reclassification compares with.
