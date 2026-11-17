@@ -154,13 +154,26 @@ fn collect_inline_script_facts(source: &str) -> InlineScriptFacts {
         );
         // A classic script with an `import` declaration is a syntax error in
         // the browser, so only a module script gives static imports.
+        // A server template can put a placeholder such as `{{ STATIC_URL }}`
+        // in a specifier. The `src` and `href` values skip these, so the
+        // script specifiers skip them too.
         if source_type.is_module() {
-            found.imports.extend(info.imports);
+            found.imports.extend(
+                info.imports
+                    .into_iter()
+                    .filter(|import| !is_template_placeholder(&import.source)),
+            );
         }
-        found.dynamic_imports.extend(info.dynamic_imports);
-        found
-            .dynamic_import_patterns
-            .extend(info.dynamic_import_patterns);
+        found.dynamic_imports.extend(
+            info.dynamic_imports
+                .into_iter()
+                .filter(|import| !is_template_placeholder(&import.source)),
+        );
+        found.dynamic_import_patterns.extend(
+            info.dynamic_import_patterns
+                .into_iter()
+                .filter(|pattern| !is_template_placeholder(&pattern.prefix)),
+        );
         found
             .member_accesses
             .extend(info.member_accesses.iter().cloned());
@@ -662,6 +675,32 @@ mod tests {
                 info.member_accesses
             );
         }
+    }
+
+    #[test]
+    fn inline_script_template_placeholders_add_no_imports() {
+        let source = "<script type=\"module\">\n  import '{{ STATIC_URL }}app.js'\n  import('{{ STATIC_URL }}lazy.js')\n  import(`${base}/x.js`)\n  import './kept.js'\n</script>";
+        let info = parse_html_to_module(FileId(0), source, 0);
+        let sources: Vec<&str> = info.imports.iter().map(|i| i.source.as_str()).collect();
+        assert!(sources.contains(&"./kept.js"), "{sources:?}");
+        assert!(
+            sources.iter().all(|s| !is_template_placeholder(s)),
+            "{sources:?}"
+        );
+        assert!(
+            info.dynamic_imports
+                .iter()
+                .all(|import| !is_template_placeholder(&import.source)),
+            "{:?}",
+            info.dynamic_imports
+        );
+        assert!(
+            info.dynamic_import_patterns
+                .iter()
+                .all(|pattern| !is_template_placeholder(&pattern.prefix)),
+            "{:?}",
+            info.dynamic_import_patterns
+        );
     }
 
     #[test]
