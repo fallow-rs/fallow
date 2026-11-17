@@ -340,10 +340,14 @@ stops a release until `main` is green.
 Concurrency follows the same goal. On a pull request, a new push cancels the
 older run. On `main`, a new push cancels the older push run of most
 workflows, because `main` gets many merges a day and only the newest commit
-needs a result. `CI` is the exception: each push run on `main` gets a group of
-its own and always finishes. The README badge shows the last `CI` run on
-`main`, and a cancelled run shows as failing. Miri takes longer than the gap
-between most merges, so a cancelling group left no finished `CI` run on `main`.
+needs a result. `CI` is the exception: a started push run on `main` always
+finishes. The README badge shows the last `CI` run on `main`, and a cancelled
+run shows as failing. Miri takes longer than the gap between most merges, so a
+cancelling group left no finished `CI` run on `main`. The push runs of `CI`
+still share one group, so a newer push replaces a run that waits in the queue.
+In a burst of merges, `CI` then tests the newest commit and skips the queued
+ones between. A replaced queued run shows as cancelled, and the README badge
+can show that state until the next run finishes.
 The release commit, with a message that starts with `chore: release v`, and
 manual or scheduled runs get a concurrency group of their own. Nothing cancels
 them, so the release gate always gets a result for the release commit.
@@ -498,6 +502,11 @@ event's `before` SHA to its `after` SHA. Only modifications confined to
 skip heavy CI jobs and fresh coverage. Typos, script policy tests, formatting,
 and documentation checks still run. These guides have no runtime or build
 consumers. Keep the allowlist explicit and review consumers before extending it.
+
+A newer push can replace the queued run of the previous commit. The helper
+skips only when the push run of the same workflow on the `before` commit
+succeeded. It reads that run through the Actions API with the job token. A
+missing, cancelled, skipped or failed run, or an API error, runs full checks.
 
 Mixed changes, other Markdown (including embedded documentation), generated
 contracts, unknown paths, additions, deletions, renames, empty ranges and failed
