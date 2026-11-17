@@ -12,6 +12,7 @@ mod config;
 mod deps;
 mod enum_helpers;
 mod enum_members;
+mod export_list;
 mod exports;
 mod io;
 mod plan;
@@ -41,13 +42,18 @@ fn run_analyze(
     config: &fallow_config::ResolvedConfig,
     output: OutputFormat,
     quiet: bool,
-) -> Result<(fallow_types::results::AnalysisResults, CapturedHashes), ExitCode> {
+) -> Result<AnalyzedProject, ExitCode> {
     let session = fallow_engine::session::AnalysisSession::from_resolved_config(config.clone())
         .map_err(|e| crate::error::emit_input_error(&format!("Analysis error: {e}"), output))?;
     let output_struct = session
-        .analyze_dead_code_with_artifacts(false, false)
+        .analyze_dead_code_keeping_graph()
         .map_err(|e| crate::error::emit_input_error(&format!("Analysis error: {e}"), output))?;
     let mut results = output_struct.results;
+    let re_exports = output_struct
+        .graph
+        .as_ref()
+        .map(fallow_engine::module_graph::named_re_exports)
+        .unwrap_or_default();
     if config.type_aware.enabled {
         let projects = config
             .type_aware
@@ -104,7 +110,20 @@ fn run_analyze(
             }
         }
     }
-    Ok((results, output_struct.file_hashes))
+    Ok(AnalyzedProject {
+        results,
+        file_hashes: output_struct.file_hashes,
+        re_exports,
+    })
+}
+
+/// The analysis facts that the fixers read.
+struct AnalyzedProject {
+    results: fallow_types::results::AnalysisResults,
+    file_hashes: CapturedHashes,
+    /// Named re-exports, so the export fixer never removes an export that a
+    /// kept re-export still names.
+    re_exports: Vec<fallow_engine::module_graph::NamedReExport>,
 }
 
 pub struct FixOptions<'a> {
@@ -193,12 +212,15 @@ fn run_fix_impl(opts: &FixOptions<'_>, fix_count: &mut usize) -> ExitCode {
         config.show_cascade = true;
     }
 
-    let (results, file_hashes) = match run_analyze(&config, opts.output, opts.quiet) {
+    let AnalyzedProject {
+        mut results,
+        file_hashes,
+        re_exports,
+    } = match run_analyze(&config, opts.output, opts.quiet) {
         Ok(r) => r,
         Err(code) => return code,
     };
 
-    let mut results = results;
     // The report hides these findings, so `fix` offers no fix for them.
     fallow_engine::dead_code::hide_cascade_findings(&mut results, &config);
     if let Some(scope) = opts.scope.as_ref() {
@@ -229,6 +251,7 @@ fn run_fix_impl(opts: &FixOptions<'_>, fix_count: &mut usize) -> ExitCode {
         config: &config,
         results: &results,
         file_hashes: &file_hashes,
+        re_exports: &re_exports,
         plan: &mut plan,
         fixes: &mut fixes,
     });
@@ -281,6 +304,7 @@ fn finalize_fix_run(
             low_confidence_count: skip_counts.low_confidence,
             low_confidence_dependency_count: count_withheld_dependency_fixes(fixes),
             low_confidence_member_count: count_withheld_member_fixes(fixes),
+            kept_re_export_count: count_kept_re_export_fixes(fixes),
         })
     {
         return code;
@@ -299,6 +323,7 @@ struct ApplyAllFixesInput<'a> {
     config: &'a fallow_config::ResolvedConfig,
     results: &'a fallow_types::results::AnalysisResults,
     file_hashes: &'a CapturedHashes,
+    re_exports: &'a [fallow_engine::module_graph::NamedReExport],
     plan: &'a mut FixPlan,
     fixes: &'a mut Vec<serde_json::Value>,
 }
@@ -309,6 +334,7 @@ fn apply_all_fixes(input: ApplyAllFixesInput<'_>) -> (bool, CatalogFixTotals) {
         config,
         results,
         file_hashes,
+        re_exports,
         plan,
         fixes,
     } = input;
@@ -322,15 +348,18 @@ fn apply_all_fixes(input: ApplyAllFixesInput<'_>) -> (bool, CatalogFixTotals) {
         fixes: &mut *fixes,
     });
 
-    apply_unused_export_fixes(&mut FixApplicationInput {
-        root: opts.root,
-        results,
-        file_hashes,
-        plan: &mut *plan,
-        output: opts.output,
-        dry_run: opts.dry_run,
-        fixes: &mut *fixes,
-    });
+    apply_unused_export_fixes(
+        &mut FixApplicationInput {
+            root: opts.root,
+            results,
+            file_hashes,
+            plan: &mut *plan,
+            output: opts.output,
+            dry_run: opts.dry_run,
+            fixes: &mut *fixes,
+        },
+        re_exports,
+    );
 
     deps::apply_dependency_fixes(&mut deps::DependencyFixInput {
         root: opts.root,
@@ -392,6 +421,7 @@ fn emit_empty_fix_output(opts: &FixOptions<'_>) -> ExitCode {
             skipped_low_confidence_exports: 0,
             skipped_low_confidence_dependencies: 0,
             skipped_low_confidence_members: 0,
+            skipped_kept_re_exports: 0,
         }) {
             Ok(envelope) if matches!(opts.output, OutputFormat::GithubSummary) => {
                 return crate::report::github_summary::print_fix_summary(&envelope);
@@ -427,7 +457,10 @@ struct FixApplicationInput<'a> {
     fixes: &'a mut Vec<serde_json::Value>,
 }
 
-fn apply_unused_export_fixes(input: &mut FixApplicationInput<'_>) {
+fn apply_unused_export_fixes(
+    input: &mut FixApplicationInput<'_>,
+    re_exports: &[fallow_engine::module_graph::NamedReExport],
+) {
     let mut exports_by_file: FxHashMap<PathBuf, Vec<&fallow_types::results::UnusedExport>> =
         FxHashMap::default();
     for finding in &input.results.unused_exports {
@@ -460,6 +493,7 @@ fn apply_unused_export_fixes(input: &mut FixApplicationInput<'_>) {
         hashes: input.file_hashes,
         unresolved_import_files: &unresolved_import_files,
         caveats_by_file: &caveats_by_file,
+        re_exports,
         plan: input.plan,
         output: input.output,
         dry_run: input.dry_run,
@@ -567,6 +601,7 @@ struct FixOutputInput<'a> {
     low_confidence_count: usize,
     low_confidence_dependency_count: usize,
     low_confidence_member_count: usize,
+    kept_re_export_count: usize,
 }
 
 struct CatalogFixTotals {
@@ -664,6 +699,18 @@ fn count_withheld_member_fixes(fixes: &[serde_json::Value]) -> usize {
         .count()
 }
 
+/// Count the export removals withheld because a kept re-export still names
+/// the export. Withheld per export, so they are read off the emitted entries.
+fn count_kept_re_export_fixes(fixes: &[serde_json::Value]) -> usize {
+    fixes
+        .iter()
+        .filter(|fix| {
+            fix.get("skip_reason").and_then(serde_json::Value::as_str)
+                == Some(plan::SkipReason::KeptReExport.as_wire_str())
+        })
+        .count()
+}
+
 fn apply_catalog_fixes(request: &mut CatalogFixRequest<'_>) -> CatalogFixTotals {
     let catalog_summary = catalog::apply_catalog_entry_fixes(
         request.root,
@@ -722,6 +769,7 @@ fn emit_fix_output(input: &FixOutputInput<'_>) -> Result<(), ExitCode> {
             skipped_low_confidence_exports: input.low_confidence_count,
             skipped_low_confidence_dependencies: input.low_confidence_dependency_count,
             skipped_low_confidence_members: input.low_confidence_member_count,
+            skipped_kept_re_exports: input.kept_re_export_count,
         }) {
             Ok(envelope) if matches!(input.output, OutputFormat::GithubSummary) => {
                 let _ = crate::report::github_summary::print_fix_summary(&envelope);
@@ -754,6 +802,7 @@ fn emit_fix_output(input: &FixOutputInput<'_>) -> Result<(), ExitCode> {
             low_confidence_count: input.low_confidence_count,
             low_confidence_dependency_count: input.low_confidence_dependency_count,
             low_confidence_member_count: input.low_confidence_member_count,
+            kept_re_export_count: input.kept_re_export_count,
         });
     }
     Ok(())
@@ -864,6 +913,7 @@ struct HumanSummaryInput<'a> {
     low_confidence_count: usize,
     low_confidence_dependency_count: usize,
     low_confidence_member_count: usize,
+    kept_re_export_count: usize,
 }
 
 /// Emit the human fix summary, split by what `--quiet` may drop.
@@ -946,72 +996,92 @@ fn emit_fix_count_line(
 /// Every line here names a mutation fallow declined to make, so none of them
 /// honour `--quiet`. See [`emit_human_summary`].
 fn emit_residual_skip_warnings(input: &HumanSummaryInput<'_>) {
-    if input.catalog_skipped > 0 {
-        let entries_word = if input.catalog_skipped == 1 {
-            "entry"
-        } else {
-            "entries"
-        };
-        eprintln!(
-            "Skipped {} catalog {entries_word} with hardcoded consumers or other guards (run with --format json for details).",
-            input.catalog_skipped,
-        );
+    for warning in residual_skip_warnings(input) {
+        if let Some(line) = warning.render() {
+            eprintln!("{line}");
+        }
     }
-    if input.content_changed_count > 0 {
-        let files_word = if input.content_changed_count == 1 {
-            "file"
+}
+
+/// One residual skip line: `{prefix}{count} {noun}{suffix}`, printed only
+/// when `count` is above zero.
+struct SkipWarning {
+    count: usize,
+    prefix: &'static str,
+    singular: &'static str,
+    plural: &'static str,
+    suffix: &'static str,
+}
+
+impl SkipWarning {
+    fn render(&self) -> Option<String> {
+        if self.count == 0 {
+            return None;
+        }
+        let noun = if self.count == 1 {
+            self.singular
         } else {
-            "files"
+            self.plural
         };
-        eprintln!(
-            "Skipped {} {files_word} that changed since `fallow dead-code` ran. Re-run `fallow fix` to refresh the analysis.",
-            input.content_changed_count,
-        );
+        Some(format!(
+            "{}{} {noun}{}",
+            self.prefix, self.count, self.suffix
+        ))
     }
-    if input.mixed_line_endings_count > 0 {
-        let files_word = if input.mixed_line_endings_count == 1 {
-            "file"
-        } else {
-            "files"
-        };
-        eprintln!(
-            "Skipped {} {files_word} with mixed CRLF/LF line endings. Normalize each file (`dos2unix <path>` or `git config core.autocrlf input` + re-checkout) before re-running.",
-            input.mixed_line_endings_count,
-        );
-    }
-    if input.low_confidence_count > 0 {
-        let files_word = if input.low_confidence_count == 1 {
-            "file"
-        } else {
-            "files"
-        };
-        eprintln!(
-            "Kept unused exports in {} {files_word} where consumers may be invisible to fallow (test, mock, and fixture directories, files with unresolved imports, or files whose verdict rests on a source the run did not fully analyze). Still listed by `fallow dead-code`; remove by hand if you have confirmed they are unused.",
-            input.low_confidence_count,
-        );
-    }
-    if input.low_confidence_dependency_count > 0 {
-        let package_word = if input.low_confidence_dependency_count == 1 {
-            "package"
-        } else {
-            "packages"
-        };
-        eprintln!(
-            "Kept {} declared {package_word} whose only import may sit in a file this run did not fully read. Resolve the files named in the workspace diagnostics above, then re-run `fallow fix`.",
-            input.low_confidence_dependency_count,
-        );
-    }
-    if input.low_confidence_member_count > 0 {
-        let member_word = if input.low_confidence_member_count == 1 {
-            "enum member"
-        } else {
-            "enum members"
-        };
-        eprintln!(
-            "Kept {} unused {member_word} whose only reference may sit in a file this run did not fully analyze. Resolve the files reported above, then re-run `fallow fix`.",
-            input.low_confidence_member_count,
-        );
-    }
+}
+
+fn residual_skip_warnings(input: &HumanSummaryInput<'_>) -> [SkipWarning; 7] {
+    [
+        SkipWarning {
+            count: input.catalog_skipped,
+            prefix: "Skipped ",
+            singular: "catalog entry",
+            plural: "catalog entries",
+            suffix: " with hardcoded consumers or other guards (run with --format json for details).",
+        },
+        SkipWarning {
+            count: input.content_changed_count,
+            prefix: "Skipped ",
+            singular: "file",
+            plural: "files",
+            suffix: " that changed since `fallow dead-code` ran. Re-run `fallow fix` to refresh the analysis.",
+        },
+        SkipWarning {
+            count: input.mixed_line_endings_count,
+            prefix: "Skipped ",
+            singular: "file",
+            plural: "files",
+            suffix: " with mixed CRLF/LF line endings. Normalize each file (`dos2unix <path>` or `git config core.autocrlf input` + re-checkout) before re-running.",
+        },
+        SkipWarning {
+            count: input.low_confidence_count,
+            prefix: "Kept unused exports in ",
+            singular: "file",
+            plural: "files",
+            suffix: " where consumers may be invisible to fallow (test, mock, and fixture directories, files with unresolved imports, or files whose verdict rests on a source the run did not fully analyze). Still listed by `fallow dead-code`; remove by hand if you have confirmed they are unused.",
+        },
+        SkipWarning {
+            count: input.low_confidence_dependency_count,
+            prefix: "Kept ",
+            singular: "declared package",
+            plural: "declared packages",
+            suffix: " whose only import may sit in a file this run did not fully read. Resolve the files named in the workspace diagnostics above, then re-run `fallow fix`.",
+        },
+        SkipWarning {
+            count: input.low_confidence_member_count,
+            prefix: "Kept ",
+            singular: "unused enum member",
+            plural: "unused enum members",
+            suffix: " whose only reference may sit in a file this run did not fully analyze. Resolve the files reported above, then re-run `fallow fix`.",
+        },
+        SkipWarning {
+            count: input.kept_re_export_count,
+            prefix: "Kept ",
+            singular: "unused export",
+            plural: "unused exports",
+            suffix: " that a kept re-export still names. Removing them would break that re-export. Remove the re-export first (run with --format json for each entry), then re-run `fallow fix`.",
+        },
+    ]
 }
 
 #[cfg(test)]

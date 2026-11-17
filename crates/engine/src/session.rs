@@ -847,7 +847,7 @@ impl AnalysisSession {
             modules,
             metrics: reused_parse_metrics(),
             collect_usages: true,
-            retain_graph: true,
+            graph: crate::session_graph::GraphChoice::WithTrace,
             retain_modules: false,
             retain_files: false,
             cancellation: self.cancellation.as_deref(),
@@ -855,10 +855,10 @@ impl AnalysisSession {
         .map(SharedDeadCodeAnalysisArtifacts::into_owned)
     }
 
-    fn analyze_dead_code_with_reuse_artifacts(
+    pub(crate) fn analyze_dead_code_with_reuse_artifacts(
         &self,
         need_complexity: bool,
-        retain_graph: bool,
+        graph: impl Into<crate::session_graph::GraphChoice>,
         retain_files: bool,
     ) -> EngineResult<SharedDeadCodeAnalysisArtifacts> {
         self.ensure_not_cancelled("parsing")?;
@@ -874,7 +874,7 @@ impl AnalysisSession {
             modules,
             metrics,
             collect_usages: true,
-            retain_graph,
+            graph: graph.into(),
             retain_modules: need_complexity,
             retain_files,
             cancellation: self.cancellation.as_deref(),
@@ -1479,7 +1479,7 @@ struct EngineDeadCodePipelineInput<'a> {
     modules: Arc<[ModuleInfo]>,
     metrics: core_backend::ParseMetrics,
     collect_usages: bool,
-    retain_graph: bool,
+    graph: crate::session_graph::GraphChoice,
     retain_modules: bool,
     retain_files: bool,
     cancellation: Option<&'a AtomicBool>,
@@ -1494,7 +1494,7 @@ fn run_engine_owned_dead_code_pipeline(
         modules,
         metrics,
         collect_usages,
-        retain_graph,
+        graph: retention,
         retain_modules,
         retain_files,
         cancellation,
@@ -1546,7 +1546,7 @@ fn run_engine_owned_dead_code_pipeline(
     stopped("assembling the dead-code report")?;
     let profile =
         core_backend::dead_code_pipeline_profile(core_backend::DeadCodePipelineProfileInput {
-            retain_timings: retain_graph,
+            retain_timings: retention.traces(),
             prelude: &prelude,
             prelude_timings,
             parse_metrics: metrics,
@@ -1560,14 +1560,14 @@ fn run_engine_owned_dead_code_pipeline(
             graph_cache_rejection,
         });
     let script_used_packages = prelude.script_used_packages();
-    let trace_provenance = prelude.trace_provenance(&modules, retain_graph, &entry_points);
+    let trace_provenance = prelude.trace_provenance(&modules, retention.traces(), &entry_points);
     prelude.finish();
     let file_hashes = collect_file_hashes(&modules, discovery.files());
 
     Ok(SharedDeadCodeAnalysisArtifacts {
         results: detector.results,
         timings: profile.timings,
-        graph: retain_graph.then_some(graph.graph),
+        graph: retention.keeps_graph().then_some(graph.graph),
         modules: retain_modules.then_some(modules),
         files: retain_files.then(|| discovery.files().to_vec()),
         script_used_packages,
@@ -1635,7 +1635,7 @@ pub(crate) fn analyze_dead_code_with_parse_result_from_config(
         modules: Arc::from(modules),
         metrics: reused_parse_metrics(),
         collect_usages: true,
-        retain_graph: true,
+        graph: crate::session_graph::GraphChoice::WithTrace,
         retain_modules: false,
         retain_files: false,
         cancellation: None,

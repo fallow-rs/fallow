@@ -65,10 +65,13 @@ export interface FixAction {
    *   did not parse cleanly, so the import that would have credited the
    *   export or the package may never have been seen. Both the export
    *   removal and the `remove-dependency` write are withheld).
+   * - `kept_re_export` (#4636: a `remove_export` entry whose removal is
+   *   withheld because a re-export that the run keeps still names the
+   *   export. Counted by `skipped_kept_re_exports`).
    *
-   * The three `low_confidence_*` reasons are INTENTIONAL skips: they do
-   * NOT cause a non-zero exit code (unlike `content_changed` /
-   * `mixed_line_endings`).
+   * The three `low_confidence_*` reasons and `kept_re_export` are
+   * INTENTIONAL skips: they do NOT cause a non-zero exit code (unlike
+   * `content_changed` / `mixed_line_endings`).
    */
   readonly skip_reason?: string;
   /**
@@ -132,4 +135,12 @@ export interface FallowFixResult {
    * code.
    */
   readonly skipped_low_confidence_dependencies?: number;
+  /**
+   * Count of `remove_export` entries withheld with
+   * `skip_reason: "kept_re_export"`: a re-export that the run keeps still
+   * names the export, so its removal would break that re-export. Counts
+   * exports, not files. Always present; defaults to 0. Does NOT change the
+   * exit code.
+   */
+  readonly skipped_kept_re_exports?: number;
 }

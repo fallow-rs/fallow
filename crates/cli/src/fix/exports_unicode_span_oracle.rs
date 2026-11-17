@@ -180,6 +180,7 @@ fn check(case: &Case) -> Result<(), TestCaseError> {
         hashes: &hashes,
         unresolved_import_files: &FxHashSet::default(),
         caveats_by_file: &FxHashMap::default(),
+        re_exports: &[],
         plan: &mut plan,
         output: OutputFormat::Json,
         dry_run: false,

@@ -87,6 +87,7 @@ mod results;
 pub mod search_visibility;
 mod security;
 pub mod session;
+mod session_graph;
 mod session_reuse;
 pub mod shell_quote;
 pub mod similar_code;
@@ -712,6 +713,37 @@ mod tests {
                 .get(&source)
                 .is_some_and(|fingerprint| fingerprint.file_size > 0)
         );
+    }
+
+    #[test]
+    fn analysis_session_keeps_the_graph_without_trace_work() {
+        let temp = tempfile::tempdir().expect("tempdir");
+        let src = temp.path().join("src");
+        std::fs::create_dir(&src).expect("src dir");
+        std::fs::write(
+            temp.path().join("package.json"),
+            r#"{"name": "graph-only", "main": "src/index.ts"}"#,
+        )
+        .expect("package.json");
+        std::fs::write(src.join("index.ts"), "export { a } from './mod';\n").expect("index");
+        std::fs::write(src.join("mod.ts"), "export const a = 1;\n").expect("mod");
+
+        let session = AnalysisSession::load(temp.path(), None).expect("session loads");
+        let artifacts = session
+            .analyze_dead_code_keeping_graph()
+            .expect("analysis succeeds");
+
+        let graph = artifacts.graph.as_ref().expect("the graph is kept");
+        assert!(
+            artifacts.timings.is_none(),
+            "the graph-only run collects no pipeline timings"
+        );
+        let re_exports = crate::module_graph::named_re_exports(graph);
+        assert_eq!(re_exports.len(), 1, "{re_exports:?}");
+        assert_eq!(re_exports[0].exported_name, "a");
+        assert_eq!(re_exports[0].imported_name, "a");
+        assert!(re_exports[0].path.ends_with("src/index.ts"));
+        assert!(re_exports[0].source_path.ends_with("src/mod.ts"));
     }
 
     #[test]
