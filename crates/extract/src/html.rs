@@ -141,17 +141,22 @@ fn collect_inline_script_facts(source: &str) -> InlineScriptFacts {
         if body_text.trim().is_empty() {
             continue;
         }
-        let allocator = Allocator::default();
-        let parsed = Parser::new(&allocator, body_text, source_type).parse();
-        let mut extractor = ModuleInfoExtractor::new();
-        extractor.visit_program(&parsed.program);
-        let extraction = ExtractionResult::contiguous(body_text, body.start());
-        extractor.remap_spans_with(|span| extraction.remap_span(span));
-        let info = extractor.into_module_info(
-            FileId(0),
-            0,
-            crate::suppress::ParsedSuppressions::default(),
-        );
+        let body_start = body.start();
+        // The whole-file nesting scan reads the page as script, so quotes in
+        // the HTML text can hide the brackets of a script body. Each body
+        // therefore gets its own bounded parse, and a too-deep body adds no
+        // facts.
+        let Some(info) = crate::parse_bounded(body_text, || {
+            let allocator = Allocator::default();
+            let parsed = Parser::new(&allocator, body_text, source_type).parse();
+            let mut extractor = ModuleInfoExtractor::new();
+            extractor.visit_program(&parsed.program);
+            let extraction = ExtractionResult::contiguous(body_text, body_start);
+            extractor.remap_spans_with(|span| extraction.remap_span(span));
+            extractor.into_module_info(FileId(0), 0, crate::suppress::ParsedSuppressions::default())
+        }) else {
+            continue;
+        };
         // A classic script with an `import` declaration is a syntax error in
         // the browser, so only a module script gives static imports.
         // A server template can put a placeholder such as `{{ STATIC_URL }}`
