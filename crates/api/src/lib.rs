@@ -65,6 +65,7 @@ pub mod mutation;
 mod next_steps;
 pub mod output_contracts;
 pub mod ownership;
+mod release_signature;
 pub mod review_deltas;
 pub mod routing;
 pub mod runtime;
@@ -244,6 +245,10 @@ pub use type_aware::{
     terminate_active_type_aware_sidecars, trace_symbol as run_type_aware_symbol_trace,
     trace_symbol as trace_type_aware_symbol, type_coupling as analyze_type_coupling,
 };
+
+/// The user directory of `fallow type-aware setup`, its bundle manifest, and
+/// the signature check of a bundle.
+pub use type_aware::setup_store as type_aware_setup;
 
 /// Long names of the analysis-affecting global CLI flags that
 /// [`AnalysisOptions`] mirrors for embedders.

@@ -8,6 +8,7 @@
 mod client;
 mod manifest;
 mod mutant_typecheck;
+pub mod setup_store;
 mod transport;
 
 use fallow_engine::session::AnalysisSession;

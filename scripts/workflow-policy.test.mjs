@@ -1011,7 +1011,10 @@ test("release publication waits for the aggregate verification gate", () => {
     /cargo deny[\s\S]*tools\/similar-code-sidecar\/Cargo\.toml[\s\S]*check licenses/u,
   );
   assert.match(similarCodeConformance, /semantic-clone-candle-conformance\.mjs/);
-  assert.match(gate, /needs: \[build, sign, validate, similar-code-conformance, musl-smoke\]/);
+  assert.match(
+    gate,
+    /needs: \[build, sign, validate, similar-code-conformance, musl-smoke, type-aware-bundle-sign\]/,
+  );
   assert.match(gate, /permissions: \{\}/);
   assert.match(publishCrates, /needs: \[release-verified, release-assets\]/);
   assert.match(releaseAssets, /needs: \[release-verified, vscode-prep, vscode-host-smoke, sbom\]/);
@@ -1340,6 +1343,7 @@ test("release credential jobs run in the main-only release environment", () => {
     "publish-crates",
     "publisher-auth-check",
     "sign",
+    "type-aware-bundle-sign",
     "vscode-publish-marketplace",
     "vscode-publish-open-vsx",
   ];

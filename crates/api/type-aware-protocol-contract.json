@@ -1,0 +1,6 @@
+{
+  "description": "SHA-256 of the type-aware wire contract sources. scripts/type-aware-protocol-contract.mjs owns this file.",
+  "hash_method": 2,
+  "wire_protocol_version": 8,
+  "contract_sha256": "eb66828e10629895742a2b0f1ce15fdfdfa116978c7af4bd8045a1f400147767"
+}

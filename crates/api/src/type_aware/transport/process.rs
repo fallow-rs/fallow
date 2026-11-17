@@ -259,6 +259,11 @@ impl SidecarTimeout {
     }
 }
 
+/// The error text of a companion that refuses the protocol of the request.
+/// A companion of an older release exits with it before it answers, so the
+/// version check of the response never runs.
+const UNSUPPORTED_PROTOCOL: &str = "unsupported protocol_version";
+
 fn validate_process_output(output: &Output) -> Result<(), String> {
     if output.status.success() {
         return Ok(());
@@ -269,10 +274,15 @@ fn validate_process_output(output: &Output) -> Result<(), String> {
     } else {
         format!(": {stderr}")
     };
-    Err(format!(
+    let mut message = format!(
         "type-aware sidecar exited with status {}{suffix}",
         output.status
-    ))
+    );
+    if stderr.contains(UNSUPPORTED_PROTOCOL) {
+        message.push_str(". The companion speaks another type-aware protocol. ");
+        message.push_str(&super::discovery::protocol_mismatch_hint());
+    }
+    Err(message)
 }
 
 pub(super) fn bounded_text(bytes: &[u8], max_chars: usize) -> String {

@@ -15,7 +15,7 @@ use crate::cli_agent::{AgentCli, run_agent_command};
 use crate::cli_args::{
     AuditCacheCli, AuditGateArg, AuditWorsenedArg, BaselinesCli, CiCli, CiProviderArg,
     CiTemplateCli, Cli, Command, CoverageCli, EffortFilter, EmailModeArg, HealthSeverityCli,
-    LicenseCli, RulePackCli, SecuritySubcommand, TelemetryCli, TypeAwareCli, TypeAwareRequireArg,
+    LicenseCli, RulePackCli, SecuritySubcommand, TelemetryCli, TypeAwareRequireArg,
 };
 use crate::cli_hooks::run_hooks_command;
 use crate::cli_impact::{ImpactCrossRepoOpts, dispatch_impact};
@@ -138,7 +138,9 @@ pub fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> 
             dispatch_architecture_command(architecture, dispatch)
         }
         Command::Watch { no_clear } => dispatch_watch(dispatch, no_clear),
-        Command::TypeAware { subcommand } => dispatch_type_aware_command(dispatch, subcommand),
+        Command::TypeAware { subcommand } => {
+            type_aware_status::dispatch_type_aware_command(dispatch, subcommand)
+        }
         Command::Doctor => unreachable!("doctor bypasses the normal dispatch epilogue"),
         Command::SimilarCode {
             subcommand,
@@ -350,71 +352,6 @@ pub fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> 
         Command::Coverage { subcommand } => dispatch_coverage_command(dispatch, &subcommand),
         setup_hooks @ Command::SetupHooks { .. } => {
             dispatch_setup_hooks_command(&setup_hooks, dispatch)
-        }
-    }
-}
-
-fn dispatch_type_aware_command(
-    dispatch: &DispatchContext<'_>,
-    subcommand: TypeAwareCli,
-) -> ExitCode {
-    match subcommand {
-        TypeAwareCli::Status => {
-            let status = fallow_api::type_aware_status(dispatch.root);
-            match dispatch.output {
-                fallow_config::OutputFormat::Json => {
-                    let output = type_aware_status_output(dispatch.root, status);
-                    match fallow_output::serialize_type_aware_status_json_output(output) {
-                        Ok(value) => match dispatch.json_style.serialize(&value) {
-                            Ok(json) => {
-                                crate::report::sink::outln!("{json}");
-                                ExitCode::SUCCESS
-                            }
-                            Err(error) => emit_input_error(
-                                &format!("failed to serialize type-aware status: {error}"),
-                                dispatch.output,
-                            ),
-                        },
-                        Err(error) => emit_input_error(
-                            &format!("failed to build type-aware status: {error}"),
-                            dispatch.output,
-                        ),
-                    }
-                }
-                fallow_config::OutputFormat::Human => {
-                    if status.available {
-                        crate::report::sink::outln!(
-                            "{}",
-                            report::human_status_line(
-                                report::HumanStatus::Ok,
-                                type_aware_status::available_message(&status),
-                            )
-                        );
-                    } else {
-                        crate::report::sink::outln!(
-                            "{}",
-                            report::human_status_line(
-                                report::HumanStatus::Inactive,
-                                "Type-aware companion: unavailable"
-                            )
-                        );
-                        if let Some(remediation) = status.remediation {
-                            crate::report::sink::outln!(
-                                "{}",
-                                report::human_status_line(
-                                    report::HumanStatus::Warning,
-                                    format_args!("Action: {remediation}")
-                                )
-                            );
-                        }
-                    }
-                    ExitCode::SUCCESS
-                }
-                _ => emit_input_error(
-                    "type-aware status supports human and json output",
-                    dispatch.output,
-                ),
-            }
         }
     }
 }
