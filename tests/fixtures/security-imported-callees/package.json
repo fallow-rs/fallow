@@ -1,0 +1,8 @@
+{
+  "name": "security-imported-callees-fixture",
+  "version": "0.0.0",
+  "private": true,
+  "dependencies": {
+    "lodash.merge": "^4.6.2"
+  }
+}

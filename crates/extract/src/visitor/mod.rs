@@ -1088,6 +1088,8 @@ pub(crate) struct ModuleInfoExtractor {
     sink_aliases: visit_impl::SinkAliasState,
     /// Span-level diagnostics for skipped security sink callees.
     security_unresolved_callee_sites: Vec<SkippedSecurityCalleeSite>,
+    /// Export names of the shallow-safe module-scope functions.
+    inert_function_exports: Vec<String>,
     /// Local bindings tied to the member-access path they were sourced from
     /// (e.g. `const id = req.query.id`). Feeds the security `tainted_sink`
     /// source-to-sink association in the analyze layer.
@@ -3451,6 +3453,7 @@ impl ModuleInfoExtractor {
             security_sinks: self.security_sinks,
             security_sinks_skipped: self.security_sinks_skipped,
             security_unresolved_callee_sites: self.security_unresolved_callee_sites,
+            inert_function_exports: self.inert_function_exports,
             tainted_bindings: self.tainted_bindings,
             sanitized_sink_args: self.sanitized_sink_args,
             security_control_sites: self.security_control_sites,
@@ -3618,18 +3621,6 @@ impl ModuleInfoExtractor {
             calls.append(&mut self.imported_call_sites);
             info.imported_call_sites = calls.into();
         }
-    }
-
-    fn merge_security_info(&mut self, info: &mut ModuleInfo) {
-        info.security_sinks.append(&mut self.security_sinks);
-        info.security_sinks_skipped += self.security_sinks_skipped;
-        info.security_unresolved_callee_sites
-            .append(&mut self.security_unresolved_callee_sites);
-        info.tainted_bindings.append(&mut self.tainted_bindings);
-        info.sanitized_sink_args
-            .append(&mut self.sanitized_sink_args);
-        info.security_control_sites
-            .append(&mut self.security_control_sites);
     }
 
     fn merge_framework_info(&mut self, info: &mut ModuleInfo) {

@@ -25,6 +25,7 @@ mod require_resolve;
 mod security_local_callees;
 mod security_node_bindings;
 mod security_set_attribute;
+mod security_shallow_callees;
 mod security_sources;
 mod signature_references;
 mod type_only_namespace;

@@ -497,6 +497,7 @@ fn release_resolution_payload_drops_copied_vectors_only() {
         security_sinks: Vec::new(),
         security_sinks_skipped: 1,
         security_unresolved_callee_sites: Vec::new(),
+        inert_function_exports: Vec::new(),
         tainted_bindings: Vec::new(),
         sanitized_sink_args: Vec::new(),
         security_control_sites: Vec::new(),

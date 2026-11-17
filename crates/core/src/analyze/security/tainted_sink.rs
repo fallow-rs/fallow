@@ -16,7 +16,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use fallow_extract::TEMPLATE_SINK_CALLEE_PREFIX;
 use fallow_types::extract::{
-    ModuleInfo, SanitizedSinkArg, SanitizerScope, SecurityUrlShape, SinkSite, TaintedBinding,
+    ImportedName, ModuleInfo, SanitizedSinkArg, SanitizerScope, SecurityUrlShape, SinkSite,
+    TaintedBinding,
 };
 use fallow_types::output::{IssueAction, SuppressFileAction, SuppressFileKind};
 use fallow_types::results::{
@@ -783,6 +784,63 @@ fn match_tainted_sink<'a>(
     })
 }
 
+/// Whether the sink calls a function that another project module exports
+/// with a shallow-safe body (see `ModuleInfo::inert_function_exports`). Only
+/// a bare callee that a static named or default `import` binds counts, and
+/// only one hop: a re-export module records no inert export, and an external
+/// package has no module in the graph. The callee must resolve to the import
+/// binding: `imported_call_sites` holds a call only when semantic analysis
+/// resolves its root to that binding, so a parameter or a local of the same
+/// name keeps the sink. The check reads the facts that the extraction already
+/// cached, so it parses no file.
+fn calls_imported_inert_function(
+    run: &TaintedSinkRun<'_>,
+    module: &ModuleInfo,
+    sink: &SinkSite,
+) -> bool {
+    let local = sink.callee_path.as_str();
+    if local.contains('.') {
+        return false;
+    }
+    let resolves_to_import = module.imported_call_sites.iter().any(|call| {
+        call.span_start == sink.span_start
+            && call.local_name == local
+            && call.member_path.is_empty()
+    });
+    if !resolves_to_import {
+        return false;
+    }
+    let Some(import) = module
+        .imports
+        .iter()
+        .find(|import| import.local_name == local && !import.is_type_only)
+    else {
+        return false;
+    };
+    let export = match &import.imported_name {
+        ImportedName::Named(name) => name.as_str(),
+        ImportedName::Default => "default",
+        ImportedName::Namespace | ImportedName::SideEffect => return false,
+    };
+    run.graph
+        .outgoing_symbol_edges(module.file_id)
+        .filter(|(_, symbols)| {
+            symbols.iter().any(|symbol| {
+                symbol.local_name == local
+                    && symbol.imported_name == import.imported_name
+                    && !symbol.is_type_only
+            })
+        })
+        .any(|(target, _)| {
+            run.modules_by_id.get(&target).is_some_and(|target| {
+                target
+                    .inert_function_exports
+                    .iter()
+                    .any(|name| name == export)
+            })
+        })
+}
+
 /// Match every sink in one module against the active catalogue and push a
 /// finding per admitted, non-sanitized sink. A sink that an inline comment
 /// suppresses goes to `suppressed` instead. Low-value-anchor and
@@ -821,7 +879,9 @@ fn collect_module_tainted_sinks(
             continue;
         };
 
-        if sink_is_sanitized_for_matcher(matcher, module, sink) {
+        if sink_is_sanitized_for_matcher(matcher, module, sink)
+            || calls_imported_inert_function(run, module, sink)
+        {
             continue;
         }
 

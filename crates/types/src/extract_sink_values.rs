@@ -65,3 +65,25 @@ pub struct SinkCallOptions {
     /// argument is not an object literal, or has a spread or a computed key.
     pub keys_complete: bool,
 }
+
+/// Static URL construction shape captured for URL-shaped security sinks.
+#[derive(
+    Debug,
+    Clone,
+    Copy,
+    PartialEq,
+    Eq,
+    serde::Serialize,
+    serde::Deserialize,
+    bitcode::Encode,
+    bitcode::Decode,
+)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum SecurityUrlShape {
+    /// The sink target has a fixed origin, scheme, or relative root while only
+    /// path or query components are dynamic.
+    FixedOriginDynamicPath,
+    /// The sink target's scheme or origin is dynamic or opaque.
+    DynamicOrigin,
+}

@@ -10,7 +10,7 @@ use crate::MemberKind;
 /// extraction semantics change, and give the reason in the commit message and
 /// the CHANGELOG. A stale version serves old extraction results from a warm
 /// cache. The `assert_cached_type_size!` guards below catch shape changes.
-pub(super) const CACHE_VERSION: u32 = 451;
+pub(super) const CACHE_VERSION: u32 = 452;
 
 /// Duplication token cache version. Bump it when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes, and give the
@@ -56,7 +56,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 1544);
+assert_cached_type_size!(CachedModule, 1568);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 // The call facts blob of `CachedModule` encodes these types. A blob that an
 // older shape wrote does not decode, and the entry then parses again on each
@@ -248,6 +248,8 @@ pub struct CachedModule {
     pub security_sinks_skipped: u32,
     /// Span-level diagnostics for skipped security sink callees.
     pub security_unresolved_callee_sites: Vec<fallow_types::extract::SkippedSecurityCalleeSite>,
+    /// Export names of the shallow-safe module-scope functions.
+    pub inert_function_exports: Vec<String>,
     /// Local bindings tied to the member-access path they were sourced from.
     /// Round-trips so the security `tainted_sink` source-to-sink association
     /// sees source-tainted bindings on warm-cache loads.
