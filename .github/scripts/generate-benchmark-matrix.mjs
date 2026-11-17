@@ -238,7 +238,7 @@ export const changedFilesFromEnvironment = (env = process.env) => {
   }
 
   const eventName = env.GITHUB_EVENT_NAME ?? "";
-  if (eventName === "workflow_dispatch" || eventName === "merge_group") {
+  if (eventName === "workflow_dispatch" || eventName === "merge_group" || eventName === "schedule") {
     return null;
   }
 

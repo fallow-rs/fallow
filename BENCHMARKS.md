@@ -187,8 +187,4 @@ The time covers the full pipeline: discovery, parsing, graph building, and cycle
 
 ## CI Integration
 
-The `.github/workflows/bench.yml` workflow runs the Rust benchmarks under CodSpeed on pushes to main and on pull requests with the `ci:perf` label. CodSpeed keeps the history and compares a pull request with its base. The workflow measures only the Rust benchmarks, not the end-to-end benchmarks above.
-
-`.github/workflows/bench-cli-instructions.yml` runs the release CLI under CodSpeed CPU simulation on pinned public projects. See [docs/benchmarking.md](docs/benchmarking.md) for details.
-
-`.github/workflows/bench-walltime.yml` runs the same projects and the type-aware companion under CodSpeed walltime each night, on a dedicated bare-metal runner. See [docs/benchmarking.md](docs/benchmarking.md#nightly-walltime-lane).
+The `.github/workflows/bench.yml` workflow runs every CodSpeed benchmark: the Rust benchmarks and the release CLI on pinned public projects under CPU simulation, and the same projects and the type-aware companion under walltime on a dedicated bare-metal runner. It measures `main` each night and the release commit on push, and a pull request with the `ci:perf` label. CodSpeed keeps the history and compares a pull request with the latest measured `main` commit. See [docs/benchmarking.md](docs/benchmarking.md#when-codspeed-runs) for details.

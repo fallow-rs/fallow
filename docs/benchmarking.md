@@ -5,6 +5,29 @@ Fallow uses Criterion-compatible Rust benchmarks with CodSpeed simulation in
 shards so PR feedback stays useful and noisy suites do not hide real
 regressions.
 
+## When CodSpeed runs
+
+Every CodSpeed job lives in `.github/workflows/bench.yml`. CodSpeed takes the
+results for one commit from one workflow run. When a second workflow uploads
+for the same commit, CodSpeed marks the run with "Benchmarks ran in several CI
+workflows". One run may carry simulation and walltime results, and two runs of
+the same workflow on one commit are fine.
+
+- Each night at 06:00 UTC, a full run measures the `main` HEAD: every
+  simulation shard, the CLI instruction counts and the walltime jobs.
+- A push to `main` measures only the release commit (`chore: release v`),
+  because `scripts/verify-release-ci.mjs` reads that result before a release.
+  The other pushes skip every job.
+- A pull request with the `ci:perf` label runs the affected simulation shards
+  and the CLI instruction counts. CodSpeed compares it with the latest `main`
+  commit that has a run, usually the last nightly run. The comparison then
+  also holds the changes merged after that run. For a precise result, start a
+  run on `main` first with `gh workflow run bench.yml`.
+- `gh workflow run bench.yml --ref <branch>` measures a branch with every job.
+
+Only the release push saves the Rust caches of these jobs. The repository
+cache is over its limit, and a nightly cache is gone before the next night.
+
 Simulation jobs run with `RAYON_NUM_THREADS=1`. Rayon splits work adaptively
 when a thread steals a job, so with more than one thread the simulated
 instruction count changes between runs of the same code. A benchmark takes its
@@ -19,7 +42,7 @@ CPU. Benchmarks outside `crates/benchmarks` include the same helper with a
 
 Simulation leaves syscall time out of the value. A benchmark that CodSpeed
 marks "dominated by syscalls" does not show file-system cost, so do not use it
-to judge an I/O change. The nightly walltime lane (below) measures that cost.
+to judge an I/O change. The nightly walltime jobs (below) measure that cost.
 
 Most fallow benchmarks get this warning even when they do no I/O. The analysis
 runs on a rayon pool, and the bench thread waits on a futex until a pool worker
@@ -61,13 +84,14 @@ the full fast matrix, and global benchmark or Cargo changes fall back to all
 fast shards. The shared fixtures under `crates/benchmarks/benches/support/`
 count as a global benchmark change.
 
-## Nightly walltime lane
+## Nightly walltime jobs
 
-`.github/workflows/bench-walltime.yml` runs walltime benchmarks once a night
-on a CodSpeed Macro Runner, a dedicated bare-metal ARM64 (Graviton) machine.
+The `walltime-cli` and `type-aware` jobs of `.github/workflows/bench.yml` run
+walltime benchmarks on a CodSpeed Macro Runner, a dedicated bare-metal ARM64
+(Graviton) machine.
 The hardware is the same each night, so the values are comparable between
 runs. CodSpeed marks walltime from a shared GitHub-hosted runner as unreliable,
-so no other workflow uses walltime.
+so no other job uses walltime.
 
 - The release CLI on the pinned corpus of `benchmarks/cli-instructions.sh`,
   cold and warm. This is the real cost of file reads and other syscalls that
@@ -79,11 +103,9 @@ so no other workflow uses walltime.
   reuse as distinct benchmarks.
 
 The fallow-rs organization shares 600 free macro runner minutes per month, so
-the lane has no push or pull request trigger. The release build runs on a free
-`ubuntu-22.04-arm` GitHub runner, the same Ubuntu release as the macro runner
-image, and the macro runner job only measures. Start the lane by hand with
-`gh workflow run bench-walltime.yml` to measure a change before the next
-night.
+these jobs run only in the nightly and manual runs. The release build runs on
+a free `ubuntu-22.04-arm` GitHub runner, the same Ubuntu release as the macro
+runner image, and the macro runner job only measures.
 
 ## Local walltime retain gates
 
@@ -155,7 +177,7 @@ thread count.
 
 The Criterion shards measure code paths in process. They do not see process
 startup, config loading, the report output or the interaction between stages.
-`.github/workflows/bench-cli-instructions.yml` runs the release binary under
+The `cli-instructions` job of `.github/workflows/bench.yml` runs the release binary under
 CodSpeed CPU simulation with the exec harness, so each run of the whole CLI
 gets an instruction-based value:
 
@@ -180,9 +202,8 @@ The simulation does not count the child processes, for example `git` in
 Under callgrind with one thread, the instruction count of each benchmark
 differed by less than 0.1% between runs. A regression threshold of 2% is safe.
 
-The job needs a release build, so it does not run on every push. It runs once
-a day on main and on a pull request with the `ci:perf` label. Run the same
-steps locally on Linux:
+The job needs a release build. It runs in the nightly run on main and on a
+pull request with the `ci:perf` label. Run the same steps locally on Linux:
 
 ```bash
 cargo build --release -p fallow-cli

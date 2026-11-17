@@ -39,7 +39,8 @@ When adding a test fixture:
 
 ## Performance tests
 - Criterion benchmarks in `benches/`
-- `bench-cli-instructions.yml` runs the release CLI under CPU simulation on
-  pinned public projects (daily, and on pull requests with the `ci:perf` label)
-- `bench-walltime.yml` runs the same CLI corpus and the type-aware companion
-  under walltime on a CodSpeed macro runner (nightly, or by hand)
+- `bench.yml` holds every CodSpeed job: the Rust shards and the release CLI on
+  pinned public projects under CPU simulation, and the same CLI corpus and the
+  type-aware companion under walltime on a CodSpeed macro runner. It runs
+  nightly on main, on the release push, and on pull requests with the
+  `ci:perf` label
