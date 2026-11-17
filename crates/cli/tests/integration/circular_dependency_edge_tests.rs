@@ -1,5 +1,5 @@
-//! The edges of a `circular_dependencies` finding point at the statement that
-//! makes each hop of the cycle.
+//! The edges of a `circular_dependencies` finding: each edge exists in the
+//! source, and it points at the statement that makes the hop of the cycle.
 
 #![allow(
     clippy::unwrap_used,
@@ -112,4 +112,24 @@ fn line_suppression_above_a_re_export_hides_the_cycle() {
         Some(0),
         "{json}"
     );
+}
+
+/// The `tailwindcss` package itself: a stylesheet with `@tailwind` gets a
+/// synthetic `tailwindcss` import, which resolves to the package entry. That
+/// import must not close a cycle with the entry stylesheet (#4740).
+#[test]
+fn synthetic_tailwind_import_does_not_point_into_its_own_package() {
+    let dir = write_project(
+        r#"{"name":"tailwindcss","version":"4.0.0","private":true,"style":"index.css","exports":{".":{"style":"./index.css"}}}"#,
+        &[
+            ("index.css", "@import './utilities.css' layer(utilities);\n"),
+            ("utilities.css", "@tailwind utilities;\n"),
+        ],
+    );
+    let json = parse_json(&run_fallow_in_root(
+        "dead-code",
+        dir.path(),
+        &["--format", "json", "--quiet"],
+    ));
+    assert!(cycle_edges(&json).is_empty(), "{json}");
 }
