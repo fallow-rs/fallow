@@ -40,7 +40,7 @@ enum GateBlocker {
     /// The installed native gate differs from the verified managed template.
     ModifiedNativeGate,
     /// PATH resolves a different fallow than this build, and the gate runs
-    /// what PATH resolves.
+    /// what PATH resolves because the project has no local launcher.
     PathVersion(String),
 }
 
@@ -184,12 +184,15 @@ fn native_reader_inventory(root: &Path) -> NativeGateState {
 /// Version of the `fallow` PATH resolves, when that binary is not this one and
 /// reports a version other than this build's.
 ///
-/// The gate prefers PATH over every project-local fallback, so the version it
-/// runs is independent of the checkout that installed it. Returns `None` when
-/// nothing resolves, when PATH resolves this very executable, or when the
-/// probe fails: the gate has further fallbacks and an unreadable binary is not
-/// evidence of drift.
+/// The gate runs the project-local `node_modules/.bin/fallow` first and the
+/// `fallow` on PATH only when that launcher is absent. Returns `None` when the
+/// project-local launcher exists, when nothing resolves, when PATH resolves
+/// this very executable, or when the probe fails: the gate has further
+/// fallbacks and an unreadable binary is not evidence of drift.
 fn path_fallow_drift(root: &Path) -> Option<String> {
+    if root.join("node_modules/.bin/fallow").is_file() {
+        return None;
+    }
     let candidate = std::path::absolute(mcp::find_on_path("fallow")?).ok()?;
     let resolved = dunce::canonicalize(&candidate).unwrap_or_else(|_| candidate.clone());
     // Resolve directory aliases without losing ownership of a final symlink.

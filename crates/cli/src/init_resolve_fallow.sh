@@ -12,10 +12,10 @@ fallow_runs() {
   fi
   return 1
 }
-if command -v fallow >/dev/null 2>&1 && fallow_runs "$(command -v fallow)" fallow; then
-  run_fallow() { fallow "$@"; }
-elif [ -x ./node_modules/.bin/fallow ] && fallow_runs ./node_modules/.bin/fallow ./node_modules/.bin/fallow; then
+if [ -x ./node_modules/.bin/fallow ] && fallow_runs ./node_modules/.bin/fallow ./node_modules/.bin/fallow; then
   run_fallow() { ./node_modules/.bin/fallow "$@"; }
+elif command -v fallow >/dev/null 2>&1 && fallow_runs "$(command -v fallow)" fallow; then
+  run_fallow() { fallow "$@"; }
 elif command -v yarn >/dev/null 2>&1 \
   && FALLOW_BIN="$(yarn bin fallow 2>/dev/null)" \
   && [ -n "$FALLOW_BIN" ] \
@@ -30,6 +30,6 @@ elif [ -n "$FALLOW_BROKEN" ]; then
   echo "fallow-hook: reinstall fallow, or skip the audit for one commit with git commit --no-verify." >&2
   exit 1
 else
-  echo "fallow-hook: fallow not found (tried PATH, node_modules/.bin, yarn and npx --no-install), skipping the pre-commit audit." >&2
+  echo "fallow-hook: fallow not found (tried node_modules/.bin, PATH, yarn and npx --no-install), skipping the pre-commit audit." >&2
   exit 0
 fi

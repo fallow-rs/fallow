@@ -509,3 +509,64 @@ fn foreign_skill_is_refused_with_exit_two() {
     assert!(dir.join(".cursor/mcp.json").is_file());
     let _ = fs::remove_dir_all(&dir);
 }
+
+/// The gate runs the project-local `node_modules/.bin/fallow` before a
+/// `fallow` on `PATH`. Status must then not ask the user to upgrade the
+/// `PATH` fallow, because the gate does not run it.
+#[cfg(unix)]
+#[test]
+fn status_reports_path_drift_only_when_the_gate_runs_the_path_fallow() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let write_stub = |path: &Path| {
+        fs::create_dir_all(path.parent().unwrap()).unwrap();
+        fs::write(path, "#!/bin/sh\necho 'fallow 0.0.1'\n").unwrap();
+        fs::set_permissions(path, fs::Permissions::from_mode(0o755)).unwrap();
+    };
+    let dir = agent_temp_dir("path-drift");
+    let home = dir.join("home");
+    fs::create_dir_all(&home).unwrap();
+    let install = run_agent(&dir, &home, &["install", "--harness", "claude"]);
+    assert_eq!(install.code, 0, "stderr: {}", install.stderr);
+    // Status ignores a `PATH` fallow inside the project, so the global stub
+    // lives in its own directory.
+    let global = tempfile::tempdir().unwrap();
+    let path_bin = global.path().to_path_buf();
+    write_stub(&path_bin.join("fallow"));
+    let path = std::env::join_paths(std::iter::once(path_bin).chain(std::env::split_paths(
+        &std::env::var_os("PATH").unwrap_or_default(),
+    )))
+    .unwrap();
+    let status = || {
+        let output = run_fallow_raw_with_env(
+            &[
+                "agent",
+                "status",
+                "--root",
+                dir.to_str().unwrap(),
+                "--format",
+                "json",
+            ],
+            &[
+                ("HOME", home.to_str().unwrap()),
+                ("PATH", path.to_str().unwrap()),
+                ("CLAUDECODE", ""),
+                ("CODEX_THREAD_ID", ""),
+                ("CURSOR_AGENT", ""),
+            ],
+        );
+        let json = crate::common::parse_json(&output);
+        json["next_actions"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|action| action["id"] == "gate-path-version")
+    };
+
+    write_stub(&dir.join("node_modules/.bin/fallow"));
+    assert!(!status(), "the gate runs the project-local fallow");
+
+    fs::remove_file(dir.join("node_modules/.bin/fallow")).unwrap();
+    assert!(status(), "the gate runs the fallow on PATH");
+    let _ = fs::remove_dir_all(&dir);
+}

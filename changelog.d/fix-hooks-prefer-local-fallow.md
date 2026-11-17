@@ -1,0 +1,3 @@
+### Fixed
+
+- **The Git hooks and the agent gate now run the project-local fallow first.** The pre-commit hook of `fallow init --hooks`, the Lefthook job and the gate of `fallow agent install` now try `./node_modules/.bin/fallow` before a `fallow` on `PATH`. The project pins its fallow version, and a global install can have another version or no type-aware companion. The order is now the same as the order of the plugin gate. `fallow agent status` reports `gate-path-version` only when the project has no `node_modules/.bin/fallow`, because only then does the gate run the `fallow` on `PATH`. (Closes [#4628](https://github.com/fallow-rs/fallow/issues/4628))

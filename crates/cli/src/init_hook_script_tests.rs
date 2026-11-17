@@ -98,3 +98,41 @@ fn prune_baselines_hints_carry_the_prune_block() {
     );
     assert!(!lefthook_hint(false).contains("baselines prune"));
 }
+
+/// A project pins its fallow version in its dependencies. A global install
+/// on `PATH` can have another version and another packaging, so the hook
+/// must run the project-local launcher first.
+#[cfg(unix)]
+#[test]
+fn resolution_block_prefers_the_project_local_launcher_over_path() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let write_stub = |path: &std::path::Path, version: &str| {
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, format!("#!/bin/sh\necho 'fallow {version}'\n")).unwrap();
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    };
+    let tmp = tempfile::tempdir().unwrap();
+    let project = tmp.path();
+    write_stub(&project.join("bin/fallow"), "1.0.0-path");
+    write_stub(&project.join("node_modules/.bin/fallow"), "2.0.0-local");
+    let script = project.join("resolve.sh");
+    std::fs::write(
+        &script,
+        format!("{RESOLVE_FALLOW_BLOCK}run_fallow --version\n"),
+    )
+    .unwrap();
+
+    let output = std::process::Command::new("sh")
+        .arg(&script)
+        .current_dir(project)
+        .env(
+            "PATH",
+            format!("{}:/usr/bin:/bin", project.join("bin").display()),
+        )
+        .output()
+        .expect("spawn sh");
+
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert_eq!(stdout.trim(), "fallow 2.0.0-local", "{output:?}");
+}

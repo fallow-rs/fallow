@@ -830,16 +830,17 @@ fallow_runs() {
 run_audit() {
   # A real installed Git hook keeps its caller's PATH and does not add
   # node_modules/.bin, so a project-local install is invisible to `command -v`.
-  # The arms below cover the layouts a project-local install can take, in the
-  # order they are cheapest to probe. Keep them in step with the Git hook and
-  # the Lefthook job `fallow hooks install --target git` writes: they must
-  # resolve the same installs.
-  if command -v fallow >/dev/null 2>&1 && fallow_runs "$(command -v fallow)" fallow; then
-    RUNNER=(fallow)
-    BIN_DESC="$(command -v fallow)"
-  elif [ -x ./node_modules/.bin/fallow ] && fallow_runs ./node_modules/.bin/fallow ./node_modules/.bin/fallow; then
+  # The project pins its fallow version in its dependencies, so the
+  # project-local launcher comes first. A global install on PATH can differ
+  # in version and in packaging. Keep this order in step with the Git hook
+  # and the Lefthook job that `fallow hooks install --target git` writes, and
+  # with the plugin gate of fallow-skills: they must resolve the same installs.
+  if [ -x ./node_modules/.bin/fallow ] && fallow_runs ./node_modules/.bin/fallow ./node_modules/.bin/fallow; then
     RUNNER=(./node_modules/.bin/fallow)
     BIN_DESC="./node_modules/.bin/fallow"
+  elif command -v fallow >/dev/null 2>&1 && fallow_runs "$(command -v fallow)" fallow; then
+    RUNNER=(fallow)
+    BIN_DESC="$(command -v fallow)"
   elif command -v yarn >/dev/null 2>&1 && YARN_BIN="$(yarn bin fallow 2>/dev/null)" && [ -n "$YARN_BIN" ] && fallow_runs "yarn exec fallow" yarn exec fallow --; then
     # Yarn Plug'n'Play has no node_modules/.bin at all, so neither the launcher
     # check above nor npx can see the install.
@@ -857,7 +858,7 @@ run_audit() {
     } >&2
     exit 2
   else
-    echo "fallow-gate: fallow binary not found (tried PATH, node_modules/.bin, yarn and npx --no-install), skipping audit." >&2
+    echo "fallow-gate: fallow binary not found (tried node_modules/.bin, PATH, yarn and npx --no-install), skipping audit." >&2
     exit 0
   fi
 
