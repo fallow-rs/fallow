@@ -12,6 +12,11 @@
 //! - a metric that it exceeds grew, and its severity tier is higher than the
 //!   tier of the base finding (see [`severity_tier_rose`]).
 //!
+//! A function that the change moved to another file has a new path, so its
+//! identity key has no base finding. Such a finding takes the base finding of
+//! the same function name from another changed file (see
+//! [`classify_complexity_attribution_with_moves`]).
+//!
 //! The exceeded flags and the tier of the base finding come from the base run,
 //! so a threshold override in the same change cannot make an old finding
 //! introduced. Unchanged and decreased metrics stay inherited, also when the
@@ -475,6 +480,84 @@ pub fn classify_complexity_attribution(
     root: &Path,
     base: &ComplexityBaseline,
 ) -> Vec<ComplexityClass> {
+    classify_with_moves(findings, root, base, None)
+}
+
+/// Classify each head complexity finding against one base, as
+/// [`classify_complexity_attribution`] does, and then match the functions
+/// that the change moved to another file.
+///
+/// A head finding without a base finding takes a base finding of the same
+/// function name that no head finding took, from another file of
+/// `changed_paths`. Without this step, a refactor that splits a file reports
+/// each moved function as introduced, because the path is part of the
+/// identity key and git reports no rename for a split.
+///
+/// The candidates of one function name match by these rules, in path and line
+/// order:
+///
+/// 1. The four value rules of [`classify_complexity_attribution`] run first,
+///    so an unchanged function finds its own base finding.
+/// 2. When one head finding remains, and one base finding of a deleted file
+///    remains, they pair, and the pair compares the metrics. A moved function
+///    that grew is worsened.
+/// 3. The other remaining head findings are introduced. With more candidates
+///    on either side, the name does not tell which function is which.
+///
+/// Rule 2 needs a deleted file, because the function of a deleted file is
+/// gone. In a file that still exists, a base finding without a head finding
+/// can be a function that the change made simpler. A new function of the
+/// same name in another file must not take that base finding, so only equal
+/// values match there.
+///
+/// A placeholder name (`<anonymous>`, `<arrow>`) identifies no function, so
+/// such a finding matches only a base finding with the same cyclomatic and
+/// cognitive values and the same line count.
+///
+/// A base finding outside `changed_paths` is no candidate. The head report
+/// holds only the changed files, so a function in an unchanged file still
+/// exists and a new function of the same name is new.
+#[must_use]
+pub fn classify_complexity_attribution_with_moves(
+    findings: &[fallow_output::HealthFinding],
+    root: &Path,
+    base: &ComplexityBaseline,
+    changed_paths: &ChangedPaths,
+) -> Vec<ComplexityClass> {
+    classify_with_moves(findings, root, base, Some(changed_paths))
+}
+
+/// The files of a change, as root-relative paths in the form of the identity
+/// keys.
+#[derive(Debug, Clone, Default)]
+pub struct ChangedPaths {
+    /// Each file that the change touched, added or deleted.
+    pub changed: FxHashSet<String>,
+    /// The files of `changed` that do not exist on the head.
+    pub deleted: FxHashSet<String>,
+}
+
+/// The four value rules that pair findings of one identity, most exact first.
+const VALUE_RULES: [fn(&ComplexityMetrics, &ComplexityMetrics) -> bool; 4] = [
+    ComplexityMetrics::same_values_and_lines,
+    ComplexityMetrics::same_values,
+    ComplexityMetrics::same_structure_and_lines,
+    ComplexityMetrics::same_structure,
+];
+
+/// The value rules for a placeholder function name. Both compare the line
+/// count, because the name identifies no function.
+const PLACEHOLDER_RULES: [fn(&ComplexityMetrics, &ComplexityMetrics) -> bool; 2] = [
+    ComplexityMetrics::same_values_and_lines,
+    ComplexityMetrics::same_structure_and_lines,
+];
+
+fn classify_with_moves(
+    findings: &[fallow_output::HealthFinding],
+    root: &Path,
+    base: &ComplexityBaseline,
+    changed_paths: Option<&ChangedPaths>,
+) -> Vec<ComplexityClass> {
     let mut groups: FxHashMap<String, Vec<usize>> = FxHashMap::default();
     for (index, finding) in findings.iter().enumerate() {
         groups
@@ -483,44 +566,155 @@ pub fn classify_complexity_attribution(
             .push(index);
     }
     let mut matches: Vec<Option<&ComplexityMetrics>> = vec![None; findings.len()];
+    let mut unused_bases: FxHashMap<&str, Vec<&ComplexityMetrics>> = FxHashMap::default();
     for (key, mut heads) in groups {
-        let Some(bases) = base.get(&key) else {
+        let Some((base_key, bases)) = base.get_key_value(&key) else {
             continue;
         };
         heads.sort_by_key(|&index| (findings[index].line, findings[index].col));
         let mut unmatched_bases: Vec<Option<&ComplexityMetrics>> = bases.iter().map(Some).collect();
-        let rules: [fn(&ComplexityMetrics, &ComplexityMetrics) -> bool; 4] = [
-            ComplexityMetrics::same_values_and_lines,
-            ComplexityMetrics::same_values,
-            ComplexityMetrics::same_structure_and_lines,
-            ComplexityMetrics::same_structure,
-        ];
-        for rule in rules {
-            for &index in &heads {
-                if matches[index].is_some() {
-                    continue;
-                }
-                let head = ComplexityMetrics::of(&findings[index]);
-                if let Some(slot) = unmatched_bases
-                    .iter_mut()
-                    .find(|slot| slot.is_some_and(|base| rule(base, &head)))
-                {
-                    matches[index] = slot.take();
-                }
-            }
-        }
+        match_by_rules(
+            findings,
+            &heads,
+            &mut unmatched_bases,
+            &mut matches,
+            &VALUE_RULES,
+        );
         let mut remaining_bases = unmatched_bases.into_iter().flatten();
         for &index in &heads {
             if matches[index].is_none() {
                 matches[index] = remaining_bases.next();
             }
         }
+        unused_bases.insert(base_key.as_str(), remaining_bases.collect());
+    }
+    if let Some(changed_paths) = changed_paths {
+        match_moved_functions(findings, base, changed_paths, &unused_bases, &mut matches);
     }
     findings
         .iter()
         .zip(matches)
         .map(|(finding, base)| ComplexityClass::of_match(finding, base))
         .collect()
+}
+
+/// Give each unmatched head finding of `heads` an unmatched base finding that
+/// a rule of `rules` accepts. Each rule runs for all head findings before the
+/// next rule, so an earlier head finding cannot take the exact match of a
+/// later one.
+fn match_by_rules<'a>(
+    findings: &[fallow_output::HealthFinding],
+    heads: &[usize],
+    unmatched_bases: &mut [Option<&'a ComplexityMetrics>],
+    matches: &mut [Option<&'a ComplexityMetrics>],
+    rules: &[fn(&ComplexityMetrics, &ComplexityMetrics) -> bool],
+) {
+    for rule in rules {
+        for &index in heads {
+            if matches[index].is_some() {
+                continue;
+            }
+            let head = ComplexityMetrics::of(&findings[index]);
+            if let Some(slot) = unmatched_bases
+                .iter_mut()
+                .find(|slot| slot.is_some_and(|base| rule(base, &head)))
+            {
+                matches[index] = slot.take();
+            }
+        }
+    }
+}
+
+/// Match the head findings that have no base finding with the base findings
+/// of the same function name in another changed file. See
+/// [`classify_complexity_attribution_with_moves`].
+///
+/// `unused_bases` holds, for each base key that the head also has, the base
+/// findings that no head finding of that key took. A base key that the head
+/// does not have keeps all its findings.
+fn match_moved_functions<'a>(
+    findings: &[fallow_output::HealthFinding],
+    base: &'a ComplexityBaseline,
+    changed_paths: &ChangedPaths,
+    unused_bases: &FxHashMap<&str, Vec<&'a ComplexityMetrics>>,
+    matches: &mut [Option<&'a ComplexityMetrics>],
+) {
+    let mut heads_by_name: FxHashMap<&str, Vec<usize>> = FxHashMap::default();
+    for (index, finding) in findings.iter().enumerate() {
+        if matches[index].is_none() {
+            heads_by_name
+                .entry(finding.name.as_str())
+                .or_default()
+                .push(index);
+        }
+    }
+    if heads_by_name.is_empty() {
+        return;
+    }
+    let mut bases_by_name: FxHashMap<&str, Vec<(&str, &ComplexityMetrics)>> = FxHashMap::default();
+    for (key, bases) in base {
+        let Some((path, name)) = changed_path_and_name(key, &changed_paths.changed) else {
+            continue;
+        };
+        if !heads_by_name.contains_key(name) {
+            continue;
+        }
+        let candidates = bases_by_name.entry(name).or_default();
+        match unused_bases.get(key.as_str()) {
+            Some(unused) => candidates.extend(unused.iter().map(|metrics| (path, *metrics))),
+            None => candidates.extend(bases.iter().map(|metrics| (path, metrics))),
+        }
+    }
+    for (name, mut heads) in heads_by_name {
+        let Some(mut bases) = bases_by_name.remove(name) else {
+            continue;
+        };
+        heads.sort_by(|&left, &right| {
+            let (left, right) = (&findings[left], &findings[right]);
+            (&left.path, left.line, left.col).cmp(&(&right.path, right.line, right.col))
+        });
+        bases.sort_by_key(|(path, metrics)| (*path, metrics.line));
+        let mut unmatched_bases: Vec<Option<&ComplexityMetrics>> =
+            bases.iter().map(|(_, metrics)| Some(*metrics)).collect();
+        let placeholder = name.starts_with('<');
+        let rules: &[fn(&ComplexityMetrics, &ComplexityMetrics) -> bool] = if placeholder {
+            &PLACEHOLDER_RULES
+        } else {
+            &VALUE_RULES
+        };
+        match_by_rules(findings, &heads, &mut unmatched_bases, matches, rules);
+        if placeholder {
+            continue;
+        }
+        let mut remaining_heads = heads.iter().filter(|&&index| matches[index].is_none());
+        let mut remaining_bases = unmatched_bases
+            .into_iter()
+            .zip(&bases)
+            .filter(|(_, (path, _))| changed_paths.deleted.contains(*path))
+            .filter_map(|(metrics, _)| metrics);
+        if let (Some(&head), None, Some(base), None) = (
+            remaining_heads.next(),
+            remaining_heads.next(),
+            remaining_bases.next(),
+            remaining_bases.next(),
+        ) {
+            matches[head] = Some(base);
+        }
+    }
+}
+
+/// Split a base identity key (`complexity:<path>:<function>`) into its path
+/// and its function name, when the path is in `changed_paths`. A function
+/// name can contain `:`, so each `:` is tried as the separator.
+fn changed_path_and_name<'a>(
+    key: &'a str,
+    changed_paths: &FxHashSet<String>,
+) -> Option<(&'a str, &'a str)> {
+    let rest = key.strip_prefix("complexity:")?;
+    rest.match_indices(':').find_map(|(at, _)| {
+        let (path, name) = (&rest[..at], &rest[at + 1..]);
+        changed_paths.contains(path).then_some((path, name))
+    })
 }
 
 /// Classify each head complexity finding against several bases, in report
@@ -552,9 +746,32 @@ pub fn classify_complexity_attribution_against_all<'a>(
     root: &Path,
     bases: impl IntoIterator<Item = &'a ComplexityBaseline>,
 ) -> Vec<ComplexityClass> {
+    classify_against_all(findings, root, bases, None)
+}
+
+/// Classify each head complexity finding against several bases, as
+/// [`classify_complexity_attribution_against_all`] does, and match the
+/// functions that the change moved to another file against each base (see
+/// [`classify_complexity_attribution_with_moves`]).
+#[must_use]
+pub fn classify_complexity_attribution_against_all_with_moves<'a>(
+    findings: &[fallow_output::HealthFinding],
+    root: &Path,
+    bases: impl IntoIterator<Item = &'a ComplexityBaseline>,
+    changed_paths: &ChangedPaths,
+) -> Vec<ComplexityClass> {
+    classify_against_all(findings, root, bases, Some(changed_paths))
+}
+
+fn classify_against_all<'a>(
+    findings: &[fallow_output::HealthFinding],
+    root: &Path,
+    bases: impl IntoIterator<Item = &'a ComplexityBaseline>,
+    changed_paths: Option<&ChangedPaths>,
+) -> Vec<ComplexityClass> {
     let per_base: Vec<Vec<ComplexityClass>> = bases
         .into_iter()
-        .map(|base| classify_complexity_attribution(findings, root, base))
+        .map(|base| classify_with_moves(findings, root, base, changed_paths))
         .collect();
     (0..findings.len())
         .map(|index| {
@@ -730,6 +947,193 @@ mod tests {
                 [&baseline(vec![finding("f", 1, 17, 16)]), &merged]
             ),
             [true]
+        );
+    }
+
+    fn finding_in(path: &str, name: &str, cyclomatic: u16, cognitive: u16) -> HealthFinding {
+        let mut finding = finding(name, 1, cyclomatic, cognitive);
+        finding.violation.path = root().join(path);
+        finding
+    }
+
+    /// Changed paths where `src/old.js`, `src/a.js` and `src/b.js` are the
+    /// deleted files.
+    fn changed(paths: &[&str]) -> ChangedPaths {
+        let changed: FxHashSet<String> = paths.iter().map(|path| (*path).to_string()).collect();
+        let deleted = ["src/old.js", "src/a.js", "src/b.js"]
+            .into_iter()
+            .filter(|path| changed.contains(*path))
+            .map(str::to_string)
+            .collect();
+        ChangedPaths { changed, deleted }
+    }
+
+    fn classify_moves(
+        base: Vec<HealthFinding>,
+        head: &[HealthFinding],
+        changed_paths: &[&str],
+    ) -> Vec<AuditFindingAttribution> {
+        classify_complexity_attribution_with_moves(
+            head,
+            &root(),
+            &baseline(base),
+            &changed(changed_paths),
+        )
+        .iter()
+        .map(ComplexityClass::attribution)
+        .collect()
+    }
+
+    #[test]
+    fn moved_function_compares_with_its_base_finding() {
+        use AuditFindingAttribution::{Inherited, Introduced, Worsened};
+        let base = || vec![finding_in("src/old.js", "f", 17, 16)];
+        let both = ["src/old.js", "src/new.js"];
+
+        assert_eq!(
+            classify_moves(base(), &[finding_in("src/new.js", "f", 17, 16)], &both),
+            [Inherited]
+        );
+        assert_eq!(
+            classify_moves(base(), &[finding_in("src/new.js", "f", 18, 17)], &both),
+            [Worsened]
+        );
+        // Without the changed paths, the path is part of the identity.
+        assert_eq!(
+            classify(base(), &[finding_in("src/new.js", "f", 17, 16)]),
+            [true]
+        );
+        // The base function is in a file that the change did not touch, so it
+        // still exists.
+        assert_eq!(
+            classify_moves(
+                base(),
+                &[finding_in("src/new.js", "f", 17, 16)],
+                &["src/new.js"]
+            ),
+            [Introduced]
+        );
+    }
+
+    #[test]
+    fn grown_function_does_not_take_the_base_finding_of_a_kept_file() {
+        use AuditFindingAttribution::{Inherited, Introduced};
+        let base = || vec![finding_in("src/kept.js", "f", 17, 16)];
+        let both = ["src/kept.js", "src/new.js"];
+        // `src/kept.js` has no head finding: the change made `f` simpler, or
+        // removed it. A different `f` in a new file is new.
+        assert_eq!(
+            classify_moves(base(), &[finding_in("src/new.js", "f", 16, 16)], &both),
+            [Introduced]
+        );
+        // Equal values still match.
+        assert_eq!(
+            classify_moves(base(), &[finding_in("src/new.js", "f", 17, 16)], &both),
+            [Inherited]
+        );
+    }
+
+    #[test]
+    fn one_of_two_same_named_functions_moves() {
+        use AuditFindingAttribution::Inherited;
+        let mut second = finding_in("src/kept.js", "run", 21, 20);
+        second.violation.line = 40;
+        let base = vec![finding_in("src/kept.js", "run", 17, 16), second];
+        let head = [
+            finding_in("src/kept.js", "run", 17, 16),
+            finding_in("src/new.js", "run", 21, 20),
+        ];
+        assert_eq!(
+            classify_moves(base, &head, &["src/kept.js", "src/new.js"]),
+            [Inherited, Inherited]
+        );
+    }
+
+    #[test]
+    fn moved_function_does_not_take_a_base_finding_that_is_in_use() {
+        use AuditFindingAttribution::{Inherited, Introduced};
+        let head = [
+            finding_in("src/old.js", "f", 17, 16),
+            finding_in("src/new.js", "f", 17, 16),
+        ];
+        assert_eq!(
+            classify_moves(
+                vec![finding_in("src/old.js", "f", 17, 16)],
+                &head,
+                &["src/old.js", "src/new.js"]
+            ),
+            [Inherited, Introduced]
+        );
+    }
+
+    #[test]
+    fn same_named_moved_functions_pair_by_values_only() {
+        use AuditFindingAttribution::{Inherited, Introduced};
+        let base = || {
+            vec![
+                finding_in("src/a.js", "run", 17, 16),
+                finding_in("src/b.js", "run", 21, 20),
+            ]
+        };
+        let paths = ["src/a.js", "src/b.js", "src/c.js", "src/d.js"];
+        // Each function keeps its values, in the opposite path order.
+        assert_eq!(
+            classify_moves(
+                base(),
+                &[
+                    finding_in("src/c.js", "run", 21, 20),
+                    finding_in("src/d.js", "run", 17, 16),
+                ],
+                &paths
+            ),
+            [Inherited, Inherited]
+        );
+        // Both functions changed: the name does not tell which is which.
+        assert_eq!(
+            classify_moves(
+                base(),
+                &[
+                    finding_in("src/c.js", "run", 22, 21),
+                    finding_in("src/d.js", "run", 18, 17),
+                ],
+                &paths
+            ),
+            [Introduced, Introduced]
+        );
+    }
+
+    #[test]
+    fn moved_placeholder_name_needs_equal_values_and_lines() {
+        use AuditFindingAttribution::{Inherited, Introduced};
+        let base = || vec![finding_in("src/old.js", "<arrow>", 17, 16)];
+        let both = ["src/old.js", "src/new.js"];
+        assert_eq!(
+            classify_moves(
+                base(),
+                &[finding_in("src/new.js", "<arrow>", 17, 16)],
+                &both
+            ),
+            [Inherited]
+        );
+        assert_eq!(
+            classify_moves(
+                base(),
+                &[finding_in("src/new.js", "<arrow>", 18, 17)],
+                &both
+            ),
+            [Introduced]
+        );
+    }
+
+    #[test]
+    fn moved_function_name_can_contain_a_colon() {
+        assert_eq!(
+            classify_moves(
+                vec![finding_in("src/old.js", "it: parses", 17, 16)],
+                &[finding_in("src/new.js", "it: parses", 17, 16)],
+                &["src/old.js", "src/new.js"]
+            ),
+            [AuditFindingAttribution::Inherited]
         );
     }
 
