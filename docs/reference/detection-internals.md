@@ -53,7 +53,12 @@ error by suppressing a downstream detector.
   direct import of the origin wins over a barrel import. When a hop in the
   chain breaks the rules of the zone that owns the re-exporting file, only
   that hop gets a finding. Namespace and side-effect imports stay judged by
-  the direct target (issue #2939).
+  the direct target (issue #2939). The walk stops at the first file of a
+  zone with `publicApi: true` and judges the import by that file, so a
+  module can expose one public entry file. Hops before that file keep their
+  own checks, and a direct import of an internal file is still judged by
+  its own zone (issue #4760). The public file has its own zone, so an import
+  from inside the module to it crosses a zone too.
 - Framework and component intelligence:
   `crates/core/src/analyze/react_intel.rs`, route and render analyzers, and
   `crates/core/src/plugins/`.

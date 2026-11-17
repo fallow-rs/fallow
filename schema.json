@@ -2279,6 +2279,10 @@
             "string",
             "null"
           ]
+        },
+        "publicApi": {
+          "description": "Marks the files of this zone as the public API of a module.\n\nThe boundary check follows a named or default import through\nre-export chains to the file that declares the symbol. The walk stops\nat the first file of a public-API zone, and the check judges the\nimport by that file. Only the boundary check reads this flag.",
+          "type": "boolean"
         }
       },
       "required": [

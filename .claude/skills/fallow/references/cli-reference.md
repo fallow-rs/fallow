@@ -2709,6 +2709,9 @@ Config files are searched in priority order: `.fallowrc.json` > `.fallowrc.jsonc
   // Rules accept an optional `allowTypeOnly: [zones]` list that admits type-only imports
   // (`import type`, inline `{ type Foo }`, namespace type imports, and `export type` re-exports)
   // to the listed zones even when not present in `allow`. Mixed-specifier imports still fire.
+  // A zone with `"publicApi": true` holds the public entry files of a module. An import
+  // through such a file is judged by that file, not by the file that declares the symbol.
+  // List the publicApi zone before the zone of its module, because the first match wins.
   "boundaries": {
     "preset": "bulletproof"
     // Or:

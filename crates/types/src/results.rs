@@ -3831,9 +3831,9 @@ pub struct BoundaryViolation {
     /// The file making the disallowed import.
     #[serde(serialize_with = "serde_path::serialize")]
     pub from_path: PathBuf,
-    /// The file being imported that violates the boundary. When the import
-    /// goes through a re-export chain, this is the origin module that
-    /// declares the imported symbol, not the barrel.
+    /// The imported file that violates the boundary. Through a re-export chain,
+    /// the origin module that declares the symbol, not the barrel; a chain
+    /// stops at the first file of a `publicApi` zone, which it then names.
     #[serde(serialize_with = "serde_path::serialize")]
     pub to_path: PathBuf,
     /// The zone the importing file belongs to.
