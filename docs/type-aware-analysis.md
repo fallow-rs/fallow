@@ -77,7 +77,10 @@ The command does these steps:
    binary holds, before it reads the archive. Then it checks that the bundle
    manifest names this Fallow version, the Node platform and the wire protocol
    of this Fallow build.
-5. It unpacks the bundle into a directory with the Fallow version in its name:
+5. It unpacks the bundle into a temporary directory. A previous install of the
+   same version moves aside, the new one moves into place, and only then is
+   the previous one deleted. When the move fails, the previous install moves
+   back. The directory has the Fallow version in its name:
 
    | Platform | Directory |
    | --- | --- |
@@ -92,15 +95,20 @@ packages. Fallow never talks to the npm registry in this route.
 
 The companion still runs on Node. An editor can start `fallow-lsp` with a
 shorter `PATH` than your shell. When the companion finds no `node`, it reports
-that Node.js 20 or later must be on `PATH`.
+that Node.js 20 or later must be on `PATH`. At each start, the launcher also
+compares `process.platform` and `process.arch` of that `node` with
+`bundle.json`. A different Node (for example an x64 Node after setup with an
+arm64 Node) stops with a message that names `fallow type-aware setup`.
 
 After a Fallow upgrade, the installed companion stays in use while it speaks
 the same wire protocol (`wire_protocol_version` in
 `crates/api/type-aware-protocol.json`). Discovery prefers the install of the
 running Fallow version. Otherwise it takes the newest install with the same
-protocol. When the protocol changes, `type-aware status` names
+protocol, by semantic version precedence (a release before its prereleases),
+so the order of the directories does not change the choice. When the protocol changes, `type-aware status` names
 `fallow type-aware setup` again. `fallow type-aware cleanup` removes every
-install except the one that Fallow uses now. It also asks for approval, or
+install except the one that Fallow uses now, and the `.partial-` and
+`.previous-` directories that an interrupted setup leaves. It also asks for approval, or
 needs `--yes`.
 
 Windows has no setup bundle. There, the npm launcher starts the companion
@@ -120,7 +128,19 @@ runs the native TypeScript-Go backend. The canonical protocol manifest at
 `crates/api/type-aware-protocol.json` owns the wire version, semantic schema,
 operations, backend identity, and session envelope. Generated Rust and
 JavaScript constants keep the native client, sidecar, corpus, and editor bundle
-on that single contract. Fallow only changes a finding when the checker
+on that single contract. Fallow accepts a companion of another release when
+it speaks the same `wire_protocol_version`, so every change of the wire format
+must raise that version. `crates/api/type-aware-protocol-contract.json` pins a
+SHA-256 of the contract sources to the version: the manifest, the request and
+response modules of the sidecar (`protocol.mjs`, `cli.mjs`,
+`response-normalization.mjs`), and the serde wire types of the Rust client,
+with the shared `fallow-types` and `fallow-output` types that they use.
+Comments and test modules do not count.
+`node --test scripts/type-aware-protocol-contract.test.mjs` fails when the
+contract changes without a new version. Raise the version, run
+`npm run generate:contracts`, then run
+`node scripts/type-aware-protocol-contract.mjs --write`, which refuses a
+changed contract at the old version. Fallow only changes a finding when the checker
 resolves an exact declaration identity. Name-only matches are never enough.
 
 ### Experimental tsrs backend

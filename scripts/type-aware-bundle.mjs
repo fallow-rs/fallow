@@ -45,7 +45,25 @@ if ! command -v node >/dev/null 2>&1; then
   exit 2
 fi
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd -P) || exit 2
-exec node "$here/lib/fallow-type-aware.mjs" "$@"
+exec node --require "$here/platform-check.cjs" "$here/lib/fallow-type-aware.mjs" "$@"
+`;
+
+/** Loaded before the companion. The TypeScript platform package follows the
+ * Node that setup asked, so a different \`node\` on PATH at run time (another
+ * architecture after a Node switch) must stop with a clear message. */
+export const PLATFORM_CHECK = `"use strict";
+const { readFileSync } = require("node:fs");
+const { join } = require("node:path");
+
+const bundle = JSON.parse(readFileSync(join(__dirname, "bundle.json"), "utf8"));
+if (bundle.platform !== process.platform || bundle.arch !== process.arch) {
+  process.stderr.write(
+    \`fallow-type-aware: this companion is for Node on \${bundle.platform}-\${bundle.arch}, \` +
+      \`but the node on PATH runs on \${process.platform}-\${process.arch}. \` +
+      "Run \`fallow type-aware setup\` again with the node that starts Fallow.\\n",
+  );
+  process.exit(2);
+}
 `;
 
 const octal = (value, width) => value.toString(8).padStart(width - 1, "0") + "\0";
@@ -315,6 +333,7 @@ export const buildBundle = async ({
   };
   const files = [
     { path: "fallow-type-aware", data: Buffer.from(LAUNCHER), executable: true },
+    { path: "platform-check.cjs", data: Buffer.from(PLATFORM_CHECK) },
     { path: "bundle.json", data: Buffer.from(`${JSON.stringify(bundleManifest, null, 2)}\n`) },
     {
       path: "THIRD_PARTY_NOTICES.md",

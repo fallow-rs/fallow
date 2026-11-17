@@ -609,7 +609,7 @@ test("protocol v7 batches exact export and type-use queries through one Program"
       ]),
     );
 
-    assert.equal(response.protocol_version, 7);
+    assert.equal(response.protocol_version, WIRE_PROTOCOL_VERSION);
     assert.equal(response.operation, "semantic-queries");
     assert.equal(response.projects.length, 1);
     assert.equal(response.projects[0].program_reused, true);
@@ -3536,7 +3536,7 @@ test("rejects oversized stdin while reading", async () => {
 test("returns provenance for an empty semantic request", () => {
   const response = runSidecar(semanticRequest(sidecarRoot, [], { projects: [] }));
 
-  assert.equal(response.protocol_version, 7);
+  assert.equal(response.protocol_version, WIRE_PROTOCOL_VERSION);
   assert.equal(response.operation, "semantic-queries");
   assert.equal(response.sidecar_version, sidecarVersion);
   assert.equal(response.backend, BACKEND.family);

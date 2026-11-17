@@ -3,7 +3,7 @@ import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 import { gunzipSync, gzipSync } from "node:zlib";
@@ -27,7 +27,7 @@ const npmTarball = (files) =>
 
 const integrity = (data) => `sha512-${createHash("sha512").update(data).digest("base64")}`;
 
-const fixture = (t, { tamper = false } = {}) => {
+const fixture = (t, { tamper = false, platform = { platform: "linux", arch: "x64" } } = {}) => {
   const dir = mkdtempSync(join(tmpdir(), "fallow-type-aware-bundle-"));
   t.after(() => rmSync(dir, { recursive: true, force: true }));
   const sidecar = join(dir, "sidecar");
@@ -69,7 +69,7 @@ const fixture = (t, { tamper = false } = {}) => {
           resolved: "https://registry.example/typescript.tgz",
           integrity: integrity(typescript),
         },
-        "node_modules/@typescript/typescript-linux-x64": {
+        [`node_modules/@typescript/typescript-${platform.platform}-${platform.arch}`]: {
           version: "7.0.2",
           resolved: "https://registry.example/native.tgz",
           integrity: integrity(native),
@@ -103,6 +103,7 @@ test("a bundle holds the launcher, the manifest, the companion and both TypeScri
     "lib/node_modules/typescript/package.json",
     "lib/package.json",
     "lib/src/cli.mjs",
+    "platform-check.cjs",
   ]);
   assert.equal(files.get("fallow-type-aware").data.toString(), LAUNCHER);
   assert.ok(files.get("fallow-type-aware").executable);
@@ -183,3 +184,50 @@ test("the script starts its build when run as a process", (t) => {
   assert.notEqual(result.status, 0);
   assert.match(result.stderr, /no bundle for win32-x64/u);
 });
+
+const unpackBundle = (t, archive) => {
+  const dir = mkdtempSync(join(tmpdir(), "fallow-type-aware-unpacked-"));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  for (const file of readTar(gunzipSync(archive))) {
+    mkdirSync(dirname(join(dir, file.path)), { recursive: true });
+    writeFileSync(join(dir, file.path), file.data, { mode: file.executable ? 0o755 : 0o644 });
+  }
+  writeFileSync(
+    join(dir, "lib", "fallow-type-aware.mjs"),
+    'process.stdout.write("companion started");\n',
+  );
+  return dir;
+};
+
+test(
+  "the launcher refuses a Node of another platform than the bundle",
+  { skip: process.platform === "win32" },
+  async (t) => {
+    const platform = { platform: process.platform, arch: process.arch };
+    if (
+      !BUNDLE_PLATFORMS.some(
+        (entry) => entry.platform === platform.platform && entry.arch === platform.arch,
+      )
+    ) {
+      t.skip("no bundle for the platform of this runner");
+      return;
+    }
+    const bundle = await buildBundle({ ...platform, ...fixture(t, { platform }) });
+    const dir = unpackBundle(t, bundle.archive);
+    const launch = () => spawnSync(join(dir, "fallow-type-aware"), [], { encoding: "utf8" });
+
+    const same = launch();
+    assert.equal(same.status, 0, same.stderr);
+    assert.equal(same.stdout, "companion started");
+
+    const manifestPath = join(dir, "bundle.json");
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+    const otherArch = manifest.arch === "x64" ? "arm64" : "x64";
+    writeFileSync(manifestPath, JSON.stringify({ ...manifest, arch: otherArch }));
+    const other = launch();
+    assert.equal(other.status, 2);
+    assert.equal(other.stdout, "");
+    assert.match(other.stderr, new RegExp(`${manifest.platform}-${otherArch}`, "u"));
+    assert.match(other.stderr, /fallow type-aware setup/u);
+  },
+);

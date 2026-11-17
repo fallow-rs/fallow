@@ -34,6 +34,8 @@ const CONNECT_TIMEOUT_SECS: u64 = 30;
 const DOWNLOAD_TIMEOUT_SECS: u64 = 600;
 /// Prefix of the temporary directory of an install that is not complete.
 const PARTIAL_PREFIX: &str = ".partial-";
+/// Prefix of a previous install while a new one moves into its place.
+const PREVIOUS_PREFIX: &str = ".previous-";
 
 /// Public key that checks a bundle signature: the release key, or under the
 /// `test-sidecar-key` feature the key of the public test seed `[0xAA; 32]`.
@@ -281,12 +283,47 @@ fn install(request: &InstallRequest<'_>) -> Result<PathBuf, String> {
         return Err(error);
     }
     let target = version_dir(request.store, request.version);
-    remove_dir_if_present(&target)?;
-    std::fs::rename(&partial, &target).map_err(|error| {
+    if let Err(error) = replace_install(&partial, &target) {
         let _ = std::fs::remove_dir_all(&partial);
-        format!("cannot move the companion to {}: {error}", target.display())
-    })?;
+        return Err(error);
+    }
     Ok(target)
+}
+
+/// Move the unpacked `partial` directory to `target`. A previous install
+/// moves aside first and is deleted only after the new one is in place, so
+/// an error or a crash never leaves the user with no install. When the new
+/// directory cannot move in, the previous install moves back.
+fn replace_install(partial: &Path, target: &Path) -> Result<(), String> {
+    let name = target
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let previous = target.with_file_name(format!("{PREVIOUS_PREFIX}{name}-{}", std::process::id()));
+    remove_dir_if_present(&previous)?;
+    let moved_aside = match std::fs::rename(target, &previous) {
+        Ok(()) => true,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => false,
+        Err(error) => {
+            return Err(format!(
+                "cannot move the previous companion out of {}: {error}",
+                target.display()
+            ));
+        }
+    };
+    if let Err(error) = std::fs::rename(partial, target) {
+        if moved_aside {
+            let _ = std::fs::rename(&previous, target);
+        }
+        return Err(format!(
+            "cannot move the companion to {}: {error}",
+            target.display()
+        ));
+    }
+    if moved_aside {
+        let _ = std::fs::remove_dir_all(&previous);
+    }
+    Ok(())
 }
 
 fn bundle_manifest(files: &[archive::BundleFile]) -> Result<BundleManifest, String> {
@@ -354,8 +391,8 @@ pub struct CleanupInput {
 }
 
 /// Run `fallow type-aware cleanup`: remove every install in the setup
-/// directory except the one that discovery uses, and the temporary
-/// directories of an interrupted setup.
+/// directory except the one that discovery uses, and the temporary and
+/// previous directories of an interrupted setup.
 pub fn run_cleanup(input: &CleanupInput) -> ExitCode {
     let fail = |message: &str, code| failure(message, code, input.output, input.json_style);
     if !matches!(input.output, OutputFormat::Human) {
@@ -415,10 +452,9 @@ fn cleanup_targets(store: &Path) -> CleanupPlan {
                 .filter_map(Result::ok)
                 .filter(|entry| {
                     entry.file_type().is_ok_and(|kind| kind.is_dir())
-                        && entry
-                            .file_name()
-                            .to_str()
-                            .is_some_and(|name| name.starts_with(PARTIAL_PREFIX))
+                        && entry.file_name().to_str().is_some_and(|name| {
+                            name.starts_with(PARTIAL_PREFIX) || name.starts_with(PREVIOUS_PREFIX)
+                        })
                 })
                 .map(|entry| entry.path()),
         );

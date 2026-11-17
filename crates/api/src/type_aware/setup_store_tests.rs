@@ -183,3 +183,41 @@ fn bundle_signature_must_match_the_key_and_the_bytes() {
         .expect_err("a test signature does not match the release key");
     assert!(release.contains("release key"), "{release}");
 }
+
+#[test]
+fn installs_with_the_same_version_core_select_by_version_order_not_by_directory_order() {
+    let store = tempfile::tempdir().expect("store");
+    write_install(store.path(), "1.2.0-alpha.1", WIRE_PROTOCOL_VERSION);
+    write_install(store.path(), "1.2.0-beta.2", WIRE_PROTOCOL_VERSION);
+    write_install(store.path(), "1.2.0-beta.10", WIRE_PROTOCOL_VERSION);
+    let mut bundles = installed_bundles(store.path());
+    let newest = |bundles: &[InstalledBundle]| {
+        select_bundle(bundles, "2.0.0", WIRE_PROTOCOL_VERSION)
+            .expect("a compatible install")
+            .manifest
+            .fallow_version
+            .clone()
+    };
+    assert_eq!(newest(&bundles), "1.2.0-beta.10");
+    bundles.reverse();
+    assert_eq!(newest(&bundles), "1.2.0-beta.10");
+
+    write_install(store.path(), "1.2.0", WIRE_PROTOCOL_VERSION);
+    let mut bundles = installed_bundles(store.path());
+    assert_eq!(
+        newest(&bundles),
+        "1.2.0",
+        "a release wins over its prereleases"
+    );
+    bundles.reverse();
+    assert_eq!(newest(&bundles), "1.2.0");
+
+    assert_eq!(
+        select_bundle(&bundles, "1.2.0-beta.2", WIRE_PROTOCOL_VERSION)
+            .expect("the exact version")
+            .manifest
+            .fallow_version,
+        "1.2.0-beta.2",
+        "the exact version of the binary wins"
+    );
+}

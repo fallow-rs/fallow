@@ -577,7 +577,9 @@ Two release jobs make the bundles:
    `tools/type-aware-sidecar/package-lock.json`, downloads each tarball, and
    stops when its integrity differs from the lockfile. It writes a
    reproducible archive: sorted paths, zero times and owners, regular files
-   only. The job then unpacks the linux-x64 bundle and checks that the
+   only. The launcher loads `platform-check.cjs` before the companion, so a
+   `node` of another platform or architecture than the bundle stops with a
+   clear message. The job then unpacks the linux-x64 bundle and checks that the
    companion answers a `status` request with the release version.
 2. `type-aware-bundle-sign` signs each bundle with the binary signing key,
    checks the signature with the public key, and uploads the bundles as

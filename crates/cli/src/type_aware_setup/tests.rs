@@ -189,18 +189,24 @@ fn cleanup_removes_older_installs_and_partial_directories_only() {
     .expect("install an older version");
     let partial = store.path().join(format!("{PARTIAL_PREFIX}9.9.9-1"));
     std::fs::create_dir_all(&partial).expect("create partial directory");
+    let previous = store.path().join(format!("{PREVIOUS_PREFIX}{VERSION}-1"));
+    std::fs::create_dir_all(&previous).expect("create previous directory");
     let unrelated = store.path().join("notes");
     std::fs::create_dir_all(&unrelated).expect("create unrelated directory");
 
     let plan = cleanup_targets(store.path());
     assert_eq!(plan.keep, Some(current.clone()));
-    assert_eq!(plan.remove, vec![partial.clone(), older.clone()]);
+    assert_eq!(
+        plan.remove,
+        vec![partial.clone(), previous.clone(), older.clone()]
+    );
 
     remove_all(&plan.remove).expect("remove");
     assert!(current.is_dir());
     assert!(unrelated.is_dir());
     assert!(!older.exists());
     assert!(!partial.exists());
+    assert!(!previous.exists());
 }
 
 #[test]
@@ -257,4 +263,53 @@ fn download_reads_a_bounded_body_and_names_a_missing_release() {
     let (error, _) =
         download(&agent, &serve_once("404 Not Found", b""), 64).expect_err("missing asset");
     assert!(error.contains("--from <file>"), "{error}");
+}
+
+#[test]
+fn a_failed_replace_keeps_the_previous_install() {
+    let store = tempfile::tempdir().expect("store");
+    let target = store.path().join(VERSION);
+    std::fs::create_dir_all(&target).expect("create the previous install");
+    std::fs::write(target.join("fallow-type-aware"), "previous")
+        .expect("write the previous install");
+
+    let missing = store
+        .path()
+        .join(format!("{PARTIAL_PREFIX}{VERSION}-missing"));
+    replace_install(&missing, &target).expect_err("the new directory does not exist");
+
+    assert_eq!(
+        std::fs::read_to_string(target.join("fallow-type-aware"))
+            .expect("the previous install stays"),
+        "previous"
+    );
+    let names = std::fs::read_dir(store.path())
+        .expect("list store")
+        .map(|entry| entry.expect("entry").file_name())
+        .collect::<Vec<_>>();
+    assert_eq!(names, vec![std::ffi::OsString::from(VERSION)]);
+}
+
+#[test]
+fn a_replace_swaps_the_install_and_removes_the_previous_one() {
+    let store = tempfile::tempdir().expect("store");
+    let target = store.path().join(VERSION);
+    std::fs::create_dir_all(&target).expect("create the previous install");
+    std::fs::write(target.join("fallow-type-aware"), "previous")
+        .expect("write the previous install");
+    let partial = store.path().join(format!("{PARTIAL_PREFIX}{VERSION}-1"));
+    std::fs::create_dir_all(&partial).expect("create the new install");
+    std::fs::write(partial.join("fallow-type-aware"), "new").expect("write the new install");
+
+    replace_install(&partial, &target).expect("replace");
+
+    assert_eq!(
+        std::fs::read_to_string(target.join("fallow-type-aware")).expect("read the new install"),
+        "new"
+    );
+    let names = std::fs::read_dir(store.path())
+        .expect("list store")
+        .map(|entry| entry.expect("entry").file_name())
+        .collect::<Vec<_>>();
+    assert_eq!(names, vec![std::ffi::OsString::from(VERSION)]);
 }

@@ -5,4 +5,4 @@
 
 ### Changed
 
-- **A type-aware companion of another Fallow release stays valid while it speaks the same wire protocol.** Fallow compared the companion package version with its own version, so each upgrade needed a new companion. It now compares only the wire protocol version, so a companion stays in use until the protocol changes. The npm launcher still selects the companion of the exact version.
+- **A type-aware companion of another Fallow release stays valid while it speaks the same wire protocol.** Fallow compared the companion package version with its own version, so each upgrade needed a new companion. It now compares only the wire protocol version, so a companion stays in use until the protocol changes. The wire protocol is now 8, because the format changed three times at version 7. A CI check now ties the version to a hash of the wire contract, so a format change cannot ship at the old version. Companions of earlier releases are not accepted. The npm launcher still selects the companion of the exact version.

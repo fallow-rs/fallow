@@ -199,6 +199,8 @@ pub fn installed_bundles(store: &Path) -> Vec<InstalledBundle> {
 
 /// The install that discovery uses: the one of `current_version` when it
 /// speaks `protocol`, otherwise the newest install that speaks `protocol`.
+/// Versions compare by semantic version precedence, so the result does not
+/// depend on the order of `bundles`.
 #[must_use]
 pub fn select_bundle<'a>(
     bundles: &'a [InstalledBundle],
@@ -208,22 +210,79 @@ pub fn select_bundle<'a>(
     let compatible = bundles
         .iter()
         .filter(|bundle| bundle.manifest.wire_protocol_version == protocol);
-    let mut newest: Option<&InstalledBundle> = None;
-    for bundle in compatible {
-        if bundle.manifest.fallow_version == current_version {
-            return Some(bundle);
-        }
-        let Some(core) = version_core(&bundle.manifest.fallow_version) else {
-            continue;
-        };
-        let newer = newest
-            .and_then(|current| version_core(&current.manifest.fallow_version))
-            .is_none_or(|current| core > current);
-        if newer {
-            newest = Some(bundle);
+    if let Some(exact) = compatible
+        .clone()
+        .find(|bundle| bundle.manifest.fallow_version == current_version)
+    {
+        return Some(exact);
+    }
+    compatible
+        .filter_map(|bundle| Some((Version::parse(&bundle.manifest.fallow_version)?, bundle)))
+        .max_by(|(left, _), (right, _)| left.cmp(right))
+        .map(|(_, bundle)| bundle)
+}
+
+/// A `major.minor.patch[-prerelease][+build]` version, ordered by semantic
+/// version precedence. Build metadata does not count.
+#[derive(Debug, PartialEq, Eq)]
+struct Version<'a> {
+    core: (u64, u64, u64),
+    prerelease: Option<&'a str>,
+}
+
+impl<'a> Version<'a> {
+    fn parse(text: &'a str) -> Option<Self> {
+        let core = version_core(text)?;
+        let without_build = text.split_once('+').map_or(text, |(version, _)| version);
+        let prerelease = without_build.split_once('-').map(|(_, pre)| pre);
+        Some(Self { core, prerelease })
+    }
+}
+
+impl Ord for Version<'_> {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        use std::cmp::Ordering;
+        self.core
+            .cmp(&other.core)
+            .then_with(|| match (self.prerelease, other.prerelease) {
+                (None, None) => Ordering::Equal,
+                (None, Some(_)) => Ordering::Greater,
+                (Some(_), None) => Ordering::Less,
+                (Some(left), Some(right)) => compare_prerelease(left, right),
+            })
+    }
+}
+
+impl PartialOrd for Version<'_> {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+/// Numeric identifiers compare as numbers and sort before alphanumeric ones;
+/// a shorter list sorts first when every shared identifier is equal.
+fn compare_prerelease(left: &str, right: &str) -> std::cmp::Ordering {
+    use std::cmp::Ordering;
+    let mut left_parts = left.split('.');
+    let mut right_parts = right.split('.');
+    loop {
+        match (left_parts.next(), right_parts.next()) {
+            (None, None) => return Ordering::Equal,
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(a), Some(b)) => {
+                let order = match (a.parse::<u64>(), b.parse::<u64>()) {
+                    (Ok(a), Ok(b)) => a.cmp(&b),
+                    (Ok(_), Err(_)) => Ordering::Less,
+                    (Err(_), Ok(_)) => Ordering::Greater,
+                    (Err(_), Err(_)) => a.cmp(b),
+                };
+                if order != Ordering::Equal {
+                    return order;
+                }
+            }
         }
     }
-    newest
 }
 
 /// The companion executable of the selected install, when one exists.
