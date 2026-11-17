@@ -2,5 +2,8 @@
   "name": "hono-html-tagged-template",
   "version": "1.0.0",
   "private": true,
-  "main": "src/layout.ts"
+  "main": "src/layout.ts",
+  "dependencies": {
+    "hono": "^4.0.0"
+  }
 }
