@@ -40,7 +40,7 @@ enum GateBlocker {
     /// The installed native gate differs from the verified managed template.
     ModifiedNativeGate,
     /// PATH resolves a different fallow than this build, and the gate runs
-    /// what PATH resolves.
+    /// what PATH resolves because the project has no local launcher.
     PathVersion(String),
 }
 
@@ -159,6 +159,11 @@ fn native_reader_inventory(root: &Path) -> NativeGateState {
             NativeGateState::Unverified
         }
     };
+    // The gate tries the project-local launcher before the fallow on PATH.
+    let local = root.join("node_modules/.bin/fallow");
+    if is_executable_file(&local) {
+        return candidate_state(&local);
+    }
     if let Some(path) = mcp::find_on_path("fallow") {
         return candidate_state(&path);
     }
@@ -184,12 +189,17 @@ fn native_reader_inventory(root: &Path) -> NativeGateState {
 /// Version of the `fallow` PATH resolves, when that binary is not this one and
 /// reports a version other than this build's.
 ///
-/// The gate prefers PATH over every project-local fallback, so the version it
-/// runs is independent of the checkout that installed it. Returns `None` when
-/// nothing resolves, when PATH resolves this very executable, or when the
-/// probe fails: the gate has further fallbacks and an unreadable binary is not
-/// evidence of drift.
+/// The gate runs an executable project-local `node_modules/.bin/fallow` first
+/// and the `fallow` on PATH only when no such launcher exists. Returns `None`
+/// when that launcher exists, when nothing resolves, when PATH resolves this
+/// very executable, or when the probe fails: the gate has further fallbacks
+/// and an unreadable binary is not evidence of drift. Status does not run
+/// project code, so a local launcher that is executable but cannot start
+/// still counts as the runner, although the gate then falls back to PATH.
 fn path_fallow_drift(root: &Path) -> Option<String> {
+    if is_executable_file(&root.join("node_modules/.bin/fallow")) {
+        return None;
+    }
     let candidate = std::path::absolute(mcp::find_on_path("fallow")?).ok()?;
     let resolved = dunce::canonicalize(&candidate).unwrap_or_else(|_| candidate.clone());
     // Resolve directory aliases without losing ownership of a final symlink.
@@ -228,6 +238,23 @@ fn path_fallow_drift(root: &Path) -> Option<String> {
     }
     let reported = parse_version_output(&String::from_utf8_lossy(&output.stdout))?;
     (reported != env!("CARGO_PKG_VERSION")).then_some(reported)
+}
+
+/// Whether `path` is a file that the gate's `[ -x ]` test accepts. Windows
+/// has no executable bit, so there a file is enough.
+fn is_executable_file(path: &Path) -> bool {
+    let Ok(metadata) = std::fs::metadata(path) else {
+        return false;
+    };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        metadata.is_file() && metadata.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        metadata.is_file()
+    }
 }
 
 /// Read the version out of a `fallow --version` line (`fallow 3.23.0`).

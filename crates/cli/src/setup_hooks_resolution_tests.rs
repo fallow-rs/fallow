@@ -168,7 +168,8 @@ fn gate_blocks_when_the_only_launcher_cannot_run() {
     assert!(!stderr.contains("binary not found"), "{stderr}");
 }
 
-/// The gate reports the first launcher that failed, not a later one.
+/// The gate reports the first launcher that failed, not a later one. The
+/// project-local launcher comes before the one on PATH.
 #[test]
 fn gate_names_the_first_broken_launcher() {
     let tmp = tempdir().unwrap();
@@ -187,8 +188,38 @@ fn gate_names_the_first_broken_launcher() {
     let stderr = String::from_utf8_lossy(&output.stderr);
 
     assert_eq!(output.status.code(), Some(2), "{stderr}");
-    assert!(stderr.contains("(path shim broken)"), "{stderr}");
-    assert!(stderr.contains("bin/fallow cannot print"), "{stderr}");
+    assert!(stderr.contains("(local launcher broken)"), "{stderr}");
+    assert!(
+        stderr.contains("./node_modules/.bin/fallow cannot print"),
+        "{stderr}"
+    );
+}
+
+/// A project pins its fallow version in its dependencies. A global install
+/// on PATH can have another version and another packaging, so the gate must
+/// run the project-local launcher when both work.
+#[test]
+fn gate_prefers_the_project_local_launcher_over_path() {
+    let tmp = tempdir().unwrap();
+    let project = tmp.path();
+    let bin = project.join("bin");
+    write_stale_fallow(
+        &bin.join("fallow"),
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'fallow 2.10.0'; exit 0; fi\nexit 0\n",
+    );
+    write_stale_fallow(
+        &project.join("node_modules/.bin/fallow"),
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'fallow 2.30.0'; exit 0; fi\nexit 0\n",
+    );
+
+    let output = probe_gate_resolution(project, &bin);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+
+    assert_eq!(output.status.code(), Some(2), "{stderr}");
+    assert!(
+        stderr.contains("./node_modules/.bin/fallow is fallow 2.30.0"),
+        "the project-local launcher must be the runner the script chose: {stderr}"
+    );
 }
 
 /// With no launcher at all, the gate keeps the commit and names the skip.
@@ -206,4 +237,60 @@ fn gate_names_the_skip_when_no_launcher_exists() {
         stderr.contains("fallow binary not found"),
         "the gate must name the skip: {stderr}"
     );
+}
+
+/// The version-floor message names the fix for the runner that the gate
+/// chose: the devDependency for a project-local launcher, the global install
+/// for a fallow on PATH.
+#[test]
+fn gate_floor_message_names_the_fix_for_the_chosen_runner() {
+    let version =
+        "#!/bin/sh\nif [ \"$1\" = \"--version\" ]; then echo 'fallow 2.30.0'; exit 0; fi\nexit 0\n";
+
+    let tmp = tempdir().unwrap();
+    let project = tmp.path();
+    write_stale_fallow(&project.join("node_modules/.bin/fallow"), version);
+    std::fs::create_dir_all(project.join("empty-bin")).unwrap();
+    let output = probe_gate_resolution(project, &project.join("empty-bin"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("update the fallow devDependency of the project"),
+        "{stderr}"
+    );
+    assert!(!stderr.contains("upgrade the fallow on PATH"), "{stderr}");
+
+    let tmp = tempdir().unwrap();
+    let project = tmp.path();
+    write_stale_fallow(&project.join("bin/fallow"), version);
+    let output = probe_gate_resolution(project, &project.join("bin"));
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("upgrade the fallow on PATH"), "{stderr}");
+    assert!(!stderr.contains("devDependency"), "{stderr}");
+}
+
+/// The JSON reader uses the same order as the audit runner: the
+/// project-local launcher before the fallow on PATH.
+#[test]
+fn gate_json_reader_prefers_the_project_local_launcher_over_path() {
+    let tmp = tempdir().unwrap();
+    let project = tmp.path();
+    let log = project.join("calls.log");
+    let stub = |name: &str| {
+        format!(
+            "#!/bin/sh\necho \"{name} $*\" >> '{}'\nif [ \"$1 $2 $3\" = 'hooks gate-runtime probe' ]; then echo fallow-gate-json-v1; exit 0; fi\nif [ \"$1\" = \"--version\" ]; then echo 'fallow 2.30.0'; exit 0; fi\nexit 1\n",
+            log.display()
+        )
+    };
+    write_stale_fallow(&project.join("bin/fallow"), &stub("path"));
+    write_stale_fallow(&project.join("node_modules/.bin/fallow"), &stub("local"));
+
+    let output = probe_gate_resolution(project, &project.join("bin"));
+    let calls = std::fs::read_to_string(&log).unwrap_or_default();
+
+    assert!(
+        calls.contains("local hooks gate-runtime probe"),
+        "{calls}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(!calls.contains("path hooks gate-runtime"), "{calls}");
 }
