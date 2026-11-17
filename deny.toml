@@ -6,7 +6,10 @@
 # (often the first signal of a compromised or withdrawn release) is treated the
 # same way. Every entry added to `ignore` must carry a one-line justification so
 # the suppression is auditable, not a silent hole.
-ignore = []
+ignore = [
+    # chrono is unmaintained and has no fixed release. rmcp and schemars depend on it, so fallow cannot remove it yet.
+    { id = "RUSTSEC-2026-0543", reason = "chrono is unmaintained (not a vulnerability); rmcp and schemars still depend on it" },
+]
 yanked = "deny"
 
 [licenses]
