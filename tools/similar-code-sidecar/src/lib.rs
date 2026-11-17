@@ -79,7 +79,6 @@ struct CliError {
     retryable: bool,
 }
 
-#[must_use]
 pub fn run() -> ExitCode {
     let cli = Cli::parse();
     match run_command(cli.command) {

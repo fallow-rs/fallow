@@ -95,8 +95,8 @@ impl ConfigSources {
     #[must_use]
     pub fn read(config_path: Option<&Path>) -> Self {
         let files = config_path
-            .map_or_default(fallow_config::FallowConfig::local_source_files)
             .into_iter()
+            .flat_map(fallow_config::FallowConfig::local_source_files)
             .map(|path| {
                 let content = std::fs::read(&path).ok();
                 (path, content)
