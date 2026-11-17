@@ -97,6 +97,7 @@ fn top_level_changes(base: &ConfigChain, head: &ConfigChain) -> Vec<Weakening> {
         if strictness(head_severity) < strictness(base_severity) {
             changes.push(Weakening {
                 kind: WeakenedTestsKind::RuleSeverity,
+                message: rule_message(&format!("{key}: {base_severity} -> {head_severity}")),
                 evidence: format!("{key}: {base_severity} -> {head_severity}"),
                 head_file,
                 base_file,
@@ -149,12 +150,14 @@ fn override_changes(base: &ConfigChain, head: &ConfigChain) -> Vec<Weakening> {
                 },
             };
             if strictness(*head_severity) < strictness(base_severity) {
+                let evidence = format!(
+                    "{key}: {base_severity} -> {head_severity} for {}",
+                    entry.files.join(", ")
+                );
                 changes.push(Weakening {
                     kind: WeakenedTestsKind::RuleSeverity,
-                    evidence: format!(
-                        "{key}: {base_severity} -> {head_severity} for {}",
-                        entry.files.join(", ")
-                    ),
+                    message: rule_message(&evidence),
+                    evidence,
                     head_file: head_file.clone(),
                     base_file: from,
                     line_match: LineMatch::Rule {
@@ -166,6 +169,10 @@ fn override_changes(base: &ConfigChain, head: &ConfigChain) -> Vec<Weakening> {
         }
     }
     changes
+}
+
+fn rule_message(evidence: &str) -> String {
+    format!("The change makes a rule less strict ({evidence})")
 }
 
 /// The rule part of one `overrides` entry.

@@ -985,3 +985,76 @@ fn a_config_in_a_parent_directory_of_the_root_reports_with_a_relative_path() {
         "{json}"
     );
 }
+
+#[test]
+fn new_entries_in_other_ignore_keys_report_with_the_key_name() {
+    let tmp = fixture(Some(
+        r#"{"ignoreDependencies": ["left-pad"], "ignoreExports": [{"file": "src/a.ts", "exports": ["a"]}]}"#,
+    ));
+    let dir = tmp.path();
+    fs::write(
+        dir.join(".fallowrc.json"),
+        "{\n  \"entry\": [\"src/index.test.ts\"],\n  \"ignoreDependencies\": [\"left-pad\", \"@acme/*\"],\n  \"ignoreExports\": [{\"file\": \"src/a.ts\", \"exports\": [\"a\"]}, {\"file\": \"src/index.ts\", \"exports\": [\"*\"]}],\n  \"ignoreUnresolvedImports\": [\"virtual:*\"],\n  \"production\": {\"ignore\": [\"src/legacy/**\"]},\n  \"health\": {\"ignore\": [\"src/index.ts\"]}\n}\n",
+    )
+    .unwrap();
+    let (_, json) = audit_json(dir, &[]);
+    let mut hits = config_findings(&json);
+    hits.sort();
+    assert_eq!(
+        hits,
+        vec![
+            config_finding(
+                "ignore-pattern",
+                ".fallowrc.json",
+                Some(2),
+                "entry: + src/index.test.ts"
+            ),
+            config_finding(
+                "ignore-pattern",
+                ".fallowrc.json",
+                Some(3),
+                "ignoreDependencies: + @acme/*"
+            ),
+            config_finding(
+                "ignore-pattern",
+                ".fallowrc.json",
+                Some(4),
+                r#"ignoreExports: + {"file":"src/index.ts","exports":["*"]}"#
+            ),
+            config_finding(
+                "ignore-pattern",
+                ".fallowrc.json",
+                Some(5),
+                "ignoreUnresolvedImports: + virtual:*"
+            ),
+            config_finding(
+                "ignore-pattern",
+                ".fallowrc.json",
+                Some(6),
+                "production.ignore: + src/legacy/**"
+            ),
+            config_finding(
+                "ignore-pattern",
+                ".fallowrc.json",
+                Some(7),
+                "health.ignore: + src/index.ts"
+            ),
+        ],
+        "{json}"
+    );
+}
+
+#[test]
+fn narrower_entries_in_other_ignore_keys_do_not_report() {
+    let tmp = fixture(Some(
+        r#"{"entry": ["src/**/*.ts"], "ignoreDependencies": ["@acme/*"], "ignoreExports": [{"file": "src/**", "exports": ["*"]}], "production": {"ignore": ["src/**"]}}"#,
+    ));
+    let dir = tmp.path();
+    fs::write(
+        dir.join(".fallowrc.json"),
+        r#"{"entry": ["src/index.ts"], "ignoreDependencies": ["@acme/ui"], "ignoreExports": [{"file": "src/index.ts", "exports": ["price"]}], "production": true}"#,
+    )
+    .unwrap();
+    let (_, json) = audit_json(dir, &[]);
+    assert!(config_findings(&json).is_empty(), "{json}");
+}

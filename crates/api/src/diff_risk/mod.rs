@@ -381,21 +381,12 @@ fn detect_config_changes(
         BaseRead::Missing | BaseRead::Error => None,
     };
     for hit in sides.hits(&root, &mut read_base_text) {
-        let message = match hit.kind {
-            WeakenedTestsKind::IgnorePattern => {
-                format!(
-                    "The change removes paths from the analysis ({})",
-                    hit.evidence
-                )
-            }
-            _ => format!("The change makes a rule less strict ({})", hit.evidence),
-        };
         raw.push(RawFinding {
             rule: DiffRiskRule::WeakenedTests,
             kind: Some(hit.kind),
             path: hit.path,
             line: hit.line,
-            message,
+            message: hit.message,
             evidence: hit.evidence,
             related: Vec::new(),
             min_severity: Some(min_severity),

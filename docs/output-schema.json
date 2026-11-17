@@ -32896,7 +32896,7 @@
         {
           "type": "string",
           "const": "ignore-pattern",
-          "description": "A new or broader `ignorePatterns` or `ignoreFindings` entry in a\nFallow config, or a removed `!` exception."
+          "description": "A new or broader entry in a Fallow config key that removes files or\nfindings from the analysis, or makes code count as used, such as\n`ignorePatterns`, `entry` or `ignoreDependencies`. A removed `!`\nexception also has this kind. The evidence names the key."
         }
       ],
       "description": "How a `weakened-tests` finding weakened the tests."

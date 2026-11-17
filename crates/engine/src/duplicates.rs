@@ -15,6 +15,8 @@ mod detector;
 pub(crate) use detector::token_types;
 pub(crate) use detector::types;
 
+pub use detector::DUPES_DEFAULT_IGNORES;
+
 /// Detector internals re-exported for the engine's own benches and
 /// integration tests; not part of the supported engine API surface.
 #[doc(hidden)]
