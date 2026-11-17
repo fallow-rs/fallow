@@ -1,0 +1,1 @@
+{"name":"mutation-plan-ignored","private":true,"version":"1.0.0","main":"src/index.ts","scripts":{"test":"vitest run"},"devDependencies":{"vitest":"^4.1.0"}}

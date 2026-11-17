@@ -33389,6 +33389,13 @@
           },
           "description": "The paths of a `paths` scope that select no file."
         },
+        "unmatched_path_reasons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MutationUnmatchedPath"
+          },
+          "description": "The reason for each entry of `unmatched_paths`, in the same order.\nAbsent when `unmatched_paths` is empty."
+        },
         "unloaded_paths": {
           "type": "array",
           "items": {
@@ -33572,6 +33579,13 @@
             "type": "string"
           },
           "description": "The paths of a `paths` scope that select no file."
+        },
+        "unmatched_path_reasons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MutationUnmatchedPath"
+          },
+          "description": "The reason for each entry of `unmatched_paths`, in the same order.\nAbsent when `unmatched_paths` is empty."
         },
         "runner": {
           "description": "The selected test runner and the verdict on its installed version.",
@@ -38436,6 +38450,24 @@
         }
       ],
       "description": "What is wrong with one `fallow-ignore-start` or `fallow-ignore-end`\nmarker. A marker with a problem has no effect."
+    },
+    "MutationUnmatchedPath": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The path as given, with forward slashes. The same value is in\n`unmatched_paths`."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Why the path selects no file, kebab-case: `not-found` (the path does\nnot exist), `ignored` (the ignore globs of the config exclude the\npath or a file under it) or `no-source-file` (the path holds only\ntest code, declaration files or files outside the module graph)."
+        }
+      },
+      "required": [
+        "path",
+        "reason"
+      ],
+      "description": "A path of a `paths` scope that selects no file, with the reason."
     }
   }
 }
