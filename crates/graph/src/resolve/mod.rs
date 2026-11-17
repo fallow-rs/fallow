@@ -31,6 +31,7 @@ mod path_info;
 mod re_exports;
 mod react_native;
 mod require_imports;
+mod root_relative;
 mod specifier;
 mod static_imports;
 #[cfg(test)]

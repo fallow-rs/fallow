@@ -31,6 +31,7 @@ use super::path_info::{
     normalize_npm_specifier,
 };
 use super::react_native::{build_condition_names, build_extensions};
+use super::root_relative::try_root_relative_specifier;
 use super::tsconfig_scope::{glob_values_match, resolve_tsconfig_relative_path};
 use super::types::{DenoImportMapEntry, ResolveContext, ResolveResult};
 use super::url_suffix::{resolve_failed_bare_query_specifier, strip_bare_query, strip_url_suffix};
@@ -163,96 +164,6 @@ fn find_yarn_pnp_manifest_dir(root: &Path) -> Option<PathBuf> {
     root.ancestors()
         .find(|dir| dir.join(YARN_PNP_MANIFEST).traced_is_file())
         .map(Path::to_path_buf)
-}
-
-fn try_root_relative_specifier(
-    ctx: &ResolveContext<'_>,
-    from_file: &Path,
-    specifier: &str,
-    from_style: bool,
-) -> Option<ResolveResult> {
-    if !specifier.starts_with('/') || !is_root_relative_importer(from_file) {
-        return None;
-    }
-
-    let relative = format!(".{specifier}");
-    let source_dir = from_file.parent().unwrap_or(ctx.root);
-    if let Some(result) = resolve_root_relative_from_dir(ctx, source_dir, &relative, from_style) {
-        return Some(result);
-    }
-    if let Some(package_dir) = nearest_package_dir_below_root(ctx.root, source_dir)
-        && let Some(result) =
-            resolve_root_relative_from_dir(ctx, package_dir, &relative, from_style)
-    {
-        return Some(result);
-    }
-    if source_dir != ctx.root
-        && let Some(result) = resolve_root_relative_from_dir(ctx, ctx.root, &relative, from_style)
-    {
-        return Some(result);
-    }
-    if let Some(result) = try_html_root_relative_asset(ctx, from_file, specifier) {
-        return Some(result);
-    }
-    Some(ResolveResult::Unresolvable(specifier.to_string()))
-}
-
-/// Return the nearest directory above `source_dir` that holds a
-/// `package.json`, when that directory is below the project root.
-///
-/// A Vite root is usually the package directory, so a root-relative
-/// specifier in a nested package resolves against that package. The source
-/// directory and the project root are tried separately.
-fn nearest_package_dir_below_root<'p>(root: &Path, source_dir: &'p Path) -> Option<&'p Path> {
-    source_dir
-        .ancestors()
-        .skip(1)
-        .take_while(|dir| *dir != root && dir.starts_with(root))
-        .find(|dir| dir.join("package.json").traced_is_file())
-}
-
-fn is_root_relative_importer(from_file: &Path) -> bool {
-    from_file.extension().is_some_and(|extension| {
-        matches!(
-            extension.to_str(),
-            Some(
-                "html"
-                    | "jsx"
-                    | "tsx"
-                    | "js"
-                    | "ts"
-                    | "mjs"
-                    | "cjs"
-                    | "mts"
-                    | "cts"
-                    | "gts"
-                    | "gjs"
-            )
-        )
-    })
-}
-
-fn resolve_root_relative_from_dir(
-    ctx: &ResolveContext<'_>,
-    source_dir: &Path,
-    relative: &str,
-    style_context: bool,
-) -> Option<ResolveResult> {
-    let resolved = resolve_with_extension_policy(ctx, source_dir, relative, style_context).ok()?;
-    let resolved_path = resolved.path();
-    if let Some(&file_id) = ctx.raw_path_to_id.get(resolved_path) {
-        return Some(ResolveResult::InternalModule(file_id));
-    }
-    let canonical = ctx.canonicalize_cache.get(resolved_path)?;
-    if let Some(&file_id) = ctx.path_to_id.get(canonical.as_path()) {
-        return Some(ResolveResult::InternalModule(file_id));
-    }
-    if let Some(fallback) = ctx.canonical_fallback
-        && let Some(file_id) = fallback.get(&canonical)
-    {
-        return Some(ResolveResult::InternalModule(file_id));
-    }
-    None
 }
 
 fn nearest_tsconfig_path(root: &Path, from_file: &Path) -> Option<PathBuf> {
@@ -531,7 +442,7 @@ fn try_static_dir_mapping(
     })
 }
 
-fn try_html_root_relative_asset(
+pub(super) fn try_html_root_relative_asset(
     ctx: &ResolveContext<'_>,
     from_file: &Path,
     specifier: &str,
@@ -1264,7 +1175,7 @@ fn resolve_style_canonical_path(
 /// outside the root is a workspace package reached through its install symlink,
 /// which must keep npm-package accounting so the declared dependency is credited
 /// (see `package_usage_name_for_external_bare_specifier`).
-fn is_inside_project_root(ctx: &ResolveContext<'_>, path: &Path) -> bool {
+pub(super) fn is_inside_project_root(ctx: &ResolveContext<'_>, path: &Path) -> bool {
     if path.starts_with(ctx.root) {
         return true;
     }
