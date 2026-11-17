@@ -1122,8 +1122,10 @@ fn is_eager_glob_options(argument: &Argument<'_>) -> bool {
 }
 
 /// The Vite query parameters that make `import.meta.glob` load each match as
-/// a string (`raw`, `inline`) or a URL (`url`) instead of as a module.
-const ASSET_GLOB_QUERY_PARAMS: [&str; 3] = ["raw", "url", "inline"];
+/// a string (`raw`) or a URL (`url`) instead of as a module. Vite applies
+/// `inline` only to CSS, asset files and workers, so a script match with
+/// `?inline` still loads as a module.
+const ASSET_GLOB_QUERY_PARAMS: [&str; 2] = ["raw", "url"];
 
 /// The values of the legacy `as` option that load each match as a string or
 /// a URL.
@@ -1135,7 +1137,7 @@ const GLOB_IMPORT_NAMESPACE: &str = "*";
 /// What each match of an `import.meta.glob` call gives the importer, read from
 /// the options argument.
 ///
-/// A raw, url or inline query (or the legacy `as: 'raw'` or `as: 'url'`)
+/// A raw or url query (or the legacy `as: 'raw'` or `as: 'url'`)
 /// reads each match as text or a URL, so no export of a match is used. The
 /// `import` option selects one export. Every other shape keeps the whole
 /// module: no options, an options value that is not an object literal, a

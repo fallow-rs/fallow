@@ -2691,7 +2691,6 @@ fn import_meta_glob_asset_queries_import_nothing() {
     for options in [
         "{ query: '?raw' }",
         "{ query: '?url' }",
-        "{ query: '?inline' }",
         "{ query: '?url&inline' }",
         "{ query: '?raw', import: 'default', eager: true }",
         "{ as: 'raw' }",
@@ -2722,6 +2721,8 @@ fn import_meta_glob_module_shapes_import_the_namespace() {
     for source in [
         "import.meta.glob('./src/*.ts');",
         "import.meta.glob('./src/*.ts', { eager: true });",
+        "import.meta.glob('./mods/*.ts', { query: '?inline', eager: true });",
+        "import.meta.glob('./workers/*.ts', { query: '?worker&inline' });",
         "import.meta.glob('./src/*.ts', { import: '*' });",
         "import.meta.glob('./src/*.ts', { query: '?custom', import: 'default' });",
         "import.meta.glob('./src/*.ts', { query: '?raw=true' });",

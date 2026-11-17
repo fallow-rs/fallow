@@ -25,7 +25,7 @@ pub struct DynamicImportPattern {
     /// What each match gives the importer, which decides the exports that the
     /// pattern credits. A pattern loads the whole module by default
     /// (`Namespace`). The `import` option of `import.meta.glob` selects one
-    /// export (`Default` or `Named`). A raw, url or inline query reads each
+    /// export (`Default` or `Named`). A raw or url query reads each
     /// match as text or a URL, so the match stays in use but no export gets
     /// credit (`SideEffect`).
     pub imported_name: ImportedName,

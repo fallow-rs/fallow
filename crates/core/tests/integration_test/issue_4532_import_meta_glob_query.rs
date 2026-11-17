@@ -1,6 +1,6 @@
-//! An `import.meta.glob` with a raw, url or inline query loads its matches as
-//! strings or URLs, so it keeps the matches in use but credits none of their
-//! exports. The `import` option credits only the named export (issue #4532).
+//! An `import.meta.glob` with a raw or url query loads its matches as strings
+//! or URLs, so it keeps the matches in use but credits none of their exports.
+//! The `import` option credits only the named export (issue #4532).
 
 use super::common::{create_config, fixture_path};
 
@@ -53,16 +53,9 @@ fn unused_exports_in<'a>(findings: &'a Findings, dir: &str) -> Vec<&'a str> {
 }
 
 #[test]
-fn raw_url_and_inline_globs_keep_matches_in_use() {
+fn raw_and_url_globs_keep_matches_in_use() {
     let findings = findings();
-    for dir in [
-        "raw",
-        "url",
-        "inline",
-        "legacy-raw",
-        "legacy-url",
-        "raw-named",
-    ] {
+    for dir in ["raw", "url", "legacy-raw", "legacy-url", "raw-named"] {
         let file = format!("src/{dir}/a.ts");
         assert!(
             !findings.unused_files.contains(&file),
@@ -73,9 +66,9 @@ fn raw_url_and_inline_globs_keep_matches_in_use() {
 }
 
 #[test]
-fn raw_url_and_inline_globs_credit_no_export() {
+fn raw_and_url_globs_credit_no_export() {
     let findings = findings();
-    for dir in ["url", "inline", "legacy-raw", "legacy-url", "raw-named"] {
+    for dir in ["url", "legacy-raw", "legacy-url", "raw-named"] {
         assert_eq!(
             unused_exports_in(&findings, dir),
             vec!["default", "setup", "unused"],
@@ -114,10 +107,29 @@ fn import_option_credits_only_the_named_export() {
     );
 }
 
+/// Vite applies `?inline` only to CSS, asset files and workers. A script
+/// module with `?inline` still loads as a module.
+#[test]
+fn inline_query_on_script_modules_credits_every_export() {
+    let findings = findings();
+    assert!(
+        !findings
+            .unused_files
+            .contains(&"src/inline/a.ts".to_string()),
+        "the `inline` glob loads src/inline/a.ts, found {:?}",
+        findings.unused_files
+    );
+    assert!(
+        unused_exports_in(&findings, "inline").is_empty(),
+        "`?inline` loads a `.ts` match as a module, found {:?}",
+        findings.unused_exports
+    );
+}
+
 #[test]
 fn module_globs_keep_crediting_every_export() {
     let findings = findings();
-    for dir in ["plain", "star", "custom", "dynamic-options"] {
+    for dir in ["plain", "star", "inline", "custom", "dynamic-options"] {
         assert!(
             unused_exports_in(&findings, dir).is_empty(),
             "the `{dir}` glob loads its matches as modules, found {:?}",

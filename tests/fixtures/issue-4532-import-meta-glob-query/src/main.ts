@@ -9,7 +9,7 @@ const globs = [
 		eager: true,
 	}),
 	import.meta.glob("./url/*.ts", { query: "?url" }),
-	import.meta.glob("./inline/*.ts", { query: "?inline" }),
+	import.meta.glob("./inline/*.ts", { query: "?inline", eager: true }),
 	import.meta.glob("./legacy-raw/*.ts", { as: "raw" }),
 	import.meta.glob("./legacy-url/*.ts", { as: "url" }),
 	import.meta.glob("./plain/*.ts"),
