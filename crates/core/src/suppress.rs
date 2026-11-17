@@ -7,6 +7,7 @@ pub use fallow_types::suppress::{
     IssueKind, PolicyRuleSuppression, Suppression, UnknownSuppressionKind, is_file_suppressed,
     is_suppressed, issue_kind_to_kebab,
 };
+use fallow_types::suppress::{RangeMarkerProblem, RangeMarkerProblemKind, SuppressionScope};
 
 pub use fallow_extract::suppress::parse_suppressions_from_source;
 
@@ -68,6 +69,9 @@ pub struct SuppressionContext<'a> {
     /// Emitted as `StaleSuppression` with `kind_known: false` in `find_stale`.
     /// See issue #449.
     unknown_kinds: FxHashMap<FileId, &'a [UnknownSuppressionKind]>,
+    /// Range markers with a problem. Listed by the suppression inventory
+    /// only: clone detection reports them.
+    range_problems: FxHashMap<FileId, &'a [RangeMarkerProblem]>,
 }
 
 impl<'a> SuppressionContext<'a> {
@@ -97,10 +101,17 @@ impl<'a> SuppressionContext<'a> {
             .map(|m| (m.file_id, m.unknown_suppression_kinds.as_slice()))
             .collect();
 
+        let range_problems: FxHashMap<FileId, &[RangeMarkerProblem]> = modules
+            .iter()
+            .filter(|m| !m.range_marker_problems.is_empty())
+            .map(|m| (m.file_id, m.range_marker_problems.as_slice()))
+            .collect();
+
         Self {
             by_file,
             used,
             unknown_kinds,
+            range_problems,
         }
     }
 
@@ -122,6 +133,7 @@ impl<'a> SuppressionContext<'a> {
             by_file,
             used,
             unknown_kinds: FxHashMap::default(),
+            range_problems: FxHashMap::default(),
         }
     }
 
@@ -131,6 +143,7 @@ impl<'a> SuppressionContext<'a> {
             by_file: FxHashMap::default(),
             used: FxHashMap::default(),
             unknown_kinds: FxHashMap::default(),
+            range_problems: FxHashMap::default(),
         }
     }
 
@@ -164,7 +177,7 @@ impl<'a> SuppressionContext<'a> {
             return false;
         };
         for (i, s) in supps.iter().enumerate() {
-            if s.line == 0 && s.matches_issue_kind(0, kind) {
+            if s.scope == SuppressionScope::File && s.matches_issue_kind(0, kind) {
                 used[i].store(true, Ordering::Relaxed);
                 return true;
             }
@@ -296,7 +309,8 @@ impl<'a> SuppressionContext<'a> {
                     origin: SuppressionOrigin::Comment {
                         issue_kind: s.target_token(),
                         reason: None,
-                        is_file_level: s.line == 0,
+                        is_file_level: s.scope == SuppressionScope::File,
+                        is_range: s.range_end_line().is_some(),
                         kind_known: true,
                     },
                     missing_reason: true,
@@ -322,6 +336,7 @@ impl<'a> SuppressionContext<'a> {
                         issue_kind: Some(u.token.clone()),
                         reason: None,
                         is_file_level: u.is_file_level,
+                        is_range: false,
                         kind_known: false,
                     },
                     missing_reason: true,
@@ -362,13 +377,42 @@ impl<'a> SuppressionContext<'a> {
                 active.push(ActiveSuppression {
                     path: path.clone(),
                     kind: s.target_token(),
-                    is_file_level: s.line == 0,
+                    is_file_level: s.scope == SuppressionScope::File,
                     reason: s.reason.clone(),
                     comment_line: s.comment_line,
+                    range_end_line: s.range_end_line(),
+                    range_problem: None,
                 });
             }
         }
+        for (&file_id, problems) in &self.range_problems {
+            let path = &graph.modules[file_id.0 as usize].path;
+            active.extend(problems.iter().map(|problem| ActiveSuppression {
+                path: path.clone(),
+                kind: range_problem_kind_token(problem),
+                is_file_level: false,
+                reason: None,
+                comment_line: problem.line,
+                range_end_line: None,
+                range_problem: Some(problem.kind),
+            }));
+        }
         active
+    }
+}
+
+/// The kind token that the inventory lists for a range marker with a
+/// problem: the unsupported token, nothing for a marker without a kind, and
+/// `code-duplication` for a pairing problem.
+fn range_problem_kind_token(problem: &RangeMarkerProblem) -> Option<String> {
+    match problem.kind {
+        RangeMarkerProblemKind::UnsupportedKind => problem.token.clone(),
+        RangeMarkerProblemKind::MissingKind => None,
+        RangeMarkerProblemKind::UnclosedStart
+        | RangeMarkerProblemKind::UnmatchedEnd
+        | RangeMarkerProblemKind::NestedStart => {
+            Some(issue_kind_to_kebab(IssueKind::CodeDuplication).to_string())
+        }
     }
 }
 
@@ -422,7 +466,8 @@ fn stale_entry_for_suppression(
         origin: SuppressionOrigin::Comment {
             issue_kind: s.target_token(),
             reason: s.reason.clone(),
-            is_file_level: s.line == 0,
+            is_file_level: s.scope == SuppressionScope::File,
+            is_range: s.range_end_line().is_some(),
             kind_known: true,
         },
         missing_reason: false,
@@ -451,6 +496,7 @@ fn unknown_kind_stale_entry(
                 u.reason.clone()
             },
             is_file_level: u.is_file_level,
+            is_range: false,
             kind_known: false,
         },
         missing_reason,

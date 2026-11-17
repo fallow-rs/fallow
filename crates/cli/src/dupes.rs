@@ -1437,8 +1437,6 @@ mod tests {
         let group_count = groups.len();
         DuplicationReport {
             clone_groups: groups,
-            clone_families: vec![],
-            mirrored_directories: vec![],
             stats: DuplicationStats {
                 total_files,
                 files_with_clones: 0,
@@ -1454,6 +1452,7 @@ mod tests {
                 clone_groups_ignored: 0,
                 near_candidates_skipped: 0,
             },
+            ..Default::default()
         }
     }
 

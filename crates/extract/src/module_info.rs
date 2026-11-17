@@ -22,6 +22,7 @@ pub fn non_js_module_info(input: NonJsModuleInfoInput<'_>) -> ModuleInfo {
         content_hash: input.content_hash,
         suppressions: input.parsed_suppressions.suppressions,
         unknown_suppression_kinds: input.parsed_suppressions.unknown_kinds,
+        range_marker_problems: input.parsed_suppressions.range_problems,
         line_offsets: fallow_types::extract::compute_line_offsets(input.source),
         ..ModuleInfo::empty(input.file_id)
     }

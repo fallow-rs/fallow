@@ -129,7 +129,7 @@ enum SavedMarkdown {
     Health(SavedHealth),
     Combined {
         check: Option<SavedDeadCode>,
-        dupes: Option<DuplicationReport>,
+        dupes: Option<Box<DuplicationReport>>,
         health: Option<Box<fallow_output::HealthReport>>,
     },
 }
@@ -258,7 +258,7 @@ fn parse_saved_combined(
         .map(|section| SavedDeadCode::parse(section, envelope, root, None, Some("dead-code")))
         .transpose()?;
     let dupes = present_section(envelope, "/dupes")
-        .map(|section| parse_saved(section, "section `/dupes`"))
+        .map(|section| parse_saved(section, "section `/dupes`").map(Box::new))
         .transpose()?;
     let health = present_section(envelope, "/health")
         .map(|section| parse_saved(section, "section `/health`").map(Box::new))

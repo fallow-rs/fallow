@@ -531,6 +531,7 @@ fn codeclimate_missing_suppression_reason_uses_reason_rule_severity() {
             issue_kind: Some("unused-exports".to_string()),
             reason: None,
             is_file_level: false,
+            is_range: false,
             kind_known: true,
         },
         missing_reason: true,
@@ -557,6 +558,7 @@ fn codeclimate_stale_and_missing_suppression_have_distinct_identities() {
         issue_kind: Some("unused-exports".to_string()),
         reason: None,
         is_file_level: false,
+        is_range: false,
         kind_known: true,
     };
     results.stale_suppressions.push(StaleSuppression {
@@ -2272,6 +2274,7 @@ fn duplication_codeclimate_one_issue_per_instance() {
         }],
         clone_families: vec![],
         mirrored_directories: vec![],
+        range_marker_problems: Vec::new(),
         stats: DuplicationStats::default(),
     };
     let output = codeclimate_issues_to_value(&api_duplication_codeclimate_issues(&report, &root));
@@ -2331,6 +2334,7 @@ fn duplication_codeclimate_description_uses_stable_clone_handle_not_ordinal() {
         ],
         clone_families: vec![],
         mirrored_directories: vec![],
+        range_marker_problems: Vec::new(),
         stats: DuplicationStats::default(),
     };
     let output = codeclimate_issues_to_value(&api_duplication_codeclimate_issues(&report, &root));
@@ -2389,6 +2393,7 @@ fn duplication_codeclimate_empty_report_produces_empty_array() {
         clone_groups: vec![],
         clone_families: vec![],
         mirrored_directories: vec![],
+        range_marker_problems: Vec::new(),
         stats: DuplicationStats::default(),
     };
     let output = codeclimate_issues_to_value(&api_duplication_codeclimate_issues(&report, &root));
@@ -2429,6 +2434,7 @@ fn duplication_codeclimate_fingerprints_are_unique_across_instances() {
         }],
         clone_families: vec![],
         mirrored_directories: vec![],
+        range_marker_problems: Vec::new(),
         stats: DuplicationStats::default(),
     };
     let output = codeclimate_issues_to_value(&api_duplication_codeclimate_issues(&report, &root));

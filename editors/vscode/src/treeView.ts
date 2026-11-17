@@ -91,7 +91,13 @@ const staleSuppressionLabel = (
     return `@expected-unused ${origin.export_name}`;
   }
   if (origin.issue_kind) {
+    if (origin.is_range) {
+      return `range ${origin.issue_kind}`;
+    }
     return origin.is_file_level ? `file ${origin.issue_kind}` : origin.issue_kind;
+  }
+  if (origin.is_range) {
+    return "range suppression";
   }
   return origin.is_file_level ? "file suppression" : "line suppression";
 };

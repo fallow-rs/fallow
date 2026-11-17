@@ -1909,6 +1909,7 @@ fn suppression_footer_names_a_stale_count_only_above_zero() {
             issue_kind: Some("unused-export".to_owned()),
             reason: None,
             is_file_level: false,
+            is_range: false,
             kind_known: true,
         },
         missing_reason: false,

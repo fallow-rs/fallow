@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 use bitcode::{Decode, Encode};
 use fallow_config::ResolvedNormalization;
 use fallow_types::source_fingerprint::SourceFingerprint;
-use fallow_types::suppress::{PolicyRuleSuppression, SuppressionTarget};
+use fallow_types::suppress::{
+    PolicyRuleSuppression, RangeMarkerProblem, RangeMarkerProblemKind, SuppressionScope,
+    SuppressionTarget,
+};
 use oxc_span::Span;
 use rustc_hash::FxHashMap;
 use tempfile::NamedTempFile;
@@ -23,6 +26,7 @@ pub(super) struct TokenPayload<'a> {
     pub(super) hashed_tokens: &'a [HashedToken],
     pub(super) file_tokens: &'a FileTokens,
     pub(super) suppressions: &'a [Suppression],
+    pub(super) range_problems: &'a [RangeMarkerProblem],
 }
 
 #[derive(Debug, Encode, Decode)]
@@ -52,6 +56,14 @@ struct CachedTokenFile {
     source: String,
     line_count: u64,
     suppressions: Vec<CachedSuppression>,
+    range_problems: Vec<CachedRangeMarkerProblem>,
+}
+
+#[derive(Debug, Clone, Encode, Decode)]
+struct CachedRangeMarkerProblem {
+    line: u32,
+    kind: u8,
+    token: Option<String>,
 }
 
 impl CachedTokenFile {
@@ -79,6 +91,8 @@ struct CachedSuppression {
     kind: u8,
     policy_pack: String,
     policy_rule_id: String,
+    /// `fallow-ignore-end` line of a range. 0 = not a range.
+    range_end_line: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -86,6 +100,7 @@ pub(super) struct TokenCacheEntry {
     pub hashed_tokens: Vec<HashedToken>,
     pub file_tokens: FileTokens,
     pub suppressions: Vec<Suppression>,
+    pub range_problems: Vec<RangeMarkerProblem>,
 }
 
 #[derive(Debug)]
@@ -225,6 +240,7 @@ impl TokenCache {
                 payload.hashed_tokens,
                 payload.file_tokens,
                 payload.suppressions,
+                payload.range_problems,
             ),
         );
         self.dirty = true;
@@ -320,6 +336,7 @@ impl CachedTokenFile {
         hashed_tokens: &[HashedToken],
         file_tokens: &FileTokens,
         suppressions: &[Suppression],
+        range_problems: &[RangeMarkerProblem],
     ) -> Self {
         Self {
             mtime_ns: fingerprint.mtime_ns,
@@ -361,6 +378,14 @@ impl CachedTokenFile {
             source: file_tokens.source.clone(),
             line_count: file_tokens.line_count as u64,
             suppressions: suppressions.iter().map(cached_suppression).collect(),
+            range_problems: range_problems
+                .iter()
+                .map(|problem| CachedRangeMarkerProblem {
+                    line: problem.line,
+                    kind: problem.kind.to_code(),
+                    token: problem.token.clone(),
+                })
+                .collect(),
         }
     }
 
@@ -423,13 +448,32 @@ impl CachedTokenFile {
                     comment_line: suppression.comment_line,
                     target,
                     reason: None,
+                    scope: if suppression.range_end_line == 0 {
+                        SuppressionScope::for_line(suppression.line)
+                    } else {
+                        SuppressionScope::Range {
+                            end_line: suppression.range_end_line,
+                        }
+                    },
                 }
+            })
+            .collect();
+        let range_problems = self
+            .range_problems
+            .iter()
+            .filter_map(|problem| {
+                Some(RangeMarkerProblem {
+                    line: problem.line,
+                    kind: RangeMarkerProblemKind::from_code(problem.kind)?,
+                    token: problem.token.clone(),
+                })
             })
             .collect();
         TokenCacheEntry {
             hashed_tokens,
             file_tokens,
             suppressions,
+            range_problems,
         }
     }
 }
@@ -462,6 +506,7 @@ fn cached_suppression(suppression: &Suppression) -> CachedSuppression {
         kind,
         policy_pack,
         policy_rule_id,
+        range_end_line: suppression.range_end_line().unwrap_or(0),
     }
 }
 
@@ -503,6 +548,7 @@ mod tests {
                 line_count: 1,
             },
             suppressions: vec![Suppression::issue(2, 1, IssueKind::CodeDuplication)],
+            range_problems: Vec::new(),
         }
     }
 
@@ -522,6 +568,7 @@ mod tests {
                 hashed_tokens: &entry.hashed_tokens,
                 file_tokens: &entry.file_tokens,
                 suppressions: &entry.suppressions,
+                range_problems: &entry.range_problems,
             },
         );
     }
@@ -655,6 +702,7 @@ mod tests {
                 &entry.hashed_tokens,
                 &entry.file_tokens,
                 &entry.suppressions,
+                &entry.range_problems,
             ),
         );
         std::fs::write(cache_dir.join("cache.bin"), bitcode::encode(&store)).expect("write cache");
@@ -816,6 +864,7 @@ mod tests {
                 &entry.hashed_tokens,
                 &entry.file_tokens,
                 &entry.suppressions,
+                &entry.range_problems,
             ),
         );
 
@@ -851,6 +900,7 @@ mod tests {
                 &entry.hashed_tokens,
                 &entry.file_tokens,
                 &entry.suppressions,
+                &entry.range_problems,
             ),
         );
 
@@ -887,6 +937,7 @@ mod tests {
                 &entry.hashed_tokens,
                 &entry.file_tokens,
                 &entry.suppressions,
+                &entry.range_problems,
             ),
         );
 
@@ -940,6 +991,7 @@ mod tests {
                 hashed_tokens: &entry.hashed_tokens,
                 file_tokens: &entry.file_tokens,
                 suppressions: &entry.suppressions,
+                range_problems: &entry.range_problems,
             },
         );
 
@@ -966,6 +1018,7 @@ mod tests {
                 hashed_tokens: &entry.hashed_tokens,
                 file_tokens: &entry.file_tokens,
                 suppressions: &entry.suppressions,
+                range_problems: &entry.range_problems,
             },
         );
         let stored = |cache: &TokenCache| {

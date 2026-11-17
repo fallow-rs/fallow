@@ -16,7 +16,9 @@ const JSCPD_UNMAPPABLE_FIELDS: &[(&str, &str, Option<&str>)] = &[
     (
         "ignorePattern",
         "Content-based ignore patterns are not supported",
-        Some("use inline suppression: // fallow-ignore-next-line code-duplication"),
+        Some(
+            "use inline suppression: wrap the block in // fallow-ignore-start code-duplication and // fallow-ignore-end code-duplication",
+        ),
     ),
     (
         "reporters",
@@ -746,7 +748,7 @@ mod tests {
         let w = by_field("ignorePattern");
         assert_eq!(
             w.suggestion.as_deref().unwrap(),
-            "use inline suppression: // fallow-ignore-next-line code-duplication"
+            "use inline suppression: wrap the block in // fallow-ignore-start code-duplication and // fallow-ignore-end code-duplication"
         );
 
         let w = by_field("reporters");

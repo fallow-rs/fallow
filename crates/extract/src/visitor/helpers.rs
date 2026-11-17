@@ -1811,3 +1811,11 @@ fn extract_new_class_from_return_body(stmts: &[Statement<'_>]) -> Option<(String
 #[cfg(all(test, not(miri)))]
 #[path = "helpers_tests.rs"]
 mod tests;
+
+/// Keep the start offset of each final resolve-call span.
+pub(super) fn finish_package_resolve_sites(sites: Vec<(String, Span)>) -> Box<[(String, u32)]> {
+    sites
+        .into_iter()
+        .map(|(package_name, span)| (package_name, span.start))
+        .collect()
+}

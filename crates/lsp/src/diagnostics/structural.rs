@@ -825,6 +825,7 @@ mod tests {
             clone_groups: vec![],
             clone_families: vec![],
             mirrored_directories: vec![],
+            range_marker_problems: Vec::new(),
             stats: DuplicationStats {
                 total_files: 0,
                 files_with_clones: 0,

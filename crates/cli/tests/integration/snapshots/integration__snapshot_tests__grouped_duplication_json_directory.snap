@@ -50,6 +50,13 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "auto_fixable": false,
           "description": "Suppress with an inline comment above the duplicated code",
           "comment": "// fallow-ignore-next-line code-duplication"
+        },
+        {
+          "type": "suppress-range",
+          "auto_fixable": false,
+          "description": "Suppress only this clone: put the start comment above the whole duplicated block or function and the end comment below it. Neighbor clones that reach into the range stop at its border",
+          "comment": "// fallow-ignore-start code-duplication -- <reason>",
+          "end_comment": "// fallow-ignore-end code-duplication"
         }
       ]
     },
@@ -87,6 +94,13 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
           "auto_fixable": false,
           "description": "Suppress with an inline comment above the duplicated code",
           "comment": "// fallow-ignore-next-line code-duplication"
+        },
+        {
+          "type": "suppress-range",
+          "auto_fixable": false,
+          "description": "Suppress only this clone: put the start comment above the whole duplicated block or function and the end comment below it. Neighbor clones that reach into the range stop at its border",
+          "comment": "// fallow-ignore-start code-duplication -- <reason>",
+          "end_comment": "// fallow-ignore-end code-duplication"
         }
       ]
     }
@@ -170,6 +184,13 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
               "auto_fixable": false,
               "description": "Suppress with an inline comment above the duplicated code",
               "comment": "// fallow-ignore-next-line code-duplication"
+            },
+            {
+              "type": "suppress-range",
+              "auto_fixable": false,
+              "description": "Suppress only this clone: put the start comment above the whole duplicated block or function and the end comment below it. Neighbor clones that reach into the range stop at its border",
+              "comment": "// fallow-ignore-start code-duplication -- <reason>",
+              "end_comment": "// fallow-ignore-end code-duplication"
             }
           ]
         }
@@ -237,6 +258,13 @@ expression: "json_str.replace(&format!(\"\\\"version\\\": \\\"{}\\\"\", env!(\"C
               "auto_fixable": false,
               "description": "Suppress with an inline comment above the duplicated code",
               "comment": "// fallow-ignore-next-line code-duplication"
+            },
+            {
+              "type": "suppress-range",
+              "auto_fixable": false,
+              "description": "Suppress only this clone: put the start comment above the whole duplicated block or function and the end comment below it. Neighbor clones that reach into the range stop at its border",
+              "comment": "// fallow-ignore-start code-duplication -- <reason>",
+              "end_comment": "// fallow-ignore-end code-duplication"
             }
           ]
         }
