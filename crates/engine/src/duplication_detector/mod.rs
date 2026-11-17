@@ -6,6 +6,8 @@
 //! matching that ignores identifier names and literal values).
 
 mod cache;
+#[cfg(test)]
+mod clone_edge_tests;
 pub mod deepdive;
 pub mod detect;
 pub mod families;

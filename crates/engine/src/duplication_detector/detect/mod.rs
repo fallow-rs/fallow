@@ -14,6 +14,7 @@ mod ranking;
 mod rolling;
 mod statistics;
 mod suffix_array;
+mod trim;
 mod utils;
 
 #[cfg(test)]
@@ -172,6 +173,7 @@ impl CloneDetector {
         } else {
             raw_groups
         };
+        let raw_groups = trim::trim_leading_semicolons(raw_groups, files, self.min_tokens);
 
         let t0 = std::time::Instant::now();
         let clone_groups =
