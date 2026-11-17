@@ -1548,6 +1548,9 @@ OUT_UNKNOWN_KIND_SUMMARY=$(jq '.unused_files = [] | .unused_exports = [] | .unus
 assert_contains "$OUT_UNKNOWN_KIND_SUMMARY" 'unknown kind' "summary unknown kind: prefix renders"
 assert_contains "$OUT_UNKNOWN_KIND_SUMMARY" 'complexity-typo' "summary unknown kind: verbatim token renders"
 
+OUT_MISSING_REASON_SUMMARY=$(jq '.stale_suppressions = [{"path": "src/utils.ts", "line": 3, "col": 0, "missing_reason": true, "origin": {"type": "comment", "issue_kind": "code-duplication", "is_file_level": false, "kind_known": true}}] | .total_issues = 1' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_MISSING_REASON_SUMMARY" 'missing reason for `code-duplication`' "summary missing reason: row names the missing reason"
+
 echo "  summary-security.jq:"
 OUT=$(jq -n '{
   kind: "security",
@@ -2127,6 +2130,11 @@ assert_contains "$OUT_UNKNOWN_KIND" "Unknown suppression kind" "unknown kind: ty
 assert_contains "$OUT_UNKNOWN_KIND" "complexity-typo" "unknown kind: verbatim token in message"
 assert_contains "$OUT_UNKNOWN_KIND" "fallow-ignore-next-line" "unknown kind: directive type preserved"
 assert_contains "$OUT_UNKNOWN_KIND" "Fix the typo" "unknown kind: actionable next step"
+
+OUT_MISSING_REASON=$(jq '.unused_files = [] | .unused_exports = [] | .unused_types = [] | .unused_dependencies = [] | .unused_dev_dependencies = [] | .unused_optional_dependencies = [] | .unused_enum_members = [] | .unused_class_members = [] | .unresolved_imports = [] | .unlisted_dependencies = [] | .duplicate_exports = [] | .circular_dependencies = [] | .boundary_violations = [] | .type_only_dependencies = [] | .test_only_dependencies = [] | .unused_catalog_entries = [] | .empty_catalog_groups = [] | .unresolved_catalog_references = [] | .unused_dependency_overrides = [] | .misconfigured_dependency_overrides = [] | .private_type_leaks = [] | .stale_suppressions = [{"path": "src/utils.ts", "line": 3, "col": 0, "missing_reason": true, "origin": {"type": "comment", "issue_kind": "code-duplication", "is_file_level": false, "kind_known": true}}] | .total_issues = 1' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/annotations-check.jq" 2>&1)
+assert_contains "$OUT_MISSING_REASON" "title=Suppression without a reason" "missing reason: own title"
+assert_contains "$OUT_MISSING_REASON" "after \`--\`" "missing reason: says where the reason goes"
+assert_not_contains "$OUT_MISSING_REASON" "Remove the suppression comment" "missing reason: does not tell the user to remove the comment"
 
 echo "  annotations-dupes.jq:"
 OUT=$(jq -r -f "$JQ_DIR/annotations-dupes.jq" "$FIXTURES/dupes.json" 2>&1)
