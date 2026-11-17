@@ -4,6 +4,10 @@ use std::path::{Path, PathBuf};
 use fallow_config::OutputFormat;
 
 use super::enum_helpers::{EnumDeclarationRange, removable_exported_enum_range};
+use super::export_list::{
+    ExportListStatement, ListRewrite, find_export_list_statement, rewrite_export_list,
+};
+use fallow_engine::module_graph::NamedReExport;
 use fallow_types::output_dead_code::ReachabilityCaveat;
 
 use super::plan::{
@@ -82,7 +86,29 @@ fn low_confidence_skip_reason(
 struct ExportFix {
     line_idx: usize,
     export_name: String,
-    enum_declaration: Option<EnumDeclarationRange>,
+    edit: ExportEdit,
+}
+
+#[derive(Clone, Copy)]
+enum ExportEdit {
+    /// Remove the `export` (or `export default`) keyword on `line_idx`.
+    Keyword,
+    /// Delete the exported enum declaration.
+    EnumDeclaration(EnumDeclarationRange),
+    /// Remove the specifier from the list statement. The statement can span
+    /// several lines.
+    List(ExportListStatement),
+}
+
+impl ExportFix {
+    /// The line that holds the edit. All names of one list statement share
+    /// the first line of that statement, so one rewrite handles them.
+    const fn edit_line(&self) -> usize {
+        match self.edit {
+            ExportEdit::List(statement) => statement.start_line,
+            ExportEdit::Keyword | ExportEdit::EnumDeclaration(_) => self.line_idx,
+        }
+    }
 }
 
 pub(super) struct ExportFixInput<'a, 'export> {
@@ -94,75 +120,18 @@ pub(super) struct ExportFixInput<'a, 'export> {
     /// Degraded-parse caveats per file, from the findings the analysis
     /// annotated. A file present here has its export removals withheld.
     pub(super) caveats_by_file: &'a FxHashMap<PathBuf, Vec<ReachabilityCaveat>>,
+    /// Every named re-export of the project. A removal of an export stays
+    /// withheld while a re-export that this run keeps still names it.
+    pub(super) re_exports: &'a [NamedReExport],
     pub(super) plan: &'a mut FixPlan,
     pub(super) output: OutputFormat,
     pub(super) dry_run: bool,
     pub(super) fixes: &'a mut Vec<serde_json::Value>,
 }
 
-/// Check if a line (after stripping `export `) is a named export list like `{ A, B } ...`
-fn is_export_list(after_export: &str) -> bool {
-    let s = after_export.trim_start();
-    let s = if let Some(rest) = s.strip_prefix("type") {
-        rest.trim_start()
-    } else {
-        s
-    };
-    s.starts_with('{')
-}
-
-/// Given a line like `export { A, B, C } from "./mod";` or `export { A, B, C };`,
-/// remove the specified specifiers. If all specifiers are removed, returns `None`
-/// (meaning the entire line should be deleted). Otherwise returns the updated line.
-fn remove_specifiers_from_export_list(line: &str, names_to_remove: &[&str]) -> Option<String> {
-    let indent = line.len() - line.trim_start().len();
-    let trimmed = line.trim_start();
-
-    let after_export = trimmed.strip_prefix("export ").unwrap_or(trimmed);
-    let (type_prefix, after_type) = if let Some(rest) = after_export.strip_prefix("type") {
-        if rest.trim_start().starts_with('{') {
-            ("type ", rest.trim_start())
-        } else {
-            ("", after_export)
-        }
-    } else {
-        ("", after_export)
-    };
-
-    let brace_start = after_type.find('{')?;
-    let brace_end = after_type.find('}')?;
-
-    let inside = &after_type[brace_start + 1..brace_end];
-    let after_brace = &after_type[brace_end + 1..];
-
-    let remaining: Vec<&str> = inside
-        .split(',')
-        .map(str::trim)
-        .filter(|s| !s.is_empty())
-        .filter(|spec| {
-            let exported_name = if let Some((original, _alias)) = spec.split_once(" as ") {
-                original.trim()
-            } else {
-                spec.trim()
-            };
-            !names_to_remove.contains(&exported_name)
-        })
-        .collect();
-
-    if remaining.is_empty() {
-        None
-    } else {
-        let prefix = &line[..indent];
-        let new_inside = remaining.join(", ");
-        Some(format!(
-            "{prefix}export {type_prefix}{{ {new_inside} }}{after_brace}"
-        ))
-    }
-}
-
 fn emit_dry_run_export_fix(relative: &Path, fix: &ExportFix) {
     let relative_display = relative.to_string_lossy().replace('\\', "/");
-    if fix.enum_declaration.is_some() {
+    if matches!(fix.edit, ExportEdit::EnumDeclaration(_)) {
         eprintln!(
             "Would remove enum declaration from {relative_display}:{} `{}`",
             fix.line_idx + 1,
@@ -197,6 +166,15 @@ fn push_export_fix_json(
     fixes.push(value);
 }
 
+/// The planned export removals of one file, with the source they edit.
+struct FileExportPlan<'a> {
+    path: &'a Path,
+    relative: &'a Path,
+    content: String,
+    meta: super::io::EncodingMetadata,
+    fixes: Vec<ExportFix>,
+}
+
 /// Apply export fixes to source files, returning JSON fix entries.
 ///
 /// Stages every per-file rewrite on `plan` instead of writing directly;
@@ -212,59 +190,180 @@ fn push_export_fix_json(
 /// (issue #602): the rewrite would risk breaking a consumer fallow's graph
 /// cannot see. The skip is recorded on `plan` so the orchestrator surfaces
 /// it; the export stays reported by `fallow dead-code`.
+///
+/// A removal is also withheld while a re-export that the run keeps still
+/// names the export (issue #4636). Without this rule the kept re-export
+/// points at a declaration that is no longer exported, and the type check
+/// of the fixed code fails.
 pub(super) fn apply_export_fixes(input: &mut ExportFixInput<'_, '_>) {
-    let root = input.root;
-    let exports_by_file = input.exports_by_file;
-    let hashes = input.hashes;
-    let unresolved_import_files = input.unresolved_import_files;
-    let caveats_by_file = input.caveats_by_file;
-    let output = input.output;
-    let dry_run = input.dry_run;
-    let plan = &mut *input.plan;
-    let fixes = &mut *input.fixes;
+    let mut file_plans = plan_export_fixes(input);
+    withhold_removals_behind_kept_re_exports(&mut file_plans, input.re_exports);
 
-    for (path, file_exports) in exports_by_file {
-        let relative = path.strip_prefix(root).unwrap_or(path);
-
-        let caveats = caveats_by_file
-            .get(path)
-            .map_or(&[][..], |caveats| caveats.as_slice());
-        if let Some(reason) =
-            low_confidence_skip_reason(relative, path, unresolved_import_files, caveats)
-        {
-            plan.skip_with_caveats(path.clone(), reason, caveats.to_vec());
+    for mut file_plan in file_plans {
+        let lines: Vec<&str> = file_plan
+            .content
+            .split(file_plan.meta.line_ending)
+            .collect();
+        retain_rewritable_list_fixes(&lines, &mut file_plan.fixes);
+        if file_plan.fixes.is_empty() {
             continue;
         }
+        file_plan.fixes.sort_by_key(|f| {
+            (
+                std::cmp::Reverse(f.edit_line()),
+                std::cmp::Reverse(f.line_idx),
+            )
+        });
+        let grouped = group_export_fixes_by_edit_line(&file_plan.fixes);
 
-        let Some((content, meta)) = read_source_with_hash_check(root, path, hashes, plan) else {
-            continue;
-        };
-        let lines: Vec<&str> = content.split(meta.line_ending).collect();
-
-        let mut line_fixes = collect_export_line_fixes(&lines, file_exports);
-        if line_fixes.is_empty() {
-            continue;
-        }
-
-        line_fixes.sort_by_key(|f| std::cmp::Reverse(f.line_idx));
-        let grouped = group_export_fixes_by_line(&line_fixes);
-
-        if dry_run {
-            push_dry_run_export_fixes(output, fixes, relative, path, &line_fixes);
+        if input.dry_run {
+            push_dry_run_export_fixes(
+                input.output,
+                input.fixes,
+                file_plan.relative,
+                file_plan.path,
+                &file_plan.fixes,
+            );
         } else {
             apply_grouped_export_fixes(GroupedExportFixInput {
-                plan,
-                path,
-                fixes,
-                relative,
-                content: &content,
-                meta: &meta,
+                plan: input.plan,
+                path: file_plan.path,
+                fixes: input.fixes,
+                relative: file_plan.relative,
+                content: &file_plan.content,
+                meta: &file_plan.meta,
                 lines: &lines,
-                line_fixes: &line_fixes,
+                line_fixes: &file_plan.fixes,
                 grouped: &grouped,
             });
         }
     }
+}
+
+/// Read each file with findings and collect the edits that its text allows.
+fn plan_export_fixes<'a>(input: &mut ExportFixInput<'a, '_>) -> Vec<FileExportPlan<'a>> {
+    let root = input.root;
+    let mut file_plans = Vec::new();
+    for (path, file_exports) in input.exports_by_file {
+        let relative = path.strip_prefix(root).unwrap_or(path);
+
+        let caveats = input
+            .caveats_by_file
+            .get(path)
+            .map_or(&[][..], |caveats| caveats.as_slice());
+        if let Some(reason) =
+            low_confidence_skip_reason(relative, path, input.unresolved_import_files, caveats)
+        {
+            input
+                .plan
+                .skip_with_caveats(path.clone(), reason, caveats.to_vec());
+            continue;
+        }
+
+        let Some((content, meta)) =
+            read_source_with_hash_check(root, path, input.hashes, input.plan)
+        else {
+            continue;
+        };
+        let lines: Vec<&str> = content.split(meta.line_ending).collect();
+        let mut fixes = collect_export_line_fixes(&lines, file_exports);
+        retain_rewritable_list_fixes(&lines, &mut fixes);
+        if fixes.is_empty() {
+            continue;
+        }
+        file_plans.push(FileExportPlan {
+            path,
+            relative,
+            content,
+            meta,
+            fixes,
+        });
+    }
+    file_plans
+}
+
+/// Drop each planned removal that a kept re-export still names.
+///
+/// A re-export is kept when the run does not remove it. Each dropped
+/// removal of a re-export keeps that re-export too, so the loop runs until
+/// no removal changes.
+fn withhold_removals_behind_kept_re_exports(
+    file_plans: &mut [FileExportPlan<'_>],
+    re_exports: &[NamedReExport],
+) {
+    loop {
+        let planned: FxHashSet<(&Path, &str)> = file_plans
+            .iter()
+            .flat_map(|file_plan| {
+                file_plan
+                    .fixes
+                    .iter()
+                    .map(|fix| (file_plan.path, fix.export_name.as_str()))
+            })
+            .collect();
+        let named_by_kept: FxHashSet<(&Path, &str)> = re_exports
+            .iter()
+            .filter(|re_export| {
+                !planned.contains(&(re_export.path.as_path(), re_export.exported_name.as_str()))
+            })
+            .map(|re_export| {
+                (
+                    re_export.source_path.as_path(),
+                    re_export.imported_name.as_str(),
+                )
+            })
+            .collect();
+
+        let mut changed = false;
+        for file_plan in file_plans.iter_mut() {
+            let before = file_plan.fixes.len();
+            let path = file_plan.path;
+            file_plan
+                .fixes
+                .retain(|fix| !named_by_kept.contains(&(path, fix.export_name.as_str())));
+            changed |= file_plan.fixes.len() != before;
+        }
+        if !changed {
+            return;
+        }
+    }
+}
+
+/// Keep only the list fixes that the statement rewrite can apply.
+///
+/// The rewrite matches the exported name of each specifier. A fix whose name
+/// the statement does not export, or a statement that has no safe text edit,
+/// is not planned, so the report never claims an edit that does not happen.
+fn retain_rewritable_list_fixes(lines: &[&str], fixes: &mut Vec<ExportFix>) {
+    let mut names_by_statement: FxHashMap<usize, (ExportListStatement, Vec<&str>)> =
+        FxHashMap::default();
+    for fix in fixes.iter() {
+        if let ExportEdit::List(statement) = fix.edit {
+            names_by_statement
+                .entry(statement.start_line)
+                .or_insert_with(|| (statement, Vec::new()))
+                .1
+                .push(fix.export_name.as_str());
+        }
+    }
+    if names_by_statement.is_empty() {
+        return;
+    }
+    let removed_by_statement: FxHashMap<usize, Vec<String>> = names_by_statement
+        .into_iter()
+        .map(|(start, (statement, names))| {
+            let removed = rewrite_export_list(lines, statement, &names)
+                .map(|outcome| outcome.removed)
+                .unwrap_or_default();
+            (start, removed)
+        })
+        .collect();
+    fixes.retain(|fix| match fix.edit {
+        ExportEdit::List(statement) => removed_by_statement
+            .get(&statement.start_line)
+            .is_some_and(|removed| removed.contains(&fix.export_name)),
+        ExportEdit::Keyword | ExportEdit::EnumDeclaration(_) => true,
+    });
 }
 
 fn collect_export_line_fixes(
@@ -284,20 +383,38 @@ fn export_line_fix(
     let line_idx = export.line.saturating_sub(1) as usize;
     let line = *lines.get(line_idx)?;
     let trimmed = line.trim_start();
-    if !trimmed.starts_with("export ") {
-        return None;
+    let after_export = trimmed.strip_prefix("export ");
+
+    // The specifier of a list over several lines is on its own line, so the
+    // reported line does not start with `export`.
+    if after_export.is_none_or(is_export_list) {
+        let statement = find_export_list_statement(lines, line_idx)?;
+        return Some(ExportFix {
+            line_idx,
+            export_name: export.export_name.clone(),
+            edit: ExportEdit::List(statement),
+        });
     }
 
-    let after_export = trimmed.strip_prefix("export ").unwrap_or(trimmed);
+    let after_export = after_export?;
     if !is_removable_default_export(after_export) {
         return None;
     }
 
+    let edit = removable_exported_enum_range(lines, line_idx, &export.export_name)
+        .map_or(ExportEdit::Keyword, ExportEdit::EnumDeclaration);
     Some(ExportFix {
         line_idx,
         export_name: export.export_name.clone(),
-        enum_declaration: removable_exported_enum_range(lines, line_idx, &export.export_name),
+        edit,
     })
+}
+
+/// Check if a line (after stripping `export `) is a named export list like `{ A, B } ...`
+fn is_export_list(after_export: &str) -> bool {
+    let s = after_export.trim_start();
+    let s = s.strip_prefix("type").map_or(s, str::trim_start);
+    s.starts_with('{')
 }
 
 fn is_removable_default_export(after_export: &str) -> bool {
@@ -313,16 +430,19 @@ fn is_removable_default_export(after_export: &str) -> bool {
         || after_default.starts_with("abstract class ")
 }
 
-fn group_export_fixes_by_line(line_fixes: &[ExportFix]) -> Vec<(usize, Vec<String>)> {
+/// Group fixes that share an edit line. `line_fixes` must be sorted by edit
+/// line.
+fn group_export_fixes_by_edit_line(line_fixes: &[ExportFix]) -> Vec<(usize, Vec<String>)> {
     let mut grouped: Vec<(usize, Vec<String>)> = Vec::new();
     for fix in line_fixes {
+        let edit_line = fix.edit_line();
         if let Some(last) = grouped.last_mut()
-            && last.0 == fix.line_idx
+            && last.0 == edit_line
         {
             last.1.push(fix.export_name.clone());
             continue;
         }
-        grouped.push((fix.line_idx, vec![fix.export_name.clone()]));
+        grouped.push((edit_line, vec![fix.export_name.clone()]));
     }
     grouped
 }
@@ -369,20 +489,19 @@ fn apply_grouped_export_fixes(input: GroupedExportFixInput<'_>) {
 
     let mut new_lines: Vec<String> = lines.iter().map(ToString::to_string).collect();
     let mut lines_to_delete = Vec::new();
-    let mut ranges_to_delete = Vec::new();
 
-    for (line_idx, names) in grouped {
+    for (edit_line, names) in grouped {
         apply_export_line_group(
             &mut new_lines,
             &mut lines_to_delete,
-            &mut ranges_to_delete,
+            lines,
             line_fixes,
-            *line_idx,
+            *edit_line,
             names,
         );
     }
 
-    delete_export_lines(&mut new_lines, lines_to_delete, ranges_to_delete);
+    delete_export_lines(&mut new_lines, lines_to_delete);
     stage_fixed_content(plan, path, &new_lines, meta, content);
     for fix in line_fixes {
         push_export_fix_json(fixes, relative, path, fix, Some(true));
@@ -392,42 +511,43 @@ fn apply_grouped_export_fixes(input: GroupedExportFixInput<'_>) {
 fn apply_export_line_group(
     new_lines: &mut [String],
     lines_to_delete: &mut Vec<usize>,
-    ranges_to_delete: &mut Vec<EnumDeclarationRange>,
+    lines: &[&str],
     line_fixes: &[ExportFix],
-    line_idx: usize,
+    edit_line: usize,
     names: &[String],
 ) {
-    if let Some(range) = line_fixes
+    let Some(edit) = line_fixes
         .iter()
-        .find(|fix| fix.line_idx == line_idx && fix.enum_declaration.is_some())
-        .and_then(|fix| fix.enum_declaration)
-    {
-        ranges_to_delete.push(range);
+        .find(|fix| fix.edit_line() == edit_line)
+        .map(|fix| fix.edit)
+    else {
         return;
-    }
-
-    let line = new_lines[line_idx].clone();
-    let trimmed = line.trim_start();
-    let after_export = trimmed.strip_prefix("export ").unwrap_or(trimmed);
-    if is_export_list(after_export) {
-        apply_export_list_line(new_lines, lines_to_delete, line_idx, &line, names);
-    } else {
-        new_lines[line_idx] = remove_direct_export_keyword(&line, trimmed, after_export);
-    }
-}
-
-fn apply_export_list_line(
-    new_lines: &mut [String],
-    lines_to_delete: &mut Vec<usize>,
-    line_idx: usize,
-    line: &str,
-    names: &[String],
-) {
-    let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
-    match remove_specifiers_from_export_list(line, &name_refs) {
-        None => lines_to_delete.push(line_idx),
-        Some(new_line) => {
-            new_lines[line_idx] = new_line;
+    };
+    match edit {
+        ExportEdit::EnumDeclaration(range) => {
+            lines_to_delete.extend(range.start_line..=range.end_line);
+        }
+        ExportEdit::List(statement) => {
+            let name_refs: Vec<&str> = names.iter().map(String::as_str).collect();
+            match rewrite_export_list(lines, statement, &name_refs).map(|outcome| outcome.rewrite) {
+                Some(ListRewrite::DeleteStatement) => {
+                    lines_to_delete.extend(statement.start_line..=statement.end_line);
+                }
+                Some(ListRewrite::Replace(rewritten)) => {
+                    let kept = rewritten.len();
+                    for (offset, line) in rewritten.into_iter().enumerate() {
+                        new_lines[statement.start_line + offset] = line;
+                    }
+                    lines_to_delete.extend(statement.start_line + kept..=statement.end_line);
+                }
+                None => {}
+            }
+        }
+        ExportEdit::Keyword => {
+            let line = new_lines[edit_line].clone();
+            let trimmed = line.trim_start();
+            let after_export = trimmed.strip_prefix("export ").unwrap_or(trimmed);
+            new_lines[edit_line] = remove_direct_export_keyword(&line, trimmed, after_export);
         }
     }
 }
@@ -450,15 +570,7 @@ fn remove_direct_export_keyword(line: &str, trimmed: &str, after_export: &str) -
     format!("{prefix}{replacement}")
 }
 
-fn delete_export_lines(
-    new_lines: &mut Vec<String>,
-    lines_to_delete: Vec<usize>,
-    ranges_to_delete: Vec<EnumDeclarationRange>,
-) {
-    let mut delete_indices = lines_to_delete;
-    for range in ranges_to_delete {
-        delete_indices.extend(range.start_line..=range.end_line);
-    }
+fn delete_export_lines(new_lines: &mut Vec<String>, mut delete_indices: Vec<usize>) {
     delete_indices.sort_unstable();
     delete_indices.dedup();
     for &idx in delete_indices.iter().rev() {
@@ -495,6 +607,7 @@ mod tests {
             hashes,
             unresolved_import_files,
             caveats_by_file: &FxHashMap::default(),
+            re_exports: &[],
             plan,
             output,
             dry_run,
@@ -1110,7 +1223,7 @@ mod tests {
         let fix = ExportFix {
             line_idx: 1,
             export_name: "removable".to_owned(),
-            enum_declaration: None,
+            edit: ExportEdit::Keyword,
         };
 
         let mut fixes = Vec::new();
@@ -1204,14 +1317,24 @@ mod tests {
         assert_eq!(content, "export type { Bar } from \"./types\";\n");
     }
 
+    /// The analysis reports an aliased specifier by its exported name, so
+    /// the fixer matches that name and not the local name before `as`.
     #[test]
     fn export_fix_handles_aliased_specifiers() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         let file = root.join("index.ts");
-        std::fs::write(&file, "export { Foo as MyFoo, Bar } from \"./mod\";\n").unwrap();
+        let original = "export { Foo as MyFoo, Bar } from \"./mod\";\n";
+        std::fs::write(&file, original).unwrap();
 
-        let (_, _) = fix_single(root, &file, "Foo", 1, false);
+        let (_, fixes) = fix_single(root, &file, "Foo", 1, false);
+        assert!(
+            fixes.is_empty(),
+            "the local name is not an export: {fixes:?}"
+        );
+        assert_eq!(std::fs::read_to_string(&file).unwrap(), original);
+
+        let (_, _) = fix_single(root, &file, "MyFoo", 1, false);
 
         let content = std::fs::read_to_string(&file).unwrap();
         assert_eq!(content, "export { Bar } from \"./mod\";\n");
@@ -1328,6 +1451,7 @@ mod tests {
             hashes: &hashes,
             unresolved_import_files: &FxHashSet::default(),
             caveats_by_file: &caveats_by_file,
+            re_exports: &[],
             plan: &mut plan,
             output: OutputFormat::Human,
             dry_run: false,
@@ -1386,6 +1510,7 @@ mod tests {
             hashes: &hashes,
             unresolved_import_files: &FxHashSet::default(),
             caveats_by_file: &caveats_by_file,
+            re_exports: &[],
             plan: &mut plan,
             output: OutputFormat::Json,
             dry_run: true,
@@ -1425,6 +1550,7 @@ mod tests {
             hashes: &hashes,
             unresolved_import_files: &FxHashSet::default(),
             caveats_by_file: &caveats_by_file,
+            re_exports: &[],
             plan: &mut plan,
             output: OutputFormat::Human,
             dry_run: false,

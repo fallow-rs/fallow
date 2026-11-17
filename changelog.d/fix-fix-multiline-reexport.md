@@ -1,0 +1,4 @@
+### Fixed
+
+- **`fallow fix` now removes unused names from an export list that spans several lines.** A formatter puts each name of a long `export { ... } from` list on its own line. `fix` removed the `export` of the source declaration but kept the list, so the type check of the fixed code failed with TS2459. `fix` now removes the unused names from the list and keeps the layout, comments and trailing commas of the names that stay. It deletes the full statement when no name is left. It also removes an aliased name such as `export { a as b }` by its exported name. As a safety rule, `fix` keeps the `export` of a declaration while a re-export that it keeps still names that declaration, for example a re-export in a file that `fix` skips as low confidence.
+  (Closes [#4636](https://github.com/fallow-rs/fallow/issues/4636))

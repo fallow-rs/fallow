@@ -195,6 +195,52 @@ impl From<ModuleGraph> for RetainedModuleGraph {
     }
 }
 
+/// One named re-export statement entry, such as `export { a as b } from './mod'`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NamedReExport {
+    /// Absolute path of the module that holds the re-export.
+    pub path: PathBuf,
+    /// The name that the module exports (`b` in the example).
+    pub exported_name: String,
+    /// Absolute path of the module that the re-export reads from.
+    pub source_path: PathBuf,
+    /// The name that the re-export reads from the source module (`a`).
+    pub imported_name: String,
+}
+
+/// Return every named re-export that a source statement declares.
+///
+/// Star re-exports (`export * from`, `export * as ns from`) name no single
+/// export of the source module, so they are not in the result. Edges that the
+/// graph synthesized for star chains have no source statement and are also
+/// left out.
+#[must_use]
+pub fn named_re_exports(graph: &RetainedModuleGraph) -> Vec<NamedReExport> {
+    let graph = graph.as_graph();
+    graph
+        .modules
+        .iter()
+        .flat_map(|node| {
+            node.re_exports
+                .iter()
+                .filter(|edge| {
+                    edge.imported_name != "*"
+                        && edge.exported_name != "*"
+                        && !(edge.span.start == 0 && edge.span.end == 0)
+                })
+                .filter_map(|edge| {
+                    let source = graph.modules.get(edge.source_file.0 as usize)?;
+                    Some(NamedReExport {
+                        path: node.path.clone(),
+                        exported_name: edge.exported_name.clone(),
+                        source_path: source.path.clone(),
+                        imported_name: edge.imported_name.clone(),
+                    })
+                })
+        })
+        .collect()
+}
+
 /// Engine-owned importer details for one file that directly imports a target module.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DirectImporterSummary {

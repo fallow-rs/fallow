@@ -12,6 +12,7 @@ mod config;
 mod deps;
 mod enum_helpers;
 mod enum_members;
+mod export_list;
 mod exports;
 mod io;
 mod plan;
@@ -41,13 +42,18 @@ fn run_analyze(
     config: &fallow_config::ResolvedConfig,
     output: OutputFormat,
     quiet: bool,
-) -> Result<(fallow_types::results::AnalysisResults, CapturedHashes), ExitCode> {
+) -> Result<AnalyzedProject, ExitCode> {
     let session = fallow_engine::session::AnalysisSession::from_resolved_config(config.clone())
         .map_err(|e| crate::error::emit_input_error(&format!("Analysis error: {e}"), output))?;
     let output_struct = session
-        .analyze_dead_code_with_artifacts(false, false)
+        .analyze_dead_code_with_artifacts(false, true)
         .map_err(|e| crate::error::emit_input_error(&format!("Analysis error: {e}"), output))?;
     let mut results = output_struct.results;
+    let re_exports = output_struct
+        .graph
+        .as_ref()
+        .map(fallow_engine::module_graph::named_re_exports)
+        .unwrap_or_default();
     if config.type_aware.enabled {
         let projects = config
             .type_aware
@@ -104,7 +110,20 @@ fn run_analyze(
             }
         }
     }
-    Ok((results, output_struct.file_hashes))
+    Ok(AnalyzedProject {
+        results,
+        file_hashes: output_struct.file_hashes,
+        re_exports,
+    })
+}
+
+/// The analysis facts that the fixers read.
+struct AnalyzedProject {
+    results: fallow_types::results::AnalysisResults,
+    file_hashes: CapturedHashes,
+    /// Named re-exports, so the export fixer never removes an export that a
+    /// kept re-export still names.
+    re_exports: Vec<fallow_engine::module_graph::NamedReExport>,
 }
 
 pub struct FixOptions<'a> {
@@ -193,12 +212,15 @@ fn run_fix_impl(opts: &FixOptions<'_>, fix_count: &mut usize) -> ExitCode {
         config.show_cascade = true;
     }
 
-    let (results, file_hashes) = match run_analyze(&config, opts.output, opts.quiet) {
+    let AnalyzedProject {
+        mut results,
+        file_hashes,
+        re_exports,
+    } = match run_analyze(&config, opts.output, opts.quiet) {
         Ok(r) => r,
         Err(code) => return code,
     };
 
-    let mut results = results;
     // The report hides these findings, so `fix` offers no fix for them.
     fallow_engine::dead_code::hide_cascade_findings(&mut results, &config);
     if let Some(scope) = opts.scope.as_ref() {
@@ -229,6 +251,7 @@ fn run_fix_impl(opts: &FixOptions<'_>, fix_count: &mut usize) -> ExitCode {
         config: &config,
         results: &results,
         file_hashes: &file_hashes,
+        re_exports: &re_exports,
         plan: &mut plan,
         fixes: &mut fixes,
     });
@@ -299,6 +322,7 @@ struct ApplyAllFixesInput<'a> {
     config: &'a fallow_config::ResolvedConfig,
     results: &'a fallow_types::results::AnalysisResults,
     file_hashes: &'a CapturedHashes,
+    re_exports: &'a [fallow_engine::module_graph::NamedReExport],
     plan: &'a mut FixPlan,
     fixes: &'a mut Vec<serde_json::Value>,
 }
@@ -309,6 +333,7 @@ fn apply_all_fixes(input: ApplyAllFixesInput<'_>) -> (bool, CatalogFixTotals) {
         config,
         results,
         file_hashes,
+        re_exports,
         plan,
         fixes,
     } = input;
@@ -322,15 +347,18 @@ fn apply_all_fixes(input: ApplyAllFixesInput<'_>) -> (bool, CatalogFixTotals) {
         fixes: &mut *fixes,
     });
 
-    apply_unused_export_fixes(&mut FixApplicationInput {
-        root: opts.root,
-        results,
-        file_hashes,
-        plan: &mut *plan,
-        output: opts.output,
-        dry_run: opts.dry_run,
-        fixes: &mut *fixes,
-    });
+    apply_unused_export_fixes(
+        &mut FixApplicationInput {
+            root: opts.root,
+            results,
+            file_hashes,
+            plan: &mut *plan,
+            output: opts.output,
+            dry_run: opts.dry_run,
+            fixes: &mut *fixes,
+        },
+        re_exports,
+    );
 
     deps::apply_dependency_fixes(&mut deps::DependencyFixInput {
         root: opts.root,
@@ -427,7 +455,10 @@ struct FixApplicationInput<'a> {
     fixes: &'a mut Vec<serde_json::Value>,
 }
 
-fn apply_unused_export_fixes(input: &mut FixApplicationInput<'_>) {
+fn apply_unused_export_fixes(
+    input: &mut FixApplicationInput<'_>,
+    re_exports: &[fallow_engine::module_graph::NamedReExport],
+) {
     let mut exports_by_file: FxHashMap<PathBuf, Vec<&fallow_types::results::UnusedExport>> =
         FxHashMap::default();
     for finding in &input.results.unused_exports {
@@ -460,6 +491,7 @@ fn apply_unused_export_fixes(input: &mut FixApplicationInput<'_>) {
         hashes: input.file_hashes,
         unresolved_import_files: &unresolved_import_files,
         caveats_by_file: &caveats_by_file,
+        re_exports,
         plan: input.plan,
         output: input.output,
         dry_run: input.dry_run,

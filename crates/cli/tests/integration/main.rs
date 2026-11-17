@@ -81,6 +81,7 @@ mod export_assignment_forward_tests;
 mod file_lines_tests;
 mod finding_id_filter_tests;
 mod finding_id_tests;
+mod fix_multiline_reexport_tests;
 mod fix_tests;
 mod flags_tests;
 mod gate_outcome_tests;
