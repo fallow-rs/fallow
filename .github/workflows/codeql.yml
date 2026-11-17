@@ -2,10 +2,11 @@ name: CodeQL
 
 # Static analysis for the Rust crates, the JavaScript and TypeScript tools and
 # the workflows. It runs on GitHub-hosted runners, so it costs no paid minutes.
-# The Analyze checks are required on `main`, and findings show as code scanning
-# alerts. The Rust analysis takes about 20 minutes, so a pull request that
-# changes no Rust input skips its steps and the check passes at once. Pushes to
-# main and the schedule always analyze.
+# The Analyze checks are not required checks, and findings show as code
+# scanning alerts. The Rust analysis takes about 20 minutes, longer than CI on
+# most pull requests, so it runs on pushes to main and on the schedule. A pull
+# request analyzes Rust only when it changes the CodeQL configuration. A Rust
+# alert then shows after the next analyzed push to main.
 on:
   pull_request:
   push:
@@ -15,17 +16,18 @@ on:
   workflow_dispatch:
 
 # A cancelled analysis uploads a failed run to code scanning, which shows as a
-# configuration error. Let a started run finish. A newer push replaces only the
-# run that waits in the queue.
+# configuration error. Let a started run finish. Pull requests and pushes to
+# main share one group per ref, so a newer push replaces only the run that
+# waits in the queue. Scheduled and manual runs get a group of their own.
 concurrency:
-  group: codeql-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  group: codeql-${{ (github.event_name == 'pull_request' || github.event_name == 'push') && github.ref || github.run_id }}
   cancel-in-progress: false
 
 permissions: {}
 
 jobs:
   changes:
-    name: Detect Rust changes
+    name: Detect CodeQL configuration changes
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
@@ -43,9 +45,6 @@ jobs:
         with:
           filters: |
             rust:
-              - '**/*.rs'
-              - '**/Cargo.toml'
-              - '**/Cargo.lock'
               - '.github/codeql/**'
               - '.github/workflows/codeql.yml'
 
@@ -69,7 +68,7 @@ jobs:
     steps:
       - name: Skip the Rust analysis
         if: env.ANALYZE != 'true'
-        run: echo "This pull request changes no Rust input, so the Rust analysis is skipped."
+        run: echo "Pull requests analyze Rust only when the CodeQL configuration changes. Pushes to main analyze Rust."
 
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         if: env.ANALYZE == 'true'

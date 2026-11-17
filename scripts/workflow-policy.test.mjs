@@ -846,6 +846,37 @@ test("CodeQL analyze jobs always report so the required checks resolve", () => {
   assert.match(job, /codeql-action\/analyze@[0-9a-f]{40}[^\n]*\n\s+if: env\.ANALYZE == 'true'/u);
 });
 
+test("CodeQL analyzes Rust on main, and on a pull request only for its own configuration", async () => {
+  const { runInNewContext } = await import("node:vm");
+  const workflow = readWorkflow(".github/workflows/codeql.yml");
+  const filter = indentedBlock(workflow, "changes", 2);
+  const concurrency = indentedBlock(workflow, "concurrency", 0);
+
+  // The Rust leg takes about 20 minutes, so a Rust source change must not
+  // start it on a pull request. Pushes to main analyze every commit that
+  // reaches a runner.
+  assert.deepEqual(
+    [...filter.matchAll(/^ {14}- '([^']+)'$/gmu)].map((match) => match[1]),
+    [".github/codeql/**", ".github/workflows/codeql.yml"],
+  );
+  assert.match(concurrency, /^ {2}cancel-in-progress: false$/mu);
+  const group = concurrency.match(/^ {2}group: (.+)$/mu)[1];
+  const evaluate = (event_name, run_id) => {
+    const ref = event_name === "pull_request" ? "refs/pull/1/merge" : "refs/heads/main";
+    const github = { event_name, ref, run_id };
+    return group.replace(/\$\{\{ (.+?) \}\}/gu, (_, expression) =>
+      runInNewContext(expression, { github }),
+    );
+  };
+  // A newer push replaces a queued analysis; a started one always finishes.
+  assert.equal(evaluate("push", 1), evaluate("push", 2));
+  assert.equal(evaluate("pull_request", 1), evaluate("pull_request", 2));
+  assert.notEqual(evaluate("push", 1), evaluate("pull_request", 1));
+  for (const event of ["schedule", "workflow_dispatch"]) {
+    assert.notEqual(evaluate(event, 1), evaluate(event, 2));
+  }
+});
+
 test("NAPI builds preserve the maintained native loader", () => {
   const packageJson = JSON.parse(readFileSync("crates/napi/package.json", "utf8"));
   for (const script of [packageJson.scripts.build, packageJson.scripts["build:debug"]]) {

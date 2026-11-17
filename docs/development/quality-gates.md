@@ -372,6 +372,12 @@ On push to `main` only (each one also has `workflow_dispatch`):
   pull requests.
 - `Fuzz Smoke`, which also runs every week.
 - `Scorecard`.
+- The Rust leg of `CodeQL`. Its analysis takes about 20 minutes, longer than
+  `CI` on most pull requests. A pull request analyzes Rust only when it
+  changes `.github/codeql/**` or `codeql.yml`. The JavaScript and TypeScript
+  leg and the Actions leg still run on each pull request. On `main`, a newer
+  push replaces a queued analysis but never cancels a started one, because a
+  cancelled analysis uploads a failed run to code scanning.
 - `osv-scanner ignores`, which also runs every week. It fails when an
   `IgnoredVulns` entry matches no advisory in its lockfile.
 
