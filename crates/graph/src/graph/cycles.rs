@@ -898,8 +898,7 @@ mod tests {
         };
         let range = &succs.succ_ranges[0];
         assert_eq!(range.end - range.start, 3);
-        for i in 1..4 {
-            let r = &succs.succ_ranges[i];
+        for r in &succs.succ_ranges[1..4] {
             assert_eq!(r.end - r.start, 0);
         }
     }

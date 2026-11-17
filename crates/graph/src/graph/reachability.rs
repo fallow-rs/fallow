@@ -1039,9 +1039,9 @@ mod tests {
     #[test]
     fn deep_chain_all_reachable() {
         let graph = build_reachability_graph(5, &[(0, 1), (1, 2), (2, 3), (3, 4)], &[0], &[]);
-        for i in 0..5 {
+        for (i, module) in graph.modules.iter().enumerate() {
             assert!(
-                graph.modules[i].is_reachable(),
+                module.is_reachable(),
                 "file{i} should be reachable through chain"
             );
         }
@@ -1072,9 +1072,9 @@ mod tests {
     #[test]
     fn three_node_cycle_all_reachable() {
         let graph = build_reachability_graph(3, &[(0, 1), (1, 2), (2, 0)], &[0], &[]);
-        for i in 0..3 {
+        for (i, module) in graph.modules.iter().enumerate() {
             assert!(
-                graph.modules[i].is_reachable(),
+                module.is_reachable(),
                 "file{i} in cycle should be reachable"
             );
         }
@@ -2006,11 +2006,8 @@ mod tests {
     #[test]
     fn overall_reachable_is_union_of_runtime_and_test() {
         let graph = build_reachability_graph(4, &[(0, 1), (2, 3)], &[0], &[2]);
-        for i in 0..4 {
-            assert!(
-                graph.modules[i].is_reachable(),
-                "file{i} should be overall-reachable"
-            );
+        for (i, module) in graph.modules.iter().enumerate() {
+            assert!(module.is_reachable(), "file{i} should be overall-reachable");
         }
     }
 
@@ -2025,10 +2022,10 @@ mod tests {
     #[test]
     fn runtime_same_as_overall_reuses_bfs() {
         let graph = build_reachability_graph(3, &[(0, 1), (1, 2)], &[0], &[]);
-        for i in 0..3 {
+        for (i, module) in graph.modules.iter().enumerate() {
             assert_eq!(
-                graph.modules[i].is_reachable(),
-                graph.modules[i].is_runtime_reachable(),
+                module.is_reachable(),
+                module.is_runtime_reachable(),
                 "file{i}: reachable and runtime_reachable should match when runtime==overall"
             );
         }
@@ -2037,9 +2034,9 @@ mod tests {
     #[test]
     fn empty_test_entries_none_test_reachable() {
         let graph = build_reachability_graph(3, &[(0, 1), (1, 2)], &[0], &[]);
-        for i in 0..3 {
+        for (i, module) in graph.modules.iter().enumerate() {
             assert!(
-                !graph.modules[i].is_test_reachable(),
+                !module.is_test_reachable(),
                 "file{i} should not be test-reachable when no test entries exist"
             );
         }
@@ -2059,9 +2056,9 @@ mod tests {
     #[test]
     fn diamond_dependency_all_reachable() {
         let graph = build_reachability_graph(4, &[(0, 1), (0, 2), (1, 3), (2, 3)], &[0], &[]);
-        for i in 0..4 {
+        for (i, module) in graph.modules.iter().enumerate() {
             assert!(
-                graph.modules[i].is_reachable(),
+                module.is_reachable(),
                 "file{i} in diamond should be reachable"
             );
         }
@@ -2070,9 +2067,9 @@ mod tests {
     #[test]
     fn multiple_entry_points_reach_disjoint_subtrees() {
         let graph = build_reachability_graph(4, &[(0, 1), (2, 3)], &[0, 2], &[]);
-        for i in 0..4 {
+        for (i, module) in graph.modules.iter().enumerate() {
             assert!(
-                graph.modules[i].is_reachable(),
+                module.is_reachable(),
                 "file{i} should be reachable from one of the entry points"
             );
         }

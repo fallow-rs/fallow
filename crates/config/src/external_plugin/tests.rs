@@ -351,7 +351,7 @@ fn manifest_conditions_preserve_non_operator_json_equality_values() {
             "name": "equality-condition",
             "manifestEntries": [{
                 "manifests": "**/manifest.json",
-                "when": { "field": condition.clone() },
+                "when": { "field": condition },
                 "entries": [{ "path": "index.ts" }]
             }]
         });

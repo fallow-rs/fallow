@@ -270,7 +270,7 @@ pub(super) struct RuntimeCoverageAnalysisInput<'a> {
 /// raw exit code so the engine can wrap it in `HealthError::Printed` without
 /// re-printing at the CLI boundary.
 fn emit_printed(message: &str, code: ErrorExitCode, output: OutputFormat) -> u8 {
-    emit_error(message, code, output);
+    let _ = emit_error(message, code, output);
     code.get()
 }
 

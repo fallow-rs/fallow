@@ -11,6 +11,10 @@ use serde::{Deserialize, Serialize};
 /// Custom notification sent to the client after every analysis completes.
 /// Carries summary stats so the extension can update the status bar, context
 /// keys, and other UI without running a separate CLI process.
+#[expect(
+    clippy::empty_enums,
+    reason = "a notification is a marker type, as in `lsp-types`, so no code constructs it"
+)]
 pub enum AnalysisComplete {}
 
 impl notification::Notification for AnalysisComplete {

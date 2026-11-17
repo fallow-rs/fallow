@@ -305,7 +305,6 @@ fn sanitize_marker_segment(value: &str) -> String {
         .to_owned()
 }
 
-#[must_use]
 pub(crate) fn print_pr_comment_from_codeclimate_issues(
     command: &str,
     provider: Provider,
@@ -320,7 +319,6 @@ pub(crate) fn print_pr_comment_from_codeclimate_issues(
 /// a saved render. The survivors come after the analysis findings, so the
 /// decision annotations list them after the analysis findings, inside the
 /// same cap.
-#[must_use]
 pub(crate) fn print_pr_comment_with_mutation(
     command: &str,
     provider: Provider,
@@ -359,7 +357,6 @@ fn rebase_issue_paths(mut issues: Vec<CiIssue>) -> Vec<CiIssue> {
     issues
 }
 
-#[must_use]
 fn print_pr_comment_from_ci_issues(
     command: &str,
     provider: Provider,

@@ -5,7 +5,7 @@
 //! `cargo test --workspace`, Cargo builds it automatically. If running `cargo test -p fallow-mcp`
 //! alone, build the binary first: `cargo build -p fallow-cli`.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use rmcp::model::ContentBlock;
 
@@ -17,17 +17,19 @@ use crate::tools::{
     run_trace_error_tool, run_trace_export_tool,
 };
 
-/// The Cargo profile directory of the running test binary. Test binaries
-/// live in `<target>/<profile>/deps`, next to the `fallow` binary one level
-/// up, so this follows `CARGO_TARGET_DIR` and `build.target-dir`.
+/// The Cargo profile directory of the running test binary. Older Cargo
+/// puts test binaries in `<target>/<profile>/deps`. Newer Cargo puts them in
+/// `<target>/<profile>/build/<pkg>/<hash>/out`. The `fallow` binary is in
+/// `<target>/<profile>` for both, so this follows `CARGO_TARGET_DIR` and
+/// `build.target-dir`.
 fn cargo_profile_dir() -> PathBuf {
     let exe = std::env::current_exe().expect("test binary path");
     let dir = exe.parent().expect("test binary directory");
-    if dir.ends_with("deps") {
-        dir.parent().expect("profile directory").to_path_buf()
-    } else {
-        dir.to_path_buf()
-    }
+    dir.ancestors()
+        .find(|ancestor| ancestor.ends_with("deps") || ancestor.ends_with("build"))
+        .and_then(Path::parent)
+        .unwrap_or(dir)
+        .to_path_buf()
 }
 
 /// Resolve the fallow binary from `FALLOW_BIN`, or the Cargo profile directory.

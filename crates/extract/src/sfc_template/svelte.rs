@@ -404,11 +404,7 @@ fn apply_svelte_block_tag(input: &mut SvelteTagInput<'_>) -> bool {
         return true;
     }
 
-    if apply_svelte_snippet_tag(input) {
-        return true;
-    }
-
-    false
+    apply_svelte_snippet_tag(input)
 }
 
 fn apply_svelte_snippet_tag(input: &mut SvelteTagInput<'_>) -> bool {
@@ -493,11 +489,7 @@ fn apply_svelte_expression_directive(input: &mut SvelteExpressionDirectiveInput<
         return true;
     }
 
-    if input.tag.starts_with(":else") {
-        return true;
-    }
-
-    false
+    input.tag.starts_with(":else")
 }
 
 /// Merge a directive's expression operand into template usage.

@@ -49,7 +49,7 @@ fn init_does_not_append_to_a_gitignore_outside_the_project() {
     std::fs::write(&target, "keep\n").unwrap();
     symlink(&target, root.path().join(".gitignore")).unwrap();
 
-    run_init(&init_opts(root.path(), false));
+    let _ = run_init(&init_opts(root.path(), false));
 
     assert_eq!(std::fs::read_to_string(&target).unwrap(), "keep\n");
 }

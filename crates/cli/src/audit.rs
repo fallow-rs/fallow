@@ -2803,7 +2803,6 @@ fn print_audit_command_result(
 /// The MCP `decision_surface` tool wraps this command. It is callable without the
 /// full pipeline because it reuses `execute_audit` in brief mode (changed-code
 /// scope), not bare `fallow`.
-#[must_use]
 pub fn run_decision_surface(opts: &AuditOptions<'_>) -> ExitCode {
     // Force brief mode: the decision surface is only computed on the brief path.
     let brief_opts = AuditOptions {

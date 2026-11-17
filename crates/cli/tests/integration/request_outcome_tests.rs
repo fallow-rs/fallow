@@ -361,7 +361,7 @@ fn security_gate_states_the_cause_without_claiming_a_whole_project_report() {
                 .expect("an error document")
                 .to_owned()
         } else {
-            out.stderr.clone()
+            out.stderr
         };
         assert!(
             error.contains("--gate could not compute the diff for 'refs/heads/does-not-exist'"),

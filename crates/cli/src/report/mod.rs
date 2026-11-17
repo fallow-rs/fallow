@@ -287,7 +287,6 @@ pub(crate) fn format_bytes(bytes: u64) -> String {
 ///
 /// On success prints the JSON and returns `ExitCode::SUCCESS`.
 /// On serialization failure prints an error to stderr and returns exit code 2.
-#[must_use]
 pub(crate) fn emit_json(value: &serde_json::Value, kind: &str) -> ExitCode {
     match serde_json::to_string_pretty(value) {
         Ok(json) => {
@@ -302,7 +301,6 @@ pub(crate) fn emit_json(value: &serde_json::Value, kind: &str) -> ExitCode {
 }
 
 /// Serialize report JSON with the requested presentation style.
-#[must_use]
 pub(crate) fn emit_report_json(
     value: &serde_json::Value,
     kind: &str,
@@ -465,7 +463,6 @@ fn print_shared_state(
 ///
 /// When `regression` is `Some`, the JSON format includes a `regression` key in the output envelope.
 /// When `ctx.group_by` is `Some`, results are partitioned into labeled groups before rendering.
-#[must_use]
 pub(crate) fn print_results(
     results: &AnalysisResults,
     ctx: &ReportContext<'_>,
@@ -719,7 +716,6 @@ fn print_results_ci_comment(
 }
 
 /// Render grouped results across all output formats.
-#[must_use]
 fn print_grouped_results(
     groups: &[grouping::ResultGroup],
     original: &AnalysisResults,
@@ -804,7 +800,6 @@ fn print_grouped_results(
 }
 
 /// Print duplication analysis results in the configured format.
-#[must_use]
 pub(crate) fn print_duplication_report(
     report: &DuplicationReport,
     ctx: &ReportContext<'_>,
@@ -944,7 +939,6 @@ fn print_duplication_ci_comment(
 }
 
 /// Render grouped duplication results across all output formats.
-#[must_use]
 fn print_grouped_duplication_report(
     report: &DuplicationReport,
     grouping: &DuplicationGrouping,
@@ -1125,7 +1119,6 @@ fn dropped_grouping_mode<'a>(ctx: &'a ReportContext<'_>, output: OutputFormat) -
 /// - **Compact**, **Badge**, **GitHub annotations** and the PR comment and
 ///   review formats fall back to ungrouped output and emit a one-line stderr
 ///   note pointing at `--format json` for the richer grouped envelope.
-#[must_use]
 pub(crate) fn print_health_report(
     report: &fallow_output::HealthReport,
     grouping: Option<&fallow_output::HealthGrouping>,

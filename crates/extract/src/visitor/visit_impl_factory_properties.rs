@@ -764,7 +764,7 @@ impl ModuleInfoExtractor {
             self.factory_property_sources
                 .entry(factory)
                 .or_default()
-                .insert(property_path.clone(), source.clone());
+                .insert(property_path, source);
         }
         let mut emitted = 0;
         for export in &self.exports {

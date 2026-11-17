@@ -17,13 +17,11 @@ use fallow_output::exit_code::{EXIT_GATE_FAILED, EXIT_INVALID_INPUT, EXIT_OK};
 
 /// Exit code 1: an enforced gate failed. The run found problems, the tool did
 /// not fail.
-#[must_use]
 pub fn exit_gate_failed() -> ExitCode {
     ExitCode::from(EXIT_GATE_FAILED)
 }
 
 /// Exit code 2: the input was not valid, or the run could not complete.
-#[must_use]
 pub fn exit_invalid_input() -> ExitCode {
     ExitCode::from(EXIT_INVALID_INPUT)
 }
@@ -117,7 +115,6 @@ pub const fn gate_failed_exit_code(gate: fallow_output::GateName, failed: bool) 
 
 /// The process exit code for the verdicts of one run: the highest code of the
 /// gates that failed, or 0.
-#[must_use]
 pub fn run_exit_code(codes: impl IntoIterator<Item = u8>) -> ExitCode {
     ExitCode::from(codes.into_iter().max().unwrap_or(EXIT_OK))
 }

@@ -188,6 +188,10 @@ pub trait HealthGroupResolver {
 /// Placeholder grouping resolver for runs without `--group-by` (the programmatic
 /// API path). Constructed only as `None`, so its methods are never invoked.
 #[derive(Debug, Clone, Copy)]
+#[expect(
+    clippy::empty_enums,
+    reason = "NoGroupResolver must be uninhabited so that no code can construct it"
+)]
 pub enum NoGroupResolver {}
 
 #[expect(

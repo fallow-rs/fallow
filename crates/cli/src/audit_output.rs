@@ -38,7 +38,6 @@ use codeclimate::{build_audit_codeclimate_issues, print_audit_codeclimate};
 pub use quiet::print_audit_report;
 
 /// Print audit results and return the appropriate exit code.
-#[must_use]
 pub fn print_audit_result(result: &AuditResult, quiet: bool, explain: bool) -> ExitCode {
     print_audit_result_with_style(
         result,
@@ -546,7 +545,7 @@ fn print_audit_dead_code_section(
         show_headers,
         "── Dead Code ──────────────────────────────────────",
     );
-    crate::check::print_check_result(
+    let _ = crate::check::print_check_result(
         check,
         crate::check::PrintCheckOptions {
             quiet,
@@ -576,7 +575,7 @@ fn print_audit_duplication_section(
         show_headers,
         "── Duplication ────────────────────────────────────",
     );
-    crate::dupes::print_audit_dupes_result(&crate::dupes::DupesRenderOptions {
+    let _ = crate::dupes::print_audit_dupes_result(&crate::dupes::DupesRenderOptions {
         result: dupes,
         quiet,
         explain,
@@ -667,7 +666,7 @@ fn print_audit_complexity_section(
         show_headers,
         "── Complexity ─────────────────────────────────────",
     );
-    crate::health::print_health_result(
+    let _ = crate::health::print_health_result(
         health,
         crate::health::HealthPrintOptions {
             quiet,

@@ -125,7 +125,7 @@ fn collect_cva_file_token_drifts(
             }
             out.push(fallow_output::CvaVariantTokenDrift {
                 class_token: arbitrary.value.clone(),
-                value: value.clone(),
+                value,
                 variant_classes: variant_classes.clone(),
                 path: rel.to_owned(),
                 line,

@@ -3297,7 +3297,7 @@ impl<'a> ModuleInfoExtractor {
             &field_types,
         );
         for name in refs.identifiers {
-            self.record_angular_template_member_fact(name.clone());
+            self.record_angular_template_member_fact(name);
         }
         self.member_accesses.extend(refs.member_accesses);
         let template_offset = meta
