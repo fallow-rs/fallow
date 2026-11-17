@@ -84,8 +84,10 @@ pub enum WeakenedTestsKind {
     CoverageThreshold,
     /// A rule severity in a Fallow config that the change made less strict.
     RuleSeverity,
-    /// A new or broader `ignorePatterns` or `ignoreFindings` entry in a
-    /// Fallow config, or a removed `!` exception.
+    /// A new or broader entry in a Fallow config key that removes files or
+    /// findings from the analysis, or makes code count as used, such as
+    /// `ignorePatterns`, `entry` or `ignoreDependencies`. A removed `!`
+    /// exception also has this kind. The evidence names the key.
     IgnorePattern,
 }
 

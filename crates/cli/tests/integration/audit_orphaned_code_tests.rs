@@ -194,7 +194,7 @@ fn a_config_change_that_keeps_the_entries_orphans_nothing() {
     let tmp = fixture(ENTRY_INDEX_AND_EXTRA);
     fs::write(
         tmp.path().join(".fallowrc.json"),
-        r#"{"entry": ["src/index.ts", "scripts/extra.ts"], "ignoreDependencies": ["left-pad"]}"#,
+        r#"{"entry": ["src/index.ts", "scripts/extra.ts"], "rules": {"unused-files": "error"}}"#,
     )
     .unwrap();
     commit_all(tmp.path(), "edit the config");
