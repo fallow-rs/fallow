@@ -19,7 +19,8 @@ pub use fallow_output::{WeakeningKind, WeakeningSignal};
 ///
 /// - `weakened-tests` maps to `test-weakened`, except a less strict coverage
 ///   threshold or a less strict rule severity, which map to
-///   `threshold-lowered`.
+///   `threshold-lowered`, and a new ignore entry in the Fallow config, which
+///   maps to `suppression-added`.
 /// - `added-suppression` maps to `suppression-added`.
 ///
 /// The other diff-risk rules are not weakening signals.
@@ -34,6 +35,9 @@ pub fn signals_from_diff_risk(report: &DiffRiskReport) -> Vec<WeakeningSignal> {
                     DiffRiskRule::WeakenedTests,
                     Some(WeakenedTestsKind::CoverageThreshold | WeakenedTestsKind::RuleSeverity),
                 ) => (WeakeningKind::ThresholdLowered, finding.evidence.clone()),
+                (DiffRiskRule::WeakenedTests, Some(WeakenedTestsKind::IgnorePattern)) => {
+                    (WeakeningKind::SuppressionAdded, finding.evidence.clone())
+                }
                 (DiffRiskRule::WeakenedTests, Some(WeakenedTestsKind::SkipOnly)) => (
                     WeakeningKind::TestWeakened,
                     format!("{} added", finding.evidence),
@@ -189,6 +193,12 @@ mod tests {
                 ".fallowrc.json",
                 "weakened-tests: error -> off",
             ),
+            finding(
+                DiffRiskRule::WeakenedTests,
+                Some(WeakenedTestsKind::IgnorePattern),
+                ".fallowrc.json",
+                "ignorePatterns: + src/a.test.ts",
+            ),
         ]);
         assert_eq!(
             signals,
@@ -213,6 +223,11 @@ mod tests {
                     WeakeningKind::ThresholdLowered,
                     ".fallowrc.json",
                     "weakened-tests: error -> off"
+                ),
+                signal(
+                    WeakeningKind::SuppressionAdded,
+                    ".fallowrc.json",
+                    "ignorePatterns: + src/a.test.ts"
                 ),
             ]
         );

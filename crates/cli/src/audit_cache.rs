@@ -57,7 +57,10 @@ use crate::error::emit_input_error;
 /// base, also outside the changed files. A version-21 snapshot holds only the
 /// keys in the changed files, so an old unused file outside them would look
 /// introduced.
-pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 22;
+/// Version 23 makes the fragment hash of a clone-group key independent of
+/// the instance order. A version-22 snapshot holds hashes in instance order,
+/// so its clone groups with unequal fragments would not match the head keys.
+pub(super) const AUDIT_BASE_SNAPSHOT_CACHE_VERSION: u8 = 23;
 const MAX_AUDIT_BASE_SNAPSHOT_CACHE_SIZE: usize = 16 * 1024 * 1024;
 /// Most snapshot files that one cache version directory keeps. Each key folds
 /// in the base SHA and the changed files, so every new commit or edit adds a

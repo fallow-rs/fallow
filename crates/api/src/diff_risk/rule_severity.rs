@@ -1,168 +1,171 @@
-//! Rule severities that a change of the Fallow config file made less strict.
+//! Rule severities that a change of the Fallow config made less strict.
 //!
-//! The detector compares the `rules` table and the `overrides[].rules`
-//! entries of the base and head text of the config file at the analysis root.
-//! A missing, empty or comment-only file reads as an empty config, so a new or
-//! deleted file compares with the default severities. The detector reads only
-//! that file. When either side has an `extends` entry, a rule that one side
-//! does not set can take its value from another file, so only a rule that both
-//! sides set compares.
+//! The detector compares the `rules` table and the `overrides` list that the
+//! base and head config chains resolve to (see the `config_chain` module). A
+//! side without a config file uses the default severities. A key that an
+//! opaque source can set on either side does not compare.
+
+use std::path::PathBuf;
+use std::sync::LazyLock;
 
 use fallow_config::{PartialRulesConfig, RulesConfig, Severity};
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use serde_json::{Map, Value};
 
-use super::text::{LineHit, added_lines};
+use super::config_chain::{ConfigChain, Lookup};
+use super::config_change::{LineMatch, Weakening};
+use fallow_output::WeakenedTestsKind;
 
-/// Whether `rel_path` names a Fallow config file at the analysis root. The
-/// config loader reads the first config file that it finds from the root
-/// upward, so a config file in a subdirectory has no effect.
+/// The `weakened-tests` severity of the base chain, or `None` when an opaque
+/// source can set it.
 #[must_use]
-pub fn is_fallow_config_path(rel_path: &str) -> bool {
-    !rel_path.contains('/') && fallow_config::CONFIG_FILE_NAMES.contains(&rel_path)
+pub fn weakened_tests_severity(chain: &ConfigChain) -> Option<Severity> {
+    match rule_lookup(chain, "weakened-tests", &key_names("weakened-tests")) {
+        Resolved::Known(severity, _) => Some(severity),
+        Resolved::Unknown => None,
+    }
 }
 
-/// The `weakened-tests` severity of the top-level `rules` table, or `None`
-/// when the text does not parse.
+/// Rule severities of the head chain that are less strict than in the base
+/// chain.
 #[must_use]
-pub fn weakened_tests_severity(text: &str) -> Option<Severity> {
-    let config = ConfigRules::parse(text)?;
-    Some(config.rules.weakened_tests)
+pub fn rule_weakenings(base: &ConfigChain, head: &ConfigChain) -> Vec<Weakening> {
+    let mut changes = top_level_changes(base, head);
+    changes.extend(override_changes(base, head));
+    changes
 }
 
-/// Rule severities of the head text that are less strict than in the base
-/// text. A text that does not parse gives no hit.
-#[must_use]
-pub fn weakened_rule_hits(base: &str, head: &str) -> Vec<LineHit> {
-    let (Some(base_config), Some(head_config)) =
-        (ConfigRules::parse(base), ConfigRules::parse(head))
-    else {
-        return Vec::new();
-    };
-    let mut changes = top_level_changes(&base_config, &head_config);
-    changes.extend(override_changes(&base_config, &head_config));
-    attach_lines(base, head, changes)
+/// A rule severity after the chain resolves it.
+enum Resolved {
+    /// The severity and the file that sets it, `None` for the default.
+    Known(Severity, Option<PathBuf>),
+    Unknown,
 }
 
-fn top_level_changes(base: &ConfigRules, head: &ConfigRules) -> Vec<Change> {
-    let base_rules = severities(&base.rules);
-    let inherits = base.extends || head.extends;
-    let mut changes = Vec::new();
-    for (key, head_severity) in severities(&head.rules) {
-        if inherits && !(base.explicit.contains(&key) && head.explicit.contains(&key)) {
-            continue;
+fn rule_lookup(chain: &ConfigChain, key: &str, names: &[&str]) -> Resolved {
+    let lookup = chain.lookup(|map| {
+        let rules = map.get("rules")?.as_object()?;
+        names.iter().find_map(|name| rules.get(*name))
+    });
+    match lookup {
+        Lookup::Unknown => Resolved::Unknown,
+        Lookup::Unset => default_severity(key).map_or(Resolved::Unknown, |severity| {
+            Resolved::Known(severity, None)
+        }),
+        Lookup::Set { value, abs } => serde_json::from_value(value.clone())
+            .map_or(Resolved::Unknown, |severity| {
+                Resolved::Known(severity, Some(abs.to_path_buf()))
+            }),
+    }
+}
+
+/// The default severity of each rule, by canonical name.
+static DEFAULT_SEVERITIES: LazyLock<FxHashMap<String, Severity>> =
+    LazyLock::new(|| severities(&RulesConfig::default()));
+
+/// The alias names of each rule, by canonical name.
+static ALIASES: LazyLock<FxHashMap<String, Vec<&'static str>>> = LazyLock::new(|| {
+    let mut aliases: FxHashMap<String, Vec<&'static str>> = FxHashMap::default();
+    for name in fallow_config::KNOWN_RULE_NAMES {
+        let mut probe = Map::new();
+        probe.insert((*name).to_owned(), Value::String("warn".to_owned()));
+        for (canonical, _) in partial_severities(Value::Object(probe)).unwrap_or_default() {
+            if canonical != *name {
+                aliases.entry(canonical).or_default().push(name);
+            }
         }
-        let Some(base_severity) = base_rules.get(&key).copied() else {
+    }
+    aliases
+});
+
+fn default_severity(key: &str) -> Option<Severity> {
+    DEFAULT_SEVERITIES.get(key).copied()
+}
+
+fn top_level_changes(base: &ConfigChain, head: &ConfigChain) -> Vec<Weakening> {
+    let mut keys: Vec<&String> = DEFAULT_SEVERITIES.keys().collect();
+    keys.sort();
+    let mut changes = Vec::new();
+    for key in keys {
+        let names = key_names(key);
+        let (Resolved::Known(base_severity, base_file), Resolved::Known(head_severity, head_file)) = (
+            rule_lookup(base, key, &names),
+            rule_lookup(head, key, &names),
+        ) else {
             continue;
         };
         if strictness(head_severity) < strictness(base_severity) {
-            changes.push(Change {
-                key,
-                base: base_severity,
-                head: head_severity,
-                files: None,
+            changes.push(Weakening {
+                kind: WeakenedTestsKind::RuleSeverity,
+                evidence: format!("{key}: {base_severity} -> {head_severity}"),
+                head_file,
+                base_file,
+                line_match: LineMatch::Rule {
+                    key: key.clone(),
+                    head: head_severity,
+                },
             });
         }
     }
-    changes.sort_by(|a, b| a.key.cmp(&b.key));
     changes
+}
+
+/// The `overrides` list of a chain, `None` when an opaque source can set it.
+fn overrides_lookup(chain: &ConfigChain) -> Option<(Vec<OverrideRules>, Option<PathBuf>)> {
+    match chain.lookup(|map| map.get("overrides")) {
+        Lookup::Unknown => None,
+        Lookup::Unset => Some((Vec::new(), None)),
+        Lookup::Set { value, abs } => Some((
+            value
+                .as_array()
+                .map(|entries| entries.iter().filter_map(override_rules).collect())
+                .unwrap_or_default(),
+            Some(abs.to_path_buf()),
+        )),
+    }
 }
 
 /// Override entries compare with the base entry that has the same `files`
 /// globs, else with the base top level.
-fn override_changes(base: &ConfigRules, head: &ConfigRules) -> Vec<Change> {
-    let base_rules = severities(&base.rules);
-    let inherits = base.extends || head.extends;
+fn override_changes(base: &ConfigChain, head: &ConfigChain) -> Vec<Weakening> {
+    let (Some((base_overrides, base_file)), Some((head_overrides, head_file))) =
+        (overrides_lookup(base), overrides_lookup(head))
+    else {
+        return Vec::new();
+    };
     let mut changes = Vec::new();
-    for entry in &head.overrides {
+    for entry in &head_overrides {
         for (key, head_severity) in &entry.rules {
-            let base_top_level = (!inherits || base.explicit.contains(key))
-                .then(|| base_rules.get(key).copied())
-                .flatten();
-            let base_severity = base
-                .overrides
+            let base_entry = base_overrides
                 .iter()
                 .rev()
                 .filter(|base_entry| base_entry.files == entry.files)
-                .find_map(|base_entry| base_entry.severity(key))
-                .or(base_top_level);
-            let Some(base_severity) = base_severity else {
-                continue;
+                .find_map(|base_entry| base_entry.severity(key));
+            let (base_severity, from) = match base_entry {
+                Some(severity) => (severity, base_file.clone()),
+                None => match rule_lookup(base, key, &key_names(key)) {
+                    Resolved::Known(severity, file) => (severity, file),
+                    Resolved::Unknown => continue,
+                },
             };
             if strictness(*head_severity) < strictness(base_severity) {
-                changes.push(Change {
-                    key: key.clone(),
-                    base: base_severity,
-                    head: *head_severity,
-                    files: Some(entry.files.join(", ")),
+                changes.push(Weakening {
+                    kind: WeakenedTestsKind::RuleSeverity,
+                    evidence: format!(
+                        "{key}: {base_severity} -> {head_severity} for {}",
+                        entry.files.join(", ")
+                    ),
+                    head_file: head_file.clone(),
+                    base_file: from,
+                    line_match: LineMatch::Rule {
+                        key: key.clone(),
+                        head: *head_severity,
+                    },
                 });
             }
         }
     }
     changes
-}
-
-/// Give each change the first free added line that names its rule, and
-/// prefer a line that also holds the new severity.
-fn attach_lines(base: &str, head: &str, changes: Vec<Change>) -> Vec<LineHit> {
-    let added = added_lines(base, head);
-    let mut used_lines = FxHashSet::default();
-    changes
-        .into_iter()
-        .map(|change| {
-            let names = key_names(&change.key);
-            let free = |line: &u32| !used_lines.contains(line);
-            let names_rule = |text: &str| names.iter().any(|name| names_key(text, name));
-            let head_value = format!("\"{}\"", change.head);
-            let line = added
-                .iter()
-                .find(|(line, text)| free(line) && names_rule(text) && text.contains(&head_value))
-                .or_else(|| {
-                    added
-                        .iter()
-                        .find(|(line, text)| free(line) && names_rule(text))
-                })
-                .map(|(line, _)| *line);
-            if let Some(line) = line {
-                used_lines.insert(line);
-            }
-            LineHit {
-                line: line.unwrap_or(0),
-                evidence: change.evidence(),
-            }
-        })
-        .collect()
-}
-
-/// One rule whose severity the change lowered.
-struct Change {
-    key: String,
-    base: Severity,
-    head: Severity,
-    /// The `files` globs of an `overrides` entry, `None` for the top level.
-    files: Option<String>,
-}
-
-impl Change {
-    fn evidence(&self) -> String {
-        let mut evidence = format!("{}: {} -> {}", self.key, self.base, self.head);
-        if let Some(files) = &self.files {
-            evidence.push_str(" for ");
-            evidence.push_str(files);
-        }
-        evidence
-    }
-}
-
-/// The rule parts of one config text.
-struct ConfigRules {
-    /// The top-level rules, with the defaults for rules the text does not set.
-    rules: RulesConfig,
-    /// Canonical names of the rules that the top-level table sets.
-    explicit: FxHashSet<String>,
-    /// Whether the text has a non-empty `extends` entry.
-    extends: bool,
-    overrides: Vec<OverrideRules>,
 }
 
 /// The rule part of one `overrides` entry.
@@ -179,51 +182,6 @@ impl OverrideRules {
             .iter()
             .find(|(name, _)| name == key)
             .map(|(_, severity)| *severity)
-    }
-}
-
-impl ConfigRules {
-    fn parse(text: &str) -> Option<Self> {
-        let value = parse_value(text)?;
-        let object = value.as_object()?;
-        let rules_value = object
-            .get("rules")
-            .cloned()
-            .unwrap_or_else(|| Value::Object(Map::new()));
-        let rules: RulesConfig = serde_json::from_value(rules_value.clone()).ok()?;
-        let explicit = partial_severities(rules_value)?
-            .into_iter()
-            .map(|(key, _)| key)
-            .collect();
-        let extends = object.get("extends").is_some_and(|extends| match extends {
-            Value::String(entry) => !entry.is_empty(),
-            Value::Array(entries) => !entries.is_empty(),
-            _ => false,
-        });
-        let overrides = object
-            .get("overrides")
-            .and_then(Value::as_array)
-            .map(|entries| entries.iter().filter_map(override_rules).collect())
-            .unwrap_or_default();
-        Some(Self {
-            rules,
-            explicit,
-            extends,
-            overrides,
-        })
-    }
-}
-
-/// Parse a config text as JSONC, else as TOML. The text decides the format,
-/// not the file name, so a rename from `.fallowrc.json` to `fallow.toml`
-/// still parses the base text. An empty or comment-only text is an empty
-/// config.
-fn parse_value(text: &str) -> Option<Value> {
-    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
-    match fallow_config::jsonc::parse_to_value::<Option<Value>>(text) {
-        Ok(Some(value)) => Some(value),
-        Ok(None) => Some(Value::Object(Map::new())),
-        Err(_) => fallow_config::toml_input::from_str(text).ok(),
     }
 }
 
@@ -279,24 +237,16 @@ pub(super) const fn strictness(severity: Severity) -> u8 {
 }
 
 /// The canonical name `key` and every alias that reads as it.
-fn key_names(key: &str) -> Vec<&str> {
+pub(super) fn key_names(key: &str) -> Vec<&str> {
     let mut names = vec![key];
-    for name in fallow_config::KNOWN_RULE_NAMES {
-        if *name == key {
-            continue;
-        }
-        let mut probe = Map::new();
-        probe.insert((*name).to_owned(), Value::String("warn".to_owned()));
-        let canonical = partial_severities(Value::Object(probe));
-        if canonical.is_some_and(|pairs| pairs.iter().any(|(canonical, _)| canonical == key)) {
-            names.push(name);
-        }
+    if let Some(aliases) = ALIASES.get(key) {
+        names.extend(aliases.iter().copied());
     }
     names
 }
 
 /// Whether a config line holds the rule `key` as a JSON key or a TOML key.
-fn names_key(line: &str, key: &str) -> bool {
+pub(super) fn names_key(line: &str, key: &str) -> bool {
     let trimmed = line.trim_start();
     trimmed.contains(&format!("\"{key}\""))
         || trimmed
@@ -307,12 +257,10 @@ fn names_key(line: &str, key: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::diff_risk::config_change::test_support::single_file_hits;
 
     fn evidence(base: &str, head: &str) -> Vec<(u32, String)> {
-        weakened_rule_hits(base, head)
-            .into_iter()
-            .map(|hit| (hit.line, hit.evidence))
-            .collect()
+        single_file_hits(base, head)
     }
 
     #[test]
@@ -404,10 +352,12 @@ mod tests {
             ),
             vec![(0, "weakened-tests: error -> warn".to_owned())]
         );
-        assert_eq!(
-            weakened_tests_severity("\u{feff}{\"rules\": {\"weakened-tests\": \"error\"}}"),
-            Some(Severity::Error)
-        );
+        let chain = ConfigChain::from_text(
+            std::path::Path::new("/r/.fallowrc.json"),
+            "\u{feff}{\"rules\": {\"weakened-tests\": \"error\"}}",
+        )
+        .expect("chain");
+        assert_eq!(weakened_tests_severity(&chain), Some(Severity::Error));
     }
 
     #[test]
@@ -430,14 +380,5 @@ mod tests {
     #[test]
     fn a_config_that_does_not_parse_gives_no_hit() {
         assert!(evidence(r#"{"rules": {}}"#, "{ not json").is_empty());
-    }
-
-    #[test]
-    fn config_paths_match_fallow_config_names_only() {
-        assert!(is_fallow_config_path(".fallowrc.json"));
-        assert!(is_fallow_config_path("fallow.toml"));
-        assert!(!is_fallow_config_path("packages/app/fallow.toml"));
-        assert!(!is_fallow_config_path("vitest.config.ts"));
-        assert!(!is_fallow_config_path("package.json"));
     }
 }

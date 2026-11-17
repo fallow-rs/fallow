@@ -35,6 +35,7 @@ mod audit_complexity;
 /// a base snapshot, plus helpers that annotate output JSON with
 /// introduced-vs-pre-existing attribution.
 pub mod audit_keys;
+mod audit_moved;
 pub mod audit_output;
 pub mod audit_run;
 pub mod combined_output;

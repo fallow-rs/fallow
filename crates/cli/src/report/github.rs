@@ -222,7 +222,7 @@ impl PathRebase {
     pub(crate) fn apply(&self, path: &str) -> String {
         match self {
             Self::None => path.to_owned(),
-            Self::Prefix(prefix) => format!("{prefix}/{path}"),
+            Self::Prefix(prefix) => fallow_output::apply_path_prefix(prefix, path),
         }
     }
 
