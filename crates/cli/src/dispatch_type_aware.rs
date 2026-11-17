@@ -1,4 +1,14 @@
+use std::path::Path;
+use std::process::ExitCode;
+
 use fallow_api::{DEFAULT_TYPE_AWARE_BACKEND_FAMILY, TypeAwareStatus};
+
+use super::DispatchContext;
+use crate::cli_args::TypeAwareCli;
+use crate::error::emit_input_error;
+
+#[path = "type_aware_setup/mod.rs"]
+mod setup;
 
 /// The word before the backend version. The default backend is TypeScript, and
 /// each other backend has a version scheme of its own, so it keeps its name.
@@ -18,6 +28,100 @@ pub(super) fn available_message(status: &TypeAwareStatus) -> String {
         backend_label(status.backend_family.as_deref()),
         status.backend_version.as_deref().unwrap_or("unknown"),
     )
+}
+
+pub(super) fn dispatch_type_aware_command(
+    dispatch: &DispatchContext<'_>,
+    subcommand: TypeAwareCli,
+) -> ExitCode {
+    match subcommand {
+        TypeAwareCli::Setup { yes, from } => setup::run_setup(&setup::SetupInput {
+            root: dispatch.root,
+            yes,
+            from: from.as_deref(),
+            output: dispatch.output,
+            json_style: dispatch.json_style,
+        }),
+        TypeAwareCli::Cleanup { yes } => setup::run_cleanup(&setup::CleanupInput {
+            yes,
+            output: dispatch.output,
+            json_style: dispatch.json_style,
+        }),
+        TypeAwareCli::Status => {
+            let status = fallow_api::type_aware_status(dispatch.root);
+            match dispatch.output {
+                fallow_config::OutputFormat::Json => emit_type_aware_status_json(
+                    dispatch.root,
+                    status,
+                    dispatch.output,
+                    dispatch.json_style,
+                ),
+                fallow_config::OutputFormat::Human => {
+                    if status.available {
+                        crate::report::sink::outln!(
+                            "{}",
+                            crate::report::human_status_line(
+                                crate::report::HumanStatus::Ok,
+                                available_message(&status),
+                            )
+                        );
+                    } else {
+                        crate::report::sink::outln!(
+                            "{}",
+                            crate::report::human_status_line(
+                                crate::report::HumanStatus::Inactive,
+                                "Type-aware companion: unavailable"
+                            )
+                        );
+                        if let Some(remediation) = status.remediation {
+                            crate::report::sink::outln!(
+                                "{}",
+                                crate::report::human_status_line(
+                                    crate::report::HumanStatus::Warning,
+                                    format_args!("Action: {remediation}")
+                                )
+                            );
+                        }
+                    }
+                    ExitCode::SUCCESS
+                }
+                _ => emit_input_error(
+                    "type-aware status supports human and json output",
+                    dispatch.output,
+                ),
+            }
+        }
+    }
+}
+
+/// Print the `type-aware-status` JSON envelope.
+pub fn emit_type_aware_status_json(
+    root: &Path,
+    status: fallow_api::TypeAwareStatus,
+    output: fallow_config::OutputFormat,
+    json_style: crate::json_style::JsonStyle,
+) -> ExitCode {
+    let value = match fallow_output::serialize_type_aware_status_json_output(
+        super::type_aware_status_output(root, status),
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            return emit_input_error(
+                &format!("failed to build type-aware status: {error}"),
+                output,
+            );
+        }
+    };
+    match json_style.serialize(&value) {
+        Ok(json) => {
+            crate::report::sink::outln!("{json}");
+            ExitCode::SUCCESS
+        }
+        Err(error) => emit_input_error(
+            &format!("failed to serialize type-aware status: {error}"),
+            output,
+        ),
+    }
 }
 
 #[cfg(test)]

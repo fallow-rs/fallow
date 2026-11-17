@@ -27,7 +27,11 @@ use discovery::canonical_sidecar_path;
 use discovery::discover_type_aware_sidecar_from;
 #[cfg(all(test, unix))]
 use discovery::find_installed_sidecar;
-use discovery::{canonicalize_root, discover_type_aware_sidecar, non_empty_env};
+use discovery::{
+    canonicalize_root, discover_type_aware_sidecar, discover_type_aware_sidecar_with_source,
+    non_empty_env,
+};
+pub use discovery::{find_sidecar_in, protocol_mismatch_hint};
 #[cfg(all(test, windows))]
 use process::sidecar_command_with_script;
 use process::{
@@ -133,13 +137,13 @@ impl Drop for ActiveSidecarGuard {
 /// Semantic-companion availability report produced by [`status`].
 #[derive(Debug, Clone, Serialize)]
 pub struct TypeAwareStatus {
-    /// True only when the companion was found, its protocol and package
-    /// versions match this fallow build exactly, and its backend version is in
+    /// True only when the companion was found, its wire protocol version
+    /// equals the one this fallow build speaks, and its backend version is in
     /// the supported range of the selected backend.
     pub available: bool,
     /// How the companion binary was located: `installed-sibling`,
-    /// `environment-override`, or a wrapper marker such as `npm-wrapper`;
-    /// `None` when discovery failed.
+    /// `setup-directory`, `environment-override`, or a wrapper marker such as
+    /// `npm-wrapper`; `None` when discovery failed.
     pub discovery_source: Option<&'static str>,
     /// Discovered companion binary path; `None` when discovery failed.
     #[serde(serialize_with = "fallow_types::serde_path::serialize_option")]
@@ -173,11 +177,19 @@ struct StatusResponse {
     backend_version: String,
 }
 
+/// A companion of another Fallow release stays usable while it speaks the same
+/// wire protocol, so a Fallow upgrade does not need a new companion until the
+/// protocol changes.
+fn status_response_is_usable(response: &StatusResponse, backend: BackendSpec) -> bool {
+    response.protocol_version == TYPE_AWARE_PROTOCOL_VERSION
+        && response.backend_family == backend.family
+        && backend.supports(&response.backend_version)
+}
+
 /// Names the mismatch that made a status response unusable. A backend outside
 /// its supported range needs another backend install, not another companion.
 fn status_mismatch_remediation(response: &StatusResponse, backend: BackendSpec) -> String {
     if response.protocol_version == TYPE_AWARE_PROTOCOL_VERSION
-        && response.package_version == env!("CARGO_PKG_VERSION")
         && response.backend_family == backend.family
     {
         return format!(
@@ -189,7 +201,12 @@ fn status_mismatch_remediation(response: &StatusResponse, backend: BackendSpec) 
             backend.version
         );
     }
-    "Install the exact fallow-type-aware version that matches Fallow".to_string()
+    format!(
+        "The companion speaks type-aware protocol {}, but Fallow {} speaks protocol {TYPE_AWARE_PROTOCOL_VERSION}. {}",
+        response.protocol_version,
+        env!("CARGO_PKG_VERSION"),
+        discovery::protocol_mismatch_hint()
+    )
 }
 
 /// Marker set alongside `FALLOW_TYPE_AWARE_BIN` by fallow's own launchers
@@ -199,7 +216,14 @@ fn status_mismatch_remediation(response: &StatusResponse, backend: BackendSpec) 
 const SIDECAR_SOURCE_ENV: &str = "FALLOW_TYPE_AWARE_BIN_SOURCE";
 const WRAPPER_SOURCES: &[&str] = &["npm-wrapper", "github-action"];
 
-fn discovery_source_label(override_set: bool, source_marker: Option<&str>) -> &'static str {
+fn discovery_source_label(
+    override_set: bool,
+    source_marker: Option<&str>,
+    from_setup_directory: bool,
+) -> &'static str {
+    if from_setup_directory {
+        return super::setup_store::SETUP_DIRECTORY_SOURCE;
+    }
     if !override_set {
         return "installed-sibling";
     }
@@ -211,13 +235,20 @@ fn discovery_source_label(override_set: bool, source_marker: Option<&str>) -> &'
 /// Inspect the optional semantic companion without loading or analyzing a
 /// TypeScript project.
 pub fn status(root: &Path) -> TypeAwareStatus {
-    let discovery_source = discovery_source_label(
-        non_empty_env("FALLOW_TYPE_AWARE_BIN").is_some(),
-        non_empty_env(SIDECAR_SOURCE_ENV).as_deref(),
-    );
-    let sidecar = match discover_type_aware_sidecar(root) {
-        Ok(sidecar) => sidecar,
+    let override_set = non_empty_env("FALLOW_TYPE_AWARE_BIN").is_some();
+    let source_marker = non_empty_env(SIDECAR_SOURCE_ENV);
+    let (sidecar, discovery_source) = match discover_type_aware_sidecar_with_source(root) {
+        Ok(found) => (
+            found.path,
+            discovery_source_label(
+                override_set,
+                source_marker.as_deref(),
+                found.from_setup_directory,
+            ),
+        ),
         Err(error) => {
+            let discovery_source =
+                discovery_source_label(override_set, source_marker.as_deref(), false);
             // Both the sibling and wrapper paths are installation problems the
             // npm package fixes; only a user-set override keeps the raw error.
             let remediation = if discovery_source == "environment-override" {
@@ -264,23 +295,16 @@ pub fn status(root: &Path) -> TypeAwareStatus {
         sidecar_timeout(),
         MAX_RESPONSE_BYTES,
     ) {
-        Ok(response)
-            if response.protocol_version == TYPE_AWARE_PROTOCOL_VERSION
-                && response.package_version == env!("CARGO_PKG_VERSION")
-                && response.backend_family == backend.family
-                && backend.supports(&response.backend_version) =>
-        {
-            TypeAwareStatus {
-                available: true,
-                discovery_source: Some(discovery_source),
-                companion_path: Some(sidecar),
-                package_version: Some(response.package_version),
-                protocol_version: response.protocol_version,
-                backend_family: Some(response.backend_family),
-                backend_version: Some(response.backend_version),
-                remediation: None,
-            }
-        }
+        Ok(response) if status_response_is_usable(&response, backend) => TypeAwareStatus {
+            available: true,
+            discovery_source: Some(discovery_source),
+            companion_path: Some(sidecar),
+            package_version: Some(response.package_version),
+            protocol_version: response.protocol_version,
+            backend_family: Some(response.backend_family),
+            backend_version: Some(response.backend_version),
+            remediation: None,
+        },
         Ok(response) => {
             let remediation = status_mismatch_remediation(&response, backend);
             TypeAwareStatus {
@@ -424,10 +448,29 @@ mod tests {
             "{remediation}"
         );
 
-        response.package_version = "0.0.0".to_string();
+        response.protocol_version += 1;
         assert!(
-            status_mismatch_remediation(&response, backend).contains("fallow-type-aware"),
-            "a companion mismatch keeps the companion hint"
+            status_mismatch_remediation(&response, backend).contains("fallow type-aware setup"),
+            "a protocol mismatch names the companion install"
+        );
+    }
+
+    #[test]
+    fn status_accepts_a_companion_of_another_release_with_the_same_protocol() {
+        let backend = selected_backend().expect("default backend");
+        let mut response = StatusResponse {
+            package_version: "0.0.1".to_string(),
+            protocol_version: TYPE_AWARE_PROTOCOL_VERSION,
+            backend_family: backend.family.to_string(),
+            backend_version: backend.version.to_string(),
+        };
+        assert!(status_response_is_usable(&response, backend));
+        response.protocol_version += 1;
+        assert!(!status_response_is_usable(&response, backend));
+        let remediation = status_mismatch_remediation(&response, backend);
+        assert!(
+            remediation.contains("fallow type-aware setup"),
+            "{remediation}"
         );
     }
 
@@ -445,26 +488,33 @@ mod tests {
 
     #[test]
     fn discovery_source_labels_each_resolution_path() {
-        assert_eq!(discovery_source_label(false, None), "installed-sibling");
-        // A stale wrapper marker without an override must not relabel siblings.
         assert_eq!(
-            discovery_source_label(false, Some("npm-wrapper")),
+            discovery_source_label(false, None, false),
             "installed-sibling"
         );
-        assert_eq!(discovery_source_label(true, None), "environment-override");
+        // A stale wrapper marker without an override must not relabel siblings.
         assert_eq!(
-            discovery_source_label(true, Some("npm-wrapper")),
+            discovery_source_label(false, Some("npm-wrapper"), false),
+            "installed-sibling"
+        );
+        assert_eq!(
+            discovery_source_label(true, None, false),
+            "environment-override"
+        );
+        assert_eq!(
+            discovery_source_label(true, Some("npm-wrapper"), false),
             "npm-wrapper"
         );
         assert_eq!(
-            discovery_source_label(true, Some("github-action")),
+            discovery_source_label(true, Some("github-action"), false),
             "github-action"
         );
         // Unrecognized marker values never leak into the reported taxonomy.
         assert_eq!(
-            discovery_source_label(true, Some("custom-marker")),
+            discovery_source_label(true, Some("custom-marker"), false),
             "environment-override"
         );
+        assert_eq!(discovery_source_label(false, None, true), "setup-directory");
     }
 
     #[test]
@@ -482,8 +532,10 @@ mod tests {
             override_sidecar.to_str(),
             Some(executable.as_path()),
             None,
+            None,
         )
-        .expect("explicit override should be discovered");
+        .expect("explicit override should be discovered")
+        .path;
 
         assert_eq!(
             discovered,
@@ -500,9 +552,13 @@ mod tests {
         std::fs::write(&sibling, []).expect("write sibling sidecar fixture");
         let missing = install.path().join("missing-sidecar");
 
-        let error =
-            discover_type_aware_sidecar_from(missing.to_str(), Some(executable.as_path()), None)
-                .expect_err("invalid explicit override must not fall back");
+        let error = discover_type_aware_sidecar_from(
+            missing.to_str(),
+            Some(executable.as_path()),
+            None,
+            None,
+        )
+        .expect_err("invalid explicit override must not fall back");
 
         assert!(
             error.not_found,
@@ -521,13 +577,85 @@ mod tests {
         std::fs::write(&executable, []).expect("write fallow executable fixture");
         std::fs::write(&sibling, []).expect("write sibling sidecar fixture");
 
-        let discovered = discover_type_aware_sidecar_from(None, Some(executable.as_path()), None)
-            .expect("installed sibling should be discovered");
+        let discovered =
+            discover_type_aware_sidecar_from(None, Some(executable.as_path()), None, None)
+                .expect("installed sibling should be discovered")
+                .path;
 
         assert_eq!(
             discovered,
             dunce::canonicalize(sibling).expect("canonical sibling sidecar")
         );
+    }
+
+    #[test]
+    fn discovery_checks_the_override_then_the_sibling_then_the_setup_directory() {
+        use crate::type_aware::setup_store::tests::write_install;
+
+        let store = tempfile::tempdir().expect("temporary setup directory");
+        let installed = write_install(
+            store.path(),
+            env!("CARGO_PKG_VERSION"),
+            TYPE_AWARE_PROTOCOL_VERSION,
+        );
+        let from_store =
+            dunce::canonicalize(installed.join(SIDECAR_BINARY)).expect("canonical setup companion");
+
+        let bare = tempfile::tempdir().expect("directory without a sibling");
+        let lone_executable = bare.path().join("fallow");
+        std::fs::write(&lone_executable, []).expect("write fallow executable fixture");
+        let found = discover_type_aware_sidecar_from(
+            None,
+            Some(lone_executable.as_path()),
+            Some(store.path()),
+            None,
+        )
+        .expect("the setup directory is the last step");
+        assert_eq!(found.path, from_store);
+        assert!(found.from_setup_directory);
+
+        let install = tempfile::tempdir().expect("temporary install directory");
+        let executable = install.path().join("fallow");
+        let sibling = install.path().join(SIDECAR_BINARY);
+        std::fs::write(&executable, []).expect("write fallow executable fixture");
+        std::fs::write(&sibling, []).expect("write sibling sidecar fixture");
+        let found = discover_type_aware_sidecar_from(
+            None,
+            Some(executable.as_path()),
+            Some(store.path()),
+            None,
+        )
+        .expect("the sibling wins over the setup directory");
+        assert_eq!(
+            found.path,
+            dunce::canonicalize(&sibling).expect("canonical sibling")
+        );
+        assert!(!found.from_setup_directory);
+
+        let override_dir = tempfile::tempdir().expect("temporary override directory");
+        let override_sidecar = override_dir.path().join("custom-sidecar");
+        std::fs::write(&override_sidecar, []).expect("write override sidecar fixture");
+        let found = discover_type_aware_sidecar_from(
+            override_sidecar.to_str(),
+            Some(executable.as_path()),
+            Some(store.path()),
+            None,
+        )
+        .expect("the override wins over every other location");
+        assert_eq!(
+            found.path,
+            dunce::canonicalize(&override_sidecar).expect("canonical override")
+        );
+
+        let missing = bare.path().join("missing");
+        let error = discover_type_aware_sidecar_from(
+            missing.to_str(),
+            Some(lone_executable.as_path()),
+            Some(store.path()),
+            None,
+        )
+        .expect_err("a broken override never falls back to the setup directory");
+        assert!(error.message.contains("FALLOW_TYPE_AWARE_BIN is set"));
     }
 
     #[cfg(unix)]
@@ -566,6 +694,7 @@ mod tests {
         let error = discover_type_aware_sidecar_from(
             None,
             Some(executable.as_path()),
+            None,
             Some(project.path()),
         )
         .expect_err("no trusted companion is installed")
@@ -573,7 +702,7 @@ mod tests {
 
         assert!(error.contains("is not the npm install"), "{error}");
         assert_eq!(
-            error.contains("export FALLOW_TYPE_AWARE_BIN"),
+            error.contains("`fallow type-aware setup`"),
             !cfg!(windows),
             "{error}"
         );
@@ -582,18 +711,24 @@ mod tests {
     }
 
     #[test]
-    fn the_unix_standalone_hint_names_the_environment_override() {
-        let version = env!("CARGO_PKG_VERSION");
+    fn the_windows_search_text_names_no_setup_directory() {
+        assert!(!discovery::searched_locations(true).contains("type-aware setup"));
+        assert!(
+            discovery::searched_locations(false).contains("`fallow type-aware setup` directory")
+        );
+    }
+
+    #[test]
+    fn the_unix_standalone_hint_names_the_setup_command() {
         let hint = discovery::standalone_install_hint(false);
         for text in [
-            format!("`npm install --global fallow-type-aware@{version}`"),
-            "`export FALLOW_TYPE_AWARE_BIN=\"$(npm prefix --global)/bin/fallow-type-aware\"`"
-                .to_owned(),
-            "the environment that starts Fallow, such as your shell or your editor".to_owned(),
-            format!("`npm install --global fallow@{version} fallow-type-aware@{version}`"),
+            "Run `fallow type-aware setup`",
+            "Node.js 20 or later on PATH",
+            "FALLOW_TYPE_AWARE_BIN",
         ] {
-            assert!(hint.contains(&text), "{text}\n{hint}");
+            assert!(hint.contains(text), "{text}\n{hint}");
         }
+        assert!(!hint.contains("npm prefix --global"), "{hint}");
     }
 
     /// The npm launcher starts the companion through Node with a script path
@@ -666,7 +801,7 @@ mod tests {
         std::fs::write(path_dir.path().join(SIDECAR_BINARY), [])
             .expect("write PATH sidecar fixture");
 
-        let error = discover_type_aware_sidecar_from(None, Some(executable.as_path()), None)
+        let error = discover_type_aware_sidecar_from(None, Some(executable.as_path()), None, None)
             .expect_err("untrusted discovery locations must be ignored");
         assert!(error.not_found, "no sibling sidecar is a missing sidecar");
         let error = error.message;
@@ -819,6 +954,52 @@ mod tests {
             .expect_err("oversized response should fail");
 
         assert!(error.contains("exceeded the 64-byte limit"));
+    }
+
+    /// A companion of an older protocol refuses the request on stderr and
+    /// exits 2, so the version check never sees a response. The error must
+    /// still name the way to a companion of this protocol.
+    #[cfg(unix)]
+    #[test]
+    fn an_older_protocol_companion_gets_the_install_hint() {
+        use std::fs;
+        use std::os::unix::fs::PermissionsExt;
+
+        let _lifecycle_lock = lock_sidecar_lifecycle_tests();
+        let root = tempfile::tempdir().expect("temporary sidecar root");
+        let sidecar = root.path().join("protocol-7-sidecar.sh");
+        fs::write(
+            &sidecar,
+            format!(
+                "#!/bin/sh\ncat >/dev/null\necho 'fallow-type-aware: unsupported protocol_version {TYPE_AWARE_PROTOCOL_VERSION}' >&2\nexit 2\n"
+            ),
+        )
+        .expect("write sidecar");
+        let mut permissions = fs::metadata(&sidecar)
+            .expect("sidecar metadata")
+            .permissions();
+        permissions.set_mode(0o755);
+        fs::set_permissions(&sidecar, permissions).expect("make sidecar executable");
+
+        let request = StatusRequest {
+            protocol_version: TYPE_AWARE_PROTOCOL_VERSION,
+            operation: "status",
+        };
+        let error = run_sidecar_json::<_, StatusResponse>(
+            &sidecar,
+            root.path(),
+            &request,
+            Duration::from_secs(20),
+            MAX_RESPONSE_BYTES,
+        )
+        .expect_err("an older companion refuses the request");
+
+        assert!(error.contains("unsupported protocol_version"), "{error}");
+        assert!(error.contains("`fallow type-aware setup`"), "{error}");
+        assert!(
+            error.contains(&format!("fallow-type-aware@{}", env!("CARGO_PKG_VERSION"))),
+            "{error}"
+        );
     }
 
     #[cfg(unix)]

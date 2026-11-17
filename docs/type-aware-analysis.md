@@ -53,18 +53,78 @@ companion together with `fallow`. Without the companion, `--type-aware`
 and `type-aware status` name the install command.
 
 A `fallow` binary from Homebrew, `cargo install`, or a release archive has no
-npm launcher, so it does not find a global companion. On macOS and Linux,
-install the companion with npm, then set `FALLOW_TYPE_AWARE_BIN` to it:
+npm launcher, so it does not find a global companion. On macOS and Linux, run
+`fallow type-aware setup` once:
 
 ```bash
-npm install --global fallow-type-aware@<fallow version>
-export FALLOW_TYPE_AWARE_BIN="$(npm prefix --global)/bin/fallow-type-aware"
+fallow type-aware setup
 ```
 
-Set the variable in the environment that starts Fallow. For a terminal, that
-is the shell profile. For an editor that starts `fallow-lsp`, it is the
-environment of the editor process. On Windows, the npm launcher starts the
-companion through Node, so install `fallow` and the companion from npm.
+The command does these steps:
+
+1. It runs `node` from `PATH` and reads `process.platform`, `process.arch` and
+   the Node version. The TypeScript platform package follows Node, not Fallow:
+   an x64 Node on an arm64 Mac gets the x64 bundle. Node 20 or later is
+   necessary.
+2. It shows the bundle, the source URL, the target directory and the license
+   notice, and asks for approval. A caller with no terminal must pass `--yes`.
+3. It downloads `fallow-type-aware-<platform>-<arch>.tar.gz` and its `.sig`
+   file from the GitHub release of its own version. The download honors
+   `HTTPS_PROXY`, `HTTP_PROXY`, `ALL_PROXY`, `NO_PROXY` and `FALLOW_CA_BUNDLE`.
+   `--from <file>` installs a bundle that you copied to the machine. The
+   signature must be next to it as `<file>.sig`.
+4. It checks the detached Ed25519 signature with the release key that the
+   binary holds, before it reads the archive. Then it checks that the bundle
+   manifest names this Fallow version, the Node platform and the wire protocol
+   of this Fallow build.
+5. It holds a lock file (`.setup.lock`) in the setup directory, so a second
+   setup stops, and unpacks the bundle into a temporary directory. A previous
+   install of the same version moves aside, the new one moves into place, and
+   only then is the previous one deleted. When the move fails, the previous
+   install moves back, and the error names its directory when that also
+   fails. A crash between the two moves leaves the previous install in
+   `.previous-<version>-<pid>`: run the setup again. The directory has the
+   Fallow version in its name:
+
+   | Platform | Directory |
+   | --- | --- |
+   | macOS | `~/Library/Application Support/fallow/fallow-type-aware/<version>/` |
+   | Linux | `$XDG_DATA_HOME/fallow/fallow-type-aware/<version>/`, else `~/.local/share/fallow/fallow-type-aware/<version>/` |
+
+The bundle holds the companion, the `typescript` package that
+`tools/type-aware-sidecar/package-lock.json` pins, and the TypeScript platform
+package of that Node platform. `THIRD_PARTY_NOTICES.md` at the root of the
+bundle names the Apache-2.0 license and notice files of the TypeScript
+packages. Fallow never talks to the npm registry in this route.
+
+The companion still runs on Node. An editor can start `fallow-lsp` with a
+shorter `PATH` than your shell. When the companion finds no `node`, it reports
+that Node.js 20 or later must be on `PATH`. At each start, the launcher also
+compares `process.platform` and `process.arch` of that `node` with
+`bundle.json`. A different Node (for example an x64 Node after setup with an
+arm64 Node) stops with a message that names the node on `PATH` and
+`fallow type-aware setup`. A missing or damaged `bundle.json` stops with a
+message too.
+
+After a Fallow upgrade, the installed companion stays in use while it speaks
+the same wire protocol (`wire_protocol_version` in
+`crates/api/type-aware-protocol.json`). Discovery prefers the install of the
+running Fallow version. Otherwise it takes the newest install with the same
+protocol, by semantic version precedence (a release before its prereleases),
+so the order of the directories does not change the choice. When the
+protocol changes, `type-aware status` names `fallow type-aware setup` again.
+A companion of an older protocol refuses the request with
+`unsupported protocol_version` before it answers, and Fallow then adds the
+same hint: run `fallow type-aware setup`, or install the companion of this
+version from npm. `fallow type-aware cleanup` removes every install except
+the one that Fallow uses now, and the `.partial-` and `.previous-`
+directories that an interrupted setup leaves. It keeps those directories
+while a setup holds the lock. It also asks for approval, or needs `--yes`.
+
+Windows has no setup bundle. There, the npm launcher starts the companion
+through Node, so install `fallow` and the companion from npm. On every
+platform you can also set `FALLOW_TYPE_AWARE_BIN` to a trusted companion
+executable, in the environment that starts Fallow.
 
 `--type-aware`, `type-aware status`, and `mutation --typecheck` name these
 steps instead of the npm project commands when two conditions are true:
@@ -78,7 +138,27 @@ runs the native TypeScript-Go backend. The canonical protocol manifest at
 `crates/api/type-aware-protocol.json` owns the wire version, semantic schema,
 operations, backend identity, and session envelope. Generated Rust and
 JavaScript constants keep the native client, sidecar, corpus, and editor bundle
-on that single contract. Fallow only changes a finding when the checker
+on that single contract. Fallow accepts a companion of another release when
+it speaks the same `wire_protocol_version`, so every change of the wire format
+must raise that version. `crates/api/type-aware-protocol-contract.json` pins a
+SHA-256 of the contract sources to the version: the manifest, the request and
+response modules of the sidecar (`protocol.mjs`, `cli.mjs`,
+`response-normalization.mjs`), and the serde wire types of the Rust client,
+with the shared `fallow-types` and `fallow-output` types that they use,
+transitively. A field type that no listed source defines stops the hash, so
+a new wire type cannot drop out of it. Comments, whitespace, an external
+test module file and the inline `mod tests` do not count. The response values
+that other sidecar modules build, for example `call-evidence.mjs`, count only
+through the Rust types that parse them: a response that a new Fallow cannot
+parse changes those types and therefore the hash.
+`node --test scripts/type-aware-protocol-contract.test.mjs` fails when the
+contract changes without a new version, and when the pin differs from the
+pin on `origin/main` without a version above it (the base check skips when
+that ref does not exist). Raise the version, run `npm run generate:contracts`,
+then run `node scripts/type-aware-protocol-contract.mjs --write`. The writer
+refuses a changed contract at the pinned version and a version below it. The
+pin also records `hash_method`; a change of the hash computation raises it,
+and only then may the writer record a new hash at the same version. Fallow only changes a finding when the checker
 resolves an exact declaration identity. Name-only matches are never enough.
 
 ### Experimental tsrs backend
@@ -453,15 +533,17 @@ fallow dead-code --root packages/app --unused-class-members --type-aware \
 ```
 
 Fallow never searches project `node_modules/.bin` or `PATH` for this executable.
-It accepts an explicit `FALLOW_TYPE_AWARE_BIN` path, or a regular non-symlinked
-sidecar next to the active Fallow executable. The `fallow` npm launcher, the
+It checks three locations in this order: an explicit `FALLOW_TYPE_AWARE_BIN`
+path, a regular non-symlinked sidecar next to the active Fallow executable, and
+the `fallow type-aware setup` directory. The `fallow` npm launcher, the
 Node-API loader, and the VS Code extension resolve a version-matched
 `fallow-type-aware` npm package themselves and wire it through
 `FALLOW_TYPE_AWARE_BIN`, marked as wrapper-provided. `type-aware status`
 reports the resolution path as
 `discovery_source`: `environment-override` (user-set `FALLOW_TYPE_AWARE_BIN`),
 `npm-wrapper` (companion resolved from `node_modules` by a fallow launcher),
-or `installed-sibling` (found next to the active executable). Requests, responses, warnings,
+`installed-sibling` (found next to the active executable), or
+`setup-directory` (installed by `fallow type-aware setup`). Requests, responses, warnings,
 candidate counts, project counts, and execution time are bounded. The child
 process receives a minimal environment. Relative, missing, and project-local
 search-path entries are removed before its Node interpreter is resolved. Its
@@ -545,7 +627,7 @@ compact, markdown, JSON, grouped JSON, and SARIF preserve the semantic analysis
 identity or a bounded provenance summary.
 
 Combined analysis, audit, MCP, LSP, VS Code, the Rust API, and Node bindings use
-the same exact-version protocol. The VS Code package bundles the companion and
+the same wire protocol. The VS Code package bundles the companion and
 its TypeScript runtime, and passes it to each Fallow child process. A
 version-matched project companion takes its place for a project-local Fallow.
 CI integrations install the matching optional package.

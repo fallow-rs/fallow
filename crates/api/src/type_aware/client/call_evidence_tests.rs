@@ -101,3 +101,41 @@ fn a_suppressed_method_line_gives_no_finding() {
     );
     assert_eq!(findings[0].reason, ConstantParameterReason::UnusedDefault);
 }
+
+fn empty_request() -> Request {
+    Request {
+        protocol_version: WIRE_PROTOCOL_VERSION,
+        operation: CALL_EVIDENCE_OPERATION,
+        root: "/project".to_string(),
+        defaults: Vec::new(),
+        classes: Vec::new(),
+        files: Vec::new(),
+    }
+}
+
+fn empty_response(sidecar_version: &str, protocol_version: u32) -> Response {
+    let backend = selected_backend().expect("default backend");
+    Response {
+        protocol_version,
+        operation: CALL_EVIDENCE_OPERATION.to_string(),
+        sidecar_version: sidecar_version.to_string(),
+        backend: backend.family.to_string(),
+        backend_version: backend.version.to_string(),
+        defaults: Vec::new(),
+        methods: Vec::new(),
+        elapsed_ms: 0,
+    }
+}
+
+#[test]
+fn a_companion_of_another_release_with_the_same_protocol_is_accepted() {
+    let request = empty_request();
+    assert!(validate(&request, &empty_response("0.0.1", WIRE_PROTOCOL_VERSION)).is_ok());
+    assert!(
+        validate(
+            &request,
+            &empty_response("0.0.1", WIRE_PROTOCOL_VERSION + 1)
+        )
+        .is_err()
+    );
+}

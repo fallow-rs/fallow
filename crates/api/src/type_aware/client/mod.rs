@@ -1419,16 +1419,10 @@ fn validate_response(
 ) -> Result<(), TypeAwareError> {
     if response.protocol_version != PROTOCOL_VERSION || response.operation != OPERATION {
         return Err(TypeAwareError::from(format!(
-            "type-aware protocol mismatch: expected {PROTOCOL_VERSION}/{OPERATION}, received {}/{}",
-            response.protocol_version, response.operation
-        )));
-    }
-    if response.sidecar_version != env!("CARGO_PKG_VERSION") {
-        return Err(TypeAwareError::from(format!(
-            "type-aware companion version {} does not match Fallow {}. Install fallow-type-aware@{}",
-            response.sidecar_version,
-            env!("CARGO_PKG_VERSION"),
-            env!("CARGO_PKG_VERSION"),
+            "type-aware protocol mismatch: expected {PROTOCOL_VERSION}/{OPERATION}, received {}/{}. {}",
+            response.protocol_version,
+            response.operation,
+            super::transport::protocol_mismatch_hint()
         )));
     }
     selected_backend()
@@ -2621,9 +2615,12 @@ mod tests {
         invalid.protocol_version += 1;
         assert!(validate_response(&request, &invalid).is_err());
 
-        invalid = response.clone();
-        invalid.sidecar_version = "0.0.0".to_string();
-        assert!(validate_response(&request, &invalid).is_err());
+        let mut other_release = response.clone();
+        other_release.sidecar_version = "0.0.1".to_string();
+        assert!(
+            validate_response(&request, &other_release).is_ok(),
+            "a companion of another release that speaks the same protocol stays valid"
+        );
 
         invalid = response.clone();
         invalid.backend = "other".to_string();
