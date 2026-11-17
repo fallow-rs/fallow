@@ -361,7 +361,7 @@ On pull requests:
   `rust-toolchain.toml` changes. It skips Dependabot Cargo branches. For
   `Cargo.toml`, it runs only when a `[profile.release]` or
   `[profile.release.package.*]` section changes. For `release.yml`, it runs
-  only when the `pgo-profile` or `build` job changes.
+  only when the top-level `env` or the `pgo-profile` or `build` job changes.
   `scripts/pgo-validate-inputs.mjs` makes this decision and runs the
   comparison when it cannot read the diff. It
   compares a PGO build with a base build of the same pull request. A weekly

@@ -26,8 +26,17 @@ const PGO_RELEASE_JOBS = ["pgo-profile", "build"];
 const SHA = /^(?!0{40}$)[0-9a-f]{40}$/u;
 const PROFILE_RELEASE_HEADER = /^\[profile\.release(?:[.\]])/u;
 
-/** Return the `[profile.release]` and `[profile.release.package.*]` sections. */
+// A profile in a `[profile]` table, a dotted `profile.` key or an indented
+// table header is a form that the section reader does not follow.
+const UNREAD_PROFILE_FORM = /^[ \t]*\[profile\]|^[ \t]*profile[ \t]*\.|^[ \t]+\[[A-Za-z]/mu;
+
+/**
+ * Return the `[profile.release]` and `[profile.release.package.*]` sections,
+ * or null when the manifest writes a profile in a form that this reader
+ * does not follow.
+ */
 export const releaseProfileSections = (manifest) => {
+  if (UNREAD_PROFILE_FORM.test(manifest)) return null;
   const sections = [];
   let current = null;
   for (const line of manifest.split("\n")) {
@@ -38,6 +47,16 @@ export const releaseProfileSections = (manifest) => {
     if (current) current.push(line.trimEnd());
   }
   return sections.map((section) => section.join("\n").trim()).join("\n\n");
+};
+
+/** Return the top-level `env` block of a workflow, or an empty string. */
+export const workflowEnv = (workflow) => {
+  const lines = workflow.split("\n");
+  const start = lines.indexOf("env:");
+  if (start === -1) return "";
+  let end = start + 1;
+  while (end < lines.length && !/^\S/u.test(lines[end])) end += 1;
+  return lines.slice(start, end).join("\n").trimEnd();
 };
 
 /** Return the text of one top-level job of a workflow, or null when it is absent. */
@@ -59,7 +78,11 @@ const matchesFilter = (path) =>
 // build reads. Two equal texts mean that the edit cannot change the build.
 const PGO_VIEWS = new Map([
   [CARGO_MANIFEST, (text) => [releaseProfileSections(text)]],
-  [RELEASE_WORKFLOW, (text) => PGO_RELEASE_JOBS.map((job) => workflowJob(text, job))],
+  // The top-level env reaches every job, so it is part of the build.
+  [
+    RELEASE_WORKFLOW,
+    (text) => [workflowEnv(text), ...PGO_RELEASE_JOBS.map((job) => workflowJob(text, job))],
+  ],
 ]);
 
 const pathNeedsValidation = (path, read) => {

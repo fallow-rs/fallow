@@ -31,6 +31,8 @@ inherits = "release"
 `;
 
 const RELEASE = `name: Release
+env:
+  CARGO_TERM_COLOR: always
 jobs:
   release-context:
     runs-on: ubuntu-26.04
@@ -112,6 +114,28 @@ test("release.yml needs PGO validation only for the profile and build jobs", () 
     true,
   );
   assert.equal(decide(paths, base, edit(RELEASE.replace("  build:", "  build-all:"))), true);
+});
+
+test("a release profile in a form that the reader does not follow runs the comparison", () => {
+  for (const form of [
+    '[profile]\nrelease = { lto = "thin" }\n',
+    'profile.release.lto = "thin"\n',
+    '  [profile.release]\nlto = "thin"\n',
+  ]) {
+    assert.equal(releaseProfileSections(`${MANIFEST}${form}`), null, form);
+    assert.equal(
+      decide(["Cargo.toml"], { "Cargo.toml": MANIFEST }, { "Cargo.toml": `${MANIFEST}${form}` }),
+      true,
+      form,
+    );
+  }
+});
+
+test("a top-level env change of release.yml runs the comparison", () => {
+  const paths = [".github/workflows/release.yml"];
+  const base = { ".github/workflows/release.yml": RELEASE };
+  const head = { ".github/workflows/release.yml": RELEASE.replace("always", "never") };
+  assert.equal(decide(paths, base, head), true);
 });
 
 test("other filter paths, unreadable files and unknown shapes run the comparison", () => {
