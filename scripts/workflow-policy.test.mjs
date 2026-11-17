@@ -2630,6 +2630,27 @@ test("bench.yml measures main nightly and a push only for the release commit", a
   assert.equal(runs("push", { head_commit: { message: "fix: something" } }), false);
   assert.equal(runs("pull_request", { action: "synchronize" }), false);
   assert.equal(runs("pull_request", { action: "synchronize", labels: ["ci:perf"] }), true);
+  // A label event for another label must not start a second ci:perf run.
+  assert.equal(
+    runs("pull_request", { action: "labeled", label: { name: "other" }, labels: ["ci:perf"] }),
+    false,
+  );
+  assert.equal(
+    runs("pull_request", { action: "labeled", label: { name: "ci:perf" }, labels: ["ci:perf"] }),
+    true,
+  );
+  // The release push must not wait on a release build of the CLI corpus.
+  assert.match(
+    indentedBlock(benchmark, "cli-instructions", 2),
+    /^    if: github\.event_name != 'push'$/mu,
+  );
+  for (const trigger of ["pull_request", "push"]) {
+    assert.match(
+      indentedBlock(indentedBlock(benchmark, "on", 0), trigger, 2),
+      /- 'benchmarks\/cli-instructions\.sh'/u,
+      trigger,
+    );
+  }
 
   // The organization shares 600 free macro runner minutes per month, so the
   // walltime jobs run only at night and on demand. The release build runs on
@@ -2637,7 +2658,7 @@ test("bench.yml measures main nightly and a push only for the release commit", a
   for (const name of ["walltime-build-cli", "type-aware"]) {
     assert.match(
       indentedBlock(benchmark, name, 2),
-      /^    if: github\.event_name == 'schedule' \|\| github\.event_name == 'workflow_dispatch'$/mu,
+      /^    if: github\.event_name == 'schedule' \|\| \(github\.event_name == 'workflow_dispatch' && inputs\.walltime\)$/mu,
       name,
     );
   }

@@ -17,13 +17,16 @@ the same workflow on one commit are fine.
   simulation shard, the CLI instruction counts and the walltime jobs.
 - A push to `main` measures only the release commit (`chore: release v`),
   because `scripts/verify-release-ci.mjs` reads that result before a release.
-  The other pushes skip every job.
+  That run has the Rust shards only. The other pushes skip every job.
 - A pull request with the `ci:perf` label runs the affected simulation shards
   and the CLI instruction counts. CodSpeed compares it with the latest `main`
   commit that has a run, usually the last nightly run. The comparison then
   also holds the changes merged after that run. For a precise result, start a
   run on `main` first with `gh workflow run bench.yml`.
-- `gh workflow run bench.yml --ref <branch>` measures a branch with every job.
+- `gh workflow run bench.yml --ref <branch>` measures a branch with the
+  simulation jobs. Add `-f walltime=true` for the walltime jobs too. A plain
+  dispatch never waits on a macro runner, so the dispatch of
+  `scripts/verify-release-ci.mjs --dispatch-missing` cannot hold a release.
 
 Only the release push saves the Rust caches of these jobs. The repository
 cache is over its limit, and a nightly cache is gone before the next night.
@@ -103,7 +106,8 @@ so no other job uses walltime.
   reuse as distinct benchmarks.
 
 The fallow-rs organization shares 600 free macro runner minutes per month, so
-these jobs run only in the nightly and manual runs. The release build runs on
+these jobs run only in the nightly run and in a dispatch with
+`-f walltime=true`. The release build runs on
 a free `ubuntu-22.04-arm` GitHub runner, the same Ubuntu release as the macro
 runner image, and the macro runner job only measures.
 

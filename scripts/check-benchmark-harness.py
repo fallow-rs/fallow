@@ -216,6 +216,8 @@ def assert_codspeed_action_modes(text: str) -> list[str]:
     for job in (*SIMULATION_JOBS, *WALLTIME_JOBS):
         if job not in jobs:
             errors.append(f"bench workflow is missing the {job} job")
+        elif "uses: CodSpeedHQ/action@" not in job_block(text, job):
+            errors.append(f"{job} must upload with CodSpeedHQ/action")
     return errors
 
 
