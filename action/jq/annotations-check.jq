@@ -128,7 +128,9 @@ def dependency_action(pkg):
   (.dev_dependencies_in_production[]? |
     "::\(lvl("warning")) file=\(.path | prop)\(if .line > 0 then ",line=\(.line | n(1))" else "" end),title=Dev dependency in production::Package '\(.package_name | san)' is a devDependency imported by production code at runtime.\(nl)\(nl)Move it from devDependencies to dependencies so a production-only install does not break at runtime."),
   (.stale_suppressions[]? |
-    if .origin.type == "jsdoc_tag" then
+    if .missing_reason == true then
+      "::\(lvl("warning")) file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Suppression without a reason::This \(if .origin.type == "jsdoc_tag" then "@expected-unused tag" else "'\(if .origin.is_file_level then "fallow-ignore-file" else "fallow-ignore-next-line" end)' comment" end)\(if .origin.issue_kind then " for '\(.origin.issue_kind | san)'" else "" end) has no reason.\(nl)\(nl)Add a human-authored reason after `--` on the same line."
+    elif .origin.type == "jsdoc_tag" then
       "::\(lvl("warning")) file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Stale @expected-unused::The @expected-unused tag on '\(.origin.export_name | san)' is stale because the export is now used.\(nl)\(nl)Remove the @expected-unused tag."
     elif (.origin.kind_known == false) then
       "::\(lvl("warning")) file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Unknown suppression kind::'\((.origin.issue_kind // "") | san)' is not a recognized fallow issue kind. Other tokens on this '\(if .origin.is_file_level then "fallow-ignore-file" else "fallow-ignore-next-line" end)' line still apply.\(nl)\(nl)Fix the typo or remove the unknown token."
