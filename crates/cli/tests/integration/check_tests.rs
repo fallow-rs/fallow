@@ -4436,7 +4436,7 @@ impl GitShim {
     }
 }
 
-/// The CodSpeed CPU simulation in `.github/workflows/bench-cli-instructions.yml`
+/// The CodSpeed CPU simulation in `.github/workflows/bench.yml` (job `cli-instructions`)
 /// rejects a measured process that starts a child process. Under the settings
 /// of that workflow (`CI` set, `FALLOW_SUGGESTIONS=off`) and with the flags of
 /// `benchmarks/cli-instructions.sh`, `dead-code` must start no git process.

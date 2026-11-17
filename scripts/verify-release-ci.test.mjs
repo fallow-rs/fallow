@@ -126,10 +126,19 @@ test("a non-required run may be skipped or neutral", () => {
   assert.equal(evaluateRuns(runs, { required: REQUIRED }).state, "pass");
 });
 
-test("ignores pull request runs, the release workflows and the nightly walltime lane", () => {
+test("a queued nightly benchmark run does not replace the release push run", () => {
+  const required = [...REQUIRED, { name: "Benchmarks", file: "bench.yml" }];
   const runs = [
     ...green(),
-    run("bench-walltime.yml", { event: "schedule", status: "queued" }),
+    run("bench.yml"),
+    run("bench.yml", { event: "schedule", status: "queued" }),
+  ];
+  assert.equal(evaluateRuns(runs, { required }).state, "pass");
+});
+
+test("ignores pull request runs and the release workflows", () => {
+  const runs = [
+    ...green(),
     run("bench.yml", { event: "pull_request", conclusion: "failure" }),
     run("release.yml", { event: "workflow_dispatch", conclusion: "failure" }),
     run("release-published.yml", { event: "release", conclusion: "failure" }),

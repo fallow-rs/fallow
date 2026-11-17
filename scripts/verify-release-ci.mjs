@@ -56,13 +56,16 @@ const WORKFLOW_DIR = ".github/workflows/";
  */
 const IGNORED_EVENTS = new Set(["pull_request", "pull_request_target", "merge_group", "dynamic"]);
 
+/** The release workflows themselves. An earlier failed release attempt must not block a retry. */
+const IGNORED_FILES = new Set(["release.yml", "release-published.yml"]);
+
 /**
- * The release workflows themselves: an earlier failed release attempt must not
- * block a retry. And the nightly walltime benchmarks: their macro runner comes
- * from a shared monthly minute pool and can stay queued, and a release must not
- * wait on a measurement.
+ * Scheduled runs that do not count for the release commit. The nightly
+ * Benchmarks run adds walltime jobs on a macro runner from a shared monthly
+ * minute pool. It can stay queued, and a release must not wait on it. The push
+ * run of the release commit is the result that counts.
  */
-const IGNORED_FILES = new Set(["release.yml", "release-published.yml", "bench-walltime.yml"]);
+const IGNORED_SCHEDULED_FILES = new Set(["bench.yml"]);
 
 const PASSING_CONCLUSIONS = new Set(["success", "skipped", "neutral"]);
 
@@ -94,6 +97,7 @@ export const latestRunPerWorkflow = (runs) => {
     if (IGNORED_EVENTS.has(run.event)) continue;
     const file = workflowFile(run);
     if (IGNORED_FILES.has(file)) continue;
+    if (run.event === "schedule" && IGNORED_SCHEDULED_FILES.has(file)) continue;
     const current = latest.get(file);
     if (current === undefined || run.id > current.id) latest.set(file, run);
   }

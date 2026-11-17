@@ -389,9 +389,13 @@ On push to `main` only (each one also has `workflow_dispatch`):
 - `osv-scanner ignores`, which also runs every week. It fails when an
   `IgnoredVulns` entry matches no advisory in its lockfile.
 
-On push to `main`, and on a pull request only with the `ci:perf` label:
+Each night on `main`, on the push of the release commit, and on a pull
+request only with the `ci:perf` label:
 
-- `Benchmarks` (CodSpeed).
+- `Benchmarks` (CodSpeed). Every CodSpeed job lives in this workflow, because
+  CodSpeed takes the results for one commit from one workflow run. Other
+  pushes to `main` start the workflow, but every job skips. See
+  [Benchmarking](../benchmarking.md#when-codspeed-runs).
 
 Add the `ci:perf` label to a pull request that changes a hot path. The label event starts the run. A pull request
 without the label starts these workflows, but every job skips and uses no

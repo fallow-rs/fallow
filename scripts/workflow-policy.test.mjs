@@ -922,7 +922,6 @@ test("workflows without a push trigger never save a Rust cache", () => {
   }
   // A parser that misses the triggers of a known file would skip it silently.
   for (const file of [
-    "bench-cli-instructions.yml",
     "branch-coverage.yml",
     "ecosystem-full.yml",
     "oracle-seeds.yml",
@@ -2581,32 +2580,93 @@ test("CodSpeed simulation keeps its compatible runner without downgrading wallti
 
   assert.ok(simulationJobs.includes("bench.yml/benchmark"));
   assert.ok(simulationJobs.includes("bench.yml/benchmark-full"));
-  assert.ok(simulationJobs.includes("bench-cli-instructions.yml/instructions"));
+  assert.ok(simulationJobs.includes("bench.yml/cli-instructions"));
   const benchmark = readWorkflow(".github/workflows/bench.yml");
   for (const name of ["benchmark-harness", "determine-matrix"]) {
     assert.match(indentedBlock(benchmark, name, 2), /runs-on: ubuntu-26\.04/u);
   }
-  const walltime = readWorkflow(".github/workflows/bench-walltime.yml");
-  for (const name of ["cli", "type-aware"]) {
-    const job = indentedBlock(walltime, name, 2);
+  for (const name of ["walltime-cli", "type-aware"]) {
+    const job = indentedBlock(benchmark, name, 2);
     assert.match(job, /mode: walltime/u);
     assert.match(job, /^    runs-on: codspeed-macro-arm64-graviton-ubuntu-22-04$/mu);
   }
-  assert.doesNotMatch(walltime, /mode: (?:simulation|memory)/u);
 });
 
-test("walltime benchmarks run only nightly or on demand", () => {
-  const walltime = readWorkflow(".github/workflows/bench-walltime.yml");
-  const triggers = [...indentedBlock(walltime, "on", 0).matchAll(/^ {2}(\w+):/gmu)].map(
+test("only bench.yml uploads to CodSpeed", () => {
+  // CodSpeed takes the results for one commit from one workflow run. A second
+  // workflow on the same commit gets "Benchmarks ran in several CI workflows".
+  const uploaders = readdirSync(".github/workflows")
+    .filter((file) => file.endsWith(".yml"))
+    .filter((file) => /uses: CodSpeedHQ\/action@/u.test(readWorkflow(`.github/workflows/${file}`)));
+  assert.deepEqual(uploaders, ["bench.yml"]);
+});
+
+test("bench.yml measures main nightly and a push only for the release commit", async () => {
+  const { runInNewContext } = await import("node:vm");
+  const benchmark = readWorkflow(".github/workflows/bench.yml");
+  const triggers = [...indentedBlock(benchmark, "on", 0).matchAll(/^ {2}(\w+):/gmu)].map(
     (match) => match[1],
   );
-  // The organization shares 600 free macro runner minutes per month.
-  assert.deepEqual(triggers, ["schedule", "workflow_dispatch"]);
-  // The release build runs on a free GitHub runner, so the macro runner only
-  // measures. Its Ubuntu release must match the macro runner image for glibc.
-  const build = indentedBlock(walltime, "build-cli", 2);
-  assert.match(build, /^    runs-on: ubuntu-22\.04-arm$/mu);
-  assert.match(indentedBlock(walltime, "cli", 2), /^    needs: build-cli$/mu);
+  assert.deepEqual(triggers, ["pull_request", "push", "schedule", "workflow_dispatch"]);
+
+  const gate = indentedBlock(benchmark, "benchmark-harness", 2)
+    .match(/^    if: >-\n((?: {6}.+\n)+)/mu)[1]
+    .replace(/\s+/gu, " ")
+    .trim();
+  const expression = gate
+    .replaceAll("github.event.pull_request.labels.*.name", "__labels")
+    .replaceAll("startsWith(", "__startsWith(")
+    .replaceAll("contains(", "__contains(");
+  const runs = (event_name, { labels = [], ...event } = {}) =>
+    runInNewContext(expression, {
+      __labels: labels,
+      __startsWith: (value, prefix) => String(value ?? "").startsWith(prefix),
+      __contains: (list, value) => list.includes(value),
+      github: { event_name, event: { head_commit: {}, label: {}, ...event } },
+    });
+  assert.equal(runs("schedule"), true);
+  assert.equal(runs("workflow_dispatch"), true);
+  assert.equal(runs("push", { head_commit: { message: "chore: release v3.44.0" } }), true);
+  assert.equal(runs("push", { head_commit: { message: "fix: something" } }), false);
+  assert.equal(runs("pull_request", { action: "synchronize" }), false);
+  assert.equal(runs("pull_request", { action: "synchronize", labels: ["ci:perf"] }), true);
+  // A label event for another label must not start a second ci:perf run.
+  assert.equal(
+    runs("pull_request", { action: "labeled", label: { name: "other" }, labels: ["ci:perf"] }),
+    false,
+  );
+  assert.equal(
+    runs("pull_request", { action: "labeled", label: { name: "ci:perf" }, labels: ["ci:perf"] }),
+    true,
+  );
+  // The release push must not wait on a release build of the CLI corpus.
+  assert.match(
+    indentedBlock(benchmark, "cli-instructions", 2),
+    /^    if: github\.event_name != 'push'$/mu,
+  );
+  for (const trigger of ["pull_request", "push"]) {
+    assert.match(
+      indentedBlock(indentedBlock(benchmark, "on", 0), trigger, 2),
+      /- 'benchmarks\/cli-instructions\.sh'/u,
+      trigger,
+    );
+  }
+
+  // The organization shares 600 free macro runner minutes per month, so the
+  // walltime jobs run only at night and on demand. The release build runs on
+  // a free GitHub runner with the Ubuntu release of the macro runner image.
+  for (const name of ["walltime-build-cli", "type-aware"]) {
+    assert.match(
+      indentedBlock(benchmark, name, 2),
+      /^    if: github\.event_name == 'schedule' \|\| \(github\.event_name == 'workflow_dispatch' && inputs\.walltime\)$/mu,
+      name,
+    );
+  }
+  assert.match(
+    indentedBlock(benchmark, "walltime-build-cli", 2),
+    /^    runs-on: ubuntu-22\.04-arm$/mu,
+  );
+  assert.match(indentedBlock(benchmark, "walltime-cli", 2), /^    needs: walltime-build-cli$/mu);
 });
 
 test("failed selector steps discard partial Blacksmith output despite continue-on-error", async () => {
@@ -3268,7 +3328,7 @@ test("root npm installs disable lifecycle scripts by default", (t) => {
 });
 
 test("ordinary workflow npm installs suppress dependency lifecycle scripts", () => {
-  for (const path of ["bench-walltime.yml", "ci.yml"]) {
+  for (const path of ["bench.yml", "ci.yml"]) {
     const workflow = readWorkflow(`.github/workflows/${path}`);
     const installs = workflow
       .split("\n")
@@ -3779,7 +3839,6 @@ test("optional Marketplace publisher proof installs only the frozen CLI before A
 // request. A new workflow with a pull request trigger must pass the "Rule for
 // new workflows" in docs/development/quality-gates.md before it joins this list.
 const PULL_REQUEST_WORKFLOWS = [
-  "bench-cli-instructions.yml",
   "bench.yml",
   "ci.yml",
   "codeql.yml",
