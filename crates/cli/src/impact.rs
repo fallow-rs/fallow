@@ -1290,7 +1290,7 @@ fn collect_current_state(
     let mut current_supps: FxHashMap<String, FxHashSet<String>> = FxHashMap::default();
     for s in input.suppressions {
         let rel = format_display_path(&s.path, root);
-        if !changed.contains(&rel) {
+        if s.range_problem.is_some() || !changed.contains(&rel) {
             continue;
         }
         let key = s

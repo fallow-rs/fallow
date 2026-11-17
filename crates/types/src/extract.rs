@@ -84,6 +84,8 @@ pub struct ModuleInfo {
     /// typos or obsolete kind names instead of having the entire marker
     /// silently discarded. See issue #449.
     pub unknown_suppression_kinds: Vec<UnknownSuppressionKind>,
+    /// Range suppression markers with a problem. They have no effect.
+    pub range_marker_problems: Vec<crate::suppress::RangeMarkerProblem>,
     /// Local names of import bindings that are never referenced in this file.
     /// Populated via `oxc_semantic` scope analysis. Used at graph-build time
     /// to skip adding references for imports whose binding is never read,
@@ -470,6 +472,7 @@ impl ModuleInfo {
             parse_nesting_too_deep: false,
             suppressions: Vec::new(),
             unknown_suppression_kinds: Vec::new(),
+            range_marker_problems: Vec::new(),
             unused_import_bindings: Vec::new(),
             type_referenced_import_bindings: Vec::new(),
             value_referenced_import_bindings: Vec::new(),
@@ -3488,7 +3491,7 @@ const _: () = assert!(std::mem::size_of::<SemanticFact>() == 80);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 224);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1528);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1552);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ImportBindingReference>() == 64);
 #[cfg(target_pointer_width = "64")]
@@ -3502,29 +3505,9 @@ pub use re_export::ReExportInfo;
 mod dynamic_pattern;
 pub use dynamic_pattern::DynamicImportPattern;
 
-/// A dynamic `import()` call.
-#[derive(Debug, Clone)]
-pub struct DynamicImportInfo {
-    /// The import specifier.
-    pub source: String,
-    /// Source span of the `import()` expression.
-    pub span: Span,
-    /// Names destructured from the dynamic import result.
-    /// Non-empty means `const { a, b } = await import(...)` -> Named imports.
-    /// Empty means simple `import(...)` or `const x = await import(...)` -> Namespace.
-    pub destructured_names: Vec<String>,
-    /// The local variable name for `const x = await import(...)`.
-    /// Used for namespace import narrowing via member access tracking.
-    pub local_name: Option<String>,
-    /// True when this dynamic import was synthesised by fallow rather than appearing in user source.
-    pub is_speculative: bool,
-    /// True when the value of an `import()` without a binding escapes, for
-    /// example as a return value, a call argument, or an array element.
-    /// The consumer can then read any export, so the edge credits the whole
-    /// module namespace. False for a discarded `import()` statement, which
-    /// only loads the module.
-    pub value_escapes: bool,
-}
+#[path = "extract_dynamic_import.rs"]
+mod dynamic_import;
+pub use dynamic_import::DynamicImportInfo;
 
 /// A `require()` call.
 #[derive(Debug, Clone)]

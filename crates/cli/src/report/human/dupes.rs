@@ -48,6 +48,12 @@ pub(in crate::report) fn print_duplication_human(
         eprintln!();
     }
 
+    for line in
+        super::dupes_range_markers::range_marker_problem_lines(&report.range_marker_problems, root)
+    {
+        outln!("{line}");
+    }
+
     // The clean state is a property of the measured corpus, not of the array
     // a display cap left behind. `--top 0` empties `clone_groups[]` while
     // `stats.clone_groups` still counts every group the run found, and testing
@@ -929,6 +935,7 @@ mod tests {
                 suggestions: vec![],
             }],
             mirrored_directories: vec![],
+            range_marker_problems: Vec::new(),
             stats: DuplicationStats {
                 clone_groups: 251,
                 clone_families: 163,
@@ -966,6 +973,7 @@ mod tests {
             clone_groups: vec![],
             clone_families: vec![],
             mirrored_directories: vec![],
+            range_marker_problems: Vec::new(),
             stats: DuplicationStats {
                 clone_groups: 37,
                 clone_families: 12,
@@ -999,6 +1007,7 @@ mod tests {
             clone_groups: groups,
             clone_families: vec![],
             mirrored_directories: vec![],
+            range_marker_problems: Vec::new(),
             stats: DuplicationStats {
                 clone_groups: MAX_CLONE_GROUPS + 2,
                 clone_families: 0,
@@ -1067,6 +1076,7 @@ mod tests {
             }],
             clone_families: vec![],
             mirrored_directories: vec![],
+            range_marker_problems: Vec::new(),
             stats: DuplicationStats {
                 clone_groups: 1,
                 clone_instances: 2,
@@ -1104,6 +1114,7 @@ mod tests {
             }],
             clone_families: vec![],
             mirrored_directories: vec![],
+            range_marker_problems: Vec::new(),
             stats: DuplicationStats::default(),
         };
         let lines = build_duplication_human_lines(&report, &root);
@@ -1148,6 +1159,7 @@ mod tests {
                 }],
             }],
             mirrored_directories: vec![],
+            range_marker_problems: Vec::new(),
             stats: DuplicationStats::default(),
         };
         let lines = build_duplication_human_lines(&report, &root);
@@ -1193,6 +1205,7 @@ mod tests {
                 }],
             }],
             mirrored_directories: vec![],
+            range_marker_problems: Vec::new(),
             stats: DuplicationStats::default(),
         };
         let lines = build_duplication_human_lines(&report, &root);
@@ -1232,6 +1245,7 @@ mod tests {
                 suggestions: vec![],
             }],
             mirrored_directories: vec![],
+            range_marker_problems: Vec::new(),
             stats: DuplicationStats::default(),
         };
         let lines = build_duplication_human_lines(&report, &root);
@@ -1271,6 +1285,7 @@ mod tests {
                 suggestions: vec![],
             }],
             mirrored_directories: vec![],
+            range_marker_problems: Vec::new(),
             stats: DuplicationStats::default(),
         };
         let lines = build_duplication_human_lines(&report, &root);
@@ -1298,6 +1313,7 @@ mod tests {
             }],
             clone_families: vec![],
             mirrored_directories: vec![],
+            range_marker_problems: Vec::new(),
             stats: DuplicationStats::default(),
         };
         let lines = build_duplication_human_lines(&report, &root);
@@ -1336,6 +1352,7 @@ mod tests {
             ],
             clone_families: Vec::new(),
             mirrored_directories: Vec::new(),
+            range_marker_problems: Vec::new(),
             stats: DuplicationStats::default(),
         };
         report.sort();
@@ -1383,6 +1400,7 @@ mod tests {
                 mirror_family("c.ts"),
             ],
             mirrored_directories: vec![],
+            range_marker_problems: Vec::new(),
             stats: DuplicationStats::default(),
         };
 

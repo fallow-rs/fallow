@@ -108,6 +108,8 @@ fn supp(path: &Path, kind: &str) -> ActiveSuppression {
         is_file_level: false,
         reason: None,
         comment_line: 3,
+        range_end_line: None,
+        range_problem: None,
     }
 }
 
@@ -1025,6 +1027,8 @@ fn blanket_suppression_covers_any_kind() {
         is_file_level: true,
         reason: None,
         comment_line: 1,
+        range_end_line: None,
+        range_problem: None,
     };
     run(root, &[&a], vec![], vec![], &[blanket], "t1");
     let store = load(root);
@@ -2360,6 +2364,8 @@ fn suppressed_clone_disappearance_credits_suppressed_not_resolved() {
         is_file_level: true,
         reason: None,
         comment_line: 1,
+        range_end_line: None,
+        range_problem: None,
     };
     run(root, &[&a, &b], vec![], vec![], &[blanket], "t1");
     let store = load(root);

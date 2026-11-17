@@ -32,6 +32,7 @@ fn capped_report(shown: usize, corpus_groups: usize, corpus_families: usize) -> 
         clone_groups: (0..shown).map(group).collect(),
         clone_families: (0..shown.min(corpus_families)).map(family).collect(),
         mirrored_directories: Vec::new(),
+        range_marker_problems: Vec::new(),
         stats: DuplicationStats {
             clone_groups: corpus_groups,
             clone_families: corpus_families,

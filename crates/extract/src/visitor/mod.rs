@@ -52,6 +52,7 @@ use fallow_types::extract::{
 };
 use helpers::LitCustomElementDecorator;
 use helpers::array_element_type_from_type;
+use helpers::finish_package_resolve_sites;
 use interface_types::InterfaceTypeLinks;
 use worker_env::WorkerEnvBodies;
 mod static_imports;
@@ -3430,6 +3431,7 @@ impl ModuleInfoExtractor {
             parse_nesting_too_deep: false,
             suppressions: parsed.suppressions,
             unknown_suppression_kinds: parsed.unknown_kinds,
+            range_marker_problems: parsed.range_problems,
             unused_import_bindings: Vec::new(),
             type_referenced_import_bindings: Vec::new(),
             value_referenced_import_bindings: Vec::new(),
@@ -3646,14 +3648,6 @@ impl ModuleInfoExtractor {
             .append(&mut self.svelte_dispatched_events);
         info.has_dynamic_dispatch |= self.has_dynamic_dispatch;
     }
-}
-
-/// Keep the start offset of each final resolve-call span.
-fn finish_package_resolve_sites(sites: Vec<(String, Span)>) -> Box<[(String, u32)]> {
-    sites
-        .into_iter()
-        .map(|(package_name, span)| (package_name, span.start))
-        .collect()
 }
 
 /// The statically named keys of a destructuring pattern, or `None` when the pattern

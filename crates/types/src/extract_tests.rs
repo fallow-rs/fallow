@@ -412,6 +412,7 @@ fn release_resolution_payload_drops_copied_vectors_only() {
         parse_nesting_too_deep: false,
         suppressions: Vec::new(),
         unknown_suppression_kinds: Vec::new(),
+        range_marker_problems: Vec::new(),
         unused_import_bindings: vec!["unused".to_string()],
         type_referenced_import_bindings: vec!["TypeOnly".to_string()],
         value_referenced_import_bindings: vec!["Value".to_string()],

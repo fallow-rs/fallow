@@ -111,6 +111,9 @@ pub fn filter_to_workspaces(report: &mut DuplicationReport, roots: &[PathBuf], r
             .iter()
             .any(|instance| roots.iter().any(|scope| instance.file.starts_with(scope)))
     });
+    report
+        .range_marker_problems
+        .retain(|finding| roots.iter().any(|scope| finding.path.starts_with(scope)));
     refresh_scoped_report(report, root);
 }
 
@@ -282,6 +285,7 @@ mod tests {
             clone_groups,
             clone_families: Vec::new(),
             mirrored_directories: Vec::new(),
+            range_marker_problems: Vec::new(),
             stats: DuplicationStats {
                 total_files: 3,
                 total_lines: 100,

@@ -1392,6 +1392,44 @@ inputs. A test-only copy that is never compared with production is not such an
 oracle. Performance assertions must observe actual operations, rather than
 infer an operation count from a result enum or other derived label.
 
+## Clone range suppressions
+
+`// fallow-ignore-start code-duplication` and `// fallow-ignore-end
+code-duplication` suppress clones in a range of lines (issue #4706).
+
+- `fallow_types::suppress::Suppression` has a `scope`: `File`, `Line`, or
+  `Range { end_line }`. `applies_to_line`, `is_suppressed` and
+  `is_file_suppressed` never match a range entry, so no line-based detector
+  applies a range by mistake.
+- One pairing function, `ParsedSuppressions::pair_ranges` in
+  `crates/extract/src/suppress.rs`, serves the AST path and the line scanner.
+  A start with no end, an end with no start, a nested start, a marker with no
+  kind, and a kind other than `code-duplication` become a
+  `RangeMarkerProblem` with no effect. In a mixed kind list the
+  `code-duplication` part applies. A range marker must be on its own line.
+  A marker that shares its line with code has no effect and becomes a
+  `not_own_line` problem, so the user sees it on the marker line, not only
+  as an unmatched end.
+- Clone detection uses the line scanner that it already runs. It drops a
+  range marker whose offset is inside a string or template literal token,
+  then pairs the rest (`range_mask::pair_ranges_outside_strings`).
+- `detect_and_postprocess` gives each hashed token inside a range a unique
+  hash value before the near-clone, shingle, suffix array and rolling paths,
+  and after the token cache save. No repeat can hold a unique value, so a
+  clone inside a range is gone and a clone that reaches into it is cut at the
+  border. A cut part then meets the normal `minTokens` and `minLines`
+  thresholds or is not reported. Near clones come from their own token
+  stream, so the detector drops each near instance that overlaps a range.
+- `fallow dupes` (and so `fallow audit`) reports the problems in
+  `range_marker_problems`. `fallow suppressions` lists a range with
+  `level: "range"` and `end_line`, and a marker with a problem with its
+  `problem`. A range is never a stale suppression, the same as a next-line
+  `code-duplication` marker. `require-suppression-reason` reads the reason
+  of the start marker.
+- The token cache stores the range scope and the problems, so a change of
+  the marker semantics needs a `DUPES_CACHE_VERSION` bump. `ModuleInfo`
+  carries the problems for the inventory, which `CACHE_VERSION` covers.
+
 ## Adding or changing an analyzer
 
 Follow [analyzer authoring](../analyzer-authoring.md). Update the shared issue

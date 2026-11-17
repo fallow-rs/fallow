@@ -194,6 +194,7 @@ mod tests {
             clone_groups: vec![],
             clone_families: vec![],
             mirrored_directories: vec![],
+            range_marker_problems: Vec::new(),
             stats: DuplicationStats {
                 total_files: 0,
                 files_with_clones: 0,
@@ -483,6 +484,7 @@ mod severity_gate {
             clone_groups: vec![],
             clone_families: vec![],
             mirrored_directories: vec![],
+            range_marker_problems: Vec::new(),
             stats: DuplicationStats {
                 total_files: 0,
                 files_with_clones: 0,
@@ -1216,6 +1218,7 @@ mod severity_gate {
                                 issue_kind: None,
                                 reason: None,
                                 is_file_level: false,
+                                is_range: false,
                                 kind_known: true,
                             },
                             missing_reason: false,

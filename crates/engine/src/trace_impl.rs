@@ -3164,8 +3164,6 @@ mod tests {
                 line_count: 11,
                 similarity: None,
             }],
-            clone_families: vec![],
-            mirrored_directories: vec![],
             stats: DuplicationStats {
                 total_files: 2,
                 files_with_clones: 2,
@@ -3181,6 +3179,7 @@ mod tests {
                 clone_groups_ignored: 0,
                 near_candidates_skipped: 0,
             },
+            ..Default::default()
         };
         let trace = trace_clone(&report, Path::new("/project"), "src/a.ts", 15);
         assert!(trace.matched_instance.is_some());
@@ -3221,9 +3220,8 @@ mod tests {
                 line_count: 11,
                 similarity: None,
             }],
-            clone_families: vec![],
-            mirrored_directories: vec![],
             stats: DuplicationStats::default(),
+            ..Default::default()
         };
         let fp = clone_fingerprint(&report.clone_groups[0].instances);
 
@@ -3256,8 +3254,6 @@ mod tests {
                 line_count: 11,
                 similarity: None,
             }],
-            clone_families: vec![],
-            mirrored_directories: vec![],
             stats: DuplicationStats {
                 total_files: 1,
                 files_with_clones: 1,
@@ -3273,6 +3269,7 @@ mod tests {
                 clone_groups_ignored: 0,
                 near_candidates_skipped: 0,
             },
+            ..Default::default()
         };
         let trace = trace_clone(&report, Path::new("/project"), "src/a.ts", 25);
         assert!(trace.matched_instance.is_none());
@@ -3308,8 +3305,6 @@ mod tests {
                 line_count: 11,
                 similarity: None,
             }],
-            clone_families: vec![],
-            mirrored_directories: vec![],
             stats: DuplicationStats {
                 total_files: 2,
                 files_with_clones: 2,
@@ -3325,6 +3320,7 @@ mod tests {
                 clone_groups_ignored: 0,
                 near_candidates_skipped: 0,
             },
+            ..Default::default()
         };
         let root = Path::new("/project");
         assert!(
@@ -3373,8 +3369,6 @@ mod tests {
                 line_count: 10,
                 similarity: None,
             }],
-            clone_families: vec![],
-            mirrored_directories: vec![],
             stats: DuplicationStats {
                 total_files: 2,
                 files_with_clones: 2,
@@ -3390,6 +3384,7 @@ mod tests {
                 clone_groups_ignored: 0,
                 near_candidates_skipped: 0,
             },
+            ..Default::default()
         };
         let trace = trace_clone(&report, Path::new("/project"), "src/a.ts", 5);
         let matched = trace.matched_instance.as_ref().expect("match expected");

@@ -76,6 +76,15 @@ pub fn filter_duplication_by_diff(report: &mut DuplicationReport, diff: &DiffInd
     report
         .clone_groups
         .retain(|group| group.instances.iter().any(instance_overlaps));
+    report.range_marker_problems.retain(|finding| {
+        diff.key_for(&finding.path, root).is_none_or(|rel| {
+            diff.range_overlaps_added(
+                &rel,
+                u64::from(finding.problem.line),
+                u64::from(finding.problem.line),
+            )
+        })
+    });
     crate::duplicates::refresh_scoped_report(report, root);
 }
 

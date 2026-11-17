@@ -13,6 +13,9 @@ mod near;
 /// Token normalization and rolling-hash computation for detection modes that
 /// ignore identifier names and literal values.
 pub mod normalize;
+mod range_mask;
+#[cfg(test)]
+mod range_tests;
 mod shingle_filter;
 pub mod token_types;
 mod token_visitor;
@@ -75,6 +78,7 @@ pub(super) struct TokenizedFile {
     metadata: Option<std::fs::Metadata>,
     cache_hit: bool,
     suppressions: Vec<Suppression>,
+    range_problems: Vec<fallow_types::suppress::RangeMarkerProblem>,
 }
 
 struct IgnoreSet {
@@ -225,6 +229,15 @@ fn detect_and_postprocess(
         .filter(|file| !file.suppressions.is_empty())
         .map(|file| (file.path.clone(), file.suppressions.clone()))
         .collect();
+    let ranges_by_file = range_mask::ranges_by_file(&file_data);
+    range_mask::mask_range_tokens(&mut file_data);
+    let mut range_report = DuplicationReport::default();
+    range_mask::collect_problems(&mut range_report, &file_data);
+    if let Some(focus_files) = focus_files {
+        range_report
+            .range_marker_problems
+            .retain(|finding| focus_files.contains(&finding.path));
+    }
     let mut near_result = config.near.then(|| {
         near::detect_near_clones(&near::NearDetectionInput {
             files: &file_data,
@@ -274,6 +287,12 @@ fn detect_and_postprocess(
         report.stats.near_candidates_skipped = result.skipped_candidates;
         report.stats = crate::duplicates::recompute_stats(&report);
     }
+
+    if !ranges_by_file.is_empty() {
+        range_mask::drop_instances_in_ranges(&mut report, &ranges_by_file);
+        report.stats = crate::duplicates::recompute_stats(&report);
+    }
+    report.range_marker_problems = range_report.range_marker_problems;
 
     if !suppressions_by_file.is_empty() {
         apply_line_suppressions(&mut report, &suppressions_by_file);
@@ -410,6 +429,7 @@ fn tokenize_duplication_file(
         .and_then(|cache| cache.get(&file.path, &metadata, ctx.token_cache_mode));
     let cache_hit = cached_entry.is_some();
     let (mut entry, suppressions) = duplication_token_cache_entry(file, ctx, cached_entry)?;
+    let range_problems = std::mem::take(&mut entry.range_problems);
     if entry.file_tokens.tokens.is_empty() || entry.hashed_tokens.len() < ctx.config.min_tokens {
         return None;
     }
@@ -421,6 +441,7 @@ fn tokenize_duplication_file(
         metadata: Some(metadata),
         cache_hit,
         suppressions,
+        range_problems,
     })
 }
 
@@ -458,22 +479,24 @@ fn duplication_token_cache_entry(
 
     let raw = std::fs::read_to_string(&file.path).ok()?;
     let source = without_byte_order_mark(&raw);
-    let suppressions = suppress::parse_suppressions_from_source(source).suppressions;
-    if suppress::is_file_suppressed(&suppressions, IssueKind::CodeDuplication) {
+    let mut parsed = fallow_extract::suppress::scan_suppressions_from_source(source);
+    if suppress::is_file_suppressed(&parsed.suppressions, IssueKind::CodeDuplication) {
         return None;
     }
     let file_tokens = tokenize_duplication_source(file, ctx, source);
     if file_tokens.tokens.is_empty() {
         return None;
     }
+    range_mask::pair_ranges_outside_strings(&mut parsed, &file_tokens);
     let hashed_tokens = normalize_and_hash_resolved(&file_tokens.tokens, ctx.normalization);
     Some((
         TokenCacheEntry {
             hashed_tokens,
             file_tokens,
-            suppressions: suppressions.clone(),
+            suppressions: parsed.suppressions.clone(),
+            range_problems: parsed.range_problems,
         },
-        suppressions,
+        parsed.suppressions,
     ))
 }
 
@@ -529,6 +552,7 @@ fn save_duplication_token_cache(
                     hashed_tokens: &file.hashed_tokens,
                     file_tokens: &file.file_tokens,
                     suppressions: &file.suppressions,
+                    range_problems: &file.range_problems,
                 },
             );
         }

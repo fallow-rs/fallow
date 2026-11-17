@@ -326,6 +326,7 @@ fn html_module_info(
         content_hash,
         suppressions: parsed_suppressions.suppressions,
         unknown_suppression_kinds: parsed_suppressions.unknown_kinds,
+        range_marker_problems: parsed_suppressions.range_problems,
         line_offsets: fallow_types::extract::compute_line_offsets(source),
         complexity,
         security_sinks,

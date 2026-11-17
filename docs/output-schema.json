@@ -3014,6 +3014,13 @@
           },
           "description": "Detected mirrored directory trees (directories with many identical files)."
         },
+        "range_marker_problems": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RangeMarkerFinding"
+          },
+          "description": "`fallow-ignore-start` and `fallow-ignore-end` markers with a problem.\nA marker with a problem has no effect on clone detection."
+        },
         "stats": {
           "description": "Aggregate statistics.",
           "$ref": "#/definitions/DuplicationStats"
@@ -3295,6 +3302,13 @@
             "$ref": "#/definitions/MirroredDirectory"
           },
           "description": "Mirrored directory pairs."
+        },
+        "range_marker_problems": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RangeMarkerFinding"
+          },
+          "description": "`fallow-ignore-start` and `fallow-ignore-end` markers with a problem.\nA marker with a problem has no effect on clone detection."
         },
         "stats": {
           "description": "Aggregate duplication statistics.",
@@ -5296,7 +5310,7 @@
         },
         "auto_fixable": {
           "type": "boolean",
-          "description": "Whether `fallow fix` can auto-apply this action. Both variants are\nmanual today; the field is non-singleton so a future auto-applier\ndoes not need a schema change."
+          "description": "Whether `fallow fix` can auto-apply this action. All variants are\nmanual today; the field is non-singleton so a future auto-applier\ndoes not need a schema change."
         },
         "description": {
           "type": "string",
@@ -5307,7 +5321,14 @@
             "string",
             "null"
           ],
-          "description": "The inline comment to insert (e.g.,\n`// fallow-ignore-next-line code-duplication`). Present on\n`suppress-line`; absent on `extract-shared`."
+          "description": "The inline comment to insert (e.g.,\n`// fallow-ignore-next-line code-duplication`). Present on\n`suppress-line` and `suppress-range` (the start comment); absent on\n`extract-shared`."
+        },
+        "end_comment": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The comment that closes the range. Present on `suppress-range` only."
         }
       },
       "required": [
@@ -5315,7 +5336,7 @@
         "auto_fixable",
         "description"
       ],
-      "description": "Per-action wire shape attached to each `CloneGroupFinding` and\n`AttributedCloneGroupFinding` (see `crates/api/src/dupes_output.rs`):\n`extract-shared` plus `suppress-line`. The typed wrappers replaced the\nlegacy JSON post-pass injection that used to live in the CLI report layer."
+      "description": "Per-action wire shape attached to each `CloneGroupFinding` and\n`AttributedCloneGroupFinding` (see `crates/api/src/dupes_output.rs`):\n`extract-shared`, `suppress-line`, and `suppress-range`. The typed wrappers replaced the\nlegacy JSON post-pass injection that used to live in the CLI report layer."
     },
     "UnusedFile": {
       "type": "object",
@@ -7644,6 +7665,10 @@
             "is_file_level": {
               "type": "boolean",
               "description": "Whether this was a file-level suppression."
+            },
+            "is_range": {
+              "type": "boolean",
+              "description": "Whether this was a `fallow-ignore-start` range marker (then\n`is_file_level` is `false`). Omitted from the wire when `false`."
             },
             "kind_known": {
               "type": "boolean",
@@ -12969,6 +12994,11 @@
           "type": "string",
           "const": "suppress-line",
           "description": "Suppress the finding with an inline comment above the duplicated code."
+        },
+        {
+          "type": "string",
+          "const": "suppress-range",
+          "description": "Suppress only this clone with a `fallow-ignore-start` /\n`fallow-ignore-end` range around the duplicated block."
         }
       ],
       "description": "Discriminant for [`CloneGroupAction::kind`]. Mirrors the action types\nemitted by the legacy `build_clone_group_actions` walker."
@@ -13073,6 +13103,13 @@
             "$ref": "#/definitions/MirroredDirectory"
           },
           "description": "Mirrored directory pairs."
+        },
+        "range_marker_problems": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RangeMarkerFinding"
+          },
+          "description": "`fallow-ignore-start` and `fallow-ignore-end` markers with a problem.\nA marker with a problem has no effect on clone detection."
         },
         "stats": {
           "description": "Aggregate duplication statistics.",
@@ -23310,8 +23347,26 @@
           "description": "The suppressed issue kind in kebab-case (e.g. `\"unused-export\"`), or\n`null` for a blanket marker that suppresses every kind on its target.\nHuman output renders the blanket case as the literal word \"blanket\";\nthe JSON contract deliberately keeps `null` so machine consumers\nbranch on `null` instead of a magic string."
         },
         "level": {
-          "description": "Whether the marker is file-wide (`fallow-ignore-file`) or line-scoped\n(`fallow-ignore-next-line`).",
+          "description": "Whether the marker is file-wide (`fallow-ignore-file`), line-scoped\n(`fallow-ignore-next-line`), or a range (`fallow-ignore-start` /\n`fallow-ignore-end`).",
           "$ref": "#/definitions/SuppressionInventoryLevel"
+        },
+        "end_line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "The `fallow-ignore-end` line of a range. Present only on a range\nmarker pair that applies."
+        },
+        "problem": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RangeMarkerProblemKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What is wrong with a range marker. A marker with a problem has no\neffect. Present only on such a marker; `fallow dupes` reports it too."
         },
         "origin": {
           "description": "How the suppression was authored. `\"comment\"` in v1; `\"jsdoc_tag\"` is\nreserved for a follow-up if `@expected-unused` entries enter the\nactive inventory.",
@@ -23348,6 +23403,11 @@
           "type": "string",
           "const": "line",
           "description": "A `fallow-ignore-next-line` marker covering one line."
+        },
+        {
+          "type": "string",
+          "const": "range",
+          "description": "A `fallow-ignore-start` / `fallow-ignore-end` marker covering a range\nof lines for `code-duplication`."
         }
       ],
       "description": "Suppression marker scope."
@@ -29389,6 +29449,13 @@
             "$ref": "#/definitions/MirroredDirectory"
           },
           "description": "Mirrored directory pairs."
+        },
+        "range_marker_problems": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RangeMarkerFinding"
+          },
+          "description": "`fallow-ignore-start` and `fallow-ignore-end` markers with a problem.\nA marker with a problem has no effect on clone detection."
         },
         "stats": {
           "description": "Aggregate duplication statistics.",
@@ -38304,6 +38371,71 @@
         }
       ],
       "description": "How a `--kill-matrix-for` run selects the tests of each mutant."
+    },
+    "RangeMarkerFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Path to the file that holds the marker."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the marker comment."
+        },
+        "problem": {
+          "description": "What is wrong with the marker.",
+          "$ref": "#/definitions/RangeMarkerProblemKind"
+        },
+        "token": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The kind token that the range does not support. Present only for\n`unsupported_kind`."
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "problem"
+      ],
+      "description": "A `fallow-ignore-start` or `fallow-ignore-end` marker with a problem, in\none file."
+    },
+    "RangeMarkerProblemKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "unclosed_start",
+          "description": "A `fallow-ignore-start` with no `fallow-ignore-end` after it."
+        },
+        {
+          "type": "string",
+          "const": "unmatched_end",
+          "description": "A `fallow-ignore-end` with no open `fallow-ignore-start`."
+        },
+        {
+          "type": "string",
+          "const": "nested_start",
+          "description": "A `fallow-ignore-start` inside an open range. The outer range applies."
+        },
+        {
+          "type": "string",
+          "const": "missing_kind",
+          "description": "A range marker without an issue kind. A range needs\n`code-duplication`."
+        },
+        {
+          "type": "string",
+          "const": "unsupported_kind",
+          "description": "A range marker names an issue kind other than `code-duplication`.\nThe `code-duplication` part of the same marker still applies."
+        },
+        {
+          "type": "string",
+          "const": "not_own_line",
+          "description": "A range marker shares its line with code. A range marker must be on\nits own line."
+        }
+      ],
+      "description": "What is wrong with one `fallow-ignore-start` or `fallow-ignore-end`\nmarker. A marker with a problem has no effect."
     }
   }
 }

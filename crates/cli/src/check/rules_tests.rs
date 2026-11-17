@@ -1519,6 +1519,7 @@ fn stale_suppression(path: &str, missing_reason: bool) -> StaleSuppression {
                 Some("no longer needed".to_string())
             },
             is_file_level: false,
+            is_range: false,
             kind_known: true,
         },
         missing_reason,

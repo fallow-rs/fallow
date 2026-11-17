@@ -708,6 +708,7 @@ pub(super) fn make_duplication_report(groups: Vec<CloneGroup>) -> DuplicationRep
         clone_groups: groups,
         clone_families: vec![],
         mirrored_directories: vec![],
+        range_marker_problems: Vec::new(),
         stats: DuplicationStats {
             total_files: 10,
             files_with_clones: 2,
@@ -1318,6 +1319,7 @@ fn recompute_stats_zero_total_lines() {
         clone_groups: vec![],
         clone_families: vec![],
         mirrored_directories: vec![],
+        range_marker_problems: Vec::new(),
         stats: DuplicationStats {
             total_files: 0,
             files_with_clones: 0,
@@ -2657,6 +2659,7 @@ fn stale_suppression_baseline_keys_include_missing_reason_state() {
             issue_kind: Some("unused-export".to_string()),
             reason: None,
             is_file_level: false,
+            is_range: false,
             kind_known: true,
         },
         missing_reason: false,
@@ -2808,6 +2811,7 @@ fn line_free_suppression(
             issue_kind: Some("unused-export".to_owned()),
             reason: reason.map(str::to_owned),
             is_file_level: false,
+            is_range: false,
             kind_known: true,
         },
         missing_reason: false,

@@ -313,7 +313,16 @@ const handler = createStandardHandler(config);
 
 // CORRECT: suppress all duplication in a file
 // fallow-ignore-file code-duplication
+
+// CORRECT: suppress only one clone, with the reason next to the code
+// fallow-ignore-start code-duplication -- one field block per locale
+export const en = { title: "", body: "", footer: "" };
+// fallow-ignore-end code-duplication
 ```
+
+A next-line marker removes each clone instance that touches the next line. A clone of the code above often ends on that line, so the marker can hide a neighbor clone too. A range removes only the clones inside it, and cuts a neighbor clone at the range border. A cut part below `minTokens` or `minLines` is not reported.
+
+Wrap the whole block or function in the range, not the line range that `fallow dupes` reports. The reported ranges of neighbor clones share border lines. Put each range marker on its own line: a marker after code on the same line has no effect and shows as `not_own_line`. Ranges support only `code-duplication`: `fallow dupes` reports a range marker with another kind, with no kind, an end with no start, a nested start, and a start with no end in `range_marker_problems`, and such a marker has no effect. A cut neighbor clone has new lines and content, so it can show as a new clone in a baseline gate and needs a new `ignoredClones` key. Save the baseline again after you add a range.
 
 This is separate from the dead code suppression tokens. See the full list of valid tokens in the [CLI Reference](cli-reference.md#inline-suppression-comments).
 

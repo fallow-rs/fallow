@@ -2143,6 +2143,13 @@ assert_contains "$OUT_MISSING_REASON" "title=Suppression without a reason" "miss
 assert_contains "$OUT_MISSING_REASON" "after \`--\`" "missing reason: says where the reason goes"
 assert_not_contains "$OUT_MISSING_REASON" "Remove the suppression comment" "missing reason: does not tell the user to remove the comment"
 
+# A missing reason on a fallow-ignore-start range names the range marker,
+# not the next-line marker.
+OUT_RANGE_REASON=$(jq '.unused_files = [] | .unused_exports = [] | .unused_types = [] | .unused_dependencies = [] | .unused_dev_dependencies = [] | .unused_optional_dependencies = [] | .unused_enum_members = [] | .unused_class_members = [] | .unresolved_imports = [] | .unlisted_dependencies = [] | .duplicate_exports = [] | .circular_dependencies = [] | .boundary_violations = [] | .type_only_dependencies = [] | .test_only_dependencies = [] | .unused_catalog_entries = [] | .empty_catalog_groups = [] | .unresolved_catalog_references = [] | .unused_dependency_overrides = [] | .misconfigured_dependency_overrides = [] | .private_type_leaks = [] | .stale_suppressions = [{"path": "src/utils.ts", "line": 3, "col": 0, "origin": {"type": "comment", "issue_kind": "code-duplication", "is_file_level": false, "is_range": true}, "missing_reason": true}] | .total_issues = 1' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/annotations-check.jq" 2>&1)
+assert_contains "$OUT_RANGE_REASON" "title=Suppression without a reason" "range marker: missing-reason title"
+assert_contains "$OUT_RANGE_REASON" "fallow-ignore-start" "range marker: directive is fallow-ignore-start"
+assert_not_contains "$OUT_RANGE_REASON" "fallow-ignore-next-line" "range marker: no next-line directive"
+
 echo "  annotations-dupes.jq:"
 OUT=$(jq -r -f "$JQ_DIR/annotations-dupes.jq" "$FIXTURES/dupes.json" 2>&1)
 assert_contains "$OUT" "::warning" "emits warning commands"

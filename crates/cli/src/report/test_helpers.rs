@@ -273,6 +273,7 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
             issue_kind: Some("unused-exports".to_string()),
             reason: None,
             is_file_level: false,
+            is_range: false,
             kind_known: false,
         },
         missing_reason: false,

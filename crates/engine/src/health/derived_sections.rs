@@ -482,6 +482,7 @@ fn subset_precomputed_duplication_report(
         clone_groups,
         clone_families: Vec::new(),
         mirrored_directories: Vec::new(),
+        range_marker_problems: Vec::new(),
         stats,
     }
 }
