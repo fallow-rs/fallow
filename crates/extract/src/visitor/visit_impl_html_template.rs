@@ -38,7 +38,9 @@ impl ModuleInfoExtractor {
     /// the remote-url filter and the normalization of the HTML parser. Each
     /// import points at its quoted attribute value. When an escape makes the
     /// cooked text differ from the source text, the offsets do not match the
-    /// source, so the import points at the start of the template text.
+    /// source, so the import points at the start of the template text. The
+    /// parser also turns CRLF into LF in the raw text, so a raw text that is
+    /// shorter than its span gets the same fallback.
     pub(super) fn push_html_template_asset_imports(
         &mut self,
         quasi: &TemplateElement<'_>,
@@ -47,7 +49,8 @@ impl ModuleInfoExtractor {
         if self.html_tag_is_project_value {
             return;
         }
-        let exact = quasi.value.raw.as_str() == text;
+        let raw = quasi.value.raw.as_str();
+        let exact = raw == text && quasi.span.size() as usize == raw.len();
         for asset in collect_asset_ref_spans(text) {
             let (span, source_span) = if exact {
                 let quoted = Span::new(

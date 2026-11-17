@@ -431,3 +431,19 @@ fn html_tagged_template_with_escape_anchors_asset_at_template_text() {
     assert_eq!(import.span.start, template_text);
     assert!(import.source_span.is_empty());
 }
+
+#[test]
+fn html_tagged_template_with_crlf_anchors_asset_at_template_text() {
+    // The parser turns CRLF into LF in the raw template text, so the offsets
+    // of that text do not match the source after the first CRLF.
+    let source = "import { html } from 'hono/html'\r\nexport const layout = () => html`\r\n\r\n\r\n\r\n<script src=\"./a.js\"></script>`";
+    let info = parse_ts(source);
+    let import = info
+        .imports
+        .iter()
+        .find(|import| import.source == "./a.js")
+        .expect("asset import");
+    let template_text = (source.find('`').expect("template") + 1) as u32;
+    assert_eq!(import.span.start, template_text);
+    assert!(import.source_span.is_empty());
+}
