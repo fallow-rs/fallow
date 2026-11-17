@@ -143,11 +143,11 @@
         "decl": {
           "start": {
             "line": 7,
-            "column": 6
+            "column": 2
           },
           "end": {
             "line": 7,
-            "column": 10
+            "column": 5
           }
         },
         "loc": {
@@ -167,11 +167,11 @@
         "decl": {
           "start": {
             "line": 14,
-            "column": 6
+            "column": 2
           },
           "end": {
             "line": 14,
-            "column": 10
+            "column": 5
           }
         },
         "loc": {
@@ -386,12 +386,12 @@
         "b:2:34:2:39:2:43:2:44": 2,
         "s:3:4:3:Infinity": 0,
         "s:4:4:4:Infinity": 1,
-        "f:7:6:7:10": 1,
+        "f:7:2:7:5": 1,
         "b:8:4:10:Infinity:undefined:undefined:undefined:undefined": 3,
         "s:8:4:10:Infinity": 2,
         "s:9:6:9:Infinity": 3,
         "s:11:4:11:Infinity": 4,
-        "f:14:6:14:10": 2,
+        "f:14:2:14:5": 2,
         "b:15:4:18:Infinity:undefined:undefined:undefined:undefined": 4,
         "s:15:4:18:Infinity": 5,
         "s:16:6:16:Infinity": 6,
