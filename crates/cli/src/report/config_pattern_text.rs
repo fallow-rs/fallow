@@ -1,5 +1,6 @@
 //! The text of the config entries that had no effect outside JSON and SARIF:
-//! the unmatched patterns (`ignoreFindings`, `ignoreDependencies`), the
+//! the unmatched patterns (`ignoreFindings`, `ignoreDependencies`,
+//! `circularDependencies.allow`), the
 //! redundant entries (`entry`, `ignoreDependencies`, `ignorePatterns`), the
 //! `overrides` rules that cannot change a result, and the requested checks that
 //! did not run because their rule is off.
@@ -75,7 +76,7 @@ pub fn print_stderr_notes(diagnostics: &[WorkspaceDiagnostic], format: OutputFor
 }
 
 /// One note line per config setting with unmatched patterns, in the order
-/// `ignoreFindings`, `ignoreDependencies`, then one note line per config
+/// `ignoreFindings`, `ignoreDependencies`, `circularDependencies.allow`, then one note line per config
 /// setting with redundant entries, in the order `entry`,
 /// `ignoreDependencies`, `ignorePatterns`, then one note line per `overrides`
 /// rule that had no effect, then one note line per requested rule that is off.
@@ -101,6 +102,15 @@ pub fn stderr_notes(diagnostics: &[WorkspaceDiagnostic]) -> Vec<String> {
             ("ignoreDependencies glob", "ignoreDependencies globs"),
             "matched no declared dependency this run",
             "globs match package names such as @scope/*; check for typos",
+        ),
+        (
+            "circular-dependencies-allow-unmatched",
+            (
+                "circularDependencies.allow entry",
+                "circularDependencies.allow entries",
+            ),
+            "matched no cycle this run",
+            "an entry lists the files of one cycle in import order; check the paths",
         ),
         (
             "entry-pattern-redundant",

@@ -66,13 +66,6 @@ pub(super) const KNIP_UNMAPPABLE_FIELDS: &[(&str, &str, Option<&str>)] = &[
         None,
     ),
     (
-        "cycles",
-        "Fallow has no allow-list for exact cycle paths",
-        Some(
-            "set circularDependencies.ignoreLazyImports to skip lazy import() edges; use // fallow-ignore-next-line circular-dependency for an accepted cycle",
-        ),
-    ),
-    (
         "ignoreGlobalBinaries",
         "Fallow has no switch for globally installed binaries",
         Some("add the binary names to ignoreBinaries"),
@@ -95,6 +88,7 @@ pub(super) const KNIP_UNMAPPABLE_FIELDS: &[(&str, &str, Option<&str>)] = &[
 /// `warn_unhandled_root_keys` must stay quiet about it.
 pub(super) const KNIP_MIGRATED_FIELDS: &[&str] = &[
     "$schema",
+    "cycles",
     "entry",
     "exclude",
     "ignore",
@@ -431,14 +425,10 @@ mod tests {
 
     #[test]
     fn unmappable_fields_do_not_overlap_with_rule_map_keys() {
-        // Knip names both the cycle issue type and its root config section
-        // `cycles`. The two live at different levels of the config, so they
-        // cannot collide.
-        const SHARED_NAMES: &[&str] = &["cycles"];
         let rule_keys: FxHashSet<&str> = KNIP_RULE_MAP.iter().map(|(k, _)| *k).collect();
         for (field, _, _) in KNIP_UNMAPPABLE_FIELDS {
             assert!(
-                SHARED_NAMES.contains(field) || !rule_keys.contains(field),
+                !rule_keys.contains(field),
                 "KNIP_UNMAPPABLE_FIELDS entry `{field}` overlaps with KNIP_RULE_MAP"
             );
         }

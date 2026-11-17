@@ -18,13 +18,16 @@ use fallow_config::{
 /// - each `ignorePatterns` glob that excluded no file the run would otherwise
 ///   analyze;
 /// - each `overrides` rule that cannot change a result of this config.
+/// - each `circularDependencies.allow` entry that matched no cycle.
 ///
 /// The `ignoreDependencies` entries need `reports_dependencies`. A surface
 /// passes `reports_dependencies = false` when its run does not report
 /// dependency findings (an issue-type filter without the dependency types, or
 /// a file scope), because a dependency entry is then not relevant to what the
 /// run shows. A `--production` run checks fewer files and dependency
-/// sections, so it reports no redundant entry (issue #3824).
+/// sections, so it reports no redundant entry (issue #3824) and no unmatched
+/// `circularDependencies.allow` entry: a cycle through a test file is not
+/// in that run.
 /// A normal run does not report an `ignoreDependencies` entry that a
 /// `--production` run could need, because following the note would add a
 /// finding to that run.
@@ -65,6 +68,13 @@ pub fn config_pattern_diagnostics(
         (Vec::new(), Vec::new())
     };
     let finding_patterns = config.ignore_findings.unmatched_patterns();
+    let unmatched_cycles = if checks_redundancy {
+        config
+            .circular_dependencies_allow_effect
+            .ineffective(&config.circular_dependencies.allow)
+    } else {
+        Vec::new()
+    };
     let ineffective_overrides = config
         .ineffective_override_rules()
         .into_iter()
@@ -94,6 +104,12 @@ pub fn config_pattern_diagnostics(
         .chain(redundant_ignores.into_iter().map(|pattern| {
             WorkspaceDiagnosticKind::IgnorePatternsEntryRedundant {
                 pattern: pattern.to_owned(),
+            }
+        }))
+        .chain(unmatched_cycles.into_iter().map(|files| {
+            WorkspaceDiagnosticKind::CircularDependenciesAllowUnmatched {
+                pattern: format!("[{}]", files.join(", ")),
+                files: files.clone(),
             }
         }))
         .chain(ineffective_overrides.map(|entry| {

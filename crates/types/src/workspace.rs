@@ -13,7 +13,6 @@
 
 use std::path::{Path, PathBuf};
 
-use rustc_hash::FxHashSet;
 #[cfg(feature = "schema")]
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -25,12 +24,15 @@ use crate::serde_path;
 mod config_entry;
 #[path = "workspace_health_text.rs"]
 mod health_text;
+#[path = "workspace_merge.rs"]
+mod merge;
 #[path = "workspace_plugin_text.rs"]
 mod plugin_text;
 #[path = "workspace_production_text.rs"]
 mod production_text;
 
 pub use config_entry::{OVERRIDE_REASON_BASE_RULE_OFF, OVERRIDE_REASON_PROJECT_LEVEL};
+pub use merge::{dedupe_workspace_diagnostics, merge_workspace_diagnostics};
 
 /// Why the declared pnpm version ignores the `overrides` section of
 /// `pnpm-workspace.yaml`.
@@ -688,6 +690,18 @@ pub enum WorkspaceDiagnosticKind {
         /// The `ignorePatterns` glob, as written in the config.
         pattern: String,
     },
+    /// A `circularDependencies.allow` entry matched no cycle of the run
+    /// (issue #4623): no cycle has exactly these files in this order, from
+    /// any start file. The usual cause is a cycle that the code no longer
+    /// has, or a path that is not relative to the project root. Not for a
+    /// `--production` run, nor a run with the `circular-dependencies` rule
+    /// off. `path` is the root. Not degraded.
+    CircularDependenciesAllowUnmatched {
+        /// The entry as one line: the files joined by `, ` in brackets.
+        pattern: String,
+        /// The files of the entry, as written in the config.
+        files: Vec<String>,
+    },
     /// An `overrides` rule cannot change the result (issue #4065). `reason` is
     /// `project-level` (fallow reads only the top-level severity of the rule)
     /// or `base-rule-off` (the top-level rule is off after CLI flags, so its
@@ -780,6 +794,9 @@ impl WorkspaceDiagnosticKind {
             Self::EntryPatternRedundant { .. } => "entry-pattern-redundant",
             Self::IgnoreDependenciesEntryRedundant { .. } => "ignore-dependencies-entry-redundant",
             Self::IgnorePatternsEntryRedundant { .. } => "ignore-patterns-entry-redundant",
+            Self::CircularDependenciesAllowUnmatched { .. } => {
+                "circular-dependencies-allow-unmatched"
+            }
             Self::OverrideRuleIneffective { .. } => "override-rule-ineffective",
             Self::RequestedRuleOff { .. } => "requested-rule-off",
             Self::BaselineInstallStateMismatch { .. } => "baseline-install-state-mismatch",
@@ -827,6 +844,7 @@ impl WorkspaceDiagnosticKind {
             | Self::EntryPatternRedundant { .. }
             | Self::IgnoreDependenciesEntryRedundant { .. }
             | Self::IgnorePatternsEntryRedundant { .. }
+            | Self::CircularDependenciesAllowUnmatched { .. }
             | Self::OverrideRuleIneffective { .. }
             | Self::RequestedRuleOff { .. }
             | Self::NestedProjectRoot => false,
@@ -1004,6 +1022,7 @@ impl WorkspaceDiagnosticKind {
             | Self::EntryPatternRedundant { .. }
             | Self::IgnoreDependenciesEntryRedundant { .. }
             | Self::IgnorePatternsEntryRedundant { .. }
+            | Self::CircularDependenciesAllowUnmatched { .. }
             | Self::OverrideRuleIneffective { .. }
             | Self::RequestedRuleOff { .. }
             | Self::BaselineInstallStateMismatch { .. } => false,
@@ -1073,6 +1092,7 @@ impl WorkspaceDiagnosticKind {
             | Self::EntryPatternRedundant { .. }
             | Self::IgnoreDependenciesEntryRedundant { .. }
             | Self::IgnorePatternsEntryRedundant { .. }
+            | Self::CircularDependenciesAllowUnmatched { .. }
             | Self::OverrideRuleIneffective { .. }
             | Self::RequestedRuleOff { .. }
             | Self::BaselineInstallStateMismatch { .. } => false,
@@ -1144,6 +1164,7 @@ impl WorkspaceDiagnosticKind {
             | Self::EntryPatternRedundant { .. }
             | Self::IgnoreDependenciesEntryRedundant { .. }
             | Self::IgnorePatternsEntryRedundant { .. }
+            | Self::CircularDependenciesAllowUnmatched { .. }
             | Self::OverrideRuleIneffective { .. }
             | Self::RequestedRuleOff { .. }
             | Self::BaselineInstallStateMismatch { .. } => false,
@@ -1216,6 +1237,7 @@ impl WorkspaceDiagnosticKind {
             | Self::EntryPatternRedundant { .. }
             | Self::IgnoreDependenciesEntryRedundant { .. }
             | Self::IgnorePatternsEntryRedundant { .. }
+            | Self::CircularDependenciesAllowUnmatched { .. }
             | Self::OverrideRuleIneffective { .. }
             | Self::RequestedRuleOff { .. }
             | Self::BaselineInstallStateMismatch { .. } => false,
@@ -1449,59 +1471,6 @@ fn canonical_glob_pattern(pattern: String) -> String {
         }
     }
     pattern
-}
-
-/// Concatenate two diagnostic lists, keeping the first occurrence of each
-/// `(kind, path)` pair and the order of `primary` followed by the entries only
-/// `secondary` has.
-///
-/// The single place diagnostics from two observation points are folded
-/// together: an engine session's own capture plus the process registry, and
-/// the combined run's per-analysis lists (issue #2366). A combined run walks
-/// the project once per analysis, and per-analysis `production` modes can make
-/// those walks see different file sets, so no single observation point holds
-/// everything the run recorded; the union does, and folding it the same way
-/// everywhere is what keeps the CLI and the programmatic route answering
-/// identically.
-///
-/// The key is the WHOLE kind, payload included, not its
-/// [`id`](WorkspaceDiagnosticKind::id). Two entries can share a kind id and a
-/// path and still be two distinct diagnostics: overlapping workspace globs
-/// (`["packages/*", "packages/*/*"]`) each report the same package-less
-/// directory with their own `pattern`, and the standalone envelopes report
-/// both. An id-keyed fold silently dropped the second one.
-#[must_use]
-pub fn merge_workspace_diagnostics(
-    primary: Vec<WorkspaceDiagnostic>,
-    secondary: Vec<WorkspaceDiagnostic>,
-) -> Vec<WorkspaceDiagnostic> {
-    let mut merged = Vec::with_capacity(primary.len() + secondary.len());
-    let mut seen: FxHashSet<(WorkspaceDiagnosticKind, PathBuf)> = FxHashSet::default();
-    for diagnostic in primary.into_iter().chain(secondary) {
-        let key = (diagnostic.kind.clone(), diagnostic.path.clone());
-        if seen.insert(key) {
-            merged.push(diagnostic);
-        }
-    }
-    merged
-}
-
-/// Keep the first occurrence of each `(kind, path)` pair in one list.
-///
-/// The single-list form of [`merge_workspace_diagnostics`], applied where
-/// diagnostics are produced rather than where two observation points are
-/// folded: workspace discovery reads `package.json` `workspaces`,
-/// `pnpm-workspace.yaml` `packages`, `deno.json` `workspace` and the root
-/// `tsconfig.json` references additively, so a repository that declares one
-/// glob in two of them reports every package-less directory under it twice.
-/// Deduplicating at that source is what keeps the JSON envelopes, the
-/// aggregated stderr warning and the process registry telling one story
-/// (issue #2366).
-#[must_use]
-pub fn dedupe_workspace_diagnostics(
-    diagnostics: Vec<WorkspaceDiagnostic>,
-) -> Vec<WorkspaceDiagnostic> {
-    merge_workspace_diagnostics(diagnostics, Vec::new())
 }
 
 /// The first segment of a glob that contains no glob metacharacter, so it
@@ -1820,6 +1789,7 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
         | WorkspaceDiagnosticKind::EntryPatternRedundant { .. }
         | WorkspaceDiagnosticKind::IgnoreDependenciesEntryRedundant { .. }
         | WorkspaceDiagnosticKind::IgnorePatternsEntryRedundant { .. }
+        | WorkspaceDiagnosticKind::CircularDependenciesAllowUnmatched { .. }
         | WorkspaceDiagnosticKind::OverrideRuleIneffective { .. }
         | WorkspaceDiagnosticKind::RequestedRuleOff { .. } => {
             config_entry::config_entry_message(kind)

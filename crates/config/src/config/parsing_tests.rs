@@ -46,6 +46,50 @@ fn a_config_written_for_a_newer_binary_names_both_versions() {
 }
 
 #[test]
+fn circular_dependencies_allow_rejects_an_entry_that_cannot_be_a_cycle() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(".fallowrc.json");
+    std::fs::write(
+        &path,
+        r#"{"circularDependencies": {"allow": [
+            ["src/a.ts", "src/b.ts"],
+            ["src/a.ts"],
+            ["src/a.ts", "./src/b.ts", "src/b.ts"]
+        ]}}"#,
+    )
+    .unwrap();
+
+    let message = FallowConfig::load(&path)
+        .expect_err("a one-file entry and a repeated file fail the load")
+        .to_string();
+    assert!(
+        message.contains(
+            "circularDependencies.allow[1] lists 1 file; an entry lists the 2 or more files of one cycle"
+        ),
+        "{message}"
+    );
+    assert!(
+        message.contains(
+            "circularDependencies.allow[2] lists 'src/b.ts' more than once; a cycle has each file once"
+        ),
+        "{message}"
+    );
+}
+
+#[test]
+fn circular_dependencies_allow_accepts_valid_entries() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(".fallowrc.json");
+    std::fs::write(
+        &path,
+        r#"{"circularDependencies": {"allow": [["src/a.ts", "src/b.ts"]]}}"#,
+    )
+    .unwrap();
+    let config = FallowConfig::load(&path).expect("a valid entry loads");
+    assert_eq!(config.circular_dependencies.allow.len(), 1);
+}
+
+#[test]
 fn an_unknown_field_still_fails_on_a_binary_that_meets_the_floor() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join(".fallowrc.json");

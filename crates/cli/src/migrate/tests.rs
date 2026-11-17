@@ -233,6 +233,32 @@ fn toml_output_duplicates_section() {
 }
 
 #[test]
+fn toml_output_circular_dependencies_allow_parses_as_config() {
+    let result = MigrationResult {
+        config: serde_json::json!({
+            "circularDependencies": {
+                "allow": [["src/a.ts", "src/b.ts"], ["src/c.ts", "src/d.ts", "src/e.ts"]]
+            }
+        }),
+        warnings: vec![],
+        sources: vec!["knip.json".to_string()],
+    };
+    let output = generate_toml(&result);
+    let config: fallow_config::FallowConfig = toml::from_str(&output).unwrap();
+    assert_eq!(
+        config.circular_dependencies.allow,
+        vec![
+            vec!["src/a.ts".to_string(), "src/b.ts".to_string()],
+            vec![
+                "src/c.ts".to_string(),
+                "src/d.ts".to_string(),
+                "src/e.ts".to_string()
+            ],
+        ]
+    );
+}
+
+#[test]
 fn toml_output_deserializes_as_valid_config() {
     let result = MigrationResult {
         config: serde_json::json!({

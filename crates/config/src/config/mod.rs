@@ -189,7 +189,7 @@ impl UnusedComponentPropsConfig {
 ///
 /// The default leaves the rule unchanged: every runtime import edge takes
 /// part in cycle detection, and only type-only edges are skipped.
-#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize, Serialize, JsonSchema)]
 #[serde(default, deny_unknown_fields, rename_all = "camelCase")]
 pub struct CircularDependenciesConfig {
     /// Skip import edges that load their target on demand or on another
@@ -201,13 +201,70 @@ pub struct CircularDependenciesConfig {
     /// An edge that also carries a static import stays. Default `false`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub ignore_lazy_imports: bool,
+    /// Accepted cycles. Each entry is the list of files of one cycle, in
+    /// import order, without the repeat of the first file at the end. An
+    /// entry accepts a cycle that has exactly these files in this order, from
+    /// any start file: `["src/a.ts", "src/b.ts", "src/c.ts"]` also accepts
+    /// `src/b.ts -> src/c.ts -> src/a.ts`. A cycle with another set of files
+    /// stays reported, also when it shares an import with an accepted cycle.
+    ///
+    /// Each path is relative to the project root, also in a monorepo: write
+    /// `packages/app/src/a.ts`, not a path relative to the workspace. The
+    /// match is case-sensitive on every platform. Globs are not supported.
+    /// An entry needs at least 2 files and lists each file once.
+    ///
+    /// An entry that matches no cycle in a run gives a
+    /// `circular-dependencies-allow-unmatched` diagnostic. The detector lists
+    /// at most 20 cycles per group of files that import each other, and no
+    /// cycle with more than 12 files. An accepted cycle does not count toward
+    /// the 20. An entry with more than 12 files, or with all files in a group
+    /// that reached the limit, gives no diagnostic, because the detector
+    /// cannot prove that it matches no cycle.
+    ///
+    /// A `fallow-ignore-next-line circular-dependency` comment on an accepted
+    /// cycle becomes a stale suppression: remove the comment when you add the
+    /// entry. Default `[]`.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    #[schemars(inner(length(min = 2)))]
+    pub allow: Vec<Vec<String>>,
 }
 
 impl CircularDependenciesConfig {
     /// True when no option is set, so serialization can omit the section.
     #[must_use]
     pub const fn is_default(&self) -> bool {
-        !self.ignore_lazy_imports
+        !self.ignore_lazy_imports && self.allow.is_empty()
+    }
+
+    /// The `allow` entries that can never match a cycle: an entry with fewer
+    /// than 2 files, and an entry that lists one file more than once. A
+    /// leading `./` does not make two paths different.
+    #[must_use]
+    pub fn allow_errors(&self) -> Vec<String> {
+        let mut errors = Vec::new();
+        for (index, entry) in self.allow.iter().enumerate() {
+            if entry.len() < 2 {
+                let noun = if entry.len() == 1 { "file" } else { "files" };
+                errors.push(format!(
+                    "circularDependencies.allow[{index}] lists {} {noun}; an entry lists the 2 or \
+                     more files of one cycle",
+                    entry.len()
+                ));
+                continue;
+            }
+            let mut seen = rustc_hash::FxHashSet::default();
+            if let Some(repeated) = entry
+                .iter()
+                .map(|file| file.trim_start_matches("./"))
+                .find(|file| !seen.insert(*file))
+            {
+                errors.push(format!(
+                    "circularDependencies.allow[{index}] lists '{repeated}' more than once; a \
+                     cycle has each file once"
+                ));
+            }
+        }
+        errors
     }
 }
 
