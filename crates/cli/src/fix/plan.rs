@@ -49,6 +49,12 @@ pub(super) enum SkipReason {
     /// pointing at a declaration that is no longer exported. Recorded per
     /// export entry, never on the per-file skip list.
     KeptReExport,
+    /// An export removal withheld because the same `export` keyword also
+    /// exports a name that the run keeps, as in `export const { a, b } = x;`
+    /// with only `b` unused. The removal of the keyword would remove the
+    /// export of the kept name too. Recorded per export entry, never on the
+    /// per-file skip list.
+    SharedDeclarationInUse,
 }
 
 impl SkipReason {
@@ -60,6 +66,7 @@ impl SkipReason {
             Self::LowConfidenceUnresolvedImports => "low_confidence_unresolved_imports",
             Self::LowConfidenceIncompleteAnalysis => "low_confidence_incomplete_analysis",
             Self::KeptReExport => "kept_re_export",
+            Self::SharedDeclarationInUse => "shared_declaration_in_use",
         }
     }
 
@@ -84,6 +91,9 @@ impl SkipReason {
             Self::KeptReExport => {
                 "Preserved because a re-export that this run keeps still names this export. Remove that re-export first, then run `fallow fix --dry-run` and review the new preview."
             }
+            Self::SharedDeclarationInUse => {
+                "Preserved because the same `export` keyword also exports a name that is in use. Move this name to a declaration without `export` by hand, then run `fallow fix --dry-run` and review the new preview."
+            }
         }
     }
 
@@ -95,6 +105,7 @@ impl SkipReason {
                 | Self::LowConfidenceUnresolvedImports
                 | Self::LowConfidenceIncompleteAnalysis
                 | Self::KeptReExport
+                | Self::SharedDeclarationInUse
         )
     }
 
@@ -118,6 +129,9 @@ impl SkipReason {
             ),
             Self::KeptReExport => format!(
                 "Kept unused export(s) in {display}: a re-export that this run keeps still names them.",
+            ),
+            Self::SharedDeclarationInUse => format!(
+                "Kept unused export(s) in {display}: the same `export` keyword also exports a name that is in use.",
             ),
         }
     }

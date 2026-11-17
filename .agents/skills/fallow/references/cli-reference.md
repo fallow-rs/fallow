@@ -410,6 +410,10 @@ JSON output carries `{"type": "skipped", "path": "...", "skipped": true, "skip_r
 
 Limit: the check reads the re-exports from the module graph. A file that `ignorePatterns` excludes is not in the graph, so a re-export in such a file cannot hold a removal back. When an ignored file re-exports project code, run the type check after `fallow fix`.
 
+### Declarations that export more than one name
+
+One `export` keyword can export several names: `export const { a, b } = x;`, `export const [a, b] = x;` or `export const a = 1, b = 2;`. `fallow fix` removes that keyword only when every name of the declaration is unused. While one name is in use or kept, each unused name of the declaration is a `remove_export` entry with `applied: false`, `skipped: true` and `skip_reason: "shared_declaration_in_use"`, counted by the top-level `skipped_shared_declarations: number` (always present), disjoint from `skipped`. `fix` does not split the declaration, because a split evaluates the initializer twice and changes the value of a rest element. Move each unused name to a declaration without `export` by hand. This is intentional and does not change the exit code.
+
 ### File encoding contract
 
 `fallow fix` is UTF-8 only. Two encoding shapes that previously caused silent corruption are handled explicitly (issue #475):

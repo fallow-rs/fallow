@@ -55,6 +55,7 @@ pub mod duplicates;
 mod effective_severity;
 pub mod entry_weight;
 pub mod error_severity;
+pub mod export_declarations;
 mod feature_flags;
 pub mod flag_age;
 mod flag_registry;
