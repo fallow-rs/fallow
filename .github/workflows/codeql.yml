@@ -61,8 +61,8 @@ jobs:
       fail-fast: false
       matrix:
         language: [rust, javascript-typescript, actions]
-    # A skipped job does not satisfy a required check, so the job always runs
-    # and only its steps skip.
+    # The job always runs and only its steps skip, so each Analyze check
+    # reports a result on every pull request.
     env:
       ANALYZE: ${{ matrix.language != 'rust' || github.event_name != 'pull_request' || needs.changes.outputs.rust == 'true' }}
     steps:

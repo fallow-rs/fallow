@@ -831,12 +831,12 @@ test("release runs the test suite natively on arm64 Linux and Apple Silicon", ()
   assert.match(job, /cd crates\/napi && npm test/);
 });
 
-test("CodeQL analyze jobs always report so the required checks resolve", () => {
+test("CodeQL analyze jobs always report a result", () => {
   const workflow = readWorkflow(".github/workflows/codeql.yml");
   const job = indentedBlock(workflow, "analyze", 2);
 
-  // A job that a job-level `if` skips leaves a required check waiting
-  // forever, so only the steps may skip.
+  // A job that a job-level `if` skips reports no result for its check, so
+  // only the steps may skip.
   assert.doesNotMatch(job, /^ {4}if:/mu);
   assert.match(job, /language: \[rust, javascript-typescript, actions\]/u);
   assert.match(
