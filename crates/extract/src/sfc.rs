@@ -426,12 +426,16 @@ pub(crate) fn parse_sfc_to_module_with_mode(
     let mut template_visible_iterable_types: FxHashMap<String, String> = FxHashMap::default();
     let mut props_return_binding: Option<String> = None;
     let mut emit_return_binding: Option<String> = None;
+    let mut shared_scope_references = SharedScopeReferences::default();
+    let has_setup_script = scripts.iter().any(|script| script.is_setup);
 
     for script in &scripts {
         merge_script_into_module(&mut SfcScriptMergeInput {
             kind,
             script,
+            has_setup_script,
             combined: &mut combined,
+            shared_scope_references: &mut shared_scope_references,
             template_visible_imports: &mut template_visible_imports,
             template_visible_bound_targets: &mut template_visible_bound_targets,
             template_visible_iterable_types: &mut template_visible_iterable_types,
@@ -440,6 +444,9 @@ pub(crate) fn parse_sfc_to_module_with_mode(
             need_complexity,
             mode,
         });
+    }
+    if scripts.len() > 1 {
+        credit_shared_scope_references(&shared_scope_references, &mut combined);
     }
 
     for style in &styles {
@@ -593,19 +600,10 @@ fn empty_sfc_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleI
 
 #[path = "sfc_script_merge.rs"]
 mod script_merge;
-use script_merge::merge_script_into_module;
-struct SfcScriptMergeInput<'a> {
-    kind: SfcKind,
-    script: &'a SfcScript,
-    combined: &'a mut ModuleInfo,
-    template_visible_imports: &'a mut FxHashSet<String>,
-    template_visible_bound_targets: &'a mut FxHashMap<String, String>,
-    template_visible_iterable_types: &'a mut FxHashMap<String, String>,
-    props_return_binding: &'a mut Option<String>,
-    emit_return_binding: &'a mut Option<String>,
-    need_complexity: bool,
-    mode: fallow_types::shared_state::ExtractionMode,
-}
+use script_merge::{
+    SfcScriptMergeInput, SharedScopeReferences, credit_shared_scope_references,
+    merge_script_into_module,
+};
 
 /// Compute and merge this script's import-binding usage (unused / type- and
 /// value-referenced) plus auto-import candidates into `combined`. A
@@ -625,26 +623,23 @@ fn merge_script_binding_usage(
     semantic_usage: crate::parse::SemanticUsage,
 ) {
     let augmented_body = build_generic_attr_probe_source(input.script);
-    let empty_template_used = FxHashSet::default();
-    let (binding_usage, auto_import_candidates) = if let Some(augmented) = augmented_body.as_deref()
-    {
+    let binding_usage = if let Some(augmented) = augmented_body.as_deref() {
         let augmented_return =
             Parser::new(allocator, augmented, source_type_for_script(input.script)).parse();
-        (
-            compute_import_binding_usage(
-                &augmented_return.program,
-                imports,
-                import_equals_bindings,
-                &empty_template_used,
-            ),
-            semantic_usage.auto_import_candidates,
-        )
+        let mut probe = compute_import_binding_usage(
+            &augmented_return.program,
+            imports,
+            import_equals_bindings,
+            &FxHashSet::default(),
+        );
+        input
+            .shared_scope_references
+            .record_references(input.kind, &mut probe);
+        probe.import_binding_usage
     } else {
-        (
-            semantic_usage.import_binding_usage,
-            semantic_usage.auto_import_candidates,
-        )
+        semantic_usage.import_binding_usage
     };
+    let auto_import_candidates = semantic_usage.auto_import_candidates;
     crate::parse::append_declaration_merge_facts(
         &mut input.combined.semantic_facts,
         semantic_usage.declaration_merges,

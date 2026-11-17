@@ -8,6 +8,9 @@ use mock_api::compute_mock_api_reference_spans;
 #[path = "parse_jsdoc_visibility.rs"]
 mod jsdoc_visibility;
 use jsdoc_visibility::apply_jsdoc_visibility_tags;
+#[path = "parse_root_unresolved.rs"]
+mod root_unresolved;
+use root_unresolved::compute_root_unresolved_names;
 use std::path::Path;
 
 use oxc_allocator::Allocator;
@@ -1474,6 +1477,9 @@ pub struct MockApiReferenceSpans {
 pub struct SemanticUsage {
     pub import_binding_usage: ImportBindingUsage,
     pub auto_import_candidates: Vec<String>,
+    /// Names that a type position references and no binding of the program
+    /// declares. An SFC credits another script block's imports with them.
+    pub(crate) unresolved_type_names: Vec<String>,
     pub declaration_merges: Vec<fallow_types::extract::DeclarationMergeFact>,
     mock_api_reference_spans: MockApiReferenceSpans,
     module_binding_reference_spans: rustc_hash::FxHashSet<Span>,
@@ -1716,13 +1722,15 @@ fn compute_semantic_usage_with_candidates(
         loads: candidates.opaque_loads,
         template_reads_root: candidates.template_reads_root,
     };
+    let (auto_import_candidates, unresolved_type_names) = compute_root_unresolved_names(scoping);
     SemanticUsage {
         import_binding_usage: ImportBindingUsage {
             unused,
             type_referenced: type_referenced_bindings,
             value_referenced: value_referenced_bindings,
         },
-        auto_import_candidates: compute_auto_import_candidates_from_semantic(scoping),
+        auto_import_candidates,
+        unresolved_type_names,
         declaration_merges: declaration_merge_facts(&semantic),
         mock_api_reference_spans,
         module_binding_reference_spans,
@@ -1926,24 +1934,6 @@ const fn compatible_merge(left: MergeDeclarationKind, right: MergeDeclarationKin
     )
 }
 
-fn compute_auto_import_candidates_from_semantic(scoping: &oxc_semantic::Scoping) -> Vec<String> {
-    use rustc_hash::FxHashSet;
-
-    let mut candidates: FxHashSet<String> = FxHashSet::default();
-    for (name, reference_ids) in scoping.root_unresolved_references() {
-        if reference_ids
-            .iter()
-            .any(|reference_id| scoping.get_reference(*reference_id).is_value())
-        {
-            candidates.insert(name.as_str().to_string());
-        }
-    }
-
-    let mut candidates: Vec<String> = candidates.into_iter().collect();
-    candidates.sort_unstable();
-    candidates
-}
-
 /// Use `oxc_semantic` to summarize how import bindings are referenced in the file.
 ///
 /// An import like `import { foo } from './utils'` where `foo` is never used
@@ -1966,12 +1956,15 @@ fn compute_auto_import_candidates_from_semantic(scoping: &oxc_semantic::Scoping)
 /// without them the require-derived lane would be absent on this path and such
 /// a binding would keep crediting its target on a script the caller re-parses
 /// (a Vue `generic="..."` block). Pass `&[]` when the program has none.
+///
+/// The result also carries the names that the program uses but does not
+/// declare, so an SFC can credit the imports of another script block.
 pub fn compute_import_binding_usage(
     program: &Program<'_>,
     imports: &[ImportInfo],
     import_equals_bindings: &[String],
     template_used: &rustc_hash::FxHashSet<String>,
-) -> ImportBindingUsage {
+) -> SemanticUsage {
     let mut semantic_usage = compute_semantic_usage_with_candidates(
         program,
         imports,
@@ -1992,7 +1985,7 @@ pub fn compute_import_binding_usage(
     // `export import X = require('./x')` is not a `<script setup>` spelling: no
     // name is exempted here.
     report_unreferenced_import_equals_bindings(&mut semantic_usage, &[]);
-    semantic_usage.import_binding_usage
+    semantic_usage
 }
 
 #[cfg(test)]

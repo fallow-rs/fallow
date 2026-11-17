@@ -1,0 +1,4 @@
+### Fixed
+
+- **`fallow dead-code` no longer reports an export as unused when a Vue `<script setup>` block or the template uses an import of the plain `<script>` block.** Vue compiles both blocks into one module, and `<script setup>` and the template can see the bindings of the plain `<script>`, so fallow now credits that use. This includes a type that only the `generic="..."` attribute of `<script setup>` uses. The plain `<script>` cannot see the bindings of `<script setup>`, so that direction gets no credit. A Svelte component gets the same fix: the instance script and the markup can use an import of the module script (`<script module>` or `<script context="module">`), also as a `$name` store subscription. An import that no block uses stays unused. The extraction cache version changes, so the first run after the update parses all files again.
+  (Closes [#4672](https://github.com/fallow-rs/fallow/issues/4672))
