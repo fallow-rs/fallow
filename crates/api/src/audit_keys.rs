@@ -154,6 +154,19 @@ impl DeadCodeAuditLedger {
             }
         }
     }
+    /// Mark the introduced findings whose keys are in `inherit` as inherited:
+    /// each one matches a base finding under another key.
+    pub fn inherit_introductions(&mut self, inherit: &FxHashSet<String>) {
+        for record in &mut self.records {
+            if record.introduced && inherit.contains(&record.stable_key) {
+                record.introduced = false;
+                self.introduced_keys.remove(&record.stable_key);
+                if is_counted_dead_code_finding(record.collection, record.effective_severity) {
+                    self.inherited_keys.insert(record.stable_key.clone());
+                }
+            }
+        }
+    }
     /// Persist comparison membership into existing typed output fields.
     ///
     /// `StaleSuppression` is the sole legacy finding without a typed
@@ -367,10 +380,13 @@ impl AuditComparison {
             .count()
     }
 
-    /// Reclassify worsened complexity findings as inherited, for
-    /// `audit.worsened: off`. Growth of an exceeded metric stays worsened, see
-    /// [`ComplexityClass::clear_worsened_for_off`].
-    pub fn clear_worsened(&mut self) {
+    /// Reclassify worsened complexity findings as inherited when `worsened`
+    /// is `audit.worsened: off`. Growth of an exceeded metric stays worsened,
+    /// see [`ComplexityClass::clear_worsened_for_off`].
+    pub fn clear_worsened_when_off(&mut self, worsened: fallow_config::AuditWorsened) {
+        if worsened != fallow_config::AuditWorsened::Off {
+            return;
+        }
         for class in &mut self.health_classes {
             class.clear_worsened_for_off();
         }
@@ -1748,6 +1764,8 @@ pub fn dupes_keys(
 /// The fragment hash keeps distinct groups spanning the same files apart;
 /// line positions are excluded so a group survives shifts within its files.
 /// The fragment hash leaves out `\r`, so the line endings do not change the key.
+/// It does not depend on the order of the instances, so a group keeps its
+/// hash when the change moves its instances to other files.
 pub fn dupe_group_key(group: &fallow_types::duplicates::CloneGroup, root: &Path) -> String {
     let mut files: Vec<String> = group
         .instances
@@ -1756,13 +1774,23 @@ pub fn dupe_group_key(group: &fallow_types::duplicates::CloneGroup, root: &Path)
         .collect();
     files.sort();
     files.dedup();
+    let mut fragment_hashes: Vec<u64> = group
+        .instances
+        .iter()
+        .map(|instance| {
+            let mut hasher = DefaultHasher::new();
+            if instance.fragment.contains('\r') {
+                instance.fragment.replace('\r', "").hash(&mut hasher);
+            } else {
+                instance.fragment.hash(&mut hasher);
+            }
+            hasher.finish()
+        })
+        .collect();
+    fragment_hashes.sort_unstable();
     let mut hasher = DefaultHasher::new();
-    for instance in &group.instances {
-        if instance.fragment.contains('\r') {
-            instance.fragment.replace('\r', "").hash(&mut hasher);
-        } else {
-            instance.fragment.hash(&mut hasher);
-        }
+    for fragment_hash in fragment_hashes {
+        fragment_hash.hash(&mut hasher);
     }
     format!(
         "dupe:{}:{}:{}:{:x}",
