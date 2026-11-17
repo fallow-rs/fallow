@@ -214,7 +214,6 @@ fn render_badge(label: &str, message: &str, color: &str) -> String {
     clippy::cast_sign_loss,
     reason = "text widths and 0-100 scores are non-negative"
 )]
-#[must_use]
 #[expect(
     clippy::cast_possible_truncation,
     reason = "health score is 0-100, always fits in u32"

@@ -19,7 +19,6 @@ pub use fallow_api::{
 };
 
 /// Run the standalone explain subcommand.
-#[must_use]
 pub(crate) fn run_explain(
     issue_type: &str,
     output: OutputFormat,

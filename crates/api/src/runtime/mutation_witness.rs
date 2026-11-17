@@ -208,7 +208,7 @@ pub(super) fn search_witnesses(
             verdict: output.verdict,
             input_id: output.input.input_id.clone(),
             inputs_checked: output.inputs_checked,
-            reason: output.reason.clone(),
+            reason: output.reason,
         });
     }
     link.reset();

@@ -268,7 +268,6 @@ fn note_review_truncation(truncation: ReviewEnvelopeTruncation) {
     }
 }
 
-#[must_use]
 pub(crate) fn print_review_envelope_from_codeclimate_issues(
     command: &str,
     provider: Provider,
@@ -278,7 +277,6 @@ pub(crate) fn print_review_envelope_from_codeclimate_issues(
     print_review_envelope_with_mutation(command, provider, codeclimate, None, notes, None)
 }
 
-#[must_use]
 pub(crate) fn print_review_envelope_from_codeclimate_issues_with_conclusion(
     command: &str,
     provider: Provider,
@@ -298,7 +296,6 @@ pub(crate) fn print_review_envelope_from_codeclimate_issues_with_conclusion(
 
 /// Print the review envelope of the analysis findings and, for a saved
 /// render with mutation evidence, the survivor findings on the diff.
-#[must_use]
 pub(crate) fn print_review_envelope_with_mutation(
     command: &str,
     provider: Provider,
@@ -323,7 +320,6 @@ pub(crate) fn print_review_envelope_with_mutation(
     )
 }
 
-#[must_use]
 fn print_review_envelope_from_ci_issues(
     command: &str,
     provider: Provider,

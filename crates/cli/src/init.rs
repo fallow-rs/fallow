@@ -1267,7 +1267,7 @@ mod tests {
     fn init_json_config_is_valid_jsonc() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        run_init(&config_opts(root, false));
+        let _ = run_init(&config_opts(root, false));
         let content = std::fs::read_to_string(root.join(".fallowrc.json")).unwrap();
         let parsed = parse_jsonc_config(&content);
         assert!(parsed.is_object());
@@ -1279,7 +1279,7 @@ mod tests {
     fn init_json_template_writes_min_occurrences_three() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        run_init(&config_opts(root, false));
+        let _ = run_init(&config_opts(root, false));
         let content = std::fs::read_to_string(root.join(".fallowrc.json")).unwrap();
         let parsed = parse_jsonc_config(&content);
         assert_eq!(
@@ -1292,7 +1292,7 @@ mod tests {
     fn init_toml_template_writes_min_occurrences_three() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        run_init(&config_opts(root, true));
+        let _ = run_init(&config_opts(root, true));
         let content = std::fs::read_to_string(root.join("fallow.toml")).unwrap();
         assert!(
             content.contains("minOccurrences = 3"),
@@ -1304,7 +1304,7 @@ mod tests {
     fn init_toml_does_not_create_json() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        run_init(&config_opts(root, true));
+        let _ = run_init(&config_opts(root, true));
         assert!(!root.join(".fallowrc.json").exists());
         assert!(root.join("fallow.toml").exists());
     }
@@ -1313,7 +1313,7 @@ mod tests {
     fn init_json_does_not_create_toml() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        run_init(&config_opts(root, false));
+        let _ = run_init(&config_opts(root, false));
         assert!(!root.join("fallow.toml").exists());
         assert!(root.join(".fallowrc.json").exists());
     }
@@ -1752,7 +1752,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         std::fs::create_dir_all(root.join(".git/hooks")).unwrap();
-        run_init(&hooks_opts(root, None));
+        let _ = run_init(&hooks_opts(root, None));
         let meta = std::fs::metadata(root.join(".git/hooks/pre-commit")).unwrap();
         let mode = meta.permissions().mode();
         assert!(
@@ -1776,7 +1776,7 @@ mod tests {
     fn init_creates_gitignore_with_fallow_entry() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        run_init(&config_opts(root, false));
+        let _ = run_init(&config_opts(root, false));
         let content = std::fs::read_to_string(root.join(".gitignore")).unwrap();
         assert!(content.contains(".fallow/"));
     }
@@ -1786,7 +1786,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         std::fs::write(root.join(".gitignore"), "node_modules/\n").unwrap();
-        run_init(&config_opts(root, false));
+        let _ = run_init(&config_opts(root, false));
         let content = std::fs::read_to_string(root.join(".gitignore")).unwrap();
         assert!(content.starts_with("node_modules/\n"));
         assert!(content.contains(".fallow/"));
@@ -1797,7 +1797,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         std::fs::write(root.join(".gitignore"), "node_modules/\n.fallow/\n").unwrap();
-        run_init(&config_opts(root, false));
+        let _ = run_init(&config_opts(root, false));
         let content = std::fs::read_to_string(root.join(".gitignore")).unwrap();
         assert_eq!(content.matches(".fallow").count(), 1);
     }
@@ -1807,7 +1807,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         std::fs::write(root.join(".gitignore"), ".fallow\n").unwrap();
-        run_init(&config_opts(root, false));
+        let _ = run_init(&config_opts(root, false));
         let content = std::fs::read_to_string(root.join(".gitignore")).unwrap();
         assert_eq!(content.matches(".fallow").count(), 1);
     }
@@ -1817,7 +1817,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
         std::fs::write(root.join(".gitignore"), "node_modules/").unwrap();
-        run_init(&config_opts(root, false));
+        let _ = run_init(&config_opts(root, false));
         let content = std::fs::read_to_string(root.join(".gitignore")).unwrap();
         assert_eq!(content, "node_modules/\n.fallow/\n");
     }
@@ -1826,7 +1826,7 @@ mod tests {
     fn init_toml_also_updates_gitignore() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
-        run_init(&config_opts(root, true));
+        let _ = run_init(&config_opts(root, true));
         let content = std::fs::read_to_string(root.join(".gitignore")).unwrap();
         assert!(content.contains(".fallow/"));
     }

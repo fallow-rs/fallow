@@ -260,7 +260,7 @@ impl ModuleInfoExtractor {
         for (fixture_name, type_name) in bindings {
             self.record_playwright_fixture_definition_fact(
                 test_name.to_string(),
-                fixture_name.clone(),
+                fixture_name,
                 type_name,
             );
         }

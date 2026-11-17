@@ -1761,7 +1761,6 @@ fn effort_label(effort: ReviewEffort) -> &'static str {
 /// (SARIF, CodeClimate, PR/review envelopes, badge) is rendered through the
 /// standard audit path and then forced to success so the format stays usable
 /// without re-implementing it for the brief.
-#[must_use]
 pub fn print_brief_result(
     result: &AuditResult,
     diff_index: Option<&fallow_output::DiffIndex>,
@@ -1794,7 +1793,6 @@ pub fn print_brief_result(
 ///
 /// JSON renders the typed decision-surface envelope (`kind:
 /// "decision-surface"`); human / compact / markdown render the apex header.
-#[must_use]
 pub fn print_decision_surface_result(
     result: &AuditResult,
     quiet: bool,
@@ -1832,7 +1830,6 @@ pub fn print_decision_surface_result(
 /// envelope (`kind: "review-walkthrough-guide"`). Every format emits the guide
 /// as JSON: the guide is an agent-facing contract, not a human walkthrough.
 /// Always exit 0.
-#[must_use]
 pub fn print_walkthrough_guide_result(
     result: &AuditResult,
     json_style: crate::json_style::JsonStyle,
@@ -1858,7 +1855,6 @@ pub fn print_walkthrough_guide_result(
 /// direction: a missing or garbled agent file never accepts a judgment. The
 /// read error itself is reported on stderr naming the failing path, so a typo'd
 /// path is not misdiagnosed as a moved tree.
-#[must_use]
 pub fn print_walkthrough_file_result(
     result: &AuditResult,
     path: &std::path::Path,
@@ -1911,7 +1907,6 @@ pub fn print_walkthrough_file_result(
 /// carries neither: `root` displays paths, `cache_dir` locates the local
 /// viewed-state ledger. `mark_viewed` records files as viewed BEFORE rendering;
 /// the render itself is read-only. Always exit 0, even when the verdict is Fail.
-#[must_use]
 #[expect(
     clippy::too_many_arguments,
     reason = "walkthrough rendering needs its existing view state plus the JSON presentation style"

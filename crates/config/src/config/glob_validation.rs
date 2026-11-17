@@ -186,10 +186,7 @@ fn is_absolute_pattern(pattern: &str) -> bool {
         return true;
     }
     let bytes = pattern.as_bytes();
-    if bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':' {
-        return true;
-    }
-    false
+    bytes.len() >= 2 && bytes[0].is_ascii_alphabetic() && bytes[1] == b':'
 }
 
 /// Return `true` if any segment of `pattern` is `..`.
