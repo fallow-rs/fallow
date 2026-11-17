@@ -1,6 +1,22 @@
 //! Merge script-local extraction into host-file coordinates.
 use super::*;
 
+pub(super) struct SfcScriptMergeInput<'a> {
+    pub(super) kind: SfcKind,
+    pub(super) script: &'a SfcScript,
+    /// Whether the SFC has a Vue `<script setup>` block.
+    pub(super) has_setup_script: bool,
+    pub(super) combined: &'a mut ModuleInfo,
+    pub(super) shared_scope_references: &'a mut SharedScopeReferences,
+    pub(super) template_visible_imports: &'a mut FxHashSet<String>,
+    pub(super) template_visible_bound_targets: &'a mut FxHashMap<String, String>,
+    pub(super) template_visible_iterable_types: &'a mut FxHashMap<String, String>,
+    pub(super) props_return_binding: &'a mut Option<String>,
+    pub(super) emit_return_binding: &'a mut Option<String>,
+    pub(super) need_complexity: bool,
+    pub(super) mode: fallow_types::shared_state::ExtractionMode,
+}
+
 pub(super) fn merge_script_into_module(input: &mut SfcScriptMergeInput<'_>) {
     if input.kind == SfcKind::Vue
         && let Some(src) = &input.script.src
@@ -41,6 +57,7 @@ pub(super) fn merge_script_into_module(input: &mut SfcScriptMergeInput<'_>) {
             }),
         );
     }
+    input.shared_scope_references.record(&mut semantic_usage);
     let extraction = ExtractionResult::contiguous(&input.script.body, input.script.byte_offset);
     extractor.remap_spans_with(|span| extraction.remap_span(span));
     extractor.resolve_typed_destructure_bindings();
@@ -82,7 +99,7 @@ pub(super) fn merge_script_into_module(input: &mut SfcScriptMergeInput<'_>) {
         );
     }
 
-    if is_template_visible_script(input.kind, input.script) {
+    if shares_template_scope(input.kind, input.script, input.has_setup_script) {
         harvest_template_visible_bindings(input, &extractor);
     }
 
@@ -95,5 +112,70 @@ pub(super) fn merge_script_into_module(input: &mut SfcScriptMergeInput<'_>) {
     crate::visitor::mark_template_callers(input.combined);
     for event in &mut input.combined.svelte_dispatched_events[dispatch_base..] {
         event.span_start += input.script.byte_offset as u32;
+    }
+}
+
+/// The SFC compilers put the top level of every script block into one module
+/// scope: Vue joins `<script>` and `<script setup>`, Svelte joins the module
+/// script and the instance script. Each block is parsed alone, so a name that
+/// one block imports and another block uses is an unresolved reference in the
+/// block that uses it. This set collects those names over all blocks.
+#[derive(Default)]
+pub(super) struct SharedScopeReferences {
+    values: FxHashSet<String>,
+    types: FxHashSet<String>,
+}
+
+impl SharedScopeReferences {
+    fn record(&mut self, semantic_usage: &mut crate::parse::SemanticUsage) {
+        self.values
+            .extend(semantic_usage.auto_import_candidates.iter().cloned());
+        self.types
+            .extend(std::mem::take(&mut semantic_usage.unresolved_type_names));
+    }
+}
+
+/// Credit each import binding of the SFC that another script block of the same
+/// SFC references. Such a binding is not unused, and it gets the value or type
+/// classification of the references.
+pub(super) fn credit_shared_scope_references(
+    references: &SharedScopeReferences,
+    combined: &mut ModuleInfo,
+) {
+    let is_referenced =
+        |name: &String| references.values.contains(name) || references.types.contains(name);
+    let mut names: Vec<String> = combined
+        .imports
+        .iter()
+        .map(|import| &import.local_name)
+        .filter(|name| !name.is_empty() && is_referenced(name))
+        .cloned()
+        .collect();
+    combined.unused_import_bindings.retain(|name| {
+        if !is_referenced(name) {
+            return true;
+        }
+        names.push(name.clone());
+        false
+    });
+    for name in names {
+        if references.types.contains(&name) {
+            combined.type_referenced_import_bindings.push(name.clone());
+        }
+        if references.values.contains(&name) {
+            combined.value_referenced_import_bindings.push(name);
+        }
+    }
+}
+
+/// Whether the template can read the top-level bindings of `script`. The
+/// template of a Vue SFC with `<script setup>` sees the bindings of both script
+/// blocks. A Vue SFC without `<script setup>` exposes only the component
+/// instance. The Svelte markup sees the bindings of both the module script and
+/// the instance script.
+fn shares_template_scope(kind: SfcKind, script: &SfcScript, has_setup_script: bool) -> bool {
+    match kind {
+        SfcKind::Vue => script.is_setup || has_setup_script,
+        SfcKind::Svelte => true,
     }
 }

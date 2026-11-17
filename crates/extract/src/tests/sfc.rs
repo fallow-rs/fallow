@@ -178,6 +178,62 @@ export default {};
     );
 }
 
+/// Vue joins `<script>` and `<script setup>` into one module (issue #4672).
+/// `<script setup>` and the template can use an import of the plain block.
+#[test]
+fn vue_plain_script_import_is_credited_from_script_setup_and_template() {
+    let info = parse_sfc(
+        r#"
+<script lang="ts">
+import { inSetup, inTemplate, inPlain, unused, shadowed } from './utils';
+import type { SetupProps } from './types';
+export const fromPlain = inPlain();
+</script>
+<script setup lang="ts">
+const value = inSetup();
+const double = (shadowed: number): number => shadowed * 2;
+defineProps<SetupProps>();
+</script>
+<template><p>{{ value }} {{ inTemplate }} {{ double(1) }}</p></template>
+"#,
+        "Comp.vue",
+    );
+
+    assert_eq!(info.unused_import_bindings, ["shadowed", "unused"]);
+    assert!(
+        info.value_referenced_import_bindings
+            .contains(&"inSetup".to_string()),
+        "a value use in <script setup> should classify the import as value-referenced, got: {:?}",
+        info.value_referenced_import_bindings
+    );
+    assert!(
+        info.type_referenced_import_bindings
+            .contains(&"SetupProps".to_string()),
+        "a type use in <script setup> should classify the import as type-referenced, got: {:?}",
+        info.type_referenced_import_bindings
+    );
+}
+
+/// The instance script of a Svelte component can use an import of the module
+/// script, because both blocks share one module scope.
+#[test]
+fn svelte_module_script_import_is_credited_from_instance_script() {
+    let info = parse_sfc(
+        r#"
+<script module lang="ts">
+import { inInstance, unused } from './utils';
+</script>
+<script lang="ts">
+const value = inInstance();
+</script>
+<p>{value}</p>
+"#,
+        "Comp.svelte",
+    );
+
+    assert_eq!(info.unused_import_bindings, ["unused"]);
+}
+
 #[test]
 fn vue_v_for_alias_shadows_import_name() {
     let info = parse_sfc(
@@ -638,8 +694,10 @@ import { formatDate } from './utils';
     );
 }
 
+/// Svelte puts the module script and the instance script into one module
+/// scope, so the markup can read an import of the module script.
 #[test]
-fn svelte_module_context_import_is_not_visible_to_template() {
+fn svelte_module_context_import_is_visible_to_template() {
     let info = parse_sfc(
         r#"
 <script context="module" lang="ts">
@@ -654,9 +712,10 @@ const value = new Date();
     );
 
     assert!(
-        info.unused_import_bindings
+        !info
+            .unused_import_bindings
             .contains(&"formatDate".to_string()),
-        "module-context import should not get template credit, got: {:?}",
+        "module-context import should get template credit, got: {:?}",
         info.unused_import_bindings
     );
 }

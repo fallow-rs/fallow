@@ -426,12 +426,16 @@ pub(crate) fn parse_sfc_to_module_with_mode(
     let mut template_visible_iterable_types: FxHashMap<String, String> = FxHashMap::default();
     let mut props_return_binding: Option<String> = None;
     let mut emit_return_binding: Option<String> = None;
+    let mut shared_scope_references = SharedScopeReferences::default();
+    let has_setup_script = scripts.iter().any(|script| script.is_setup);
 
     for script in &scripts {
         merge_script_into_module(&mut SfcScriptMergeInput {
             kind,
             script,
+            has_setup_script,
             combined: &mut combined,
+            shared_scope_references: &mut shared_scope_references,
             template_visible_imports: &mut template_visible_imports,
             template_visible_bound_targets: &mut template_visible_bound_targets,
             template_visible_iterable_types: &mut template_visible_iterable_types,
@@ -440,6 +444,9 @@ pub(crate) fn parse_sfc_to_module_with_mode(
             need_complexity,
             mode,
         });
+    }
+    if scripts.len() > 1 {
+        credit_shared_scope_references(&shared_scope_references, &mut combined);
     }
 
     for style in &styles {
@@ -593,19 +600,10 @@ fn empty_sfc_module(file_id: FileId, source: &str, content_hash: u64) -> ModuleI
 
 #[path = "sfc_script_merge.rs"]
 mod script_merge;
-use script_merge::merge_script_into_module;
-struct SfcScriptMergeInput<'a> {
-    kind: SfcKind,
-    script: &'a SfcScript,
-    combined: &'a mut ModuleInfo,
-    template_visible_imports: &'a mut FxHashSet<String>,
-    template_visible_bound_targets: &'a mut FxHashMap<String, String>,
-    template_visible_iterable_types: &'a mut FxHashMap<String, String>,
-    props_return_binding: &'a mut Option<String>,
-    emit_return_binding: &'a mut Option<String>,
-    need_complexity: bool,
-    mode: fallow_types::shared_state::ExtractionMode,
-}
+use script_merge::{
+    SfcScriptMergeInput, SharedScopeReferences, credit_shared_scope_references,
+    merge_script_into_module,
+};
 
 /// Compute and merge this script's import-binding usage (unused / type- and
 /// value-referenced) plus auto-import candidates into `combined`. A
