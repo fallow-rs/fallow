@@ -4,13 +4,18 @@
 //! `WorkflowEntrypoint` from `cloudflare:workers` receives calls from the
 //! runtime, not from project code. The handlers that the base class declares
 //! are therefore used. The credit applies only when the base resolves through
-//! an import of `cloudflare:workers` with the exact imported name, so a local
-//! class or a package class with the same name gets no credit.
+//! an import of `cloudflare:workers`: a named import with the exact base name,
+//! or a namespace import (`cf.DurableObject`). A local class or a package
+//! class with the same name gets no credit.
+//!
+//! The credit does not check the `static` modifier, because the extraction
+//! records no such flag. A static method with a handler name also gets credit.
 
 use rustc_hash::FxHashMap;
 
 use super::ExportKey;
-use crate::extract::ImportedName;
+use crate::discover::FileId;
+use crate::extract::{ImportedName, ModuleInfo};
 use crate::resolve::ResolvedModule;
 
 const CLOUDFLARE_WORKERS_SOURCE: &str = "cloudflare:workers";
@@ -55,39 +60,98 @@ fn runtime_handlers(imported_name: &str) -> Option<&'static [&'static str]> {
     }
 }
 
+/// The `cloudflare:workers` imports of one module.
+#[derive(Default)]
+struct WorkersImports<'a> {
+    /// Named imports of a runtime base, by local name.
+    base_by_local: FxHashMap<&'a str, &'static [&'static str]>,
+    /// Local names of namespace imports.
+    namespaces: Vec<&'a str>,
+}
+
+impl<'a> WorkersImports<'a> {
+    fn new(resolved: &'a ResolvedModule) -> Self {
+        let mut imports = Self::default();
+        for import in &resolved.resolved_imports {
+            if import.info.source != CLOUDFLARE_WORKERS_SOURCE {
+                continue;
+            }
+            let local = import.info.local_name.as_str();
+            match &import.info.imported_name {
+                ImportedName::Named(name) => {
+                    if let Some(handlers) = runtime_handlers(name) {
+                        imports.base_by_local.insert(local, handlers);
+                    }
+                }
+                ImportedName::Namespace => imports.namespaces.push(local),
+                ImportedName::Default | ImportedName::SideEffect => {}
+            }
+        }
+        imports
+    }
+
+    fn is_empty(&self) -> bool {
+        self.base_by_local.is_empty() && self.namespaces.is_empty()
+    }
+
+    /// The handlers of the base that an `extends` expression names: a local
+    /// name of a named import, or `<namespace>.<base>`.
+    fn handlers_of(&self, super_class: &str) -> Option<&'static [&'static str]> {
+        if let Some(handlers) = self.base_by_local.get(super_class) {
+            return Some(handlers);
+        }
+        let (namespace, base) = super_class.split_once('.')?;
+        if !self.namespaces.contains(&namespace) {
+            return None;
+        }
+        runtime_handlers(base)
+    }
+}
+
 /// Map each exported class whose heritage chain reaches a Cloudflare runtime
 /// base to the handlers of that base.
 ///
 /// A direct subclass is found through the `super_class` local name and the
-/// imports of its module. A local subclass of such a class inherits the same
-/// handlers through `parent_to_children`.
+/// imports of its module. A class that extends a base class that its module
+/// declares but does not export is found through the `extends` target after
+/// the fold of such bases (`binding_super_class`). A local subclass of a
+/// credited exported class inherits the same handlers through
+/// `parent_to_children`.
 pub(super) fn build_cloudflare_runtime_subclass_handlers(
     resolved_modules: &[ResolvedModule],
+    modules: &[ModuleInfo],
     parent_to_children: &FxHashMap<ExportKey, Vec<ExportKey>>,
 ) -> FxHashMap<ExportKey, &'static [&'static str]> {
     let mut handlers_by_key: FxHashMap<ExportKey, &'static [&'static str]> = FxHashMap::default();
+    let module_by_id: FxHashMap<FileId, &ModuleInfo> = modules
+        .iter()
+        .map(|module| (module.file_id, module))
+        .collect();
 
     for resolved in resolved_modules {
-        let base_by_local: FxHashMap<&str, &'static [&'static str]> = resolved
-            .resolved_imports
-            .iter()
-            .filter(|import| import.info.source == CLOUDFLARE_WORKERS_SOURCE)
-            .filter_map(|import| match &import.info.imported_name {
-                ImportedName::Named(name) => runtime_handlers(name)
-                    .map(|handlers| (import.info.local_name.as_str(), handlers)),
-                _ => None,
-            })
-            .collect();
-        if base_by_local.is_empty() {
+        let imports = WorkersImports::new(resolved);
+        if imports.is_empty() {
             continue;
         }
+        let folded_base_by_export: FxHashMap<&str, &str> = module_by_id
+            .get(&resolved.file_id)
+            .into_iter()
+            .flat_map(|module| module.class_heritage.iter())
+            .filter_map(|heritage| {
+                let (outer, _) = heritage.binding_super_class.as_ref()?;
+                Some((heritage.export_name.as_str(), outer.as_str()))
+            })
+            .collect();
 
         for export in resolved.exports.iter() {
-            if let Some(handlers) = export
-                .super_class
-                .as_deref()
-                .and_then(|super_local| base_by_local.get(super_local))
-            {
+            let Some(super_class) = export.super_class.as_deref() else {
+                continue;
+            };
+            let handlers = imports.handlers_of(super_class).or_else(|| {
+                let local_name = export.local_name.as_deref()?;
+                imports.handlers_of(folded_base_by_export.get(local_name)?)
+            });
+            if let Some(handlers) = handlers {
                 handlers_by_key.insert(
                     ExportKey::new(resolved.file_id, export.name.to_string()),
                     handlers,

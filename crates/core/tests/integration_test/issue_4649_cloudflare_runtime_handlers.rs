@@ -1,3 +1,5 @@
+use fallow_config::Severity;
+
 use crate::common::{create_config, fixture_path};
 
 /// The Cloudflare Workers runtime calls the handlers of a `DurableObject`,
@@ -8,13 +10,21 @@ use crate::common::{create_config, fixture_path};
 #[test]
 fn cloudflare_runtime_handlers_are_credited() {
     let root = fixture_path("issue-4649-cloudflare-runtime-handlers");
-    let config = create_config(root);
+    let mut config = create_config(root);
+    config.rules.unused_protected_class_members = Severity::Error;
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
 
+    let render =
+        |m: &fallow_core::results::UnusedMember| format!("{}.{}", m.parent_name, m.member_name);
     let unused: Vec<String> = results
         .unused_class_members
         .iter()
-        .map(|m| format!("{}.{}", m.member.parent_name, m.member.member_name))
+        .map(|finding| render(&finding.member))
+        .collect();
+    let unused_protected: Vec<String> = results
+        .unused_protected_class_members
+        .iter()
+        .map(|finding| render(&finding.member))
         .collect();
 
     let credited = [
@@ -36,6 +46,11 @@ fn cloudflare_runtime_handlers_are_credited() {
         "Api.test",
         "Api.connect",
         "Pipeline.run",
+        "NsRoom.webSocketError",
+        "LocalChainRoom.alarm",
+        "CrossFileRoom.webSocketMessage",
+        "SpecifierRoom.alarm",
+        "default.run",
     ];
     for member in credited {
         assert!(
@@ -43,6 +58,10 @@ fn cloudflare_runtime_handlers_are_credited() {
             "{member} is a runtime handler and must be credited: {unused:?}"
         );
     }
+    assert!(
+        !unused_protected.contains(&"ProtectedRoom.alarm".to_string()),
+        "a protected runtime handler must be credited: {unused_protected:?}"
+    );
 
     let reported = [
         "Room.run",
@@ -52,6 +71,10 @@ fn cloudflare_runtime_handlers_are_credited() {
         "FakeRoom.webSocketMessage",
         "OtherRoom.webSocketMessage",
         "PlainRoom.webSocketClose",
+        "NsUnknownBase.webSocketError",
+        "OtherNsRoom.webSocketError",
+        "LocalChainRoom.unusedLocalChainHelper",
+        "default.unusedWorkflowStep",
     ];
     for member in reported {
         assert!(
@@ -59,4 +82,8 @@ fn cloudflare_runtime_handlers_are_credited() {
             "{member} is not a runtime handler of its base and must be reported: {unused:?}"
         );
     }
+    assert!(
+        unused_protected.contains(&"ProtectedRoom.unusedProtectedHelper".to_string()),
+        "a protected member that is not a handler must be reported: {unused_protected:?}"
+    );
 }

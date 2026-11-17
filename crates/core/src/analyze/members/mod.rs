@@ -1188,8 +1188,11 @@ fn prepare_member_scan(input: UnusedMemberScanInput<'_>) -> PreparedMemberScan<'
     let ol_interaction_subclass_keys =
         build_ol_interaction_subclass_keys(input.resolved_modules, &parent_to_children);
 
-    let cloudflare_runtime_handlers =
-        build_cloudflare_runtime_subclass_handlers(input.resolved_modules, &parent_to_children);
+    let cloudflare_runtime_handlers = build_cloudflare_runtime_subclass_handlers(
+        input.resolved_modules,
+        input.modules,
+        &parent_to_children,
+    );
 
     PreparedMemberScan {
         ambiguity: input.graph.ambiguity_participants(),

@@ -211,6 +211,23 @@ fn durable_object_env_binding_credits_member() {
 }
 
 #[test]
+fn durable_object_env_parameter_of_an_exported_handler_credits_member() {
+    // The `Env` argument of `ExportedHandler<Env>` types the untyped `env`
+    // parameter of a Worker handler, through `satisfies` and through a
+    // variable annotation. An object without that type gives no credit.
+    let unused = unused_class_members("class-member-durable-object-handler-env");
+    assert_credited(
+        &unused,
+        &["Room.viaFetchEnv", "Room.viaQueueEnv"],
+        "Room.unused",
+    );
+    assert!(
+        unused.contains(&"Room.viaPlainObject".to_string()),
+        "an object without the `ExportedHandler` type types no `env`, found: {unused:?}"
+    );
+}
+
+#[test]
 fn durable_object_env_binding_uses_the_nearest_declaration_file() {
     // Each Worker package declares its own global `Env`. Package a has the
     // current `wrangler types` shape (`declare namespace Cloudflare` and a
