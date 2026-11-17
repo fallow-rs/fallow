@@ -44,7 +44,19 @@ pub fn apply_path_prefix(prefix: &str, path: &str) -> String {
     if prefix.is_empty() {
         return path.to_owned();
     }
-    format!("{prefix}/{path}")
+    let mut segments: Vec<&str> = prefix.split('/').filter(|s| !s.is_empty()).collect();
+    let mut rest = path;
+    // A diff-risk finding on a Fallow config file in a parent directory of
+    // the analysis root has a `../` path. The prefix absorbs each `../`, so
+    // the result is a plain repository-relative path.
+    while let Some(after) = rest.strip_prefix("../") {
+        if segments.pop().is_none() {
+            return format!("{prefix}/{path}");
+        }
+        rest = after;
+    }
+    segments.push(rest);
+    segments.join("/")
 }
 
 /// Normalized CodeClimate issue used by CI comment renderers.
@@ -1151,6 +1163,23 @@ pub fn composite_fingerprint(constituents: &[&str]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_parent_path_resolves_against_the_prefix() {
+        assert_eq!(
+            apply_path_prefix("packages/app", "src/a.ts"),
+            "packages/app/src/a.ts"
+        );
+        assert_eq!(
+            apply_path_prefix("packages/app", "../../.fallowrc.json"),
+            ".fallowrc.json"
+        );
+        assert_eq!(
+            apply_path_prefix("packages/app", "../shared.json"),
+            "packages/shared.json"
+        );
+        assert_eq!(apply_path_prefix("", "../x.json"), "../x.json");
+    }
     use crate::{CodeClimateIssueKind, CodeClimateLines, CodeClimateLocation};
 
     fn category_for_rule(rule_id: &str) -> &'static str {
