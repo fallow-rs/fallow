@@ -77,6 +77,12 @@ fn utf8(path: &Path) -> &str {
     path.to_str().expect("utf-8 path")
 }
 
+fn folder_name(path: &Path) -> &str {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .expect("utf-8 folder name")
+}
+
 /// Save the dead-code JSON of `root` to a file next to it.
 fn save_json(root: &Path, extra: &[&str], out: &Path) -> Value {
     let mut args = vec![
@@ -449,9 +455,13 @@ fn old_report_treats_a_discovered_config_that_does_not_load_as_missing() {
             missing.stderr
         );
         let broken = report_from(&old, broken_root.path(), format, &[]);
-        let expected = missing
-            .stderr
-            .replace(utf8(missing_root.path()), utf8(broken_root.path()));
+        // Replace only the unique temp folder name. A Windows runner can give
+        // the temp directory as an 8.3 short path while the note prints the
+        // long path, so the full path is not a reliable match.
+        let expected = missing.stderr.replace(
+            folder_name(missing_root.path()),
+            folder_name(broken_root.path()),
+        );
         assert_eq!(broken.stderr, expected, "{format}");
         assert_eq!(broken.stdout, missing.stdout, "{format}");
     }

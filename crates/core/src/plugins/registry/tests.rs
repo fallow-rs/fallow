@@ -4280,3 +4280,21 @@ fn anchored_config_file_exports_get_workspace_prefix() {
         )]
     );
 }
+
+#[test]
+fn workspace_prefix_gives_each_plugin_scope_forward_slashes() {
+    let mut result = AggregatedPluginResult::default();
+    result
+        .active_plugin_scopes
+        .push(("react-router".to_string(), String::new()));
+
+    // A workspace prefix comes from `Path::to_string_lossy`, which keeps the
+    // backslashes of a Windows path. Security roots compare the scope with a
+    // `/`-separated project-relative path.
+    result.apply_workspace_prefix("packages\\web");
+
+    assert_eq!(
+        result.active_plugin_scopes,
+        vec![("react-router".to_string(), "packages/web".to_string())]
+    );
+}
