@@ -404,13 +404,32 @@ fn context_radius_from_env() -> u64 {
 /// ran (an embedder or a test), so those callers keep working.
 #[must_use]
 pub(crate) fn filter_issues_from_env(issues: Vec<CiIssue>) -> Vec<CiIssue> {
+    filter_issues_from_env_at(issues, Granularity::Line)
+}
+
+/// How the filter treats the rules of [`fallow_output::is_file_scoped_rule`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Granularity {
+    /// Each finding needs its anchored line in the diff. Inline review
+    /// comments use this, because a review comment must sit on a diff line.
+    Line,
+    /// A file-scoped finding stays when the diff touches any file of the
+    /// finding, as in the diff-scoped analysis (`fallow_engine::diff_scope`).
+    /// The sticky summary uses this, so it shows each finding that the
+    /// analysis kept and that its gates counted.
+    Summary,
+}
+
+fn filter_issues_from_env_at(issues: Vec<CiIssue>, granularity: Granularity) -> Vec<CiIssue> {
     let mode = DiffFilterMode::from_env();
     let radius = context_radius_from_env();
     match SHARED_DIFF.get() {
         // A diff was resolved for this run (a placed base, or a parsed-but-empty
         // scope). Filter against it; an empty-scope index drops every
         // source-anchored issue, matching the finding filter.
-        Some(Some(loaded)) => filter_issues_with_index(issues, &loaded.index, mode, radius),
+        Some(Some(loaded)) => {
+            filter_issues_with_index(issues, &loaded.index, mode, radius, granularity)
+        }
         // `init_shared_diff` ran and deliberately discarded the diff (foreign or
         // ambiguous base): report at full scope, the same decision the finding
         // filter made. Re-reading FALLOW_DIFF_FILE here would contradict it.
@@ -421,7 +440,7 @@ pub(crate) fn filter_issues_from_env(issues: Vec<CiIssue>) -> Vec<CiIssue> {
             let Some(raw_path) = std::env::var_os("FALLOW_DIFF_FILE") else {
                 return issues;
             };
-            filter_issues_from_path(issues, Path::new(&raw_path), mode, radius)
+            filter_issues_from_path(issues, Path::new(&raw_path), mode, radius, granularity)
         }
     }
 }
@@ -443,7 +462,9 @@ pub(crate) fn filter_issues_from_env(issues: Vec<CiIssue>) -> Vec<CiIssue> {
 /// sees the same `(path, line, fingerprint)` order as the unfiltered input.
 #[must_use]
 pub(crate) fn filter_issues_for_summary(issues: Vec<CiIssue>) -> Vec<CiIssue> {
-    summary_filter_with_scope(issues, SummaryScope::from_env(), filter_issues_from_env)
+    summary_filter_with_scope(issues, SummaryScope::from_env(), |issues| {
+        filter_issues_from_env_at(issues, Granularity::Summary)
+    })
 }
 
 /// Scope-aware helper for `filter_issues_for_summary`. Generic over the
@@ -487,6 +508,7 @@ fn filter_issues_from_path(
     path: &Path,
     mode: DiffFilterMode,
     radius: u64,
+    granularity: Granularity,
 ) -> Vec<CiIssue> {
     match std::fs::metadata(path) {
         Ok(meta) if meta.len() > MAX_DIFF_BYTES => {
@@ -518,7 +540,7 @@ fn filter_issues_from_path(
         return issues;
     };
     let index = DiffIndex::from_unified_diff(&diff);
-    filter_issues_with_index(issues, &index, mode, radius)
+    filter_issues_with_index(issues, &index, mode, radius, granularity)
 }
 
 fn filter_issues_with_index(
@@ -526,10 +548,17 @@ fn filter_issues_with_index(
     index: &DiffIndex,
     mode: DiffFilterMode,
     radius: u64,
+    granularity: Granularity,
 ) -> Vec<CiIssue> {
     let mut kept = issues
         .into_iter()
         .filter_map(|mut issue| {
+            if granularity == Granularity::Summary
+                && mode != DiffFilterMode::NoFilter
+                && fallow_output::is_file_scoped_rule(&issue.rule_id)
+            {
+                return touches_any_file(index, &issue).then_some(issue);
+            }
             if mode == DiffFilterMode::Added {
                 let key = index.key_for_root_relative(&issue.path);
                 let end = issue
@@ -548,6 +577,17 @@ fn filter_issues_with_index(
         });
     }
     kept
+}
+
+fn touches_any_file(index: &DiffIndex, issue: &CiIssue) -> bool {
+    std::iter::once(issue.path.as_str())
+        .chain(
+            issue
+                .other_locations
+                .iter()
+                .map(|location| location.path.as_str()),
+        )
+        .any(|path| index.touches_file(&index.key_for_root_relative(path)))
 }
 
 fn diff_index_keeps_issue(
@@ -572,7 +612,7 @@ mod tests {
     use std::io::{Cursor, Write as _};
 
     use super::*;
-    use fallow_output::relative_to_diff_path;
+    use fallow_output::{CiLocation, relative_to_diff_path};
 
     #[test]
     fn bounded_diff_reader_accepts_exact_limit() {
@@ -673,7 +713,13 @@ mod tests {
             legacy_fingerprint: None,
             audit: None,
         };
-        let kept = filter_issues_from_path(vec![issue], &path, DiffFilterMode::Added, 3);
+        let kept = filter_issues_from_path(
+            vec![issue],
+            &path,
+            DiffFilterMode::Added,
+            3,
+            Granularity::Line,
+        );
         assert_eq!(kept.len(), 1, "oversize diff must fall through unfiltered");
     }
 
@@ -693,7 +739,13 @@ mod tests {
             legacy_fingerprint: None,
             audit: None,
         };
-        let kept = filter_issues_from_path(vec![issue], &path, DiffFilterMode::Added, 3);
+        let kept = filter_issues_from_path(
+            vec![issue],
+            &path,
+            DiffFilterMode::Added,
+            3,
+            Granularity::Line,
+        );
         assert_eq!(kept.len(), 1, "missing diff must fall through unfiltered");
     }
 
@@ -763,7 +815,15 @@ mod tests {
                 source_level_outside_diff,
             ],
             SummaryScope::All,
-            |src| filter_issues_from_path(src, &diff_path, DiffFilterMode::Added, 3),
+            |src| {
+                filter_issues_from_path(
+                    src,
+                    &diff_path,
+                    DiffFilterMode::Added,
+                    3,
+                    Granularity::Summary,
+                )
+            },
         );
         let fingerprints: Vec<&str> = kept.iter().map(|i| i.fingerprint.as_str()).collect();
         assert!(
@@ -807,7 +867,13 @@ mod tests {
             audit: None,
         };
         let kept = summary_filter_with_scope(vec![project_level], SummaryScope::Diff, |src| {
-            filter_issues_from_path(src, &diff_path, DiffFilterMode::Added, 3)
+            filter_issues_from_path(
+                src,
+                &diff_path,
+                DiffFilterMode::Added,
+                3,
+                Granularity::Summary,
+            )
         });
         assert!(
             kept.is_empty(),
@@ -843,7 +909,13 @@ mod tests {
             audit: None,
         };
         let kept = summary_filter_with_scope(vec![project_level], SummaryScope::Diff, |src| {
-            filter_issues_from_path(src, &diff_path, DiffFilterMode::Added, 3)
+            filter_issues_from_path(
+                src,
+                &diff_path,
+                DiffFilterMode::Added,
+                3,
+                Granularity::Summary,
+            )
         });
         assert_eq!(kept.len(), 1, "changed package.json finding must remain");
         assert_eq!(kept[0].fingerprint, "dep");
@@ -878,6 +950,99 @@ mod tests {
         let kept = summary_filter_with_scope(vec![a, b], SummaryScope::All, |issues| issues);
         assert_eq!(kept[0].fingerprint, "b");
         assert_eq!(kept[1].fingerprint, "a");
+    }
+
+    /// A cycle whose anchored file is outside the diff, while the diff touches
+    /// another member file away from its import (fallow-rs/fallow#4779).
+    fn cycle_and_export_outside_the_added_lines() -> (DiffIndex, Vec<CiIssue>) {
+        let diff = "\
+diff --git a/src/utils.ts b/src/utils.ts
+--- a/src/utils.ts
++++ b/src/utils.ts
+@@ -40,0 +41,1 @@
++export const added = 1;
+";
+        let cycle = CiIssue {
+            rule_id: "fallow/circular-dependency".into(),
+            description: "Circular dependency: src/parse.ts -> src/utils.ts".into(),
+            severity: "major".into(),
+            path: "src/parse.ts".into(),
+            line: 2,
+            end_line: None,
+            other_locations: vec![CiLocation {
+                path: "src/utils.ts".into(),
+                line: 1,
+                end_line: 1,
+            }],
+            fingerprint: "cycle".into(),
+            legacy_fingerprint: None,
+            audit: None,
+        };
+        let export = CiIssue {
+            rule_id: "fallow/unused-export".into(),
+            description: "Export unused".into(),
+            severity: "major".into(),
+            path: "src/utils.ts".into(),
+            line: 7,
+            end_line: None,
+            other_locations: Vec::new(),
+            fingerprint: "export".into(),
+            legacy_fingerprint: None,
+            audit: None,
+        };
+        (DiffIndex::from_unified_diff(diff), vec![cycle, export])
+    }
+
+    #[test]
+    fn summary_keeps_a_cycle_when_the_diff_touches_a_member_file() {
+        let (index, issues) = cycle_and_export_outside_the_added_lines();
+        let kept = filter_issues_with_index(
+            issues,
+            &index,
+            DiffFilterMode::Added,
+            3,
+            Granularity::Summary,
+        );
+        let fingerprints: Vec<&str> = kept.iter().map(|i| i.fingerprint.as_str()).collect();
+        assert_eq!(fingerprints, ["cycle"], "the old export stays filtered");
+        assert_eq!(kept[0].line, 2, "the anchored line does not move");
+    }
+
+    #[test]
+    fn review_comments_keep_a_cycle_only_on_its_anchored_line() {
+        let (index, issues) = cycle_and_export_outside_the_added_lines();
+        let kept =
+            filter_issues_with_index(issues, &index, DiffFilterMode::Added, 3, Granularity::Line);
+        assert!(kept.is_empty(), "{kept:?}");
+    }
+
+    #[test]
+    fn summary_without_a_diff_filter_keeps_every_finding() {
+        let (index, issues) = cycle_and_export_outside_the_added_lines();
+        let kept = filter_issues_with_index(
+            issues,
+            &index,
+            DiffFilterMode::NoFilter,
+            3,
+            Granularity::Summary,
+        );
+        assert_eq!(kept.len(), 2, "{kept:?}");
+    }
+
+    #[test]
+    fn summary_drops_a_cycle_when_the_diff_touches_no_member_file() {
+        let (_, issues) = cycle_and_export_outside_the_added_lines();
+        let index = DiffIndex::from_unified_diff(
+            "diff --git a/src/index.ts b/src/index.ts\n--- a/src/index.ts\n+++ b/src/index.ts\n@@ -1,0 +2,1 @@\n+export {};\n",
+        );
+        let kept = filter_issues_with_index(
+            issues,
+            &index,
+            DiffFilterMode::Added,
+            3,
+            Granularity::Summary,
+        );
+        assert!(kept.is_empty(), "{kept:?}");
     }
 
     #[test]
@@ -1142,8 +1307,13 @@ diff --git a/src/a.ts b/src/a.ts
             ..ranged.clone()
         };
 
-        let kept =
-            filter_issues_with_index(vec![outside, ranged], &index, DiffFilterMode::Added, 3);
+        let kept = filter_issues_with_index(
+            vec![outside, ranged],
+            &index,
+            DiffFilterMode::Added,
+            3,
+            Granularity::Line,
+        );
         assert_eq!(kept.len(), 1);
         assert_eq!(kept[0].fingerprint, "range");
         assert_eq!(kept[0].line, 4);

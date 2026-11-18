@@ -14,6 +14,7 @@ fn codeclimate_check_name_literals() -> BTreeSet<String> {
         include_str!("dead_code_codeclimate_caller_review.rs"),
         include_str!("dead_code_codeclimate_duplicates.rs"),
         include_str!("dead_code_codeclimate_boundary.rs"),
+        include_str!("dead_code_codeclimate_cycles.rs"),
     ]
     .concat();
     let mut literals = BTreeSet::new();
@@ -502,6 +503,90 @@ mod stable_fingerprints {
         assert_eq!(
             issues[0].fingerprint,
             codeclimate_fingerprint_hash(&["fallow/unused-export", "src/lib.ts", "3", "first"])
+        );
+    }
+}
+
+/// A cycle issue names its other member files in `other_locations`, so the
+/// diff filter of the PR summary keeps the cycle when the diff touches any
+/// member file, as the diff-scoped analysis does (fallow-rs/fallow#4779).
+mod cycle_member_locations {
+    use std::path::{Path, PathBuf};
+
+    use fallow_config::RulesConfig;
+    use fallow_output::CodeClimateIssue;
+    use fallow_types::output_dead_code::{CircularDependencyFinding, ReExportCycleFinding};
+    use fallow_types::results::{
+        AnalysisResults, CircularDependency, CircularDependencyEdge, ReExportCycle,
+        ReExportCycleKind,
+    };
+
+    use crate::dead_code_codeclimate::build_codeclimate;
+
+    fn locations(issue: &CodeClimateIssue) -> Vec<(String, u32)> {
+        issue
+            .other_locations
+            .iter()
+            .map(|location| (location.path.clone(), location.lines.begin))
+            .collect()
+    }
+
+    fn edge(root: &Path, file: &str, line: u32) -> CircularDependencyEdge {
+        CircularDependencyEdge {
+            path: root.join(file),
+            line,
+            col: 0,
+        }
+    }
+
+    fn issue_of<'a>(issues: &'a [CodeClimateIssue], check_name: &str) -> &'a CodeClimateIssue {
+        issues
+            .iter()
+            .find(|issue| issue.check_name == check_name)
+            .unwrap_or_else(|| panic!("no {check_name} issue in {issues:?}"))
+    }
+
+    #[test]
+    fn cycles_list_their_other_member_files() {
+        let root = PathBuf::from("/project");
+        let mut results = AnalysisResults::default();
+        results
+            .circular_dependencies
+            .push(CircularDependencyFinding::with_actions(
+                CircularDependency {
+                    files: vec![
+                        root.join("src/a.ts"),
+                        root.join("src/b.ts"),
+                        root.join("src/c.ts"),
+                    ],
+                    length: 3,
+                    line: 1,
+                    col: 0,
+                    edges: vec![
+                        edge(&root, "src/a.ts", 1),
+                        edge(&root, "src/b.ts", 4),
+                        // an edge without a resolved line still names its file
+                        edge(&root, "src/c.ts", 0),
+                    ],
+                    is_cross_package: false,
+                },
+            ));
+        results
+            .re_export_cycles
+            .push(ReExportCycleFinding::with_actions(ReExportCycle {
+                files: vec![root.join("src/index.ts"), root.join("src/barrel.ts")],
+                kind: ReExportCycleKind::MultiNode,
+            }));
+
+        let issues = build_codeclimate(&results, &root, &RulesConfig::default());
+
+        assert_eq!(
+            locations(issue_of(&issues, "fallow/circular-dependency")),
+            [("src/b.ts".to_owned(), 4), ("src/c.ts".to_owned(), 1)]
+        );
+        assert_eq!(
+            locations(issue_of(&issues, "fallow/re-export-cycle")),
+            [("src/barrel.ts".to_owned(), 1)]
         );
     }
 }

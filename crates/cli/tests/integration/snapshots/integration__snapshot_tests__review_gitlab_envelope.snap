@@ -1,5 +1,6 @@
 ---
 source: crates/cli/tests/integration/snapshot_tests.rs
+assertion_line: 2299
 expression: json_str
 ---
 {
@@ -140,7 +141,7 @@ expression: json_str
       "fingerprint": "405f0abed155920d"
     },
     {
-      "body": "**warn** `fallow/re-export-cycle`: Re-export cycle: src/api/index.ts \\<-\\> src/api/internal/index.ts\n\n<!-- fallow-fingerprint:v3: 3b15e7a61f99e1df -->",
+      "body": "**warn** `fallow/re-export-cycle`: Re-export cycle: src/api/index.ts \\<-\\> src/api/internal/index.ts\n\nOther locations: `src/api/internal/index.ts:1-1`\n\n<!-- fallow-fingerprint:v3: 3b15e7a61f99e1df -->",
       "position": {
         "position_type": "text",
         "old_path": "src/api/index.ts",
