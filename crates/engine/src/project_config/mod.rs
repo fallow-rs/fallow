@@ -204,12 +204,12 @@ pub struct ProjectConfig {
     /// Diagnostics from workspace discovery (undeclared or invalid members).
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     /// Workspace discovery wall time in milliseconds, when measured.
-    pub workspace_discovery_ms: Option<f64>,
+    pub(crate) workspace_discovery_ms: Option<f64>,
     /// The plugin files, rule packs and `autoDiscover` directories that
     /// config resolution read.
     pub inputs: fallow_config::ConfigInputs,
     /// The content of [`Self::inputs`] just before resolution read them.
-    pub inputs_before_resolve: fallow_config::ConfigInputsSnapshot,
+    pub(crate) inputs_before_resolve: fallow_config::ConfigInputsSnapshot,
     /// The files that duplication analyzes.
     pub(crate) duplication: DuplicationScope,
 }
