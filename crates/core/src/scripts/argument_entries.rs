@@ -465,6 +465,45 @@ fn runtime_entry_args<'a>(
     ArgumentEntries::Listed(entries)
 }
 
+/// Return the code values of the inline code flags of `binary`
+/// (`node -e <code>`, `node --eval=<code>`). `args` are the tokens after
+/// the binary. A flag after the script goes to the script, so the walk
+/// stops at the script.
+pub(super) fn inline_code_values<'a>(binary: &str, args: &[&'a str]) -> Vec<&'a str> {
+    let Some(runtime) = script_runtime(tool_name(binary)) else {
+        return Vec::new();
+    };
+    let mut values = Vec::new();
+    let mut idx = 0;
+    while let Some(&token) = args.get(idx) {
+        if runtime.inline_code_flags.contains(&token) {
+            values.extend(args.get(idx + 1).copied());
+            idx += 2;
+            continue;
+        }
+        if let Some((flag, value)) = token.split_once('=')
+            && runtime.inline_code_flags.contains(&flag)
+        {
+            values.push(value);
+            idx += 1;
+            continue;
+        }
+        if let Some((width, _)) = loading_flag(runtime, token, args.get(idx + 1).copied()) {
+            idx += width;
+            continue;
+        }
+        if let Some(width) = flag_width(runtime, token) {
+            idx += width;
+            continue;
+        }
+        if is_script_candidate(token) {
+            break;
+        }
+        idx += 1;
+    }
+    values
+}
+
 /// Return `Some` when `token` is a loading flag of `runtime`: the number of
 /// tokens that the flag takes, and the module value when it is a relative
 /// path. `next` is the token after `token`.
