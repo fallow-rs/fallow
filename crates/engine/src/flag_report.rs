@@ -8,19 +8,17 @@
 use std::path::Path;
 
 use fallow_config::WorkspaceInfo;
-use fallow_types::flag_retirement::{
-    FlagAgeMode, FlagRetirementReport, RetirementFlag, RetirementFlagKind,
-};
+use fallow_types::flag_retirement::{FlagAgeMode, FlagRetirementReport, RetirementFlagKind};
 use fallow_types::workspace::WorkspaceDiagnosticKind;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::clock::AnalysisClock;
 use crate::flag_age::{FlagAgeRequest, PickaxeProgress, apply_flag_ages};
 use crate::flag_retirement::{
     AGE_GATE_AGE_OFF, AGE_GATE_NO_HISTORY, RetirementOptions, RetirementSiteInput, aggregate_flags,
-    finish_report, max_age_gate,
+    finish_report, max_age_gate, relative,
 };
-use crate::flag_vendor::{VendorExport, VendorMatch, apply_vendor_state};
+use crate::flag_vendor::{SiteLocation, VendorExport, VendorMatch, apply_vendor_state};
 
 /// Inputs of one retirement report.
 pub struct RetirementRequest<'a> {
@@ -74,8 +72,9 @@ pub fn build_retirement_report(request: RetirementRequest<'_>) -> RetirementBuil
         .filter(|site| site.kind == RetirementFlagKind::SdkCall)
         .filter_map(|site| site.sdk_name.clone())
         .collect();
-    let confirmed_sdk_flags = confirmed_sdk_flags(&request.sites);
-    let mut rows = aggregate_flags(request.sites, root, request.workspaces, request.in_scope);
+    let mut sites = request.sites;
+    let hidden_sdk_labels = hide_unconfirmed_sdk_names(&mut sites, root);
+    let mut rows = aggregate_flags(sites, root, request.workspaces, request.in_scope);
     let age = apply_flag_ages(
         &mut rows,
         &FlagAgeRequest {
@@ -93,12 +92,12 @@ pub fn build_retirement_report(request: RetirementRequest<'_>) -> RetirementBuil
                 key_prefix: request.vendor_key_prefix,
                 code_flag_names: &code_flag_names,
                 project_sdk_labels: &project_sdk_labels,
+                hidden_sdk_labels: &hidden_sdk_labels,
                 add_vendor_only: request.whole_project,
                 clock_epoch_secs: AnalysisClock::for_repo(root).epoch_secs(),
             },
         )
     });
-    hide_unconfirmed_sdk_names(&mut rows, &confirmed_sdk_flags);
     let skip_reason = if request.age_mode == FlagAgeMode::Off {
         Some(AGE_GATE_AGE_OFF)
     } else if age.generated_at_clock.is_none() {
@@ -137,24 +136,33 @@ fn confirmed_sdk_flags(sites: &[RetirementSiteInput]) -> FxHashSet<(String, Stri
         .collect()
 }
 
-/// Remove the SDK name of a row that only unconfirmed SDK calls read. The
-/// name is only the default provider of a generic method such as
-/// `isEnabled`, so the report must not name it. The vendor-state match runs
-/// before this step and still uses the name.
+/// Remove the SDK name of each SDK call whose flag and SDK no confirmed
+/// call reads. The name is only the default provider of a generic method
+/// such as `isEnabled`, so the report must not name it. The rows group on
+/// the name that the report shows, so two such calls of one flag with
+/// different default providers give one row. Returns the removed name of
+/// each call, keyed by its location, because the vendor-state match still
+/// uses it.
 fn hide_unconfirmed_sdk_names(
-    rows: &mut [RetirementFlag],
-    confirmed: &FxHashSet<(String, String)>,
-) {
-    for row in rows
+    sites: &mut [RetirementSiteInput],
+    root: &Path,
+) -> FxHashMap<SiteLocation, String> {
+    let confirmed = confirmed_sdk_flags(sites);
+    let mut hidden = FxHashMap::default();
+    for site in sites
         .iter_mut()
-        .filter(|row| row.kind == RetirementFlagKind::SdkCall)
+        .filter(|site| site.kind == RetirementFlagKind::SdkCall)
     {
-        let is_confirmed = row
+        let is_confirmed = site
             .sdk_name
             .as_ref()
-            .is_some_and(|sdk| confirmed.contains(&(row.flag_name.clone(), sdk.clone())));
-        if !is_confirmed {
-            row.sdk_name = None;
+            .is_none_or(|sdk| confirmed.contains(&(site.flag_name.clone(), sdk.clone())));
+        if is_confirmed {
+            continue;
+        }
+        if let Some(sdk) = site.sdk_name.take() {
+            hidden.insert((relative(&site.path, root), site.line, site.col), sdk);
         }
     }
+    hidden
 }

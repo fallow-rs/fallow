@@ -1380,3 +1380,54 @@ fn an_unconfirmed_sdk_call_names_no_sdk() {
         human.stdout
     );
 }
+
+#[test]
+fn unconfirmed_calls_with_different_default_providers_share_one_row() {
+    let out = run_fallow(
+        "flags",
+        "flags-unconfirmed-sdk",
+        &[
+            "--no-cache",
+            "--format",
+            "json",
+            "--quiet",
+            "--retirement",
+            "--flag-age",
+            "off",
+        ],
+    );
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).expect("valid JSON");
+    let rows: Vec<&serde_json::Value> = json["retirement"]["flags"]
+        .as_array()
+        .expect("retirement flags array")
+        .iter()
+        .filter(|row| row["flag_name"] == "dup-flag")
+        .collect();
+    assert_eq!(rows.len(), 1, "{json}");
+    assert!(rows[0].get("sdk_name").is_none(), "{json}");
+    assert_eq!(rows[0]["read_sites"], 2, "{json}");
+
+    let codeclimate = run_fallow(
+        "flags",
+        "flags-unconfirmed-sdk",
+        &[
+            "--no-cache",
+            "--format",
+            "codeclimate",
+            "--quiet",
+            "--retirement",
+            "--flag-age",
+            "off",
+        ],
+    );
+    let issues: serde_json::Value =
+        serde_json::from_str(&codeclimate.stdout).expect("valid CodeClimate JSON");
+    let fingerprints: Vec<&str> = issues
+        .as_array()
+        .expect("issue array")
+        .iter()
+        .filter_map(|issue| issue["fingerprint"].as_str())
+        .collect();
+    let unique: rustc_hash::FxHashSet<&str> = fingerprints.iter().copied().collect();
+    assert_eq!(unique.len(), fingerprints.len(), "{}", codeclimate.stdout);
+}
