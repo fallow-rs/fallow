@@ -86,6 +86,7 @@ mod pr_status;
 mod pr_summary;
 mod report_contract;
 mod request_outcomes;
+mod resolved_run_view;
 mod review_envelopes;
 mod root_envelopes;
 mod sarif;
@@ -404,6 +405,10 @@ pub use report_contract::{
     coverage_analyze_meta, coverage_setup_meta, dupes_meta, health_meta, security_meta,
 };
 pub use request_outcomes::{RequestName, RequestOutcome, RequestOutcomes, RequestStatus};
+pub use resolved_run_view::{
+    AnalysesView, AnalysisView, EnvView, RESOLVED_RUN_VIEW_SCHEMA_VERSION, ResolvedRunView,
+    RunSettingsView, SelectionView,
+};
 pub use review_envelopes::{
     GitHubReviewComment, GitHubReviewSide, GitLabReviewComment, GitLabReviewPosition,
     GitLabReviewPositionType, MARKER_REGEX_V3, ReviewCheckConclusion, ReviewComment,
