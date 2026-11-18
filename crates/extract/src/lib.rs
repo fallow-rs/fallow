@@ -74,6 +74,7 @@ pub mod similar_code;
 mod sink_identity;
 mod source_map;
 mod stack;
+mod style_tokens;
 pub mod suppress;
 mod suppress_literals;
 /// Tailwind CSS arbitrary-value detection.

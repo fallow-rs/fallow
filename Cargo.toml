@@ -361,6 +361,7 @@ allow = [
     { path = "crates/extract/src/sfc_template/component_contracts.rs", max = 1 },
     { path = "crates/extract/src/similar_code.rs", max = 1, require = ["parse_bounded("] },
     { path = "crates/extract/src/sink_identity.rs", max = 1, require = ["parse_bounded("] },
+    { path = "crates/extract/src/style_tokens.rs", max = 1 },
     { path = "crates/extract/src/suppress_literals.rs", max = 1, require = ["parse_bounded("] },
     { path = "crates/extract/src/template_usage.rs", max = 3 },
     # fallow-mutation has no fallow dependencies. The engine calls it only

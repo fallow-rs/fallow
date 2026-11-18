@@ -11,6 +11,12 @@ fuzz_target!(|data: &[u8]| {
         let is_scss = data.first().copied().unwrap_or(0) & 1 == 1;
         worker_stack::on_worker_stack(|| {
             let _ = fallow_core::extract::extract_css_module_exports(s, is_scss);
+            // `fallow health --css` reads standard CSS only, and it parses
+            // each color declaration value on its own.
+            if !is_scss {
+                let _ = fallow_extract::compute_css_analytics(s);
+                let _ = fallow_extract::parse_css_color_rgb(s);
+            }
         });
     }
 });

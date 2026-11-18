@@ -95,6 +95,39 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
     its parse time doubles at each nested level. Past
     `MAX_COLOR_FUNCTION_DEPTH`, the same fallback applies. A function name
     with a CSS escape counts as a color function.
+  - The scan closes a stylesheet block only at its matching byte, so a `}`
+    or `]` inside an open `(` does not lower the depth. A string that a
+    newline ends is a bad string in CSS, so the scan ends it there and does
+    not read its text as code. A hex escape such as `\a` takes one
+    whitespace after it, so a newline there does not end the string.
+  - Before the parse, `style_parse_is_safe` (`crates/extract/src/style_tokens.rs`)
+    walks the tokens with cssparser, the tokenizer of lightningcss, so
+    escapes, `url(` tokens and bad strings read as they do in the parse. The
+    same fallback applies when the walk finds one of these:
+    - Color functions that nest deeper than `MAX_COLOR_FUNCTION_DEPTH`.
+    - Math functions (`calc(`, `min(`, `max(`, `clamp(`, `round(`, `abs(`
+      and the other names in `MATH_FUNCTIONS`) that nest deeper than
+      `MAX_MATH_FUNCTION_DEPTH`. Each nested level about doubles the parse
+      time when the innermost value is not of the expected type. An `atan2(`
+      costs about ten times per level, so it counts as `ATAN2_LEVELS`
+      levels.
+    - A math function that makes lightningcss panic. lightningcss panics
+      when a math function where it expects a percentage (`opacity`,
+      `font-stretch`, a color channel, a keyframe selector) does not reduce
+      to one percentage, for example `max(4%, 5)`, `calc(4% + 5)`,
+      `abs(4%)` or `max(4, nan)`. `math_function_panics` parses each math
+      function that lightningcss can parse alone (the outermost one, and one
+      directly inside a color function) as a percentage calculation. A
+      number-only result such as the one of `calc(1 / 2)` panics only where
+      lightningcss takes a bare percentage and no number: the properties in
+      `PERCENTAGE_ONLY_PROPERTIES`, the channels of a legacy `rgb(` or
+      `rgba(` (after a percentage channel, lightningcss reads the others as
+      bare percentages), and any position outside a declaration value, such
+      as a keyframe selector. The walk reads `name: value;`
+      declarations in each rule block to know the property.
+- The visitor skips the Angular `@Component` analysis in a Vue or Svelte
+  script block (`ModuleInfoExtractor::sfc_script`). A `@Component` decorator
+  there comes from a Vue class-component library.
 - A walk that the visitor runs at each link of a member or call chain stops
   after `MAX_RECORDED_CHAIN_LINKS` links
   (`crates/extract/src/visitor/visit_impl_chain_names.rs`). Past the cap, the

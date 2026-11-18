@@ -152,6 +152,167 @@ fn css_module_exports_in_time(source: String) -> Vec<String> {
         .expect("CSS Modules extraction must end in time")
 }
 
+/// In CSS a `}` or `]` inside an open `(` is a plain token, so it does not end
+/// the color functions that lightningcss still nests.
+#[test]
+fn a_brace_inside_a_color_function_does_not_close_it() {
+    for repeated in ["light-dark(}", "rgb(]", "light-dark(i}\n.b{x:"] {
+        let source = format!(".keep{{color:red}}\n.a{{x:{}", repeated.repeat(COLOR_DEPTH));
+        let names = css_module_exports_in_time(source.clone());
+        assert!(names.contains(&"keep".to_string()), "{repeated}: {names:?}");
+        assert!(
+            crate::parse_style_bounded(&source, || ()).is_none(),
+            "{repeated} nesting must skip the parser"
+        );
+    }
+}
+
+/// CSS reads an unquoted `url(` body up to its first `)`, so a `{` in the body
+/// does not hide the color functions after it.
+#[test]
+fn a_brace_in_a_url_does_not_hide_color_functions() {
+    let source = format!(
+        ".keep{{color:red}}\n.a{{x:url(a{{b)}}\n.b{{x:{}",
+        "light-dark(".repeat(COLOR_DEPTH)
+    );
+    let names = css_module_exports_in_time(source.clone());
+    assert!(names.contains(&"keep".to_string()), "{names:?}");
+    assert!(crate::parse_style_bounded(&source, || ()).is_none());
+}
+
+/// lightningcss panics when a math function where it expects a percentage,
+/// such as `opacity`, `font-stretch` or a color channel, does not reduce to
+/// one percentage. The declarations have no closing `}`, as in the fuzz input,
+/// because a `}` inside an open `(` is a plain token.
+#[test]
+fn a_math_function_that_panics_the_css_parser_skips_it() {
+    for declaration in [
+        "o:lab(max(4,nan",
+        "color:lab(1 MAX(4%, NaN) 1)",
+        "opacity:max(4%,5)",
+        "opacity:clamp(1%,2,3%)",
+        "opacity:calc(4% + 5)",
+        "opacity:calc(max(4%,5))",
+        "opacity:abs(4%)",
+        "color:rgb(round(up,4%,5) 1 1)",
+        "opacity:m\\61 x(4%,5)",
+        "font-stretch:calc(1 / 2)",
+        "-webkit-text-size-adjust:max(1, 2)",
+        "color:rgb(10%, 10%, calc(1/2))",
+        "--x:var(--y, rgba(1%,2%,max(1,2)))",
+        "--x:max(lab(max(4%,5) 1 1))",
+        "color:calc(1 + lab(1 rgb(abs(4%) 1 1) 1))",
+        // The tokenizer reads escapes, `url(` tokens and bad strings, so
+        // they hide no math function.
+        "color:r\\67 b(max(4%,5) 1 1)",
+        "b:\\75rl(x( );opacity:max(4%,5)",
+        "b:\"max(\n;opacity:max(4%,5)",
+    ] {
+        let source = format!(".keep{{color:red}}\n.a{{{declaration}");
+        let names = css_module_exports_in_time(source.clone());
+        assert!(
+            names.contains(&"keep".to_string()),
+            "{declaration}: {names:?}"
+        );
+        assert!(
+            crate::css_metrics::compute_css_analytics(&source).is_none(),
+            "{declaration} must skip the parser"
+        );
+    }
+}
+
+/// A number-only math function makes lightningcss panic in a keyframe
+/// selector and in the `initial-value` of a `@property`.
+#[test]
+fn a_number_math_function_where_a_percentage_is_required_skips_the_css_parser() {
+    for source in [
+        ".keep{ color: red }\n@keyframes k{ calc(1 / 2) { opacity: 1 } }",
+        ".keep{ color: red }\n@property --p{ syntax: '<percentage>'; inherits: false; initial-value: calc(1 / 2) }",
+    ] {
+        let names = css_module_exports_in_time(source.to_string());
+        assert!(names.contains(&"keep".to_string()), "{source}: {names:?}");
+        assert!(
+            crate::parse_style_bounded(source, || ()).is_none(),
+            "{source}"
+        );
+    }
+}
+
+/// lightningcss parses the number first where a property takes a number or a
+/// percentage, so a number-only math function there is safe.
+#[test]
+fn a_number_math_function_where_a_number_is_allowed_still_parses() {
+    let source = ".a{z-index:calc(1 + 1);line-height:calc(3 / 2);opacity:calc(1 - 0.5)}\n\
+                  .b{color:hsl(calc(200 + 10) 50% 50%);background:lab(calc(50 / 2) 1 1)}\n\
+                  .c{opacity:min(1, 0.5);font-weight:clamp(100, 400, 900);aspect-ratio:calc(16 / 9)}\n\
+                  :root{--text-xs--line-height:calc(1 / 0.75)}\n\
+                  .d:hover{transform:scale(calc(1 + 0.1))}";
+    assert!(crate::parse_style_bounded(source, || ()).is_some());
+    assert!(crate::css_metrics::compute_css_analytics(source).is_some());
+}
+
+/// A hex escape takes one whitespace after it, so a newline there does not
+/// end a string, and the real closing quote does not start a new one.
+#[test]
+fn a_newline_after_a_hex_escape_does_not_end_a_string() {
+    for escape in ["\\a\r", "\\a\n", "\\a\r\n", "\\1\u{c}", "\\00000a\n"] {
+        let source = format!(
+            "a{{--x:\"{escape}\"{}1{}}}",
+            "(".repeat(DEEP),
+            ")".repeat(DEEP)
+        );
+        assert!(
+            crate::parse_style_bounded(&source, || ()).is_none(),
+            "{escape:?}"
+        );
+    }
+}
+
+/// A bad string ends at its newline, so a `/*` in it does not hide the
+/// nesting after it from the stack estimate.
+#[test]
+fn a_comment_opener_in_a_bad_string_does_not_hide_nesting() {
+    let source = format!("a{{--x:\"/*\n;}}\n{}", "a{".repeat(DEEP));
+    assert!(crate::parse_style_bounded(&source, || ()).is_none());
+    assert_degraded(&parse("src/a.css", &source));
+}
+
+/// Each level of nested math functions doubles the parse time of lightningcss
+/// when the innermost value is not of the expected type.
+#[test]
+fn deeply_nested_math_functions_skip_the_css_parser() {
+    for name in ["calc(", "abs(", "round(1,", "clamp(1,", "atan2(1px,"] {
+        let depth = if name.starts_with("atan2") { 3 } else { 26 };
+        let source = format!(".keep{{color:red}}\n.a{{width:{}1px", name.repeat(depth));
+        let names = css_module_exports_in_time(source.clone());
+        assert!(names.contains(&"keep".to_string()), "{name}: {names:?}");
+        assert!(
+            crate::parse_style_bounded(&source, || ()).is_none(),
+            "{name} nesting must skip the parser"
+        );
+    }
+}
+
+#[test]
+fn ordinary_math_functions_still_parse() {
+    let source = ".a{width:calc(100% - 2rem);font-size:clamp(1rem, 2.5vw, 2rem)}\n\
+                  .e{font-size:calc(1rem * clamp(1, 1.2, 1.5));width:calc(100% * min(1, 2))}\n\
+                  .b{opacity:calc(50% * 2);width:max(10%, 5px);height:calc(var(--h) / 2)}\n\
+                  .c{grid-template-columns:repeat(3, calc(100% / 3));--x:min(1px, 2px)}\n\
+                  .nan{animation-name:nan;width:var(--nan, 1px)}\n\
+                  @media (min-width: calc(40rem + 1px)) {.d{opacity:max(50%, 20%)}}";
+    assert!(crate::parse_style_bounded(source, || ()).is_some());
+    assert!(crate::css_metrics::compute_css_analytics(source).is_some());
+}
+
+/// The scan reads each escape once, so a long run of escapes stays linear.
+#[test]
+fn a_long_escape_chain_scans_in_time() {
+    let source = format!(".keep{{color:red}}\n.a{{x:({}", "\\!".repeat(500_000));
+    let names = css_module_exports_in_time(source);
+    assert!(names.contains(&"keep".to_string()));
+}
+
 #[test]
 fn deeply_nested_color_functions_skip_the_css_parser() {
     for name in [

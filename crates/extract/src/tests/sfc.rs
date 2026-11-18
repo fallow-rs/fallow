@@ -2634,3 +2634,30 @@ fn sfc_script_client_only_import_offset_matches_the_dynamic_import() {
         vec![import.span.start]
     );
 }
+
+/// A Vue class component declares its options in a `@Component` decorator
+/// from `vue-class-component` or `vue-facing-decorator`. Its `template` is a
+/// Vue template, not an Angular one, and SFC scripts are never Angular.
+#[test]
+fn a_vue_class_component_decorator_is_not_an_angular_component() {
+    let source = "<script>@Component({selector:'x-a',templateUrl:'./a.html',\
+                  template:`<x-b/>`}) export default class A {}</script>";
+    let info = parse_sfc_with_complexity(source, "App.vue");
+    assert_eq!(info.exports.len(), 1);
+    assert!(!info.has_angular_component_template_url);
+    assert!(
+        !info
+            .imports
+            .iter()
+            .any(|import| import.source == "./a.html")
+    );
+}
+
+#[test]
+fn an_empty_template_in_a_class_component_decorator_parses() {
+    let info = parse_sfc(
+        "<script>@Component({template:``})class{}</script>",
+        "App.vue",
+    );
+    assert_eq!(info.parse_error_count, 0);
+}
