@@ -315,7 +315,7 @@ define_plugin!(
             config_path,
             &["build", "rollupOptions", "input"],
         );
-        result.extend_entry_patterns_and_dependencies(rollup_input, root);
+        extend_config_relative_input(&mut result, rollup_input, config_path, root);
         add_environment_rollup_inputs(&mut result, source, config_path, root);
 
         let lib_entry = config_parser::extract_config_string_or_array(
@@ -325,7 +325,11 @@ define_plugin!(
         );
         // Vite resolves `lib.entry` against its root with `path.resolve`, so the
         // value is a path only and never names a package.
-        result.extend_entry_paths(lib_entry);
+        result.extend_entry_paths(
+            lib_entry
+                .into_iter()
+                .map(|entry| root_relative_input(entry, config_path, root)),
+        );
 
         credit_dependency_lists(&mut result, source, config_path, &[]);
 
@@ -356,6 +360,43 @@ define_plugin!(
     },
 );
 
+/// A Vite input value as a project-root-relative path.
+///
+/// Vite reads an input relative to the directory of its config. A root run
+/// also reads a config in a workspace package, so `src/main.ts` names
+/// `<package>/src/main.ts` and not `<root>/src/main.ts`.
+fn root_relative_input(
+    value: String,
+    config_path: &std::path::Path,
+    root: &std::path::Path,
+) -> String {
+    config_parser::normalize_config_path(&value, config_path, root).unwrap_or(value)
+}
+
+/// Register a Vite `rollupOptions.input` value as an entry path, and credit
+/// the package that an ambiguous bare value names.
+///
+/// This applies the rules of `extend_entry_patterns_and_dependencies`, with
+/// the config directory as the base of each value.
+fn extend_config_relative_input(
+    result: &mut PluginResult,
+    values: Vec<String>,
+    config_path: &std::path::Path,
+    root: &std::path::Path,
+) {
+    let config_dir = config_path.parent().unwrap_or(root);
+    for value in values {
+        if let Some(request) = super::module_request(&value)
+            && !super::names_project_file(config_dir, request)
+        {
+            result
+                .referenced_dependencies
+                .push(crate::resolve::extract_package_name(request));
+        }
+        result.push_entry_path(root_relative_input(value, config_path, root));
+    }
+}
+
 /// Register the `build.rollupOptions.input` entries of each Vite environment.
 ///
 /// Vite 6 and later read the build options of each environment from
@@ -372,7 +413,7 @@ fn add_environment_rollup_inputs(
             config_path,
             &["environments", &name, "build", "rollupOptions", "input"],
         );
-        result.extend_entry_patterns_and_dependencies(input, root);
+        extend_config_relative_input(result, input, config_path, root);
     }
 }
 
@@ -921,6 +962,55 @@ mod tests {
                 "environment input {expected} should be an entry: {patterns:?}"
             );
         }
+    }
+
+    #[test]
+    fn resolve_config_reads_rollup_input_relative_to_a_package_config() {
+        let source = r#"
+            import path from "path";
+            import { defineConfig } from "vite";
+
+            export default defineConfig({
+                build: {
+                    lib: { entry: "src/lib.ts" },
+                    rollupOptions: { input: { third: "src/third.ts", page: "index.html" } },
+                },
+                environments: {
+                    sw: {
+                        build: {
+                            rollupOptions: {
+                                input: { second: path.resolve(__dirname, "src/second.ts") },
+                            },
+                        },
+                    },
+                },
+            });
+        "#;
+        let result = VitePlugin.resolve_config(
+            Path::new("/project/packages/app/vite.config.ts"),
+            source,
+            Path::new("/project"),
+        );
+        let patterns: Vec<&str> = result
+            .entry_patterns
+            .iter()
+            .map(|rule| rule.pattern.as_str())
+            .collect();
+        for expected in [
+            "packages/app/src/second.ts",
+            "packages/app/src/third.ts",
+            "packages/app/index.html",
+            "packages/app/src/lib.ts",
+        ] {
+            assert!(
+                patterns.contains(&expected),
+                "input {expected} should be an entry below the package: {patterns:?}"
+            );
+        }
+        assert!(
+            !patterns.contains(&"src/third.ts"),
+            "an input must not resolve from the project root: {patterns:?}"
+        );
     }
 
     #[test]
