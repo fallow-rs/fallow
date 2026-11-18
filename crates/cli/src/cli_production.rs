@@ -5,7 +5,6 @@ use fallow_engine::project_config::ProductionFlags;
 pub use fallow_engine::project_config::ProductionModes;
 
 use super::Cli;
-use crate::cli_format::bool_from_env;
 use crate::runtime_support::load_config_file;
 
 /// The run plan of the project config for `request`. A project without a
@@ -61,11 +60,12 @@ pub fn resolve_production_modes(
         health: production_health.then_some(true),
         dupes: production_dupes.then_some(true),
     };
+    let env = fallow_config::ProductionEnv::from_process();
     let env = ProductionFlags {
-        global: bool_from_env("FALLOW_PRODUCTION"),
-        dead_code: bool_from_env("FALLOW_PRODUCTION_DEAD_CODE"),
-        health: bool_from_env("FALLOW_PRODUCTION_HEALTH"),
-        dupes: bool_from_env("FALLOW_PRODUCTION_DUPES"),
+        global: env.global,
+        dead_code: env.dead_code,
+        health: env.health,
+        dupes: env.dupes,
     };
     Ok(flags.with_fallback(env).effective_modes(&config.production))
 }

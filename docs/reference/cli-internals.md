@@ -153,10 +153,19 @@ load. `runtime_support::load_config_for_analysis` does these steps:
 
 `cli_production::resolve_production_modes` puts the flags before the
 `FALLOW_PRODUCTION*` variables with `ProductionFlags::with_fallback`, so the
-config decides only when neither source sets a value. A site that reads one
-optional setting, such as the audit cache, `fallow report` or the staged
-audit, uses `runtime_support::loaded_config`. That function gives `None` when
-the file does not load, and the site prints nothing.
+config decides only when neither source sets a value. The variables are parsed
+by `fallow_config::ProductionEnv`, which the typed MCP routes use too. A site
+that reads one optional setting, such as the audit cache, `fallow report` or
+the staged audit, uses `runtime_support::loaded_config`. That function gives
+`None` when the file does not load, and the site prints nothing.
+
+A command that loads the config outside the analysis loader gets the
+`--config` path and the `--allow-remote-extends` policy together as one
+`runtime_support::ConfigFlags` value. `fallow report --from`, `plugin-check`,
+the staged audit and the coverage uploads use it, so each load of one command
+reads the same file with the same trust policy. The own-config pass of
+`fallow audit` reads the base version of the `--config` file. When the change
+added that file, discovery in the base worktree decides.
 
 Exit 1 on an analysis command means that an enforced gate failed. A config
 load warning never sets it. A workspace diagnostic such as

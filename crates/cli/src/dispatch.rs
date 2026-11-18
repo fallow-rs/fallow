@@ -247,7 +247,7 @@ pub fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> 
         }
         Command::ConfigSchema => init::run_config_schema(dispatch.json_style),
         Command::PluginSchema => init::run_plugin_schema(dispatch.json_style),
-        Command::PluginCheck => plugin_check::run_plugin_check(root, output, dispatch.json_style),
+        Command::PluginCheck => plugin_check::run_plugin_check(dispatch),
         Command::RulePackSchema => init::run_rule_pack_schema(dispatch.json_style),
         Command::RulePack { subcommand } => dispatch_rule_pack_command(dispatch, subcommand),
         Command::Guard { files } => dispatch_guard_command(dispatch, &files),
@@ -332,7 +332,7 @@ pub fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> 
                 &from,
                 output,
                 root,
-                cli.config.as_deref(),
+                crate::runtime_support::ConfigFlags::from_cli(cli),
                 cli.quiet,
                 input.map(|input| cli_report::MutationRequest {
                     input,

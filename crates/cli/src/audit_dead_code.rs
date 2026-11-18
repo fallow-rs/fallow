@@ -208,14 +208,27 @@ pub(super) fn base_own_config_unused_code(
     } = *input;
     let (focus, base_check) = (focus?, base_check?);
     let relative = fallow_api::audit_run::config_path_under_root(current_config_path?, opts.root)?;
-    if !focus.contains(&base_root.join(relative)) {
+    if !focus.contains(&base_root.join(&relative)) {
         return None;
     }
-    let base_config_path = fallow_config::FallowConfig::find_config_path(base_root);
+    // With `--config`, the base config is the base version of that file. A
+    // file that the change added has no base version, so discovery decides.
+    let base_config_path = opts
+        .config_path
+        .as_ref()
+        .map(|_| base_root.join(&relative))
+        .filter(|path| path.is_file())
+        .or_else(|| fallow_config::FallowConfig::find_config_path(base_root));
     // A config that does not load would make the pass print an error.
     if let Some(path) = base_config_path.as_deref()
-        && project_config::load_config_file(base_root, Some(path), ConfigFileOptions::default())
-            .is_err()
+        && project_config::load_config_file(
+            base_root,
+            Some(path),
+            ConfigFileOptions {
+                allow_remote_extends: opts.allow_remote_extends,
+            },
+        )
+        .is_err()
     {
         return None;
     }

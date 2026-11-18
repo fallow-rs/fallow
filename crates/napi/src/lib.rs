@@ -682,6 +682,7 @@ impl TryFrom<ComplexityOptions> for api::ComplexityOptions {
             complexity: value.complexity.unwrap_or(false),
             file_scores: value.file_scores.unwrap_or(false),
             coverage_gaps: value.coverage_gaps.unwrap_or(false),
+            config_activates_coverage_gaps: false,
             hotspots: value.hotspots.unwrap_or(false),
             ownership: value.ownership.unwrap_or(false),
             ownership_emails: parse_ownership_email_mode(value.ownership_emails)?,

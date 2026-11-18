@@ -81,7 +81,12 @@ pub fn run_combined(options: &CombinedOptions) -> ProgrammaticResult<CombinedPro
     let options = &options_with_duplicates_config(options, &resolved)?;
     resolved.install(|| {
         resolved.ensure_not_cancelled("combined analysis")?;
-        let production_modes = resolve_effective_production_modes(&resolved, None, None, None)?;
+        let production_modes = resolve_effective_production_modes(
+            &resolved,
+            options.production_dead_code,
+            options.production_health,
+            options.production_dupes,
+        )?;
         let prepared = prepare_combined_options(options, production_modes);
         let changed_files = changed_files_for_run(&resolved)?;
         let sections = run_combined_sections(
@@ -178,7 +183,11 @@ fn run_combined_with_dead_code_session(
     share_dupes: bool,
 ) -> ProgrammaticResult<CombinedSectionRun> {
     resolved.ensure_not_cancelled("config load and file discovery")?;
-    let session = super::dead_code::load_dead_code_session(&prepared.dead_code, resolved)?;
+    let session = super::dead_code::load_dead_code_session_in_mode(
+        &prepared.dead_code,
+        resolved,
+        prepared.dead_code.analysis.production_override,
+    )?;
     super::dead_code::resolve_package_map_before_analysis(resolved, &session)?;
     if share_dupes {
         return run_combined_with_project_artifacts(CombinedProjectArtifactRun {
@@ -474,6 +483,7 @@ fn duplication_options_preserve_health_config(options: &DuplicationOptions) -> b
 fn combined_health_options(options: &CombinedOptions, production: bool) -> ComplexityOptions {
     let mut health = options.health_options.clone();
     health.analysis = analysis_with_effective_production(&options.analysis, production);
+    health.config_activates_coverage_gaps = true;
     health
 }
 

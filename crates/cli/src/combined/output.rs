@@ -310,7 +310,10 @@ fn print_combined_pr_comment(
         combined_provider(github),
         &envelope,
         opts.root,
-        opts.config_path.as_deref(),
+        crate::runtime_support::ConfigFlags {
+            path: opts.config_path.as_deref(),
+            allow_remote_extends: opts.allow_remote_extends,
+        },
         opts.output,
     ))
 }

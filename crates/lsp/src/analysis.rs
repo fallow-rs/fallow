@@ -68,23 +68,17 @@ pub fn load_project_session(
         .clone()
         .or_else(|| fallow_config::FallowConfig::find_config_path(project_root));
     let before = ConfigSources::read(expected_config.as_deref());
-    let session = AnalysisSession::load_with_config_options(
+    // An explicit editor `fallow.production` (on/off) acts as the CLI
+    // `--production`/`--no-production` of the sidebar, so the two surfaces
+    // agree; `None` leaves the project config in force (issue #1055).
+    let session = AnalysisSession::load_with_production(
         project_root,
         key.config_path.as_deref(),
         fallow_config::ConfigLoadOptions {
             allow_remote_extends: key.allow_remote_extends,
         },
-        |config| {
-            // Override the project config's production resolution when the
-            // editor forwarded an explicit `fallow.production` (on/off).
-            // Mirrors the CLI-driven sidebar receiving
-            // `--production`/`--no-production`, so the two surfaces agree;
-            // `None` leaves the project config in force (issue #1055).
-            if let Some(production) = key.production_override {
-                config.production = production;
-            }
-            config.scope_shared_cache_dir_to_root();
-        },
+        key.production_override,
+        fallow_config::ResolvedConfig::scope_shared_cache_dir_to_root,
     )
     .map_err(|error| error.to_string())?;
     let after = ConfigSources::read(session.config_path());

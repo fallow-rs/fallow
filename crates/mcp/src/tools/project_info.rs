@@ -4,8 +4,8 @@ use std::sync::atomic::AtomicBool;
 use crate::params::ProjectInfoParams;
 
 use fallow_api::{
-    ProjectInfoOptions, run_project_info as run_api_project_info,
-    serialize_project_info_programmatic_json,
+    AnalysisOptions, ProductionAnalysis, ProjectInfoOptions,
+    run_project_info as run_api_project_info, serialize_project_info_programmatic_json,
 };
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
@@ -13,7 +13,7 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use super::{
     api_runtime::{
         EnvScope, call_cancellation, json_success, programmatic_error_body, run_api_blocking,
-        shared_analysis_options, shared_params,
+        shared_analysis_options, shared_params, typed_production,
     },
     push_global, push_remote_extends,
 };
@@ -89,7 +89,10 @@ fn project_info_options_from_params(
         // This envelope carries no `request_outcomes`, so a ref that stood
         // down would widen the result with nothing to say so: keep the hard
         // error of an explicit ref.
-        analysis: shared_analysis_options(shared_params!(params), EnvScope::HardRef, cancellation),
+        analysis: AnalysisOptions {
+            production_override: typed_production(None, ProductionAnalysis::DeadCode),
+            ..shared_analysis_options(shared_params!(params), EnvScope::HardRef, cancellation)
+        },
         entry_points: params.entry_points == Some(true),
         files: params.files == Some(true),
         plugins: params.plugins == Some(true),

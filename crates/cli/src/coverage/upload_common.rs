@@ -6,7 +6,7 @@ use std::process::ExitCode;
 
 use colored::Colorize as _;
 use fallow_config::{OutputFormat, ProductionAnalysis, ResolvedConfig};
-use fallow_engine::project_config::{self, ConfigFileOptions, ProductionFlags};
+use fallow_engine::project_config::{self, ProductionFlags};
 
 use crate::api::{
     NETWORK_EXIT_CODE, ParsedErrorEnvelope, actionable_error_hint, api_url, response_message_suffix,
@@ -352,27 +352,20 @@ pub(super) fn dirty_worktree(root: &Path) -> bool {
 
 #[cfg(test)]
 pub(super) fn load_resolved_config(root: &Path) -> Result<ResolvedConfig, String> {
-    load_resolved_config_with_options(root, false)
+    load_resolved_config_with_options(root, crate::runtime_support::ConfigFlags::default())
 }
 
 pub(super) fn load_resolved_config_with_options(
     root: &Path,
-    allow_remote_extends: bool,
+    input: crate::runtime_support::ConfigFlags<'_>,
 ) -> Result<ResolvedConfig, String> {
-    // The upload reads the discovered config only: `--config` does not reach
-    // it. The upload pipeline runs dead-code analysis, and resolve() reads
-    // only the global production flag, so the file is flattened for dead
-    // code first.
-    let config = project_config::load_config_file(
-        root,
-        None,
-        ConfigFileOptions {
-            allow_remote_extends,
-        },
-    )
-    .map_err(|err| format!("config load failed: {}", err.message()))?
-    .for_analysis(ProductionAnalysis::DeadCode, ProductionFlags::default())
-    .config;
+    // The upload pipeline runs dead-code analysis, and resolve() reads only
+    // the global production flag, so the file is flattened for dead code
+    // first.
+    let config = project_config::load_config_file(root, input.path, input.file_options())
+        .map_err(|err| format!("config load failed: {}", err.message()))?
+        .for_analysis(ProductionAnalysis::DeadCode, ProductionFlags::default())
+        .config;
     let threads = std::thread::available_parallelism().map_or(1, std::num::NonZero::get);
     Ok(config.resolve(
         root.to_path_buf(),
@@ -542,7 +535,11 @@ mod tests {
         )
         .unwrap();
 
-        let resolved = load_resolved_config_with_options(dir.path(), false).unwrap();
+        let resolved = load_resolved_config_with_options(
+            dir.path(),
+            crate::runtime_support::ConfigFlags::default(),
+        )
+        .unwrap();
         assert!(
             resolved.production,
             "per-analysis deadCode production must survive resolve"
@@ -560,7 +557,11 @@ mod tests {
             std::fs::write(dir.path().join(".fallowrc.json"), body).unwrap();
             let cause = fallow_config::FallowConfig::find_and_load(dir.path()).unwrap_err();
             assert_eq!(
-                load_resolved_config_with_options(dir.path(), false).unwrap_err(),
+                load_resolved_config_with_options(
+                    dir.path(),
+                    crate::runtime_support::ConfigFlags::default()
+                )
+                .unwrap_err(),
                 format!("config load failed: {cause}"),
                 "{body}"
             );
