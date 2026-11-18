@@ -19,6 +19,7 @@ use crate::asset_url::normalize_asset_url;
 use crate::html::is_remote_url;
 use crate::sfc::{SfcScript, SourceRegion, ranges_to_gaps};
 use crate::source_map::ExtractionResult;
+use crate::suppress_literals::{ScriptHost, parse_host_suppressions};
 use crate::template_expression_scan::{
     TemplateScanMode, guarded_import_locals, import_declaration_ranges, merge_ranges,
     narrowable_import_locals, pos_in_ranges, record_unexplained_mentions,
@@ -568,7 +569,7 @@ pub(crate) fn parse_astro_to_module_with_mode(
     need_complexity: bool,
     mode: fallow_types::shared_state::ExtractionMode,
 ) -> ModuleInfo {
-    let parsed_suppressions = crate::suppress::parse_suppressions_from_source(source);
+    let parsed_suppressions = parse_host_suppressions(ScriptHost::Astro, source);
     let line_offsets = fallow_types::extract::compute_line_offsets(source);
 
     let frontmatter = extract_astro_frontmatter(source);

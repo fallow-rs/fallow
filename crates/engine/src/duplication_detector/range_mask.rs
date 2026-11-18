@@ -23,7 +23,7 @@ use crate::suppress::Suppression;
 /// literal would otherwise suppress the file, a line, or open or close a
 /// range.
 pub(super) fn drop_markers_in_strings(parsed: &mut ParsedSuppressions, tokens: &FileTokens) {
-    if parsed.range_markers.is_empty() && parsed.line_markers.is_empty() {
+    if !parsed.has_markers() {
         return;
     }
     let literal_spans: Vec<(u32, u32)> = tokens
@@ -37,21 +37,7 @@ pub(super) fn drop_markers_in_strings(parsed: &mut ParsedSuppressions, tokens: &
         })
         .map(|token| (token.span.start, token.span.end))
         .collect();
-    let in_literal = |offset: u32| {
-        literal_spans
-            .iter()
-            .any(|&(start, end)| start < offset && offset < end)
-    };
-    parsed
-        .range_markers
-        .retain(|marker| !in_literal(marker.offset));
-    let literal_lines: Vec<u32> = parsed
-        .line_markers
-        .iter()
-        .filter(|marker| in_literal(marker.offset))
-        .map(|marker| marker.comment_line)
-        .collect();
-    parsed.drop_line_markers(&literal_lines);
+    parsed.drop_markers_in_literals(&literal_spans);
     parsed.pair_ranges();
 }
 

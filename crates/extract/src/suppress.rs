@@ -124,6 +124,38 @@ impl ParsedSuppressions {
         self.range_problems.sort_by_key(|problem| problem.line);
     }
 
+    /// Remove each marker whose text is inside one of `literal_spans`, the
+    /// byte spans of the string and template literals of the source.
+    ///
+    /// The source scan does not know string context, so a marker in a
+    /// template literal would otherwise suppress the file, a line, or open or
+    /// close a range. Call this before [`Self::pair_ranges`].
+    pub fn drop_markers_in_literals(&mut self, literal_spans: &[(u32, u32)]) {
+        if literal_spans.is_empty() {
+            return;
+        }
+        let in_literal = |offset: u32| {
+            literal_spans
+                .iter()
+                .any(|&(start, end)| start < offset && offset < end)
+        };
+        self.range_markers
+            .retain(|marker| !in_literal(marker.offset));
+        let literal_lines: Vec<u32> = self
+            .line_markers
+            .iter()
+            .filter(|marker| in_literal(marker.offset))
+            .map(|marker| marker.comment_line)
+            .collect();
+        self.drop_line_markers(&literal_lines);
+    }
+
+    /// Whether the scan found a marker that a literal span can drop.
+    #[must_use]
+    pub fn has_markers(&self) -> bool {
+        !self.range_markers.is_empty() || !self.line_markers.is_empty()
+    }
+
     /// Remove the file and next-line suppressions, and the unknown kinds, of
     /// the markers on `comment_lines`.
     pub fn drop_line_markers(&mut self, comment_lines: &[u32]) {

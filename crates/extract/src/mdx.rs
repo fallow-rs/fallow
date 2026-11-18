@@ -18,6 +18,7 @@ use oxc_parser::Parser;
 use oxc_span::SourceType;
 
 use crate::source_map::ExtractionResult;
+use crate::suppress_literals::{ScriptHost, parse_host_suppressions};
 use crate::template_expression_scan::{
     TemplateScanMode, guarded_import_locals, import_declaration_ranges, narrowable_import_locals,
     record_unexplained_mentions, record_unexplained_script_mentions, recorded_member_pairs,
@@ -671,7 +672,7 @@ pub(crate) fn parse_mdx_to_module_with_mode(
     content_hash: u64,
     mode: fallow_types::shared_state::ExtractionMode,
 ) -> ModuleInfo {
-    let parsed_suppressions = crate::suppress::parse_suppressions_from_source(source);
+    let parsed_suppressions = parse_host_suppressions(ScriptHost::Mdx, source);
     let line_offsets = fallow_types::extract::compute_line_offsets(source);
     let (scan, extraction) = accepted_mdx_source(source);
     let (mut info, _) = parse_statement_body(
