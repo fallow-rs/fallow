@@ -630,11 +630,8 @@ impl AggregatedPluginResult {
         for rule in &mut self.used_exports {
             *rule = rule.prefixed(ws_prefix);
         }
-        // Consumers compare the scope with `/`-separated project-relative
-        // paths, so a Windows prefix must not keep its backslashes.
-        let scope_prefix = ws_prefix.replace('\\', "/");
         for (_, scope) in &mut self.active_plugin_scopes {
-            scope.clone_from(&scope_prefix);
+            *scope = ws_prefix.to_string();
         }
         for rule in &mut self.config_export_credits {
             *rule = rule.prefixed(ws_prefix);

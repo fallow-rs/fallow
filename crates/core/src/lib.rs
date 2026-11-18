@@ -1971,11 +1971,7 @@ struct ScriptDependencyContext<'a> {
 /// The directory of a workspace package relative to the project root, with
 /// `/` separators.
 fn workspace_dir(root: &std::path::Path, ws: &fallow_config::WorkspaceInfo) -> String {
-    ws.root
-        .strip_prefix(root)
-        .unwrap_or(&ws.root)
-        .to_string_lossy()
-        .replace('\\', "/")
+    workspace_prefix(root, &ws.root)
 }
 
 /// Gather the scripts declared by the root and workspace packages.
@@ -2588,13 +2584,14 @@ fn merge_workspace_plugin_results(
 
 /// The project-relative prefix of a workspace root, empty for the project root
 /// itself. A root outside the project tree keeps its own path, which is also the
-/// prefix its patterns carry.
-fn workspace_prefix(root: &Path, workspace_root: &Path) -> String {
+/// prefix its patterns carry. It uses `/` separators, because plugin patterns
+/// and scopes built from it match `/`-separated project-relative paths.
+pub(crate) fn workspace_prefix(root: &Path, workspace_root: &Path) -> String {
     workspace_root
         .strip_prefix(root)
         .unwrap_or(workspace_root)
         .to_string_lossy()
-        .into_owned()
+        .replace('\\', "/")
 }
 
 /// Make the auto-imports of a Nuxt app and of each layer it extends visible to

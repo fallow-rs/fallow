@@ -462,6 +462,11 @@ fn old_report_treats_a_discovered_config_that_does_not_load_as_missing() {
             folder_name(missing_root.path()),
             folder_name(broken_root.path()),
         );
+        assert!(
+            broken.stderr.contains(folder_name(broken_root.path())),
+            "{format}: the note names the root of the run, stderr:\n{}",
+            broken.stderr
+        );
         assert_eq!(broken.stderr, expected, "{format}");
         assert_eq!(broken.stdout, missing.stdout, "{format}");
     }
