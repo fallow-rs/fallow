@@ -47,8 +47,10 @@ impl AuditAnalysisSelection {
     /// A skipped analysis reports no findings, which Impact would credit as
     /// resolved. So only a full selection writes a record. Duplication that
     /// `duplicates.enabled: false` turned off for the project is no skip of
-    /// one run: no run fills the clone history, and the other findings still
-    /// need a history.
+    /// one run: the other findings still need a history. Such a record has no
+    /// clones, so it credits each clone group that an earlier run stored as
+    /// resolved. A record with `--only dead-code,dupes,health` or a record
+    /// before the config change can store clone groups.
     pub const fn records_impact(self) -> bool {
         self.is_full_without_dupes() && (self.dupes || self.duplicates_off_in_config)
     }

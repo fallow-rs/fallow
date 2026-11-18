@@ -1,5 +1,6 @@
 //! An older binary must not rewrite an Impact store that a newer Fallow wrote.
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use super::common::{CommandOutput, run_fallow_raw_with_env};
@@ -194,27 +195,36 @@ fn record_counts_after_runs_with_args(
     let mut bare = vec!["--root", root, "--format", "json", "--quiet"];
     bare.extend_from_slice(bare_args);
     for args in [audit, bare] {
-        let mut cmd = std::process::Command::new(super::common::fallow_bin());
-        cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
-        super::common::scrub_analysis_env(&mut cmd);
-        for name in CI_ENV_VARS {
-            cmd.env_remove(name);
-        }
-        for (key, value) in isolated_env(home) {
-            cmd.env(key, value);
-        }
-        let output = cmd.args(&args).output().expect("run fallow");
-        assert!(
-            output.status.code().is_some_and(|code| code < 2),
-            "{args:?} failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
+        run_recording(home, &args);
     }
 
-    let store: serde_json::Value =
-        serde_json::from_str(&read(&find_store(home))).expect("store json");
+    let store = read_store_json(home);
     let count = |field: &str| store[field].as_array().map_or(0, Vec::len);
     (count("records"), count("project_records"))
+}
+
+/// Run fallow with `args` outside CI, with the isolated config dirs of `home`,
+/// so that the record gate can write the Impact store.
+fn run_recording(home: &Path, args: &[&str]) {
+    let mut cmd = std::process::Command::new(super::common::fallow_bin());
+    cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
+    super::common::scrub_analysis_env(&mut cmd);
+    for name in CI_ENV_VARS {
+        cmd.env_remove(name);
+    }
+    for (key, value) in isolated_env(home) {
+        cmd.env(key, value);
+    }
+    let output = cmd.args(args).output().expect("run fallow");
+    assert!(
+        output.status.code().is_some_and(|code| code < 2),
+        "{args:?} failed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
+fn read_store_json(home: &Path) -> serde_json::Value {
+    serde_json::from_str(&read(&find_store(home))).expect("store json")
 }
 
 /// A project in the system temp folder is a test fixture or a throwaway clone.
@@ -364,7 +374,7 @@ fn audit_skip_dupes_records_when_duplication_is_off_in_the_config() {
 }
 
 /// With `duplicates.enabled: false`, `--skip dupes` narrows nothing in either
-/// command. No run fills the clone history, so both runs record.
+/// command, so both runs record.
 #[test]
 fn skip_dupes_records_both_runs_when_duplication_is_off_in_the_config() {
     let Some(project) = project_outside_temp_folder("impact-both-skip-dupes-off-") else {
@@ -425,4 +435,96 @@ fn skip_dupes_records_no_run_when_duplication_is_on() {
         ),
         (0, 0)
     );
+}
+
+/// A function body long enough to form a clone group when two files hold it.
+fn cloned_function(name: &str) -> String {
+    let mut source = format!("export function {name}(items: number[]) {{\n  const out = [];\n");
+    for step in 0..12 {
+        writeln!(
+            source,
+            "  out.push(items.map((item) => item * {step}).filter((value) => value > {step}));"
+        )
+        .expect("write to String");
+    }
+    source.push_str("  return out;\n}\n");
+    source
+}
+
+/// With `duplicates.enabled: false`, a run with `--only dead-code,dupes,health`
+/// still runs duplication and fills the clone frontier. A later `--skip dupes`
+/// record has no clones, so it credits each stored clone group as resolved.
+#[test]
+fn skip_dupes_record_credits_clones_that_an_earlier_run_stored() {
+    let Some(project) = project_outside_temp_folder("impact-skip-dupes-seeded-clones-") else {
+        return;
+    };
+    let home = tempfile::tempdir().expect("home tempdir");
+    let dir = project.path();
+    std::fs::create_dir_all(dir.join("src")).expect("create src");
+    std::fs::write(
+        dir.join(".fallowrc.json"),
+        r#"{"duplicates": {"enabled": false}}"#,
+    )
+    .expect("write config");
+    std::fs::write(
+        dir.join("package.json"),
+        r#"{"name":"impact-seeded-clones","main":"src/index.ts"}"#,
+    )
+    .expect("write package.json");
+    std::fs::write(
+        dir.join("src/index.ts"),
+        "import { first } from './first';\nimport { second } from './second';\nexport const used = [first, second];\n",
+    )
+    .expect("write index");
+    std::fs::write(dir.join("src/first.ts"), cloned_function("first")).expect("write first");
+    std::fs::write(dir.join("src/second.ts"), cloned_function("second")).expect("write second");
+    super::common::git(dir, &["init", "-q", "-b", "main"]);
+    super::common::commit_all(dir, "init");
+    let root = dir.to_str().expect("utf8 root");
+    let enable = run_isolated(
+        home.path(),
+        &["impact", "enable", "--root", root, "--quiet"],
+    );
+    assert_eq!(enable.code, 0, "enable failed: {}", enable.stderr);
+    let bare = ["--root", root, "--format", "json", "--quiet"];
+    let clone_groups = |store: &serde_json::Value| -> usize {
+        store["clone_frontier"].as_object().map_or(0, |worktrees| {
+            worktrees
+                .values()
+                .filter_map(serde_json::Value::as_object)
+                .map(serde_json::Map::len)
+                .sum()
+        })
+    };
+
+    run_recording(
+        home.path(),
+        &[&bare[..], &["--only", "dead-code,dupes,health"]].concat(),
+    );
+    let seeded = read_store_json(home.path());
+    assert_eq!(
+        seeded["project_records"].as_array().map_or(0, Vec::len),
+        1,
+        "{seeded:#}"
+    );
+    assert_eq!(clone_groups(&seeded), 1, "{seeded:#}");
+    assert_eq!(seeded["resolved_total"], 0, "{seeded:#}");
+
+    run_recording(home.path(), &[&bare[..], &["--skip", "dupes"]].concat());
+    let store = read_store_json(home.path());
+    assert_eq!(
+        store["project_records"].as_array().map_or(0, Vec::len),
+        2,
+        "{store:#}"
+    );
+    assert_eq!(clone_groups(&store), 0, "{store:#}");
+    assert_eq!(store["resolved_total"], 1, "{store:#}");
+    let kinds: Vec<&str> = store["recent_resolved"]
+        .as_array()
+        .expect("recent_resolved")
+        .iter()
+        .filter_map(|event| event["kind"].as_str())
+        .collect();
+    assert_eq!(kinds, ["code-duplication"], "{store:#}");
 }

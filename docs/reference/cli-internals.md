@@ -1162,12 +1162,14 @@ selection. Both commands use one rule, `AuditAnalysisSelection::records_impact`:
   not depend on the flags.
 
 With `duplicates.enabled: false`, `--skip dupes` and `--only dead-code,health`
-narrow nothing, so both commands write a record. No run fills the clone
-frontier of such a project, so a record without clones credits no clone as
-resolved. When the project has duplication on, `--skip dupes` writes no record
-in either command. `audit.dupes: false` writes no audit record: the bare run
-ignores that key, so the clone frontier that both runs share would credit each
-missing clone as resolved.
+narrow nothing, so both commands write a record. A record without clones
+credits each clone group in the stored clone frontier as resolved. A record
+that ran duplication fills that frontier. With duplication off, a run with
+`--only dead-code,dupes,health` writes such a record. A run before the config
+turned duplication off can also fill it. When the project has duplication on,
+`--skip dupes` writes no record in either command. `audit.dupes: false` writes
+no audit record: the bare run ignores that key, so the clone frontier that both
+runs share would credit each missing clone as resolved.
 
 Do not read a selection key outside the config crate. The tests in
 `crates/cli/src/selection_key_guard_tests.rs` fail when a production file
