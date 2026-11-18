@@ -2021,11 +2021,7 @@ button {
   cursor: help;
 }
 
-/* The floating tip. hint.ts positions it with position:fixed left/top via
-   computeTipPosition; this rule carries the visual style formerly on the
-   ::after pseudo-element. Tokens keep it theme-aware; pointer-events off so
-   it never blocks a click. No transition, so it is instant and honours
-   prefers-reduced-motion by construction. */
+/* Let clicks pass through the floating tip to the controls beneath it. */
 .hint-tip {
   position: fixed;
   z-index: 50;

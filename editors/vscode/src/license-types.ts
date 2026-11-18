@@ -63,16 +63,6 @@ export interface LicenseStatusJson {
 }
 
 /**
- * Structured JSON error envelope the CLI emits on stdout under `--format
- * json` (shared shape across fallow commands).
- */
-export interface LicenseErrorJson {
-  readonly error: true;
-  readonly message: string;
-  readonly exit_code: number;
-}
-
-/**
  * Result of parsing license CLI stdout. `Result`-style discriminated union so
  * callers branch on `ok` rather than catching thrown parse errors.
  */

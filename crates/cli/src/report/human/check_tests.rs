@@ -155,12 +155,8 @@ fn collect_matching_rules_covers_dependency_and_component_health_findings() {
 
 #[test]
 fn collect_matching_rules_routes_mixed_client_server_barrels() {
-    // A file whose ONLY finding is a mixed-client-server-barrel must still
-    // surface its CODEOWNERS rule in the `--group-by owner` "matched by"
-    // header. Reverting the `mixed_client_server_barrels` loop in
-    // `collect_matching_rules` makes this assertion fail (empty rules),
-    // pinning the fix that was previously missing alongside the sibling
-    // invalid-client-export / misplaced-directive loops.
+    // This file has only a mixed client/server barrel finding. Its CODEOWNERS
+    // rule must still appear in the `--group-by owner` match header.
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
     results

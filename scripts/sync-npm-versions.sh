@@ -144,7 +144,6 @@ update_fallow_crate_version() {
   "
 }
 
-# Update main fallow package (version + optionalDependencies)
 update_optional_deps "$ROOT/npm/fallow/package.json"
 echo "  Updated fallow/package.json → $VERSION"
 
@@ -157,7 +156,6 @@ echo "  Updated similar-code sidecar Cargo version → $VERSION"
 update_fallow_crate_version
 echo "  Updated fallow crate version and fallow-cli pin → $VERSION"
 
-# Update Node bindings package (version + optionalDependencies)
 if [ "$SKIP_NAPI" = "1" ]; then
   echo "  Skipped crates/napi (--skip-napi)"
 else
@@ -183,10 +181,9 @@ if [ -f "$ROOT/tools/type-aware-sidecar/package-lock.json" ]; then
   echo "  Updated tools/type-aware-sidecar/package-lock.json → $VERSION"
 fi
 
-# Update platform-specific npm packages
 for pkg in "$ROOT"/npm/*/package.json; do
   case "$pkg" in
-    */fallow/package.json|*/fallow-similar-code/package.json) continue ;; # Already handled above
+    */fallow/package.json|*/fallow-similar-code/package.json) continue ;;
   esac
   [ -f "$pkg" ] || continue
   update_version "$pkg"

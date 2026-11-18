@@ -1796,10 +1796,8 @@ mod tests {
         assert!(diagnostics[0].message.contains("deno.jsonc"));
     }
 
-    /// A member reached through two workspace sources (npm glob + tsconfig
-    /// reference) is diagnosed, and diagnosed ONCE: the two sources produce
-    /// byte-identical diagnostics, so the discovery fold reports the member
-    /// once where every envelope used to report it twice (issue #2366).
+    /// Workspace discovery reports one diagnostic when an npm glob and a tsconfig
+    /// reference reach the same malformed member (issue #2366).
     ///
     /// That the tsconfig leg replayed the memoized `Err` rather than silently
     /// resolving is NOT observable here (both `Ok(None)` and `Err` fall back

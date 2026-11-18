@@ -1145,11 +1145,8 @@ for (const i of items) { use(i); }
 
     #[test]
     fn attribute_binding_expressions_are_scored() {
-        // A `{ ... }` binding inside a tag carries the same expression complexity
-        // as Vue's `:class` and Angular's `[class]`, so it must be scored (it is
-        // NOT reached by the top-level text-interpolation walk). Parity
-        // regression: this whole class was previously dropped because the tag
-        // interior was skipped wholesale.
+        // The text interpolation walk does not visit tag attributes.
+        // Score Svelte attribute bindings like Vue's `:class` and Angular's `[class]`.
         let class_bind = single_unit(r#"<div class={a && b ? "x" : (c || d ? "y" : "z")}>t</div>"#)
             .expect("an attribute binding with logic has complexity");
         assert!(

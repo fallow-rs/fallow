@@ -442,7 +442,6 @@ export const renderTreemap = (state: AppState): void => {
     canvas.height = Math.round(height * dpr);
   }
 
-  // First render: start the staggered reveal.
   if (!tm.revealed) {
     tm.revealed = true;
     if (!state.reducedMotion) {

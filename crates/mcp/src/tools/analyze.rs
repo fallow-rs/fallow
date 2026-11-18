@@ -225,13 +225,8 @@ fn apply_issue_type_filter(filters: &mut DeadCodeFilters, issue_type: &str) -> R
 
 /// Refusal for an issue-type selector the `analyze` tool does not accept.
 ///
-/// The accepted vocabulary is in hand at the refusal point, so a near miss
-/// names the selector the caller meant instead of leaving them to diff their
-/// token against the full list. Two matchers answer two different misses: the
-/// edit-distance one catches a slipped keystroke, and the affinity scorer
-/// catches a caller who spelled out a name fallow abbreviates
-/// (`unused-dependencies`), which is many edits away and used to fall through
-/// to a bare dump of the whole vocabulary.
+/// Edit distance catches typos. The affinity score catches names that spell
+/// out an abbreviation, such as `unused-dependencies`.
 fn unknown_issue_type_error(issue_type: &str) -> String {
     let names = ISSUE_TYPE_FLAGS.iter().map(|&(name, _)| name);
     let suggestion = nearest_name(issue_type, names.clone())

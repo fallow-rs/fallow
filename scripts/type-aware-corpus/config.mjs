@@ -102,34 +102,28 @@ const validateProjectSource = (project, dependencies) => {
   );
 };
 
-const expectedCandidates = (role) => new Map([["zero-control", "zero"]]).get(role) ?? "nonzero";
-
 const validStringList = (values) =>
   Array.isArray(values) &&
   values.every((value) => typeof value === "string" && value.trim() !== "");
-
-const validFeatureBuckets = validStringList;
 
 /** The Fallow config that a project with `ignore_patterns` runs with, or null. */
 export const projectFallowConfig = (project) =>
   project.ignore_patterns === undefined ? null : { ignorePatterns: project.ignore_patterns };
 
 const validateProjectContract = (project, fail) => {
-  const expectation = expectedCandidates(project.role);
+  const expectation = project.role === "zero-control" ? "zero" : "nonzero";
   requireValid(
     project.candidate_expectation === expectation,
     `${project.id}.candidate_expectation must be ${expectation}`,
     fail,
   );
   requireValid(
-    validFeatureBuckets(project.feature_buckets),
+    validStringList(project.feature_buckets),
     `${project.id}.feature_buckets must be an array of non-empty strings`,
     fail,
   );
-  const accuracyNeedsBucket = [
-    project.role === "accuracy-core",
-    project.feature_buckets.length === 0,
-  ].every(Boolean);
+  const accuracyNeedsBucket =
+    project.role === "accuracy-core" && project.feature_buckets.length === 0;
   requireValid(
     !accuracyNeedsBucket,
     `${project.id} must declare at least one semantic feature bucket`,

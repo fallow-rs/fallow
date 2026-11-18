@@ -6048,11 +6048,9 @@ fn count_occurrences(haystack: &str, needle: &str) -> usize {
 
 /// Regression test for issue #557: `fallow --score` (bare combined mode) must
 /// render the health score in human output, and must render it EXACTLY ONCE.
-/// The score has always been present in JSON / SARIF / CodeClimate; only the
-/// terminal renderer was missing the call into `render_health_score`. The
-/// "exactly once" assertion guards the second half of the fix: a naive
-/// orientation-header render would double the line because the downstream
-/// Complexity section's own `print_health_human` call would render it again.
+/// The "exactly once" assertion matters because the Complexity section's own
+/// `print_health_human` call also renders the score, so an extra render in
+/// the orientation header would show the line twice.
 #[test]
 fn combined_score_renders_health_score_exactly_once() {
     let output = run_fallow_combined("complexity-project", &["--score"]);
@@ -6391,11 +6389,8 @@ fn health_churn_file_powers_hotspots_and_ownership_without_git() {
 
 #[test]
 fn health_hotspots_invalid_since_emits_single_document() {
-    // Regression: a malformed `--since` used to print an error JSON document
-    // AND THEN the full health report (two documents on stdout, breaking the
-    // single-document `--format json` contract). The churn fetch now degrades
-    // to "no churn, continue" and routes the diagnostic to tracing, so stdout
-    // carries exactly ONE JSON document (the health report), exit 0.
+    // Malformed `--since` must not put a churn error document on stdout.
+    // The health report remains the only JSON document, and the run exits 0.
     let dir = tempdir().unwrap();
     write_file(
         &dir.path().join("package.json"),
@@ -10528,8 +10523,7 @@ fn health_override_outstanding_is_not_stolen_by_a_same_named_unit() {
     assert_no_insufficient_row_without_outstanding(&json);
 }
 
-/// Two same-named units that land on the same status used to collapse into one
-/// row, dropping the other unit's metrics from the report entirely.
+/// Distinct units must keep separate metrics even when both name and status match.
 #[test]
 fn health_override_rows_do_not_collapse_across_same_named_units() {
     let dir = tempdir().expect("create temp dir");
@@ -10623,9 +10617,8 @@ fn widget_svelte_comment_row(text: &str) -> String {
         .to_owned()
 }
 
-/// The ceiling a reader sees must be the one the finding was measured with, in
-/// every format and on both the direct and the `report --from` path. SARIF and
-/// the CodeClimate-derived comment formats used to disagree inside one run.
+/// Direct output and `report --from` must show the ceiling the rule applied
+/// to the finding, in every supported format under test.
 #[test]
 fn health_formats_agree_on_an_override_affected_ceiling() {
     let dir = tempdir().expect("create temp dir");

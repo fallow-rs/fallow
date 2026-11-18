@@ -824,19 +824,9 @@ fn codeclimate_dep_with_zero_line_omits_line_number() {
     assert_eq!(output[0]["location"]["lines"]["begin"], 1);
 }
 
-/// Production-mode regression: rules can flip to `Severity::Off` while
-/// the matching findings slice arrives empty (the analyzer's own off-
-/// rule short-circuit clears the vec, but the generic-iterator helpers
-/// previously called `severity_to_codeclimate` before checking
-/// emptiness and panicked at `Severity::Off`).
-/// `fallow dead-code --format codeclimate --production` on any project
-/// with a `--production`-suppressed dep / export / member rule used to
-/// exit 101 with `entered unreachable code` at the `Severity::Off` arm
-/// of `severity_to_codeclimate`. Both those helpers and that mapper now
-/// live in `crates/api/src/dead_code_codeclimate.rs`.
-/// This test exercises all three previously-vulnerable helpers
-/// (`push_dep_cc_issues`, `push_unused_export_issues`,
-/// `push_unused_member_issues`) through `api_codeclimate_issues`.
+/// Production mode can turn a rule off and return an empty findings slice.
+/// The CodeClimate helpers must check that slice before they map its severity.
+/// `Severity::Off` has no CodeClimate equivalent.
 #[test]
 fn api_codeclimate_issues_with_off_severity_and_empty_findings_does_not_panic() {
     let root = PathBuf::from("/project");

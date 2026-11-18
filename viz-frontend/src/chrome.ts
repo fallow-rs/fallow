@@ -24,6 +24,7 @@ import { ROW_IDS } from "./shell";
 export interface ChromeRefs {
   topbar: HTMLElement;
   toolbar: HTMLElement;
+  statusline: HTMLElement;
   search: HTMLInputElement;
   searchCount: HTMLElement;
   crumbs: HTMLElement;
@@ -498,6 +499,7 @@ export const buildChrome = (
   const refs: ChromeRefs = {
     topbar,
     toolbar,
+    statusline,
     search,
     searchCount,
     crumbs,
@@ -526,13 +528,6 @@ export const buildChrome = (
   requestAnimationFrame(refreshLensOverflow);
 
   return refs;
-};
-
-/** The statusline element is appended after the stage by main.ts. */
-export const statuslineOf = (refs: ChromeRefs): HTMLElement => {
-  const line = refs.crumbs.parentElement;
-  if (!line) throw new Error("statusline detached");
-  return line;
 };
 
 // ── Per-render updates ──────────────────────────────────────────

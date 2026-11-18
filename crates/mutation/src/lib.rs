@@ -371,7 +371,7 @@ fn instrument_text(
         .map(|role| blocks::protected_spans(&parsed.program, role))
         .unwrap_or_default();
     // A component block has no module exports to wrap.
-    let record = options.record_exports && input.role.is_none() && input.prelude;
+    let record = options.record_exports && input.role.is_none();
     let insertions = header_insertions(&parsed.program, source, input.prelude, record);
     let line_starts = line_starts(source);
 

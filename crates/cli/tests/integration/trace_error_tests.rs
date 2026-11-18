@@ -577,9 +577,6 @@ fn quiet_human_output_keeps_the_unparsed_line_count() {
     );
 }
 
-/// The empty state used to state the same fact three times (a literal notice,
-/// an all-zero counts line, and the prose `reason`) and then stop, with no next
-/// step and nothing saying the input can be piped.
 #[test]
 fn the_empty_state_states_the_fact_once_and_says_what_to_do() {
     let dir = tempdir().unwrap();

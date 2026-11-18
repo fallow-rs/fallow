@@ -368,10 +368,8 @@ struct AnalysisSetup {
     progress: progress::AnalysisProgress,
     project: project::ProjectState,
     root_pkg: Option<PackageJson>,
-    /// Non-source config-candidate files captured by the same discovery walk,
-    /// used to resolve plugin config patterns in-memory (empty in production
-    /// mode, where the filesystem path is kept). Carried alongside `project`
-    /// rather than inside it to avoid churning `ProjectState`'s many callers.
+    /// The source walk collects these non-source files for plugin config lookup.
+    /// Production mode uses filesystem lookup and leaves this list empty.
     config_candidates: Vec<std::path::PathBuf>,
     discover_ms: f64,
     workspaces_ms: f64,
@@ -2712,8 +2710,8 @@ fn layer_links(
 ///
 /// Each root is classified on its own: the project root plus every workspace
 /// root, and a pattern is judged by the config of the root whose prefix it
-/// carries. One custom `nuxt.config` in a monorepo therefore no longer keeps
-/// every other app's patterns. See issue #2737.
+/// carries. One custom `nuxt.config` in a monorepo does not keep the patterns
+/// of every other app. See issue #2737.
 ///
 /// A surface that KEPT its patterns records one advisory per root and surface,
 /// because the user enabled `autoImports` and did not get the findings it

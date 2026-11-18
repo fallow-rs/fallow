@@ -3238,17 +3238,8 @@ impl UnusedProtectedClassMemberFinding {
     }
 }
 
-/// Build the standard `add-to-config` `ignoreDependencies` suppress action
-/// for any finding whose primary key is a package name. Used by the four
-/// dependency-family wrappers (unused / unlisted / type-only / test-only).
-/// The `_suppress_issue_kind` argument is currently unused; the pre-2.76
-/// `inject_actions` post-pass also did not embed the issue kind in this
-/// shape (no inline `// fallow-ignore-next-line ...` comment because the
-/// finding is anchored at a package.json line, not at a source-file line).
-fn build_ignore_dependencies_suppress_action(
-    package_name: &str,
-    _suppress_issue_kind: &str,
-) -> IssueAction {
+/// Build an `ignoreDependencies` config action for a package manifest finding.
+fn build_ignore_dependencies_suppress_action(package_name: &str) -> IssueAction {
     IssueAction::AddToConfig(AddToConfigAction {
         kind: AddToConfigKind::AddToConfig,
         auto_fixable: false,
@@ -3312,7 +3303,7 @@ impl UnusedDependencyFinding {
     /// to `move-dependency` when the dep is imported by another workspace.
     #[must_use]
     pub fn with_actions(dep: UnusedDependency) -> Self {
-        let actions = build_unused_dependency_actions(&dep, "dependencies", "unused-dependency");
+        let actions = build_unused_dependency_actions(&dep, "dependencies");
         Self {
             finding_id: None,
             dep,
@@ -3373,8 +3364,7 @@ impl UnusedDevDependencyFinding {
     /// Build the wrapper.
     #[must_use]
     pub fn with_actions(dep: UnusedDependency) -> Self {
-        let actions =
-            build_unused_dependency_actions(&dep, "devDependencies", "unused-dev-dependency");
+        let actions = build_unused_dependency_actions(&dep, "devDependencies");
         Self {
             finding_id: None,
             dep,
@@ -3435,8 +3425,7 @@ impl UnusedOptionalDependencyFinding {
     /// Build the wrapper.
     #[must_use]
     pub fn with_actions(dep: UnusedDependency) -> Self {
-        let actions =
-            build_unused_dependency_actions(&dep, "optionalDependencies", "unused-dependency");
+        let actions = build_unused_dependency_actions(&dep, "optionalDependencies");
         Self {
             finding_id: None,
             dep,
@@ -3498,7 +3487,7 @@ impl UnlistedDependencyFinding {
                 available_in_catalogs: None,
                 suggested_target: None,
             }),
-            build_ignore_dependencies_suppress_action(&dep.package_name, "unlisted-dependency"),
+            build_ignore_dependencies_suppress_action(&dep.package_name),
         ];
         Self {
             finding_id: None,
@@ -3635,7 +3624,7 @@ impl TypeOnlyDependencyFinding {
                 available_in_catalogs: None,
                 suggested_target: None,
             }),
-            build_ignore_dependencies_suppress_action(&dep.package_name, "type-only-dependency"),
+            build_ignore_dependencies_suppress_action(&dep.package_name),
         ];
         Self {
             finding_id: None,
@@ -3698,7 +3687,7 @@ impl TestOnlyDependencyFinding {
                 available_in_catalogs: None,
                 suggested_target: None,
             }),
-            build_ignore_dependencies_suppress_action(&dep.package_name, "test-only-dependency"),
+            build_ignore_dependencies_suppress_action(&dep.package_name),
         ];
         Self {
             finding_id: None,
@@ -3764,10 +3753,7 @@ impl DevDependencyInProductionFinding {
                 available_in_catalogs: None,
                 suggested_target: None,
             }),
-            build_ignore_dependencies_suppress_action(
-                &dep.package_name,
-                "dev-dependency-in-production",
-            ),
+            build_ignore_dependencies_suppress_action(&dep.package_name),
         ];
         Self {
             finding_id: None,
@@ -4532,15 +4518,6 @@ impl_gated_finding!(
     crate::results::StaleSuppression,
 );
 
-// ── Position-0 invariant golden tests ───────────────────────────
-//
-// These tests document the load-bearing position-0 semantics that flow
-// downstream into the GitHub Action / GitLab CI jq scripts, the MCP server
-// `actions[0].type` pattern-match, and the VS Code LSP code-action
-// rendering. Snapshot tests assert structural equality; these named tests
-// document WHY position 0 has a specific value, so a future refactor that
-// re-orders actions tells you what broke instead of just "the snapshot
-// changed".
 #[path = "output_dead_code_actions.rs"]
 mod output_dead_code_actions;
 use output_dead_code_actions::{
@@ -4551,22 +4528,14 @@ use output_dead_code_actions::{
 #[path = "output_dead_code_caveat_tokens.rs"]
 mod caveat_tokens;
 
-/// The gate, pinned as one property across every finding type rather than as
-/// one test per mutation surface.
-///
-/// Three separate reviewers found three separate mutation paths that had never
-/// learned about the caveat, because each earlier round fixed the door it
-/// found. These tests assert the invariant itself: for every dead-code finding
-/// that can carry a caveat, a caveated finding exposes NO auto-fixable action,
-/// and an uncaveated one is untouched. Adding a caveated finding type without
-/// registering it in `impl_caveated_finding!` fails to compile at the
-/// `set_reachability_caveats` call the annotation pass makes; adding one that
-/// exposes an auto-fixable mutation and never gets annotated is what
-/// `every_auto_fixable_dead_code_mutation_is_gated` catches.
+/// A caveated finding must expose no automatic fix. An uncaveated finding keeps its actions.
+/// The annotation pass requires an implementation of `CaveatedFinding`.
+/// The tests also cover finding types that can expose automatic fixes.
 #[cfg(test)]
 #[path = "output_dead_code_mutation_gate.rs"]
 mod mutation_gate;
 
+// These tests pin the primary action at actions[0] for consumers that read it.
 #[cfg(test)]
 #[path = "output_dead_code_position_0_invariants.rs"]
 mod position_0_invariants;

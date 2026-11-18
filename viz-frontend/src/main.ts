@@ -38,7 +38,7 @@ import {
   syncStandaloneForLens,
 } from "./graph";
 import { buildHelpOverlay } from "./overlays";
-import { buildChrome, statuslineOf, updateChrome } from "./chrome";
+import { buildChrome, updateChrome } from "./chrome";
 import type { ChromeRefs } from "./chrome";
 import { createPanel, panelRenderKey, renderPanel } from "./panel";
 import { hideTooltip, showDirTooltip, showFileTooltip, showRoadTooltip } from "./tooltip";
@@ -232,7 +232,7 @@ const init = (): void => {
   // The first graph build runs in steps behind the loading screen. Until it
   // ends, a render would start a second, blocking build.
   let booting = state.view === "graph";
-  app.appendChild(statuslineOf(refs));
+  app.appendChild(refs.statusline);
 
   // Floating [data-tip] hints: one body-level element, delegated globally so
   // it survives panel rebuilds and escapes the panel's overflow clip.

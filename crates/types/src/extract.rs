@@ -55,9 +55,6 @@ pub struct ModuleInfo {
     /// Static member access expressions (e.g., `Status.Active`).
     pub member_accesses: Arc<[MemberAccess]>,
     /// Typed semantic facts produced by extraction for cross-layer analysis.
-    ///
-    /// This carries facts that were previously encoded as synthetic
-    /// `member_accesses` strings. Extraction and analysis now use typed facts.
     pub semantic_facts: Arc<[SemanticFact]>,
     /// Identifiers used in whole-object access patterns.
     pub whole_object_uses: Arc<[String]>,
@@ -2202,8 +2199,7 @@ pub fn has_dynamic_custom_element_render(module: &ModuleInfo) -> bool {
 /// Typed-first view over semantic extraction facts.
 ///
 /// Extraction populates `semantic_facts` directly. The `member_accesses` slice
-/// remains available for consumers that need ordinary source member accesses,
-/// but it is no longer decoded as a string protocol for semantic facts.
+/// holds only ordinary source member accesses, not encoded semantic facts.
 #[derive(Debug, Clone, Copy)]
 pub struct SemanticFactView<'a> {
     semantic_facts: &'a [SemanticFact],
@@ -3541,8 +3537,8 @@ pub struct ParseResult {
     pub modules: Vec<ModuleInfo>,
     /// Files discovered with stable IDs but unreadable by the parser.
     pub read_failures: Vec<SourceReadFailure>,
-    /// Files that parsed with diagnostics, so their extracted module may be
-    /// incomplete. Reported, never used to withhold findings.
+    /// Files whose extracted modules may be incomplete because of parse diagnostics.
+    /// Analysis keeps findings visible and attaches caveats to affected findings.
     pub parse_degradations: Vec<SourceParseDegradation>,
     /// Number of files whose parse results were loaded from cache (unchanged).
     pub cache_hits: usize,

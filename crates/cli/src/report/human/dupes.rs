@@ -593,8 +593,6 @@ pub(in crate::report) fn print_duplication_summary(
 /// `Clone families` and `Clone groups` count the rendered vectors while
 /// `Duplicated lines` and `Duplication rate` describe the whole corpus, so
 /// without this the block reads as four numbers from one scope when it is two.
-/// The note used to name the group axis only, which certified the truncated
-/// family count as corpus-wide.
 fn print_duplication_summary_scope_note(report: &DuplicationReport) {
     let groups_omitted = report.clone_groups_omitted();
     let families_omitted = report.clone_families_omitted();

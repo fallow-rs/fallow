@@ -933,14 +933,8 @@ fn fix_apply_keeps_off_graph_export_and_removes_high_confidence_one() {
     assert_eq!(json["skipped_low_confidence_exports"].as_u64(), Some(1));
 }
 
-/// The reproduction that made this a defect rather than a gap: a syntax error
-/// on line 1 hides the import on line 2, `needed` reads as unused, the finding
-/// correctly carries the degraded-parse caveat AND `auto_fixable: true`, and
-/// `fix` used to plan and apply the removal anyway, breaking the build with a
-/// mutation fallow itself had flagged as resting on incomplete evidence. The
-/// declared `lodash` is the same hole one array over: the only import of it
-/// sits under the same syntax error, and `remove-dependency` empties the
-/// manifest.
+/// A parse error hides the only imports of `needed` and `lodash`.
+/// Removing either would break the consumer once its syntax is repaired.
 fn write_degraded_parse_project(root: &std::path::Path) {
     std::fs::create_dir_all(root.join("src")).unwrap();
     std::fs::write(
@@ -1168,16 +1162,9 @@ fn fix_apply_leaves_a_degraded_parse_project_byte_identical() {
     );
 }
 
-/// The second door onto the same build-breaking mutation, and the one this
-/// project's default settings leave open: no syntax error anywhere, just a file
-/// the per-file size guard skipped before reading it. `src/huge.ts` imports
-/// `needed` on its first line and is never opened, so `needed` reads as an
-/// unused export with an auto-fixable `remove-export` action, and `fix --yes`
-/// used to strip the `export` keyword while `huge.ts` still imported it.
-///
-/// The withholding is not wired to the size skip. It follows the caveat the
-/// analysis stamps on the finding, which every diagnostic kind
-/// `WorkspaceDiagnosticKind::source_never_analyzed` accepts raises.
+/// A file skipped by the size guard contains the only import of `needed`.
+/// `fix` must withhold the export removal based on the finding's caveat.
+/// This applies to every `WorkspaceDiagnosticKind::source_never_analyzed` case.
 fn write_skipped_file_project(root: &std::path::Path) {
     std::fs::create_dir_all(root.join("src")).unwrap();
     std::fs::write(
@@ -1319,10 +1306,9 @@ fn fix_still_removes_a_dependency_no_degraded_file_could_have_imported() {
 }
 
 /// A project whose only reference to `Color.Blue` lives in a file the size
-/// guard skips before reading it. Reproduced end to end before the fix:
-/// `fix --yes` deleted the member while `huge.ts` still referenced it, because
-/// member usage is collected by walking the member accesses of every module
-/// the run PARSED and no caveat had ever reached `unused_enum_members[]`.
+/// guard skips before reading it. Member usage comes only from modules that
+/// the run PARSED, so without a caveat on `unused_enum_members[]`, `fix --yes`
+/// deletes the member while `huge.ts` still references it.
 fn write_skipped_enum_member_project(root: &std::path::Path) {
     std::fs::create_dir_all(root.join("src")).unwrap();
     std::fs::write(

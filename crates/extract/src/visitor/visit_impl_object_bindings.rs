@@ -407,8 +407,7 @@ impl ModuleInfoExtractor {
         source: &str,
         reference: Option<Span>,
     ) -> Option<BindingClassProof> {
-        let (id, _) = self.direct_binding_value(source)?;
-        let (_, entry) = self.direct_binding_value(source)?;
+        let (id, entry) = self.direct_binding_value(source)?;
         let value = self.projection_value_view(id);
         let mut proof = value.iteration_proof.clone()?;
         let condition = if source.starts_with("this@") {

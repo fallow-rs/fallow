@@ -538,7 +538,6 @@ fn analysis_root_at_the_toplevel_is_unchanged() {
 fn ambiguous_diff_base_warns_instead_of_guessing_silently() {
     let dir = monorepo();
     let root = dir.path();
-    // Now `src/complex.js` resolves under the toplevel AND under packages/pkg.
     std::fs::create_dir_all(root.join("src")).expect("mkdir");
     std::fs::write(root.join("src/complex.js"), COMPLEX_JS).expect("write");
     git(root, &["add", "-A"]);

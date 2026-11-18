@@ -578,12 +578,6 @@ fn valid_package_name(name: &str) -> Option<&str> {
     is_package_name.then_some(name)
 }
 
-/// Extract unique subdirectory names referenced by the `exports` field keys.
-///
-/// For exports like `"./compat": { ... }`, `"./hooks/client": { ... }`,
-/// this returns `["compat", "hooks"]`. Used to discover sub-packages in
-/// projects that use the exports map to define their internal package structure
-/// (e.g., preact with `compat/`, `hooks/`, `debug/` sub-packages).
 fn extract_exports_subdirectories(exports: &serde_json::Value) -> Vec<String> {
     let Some(map) = exports.as_object() else {
         return Vec::new();

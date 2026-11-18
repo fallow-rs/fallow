@@ -1944,7 +1944,6 @@ assert_contains "$OUT_SINGULAR" "**1** clone group " "status-bar: singular clone
 assert_not_contains "$OUT_SINGULAR" "**1** clone groups" "status-bar: no '1 clone groups' grammar"
 assert_not_contains "$OUT_SINGULAR" "**1** health findings" "status-bar: no '1 health findings' grammar"
 
-# Complexity <details> summary pluralizes when functions_above_threshold == 1
 assert_contains "$OUT_SINGULAR" "(1 function above threshold)" "complexity dropdown: singular function"
 assert_not_contains "$OUT_SINGULAR" "(1 functions above threshold)" "complexity dropdown: no '1 functions' grammar"
 
@@ -1955,8 +1954,6 @@ assert_contains "$OUT_RSC" "| [Invalid client exports](" "combined: RSC invalid-
 assert_contains "$OUT_RSC" "| [Mixed client/server barrels](" "combined: RSC mixed-barrel row in breakdown"
 assert_contains "$OUT_RSC" "| [Misplaced directives](" "combined: RSC misplaced-directives row in breakdown"
 
-# Next.js routing keys (route_collisions + dynamic_segment_name_conflicts) were previously
-# absent from the combined-mode Code issues breakdown; assert they now render.
 OUT_ROUTING=$(jq '.check.route_collisions = [{"path": "src/app/(a)/p/page.tsx", "url": "/p", "conflicting_paths": ["src/app/(b)/p/page.tsx"], "actions": []}] | .check.dynamic_segment_name_conflicts = [{"path": "src/app/[id]/page.tsx", "position": "0", "conflicting_segments": ["id", "slug"], "actions": []}] | .check.total_issues = (.check.total_issues + 2)' "$FIXTURES/combined.json" | jq -r -f "$JQ_DIR/summary-combined.jq" 2>&1)
 assert_contains "$OUT_ROUTING" "| [Route collisions](" "combined: route-collisions row in breakdown"
 assert_contains "$OUT_ROUTING" "| [Dynamic segment conflicts](" "combined: dynamic-segment-conflicts row in breakdown"
@@ -2039,10 +2036,8 @@ echo "  summary-combined.jq (no scoped row when unfiltered):"
 assert_not_contains "$OUT" "changed files" "unfiltered: no scoped maintainability row"
 
 echo "  summary-combined.jq (conditional tips):"
-# Fixture has unused_exports and unused_dependencies → fix tip + @public tip
 assert_contains "$OUT" "fallow fix --dry-run" "tip: shows fix tip when fixable issues present"
 assert_contains "$OUT" "@public" "tip: shows @public tip when unused exports present"
-# Remove fixable categories → no tip block
 OUT_NO_FIX=$(jq '.check.unused_exports = [] | .check.unused_dependencies = [] | .check.unused_enum_members = [] | .check.circular_dependencies = [{"files":["a.ts","b.ts"],"length":2}] | .check.total_issues = 1' "$FIXTURES/combined.json" | jq -r -f "$JQ_DIR/summary-combined.jq" 2>&1)
 assert_not_contains "$OUT_NO_FIX" "fallow fix" "tip: no fix tip when no fixable issues"
 assert_not_contains "$OUT_NO_FIX" "@public" "tip: no @public tip when no unused exports"
@@ -3049,7 +3044,6 @@ echo "  comment.sh filtering with pre-computed file:"
 # Create a pre-computed changed files list (what analyze.sh produces)
 echo '["src/helpers/api.ts"]' > "$WORK_DIR/fallow-changed-files.json"
 
-# Run the filtering logic from comment.sh in the work dir
 OUT=$(cd "$WORK_DIR" && \
   CHANGED_SINCE="abc123" \
   INPUT_ROOT="." \

@@ -317,13 +317,9 @@ pub fn process_external_plugins(
 /// files), keyed by absolute directory, used to resolve plugin config patterns
 /// without re-walking the filesystem.
 ///
-/// Built once from the files the discovery walk already collected, so a
-/// `discover_config_files` lookup that previously cost one filesystem stat per
-/// `(plugin, ancestor-directory, pattern)` becomes an in-memory set lookup. The
-/// walk respects `.gitignore` / `ignorePatterns` / the hidden-directory
-/// allowlist, so config discovery via this index follows the same traversal
-/// rules as source discovery (the raw filesystem path used in production mode
-/// does not); see the crate docs / CHANGELOG for that deliberate refinement.
+/// The index uses the source walk's results, so it respects `.gitignore`,
+/// `ignorePatterns`, and the hidden-directory allowlist. The filesystem lookup
+/// in production mode does not use this index or the walk's traversal rules.
 pub struct ConfigCandidateIndex {
     dirs: FxHashMap<PathBuf, FxHashSet<OsString>>,
 }

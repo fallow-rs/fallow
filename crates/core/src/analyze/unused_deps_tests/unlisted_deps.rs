@@ -1142,8 +1142,7 @@ fn sibling_at_types_package_does_not_suppress_unlisted_check() {
 }
 
 struct WorkspaceImportCase {
-    #[expect(dead_code, reason = "keeps tempdir alive for workspace package files")]
-    tmp: tempfile::TempDir,
+    _temp_dir: tempfile::TempDir,
     root: PathBuf,
     graph: ModuleGraph,
     resolved_modules: Vec<ResolvedModule>,
@@ -1260,7 +1259,7 @@ fn build_workspace_case(spec: &WorkspaceCaseSpec<'_>, is_type_only: bool) -> Wor
     let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
 
     WorkspaceImportCase {
-        tmp,
+        _temp_dir: tmp,
         root,
         graph,
         resolved_modules,

@@ -16,6 +16,7 @@
   "files": [
     "bin",
     "scripts",
+    "!scripts/*.test.js",
     "README.md",
     "LICENSE"
   ],

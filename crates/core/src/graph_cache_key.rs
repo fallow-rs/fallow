@@ -49,10 +49,8 @@ pub fn plugin_resolve_input<'a>(
 /// had fully decoded. Every path this mode covers is hashed root-relative
 /// instead.
 ///
-/// `cache_config_hash` does NOT fold tsconfig `paths`, despite what this
-/// comment used to claim: it hashes extraction-affecting config plus external
-/// plugin names. tsconfig-derived aliases reach the mode through
-/// [`hash_path_aliases`].
+/// `cache_config_hash` covers external plugin names and custom flag settings.
+/// [`plugin_config_hash`] includes tsconfig-derived aliases through [`hash_path_aliases`].
 ///
 /// `production` and `ignore_patterns` intentionally stay out of this hash:
 /// they shape discovery, so changed file sets already miss through stable file

@@ -545,10 +545,6 @@ mod tests {
         assert_eq!(result, None);
     }
 
-    /// A bare colon used to parse into two empty halves and fail later with
-    /// "export or member '' not found in ''". It is now rejected up front by
-    /// the shared selector, with the same exit code and a diagnosis that names
-    /// the expected format.
     #[test]
     fn parse_trace_spec_colon_only() {
         let result = parse_trace_spec(":");

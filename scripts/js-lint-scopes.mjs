@@ -72,7 +72,7 @@ export const stagedLintTargets = (paths, scopes) =>
  * @param {string[]} args
  * @returns {number}
  */
-export const main = (args = process.argv.slice(2)) => {
+const main = (args = process.argv.slice(2)) => {
   const packageJson = JSON.parse(readFileSync(join(REPO_ROOT, "package.json"), "utf8"));
   try {
     assertScopesAgree(packageJson);

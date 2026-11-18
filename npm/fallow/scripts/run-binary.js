@@ -1,12 +1,5 @@
-// Shared launcher used by bin/fallow, bin/fallow-lsp, and bin/fallow-mcp.
-//
-// 1. Resolves the platform package for the current process (platform + arch + libc).
-// 2. Runs ensureVerified (Ed25519 + SHA-256 lazy first-run verify).
-// 3. Execs the platform binary.
-// 4. For `<bin> --version`, appends a `verified: ...` status line to stdout
-//    so procurement teams have a single command that surfaces the integrity
-//    posture (replaces the install-time confirmation message removed when
-//    postinstall verification was retired for RFC 868 readiness).
+// Shared launcher for bin/fallow, bin/fallow-lsp, and bin/fallow-mcp.
+// Version queries include a `verified:` status line on stdout for integrity checks.
 
 const { execFileSync } = require("node:child_process");
 const path = require("node:path");
@@ -337,7 +330,6 @@ function runBinary(binaryBaseName, options = {}) {
     process.exit(1);
   }
 
-  // Lazy first-run verify. Errors are user-facing.
   const verifyResult = ensureVerified({ platformPkgDir, packageName: pkg, manifestPath });
   if (!verifyResult.ok) {
     printVerifyError(verifyResult);
