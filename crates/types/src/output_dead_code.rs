@@ -988,16 +988,13 @@ impl BoundaryViolationFinding {
     /// Build the wrapper from a raw [`BoundaryViolation`].
     #[must_use]
     pub fn with_actions(violation: BoundaryViolation) -> Self {
+        let (description, note) = violation.refactor_action_text();
         let actions = vec![
             IssueAction::Fix(FixAction {
                 kind: FixActionType::RefactorBoundary,
                 auto_fixable: false,
-                description: "Move the import through an allowed zone or restructure the dependency"
-                    .to_string(),
-                note: Some(
-                    "This import crosses an architecture boundary that is not permitted by the configured rules"
-                        .to_string(),
-                ),
+                description: description.to_string(),
+                note: Some(note.to_string()),
                 available_in_catalogs: None,
                 suggested_target: None,
             }),

@@ -77,6 +77,10 @@ fn display_complexity_entry_name(name: &str) -> Cow<'_, str> {
 mod architecture;
 pub use architecture::build_markdown;
 
+#[path = "markdown_output_boundary.rs"]
+mod boundary_render;
+use boundary_render::format_markdown_boundary_violation;
+
 /// One line that names the findings the cascade filter hid. Markdown has no
 /// entry for a hidden finding, so this line is the only sign of them.
 fn push_cascade_note(out: &mut String, hidden: usize) {
@@ -724,28 +728,6 @@ fn format_markdown_package_cycle(
         ));
     }
     lines
-}
-
-fn format_markdown_boundary_violation(
-    v: &fallow_types::output_dead_code::BoundaryViolationFinding,
-    rel: &dyn Fn(&Path) -> String,
-) -> Vec<String> {
-    let via = v
-        .violation
-        .via_path
-        .as_ref()
-        .map_or_else(String::new, |via| {
-            format!(" via {}", markdown_code_span(&rel(via)))
-        });
-    vec![format!(
-        "- {}:{}  \u{2192} {} ({} \u{2192} {}){}",
-        markdown_code_span(&rel(&v.violation.from_path)),
-        v.violation.line,
-        markdown_code_span(&rel(&v.violation.to_path)),
-        v.violation.from_zone,
-        v.violation.to_zone,
-        via,
-    )]
 }
 
 fn format_markdown_boundary_coverage(

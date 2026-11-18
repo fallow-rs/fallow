@@ -179,6 +179,8 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
             line: 2,
             col: 0,
             via_path: None,
+            reason: fallow_types::results::BoundaryViolationReason::DisallowedZone,
+            public_api_paths: vec![],
         }));
     r.unprovided_injects
         .push(UnprovidedInjectFinding::with_actions(UnprovidedInject {

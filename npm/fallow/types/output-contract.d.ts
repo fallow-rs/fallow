@@ -410,6 +410,10 @@ export type MemberKind = ("enum_member" | "class_method" | "class_property" | "n
  */
 export type ReExportCycleKind = ("multi-node" | "self-loop")
 /**
+ * The rule that a boundary violation breaks.
+ */
+export type BoundaryViolationReason = ("disallowed_zone" | "internal_file")
+/**
  * Which rule-pack rule kind produced a [`PolicyViolation`].
  */
 export type PolicyRuleKind = ("banned-call" | "banned-import" | "banned-effect" | "banned-export" | "gdp-proof-producer")
@@ -5875,7 +5879,7 @@ from_path: string
 /**
  * The imported file that violates the boundary. Through a re-export chain,
  * the origin module that declares the symbol, not the barrel; a chain
- * stops at the first file of a `publicApi` zone, which it then names.
+ * stops at the first public entry file (`publicApi`), which it then names.
  */
 to_path: string
 /**
@@ -5903,6 +5907,12 @@ col: number
  * violation comes from a re-export chain. Absent for a direct import.
  */
 via_path?: (string | null)
+reason?: BoundaryViolationReason
+/**
+ * The public entry files of `to_zone` that the importer can use instead.
+ * Set only when `reason` is `internal_file`.
+ */
+public_api_paths?: string[]
 /**
  * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
  * `~<k>` suffix when several findings of one type share an identity.
@@ -15061,11 +15071,11 @@ patterns: string[]
  */
 file_count: number
 /**
- * Whether the zone holds the public entry files of a module
- * (`publicApi: true` in the boundary config). Omitted when false. This
- * field is not related to the `public_api` field of dead-code exports.
+ * Globs of the public entry files of the zone (`publicApi` in the
+ * boundary config), after the `autoDiscover` expansion. Omitted when
+ * empty. Not related to the `public_api` field of dead-code exports.
  */
-public_api?: boolean
+public_api?: string[]
 }
 /**
  * A boundary import rule, expanded to operate on concrete child zone

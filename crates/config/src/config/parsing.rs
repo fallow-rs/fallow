@@ -1587,6 +1587,7 @@ impl FallowConfig {
 
         for zone in &self.boundaries.zones {
             validate_user_globs(&zone.patterns, "boundaries.zones[].patterns", errors);
+            validate_user_globs(&zone.public_api, "boundaries.zones[].publicApi", errors);
             if let Some(root) = &zone.root
                 && let Err(e) = validate_user_path(root, "boundaries.zones[].root")
             {
@@ -1743,19 +1744,13 @@ impl FallowConfig {
                 .unwrap_or_else(|| "src".to_owned());
             boundaries.expand(&source_root);
         }
-        let mut errors: Vec<ZoneValidationError> = boundaries
-            .validate_public_api_zones()
-            .into_iter()
-            .map(|zone_name| ZoneValidationError::PublicApiWithAutoDiscover { zone_name })
-            .collect();
         let _logical_groups = boundaries.expand_auto_discover(root);
 
-        errors.extend(
-            boundaries
-                .validate_zone_references()
-                .into_iter()
-                .map(ZoneValidationError::UnknownZoneReference),
-        );
+        let mut errors: Vec<ZoneValidationError> = boundaries
+            .validate_zone_references()
+            .into_iter()
+            .map(ZoneValidationError::UnknownZoneReference)
+            .collect();
         errors.extend(
             boundaries
                 .validate_root_prefixes()

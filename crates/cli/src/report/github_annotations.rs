@@ -884,6 +884,36 @@ fn collect_check_package_cycles(env: &Value, out: &mut Vec<Annotation>) {
     }
 }
 
+/// The annotation text of one boundary violation. An `internal_file` finding
+/// names the public entry files of the target zone.
+fn boundary_annotation_message(violation: &Value) -> String {
+    let edge = format!(
+        "{} -> {}",
+        s(violation, "from_path"),
+        s(violation, "to_path")
+    );
+    if s(violation, "reason") != "internal_file" {
+        return format!(
+            "Import from zone '{}' to zone '{}' is not allowed.\n{edge}\n\nRoute the import through an allowed zone or restructure the dependency.",
+            s(violation, "from_zone"),
+            s(violation, "to_zone"),
+        );
+    }
+    let entries: Vec<&str> = arr(violation, "public_api_paths")
+        .filter_map(Value::as_str)
+        .collect();
+    let fix = if entries.is_empty() {
+        "No file of the zone matches its publicApi globs.".to_owned()
+    } else {
+        format!("Import it through {}.", entries.join(", "))
+    };
+    format!(
+        "{} is not a public entry file of zone '{}'.\n{edge}\n\n{fix}",
+        s(violation, "to_path"),
+        s(violation, "to_zone"),
+    )
+}
+
 fn collect_check_boundaries(env: &Value, out: &mut Vec<Annotation>) {
     for violation in arr(env, "boundary_violations") {
         push(
@@ -892,13 +922,7 @@ fn collect_check_boundaries(env: &Value, out: &mut Vec<Annotation>) {
             s(violation, "from_path"),
             Anchor::gated_line_col(violation),
             "Boundary violation".to_owned(),
-            format!(
-                "Import from zone '{}' to zone '{}' is not allowed.\n{} -> {}\n\nRoute the import through an allowed zone or restructure the dependency.",
-                s(violation, "from_zone"),
-                s(violation, "to_zone"),
-                s(violation, "from_path"),
-                s(violation, "to_path"),
-            ),
+            boundary_annotation_message(violation),
         );
     }
     push_each(

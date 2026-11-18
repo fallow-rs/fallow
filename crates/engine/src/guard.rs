@@ -390,14 +390,14 @@ mod tests {
                         patterns: vec!["src/domain/**".to_string()],
                         auto_discover: Vec::new(),
                         root: None,
-                        public_api: false,
+                        public_api: vec![],
                     },
                     BoundaryZone {
                         name: "shared".to_string(),
                         patterns: vec!["src/shared/**".to_string()],
                         auto_discover: Vec::new(),
                         root: None,
-                        public_api: false,
+                        public_api: vec![],
                     },
                 ],
                 rules: vec![BoundaryRule {
@@ -439,7 +439,7 @@ mod tests {
                     patterns: vec!["src/domain/**".to_string()],
                     auto_discover: Vec::new(),
                     root: None,
-                    public_api: false,
+                    public_api: vec![],
                 }],
                 coverage: BoundaryCoverageConfig {
                     require_all_files: true,
@@ -544,14 +544,14 @@ mod tests {
                         patterns: vec!["src/domain/**".to_string()],
                         auto_discover: Vec::new(),
                         root: None,
-                        public_api: false,
+                        public_api: vec![],
                     },
                     BoundaryZone {
                         name: "app".to_string(),
                         patterns: vec!["src/app/**".to_string()],
                         auto_discover: Vec::new(),
                         root: None,
-                        public_api: false,
+                        public_api: vec![],
                     },
                 ],
                 ..BoundaryConfig::default()

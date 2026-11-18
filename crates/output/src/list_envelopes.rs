@@ -149,11 +149,11 @@ pub struct BoundariesListZone {
     pub patterns: Vec<String>,
     /// Number of analyzable files the zone matched.
     pub file_count: usize,
-    /// Whether the zone holds the public entry files of a module
-    /// (`publicApi: true` in the boundary config). Omitted when false. This
-    /// field is not related to the `public_api` field of dead-code exports.
-    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
-    pub public_api: bool,
+    /// Globs of the public entry files of the zone (`publicApi` in the
+    /// boundary config), after the `autoDiscover` expansion. Omitted when
+    /// empty. Not related to the `public_api` field of dead-code exports.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub public_api: Vec<String>,
 }
 
 /// A boundary import rule, expanded to operate on concrete child zone

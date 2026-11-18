@@ -9,7 +9,7 @@ use crate::graph::{
     ModuleGraph, ModuleNode,
 };
 use crate::suppress::{IssueKind, SuppressionContext};
-use fallow_types::results::BoundaryViolation;
+use fallow_types::results::{BoundaryViolation, BoundaryViolationReason};
 
 use super::{LineOffsetsMap, byte_offset_to_line_col};
 
@@ -30,18 +30,22 @@ pub fn find_boundary_violations(
 ) -> Vec<BoundaryViolation> {
     let mut violations = Vec::new();
     let mut zone_cache: FxHashMap<FileId, Option<String>> = FxHashMap::default();
-    let ctx = BoundaryContext {
+    let mut ctx = BoundaryContext {
         graph,
         config,
         suppressions,
         line_offsets_by_file,
+        public_api_paths: FxHashMap::default(),
+        public_api_files: FxHashSet::default(),
     };
+    (ctx.public_api_paths, ctx.public_api_files) = collect_public_api_files(&mut zone_cache, &ctx);
 
     for node in &graph.modules {
         collect_node_boundary_violations(&mut violations, node, &mut zone_cache, &ctx);
     }
 
     warn_unmatched_boundary_zones(config, &zone_cache);
+    warn_public_api_zones_without_files(config, &ctx.public_api_paths);
     violations
 }
 
@@ -50,6 +54,54 @@ struct BoundaryContext<'a> {
     config: &'a ResolvedConfig,
     suppressions: &'a SuppressionContext<'a>,
     line_offsets_by_file: &'a LineOffsetsMap<'a>,
+    /// The public entry files of each zone that declares `publicApi`, sorted.
+    public_api_paths: FxHashMap<String, Vec<std::path::PathBuf>>,
+    /// The same files, for lookup by id.
+    public_api_files: FxHashSet<FileId>,
+}
+
+/// The public entry files of each zone that declares `publicApi`: the files
+/// that the zone owns and that match one of its globs.
+fn collect_public_api_files(
+    zone_cache: &mut FxHashMap<FileId, Option<String>>,
+    ctx: &BoundaryContext<'_>,
+) -> (
+    FxHashMap<String, Vec<std::path::PathBuf>>,
+    FxHashSet<FileId>,
+) {
+    let boundaries = &ctx.config.boundaries;
+    let mut paths: FxHashMap<String, Vec<std::path::PathBuf>> = boundaries
+        .zones
+        .iter()
+        .filter(|zone| !zone.public_api_matchers.is_empty())
+        .map(|zone| (zone.name.clone(), Vec::new()))
+        .collect();
+    let mut files = FxHashSet::default();
+    if paths.is_empty() {
+        return (paths, files);
+    }
+    for node in &ctx.graph.modules {
+        if let Some(zone) = classify_boundary_zone(node.file_id, zone_cache, ctx)
+            && let Some(zone_paths) = paths.get_mut(&zone)
+            && relative_path(node.file_id, ctx)
+                .is_some_and(|path| boundaries.is_public_api_file(&zone, &path))
+        {
+            zone_paths.push(node.path.clone());
+            files.insert(node.file_id);
+        }
+    }
+    for zone_paths in paths.values_mut() {
+        zone_paths.sort();
+    }
+    (paths, files)
+}
+
+fn relative_path(file_id: FileId, ctx: &BoundaryContext<'_>) -> Option<String> {
+    ctx.graph.modules[file_id.0 as usize]
+        .path
+        .strip_prefix(&ctx.config.root)
+        .ok()
+        .map(|p| p.to_string_lossy().replace('\\', "/"))
 }
 
 fn classify_boundary_zone(
@@ -60,13 +112,8 @@ fn classify_boundary_zone(
     if let Some(cached) = cache.get(&file_id) {
         return cached.clone();
     }
-    let node = &ctx.graph.modules[file_id.0 as usize];
-    let rel_path = node
-        .path
-        .strip_prefix(&ctx.config.root)
-        .ok()
-        .map(|p| p.to_string_lossy().replace('\\', "/"));
-    let zone = rel_path.and_then(|p| ctx.config.boundaries.classify_zone(&p).map(str::to_owned));
+    let zone = relative_path(file_id, ctx)
+        .and_then(|p| ctx.config.boundaries.classify_zone(&p).map(str::to_owned));
     cache.insert(file_id, zone.clone());
     zone
 }
@@ -80,12 +127,15 @@ fn collect_node_boundary_violations(
     let Some(from_zone) = classify_boundary_zone(node.file_id, zone_cache, ctx) else {
         return;
     };
-    if !ctx
-        .config
-        .boundaries
-        .rules
-        .iter()
-        .any(|r| r.from_zone == from_zone)
+    // A zone without a rule may import any zone, but it must still respect
+    // the public entry files of other zones.
+    if ctx.public_api_paths.is_empty()
+        && !ctx
+            .config
+            .boundaries
+            .rules
+            .iter()
+            .any(|r| r.from_zone == from_zone)
     {
         return;
     }
@@ -107,9 +157,9 @@ fn collect_node_boundary_violations(
             span_start: summary.span_start,
             via: None,
         };
-        if is_edge_violation(node.file_id, edge, zone_cache, ctx) {
+        if let Some(reason) = edge_violation(node.file_id, edge, zone_cache, ctx) {
             judged_targets.insert(summary.target);
-            push_boundary_violation(violations, node, edge, &from_zone, zone_cache, ctx);
+            push_boundary_violation(violations, node, edge, reason, zone_cache, ctx);
         } else {
             barrel_edges.push((summary.target, summary.symbols));
         }
@@ -119,8 +169,8 @@ fn collect_node_boundary_violations(
         if !judged_targets.insert(edge.target_id) {
             continue;
         }
-        if is_edge_violation(node.file_id, edge, zone_cache, ctx) {
-            push_boundary_violation(violations, node, edge, &from_zone, zone_cache, ctx);
+        if let Some(reason) = edge_violation(node.file_id, edge, zone_cache, ctx) {
+            push_boundary_violation(violations, node, edge, reason, zone_cache, ctx);
         }
     }
 }
@@ -190,9 +240,9 @@ struct ChainOrigin {
 
 /// Follow one imported name from a barrel to the module that declares it.
 ///
-/// The walk stops at the first file of a `publicApi` zone and returns that
-/// file, so an import through a public entry file is judged by the entry file
-/// (issue #4760). A barrel that is itself public returns itself, and the
+/// The walk stops at the first public entry file (`publicApi`) and returns
+/// that file, so an import through a public entry file is judged by the entry
+/// file (issue #4760). A barrel that is itself public returns itself, and the
 /// caller then keeps the verdict of the direct edge.
 ///
 /// Returns `None` when the name does not resolve to one declaration, when the
@@ -225,7 +275,7 @@ fn resolve_chain_origin(
         if !visited.insert((current, current_name.clone())) {
             return None;
         }
-        if is_public_api_file(current, zone_cache, ctx) {
+        if is_public_api_file(current, ctx) {
             return Some(ChainOrigin {
                 file_id: current,
                 type_only,
@@ -264,13 +314,9 @@ fn resolve_chain_origin(
     }
 }
 
-fn is_public_api_file(
-    file_id: FileId,
-    zone_cache: &mut FxHashMap<FileId, Option<String>>,
-    ctx: &BoundaryContext<'_>,
-) -> bool {
-    classify_boundary_zone(file_id, zone_cache, ctx)
-        .is_some_and(|zone| ctx.config.boundaries.is_public_api_zone(&zone))
+/// Whether the file is a public entry file of the zone that owns it.
+fn is_public_api_file(file_id: FileId, ctx: &BoundaryContext<'_>) -> bool {
+    ctx.public_api_files.contains(&file_id)
 }
 
 struct ChainHop {
@@ -327,40 +373,48 @@ fn is_hop_violation(
         span_start: None,
         via: None,
     };
-    is_edge_violation(from, edge, zone_cache, ctx)
+    edge_violation(from, edge, zone_cache, ctx).is_some()
 }
 
-fn is_edge_violation(
+/// The rule that the import `from -> edge.target_id` breaks, if any. A zone
+/// rule comes first, so a forbidden deep import gets one finding.
+fn edge_violation(
     from: FileId,
     edge: BoundaryEdge,
     zone_cache: &mut FxHashMap<FileId, Option<String>>,
     ctx: &BoundaryContext<'_>,
-) -> bool {
-    let Some(from_zone) = classify_boundary_zone(from, zone_cache, ctx) else {
-        return false;
-    };
-    let Some(to_zone) = classify_boundary_zone(edge.target_id, zone_cache, ctx) else {
-        return false;
-    };
-    !is_boundary_import_allowed(
+) -> Option<BoundaryViolationReason> {
+    let from_zone = classify_boundary_zone(from, zone_cache, ctx)?;
+    let to_zone = classify_boundary_zone(edge.target_id, zone_cache, ctx)?;
+    if from_zone == to_zone {
+        return None;
+    }
+    if !is_boundary_import_allowed(
         from,
         edge.target_id,
         edge.all_type_only,
         &from_zone,
         &to_zone,
         ctx,
-    )
+    ) {
+        return Some(BoundaryViolationReason::DisallowedZone);
+    }
+    (ctx.public_api_paths.contains_key(&to_zone) && !is_public_api_file(edge.target_id, ctx))
+        .then_some(BoundaryViolationReason::InternalFile)
 }
 
 fn push_boundary_violation(
     violations: &mut Vec<BoundaryViolation>,
     node: &ModuleNode,
     edge: BoundaryEdge,
-    from_zone: &str,
+    reason: BoundaryViolationReason,
     zone_cache: &mut FxHashMap<FileId, Option<String>>,
     ctx: &BoundaryContext<'_>,
 ) {
-    let Some(to_zone) = classify_boundary_zone(edge.target_id, zone_cache, ctx) else {
+    let (Some(from_zone), Some(to_zone)) = (
+        classify_boundary_zone(node.file_id, zone_cache, ctx),
+        classify_boundary_zone(edge.target_id, zone_cache, ctx),
+    ) else {
         return;
     };
     let (line, col) = edge.span_start.map_or((1, 0), |s| {
@@ -374,10 +428,18 @@ fn push_boundary_violation(
     }
 
     let target_node = &ctx.graph.modules[edge.target_id.0 as usize];
+    let public_api_paths = match reason {
+        BoundaryViolationReason::InternalFile => ctx
+            .public_api_paths
+            .get(&to_zone)
+            .cloned()
+            .unwrap_or_default(),
+        BoundaryViolationReason::DisallowedZone => Vec::new(),
+    };
     violations.push(BoundaryViolation {
         from_path: node.path.clone(),
         to_path: target_node.path.clone(),
-        from_zone: from_zone.to_string(),
+        from_zone,
         to_zone,
         import_specifier: boundary_import_specifier(target_node, ctx.config),
         line,
@@ -385,6 +447,8 @@ fn push_boundary_violation(
         via_path: edge
             .via
             .map(|via| ctx.graph.modules[via.0 as usize].path.clone()),
+        reason,
+        public_api_paths,
     });
 }
 
@@ -436,36 +500,47 @@ fn warn_unmatched_boundary_zones(
         zone_cache.values().filter_map(|z| z.as_deref()).collect();
     for zone in &config.boundaries.zones {
         if !classified_zones.contains(zone.name.as_str()) {
-            tracing::warn!(
-                "{}",
-                unmatched_zone_warning(&zone.name, zone.public_api, config)
-            );
+            tracing::warn!("{}", unmatched_zone_warning(&zone.name, config));
         }
     }
 }
 
-/// A file gets the first zone that matches it, so a `publicApi` zone listed
-/// after the zone of its module never classifies a file.
-const PUBLIC_API_ORDER_HINT: &str = "A publicApi zone must come before the zone of its \
-     module in boundaries.zones, because a file gets the first zone that matches it";
+/// Warn for each zone whose `publicApi` globs match no file of the zone,
+/// because every import into that zone from another zone is then a finding.
+fn warn_public_api_zones_without_files(
+    config: &ResolvedConfig,
+    public_api_paths: &FxHashMap<String, Vec<std::path::PathBuf>>,
+) {
+    let mut empty: Vec<&str> = public_api_paths
+        .iter()
+        .filter(|(_, paths)| paths.is_empty())
+        .map(|(zone, _)| zone.as_str())
+        .collect();
+    empty.sort_unstable();
+    for zone in empty {
+        tracing::warn!("{}", public_api_without_files_warning(zone, config));
+    }
+}
+
+fn public_api_without_files_warning(zone: &str, config: &ResolvedConfig) -> String {
+    let scope = if config.analysis_snapshot.is_base() {
+        "base revision snapshot (audit --base): "
+    } else {
+        ""
+    };
+    format!(
+        "{scope}boundary zone '{zone}' sets publicApi, but no file of the zone matches its \
+         globs, so every import into the zone from another zone is reported"
+    )
+}
 
 /// Message for a boundary zone that classified no analyzed file.
 ///
 /// The `audit --base` pass analyzes the base revision, where a zone can be
 /// legitimately empty while the working tree matches it. That pass is labelled
 /// explicitly so the warning is not read as a defect in the current
-/// configuration (issue #2013). The working-tree wording is unchanged. A
-/// `publicApi` zone also gets the zone-order hint (issue #4760).
-fn unmatched_zone_warning(zone: &str, public_api: bool, config: &ResolvedConfig) -> String {
-    let warning = unmatched_zone_base_warning(zone, config);
-    if public_api {
-        format!("{warning}. {PUBLIC_API_ORDER_HINT}")
-    } else {
-        warning
-    }
-}
-
-fn unmatched_zone_base_warning(zone: &str, config: &ResolvedConfig) -> String {
+/// configuration (issue #2013). The working-tree wording is unchanged.
+fn unmatched_zone_warning(zone: &str, config: &ResolvedConfig) -> String {
     if config.analysis_snapshot.is_base() {
         return format!(
             "base revision snapshot (audit --base): boundary zone '{zone}' matched 0 files \
@@ -610,14 +685,14 @@ mod tests {
                     patterns: vec!["src/ui/**".to_string()],
                     auto_discover: vec![],
                     root: None,
-                    public_api: false,
+                    public_api: vec![],
                 },
                 BoundaryZone {
                     name: "shared".to_string(),
                     patterns: vec!["src/shared/**".to_string()],
                     auto_discover: vec![],
                     root: None,
-                    public_api: false,
+                    public_api: vec![],
                 },
             ],
             rules: vec![BoundaryRule {
@@ -652,21 +727,21 @@ mod tests {
                     patterns: vec!["src/ui/**".to_string()],
                     auto_discover: vec![],
                     root: None,
-                    public_api: false,
+                    public_api: vec![],
                 },
                 BoundaryZone {
                     name: "db".to_string(),
                     patterns: vec!["src/db/**".to_string()],
                     auto_discover: vec![],
                     root: None,
-                    public_api: false,
+                    public_api: vec![],
                 },
                 BoundaryZone {
                     name: "shared".to_string(),
                     patterns: vec!["src/shared/**".to_string()],
                     auto_discover: vec![],
                     root: None,
-                    public_api: false,
+                    public_api: vec![],
                 },
             ],
             rules: vec![BoundaryRule {
@@ -702,7 +777,7 @@ mod tests {
                 patterns: vec!["src/ui/**".to_string()],
                 auto_discover: vec![],
                 root: None,
-                public_api: false,
+                public_api: vec![],
             }],
             rules: vec![BoundaryRule {
                 from: "ui".to_string(),
@@ -735,7 +810,7 @@ mod tests {
                 patterns: vec!["src/ui/**".to_string()],
                 auto_discover: vec![],
                 root: None,
-                public_api: false,
+                public_api: vec![],
             }],
             rules: vec![BoundaryRule {
                 from: "ui".to_string(),
@@ -769,14 +844,14 @@ mod tests {
                     patterns: vec!["src/ui/**".to_string()],
                     auto_discover: vec![],
                     root: None,
-                    public_api: false,
+                    public_api: vec![],
                 },
                 BoundaryZone {
                     name: "db".to_string(),
                     patterns: vec!["src/db/**".to_string()],
                     auto_discover: vec![],
                     root: None,
-                    public_api: false,
+                    public_api: vec![],
                 },
             ],
             rules: vec![BoundaryRule {
@@ -815,14 +890,14 @@ mod tests {
                     patterns: vec!["src/ui/**".to_string()],
                     auto_discover: vec![],
                     root: None,
-                    public_api: false,
+                    public_api: vec![],
                 },
                 BoundaryZone {
                     name: "db".to_string(),
                     patterns: vec!["src/db/**".to_string()],
                     auto_discover: vec![],
                     root: None,
-                    public_api: false,
+                    public_api: vec![],
                 },
             ],
             rules: vec![BoundaryRule {
@@ -925,14 +1000,14 @@ mod tests {
                     patterns: vec!["src/ui/**".to_string()],
                     auto_discover: vec![],
                     root: None,
-                    public_api: false,
+                    public_api: vec![],
                 },
                 BoundaryZone {
                     name: "db".to_string(),
                     patterns: vec!["src/db/**".to_string()],
                     auto_discover: vec![],
                     root: None,
-                    public_api: false,
+                    public_api: vec![],
                 },
             ],
             rules: vec![BoundaryRule {
@@ -962,23 +1037,19 @@ mod tests {
         let config = make_config(PathBuf::from("/project"), BoundaryConfig::default());
 
         assert_eq!(
-            unmatched_zone_warning("ui", false, &config),
+            unmatched_zone_warning("ui", &config),
             "boundary zone 'ui' matched 0 files, check your directory structure or pattern"
         );
     }
 
     #[test]
-    fn unmatched_public_api_zone_warning_names_the_zone_order() {
+    fn public_api_zone_without_files_warning_names_the_zone() {
         let config = make_config(PathBuf::from("/project"), BoundaryConfig::default());
 
-        let warning = unmatched_zone_warning("billing-public", true, &config);
+        let warning = public_api_without_files_warning("billing", &config);
         assert!(
-            warning.starts_with("boundary zone 'billing-public' matched 0 files"),
+            warning.starts_with("boundary zone 'billing' sets publicApi, but no file"),
             "got {warning}"
-        );
-        assert!(
-            warning.ends_with(PUBLIC_API_ORDER_HINT),
-            "a publicApi zone names the zone order, got {warning}"
         );
     }
 
@@ -987,7 +1058,7 @@ mod tests {
         let mut config = make_config(PathBuf::from("/project"), BoundaryConfig::default());
         config.analysis_snapshot = fallow_config::AnalysisSnapshot::Base;
 
-        let message = unmatched_zone_warning("ui", false, &config);
+        let message = unmatched_zone_warning("ui", &config);
 
         assert!(
             message.starts_with("base revision snapshot (audit --base): "),
@@ -997,7 +1068,6 @@ mod tests {
             message,
             unmatched_zone_warning(
                 "ui",
-                false,
                 &make_config(PathBuf::from("/project"), BoundaryConfig::default())
             ),
             "base-revision warning must differ from the current-revision warning"

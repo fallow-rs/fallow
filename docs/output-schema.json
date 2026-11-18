@@ -5752,7 +5752,7 @@
         },
         "to_path": {
           "type": "string",
-          "description": "The imported file that violates the boundary. Through a re-export chain,\nthe origin module that declares the symbol, not the barrel; a chain\nstops at the first file of a `publicApi` zone, which it then names."
+          "description": "The imported file that violates the boundary. Through a re-export chain,\nthe origin module that declares the symbol, not the barrel; a chain\nstops at the first public entry file (`publicApi`), which it then names."
         },
         "from_zone": {
           "type": "string",
@@ -5780,6 +5780,17 @@
             "null"
           ],
           "description": "The barrel file that the source file imports directly, when the\nviolation comes from a re-export chain. Absent for a direct import."
+        },
+        "reason": {
+          "description": "Why the import breaks the boundary rules. Omitted for\n`disallowed_zone`, so a project without `publicApi` keeps its output.",
+          "$ref": "#/definitions/BoundaryViolationReason"
+        },
+        "public_api_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The public entry files of `to_zone` that the importer can use instead.\nSet only when `reason` is `internal_file`."
         }
       },
       "required": [
@@ -9607,8 +9618,11 @@
           "description": "Number of analyzable files the zone matched."
         },
         "public_api": {
-          "type": "boolean",
-          "description": "Whether the zone holds the public entry files of a module\n(`publicApi: true` in the boundary config). Omitted when false. This\nfield is not related to the `public_api` field of dead-code exports."
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Globs of the public entry files of the zone (`publicApi` in the\nboundary config), after the `autoDiscover` expansion. Omitted when\nempty. Not related to the `public_api` field of dead-code exports."
         }
       },
       "required": [
@@ -11914,7 +11928,7 @@
         },
         "to_path": {
           "type": "string",
-          "description": "The imported file that violates the boundary. Through a re-export chain,\nthe origin module that declares the symbol, not the barrel; a chain\nstops at the first file of a `publicApi` zone, which it then names."
+          "description": "The imported file that violates the boundary. Through a re-export chain,\nthe origin module that declares the symbol, not the barrel; a chain\nstops at the first public entry file (`publicApi`), which it then names."
         },
         "from_zone": {
           "type": "string",
@@ -11942,6 +11956,17 @@
             "null"
           ],
           "description": "The barrel file that the source file imports directly, when the\nviolation comes from a re-export chain. Absent for a direct import."
+        },
+        "reason": {
+          "description": "Why the import breaks the boundary rules. Omitted for\n`disallowed_zone`, so a project without `publicApi` keeps its output.",
+          "$ref": "#/definitions/BoundaryViolationReason"
+        },
+        "public_api_paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The public entry files of `to_zone` that the importer can use instead.\nSet only when `reason` is `internal_file`."
         },
         "finding_id": {
           "type": [
@@ -38472,6 +38497,21 @@
         "reason"
       ],
       "description": "A path of a `paths` scope that selects no file, with the reason."
+    },
+    "BoundaryViolationReason": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "disallowed_zone",
+          "description": "No rule of `from_zone` allows an import from `to_zone`."
+        },
+        {
+          "type": "string",
+          "const": "internal_file",
+          "description": "A rule allows the zone, but the imported file is not a public entry\nfile (`publicApi`) of `to_zone`."
+        }
+      ],
+      "description": "The rule that a boundary violation breaks."
     }
   }
 }

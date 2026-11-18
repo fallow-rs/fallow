@@ -795,6 +795,8 @@ fn boundary_violation(path: &str) -> BoundaryViolationFinding {
         line: 1,
         col: 0,
         via_path: None,
+        reason: fallow_types::results::BoundaryViolationReason::DisallowedZone,
+        public_api_paths: vec![],
     })
 }
 
