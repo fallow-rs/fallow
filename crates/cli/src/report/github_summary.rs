@@ -1659,7 +1659,7 @@ fn render_health_summary(env: &Value) -> String {
 
 const fn audit_verdict_label(verdict: &str) -> &'static str {
     match verdict.as_bytes() {
-        b"fail" => "[!WARNING]\n> **Audit failed**",
+        b"fail" => "[!CAUTION]\n> **Audit failed**",
         b"warn" => "[!WARNING]\n> **Audit passed with warnings**",
         _ => "[!NOTE]\n> **Audit passed**",
     }

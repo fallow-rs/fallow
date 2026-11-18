@@ -74,7 +74,12 @@ select_summary_script() {
 # The changed-files disclaimer appended when results were scoped to a diff.
 scoping_footnote() {
   local commit_url="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}/commit/${CHANGED_SINCE}"
-  printf '%s' "*Issue counts cover the files changed since [\`${CHANGED_SINCE:0:7}\`](${commit_url}). Health metrics cover the whole project.*"
+  local health=""
+  # Only a run with health metrics has a whole-project part to name.
+  case "${FALLOW_COMMAND:-}" in
+    ""|health) health=" Health metrics cover the whole project." ;;
+  esac
+  printf '%s' "*Issue counts cover the files changed since [\`${CHANGED_SINCE:0:7}\`](${commit_url}).${health}*"
 }
 
 # 1. Native renderer: the purpose-built step-summary rendering, source of truth.

@@ -442,7 +442,7 @@ fn build_issue_decision_surface(
         issues,
         heading_conclusion(Some(conclusion), status.gates).map(super::review::review_conclusion),
     );
-    let summary_markdown = decision_summary_markdown(&verdict, issues, &gates, status.message);
+    let summary_markdown = decision_summary_markdown(issues, &gates, status.message);
     PrDecisionSurface {
         schema: PR_DECISION_SCHEMA.to_owned(),
         title: verdict,
@@ -502,25 +502,31 @@ fn capitalize(text: &str) -> String {
     })
 }
 
-/// The check run summary: the verdict of the sticky comment, the status note,
-/// and one row per decision gate, so the check run page states the same
-/// result as the comment without the finding tables.
+/// The check run summary: the status note and one row per decision gate. The
+/// verdict is the title of the check run, so the summary does not repeat it.
 fn decision_summary_markdown(
-    verdict: &str,
     issues: &[CiIssue],
     gates: &[PrDecisionGate],
     status_message: Option<&str>,
 ) -> String {
-    let mut out = format!("**{verdict}**");
+    // The check run shows the verdict as its title, so the summary starts
+    // with what the title cannot hold.
+    let mut out = String::new();
     if issues.is_empty() {
-        out.push_str("\n\nNo findings for this pull request.");
+        out.push_str("No findings for this pull request.");
     }
     if let Some(message) = status_message.filter(|message| !message.trim().is_empty()) {
-        out.push_str("\n\n> ");
+        if !out.is_empty() {
+            out.push_str("\n\n");
+        }
+        out.push_str("> ");
         out.push_str(message.trim());
     }
     if !gates.is_empty() {
-        out.push_str("\n\n| Check | Status | Result |\n| --- | --- | --- |");
+        if !out.is_empty() {
+            out.push_str("\n\n");
+        }
+        out.push_str("| Check | Status | Result |\n| --- | --- | --- |");
         for gate in gates {
             let _ = write!(
                 out,
@@ -565,7 +571,7 @@ pub(crate) fn decision_annotation_from_issue(issue: &CiIssue) -> PrDecisionAnnot
         line: u32::try_from(issue.line).unwrap_or(u32::MAX),
         level: decision_level_from_severity(&issue.severity),
         title: issue.rule_id.clone(),
-        message: issue.description.clone(),
+        message: fallow_output::unwrap_code_spans(&issue.description),
         raw_details: super::suggestion::fix_intent(issue).map(str::to_owned),
     }
 }
@@ -798,10 +804,17 @@ mod tests {
         assert_eq!(decision.gates[0].status, PrDecisionConclusion::Failure);
         assert!(decision.details.summary_markdown.contains("incomplete"));
         assert!(
-            decision
+            decision.title.starts_with("Quality gate failed"),
+            "{}",
+            decision.title
+        );
+        assert!(
+            !decision
                 .details
                 .summary_markdown
-                .contains("**Quality gate failed")
+                .contains("Quality gate failed"),
+            "the summary does not repeat the title: {}",
+            decision.details.summary_markdown
         );
     }
 
