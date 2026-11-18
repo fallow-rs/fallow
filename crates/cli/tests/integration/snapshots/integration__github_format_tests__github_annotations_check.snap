@@ -21,4 +21,4 @@ expression: rendered
 ::warning file=src/typo.ts,line=5,col=1,title=Unknown suppression kind::'not-a-kind' is not a recognized fallow issue kind. Other tokens on this 'fallow-ignore-next-line' line still apply.%0A%0AFix the typo or remove the unknown token.
 ::warning file=src/ui/button.ts,line=4,col=1,title=Boundary violation::Import from zone 'ui' to zone 'db' is not allowed.%0Asrc/ui/button.ts -> src/db/pool.ts%0A%0AImport through an allowed zone, or move the code.
 ::warning file=src/utils/format.ts,line=8,col=1,title=Duplicate export::Export 'format' is defined in 2 modules:%0A- src/format.ts:1%0A- src/utils/format.ts:8%0A%0AKeep the export in one module.
-::notice::fallow emitted 19 annotations; GitHub shows at most 10 per type per step
+::notice::Fallow wrote 19 annotations. GitHub shows at most 10 of each level for each step.

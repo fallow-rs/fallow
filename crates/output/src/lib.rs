@@ -343,7 +343,7 @@ pub use list_envelopes::{
     ListBoundariesOutput, ListEntryPointOutput, ListOutput, ListPluginOutput, WorkspaceInfo,
     WorkspacesOutput, serialize_list_boundaries_json_output, serialize_list_workspaces_json_output,
 };
-pub use markdown_prose::markdown_table_prose;
+pub use markdown_prose::{markdown_table_prose, unwrap_code_spans};
 pub use mutation::{
     DUPLICATE_TEST_IDS_CODE, MUTATION_INSPECT_SCHEMA_VERSION, MUTATION_PLAN_SCHEMA_VERSION,
     MUTATION_SCHEMA_VERSION, MUTATION_TASKS_SCHEMA_VERSION, MutantAttempt, MutantChange,

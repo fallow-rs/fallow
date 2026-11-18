@@ -89,6 +89,9 @@ pub enum MutationHeading {
     /// `####`, under the `### Fallow <title>` heading of the sticky comment.
     /// The comment has the findings tables, so the text points at them.
     Comment,
+    /// `####`, under the heading of a compact sticky comment, which has no
+    /// findings tables, so the text points at no section.
+    CompactComment,
     /// `####`, in the summary body of an inline review. The survived mutants
     /// are inline comments there, not table rows.
     Review,
@@ -176,7 +179,9 @@ pub struct MutationRunNotice {
 #[must_use]
 pub fn render_mutation_section(view: &MutationCiView, heading: MutationHeading) -> String {
     let title = match heading {
-        MutationHeading::Comment | MutationHeading::Review => "#### Mutation testing",
+        MutationHeading::Comment | MutationHeading::CompactComment | MutationHeading::Review => {
+            "#### Mutation testing"
+        }
         MutationHeading::Summary => "## Mutation testing",
     };
     let body = section_body(view, heading);
@@ -410,7 +415,9 @@ fn ran_body(view: &MutationCiView, heading: MutationHeading) -> SectionBody {
         core.push(count_table(view));
     }
     let facts = match heading {
-        MutationHeading::Comment | MutationHeading::Review => None,
+        MutationHeading::Comment | MutationHeading::CompactComment | MutationHeading::Review => {
+            None
+        }
         MutationHeading::Summary => run_facts_line(view),
     };
     let extra = [
@@ -631,7 +638,7 @@ fn survivor_explanation(view: &MutationCiView, heading: MutationHeading) -> Opti
     // The job summary has no findings, so only the comment and the review
     // point at the place where the survived mutants are.
     Some(match heading {
-        MutationHeading::Summary => format!("{FIRST} {LAST}"),
+        MutationHeading::Summary | MutationHeading::CompactComment => format!("{FIRST} {LAST}"),
         MutationHeading::Comment => {
             format!("{FIRST} The **Tests** section above lists the survived mutants{lines}. {LAST}")
         }

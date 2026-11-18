@@ -204,7 +204,10 @@ gate_step() {
       exit 0
       ;;
     gate-failed)
-      gate_error "The mutation score is below the minimum (outcome gate-failed, exit code ${exit_code:-1})."
+      local score=""
+      [ -n "${FALLOW_MUTATION_RESULTS_FILE:-}" ] && [ -f "$FALLOW_MUTATION_RESULTS_FILE" ] \
+        && score=$(report_score "$FALLOW_MUTATION_RESULTS_FILE")
+      gate_error "The mutation score${score:+ of ${score}%} is below the minimum (outcome gate-failed, exit code ${exit_code:-1})."
       exit 1
       ;;
     refused)

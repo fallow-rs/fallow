@@ -8,4 +8,4 @@ expression: rendered
 ::warning file=/abs/deep/nested/src/api/types.ts,line=7,col=1,title=Unused export::Exported value 'Old' is never imported by other modules.%0A%0ARemove the export keyword or the declaration. If the export is public API, add its file to the entry configuration.
 ::warning file=src/one.ts,line=4,endLine=12,col=1,title=Code duplication::9 duplicated lines (80 tokens)%0A%0A2 copies. Also in:%0A- src/two.ts:20-28%0A%0AMove the duplicate code to one shared function.
 ::warning file=src/two.ts,line=20,endLine=28,col=1,title=Code duplication::9 duplicated lines (80 tokens)%0A%0A2 copies. Also in:%0A- src/one.ts:4-12%0A%0AMove the duplicate code to one shared function.
-::notice::fallow emitted 6 annotations; GitHub shows at most 10 per type per step
+::notice::Fallow wrote 6 annotations. GitHub shows at most 10 of each level for each step.

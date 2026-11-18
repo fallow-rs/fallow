@@ -37,6 +37,33 @@ pub fn markdown_table_prose(value: &str) -> String {
     out
 }
 
+/// The text with each balanced code span replaced by its content, for a
+/// plain-text surface such as a workflow annotation: ``Changing `<` to `<=` ``
+/// becomes `Changing < to <=`.
+#[must_use]
+pub fn unwrap_code_spans(value: &str) -> String {
+    let mut out = String::with_capacity(value.len());
+    let mut rest = value;
+    while !rest.is_empty() {
+        if let Some((span, after)) = split_code_span(rest) {
+            let fence = span.bytes().take_while(|byte| *byte == b'`').count();
+            let inner = &span[fence..span.len() - fence];
+            let padded = inner.len() > 2 && inner.starts_with(' ') && inner.ends_with(' ');
+            out.push_str(if padded {
+                &inner[1..inner.len() - 1]
+            } else {
+                inner
+            });
+            rest = after;
+            continue;
+        }
+        let mut chars = rest.chars();
+        out.extend(chars.next());
+        rest = chars.as_str();
+    }
+    out
+}
+
 /// A code span at the start of `text`: a run of backticks, the content, and a
 /// closing run of the same length. `None` when the run has no closing match,
 /// so a lone backtick is escaped as text.
@@ -110,7 +137,17 @@ fn prose_needs_escape(ch: char, written: &str, next: Option<char>) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::markdown_table_prose;
+    use super::{markdown_table_prose, unwrap_code_spans};
+
+    #[test]
+    fn unwrap_code_spans_keeps_the_code_and_drops_the_fences() {
+        assert_eq!(
+            unwrap_code_spans("Changing `<` to `<=` in `f`. Mutant `ab`."),
+            "Changing < to <= in f. Mutant ab."
+        );
+        assert_eq!(unwrap_code_spans("to ``` `` ``` in g"), "to `` in g");
+        assert_eq!(unwrap_code_spans("a lone ` tick"), "a lone ` tick");
+    }
 
     #[test]
     fn prose_keeps_code_spans_and_quotes_names_as_code() {

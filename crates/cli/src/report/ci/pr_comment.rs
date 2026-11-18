@@ -194,7 +194,13 @@ fn render_pr_comment_with_mutation(
     mutation: Option<&MutationCiView>,
 ) -> String {
     let section = compose_trailing_section(
-        mutation.map(|view| render_mutation_section(view, MutationHeading::Comment)),
+        mutation.map(|view| {
+            let heading = match pr_comment_layout_from_env() {
+                PrCommentLayout::Compact => MutationHeading::CompactComment,
+                _ => MutationHeading::Comment,
+            };
+            render_mutation_section(view, heading)
+        }),
         crate::report::config_pattern_text::markdown_section(status.config_patterns),
     );
     let heading = heading_conclusion(conclusion, status.gates);

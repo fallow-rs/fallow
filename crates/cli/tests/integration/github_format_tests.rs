@@ -763,7 +763,7 @@ fn annotations_end_with_budget_notice() {
     assert_eq!(
         last,
         format!(
-            "::notice::fallow emitted {total} annotations; GitHub shows at most 10 per type per step"
+            "::notice::Fallow wrote {total} annotations. GitHub shows at most 10 of each level for each step."
         )
     );
 }
@@ -782,7 +782,7 @@ fn annotations_single_finding_notice_uses_singular_noun() {
     let last = rendered.lines().last().expect("non-empty");
     assert_eq!(
         last,
-        "::notice::fallow emitted 1 annotation; GitHub shows at most 10 per type per step"
+        "::notice::Fallow wrote 1 annotation. GitHub shows at most 10 of each level for each step."
     );
 }
 

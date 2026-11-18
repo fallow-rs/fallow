@@ -179,7 +179,7 @@ fn survivor_annotation(issue: &CodeClimateIssue) -> Annotation {
         col: None,
         // A label, as every other annotation title is, and not the rule id.
         title: "Survived mutant".to_owned(),
-        message: issue.description.clone(),
+        message: fallow_output::unwrap_code_spans(&issue.description),
         introduced: None,
     }
 }
@@ -1932,7 +1932,7 @@ mod tests {
         );
         assert_eq!(
             lines[2],
-            "::notice::fallow emitted 2 annotations; GitHub shows at most 10 per type per step"
+            "::notice::Fallow wrote 2 annotations. GitHub shows at most 10 of each level for each step."
         );
     }
 

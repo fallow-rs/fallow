@@ -10,4 +10,4 @@ expression: rendered
 ::warning file=src/cold.ts,line=12,title=Runtime coverage (safe_to_delete)::Function 'neverCalled' is flagged by runtime coverage.%0A%0A- Verdict: safe_to_delete%0A- Invocations: 0%0A- Confidence: high%0A- Static: unused%0A- Tests: none%0A- V8: tracked%0A%0AReview the runtime evidence before changing this path.
 ::warning file=src/dead.ts,title=Unused file::No module imports this file, and no entry point reaches it.%0ARemove the file, or import it where it is needed.
 ::warning file=src/two.ts,line=20,endLine=28,col=1,title=Code duplication::9 duplicated lines (80 tokens)%0A%0A2 copies. Also in:%0A- services/api/client.ts:10-18%0A%0AMove the duplicate code to one shared function.
-::notice::fallow emitted 8 annotations; GitHub shows at most 10 per type per step
+::notice::Fallow wrote 8 annotations. GitHub shows at most 10 of each level for each step.

@@ -5,4 +5,4 @@ expression: body
 ::notice::Fallow: Gates: failed error-severity-findings (2 at or above error).
 ::error file=src/age.ts,line=5,col=17,title=Unused export::Exported value 'isSenior' is never imported by other modules.%0A%0ARemove the export keyword or the declaration. If the export is public API, add its file to the entry configuration.
 ::error file=src/unused.ts,title=Unused file::No module imports this file, and no entry point reaches it.%0ARemove the file, or import it where it is needed.
-::notice::fallow emitted 2 annotations; GitHub shows at most 10 per type per step
+::notice::Fallow wrote 2 annotations. GitHub shows at most 10 of each level for each step.

@@ -376,6 +376,9 @@ fn survivors_without_a_finding_get_no_pointer_to_the_findings() {
 
 #[test]
 fn each_surface_points_at_the_place_where_its_survivors_are() {
+    let compact = render_mutation_section(&survivors(), MutationHeading::CompactComment);
+    assert!(!compact.contains("section above"), "{compact}");
+    assert!(compact.starts_with("#### Mutation testing"), "{compact}");
     let comment = render_mutation_section(&survivors(), MutationHeading::Comment);
     assert!(comment.contains("The **Tests** section above"), "{comment}");
 

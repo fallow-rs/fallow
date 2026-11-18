@@ -8,4 +8,4 @@ expression: rendered
 ::warning file=src/cold.ts,line=12,title=Runtime coverage (safe_to_delete)::Function 'neverCalled' is flagged by runtime coverage.%0A%0A- Verdict: safe_to_delete%0A- Invocations: 0%0A- Confidence: high%0A- Static: unused%0A- Tests: none%0A- V8: tracked%0A%0ADelete this function; production never called it in 90 days.
 ::notice file=src/refactor-me.ts,title=Refactoring target (medium effort)::Priority: . Confidence: high.%0A%0ASplit the request handler into parsing and dispatch.%0A%0A- churn: 12 commits in 30 days%0A- complexity: 27
 ::notice file=src/unknown.ts,line=30,title=Runtime coverage (coverage_unavailable)::Function 'maybeUsed' is flagged by runtime coverage.%0A%0A- Verdict: coverage_unavailable%0A- Invocations: -%0A- Confidence: low%0A- Static: used%0A- Tests: partial%0A- V8: untracked (bundled)%0A%0AReview the runtime evidence before changing this path.
-::notice::fallow emitted 6 annotations; GitHub shows at most 10 per type per step
+::notice::Fallow wrote 6 annotations. GitHub shows at most 10 of each level for each step.
