@@ -24,6 +24,8 @@ const CONFIG_NAME: &str = ".fallowrc.json";
 const SYNTAX_ERROR: &str = r#"{ "rules": "#;
 const WRONG_TYPE: &str = r#"{ "production": "yes" }"#;
 const REMOTE_EXTENDS: &str = r#"{ "extends": "https://example.com/fallow.json" }"#;
+/// No server listens on port 1, so the fetch fails at once and offline.
+const UNREACHABLE_REMOTE_EXTENDS: &str = r#"{ "extends": "https://127.0.0.1:1/fallow.json" }"#;
 const PER_ANALYSIS_PRODUCTION: &str = r#"{
     "production": { "deadCode": true, "health": false, "dupes": false, "ignore": ["scripts/**"] }
 }"#;
@@ -53,9 +55,17 @@ const ALL_WRAPPERS: [Wrapper; 4] = [
     Wrapper::Readiness(ProductionAnalysis::DeadCode, None),
 ];
 
+/// The three entry points that take the remote `extends` opt-in.
+const OPT_IN_WRAPPERS: [Wrapper; 3] = [
+    Wrapper::WithLoadOptions,
+    Wrapper::Analysis(ProductionAnalysis::DeadCode, None),
+    Wrapper::Readiness(ProductionAnalysis::DeadCode, None),
+];
+
 fn options(
     analysis: ProductionAnalysis,
     production_override: Option<bool>,
+    allow_remote_extends: bool,
 ) -> ProjectConfigOptions {
     ProjectConfigOptions {
         output: OutputFormat::Json,
@@ -64,7 +74,7 @@ fn options(
         production_override,
         quiet: true,
         analysis,
-        allow_remote_extends: false,
+        allow_remote_extends,
     }
 }
 
@@ -73,18 +83,35 @@ fn load(
     root: &Path,
     config_path: Option<&Path>,
 ) -> Result<ProjectConfig, String> {
+    load_with_trust(wrapper, root, config_path, false)
+}
+
+fn load_with_trust(
+    wrapper: Wrapper,
+    root: &Path,
+    config_path: Option<&Path>,
+    allow_remote_extends: bool,
+) -> Result<ProjectConfig, String> {
     let result = match wrapper {
         Wrapper::Project => config_for_project(root, config_path),
-        Wrapper::WithLoadOptions => {
-            config_for_project_with_load_options(root, config_path, ConfigLoadOptions::default())
-        }
-        Wrapper::Analysis(analysis, production) => {
-            config_for_project_analysis(root, config_path, options(analysis, production))
-        }
-        Wrapper::Readiness(analysis, production) => {
-            config_for_project_readiness(root, config_path, options(analysis, production))
-                .map(|readiness| readiness.project)
-        }
+        Wrapper::WithLoadOptions => config_for_project_with_load_options(
+            root,
+            config_path,
+            ConfigLoadOptions {
+                allow_remote_extends,
+            },
+        ),
+        Wrapper::Analysis(analysis, production) => config_for_project_analysis(
+            root,
+            config_path,
+            options(analysis, production, allow_remote_extends),
+        ),
+        Wrapper::Readiness(analysis, production) => config_for_project_readiness(
+            root,
+            config_path,
+            options(analysis, production, allow_remote_extends),
+        )
+        .map(|readiness| readiness.project),
     };
     result.map_err(|err| err.to_string())
 }
@@ -156,6 +183,22 @@ fn remote_extends_is_refused_without_the_opt_in() {
             load(wrapper, &root, None).expect_err("discovered"),
             discovered
         );
+    }
+}
+
+#[test]
+fn remote_extends_is_fetched_with_the_opt_in() {
+    let (_dir, root) = project(Some(UNREACHABLE_REMOTE_EXTENDS));
+    let path = root.join(CONFIG_NAME);
+    for wrapper in OPT_IN_WRAPPERS {
+        for config_path in [Some(path.as_path()), None] {
+            let err = load_with_trust(wrapper, &root, config_path, true).expect_err("fetch fails");
+            assert!(
+                err.starts_with("invalid config: ")
+                    && err.contains("Failed to fetch remote config"),
+                "{wrapper:?} with {config_path:?}: {err}"
+            );
+        }
     }
 }
 

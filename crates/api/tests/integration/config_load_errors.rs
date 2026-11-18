@@ -17,14 +17,17 @@ use fallow_api::{
 };
 use fallow_config::FallowConfig;
 
-use crate::common::write;
+use crate::common::{rerun_without_env, write};
 
 const CONFIG_NAME: &str = ".fallowrc.json";
 const SYNTAX_ERROR: &str = r#"{ "rules": "#;
 const WRONG_TYPE: &str = r#"{ "production": "yes" }"#;
 const REMOTE_EXTENDS: &str = r#"{ "extends": "https://example.com/fallow.json" }"#;
+/// No server listens on port 1, so the fetch fails at once and offline.
+const UNREACHABLE_REMOTE_EXTENDS: &str = r#"{ "extends": "https://127.0.0.1:1/fallow.json" }"#;
 const CODE: &str = "FALLOW_CONFIG_LOAD_FAILED";
 const CONTEXT: &str = "analysis.configPath";
+const TYPE_AWARE_ENV: &str = "FALLOW_TYPE_AWARE";
 
 /// A project root that stops config discovery at itself. The root is
 /// canonical, as the runners canonicalize it before discovery.
@@ -111,7 +114,37 @@ fn health_config_is_none_without_a_config_file() {
 }
 
 #[test]
+fn remote_extends_is_fetched_with_the_opt_in() {
+    for explicit in [true, false] {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = project(dir.path(), Some(UNREACHABLE_REMOTE_EXTENDS));
+        let err = load_health_config(&AnalysisOptions {
+            allow_remote_extends: true,
+            ..analysis(&root, explicit)
+        })
+        .expect_err("fetch fails");
+        assert!(
+            err.message.starts_with("failed to load config: ")
+                && err.message.contains("Failed to fetch remote config"),
+            "{}",
+            err.message
+        );
+    }
+}
+
+/// The API loader reads the config before the analysis only when
+/// `FALLOW_TYPE_AWARE` is unset. A test must not change the environment of
+/// its own process, so a run with the variable set runs the test again in a
+/// child process without it.
+#[test]
 fn runners_report_the_api_loader_text_before_the_analysis_loads() {
+    if std::env::var_os(TYPE_AWARE_ENV).is_some() {
+        rerun_without_env(
+            "config_load_errors::runners_report_the_api_loader_text_before_the_analysis_loads",
+            TYPE_AWARE_ENV,
+        );
+        return;
+    }
     for explicit in [true, false] {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = project(dir.path(), Some(SYNTAX_ERROR));

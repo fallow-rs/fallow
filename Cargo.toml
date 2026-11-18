@@ -373,7 +373,10 @@ allow = [
 
 # Each config file load goes through
 # `fallow_engine::project_config::load_config_file`, so each surface gets the
-# same trust policy for remote `extends` and the same error detail. The
+# same trust policy for remote `extends` and the same error detail. Each
+# pattern has no `(`, so the rule also finds a function path such as
+# `map(FallowConfig::load)`. The `FallowConfig as` pattern finds an alias,
+# because the rule cannot see a call through the alias. The
 # allow list holds the sites that still load the file directly. fallow-core
 # sits below the engine and cannot call it. The bench measures the config
 # parse itself. Move a CLI site to the engine loader, then lower its `max`.
@@ -381,10 +384,11 @@ allow = [
 rule = "config-load-through-engine-loader"
 paths = ["crates"]
 deny = [
-    "FallowConfig::load(",
-    "FallowConfig::load_with_options(",
-    "FallowConfig::find_and_load(",
-    "FallowConfig::find_and_load_with_options(",
+    "FallowConfig::load",
+    "FallowConfig::load_with_options",
+    "FallowConfig::find_and_load",
+    "FallowConfig::find_and_load_with_options",
+    "FallowConfig as",
 ]
 scope = "production"
 message = "{path} loads the config file directly. Call fallow_engine::project_config::load_config_file, or add the file to the allow list of this rule in Cargo.toml"

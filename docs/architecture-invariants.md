@@ -92,7 +92,9 @@ protocol and package parity.
   the same trust policy for remote `extends` and the same error detail. The
   source rule `config-load-through-engine-loader` in the root `Cargo.toml`
   denies a direct call of `FallowConfig::load`, `load_with_options`,
-  `find_and_load` or `find_and_load_with_options` in production code. Its
+  `find_and_load` or `find_and_load_with_options` in production code. It
+  also denies a function path such as `map(FallowConfig::load)` and an
+  alias such as `use fallow_config::FallowConfig as Config`. Its
   allow list holds each file that still loads the config file directly, with
   the exact count of calls.
 - Output formatting should work from typed evidence already passed to it. It

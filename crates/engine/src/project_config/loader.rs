@@ -80,11 +80,7 @@ pub fn load_config_file(
                 config,
                 path: Some(path.to_path_buf()),
             })
-            .map_err(|err| ConfigLoadError::Parse {
-                path: Some(path.to_path_buf()),
-                message: err.to_string(),
-                chain: format!("{err:#}"),
-            });
+            .map_err(|err| explicit_load_error(path, &err));
     }
     match FallowConfig::find_and_load_with_options(root, load_options) {
         Ok(Some((config, path))) => Ok(ConfigFile {
@@ -103,9 +99,22 @@ pub fn load_config_file(
     }
 }
 
+/// The error of an explicit config path. The alternate format of a config
+/// error report adds each cause to the top error.
+fn explicit_load_error(path: &Path, err: &impl std::fmt::Display) -> ConfigLoadError {
+    ConfigLoadError::Parse {
+        path: Some(path.to_path_buf()),
+        message: err.to_string(),
+        chain: format!("{err:#}"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// No server listens on port 1, so the fetch fails at once and offline.
+    const UNREACHABLE_REMOTE_EXTENDS: &str = r#"{ "extends": "https://127.0.0.1:1/fallow.json" }"#;
 
     fn project(config: &str) -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::tempdir().expect("tempdir");
@@ -130,6 +139,49 @@ mod tests {
                 chain: format!("{cause:#}"),
             }
         );
+    }
+
+    /// An error with one cause. Its alternate format adds the cause, as the
+    /// default handler of a `miette::Report` does.
+    struct WrappedError;
+
+    impl std::fmt::Display for WrappedError {
+        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            f.write_str("Failed to read config file")?;
+            if f.alternate() {
+                f.write_str(": no such file")?;
+            }
+            Ok(())
+        }
+    }
+
+    #[test]
+    fn explicit_error_chain_adds_each_cause() {
+        let err = explicit_load_error(Path::new("fallow.json"), &WrappedError);
+        assert_eq!(
+            err,
+            ConfigLoadError::Parse {
+                path: Some(PathBuf::from("fallow.json")),
+                message: "Failed to read config file".to_owned(),
+                chain: "Failed to read config file: no such file".to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn remote_extends_is_fetched_with_the_opt_in() {
+        let (_dir, root) = project(UNREACHABLE_REMOTE_EXTENDS);
+        let options = ConfigFileOptions {
+            allow_remote_extends: true,
+        };
+        for config_path in [None, Some(root.join(".fallowrc.json"))] {
+            let err =
+                load_config_file(&root, config_path.as_deref(), options).expect_err("fetch fails");
+            assert!(
+                err.chain().contains("Failed to fetch remote config"),
+                "{err:?}"
+            );
+        }
     }
 
     #[test]
