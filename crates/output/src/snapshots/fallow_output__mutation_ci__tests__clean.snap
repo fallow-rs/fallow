@@ -6,9 +6,14 @@ expression: both_headings(&view)
 
 The tests detected each mutant that ran.
 
+<details>
+<summary>Counts and details</summary>
+
 | Killed | Survived | No coverage | Score |
 | --: | --: | --: | --: |
 | 12 | 0 | 0 | 100.0% |
+
+</details>
 
 ===== summary heading =====
 

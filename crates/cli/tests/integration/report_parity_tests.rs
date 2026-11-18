@@ -1032,8 +1032,8 @@ fn live_check_pr_comment_titles_by_content_and_carries_the_verdict() {
         ],
     );
     let body = String::from_utf8(rendered.stdout).expect("sticky comment body");
-    assert!(body.contains("### Fallow codebase report"), "{body}");
-    assert!(body.contains("**Quality gate failed**"), "{body}");
+    assert!(body.contains("### Quality gate failed\n"), "{body}");
+    assert!(body.contains("Fallow codebase report, "), "{body}");
     assert!(
         body.starts_with("<!-- fallow-id: fallow-results -->\n"),
         "{body}"

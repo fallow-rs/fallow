@@ -365,17 +365,23 @@ pub fn render_pr_comment_with_verdict(
     let mut out = String::new();
     out.push_str(&marker);
     out.push('\n');
-    write!(&mut out, "### Fallow {title}\n\n").expect("write to string");
-    write!(&mut out, "**{}**\n\n", pr_comment_verdict(verdict)).expect("write to string");
+    // The verdict is the heading, so a reader scanning the timeline sees the
+    // result first; the report title follows in the line under it.
+    write!(&mut out, "### {}\n\n", pr_comment_verdict(verdict)).expect("write to string");
     if input.issues.is_empty() {
         write!(
             &mut out,
-            "No findings for this {}.\n\n",
+            "Fallow {title}, no findings for this {}.\n\n",
             change_noun(input.provider)
         )
         .expect("write to string");
     } else {
-        write!(&mut out, "{}.\n\n", severity_count_line(input.issues)).expect("write to string");
+        write!(
+            &mut out,
+            "Fallow {title}, {}.\n\n",
+            severity_count_line(input.issues)
+        )
+        .expect("write to string");
     }
     if let Some(note) = input
         .status_note
@@ -1402,7 +1408,11 @@ mod tests {
             layout: crate::PrCommentLayout::Default,
         });
         assert!(body.contains("<!-- fallow-id: fallow-results"));
-        assert!(body.contains("No findings for this pull request."));
+        assert!(body.contains("### Quality gate passed"), "{body}");
+        assert!(
+            body.contains("Fallow codebase report, no findings for this pull request."),
+            "{body}"
+        );
     }
 
     fn pr_comment_issue(rule_id: &str, description: &str, severity: &str, path: &str) -> CiIssue {
@@ -1543,9 +1553,11 @@ mod tests {
             status_note: None,
             layout: crate::PrCommentLayout::Default,
         });
-        assert!(body.contains("### Fallow codebase report"), "{body}");
-        assert!(body.contains("**Quality gate failed**"), "{body}");
-        assert!(body.contains("2 findings: 2 errors."), "{body}");
+        assert!(body.contains("### Quality gate failed\n"), "{body}");
+        assert!(
+            body.contains("Fallow codebase report, 2 findings: 2 errors."),
+            "{body}"
+        );
         assert!(body.contains("<summary>Dead code (2)</summary>"), "{body}");
     }
 
@@ -1758,11 +1770,11 @@ mod tests {
             layout: crate::PrCommentLayout::Default,
         });
         assert!(
-            github.contains("No findings for this pull request."),
+            github.contains("no findings for this pull request."),
             "{github}"
         );
         assert!(
-            gitlab.contains("No findings for this merge request."),
+            gitlab.contains("no findings for this merge request."),
             "{gitlab}"
         );
         assert!(

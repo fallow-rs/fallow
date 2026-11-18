@@ -112,6 +112,12 @@ fn read_request_outcomes(envelope: &Value) -> Vec<RequestLine> {
         .collect()
 }
 
+/// The sentence for a narrowing request that applied over an empty scope:
+/// the report has no finding on changed code because no changed file had
+/// code to analyze.
+const EMPTY_SCOPE_TEXT: &str =
+    "No changed file has code that fallow analyzes. Check the diff or the base ref of this run.";
+
 /// A one-line inventory for the job summary, the pull-request comment and the
 /// merge-request note, or `None` when every request applied over a scope that
 /// was not empty. A request that applied as asked tells the reader nothing new,
@@ -130,11 +136,17 @@ pub fn summary_line(envelope: &Value) -> Option<String> {
     }
     let (applied, unapplied): (Vec<&RequestLine>, Vec<&RequestLine>) =
         requests.iter().partition(|request| request.applied());
-    let empty_scope = applied
+    let empty: Vec<&RequestLine> = applied
         .iter()
-        .any(|request| request.applied_over_empty_scope());
+        .copied()
+        .filter(|request| request.applied_over_empty_scope())
+        .collect();
+    let empty_scope = !empty.is_empty();
     if unapplied.is_empty() && !empty_scope {
         return None;
+    }
+    if unapplied.is_empty() {
+        return Some(empty_scope_text(&empty));
     }
     let mut clauses: Vec<String> = Vec::new();
     if !unapplied.is_empty() {
@@ -163,12 +175,26 @@ pub fn summary_line(envelope: &Value) -> Option<String> {
     // and the Action and the merge-request template state the same fact from the
     // envelope they captured (issue #2734).
     if empty_scope {
-        line.push_str(
-            " A narrowing request applied over an empty scope, so this report is clean \
-             because nothing in it was analyzable; check the diff or ref this run was given.",
-        );
+        line.push(' ');
+        line.push_str(&empty_scope_text(&empty));
     }
     Some(line)
+}
+
+/// The empty-scope sentence. A change scope (`changed-since`, `diff-filter`)
+/// gets the advice to check the diff or the base ref; any other narrowing
+/// request, such as a group selector, is named, because that advice does not
+/// apply to it.
+fn empty_scope_text(empty: &[&RequestLine]) -> String {
+    const CHANGE_SCOPES: [&str; 2] = ["changed-since", "diff-filter"];
+    if empty
+        .iter()
+        .all(|request| CHANGE_SCOPES.contains(&request.name.as_str()))
+    {
+        return EMPTY_SCOPE_TEXT.to_owned();
+    }
+    let names: Vec<&str> = empty.iter().map(|request| request.name.as_str()).collect();
+    format!("{} left nothing to analyze.", names.join(", "))
 }
 
 fn join(requests: &[&RequestLine]) -> String {
@@ -343,9 +369,25 @@ mod tests {
         }));
         assert_eq!(
             summary_line(&value).expect("a request was received"),
-            "Request outcomes: applied diff-filter. \
-             A narrowing request applied over an empty scope, so this report is clean \
-             because nothing in it was analyzable; check the diff or ref this run was given."
+            "No changed file has code that fallow analyzes. Check the diff or the base ref of this run."
+        );
+    }
+
+    /// A group selector that matched nothing is not a change scope, so the
+    /// line names it instead of pointing at the diff.
+    #[test]
+    fn an_empty_group_selector_is_named() {
+        let value = envelope(&serde_json::json!({
+            "group-filter": {
+                "status": "applied",
+                "affects": "scope",
+                "requested": "--group web",
+                "scope_size": 0
+            }
+        }));
+        assert_eq!(
+            summary_line(&value).expect("the scope was empty"),
+            "group-filter left nothing to analyze."
         );
     }
 

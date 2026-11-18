@@ -370,8 +370,8 @@ pub use mutation::{
 pub use mutation_ci::{
     MUTATION_MESSAGE_MAX_CHARS, MUTATION_NO_COVERAGE_ITEMS, MUTATION_SECTION_MAX_CHARS,
     MutationCiLocation, MutationCiState, MutationCiView, MutationHeading, MutationNotRunReason,
-    MutationRunNotice, mutation_decision_row, mutation_run_notice, render_mutation_section,
-    survived_description,
+    MutationRunNotice, mutation_decision_row, mutation_run_notice, mutation_scope_was_empty,
+    render_mutation_section, survived_description,
 };
 pub use mutation_replay::{
     MutantWitness, MutationNotReplayable, MutationRecordMode, MutationRecordedFunction,

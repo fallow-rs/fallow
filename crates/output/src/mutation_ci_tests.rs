@@ -221,6 +221,9 @@ fn spec_example_renders_the_documented_comment_section() {
 
 **Score below the minimum.** The score is 62.5%, and the minimum is 80%.
 
+<details>
+<summary>Counts and details</summary>
+
 | Killed | Survived | No coverage | Score |
 | --: | --: | --: | --: |
 | 10 | 6 | 2 | 62.5% |
@@ -235,7 +238,9 @@ A survived mutant is a code change that no test detects. The **Tests** section a
 
 </details>
 
-To inspect a mutant, run `fallow mutation inspect <mutant-id> --report fallow-mutation.json` with the report that this job writes.";
+To inspect a mutant, run `fallow mutation inspect <mutant-id> --report fallow-mutation.json` with the report that this job writes.
+
+</details>";
     assert_eq!(
         render_mutation_section(&spec_example(), MutationHeading::Comment),
         expected
@@ -567,8 +572,9 @@ fn assert_inert(out: &str, own_details: usize) {
 
 #[test]
 fn hostile_strings_stay_inert_in_every_state() {
-    for heading in [MutationHeading::Comment, MutationHeading::Summary] {
-        assert_inert(&render_mutation_section(&hostile_view(), heading), 1);
+    // The comment folds its details into one more block than the summary.
+    for (heading, details) in [(MutationHeading::Comment, 2), (MutationHeading::Summary, 1)] {
+        assert_inert(&render_mutation_section(&hostile_view(), heading), details);
         assert_inert(&render_mutation_section(&hostile_failed(), heading), 0);
         assert_inert(&render_mutation_section(&hostile_unreadable(), heading), 0);
     }
@@ -810,4 +816,14 @@ fn headline_of_a_target_first_run_says_why_it_has_no_score() {
         headline(&ran(target_first, None)),
         "**The target-first kill matrix has no score.** 1 mutant was not killed by a target; pass `--kill-matrix-full` to score each mutant."
     );
+}
+
+#[test]
+fn only_a_complete_run_with_no_mutant_is_an_empty_scope() {
+    assert!(mutation_scope_was_empty(&empty_scope()));
+    assert!(!mutation_scope_was_empty(&survivors()));
+    assert!(!mutation_scope_was_empty(&partial_time_budget()));
+    assert!(!mutation_scope_was_empty(&not_run(
+        MutationNotRunReason::EventRefused
+    )));
 }

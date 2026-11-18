@@ -170,6 +170,17 @@ pub struct MutationRunNotice {
     pub message: String,
 }
 
+/// Whether a complete run had no mutant in its scope and no score gate, so a
+/// PR comment or review has nothing to say about it. The job summary and the
+/// decision row still state the run.
+#[must_use]
+pub fn mutation_scope_was_empty(view: &MutationCiView) -> bool {
+    matches!(view.state, MutationCiState::Ran)
+        && view.counts.total == 0
+        && !is_partial(view)
+        && view.min_score_gate.is_none()
+}
+
 /// Render the mutation section for `heading`.
 ///
 /// A not-run, failed, stopped or unreadable state replaces everything after
@@ -185,10 +196,19 @@ pub fn render_mutation_section(view: &MutationCiView, heading: MutationHeading) 
         MutationHeading::Summary => "## Mutation testing",
     };
     let body = section_body(view, heading);
-    let full = join_paragraphs(title, &body.core, &body.extra);
-    if full.chars().count() <= MUTATION_SECTION_MAX_CHARS {
-        return full;
+    let shown = if heading == MutationHeading::Summary {
+        body.clone()
+    } else {
+        collapse_details(view, body.clone())
+    };
+    // The cap is measured on the open section, so the fold wrapper does not
+    // push a section that fits over it.
+    let open = join_paragraphs(title, &body.core, &body.extra);
+    if open.chars().count() <= MUTATION_SECTION_MAX_CHARS {
+        return join_paragraphs(title, &shown.core, &shown.extra);
     }
+    // The shortened section keeps the count table in view: the details it
+    // would fold are the part that the cap removed.
     join_paragraphs(title, &body.core, &[SHORTENED_SECTION_NOTE.to_owned()])
 }
 
@@ -334,9 +354,33 @@ const SECONDS_PER_HOUR: u64 = 3600;
 
 /// The paragraphs of a section. `core` survives the section cap, and `extra`
 /// does not.
+#[derive(Clone)]
 struct SectionBody {
     core: Vec<String>,
     extra: Vec<String>,
+}
+
+/// The PR comment and the review show the partial-run line and the headline,
+/// and fold the count table and the other paragraphs into one `<details>`
+/// block, so the section is two lines until a reader opens it. The job
+/// summary keeps every paragraph open.
+fn collapse_details(view: &MutationCiView, mut body: SectionBody) -> SectionBody {
+    if !matches!(view.state, MutationCiState::Ran) {
+        return body;
+    }
+    let mut hidden = Vec::new();
+    if view.counts.total > 0 && body.core.len() > 1 {
+        hidden.extend(body.core.pop());
+    }
+    hidden.append(&mut body.extra);
+    if hidden.is_empty() {
+        return body;
+    }
+    body.extra = vec![format!(
+        "<details>\n<summary>Counts and details</summary>\n\n{}\n\n</details>",
+        hidden.join("\n\n")
+    )];
+    body
 }
 
 fn join_paragraphs(title: &str, core: &[String], extra: &[String]) -> String {

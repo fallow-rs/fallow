@@ -3,11 +3,9 @@ source: crates/cli/tests/integration/snapshot_tests.rs
 expression: "baseline_pr_comment(&unrecognised_baseline_fixture(), Provider::Github)"
 ---
 <!-- fallow-id: fallow-results -->
-### Fallow codebase report
+### Quality gate failed
 
-**Quality gate failed**
-
-1 finding: 1 error.
+Fallow codebase report, 1 finding: 1 error.
 
 > **Baseline recognises nothing.** `fallow health` saved this baseline, so this command reads nothing from it and it suppresses nothing. Gates: failed stale-baseline.
 

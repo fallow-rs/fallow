@@ -14,7 +14,7 @@ pub use fallow_output::{
 };
 use fallow_output::{
     MutationCiView, MutationHeading, issues_from_codeclimate_issues, mutation_decision_row,
-    render_mutation_section,
+    mutation_scope_was_empty, render_mutation_section,
 };
 
 /// Workspace name, set once by `main()` when the binary is invoked with
@@ -194,13 +194,15 @@ fn render_pr_comment_with_mutation(
     mutation: Option<&MutationCiView>,
 ) -> String {
     let section = compose_trailing_section(
-        mutation.map(|view| {
-            let heading = match pr_comment_layout_from_env() {
-                PrCommentLayout::Compact => MutationHeading::CompactComment,
-                _ => MutationHeading::Comment,
-            };
-            render_mutation_section(view, heading)
-        }),
+        mutation
+            .filter(|view| !mutation_scope_was_empty(view))
+            .map(|view| {
+                let heading = match pr_comment_layout_from_env() {
+                    PrCommentLayout::Compact => MutationHeading::CompactComment,
+                    _ => MutationHeading::Comment,
+                };
+                render_mutation_section(view, heading)
+            }),
         crate::report::config_pattern_text::markdown_section(status.config_patterns),
     );
     let heading = heading_conclusion(conclusion, status.gates);
@@ -513,7 +515,7 @@ fn decision_summary_markdown(
     // with what the title cannot hold.
     let mut out = String::new();
     if issues.is_empty() {
-        out.push_str("No findings for this pull request.");
+        out.push_str("no findings for this pull request.");
     }
     if let Some(message) = status_message.filter(|message| !message.trim().is_empty()) {
         if !out.is_empty() {
@@ -698,7 +700,7 @@ mod tests {
     fn sticky_marker_id_default_when_nothing_set() {
         let body = render_pr_comment("check", Provider::Github, &[], None);
         assert!(body.contains("<!-- fallow-id: fallow-results"));
-        assert!(body.contains("No findings for this pull request."));
+        assert!(body.contains("no findings for this pull request."));
     }
 
     #[test]
@@ -890,9 +892,9 @@ mod tests {
             },
             None,
         );
-        assert!(body.contains("**Quality gate failed**"), "{body}");
+        assert!(body.contains("### Quality gate failed"), "{body}");
         assert!(
-            body.contains("No findings for this pull request."),
+            body.contains("no findings for this pull request."),
             "{body}"
         );
     }
@@ -913,7 +915,7 @@ mod tests {
             },
             None,
         );
-        assert!(body.contains("**Quality gate passed**"), "{body}");
+        assert!(body.contains("### Quality gate passed"), "{body}");
     }
 
     #[test]

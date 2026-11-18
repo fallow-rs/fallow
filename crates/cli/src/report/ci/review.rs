@@ -172,7 +172,9 @@ fn render_review_envelope_with_mutation(
         .flatten();
     let include_guidance = review_guidance_enabled();
     let trailing_section = super::pr_comment::compose_trailing_section(
-        mutation.map(|view| render_mutation_section(view, MutationHeading::Review)),
+        mutation
+            .filter(|view| !fallow_output::mutation_scope_was_empty(view))
+            .map(|view| render_mutation_section(view, MutationHeading::Review)),
         crate::report::config_pattern_text::markdown_section(notes.config_patterns),
     );
     let status_message = notes.message;
