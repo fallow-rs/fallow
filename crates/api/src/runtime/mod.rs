@@ -6,7 +6,7 @@ use fallow_config::{FallowConfig, HealthConfig, ProductionConfig};
 use fallow_engine::{
     dead_code::DeadCodeAnalysisArtifacts,
     duplicates::DuplicationReport,
-    project_config::{ProductionFlags, ProductionModes},
+    project_config::{self, ConfigFileOptions, ConfigLoadError, ProductionFlags, ProductionModes},
     session::AnalysisSession,
 };
 use fallow_output::{HealthGrouping, HealthReport};
@@ -147,26 +147,26 @@ pub fn load_health_config(
     Ok(loaded.map(|config| config.health))
 }
 
+/// The config file of the project, or `None` when the project has no config
+/// file.
 fn load_config_file(
     root: &Path,
     config_path: Option<&Path>,
     allow_remote_extends: bool,
 ) -> ProgrammaticResult<Option<FallowConfig>> {
-    let load_options = fallow_config::ConfigLoadOptions {
-        allow_remote_extends,
-    };
-    if let Some(path) = config_path {
-        return FallowConfig::load_with_options(path, load_options)
-            .map(Some)
-            .map_err(|err| config_load_error(format!("failed to load config: {err:#}")));
-    }
-    FallowConfig::find_and_load_with_options(root, load_options)
-        .map(|found| found.map(|(config, _)| config))
-        .map_err(|err| config_load_error(format!("failed to load config: {err}")))
+    let file = project_config::load_config_file(
+        root,
+        config_path,
+        ConfigFileOptions {
+            allow_remote_extends,
+        },
+    )
+    .map_err(|err| config_load_error(&err))?;
+    Ok(file.path.map(|_| file.config))
 }
 
-fn config_load_error(message: String) -> ProgrammaticError {
-    ProgrammaticError::new(message, 2)
+fn config_load_error(err: &ConfigLoadError) -> ProgrammaticError {
+    ProgrammaticError::new(format!("failed to load config: {}", err.chain()), 2)
         .with_code("FALLOW_CONFIG_LOAD_FAILED")
         .with_context("analysis.configPath")
 }
