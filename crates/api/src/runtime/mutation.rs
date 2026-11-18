@@ -23,6 +23,7 @@ use fallow_types::envelope::ElapsedMs;
 use rustc_hash::FxHashSet;
 
 use super::mutation_record::{record_and_search, settle_recording};
+use super::mutation_runner_options::{runner_config, runner_projects};
 use super::mutation_witness::{WitnessSearch, search_witnesses};
 use crate::ProgrammaticError;
 use crate::analysis_context::{ProgrammaticAnalysisContext, resolve_programmatic_analysis_context};
@@ -382,70 +383,10 @@ pub(super) struct Planned {
     base_ref: Option<String>,
     /// The selected runner config file, relative to the project root.
     pub(super) runner_config: Option<String>,
+    /// The selected Vitest project names. Empty uses each project.
+    pub(super) runner_projects: Vec<String>,
     /// The names of the selected operators. `None` uses the default set.
     operators: Option<Vec<String>>,
-}
-
-/// The selected runner config: the caller option, else the
-/// `mutation.runnerConfig` config key. The result is relative to the project
-/// root, with `/` separators, as the companion resolves it against the root.
-///
-/// # Errors
-///
-/// Returns an exit-2 error when the file does not exist, is not a file, is
-/// outside the project root, or when the runner reads no config file.
-fn runner_config(
-    options: &MutationRunOptions,
-    session: &AnalysisSession,
-    root: &Path,
-    runner: Runner,
-) -> ProgrammaticResult<Option<String>> {
-    let Some(raw) = options.runner_config.clone().or_else(|| {
-        session
-            .config()
-            .mutation
-            .runner_config
-            .as_ref()
-            .map(PathBuf::from)
-    }) else {
-        return Ok(None);
-    };
-    let invalid = |message: String| {
-        mutation_error("FALLOW_INVALID_MUTATION_OPTIONS", message)
-            .with_context("mutation.runnerConfig")
-    };
-    let shown = raw.display();
-    if runner != Runner::Vitest {
-        return Err(invalid(format!(
-            "the runner config `{shown}` needs the Vitest runner, but the run uses `{}`; only Vitest reads a config file",
-            runner.name()
-        )));
-    }
-    let candidate = if raw.is_absolute() {
-        raw.clone()
-    } else {
-        root.join(&raw)
-    };
-    if !candidate.is_file() {
-        return Err(invalid(format!(
-            "the runner config `{shown}` is not a file; a relative path is relative to the project root"
-        )));
-    }
-    let root = canonical_path(root);
-    let file = canonical_path(&candidate);
-    let Ok(relative) = file.strip_prefix(&root) else {
-        return Err(invalid(format!(
-            "the runner config `{shown}` is outside the project root `{}`",
-            root.display()
-        )));
-    };
-    Ok(Some(
-        relative
-            .components()
-            .map(|part| part.as_os_str().to_string_lossy())
-            .collect::<Vec<_>>()
-            .join("/"),
-    ))
 }
 
 pub(super) fn plan_for(
@@ -515,6 +456,7 @@ pub(super) fn plan_with_wraps(
     let runner =
         selected.unwrap_or_else(|| select_runner(configured, resolved.root(), &plan.test_files));
     let runner_config = runner_config(options, &session, resolved.root(), runner)?;
+    let runner_projects = runner_projects(options, &session, runner)?;
     Ok(Planned {
         resolved,
         cache_dir,
@@ -522,6 +464,7 @@ pub(super) fn plan_with_wraps(
         plan,
         base_ref,
         runner_config,
+        runner_projects,
         operators: operator_names,
     })
 }
@@ -1052,7 +995,11 @@ fn open_stores(
 ) -> ProgrammaticResult<(Option<Arc<ResultCache>>, RunJournal)> {
     let root = planned.resolved.root();
     let name = planned.runner.name();
-    let files = key_files(&planned.plan, planned.runner_config.as_deref());
+    let files = key_files(
+        &planned.plan,
+        planned.runner_config.as_deref(),
+        &planned.runner_projects,
+    );
     let result_cache = open_result_cache(
         planned.resolved.no_cache,
         mutation_cache,
@@ -1073,6 +1020,7 @@ fn open_stores(
             .map(|hash| hash.to_string_lossy().into_owned())
             .unwrap_or_default(),
         runner_config: planned.runner_config.clone(),
+        runner_projects: planned.runner_projects.clone(),
         scope: scope_label(options, planned.base_ref.as_deref(), root),
         operators: planned.operators.clone(),
         allow_side_effects: options.allow_side_effects,
@@ -1154,9 +1102,16 @@ fn open_result_cache(
 
 /// The key files of the result cache. A selected runner config file is a
 /// support file of the key, so a result of one config content is never the
-/// result of another.
-fn key_files(plan: &MutationPlan, runner_config: Option<&str>) -> KeyFiles {
-    let mut files = KeyFiles::from_plan(plan);
+/// result of another. The selected Vitest projects are a key part too.
+fn key_files(
+    plan: &MutationPlan,
+    runner_config: Option<&str>,
+    runner_projects: &[String],
+) -> KeyFiles {
+    let mut files = KeyFiles {
+        runner_projects: runner_projects.to_vec(),
+        ..KeyFiles::from_plan(plan)
+    };
     if let Some(config) = runner_config
         && !files.support_files.iter().any(|file| file == config)
     {
@@ -1188,11 +1143,12 @@ fn store_results(cache: &ResultCache, outcome: &mut ScheduleOutcome) -> Mutation
 /// loading flags of the `node --test` command in the project scripts. The
 /// `node:test` and `bun:test` runners get the static test files, because
 /// their glob discovery does not go into dot directories. Vitest has its own
-/// include configuration.
+/// include configuration, and gets the selected projects.
 pub(super) fn init_options(
     runner: Runner,
     root: &Path,
     static_test_files: &[String],
+    projects: &[String],
 ) -> InitOptions {
     let node_args = match runner {
         Runner::NodeTest => node_test_args(root),
@@ -1205,6 +1161,7 @@ pub(super) fn init_options(
     InitOptions {
         extra_test_files,
         node_args,
+        projects: projects.to_vec(),
         ..InitOptions::default()
     }
 }
@@ -1298,7 +1255,7 @@ fn execute(
             config_path: planned.runner_config.clone(),
             run_dir: run_dir.dir.to_string_lossy().into_owned(),
             path_map: run_dir.path_map.clone(),
-            options: init_options(runner, &root, &plan.test_files),
+            options: init_options(runner, &root, &plan.test_files, &planned.runner_projects),
         },
         runner: range.clone(),
         kill_matrix: options.kill_matrix,
@@ -1942,12 +1899,25 @@ mod tests {
         let dir = tempfile::tempdir().expect("dir");
         let files = vec![".github/tests/math.test.mjs".to_owned()];
         for runner in [Runner::NodeTest, Runner::BunTest] {
-            let options = init_options(runner, dir.path(), &files);
+            let options = init_options(runner, dir.path(), &files, &[]);
             assert_eq!(options.extra_test_files, files, "{runner:?}");
             assert!(options.test_files.is_empty(), "{runner:?}");
         }
-        let vitest = init_options(Runner::Vitest, dir.path(), &files);
+        let vitest = init_options(Runner::Vitest, dir.path(), &files, &[]);
         assert!(vitest.extra_test_files.is_empty());
+    }
+
+    #[test]
+    fn vitest_gets_the_selected_projects() {
+        let dir = tempfile::tempdir().expect("dir");
+        let projects = vec!["unit".to_owned(), "api-*".to_owned()];
+        let vitest = init_options(Runner::Vitest, dir.path(), &[], &projects);
+        assert_eq!(vitest.projects, projects);
+        let wire = serde_json::to_value(&vitest).expect("serialize");
+        assert_eq!(wire["projects"], serde_json::json!(["unit", "api-*"]));
+        let none = serde_json::to_value(init_options(Runner::Vitest, dir.path(), &[], &[]))
+            .expect("serialize");
+        assert!(none.get("projects").is_none(), "{none}");
     }
 
     #[test]

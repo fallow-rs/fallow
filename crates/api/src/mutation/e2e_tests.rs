@@ -552,6 +552,42 @@ fn a_runner_config_must_be_a_vitest_file_inside_the_root() {
     );
 }
 
+#[test]
+fn runner_projects_need_vitest_and_a_name() {
+    let project = small_project();
+    let root = project.path();
+    let refused = |names: &[&str]| {
+        let mut plan = options(root, MutationRunScope::All);
+        plan.runner_projects = names.iter().map(|&name| name.to_owned()).collect();
+        let error = plan_mutation(&plan).unwrap_err();
+        assert_eq!(
+            error.code.as_deref(),
+            Some("FALLOW_INVALID_MUTATION_OPTIONS")
+        );
+        assert_eq!(error.context.as_deref(), Some("mutation.runnerProjects"));
+        error.message
+    };
+    assert!(refused(&["unit", " "]).contains("is empty"));
+
+    let mut plan = options(root, MutationRunScope::All);
+    plan.runner_projects = vec!["unit".to_owned()];
+    plan_mutation(&plan).expect("a Vitest project selection is valid");
+
+    // The config key selects projects too, and only Vitest has projects.
+    fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"mutation":{"runner":"node-test","runnerProjects":["unit"]}}"#,
+    )
+    .expect("write");
+    let error = plan_mutation(&options(root, MutationRunScope::All)).unwrap_err();
+    assert_eq!(error.context.as_deref(), Some("mutation.runnerProjects"));
+    assert!(
+        error.message.contains("need the Vitest runner"),
+        "{}",
+        error.message
+    );
+}
+
 /// The end-to-end run needs a symlink to `node_modules`, so it runs on Unix
 /// only. Its helper lives in the same module, so no item is dead on Windows.
 #[cfg(unix)]
