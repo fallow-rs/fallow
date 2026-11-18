@@ -12,6 +12,10 @@ use rustc_hash::FxHashSet;
 
 use crate::{EngineError, EngineResult};
 
+mod loader;
+
+pub use loader::{ConfigFile, ConfigFileOptions, ConfigLoadError, load_config_file};
+
 /// The production flags of one run: the global `--production` override and one
 /// override per analysis (`--production-dead-code`, `--production-health`,
 /// `--production-dupes`).
@@ -229,11 +233,13 @@ pub fn config_for_project_with_load_options(
     config_path: Option<&Path>,
     load_options: ConfigLoadOptions,
 ) -> EngineResult<ProjectConfig> {
-    let user_config = load_user_config(root, config_path, load_options)?;
-    let (mut config, path) = match user_config {
-        Some((config, path)) => (config, Some(path)),
-        None => (FallowConfig::default(), None),
-    };
+    let ConfigFile { mut config, path } = load_config_file(
+        root,
+        config_path,
+        ConfigFileOptions {
+            allow_remote_extends: load_options.allow_remote_extends,
+        },
+    )?;
     if path.is_some() {
         let dead_code = config.production.for_analysis(ProductionAnalysis::DeadCode);
         config.production = config.production.for_run(dead_code);
@@ -344,33 +350,23 @@ fn resolve_project_config_analysis(
     config_path: Option<&Path>,
     options: ProjectConfigOptions,
 ) -> EngineResult<(ProjectConfig, Vec<String>)> {
-    let user_config = load_user_config(
+    let ConfigFile { mut config, path } = load_config_file(
         root,
         config_path,
-        ConfigLoadOptions {
+        ConfigFileOptions {
             allow_remote_extends: options.allow_remote_extends,
         },
     )?;
-    let loaded_user_config = user_config.is_some();
-    let (mut config, path) = match user_config {
-        Some((config, path)) => (config, Some(path)),
-        None => (
-            FallowConfig {
-                production: options.production_override.unwrap_or(false).into(),
-                ..FallowConfig::default()
-            },
-            None,
-        ),
-    };
-
-    if loaded_user_config {
+    config.production = if path.is_some() {
         let production = ProductionFlags {
             global: options.production_override,
             ..ProductionFlags::default()
         }
         .effective(options.analysis, &config.production);
-        config.production = config.production.for_run(production);
-    }
+        config.production.for_run(production)
+    } else {
+        options.production_override.unwrap_or(false).into()
+    };
     validate_config(root, &config)?;
     let configured_plugin_paths = config.plugins.clone();
     let inputs = fallow_config::ConfigInputs::new(root, &config);
@@ -476,20 +472,6 @@ fn with_undeclared_workspace_diagnostics(
         }
     }
     diagnostics
-}
-
-fn load_user_config(
-    root: &Path,
-    config_path: Option<&Path>,
-    options: ConfigLoadOptions,
-) -> EngineResult<Option<(FallowConfig, PathBuf)>> {
-    if let Some(path) = config_path {
-        let config = FallowConfig::load_with_options(path, options)
-            .map_err(|err| EngineError::new(format!("invalid config: {err:#}")))?;
-        return Ok(Some((config, path.to_path_buf())));
-    }
-    FallowConfig::find_and_load_with_options(root, options)
-        .map_err(|err| EngineError::new(format!("invalid config: {err}")))
 }
 
 fn validate_config(root: &Path, config: &FallowConfig) -> EngineResult<()> {
