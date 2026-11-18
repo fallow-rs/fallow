@@ -4280,13 +4280,3 @@ fn anchored_config_file_exports_get_workspace_prefix() {
         )]
     );
 }
-
-#[test]
-fn workspace_prefix_uses_forward_slashes() {
-    // A backslash in a path component stands for the separator of a Windows
-    // path, which `to_string_lossy` keeps as written.
-    let root = std::path::Path::new("/repo");
-    let workspace = std::path::Path::new("/repo/packages\\web");
-
-    assert_eq!(crate::workspace_prefix(root, workspace), "packages/web");
-}

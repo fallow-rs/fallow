@@ -1968,12 +1968,6 @@ struct ScriptDependencyContext<'a> {
     registry: &'a plugins::PluginRegistry,
 }
 
-/// The directory of a workspace package relative to the project root, with
-/// `/` separators.
-fn workspace_dir(root: &std::path::Path, ws: &fallow_config::WorkspaceInfo) -> String {
-    workspace_prefix(root, &ws.root)
-}
-
 /// Gather the scripts declared by the root and workspace packages.
 fn collect_all_scripts(
     root_pkg: Option<&PackageJson>,
@@ -2109,7 +2103,7 @@ fn analyze_one_workspace_scripts(
     let mut used_packages = Vec::new();
     let mut discovered_always_used: Vec<(String, String)> = Vec::new();
     let mut entry_patterns: Vec<(plugins::PathRule, String)> = Vec::new();
-    let ws_prefix = workspace_dir(&config.root, ws);
+    let ws_prefix = workspace_prefix(&config.root, &ws.root);
     let ws_scripts = ws_pkg.scripts.clone().unwrap_or_default();
     let mut scripts_to_analyze = if config.production {
         scripts::filter_production_scripts(&ws_scripts)
@@ -2586,7 +2580,7 @@ fn merge_workspace_plugin_results(
 /// itself. A root outside the project tree keeps its own path, which is also the
 /// prefix its patterns carry. It uses `/` separators, because plugin patterns
 /// and scopes built from it match `/`-separated project-relative paths.
-pub(crate) fn workspace_prefix(root: &Path, workspace_root: &Path) -> String {
+fn workspace_prefix(root: &Path, workspace_root: &Path) -> String {
     workspace_root
         .strip_prefix(root)
         .unwrap_or(workspace_root)
@@ -3887,5 +3881,11 @@ mod tests {
             .map(|export| export.name.to_string())
             .collect();
         assert_eq!(exports, vec!["bravo".to_string()]);
+    }
+
+    #[test]
+    fn workspace_prefix_uses_forward_slashes() {
+        let prefix = super::workspace_prefix(Path::new("/r"), Path::new("/r/packages\\web"));
+        assert_eq!(prefix, "packages/web");
     }
 }
