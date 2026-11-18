@@ -6,8 +6,7 @@ use super::*;
 /// `unused_dev_dependencies`, `unused_optional_dependencies` views over the
 /// same bare [`UnusedDependency`] struct. Each wrapper differs only in the
 /// `package_json_location` string (`"dependencies"` / `"devDependencies"` /
-/// `"optionalDependencies"`) baked into the fix-action description and in
-/// the `suppress_issue_kind` used by the inline-suppress comment. All three
+/// `"optionalDependencies"`) in the fix-action description. All three
 /// share the cross-workspace swap (when `dep.used_in_workspaces` is
 /// non-empty the primary fix flips from `remove-dependency` to
 /// `move-dependency` because the dep is imported by ANOTHER workspace and
@@ -15,7 +14,6 @@ use super::*;
 pub(super) fn build_unused_dependency_actions(
     dep: &UnusedDependency,
     package_json_location: &str,
-    suppress_issue_kind: &str,
 ) -> Vec<IssueAction> {
     let mut actions = Vec::with_capacity(2);
     let cross_workspace = !dep.used_in_workspaces.is_empty();
@@ -42,10 +40,7 @@ pub(super) fn build_unused_dependency_actions(
             suggested_target: None,
         })
     });
-    actions.push(build_ignore_dependencies_suppress_action(
-        &dep.package_name,
-        suppress_issue_kind,
-    ));
+    actions.push(build_ignore_dependencies_suppress_action(&dep.package_name));
     actions
 }
 

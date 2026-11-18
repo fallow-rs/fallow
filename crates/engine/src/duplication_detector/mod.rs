@@ -1453,39 +1453,42 @@ export function shared(input: string): string {
     return mapped.join(", ");
 }
 "#;
-        let suppressed = format!("// fallow-ignore-file code-duplication\n{block}");
-
-        let a = src_dir.join("a.ts");
-        let b = src_dir.join("b.ts");
-        let c = src_dir.join("c.ts");
-        std::fs::write(&a, block).expect("write a");
-        std::fs::write(&b, block).expect("write b");
-        std::fs::write(&c, &suppressed).expect("write c");
-
-        let files = vec![
+        let mut files = [(0, "a.ts"), (1, "b.ts"), (2, "c.ts")].map(|(id, name)| {
+            let path = src_dir.join(name);
+            std::fs::write(&path, block).expect("write clone");
             DiscoveredFile {
-                id: FileId(0),
-                path: a,
+                id: FileId(id),
+                path,
                 size_bytes: block.len() as u64,
-            },
-            DiscoveredFile {
-                id: FileId(1),
-                path: b,
-                size_bytes: block.len() as u64,
-            },
-            DiscoveredFile {
-                id: FileId(2),
-                path: c,
-                size_bytes: suppressed.len() as u64,
-            },
-        ];
-
-        let config = DuplicatesConfig {
+            }
+        });
+        let mut config = DuplicatesConfig {
             min_tokens: 10,
             min_lines: 2,
-            min_occurrences: 3,
+            min_occurrences: 2,
             ..DuplicatesConfig::default()
         };
+
+        let original = find_duplicates(dir.path(), &files, &config);
+        let [group] = original.clone_groups.as_slice() else {
+            panic!("expected one clone group before suppression");
+        };
+        assert_eq!(group.instances.len(), 3);
+
+        let suppressed = block.replace(
+            "    return mapped.join",
+            "    // fallow-ignore-next-line code-duplication\n    return mapped.join",
+        );
+        std::fs::write(&files[2].path, &suppressed).expect("write suppressed clone");
+        files[2].size_bytes = suppressed.len() as u64;
+
+        let marked = find_duplicates(dir.path(), &files, &config);
+        let [group] = marked.clone_groups.as_slice() else {
+            panic!("expected one clone group after suppression");
+        };
+        assert_eq!(group.instances.len(), 2);
+
+        config.min_occurrences = 3;
         let report = find_duplicates(dir.path(), &files, &config);
         assert!(
             report.clone_groups.is_empty(),
@@ -1497,6 +1500,7 @@ export function shared(input: string): string {
                 .map(|g| g.instances.len())
                 .collect::<Vec<_>>()
         );
+        assert_eq!(report.stats.clone_groups_below_min_occurrences, 1);
         assert_eq!(
             report.stats.clone_groups, 0,
             "stats.clone_groups must match the empty post-filter array"

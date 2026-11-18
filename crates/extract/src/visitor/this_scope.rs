@@ -73,8 +73,7 @@ impl ModuleInfoExtractor {
                         member: access.member.clone(),
                     },
                 ))
-            })
-            .collect::<Vec<_>>();
+            });
         self.semantic_facts.extend(member_facts);
 
         let whole_object_facts = self.whole_object_uses[whole_object_start..]
@@ -87,8 +86,7 @@ impl ModuleInfoExtractor {
                         object: format!("this.{rest}"),
                     },
                 ))
-            })
-            .collect::<Vec<_>>();
+            });
         self.semantic_facts.extend(whole_object_facts);
     }
 

@@ -57,14 +57,6 @@ struct SarifCtx<'a> {
     rules: &'a RulesConfig,
 }
 
-fn severity_to_sarif_level(s: Severity) -> &'static str {
-    match s {
-        Severity::Error => "error",
-        Severity::Warn => "warning",
-        Severity::Off => unreachable!(),
-    }
-}
-
 /// The SARIF level for one finding: its saved severity when the finding
 /// carries one, otherwise the configured rule severity (a saved report from an
 /// older version has no saved severity).
@@ -76,15 +68,16 @@ fn finding_level(finding: &impl GatedFinding, rule: Severity) -> &'static str {
         Some(EffectiveSeverity::Error) => "error",
         Some(EffectiveSeverity::Warn) => "warning",
         None => match rule {
-            Severity::Off => "warning",
-            Severity::Error | Severity::Warn => severity_to_sarif_level(rule),
+            Severity::Error => "error",
+            Severity::Warn | Severity::Off => "warning",
         },
     }
 }
 
 fn configured_sarif_level(s: Severity) -> &'static str {
     match s {
-        Severity::Error | Severity::Warn => severity_to_sarif_level(s),
+        Severity::Error => "error",
+        Severity::Warn => "warning",
         Severity::Off => "none",
     }
 }

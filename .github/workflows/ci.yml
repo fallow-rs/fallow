@@ -1175,11 +1175,14 @@ jobs:
           # can use a local, version-matched $schema. Refs #3851.
           cp rule-pack-schema.json npm/fallow/rule-pack-schema.json
           diff rule-pack-schema.json npm/fallow/rule-pack-schema.json
-          npm pack --dry-run --json ./npm/fallow > /tmp/fallow-pack.json
-          node <<'NODE'
-          const fs = require('fs');
-          const [pack] = JSON.parse(fs.readFileSync('/tmp/fallow-pack.json', 'utf8'));
-          const files = new Set(pack.files.map((file) => file.path));
+          pack_dir=$(mktemp -d "$RUNNER_TEMP/fallow-pack.XXXXXXXX")
+          npm pack ./npm/fallow --pack-destination "$pack_dir"
+          tarball="$RUNNER_TEMP/fallow.tgz"
+          mv "$pack_dir"/fallow-*.tgz "$tarball"
+          node - "$tarball" <<'NODE'
+          const { execFileSync } = require('node:child_process');
+          const content = execFileSync('tar', ['-tzf', process.argv[2]], { encoding: 'utf8' });
+          const files = new Set(content.split('\n'));
           const required = [
             'package.json',
             'README.md',
@@ -1198,7 +1201,7 @@ jobs:
             'capabilities.json',
             'issue-registry.json',
           ];
-          const missing = required.filter((file) => !files.has(file));
+          const missing = required.filter((file) => !files.has(`package/${file}`));
           if (missing.length > 0) {
             throw new Error(`npm package is missing expected files: ${missing.join(', ')}`);
           }
@@ -1214,22 +1217,11 @@ jobs:
         run: npm --prefix npm/fallow test
 
       - name: Smoke that no postinstall runs on install
-        # Phase 2 of RFC 868 will block postinstall hooks by default. fallow
-        # must not regress to depending on postinstall. Pack the candidate
-        # tarball and install with --ignore-scripts; confirm the bin wrappers
-        # land and the postinstall file is gone.
+        # The bin wrappers must work when npm disables lifecycle scripts.
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p /tmp/fallow-tarball
-          npm pack ./npm/fallow --pack-destination /tmp/fallow-tarball > /tmp/fallow-pack.log
-          shopt -s nullglob
-          tarballs=(/tmp/fallow-tarball/fallow-*.tgz)
-          if [ ${#tarballs[@]} -eq 0 ]; then
-            echo "::error::npm pack produced no tarball"
-            exit 1
-          fi
-          TARBALL="${tarballs[0]}"
+          TARBALL="$RUNNER_TEMP/fallow.tgz"
           mkdir -p /tmp/fallow-smoke && cd /tmp/fallow-smoke
           printf '%s' '{"name":"fallow-smoke","version":"0.0.0","private":true}' > package.json
           # Skip the optional platform-binary fetch: the smoke checks install

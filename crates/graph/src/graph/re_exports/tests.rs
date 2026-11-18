@@ -2645,7 +2645,7 @@ fn deep_named_re_export_chain_propagates_25_hops() {
         let consumer_id = FileId(0);
         let leaf_id = FileId(barrel_count + 1);
 
-        let mut files: Vec<DiscoveredFile> = (0..=barrel_count + 1)
+        let files: Vec<DiscoveredFile> = (0..=barrel_count + 1)
             .map(|i| DiscoveredFile {
                 id: FileId(i),
                 path: if i == 0 {
@@ -2731,7 +2731,6 @@ fn deep_named_re_export_chain_propagates_25_hops() {
             ..Default::default()
         });
 
-        let _ = &mut files; // silence unused warning under expect
         let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
 
         let leaf = &graph.modules[leaf_id.0 as usize];

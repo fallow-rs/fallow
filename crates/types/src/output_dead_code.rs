@@ -3238,17 +3238,8 @@ impl UnusedProtectedClassMemberFinding {
     }
 }
 
-/// Build the standard `add-to-config` `ignoreDependencies` suppress action
-/// for any finding whose primary key is a package name. Used by the four
-/// dependency-family wrappers (unused / unlisted / type-only / test-only).
-/// The `_suppress_issue_kind` argument is currently unused; the pre-2.76
-/// `inject_actions` post-pass also did not embed the issue kind in this
-/// shape (no inline `// fallow-ignore-next-line ...` comment because the
-/// finding is anchored at a package.json line, not at a source-file line).
-fn build_ignore_dependencies_suppress_action(
-    package_name: &str,
-    _suppress_issue_kind: &str,
-) -> IssueAction {
+/// Build an `ignoreDependencies` config action for a package manifest finding.
+fn build_ignore_dependencies_suppress_action(package_name: &str) -> IssueAction {
     IssueAction::AddToConfig(AddToConfigAction {
         kind: AddToConfigKind::AddToConfig,
         auto_fixable: false,
@@ -3312,7 +3303,7 @@ impl UnusedDependencyFinding {
     /// to `move-dependency` when the dep is imported by another workspace.
     #[must_use]
     pub fn with_actions(dep: UnusedDependency) -> Self {
-        let actions = build_unused_dependency_actions(&dep, "dependencies", "unused-dependency");
+        let actions = build_unused_dependency_actions(&dep, "dependencies");
         Self {
             finding_id: None,
             dep,
@@ -3373,8 +3364,7 @@ impl UnusedDevDependencyFinding {
     /// Build the wrapper.
     #[must_use]
     pub fn with_actions(dep: UnusedDependency) -> Self {
-        let actions =
-            build_unused_dependency_actions(&dep, "devDependencies", "unused-dev-dependency");
+        let actions = build_unused_dependency_actions(&dep, "devDependencies");
         Self {
             finding_id: None,
             dep,
@@ -3435,8 +3425,7 @@ impl UnusedOptionalDependencyFinding {
     /// Build the wrapper.
     #[must_use]
     pub fn with_actions(dep: UnusedDependency) -> Self {
-        let actions =
-            build_unused_dependency_actions(&dep, "optionalDependencies", "unused-dependency");
+        let actions = build_unused_dependency_actions(&dep, "optionalDependencies");
         Self {
             finding_id: None,
             dep,
@@ -3498,7 +3487,7 @@ impl UnlistedDependencyFinding {
                 available_in_catalogs: None,
                 suggested_target: None,
             }),
-            build_ignore_dependencies_suppress_action(&dep.package_name, "unlisted-dependency"),
+            build_ignore_dependencies_suppress_action(&dep.package_name),
         ];
         Self {
             finding_id: None,
@@ -3635,7 +3624,7 @@ impl TypeOnlyDependencyFinding {
                 available_in_catalogs: None,
                 suggested_target: None,
             }),
-            build_ignore_dependencies_suppress_action(&dep.package_name, "type-only-dependency"),
+            build_ignore_dependencies_suppress_action(&dep.package_name),
         ];
         Self {
             finding_id: None,
@@ -3698,7 +3687,7 @@ impl TestOnlyDependencyFinding {
                 available_in_catalogs: None,
                 suggested_target: None,
             }),
-            build_ignore_dependencies_suppress_action(&dep.package_name, "test-only-dependency"),
+            build_ignore_dependencies_suppress_action(&dep.package_name),
         ];
         Self {
             finding_id: None,
@@ -3764,10 +3753,7 @@ impl DevDependencyInProductionFinding {
                 available_in_catalogs: None,
                 suggested_target: None,
             }),
-            build_ignore_dependencies_suppress_action(
-                &dep.package_name,
-                "dev-dependency-in-production",
-            ),
+            build_ignore_dependencies_suppress_action(&dep.package_name),
         ];
         Self {
             finding_id: None,
