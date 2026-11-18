@@ -314,8 +314,8 @@ fn project_outside_temp_folder(prefix: &str) -> Option<tempfile::TempDir> {
 }
 
 /// `audit.dupes: false` skips duplication in the audit only. The bare run
-/// ignores the `audit` keys and fills the clone history that both runs share,
-/// so an audit record would credit those clones as resolved.
+/// ignores the `audit` keys and runs duplication, so only the bare run has a
+/// full selection.
 #[test]
 fn audit_dupes_false_records_the_bare_run_only() {
     let Some(project) = project_outside_temp_folder("impact-audit-dupes-off-") else {
@@ -415,9 +415,8 @@ fn only_dead_code_and_health_records_both_runs_when_duplication_is_off_in_the_co
     );
 }
 
-/// When the project has duplication on, `--skip dupes` narrows the run. A
-/// record would credit the clones of earlier runs as resolved, so neither
-/// run records.
+/// When the project has duplication on, `--skip dupes` narrows the run, so
+/// neither run records.
 #[test]
 fn skip_dupes_records_no_run_when_duplication_is_on() {
     let Some(project) = project_outside_temp_folder("impact-both-skip-dupes-on-") else {
@@ -451,22 +450,16 @@ fn cloned_function(name: &str) -> String {
     source
 }
 
-/// With `duplicates.enabled: false`, a run with `--only dead-code,dupes,health`
-/// still runs duplication and fills the clone frontier. A later `--skip dupes`
-/// record has no clones, so it credits each stored clone group as resolved.
-#[test]
-fn skip_dupes_record_credits_clones_that_an_earlier_run_stored() {
-    let Some(project) = project_outside_temp_folder("impact-skip-dupes-seeded-clones-") else {
-        return;
-    };
+const DUPLICATES_OFF: &str = r#"{"duplicates": {"enabled": false}}"#;
+
+/// Write a committed project with one clone group (`src/first.ts` and
+/// `src/second.ts`) to `dir` and turn Impact on in a fresh home.
+fn clone_project(dir: &Path, config: Option<&str>) -> tempfile::TempDir {
     let home = tempfile::tempdir().expect("home tempdir");
-    let dir = project.path();
     std::fs::create_dir_all(dir.join("src")).expect("create src");
-    std::fs::write(
-        dir.join(".fallowrc.json"),
-        r#"{"duplicates": {"enabled": false}}"#,
-    )
-    .expect("write config");
+    if let Some(config) = config {
+        std::fs::write(dir.join(".fallowrc.json"), config).expect("write config");
+    }
     std::fs::write(
         dir.join("package.json"),
         r#"{"name":"impact-seeded-clones","main":"src/index.ts"}"#,
@@ -487,44 +480,167 @@ fn skip_dupes_record_credits_clones_that_an_earlier_run_stored() {
         &["impact", "enable", "--root", root, "--quiet"],
     );
     assert_eq!(enable.code, 0, "enable failed: {}", enable.stderr);
+    home
+}
+
+/// Run bare `fallow` on `project` with `extra` args, then read the store.
+fn bare_run(home: &Path, project: &Path, extra: &[&str]) -> serde_json::Value {
+    let root = project.to_str().expect("utf8 root");
     let bare = ["--root", root, "--format", "json", "--quiet"];
-    let clone_groups = |store: &serde_json::Value| -> usize {
-        store["clone_frontier"].as_object().map_or(0, |worktrees| {
-            worktrees
-                .values()
-                .filter_map(serde_json::Value::as_object)
-                .map(serde_json::Map::len)
-                .sum()
-        })
-    };
+    run_recording(home, &[&bare[..], extra].concat());
+    read_store_json(home)
+}
 
-    run_recording(
-        home.path(),
-        &[&bare[..], &["--only", "dead-code,dupes,health"]].concat(),
-    );
-    let seeded = read_store_json(home.path());
-    assert_eq!(
-        seeded["project_records"].as_array().map_or(0, Vec::len),
-        1,
-        "{seeded:#}"
-    );
-    assert_eq!(clone_groups(&seeded), 1, "{seeded:#}");
-    assert_eq!(seeded["resolved_total"], 0, "{seeded:#}");
+/// The clone groups in the clone frontier of every worktree of `store`.
+fn clone_groups(store: &serde_json::Value) -> usize {
+    store["clone_frontier"].as_object().map_or(0, |worktrees| {
+        worktrees
+            .values()
+            .filter_map(serde_json::Value::as_object)
+            .map(serde_json::Map::len)
+            .sum()
+    })
+}
 
-    run_recording(home.path(), &[&bare[..], &["--skip", "dupes"]].concat());
-    let store = read_store_json(home.path());
-    assert_eq!(
-        store["project_records"].as_array().map_or(0, Vec::len),
-        2,
-        "{store:#}"
-    );
-    assert_eq!(clone_groups(&store), 0, "{store:#}");
-    assert_eq!(store["resolved_total"], 1, "{store:#}");
-    let kinds: Vec<&str> = store["recent_resolved"]
+fn record_count(store: &serde_json::Value, field: &str) -> usize {
+    store[field].as_array().map_or(0, Vec::len)
+}
+
+fn resolved_kinds(store: &serde_json::Value) -> Vec<String> {
+    store["recent_resolved"]
         .as_array()
         .expect("recent_resolved")
         .iter()
-        .filter_map(|event| event["kind"].as_str())
-        .collect();
-    assert_eq!(kinds, ["code-duplication"], "{store:#}");
+        .filter_map(|event| event["kind"].as_str().map(ToOwned::to_owned))
+        .collect()
+}
+
+/// Assert that the bare run stored the clone group and credited nothing.
+fn assert_seeded(store: &serde_json::Value) {
+    assert_eq!(record_count(store, "project_records"), 1, "{store:#}");
+    assert_eq!(clone_groups(store), 1, "{store:#}");
+    assert_eq!(store["resolved_total"], 0, "{store:#}");
+}
+
+/// Assert that a record without duplication credited no clone group and kept
+/// the stored clone group.
+fn assert_clone_frontier_kept(store: &serde_json::Value) {
+    assert_eq!(store["resolved_total"], 0, "{store:#}");
+    assert!(resolved_kinds(store).is_empty(), "{store:#}");
+    assert_eq!(clone_groups(store), 1, "{store:#}");
+}
+
+/// With `duplicates.enabled: false`, a run with `--only dead-code,dupes,health`
+/// still runs duplication and fills the clone frontier. A later `--skip dupes`
+/// record does not run duplication, so it credits no clone group as resolved
+/// and keeps the stored clone frontier.
+#[test]
+fn skip_dupes_record_keeps_clones_that_an_earlier_run_stored() {
+    let Some(project) = project_outside_temp_folder("impact-skip-dupes-seeded-clones-") else {
+        return;
+    };
+    let home = clone_project(project.path(), Some(DUPLICATES_OFF));
+    let seeded = bare_run(
+        home.path(),
+        project.path(),
+        &["--only", "dead-code,dupes,health"],
+    );
+    assert_seeded(&seeded);
+
+    let store = bare_run(home.path(), project.path(), &["--skip", "dupes"]);
+    assert_eq!(record_count(&store, "project_records"), 2, "{store:#}");
+    assert_clone_frontier_kept(&store);
+}
+
+/// A bare run stores the clone group. After `duplicates.enabled: false`, an
+/// audit record of the clone files does not run duplication, so it credits no
+/// clone group as resolved.
+#[test]
+fn audit_with_duplication_off_keeps_clones_that_a_bare_run_stored() {
+    let Some(project) = project_outside_temp_folder("impact-audit-dupes-off-clones-") else {
+        return;
+    };
+    let home = clone_project(project.path(), None);
+    let dir = project.path();
+    assert_seeded(&bare_run(home.path(), dir, &[]));
+
+    std::fs::write(dir.join(".fallowrc.json"), DUPLICATES_OFF).expect("write config");
+    for name in ["first", "second"] {
+        let path = dir.join(format!("src/{name}.ts"));
+        let source = format!("{}export const {name}Edited = 1;\n", cloned_function(name));
+        std::fs::write(path, source).expect("edit clone file");
+    }
+    let root = dir.to_str().expect("utf8 root");
+    run_recording(
+        home.path(),
+        &[
+            "audit", "--root", root, "--base", "HEAD", "--format", "json", "--quiet",
+        ],
+    );
+    let store = read_store_json(home.path());
+    assert_eq!(record_count(&store, "records"), 1, "{store:#}");
+    assert_clone_frontier_kept(&store);
+}
+
+/// A bare run stores the clone group. After `duplicates.enabled: false`, the
+/// next bare run does not run duplication, so it credits no clone group.
+#[test]
+fn bare_run_with_duplication_off_keeps_clones_that_an_earlier_run_stored() {
+    let Some(project) = project_outside_temp_folder("impact-bare-dupes-off-clones-") else {
+        return;
+    };
+    let home = clone_project(project.path(), None);
+    let dir = project.path();
+    assert_seeded(&bare_run(home.path(), dir, &[]));
+
+    std::fs::write(dir.join(".fallowrc.json"), DUPLICATES_OFF).expect("write config");
+    let store = bare_run(home.path(), dir, &[]);
+    assert_eq!(record_count(&store, "project_records"), 2, "{store:#}");
+    assert_clone_frontier_kept(&store);
+}
+
+/// Control: with duplication on, the removal of one clone file resolves the
+/// clone group.
+#[test]
+fn bare_run_credits_a_clone_group_that_the_user_removed() {
+    let Some(project) = project_outside_temp_folder("impact-bare-clone-removed-") else {
+        return;
+    };
+    let home = clone_project(project.path(), None);
+    let dir = project.path();
+    assert_seeded(&bare_run(home.path(), dir, &[]));
+
+    std::fs::remove_file(dir.join("src/second.ts")).expect("remove second");
+    std::fs::write(
+        dir.join("src/index.ts"),
+        "import { first } from './first';\nexport const used = [first];\n",
+    )
+    .expect("write index");
+    let store = bare_run(home.path(), dir, &[]);
+    assert_eq!(record_count(&store, "project_records"), 2, "{store:#}");
+    assert_eq!(store["resolved_total"], 1, "{store:#}");
+    assert_eq!(resolved_kinds(&store), ["code-duplication"], "{store:#}");
+    assert_eq!(clone_groups(&store), 0, "{store:#}");
+}
+
+/// A run with duplication off keeps the clone frontier. When the user turns
+/// duplication on again and the clone is still there, the next run credits
+/// nothing.
+#[test]
+fn bare_run_after_duplication_on_again_credits_no_clone_that_is_still_there() {
+    let Some(project) = project_outside_temp_folder("impact-bare-dupes-on-again-") else {
+        return;
+    };
+    let home = clone_project(project.path(), None);
+    let dir = project.path();
+    assert_seeded(&bare_run(home.path(), dir, &[]));
+
+    let config = dir.join(".fallowrc.json");
+    std::fs::write(&config, DUPLICATES_OFF).expect("write config");
+    assert_clone_frontier_kept(&bare_run(home.path(), dir, &[]));
+
+    std::fs::write(&config, r#"{"duplicates": {"enabled": true}}"#).expect("write config");
+    let store = bare_run(home.path(), dir, &[]);
+    assert_eq!(record_count(&store, "project_records"), 3, "{store:#}");
+    assert_clone_frontier_kept(&store);
 }

@@ -127,7 +127,7 @@ fn run(
         root,
         scope: Scope::ChangedFiles(&changed_files),
         findings,
-        clones,
+        clones: Some(clones),
         suppressions: supps,
     };
     record_audit_run(
@@ -1293,7 +1293,7 @@ fn run_wp(
         root,
         scope: Scope::WholeProject,
         findings,
-        clones,
+        clones: Some(clones),
         suppressions: supps,
     };
     record_combined_run(

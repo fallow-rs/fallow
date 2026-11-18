@@ -26,8 +26,7 @@ pub(super) fn record_audit_impact(
     let clones = result
         .dupes
         .as_ref()
-        .map(|d| crate::impact::collect_clone_findings(&d.report))
-        .unwrap_or_default();
+        .map(|d| crate::impact::collect_clone_findings(&d.report));
     let empty_supps: Vec<fallow_types::results::ActiveSuppression> = Vec::new();
     let suppressions = result.check.as_ref().map_or(empty_supps.as_slice(), |c| {
         c.results.active_suppressions.as_slice()

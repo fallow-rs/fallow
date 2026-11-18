@@ -89,9 +89,7 @@ pub(super) fn record_combined_impact(
 
     let mut findings = crate::impact::collect_dead_code_findings(&check.results);
     findings.extend(crate::impact::collect_complexity_findings(&health.report));
-    let clones = dupes_report
-        .map(crate::impact::collect_clone_findings)
-        .unwrap_or_default();
+    let clones = dupes_report.map(crate::impact::collect_clone_findings);
     let suppressions = check.results.active_suppressions.as_slice();
 
     let attribution = crate::impact::AttributionInput {
