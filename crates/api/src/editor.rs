@@ -431,6 +431,39 @@ impl EditorAnalysisSession {
         .map(Self::from_engine)
     }
 
+    /// Load config with an explicit inheritance trust policy and the editor
+    /// production override, apply one editor-specific adjustment, then
+    /// discover files. The override decides the production mode before
+    /// resolution, so the rules of production mode match the CLI
+    /// `--production` flag. `None` leaves the project config in force.
+    ///
+    /// # Errors
+    ///
+    /// Returns an engine error when project config loading fails.
+    pub fn load_with_production(
+        root: &Path,
+        config_path: Option<&Path>,
+        load_options: fallow_config::ConfigLoadOptions,
+        production_override: Option<bool>,
+        configure: impl FnOnce(&mut fallow_config::ResolvedConfig),
+    ) -> fallow_engine::EngineResult<Self> {
+        let mut project = fallow_engine::project_config::config_for_project_with_production(
+            root,
+            config_path,
+            load_options,
+            fallow_engine::project_config::ProductionFlags {
+                global: production_override,
+                ..fallow_engine::project_config::ProductionFlags::default()
+            },
+        )?;
+        configure(&mut project.config);
+        Ok(Self::from_engine(
+            fallow_engine::session::AnalysisSession::from_config(
+                project.without_workspace_metadata(),
+            ),
+        ))
+    }
+
     /// Build a session from built-in defaults, ignoring project config files.
     #[must_use]
     pub fn load_default(root: &Path) -> Self {

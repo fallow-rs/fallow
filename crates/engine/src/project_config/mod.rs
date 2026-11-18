@@ -335,6 +335,23 @@ pub fn config_for_project_with_load_options(
     config_path: Option<&Path>,
     load_options: ConfigLoadOptions,
 ) -> EngineResult<ProjectConfig> {
+    config_for_project_with_production(root, config_path, load_options, ProductionFlags::default())
+}
+
+/// Resolve project config with an explicit inheritance trust policy and the
+/// production flags of the run. The flags decide the production mode before
+/// resolution, so the rules that production mode turns off are off, as with
+/// the CLI `--production` flag.
+///
+/// # Errors
+///
+/// Returns an error when config loading or validation fails.
+pub fn config_for_project_with_production(
+    root: &Path,
+    config_path: Option<&Path>,
+    load_options: ConfigLoadOptions,
+    production: ProductionFlags,
+) -> EngineResult<ProjectConfig> {
     let ConfigFile { config, path } = load_config_file(
         root,
         config_path,
@@ -342,7 +359,7 @@ pub fn config_for_project_with_load_options(
             allow_remote_extends: load_options.allow_remote_extends,
         },
     )?
-    .for_analysis(ProductionAnalysis::DeadCode, ProductionFlags::default());
+    .for_analysis(ProductionAnalysis::DeadCode, production);
     if path.is_some() {
         validate_boundaries_and_rule_packs(root, &config)?;
     }
@@ -360,6 +377,19 @@ pub fn config_for_project_with_load_options(
         workspace_diagnostics,
         workspace_discovery_ms: Some(workspace_discovery_ms),
     })
+}
+
+impl ProjectConfig {
+    /// Drop the workspace metadata of the load, so that a session built from
+    /// this config discovers the workspaces again. A caller that changes the
+    /// resolved config after the load uses this.
+    #[must_use]
+    pub fn without_workspace_metadata(mut self) -> Self {
+        self.workspaces.clear();
+        self.workspace_diagnostics.clear();
+        self.workspace_discovery_ms = None;
+        self
+    }
 }
 
 /// Resolve the parse-cache size limit for a resolved config.
