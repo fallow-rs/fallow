@@ -86,7 +86,10 @@ fn selection_key_reads_in_file(source_path: &str) -> Vec<String> {
 }
 
 fn workspace_root() -> std::path::PathBuf {
-    std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../..")
+    std::path::PathBuf::from(
+        std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
+    )
+    .join("../..")
 }
 
 /// Whether a file holds tests only: a file in a `tests` folder, or a file
