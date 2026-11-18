@@ -59,7 +59,7 @@ impl MultilineRunState {
         self.folding = folding;
     }
 
-    pub(super) fn stop(&mut self) {
+    fn stop(&mut self) {
         self.active = false;
         self.folding = false;
     }
