@@ -1183,7 +1183,6 @@ fn run_combined_scoped(
         run_check: analyses.run_check,
         run_dupes: analyses.run_dupes,
         run_health: analyses.run_health,
-        dupes_off_by_config: analyses.dupes_off_by_config,
         architecture,
         dupes: cli.dupes_overrides(),
         score: cli.score || cli.trend || cli.trend_from.is_some(),

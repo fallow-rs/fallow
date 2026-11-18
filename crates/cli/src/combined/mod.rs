@@ -72,9 +72,6 @@ pub struct CombinedOptions<'a> {
     pub run_check: bool,
     pub run_dupes: bool,
     pub run_health: bool,
-    /// `duplicates.enabled: false` in the config turned duplication off, and
-    /// no `--skip` did. The run is then still a whole-project run.
-    pub dupes_off_by_config: bool,
     /// Which dead-code findings the run reports (`--only architecture`,
     /// `--skip architecture`).
     pub architecture: ArchitectureSelection,
@@ -148,9 +145,6 @@ pub struct BareAnalyses {
     pub run_check: bool,
     pub run_dupes: bool,
     pub run_health: bool,
-    /// `duplicates.enabled: false` in the config turned duplication off, and
-    /// no `--skip` did.
-    pub dupes_off_by_config: bool,
 }
 
 /// Resolve which analyses the bare `fallow` run executes.
@@ -176,7 +170,6 @@ pub fn resolve_bare_analyses(
             run_check: plan.dead_code.runs(),
             run_dupes: plan.duplication.runs(),
             run_health: plan.health.runs(),
-            dupes_off_by_config: disabled_by_config,
         });
     }
     Err(crate::error::emit_input_error(
@@ -1109,7 +1102,6 @@ mod tests {
             run_check: true,
             run_dupes: true,
             run_health: true,
-            dupes_off_by_config: false,
             architecture: crate::check::ArchitectureSelection::All,
             dupes: DupesOverrides::default(),
             score: false,

@@ -40,4 +40,17 @@ impl AuditAnalysisSelection {
     pub const fn is_full_without_dupes(self) -> bool {
         self.dead_code && self.health && matches!(self.architecture, ArchitectureSelection::All)
     }
+
+    /// Whether a run with this selection writes an Impact record. The audit
+    /// and the bare `fallow` run both use this rule.
+    ///
+    /// A skipped analysis reports no findings, which Impact would credit as
+    /// resolved. So only a full selection writes a record. Duplication that
+    /// `duplicates.enabled: false` turned off for the project is no skip of
+    /// one run: the other findings still need a history. A record whose run
+    /// did not execute duplication credits no clone group as resolved and
+    /// keeps the clone groups that an earlier run stored.
+    pub const fn records_impact(self) -> bool {
+        self.is_full_without_dupes() && (self.dupes || self.duplicates_off_in_config)
+    }
 }

@@ -12,14 +12,7 @@ pub(super) fn record_audit_impact(
     gate_marker: Option<&str>,
     result: &AuditResult,
 ) -> Result<(), String> {
-    // A skipped sub-analysis reports no findings, which Impact would credit as
-    // resolved. Like the bare run, only a full selection writes Impact.
-    // Duplication that `duplicates.enabled: false` turned off is no skip of
-    // one run: the project has no duplication analysis, and its other
-    // findings still need a history.
-    let analyses = opts.analyses;
-    if !(analyses.is_full_without_dupes() && (analyses.dupes || analyses.duplicates_off_in_config))
-    {
+    if !opts.analyses.records_impact() {
         return Ok(());
     }
     let mut findings = result
@@ -33,8 +26,7 @@ pub(super) fn record_audit_impact(
     let clones = result
         .dupes
         .as_ref()
-        .map(|d| crate::impact::collect_clone_findings(&d.report))
-        .unwrap_or_default();
+        .map(|d| crate::impact::collect_clone_findings(&d.report));
     let empty_supps: Vec<fallow_types::results::ActiveSuppression> = Vec::new();
     let suppressions = result.check.as_ref().map_or(empty_supps.as_slice(), |c| {
         c.results.active_suppressions.as_slice()
