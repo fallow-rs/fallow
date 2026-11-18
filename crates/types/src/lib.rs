@@ -112,6 +112,9 @@ pub mod serde_path;
 pub mod similar_code;
 /// Shared source-file freshness metadata used by cache invalidation.
 pub mod source_fingerprint;
+/// Values with the cause of their value: the input layer, the scope, and the
+/// flag, variable, config key or default that gave the value.
+pub mod sourced;
 /// Inline suppression comment types and issue kind definitions.
 pub mod suppress;
 /// Agent task-to-command matrix rows shared by `fallow schema`, the
