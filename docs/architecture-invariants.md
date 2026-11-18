@@ -86,6 +86,15 @@ protocol and package parity.
 
 - Filesystem discovery, config loading, package manager detection, and parse
   cache ownership belong in session/runtime setup, not output formatting.
+- The engine function `fallow_engine::project_config::load_config_file` is
+  the one loader of the config file. The project config entry points of the
+  engine and the config reads of `fallow-api` call it, so each surface gets
+  the same trust policy for remote `extends` and the same error detail. The
+  source rule `config-load-through-engine-loader` in the root `Cargo.toml`
+  denies a direct call of `FallowConfig::load`, `load_with_options`,
+  `find_and_load` or `find_and_load_with_options` in production code. Its
+  allow list holds each file that still loads the config file directly, with
+  the exact count of calls.
 - Output formatting should work from typed evidence already passed to it. It
   must not crawl arbitrary project files to complete a report.
 - Cache expansion needs invalidation tests and visible fallback behavior before
