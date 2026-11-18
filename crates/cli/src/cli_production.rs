@@ -129,30 +129,5 @@ pub fn resolve_production_modes(
 }
 
 #[cfg(test)]
-mod tests {
-    /// `fallow_config::plan_run` is the one rule that decides whether a run
-    /// executes the duplication analysis. A command that reads the
-    /// `duplicates.enabled` field itself can apply another precedence.
-    #[test]
-    fn only_the_config_crate_reads_the_duplicates_enabled_field() {
-        use crate::architecture_boundaries::{
-            read_source_without_line_comments, rust_sources_under,
-        };
-        let needle = concat!(".duplicates", ".enabled");
-        let offenders: Vec<String> = rust_sources_under(["crates"])
-            .into_iter()
-            .filter(|source_path| !source_path.starts_with("crates/config/"))
-            .filter(|source_path| {
-                read_source_without_line_comments(source_path)
-                    .unwrap_or_else(|error| panic!("read {source_path}: {error}"))
-                    .split_whitespace()
-                    .collect::<String>()
-                    .contains(needle)
-            })
-            .collect();
-        assert!(
-            offenders.is_empty(),
-            "decide the duplication analysis with fallow_config::plan_run, not with the enabled field: {offenders:?}"
-        );
-    }
-}
+#[path = "selection_key_guard_tests.rs"]
+mod selection_key_guard_tests;
