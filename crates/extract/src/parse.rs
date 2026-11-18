@@ -1492,8 +1492,9 @@ pub struct SemanticUsage {
     /// Value references to runtime ESM import bindings that are not admitted
     /// call sites, plus admitted calls that initialize a top-level declarator.
     pub(crate) import_binding_references: Vec<fallow_types::extract::ImportBindingReference>,
-    /// Namespace member uses that a plain member access does not record.
-    namespace_member_uses: Vec<fallow_types::extract::NamespaceMemberUseFact>,
+    /// Namespace member uses that a plain member access does not record,
+    /// and the values of object holders that can be exported.
+    namespace_member_uses: Vec<fallow_types::extract::SemanticFact>,
     /// Non-destructured `require()` bindings nothing in the file references.
     /// Moved into `import_binding_usage.unused` by
     /// [`compute_semantic_usage_for_extractor_with_mode`], which is the layer that knows

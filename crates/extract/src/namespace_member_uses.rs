@@ -12,6 +12,13 @@
 //! The pass follows a `const` alias (`const M = N.Inner; M.x`) and records
 //! its reads as reads of the root.
 //!
+//! A value under a static key of an object holder (`{ websocket: WebSocket }`)
+//! can be read as `holder[name].prototype.member`. The pass records such a
+//! read of a module-level `const` holder as a read of the value. For an
+//! exported holder, it records the value as a [`HolderValueFact`], and it
+//! records a read of an imported holder under its key. The member pass joins
+//! the two across the module graph.
+//!
 //! The analysis does not know at extraction time which binding is a
 //! namespace or an enum, so the pass records these uses for every import
 //! binding. Analysis reads them for namespace members, reads the escape of
@@ -19,7 +26,8 @@
 //! class value (`use(C)`) and `C.prototype.member` for class members.
 
 use fallow_types::extract::{
-    ExportInfo, ImportInfo, ImportedName, MemberKind, NamespaceMemberUseFact,
+    ExportInfo, HolderValueFact, ImportInfo, ImportedName, MemberKind, NamespaceMemberUseFact,
+    SemanticFact,
 };
 use oxc_ast::AstKind;
 use oxc_ast::ast::{
@@ -49,12 +57,13 @@ pub struct Chain {
     pub segments: Vec<String>,
 }
 
-/// Collect the namespace member uses of a module, sorted and without repeats.
+/// Collect the namespace member uses and the holder values of a module,
+/// sorted and without repeats.
 pub fn collect(
     semantic: &Semantic<'_>,
     imports: &[ImportInfo],
     exports: &[ExportInfo],
-) -> Vec<NamespaceMemberUseFact> {
+) -> Vec<SemanticFact> {
     let scoping = semantic.scoping();
     let nodes = semantic.nodes();
     let root_scope = scoping.root_scope_id();
@@ -131,17 +140,34 @@ pub fn collect(
         }
     }
 
-    let class_field_facts =
-        uses.class_fields
-            .into_iter()
-            .map(|(object, path)| NamespaceMemberUseFact {
-                object,
-                path,
-                whole: true,
-                class_field: true,
-            });
-    let mut facts: Vec<NamespaceMemberUseFact> = uses
-        .chains
+    let facts = namespace_use_facts(uses.chains, uses.class_fields);
+    let holder_values = holder_value_facts(uses.holder_values, exports);
+    facts
+        .into_iter()
+        .map(SemanticFact::NamespaceMemberUse)
+        .chain(
+            holder_values
+                .into_iter()
+                .map(|holder| SemanticFact::HolderValue(Box::new(holder))),
+        )
+        .collect()
+}
+
+/// The namespace member use facts of the collected chain and class field
+/// uses, sorted.
+fn namespace_use_facts(
+    chains: FxHashSet<(String, String, bool)>,
+    class_fields: FxHashSet<(String, String)>,
+) -> Vec<NamespaceMemberUseFact> {
+    let class_field_facts = class_fields
+        .into_iter()
+        .map(|(object, path)| NamespaceMemberUseFact {
+            object,
+            path,
+            whole: true,
+            class_field: true,
+        });
+    let mut facts: Vec<NamespaceMemberUseFact> = chains
         .into_iter()
         .map(|(object, path, whole)| NamespaceMemberUseFact {
             object,
@@ -162,6 +188,52 @@ pub fn collect(
     facts
 }
 
+/// The holder value facts of the collected holder values, one for each
+/// export of the holder, sorted and without repeats.
+fn holder_value_facts(
+    values: FxHashSet<(Option<String>, String, String, String)>,
+    exports: &[ExportInfo],
+) -> Vec<HolderValueFact> {
+    let mut holder_values: Vec<HolderValueFact> = values
+        .into_iter()
+        .flat_map(|(holder, key, object, path)| {
+            holder_export_names(exports, holder.as_deref())
+                .into_iter()
+                .map(move |export_name| HolderValueFact {
+                    export_name,
+                    key: key.clone(),
+                    object: object.clone(),
+                    path: path.clone(),
+                })
+        })
+        .collect();
+    holder_values.sort_unstable_by(|a, b| {
+        (&a.export_name, &a.key, &a.object, &a.path).cmp(&(
+            &b.export_name,
+            &b.key,
+            &b.object,
+            &b.path,
+        ))
+    });
+    holder_values.dedup();
+    holder_values
+}
+
+/// The export names of a holder: `default` for `export default { ... }`
+/// (`None`), and each export of the `const` binding otherwise.
+fn holder_export_names(exports: &[ExportInfo], holder: Option<&str>) -> Vec<String> {
+    let Some(local) = holder else {
+        return vec![DEFAULT_EXPORT.to_string()];
+    };
+    exports
+        .iter()
+        .filter(|export| export.local_name.as_deref() == Some(local))
+        .map(|export| export.name.to_string())
+        .collect()
+}
+
+const DEFAULT_EXPORT: &str = "default";
+
 /// The uses that the pass collects before it makes them facts.
 #[derive(Default)]
 struct Uses {
@@ -169,6 +241,10 @@ struct Uses {
     chains: FxHashSet<(String, String, bool)>,
     /// `(object, path)` of each value that goes into a class field.
     class_fields: FxHashSet<(String, String)>,
+    /// `(holder, key, object, path)` of each value under a static key of an
+    /// object holder that can be exported. `holder` is the local name of the
+    /// `const`, or `None` for `export default { ... }`.
+    holder_values: FxHashSet<(Option<String>, String, String, String)>,
 }
 
 /// A binding whose references the pass records: a module-level root, or a
@@ -221,6 +297,7 @@ fn record_root_references(
             }
             continue;
         }
+        record_any_key_prototype_read(nodes, &chain, object, &path, uses);
         let chain_use = if root.re_export_escapes && is_export_specifier(nodes, &chain) {
             ChainUse::Escape
         } else {
@@ -238,6 +315,14 @@ fn record_root_references(
             ChainUse::Escape => {
                 if let Some(holder) = object_holder(nodes, &chain) {
                     record_holder_prototype_reads(scoping, nodes, &holder, object, &path, uses);
+                    if holder.can_be_exported {
+                        uses.holder_values.insert((
+                            holder.name,
+                            holder.key,
+                            object.to_string(),
+                            path.clone(),
+                        ));
+                    }
                 }
                 uses.chains.insert((object.to_string(), path, true));
             }
@@ -255,11 +340,18 @@ fn record_root_references(
 /// class value: `Class.prototype.member`.
 const PROTOTYPE_SEGMENT: &str = "prototype";
 
-/// A `const` object literal that holds a value under a static key:
-/// `const holder = { key: Value }`.
+/// An object literal that holds a value under a static key: a module-level
+/// `const holder = { key: Value }`, which can be exported, or
+/// `export default { key: Value }`.
 struct Holder {
-    symbol: SymbolId,
+    /// The `const` binding, `None` for `export default { ... }`.
+    symbol: Option<SymbolId>,
+    /// The local name of the `const` binding, `None` for
+    /// `export default { ... }`.
+    name: Option<String>,
     key: String,
+    /// The holder is a module-level declaration, so an export can name it.
+    can_be_exported: bool,
 }
 
 /// The holder whose property value is the value at the end of `chain`.
@@ -282,8 +374,65 @@ fn object_holder(nodes: &AstNodes<'_>, chain: &Chain) -> Option<Holder> {
         span: object.span,
         segments: Vec::new(),
     };
-    let symbol = const_alias_symbol(nodes, &object_chain)?;
-    Some(Holder { symbol, key })
+    if is_export_default_value(nodes, &object_chain) {
+        return Some(Holder {
+            symbol: None,
+            name: None,
+            key,
+            can_be_exported: true,
+        });
+    }
+    let declarator = const_declarator(nodes, &object_chain)?;
+    Some(Holder {
+        symbol: Some(declarator.symbol),
+        name: Some(declarator.name),
+        key,
+        can_be_exported: declarator.is_module_level,
+    })
+}
+
+/// Whether the value at the end of `chain` is the expression of
+/// `export default`.
+fn is_export_default_value(nodes: &AstNodes<'_>, chain: &Chain) -> bool {
+    let (outer, outer_span) = unwrap_upward(nodes, chain.node, chain.span);
+    matches!(
+        nodes.parent_kind(outer),
+        AstKind::ExportDefaultDeclaration(declaration)
+            if declaration.declaration.span() == outer_span
+    )
+}
+
+/// Record `chain[name].prototype.member` with a computed key that is not a
+/// string literal as a read of `[].prototype.member` under `path`. The
+/// value at the end of `chain` can be an imported holder. The member pass
+/// credits the read on each value of that holder.
+fn record_any_key_prototype_read(
+    nodes: &AstNodes<'_>,
+    chain: &Chain,
+    object: &str,
+    path: &str,
+    uses: &mut Uses,
+) {
+    let parent = nodes.parent_id(chain.node);
+    let AstKind::ComputedMemberExpression(member) = nodes.kind(parent) else {
+        return;
+    };
+    if member.object.span() != chain.span
+        || matches!(member.expression, Expression::StringLiteral(_))
+    {
+        return;
+    }
+    let value_chain = member_chain(nodes, parent, member.span);
+    if let [first, name, ..] = value_chain.segments.as_slice()
+        && first == PROTOTYPE_SEGMENT
+    {
+        let read = format!(
+            "{}.{PROTOTYPE_SEGMENT}.{name}",
+            NamespaceMemberUseFact::ANY_KEY
+        );
+        uses.chains
+            .insert((object.to_string(), join_path(path, &read), false));
+    }
 }
 
 /// Record `holder[name].prototype.member` and `holder.key.prototype.member`
@@ -297,7 +446,10 @@ fn record_holder_prototype_reads(
     path: &str,
     uses: &mut Uses,
 ) {
-    for reference in scoping.get_resolved_references(holder.symbol) {
+    let Some(symbol) = holder.symbol else {
+        return;
+    };
+    for reference in scoping.get_resolved_references(symbol) {
         let node_id = reference.node_id();
         let AstKind::IdentifierReference(identifier) = nodes.kind(node_id) else {
             continue;
@@ -346,6 +498,24 @@ fn holder_value_access(
 /// `const A = N` or `const I = N.Inner`. An exported declaration is not an
 /// alias that the pass can follow, because other modules read it.
 fn const_alias_symbol(nodes: &AstNodes<'_>, chain: &Chain) -> Option<SymbolId> {
+    let declarator = const_declarator(nodes, chain)?;
+    (!declarator.is_exported).then_some(declarator.symbol)
+}
+
+/// A `const` binding that the value at the end of a chain initializes.
+struct ConstDeclarator {
+    symbol: SymbolId,
+    name: String,
+    /// The declaration is `export const`.
+    is_exported: bool,
+    /// The declaration is at the top of the module, directly or behind
+    /// `export`.
+    is_module_level: bool,
+}
+
+/// The `const` binding that `chain` initializes: `const A = chain` or
+/// `export const A = chain`.
+fn const_declarator(nodes: &AstNodes<'_>, chain: &Chain) -> Option<ConstDeclarator> {
     let (outer, outer_span) = unwrap_upward(nodes, chain.node, chain.span);
     let declarator_id = nodes.parent_id(outer);
     let AstKind::VariableDeclarator(declarator) = nodes.kind(declarator_id) else {
@@ -361,15 +531,21 @@ fn const_alias_symbol(nodes: &AstNodes<'_>, chain: &Chain) -> Option<SymbolId> {
     let AstKind::VariableDeclaration(declaration) = nodes.kind(declaration_id) else {
         return None;
     };
-    if declaration.kind != VariableDeclarationKind::Const
-        || matches!(
-            nodes.parent_kind(declaration_id),
-            AstKind::ExportNamedDeclaration(_) | AstKind::ExportDeclaration(_)
-        )
-    {
+    if declaration.kind != VariableDeclarationKind::Const {
         return None;
     }
-    id.symbol_id.get()
+    let is_exported = matches!(
+        nodes.parent_kind(declaration_id),
+        AstKind::ExportNamedDeclaration(_) | AstKind::ExportDeclaration(_)
+    );
+    let is_module_level =
+        is_exported || matches!(nodes.parent_kind(declaration_id), AstKind::Program(_));
+    Some(ConstDeclarator {
+        symbol: id.symbol_id.get()?,
+        name: id.name.to_string(),
+        is_exported,
+        is_module_level,
+    })
 }
 
 /// Whether the value at the end of `chain` initializes an instance field
@@ -696,6 +872,80 @@ mod tests {
                 _ => None,
             })
             .collect()
+    }
+
+    /// The holder values of `source` as `export|key|object|path`.
+    fn holder_values(source: &str) -> Vec<String> {
+        parse_ts(source)
+            .semantic_facts
+            .iter()
+            .filter_map(|fact| match fact {
+                SemanticFact::HolderValue(holder) => Some(format!(
+                    "{}|{}|{}|{}",
+                    holder.export_name, holder.key, holder.object, holder.path
+                )),
+                _ => None,
+            })
+            .collect()
+    }
+
+    #[test]
+    fn exported_holders_record_their_values() {
+        assert_eq!(
+            holder_values(
+                "import { A } from './a';\n\
+                 import * as ns from './ns';\n\
+                 export default { a: A, 'b': ns.B, [A.name]: A };\n"
+            ),
+            ["default|a|A|", "default|b|ns|B"]
+        );
+        assert_eq!(
+            holder_values(
+                "import { A } from './a';\n\
+                 export const named = { a: A };\n\
+                 const local = { a: A };\n\
+                 export { local as renamed };\n"
+            ),
+            ["named|a|A|", "renamed|a|A|"]
+        );
+    }
+
+    #[test]
+    fn holders_that_no_export_can_name_record_no_value() {
+        assert!(
+            holder_values(
+                "import { A } from './a';\n\
+                 const unexported = { a: A };\n\
+                 export function make() { const inner = { a: A }; return inner; }\n\
+                 export let reassignable = { a: A };\n"
+            )
+            .is_empty()
+        );
+    }
+
+    #[test]
+    fn computed_key_prototype_read_of_an_import_is_recorded() {
+        let recorded = uses(
+            "import holder from './holder';\n\
+             export const a = (k: string) => holder[k].prototype.x;\n\
+             export const b = () => holder['s'].prototype.y;\n",
+        );
+        assert!(
+            recorded.contains(&"holder|[].prototype.x|false".to_string()),
+            "{recorded:?}"
+        );
+        assert!(
+            recorded
+                .iter()
+                .any(|use_| use_.starts_with("holder|s.prototype.y|")),
+            "{recorded:?}"
+        );
+        assert!(
+            !recorded
+                .iter()
+                .any(|use_| use_.starts_with("holder|[].prototype.y")),
+            "{recorded:?}"
+        );
     }
 
     #[test]
