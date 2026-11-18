@@ -42,6 +42,9 @@ xxhash-rust = { workspace = true }
 # Test-only hook that permutes the discovery lists with the seed in
 # FALLOW_PERMUTATION_SEED. See src/permutation.rs. Release builds leave it off.
 permutation-hook = []
+# Test constructors, such as `EnvSnapshot::from_pairs`, for the tests of
+# other crates. Release builds leave it off.
+testing = []
 
 [dev-dependencies]
 proptest = { workspace = true }

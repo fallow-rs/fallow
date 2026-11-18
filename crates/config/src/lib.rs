@@ -47,6 +47,7 @@ mod package_manager;
 pub mod permutation;
 mod production_env;
 mod rule_pack;
+mod run_inputs;
 mod source_walk;
 pub mod toml_input;
 mod workspace;
@@ -63,6 +64,7 @@ pub use package_manager::PackageManager;
 pub use permutation::{PermutationSite, sort_permuted};
 pub use production_env::*;
 pub use rule_pack::*;
+pub use run_inputs::*;
 pub use source_walk::{source_walk_builder, source_walked_workspaces};
 pub use workspace::*;
 
