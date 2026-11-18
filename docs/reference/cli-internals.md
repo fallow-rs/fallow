@@ -1080,32 +1080,101 @@ complete result.
 - The review brief and the walkthrough modes keep their own output
   contracts.
 
-## Duplication analysis selection
+## Analysis selection
 
-`DuplicatesConfig::select` in `crates/config/src/config/duplicates_config.rs`
-is the one rule that decides whether a run executes the duplication analysis.
-Each command builds a `DuplicationRequest` and reads the `DuplicationSelection`
-that the rule returns:
+`fallow_config::plan_run` in `crates/config/src/config/run_plan.rs` is the one
+rule that decides which of the dead-code, duplication and health analyses a
+run executes. A surface builds a `RunRequest`, gives it to `plan_run` with the
+`PlanSections` of its config (`plan_sections()` on `FallowConfig` and
+`ResolvedConfig`), and reads the `RunPlan` that comes back.
 
-- `Named`: the run names the analysis (`--only dupes`, `--include-dupes`, the
-  `fallow dupes` command, an API option that is `true`). The analysis runs.
-- `Default`: the command runs the analysis by default. The config key of the
-  command decides (`audit.dupes`). Without that key, `duplicates.enabled`
-  decides.
-- `Excluded`: the run leaves the analysis out (`--skip dupes`, an `--only`
-  list without it, an API option that is `false`).
+A `RunRequest` holds a `RunCommand` and one `AnalysisRequest` for each
+analysis:
 
-The bare `fallow` command, `fallow audit`, `fallow_api::run_audit` and
-`fallow_api::run_combined` build the request from their flags and options. The
-health score and the editor analysis (`crates/api/src/editor.rs`) call
-`DuplicatesConfig::runs_by_default`, so they have no duplication data when
-`duplicates.enabled` is `false`. The flags of a run do not change that answer:
+- `RunCommand::Combined`: no command key applies. The bare `fallow` run,
+  `fallow_api::run_combined`, the health score and the editor use it.
+- `RunCommand::Audit`: the `audit.deadCode`, `audit.health` and `audit.dupes`
+  keys apply.
+- `Named`: the run names the analysis. The analysis runs.
+- `Default`: the run does not name the analysis. The config decides.
+- `Excluded`: the run leaves the analysis out.
+
+The constructors map each surface to a request:
+
+- `RunRequest::from_lists`: the `--only` and `--skip` lists of the bare run and
+  of `fallow audit`. A non-empty `only` names each listed analysis and
+  excludes the others. Otherwise `skip` excludes each listed analysis.
+- `RunRequest::from_booleans`: the options of `fallow_api::run_combined`.
+  `false` excludes the analysis. `true` names the analysis only when it is the
+  one option that is `true`. Otherwise the config decides.
+- `RunRequest::from_options`: the options of `fallow_api::run_audit`.
+  `Some(true)` names, `Some(false)` excludes and `None` gives `Default`.
+- `RunRequest::all_named`: the review brief, which runs every analysis.
+
+`from_lists` and `from_booleans` have different rules for `Named` on purpose.
+Do not merge them. The tests in `run_plan_tests.rs` pin both.
+
+`planned_lists` in `crates/cli/src/combined/mod.rs` maps the `AnalysisKind`
+lists to `PlannedAnalysis` lists. The `Architecture` mapping is asymmetric:
+
+- In `--only`, `architecture` maps to the dead-code analysis, because the
+  architecture findings are a part of it.
+- In `--skip`, `architecture` maps to no analysis. The dead-code analysis
+  still runs, and `resolve_architecture_selection` removes only its
+  architecture findings. That function reads no config key.
+
+`plan_run` applies this rule to each analysis:
+
+1. `Named` gives `Run`.
+2. `Excluded` gives `Skipped(SkipReason::NotRequested)`.
+3. For `Default` with `RunCommand::Audit`, the `audit` key decides first.
+   `false` gives `Skipped(SkipReason::Config(key))`. `true` gives `Run`, also
+   when `duplicates.enabled` is `false`.
+4. For the duplication analysis, `duplicates.enabled: false` gives
+   `Skipped(SkipReason::Config(ConfigKey::DuplicatesEnabled))`.
+5. Otherwise the analysis runs.
+
+`RunRequest::reads_config` tells whether the plan depends on the config. The
+bare run (`load_run_plan` in `crates/cli/src/cli_production.rs`) and the API
+runtime load the config only when it does.
+
+`AnalysisSelection::off_by` tells which key turned an analysis off. The
+`--dupes-baseline` flag uses it:
+
+- When `duplicates.enabled` alone turned duplication off, the flag gives a
+  note and the exit code does not change.
+- When `audit.dupes: false` turned duplication off, the flag is an error with
+  exit code 2.
+
+The health score and the editor analysis call
+`DuplicatesConfig::runs_by_default`, which is the plan of a `Combined` request
+with every analysis `Default`. The flags of a run do not change that answer:
 `--only dupes,health` prints the clone groups and keeps the score without a
-duplication penalty, so the score does not depend on the selection of one run.
+duplication penalty.
 
-Do not read the `enabled` field outside the config crate. The test
-`only_the_config_crate_reads_the_duplicates_enabled_field` in
-`crates/cli/src/cli_production.rs` fails when a command does.
+An audit writes an Impact record only for a full selection.
+`AuditAnalysisSelection::is_full_without_dupes` must be true: the dead-code and
+health sub-analyses run, with every dead-code finding. The duplication
+sub-analysis must also run, or `duplicates_off_in_config` must be true. That
+field holds `!DuplicatesConfig::runs_by_default()`, so it does not depend on the
+flags. `audit.dupes: false` writes no record: the bare run ignores that key, so
+the clone frontier that both runs share would credit each missing clone as
+resolved.
+
+Do not read a selection key outside the config crate. The tests in
+`crates/cli/src/selection_key_guard_tests.rs` fail when a production file
+reads `duplicates.enabled`, `audit.deadCode`, `audit.health` or `audit.dupes`:
+
+- A text needle finds `.duplicates.enabled` in every Rust file under `crates/`.
+- A `syn` visitor finds each read of a selection key outside test code: a
+  field read on a `duplicates` or `audit` field access, on a binding of a
+  `DuplicatesConfig` or `AuditConfig` type, or on an untyped `let` of such a
+  field access. It also finds a destructure that binds a key, and the same
+  token sequence inside a macro body.
+- `SELECTION_KEY_OWNERS` names each file that may read a key, with the fact it
+  owns. A reverse check fails when a named file no longer reads a key.
+- The visitor cannot see the return type of a method that is bound to an
+  untyped `let`.
 
 ## Audit cache maintenance
 

@@ -64,6 +64,8 @@ The protocol adapters are `fallow-cli`, `fallow-lsp`, `fallow-mcp`, and
   spawn in an adapter is for a fact the engine does not model, such as worktree
   lifecycle or a coverage upload envelope, and the CLI boundary test names each
   one.
+- `fallow-config` owns the run plan. A surface builds a `RunRequest` and reads
+  no selection key.
 - Public contract crates should avoid CLI-only assumptions. A contract should
   still make sense for API, MCP, LSP, and NAPI consumers.
 
