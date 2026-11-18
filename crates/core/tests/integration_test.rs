@@ -523,6 +523,8 @@ mod issue_4532_import_meta_glob_query;
 mod issue_4672_sfc_module_script_imports;
 #[path = "integration_test/issue_4714_4715_svelte_template_tags.rs"]
 mod issue_4714_4715_svelte_template_tags;
+#[path = "integration_test/issue_4716_vite_workspace_rollup_input.rs"]
+mod issue_4716_vite_workspace_rollup_input;
 #[path = "integration_test/issue_604_vite_rollup_path_helpers.rs"]
 mod issue_604_vite_rollup_path_helpers;
 #[path = "integration_test/issue_605_new_class_member.rs"]

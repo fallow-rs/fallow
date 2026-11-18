@@ -1,0 +1,5 @@
+{
+  "name": "docusaurus-root-relative-mdx",
+  "private": true,
+  "workspaces": ["site"]
+}
