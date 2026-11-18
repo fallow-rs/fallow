@@ -58,6 +58,8 @@ clap = { version = "4", features = ["derive"] }
 # (fallow-mcp) enables. A package-scoped build such as `cargo build -p
 # fallow-cli` then resolves the same feature set as a workspace build, and a
 # switch between the two does not rebuild the dependents.
+# fallow-report-protocol declares schemars without `chrono04`, because its
+# published manifest must not pull chrono into each consumer.
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 deser-value = "0.10"
