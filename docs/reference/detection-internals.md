@@ -194,8 +194,21 @@ error by suppressing a downstream detector.
   object literal in the same module (`const holders = { ws: Socket }`),
   `holders.ws.prototype.member` and `holders[name].prototype.member` count
   `member` as used too. A computed key that is not a string literal can
-  select each class of the holder. The pass does not follow a holder that
-  another module imports. The superclass call of
+  select each class of the holder. The holder can also be exported
+  (`export const holders = { ... }`, `export default { ... }`, or a `const`
+  that `export default holders` names). For each value under a static key,
+  extraction stores a `HolderValue` fact with the export name, the key, and
+  the root binding of the value. Another module can then import the holder
+  and read `holders[name].prototype.member`: extraction records the read as
+  `[].prototype.member` on the import (a static or string-literal key keeps
+  its key). After the direct accesses of all modules are collected, the
+  member pass follows one hop: from the holder export, also behind
+  re-exports, to the class under each key that the read selects. A value
+  can also be an export of a namespace import (`{ csv: formats.Csv }`). The
+  pass does not follow objects built at runtime, spreads, or values passed
+  through function calls. A key that contains `.` is not followed. A
+  string-literal key `'[]'` has the path of the any-key read, so a read
+  through it selects each class of the holder. The superclass call of
   `class Sub extends mixin(Base)` is not an escape. A class field alias (`levels = Level`) is an
   escape for a namespace but not for an enum: the fact carries
   `class_field`, and the visitor follows the reads of the field through

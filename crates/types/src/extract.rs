@@ -2021,7 +2021,7 @@ pub struct DefaultImportWholeObjectUseFact {
 mod semantic;
 pub use semantic::SemanticFact;
 
-pub use crate::extract_namespace_member_uses::NamespaceMemberUseFact;
+pub use crate::extract_namespace_member_uses::{HolderValueFact, NamespaceMemberUseFact};
 
 /// A static member name that a runtime probe checks on an untyped value.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]

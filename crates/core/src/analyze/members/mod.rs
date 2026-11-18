@@ -45,8 +45,9 @@ use heritage::*;
 use instance::*;
 use member_probe::propagate_member_name_probe_accesses;
 use namespace::{
-    class_member_credited_by_value_use, credit_namespace_member_uses,
-    drop_members_of_unused_namespaces, enum_member_credited, namespace_member_credited,
+    class_member_credited_by_value_use, credit_holder_prototype_reads,
+    credit_namespace_member_uses, drop_members_of_unused_namespaces, enum_member_credited,
+    namespace_member_credited,
 };
 use playwright::*;
 use typed_property::*;
@@ -1927,6 +1928,8 @@ fn collect_direct_member_accesses(
             }
         }
     }
+
+    credit_holder_prototype_reads(graph, resolved_modules, indexes, &mut accessed_members);
 
     MemberAccessCollections {
         accessed_members,

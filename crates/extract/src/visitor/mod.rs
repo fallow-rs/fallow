@@ -1569,13 +1569,10 @@ impl ModuleInfoExtractor {
         self.subclass_binding_writes = binding_writes;
     }
 
-    /// Store the import binding references that the semantic pass found.
-    pub(crate) fn push_namespace_member_uses(
-        &mut self,
-        uses: Vec<fallow_types::extract::NamespaceMemberUseFact>,
-    ) {
-        self.semantic_facts
-            .extend(uses.into_iter().map(SemanticFact::NamespaceMemberUse));
+    /// Store the namespace member uses and holder values that the semantic
+    /// pass found.
+    pub(crate) fn push_namespace_member_uses(&mut self, facts: Vec<SemanticFact>) {
+        self.semantic_facts.extend(facts);
     }
 
     /// Record the template that a `defineOgImage('Name')` or

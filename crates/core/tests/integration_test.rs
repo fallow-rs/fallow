@@ -525,6 +525,8 @@ mod issue_4672_sfc_module_script_imports;
 mod issue_4714_4715_svelte_template_tags;
 #[path = "integration_test/issue_4716_vite_workspace_rollup_input.rs"]
 mod issue_4716_vite_workspace_rollup_input;
+#[path = "integration_test/issue_4724_cross_file_holder_prototype_reads.rs"]
+mod issue_4724_cross_file_holder_prototype_reads;
 #[path = "integration_test/issue_4771_vite_alias_interface_members.rs"]
 mod issue_4771_vite_alias_interface_members;
 #[path = "integration_test/issue_604_vite_rollup_path_helpers.rs"]

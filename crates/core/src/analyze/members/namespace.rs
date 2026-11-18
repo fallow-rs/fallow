@@ -2,7 +2,7 @@
 //! namespace member uses of the semantic pass, and the report filters.
 
 use super::*;
-use fallow_types::extract::NamespaceMemberUseFact;
+use fallow_types::extract::{HolderValueFact, NamespaceMemberUseFact, SemanticFact};
 
 /// Drop a member of a nested namespace that is reported itself: removing
 /// `Inner` removes `Inner.x` too, so one finding is enough.
@@ -136,6 +136,155 @@ pub(super) fn class_member_credited_by_value_use(
         return accessed.contains(VALUE_ESCAPE_USE);
     }
     accessed.contains(&format!("{PROTOTYPE_SEGMENT}.{}", member.name))
+}
+
+/// A read `holder.key.prototype.member` or `holder[name].prototype.member`
+/// that the namespace credit recorded on the export of a holder.
+struct HolderRead<'a> {
+    /// The key, or [`NamespaceMemberUseFact::ANY_KEY`] for a computed key
+    /// that can select each value. A string-literal key `'[]'` reads as
+    /// [`NamespaceMemberUseFact::ANY_KEY`] too.
+    key: &'a str,
+    member: &'a str,
+}
+
+impl<'a> HolderRead<'a> {
+    fn parse(credited: &'a str) -> Option<Self> {
+        let mut segments = credited.split('.');
+        let (Some(key), Some(PROTOTYPE_SEGMENT), Some(member), None) = (
+            segments.next(),
+            segments.next(),
+            segments.next(),
+            segments.next(),
+        ) else {
+            return None;
+        };
+        Some(Self { key, member })
+    }
+
+    fn selects(&self, key: &str) -> bool {
+        self.key == key || self.key == NamespaceMemberUseFact::ANY_KEY
+    }
+}
+
+/// Credit the instance member reads through an exported object holder on
+/// the values of the holder: `transports[name].prototype.handlesUpgrades` in
+/// one module, `export default { websocket: WebSocket }` in another. The
+/// pass follows one hop: from the holder export (also behind re-exports) to
+/// the value binding of each key that the read can select.
+pub(super) fn credit_holder_prototype_reads(
+    graph: &ModuleGraph,
+    resolved_modules: &[ResolvedModule],
+    indexes: &MemberPassIndexes<'_>,
+    accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
+) {
+    let holder_facts: Vec<(&ResolvedModule, &HolderValueFact)> = resolved_modules
+        .iter()
+        .flat_map(|resolved| {
+            resolved
+                .semantic_facts
+                .iter()
+                .filter_map(move |fact| match fact {
+                    SemanticFact::HolderValue(holder) => Some((resolved, holder.as_ref())),
+                    _ => None,
+                })
+        })
+        .collect();
+    if holder_facts.is_empty() {
+        return;
+    }
+    let holder_keys: FxHashSet<ExportKey> = holder_facts
+        .iter()
+        .map(|(resolved, fact)| ExportKey::new(resolved.file_id, fact.export_name.clone()))
+        .collect();
+
+    // A consumer can import the holder through a re-export, so the read can
+    // sit on another key than the holder export.
+    let mut reads_by_holder: FxHashMap<ExportKey, Vec<(String, String)>> = FxHashMap::default();
+    for (key, credited) in accessed_members.iter() {
+        let reads: Vec<HolderRead<'_>> = credited
+            .iter()
+            .filter_map(|credit| HolderRead::parse(credit))
+            .collect();
+        if reads.is_empty() {
+            continue;
+        }
+        for origin in export_key_with_origins(graph, key) {
+            if holder_keys.contains(&origin) {
+                reads_by_holder.entry(origin).or_default().extend(
+                    reads
+                        .iter()
+                        .map(|read| (read.key.to_string(), read.member.to_string())),
+                );
+            }
+        }
+    }
+
+    for (resolved, fact) in holder_facts {
+        let Some(reads) =
+            reads_by_holder.get(&ExportKey::new(resolved.file_id, fact.export_name.clone()))
+        else {
+            continue;
+        };
+        let members: Vec<&str> = reads
+            .iter()
+            .filter(|(key, member)| HolderRead { key, member }.selects(&fact.key))
+            .map(|(_, member)| member.as_str())
+            .collect();
+        if members.is_empty() {
+            continue;
+        }
+        for (value_key, path) in holder_value_targets(graph, resolved, indexes, fact) {
+            let credited = accessed_members.entry(value_key).or_default();
+            for member in &members {
+                let read = format!("{PROTOTYPE_SEGMENT}.{member}");
+                credited.insert(if path.is_empty() {
+                    read
+                } else {
+                    format!("{path}.{read}")
+                });
+            }
+        }
+    }
+}
+
+/// The export keys of the value of a holder, each with the member path that
+/// remains below the export: the binding itself (`{ ws: Socket }`), or an
+/// export of a namespace import (`{ ws: ns.Socket }`). Re-exports resolve to
+/// their origins.
+fn holder_value_targets<'f>(
+    graph: &ModuleGraph,
+    resolved: &ResolvedModule,
+    indexes: &MemberPassIndexes<'_>,
+    fact: &'f HolderValueFact,
+) -> Vec<(ExportKey, &'f str)> {
+    let direct: Vec<(ExportKey, &str)> = if let Some(keys) = indexes
+        .local_keys(resolved.file_id)
+        .get(fact.object.as_str())
+    {
+        keys.iter()
+            .map(|key| (key.clone(), fact.path.as_str()))
+            .collect()
+    } else {
+        let (export_name, rest) = fact
+            .path
+            .split_once('.')
+            .unwrap_or((fact.path.as_str(), ""));
+        if export_name.is_empty() {
+            return Vec::new();
+        }
+        namespace_import_targets(resolved, &fact.object)
+            .map(|file_id| (ExportKey::new(file_id, export_name.to_string()), rest))
+            .collect()
+    };
+    direct
+        .into_iter()
+        .flat_map(|(key, path)| {
+            export_key_with_origins(graph, &key)
+                .into_iter()
+                .map(move |origin| (origin, path))
+        })
+        .collect()
 }
 
 /// Project files that an inline import type `import("./x").N.a` names. The
