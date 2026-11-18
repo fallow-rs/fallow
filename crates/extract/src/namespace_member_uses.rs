@@ -236,6 +236,9 @@ fn record_root_references(
                 uses.class_fields.insert((object.to_string(), path));
             }
             ChainUse::Escape => {
+                if let Some(holder) = object_holder(nodes, &chain) {
+                    record_holder_prototype_reads(scoping, nodes, &holder, object, &path, uses);
+                }
                 uses.chains.insert((object.to_string(), path, true));
             }
             ChainUse::Destructure(keys) => {
@@ -246,6 +249,97 @@ fn record_root_references(
             }
         }
     }
+}
+
+/// The first segment of a chain that reads an instance member through a
+/// class value: `Class.prototype.member`.
+const PROTOTYPE_SEGMENT: &str = "prototype";
+
+/// A `const` object literal that holds a value under a static key:
+/// `const holder = { key: Value }`.
+struct Holder {
+    symbol: SymbolId,
+    key: String,
+}
+
+/// The holder whose property value is the value at the end of `chain`.
+fn object_holder(nodes: &AstNodes<'_>, chain: &Chain) -> Option<Holder> {
+    let (outer, outer_span) = unwrap_upward(nodes, chain.node, chain.span);
+    let property_id = nodes.parent_id(outer);
+    let AstKind::ObjectProperty(property) = nodes.kind(property_id) else {
+        return None;
+    };
+    if property.computed || property.value.span() != outer_span {
+        return None;
+    }
+    let key = property.key.static_name()?.as_str()?.to_string();
+    let object_id = nodes.parent_id(property_id);
+    let AstKind::ObjectExpression(object) = nodes.kind(object_id) else {
+        return None;
+    };
+    let object_chain = Chain {
+        node: object_id,
+        span: object.span,
+        segments: Vec::new(),
+    };
+    let symbol = const_alias_symbol(nodes, &object_chain)?;
+    Some(Holder { symbol, key })
+}
+
+/// Record `holder[name].prototype.member` and `holder.key.prototype.member`
+/// as reads of `prototype.member` on the value under `path`. A computed key
+/// that is not a string literal can select any value of the holder.
+fn record_holder_prototype_reads(
+    scoping: &Scoping,
+    nodes: &AstNodes<'_>,
+    holder: &Holder,
+    object: &str,
+    path: &str,
+    uses: &mut Uses,
+) {
+    for reference in scoping.get_resolved_references(holder.symbol) {
+        let node_id = reference.node_id();
+        let AstKind::IdentifierReference(identifier) = nodes.kind(node_id) else {
+            continue;
+        };
+        let Some((member_id, member_span)) =
+            holder_value_access(nodes, node_id, identifier.span, &holder.key)
+        else {
+            continue;
+        };
+        let chain = member_chain(nodes, member_id, member_span);
+        if let [first, member, ..] = chain.segments.as_slice()
+            && first == PROTOTYPE_SEGMENT
+        {
+            let read = format!("{PROTOTYPE_SEGMENT}.{member}");
+            uses.chains
+                .insert((object.to_string(), join_path(path, &read), false));
+        }
+    }
+}
+
+/// The member expression over the holder reference at `node_id` that can
+/// give the value under `key`.
+fn holder_value_access(
+    nodes: &AstNodes<'_>,
+    node_id: NodeId,
+    span: Span,
+    key: &str,
+) -> Option<(NodeId, Span)> {
+    let parent = nodes.parent_id(node_id);
+    let selects_key = match nodes.kind(parent) {
+        AstKind::StaticMemberExpression(member) if member.object.span() == span => {
+            member.property.name == key
+        }
+        AstKind::ComputedMemberExpression(member) if member.object.span() == span => {
+            match &member.expression {
+                Expression::StringLiteral(literal) => literal.value == key,
+                _ => true,
+            }
+        }
+        _ => false,
+    };
+    selects_key.then(|| (parent, nodes.kind(parent).span()))
 }
 
 /// The symbol of the `const` alias that `chain` initializes:

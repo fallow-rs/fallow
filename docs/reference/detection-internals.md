@@ -187,7 +187,12 @@ error by suppressing a downstream detector.
   used, as for `Object.values(Shape)`, and each static member of the class.
   An instance member of an escaping class keeps its finding, because only an
   instance reads it. A chain `Class.prototype.member` counts the instance
-  member `member` as used. The superclass call of
+  member `member` as used. When a class is a property value of a `const`
+  object literal in the same module (`const holders = { ws: Socket }`),
+  `holders.ws.prototype.member` and `holders[name].prototype.member` count
+  `member` as used too. A computed key that is not a string literal can
+  select each class of the holder. The pass does not follow a holder that
+  another module imports. The superclass call of
   `class Sub extends mixin(Base)` is not an escape. A class field alias (`levels = Level`) is an
   escape for a namespace but not for an enum: the fact carries
   `class_field`, and the visitor follows the reads of the field through

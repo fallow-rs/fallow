@@ -34,3 +34,15 @@ export class PrototypeRead {
   static upgradesTo: string[] = [];
   other(): void {}
 }
+
+export class HolderRead {
+  get handlesUpgrades(): boolean {
+    return true;
+  }
+  other(): void {}
+}
+
+export class KeyedRead {
+  keyed(): void {}
+  missed(): void {}
+}

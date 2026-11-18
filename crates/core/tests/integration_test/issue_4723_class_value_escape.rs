@@ -11,7 +11,9 @@ use crate::common::{create_config, fixture_path};
 /// leave, so its other static member stays unused.
 ///
 /// Issue #4724: a read through `Class.prototype.member` is a use of the
-/// instance member `member`.
+/// instance member `member`. A read through a same-file object holder,
+/// `holder[name].prototype.member` or `holder.key.prototype.member`, is a
+/// use of the member of each class that the holder can give.
 #[test]
 fn static_members_of_a_class_passed_as_a_value_are_used() {
     let root = fixture_path("issue-4723-class-value-escape");
@@ -31,6 +33,8 @@ fn static_members_of_a_class_passed_as_a_value_are_used() {
             "AliasArgument.instanceOnly",
             "CallArgument.instanceOnly",
             "DirectRead.dead",
+            "HolderRead.other",
+            "KeyedRead.missed",
             "PropertyValue.instanceOnly",
             "PrototypeRead.other",
         ],
