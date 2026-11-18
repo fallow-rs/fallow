@@ -66,6 +66,13 @@ root, so the two runs can replace the graph cache of each other.
 | `FALLOW_PRODUCTION_HEALTH` | Override production mode for health analysis only. | unset | `FALLOW_PRODUCTION_HEALTH=true` |
 | `FALLOW_PRODUCTION_DUPES` | Override production mode for duplication analysis only. | unset | `FALLOW_PRODUCTION_DUPES=false` |
 
+The CLI and the MCP server read these variables. An MCP tool reads them on its
+typed route and on its CLI route with the precedence of the CLI: the tool
+parameter, then the variable of the analysis, then `FALLOW_PRODUCTION`, then
+the `production` config field. The programmatic API and the Node bindings do
+not read them: pass the production options. The language server uses the
+`fallow.production` editor setting.
+
 ## Licensing
 
 | Variable | Description | Default | Example |

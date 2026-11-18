@@ -509,7 +509,20 @@ directly see it. Only a timeout gives the client a structured error:
 Each typed options builder starts from `shared_analysis_options` in
 `api_runtime.rs`. It maps root, config, remote extends, cache and threads,
 places `FALLOW_CHANGED_SINCE` and `FALLOW_DIFF_FILE` by `EnvScope`, and sets
-the cancellation flag. A tool sets only its own fields on top. A tool with
+the cancellation flag. A tool sets only its own fields on top. A tool whose
+CLI route honors the `FALLOW_PRODUCTION*` variables sets its production
+override with `api_runtime::typed_production`: the tool parameter, then the
+variable of the analysis, then `FALLOW_PRODUCTION`. The CLI parses the
+variables with the same `fallow_config::ProductionEnv`. `audit` and the Code
+Mode `combined` route set one override per analysis
+(`AuditOptions::production_*`, `CombinedOptions::production_*`).
+`fallow_api` itself does not read the variables.
+
+`fallow_api::run_combined` sets
+`ComplexityOptions::config_activates_coverage_gaps` on its health section, so
+an enabled `coverage-gaps` rule reports coverage gaps on the Code Mode
+`combined` typed route, as on bare `fallow`. The typed combined envelope has
+no `gate_outcomes`: the CLI builds that member. A tool with
 both routes has a parity test (`tools/route_parity.rs`) that builds the argv
 and the typed options from the same params and compares the shared settings,
 `production` included: `false` is `--no-production` on the CLI route.
