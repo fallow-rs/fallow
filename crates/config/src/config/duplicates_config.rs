@@ -297,12 +297,38 @@ impl DuplicatesConfig {
     /// does not depend on the analyses that one run selects.
     #[must_use]
     pub const fn runs_by_default(&self) -> bool {
-        self.select(DuplicationRequest::Default {
-            command_default: None,
-        })
+        super::plan_run(
+            super::PlanSections {
+                duplicates: self,
+                audit: &NO_AUDIT_KEYS,
+            },
+            super::RunRequest {
+                command: super::RunCommand::Combined,
+                dead_code: super::AnalysisRequest::Default,
+                duplication: super::AnalysisRequest::Default,
+                health: super::AnalysisRequest::Default,
+            },
+        )
+        .duplication
         .runs()
     }
 }
+
+/// An `audit` section without keys. The combined plan reads no `audit` key.
+const NO_AUDIT_KEYS: super::AuditConfig = super::AuditConfig {
+    gate: super::AuditGate::NewOnly,
+    worsened: super::AuditWorsened::Warn,
+    dead_code: None,
+    health: None,
+    dupes: None,
+    css: None,
+    css_deep: None,
+    dead_code_baseline: None,
+    health_baseline: None,
+    dupes_baseline: None,
+    cache_max_age_days: None,
+    type_aware: None,
+};
 
 impl Default for DuplicatesConfig {
     fn default() -> Self {

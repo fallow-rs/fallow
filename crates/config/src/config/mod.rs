@@ -17,6 +17,7 @@ mod parsing;
 mod resolution;
 mod resolve;
 mod rules;
+mod run_plan;
 mod similar_code;
 mod used_class_members;
 mod workspace_settings;
@@ -74,6 +75,10 @@ pub use rules::{
     KNOWN_RULE_NAMES, PartialRulesConfig, RulesConfig, SEMANTIC_REFINABLE_KINDS,
     SYMBOL_USE_REFINABLE_KINDS, Severity, any_symbol_use_rule_active, closest_known_rule_name,
     default_severity_for_kind, is_opt_in_kind,
+};
+pub use run_plan::{
+    AnalysisRequest, AnalysisSelection, ConfigKey, PlanSections, PlannedAnalysis, RunCommand,
+    RunPlan, RunRequest, SkipReason, plan_run,
 };
 pub use similar_code::SimilarCodeConfig;
 pub use used_class_members::{ScopedUsedClassMemberRule, UsedClassMemberRule};
