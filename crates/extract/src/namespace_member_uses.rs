@@ -490,23 +490,44 @@ fn is_export_specifier(nodes: &AstNodes<'_>, chain: &Chain) -> bool {
 fn classify(nodes: &AstNodes<'_>, chain: &Chain) -> ChainUse {
     let (outer, outer_span) = unwrap_upward(nodes, chain.node, chain.span);
     let parent = nodes.parent_id(outer);
-    if parent == outer {
+    if parent == outer
+        || is_callee_use(nodes, parent, outer_span)
+        || is_read_use(nodes.kind(parent), chain, outer_span)
+    {
         return ChainUse::Access;
     }
     match nodes.kind(parent) {
-        AstKind::CallExpression(call) if call.callee.span() == outer_span => ChainUse::Access,
-        // `class Sub extends mixin(Base) {}`: the class factory builds the
-        // superclass from `Base`. It does not give the value to other code.
-        AstKind::CallExpression(call) if is_superclass_call(nodes, parent, call.span) => {
-            ChainUse::Access
+        AstKind::VariableDeclarator(declarator)
+            if declarator.init.as_ref().map(GetSpan::span) == Some(outer_span) =>
+        {
+            destructured_keys(&declarator.id).map_or(ChainUse::Escape, ChainUse::Destructure)
         }
-        AstKind::NewExpression(new) if new.callee.span() == outer_span => ChainUse::Access,
-        AstKind::TaggedTemplateExpression(tagged) if tagged.tag.span() == outer_span => {
-            ChainUse::Access
+        _ => ChainUse::Escape,
+    }
+}
+
+/// Whether the parent calls, constructs, tags or reads a member of the
+/// value at `outer_span`.
+fn is_callee_use(nodes: &AstNodes<'_>, parent: NodeId, outer_span: Span) -> bool {
+    match nodes.kind(parent) {
+        AstKind::CallExpression(call) => {
+            call.callee.span() == outer_span
+                // `class Sub extends mixin(Base) {}`: the class factory builds
+                // the superclass from `Base`. It does not give the value to
+                // other code.
+                || is_superclass_call(nodes, parent, call.span)
         }
-        AstKind::StaticMemberExpression(member) if member.object.span() == outer_span => {
-            ChainUse::Access
-        }
+        AstKind::NewExpression(new) => new.callee.span() == outer_span,
+        AstKind::TaggedTemplateExpression(tagged) => tagged.tag.span() == outer_span,
+        AstKind::StaticMemberExpression(member) => member.object.span() == outer_span,
+        _ => false,
+    }
+}
+
+/// Whether the parent only reads the value at `outer_span`: a type use, a
+/// statement, an operator, or the target of an assignment.
+fn is_read_use(parent: AstKind<'_>, chain: &Chain, outer_span: Span) -> bool {
+    match parent {
         AstKind::TSTypeReference(_)
         | AstKind::TSClassImplements(_)
         | AstKind::TSInterfaceHeritage(_)
@@ -516,22 +537,13 @@ fn classify(nodes: &AstNodes<'_>, chain: &Chain) -> ChainUse {
         | AstKind::UnaryExpression(_)
         | AstKind::UpdateExpression(_)
         | AstKind::JSXOpeningElement(_)
-        | AstKind::JSXClosingElement(_) => ChainUse::Access,
-        AstKind::TSImportEqualsDeclaration(_) if !chain.segments.is_empty() => ChainUse::Access,
-        AstKind::BinaryExpression(binary)
-            if !(binary.operator == BinaryOperator::In && binary.right.span() == outer_span) =>
-        {
-            ChainUse::Access
+        | AstKind::JSXClosingElement(_) => true,
+        AstKind::TSImportEqualsDeclaration(_) => !chain.segments.is_empty(),
+        AstKind::BinaryExpression(binary) => {
+            !(binary.operator == BinaryOperator::In && binary.right.span() == outer_span)
         }
-        AstKind::AssignmentExpression(assignment) if assignment.right.span() != outer_span => {
-            ChainUse::Access
-        }
-        AstKind::VariableDeclarator(declarator)
-            if declarator.init.as_ref().map(GetSpan::span) == Some(outer_span) =>
-        {
-            destructured_keys(&declarator.id).map_or(ChainUse::Escape, ChainUse::Destructure)
-        }
-        _ => ChainUse::Escape,
+        AstKind::AssignmentExpression(assignment) => assignment.right.span() != outer_span,
+        _ => false,
     }
 }
 
