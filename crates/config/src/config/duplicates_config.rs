@@ -212,85 +212,7 @@ pub struct DuplicatesConfig {
     pub min_corpus_size_for_token_cache: usize,
 }
 
-/// How a run asks for the duplication analysis.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DuplicationRequest {
-    /// The run names the analysis: `--only dupes`, `--include-dupes`, the
-    /// `fallow dupes` command, or an API option that is set to `true`.
-    Named,
-    /// The command runs the analysis by default and the run does not name it.
-    /// `command_default` is the config key of the command that selects the
-    /// analysis (`audit.dupes`), when the command has one and it is set.
-    Default {
-        /// The value of the config key of the command, when it is set.
-        command_default: Option<bool>,
-    },
-    /// The run leaves the analysis out: `--skip dupes`, an `--only` list
-    /// without it, or an API option that is set to `false`.
-    Excluded,
-}
-
-impl DuplicationRequest {
-    /// Whether the decision depends on `duplicates.enabled`. A caller that
-    /// has no loaded config needs to load one only for such a request.
-    #[must_use]
-    pub const fn reads_duplicates_enabled(self) -> bool {
-        matches!(
-            self,
-            Self::Default {
-                command_default: None
-            }
-        )
-    }
-}
-
-/// The decision of [`DuplicatesConfig::select`] for one run.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DuplicationSelection {
-    /// The duplication analysis runs.
-    Run,
-    /// The run left the analysis out.
-    Excluded,
-    /// The config key of the command turned the analysis off.
-    OffByCommandConfig,
-    /// `duplicates.enabled: false` turned the analysis off.
-    OffByDuplicatesEnabled,
-}
-
-impl DuplicationSelection {
-    /// Whether the duplication analysis runs.
-    #[must_use]
-    pub const fn runs(self) -> bool {
-        matches!(self, Self::Run)
-    }
-
-    /// Whether `duplicates.enabled: false` alone turned the analysis off.
-    #[must_use]
-    pub const fn off_by_duplicates_enabled(self) -> bool {
-        matches!(self, Self::OffByDuplicatesEnabled)
-    }
-}
-
 impl DuplicatesConfig {
-    /// Decide whether a run executes the duplication analysis.
-    ///
-    /// This is the one rule for every command and API route. A run that names
-    /// the analysis executes it. Otherwise the config key of the command
-    /// decides, and without that key `duplicates.enabled` decides.
-    #[must_use]
-    pub const fn select(&self, request: DuplicationRequest) -> DuplicationSelection {
-        let command_default = match request {
-            DuplicationRequest::Named => return DuplicationSelection::Run,
-            DuplicationRequest::Excluded => return DuplicationSelection::Excluded,
-            DuplicationRequest::Default { command_default } => command_default,
-        };
-        match command_default {
-            Some(false) => DuplicationSelection::OffByCommandConfig,
-            None if !self.enabled => DuplicationSelection::OffByDuplicatesEnabled,
-            Some(true) | None => DuplicationSelection::Run,
-        }
-    }
-
     /// Whether a consumer of duplication data that no flag selects measures
     /// duplication: the health score and the editor diagnostics. The flags of
     /// the run do not change this answer, so the health score of a project
@@ -470,46 +392,6 @@ impl std::str::FromStr for DetectionMode {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn select_applies_one_precedence_to_every_request() {
-        let on = DuplicatesConfig::default();
-        let off = DuplicatesConfig {
-            enabled: false,
-            ..DuplicatesConfig::default()
-        };
-        let default = |command_default| DuplicationRequest::Default { command_default };
-
-        for config in [&on, &off] {
-            assert_eq!(
-                config.select(DuplicationRequest::Named),
-                DuplicationSelection::Run
-            );
-            assert_eq!(
-                config.select(DuplicationRequest::Excluded),
-                DuplicationSelection::Excluded
-            );
-            assert_eq!(
-                config.select(default(Some(true))),
-                DuplicationSelection::Run
-            );
-            assert_eq!(
-                config.select(default(Some(false))),
-                DuplicationSelection::OffByCommandConfig
-            );
-        }
-        assert_eq!(on.select(default(None)), DuplicationSelection::Run);
-        assert_eq!(
-            off.select(default(None)),
-            DuplicationSelection::OffByDuplicatesEnabled
-        );
-        assert!(default(None).reads_duplicates_enabled());
-        assert!(!default(Some(true)).reads_duplicates_enabled());
-        assert!(!DuplicationRequest::Named.reads_duplicates_enabled());
-        assert!(!DuplicationRequest::Excluded.reads_duplicates_enabled());
-        assert!(on.runs_by_default());
-        assert!(!off.runs_by_default());
-    }
 
     #[test]
     fn duplicates_config_defaults() {

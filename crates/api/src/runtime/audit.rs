@@ -338,9 +338,8 @@ impl AuditAnalyses for ProgrammaticAuditAnalyses<'_> {
 /// precedence of `fallow audit`. `gate` and `css_deep` win over the config,
 /// as `--gate` and `--css-deep` / `--no-css-deep` do. `css` can only turn
 /// styling off, as `--no-css` does: the CLI has no flag that overrides
-/// `audit.css: false`. `duplicates` decides the duplication domain with the
-/// rule of [`fallow_config::DuplicatesConfig::select`]: the option wins, then
-/// `audit.dupes`, then `duplicates.enabled`.
+/// `audit.css: false`. [`fallow_config::plan_run`] decides the three domains:
+/// the option wins, then the `audit` key, then `duplicates.enabled`.
 ///
 /// The destructure names every field, so a new `audit` key does not compile
 /// until the typed route applies it, rejects it, or states why it does not
@@ -353,9 +352,10 @@ fn options_with_audit_config(
     let fallow_config::AuditConfig {
         gate,
         worsened,
-        dead_code,
-        health,
-        dupes,
+        // The run plan reads these keys.
+        dead_code: _,
+        health: _,
+        dupes: _,
         css,
         css_deep,
         // `reject_config_baselines` refuses these keys.
@@ -371,26 +371,24 @@ fn options_with_audit_config(
     } = config;
     let css = options.css != Some(false) && css.unwrap_or(true);
     let css_deep = css && options.css_deep.or(*css_deep).unwrap_or(true);
+    let plan = fallow_config::plan_run(
+        fallow_config::PlanSections {
+            duplicates,
+            audit: config,
+        },
+        fallow_config::RunRequest::from_options(
+            fallow_config::RunCommand::Audit,
+            options.dead_code,
+            options.duplication,
+            options.health,
+        ),
+    );
     AuditOptions {
         gate: Some(options.gate.unwrap_or(*gate)),
         worsened: Some(options.worsened.unwrap_or(*worsened)),
-        dead_code: Some(
-            options
-                .dead_code
-                .unwrap_or_else(|| dead_code.unwrap_or(true)),
-        ),
-        health: Some(options.health.unwrap_or_else(|| health.unwrap_or(true))),
-        duplication: Some(
-            duplicates
-                .select(match options.duplication {
-                    Some(true) => fallow_config::DuplicationRequest::Named,
-                    Some(false) => fallow_config::DuplicationRequest::Excluded,
-                    None => fallow_config::DuplicationRequest::Default {
-                        command_default: *dupes,
-                    },
-                })
-                .runs(),
-        ),
+        dead_code: Some(plan.dead_code.runs()),
+        health: Some(plan.health.runs()),
+        duplication: Some(plan.duplication.runs()),
         css: Some(css),
         css_deep: Some(css_deep),
         ..options.clone()

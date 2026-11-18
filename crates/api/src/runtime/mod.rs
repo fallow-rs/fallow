@@ -91,24 +91,26 @@ pub(super) fn resolve_effective_production_modes(
     .effective_modes(&config))
 }
 
-/// The decision of the project config for a duplication `request`. A project
-/// without a config file has the default config. The config loads only when
-/// the decision depends on it.
-pub(super) fn duplication_selection(
+/// The run plan of the project config for `request`. A project without a
+/// config file has the default config. The config loads only when the plan
+/// depends on it.
+pub(super) fn plan_run(
     resolved: &ProgrammaticAnalysisContext,
-    request: fallow_config::DuplicationRequest,
-) -> ProgrammaticResult<fallow_config::DuplicationSelection> {
-    let duplicates = if request.reads_duplicates_enabled() {
+    request: fallow_config::RunRequest,
+) -> ProgrammaticResult<fallow_config::RunPlan> {
+    let config = if request.reads_config() {
         load_config_file(
             resolved.root(),
             resolved.config_path().as_deref(),
             resolved.allow_remote_extends(),
         )?
-        .map(|config| config.duplicates)
     } else {
         None
     };
-    Ok(duplicates.unwrap_or_default().select(request))
+    Ok(fallow_config::plan_run(
+        config.unwrap_or_default().plan_sections(),
+        request,
+    ))
 }
 
 fn load_context_production_config(
