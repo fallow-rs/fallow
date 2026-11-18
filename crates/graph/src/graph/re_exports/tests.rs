@@ -4802,3 +4802,108 @@ fn tarjan_scc_acyclic_chain_has_no_components() {
         .collect();
     assert!(tarjan_scc(adj.len(), &adj).is_empty());
 }
+
+/// `export * as Ns from './self'` adds one named export and forwards no names,
+/// so it cannot loop chain propagation. See issue #4722.
+#[test]
+fn self_namespace_re_export_is_not_a_cycle() {
+    let files = vec![DiscoveredFile {
+        id: FileId(0),
+        path: PathBuf::from("/project/process_signal.ts"),
+        size_bytes: 50,
+    }];
+
+    let entry_points = vec![EntryPoint {
+        path: PathBuf::from("/project/process_signal.ts"),
+        source: EntryPointSource::PackageJsonMain,
+    }];
+
+    let resolved_modules = vec![ResolvedModule {
+        file_id: FileId(0),
+        path: PathBuf::from("/project/process_signal.ts"),
+        re_exports: vec![ResolvedReExport {
+            info: fallow_types::extract::ReExportInfo {
+                source: "./process_signal".to_string(),
+                imported_name: "*".to_string(),
+                exported_name: "ProcessSignal".to_string(),
+                is_type_only: false,
+                span: oxc_span::Span::default(),
+                statement_span: oxc_span::Span::new(0, 0),
+                source_span: oxc_span::Span::new(0, 0),
+                visibility: VisibilityTag::None,
+                expected_unused_reason: None,
+            },
+            target: ResolveResult::InternalModule(FileId(0)),
+        }],
+        ..Default::default()
+    }];
+
+    let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+
+    assert!(
+        graph.re_export_cycles.is_empty(),
+        "a namespace re-export of the same file is not a cycle: {:?}",
+        graph.re_export_cycles
+    );
+}
+
+/// A loop that closes only through `export * as ns` forwards no names in a
+/// circle, so it is not a re-export cycle either.
+#[test]
+fn namespace_re_export_does_not_close_a_cycle() {
+    let files = vec![
+        DiscoveredFile {
+            id: FileId(0),
+            path: PathBuf::from("/project/a.ts"),
+            size_bytes: 50,
+        },
+        DiscoveredFile {
+            id: FileId(1),
+            path: PathBuf::from("/project/b.ts"),
+            size_bytes: 50,
+        },
+    ];
+
+    let entry_points = vec![EntryPoint {
+        path: PathBuf::from("/project/a.ts"),
+        source: EntryPointSource::PackageJsonMain,
+    }];
+
+    let re_export = |source: &str, exported_name: &str, target: u32| ResolvedReExport {
+        info: fallow_types::extract::ReExportInfo {
+            source: source.to_string(),
+            imported_name: "*".to_string(),
+            exported_name: exported_name.to_string(),
+            is_type_only: false,
+            span: oxc_span::Span::default(),
+            statement_span: oxc_span::Span::new(0, 0),
+            source_span: oxc_span::Span::new(0, 0),
+            visibility: VisibilityTag::None,
+            expected_unused_reason: None,
+        },
+        target: ResolveResult::InternalModule(FileId(target)),
+    };
+
+    let resolved_modules = vec![
+        ResolvedModule {
+            file_id: FileId(0),
+            path: PathBuf::from("/project/a.ts"),
+            re_exports: vec![re_export("./b", "B", 1)],
+            ..Default::default()
+        },
+        ResolvedModule {
+            file_id: FileId(1),
+            path: PathBuf::from("/project/b.ts"),
+            re_exports: vec![re_export("./a", "*", 0)],
+            ..Default::default()
+        },
+    ];
+
+    let graph = ModuleGraph::build(&resolved_modules, &entry_points, &files);
+
+    assert!(
+        graph.re_export_cycles.is_empty(),
+        "a loop through a namespace re-export is not a cycle: {:?}",
+        graph.re_export_cycles
+    );
+}

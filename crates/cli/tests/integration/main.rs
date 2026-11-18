@@ -58,6 +58,7 @@ mod check_tests;
 mod ci_command_routing_tests;
 mod ci_template_tests;
 mod circular_dependencies_allow_tests;
+mod circular_dependency_edge_tests;
 mod claude_code_hint_tests;
 #[cfg(target_os = "linux")]
 mod cloud_login_linux_keychain_tests;
