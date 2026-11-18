@@ -201,9 +201,11 @@ pub fn render_mutation_section(view: &MutationCiView, heading: MutationHeading) 
     } else {
         collapse_details(view, body.clone())
     };
-    let full = join_paragraphs(title, &shown.core, &shown.extra);
-    if full.chars().count() <= MUTATION_SECTION_MAX_CHARS {
-        return full;
+    // The cap is measured on the open section, so the fold wrapper does not
+    // push a section that fits over it.
+    let open = join_paragraphs(title, &body.core, &body.extra);
+    if open.chars().count() <= MUTATION_SECTION_MAX_CHARS {
+        return join_paragraphs(title, &shown.core, &shown.extra);
     }
     // The shortened section keeps the count table in view: the details it
     // would fold are the part that the cap removed.
