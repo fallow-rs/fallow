@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 use std::process::ExitCode;
 
-use fallow_config::{OutputFormat, ProductionAnalysis, ProductionConfig};
+use fallow_config::{OutputFormat, ProductionAnalysis, ProductionConfig, RunPlan, RunRequest};
 
 use super::Cli;
 use crate::cli_format::bool_from_env;
@@ -63,22 +63,24 @@ fn load_config_production(
     )
 }
 
-/// The decision of the project config for a duplication `request`. A project
-/// without a config file has the default config. The config loads only when
-/// the decision depends on it.
-pub fn duplication_selection(
+/// The run plan of the project config for `request`. A project without a
+/// config file has the default config. The config loads only when the plan
+/// depends on it.
+pub fn load_run_plan(
     cli: &Cli,
     root: &std::path::Path,
     output: OutputFormat,
-    request: fallow_config::DuplicationRequest,
-) -> Result<fallow_config::DuplicationSelection, ExitCode> {
-    let duplicates = if request.reads_duplicates_enabled() {
+    request: RunRequest,
+) -> Result<RunPlan, ExitCode> {
+    let config = if request.reads_config() {
         load_config_file(root, cli.config.as_ref(), output, cli.allow_remote_extends)?
-            .map(|config| config.duplicates)
     } else {
         None
     };
-    Ok(duplicates.unwrap_or_default().select(request))
+    Ok(fallow_config::plan_run(
+        config.unwrap_or_default().plan_sections(),
+        request,
+    ))
 }
 
 pub fn resolve_production_modes(
@@ -128,7 +130,7 @@ pub fn resolve_production_modes(
 
 #[cfg(test)]
 mod tests {
-    /// `DuplicatesConfig::select` is the one rule that decides whether a run
+    /// `fallow_config::plan_run` is the one rule that decides whether a run
     /// executes the duplication analysis. A command that reads the
     /// `duplicates.enabled` field itself can apply another precedence.
     #[test]
@@ -150,7 +152,7 @@ mod tests {
             .collect();
         assert!(
             offenders.is_empty(),
-            "decide the duplication analysis with DuplicatesConfig::select, not with the enabled field: {offenders:?}"
+            "decide the duplication analysis with fallow_config::plan_run, not with the enabled field: {offenders:?}"
         );
     }
 }
