@@ -965,7 +965,7 @@ fn finalize(
         if let Some(head) = file.head.as_deref() {
             suppressions.insert(
                 file.rel.as_str(),
-                fallow_engine::source::suppressions_from_text(head),
+                fallow_engine::source::suppressions_from_text(&file.abs, head),
             );
         }
     }
@@ -1085,7 +1085,7 @@ mod tests {
     use super::*;
 
     fn suppressions(src: &str) -> Vec<Suppression> {
-        fallow_engine::source::suppressions_from_text(src)
+        fallow_engine::source::suppressions_from_text(Path::new("src/a.test.ts"), src)
     }
 
     fn file(rel: &str, base: &str, head: &str) -> FileTexts {
@@ -1515,6 +1515,12 @@ mod tests {
             Some(1)
         ));
         assert!(is_suppressed(&list, DiffRiskRule::TestOnlyBranch, Some(2)));
+    }
+
+    #[test]
+    fn a_marker_in_a_template_literal_suppresses_nothing() {
+        let list = suppressions("export const docs = `\n// fallow-ignore-file\n`;\n");
+        assert!(list.is_empty(), "{list:?}");
     }
 
     #[test]

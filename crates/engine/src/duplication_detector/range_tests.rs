@@ -259,6 +259,57 @@ fn marker_inside_template_literal_is_ignored() {
 }
 
 #[test]
+fn file_marker_inside_template_literal_is_ignored() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let body = function("shared", 1);
+    let with_literal =
+        format!("{body}export const docs = `\n// fallow-ignore-file code-duplication\n`;\n");
+    let files = write_files(dir.path(), &[("a.ts", &body), ("b.ts", &with_literal)]);
+
+    let report = default_report(dir.path(), &files);
+
+    assert_eq!(
+        report.clone_groups.len(),
+        1,
+        "a file marker in a template literal must not suppress the file"
+    );
+}
+
+#[test]
+fn next_line_marker_inside_template_literal_is_ignored() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let body = function("shared", 1);
+    let marker = "// fallow-ignore-next-line code-duplication";
+    // The line after the marker is the first line of the shared function.
+    let plain = format!("export const docs = `\nnothing\n`; {body}");
+    let with_literal = format!("export const docs = `\n{marker}\n`; {body}");
+    let files = write_files(dir.path(), &[("a.ts", &plain), ("b.ts", &with_literal)]);
+
+    let report = default_report(dir.path(), &files);
+
+    assert_eq!(
+        report.clone_groups.len(),
+        1,
+        "a next-line marker in a template literal must not suppress the clone: {:?}",
+        group_lines(dir.path(), &report)
+    );
+}
+
+#[test]
+fn real_file_marker_after_template_literal_still_suppresses() {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let body = function("shared", 1);
+    let suppressed = format!(
+        "export const docs = `\n// fallow-ignore-file code-duplication\n`;\n// fallow-ignore-file code-duplication\n{body}"
+    );
+    let files = write_files(dir.path(), &[("a.ts", &body), ("b.ts", &suppressed)]);
+
+    let report = default_report(dir.path(), &files);
+
+    assert!(report.clone_groups.is_empty());
+}
+
+#[test]
 fn unclosed_start_has_no_effect_and_is_reported() {
     let dir = tempfile::tempdir().expect("temp dir");
     let body = function("shared", 1);

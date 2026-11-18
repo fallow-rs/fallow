@@ -4199,7 +4199,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         for declarator in &decl.declarations {
             self.record_variable_declarator(decl, declarator);
             self.record_declarator_function_name(declarator);
-            self.record_exported_handler_declarator(declarator);
+            self.record_handler_object_declarator(declarator);
         }
         walk::walk_variable_declaration(self, decl);
     }
@@ -4216,7 +4216,6 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
     fn visit_object_property(&mut self, prop: &ObjectProperty<'a>) {
         self.capture_factory_property_observation(&prop.value);
-        self.record_graphql_resolver_args_source(&prop.value);
 
         if let Some((import_expr, sources)) = try_extract_property_callback_import(prop) {
             self.push_dynamic_import_branches(
@@ -4240,6 +4239,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
     fn visit_object_expression(&mut self, obj: &ObjectExpression<'a>) {
         self.record_angular_provider_object(obj);
+        self.record_graphql_resolver_map_sources(obj);
 
         walk::walk_object_expression(self, obj);
     }

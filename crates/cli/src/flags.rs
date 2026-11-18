@@ -12,7 +12,7 @@ use fallow_engine::flag_retirement::{
     RetirementFacts, RetirementOptions, RetirementSiteInput, RetirementSort,
 };
 use fallow_engine::flag_vendor::{STALE_EXPORT_DAYS, VendorExport};
-use fallow_output::codeclimate_fingerprint_hash;
+use fallow_output::{codeclimate_fingerprint_hash, reported_sdk_name};
 use fallow_types::envelope::RegressionStatus;
 use fallow_types::flag_retirement::{
     FlagAgeGate, FlagAgeMode, FlagRetirementReport, RetirementFlag, RetirementFlagKind,
@@ -708,7 +708,7 @@ fn kind_tag(flag: &FeatureFlag) -> String {
     match flag.kind {
         FlagKind::EnvironmentVariable => "(env)".dimmed().to_string(),
         FlagKind::SdkCall => {
-            if let Some(ref sdk) = flag.sdk_name {
+            if let Some(sdk) = reported_sdk_name(flag) {
                 format!("(SDK: {sdk})").dimmed().to_string()
             } else {
                 "(SDK)".dimmed().to_string()
@@ -1261,10 +1261,9 @@ fn print_flags_markdown_sites(flags: &[FeatureFlag], config: &ResolvedConfig) {
         let name = escape_backticks(&f.flag_name);
         let kind = match f.kind {
             FlagKind::EnvironmentVariable => "env".to_string(),
-            FlagKind::SdkCall => f
-                .sdk_name
-                .as_ref()
-                .map_or_else(|| "SDK".to_string(), |sdk| format!("SDK: {sdk}")),
+            FlagKind::SdkCall => {
+                reported_sdk_name(f).map_or_else(|| "SDK".to_string(), |sdk| format!("SDK: {sdk}"))
+            }
             FlagKind::ConfigObject => "config".to_string(),
         };
         println!("| `{path}` | {} | `{name}` | {kind} |", f.line);

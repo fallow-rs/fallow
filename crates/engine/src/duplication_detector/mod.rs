@@ -6,6 +6,8 @@
 //! matching that ignores identifier names and literal values).
 
 mod cache;
+#[cfg(test)]
+mod clone_edge_tests;
 pub mod deepdive;
 pub mod detect;
 pub mod families;
@@ -480,14 +482,14 @@ fn duplication_token_cache_entry(
     let raw = std::fs::read_to_string(&file.path).ok()?;
     let source = without_byte_order_mark(&raw);
     let mut parsed = fallow_extract::suppress::scan_suppressions_from_source(source);
-    if suppress::is_file_suppressed(&parsed.suppressions, IssueKind::CodeDuplication) {
-        return None;
-    }
     let file_tokens = tokenize_duplication_source(file, ctx, source);
     if file_tokens.tokens.is_empty() {
         return None;
     }
-    range_mask::pair_ranges_outside_strings(&mut parsed, &file_tokens);
+    range_mask::drop_markers_in_strings(&mut parsed, &file_tokens);
+    if suppress::is_file_suppressed(&parsed.suppressions, IssueKind::CodeDuplication) {
+        return None;
+    }
     let hashed_tokens = normalize_and_hash_resolved(&file_tokens.tokens, ctx.normalization);
     Some((
         TokenCacheEntry {

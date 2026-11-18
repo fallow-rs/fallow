@@ -17,7 +17,8 @@ use oxc_span::{SourceType, Span};
 
 use crate::asset_url::normalize_asset_url;
 use crate::sfc_template::angular;
-use crate::source_map::ExtractionResult;
+use crate::source_map::{ExtractionResult, ScriptSection};
+use crate::suppress_literals::program_literal_spans;
 use crate::visitor::ModuleInfoExtractor;
 use crate::{
     AngularTemplateMemberAccessFact, DynamicImportInfo, DynamicImportPattern, ImportInfo,
@@ -108,9 +109,35 @@ fn inline_script_source_type(attributes: &str) -> Option<SourceType> {
         .then(SourceType::script)
 }
 
-/// The imports of the inline scripts of a page, with spans in the page, and
-/// the uses of the imported bindings (`m.default` in
-/// `import("./a.js").then((m) => m.default)`).
+/// The inline `<script>` blocks of a page that the browser runs, with the
+/// parse mode of each body. A `<script>` tag inside an HTML comment does not
+/// run, and a body with only whitespace has nothing to parse.
+pub fn page_script_sections(source: &str) -> Vec<ScriptSection> {
+    let mut scanned = source.to_owned();
+    for comment in HTML_COMMENT_RE.find_iter(source) {
+        blank(&mut scanned, comment.range());
+    }
+    SCRIPT_PARTS_RE
+        .captures_iter(&scanned)
+        .filter_map(|parts| {
+            let (attributes, body) = (parts.get(1)?, parts.get(2)?);
+            let source_type = inline_script_source_type(attributes.as_str())?;
+            let body_text = &source[body.range()];
+            if body_text.trim().is_empty() {
+                return None;
+            }
+            Some(ScriptSection {
+                extraction: ExtractionResult::contiguous(body_text, body.start()),
+                source_type,
+            })
+        })
+        .collect()
+}
+
+/// The imports of the inline scripts of a page, with spans in the page, the
+/// uses of the imported bindings (`m.default` in
+/// `import("./a.js").then((m) => m.default)`), and the spans of the string
+/// and template literals when the caller asks for them.
 #[derive(Default)]
 struct InlineScriptFacts {
     imports: Vec<ImportInfo>,
@@ -119,50 +146,51 @@ struct InlineScriptFacts {
     member_accesses: Vec<MemberAccess>,
     whole_object_uses: Vec<String>,
     semantic_facts: Vec<SemanticFact>,
+    literal_spans: Vec<(u32, u32)>,
 }
 
 /// Parse each inline script body of the page. A module script can import
 /// modules, and a classic or module script can call `import()`. The browser
 /// loads these modules, so they are part of the graph of the page.
-fn collect_inline_script_facts(source: &str) -> InlineScriptFacts {
-    let mut scanned = source.to_owned();
-    for comment in HTML_COMMENT_RE.find_iter(source) {
-        blank(&mut scanned, comment.range());
-    }
+///
+/// With `collect_literal_spans`, the same parse also gives the spans of the
+/// string and template literals, so a suppression marker inside a literal
+/// has no effect.
+fn collect_inline_script_facts(source: &str, collect_literal_spans: bool) -> InlineScriptFacts {
     let mut found = InlineScriptFacts::default();
-    for parts in SCRIPT_PARTS_RE.captures_iter(&scanned) {
-        let (Some(attributes), Some(body)) = (parts.get(1), parts.get(2)) else {
-            continue;
-        };
-        let Some(source_type) = inline_script_source_type(attributes.as_str()) else {
-            continue;
-        };
-        let body_text = &source[body.range()];
-        if body_text.trim().is_empty() {
-            continue;
-        }
-        let body_start = body.start();
+    for section in page_script_sections(source) {
+        let body_text = section.extraction.body.as_str();
         // The whole-file nesting scan reads the page as script, so quotes in
         // the HTML text can hide the brackets of a script body. Each body
-        // therefore gets its own bounded parse, and a too-deep body adds no
-        // facts.
-        let Some(info) = crate::parse_bounded(body_text, || {
+        // therefore gets its own bounded parse. A too-deep body adds no facts
+        // and no literal spans, so its markers keep their effect.
+        let Some((info, literal_spans)) = crate::parse_bounded(body_text, || {
             let allocator = Allocator::default();
-            let parsed = Parser::new(&allocator, body_text, source_type).parse();
+            let parsed = Parser::new(&allocator, body_text, section.source_type).parse();
+            let literal_spans = if collect_literal_spans {
+                program_literal_spans(&parsed.program, &section.extraction)
+            } else {
+                Vec::new()
+            };
             let mut extractor = ModuleInfoExtractor::new();
             extractor.visit_program(&parsed.program);
-            let extraction = ExtractionResult::contiguous(body_text, body_start);
-            extractor.remap_spans_with(|span| extraction.remap_span(span));
-            extractor.into_module_info(FileId(0), 0, crate::suppress::ParsedSuppressions::default())
+            extractor.remap_spans_with(|span| section.extraction.remap_span(span));
+            let info = extractor.into_module_info(
+                FileId(0),
+                0,
+                crate::suppress::ParsedSuppressions::default(),
+            );
+            (info, literal_spans)
         }) else {
             continue;
         };
+        found.literal_spans.extend(literal_spans);
         // A classic script with an `import` declaration is a syntax error in
         // the browser, so only a module script gives static imports.
         // A server template can put a placeholder such as `{{ STATIC_URL }}`
         // in a specifier. The `src` and `href` values skip these, so the
         // script specifiers skip them too.
-        if source_type.is_module() {
+        if section.source_type.is_module() {
             found.imports.extend(
                 info.imports
                     .into_iter()
@@ -190,6 +218,25 @@ fn collect_inline_script_facts(source: &str) -> InlineScriptFacts {
             .extend(info.semantic_facts.iter().cloned());
     }
     found
+}
+
+/// The inline `<script>` blocks of an Astro component that hold script, not
+/// data. Astro bundles each such block as a module.
+pub fn inline_script_sections(source: &str) -> Vec<ScriptSection> {
+    SCRIPT_PARTS_RE
+        .captures_iter(source)
+        .filter_map(|parts| {
+            let attributes = parts.get(1).map_or("", |m| m.as_str());
+            let body = parts.get(2)?;
+            let is_script = !DATA_TYPE_RE.is_match(attributes)
+                && !SRC_ATTRIBUTE_RE.is_match(attributes)
+                && !body.as_str().trim().is_empty();
+            is_script.then(|| ScriptSection {
+                extraction: ExtractionResult::contiguous(body.as_str(), body.start()),
+                source_type: SourceType::mjs(),
+            })
+        })
+        .collect()
 }
 
 /// Regex to extract `src` attribute from `<script>` tags.
@@ -372,7 +419,11 @@ struct HtmlModuleParts {
 /// Collect the asset-reference imports, Angular template member accesses /
 /// security sinks / used selectors, and (optionally) template complexity for an
 /// HTML source.
-fn collect_html_module_parts(source: &str, need_complexity: bool) -> HtmlModuleParts {
+fn collect_html_module_parts(
+    source: &str,
+    need_complexity: bool,
+    collect_literal_spans: bool,
+) -> HtmlModuleParts {
     let mut imports: Vec<ImportInfo> = collect_asset_refs(source)
         .into_iter()
         .map(|raw| ImportInfo {
@@ -389,7 +440,7 @@ fn collect_html_module_parts(source: &str, need_complexity: bool) -> HtmlModuleP
 
     imports.sort_unstable_by(|a, b| a.source.cmp(&b.source));
     imports.dedup_by(|a, b| a.source == b.source);
-    let mut inline_scripts = collect_inline_script_facts(source);
+    let mut inline_scripts = collect_inline_script_facts(source, collect_literal_spans);
     imports.append(&mut inline_scripts.imports);
 
     let angular::AngularTemplateRefs {
@@ -443,8 +494,13 @@ pub fn parse_html_to_module_with_complexity(
     content_hash: u64,
     need_complexity: bool,
 ) -> ModuleInfo {
-    let parsed_suppressions = crate::suppress::parse_suppressions_from_source(source);
-    let parts = collect_html_module_parts(source, need_complexity);
+    // One parse of each inline script gives both the graph facts and the
+    // literal spans that drop the suppression markers inside strings.
+    let mut parsed_suppressions = crate::suppress::scan_suppressions_from_source(source);
+    let has_markers = parsed_suppressions.has_markers();
+    let parts = collect_html_module_parts(source, need_complexity, has_markers);
+    parsed_suppressions.drop_markers_in_literals(&parts.inline_scripts.literal_spans);
+    parsed_suppressions.pair_ranges();
     html_module_info(file_id, content_hash, source, parsed_suppressions, parts)
 }
 
