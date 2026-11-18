@@ -1237,7 +1237,7 @@ fn apply_attribution(
         git_sha,
         timestamp,
     });
-    prune_frontier(&mut frontier, &mut clone_frontier, root);
+    prune_frontier(&mut frontier, root);
     bound_recent_resolved(store);
 
     store_worktree_baseline(store, worktree_key, frontier, clone_frontier);
@@ -1485,6 +1485,8 @@ fn classify_clone_disappearances(args: &mut CloneDisappearancesInput<'_>) {
     for (fp, paths) in current {
         clone_frontier.insert(fp, paths);
     }
+    let root = args.input.root;
+    clone_frontier.retain(|_, paths| paths.iter().any(|p| root.join(p).exists()));
 }
 
 /// Build this run's changed-touching clone groups (fingerprint -> sorted/deduped
@@ -1551,13 +1553,8 @@ fn credit_clone_disappearance(
     }
 }
 
-fn prune_frontier(
-    frontier: &mut FlatFrontier,
-    clone_frontier: &mut FlatCloneFrontier,
-    root: &Path,
-) {
+fn prune_frontier(frontier: &mut FlatFrontier, root: &Path) {
     frontier.retain(|rel, _| root.join(rel).exists());
-    clone_frontier.retain(|_, paths| paths.iter().any(|p| root.join(p).exists()));
 }
 
 fn bound_recent_resolved(store: &mut ImpactStore) {

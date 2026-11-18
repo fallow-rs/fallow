@@ -644,3 +644,29 @@ fn bare_run_after_duplication_on_again_credits_no_clone_that_is_still_there() {
     assert_eq!(record_count(&store, "project_records"), 3, "{store:#}");
     assert_clone_frontier_kept(&store);
 }
+
+/// The user removes every file of a stored clone group while duplication is
+/// off. The group stays in the clone frontier, and the next run with
+/// duplication on credits the removal.
+#[test]
+fn clone_removal_with_duplication_off_is_credited_when_duplication_is_on_again() {
+    let Some(project) = project_outside_temp_folder("impact-clone-removed-while-off-") else {
+        return;
+    };
+    let home = clone_project(project.path(), None);
+    let dir = project.path();
+    assert_seeded(&bare_run(home.path(), dir, &[]));
+
+    let config = dir.join(".fallowrc.json");
+    std::fs::write(&config, DUPLICATES_OFF).expect("write config");
+    std::fs::remove_file(dir.join("src/first.ts")).expect("remove first");
+    std::fs::remove_file(dir.join("src/second.ts")).expect("remove second");
+    std::fs::write(dir.join("src/index.ts"), "export const used = [1];\n").expect("write index");
+    assert_clone_frontier_kept(&bare_run(home.path(), dir, &[]));
+
+    std::fs::write(&config, r#"{"duplicates": {"enabled": true}}"#).expect("write config");
+    let store = bare_run(home.path(), dir, &[]);
+    assert_eq!(store["resolved_total"], 1, "{store:#}");
+    assert_eq!(resolved_kinds(&store), ["code-duplication"], "{store:#}");
+    assert_eq!(clone_groups(&store), 0, "{store:#}");
+}
