@@ -6,7 +6,7 @@ expression: json_str
   {
     "type": "issue",
     "check_name": "fallow/code-duplication",
-    "description": "Code clone dup:bae149c7 (11 lines, 2 instances)",
+    "description": "11 lines repeat in 2 places (clone group dup:bae149c7)",
     "categories": [
       "Duplication"
     ],
@@ -32,7 +32,7 @@ expression: json_str
   {
     "type": "issue",
     "check_name": "fallow/code-duplication",
-    "description": "Code clone dup:bae149c7 (11 lines, 2 instances)",
+    "description": "11 lines repeat in 2 places (clone group dup:bae149c7)",
     "categories": [
       "Duplication"
     ],

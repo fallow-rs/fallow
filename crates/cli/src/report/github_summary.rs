@@ -982,12 +982,9 @@ fn check_tips(env: &Value) -> String {
 }
 
 fn render_check_summary(env: &Value) -> String {
-    let elapsed = num(env, "elapsed_ms");
     let total_issues = u(env, "total_issues");
     if total_issues == 0 {
-        return format!(
-            "# Fallow Analysis\n\n> [!NOTE]\n> **No issues found** \u{b7} {elapsed}ms\n\nAll exports are used, all dependencies are declared, and no issues were detected."
-        );
+        return "## Fallow codebase report\n\n> [!NOTE]\n> **No issues found**".to_owned();
     }
     let mut sections = String::new();
     for group in [
@@ -1004,7 +1001,7 @@ fn render_check_summary(env: &Value) -> String {
     sections.push_str(&component_shape_sections(env));
     let issue_noun = if total_issues == 1 { "issue" } else { "issues" };
     format!(
-        "# Fallow Analysis\n\n> [!WARNING]\n> **{total_issues} {issue_noun}** found \u{b7} {elapsed}ms\n\n| Category | Count |\n|----------|------:|\n{}\n\n---\n{sections}{}",
+        "## Fallow codebase report\n\n> [!WARNING]\n> **{total_issues} {issue_noun}** found\n\n| Category | Count |\n|----------|------:|\n{}\n\n---\n{sections}{}",
         dead_code_category_table(env),
         check_tips(env),
     )
@@ -1216,15 +1213,14 @@ fn dupes_details(env: &Value) -> String {
 #[must_use]
 fn render_dupes_summary(env: &Value) -> String {
     let stats = env.get("stats").cloned().unwrap_or(Value::Null);
-    let elapsed = num(env, "elapsed_ms");
     if u(&stats, "clone_groups") == 0 {
         return format!(
-            "## Fallow - Code Duplication\n\nNo code duplication found.\n\n*Analyzed {} files in {elapsed}ms*",
+            "## Fallow duplication report\n\nNo code duplication found in {} files.",
             num(&stats, "total_files"),
         );
     }
     format!(
-        "## Fallow - Code Duplication\n\nFound **{} clone groups** ({} instances) across {} files in {elapsed}ms\n\n| Metric | Value |\n|--------|-------|\n| Files analyzed | {} |\n| Files with clones | {} |\n| Clone groups | {} |\n| Clone instances | {} |\n| Duplicated lines | {} / {} ({}%) |\n\n<details>\n<summary>View details</summary>\n\n{}\n\n</details>",
+        "## Fallow duplication report\n\nFound **{} clone groups** ({} instances) in {} files.\n\n| Metric | Value |\n|--------|-------|\n| Files analyzed | {} |\n| Files with clones | {} |\n| Clone groups | {} |\n| Clone instances | {} |\n| Duplicated lines | {} / {} ({}%) |\n\n<details>\n<summary>View details</summary>\n\n{}\n\n</details>",
         num(&stats, "clone_groups"),
         num(&stats, "clone_instances"),
         num(&stats, "files_with_clones"),
@@ -1273,7 +1269,7 @@ fn health_score_header(score_env: &Value) -> String {
             .unwrap_or(Value::Null);
         let _ = write!(
             header,
-            " \u{b7} {} pts vs previous ({} {})",
+            ", {} points against the previous run ({} {})",
             signed(f_or_zero(score_delta, "delta")),
             s(&compared, "grade"),
             pct(f_or_zero(&compared, "score")),
@@ -1283,7 +1279,7 @@ fn health_score_header(score_env: &Value) -> String {
         {
             let _ = write!(
                 header,
-                " \u{b7} {} {}% ({}%)",
+                ", {} {}% ({}%)",
                 s(dead_delta, "label").to_ascii_lowercase(),
                 pct(f_or_zero(dead_delta, "current")),
                 signed(f_or_zero(dead_delta, "delta")),
@@ -1297,7 +1293,7 @@ fn health_score_header(score_env: &Value) -> String {
         {
             let _ = write!(
                 header,
-                " \u{b7} {} {} ({})",
+                ", {} {} ({})",
                 s(cx_delta, "label").to_ascii_lowercase(),
                 pct(f_or_zero(cx_delta, "current")),
                 signed(f_or_zero(cx_delta, "delta")),
@@ -1330,27 +1326,30 @@ fn health_score_header(score_env: &Value) -> String {
     header
 }
 
-fn exceeded_marker(it: &Value, needles: &[&str]) -> &'static str {
+/// A metric value, in bold when the finding exceeded the threshold of that
+/// metric.
+fn metric_cell(it: &Value, key: &str, needles: &[&str]) -> String {
+    let value = num(it, key);
     let exceeded = s(it, "exceeded");
     if needles.iter().any(|needle| exceeded.contains(needle)) {
-        " **!**"
+        format!("**{value}**")
     } else {
-        ""
+        value
     }
 }
 
 fn crap_cell(it: &Value) -> String {
-    match it.get("crap").filter(|crap| !crap.is_null()) {
-        None => "-".to_owned(),
-        Some(crap) => format!("{}{}", fmt_num(crap), exceeded_marker(it, &["crap", "all"])),
+    if it.get("crap").is_none_or(Value::is_null) {
+        return "-".to_owned();
     }
+    metric_cell(it, "crap", &["crap", "all"])
 }
 
 fn complexity_table_row(it: &Value) -> String {
     if s(it, "exceeded") == "file_lines" {
         // A file-length finding has no complexity values of its own.
         return format!(
-            "| {} | {} | {} | - | - | - | {} **!** (threshold: {}) |",
+            "| {} | {} | {} | - | - | - | **{}** (threshold: {}) |",
             path_line_cell(it),
             code_cell(it, "name"),
             markdown_table_text(str_or(it, "severity", "moderate")),
@@ -1359,14 +1358,12 @@ fn complexity_table_row(it: &Value) -> String {
         );
     }
     format!(
-        "| {} | {} | {} | {}{} | {}{} | {} | {} |",
+        "| {} | {} | {} | {} | {} | {} | {} |",
         path_line_cell(it),
         code_cell(it, "name"),
         markdown_table_text(str_or(it, "severity", "moderate")),
-        num(it, "cyclomatic"),
-        exceeded_marker(it, &["cyclomatic", "both", "all"]),
-        num(it, "cognitive"),
-        exceeded_marker(it, &["cognitive", "both", "all"]),
+        metric_cell(it, "cyclomatic", &["cyclomatic", "both", "all"]),
+        metric_cell(it, "cognitive", &["cognitive", "both", "all"]),
         crap_cell(it),
         num(it, "line_count"),
     )
@@ -1382,7 +1379,7 @@ fn health_thresholds_footer(env: &Value) -> String {
         .map(|value| format!(", file lines > {}", fmt_num(value)))
         .unwrap_or_default();
     format!(
-        "\n\n**!** marks the dimension that breached.\n\n**{}** files, **{}** functions analyzed (thresholds: cyclomatic > {}, cognitive > {}, CRAP >= {}{file_lines})",
+        "\n\nA bold value exceeds its threshold.\n\n**{}** files, **{}** functions analyzed (thresholds: cyclomatic > {}, cognitive > {}, CRAP >= {}{file_lines})",
         num(&summary, "files_analyzed"),
         num(&summary, "functions_analyzed"),
         num(&summary, "max_cyclomatic_threshold"),
@@ -1437,12 +1434,12 @@ fn baselined_complexity(summary: &Value) -> Option<(u64, u64)> {
     Some((remaining, accepted))
 }
 
-fn render_health_complexity_only(env: &Value, complex: usize, elapsed: &str) -> String {
+fn render_health_complexity_only(env: &Value, complex: usize) -> String {
     let summary = env.get("summary").cloned().unwrap_or(Value::Null);
     let above = u(&summary, "functions_above_threshold");
     let listing = complexity_listing(env, &summary, complex, above);
     if listing.count_unlisted() {
-        return render_health_complexity_not_listed(&summary, above, &listing, elapsed);
+        return render_health_complexity_not_listed(&summary, above, &listing);
     }
     let baselined = baselined_complexity(&summary).filter(|&(_, accepted)| accepted > 0);
     if complex == 0 {
@@ -1459,7 +1456,7 @@ fn render_health_complexity_only(env: &Value, complex: usize, elapsed: &str) -> 
                 },
             );
         return format!(
-            "## Fallow - Code Complexity\n\n> [!NOTE]\n> **{headline}** \u{b7} {elapsed}ms\n\n{} functions analyzed (max cyclomatic: {}, max cognitive: {}, max CRAP: {})",
+            "## Fallow health report\n\n> [!NOTE]\n> **{headline}**\n\n{} functions analyzed (max cyclomatic: {}, max cognitive: {}, max CRAP: {})",
             num(&summary, "functions_analyzed"),
             num(&summary, "max_cyclomatic_threshold"),
             num(&summary, "max_cognitive_threshold"),
@@ -1480,7 +1477,7 @@ fn render_health_complexity_only(env: &Value, complex: usize, elapsed: &str) -> 
             (remaining, "new ", format!(" ({accepted} in the baseline)"))
         });
     format!(
-        "## Fallow - Code Complexity\n\n> [!WARNING]\n> **{shown} {new}function{} exceed{} thresholds{baseline_note}** \u{b7} {elapsed}ms\n\n{COMPLEXITY_TABLE_HEADER}{}{tail}{}",
+        "## Fallow health report\n\n> [!WARNING]\n> **{shown} {new}function{} exceed{} thresholds{baseline_note}**\n\n{COMPLEXITY_TABLE_HEADER}{}{tail}{}",
         if shown == 1 { "" } else { "s" },
         if shown == 1 { "s" } else { "" },
         complexity_rows(&findings, 25),
@@ -1524,10 +1521,9 @@ fn render_health_complexity_not_listed(
     summary: &Value,
     above: u64,
     listing: &fallow_api::ComplexityListing,
-    elapsed: &str,
 ) -> String {
     format!(
-        "## Fallow - Code Complexity\n\n> [!NOTE]\n> **{above} function{} exceed{} thresholds** \u{b7} {elapsed}ms\n\n{} functions analyzed (max cyclomatic: {}, max cognitive: {}, max CRAP: {}). {}",
+        "## Fallow health report\n\n> [!NOTE]\n> **{above} function{} exceed{} thresholds**\n\n{} functions analyzed (max cyclomatic: {}, max cognitive: {}, max CRAP: {}). {}",
         if above == 1 { "" } else { "s" },
         if above == 1 { "s" } else { "" },
         num(summary, "functions_analyzed"),
@@ -1556,22 +1552,19 @@ fn prod_phrase(complex: usize, prod: usize) -> String {
     }
 }
 
-fn render_health_with_runtime(env: &Value, complex: usize, elapsed: &str) -> String {
+fn render_health_with_runtime(env: &Value, complex: usize) -> String {
     let runtime = env.get("runtime_coverage").cloned().unwrap_or(Value::Null);
     let prod_findings: Vec<&Value> = arr(&runtime, "findings").collect();
     let hot_paths: Vec<&Value> = arr(&runtime, "hot_paths").collect();
     let prod = prod_findings.len();
     let hot = hot_paths.len();
-    let mut out = String::from("## Fallow - Health\n\n");
+    let mut out = String::from("## Fallow health report\n\n");
     if complex == 0 && prod == 0 {
-        let _ = write!(
-            out,
-            "> [!NOTE]\n> **No failing health findings** \u{b7} {elapsed}ms\n\n"
-        );
+        let _ = write!(out, "> [!NOTE]\n> **No failing health findings**\n\n");
     } else {
         let _ = write!(
             out,
-            "> [!WARNING]\n> **{}** \u{b7} {elapsed}ms\n\n",
+            "> [!WARNING]\n> **{}**\n\n",
             prod_phrase(complex, prod),
         );
     }
@@ -1643,15 +1636,14 @@ fn render_health_with_runtime(env: &Value, complex: usize, elapsed: &str) -> Str
 /// Port of `summary-health.jq`.
 #[must_use]
 fn render_health_summary(env: &Value) -> String {
-    let elapsed = num(env, "elapsed_ms");
     let complex = arr(env, "findings").count();
     let runtime = env.get("runtime_coverage").cloned().unwrap_or(Value::Null);
     let prod = arr(&runtime, "findings").count();
     let hot = arr(&runtime, "hot_paths").count();
     let body = if prod == 0 && hot == 0 {
-        render_health_complexity_only(env, complex, &elapsed)
+        render_health_complexity_only(env, complex)
     } else {
-        render_health_with_runtime(env, complex, &elapsed)
+        render_health_with_runtime(env, complex)
     };
     let groups = fallow_api::build_health_groups_markdown(env, "");
     if groups.is_empty() {
@@ -1667,7 +1659,7 @@ fn render_health_summary(env: &Value) -> String {
 
 const fn audit_verdict_label(verdict: &str) -> &'static str {
     match verdict.as_bytes() {
-        b"fail" => "[!WARNING]\n> **Audit failed**",
+        b"fail" => "[!CAUTION]\n> **Audit failed**",
         b"warn" => "[!WARNING]\n> **Audit passed with warnings**",
         _ => "[!NOTE]\n> **Audit passed**",
     }
@@ -2422,19 +2414,14 @@ fn render_security_summary(env: &Value) -> String {
         },
         |gate| u(gate, "new_count") as usize,
     );
-    let mut out = String::from("## Fallow Security\n\n");
+    let mut out = String::from("## Fallow security report\n\n");
     if count == 0 {
-        let _ = write!(
-            out,
-            "> [!NOTE]\n> **No security candidates matched** \u{b7} {}ms",
-            num(env, "elapsed_ms"),
-        );
+        out.push_str("> [!NOTE]\n> **No security candidates matched**");
     } else {
         let _ = write!(
             out,
-            "> [!WARNING]\n> **{} matched** \u{b7} {}ms",
+            "> [!WARNING]\n> **{} matched**",
             plural_n(count, "security candidate"),
-            num(env, "elapsed_ms"),
         );
     }
     if let Some(gate) = gate {
@@ -2671,15 +2658,13 @@ fn combined_zero_case(env: &Value, counts: &CombinedCounts) -> String {
         .and_then(|health| health.get("vital_signs"))
         .cloned()
         .unwrap_or(Value::Null);
-    let mut out = String::from("# \u{1F33F} Fallow\n\n");
+    let mut out = format!("{COMBINED_TITLE}> [!NOTE]\n> **Quality gate passed**\n\n");
     if counts.prod_advisory > 0 || counts.hot_paths > 0 {
-        out.push_str(
-            "> [!NOTE]\n> **Quality gate passed**\n\n:white_check_mark: No code issues \u{b7} :white_check_mark: No duplication \u{b7} :white_check_mark: No blocking health findings",
-        );
+        out.push_str("No code issues, no duplication, no blocking health findings");
         if counts.prod_advisory > 0 {
             let _ = write!(
                 out,
-                " \u{b7} :information_source: **{}** runtime coverage advisory finding{}",
+                ", {} runtime coverage advisory finding{}",
                 counts.prod_advisory,
                 if counts.prod_advisory == 1 { "" } else { "s" },
             );
@@ -2687,15 +2672,14 @@ fn combined_zero_case(env: &Value, counts: &CombinedCounts) -> String {
         if counts.hot_paths > 0 {
             let _ = write!(
                 out,
-                " \u{b7} :eyes: **{}** {}",
+                ", {} {}",
                 counts.hot_paths,
                 hot_path_label(env, counts.hot_paths),
             );
         }
+        out.push('.');
     } else {
-        out.push_str(
-            "> [!NOTE]\n> **Quality gate passed**\n\n:white_check_mark: No code issues \u{b7} :white_check_mark: No duplication \u{b7} :white_check_mark: ",
-        );
+        out.push_str("No code issues, no duplication, ");
         // A health baseline that accepts functions gets them as context, so
         // the line does not read as a project with no complex functions.
         let accepted = env
@@ -2704,9 +2688,12 @@ fn combined_zero_case(env: &Value, counts: &CombinedCounts) -> String {
             .and_then(baselined_complexity)
             .map_or(0, |(_, accepted)| accepted);
         if accepted > 0 {
-            let _ = write!(out, "No new complex functions ({accepted} in the baseline)");
+            let _ = write!(
+                out,
+                "no new complex functions ({accepted} in the baseline)."
+            );
         } else {
-            out.push_str("No complex functions");
+            out.push_str("no complex functions.");
         }
     }
     if let Some(maintainability) = opt_f(&vitals, "maintainability_avg") {
@@ -2719,58 +2706,38 @@ fn combined_zero_case(env: &Value, counts: &CombinedCounts) -> String {
     out
 }
 
+/// `4 code issues, 1 clone group, 1 health finding.`: one clause per area
+/// that has a finding, in the order of the sections below.
 fn combined_status_line(env: &Value, counts: &CombinedCounts) -> String {
-    let mut out = String::new();
+    let noun = |count: usize, singular: &str, plural: &str| {
+        format!("{count} {}", if count == 1 { singular } else { plural })
+    };
+    let mut parts = Vec::new();
     if counts.check > 0 {
-        let _ = write!(
-            out,
-            ":warning: **{}** code {}",
-            counts.check,
-            if counts.check == 1 { "issue" } else { "issues" },
-        );
-    } else {
-        out.push_str(":white_check_mark: No code issues");
+        parts.push(noun(counts.check, "code issue", "code issues"));
     }
-    out.push_str(" \u{b7} ");
     if counts.dupes > 0 {
-        let _ = write!(
-            out,
-            ":warning: **{}** clone {}",
-            counts.dupes,
-            if counts.dupes == 1 { "group" } else { "groups" },
-        );
-    } else {
-        out.push_str(":white_check_mark: No duplication");
+        parts.push(noun(counts.dupes, "clone group", "clone groups"));
     }
-    out.push_str(" \u{b7} ");
     let health = counts.health();
     if health > 0 {
-        let _ = write!(
-            out,
-            ":warning: **{health}** health {}",
-            if health == 1 { "finding" } else { "findings" },
-        );
-    } else {
-        out.push_str(":white_check_mark: No blocking health findings");
+        parts.push(noun(health, "health finding", "health findings"));
     }
     if counts.prod_advisory > 0 {
-        let _ = write!(
-            out,
-            " \u{b7} :information_source: **{}** coverage advisory finding{}",
+        parts.push(noun(
             counts.prod_advisory,
-            if counts.prod_advisory == 1 { "" } else { "s" },
-        );
+            "coverage advisory finding",
+            "coverage advisory findings",
+        ));
     }
     if counts.hot_paths > 0 {
-        let _ = write!(
-            out,
-            " \u{b7} :eyes: **{}** {}",
+        parts.push(format!(
+            "{} {}",
             counts.hot_paths,
-            hot_path_label(env, counts.hot_paths),
-        );
+            hot_path_label(env, counts.hot_paths)
+        ));
     }
-    out.push_str("\n\n");
-    out
+    format!("{}.\n\n", parts.join(", "))
 }
 
 fn combined_check_breakdown(env: &Value, counts: &CombinedCounts) -> String {
@@ -2817,21 +2784,21 @@ fn combined_dupes_breakdown(env: &Value, counts: &CombinedCounts, links: &LinkCo
         .collect::<Vec<_>>()
         .join("\n");
     let tail = if counts.dupes > 5 {
-        format!("\n\n*\u{2026} and {} more groups.*", counts.dupes - 5)
+        format!("\n\nThe table shows 5 of {} groups.", counts.dupes)
     } else {
         String::new()
     };
     format!(
-        "<details>\n<summary><strong><a href=\"{DUPES_DOCS}\">Duplication</a> ({} {} \u{b7} {} lines \u{b7} {}%)</strong></summary>\n\n| Locations | Lines | Tokens |\n|:----------|------:|-------:|\n{rows}{tail}\n\nAcross {files_with_clones} {}.\n\n</details>\n\n",
+        "<details>\n<summary><strong><a href=\"{DUPES_DOCS}\">Duplication</a> ({} {} in {files_with_clones} {}, {} lines, {}%)</strong></summary>\n\n| Locations | Lines | Tokens |\n|:----------|------:|-------:|\n{rows}{tail}\n\n</details>\n\n",
         counts.dupes,
         if counts.dupes == 1 { "group" } else { "groups" },
-        num(&stats, "duplicated_lines"),
-        pct(f_or_zero(&stats, "duplication_percentage")),
         if files_with_clones == 1 {
             "file"
         } else {
             "files"
         },
+        num(&stats, "duplicated_lines"),
+        pct(f_or_zero(&stats, "duplication_percentage")),
     )
 }
 
@@ -2867,7 +2834,7 @@ fn combined_complexity_breakdown(env: &Value, counts: &CombinedCounts) -> String
                 String::new()
             };
             format!(
-                "| {} | {} | {} | {}{} | {}{}{crap_column} | {} |",
+                "| {} | {} | {} | {} | {}{crap_column} | {} |",
                 markdown_table_code_span(&format!(
                     "{}:{}",
                     last_three_segments(s(it, "path")),
@@ -2875,10 +2842,8 @@ fn combined_complexity_breakdown(env: &Value, counts: &CombinedCounts) -> String
                 )),
                 code_cell(it, "name"),
                 markdown_table_text(str_or(it, "severity", "moderate")),
-                num(it, "cyclomatic"),
-                exceeded_marker(it, &["cyclomatic", "both", "all"]),
-                num(it, "cognitive"),
-                exceeded_marker(it, &["cognitive", "both", "all"]),
+                metric_cell(it, "cyclomatic", &["cyclomatic", "both", "all"]),
+                metric_cell(it, "cognitive", &["cognitive", "both", "all"]),
                 num(it, "line_count"),
             )
         })
@@ -3039,9 +3004,15 @@ fn combined_vitals(env: &Value) -> String {
             pct(avg_cyclomatic),
         );
     }
+    // The population row matters only when a module scope or a template adds
+    // to the average; with functions alone it repeats the function count.
     if let Some(population) = vitals
         .get("cyclomatic_population")
         .filter(|value| value.is_object())
+        .filter(|population| {
+            population["modules"]["count"].as_u64().unwrap_or(0) > 0
+                || population["templates"]["count"].as_u64().unwrap_or(0) > 0
+        })
     {
         let _ = writeln!(
             out,
@@ -3079,6 +3050,9 @@ fn combined_tips(env: &Value) -> String {
     out
 }
 
+/// The heading of the combined summary: the same title as the sticky comment.
+const COMBINED_TITLE: &str = "## Fallow combined report\n\n";
+
 /// Port of `summary-combined.jq`.
 #[must_use]
 fn render_combined_summary(env: &Value, links: &LinkContext) -> String {
@@ -3087,13 +3061,13 @@ fn render_combined_summary(env: &Value, links: &LinkContext) -> String {
     if counts.total() == 0 {
         return format!("{header}{}", combined_zero_case(env, &counts));
     }
-    let pointer = if counts.check > 0 || counts.dupes > 0 || counts.health() > 0 {
-        "See inline review comments for per-finding details.\n\n"
+    let (alert, verdict) = if crate::report::gate_outcome_text::verdict_gate_failed(env) {
+        ("CAUTION", "Quality gate failed")
     } else {
-        ""
+        ("WARNING", "Review needed")
     };
     format!(
-        "{header}# \u{1F33F} Fallow\n\n> [!WARNING]\n> **Review needed**\n\n{}{pointer}{}{}{}{}{}{}",
+        "{header}{COMBINED_TITLE}> [!{alert}]\n> **{verdict}**\n\n{}{}{}{}{}{}{}",
         combined_status_line(env, &counts),
         combined_check_breakdown(env, &counts),
         combined_dupes_breakdown(env, &counts, links),

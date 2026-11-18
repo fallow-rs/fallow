@@ -355,7 +355,7 @@ fallow_scope_main() {
      [ -n "${PR_BASE_SHA:-}" ]; then
     INPUT_CHANGED_SINCE="$PR_BASE_SHA"
     AUTO_CHANGED_SINCE=true
-    echo "::notice::Auto-scoping analysis to files changed since PR base (${PR_BASE_SHA:0:7})"
+    echo "::notice::Fallow analyzes the files changed since the PR base ${PR_BASE_SHA:0:7}."
   fi
 
   if [ -n "${INPUT_CHANGED_SINCE:-}" ]; then

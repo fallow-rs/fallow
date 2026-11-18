@@ -731,8 +731,8 @@ fn duplication_review_peer_locations_use_repository_root_paths() {
         .filter_map(|comment| comment["body"].as_str())
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(bodies.contains("Code clone dup:"), "{bodies}");
-    assert!(bodies.contains("Other locations:"), "{bodies}");
+    assert!(bodies.contains("(clone group dup:"), "{bodies}");
+    assert!(bodies.contains("Also in:"), "{bodies}");
     assert!(bodies.contains("packages/pkg/src/clone-a.js"), "{bodies}");
     assert!(bodies.contains("packages/pkg/src/clone-b.js"), "{bodies}");
 }

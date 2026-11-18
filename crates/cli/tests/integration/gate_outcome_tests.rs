@@ -1555,7 +1555,7 @@ fn the_pull_request_comment_carries_the_same_verdict_as_the_job_summary() {
             rendered.stderr
         );
         assert!(
-            rendered.stdout.contains("Gate outcomes:") && rendered.stdout.contains("regression"),
+            rendered.stdout.contains("Gates:") && rendered.stdout.contains("regression"),
             "{format} states the outcome the producing run reached: {}",
             rendered.stdout
         );
@@ -1596,7 +1596,7 @@ fn the_annotation_verdict_comes_before_the_findings() {
         .next()
         .expect("annotations rendered");
     assert!(
-        first.starts_with("::notice::Fallow: Gate outcomes:"),
+        first.starts_with("::notice::Fallow: Gates:"),
         "the verdict is the first line, so a cap cannot drop it: {first}"
     );
 }
@@ -2211,9 +2211,7 @@ fn a_tripped_stale_baseline_gate_reaches_the_comment_and_the_decision_surface() 
         output.stdout
     );
     assert!(
-        output
-            .stdout
-            .contains("Gate outcomes: failed stale-baseline"),
+        output.stdout.contains("Gates: failed stale-baseline"),
         "the gate inventory keeps its place beside the advisory: {}",
         output.stdout
     );

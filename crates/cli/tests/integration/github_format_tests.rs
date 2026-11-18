@@ -763,7 +763,7 @@ fn annotations_end_with_budget_notice() {
     assert_eq!(
         last,
         format!(
-            "::notice::fallow emitted {total} annotations; GitHub shows at most 10 per type per step"
+            "::notice::Fallow wrote {total} annotations. GitHub shows at most 10 of each level for each step."
         )
     );
 }
@@ -782,7 +782,7 @@ fn annotations_single_finding_notice_uses_singular_noun() {
     let last = rendered.lines().last().expect("non-empty");
     assert_eq!(
         last,
-        "::notice::fallow emitted 1 annotation; GitHub shows at most 10 per type per step"
+        "::notice::Fallow wrote 1 annotation. GitHub shows at most 10 of each level for each step."
     );
 }
 
@@ -1236,7 +1236,7 @@ fn render_summary_fix_mirrors_render_fix_summary() {
     );
     // The summary-fix.jq sections: heading, headline, count table, details.
     assert!(
-        via_dispatch.starts_with("## Fallow - Auto-fix"),
+        via_dispatch.starts_with("## Fallow fix report"),
         "{via_dispatch}"
     );
     assert!(
@@ -2046,7 +2046,7 @@ fn combined_summary_counts_visible_groups_plus_what_a_cap_withheld() {
 
     let rendered = render_summary(EnvelopeKind::Combined, &filtered, &LinkContext::default());
     assert!(
-        rendered.contains("No duplication"),
+        !rendered.contains("clone group"),
         "nonzero stats with nothing actionable to inspect must still read clean: {rendered}"
     );
 
@@ -2054,7 +2054,7 @@ fn combined_summary_counts_visible_groups_plus_what_a_cap_withheld() {
     capped["dupes"]["clone_groups_omitted"] = json!(4);
     let capped_counts = render_summary(EnvelopeKind::Combined, &capped, &LinkContext::default());
     assert!(
-        capped_counts.contains("**5** clone groups"),
+        capped_counts.contains("5 clone groups"),
         "one listed group plus four withheld by a cap is five: {capped_counts}"
     );
 }

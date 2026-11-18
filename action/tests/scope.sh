@@ -426,7 +426,7 @@ ENV_OUT=$(cat "$SC_TMP/scope-source-baseline-auto.env")
 assert_contains "$ARGS" "--changed-since base1234" "scope: source baseline auto-scope keeps changed-since"
 assert_contains "$OUTPUTS" "changed_since=base1234" "scope: source baseline auto-scope keeps changed_since output"
 assert_contains "$ENV_OUT" "FALLOW_DIFF_FILE=" "scope: source baseline auto-scope writes auto diff file"
-assert_contains "$OUT" "Auto-scoping analysis to files changed since PR base (base123)" "scope: auto-scope notice names the base"
+assert_contains "$OUT" "Fallow analyzes the files changed since the PR base base123." "scope: auto-scope notice names the base"
 
 OUT=$(run_scope_case "config-no-baseline" ".fallowrc.json" "" "" "")
 ARGS=$(cat "$SC_TMP/scope-config-no-baseline/fallow-analysis-args.sh")

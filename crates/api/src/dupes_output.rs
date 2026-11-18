@@ -450,8 +450,8 @@ pub fn build_duplication_codeclimate(
     root: &Path,
 ) -> Vec<CodeClimateIssue> {
     let mut issues = Vec::new();
-    let fingerprints = CloneFingerprintSet::from_groups(&report.clone_groups);
 
+    let fingerprints = CloneFingerprintSet::from_groups(&report.clone_groups);
     for group in &report.clone_groups {
         let clone_fingerprint = fingerprints.fingerprint_for_group(group);
         let token_str = group.token_count.to_string();
@@ -482,7 +482,7 @@ pub fn build_duplication_codeclimate(
             let mut issue = fallow_output::build_codeclimate_issue(CodeClimateIssueInput {
                 check_name: "fallow/code-duplication",
                 description: &format!(
-                    "Code clone {clone_fingerprint} ({} lines, {} instances)",
+                    "{} lines repeat in {} places (clone group {clone_fingerprint})",
                     group.line_count,
                     group.instances.len()
                 ),
@@ -950,7 +950,11 @@ mod tests {
         assert_eq!(issue.location.path, "app/%5Bid%5D/page.tsx");
         assert_eq!(issue.location.lines.begin, 4);
         assert_eq!(issue.categories, vec!["Duplication"]);
-        assert!(issue.description.starts_with("Code clone dup:"));
+        assert!(
+            issue.description.contains("(clone group dup:"),
+            "{}",
+            issue.description
+        );
         assert_eq!(issue.location.lines.end, Some(8));
     }
 }

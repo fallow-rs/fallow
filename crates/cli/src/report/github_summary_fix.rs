@@ -52,10 +52,10 @@ pub fn render_fix_summary(env: &Value) -> String {
     let dry_run = b(env, "dry_run");
 
     if fix_attempts == 0 && skip_counts.iter().all(|count| *count == 0) {
-        return "## Fallow - Auto-fix\n\nNo fixable issues found.".to_owned();
+        return "## Fallow fix report\n\nNo fixable issues found.".to_owned();
     }
 
-    let mut out = String::from("## Fallow - Auto-fix\n\n");
+    let mut out = String::from("## Fallow fix report\n\n");
     out.push_str(if dry_run {
         "**Dry run**: would apply"
     } else {

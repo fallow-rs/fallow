@@ -2,10 +2,10 @@
 source: crates/cli/tests/integration/report_mutation_tests.rs
 expression: body
 ---
-# Fallow Analysis
+## Fallow codebase report
 
 > [!WARNING]
-> **2 issues** found · <n>ms
+> **2 issues** found
 
 | Category | Count |
 |----------|------:|
@@ -40,4 +40,4 @@ Exported symbols with no known consumers.
 > Intentionally public? Add [`/** @public */`](https://fallow.tools/docs/configuration/suppression/) above exports to preserve them.
 > Add [`// fallow-ignore-next-line`](https://fallow.tools/docs/configuration/suppression/) above a line to suppress a specific finding.
 
-Gate outcomes: failed error-severity-findings (2 at or above error).
+Gates: failed error-severity-findings (2 at or above error).
