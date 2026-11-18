@@ -2281,8 +2281,11 @@
           ]
         },
         "publicApi": {
-          "description": "Marks the files of this zone as the public API of a module.\n\nThe boundary check follows a named or default import through\nre-export chains to the file that declares the symbol. The walk stops\nat the first file of a public-API zone, and the check judges the\nimport by that file. Only the boundary check reads this flag.",
-          "type": "boolean"
+          "description": "Globs of the public entry files of this zone.\n\nWhen the list is not empty, a file of another zone may import a file\nof this zone only through a file that is in this zone and matches a\nglob. The globs use the same base as `patterns`. On an `autoDiscover`\nzone, each glob is relative to each discovered folder.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [

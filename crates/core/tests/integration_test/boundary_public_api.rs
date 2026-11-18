@@ -1,24 +1,37 @@
-//! Boundary zones with `publicApi: true` (issue #4760).
+//! Boundary zones with public entry files (`publicApi`, issue #4760).
 //!
-//! The `boundary-public-api` fixture has a `billing` module with one public
-//! entry file, `src/billing/public.ts`. The `orders` zone may import the
-//! entry file and `shared`. The `shipping` zone may import only `shared`,
-//! plus type-only imports of the entry file.
+//! In the `boundary-public-api` fixture, `src/billing/public.ts` is the public
+//! entry file of `billing`, and `src/payments/index.ts` is the public entry
+//! file of `payments`. The `orders` zone may import `billing` and `shared`.
+//! The `shipping` zone may import `shared`, plus type-only imports of
+//! `billing`. The `shared` zone has no rule.
 
 use std::collections::BTreeSet;
+
+use fallow_types::results::BoundaryViolationReason;
 
 use super::*;
 
 const FIXTURE: &str = "boundary-public-api";
 
-fn public_api_boundaries(public_api: bool) -> BoundaryConfig {
+fn explicit_zones(public_api: bool) -> BoundaryConfig {
+    let globs = |glob: &str| {
+        if public_api {
+            vec![glob.to_string()]
+        } else {
+            vec![]
+        }
+    };
     BoundaryConfig {
         zones: vec![
             BoundaryZone {
-                public_api,
-                ..zone("billing-public", &["src/billing/public.ts"])
+                public_api: globs("src/billing/public.ts"),
+                ..zone("billing", &["src/billing/**"])
             },
-            zone("billing", &["src/billing/**"]),
+            BoundaryZone {
+                public_api: globs("src/payments/index.ts"),
+                ..zone("payments", &["src/payments/**"])
+            },
             zone("orders", &["src/orders/**"]),
             zone("shipping", &["src/shipping/**"]),
             zone("shared", &["src/shared/**"]),
@@ -26,89 +39,123 @@ fn public_api_boundaries(public_api: bool) -> BoundaryConfig {
         rules: vec![
             BoundaryRule {
                 from: "orders".to_string(),
-                allow: vec!["billing-public".to_string(), "shared".to_string()],
+                allow: vec!["billing".to_string(), "shared".to_string()],
                 allow_type_only: vec![],
             },
             BoundaryRule {
                 from: "shipping".to_string(),
                 allow: vec!["shared".to_string()],
-                allow_type_only: vec!["billing-public".to_string()],
+                allow_type_only: vec!["billing".to_string()],
             },
         ],
         ..BoundaryConfig::default()
     }
 }
 
-/// One finding as `(from_path, to_path, to_zone, via_path)`, relative to the
-/// fixture root.
-type Finding = (String, String, String, Option<String>);
+/// One finding as `(from_path, to_path, to_zone, via_path, reason,
+/// public_api_paths)`, with paths relative to the fixture root.
+type Finding = (
+    String,
+    String,
+    String,
+    Option<String>,
+    BoundaryViolationReason,
+    Vec<String>,
+);
 
-fn findings(public_api: bool) -> BTreeSet<Finding> {
+fn findings(boundaries: BoundaryConfig) -> BTreeSet<Finding> {
     let root = fixture_path(FIXTURE);
-    let config = create_boundary_config_with_entry(
-        root.clone(),
-        public_api_boundaries(public_api),
-        "src/index.ts",
-    );
+    let config = create_boundary_config_with_entry(root.clone(), boundaries, "src/index.ts");
     let results = fallow_core::analyze(&config).expect("analysis should succeed");
     results
         .boundary_violations
         .iter()
-        .map(|v| {
+        .map(|finding| {
+            let v = &finding.violation;
             (
-                relative_to(&v.violation.from_path, &root),
-                relative_to(&v.violation.to_path, &root),
-                v.violation.to_zone.clone(),
-                v.violation
-                    .via_path
-                    .as_deref()
-                    .map(|via| relative_to(via, &root)),
+                relative_to(&v.from_path, &root),
+                relative_to(&v.to_path, &root),
+                v.to_zone.clone(),
+                v.via_path.as_deref().map(|via| relative_to(via, &root)),
+                v.reason,
+                v.public_api_paths
+                    .iter()
+                    .map(|path| relative_to(path, &root))
+                    .collect(),
             )
         })
         .collect()
 }
 
-fn finding(from: &str, to: &str, to_zone: &str, via: Option<&str>) -> Finding {
+fn disallowed(from: &str, to: &str, to_zone: &str, via: Option<&str>) -> Finding {
     (
         from.to_string(),
         to.to_string(),
         to_zone.to_string(),
         via.map(str::to_string),
+        BoundaryViolationReason::DisallowedZone,
+        vec![],
+    )
+}
+
+fn internal(from: &str, to: &str, to_zone: &str, public_api: &str) -> Finding {
+    (
+        from.to_string(),
+        to.to_string(),
+        to_zone.to_string(),
+        None,
+        BoundaryViolationReason::InternalFile,
+        vec![public_api.to_string()],
     )
 }
 
 #[test]
-fn imports_through_a_public_entry_file_are_judged_by_the_entry_file() {
-    let found = findings(true);
+fn other_zones_import_a_zone_only_through_its_public_entry_files() {
+    let found = findings(explicit_zones(true));
 
     let expected: BTreeSet<Finding> = [
-        // A direct import of an internal file stays a violation.
-        finding(
+        // A direct import of an internal file of an allowed zone.
+        internal(
             "src/orders/direct.ts",
             "src/billing/invoice.ts",
             "billing",
-            None,
+            "src/billing/public.ts",
         ),
-        // A barrel inside the module, outside the public zone, is internal.
-        finding(
+        // A barrel inside the zone that is not a public entry file.
+        internal(
             "src/orders/via-internal-barrel.ts",
             "src/billing/internal-barrel.ts",
             "billing",
-            None,
+            "src/billing/public.ts",
         ),
-        // A barrel that is not public does not hide its origin.
-        finding(
-            "src/orders/via-leak.ts",
+        // A zone without a rule must also use the entry file. The finding is
+        // on the re-export, so `orders/via-leak.ts` gets no second finding.
+        internal(
+            "src/shared/leak.ts",
             "src/billing/invoice.ts",
             "billing",
-            Some("src/shared/leak.ts"),
+            "src/billing/public.ts",
+        ),
+        // `allowTypeOnly` allows the zone, not its internal files.
+        internal(
+            "src/shipping/type-deep.ts",
+            "src/billing/types.ts",
+            "billing",
+            "src/billing/public.ts",
+        ),
+        // A deep import of a forbidden zone gets only the zone finding.
+        disallowed(
+            "src/orders/forbidden.ts",
+            "src/payments/charge.ts",
+            "payments",
+            None,
         ),
         // The chain walk stops at the public entry file, and `shipping` may
-        // not import a value from it.
-        finding(
+        // not import a value from `billing`.
+        disallowed(
             "src/shipping/via-shared.ts",
             "src/billing/public.ts",
-            "billing-public",
+            "billing",
             Some("src/shared/index.ts"),
         ),
     ]
@@ -119,34 +166,76 @@ fn imports_through_a_public_entry_file_are_judged_by_the_entry_file() {
 }
 
 #[test]
-fn without_public_api_the_origin_zone_judges_the_import() {
-    let found = findings(false);
+fn auto_discover_scopes_public_entry_files_to_each_module() {
+    let boundaries = BoundaryConfig {
+        zones: vec![BoundaryZone {
+            name: "modules".to_string(),
+            auto_discover: vec!["src".to_string()],
+            public_api: vec!["public.ts".to_string(), "index.ts".to_string()],
+            ..BoundaryZone::default()
+        }],
+        rules: vec![BoundaryRule {
+            from: "modules/orders".to_string(),
+            allow: vec!["modules/billing".to_string(), "modules/shared".to_string()],
+            allow_type_only: vec![],
+        }],
+        ..BoundaryConfig::default()
+    };
+
+    let found = findings(boundaries);
 
     assert!(
-        found.contains(&finding(
-            "src/orders/via-public.ts",
+        found.contains(&internal(
+            "src/orders/direct.ts",
             "src/billing/invoice.ts",
-            "billing",
-            Some("src/billing/public.ts"),
+            "modules/billing",
+            "src/billing/public.ts",
         )),
-        "a zone without publicApi keeps the origin-module verdict, got {found:?}"
+        "the public globs of a discovered module name only its own files, got {found:?}"
     );
     assert!(
-        found.contains(&finding(
+        found.contains(&disallowed(
+            "src/orders/forbidden.ts",
+            "src/payments/charge.ts",
+            "modules/payments",
+            None,
+        )),
+        "the rule allows one discovered module and not another, got {found:?}"
+    );
+    assert!(
+        found.contains(&internal(
             "src/orders/via-star.ts",
-            "src/billing/invoice.ts",
-            "billing",
-            Some("src/shared/star.ts"),
+            "src/shared/star.ts",
+            "modules/shared",
+            "src/shared/index.ts",
         )),
-        "an `export *` chain reaches the origin, got {found:?}"
+        "`index.ts` is the public entry file of `shared`, so `star.ts` is internal, got {found:?}"
     );
     assert!(
-        found.contains(&finding(
-            "src/orders/via-shared.ts",
+        found
+            .iter()
+            .all(|f| f.0 != "src/orders/via-public.ts" && f.0 != "src/orders/via-shared.ts"),
+        "imports through public entry files are allowed, got {found:?}"
+    );
+}
+
+#[test]
+fn without_public_api_a_zone_rule_allows_every_file_of_the_zone() {
+    let found = findings(explicit_zones(false));
+
+    assert!(
+        found.iter().all(
+            |f| f.4 == BoundaryViolationReason::DisallowedZone && f.0 != "src/orders/direct.ts"
+        ),
+        "without publicApi, `orders` may import any file of `billing`, got {found:?}"
+    );
+    assert!(
+        found.contains(&disallowed(
+            "src/shipping/via-shared.ts",
             "src/billing/invoice.ts",
             "billing",
             Some("src/shared/index.ts"),
         )),
-        "a chain through a plain barrel reaches the origin, got {found:?}"
+        "without publicApi, the chain reaches the declaring file, got {found:?}"
     );
 }

@@ -308,6 +308,10 @@ fn suppression_footer(results: &AnalysisResults) -> Option<String> {
 mod check_human_footer;
 use check_human_footer::print_human_footer;
 
+#[path = "check_boundary.rs"]
+mod boundary_render;
+use boundary_render::build_boundary_violations_section;
+
 #[cfg(test)]
 fn build_human_lines(
     results: &AnalysisResults,
@@ -3138,53 +3142,6 @@ fn build_package_cycles_section(
                 type_tag,
             ));
         }
-    }
-    if items.len() > MAX_FLAT_ITEMS {
-        let remaining = items.len() - MAX_FLAT_ITEMS;
-        lines.push(format!(
-            "  {}",
-            truncation_hint(remaining, total_issues).dimmed()
-        ));
-    }
-    push_section_footer_with_count(lines, title, items.len());
-    lines.push(String::new());
-}
-
-/// Build boundary violations section grouped by importing file.
-fn build_boundary_violations_section(
-    lines: &mut Vec<String>,
-    items: &[fallow_types::output_dead_code::BoundaryViolationFinding],
-    level: Level,
-    root: &Path,
-    total_issues: usize,
-) {
-    if items.is_empty() {
-        return;
-    }
-    let title = "Boundary violations";
-    lines.push(build_section_header(title, items.len(), level));
-
-    let shown = items.len().min(MAX_FLAT_ITEMS);
-    for entry in &items[..shown] {
-        let v = &entry.violation;
-        let from = format_display_path(&v.from_path, root);
-        let to = format_display_path(&v.to_path, root);
-        let via = v.via_path.as_ref().map_or_else(String::new, |via| {
-            format!(
-                " {}",
-                format!("via {}", format_display_path(via, root)).dimmed()
-            )
-        });
-        lines.push(format!(
-            "  {}:{} {} {} {} {}{}",
-            from,
-            v.line,
-            "\u{2192}".dimmed(),
-            to,
-            format!("({}", v.from_zone).dimmed(),
-            format!("\u{2192} {})", v.to_zone).dimmed(),
-            via,
-        ));
     }
     if items.len() > MAX_FLAT_ITEMS {
         let remaining = items.len() - MAX_FLAT_ITEMS;

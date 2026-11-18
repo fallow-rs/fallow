@@ -470,34 +470,6 @@ fn sarif_package_cycle_fields(
     }
 }
 
-fn sarif_boundary_violation_fields(
-    violation: &BoundaryViolation,
-    root: &Path,
-    level: &'static str,
-) -> SarifFields {
-    let from_uri = relative_uri(&violation.from_path, root);
-    let to_uri = relative_uri(&violation.to_path, root);
-    let via = violation.via_path.as_ref().map_or_else(String::new, |via| {
-        format!(", via {}", relative_uri(via, root))
-    });
-    SarifFields {
-        rule_id: "fallow/boundary-violation",
-        level,
-        message: format!(
-            "Import from zone '{}' to zone '{}' is not allowed ({}{})",
-            violation.from_zone, violation.to_zone, to_uri, via,
-        ),
-        uri: from_uri,
-        region: if violation.line > 0 {
-            Some((violation.line, violation.col + 1))
-        } else {
-            None
-        },
-        source_path: (violation.line > 0).then(|| violation.from_path.clone()),
-        properties: None,
-    }
-}
-
 fn sarif_boundary_coverage_fields(
     violation: &BoundaryCoverageViolation,
     root: &Path,
@@ -2073,6 +2045,10 @@ fn push_dependency_override_sarif_results(
 #[path = "dead_code_sarif_severity.rs"]
 mod dead_code_sarif_severity;
 use dead_code_sarif_severity::dead_code_rule_severity;
+
+#[path = "dead_code_sarif_boundary.rs"]
+mod boundary_render;
+use boundary_render::sarif_boundary_violation_fields;
 
 #[cfg(test)]
 #[path = "dead_code_sarif_tests.rs"]

@@ -33,10 +33,13 @@ use crate::output_dead_code::{
 pub use crate::output_dead_code::{
     UnproducedCatchTagFinding, UnusedEffectLayerFinding, UnusedTaggedErrorFinding,
 };
+#[path = "results_boundary.rs"]
+mod boundary;
 #[path = "results_caller_review.rs"]
 mod caller_review;
 #[path = "results_component_health.rs"]
 mod component_health;
+pub use boundary::{BoundaryViolation, BoundaryViolationReason};
 pub use caller_review::*;
 
 pub use component_health::ERROR_ONLY_RESULT_KEYS;
@@ -3822,38 +3825,6 @@ impl PackageCycle {
         }
         chain.join(separator)
     }
-}
-
-/// An import that crosses an architecture boundary rule.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct BoundaryViolation {
-    /// The file making the disallowed import.
-    #[serde(serialize_with = "serde_path::serialize")]
-    pub from_path: PathBuf,
-    /// The imported file that violates the boundary. Through a re-export chain,
-    /// the origin module that declares the symbol, not the barrel; a chain
-    /// stops at the first file of a `publicApi` zone, which it then names.
-    #[serde(serialize_with = "serde_path::serialize")]
-    pub to_path: PathBuf,
-    /// The zone the importing file belongs to.
-    pub from_zone: String,
-    /// The zone the imported file belongs to.
-    pub to_zone: String,
-    /// The raw import specifier from the source file.
-    pub import_specifier: String,
-    /// 1-based line number of the import statement in the source file.
-    pub line: u32,
-    /// 0-based byte column offset of the import statement.
-    pub col: u32,
-    /// The barrel file that the source file imports directly, when the
-    /// violation comes from a re-export chain. Absent for a direct import.
-    #[serde(
-        default,
-        serialize_with = "serde_path::serialize_option",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub via_path: Option<PathBuf>,
 }
 
 /// A source file that does not match any configured architecture boundary zone.

@@ -826,46 +826,6 @@ fn push_package_cycle_issues(
     }
 }
 
-fn push_boundary_violation_issues(
-    issues: &mut Vec<CodeClimateIssue>,
-    violations: &[fallow_types::output_dead_code::BoundaryViolationFinding],
-    root: &Path,
-    severity: Severity,
-) {
-    if violations.is_empty() {
-        return;
-    }
-    for entry in violations {
-        let level = finding_codeclimate(entry, severity);
-        let v = &entry.violation;
-        let path = cc_path(&v.from_path, root);
-        let to = cc_path(&v.to_path, root);
-        let fp = codeclimate_fingerprint_hash(&["fallow/boundary-violation", &path, &to]);
-        let line = if v.line > 0 { Some(v.line) } else { None };
-        let via = v
-            .via_path
-            .as_ref()
-            .map_or_else(String::new, |via| format!(", via {}", cc_path(via, root)));
-        issues.push(dead_code_issue(
-            entry.finding_id.as_deref(),
-            entry.introduced,
-            &[],
-            CodeClimateIssueInput {
-                check_name: "fallow/boundary-violation",
-                description: &format!(
-                    "Boundary violation: {} -> {} ({} -> {}{})",
-                    path, to, v.from_zone, v.to_zone, via
-                ),
-                severity: level,
-                category: "Bug Risk",
-                path: &path,
-                begin_line: line,
-                fingerprint: &fp,
-            },
-        ));
-    }
-}
-
 fn push_boundary_coverage_issues(
     issues: &mut Vec<CodeClimateIssue>,
     violations: &[fallow_types::output_dead_code::BoundaryCoverageViolationFinding],
@@ -2131,6 +2091,10 @@ impl CodeClimateBuilder<'_> {
 #[path = "dead_code_codeclimate_duplicates.rs"]
 mod dead_code_codeclimate_duplicates;
 use dead_code_codeclimate_duplicates::push_duplicate_export_issues;
+
+#[path = "dead_code_codeclimate_boundary.rs"]
+mod boundary_render;
+use boundary_render::push_boundary_violation_issues;
 
 #[cfg(test)]
 #[path = "dead_code_codeclimate_tests.rs"]

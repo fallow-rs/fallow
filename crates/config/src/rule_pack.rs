@@ -971,7 +971,7 @@ mod tests {
                 patterns: vec!["src/domain/**".to_owned()],
                 auto_discover: Vec::new(),
                 root: None,
-                public_api: false,
+                public_api: vec![],
             }],
             ..BoundaryConfig::default()
         };
@@ -1000,7 +1000,7 @@ mod tests {
                 patterns: vec!["src/domain/**".to_owned()],
                 auto_discover: Vec::new(),
                 root: None,
-                public_api: false,
+                public_api: vec![],
             }],
             ..BoundaryConfig::default()
         };

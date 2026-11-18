@@ -410,6 +410,8 @@ fn graph_boundary_catalog_override_results(root: &std::path::Path) -> AnalysisRe
             line: 1,
             col: 0,
             via_path: None,
+            reason: fallow_types::results::BoundaryViolationReason::DisallowedZone,
+            public_api_paths: vec![],
         }));
     results
         .boundary_coverage_violations

@@ -2203,3 +2203,43 @@ fn audit_summary_lists_diff_risk_findings() {
         "{rendered}"
     );
 }
+
+/// An `internal_file` boundary finding names the public entry files of the
+/// target zone, because the zone rule allows the import (issue #4760).
+#[test]
+fn internal_file_boundary_annotation_names_the_public_entry_files() {
+    let env = json!({
+        "boundary_violations": [
+            {
+                "from_path": "src/orders/a.ts",
+                "to_path": "src/billing/invoice.ts",
+                "from_zone": "orders",
+                "to_zone": "billing",
+                "import_specifier": "../billing/invoice",
+                "line": 1,
+                "col": 0,
+                "reason": "internal_file",
+                "public_api_paths": ["src/billing/index.ts"]
+            },
+            {
+                "from_path": "src/orders/b.ts",
+                "to_path": "src/payments/charge.ts",
+                "from_zone": "orders",
+                "to_zone": "payments",
+                "import_specifier": "../payments/charge",
+                "line": 1,
+                "col": 0
+            }
+        ]
+    });
+    let rendered = render_annotations(EnvelopeKind::DeadCode, &env, &plain_options());
+    assert!(
+        rendered.contains("src/billing/invoice.ts is not a public entry file of zone 'billing'")
+            && rendered.contains("Import it through src/billing/index.ts."),
+        "got {rendered}"
+    );
+    assert!(
+        rendered.contains("Import from zone 'orders' to zone 'payments' is not allowed."),
+        "a finding without reason keeps the zone-rule text, got {rendered}"
+    );
+}
