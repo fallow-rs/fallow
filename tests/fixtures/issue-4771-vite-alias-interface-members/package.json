@@ -1,0 +1,8 @@
+{
+  "name": "issue-4771-vite-alias-interface-members",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "devDependencies": {
+    "vite": "^6.0.0"
+  }
+}
