@@ -230,7 +230,7 @@ fn configured_filter_removes_findings_added_after_engine_analysis() {
             col: 0,
             via_path: None,
             reason: fallow_types::results::BoundaryViolationReason::DisallowedZone,
-            public_api_paths: vec![],
+            public_files: vec![],
         }));
 
     filter_configured_ignored_findings(&mut results, &config);
@@ -634,7 +634,7 @@ fn cascade_fixture() -> AnalysisResults {
             col: 0,
             via_path: None,
             reason: fallow_types::results::BoundaryViolationReason::DisallowedZone,
-            public_api_paths: vec![],
+            public_files: vec![],
         }));
     results
 }

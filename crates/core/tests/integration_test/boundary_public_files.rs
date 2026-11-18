@@ -1,6 +1,6 @@
-//! Boundary zones with public entry files (`publicApi`, issue #4760).
+//! Boundary zones with public entry files (`publicFiles`, issue #4760).
 //!
-//! In the `boundary-public-api` fixture, `src/billing/public.ts` is the public
+//! In the `boundary-public-files` fixture, `src/billing/public.ts` is the public
 //! entry file of `billing`, and `src/payments/index.ts` is the public entry
 //! file of `payments`. The `orders` zone may import `billing` and `shared`.
 //! The `shipping` zone may import `shared`, plus type-only imports of
@@ -12,11 +12,11 @@ use fallow_types::results::BoundaryViolationReason;
 
 use super::*;
 
-const FIXTURE: &str = "boundary-public-api";
+const FIXTURE: &str = "boundary-public-files";
 
-fn explicit_zones(public_api: bool) -> BoundaryConfig {
+fn explicit_zones(public_files: bool) -> BoundaryConfig {
     let globs = |glob: &str| {
-        if public_api {
+        if public_files {
             vec![glob.to_string()]
         } else {
             vec![]
@@ -25,11 +25,11 @@ fn explicit_zones(public_api: bool) -> BoundaryConfig {
     BoundaryConfig {
         zones: vec![
             BoundaryZone {
-                public_api: globs("src/billing/public.ts"),
+                public_files: globs("src/billing/public.ts"),
                 ..zone("billing", &["src/billing/**"])
             },
             BoundaryZone {
-                public_api: globs("src/payments/index.ts"),
+                public_files: globs("src/payments/index.ts"),
                 ..zone("payments", &["src/payments/**"])
             },
             zone("orders", &["src/orders/**"]),
@@ -53,7 +53,7 @@ fn explicit_zones(public_api: bool) -> BoundaryConfig {
 }
 
 /// One finding as `(from_path, to_path, to_zone, via_path, reason,
-/// public_api_paths)`, with paths relative to the fixture root.
+/// public_files)`, with paths relative to the fixture root.
 type Finding = (
     String,
     String,
@@ -78,7 +78,7 @@ fn findings(boundaries: BoundaryConfig) -> BTreeSet<Finding> {
                 v.to_zone.clone(),
                 v.via_path.as_deref().map(|via| relative_to(via, &root)),
                 v.reason,
-                v.public_api_paths
+                v.public_files
                     .iter()
                     .map(|path| relative_to(path, &root))
                     .collect(),
@@ -98,14 +98,14 @@ fn disallowed(from: &str, to: &str, to_zone: &str, via: Option<&str>) -> Finding
     )
 }
 
-fn internal(from: &str, to: &str, to_zone: &str, public_api: &str) -> Finding {
+fn internal(from: &str, to: &str, to_zone: &str, public_files: &str) -> Finding {
     (
         from.to_string(),
         to.to_string(),
         to_zone.to_string(),
         None,
         BoundaryViolationReason::InternalFile,
-        vec![public_api.to_string()],
+        vec![public_files.to_string()],
     )
 }
 
@@ -171,7 +171,7 @@ fn auto_discover_scopes_public_entry_files_to_each_module() {
         zones: vec![BoundaryZone {
             name: "modules".to_string(),
             auto_discover: vec!["src".to_string()],
-            public_api: vec!["public.ts".to_string(), "index.ts".to_string()],
+            public_files: vec!["public.ts".to_string(), "index.ts".to_string()],
             ..BoundaryZone::default()
         }],
         rules: vec![BoundaryRule {
@@ -220,14 +220,14 @@ fn auto_discover_scopes_public_entry_files_to_each_module() {
 }
 
 #[test]
-fn without_public_api_a_zone_rule_allows_every_file_of_the_zone() {
+fn without_public_files_a_zone_rule_allows_every_file_of_the_zone() {
     let found = findings(explicit_zones(false));
 
     assert!(
         found.iter().all(
             |f| f.4 == BoundaryViolationReason::DisallowedZone && f.0 != "src/orders/direct.ts"
         ),
-        "without publicApi, `orders` may import any file of `billing`, got {found:?}"
+        "without publicFiles, `orders` may import any file of `billing`, got {found:?}"
     );
     assert!(
         found.contains(&disallowed(
@@ -236,6 +236,6 @@ fn without_public_api_a_zone_rule_allows_every_file_of_the_zone() {
             "billing",
             Some("src/shared/index.ts"),
         )),
-        "without publicApi, the chain reaches the declaring file, got {found:?}"
+        "without publicFiles, the chain reaches the declaring file, got {found:?}"
     );
 }

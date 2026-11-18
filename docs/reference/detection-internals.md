@@ -54,11 +54,11 @@ error by suppressing a downstream detector.
   chain breaks the rules of the zone that owns the re-exporting file, only
   that hop gets a finding. Namespace and side-effect imports stay judged by
   the direct target (issue #2939). A zone can list the globs of its public
-  entry files in `publicApi`. A file of another zone may then import only
+  entry files in `publicFiles`. A file of another zone may then import only
   those files of the zone, also a zone without a rule. A zone rule is
   checked first, so a forbidden deep import gets one zone-rule finding, which
   omits `reason`. An allowed deep import gets `reason: "internal_file"` and
-  `public_api_paths`. The chain walk stops at the first public entry
+  `public_files`. The chain walk stops at the first public entry
   file and judges the import by that file. On an `autoDiscover` zone, each
   glob is relative to each discovered folder, and the fallback zone of the
   parent patterns gets no public files (issue #4760).

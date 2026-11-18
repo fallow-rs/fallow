@@ -149,11 +149,11 @@ pub struct BoundariesListZone {
     pub patterns: Vec<String>,
     /// Number of analyzable files the zone matched.
     pub file_count: usize,
-    /// Globs of the public entry files of the zone (`publicApi` in the
+    /// Globs of the public entry files of the zone (`publicFiles` in the
     /// boundary config), after the `autoDiscover` expansion. Omitted when
-    /// empty. Not related to the `public_api` field of dead-code exports.
+    /// empty.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub public_api: Vec<String>,
+    pub public_files: Vec<String>,
 }
 
 /// A boundary import rule, expanded to operate on concrete child zone

@@ -2036,17 +2036,20 @@ fn resolve_panics_on_unvalidated_invalid_zone_glob() {
     let _ = config.resolve();
 }
 
-fn zone_with(name: &str, pattern: &str, public_api: &[&str]) -> BoundaryZone {
+fn zone_with(name: &str, pattern: &str, public_files: &[&str]) -> BoundaryZone {
     BoundaryZone {
         name: name.to_string(),
         patterns: vec![pattern.to_string()],
-        public_api: public_api.iter().map(|glob| (*glob).to_string()).collect(),
+        public_files: public_files
+            .iter()
+            .map(|glob| (*glob).to_string())
+            .collect(),
         ..BoundaryZone::default()
     }
 }
 
 #[test]
-fn merging_zones_by_name_joins_public_api_globs() {
+fn merging_zones_by_name_joins_public_file_globs() {
     let mut zones = vec![zone_with(
         "billing",
         "src/billing/**",
@@ -2058,13 +2061,13 @@ fn merging_zones_by_name_joins_public_api_globs() {
     );
     assert_eq!(zones.len(), 1);
     assert_eq!(
-        zones[0].public_api,
+        zones[0].public_files,
         vec!["src/billing/index.ts", "src/billing/*.routes.ts"]
     );
 }
 
 #[test]
-fn auto_discover_scopes_public_api_globs_to_each_child() {
+fn auto_discover_scopes_public_file_globs_to_each_child() {
     let temp = tempfile::tempdir().unwrap();
     std::fs::create_dir_all(temp.path().join("src/modules/billing")).unwrap();
     std::fs::create_dir_all(temp.path().join("src/modules/orders")).unwrap();
@@ -2073,7 +2076,7 @@ fn auto_discover_scopes_public_api_globs_to_each_child() {
             name: "modules".to_string(),
             patterns: vec!["src/modules/*.ts".to_string()],
             auto_discover: vec!["src/modules".to_string()],
-            public_api: vec!["./index.ts".to_string()],
+            public_files: vec!["./index.ts".to_string()],
             ..BoundaryZone::default()
         }],
         ..BoundaryConfig::default()
@@ -2081,11 +2084,11 @@ fn auto_discover_scopes_public_api_globs_to_each_child() {
     config.expand_auto_discover(temp.path());
     let resolved = config.resolve();
 
-    assert!(resolved.is_public_api_file("modules/billing", "src/modules/billing/index.ts"));
-    assert!(!resolved.is_public_api_file("modules/billing", "src/modules/orders/index.ts"));
-    assert!(resolved.has_public_api("modules/orders"));
+    assert!(resolved.is_public_file("modules/billing", "src/modules/billing/index.ts"));
+    assert!(!resolved.is_public_file("modules/billing", "src/modules/orders/index.ts"));
+    assert!(resolved.has_public_files("modules/orders"));
     assert!(
-        !resolved.has_public_api("modules"),
+        !resolved.has_public_files("modules"),
         "the fallback zone of the parent patterns has no public files"
     );
 }

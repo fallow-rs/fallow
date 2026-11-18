@@ -899,11 +899,11 @@ fn boundary_annotation_message(violation: &Value) -> String {
             s(violation, "to_zone"),
         );
     }
-    let entries: Vec<&str> = arr(violation, "public_api_paths")
+    let entries: Vec<&str> = arr(violation, "public_files")
         .filter_map(Value::as_str)
         .collect();
     let fix = if entries.is_empty() {
-        "No file of the zone matches its publicApi globs.".to_owned()
+        "No file of the zone matches its publicFiles globs.".to_owned()
     } else {
         format!("Import it through {}.", entries.join(", "))
     };

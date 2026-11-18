@@ -15,7 +15,7 @@ pub struct BoundaryViolation {
     pub from_path: PathBuf,
     /// The imported file that violates the boundary. Through a re-export chain,
     /// the origin module that declares the symbol, not the barrel; a chain
-    /// stops at the first public entry file (`publicApi`), which it then names.
+    /// stops at the first public entry file (`publicFiles`), which it then names.
     #[serde(serialize_with = "serde_path::serialize")]
     pub to_path: PathBuf,
     /// The zone the importing file belongs to.
@@ -37,7 +37,7 @@ pub struct BoundaryViolation {
     )]
     pub via_path: Option<PathBuf>,
     /// Why the import breaks the boundary rules. Omitted for
-    /// `disallowed_zone`, so a project without `publicApi` keeps its output.
+    /// `disallowed_zone`, so a project without `publicFiles` keeps its output.
     #[serde(
         default,
         skip_serializing_if = "BoundaryViolationReason::is_disallowed_zone"
@@ -50,7 +50,7 @@ pub struct BoundaryViolation {
         serialize_with = "serde_path::serialize_vec",
         skip_serializing_if = "Vec::is_empty"
     )]
-    pub public_api_paths: Vec<PathBuf>,
+    pub public_files: Vec<PathBuf>,
 }
 
 /// The rule that a boundary violation breaks.
@@ -64,7 +64,7 @@ pub enum BoundaryViolationReason {
     #[default]
     DisallowedZone,
     /// A rule allows the zone, but the imported file is not a public entry
-    /// file (`publicApi`) of `to_zone`.
+    /// file (`publicFiles`) of `to_zone`.
     InternalFile,
 }
 
@@ -92,26 +92,26 @@ impl BoundaryViolation {
         }
         let target = display(&self.to_path);
         let zone = &self.to_zone;
-        if self.public_api_paths.is_empty() {
+        if self.public_files.is_empty() {
             return Some(format!(
                 "{target} is not a public entry file of zone '{zone}', and no file of the zone \
-                 matches its publicApi globs"
+                 matches its publicFiles globs"
             ));
         }
         let mut shown: Vec<String> = self
-            .public_api_paths
+            .public_files
             .iter()
             .take(SHOWN_PUBLIC_API_PATHS)
             .map(|path| display(path))
             .collect();
         let hidden = self
-            .public_api_paths
+            .public_files
             .len()
             .saturating_sub(SHOWN_PUBLIC_API_PATHS);
         if hidden > 0 {
             shown.push(format!("{hidden} more"));
         }
-        let through = if self.public_api_paths.len() == 1 {
+        let through = if self.public_files.len() == 1 {
             shown.join("")
         } else {
             format!("one of {}", shown.join(", "))
@@ -130,8 +130,8 @@ impl BoundaryViolation {
                 "This import crosses an architecture boundary that is not permitted by the configured rules",
             ),
             BoundaryViolationReason::InternalFile => (
-                "Import the symbol through a public entry file of the target zone (public_api_paths)",
-                "The target zone declares publicApi, and the imported file is not one of its public entry files",
+                "Import the symbol through a public entry file of the target zone (public_files)",
+                "The target zone declares publicFiles, and the imported file is not one of its public entry files",
             ),
         }
     }

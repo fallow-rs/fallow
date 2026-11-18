@@ -2280,7 +2280,7 @@
             "null"
           ]
         },
-        "publicApi": {
+        "publicFiles": {
           "description": "Globs of the public entry files of this zone.\n\nWhen the list is not empty, a file of another zone may import a file\nof this zone only through a file that is in this zone and matches a\nglob. The globs use the same base as `patterns`. On an `autoDiscover`\nzone, each glob is relative to each discovered folder.",
           "type": "array",
           "items": {

@@ -109,7 +109,7 @@ fn analysis_complete_params_collapses_boundary_subresults() {
             col: 0,
             via_path: None,
             reason: fallow_types::results::BoundaryViolationReason::DisallowedZone,
-            public_api_paths: vec![],
+            public_files: vec![],
         })],
         boundary_coverage_violations: vec![
             fallow_api::editor_results::BoundaryCoverageViolationFinding::with_actions(

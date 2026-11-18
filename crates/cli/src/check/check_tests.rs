@@ -636,7 +636,7 @@ fn apply_boundary_violations_filter() {
                 col: 0,
                 via_path: None,
                 reason: fallow_types::results::BoundaryViolationReason::DisallowedZone,
-                public_api_paths: vec![],
+                public_files: vec![],
             },
         ),
     );
@@ -681,7 +681,7 @@ fn apply_all_filter_types_simultaneously() {
                 col: 0,
                 via_path: None,
                 reason: fallow_types::results::BoundaryViolationReason::DisallowedZone,
-                public_api_paths: vec![],
+                public_files: vec![],
             },
         ),
     );

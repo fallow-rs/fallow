@@ -242,7 +242,7 @@ fn results_total_counts_all_types() {
             col: 0,
             via_path: None,
             reason: crate::results::BoundaryViolationReason::DisallowedZone,
-            public_api_paths: vec![],
+            public_files: vec![],
         })],
         ..Default::default()
     };
@@ -744,7 +744,7 @@ fn sort_boundary_violations() {
             col,
             via_path: None,
             reason: crate::results::BoundaryViolationReason::DisallowedZone,
-            public_api_paths: vec![],
+            public_files: vec![],
         })
     };
     r.boundary_violations.push(mk("z.ts", 1, 0, "a.ts"));
@@ -942,7 +942,7 @@ fn serialize_boundary_violation_fields() {
         col: 0,
         via_path: None,
         reason: crate::results::BoundaryViolationReason::DisallowedZone,
-        public_api_paths: vec![],
+        public_files: vec![],
     };
     let json = serde_json::to_value(&v).unwrap();
     assert_eq!(json["from_path"], "src/ui/button.tsx");
@@ -951,21 +951,18 @@ fn serialize_boundary_violation_fields() {
     assert_eq!(json["to_zone"], "db");
     assert_eq!(json["import_specifier"], "../db/queries");
     assert!(
-        json.get("reason").is_none() && json.get("public_api_paths").is_none(),
-        "a zone-rule finding keeps the output of a project without publicApi, got {json}"
+        json.get("reason").is_none() && json.get("public_files").is_none(),
+        "a zone-rule finding keeps the output of a project without publicFiles, got {json}"
     );
 
     let internal = BoundaryViolation {
         reason: crate::results::BoundaryViolationReason::InternalFile,
-        public_api_paths: vec![PathBuf::from("src/db/index.ts")],
+        public_files: vec![PathBuf::from("src/db/index.ts")],
         ..v
     };
     let json = serde_json::to_value(&internal).unwrap();
     assert_eq!(json["reason"], "internal_file");
-    assert_eq!(
-        json["public_api_paths"],
-        serde_json::json!(["src/db/index.ts"])
-    );
+    assert_eq!(json["public_files"], serde_json::json!(["src/db/index.ts"]));
     let message = internal
         .internal_file_message(&|path| path.display().to_string())
         .expect("an internal_file finding has a message");
@@ -1116,7 +1113,7 @@ fn protected_architecture_findings(path: &Path) -> AnalysisResults {
             col: 0,
             via_path: None,
             reason: crate::results::BoundaryViolationReason::DisallowedZone,
-            public_api_paths: vec![],
+            public_files: vec![],
         })],
         boundary_coverage_violations: vec![BoundaryCoverageViolationFinding::with_actions(
             BoundaryCoverageViolation {

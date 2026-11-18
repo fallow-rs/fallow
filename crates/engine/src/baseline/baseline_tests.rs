@@ -2185,7 +2185,7 @@ fn make_full_results() -> AnalysisResults {
                 col: 0,
                 via_path: None,
                 reason: fallow_types::results::BoundaryViolationReason::DisallowedZone,
-                public_api_paths: vec![],
+                public_files: vec![],
             },
         ),
     );
@@ -2379,7 +2379,7 @@ fn filter_keeps_new_boundary_violations() {
             col: 0,
             via_path: None,
             reason: fallow_types::results::BoundaryViolationReason::DisallowedZone,
-            public_api_paths: vec![],
+            public_files: vec![],
         }));
     results
         .boundary_violations
@@ -2393,7 +2393,7 @@ fn filter_keeps_new_boundary_violations() {
             col: 0,
             via_path: None,
             reason: fallow_types::results::BoundaryViolationReason::DisallowedZone,
-            public_api_paths: vec![],
+            public_files: vec![],
         }));
     let filtered = filter_new_issues(results, &baseline, Path::new(""));
     assert_eq!(filtered.boundary_violations.len(), 1);
@@ -2484,7 +2484,7 @@ fn boundary_violation_key_format() {
         col: 0,
         via_path: None,
         reason: fallow_types::results::BoundaryViolationReason::DisallowedZone,
-        public_api_paths: vec![],
+        public_files: vec![],
     };
     let key = super::boundary_violation_key(&v, Path::new(""));
     assert_eq!(key, "src/ui/btn.ts->src/db/query.ts");
@@ -2586,7 +2586,7 @@ fn make_absolute_results(root: &str) -> AnalysisResults {
             col: 0,
             via_path: None,
             reason: fallow_types::results::BoundaryViolationReason::DisallowedZone,
-            public_api_paths: vec![],
+            public_files: vec![],
         })],
         ..Default::default()
     }
