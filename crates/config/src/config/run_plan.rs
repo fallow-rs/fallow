@@ -22,8 +22,11 @@ pub enum PlannedAnalysis {
 /// How a run asks for one analysis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnalysisRequest {
-    /// The run names the analysis: `--only dupes`, or an API option that is
-    /// set to `true`. The analysis runs, whatever the config says.
+    /// The run names the analysis: `--only dupes`, an option of
+    /// `fallow_api::run_audit` that is set to `true` (see
+    /// [`RunRequest::from_options`]), or the only `true` boolean of
+    /// [`RunRequest::from_booleans`]. The analysis runs, whatever the config
+    /// says.
     Named,
     /// The run does not name the analysis. The config decides.
     Default,
@@ -244,15 +247,6 @@ impl AnalysisSelection {
         matches!(self, Self::Run)
     }
 
-    /// The reason for the skip, or `None` when the analysis runs.
-    #[must_use]
-    pub const fn skip_reason(self) -> Option<SkipReason> {
-        match self {
-            Self::Run => None,
-            Self::Skipped(reason) => Some(reason),
-        }
-    }
-
     /// Whether the config key `key` turned the analysis off.
     #[must_use]
     pub const fn off_by(self, key: ConfigKey) -> bool {
@@ -275,16 +269,6 @@ pub struct RunPlan {
 }
 
 impl RunPlan {
-    /// The decision for `analysis`.
-    #[must_use]
-    pub const fn get(&self, analysis: PlannedAnalysis) -> AnalysisSelection {
-        match analysis {
-            PlannedAnalysis::DeadCode => self.dead_code,
-            PlannedAnalysis::Duplication => self.duplication,
-            PlannedAnalysis::Health => self.health,
-        }
-    }
-
     /// Whether at least one analysis runs.
     #[must_use]
     pub const fn runs_any(&self) -> bool {

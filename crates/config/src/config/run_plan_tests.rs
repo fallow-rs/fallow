@@ -178,6 +178,14 @@ const fn request_of(request: RunRequest, analysis: PlannedAnalysis) -> AnalysisR
     }
 }
 
+const fn decision_of(plan: RunPlan, analysis: PlannedAnalysis) -> AnalysisSelection {
+    match analysis {
+        PlannedAnalysis::DeadCode => plan.dead_code,
+        PlannedAnalysis::Duplication => plan.duplication,
+        PlannedAnalysis::Health => plan.health,
+    }
+}
+
 fn matches_column<T: PartialEq + Copy>(column: Option<T>, value: T) -> bool {
     column.is_none_or(|expected| expected == value)
 }
@@ -232,7 +240,7 @@ fn check_every_config(request: RunRequest, used: &mut [bool; RULE.len()]) {
                         };
                         used[index] = true;
                         assert_eq!(
-                            plan.get(analysis),
+                            decision_of(plan, analysis),
                             RULE[index].expected,
                             "{analysis:?} {request:?} enabled {enabled} {config:?}"
                         );
@@ -334,12 +342,8 @@ fn from_options_maps_each_option() {
 }
 
 #[test]
-fn selection_reports_the_skip_reason() {
-    assert_eq!(Run.skip_reason(), None);
-    assert_eq!(
-        Skipped(Config(AuditDupes)).skip_reason(),
-        Some(Config(AuditDupes))
-    );
+fn selection_reports_the_key_that_turned_it_off() {
+    assert!(Skipped(Config(AuditDupes)).off_by(AuditDupes));
     assert!(Skipped(Config(DuplicatesEnabled)).off_by(DuplicatesEnabled));
     assert!(!Skipped(Config(AuditDupes)).off_by(DuplicatesEnabled));
     assert!(!Skipped(NotRequested).off_by(DuplicatesEnabled));
