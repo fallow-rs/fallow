@@ -449,6 +449,23 @@ pub fn is_project_level_rule(rule_id: &str) -> bool {
     PROJECT_LEVEL_RULE_IDS.contains(&rule_id)
 }
 
+/// Rules whose findings a diff-scoped analysis keeps when the diff touches
+/// any file of the finding, not only its anchored line: an unused file and
+/// the member files of a cycle (`fallow_engine::diff_scope`). The location
+/// and the `other_locations` of such a finding name those files.
+pub const FILE_SCOPED_RULE_IDS: &[&str] = &[
+    "fallow/unused-file",
+    "fallow/circular-dependency",
+    "fallow/re-export-cycle",
+    "fallow/package-cycle",
+];
+
+/// Whether a diff-scoped analysis keeps findings for `rule_id` at file scope.
+#[must_use]
+pub fn is_file_scoped_rule(rule_id: &str) -> bool {
+    FILE_SCOPED_RULE_IDS.contains(&rule_id)
+}
+
 /// Section order for the sticky comment. Every category the rule registry
 /// carries is listed, so a new bucket does not sort alphabetically into the
 /// middle of the report. "Other" collects rules a downstream consumer added

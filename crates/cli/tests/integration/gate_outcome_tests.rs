@@ -2727,9 +2727,11 @@ fn a_human_combined_run_states_the_regression_outcome_once() {
     );
 }
 
-/// A cycle anchored at `src/a.ts:1`, and a pull-request diff that changes only
-/// line 3 of that file. The added-line filter drops the cycle from the comment.
-fn cycle_project_with_diff() -> (TempDir, std::path::PathBuf) {
+/// The cycle `src/a.ts` <-> `src/b.ts`, anchored at `src/a.ts:1`, and a diff
+/// that changes one line of `diff_target`: line 3 of `src/a.ts` touches a
+/// member file of the cycle away from its import; line 2 of `src/index.ts`
+/// touches no member file.
+fn cycle_project_with_diff_of(diff_target: &str) -> (TempDir, std::path::PathBuf) {
     let project = TempDir::new().expect("temp dir");
     let root = project.path();
     std::fs::create_dir_all(root.join("src")).expect("src dir");
@@ -2747,24 +2749,33 @@ fn cycle_project_with_diff() -> (TempDir, std::path::PathBuf) {
             "src/b.ts",
             "import { a } from \"./a\";\nexport const b = () => a;\n",
         ),
-        (
-            "pr.diff",
-            "diff --git a/src/a.ts b/src/a.ts\n--- a/src/a.ts\n+++ b/src/a.ts\n@@ -3 +3 @@\n-export const x = 1;\n+export const x = 2;\n",
-        ),
     ];
     for (path, contents) in files {
         std::fs::write(root.join(path), contents).expect("write fixture file");
     }
+    let changed_line = match diff_target {
+        "src/a.ts" => 3,
+        "src/index.ts" => 2,
+        other => panic!("no fixture line for {other}"),
+    };
+    std::fs::write(
+        root.join("pr.diff"),
+        format!(
+            "diff --git a/{diff_target} b/{diff_target}\n--- a/{diff_target}\n+++ b/{diff_target}\n@@ -{changed_line} +{changed_line} @@\n-old\n+new\n"
+        ),
+    )
+    .expect("write the diff");
     let diff = root.join("pr.diff");
     (project, diff)
 }
 
 /// The added-line diff filter can drop every finding from the comment while
-/// the producing run failed an enforced gate on them. The comment heading must
-/// then say that the gate failed, because the check that the run drives is red.
+/// the producing run failed an enforced gate on them: here the diff touches no
+/// file of the cycle. The comment heading must then say that the gate failed,
+/// because the check that the run drives is red.
 #[test]
 fn a_comment_whose_findings_the_diff_filter_drops_still_says_the_gate_failed() {
-    let (project, diff) = cycle_project_with_diff();
+    let (project, diff) = cycle_project_with_diff_of("src/index.ts");
     let root = project.path();
     let produced = run(&[
         "dead-code",
@@ -2805,6 +2816,60 @@ fn a_comment_whose_findings_the_diff_filter_drops_still_says_the_gate_failed() {
         assert!(
             rendered.stdout.contains("No findings for this"),
             "{format}: the diff filter drops the cycle: {}",
+            rendered.stdout
+        );
+        assert!(
+            rendered.stdout.contains("**Quality gate failed**"),
+            "{format} must not say the gate passed: {}",
+            rendered.stdout
+        );
+    }
+}
+
+/// A diff that touches a member file of a cycle keeps the cycle in the
+/// diff-scoped analysis, also away from its import line. The comment must
+/// then show the cycle next to the failed gate, not only the failed gate
+/// (fallow-rs/fallow#4779).
+#[test]
+fn a_comment_shows_the_cycle_whose_member_file_the_diff_touches() {
+    let (project, diff) = cycle_project_with_diff_of("src/a.ts");
+    let root = project.path();
+    let produced = run(&[
+        "dead-code",
+        "--root",
+        root.to_str().expect("utf8"),
+        "--format",
+        "json",
+        "--quiet",
+    ]);
+    assert_eq!(
+        gate(&parse_json(&produced), "error-severity-findings")["status"],
+        "fail"
+    );
+    let saved = root.join("results.json");
+    std::fs::write(&saved, &produced.stdout).expect("save the envelope");
+
+    for format in ["pr-comment-github", "pr-comment-gitlab"] {
+        let rendered = crate::common::run_fallow_raw_with_env(
+            &[
+                "report",
+                "--from",
+                saved.to_str().expect("utf8"),
+                "--root",
+                root.to_str().expect("utf8"),
+                "--quiet",
+                "--format",
+                format,
+            ],
+            &[
+                ("FALLOW_DIFF_FILE", diff.to_str().expect("utf8")),
+                ("FALLOW_DIFF_FILTER", "added"),
+            ],
+        );
+        assert_eq!(rendered.code, 0, "the render exits 0: {}", rendered.stderr);
+        assert!(
+            rendered.stdout.contains("fallow/circular-dependency"),
+            "{format}: the summary shows the cycle that fails the gate: {}",
             rendered.stdout
         );
         assert!(
