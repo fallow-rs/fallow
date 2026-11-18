@@ -9,6 +9,7 @@ fn header() -> JournalHeader {
         runtime: "node 24.1.0".to_owned(),
         run_dir: "0123456789abcdef0123".to_owned(),
         runner_config: None,
+        runner_projects: Vec::new(),
         scope: "all".to_owned(),
         operators: None,
         allow_side_effects: false,
@@ -162,6 +163,7 @@ fn a_resume_with_another_fingerprint_names_each_input_that_differs() {
     let mut changed = header();
     changed.runtime = "node 22.18.0".to_owned();
     changed.run_dir = "fedcba9876543210fedc".to_owned();
+    changed.runner_projects = vec!["unit".to_owned()];
     changed.operators = Some(vec!["arithmetic-operator".to_owned()]);
     let Err(mismatch) = open(dir.path(), &changed, true) else {
         panic!("a different fingerprint is refused");
@@ -172,6 +174,7 @@ fn a_resume_with_another_fingerprint_names_each_input_that_differs() {
             "runtime (journal: node 24.1.0, this run: node 22.18.0)".to_owned(),
             "planned source and instrumentation (journal: 0123456789ab, this run: fedcba987654)"
                 .to_owned(),
+            "runner projects (journal: none, this run: unit)".to_owned(),
             "operators (journal: default set, this run: arithmetic-operator)".to_owned(),
         ]
     );

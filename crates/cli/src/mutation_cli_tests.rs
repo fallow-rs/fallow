@@ -2204,6 +2204,17 @@ fn the_runner_config_flag_resolves_inside_the_root() {
     );
 }
 
+#[test]
+fn the_runner_project_flags_reach_the_run_options() {
+    let project = tempfile::tempdir().expect("dir");
+    let args = MutationArgs {
+        runner_projects: vec!["unit".to_owned(), "api".to_owned()],
+        ..MutationArgs::default()
+    };
+    let options = run_options(&input(project.path(), args, MutationConfig::default())).unwrap();
+    assert_eq!(options.runner_projects, ["unit", "api"]);
+}
+
 fn kill_matrix_fixture() -> fallow_output::MutationKillMatrix {
     use fallow_output::{MutationKillMatrix, MutationKillMatrixStatus, MutationTestKillRow};
 

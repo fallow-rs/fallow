@@ -260,6 +260,14 @@ const resolveConfigPath = (init) => {
 };
 
 /**
+ * Gives the `project` option of Vitest for the selected project names, as the
+ * Vitest `--project` flag does. Vitest then keeps only the matching projects,
+ * so an unselected project never needs the overlay.
+ */
+const projectFilter = (projects) =>
+  Array.isArray(projects) && projects.length > 0 ? { project: projects } : {};
+
+/**
  * Starts Vitest as the Vitest CLI does from the project root. The process
  * goes to the project root first, and the options do not set `root`. A
  * `root` option is a CLI override: it replaces the `root` and `test.root` of
@@ -287,6 +295,7 @@ const createVitestInstance = async ({ createVitest, version, init, plugin }) => 
         includeTaskLocation: true,
         coverage: { enabled: false },
         ...moduleCacheOptions(version),
+        ...projectFilter(init.options?.projects),
       },
       { plugins: [plugin] },
       { stdout: process.stderr, stderr: process.stderr },

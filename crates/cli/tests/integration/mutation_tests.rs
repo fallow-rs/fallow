@@ -43,6 +43,39 @@ fn json_mutation(root: &Path, args: &[&str]) -> (CommandOutput, serde_json::Valu
 }
 
 #[test]
+fn runner_project_flag_needs_the_vitest_runner() {
+    let project = untested_project();
+    let root = project.path();
+    fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"mutation":{"runner":"node-test"}}"#,
+    )
+    .expect("config");
+    let (output, envelope) = json_mutation(
+        root,
+        &[
+            "--plan",
+            "--all",
+            "--runner-project",
+            "unit",
+            "--runner-project",
+            "api",
+        ],
+    );
+    assert_eq!(output.code, 2, "{}", output.stderr);
+    assert_eq!(
+        envelope["code"], "FALLOW_INVALID_MUTATION_OPTIONS",
+        "{envelope}"
+    );
+    assert!(
+        envelope["message"]
+            .as_str()
+            .is_some_and(|message| message.contains("`api, unit` need the Vitest runner")),
+        "{envelope}"
+    );
+}
+
+#[test]
 fn plan_json_lists_unreached_mutants_and_runs_no_code() {
     let project = untested_project();
     let (output, mut value) = json_mutation(project.path(), &["--plan", "--all"]);

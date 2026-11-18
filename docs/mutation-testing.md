@@ -46,7 +46,7 @@ read-only next steps. It never writes a test and never proposes a code change.
   directory as a path.
 - The run flags are `--max-mutants`, `--mutants-per-line`, `--function-scope`,
   `--time-budget` (`90s`, `10m`, `1h`),
-  `--setup-timeout` (default `2m`), `--runner-config`, `--kill-matrix`,
+  `--setup-timeout` (default `2m`), `--runner-config`, `--runner-project`, `--kill-matrix`,
   `--kill-matrix-for`, `--concurrency`, `--runtime`, `--allow-dirty`, `--allow-side-effects`,
   `--min-score`, `--operators`, `--verdicts`, `--typecheck`, `--record-args`, `--resume` and
   `--recheck` (with `--report` and `--mutant`) and `--compare`.
@@ -1459,6 +1459,36 @@ fallow mutation src/math.ts --runner-config vitest.integration.config.mjs
   file of the plan that the selected config does not include stays visible as
   a `test-files-not-discovered` error, and the run is `partial`.
 
+### Runner projects
+
+`--runner-project <name>` (or the `mutation.runnerProjects` config key)
+selects the Vitest projects of a run, as the Vitest `--project` flag does.
+Repeat the flag for more projects. Use it for a root config that also holds
+projects that the companion cannot instrument, for example:
+
+```bash
+fallow mutation src/math.ts --runner-project unit --runner-project api
+```
+
+- The companion gives the names to the `project` option of Vitest. Vitest
+  keeps only the matching projects. A name can hold a `*` wildcard.
+- A project that comes from a separate config file never gets the overlay
+  plugin, so `init` fails with `config-load-failed` when the run uses such a
+  project. A selection that leaves those projects out lets the inline
+  projects of the same root config run.
+- A selection that matches no project fails `init` with `config-load-failed`
+  and the message of Vitest.
+- The flag wins over the config key. The run trims the names, sorts them and
+  removes duplicates. The result cache key and the resume journal hold the
+  selection, so another selection never reuses a result and a resume with
+  another selection is refused.
+- Only the Vitest adapter has projects. With the `node-test` or `bun-test`
+  runner, a selection exits with code 2, `FALLOW_INVALID_MUTATION_OPTIONS`
+  and the context `mutation.runnerProjects`. An empty name exits with code 2
+  too.
+- A static test file of the plan that no selected project includes stays
+  visible as a `test-files-not-discovered` error, and the run is `partial`.
+
 `--runtime` takes a name or a file path. A bare name such as `node` or
 `bun`, without a path separator, is a `PATH` lookup, as in a shell. A path
 with a separator, such as `./bin/node`, is a file path. A relative file path
@@ -1791,7 +1821,8 @@ The key hashes these parts:
   A change to a config fragment that the runner config imports changes the
   key. A runner config that `--runner-config` or `mutation.runnerConfig`
   selects is a support file too, so a change to it changes the key. The key
-  does not hash the files that a selected config imports;
+  does not hash the files that a selected config imports. The selected
+  Vitest projects (`--runner-project`) are a key part too;
 - the lockfiles of the first directory from the root upward that has one;
 - the runner config files at the root: `vitest.config.*`, `vite.config.*`,
   `vitest.workspace.*`, `bunfig.toml`, `package.json` and `tsconfig.json`. An
@@ -2791,7 +2822,8 @@ reads files only. It runs no test.
     "mutantsPerLine": 2,
     "functionScope": true,
     "typecheck": true,
-    "runnerConfig": "vitest.integration.config.mjs"
+    "runnerConfig": "vitest.integration.config.mjs",
+    "runnerProjects": ["unit"]
   }
 }
 ```
@@ -2812,6 +2844,8 @@ reads files only. It runs no test.
   off. See [Function scope](#function-scope).
 - `runnerConfig` selects the runner config file for each run.
   `--runner-config` wins. See [Runner config](#runner-config).
+- `runnerProjects` selects the Vitest projects for each run.
+  `--runner-project` wins. See [Runner projects](#runner-projects).
 - `typecheck: true` turns on the survivor type check for each run.
   `--typecheck` turns it on for one run. No flag turns it off.
 - The section has no source globs and no timeout keys. `MutationRunOptions`

@@ -1253,6 +1253,16 @@
             "string",
             "null"
           ]
+        },
+        "runnerProjects": {
+          "description": "The names of the Vitest projects that the run uses, as the Vitest\n`--project` flag selects them, for example `[\"unit\"]`. A name can\nhold a `*` wildcard. The run then ignores each other project of the\nconfig, also a project from a separate config file. Only the Vitest\nrunner reads it. Unset uses each project. `--runner-project` wins.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
         }
       },
       "additionalProperties": false

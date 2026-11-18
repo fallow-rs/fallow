@@ -190,6 +190,14 @@ pub struct MutationArgs {
     /// `--config`, which selects the Fallow config.
     #[arg(long, value_name = "PATH")]
     pub runner_config: Option<PathBuf>,
+    /// Use only this Vitest project, as the Vitest `--project` flag does.
+    /// Repeat the flag for more projects. A name can hold a `*` wildcard.
+    /// Each other project of the config stays out of the run, also a
+    /// project from a separate config file (default: the
+    /// `mutation.runnerProjects` key, else each project). Only Vitest reads
+    /// it.
+    #[arg(long = "runner-project", value_name = "NAME")]
+    pub runner_projects: Vec<String>,
     /// Type-check each survived mutant through the `--type-aware`
     /// companion. A survivor that does not type-check becomes
     /// `compile_error` and leaves the score. An optional-chaining or
@@ -463,6 +471,7 @@ pub fn run_options(input: &MutationCliInput<'_>) -> Result<MutationRunOptions, P
         time_budget,
         runner_timeout,
         runner_config,
+        runner_projects: input.args.runner_projects.clone(),
         output_paths: input
             .output_file
             .into_iter()
@@ -1231,6 +1240,7 @@ fn add_replay(
         args,
         runtime: options.runtime,
         runner_config: options.runner_config,
+        runner_projects: options.runner_projects,
         call_timeout,
         runner_timeout: options.runner_timeout,
     })?;
