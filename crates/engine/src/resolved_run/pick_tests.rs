@@ -151,6 +151,9 @@ fn wrapper_modes(case: &Case) -> [bool; 3] {
         health: case.own_env[1],
         dupes: case.own_env[2],
     };
+    if case.global_env.is_none() && case.own_env == [None; 3] {
+        assert_direct_modes(case, flags);
+    }
     let combined = flags.with_fallback(env);
     let modes = combined.effective_modes(&case.config);
     for analysis in ANALYSES {
@@ -161,6 +164,29 @@ fn wrapper_modes(case: &Case) -> [bool; 3] {
         );
     }
     [modes.dead_code, modes.health, modes.dupes]
+}
+
+/// `with_fallback` always clears `global`, so this check calls
+/// `effective` and `effective_modes` on the flags themselves. Only then
+/// does a global flag reach both methods.
+fn assert_direct_modes(case: &Case, flags: ProductionFlags) {
+    let modes = flags.effective_modes(&case.config);
+    let modes = [modes.dead_code, modes.health, modes.dupes];
+    for analysis in ANALYSES {
+        let (value, _) = reference(case, analysis);
+        assert_eq!(
+            modes[index(analysis)],
+            value,
+            "effective_modes, {} {case:?} {analysis:?}",
+            case.config_json
+        );
+        assert_eq!(
+            flags.effective(analysis, &case.config),
+            value,
+            "effective, {} {case:?} {analysis:?}",
+            case.config_json
+        );
+    }
 }
 
 fn inputs(case: &Case) -> ProductionInputs {
