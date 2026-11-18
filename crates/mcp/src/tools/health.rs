@@ -5,7 +5,7 @@ use crate::params::HealthParams;
 
 use fallow_api::{
     AnalysisOptions, ComplexityOptions, ComplexitySort, CoverageInputs, OwnershipEmailMode,
-    ProgrammaticError, TargetEffort, run_health as run_api_health,
+    ProductionAnalysis, ProgrammaticError, TargetEffort, run_health as run_api_health,
     serialize_health_programmatic_json,
 };
 use rmcp::ErrorData as McpError;
@@ -15,7 +15,7 @@ use super::{
     api_runtime::{
         EnvScope, call_cancellation, non_empty_path, non_empty_string,
         resolve_typed_coverage_inputs, run_api_blocking, shared_analysis_options, shared_params,
-        typed_tool_result, typed_type_aware, workspace_patterns_from_param,
+        typed_production, typed_tool_result, typed_type_aware, workspace_patterns_from_param,
     },
     fallback_policy::{baseline_requested, filled, grouped_requested, type_aware_requested},
     push_baseline, push_global, push_remote_extends, push_scope, push_str_flag, run_tool,
@@ -360,7 +360,7 @@ fn health_options_from_params(
     Ok(ComplexityOptions {
         analysis: AnalysisOptions {
             production: params.production.unwrap_or(false),
-            production_override: params.production,
+            production_override: typed_production(params.production, ProductionAnalysis::Health),
             changed_since: non_empty_string(params.changed_since.as_deref()),
             workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             explain: true,

@@ -81,7 +81,12 @@ pub fn run_combined(options: &CombinedOptions) -> ProgrammaticResult<CombinedPro
     let options = &options_with_duplicates_config(options, &resolved)?;
     resolved.install(|| {
         resolved.ensure_not_cancelled("combined analysis")?;
-        let production_modes = resolve_effective_production_modes(&resolved, None, None, None)?;
+        let production_modes = resolve_effective_production_modes(
+            &resolved,
+            options.production_dead_code,
+            options.production_health,
+            options.production_dupes,
+        )?;
         let prepared = prepare_combined_options(options, production_modes);
         let changed_files = changed_files_for_run(&resolved)?;
         let sections = run_combined_sections(

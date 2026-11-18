@@ -7,10 +7,10 @@ use crate::params::{
 };
 
 use fallow_api::{
-    AnalysisOptions, DependencyUsageQuery, DuplicationOptions, SitePageRequest, TraceCloneOptions,
-    TraceCloneTarget, TraceDependencyOptions, TraceErrorOptions, TraceExportOptions,
-    TraceFileOptions, TraceImportPathOptions, run_trace_clone, run_trace_dependency,
-    run_trace_error, run_trace_export, run_trace_file, run_trace_import_path,
+    AnalysisOptions, DependencyUsageQuery, DuplicationOptions, ProductionAnalysis, SitePageRequest,
+    TraceCloneOptions, TraceCloneTarget, TraceDependencyOptions, TraceErrorOptions,
+    TraceExportOptions, TraceFileOptions, TraceImportPathOptions, run_trace_clone,
+    run_trace_dependency, run_trace_error, run_trace_export, run_trace_file, run_trace_import_path,
     serialize_trace_clone_programmatic_json, serialize_trace_dependency_programmatic_json,
     serialize_trace_error_programmatic_json, serialize_trace_export_programmatic_json,
     serialize_trace_file_programmatic_json, serialize_trace_import_path_programmatic_json,
@@ -23,7 +23,7 @@ use super::{
     api_runtime::{
         EnvScope, SharedParams, call_cancellation, json_success, programmatic_error_body,
         run_api_blocking, shared_analysis_options, shared_params, typed_api_value,
-        typed_tool_result, workspace_patterns_from_param,
+        typed_production, typed_tool_result, workspace_patterns_from_param,
     },
     duplication_mode_from_param, min_occurrences_from_param, push_global, push_remote_extends,
     push_scope, require_non_empty, run_tool, validation_error_body,
@@ -581,6 +581,7 @@ fn trace_clone_options_from_params(
     Ok(TraceCloneOptions {
         duplication: DuplicationOptions {
             analysis: AnalysisOptions {
+                production_override: typed_production(None, ProductionAnalysis::Dupes),
                 workspace: workspace_patterns_from_param(params.workspace.as_deref()),
                 // This envelope carries no `request_outcomes`, so a ref that
                 // stood down would widen the result with nothing to say so:
@@ -615,7 +616,7 @@ fn dead_code_analysis_options(
 ) -> AnalysisOptions {
     AnalysisOptions {
         production: production.unwrap_or(false),
-        production_override: production,
+        production_override: typed_production(production, ProductionAnalysis::DeadCode),
         workspace: workspace_patterns_from_param(workspace),
         ..shared_analysis_options(shared, EnvScope::HardRef, cancellation)
     }

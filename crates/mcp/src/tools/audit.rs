@@ -4,8 +4,8 @@ use std::sync::atomic::AtomicBool;
 use crate::params::AuditParams;
 
 use fallow_api::{
-    AnalysisOptions, AuditGate, AuditOptions, AuditWorsened, CoverageInputs, ProgrammaticError,
-    run_audit as run_audit_api, serialize_audit_programmatic_json,
+    AnalysisOptions, AuditGate, AuditOptions, AuditWorsened, CoverageInputs, ProductionAnalysis,
+    ProgrammaticError, run_audit as run_audit_api, serialize_audit_programmatic_json,
 };
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
@@ -15,7 +15,7 @@ use super::{
     api_runtime::{
         EnvScope, call_cancellation, non_empty_path, non_empty_string,
         resolve_typed_coverage_inputs, run_api_blocking, shared_analysis_options, shared_params,
-        typed_tool_result, typed_type_aware, workspace_patterns_from_param,
+        typed_production, typed_tool_result, typed_type_aware, workspace_patterns_from_param,
     },
     fallback_policy::{baseline_requested, filled, grouped_requested, type_aware_requested},
     push_global, push_remote_extends, push_scope, push_str_flag, run_tool, validation_error_body,
@@ -343,9 +343,18 @@ fn audit_options_from_params(
         },
         base: non_empty_string(params.base.as_deref()),
         production: params.production.unwrap_or(false),
-        production_dead_code: params.production_dead_code,
-        production_health: params.production_health,
-        production_dupes: params.production_dupes,
+        production_dead_code: typed_production(
+            params.production_dead_code.or(params.production),
+            ProductionAnalysis::DeadCode,
+        ),
+        production_health: typed_production(
+            params.production_health.or(params.production),
+            ProductionAnalysis::Health,
+        ),
+        production_dupes: typed_production(
+            params.production_dupes.or(params.production),
+            ProductionAnalysis::Dupes,
+        ),
         // The typed route runs only without `only` and `skip`, so the config
         // decides the selection.
         dead_code: None,

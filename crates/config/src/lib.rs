@@ -45,6 +45,7 @@ pub mod levenshtein;
 mod package_manager;
 #[doc(hidden)]
 pub mod permutation;
+mod production_env;
 mod rule_pack;
 mod source_walk;
 pub mod toml_input;
@@ -60,6 +61,7 @@ pub use fixability::*;
 pub use package_manager::PackageManager;
 #[doc(hidden)]
 pub use permutation::{PermutationSite, sort_permuted};
+pub use production_env::*;
 pub use rule_pack::*;
 pub use source_walk::{source_walk_builder, source_walked_workspaces};
 pub use workspace::*;

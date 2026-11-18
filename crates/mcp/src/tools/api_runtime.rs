@@ -5,8 +5,9 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use fallow_api::{
-    AUDIT_CONFIG_BASELINE_UNSUPPORTED, AnalysisOptions, CoverageInputs, ProgrammaticError,
-    TYPE_AWARE_CONFIG_UNSUPPORTED, load_health_config, resolve_coverage_inputs,
+    AUDIT_CONFIG_BASELINE_UNSUPPORTED, AnalysisOptions, CoverageInputs, ProductionAnalysis,
+    ProductionEnv, ProgrammaticError, TYPE_AWARE_CONFIG_UNSUPPORTED, load_health_config,
+    resolve_coverage_inputs,
 };
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
@@ -190,6 +191,28 @@ fn changed_since_from_lookup(lookup: impl Fn(&str) -> Option<OsString>) -> Optio
 /// hard error, and it takes precedence over this value.
 fn env_changed_since() -> Option<String> {
     changed_since_from_lookup(|name| std::env::var_os(name))
+}
+
+/// The production override of a typed route, with the precedence of the CLI
+/// route: the tool parameter, then the `FALLOW_PRODUCTION*` variable of
+/// `analysis`, then `FALLOW_PRODUCTION`. `None` lets the config decide. The
+/// typed route reads the variables here, at the adapter boundary, because
+/// `fallow_api` takes explicit options only.
+pub(super) fn typed_production(param: Option<bool>, analysis: ProductionAnalysis) -> Option<bool> {
+    production_with_env(param, ProductionEnv::from_process(), analysis)
+}
+
+/// [`typed_production`] over an injected environment, so the precedence is
+/// testable without a change to the process environment.
+const fn production_with_env(
+    param: Option<bool>,
+    env: ProductionEnv,
+    analysis: ProductionAnalysis,
+) -> Option<bool> {
+    match param {
+        Some(value) => Some(value),
+        None => env.override_for(analysis),
+    }
 }
 
 /// The settings every typed route reads from its tool params. The CLI route
@@ -654,5 +677,25 @@ mod tests {
             None
         );
         assert_eq!(changed_since_from_lookup(|_| None), None);
+    }
+
+    #[test]
+    fn typed_production_puts_the_parameter_before_the_environment() {
+        let env = ProductionEnv {
+            global: Some(true),
+            health: Some(false),
+            ..ProductionEnv::default()
+        };
+        let analysis = ProductionAnalysis::Health;
+        assert_eq!(production_with_env(Some(true), env, analysis), Some(true));
+        assert_eq!(production_with_env(None, env, analysis), Some(false));
+        assert_eq!(
+            production_with_env(None, env, ProductionAnalysis::Dupes),
+            Some(true)
+        );
+        assert_eq!(
+            production_with_env(None, ProductionEnv::default(), analysis),
+            None
+        );
     }
 }

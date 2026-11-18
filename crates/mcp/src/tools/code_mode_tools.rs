@@ -12,7 +12,7 @@ use crate::params::{
 
 use fallow_api::{
     AnalysisOptions, CombinedOptions, ComplexityOptions, CoverageInputs, DuplicationMode,
-    DuplicationOptions, run_combined, serialize_combined_programmatic_json,
+    DuplicationOptions, ProductionAnalysis, run_combined, serialize_combined_programmatic_json,
     serialize_explain_programmatic_json,
 };
 
@@ -21,7 +21,7 @@ use super::super::{
     api_runtime::{
         EnvScope, non_empty_path, non_empty_string, programmatic_error_body,
         resolve_typed_coverage_inputs, shared_analysis_options, shared_params, typed_api_value,
-        workspace_patterns_from_param,
+        typed_production, workspace_patterns_from_param,
     },
     build_analyze_args, build_architecture_args, build_audit_args, build_check_changed_args,
     build_check_runtime_coverage_args, build_explain_args, build_feature_flags_args,
@@ -592,6 +592,9 @@ fn combined_options_from_params(
     .map_err(|error| programmatic_error_body(&error))?;
     Ok(CombinedOptions {
         analysis,
+        production_dead_code: typed_production(params.production, ProductionAnalysis::DeadCode),
+        production_health: typed_production(params.production, ProductionAnalysis::Health),
+        production_dupes: typed_production(params.production, ProductionAnalysis::Dupes),
         include_entry_exports: params.include_entry_exports.unwrap_or(false),
         show_cascade: params.show_cascade.unwrap_or(false),
         duplication_options: DuplicationOptions {

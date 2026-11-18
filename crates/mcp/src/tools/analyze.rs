@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use fallow_api::{
-    AnalysisOptions, DeadCodeFilters, DeadCodeOptions, run_boundary_violations,
+    AnalysisOptions, DeadCodeFilters, DeadCodeOptions, ProductionAnalysis, run_boundary_violations,
     run_circular_dependencies, run_dead_code, serialize_boundary_violations_programmatic_json,
     serialize_circular_dependencies_programmatic_json, serialize_dead_code_programmatic_json,
 };
@@ -17,7 +17,7 @@ use super::{
     ISSUE_TYPE_FLAGS,
     api_runtime::{
         EnvScope, call_cancellation, run_api_blocking, shared_analysis_options, shared_params,
-        typed_tool_result, typed_type_aware, workspace_patterns_from_param,
+        typed_production, typed_tool_result, typed_type_aware, workspace_patterns_from_param,
     },
     fallback_policy::{
         baseline_requested, grouped_requested, regression_requested, type_aware_requested,
@@ -181,7 +181,7 @@ fn dead_code_options_from_params(
         finding_ids: params.finding_ids.clone().unwrap_or_default(),
         analysis: AnalysisOptions {
             production: params.production.unwrap_or(false),
-            production_override: params.production,
+            production_override: typed_production(params.production, ProductionAnalysis::DeadCode),
             no_package_baselines: params.no_package_baselines.unwrap_or(false),
             workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             explain: true,
