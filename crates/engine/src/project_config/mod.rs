@@ -1,11 +1,10 @@
 //! Project config resolution owned by the engine boundary.
 
-use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use fallow_config::{
-    ConfigLoadOptions, FallowConfig, ProductionAnalysis, ResolvedConfig, WorkspaceDiagnostic,
-    WorkspaceInfo,
+    ConfigLoadOptions, EnvSnapshot, EnvVar, FallowConfig, ProductionAnalysis, ResolvedConfig,
+    WorkspaceDiagnostic, WorkspaceInfo,
 };
 use fallow_types::output_format::OutputFormat;
 use fallow_types::sourced::{Given, Layer, Origin, Sourced};
@@ -257,7 +256,7 @@ pub(crate) enum DuplicationScope {
     Own {
         config: Box<FallowConfig>,
         options: ResolveOptions,
-        env: EnvLookup,
+        env: Box<EnvSnapshot>,
     },
 }
 
@@ -269,7 +268,7 @@ impl DuplicationScope {
         file: &ConfigFile,
         flags: ProductionFlags,
         options: ResolveOptions,
-        env: EnvLookup,
+        env: &EnvSnapshot,
     ) -> Self {
         let mode = |analysis| {
             if file.path.is_some() {
@@ -289,7 +288,7 @@ impl DuplicationScope {
         Self::Own {
             config: Box::new(dupes.config),
             options,
-            env,
+            env: Box::new(env.clone()),
         }
     }
 }
@@ -354,16 +353,8 @@ impl ConfigFile {
     }
 }
 
-/// Reads one environment variable. Hosts read the process environment. A test
-/// gives a fixed set of values.
-pub(crate) type EnvLookup = fn(&str) -> Option<OsString>;
-
-fn process_env(name: &str) -> Option<OsString> {
-    std::env::var_os(name)
-}
-
 fn resolve_with_env(config: FallowConfig, root: &Path, options: ResolveOptions) -> ResolvedConfig {
-    resolve_with_env_from(config, root, options, process_env)
+    resolve_with_env_from(config, root, options, &EnvSnapshot::capture())
 }
 
 /// Resolve the config for `root`, then apply the environment variables that
@@ -372,7 +363,7 @@ pub(crate) fn resolve_with_env_from(
     config: FallowConfig,
     root: &Path,
     options: ResolveOptions,
-    env: EnvLookup,
+    env: &EnvSnapshot,
 ) -> ResolvedConfig {
     let mut resolved = config.resolve(
         root.to_path_buf(),
@@ -455,7 +446,13 @@ pub fn config_for_project_with_production(
     load_options: ConfigLoadOptions,
     production: ProductionFlags,
 ) -> EngineResult<ProjectConfig> {
-    load_project_config(root, config_path, load_options, production, process_env)
+    load_project_config(
+        root,
+        config_path,
+        load_options,
+        production,
+        &EnvSnapshot::capture(),
+    )
 }
 
 /// Load a project config as [`config_for_project_with_production`] does, with
@@ -464,7 +461,7 @@ pub fn config_for_project_with_production(
 pub(crate) fn config_for_project_with_env(
     root: &Path,
     config_path: Option<&Path>,
-    env: EnvLookup,
+    env: &EnvSnapshot,
 ) -> EngineResult<ProjectConfig> {
     load_project_config(
         root,
@@ -480,7 +477,7 @@ fn load_project_config(
     config_path: Option<&Path>,
     load_options: ConfigLoadOptions,
     production: ProductionFlags,
-    env: EnvLookup,
+    env: &EnvSnapshot,
 ) -> EngineResult<ProjectConfig> {
     let file = load_config_file(
         root,
@@ -653,28 +650,28 @@ fn resolve_project_config_analysis(
 /// Apply the environment variables that every host honors. The CLI, the LSP,
 /// the MCP server and the Node bindings all load config through this module,
 /// so a variable applied here has the same meaning on each surface.
-fn apply_env_overrides_from(
-    config: &mut ResolvedConfig,
-    lookup: impl Fn(&str) -> Option<OsString>,
-) {
-    let max_file_size_mb = lookup("FALLOW_MAX_FILE_SIZE")
+fn apply_env_overrides_from(config: &mut ResolvedConfig, env: &EnvSnapshot) {
+    let max_file_size_mb = env
+        .get(EnvVar::MaxFileSize)
         .and_then(|raw| raw.to_str().and_then(|raw| raw.trim().parse::<u32>().ok()));
     if let Some(max_file_size_mb) = max_file_size_mb {
         config.max_file_size_bytes =
             fallow_config::resolve_max_file_size_bytes(Some(max_file_size_mb));
     }
-    if let Some(dir) =
-        lookup(fallow_config::CACHE_DIR_ENV).and_then(fallow_config::cache_dir_from_env_value)
+    if let Some(dir) = env
+        .get(EnvVar::CacheDir)
+        .map(std::ffi::OsStr::to_os_string)
+        .and_then(fallow_config::cache_dir_from_env_value)
     {
         config.override_cache_dir(dir);
     }
-    if let Some(mb) = lookup(fallow_config::CACHE_MAX_SIZE_ENV)
-        .as_deref()
+    if let Some(mb) = env
+        .get(EnvVar::CacheMaxSize)
         .and_then(fallow_config::cache_max_size_from_env_value)
     {
         config.cache_max_size_mb = Some(mb);
     }
-    config.apply_package_baselines_env(lookup(fallow_config::PACKAGE_BASELINES_ENV).as_deref());
+    config.apply_package_baselines_env(env.get(EnvVar::PackageBaselines));
 }
 
 pub(crate) fn collect_workspace_metadata(
@@ -761,14 +758,8 @@ fn joined_config_errors(label: &str, errors: &[impl ToString]) -> EngineError {
 mod tests {
     use super::*;
 
-    fn lookup_from(
-        vars: &'static [(&'static str, &'static str)],
-    ) -> impl Fn(&str) -> Option<OsString> {
-        move |name| {
-            vars.iter()
-                .find(|(key, _)| *key == name)
-                .map(|(_, value)| OsString::from(value))
-        }
+    fn lookup_from(vars: &[(&str, &str)]) -> EnvSnapshot {
+        EnvSnapshot::from_pairs(vars, None)
     }
 
     #[test]
@@ -778,7 +769,7 @@ mod tests {
 
         apply_env_overrides_from(
             &mut config,
-            lookup_from(&[
+            &lookup_from(&[
                 ("FALLOW_MAX_FILE_SIZE", "7"),
                 ("FALLOW_CACHE_DIR", ".cache/fallow"),
                 ("FALLOW_CACHE_MAX_SIZE", "64"),
@@ -815,7 +806,7 @@ mod tests {
                 argument,
             )
         };
-        let values: [&'static [(&'static str, &'static str)]; 5] = [
+        let values: [&[(&str, &str)]; 5] = [
             &[],
             &[("FALLOW_CACHE_MAX_SIZE", "64")],
             &[("FALLOW_CACHE_MAX_SIZE", " 8 ")],
@@ -824,12 +815,12 @@ mod tests {
         ];
         for configured in [None, Some(5)] {
             for vars in values {
-                let argument = lookup_from(vars)("FALLOW_CACHE_MAX_SIZE")
-                    .as_deref()
+                let argument = lookup_from(vars)
+                    .get(EnvVar::CacheMaxSize)
                     .and_then(fallow_config::cache_max_size_from_env_value);
                 let before = resolve(configured, argument);
                 let mut after = resolve(configured, None);
-                apply_env_overrides_from(&mut after, lookup_from(vars));
+                apply_env_overrides_from(&mut after, &lookup_from(vars));
                 assert_eq!(
                     before.cache_max_size_mb, after.cache_max_size_mb,
                     "{configured:?} {vars:?}"
@@ -847,7 +838,7 @@ mod tests {
 
         apply_env_overrides_from(
             &mut config,
-            lookup_from(&[("FALLOW_CACHE_DIR", ""), ("FALLOW_CACHE_MAX_SIZE", "0")]),
+            &lookup_from(&[("FALLOW_CACHE_DIR", ""), ("FALLOW_CACHE_MAX_SIZE", "0")]),
         );
 
         assert_eq!(config.cache_dir, before_dir);
@@ -868,19 +859,16 @@ mod tests {
         let mut disabled = with_map();
         apply_env_overrides_from(
             &mut disabled,
-            lookup_from(&[("FALLOW_PACKAGE_BASELINES", " Off ")]),
+            &lookup_from(&[("FALLOW_PACKAGE_BASELINES", " Off ")]),
         );
         assert!(disabled.workspace_changed_since.is_empty());
 
         for value in ["true", "1", "maybe", ""] {
             let mut kept = with_map();
-            let vars: &'static [(&'static str, &'static str)] = match value {
-                "true" => &[("FALLOW_PACKAGE_BASELINES", "true")],
-                "1" => &[("FALLOW_PACKAGE_BASELINES", "1")],
-                "maybe" => &[("FALLOW_PACKAGE_BASELINES", "maybe")],
-                _ => &[("FALLOW_PACKAGE_BASELINES", "")],
-            };
-            apply_env_overrides_from(&mut kept, lookup_from(vars));
+            apply_env_overrides_from(
+                &mut kept,
+                &lookup_from(&[("FALLOW_PACKAGE_BASELINES", value)]),
+            );
             assert_eq!(kept.workspace_changed_since.len(), 1, "{value:?}");
         }
     }

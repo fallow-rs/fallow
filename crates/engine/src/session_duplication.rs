@@ -60,7 +60,7 @@ impl AnalysisSession {
         };
         self.duplication.files.get_or_init(|| {
             let resolved = self.duplication.config.get_or_init(|| {
-                resolve_with_env_from((**config).clone(), &self.config.root, *options, *env)
+                resolve_with_env_from((**config).clone(), &self.config.root, *options, env)
             });
             crate::discover::prepare_analysis_discovery_with_workspaces(
                 resolved,

@@ -58,9 +58,13 @@ windows-sys = { workspace = true }
 
 [features]
 codspeed = []
+# Test constructors of the resolved run for the tests of this crate and of
+# other crates. Release builds leave it off.
+testing = ["fallow-config/testing"]
 schema = ["fallow-output/schema", "fallow-types/schema"]
 
 [dev-dependencies]
+fallow-engine = { path = ".", features = ["testing"] }
 fallow-graph = { workspace = true, features = ["read-trace"] }
 criterion = { workspace = true }
 insta = { workspace = true }
