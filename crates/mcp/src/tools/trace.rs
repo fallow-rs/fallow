@@ -476,7 +476,7 @@ fn trace_import_path_options_from_params(
     require_non_empty("from", &params.from).map_err(validation_error_body)?;
     require_non_empty("to", &params.to).map_err(validation_error_body)?;
     Ok(TraceImportPathOptions {
-        analysis: dead_code_analysis_options(
+        analysis: parameter_production_analysis_options(
             shared_params!(params),
             params.production,
             params.workspace.as_deref(),
@@ -510,7 +510,7 @@ fn trace_error_options_from_params(
         .filter(|source| !source.is_empty())
         .unwrap_or(MCP_TRACE_SOURCE);
     TraceErrorOptions {
-        analysis: dead_code_analysis_options(
+        analysis: parameter_production_analysis_options(
             shared_params!(params),
             params.production,
             params.workspace.as_deref(),
@@ -619,6 +619,22 @@ fn dead_code_analysis_options(
         production_override: typed_production(production, ProductionAnalysis::DeadCode),
         workspace: workspace_patterns_from_param(workspace),
         ..shared_analysis_options(shared, EnvScope::HardRef, cancellation)
+    }
+}
+
+/// The analysis options of `trace_import_path` and `trace_error`. Their CLI
+/// commands, `fallow trace --path` and `fallow trace-error`, read no
+/// `FALLOW_PRODUCTION*` variable, so only the tool parameter overrides the
+/// production mode of the config.
+fn parameter_production_analysis_options(
+    shared: SharedParams<'_>,
+    production: Option<bool>,
+    workspace: Option<&str>,
+    cancellation: Option<Arc<AtomicBool>>,
+) -> AnalysisOptions {
+    AnalysisOptions {
+        production_override: production,
+        ..dead_code_analysis_options(shared, production, workspace, cancellation)
     }
 }
 

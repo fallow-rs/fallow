@@ -183,7 +183,11 @@ fn run_combined_with_dead_code_session(
     share_dupes: bool,
 ) -> ProgrammaticResult<CombinedSectionRun> {
     resolved.ensure_not_cancelled("config load and file discovery")?;
-    let session = super::dead_code::load_dead_code_session(&prepared.dead_code, resolved)?;
+    let session = super::dead_code::load_dead_code_session_in_mode(
+        &prepared.dead_code,
+        resolved,
+        prepared.dead_code.analysis.production_override,
+    )?;
     super::dead_code::resolve_package_map_before_analysis(resolved, &session)?;
     if share_dupes {
         return run_combined_with_project_artifacts(CombinedProjectArtifactRun {

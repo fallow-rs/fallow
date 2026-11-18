@@ -513,7 +513,11 @@ the cancellation flag. A tool sets only its own fields on top. A tool whose
 CLI route honors the `FALLOW_PRODUCTION*` variables sets its production
 override with `api_runtime::typed_production`: the tool parameter, then the
 variable of the analysis, then `FALLOW_PRODUCTION`. The CLI parses the
-variables with the same `fallow_config::ProductionEnv`. `audit` and the Code
+variables with the same `fallow_config::ProductionEnv`. `list_boundaries`
+keeps only an override that is on, because `fallow list` turns production
+mode on from the variables and never off. `trace_import_path` and
+`trace_error` take the tool parameter only, because `fallow trace --path` and
+`fallow trace-error` read no variable. `audit` and the Code
 Mode `combined` route set one override per analysis
 (`AuditOptions::production_*`, `CombinedOptions::production_*`).
 `fallow_api` itself does not read the variables.

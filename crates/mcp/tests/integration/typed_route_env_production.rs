@@ -106,6 +106,9 @@ fn analyze_routes_read_the_variable_of_the_analysis_before_the_global_one() {
     assert_eq!(typed, cli, "the typed route gives the same precedence");
 }
 
+/// An ordering guard, not a regression test: a typed route that reads no
+/// variable also passes. It fails when a route puts the variable before the
+/// tool parameter.
 #[test]
 fn analyze_routes_let_the_tool_parameter_win_over_the_environment() {
     let [typed, cli] = both_routes(

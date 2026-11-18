@@ -14,6 +14,7 @@ mod audit_config_patterns;
 mod audit_config_section;
 mod capability_parity;
 mod combined_duplicates_enabled;
+mod combined_production_overrides;
 mod config_load_errors;
 mod config_type_aware;
 mod dead_code_baseline;
