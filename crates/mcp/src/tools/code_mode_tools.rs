@@ -992,6 +992,46 @@ mod tests {
         assert_eq!(file_finding["max_file_lines"], 3);
     }
 
+    /// An enabled `coverage-gaps` rule reports coverage gaps on the
+    /// in-process route, as it does on bare `fallow`. Without the rule the
+    /// section stays out.
+    #[test]
+    fn combined_reports_coverage_gaps_that_the_config_turns_on() {
+        let project = tempfile::tempdir().expect("project");
+        std::fs::write(
+            project.path().join("package.json"),
+            r#"{"name":"fixture","main":"index.ts"}"#,
+        )
+        .expect("write package");
+        std::fs::write(project.path().join("index.ts"), "export const a = 1;\n")
+            .expect("write source");
+        std::fs::write(
+            project.path().join(".fallowrc.json"),
+            r#"{"rules":{"coverage-gaps":"error"}}"#,
+        )
+        .expect("write config");
+        let params = CombinedParams {
+            root: Some(project.path().display().to_string()),
+            no_cache: Some(true),
+            ..CombinedParams::default()
+        };
+
+        let run = || {
+            run_combined_api_value(&params, None)
+                .expect("combined run")
+                .expect("in-process result")
+        };
+        let json = run();
+        assert_eq!(
+            json["health"]["coverage_gaps"]["summary"]["untested_files"], 1,
+            "{json}"
+        );
+
+        std::fs::write(project.path().join(".fallowrc.json"), "{}").expect("write config");
+        let json = run();
+        assert!(json["health"].get("coverage_gaps").is_none(), "{json}");
+    }
+
     /// Bare `fallow` runs type-aware analysis when the config turns it on.
     /// The in-process route declines the call, so Code Mode runs the
     /// subprocess.

@@ -377,6 +377,7 @@ fn health_options_from_params(
         complexity: params.complexity.unwrap_or(false),
         file_scores: params.file_scores.unwrap_or(false),
         coverage_gaps: params.coverage_gaps.unwrap_or(false),
+        config_activates_coverage_gaps: false,
         hotspots: params.hotspots.unwrap_or(false),
         ownership: params.ownership.unwrap_or(false),
         ownership_emails: params

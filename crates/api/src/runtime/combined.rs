@@ -479,6 +479,7 @@ fn duplication_options_preserve_health_config(options: &DuplicationOptions) -> b
 fn combined_health_options(options: &CombinedOptions, production: bool) -> ComplexityOptions {
     let mut health = options.health_options.clone();
     health.analysis = analysis_with_effective_production(&options.analysis, production);
+    health.config_activates_coverage_gaps = true;
     health
 }
 
