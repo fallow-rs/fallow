@@ -16,6 +16,8 @@ mod env_policy;
 mod pick;
 mod resolve;
 pub mod steps;
+#[cfg(any(test, feature = "testing"))]
+mod testing;
 mod view;
 
 use std::path::{Path, PathBuf};

@@ -144,6 +144,33 @@ fn given_value<T: Clone>(given: &Given<T>, scope: Scope) -> Sourced<T> {
 /// Returns a [`ResolveError`] for an invalid input, a config error, a
 /// workspace error, or a run that selects no analysis.
 pub fn resolve_run(inputs: &RunInputs) -> Result<ResolvedRun, ResolveError> {
+    resolve_with(inputs, FileSource::Load)
+}
+
+/// Resolve the raw inputs of one run with `config` in place of a config file.
+/// The config is validated, and the run has no config file.
+///
+/// # Errors
+///
+/// Returns a [`ResolveError`] as [`resolve_run`] does.
+#[cfg(any(test, feature = "testing"))]
+pub fn resolve_run_inline(
+    inputs: &RunInputs,
+    config: FallowConfig,
+) -> Result<ResolvedRun, ResolveError> {
+    resolve_with(inputs, FileSource::Inline(Box::new(config)))
+}
+
+/// Where the config of a run comes from.
+enum FileSource {
+    /// The config file at the explicit path, else the discovered file, else
+    /// the defaults.
+    Load,
+    /// A config that the caller built.
+    Inline(Box<FallowConfig>),
+}
+
+fn resolve_with(inputs: &RunInputs, source: FileSource) -> Result<ResolvedRun, ResolveError> {
     let surface = inputs.surface();
     let (env, env_read, env_ignored) = split_env(inputs.env(), surface, inputs.command);
     if inputs
@@ -164,7 +191,11 @@ pub fn resolve_run(inputs: &RunInputs) -> Result<ResolvedRun, ResolveError> {
         env: &env,
         root: root.value(),
     };
-    let loaded = match ctx.load(config_path.as_ref()) {
+    let loaded = match source {
+        FileSource::Load => ctx.load(config_path.as_ref()),
+        FileSource::Inline(config) => ctx.inline(*config),
+    };
+    let loaded = match loaded {
         Ok(loaded) => loaded,
         Err(err) if err.is_config_error() && ctx.falls_back(config_path.as_ref()) => {
             tracing::debug!("config fell back to the defaults: {}", err.message());
@@ -335,6 +366,22 @@ impl Context<'_> {
             ),
             (_, None) => Sourced::new(None, Source::Default { rule: "no-config" }, Scope::Global),
         };
+        self.decide(config, config_file, false)
+    }
+
+    /// The steps of [`Self::load`] with a config that the caller built.
+    fn inline(&self, config: FallowConfig) -> Result<Loaded, ResolveError> {
+        steps::validate_config(self.root, &config).map_err(|err| ResolveError::ConfigInvalid {
+            file: None,
+            message: err.to_string(),
+        })?;
+        let config_file = Sourced::new(
+            None,
+            Source::Derived {
+                from: "inline-config",
+            },
+            Scope::Global,
+        );
         self.decide(config, config_file, false)
     }
 
