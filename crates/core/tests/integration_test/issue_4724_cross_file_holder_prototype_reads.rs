@@ -80,3 +80,16 @@ fn computed_key_read_of_an_exported_holder_in_the_same_file() {
         "unusedStrictHelper is not read, so it stays unused. Got: {members:?}"
     );
 }
+
+#[test]
+fn holder_value_through_a_namespace_import_is_credited() {
+    let members = unused_member_names();
+    assert!(
+        !members.iter().any(|m| m == "CsvFormat.delimiter"),
+        "the holder value all.CsvFormat is read through formats.csv.prototype. Got: {members:?}"
+    );
+    assert!(
+        members.iter().any(|m| m == "CsvFormat.unusedCsvHelper"),
+        "unusedCsvHelper is not read, so it stays unused. Got: {members:?}"
+    );
+}

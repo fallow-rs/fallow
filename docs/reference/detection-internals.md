@@ -203,9 +203,12 @@ error by suppressing a downstream detector.
   `[].prototype.member` on the import (a static or string-literal key keeps
   its key). After the direct accesses of all modules are collected, the
   member pass follows one hop: from the holder export, also behind
-  re-exports, to the class under each key that the read selects. The pass
-  does not follow objects built at runtime, spreads, or values passed
-  through function calls. The superclass call of
+  re-exports, to the class under each key that the read selects. A value
+  can also be an export of a namespace import (`{ csv: formats.Csv }`). The
+  pass does not follow objects built at runtime, spreads, or values passed
+  through function calls. A key that contains `.` is not followed. A
+  string-literal key `'[]'` has the path of the any-key read, so a read
+  through it selects each class of the holder. The superclass call of
   `class Sub extends mixin(Base)` is not an escape. A class field alias (`levels = Level`) is an
   escape for a namespace but not for an enum: the fact carries
   `class_field`, and the visitor follows the reads of the field through

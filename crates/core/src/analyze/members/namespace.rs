@@ -142,7 +142,8 @@ pub(super) fn class_member_credited_by_value_use(
 /// that the namespace credit recorded on the export of a holder.
 struct HolderRead<'a> {
     /// The key, or [`NamespaceMemberUseFact::ANY_KEY`] for a computed key
-    /// that can select each value.
+    /// that can select each value. A string-literal key `'[]'` reads as
+    /// [`NamespaceMemberUseFact::ANY_KEY`] too.
     key: &'a str,
     member: &'a str,
 }
@@ -177,14 +178,14 @@ pub(super) fn credit_holder_prototype_reads(
     indexes: &MemberPassIndexes<'_>,
     accessed_members: &mut FxHashMap<ExportKey, FxHashSet<String>>,
 ) {
-    let holder_facts: Vec<(FileId, &HolderValueFact)> = resolved_modules
+    let holder_facts: Vec<(&ResolvedModule, &HolderValueFact)> = resolved_modules
         .iter()
         .flat_map(|resolved| {
             resolved
                 .semantic_facts
                 .iter()
                 .filter_map(move |fact| match fact {
-                    SemanticFact::HolderValue(holder) => Some((resolved.file_id, holder.as_ref())),
+                    SemanticFact::HolderValue(holder) => Some((resolved, holder.as_ref())),
                     _ => None,
                 })
         })
@@ -194,7 +195,7 @@ pub(super) fn credit_holder_prototype_reads(
     }
     let holder_keys: FxHashSet<ExportKey> = holder_facts
         .iter()
-        .map(|(file_id, fact)| ExportKey::new(*file_id, fact.export_name.clone()))
+        .map(|(resolved, fact)| ExportKey::new(resolved.file_id, fact.export_name.clone()))
         .collect();
 
     // A consumer can import the holder through a re-export, so the read can
@@ -219,8 +220,9 @@ pub(super) fn credit_holder_prototype_reads(
         }
     }
 
-    for (file_id, fact) in holder_facts {
-        let Some(reads) = reads_by_holder.get(&ExportKey::new(file_id, fact.export_name.clone()))
+    for (resolved, fact) in holder_facts {
+        let Some(reads) =
+            reads_by_holder.get(&ExportKey::new(resolved.file_id, fact.export_name.clone()))
         else {
             continue;
         };
@@ -232,25 +234,57 @@ pub(super) fn credit_holder_prototype_reads(
         if members.is_empty() {
             continue;
         }
-        let Some(value_keys) = indexes.local_keys(file_id).get(fact.object.as_str()) else {
-            continue;
-        };
-        let value_keys: Vec<ExportKey> = value_keys
-            .iter()
-            .flat_map(|key| export_key_with_origins(graph, key))
-            .collect();
-        for value_key in value_keys {
+        for (value_key, path) in holder_value_targets(graph, resolved, indexes, fact) {
             let credited = accessed_members.entry(value_key).or_default();
             for member in &members {
                 let read = format!("{PROTOTYPE_SEGMENT}.{member}");
-                credited.insert(if fact.path.is_empty() {
+                credited.insert(if path.is_empty() {
                     read
                 } else {
-                    format!("{}.{read}", fact.path)
+                    format!("{path}.{read}")
                 });
             }
         }
     }
+}
+
+/// The export keys of the value of a holder, each with the member path that
+/// remains below the export: the binding itself (`{ ws: Socket }`), or an
+/// export of a namespace import (`{ ws: ns.Socket }`). Re-exports resolve to
+/// their origins.
+fn holder_value_targets<'f>(
+    graph: &ModuleGraph,
+    resolved: &ResolvedModule,
+    indexes: &MemberPassIndexes<'_>,
+    fact: &'f HolderValueFact,
+) -> Vec<(ExportKey, &'f str)> {
+    let direct: Vec<(ExportKey, &str)> = if let Some(keys) = indexes
+        .local_keys(resolved.file_id)
+        .get(fact.object.as_str())
+    {
+        keys.iter()
+            .map(|key| (key.clone(), fact.path.as_str()))
+            .collect()
+    } else {
+        let (export_name, rest) = fact
+            .path
+            .split_once('.')
+            .unwrap_or((fact.path.as_str(), ""));
+        if export_name.is_empty() {
+            return Vec::new();
+        }
+        namespace_import_targets(resolved, &fact.object)
+            .map(|file_id| (ExportKey::new(file_id, export_name.to_string()), rest))
+            .collect()
+    };
+    direct
+        .into_iter()
+        .flat_map(|(key, path)| {
+            export_key_with_origins(graph, &key)
+                .into_iter()
+                .map(move |origin| (origin, path))
+        })
+        .collect()
 }
 
 /// Project files that an inline import type `import("./x").N.a` names. The

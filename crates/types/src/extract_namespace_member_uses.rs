@@ -24,7 +24,9 @@ impl NamespaceMemberUseFact {
     /// The path segment of a holder read with a computed key that is not a
     /// string literal: `holder[name].prototype.member` gives the path
     /// `[].prototype.member`. Such a key can select each value of the
-    /// holder. An identifier cannot contain `[`, so no key has this name.
+    /// holder. An identifier cannot contain `[`, so no identifier key has
+    /// this name. A string-literal key `'[]'` gives the same path, so a read
+    /// through it selects each value too.
     pub const ANY_KEY: &'static str = "[]";
 
     /// The `object` of a use through the inline import type
