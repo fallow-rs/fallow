@@ -71,6 +71,7 @@ pub enum Source {
     /// chain, because the merge of the chain keeps no file per key.
     ConfigFile {
         /// The top config file.
+        #[serde(serialize_with = "crate::serde_path::serialize")]
         file: PathBuf,
         /// The config key, for example `production.deadCode`.
         key: &'static str,
