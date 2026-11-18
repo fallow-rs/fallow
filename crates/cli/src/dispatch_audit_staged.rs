@@ -16,7 +16,10 @@ pub(super) fn dispatch_staged_audit(
             output,
         );
     }
-    let tree = match audit::staged::StagedTree::create(dispatch.root) {
+    let tree = match audit::staged::StagedTree::create(
+        dispatch.root,
+        crate::runtime_support::ConfigFlags::from_cli(dispatch.cli),
+    ) {
         Ok(tree) => tree,
         Err(message) => return emit_input_error(&message, output),
     };

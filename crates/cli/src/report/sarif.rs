@@ -7,7 +7,6 @@ use serde::Deserialize;
 use fallow_config::RulesConfig;
 #[cfg(test)]
 use fallow_config::Severity;
-use fallow_engine::project_config::ConfigFileOptions;
 use fallow_output::{
     SarifDocumentInput, SarifResultInput, SarifRuleInput, build_sarif_document, build_sarif_result,
     build_sarif_rule,
@@ -20,7 +19,7 @@ use super::github::{AnnotationLevel, resolve_render_options};
 use super::github_annotations::{EnvelopeKind, collect_annotations};
 use super::grouping::{self, OwnershipResolver};
 use crate::explain;
-use crate::runtime_support::loaded_config;
+use crate::runtime_support::ConfigFlags;
 
 /// Build a SARIF rule definition with optional `fullDescription` and `helpUri`
 /// sourced from the centralized explain module.
@@ -227,12 +226,12 @@ pub fn print_envelope_sarif_with_config(
     kind: EnvelopeKind,
     envelope: &serde_json::Value,
     root: &Path,
-    config_path: Option<&Path>,
+    report_config: ConfigFlags<'_>,
     resolver: Option<&OwnershipResolver>,
     quiet: bool,
 ) -> ExitCode {
-    let sarif = envelope_sarif_document_with_context(kind, envelope, root, config_path, resolver);
-    if !quiet && !saved_report_config_found(root, config_path) {
+    let sarif = envelope_sarif_document_with_context(kind, envelope, root, report_config, resolver);
+    if !quiet && !saved_report_config_found(root, report_config) {
         note_default_rule_levels(&sarif, root);
     }
     emit_json(&sarif, "SARIF")
@@ -293,7 +292,7 @@ fn envelope_sarif_document(
     envelope: &serde_json::Value,
     root: &Path,
 ) -> serde_json::Value {
-    envelope_sarif_document_with_config(kind, envelope, root, None)
+    envelope_sarif_document_with_config(kind, envelope, root, ConfigFlags::default())
 }
 
 #[cfg(test)]
@@ -301,20 +300,20 @@ fn envelope_sarif_document_with_config(
     kind: EnvelopeKind,
     envelope: &serde_json::Value,
     root: &Path,
-    config_path: Option<&Path>,
+    report_config: ConfigFlags<'_>,
 ) -> serde_json::Value {
-    envelope_sarif_document_with_context(kind, envelope, root, config_path, None)
+    envelope_sarif_document_with_context(kind, envelope, root, report_config, None)
 }
 
 fn envelope_sarif_document_with_context(
     kind: EnvelopeKind,
     envelope: &serde_json::Value,
     root: &Path,
-    config_path: Option<&Path>,
+    report_config: ConfigFlags<'_>,
     resolver: Option<&OwnershipResolver>,
 ) -> serde_json::Value {
     if let Some(results) = saved_dead_code_results(kind, envelope) {
-        let rules = saved_report_rules(root, config_path);
+        let rules = saved_report_rules(root, report_config);
         let mut sarif = api_sarif_document(&results, root, &rules);
         if let Some(type_aware) = envelope_type_aware(envelope) {
             annotate_type_aware_sarif_value(&mut sarif, type_aware);
@@ -350,13 +349,13 @@ fn envelope_sarif_document_with_context(
         return sarif;
     }
     if kind == EnvelopeKind::Audit
-        && let Some(mut sarif) = saved_audit_sarif(envelope, root, config_path)
+        && let Some(mut sarif) = saved_audit_sarif(envelope, root, report_config)
     {
         annotate_saved_sarif_grouping(&mut sarif, kind, resolver);
         return sarif;
     }
     if kind == EnvelopeKind::Combined
-        && let Some(mut sarif) = saved_combined_sarif(envelope, root, config_path)
+        && let Some(mut sarif) = saved_combined_sarif(envelope, root, report_config)
     {
         annotate_saved_sarif_grouping(&mut sarif, kind, resolver);
         return sarif;
@@ -367,7 +366,7 @@ fn envelope_sarif_document_with_context(
         return sarif;
     }
 
-    let mut sarif = annotation_sarif_document(kind, envelope, root, config_path);
+    let mut sarif = annotation_sarif_document(kind, envelope, root, report_config);
     annotate_saved_sarif_grouping(&mut sarif, kind, resolver);
     sarif
 }
@@ -385,11 +384,11 @@ fn annotation_sarif_document(
     kind: EnvelopeKind,
     envelope: &serde_json::Value,
     root: &Path,
-    config_path: Option<&Path>,
+    report_config: ConfigFlags<'_>,
 ) -> serde_json::Value {
     let options = resolve_render_options(root);
     let annotations = collect_annotations(kind, envelope, options.pm);
-    let mut sarif = envelope_sarif_base_with_config(kind, root, config_path);
+    let mut sarif = envelope_sarif_base_with_config(kind, root, report_config);
     let rule_order = sarif_rule_ids(&sarif);
     let mut rules = sarif_rules_by_id(&sarif);
     let mut results = Vec::with_capacity(annotations.len());
@@ -478,9 +477,9 @@ fn annotation_sarif_document(
 fn saved_audit_sarif(
     envelope: &serde_json::Value,
     root: &Path,
-    config_path: Option<&Path>,
+    report_config: ConfigFlags<'_>,
 ) -> Option<serde_json::Value> {
-    let rules = saved_report_rules(root, config_path);
+    let rules = saved_report_rules(root, report_config);
     let mut dead_code = parse_optional_section::<AnalysisResults>(envelope, "/dead_code")
         .ok()?
         .map(|results| api_sarif_document(&results, root, &rules));
@@ -520,9 +519,9 @@ fn saved_audit_sarif(
 fn saved_combined_sarif(
     envelope: &serde_json::Value,
     root: &Path,
-    config_path: Option<&Path>,
+    report_config: ConfigFlags<'_>,
 ) -> Option<serde_json::Value> {
-    let rules = saved_report_rules(root, config_path);
+    let rules = saved_report_rules(root, report_config);
     let dead_code = parse_optional_section::<AnalysisResults>(envelope, "/check").ok()?;
     let duplication = parse_optional_section::<DuplicationReport>(envelope, "/dupes").ok()?;
     let health = match envelope.pointer("/health") {
@@ -622,10 +621,10 @@ pub(super) fn envelope_rule_level_with_config(
     kind: EnvelopeKind,
     title: &str,
     root: &Path,
-    config_path: Option<&Path>,
+    report_config: ConfigFlags<'_>,
 ) -> Option<String> {
     let rule_id = native_rule_id(title);
-    envelope_sarif_base_with_config(kind, root, config_path)
+    envelope_sarif_base_with_config(kind, root, report_config)
         .pointer("/runs/0/tool/driver/rules")
         .and_then(serde_json::Value::as_array)
         .into_iter()
@@ -653,10 +652,8 @@ fn saved_dead_code_results(
 }
 
 /// Whether `report --from` finds a config for the rules it falls back to.
-pub(super) fn saved_report_config_found(root: &Path, config_path: Option<&Path>) -> bool {
-    config_path
-        .is_some_and(|path| loaded_config(root, Some(path), ConfigFileOptions::default()).is_some())
-        || loaded_config(root, None, ConfigFileOptions::default()).is_some()
+pub(super) fn saved_report_config_found(root: &Path, report_config: ConfigFlags<'_>) -> bool {
+    report_config.explicit(root).is_some() || report_config.discovered(root).is_some()
 }
 
 /// Say on stderr when saved dead-code findings without a severity take their
@@ -669,7 +666,7 @@ pub fn note_saved_severity_fallback(
     kind: EnvelopeKind,
     envelope: &serde_json::Value,
     root: &Path,
-    config_path: Option<&Path>,
+    report_config: ConfigFlags<'_>,
 ) {
     let section = match kind {
         EnvelopeKind::DeadCode | EnvelopeKind::Architecture => Some(envelope),
@@ -683,7 +680,7 @@ pub fn note_saved_severity_fallback(
         return;
     };
     let missing = fallow_engine::dead_code::findings_without_severity(results);
-    if missing == 0 || saved_report_config_found(root, config_path) {
+    if missing == 0 || saved_report_config_found(root, report_config) {
         return;
     }
     let (noun, verb) = if missing == 1 {
@@ -699,10 +696,10 @@ pub fn note_saved_severity_fallback(
     );
 }
 
-pub(super) fn saved_report_rules(root: &Path, config_path: Option<&Path>) -> RulesConfig {
-    config_path
-        .and_then(|path| loaded_config(root, Some(path), ConfigFileOptions::default()))
-        .or_else(|| loaded_config(root, None, ConfigFileOptions::default()))
+pub(super) fn saved_report_rules(root: &Path, report_config: ConfigFlags<'_>) -> RulesConfig {
+    report_config
+        .explicit(root)
+        .or_else(|| report_config.discovered(root))
         .map(|config| config.rules)
         .unwrap_or_default()
 }
@@ -710,9 +707,9 @@ pub(super) fn saved_report_rules(root: &Path, config_path: Option<&Path>) -> Rul
 fn envelope_sarif_base_with_config(
     kind: EnvelopeKind,
     root: &Path,
-    config_path: Option<&Path>,
+    report_config: ConfigFlags<'_>,
 ) -> serde_json::Value {
-    let rules = saved_report_rules(root, config_path);
+    let rules = saved_report_rules(root, report_config);
     match kind {
         EnvelopeKind::DeadCode | EnvelopeKind::Architecture => {
             api_sarif_document(&AnalysisResults::default(), root, &rules)
@@ -1215,7 +1212,10 @@ mod tests {
             EnvelopeKind::DeadCode,
             &envelope,
             root.path(),
-            Some(&explicit),
+            ConfigFlags {
+                path: Some(&explicit),
+                ..ConfigFlags::default()
+            },
         );
 
         assert_eq!(saved["runs"][0]["results"][0]["level"], "error");
@@ -1245,7 +1245,12 @@ mod tests {
         let without_source = tempfile::tempdir().expect("root");
 
         let first = |root: &Path| {
-            let sarif = annotation_sarif_document(EnvelopeKind::Dupes, &envelope, root, None);
+            let sarif = annotation_sarif_document(
+                EnvelopeKind::Dupes,
+                &envelope,
+                root,
+                ConfigFlags::default(),
+            );
             let result = sarif["runs"][0]["results"]
                 .as_array()
                 .and_then(|results| {
@@ -1318,7 +1323,8 @@ mod tests {
             (EnvelopeKind::Combined, serde_json::json!({"check": false})),
             (EnvelopeKind::Combined, serde_json::json!({"dupes": false})),
         ] {
-            let expected = annotation_sarif_document(kind, &envelope, root.path(), None);
+            let expected =
+                annotation_sarif_document(kind, &envelope, root.path(), ConfigFlags::default());
             assert_eq!(
                 envelope_sarif_document(kind, &envelope, root.path()),
                 expected
@@ -1335,7 +1341,7 @@ mod tests {
         });
         // The native renderer must keep the valid sections. Before, a bad
         // diff-risk section made it give up on the whole saved report.
-        let sarif = saved_audit_sarif(&envelope, root.path(), None)
+        let sarif = saved_audit_sarif(&envelope, root.path(), ConfigFlags::default())
             .expect("a malformed diff-risk section must not drop the saved report");
         let runs = sarif["runs"].as_array().expect("SARIF runs");
         assert_eq!(runs.len(), 1, "only the dead-code run remains: {sarif}");

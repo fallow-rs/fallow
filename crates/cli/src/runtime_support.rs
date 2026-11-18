@@ -402,6 +402,52 @@ pub fn config_load_error_message(err: &ConfigLoadError) -> String {
     }
 }
 
+/// The config inputs of a command line: the `--config` path and the trust
+/// policy of `--allow-remote-extends`. A command that reads optional settings
+/// passes both to each config load, so every load reads the same file with
+/// the same policy.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ConfigFlags<'a> {
+    /// The `--config` path. `None` lets discovery find the config.
+    pub path: Option<&'a Path>,
+    /// Permit `https://` entries in the `extends` chain.
+    pub allow_remote_extends: bool,
+}
+
+impl ConfigFlags<'_> {
+    /// The load options of these flags.
+    #[must_use]
+    pub const fn file_options(self) -> ConfigFileOptions {
+        ConfigFileOptions {
+            allow_remote_extends: self.allow_remote_extends,
+        }
+    }
+
+    /// The `--config` file, when it loads.
+    #[must_use]
+    pub fn explicit(self, root: &Path) -> Option<FallowConfig> {
+        self.path
+            .and_then(|path| loaded_config(root, Some(path), self.file_options()))
+    }
+
+    /// The config that discovery finds from `root`, when it loads.
+    #[must_use]
+    pub fn discovered(self, root: &Path) -> Option<FallowConfig> {
+        loaded_config(root, None, self.file_options())
+    }
+}
+
+impl<'a> ConfigFlags<'a> {
+    /// The config flags of `cli`.
+    #[must_use]
+    pub fn from_cli(cli: &'a crate::cli_args::Cli) -> Self {
+        Self {
+            path: cli.config.as_deref(),
+            allow_remote_extends: cli.allow_remote_extends,
+        }
+    }
+}
+
 /// The config file at `config_path`, else the discovered config file. `None`
 /// when the file does not load or when no file exists. A caller that reads
 /// one optional setting uses this, so a broken config never stops it.
@@ -493,6 +539,35 @@ fn partial_rules_config_has_values(rules: &PartialRulesConfig) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn config_flags_read_the_explicit_file_and_keep_the_discovered_file_apart() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        std::fs::create_dir(root.join(".git")).expect("git marker");
+        std::fs::write(
+            root.join(".fallowrc.json"),
+            r#"{"entry":["discovered.ts"]}"#,
+        )
+        .expect("discovered config");
+        let explicit = root.join("ci.json");
+        std::fs::write(&explicit, r#"{"entry":["explicit.ts"]}"#).expect("explicit config");
+        let flags = ConfigFlags {
+            path: Some(&explicit),
+            allow_remote_extends: true,
+        };
+
+        assert!(flags.file_options().allow_remote_extends);
+        assert_eq!(
+            flags.explicit(root).expect("explicit").entry,
+            ["explicit.ts"]
+        );
+        assert_eq!(
+            flags.discovered(root).expect("discovered").entry,
+            ["discovered.ts"]
+        );
+        assert!(ConfigFlags::default().explicit(root).is_none());
+    }
 
     #[test]
     fn find_unknown_security_categories_flags_typos_with_suggestion() {

@@ -30,12 +30,10 @@ const NOTE: &str = "path_exists reports whether a file matches the seeded glob o
     gitignored and wrong-extension files).";
 
 /// Run the `plugin-check` command.
-pub fn run_plugin_check(
-    root: &Path,
-    output: OutputFormat,
-    json_style: crate::json_style::JsonStyle,
-) -> ExitCode {
-    let doc = match build_plugin_check_doc(root) {
+pub fn run_plugin_check(dispatch: &crate::DispatchContext<'_>) -> ExitCode {
+    let (output, json_style) = (dispatch.output, dispatch.json_style);
+    let config = crate::runtime_support::ConfigFlags::from_cli(dispatch.cli);
+    let doc = match build_plugin_check_doc(dispatch.root, config) {
         Ok(doc) => doc,
         Err(e) => return emit_input_error(&e, output),
     };
@@ -64,14 +62,23 @@ fn render_plugin_check_json(
 }
 
 /// Build the `plugin-check` JSON document (pure, no output side effects).
-fn build_plugin_check_doc(root: &Path) -> Result<Value, String> {
+fn build_plugin_check_doc(
+    root: &Path,
+    config: crate::runtime_support::ConfigFlags<'_>,
+) -> Result<Value, String> {
     // Canonicalize so a `..`-relative root does not make every seeded entry fail
     // the under-root check (main.rs already canonicalizes `--root`, but a
     // programmatic caller might not).
     let canonical = dunce::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let root = canonical.as_path();
-    let project = fallow_engine::project_config::config_for_project(root, None)
-        .map_err(|e| format!("failed to load config: {e}"))?;
+    let project = fallow_engine::project_config::config_for_project_with_load_options(
+        root,
+        config.path,
+        fallow_config::ConfigLoadOptions {
+            allow_remote_extends: config.allow_remote_extends,
+        },
+    )
+    .map_err(|e| format!("failed to load config: {e}"))?;
     let external = &project.config.external_plugins;
 
     // Activation needs the project's dependency set; the manifest walk and
@@ -563,7 +570,11 @@ mod tests {
 
     #[test]
     fn doc_reports_active_manifest_plugin_seeded_entries() {
-        let doc = build_plugin_check_doc(&manifest_fixture()).expect("build doc");
+        let doc = build_plugin_check_doc(
+            &manifest_fixture(),
+            crate::runtime_support::ConfigFlags::default(),
+        )
+        .expect("build doc");
         assert_eq!(doc["kind"], "plugin-check");
         let plugins = doc["plugins"].as_array().unwrap();
         let acme = plugins.iter().find(|p| p["name"] == "acme").unwrap();
@@ -606,7 +617,8 @@ mod tests {
         )
         .unwrap();
 
-        let doc = build_plugin_check_doc(root).expect("build doc");
+        let doc = build_plugin_check_doc(root, crate::runtime_support::ConfigFlags::default())
+            .expect("build doc");
         let plugins = doc["plugins"].as_array().unwrap();
         let plugin = plugins.iter().find(|p| p["name"] == "x").unwrap();
         assert_eq!(
@@ -676,7 +688,8 @@ mod tests {
             std::fs::write(extension.join(path), "export {};").unwrap();
         }
 
-        let doc = build_plugin_check_doc(root).expect("build plugin-check document");
+        let doc = build_plugin_check_doc(root, crate::runtime_support::ConfigFlags::default())
+            .expect("build plugin-check document");
         let plugin = doc["plugins"]
             .as_array()
             .unwrap()

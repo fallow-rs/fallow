@@ -360,17 +360,27 @@ fn audit_cache_prune_ignores_a_config_that_does_not_load() {
     }
 }
 
+/// A config with a remote `extends` entry: no server listens on port 1, so
+/// the fetch fails at once and offline.
+fn remote_extends_config(root: &Path) -> PathBuf {
+    let config = root.join("remote.json");
+    std::fs::write(&config, r#"{"extends":"https://127.0.0.1:1/fallow.json"}"#).unwrap();
+    config
+}
+
+/// `report --from` loads the `--config` file with the trust policy of
+/// `--allow-remote-extends`: without the flag the load refuses the remote
+/// entry, with the flag it fetches it.
 #[test]
-fn report_from_a_saved_file_refuses_remote_extends_also_with_the_flag() {
+fn report_from_a_saved_file_fetches_remote_extends_only_with_the_flag() {
     let dir = project();
     let root = canonical_root(&dir);
     let saved = run(&root, &["dead-code", "--format", "json", "--quiet"], &[]);
     let saved_path = root.join("saved.json");
     std::fs::write(&saved_path, &saved.stdout).unwrap();
-    let config = root.join("remote.json");
-    std::fs::write(&config, r#"{"extends":"https://127.0.0.1:1/fallow.json"}"#).unwrap();
+    let config = remote_extends_config(&root);
     let cause = FallowConfig::load(&config).expect_err("refused");
-    let expected = format!(
+    let refused = format!(
         "Error: failed to load report config {}: {cause}\n",
         config.display()
     );
@@ -378,23 +388,123 @@ fn report_from_a_saved_file_refuses_remote_extends_also_with_the_flag() {
         cause.to_string().contains("is disabled by default"),
         "{cause}"
     );
-    for extra in [&[][..], &["--allow-remote-extends"][..]] {
-        let args = with_args(
-            &[
-                "report",
-                "--from",
-                saved_path.to_str().unwrap(),
-                "--format",
-                "sarif",
-                "--config",
-                config.to_str().unwrap(),
-            ],
-            extra,
-        );
-        let output = run(&root, &args, &[]);
-        assert_eq!(output.code, 2, "{args:?}");
-        assert_eq!(output.stderr, expected, "{args:?}");
-    }
+    let args = [
+        "report",
+        "--from",
+        saved_path.to_str().unwrap(),
+        "--format",
+        "sarif",
+        "--config",
+        config.to_str().unwrap(),
+    ];
+    let output = run(&root, &args, &[]);
+    assert_eq!(output.code, 2, "{}", output.stderr);
+    assert_eq!(output.stderr, refused);
+
+    let output = run(&root, &with_args(&args, &["--allow-remote-extends"]), &[]);
+    assert_eq!(output.code, 2, "{}", output.stderr);
+    assert!(
+        output.stderr.contains("Failed to fetch remote config"),
+        "{}",
+        output.stderr
+    );
+}
+
+/// `plugin-check` reads the external plugins of the `--config` file.
+#[test]
+fn plugin_check_reads_the_explicit_config() {
+    let dir = project();
+    let root = canonical_root(&dir);
+    std::fs::create_dir_all(root.join("tools")).unwrap();
+    std::fs::write(
+        root.join("tools/entries.json"),
+        r#"{"name":"ci-entries","entryPoints":["src/index.ts"]}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("custom.json"),
+        r#"{"plugins":["tools/entries.json"]}"#,
+    )
+    .unwrap();
+    let output = run(
+        &root,
+        &[
+            "plugin-check",
+            "--format",
+            "json",
+            "--config",
+            "custom.json",
+        ],
+        &[],
+    );
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    let names: Vec<String> = parse_json(&output)["plugins"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|plugin| plugin["name"].as_str().map(str::to_owned))
+        .collect();
+    assert_eq!(names, ["ci-entries"]);
+}
+
+/// `plugin-check` loads the config with the trust policy of
+/// `--allow-remote-extends`.
+#[test]
+fn plugin_check_fetches_remote_extends_only_with_the_flag() {
+    let dir = project();
+    let root = canonical_root(&dir);
+    let config = remote_extends_config(&root);
+    let args = [
+        "plugin-check",
+        "--format",
+        "json",
+        "--config",
+        config.to_str().unwrap(),
+    ];
+    let refused = run(&root, &args, &[]);
+    assert_eq!(refused.code, 2, "{}", refused.stderr);
+    assert!(
+        refused.stdout.contains("Remote config extends"),
+        "{}",
+        refused.stdout
+    );
+    let fetched = run(&root, &with_args(&args, &["--allow-remote-extends"]), &[]);
+    assert_eq!(fetched.code, 2, "{}", fetched.stderr);
+    assert!(
+        fetched.stdout.contains("Failed to fetch remote config"),
+        "{}",
+        fetched.stdout
+    );
+}
+
+/// The coverage uploads analyze the project with the `--config` file.
+#[test]
+fn coverage_upload_reads_the_explicit_config() {
+    let dir = project();
+    let root = canonical_root(&dir);
+    std::fs::write(root.join("broken.json"), "{ \"rules\": \n").unwrap();
+    let output = run(
+        &root,
+        &[
+            "coverage",
+            "upload-static-findings",
+            "--dry-run",
+            "--allow-dirty",
+            "--project-id",
+            "acme/app",
+            "--git-sha",
+            "0123456789abcdef0123456789abcdef01234567",
+            "--config",
+            "broken.json",
+        ],
+        &[],
+    );
+    assert_ne!(output.code, 0, "{}", output.stdout);
+    assert!(
+        output.stderr.contains("config load failed"),
+        "{}",
+        output.stderr
+    );
 }
 
 fn workspace_notices(output: &CommandOutput) -> usize {

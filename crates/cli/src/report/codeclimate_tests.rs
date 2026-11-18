@@ -100,7 +100,7 @@ fn malformed_current_dead_code_envelope_does_not_fall_back_to_partial_issues() {
         EnvelopeKind::DeadCode,
         &envelope,
         root,
-        None,
+        crate::runtime_support::ConfigFlags::default(),
         None,
     )
     .expect_err("current malformed envelope must fail closed");
@@ -121,7 +121,7 @@ fn current_dead_code_envelope_rejects_an_inconsistent_finding_total() {
         EnvelopeKind::DeadCode,
         &envelope,
         Path::new("/project"),
-        None,
+        crate::runtime_support::ConfigFlags::default(),
         None,
     )
     .expect_err("inconsistent current finding total must fail closed");
@@ -148,7 +148,7 @@ fn prior_strict_schemas_preserve_validation_and_block_partial_fallback() {
                     kind,
                     value,
                     Path::new("/project"),
-                    None,
+                    crate::runtime_support::ConfigFlags::default(),
                     None,
                 )
             };
@@ -190,7 +190,7 @@ fn current_parents_accept_prior_check_schema_but_reject_older_child_shapes() {
                 kind,
                 &envelope,
                 Path::new("/project"),
-                None,
+                crate::runtime_support::ConfigFlags::default(),
                 None,
             );
             if matches!(version, 10 | 11) {
@@ -277,7 +277,7 @@ fn current_parent_envelopes_accept_null_optional_sections() {
         EnvelopeKind::Combined,
         &combined,
         Path::new("/project"),
-        None,
+        crate::runtime_support::ConfigFlags::default(),
         None,
     )
     .expect("null optional sections render empty");
@@ -332,7 +332,7 @@ fn saved_fix_envelope_preserves_empty_codeclimate_compatibility() {
         EnvelopeKind::Fix,
         &serde_json::json!({ "actions": [] }),
         Path::new("/project"),
-        None,
+        crate::runtime_support::ConfigFlags::default(),
         None,
     )
     .expect("saved fix CodeClimate compatibility");
@@ -471,7 +471,7 @@ fn stored_grouped_dead_code_preserves_native_owner_contract() {
         EnvelopeKind::DeadCode,
         &envelope,
         root.path(),
-        None,
+        crate::runtime_support::ConfigFlags::default(),
         Some(&resolver),
     )
     .expect("saved envelope should reconstruct");
