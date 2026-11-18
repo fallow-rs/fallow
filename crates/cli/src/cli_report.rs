@@ -400,7 +400,7 @@ pub fn render_live_combined_pr_comment(
     provider: Provider,
     envelope: &serde_json::Value,
     root: &Path,
-    config_path: Option<&Path>,
+    report_config: ConfigFlags<'_>,
     output: OutputFormat,
 ) -> ExitCode {
     render_saved_ci_target(
@@ -409,7 +409,7 @@ pub fn render_live_combined_pr_comment(
         EnvelopeKind::Combined,
         envelope,
         root,
-        config_path,
+        report_config,
         None,
         output,
         None,
