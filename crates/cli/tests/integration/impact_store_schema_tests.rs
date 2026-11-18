@@ -158,6 +158,18 @@ fn record_counts_after_runs_with_audit_args(
     config: Option<&str>,
     audit_args: &[&str],
 ) -> (usize, usize) {
+    record_counts_after_runs_with_args(home, root, config, audit_args, &[])
+}
+
+/// [`record_counts_after_runs_with_audit_args`] with `bare_args` added to the
+/// bare `fallow` command line.
+fn record_counts_after_runs_with_args(
+    home: &Path,
+    root: &Path,
+    config: Option<&str>,
+    audit_args: &[&str],
+    bare_args: &[&str],
+) -> (usize, usize) {
     std::fs::create_dir_all(root.join("src")).expect("create src");
     if let Some(config) = config {
         std::fs::write(root.join(".fallowrc.json"), config).expect("write config");
@@ -179,7 +191,9 @@ fn record_counts_after_runs_with_audit_args(
         "audit", "--root", root, "--base", "HEAD", "--format", "json", "--quiet",
     ];
     audit.extend_from_slice(audit_args);
-    for args in [audit, vec!["--root", root, "--format", "json", "--quiet"]] {
+    let mut bare = vec!["--root", root, "--format", "json", "--quiet"];
+    bare.extend_from_slice(bare_args);
+    for args in [audit, bare] {
         let mut cmd = std::process::Command::new(super::common::fallow_bin());
         cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
         super::common::scrub_analysis_env(&mut cmd);
@@ -346,5 +360,69 @@ fn audit_skip_dupes_records_when_duplication_is_off_in_the_config() {
             &["--skip", "dupes"],
         ),
         (1, 1)
+    );
+}
+
+/// With `duplicates.enabled: false`, `--skip dupes` narrows nothing in either
+/// command. No run fills the clone history, so both runs record.
+#[test]
+fn skip_dupes_records_both_runs_when_duplication_is_off_in_the_config() {
+    let Some(project) = project_outside_temp_folder("impact-both-skip-dupes-off-") else {
+        return;
+    };
+    let home = tempfile::tempdir().expect("home tempdir");
+
+    assert_eq!(
+        record_counts_after_runs_with_args(
+            home.path(),
+            project.path(),
+            Some(r#"{"duplicates": {"enabled": false}}"#),
+            &["--skip", "dupes"],
+            &["--skip", "dupes"],
+        ),
+        (1, 1)
+    );
+}
+
+/// `--only dead-code,health` selects the same analyses as `--skip dupes`, so
+/// both runs record when `duplicates.enabled` is false.
+#[test]
+fn only_dead_code_and_health_records_both_runs_when_duplication_is_off_in_the_config() {
+    let Some(project) = project_outside_temp_folder("impact-both-only-dupes-off-") else {
+        return;
+    };
+    let home = tempfile::tempdir().expect("home tempdir");
+
+    assert_eq!(
+        record_counts_after_runs_with_args(
+            home.path(),
+            project.path(),
+            Some(r#"{"duplicates": {"enabled": false}}"#),
+            &["--only", "dead-code,health"],
+            &["--only", "dead-code,health"],
+        ),
+        (1, 1)
+    );
+}
+
+/// When the project has duplication on, `--skip dupes` narrows the run. A
+/// record would credit the clones of earlier runs as resolved, so neither
+/// run records.
+#[test]
+fn skip_dupes_records_no_run_when_duplication_is_on() {
+    let Some(project) = project_outside_temp_folder("impact-both-skip-dupes-on-") else {
+        return;
+    };
+    let home = tempfile::tempdir().expect("home tempdir");
+
+    assert_eq!(
+        record_counts_after_runs_with_args(
+            home.path(),
+            project.path(),
+            None,
+            &["--skip", "dupes"],
+            &["--skip", "dupes"],
+        ),
+        (0, 0)
     );
 }

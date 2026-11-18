@@ -260,7 +260,6 @@ fn combined_options<'a>(opts: &'a BaselinesPruneOptions<'a>) -> CombinedOptions<
         run_check: opts.targets.dead_code.is_some(),
         run_dupes: opts.targets.dupes.is_some(),
         run_health: opts.targets.health.is_some(),
-        dupes_off_by_config: false,
         architecture: crate::check::ArchitectureSelection::All,
         dupes: crate::dupes::DupesOverrides::default(),
         score: false,

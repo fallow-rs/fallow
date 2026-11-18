@@ -12,14 +12,7 @@ pub(super) fn record_audit_impact(
     gate_marker: Option<&str>,
     result: &AuditResult,
 ) -> Result<(), String> {
-    // A skipped sub-analysis reports no findings, which Impact would credit as
-    // resolved. Like the bare run, only a full selection writes Impact.
-    // Duplication that `duplicates.enabled: false` turned off is no skip of
-    // one run: the project has no duplication analysis, and its other
-    // findings still need a history.
-    let analyses = opts.analyses;
-    if !(analyses.is_full_without_dupes() && (analyses.dupes || analyses.duplicates_off_in_config))
-    {
+    if !opts.analyses.records_impact() {
         return Ok(());
     }
     let mut findings = result

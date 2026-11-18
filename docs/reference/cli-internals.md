@@ -1152,14 +1152,22 @@ with every analysis `Default`. The flags of a run do not change that answer:
 `--only dupes,health` prints the clone groups and keeps the score without a
 duplication penalty.
 
-An audit writes an Impact record only for a full selection.
-`AuditAnalysisSelection::is_full_without_dupes` must be true: the dead-code and
-health sub-analyses run, with every dead-code finding. The duplication
-sub-analysis must also run, or `duplicates_off_in_config` must be true. That
-field holds `!DuplicatesConfig::runs_by_default()`, so it does not depend on the
-flags. `audit.dupes: false` writes no record: the bare run ignores that key, so
-the clone frontier that both runs share would credit each missing clone as
-resolved.
+An audit and a bare `fallow` run write an Impact record only for a full
+selection. Both commands use one rule, `AuditAnalysisSelection::records_impact`:
+
+- `is_full_without_dupes` must be true: the dead-code and health analyses run,
+  with every dead-code finding.
+- The duplication analysis must also run, or `duplicates_off_in_config` must
+  be true. That field holds `!DuplicatesConfig::runs_by_default()`, so it does
+  not depend on the flags.
+
+With `duplicates.enabled: false`, `--skip dupes` and `--only dead-code,health`
+narrow nothing, so both commands write a record. No run fills the clone
+frontier of such a project, so a record without clones credits no clone as
+resolved. When the project has duplication on, `--skip dupes` writes no record
+in either command. `audit.dupes: false` writes no audit record: the bare run
+ignores that key, so the clone frontier that both runs share would credit each
+missing clone as resolved.
 
 Do not read a selection key outside the config crate. The tests in
 `crates/cli/src/selection_key_guard_tests.rs` fail when a production file
