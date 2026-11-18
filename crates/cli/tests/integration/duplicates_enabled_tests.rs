@@ -109,6 +109,17 @@ fn a_selection_that_leaves_only_disabled_duplication_is_an_error() {
     );
 }
 
+/// The `audit` config keys apply to `fallow audit` only. The bare run ignores
+/// `audit.dupes: false`.
+#[test]
+fn bare_run_ignores_the_audit_dupes_key() {
+    let tmp = project(r#"{"audit": {"dupes": false}}"#);
+    let output = run(tmp.path(), &["--skip", "dead-code,health", "--quiet"]);
+    let json = parse_json(&output);
+
+    assert_eq!(clone_groups(&json["dupes"]), 1, "{json:#}");
+}
+
 #[test]
 fn bare_run_names_a_dupes_baseline_that_has_no_effect() {
     let tmp = project(DISABLED);

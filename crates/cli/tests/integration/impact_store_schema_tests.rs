@@ -147,6 +147,17 @@ fn record_counts_after_runs_with_config(
     root: &Path,
     config: Option<&str>,
 ) -> (usize, usize) {
+    record_counts_after_runs_with_audit_args(home, root, config, &[])
+}
+
+/// [`record_counts_after_runs_with_config`] with `audit_args` added to the
+/// `fallow audit` command line.
+fn record_counts_after_runs_with_audit_args(
+    home: &Path,
+    root: &Path,
+    config: Option<&str>,
+    audit_args: &[&str],
+) -> (usize, usize) {
     std::fs::create_dir_all(root.join("src")).expect("create src");
     if let Some(config) = config {
         std::fs::write(root.join(".fallowrc.json"), config).expect("write config");
@@ -164,12 +175,11 @@ fn record_counts_after_runs_with_config(
     let enable = run_isolated(home, &["impact", "enable", "--root", root, "--quiet"]);
     assert_eq!(enable.code, 0, "enable failed: {}", enable.stderr);
 
-    for args in [
-        vec![
-            "audit", "--root", root, "--base", "HEAD", "--format", "json", "--quiet",
-        ],
-        vec!["--root", root, "--format", "json", "--quiet"],
-    ] {
+    let mut audit = vec![
+        "audit", "--root", root, "--base", "HEAD", "--format", "json", "--quiet",
+    ];
+    audit.extend_from_slice(audit_args);
+    for args in [audit, vec!["--root", root, "--format", "json", "--quiet"]] {
         let mut cmd = std::process::Command::new(super::common::fallow_bin());
         cmd.env("RUST_LOG", "").env("NO_COLOR", "1");
         super::common::scrub_analysis_env(&mut cmd);
@@ -255,6 +265,85 @@ fn runs_with_duplication_off_in_the_config_record_impact() {
             home.path(),
             project.path(),
             Some(r#"{"duplicates": {"enabled": false}}"#),
+        ),
+        (1, 1)
+    );
+}
+
+/// A project dir in the cargo target folder, or `None` when that folder is in
+/// the temp folder. The record gate skips every project in the temp folder,
+/// so a test of a record has nothing to prove there.
+fn project_outside_temp_folder(prefix: &str) -> Option<tempfile::TempDir> {
+    let target_tmp = Path::new(env!("CARGO_TARGET_TMPDIR"));
+    let canonical = |path: &Path| dunce::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    if canonical(target_tmp).starts_with(canonical(&std::env::temp_dir()))
+        || (cfg!(unix) && canonical(target_tmp).starts_with(canonical(Path::new("/tmp"))))
+    {
+        return None;
+    }
+    Some(
+        tempfile::Builder::new()
+            .prefix(prefix)
+            .tempdir_in(target_tmp)
+            .expect("project dir in target tmp"),
+    )
+}
+
+/// `audit.dupes: false` skips duplication in the audit only. The bare run
+/// ignores the `audit` keys and fills the clone history that both runs share,
+/// so an audit record would credit those clones as resolved.
+#[test]
+fn audit_dupes_false_records_the_bare_run_only() {
+    let Some(project) = project_outside_temp_folder("impact-audit-dupes-off-") else {
+        return;
+    };
+    let home = tempfile::tempdir().expect("home tempdir");
+
+    assert_eq!(
+        record_counts_after_runs_with_config(
+            home.path(),
+            project.path(),
+            Some(r#"{"audit": {"dupes": false}}"#),
+        ),
+        (0, 1)
+    );
+}
+
+/// `--skip architecture` narrows the dead-code findings, so the audit records
+/// nothing.
+#[test]
+fn audit_skip_architecture_records_no_audit_run() {
+    let Some(project) = project_outside_temp_folder("impact-skip-architecture-") else {
+        return;
+    };
+    let home = tempfile::tempdir().expect("home tempdir");
+
+    assert_eq!(
+        record_counts_after_runs_with_audit_args(
+            home.path(),
+            project.path(),
+            None,
+            &["--skip", "architecture"],
+        ),
+        (0, 1)
+    );
+}
+
+/// With `duplicates.enabled: false`, the project has no duplication analysis.
+/// `--skip dupes` then narrows nothing, so the audit still records.
+#[test]
+fn audit_skip_dupes_records_when_duplication_is_off_in_the_config() {
+    let Some(project) = project_outside_temp_folder("impact-skip-dupes-off-") else {
+        return;
+    };
+    let home = tempfile::tempdir().expect("home tempdir");
+
+    assert_eq!(
+        record_counts_after_runs_with_audit_args(
+            home.path(),
+            project.path(),
+            Some(r#"{"duplicates": {"enabled": false}}"#),
+            &["--skip", "dupes"],
         ),
         (1, 1)
     );

@@ -937,6 +937,55 @@ mod tests {
         );
     }
 
+    /// Every valid `--only` and `--skip` list, with the analyses it requests:
+    /// `(dead code, duplication, health)`. `architecture` in `--only` runs the
+    /// dead-code analysis. `architecture` in `--skip` keeps it.
+    #[test]
+    fn resolve_analyses_table_for_every_only_and_skip_list() {
+        use AnalysisKind::{Architecture as A, DeadCode as D, Dupes as U, Health as H};
+        type Row = (
+            &'static [AnalysisKind],
+            &'static [AnalysisKind],
+            (bool, bool, bool),
+        );
+        let rows: [Row; 31] = [
+            (&[], &[], (true, true, true)),
+            (&[D], &[], (true, false, false)),
+            (&[U], &[], (false, true, false)),
+            (&[H], &[], (false, false, true)),
+            (&[A], &[], (true, false, false)),
+            (&[D, U], &[], (true, true, false)),
+            (&[D, H], &[], (true, false, true)),
+            (&[D, A], &[], (true, false, false)),
+            (&[U, H], &[], (false, true, true)),
+            (&[U, A], &[], (true, true, false)),
+            (&[H, A], &[], (true, false, true)),
+            (&[D, U, H], &[], (true, true, true)),
+            (&[D, U, A], &[], (true, true, false)),
+            (&[D, H, A], &[], (true, false, true)),
+            (&[U, H, A], &[], (true, true, true)),
+            (&[D, U, H, A], &[], (true, true, true)),
+            (&[], &[D], (false, true, true)),
+            (&[], &[U], (true, false, true)),
+            (&[], &[H], (true, true, false)),
+            (&[], &[A], (true, true, true)),
+            (&[], &[D, U], (false, false, true)),
+            (&[], &[D, H], (false, true, false)),
+            (&[], &[D, A], (false, true, true)),
+            (&[], &[U, H], (true, false, false)),
+            (&[], &[U, A], (true, false, true)),
+            (&[], &[H, A], (true, true, false)),
+            (&[], &[D, U, H], (false, false, false)),
+            (&[], &[D, U, A], (false, false, true)),
+            (&[], &[D, H, A], (false, true, false)),
+            (&[], &[U, H, A], (true, false, false)),
+            (&[], &[D, U, H, A], (false, false, false)),
+        ];
+        for (row, (only, skip, expected)) in rows.into_iter().enumerate() {
+            assert_eq!(resolve_analyses(only, skip), expected, "row {row}");
+        }
+    }
+
     #[test]
     fn test_path_verdicts_over_shared_corpus() {
         let corpus = include_str!("../../../engine/tests/fixtures/test-path-corpus.txt");
