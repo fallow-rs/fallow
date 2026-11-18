@@ -507,6 +507,15 @@ test("CI caches are scoped to the analyzed root", () => {
     /fallback_keys/,
     "GitLab cache keys are exact matches; a fallback key list would reintroduce prefix bleed",
   );
+  // A survived mutant or another error finding fails the job by default.
+  // GitLab saves a cache only after a successful job unless `when: always` is
+  // set, so without it a failed run loses its mutation results and the next
+  // run cannot continue a partial run.
+  assert.match(
+    gitlabCache,
+    /^\s+when: always$/m,
+    "the GitLab cache must be saved when the job fails, as the Action saves its mutation cache with always()",
+  );
 });
 
 // A predicate that names Windows or excludes Unix selects code that only
