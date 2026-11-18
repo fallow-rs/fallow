@@ -1,8 +1,8 @@
 //! Issue #4771: a class in a workspace package implements an interface that
-//! the file imports through a Vite `resolve.alias`. Code reads the members
-//! through the interface type, both through a class field and through a
-//! parameter. The implementing members are used. A member that the interface
-//! does not declare stays unused.
+//! the file imports through a Vite `resolve.alias`. The file is reachable
+//! only through the `rollupOptions.input` of the package config. Each member
+//! that the interface declares counts as used on the class. A member that
+//! the interface does not declare stays unused.
 
 use super::common::{create_config, fixture_path};
 
