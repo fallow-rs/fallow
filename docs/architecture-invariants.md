@@ -96,8 +96,8 @@ protocol and package parity.
   `find_and_load` or `find_and_load_with_options` in production code. It
   also denies a function path such as `map(FallowConfig::load)` and an
   alias such as `use fallow_config::FallowConfig as Config`. Its allow list
-  holds the engine loader, `fallow-core`, which sits below the engine, and
-  the config parse bench, each with the exact count of calls.
+  holds the engine loader and the config parse bench, each with the exact
+  count of calls.
 - Output formatting should work from typed evidence already passed to it. It
   must not crawl arbitrary project files to complete a report.
 - Cache expansion needs invalidation tests and visible fallback behavior before
