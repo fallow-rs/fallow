@@ -6,6 +6,9 @@ expression: both_headings(&view)
 
 **No mutant was counted.** The score gate was skipped.
 
+<details>
+<summary>Counts and details</summary>
+
 | Killed | Survived | No coverage | Score |
 | --: | --: | --: | --: |
 | 0 | 0 | 4 | - |
@@ -18,6 +21,8 @@ expression: both_headings(&view)
 </details>
 
 To inspect a mutant, run `fallow mutation inspect <mutant-id> --report fallow-mutation.json` with the report that this job writes.
+
+</details>
 
 ===== summary heading =====
 

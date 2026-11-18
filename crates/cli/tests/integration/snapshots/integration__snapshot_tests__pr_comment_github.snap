@@ -3,11 +3,9 @@ source: crates/cli/tests/integration/snapshot_tests.rs
 expression: output
 ---
 <!-- fallow-id: fallow-results -->
-### Fallow codebase report
+### Quality gate failed
 
-**Quality gate failed**
-
-29 findings: 13 errors, 16 warnings.
+Fallow codebase report, 29 findings: 13 errors, 16 warnings.
 
 <details>
 <summary>Dead code (13)</summary>

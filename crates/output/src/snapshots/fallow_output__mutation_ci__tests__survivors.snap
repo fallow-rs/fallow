@@ -6,6 +6,9 @@ expression: both_headings(&view)
 
 **6 mutants survived.** Score 62.5%.
 
+<details>
+<summary>Counts and details</summary>
+
 | Killed | Survived | No coverage | Score |
 | --: | --: | --: | --: |
 | 10 | 6 | 0 | 62.5% |
@@ -13,6 +16,8 @@ expression: both_headings(&view)
 A survived mutant is a code change that no test detects. The **Tests** section above lists the survived mutants on the changed lines. Add a test that fails on the change.
 
 To inspect a mutant, run `fallow mutation inspect <mutant-id> --report fallow-mutation.json` with the report that this job writes.
+
+</details>
 
 ===== summary heading =====
 

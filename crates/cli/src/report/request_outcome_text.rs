@@ -112,6 +112,12 @@ fn read_request_outcomes(envelope: &Value) -> Vec<RequestLine> {
         .collect()
 }
 
+/// The sentence for a narrowing request that applied over an empty scope:
+/// the report has no finding on changed code because no changed file had
+/// code to analyze.
+const EMPTY_SCOPE_TEXT: &str =
+    "No changed file has code that fallow analyzes. Check the diff or the base ref of this run.";
+
 /// A one-line inventory for the job summary, the pull-request comment and the
 /// merge-request note, or `None` when every request applied over a scope that
 /// was not empty. A request that applied as asked tells the reader nothing new,
@@ -135,6 +141,9 @@ pub fn summary_line(envelope: &Value) -> Option<String> {
         .any(|request| request.applied_over_empty_scope());
     if unapplied.is_empty() && !empty_scope {
         return None;
+    }
+    if unapplied.is_empty() {
+        return Some(EMPTY_SCOPE_TEXT.to_owned());
     }
     let mut clauses: Vec<String> = Vec::new();
     if !unapplied.is_empty() {
@@ -163,10 +172,8 @@ pub fn summary_line(envelope: &Value) -> Option<String> {
     // and the Action and the merge-request template state the same fact from the
     // envelope they captured (issue #2734).
     if empty_scope {
-        line.push_str(
-            " A narrowing request applied over an empty scope, so this report is clean \
-             because nothing in it was analyzable; check the diff or ref this run was given.",
-        );
+        line.push(' ');
+        line.push_str(EMPTY_SCOPE_TEXT);
     }
     Some(line)
 }
@@ -343,9 +350,7 @@ mod tests {
         }));
         assert_eq!(
             summary_line(&value).expect("a request was received"),
-            "Request outcomes: applied diff-filter. \
-             A narrowing request applied over an empty scope, so this report is clean \
-             because nothing in it was analyzable; check the diff or ref this run was given."
+            "No changed file has code that fallow analyzes. Check the diff or the base ref of this run."
         );
     }
 

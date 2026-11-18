@@ -2812,12 +2812,12 @@ fn a_comment_whose_findings_the_diff_filter_drops_still_says_the_gate_failed() {
         );
         assert_eq!(rendered.code, 0, "the render exits 0: {}", rendered.stderr);
         assert!(
-            rendered.stdout.contains("No findings for this"),
+            rendered.stdout.contains("no findings for this"),
             "{format}: the diff filter drops the cycle: {}",
             rendered.stdout
         );
         assert!(
-            rendered.stdout.contains("**Quality gate failed**"),
+            rendered.stdout.contains("Quality gate failed"),
             "{format} must not say the gate passed: {}",
             rendered.stdout
         );
@@ -2871,7 +2871,7 @@ fn a_comment_shows_the_cycle_whose_member_file_the_diff_touches() {
             rendered.stdout
         );
         assert!(
-            rendered.stdout.contains("**Quality gate failed**"),
+            rendered.stdout.contains("Quality gate failed"),
             "{format} must not say the gate passed: {}",
             rendered.stdout
         );

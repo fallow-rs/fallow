@@ -1,0 +1,5 @@
+### Changed
+
+- **The sticky PR comment puts the verdict in its heading.** The heading is now `Quality gate failed`, `Review needed` or `Quality gate passed`, and the line under it names the report and the counts, for example `Fallow combined report, 19 findings: 4 errors, 15 warnings.` A reader who scans the pull request timeline sees the result first.
+- **The mutation section of the PR comment and the review is two lines until a reader opens it.** The partial-run line and the headline (`12 mutants survived. Score 14.2%.`) stay visible. The count table, the explanation, the lines without tests and the inspect command move into one `Counts and details` block. The job summary keeps every paragraph open.
+- **A run with nothing to say says less.** The PR comment and the review leave out the mutation section when no mutant was in scope. A passed gate names no measured value (`Gates: passed error-severity-findings, health-findings.`). A narrowing request that applied over an empty scope reads `No changed file has code that fallow analyzes. Check the diff or the base ref of this run.`

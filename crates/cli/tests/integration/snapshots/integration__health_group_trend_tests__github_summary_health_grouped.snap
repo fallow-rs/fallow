@@ -21,4 +21,4 @@ Groups selected with `--group` `@team/b`. Project-level sections are not filtere
 | `@team/b` | 90.0 | A | - | 2 | 2 | 0 |
 
 
-Gates: passed health-findings (0 at or above error).
+Gates: passed health-findings.

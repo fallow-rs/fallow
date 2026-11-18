@@ -276,7 +276,10 @@ pub fn summary_line(envelope: &Value) -> Option<String> {
         clauses.push(format!("stood down {}", join(&parts.skipped)));
     }
     if !parts.passed.is_empty() {
-        clauses.push(format!("passed {}", join(&parts.passed)));
+        // A passed gate names no measured value: "0 at or above error" says
+        // nothing that "passed" does not.
+        let names: Vec<&str> = parts.passed.iter().map(|gate| gate.name.as_str()).collect();
+        clauses.push(format!("passed {}", names.join(", ")));
     }
     Some(format!("Gates: {}.", clauses.join("; ")))
 }

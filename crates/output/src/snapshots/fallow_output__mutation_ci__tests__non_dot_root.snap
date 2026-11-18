@@ -8,6 +8,9 @@ expression: both_headings(&view)
 
 **Score below the minimum.** The score is 62.5%, and the minimum is 80%.
 
+<details>
+<summary>Counts and details</summary>
+
 | Killed | Survived | No coverage | Score |
 | --: | --: | --: | --: |
 | 10 | 6 | 2 | 62.5% |
@@ -23,6 +26,8 @@ A survived mutant is a code change that no test detects. The **Tests** section a
 </details>
 
 To inspect a mutant, run `fallow mutation inspect <mutant-id> --report fallow-mutation.json --root 'packages/web app'` with the report that this job writes.
+
+</details>
 
 ===== summary heading =====
 
