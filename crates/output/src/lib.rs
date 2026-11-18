@@ -359,11 +359,11 @@ pub use mutation::{
     MutationSkippedFile, MutationStaleReason, MutationStatusCounts, MutationSummary,
     MutationTargetOnlyKill, MutationTask, MutationTasksOutput, MutationTasksSchemaVersion,
     MutationTasksSummary, MutationTestKillRow, MutationTimings, MutationTypecheckOutput,
-    MutationTypecheckSkip, MutationTypecheckSkipReason, MutationVerdict, MutationVerdictInput,
-    MutationVerdictJoin, MutationVerdictKind, MutationVerdictSchemaVersion, MutationWorktreeCheck,
-    SAMPLED_OUT_REASON, SKIPPED_TESTS_CODE, serialize_mutation_inspect_json_output,
-    serialize_mutation_json_output, serialize_mutation_plan_json_output,
-    serialize_mutation_tasks_json_output,
+    MutationTypecheckSkip, MutationTypecheckSkipReason, MutationUnmatchedPath, MutationVerdict,
+    MutationVerdictInput, MutationVerdictJoin, MutationVerdictKind, MutationVerdictSchemaVersion,
+    MutationWorktreeCheck, SAMPLED_OUT_REASON, SKIPPED_TESTS_CODE,
+    serialize_mutation_inspect_json_output, serialize_mutation_json_output,
+    serialize_mutation_plan_json_output, serialize_mutation_tasks_json_output,
 };
 pub use mutation_ci::{
     MUTATION_MESSAGE_MAX_CHARS, MUTATION_NO_COVERAGE_ITEMS, MUTATION_SECTION_MAX_CHARS,

@@ -21289,6 +21289,12 @@ skipped_files: MutationSkippedFile[]
  */
 unmatched_paths: string[]
 /**
+ * The reason for each entry of `unmatched_paths`, at the same index.
+ * Each path is relative to the project root. Absent when
+ * `unmatched_paths` is empty.
+ */
+unmatched_path_reasons?: MutationUnmatchedPath[]
+/**
  * The instrumented files that the runner never loaded.
  */
 unloaded_paths: string[]
@@ -21935,6 +21941,24 @@ path: string
 reason: string
 }
 /**
+ * A path of a `paths` scope that selects no file, with the reason.
+ */
+export interface MutationUnmatchedPath {
+/**
+ * The path relative to the project root, with forward slashes. The
+ * entry at the same index of `unmatched_paths` holds the path as given,
+ * so match the two fields by index, not by value.
+ */
+path: string
+/**
+ * Why the path selects no file, kebab-case: `not-found` (the path does
+ * not exist), `ignored` (the ignore globs of the config exclude the
+ * path or a file under it) or `no-source-file` (the path holds only
+ * test code, declaration files or files outside the module graph).
+ */
+reason: string
+}
+/**
  * The git worktree check of a run: a run refuses a dirty worktree unless
  * `--allow-dirty` is set, and it compares the worktree after the run.
  */
@@ -22333,6 +22357,12 @@ skipped_files: MutationSkippedFile[]
  * The paths of a `paths` scope that select no file.
  */
 unmatched_paths: string[]
+/**
+ * The reason for each entry of `unmatched_paths`, at the same index.
+ * Each path is relative to the project root. Absent when
+ * `unmatched_paths` is empty.
+ */
+unmatched_path_reasons?: MutationUnmatchedPath[]
 runner: MutationPlanRunner
 }
 /**

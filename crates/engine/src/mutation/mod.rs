@@ -28,6 +28,7 @@ mod sampling;
 mod skipped_tests;
 #[cfg(test)]
 mod tests;
+mod unmatched;
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -207,6 +208,9 @@ pub struct MutationPlanInputs<'a> {
     /// [`MutationPlan::support_files`], with the runner config modules at the
     /// root.
     pub setup_files: &'a [PathBuf],
+    /// The ignore globs of the config. They give the reason of an unmatched
+    /// path. `None` when the caller has no config.
+    pub ignore_patterns: Option<&'a fallow_config::IgnorePatternSet>,
 }
 
 /// Why a static rule removes a mutant.
@@ -355,6 +359,29 @@ pub enum SkipReason {
     RunnerCannotLoad,
 }
 
+/// Why a path of a `Paths` scope selects no source file.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum UnmatchedReason {
+    /// The path does not exist.
+    NotFound,
+    /// The `ignorePatterns` of the config, or a built-in ignore, exclude the
+    /// path or a file under it.
+    Ignored,
+    /// The path exists, but it holds only test code, declaration files or
+    /// files outside the module graph.
+    NoSourceFile,
+}
+
+/// A path of a `Paths` scope that selects no source file.
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize)]
+pub struct UnmatchedPath {
+    /// The path as given, with forward slashes.
+    pub path: String,
+    /// Why the path selects no source file.
+    pub reason: UnmatchedReason,
+}
+
 /// A selected file that the plan did not instrument.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct SkippedFile {
@@ -449,11 +476,9 @@ pub struct MutationPlan {
     pub framework_config_checked: bool,
     /// The selected files that the plan did not instrument, sorted by path.
     pub skipped_files: Vec<SkippedFile>,
-    /// The paths of a `Paths` scope that select no source file, as given and
-    /// with forward slashes, sorted. A path can select no file because it
-    /// does not exist, or because it names only test code, declaration files
-    /// or files outside the module graph.
-    pub unmatched_paths: Vec<String>,
+    /// The paths of a `Paths` scope that select no source file, sorted by
+    /// path, each with the reason.
+    pub unmatched_paths: Vec<UnmatchedPath>,
 }
 
 #[cfg(test)]
@@ -564,6 +589,7 @@ pub fn plan_mutations_for_session_with(
         results: &artifacts.results,
         framework_config_exports: Some(&framework_config_exports),
         setup_files: &setup_files,
+        ignore_patterns: Some(&session.config().ignore_patterns),
     };
     let plan = plan_mutations(&inputs, request);
     let has_component = plan

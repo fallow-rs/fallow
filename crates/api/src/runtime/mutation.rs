@@ -16,7 +16,8 @@ use fallow_engine::session::AnalysisSession;
 use fallow_output::{
     MutationCacheOutput, MutationPlanOutput, MutationPlanSchemaVersion, MutationReport,
     MutationResumeOutput, MutationRunnerOutput, MutationRuntimeOutput, MutationSchemaVersion,
-    MutationScopeKind, MutationScopeOutput, MutationTimings, MutationWorktreeCheck,
+    MutationScopeKind, MutationScopeOutput, MutationTimings, MutationUnmatchedPath,
+    MutationWorktreeCheck,
 };
 use fallow_types::envelope::ElapsedMs;
 use rustc_hash::FxHashSet;
@@ -34,9 +35,9 @@ use crate::mutation::node_args::node_test_args;
 use crate::mutation::protocol::{InitOptions, InitRequest};
 use crate::mutation::recorded_args::RecordPass;
 use crate::mutation::report::{
-    CompletionFacts, baseline_failures, completion, function_results, issues, mutant_results,
-    plan_counts, plan_files, plan_mutants, skipped_files, skipped_tests_issue, summary,
-    tool_version,
+    CompletionFacts, baseline_failures, completion, function_results, issues, kebab,
+    mutant_results, plan_counts, plan_files, plan_mutants, skipped_files, skipped_tests_issue,
+    summary, tool_version, unmatched_paths,
 };
 use crate::mutation::result_cache::{KeyFiles, NOT_KEYED, ResultCache};
 use crate::mutation::run_dir::{RunFile, write_run_dir};
@@ -547,7 +548,8 @@ pub fn plan_mutation(options: &MutationRunOptions) -> ProgrammaticResult<Mutatio
         no_test_files: plan.no_test_files,
         framework_config_checked: plan.framework_config_checked,
         skipped_files: skipped_files(plan),
-        unmatched_paths: plan.unmatched_paths.clone(),
+        unmatched_paths: unmatched_paths(plan),
+        unmatched_path_reasons: unmatched_path_reasons(plan, planned.resolved.root()),
         runner: plan_runner(planned.runner, planned.resolved.root())
             .map_err(|message| mutation_error("FALLOW_MUTATION_PROTOCOL_INVALID", message))?,
     })
@@ -980,6 +982,18 @@ fn scope_path(root: &Path, path: &Path) -> String {
         .map(|part| part.as_os_str().to_string_lossy())
         .collect::<Vec<_>>()
         .join("/")
+}
+
+/// The reason for each path of a `paths` scope that selects no file, in the
+/// order of `unmatched_paths`, with the path relative to the root.
+fn unmatched_path_reasons(plan: &MutationPlan, root: &Path) -> Vec<MutationUnmatchedPath> {
+    plan.unmatched_paths
+        .iter()
+        .map(|entry| MutationUnmatchedPath {
+            path: scope_path(root, Path::new(&entry.path)),
+            reason: kebab(&entry.reason),
+        })
+        .collect()
 }
 
 /// The scope of the journal fingerprint. The paths of a `paths` scope are
@@ -1528,10 +1542,9 @@ pub fn run_mutation_with_progress(
         no_test_files: plan.no_test_files,
         baseline_failures: baseline,
         skipped_files: skipped_files(plan),
-        unmatched_paths: plan.unmatched_paths.clone(),
-        unloaded_paths: outcome
-            .map(|outcome| outcome.unloaded_paths.clone())
-            .unwrap_or_default(),
+        unmatched_paths: unmatched_paths(plan),
+        unmatched_path_reasons: unmatched_path_reasons(plan, planned.resolved.root()),
+        unloaded_paths: outcome.map_or_else(Vec::new, |outcome| outcome.unloaded_paths.clone()),
         worktree: worktree_check(start_snapshot.as_ref(), options.allow_dirty, changed_paths),
         errors,
         timings,
@@ -1774,6 +1787,39 @@ mod tests {
             unmatched_paths: Vec::new(),
             skipped_tests: Vec::new(),
         }
+    }
+
+    #[test]
+    fn an_unmatched_path_reason_is_root_relative_at_the_index_of_its_path() {
+        use fallow_engine::mutation::{UnmatchedPath, UnmatchedReason};
+        let root = Path::new("/project");
+        let mut plan = empty_plan();
+        plan.unmatched_paths = vec![
+            UnmatchedPath {
+                path: "/project/pkg".to_owned(),
+                reason: UnmatchedReason::Ignored,
+            },
+            UnmatchedPath {
+                path: "./src/missing.ts".to_owned(),
+                reason: UnmatchedReason::NotFound,
+            },
+        ];
+        let paths = unmatched_paths(&plan);
+        let reasons = unmatched_path_reasons(&plan, root);
+        assert_eq!(paths, vec!["/project/pkg", "./src/missing.ts"]);
+        assert_eq!(
+            reasons,
+            vec![
+                MutationUnmatchedPath {
+                    path: "pkg".to_owned(),
+                    reason: "ignored".to_owned(),
+                },
+                MutationUnmatchedPath {
+                    path: "src/missing.ts".to_owned(),
+                    reason: "not-found".to_owned(),
+                },
+            ]
+        );
     }
 
     #[test]
