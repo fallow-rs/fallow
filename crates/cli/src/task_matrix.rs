@@ -37,6 +37,14 @@ mod tests {
     #[test]
     fn render_connects_tasks_to_commands_and_notes() {
         let table = render_task_matrix_markdown();
+        assert!(table.contains("When the agent is about to..."));
+        for row in TASK_MATRIX {
+            assert!(
+                table.contains(row.command),
+                "rendered table missing command {}",
+                row.command
+            );
+        }
         assert!(table.lines().any(|line| line
             == r#"| delete an "unused" export or file | `fallow dead-code --trace <file>:<export>` |"#));
         assert!(table.lines().any(|line| line
