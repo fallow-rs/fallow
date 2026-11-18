@@ -1591,6 +1591,10 @@ fn audit_control_model(change_manifest: bool) -> ProjectModel {
 /// The finding kinds that the `new-only` audit keeps outside the changed files.
 const KEPT_OUTSIDE_CHANGED_FILES: [&str; 2] = ["unused_files", "unused_exports"];
 
+/// The dead-code kinds of the model whose finding can move with its code to
+/// another file (the movable rules of `fallow_api::audit_moved`).
+const MOVABLE_KINDS: [&str; 2] = ["unused_exports", "unused_types"];
+
 /// The split that I4 expects, built without the audit code: the head
 /// findings of the standalone commands in scope, each one introduced when no
 /// finding with the same identity exists at the base commit.
@@ -1611,6 +1615,7 @@ const KEPT_OUTSIDE_CHANGED_FILES: [&str; 2] = ["unused_files", "unused_exports"]
 ///   numbers equal keys. The first N head occurrences are inherited, where N
 ///   is the base count of that identity. Two stale suppressions of one kind in
 ///   one file share an identity, so a count and not a set decides.
+/// - Moved code (#4670): see [`inherit_moved_dead_code`].
 fn expected_audit_split(project: &Project) -> AuditKeys {
     let changed = changed_paths(&project.files);
     let base_root = project.scratch.join("base");
@@ -1628,12 +1633,13 @@ fn expected_audit_split(project: &Project) -> AuditKeys {
     let added = project.added_lines();
     let unscoped = Scope::default();
     let mut base_counts: BTreeMap<Identity, usize> = BTreeMap::new();
-    for key in Analysis::ALL
+    let base_keys: Vec<FindingKey> = Analysis::ALL
         .into_iter()
         .flat_map(|analysis| cli_keys(analysis, &base_root, &unscoped, None))
-    {
+        .collect();
+    for key in &base_keys {
         *base_counts
-            .entry(identity(&key, &renames, &project.files.base))
+            .entry(identity(key, &renames, &project.files.base))
             .or_default() += 1;
     }
     let mut head_keys: Vec<FindingKey> = Analysis::ALL
@@ -1643,6 +1649,8 @@ fn expected_audit_split(project: &Project) -> AuditKeys {
     head_keys.sort_by_key(|key| key.line);
     let mut head_seen: BTreeMap<Identity, usize> = BTreeMap::new();
     let mut expected = AuditKeys::default();
+    let head_findings: BTreeSet<(String, String, String)> =
+        head_keys.iter().map(finding_triple).collect();
     for key in head_keys {
         let key_identity = identity(&key, &BTreeMap::new(), &project.files.head);
         let seen = head_seen.entry(key_identity.clone()).or_default();
@@ -1664,7 +1672,77 @@ fn expected_audit_split(project: &Project) -> AuditKeys {
             expected.introduced.insert(key);
         }
     }
+    inherit_moved_dead_code(
+        &mut expected,
+        &base_keys,
+        &head_findings,
+        &project.files,
+        &added,
+    );
     expected
+}
+
+fn finding_triple(key: &FindingKey) -> (String, String, String) {
+    (key.kind.clone(), key.path.clone(), key.symbol.clone())
+}
+
+/// Move each introduced finding of moved code to the inherited split, by the
+/// rule of the audit: the finding has a movable kind, the base has the same
+/// kind and symbol under another path that the change touched or deleted, no
+/// head finding has that base finding, and the change wrote a line with the
+/// symbol in the head file. Each base finding matches one head finding.
+fn inherit_moved_dead_code(
+    expected: &mut AuditKeys,
+    base_keys: &[FindingKey],
+    head_findings: &BTreeSet<(String, String, String)>,
+    files: &Materialized,
+    added: &BTreeMap<String, Vec<(u64, u64)>>,
+) {
+    let mut left_behind: Vec<(String, String, String)> = base_keys
+        .iter()
+        .filter(|key| MOVABLE_KINDS.contains(&key.kind.as_str()))
+        .filter(|key| files.head.get(&key.path) != files.base.get(&key.path))
+        .map(finding_triple)
+        .filter(|triple| !head_findings.contains(triple))
+        .collect();
+    left_behind.sort();
+    let mut introduced: Vec<FindingKey> = expected
+        .introduced
+        .iter()
+        .filter(|key| MOVABLE_KINDS.contains(&key.kind.as_str()))
+        .cloned()
+        .collect();
+    introduced.sort_by(|a, b| (&a.path, a.line).cmp(&(&b.path, b.line)));
+    for key in introduced {
+        let Some(position) = left_behind.iter().position(|(kind, path, symbol)| {
+            *kind == key.kind && *symbol == key.symbol && *path != key.path
+        }) else {
+            continue;
+        };
+        if added_line_names(files, added, &key.path, &key.symbol) {
+            left_behind.remove(position);
+            expected.introduced.remove(&key);
+            expected.inherited.insert(key);
+        }
+    }
+}
+
+/// Whether the change added a line with `symbol` to the head file `path`.
+fn added_line_names(
+    files: &Materialized,
+    added: &BTreeMap<String, Vec<(u64, u64)>>,
+    path: &str,
+    symbol: &str,
+) -> bool {
+    let (Some(source), Some(hunks)) = (files.head.get(path), added.get(path)) else {
+        return false;
+    };
+    source.lines().zip(1_u64..).any(|(line, number)| {
+        line.contains(symbol)
+            && hunks
+                .iter()
+                .any(|&(first, last)| first <= number && number <= last)
+    })
 }
 
 /// Whether an instance of a clone-group symbol holds an added line of its
