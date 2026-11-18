@@ -543,6 +543,51 @@ mod tests {
         assert_eq!(config.cache_max_size_mb, Some(64));
     }
 
+    /// `FALLOW_CACHE_MAX_SIZE` gives the same limit when a host passes it to
+    /// `resolve` and when the engine applies it after `resolve`.
+    #[test]
+    fn cache_max_size_env_gives_one_limit_before_and_after_resolve() {
+        let root = Path::new("/repo");
+        let resolve = |configured: Option<u32>, argument: Option<u32>| {
+            FallowConfig {
+                cache: fallow_config::CacheConfig {
+                    dir: None,
+                    max_size_mb: configured,
+                },
+                ..FallowConfig::default()
+            }
+            .resolve(
+                root.to_path_buf(),
+                OutputFormat::Human,
+                1,
+                false,
+                true,
+                argument,
+            )
+        };
+        let values: [&'static [(&'static str, &'static str)]; 5] = [
+            &[],
+            &[("FALLOW_CACHE_MAX_SIZE", "64")],
+            &[("FALLOW_CACHE_MAX_SIZE", " 8 ")],
+            &[("FALLOW_CACHE_MAX_SIZE", "0")],
+            &[("FALLOW_CACHE_MAX_SIZE", "many")],
+        ];
+        for configured in [None, Some(5)] {
+            for vars in values {
+                let argument = lookup_from(vars)("FALLOW_CACHE_MAX_SIZE")
+                    .as_deref()
+                    .and_then(fallow_config::cache_max_size_from_env_value);
+                let before = resolve(configured, argument);
+                let mut after = resolve(configured, None);
+                apply_env_overrides_from(&mut after, lookup_from(vars));
+                assert_eq!(
+                    before.cache_max_size_mb, after.cache_max_size_mb,
+                    "{configured:?} {vars:?}"
+                );
+            }
+        }
+    }
+
     #[test]
     fn invalid_or_empty_env_values_keep_the_config() {
         let root = Path::new("/repo");
