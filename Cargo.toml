@@ -376,10 +376,10 @@ allow = [
 # same trust policy for remote `extends` and the same error detail. Each
 # pattern has no `(`, so the rule also finds a function path such as
 # `map(FallowConfig::load)`. The `FallowConfig as` pattern finds an alias,
-# because the rule cannot see a call through the alias. The
-# allow list holds the sites that still load the file directly. fallow-core
-# sits below the engine and cannot call it. The bench measures the config
-# parse itself. Move a CLI site to the engine loader, then lower its `max`.
+# because the rule cannot see a call through the alias. The allow list holds
+# the sites that load the file directly. The engine loader is the one
+# loader. fallow-core sits below the engine and cannot call it. The bench
+# measures the config parse itself.
 [[workspace.metadata.fallow.boundaries.sources]]
 rule = "config-load-through-engine-loader"
 paths = ["crates"]
@@ -394,17 +394,6 @@ scope = "production"
 message = "{path} loads the config file directly. Call fallow_engine::project_config::load_config_file, or add the file to the allow list of this rule in Cargo.toml"
 allow = [
     { path = "crates/benchmarks/benches/component_config.rs", max = 1 },
-    { path = "crates/cli/src/audit_cache.rs", max = 4 },
-    { path = "crates/cli/src/audit_cache_prune.rs", max = 2 },
-    { path = "crates/cli/src/audit_dead_code.rs", max = 1 },
-    { path = "crates/cli/src/audit_staged.rs", max = 1 },
-    { path = "crates/cli/src/base_worktree.rs", max = 2 },
-    { path = "crates/cli/src/cli_production.rs", max = 2 },
-    { path = "crates/cli/src/cli_report.rs", max = 3 },
-    { path = "crates/cli/src/config.rs", max = 2 },
-    { path = "crates/cli/src/coverage/upload_common.rs", max = 1 },
-    { path = "crates/cli/src/report/sarif.rs", max = 4 },
-    { path = "crates/cli/src/runtime_support.rs", max = 2 },
     { path = "crates/core/src/lib.rs", max = 2 },
     { path = "crates/engine/src/project_config/loader.rs", max = 2 },
 ]

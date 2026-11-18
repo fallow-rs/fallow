@@ -66,6 +66,7 @@ mod codeowners_tests;
 mod combined_coverage_tests;
 mod combined_health_duplication_tests;
 mod complexity_gate_tests;
+mod config_load_cli_tests;
 mod config_pattern_parity_tests;
 mod config_string_package_names_tests;
 mod constant_parameter_tests;

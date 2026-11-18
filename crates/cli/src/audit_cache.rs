@@ -19,6 +19,8 @@ use crate::base_worktree::{
     git_rev_parse, git_toplevel,
 };
 use crate::error::emit_input_error;
+use crate::runtime_support::{load_config_file, loaded_config};
+use fallow_engine::project_config::{ConfigFile, ConfigFileOptions};
 
 /// Version 11: complexity keys hold path and function name only, and each
 /// complexity entry carries its metric values (#3277). A version-10 snapshot
@@ -596,17 +598,10 @@ fn normalized_changed_files(root: &Path, changed_files: &FxHashSet<PathBuf>) -> 
 /// A config that does not load gives no patterns. The head analysis loads the
 /// same config and reports the error, so this function stays silent.
 pub(super) fn audit_workspace_patterns(opts: &AuditOptions<'_>) -> Vec<String> {
-    let load_options = fallow_config::ConfigLoadOptions {
+    let options = ConfigFileOptions {
         allow_remote_extends: opts.allow_remote_extends,
     };
-    let config = match opts.config_path {
-        Some(path) => fallow_config::FallowConfig::load_with_options(path, load_options).ok(),
-        None => fallow_config::FallowConfig::find_and_load_with_options(opts.root, load_options)
-            .ok()
-            .flatten()
-            .map(|(config, _)| config),
-    };
-    config
+    loaded_config(opts.root, opts.config_path.as_deref(), options)
         .and_then(|config| config.workspaces)
         .map(|workspaces| workspaces.patterns)
         .unwrap_or_default()
@@ -615,24 +610,17 @@ pub(super) fn audit_workspace_patterns(opts: &AuditOptions<'_>) -> Vec<String> {
 pub(super) fn config_file_fingerprint(
     opts: &AuditOptions<'_>,
 ) -> Result<AuditConfigFingerprint, ExitCode> {
-    let load_options = fallow_config::ConfigLoadOptions {
-        allow_remote_extends: opts.allow_remote_extends,
-    };
-    let loaded = if let Some(path) = opts.config_path {
-        let config =
-            fallow_config::FallowConfig::load_with_options(path, load_options).map_err(|e| {
-                emit_input_error(
-                    &format!("failed to load config '{}': {e}", path.display()),
-                    opts.output,
-                )
-            })?;
-        Some((config, path.clone()))
-    } else {
-        fallow_config::FallowConfig::find_and_load_with_options(opts.root, load_options)
-            .map_err(|e| emit_input_error(&e, opts.output))?
-    };
-
-    let Some((config, path)) = loaded else {
+    let file = load_config_file(
+        opts.root,
+        opts.config_path.as_deref(),
+        opts.allow_remote_extends,
+        opts.output,
+    )?;
+    let ConfigFile {
+        config,
+        path: Some(path),
+    } = file
+    else {
         return Ok(AuditConfigFingerprint {
             path: None,
             resolved_hash: None,

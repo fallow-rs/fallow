@@ -4,9 +4,10 @@ use std::process::ExitCode;
 
 use serde::Deserialize;
 
+use fallow_config::RulesConfig;
 #[cfg(test)]
 use fallow_config::Severity;
-use fallow_config::{FallowConfig, RulesConfig};
+use fallow_engine::project_config::ConfigFileOptions;
 use fallow_output::{
     SarifDocumentInput, SarifResultInput, SarifRuleInput, build_sarif_document, build_sarif_result,
     build_sarif_rule,
@@ -19,6 +20,7 @@ use super::github::{AnnotationLevel, resolve_render_options};
 use super::github_annotations::{EnvelopeKind, collect_annotations};
 use super::grouping::{self, OwnershipResolver};
 use crate::explain;
+use crate::runtime_support::loaded_config;
 
 /// Build a SARIF rule definition with optional `fullDescription` and `helpUri`
 /// sourced from the centralized explain module.
@@ -652,8 +654,9 @@ fn saved_dead_code_results(
 
 /// Whether `report --from` finds a config for the rules it falls back to.
 pub(super) fn saved_report_config_found(root: &Path, config_path: Option<&Path>) -> bool {
-    config_path.is_some_and(|path| FallowConfig::load(path).is_ok())
-        || FallowConfig::find_and_load(root).ok().flatten().is_some()
+    config_path
+        .is_some_and(|path| loaded_config(root, Some(path), ConfigFileOptions::default()).is_some())
+        || loaded_config(root, None, ConfigFileOptions::default()).is_some()
 }
 
 /// Say on stderr when saved dead-code findings without a severity take their
@@ -698,14 +701,9 @@ pub fn note_saved_severity_fallback(
 
 pub(super) fn saved_report_rules(root: &Path, config_path: Option<&Path>) -> RulesConfig {
     config_path
-        .and_then(|path| FallowConfig::load(path).ok())
+        .and_then(|path| loaded_config(root, Some(path), ConfigFileOptions::default()))
+        .or_else(|| loaded_config(root, None, ConfigFileOptions::default()))
         .map(|config| config.rules)
-        .or_else(|| {
-            FallowConfig::find_and_load(root)
-                .ok()
-                .flatten()
-                .map(|(config, _)| config.rules)
-        })
         .unwrap_or_default()
 }
 

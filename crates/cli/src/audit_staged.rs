@@ -127,16 +127,17 @@ fn staged_worktree_path() -> Option<PathBuf> {
     )))
 }
 
+/// The `workspaces.patterns` of the staged tree. The tree holds the config
+/// file of the index, so discovery from its root reads that file and
+/// `--config` does not apply. A remote `extends` entry or a load error gives
+/// no patterns.
 fn workspace_patterns(root: &Path) -> Vec<String> {
-    fallow_config::FallowConfig::find_and_load_with_options(
+    crate::runtime_support::loaded_config(
         root,
-        fallow_config::ConfigLoadOptions {
-            allow_remote_extends: false,
-        },
+        None,
+        fallow_engine::project_config::ConfigFileOptions::default(),
     )
-    .ok()
-    .flatten()
-    .and_then(|(config, _)| config.workspaces)
+    .and_then(|config| config.workspaces)
     .map(|workspaces| workspaces.patterns)
     .unwrap_or_default()
 }

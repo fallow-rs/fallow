@@ -426,6 +426,37 @@ fn old_report_note_counts_one_finding_in_the_singular() {
     );
 }
 
+/// A discovered config that does not load counts as no config: the old report
+/// gets the same output and the same note as without a config.
+#[test]
+fn old_report_treats_a_discovered_config_that_does_not_load_as_missing() {
+    let project = split_project();
+    let store = empty_root();
+    let saved = saved_path(&store, "saved.json");
+    let mut envelope = save_json(project.path(), &[], &saved);
+    strip_severity(&mut envelope);
+    let old = saved_path(&store, "old.json");
+    std::fs::write(&old, envelope.to_string()).expect("write old report");
+
+    let missing_root = empty_root();
+    let broken_root = empty_root();
+    write(broken_root.path(), ".fallowrc.json", "{ \"rules\": \n");
+    for format in ["codeclimate", "sarif"] {
+        let missing = report_from(&old, missing_root.path(), format, &[]);
+        assert!(
+            missing.stderr.contains(NOTE),
+            "{format}: expected the note without a config, stderr:\n{}",
+            missing.stderr
+        );
+        let broken = report_from(&old, broken_root.path(), format, &[]);
+        let expected = missing
+            .stderr
+            .replace(utf8(missing_root.path()), utf8(broken_root.path()));
+        assert_eq!(broken.stderr, expected, "{format}");
+        assert_eq!(broken.stdout, missing.stdout, "{format}");
+    }
+}
+
 #[test]
 fn old_component_report_keeps_sarif_findings_and_uses_rule_fallback() {
     let store = empty_root();

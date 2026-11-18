@@ -92,21 +92,15 @@ fn project_cache_dir(opts: &AuditCachePruneOptions<'_>) -> PathBuf {
     if let Some(dir) = fallow_config::cache_dir_env_override() {
         return opts.root.join(dir);
     }
-    let configured = {
-        let load_options = fallow_config::ConfigLoadOptions {
-            allow_remote_extends: opts.allow_remote_extends,
-        };
-        let config = match opts.config_path {
-            Some(path) => fallow_config::FallowConfig::load_with_options(path, load_options).ok(),
-            None => {
-                fallow_config::FallowConfig::find_and_load_with_options(opts.root, load_options)
-                    .ok()
-                    .flatten()
-                    .map(|(config, _)| config)
-            }
-        };
-        config.and_then(|config| config.cache.dir)
+    let options = fallow_engine::project_config::ConfigFileOptions {
+        allow_remote_extends: opts.allow_remote_extends,
     };
+    let configured = crate::runtime_support::loaded_config(
+        opts.root,
+        opts.config_path.map(PathBuf::as_path),
+        options,
+    )
+    .and_then(|config| config.cache.dir);
     fallow_config::config_cache_dir(opts.root, configured)
 }
 

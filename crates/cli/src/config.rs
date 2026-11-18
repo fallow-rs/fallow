@@ -60,12 +60,15 @@ pub struct RunConfigInput<'a> {
 
 pub fn run_config_with_options(input: RunConfigInput<'_>) -> ExitCode {
     let output = input.output;
-    let result = match input.explicit_config {
-        Some(path) => FallowConfig::load_with_options(path, input.load_options)
-            .map(|c| Some((c, path.to_path_buf())))
-            .map_err(|e| format!("failed to load config '{}': {e}", path.display())),
-        None => FallowConfig::find_and_load_with_options(input.root, input.load_options),
-    };
+    let result = fallow_engine::project_config::load_config_file(
+        input.root,
+        input.explicit_config,
+        fallow_engine::project_config::ConfigFileOptions {
+            allow_remote_extends: input.load_options.allow_remote_extends,
+        },
+    )
+    .map(|file| file.path.map(|path| (file.config, path)))
+    .map_err(|err| crate::runtime_support::config_load_error_message(&err));
 
     match result {
         Ok(Some((config, path))) => {
