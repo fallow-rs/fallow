@@ -1394,6 +1394,7 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
                         is_self_returning: false,
                         override_base: None,
                         is_protected: false,
+                        is_static: false,
                     },
                     MemberInfo {
                         name: "listUsers".to_string(),
@@ -1405,6 +1406,7 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
                         is_self_returning: false,
                         override_base: None,
                         is_protected: false,
+                        is_static: false,
                     },
                     MemberInfo {
                         name: "baseUrl".to_string(),
@@ -1416,6 +1418,7 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
                         is_self_returning: false,
                         override_base: None,
                         is_protected: false,
+                        is_static: false,
                     },
                 ],
                 is_side_effect_used: false,
@@ -1441,6 +1444,7 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
                         is_self_returning: false,
                         override_base: None,
                         is_protected: false,
+                        is_static: false,
                     },
                     MemberInfo {
                         name: "Inactive".to_string(),
@@ -1452,6 +1456,7 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
                         is_self_returning: false,
                         override_base: None,
                         is_protected: false,
+                        is_static: false,
                     },
                     MemberInfo {
                         name: "Pending".to_string(),
@@ -1463,6 +1468,7 @@ fn create_cache_round_trip_input() -> fallow_core::extract::ModuleInfo {
                         is_self_returning: false,
                         override_base: None,
                         is_protected: false,
+                        is_static: false,
                     },
                 ],
                 is_side_effect_used: false,

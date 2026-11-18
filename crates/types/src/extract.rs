@@ -1924,12 +1924,9 @@ pub struct MemberInfo {
     /// string in that case, treated as never-matching by the predicate).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub decorator_names: Vec<String>,
-    /// True when this is a static class method that returns a fresh instance
-    /// of the same class: either via `return new this()` / `return new
-    /// <SameClassName>()` in the body's last statement, or via a declared
-    /// return type matching the class name. Consumers calling such a static
-    /// method receive an instance, so the call result's member accesses are
-    /// credited against the class. See issues #346, #387.
+    /// True for a static method that returns a new instance of its class
+    /// (`return new this()`, `return new C()`, or a declared return type `C`).
+    /// Member accesses on the call result credit the class (#346, #387).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub is_instance_returning_static: bool,
     /// True when this is an instance class method whose call result is an
@@ -1953,6 +1950,9 @@ pub struct MemberInfo {
     /// other consumer that checks class members skips them.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub is_protected: bool,
+    /// True for a `static` class member, which code with the class value reads.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_static: bool,
 }
 
 /// The kind of member.

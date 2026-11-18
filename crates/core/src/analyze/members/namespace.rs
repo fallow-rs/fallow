@@ -100,22 +100,42 @@ pub(super) fn credit_namespace_member_uses(
             let credited = accessed_members.entry(key).or_default();
             credit_namespace_path(credited, path, namespace_use.whole);
             if namespace_use.whole && path.is_empty() && !namespace_use.class_field {
-                credited.insert(ENUM_ESCAPE_USE.to_string());
+                credited.insert(VALUE_ESCAPE_USE.to_string());
             }
         }
     }
 }
 
-/// The marker that `accessed_members` holds when a whole enum leaves its
-/// chain (`takesEnum(Shape)`, `{ ref: Size }`). Code can then read any
-/// member, as with `Object.values(Shape)`. A class field alias
-/// (`levels = Level`) does not set it: the visitor follows the reads of the
-/// field, so only those members count as used. No member has this name.
-const ENUM_ESCAPE_USE: &str = "(escape)";
+/// The marker that `accessed_members` holds when a whole enum or class
+/// value leaves its chain (`takesEnum(Shape)`, `{ ref: Size }`,
+/// `run(Adapter)`). Code can then read any member of the enum, as with
+/// `Object.values(Shape)`, and any static member of the class. A class
+/// field alias (`levels = Level`) does not set it: the visitor follows the
+/// reads of the field, so only those members count as used. No member has
+/// this name.
+const VALUE_ESCAPE_USE: &str = "(escape)";
+
+/// The first segment of a chain that reads an instance member through the
+/// class value: `Class.prototype.member`.
+const PROTOTYPE_SEGMENT: &str = "prototype";
 
 /// Whether the enum member `name` counts as used.
 pub(super) fn enum_member_credited(accessed: &FxHashSet<String>, name: &str) -> bool {
-    accessed.contains(name) || accessed.contains(ENUM_ESCAPE_USE)
+    accessed.contains(name) || accessed.contains(VALUE_ESCAPE_USE)
+}
+
+/// Whether a use of the class value credits `member`. Code that receives
+/// the class value can read each static member. Only an instance or
+/// `Class.prototype.member` reads an instance member, so an escape does not
+/// credit it.
+pub(super) fn class_member_credited_by_value_use(
+    accessed: &FxHashSet<String>,
+    member: &MemberInfo,
+) -> bool {
+    if member.is_static {
+        return accessed.contains(VALUE_ESCAPE_USE);
+    }
+    accessed.contains(&format!("{PROTOTYPE_SEGMENT}.{}", member.name))
 }
 
 /// Project files that an inline import type `import("./x").N.a` names. The

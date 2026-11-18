@@ -783,6 +783,8 @@ mod issue_4552_method_call_result_local;
 mod issue_4578_enum_member_alias;
 #[path = "integration_test/issue_4603_nested_class_binding_shadow.rs"]
 mod issue_4603_nested_class_binding_shadow;
+#[path = "integration_test/issue_4723_class_value_escape.rs"]
+mod issue_4723_class_value_escape;
 #[path = "integration_test/issue_4731_base_url_missing_file.rs"]
 mod issue_4731_base_url_missing_file;
 #[path = "integration_test/issue_4734_ts_import_declaration_file.rs"]

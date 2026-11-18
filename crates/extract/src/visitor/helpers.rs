@@ -867,11 +867,16 @@ pub fn extract_class_members(
         .and_then(|heritage| heritage_root_name(&heritage.expression, plain_object_names));
     let override_base = |is_override: bool| heritage_root.clone().filter(|_| is_override);
     let mut members = Vec::new();
+    let mut overload_slots: FxHashSet<(bool, String)> = FxHashSet::default();
     for element in &class.body.body {
         match element {
             ClassElement::MethodDefinition(method) => {
+                if !is_member_slot_of_method(class, method, &mut overload_slots) {
+                    continue;
+                }
                 if let Some(mut member) = build_method_member(method, class_name) {
                     member.override_base = override_base(method.r#override);
+                    merge_overload_return_flags(class, method, class_name, &mut member);
                     members.push(member);
                 }
             }
@@ -885,6 +890,81 @@ pub fn extract_class_members(
         }
     }
     members
+}
+
+/// Whether `method` is the one declaration that stands for its overload set.
+///
+/// TypeScript declares an overloaded method as bodyless signatures plus one
+/// implementation with a body. They are one runtime member, so one finding
+/// must cover them. The implementation stands for the set. A set with no
+/// implementation (abstract or ambient signatures) keeps its first signature.
+/// Getters and setters are not overloads and keep their own entries.
+fn is_member_slot_of_method(
+    class: &Class<'_>,
+    method: &oxc_ast::ast::MethodDefinition<'_>,
+    overload_slots: &mut FxHashSet<(bool, String)>,
+) -> bool {
+    if method.kind != MethodDefinitionKind::Method {
+        return true;
+    }
+    let Some(name) = method.key.static_name() else {
+        return true;
+    };
+    if method.value.body.is_some() {
+        return true;
+    }
+    let has_implementation = class.body.body.iter().any(|element| {
+        matches!(
+            element,
+            ClassElement::MethodDefinition(other)
+                if other.kind == MethodDefinitionKind::Method
+                    && other.r#static == method.r#static
+                    && other.value.body.is_some()
+                    && other.key.static_name().is_some_and(|other_name| other_name == name)
+        )
+    });
+    !has_implementation && overload_slots.insert((method.r#static, name.text().into_owned()))
+}
+
+/// Give the kept member of an overload set the return flags of every
+/// declaration in the set.
+///
+/// A signature can declare the class as return type while the implementation
+/// returns `any`. The call result is still a class instance, so the members
+/// read on it must stay credited.
+fn merge_overload_return_flags(
+    class: &Class<'_>,
+    method: &oxc_ast::ast::MethodDefinition<'_>,
+    class_name: Option<&str>,
+    member: &mut MemberInfo,
+) {
+    if method.kind != MethodDefinitionKind::Method {
+        return;
+    }
+    let Some(name) = method.key.static_name() else {
+        return;
+    };
+    for element in &class.body.body {
+        let ClassElement::MethodDefinition(other) = element else {
+            continue;
+        };
+        if std::ptr::eq(other.as_ref(), method)
+            || other.kind != MethodDefinitionKind::Method
+            || other.r#static != method.r#static
+            || other
+                .key
+                .static_name()
+                .is_none_or(|other_name| other_name != name)
+        {
+            continue;
+        }
+        if method.r#static {
+            member.is_instance_returning_static |=
+                is_instance_returning_static_method(other, class_name);
+        } else {
+            member.is_self_returning |= is_self_returning_instance_method(other, class_name);
+        }
+    }
 }
 
 /// Build a `MemberInfo` for a non-constructor, non-private method. A
@@ -919,6 +999,7 @@ fn build_method_member(
         is_self_returning,
         override_base: None,
         is_protected: matches!(method.accessibility, Some(TSAccessibility::Protected)),
+        is_static: method.r#static,
     })
 }
 
@@ -956,6 +1037,7 @@ fn build_property_member(
         is_self_returning: false,
         override_base: None,
         is_protected: matches!(prop.accessibility, Some(TSAccessibility::Protected)),
+        is_static: prop.r#static,
     })
 }
 

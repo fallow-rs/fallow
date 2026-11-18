@@ -14,8 +14,9 @@
 //!
 //! The analysis does not know at extraction time which binding is a
 //! namespace or an enum, so the pass records these uses for every import
-//! binding. Analysis reads them for namespace members, and reads the
-//! escape of a whole enum (`use(E)`) for enum members.
+//! binding. Analysis reads them for namespace members, reads the escape of
+//! a whole enum (`use(E)`) for enum members, and reads the escape of a
+//! class value (`use(C)`) and `C.prototype.member` for class members.
 
 use fallow_types::extract::{
     ExportInfo, ImportInfo, ImportedName, MemberKind, NamespaceMemberUseFact,
@@ -96,13 +97,17 @@ pub fn collect(
             .members
             .iter()
             .any(|member| member.kind == MemberKind::NamespaceMember);
-        // An enum that the module declares can escape in the same module
-        // (`takesEnum(Shape)`), as an imported enum can.
-        let is_enum = export
-            .members
-            .iter()
-            .any(|member| member.kind == MemberKind::EnumMember);
-        if !is_namespace && !is_enum {
+        // An enum or a class that the module declares can escape in the
+        // same module (`takesEnum(Shape)`, `register(Adapter)`), as an
+        // imported one can. A class can also have a member read through
+        // `Class.prototype.member`.
+        let has_value_members = export.members.iter().any(|member| {
+            matches!(
+                member.kind,
+                MemberKind::EnumMember | MemberKind::ClassMethod | MemberKind::ClassProperty
+            )
+        });
+        if !is_namespace && !has_value_members {
             continue;
         }
         let Some(local) = export.local_name.as_deref() else {
@@ -231,6 +236,9 @@ fn record_root_references(
                 uses.class_fields.insert((object.to_string(), path));
             }
             ChainUse::Escape => {
+                if let Some(holder) = object_holder(nodes, &chain) {
+                    record_holder_prototype_reads(scoping, nodes, &holder, object, &path, uses);
+                }
                 uses.chains.insert((object.to_string(), path, true));
             }
             ChainUse::Destructure(keys) => {
@@ -241,6 +249,97 @@ fn record_root_references(
             }
         }
     }
+}
+
+/// The first segment of a chain that reads an instance member through a
+/// class value: `Class.prototype.member`.
+const PROTOTYPE_SEGMENT: &str = "prototype";
+
+/// A `const` object literal that holds a value under a static key:
+/// `const holder = { key: Value }`.
+struct Holder {
+    symbol: SymbolId,
+    key: String,
+}
+
+/// The holder whose property value is the value at the end of `chain`.
+fn object_holder(nodes: &AstNodes<'_>, chain: &Chain) -> Option<Holder> {
+    let (outer, outer_span) = unwrap_upward(nodes, chain.node, chain.span);
+    let property_id = nodes.parent_id(outer);
+    let AstKind::ObjectProperty(property) = nodes.kind(property_id) else {
+        return None;
+    };
+    if property.computed || property.value.span() != outer_span {
+        return None;
+    }
+    let key = property.key.static_name()?.as_str()?.to_string();
+    let object_id = nodes.parent_id(property_id);
+    let AstKind::ObjectExpression(object) = nodes.kind(object_id) else {
+        return None;
+    };
+    let object_chain = Chain {
+        node: object_id,
+        span: object.span,
+        segments: Vec::new(),
+    };
+    let symbol = const_alias_symbol(nodes, &object_chain)?;
+    Some(Holder { symbol, key })
+}
+
+/// Record `holder[name].prototype.member` and `holder.key.prototype.member`
+/// as reads of `prototype.member` on the value under `path`. A computed key
+/// that is not a string literal can select any value of the holder.
+fn record_holder_prototype_reads(
+    scoping: &Scoping,
+    nodes: &AstNodes<'_>,
+    holder: &Holder,
+    object: &str,
+    path: &str,
+    uses: &mut Uses,
+) {
+    for reference in scoping.get_resolved_references(holder.symbol) {
+        let node_id = reference.node_id();
+        let AstKind::IdentifierReference(identifier) = nodes.kind(node_id) else {
+            continue;
+        };
+        let Some((member_id, member_span)) =
+            holder_value_access(nodes, node_id, identifier.span, &holder.key)
+        else {
+            continue;
+        };
+        let chain = member_chain(nodes, member_id, member_span);
+        if let [first, member, ..] = chain.segments.as_slice()
+            && first == PROTOTYPE_SEGMENT
+        {
+            let read = format!("{PROTOTYPE_SEGMENT}.{member}");
+            uses.chains
+                .insert((object.to_string(), join_path(path, &read), false));
+        }
+    }
+}
+
+/// The member expression over the holder reference at `node_id` that can
+/// give the value under `key`.
+fn holder_value_access(
+    nodes: &AstNodes<'_>,
+    node_id: NodeId,
+    span: Span,
+    key: &str,
+) -> Option<(NodeId, Span)> {
+    let parent = nodes.parent_id(node_id);
+    let selects_key = match nodes.kind(parent) {
+        AstKind::StaticMemberExpression(member) if member.object.span() == span => {
+            member.property.name == key
+        }
+        AstKind::ComputedMemberExpression(member) if member.object.span() == span => {
+            match &member.expression {
+                Expression::StringLiteral(literal) => literal.value == key,
+                _ => true,
+            }
+        }
+        _ => false,
+    };
+    selects_key.then(|| (parent, nodes.kind(parent).span()))
 }
 
 /// The symbol of the `const` alias that `chain` initializes:
@@ -485,18 +584,44 @@ fn is_export_specifier(nodes: &AstNodes<'_>, chain: &Chain) -> bool {
 fn classify(nodes: &AstNodes<'_>, chain: &Chain) -> ChainUse {
     let (outer, outer_span) = unwrap_upward(nodes, chain.node, chain.span);
     let parent = nodes.parent_id(outer);
-    if parent == outer {
+    if parent == outer
+        || is_callee_use(nodes, parent, outer_span)
+        || is_read_use(nodes.kind(parent), chain, outer_span)
+    {
         return ChainUse::Access;
     }
     match nodes.kind(parent) {
-        AstKind::CallExpression(call) if call.callee.span() == outer_span => ChainUse::Access,
-        AstKind::NewExpression(new) if new.callee.span() == outer_span => ChainUse::Access,
-        AstKind::TaggedTemplateExpression(tagged) if tagged.tag.span() == outer_span => {
-            ChainUse::Access
+        AstKind::VariableDeclarator(declarator)
+            if declarator.init.as_ref().map(GetSpan::span) == Some(outer_span) =>
+        {
+            destructured_keys(&declarator.id).map_or(ChainUse::Escape, ChainUse::Destructure)
         }
-        AstKind::StaticMemberExpression(member) if member.object.span() == outer_span => {
-            ChainUse::Access
+        _ => ChainUse::Escape,
+    }
+}
+
+/// Whether the parent calls, constructs, tags or reads a member of the
+/// value at `outer_span`.
+fn is_callee_use(nodes: &AstNodes<'_>, parent: NodeId, outer_span: Span) -> bool {
+    match nodes.kind(parent) {
+        AstKind::CallExpression(call) => {
+            call.callee.span() == outer_span
+                // `class Sub extends mixin(Base) {}`: the class factory builds
+                // the superclass from `Base`. It does not give the value to
+                // other code.
+                || is_superclass_call(nodes, parent, call.span)
         }
+        AstKind::NewExpression(new) => new.callee.span() == outer_span,
+        AstKind::TaggedTemplateExpression(tagged) => tagged.tag.span() == outer_span,
+        AstKind::StaticMemberExpression(member) => member.object.span() == outer_span,
+        _ => false,
+    }
+}
+
+/// Whether the parent only reads the value at `outer_span`: a type use, a
+/// statement, an operator, or the target of an assignment.
+fn is_read_use(parent: AstKind<'_>, chain: &Chain, outer_span: Span) -> bool {
+    match parent {
         AstKind::TSTypeReference(_)
         | AstKind::TSClassImplements(_)
         | AstKind::TSInterfaceHeritage(_)
@@ -506,23 +631,23 @@ fn classify(nodes: &AstNodes<'_>, chain: &Chain) -> ChainUse {
         | AstKind::UnaryExpression(_)
         | AstKind::UpdateExpression(_)
         | AstKind::JSXOpeningElement(_)
-        | AstKind::JSXClosingElement(_) => ChainUse::Access,
-        AstKind::TSImportEqualsDeclaration(_) if !chain.segments.is_empty() => ChainUse::Access,
-        AstKind::BinaryExpression(binary)
-            if !(binary.operator == BinaryOperator::In && binary.right.span() == outer_span) =>
-        {
-            ChainUse::Access
+        | AstKind::JSXClosingElement(_) => true,
+        AstKind::TSImportEqualsDeclaration(_) => !chain.segments.is_empty(),
+        AstKind::BinaryExpression(binary) => {
+            !(binary.operator == BinaryOperator::In && binary.right.span() == outer_span)
         }
-        AstKind::AssignmentExpression(assignment) if assignment.right.span() != outer_span => {
-            ChainUse::Access
-        }
-        AstKind::VariableDeclarator(declarator)
-            if declarator.init.as_ref().map(GetSpan::span) == Some(outer_span) =>
-        {
-            destructured_keys(&declarator.id).map_or(ChainUse::Escape, ChainUse::Destructure)
-        }
-        _ => ChainUse::Escape,
+        AstKind::AssignmentExpression(assignment) => assignment.right.span() != outer_span,
+        _ => false,
     }
+}
+
+/// Whether the call at `call_id` is the `extends` expression of a class.
+fn is_superclass_call(nodes: &AstNodes<'_>, call_id: NodeId, call_span: Span) -> bool {
+    matches!(
+        nodes.parent_kind(call_id),
+        AstKind::Class(class)
+            if class.heritage.as_ref().map(|heritage| heritage.expression.span()) == Some(call_span)
+    )
 }
 
 /// The keys of `const { a, b: c } = ...` when every key is static and the

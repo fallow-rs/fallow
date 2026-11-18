@@ -2150,6 +2150,22 @@ mod tests {
         ModuleGraph::build(&resolved, &entry_points, &files)
     }
 
+    fn class_method(name: &str, start: u32, end: u32) -> fallow_types::extract::MemberInfo {
+        use fallow_types::extract::{MemberInfo, MemberKind};
+        MemberInfo {
+            name: name.to_string(),
+            kind: MemberKind::ClassMethod,
+            span: oxc_span::Span::new(start, end),
+            has_decorator: false,
+            decorator_names: vec![],
+            is_instance_returning_static: false,
+            is_self_returning: false,
+            override_base: None,
+            is_protected: false,
+            is_static: false,
+        }
+    }
+
     fn named_foo_export(is_type_only: bool) -> ExportInfo {
         ExportInfo {
             name: ExportName::Named("Foo".to_string()),
@@ -2330,23 +2346,11 @@ mod tests {
 
     #[test]
     fn class_member_trace_inherits_the_type_lane_credit_of_its_owner() {
-        use fallow_types::extract::{MemberInfo, MemberKind};
-
         // Issue #2371: the member trace is built from the owner's export
         // trace, so an owner credited only through the type lane reports a
         // used owner instead of the "referenced by no file" reason.
         let mut owner = named_foo_export(false);
-        owner.members = vec![MemberInfo {
-            name: "run".to_string(),
-            kind: MemberKind::ClassMethod,
-            span: oxc_span::Span::new(0, 3),
-            has_decorator: false,
-            decorator_names: vec![],
-            is_instance_returning_static: false,
-            is_self_returning: false,
-            override_base: None,
-            is_protected: false,
-        }];
+        owner.members = vec![class_method("run", 0, 3)];
         let graph = source_consumer_graph(vec![owner], true, false, Vec::new());
 
         let trace = trace_class_member(&graph, Path::new("/project"), "src/source.ts", "run")
@@ -2484,8 +2488,6 @@ mod tests {
     }
 
     fn build_class_member_graph() -> ModuleGraph {
-        use fallow_types::extract::{MemberInfo, MemberKind};
-
         let files = vec![
             DiscoveredFile {
                 id: FileId(0),
@@ -2502,17 +2504,7 @@ mod tests {
             path: PathBuf::from("/project/src/entry.ts"),
             source: EntryPointSource::PackageJsonMain,
         }];
-        let method = |name: &str| MemberInfo {
-            name: name.to_string(),
-            kind: MemberKind::ClassMethod,
-            span: oxc_span::Span::new(0, 4),
-            has_decorator: false,
-            decorator_names: vec![],
-            is_instance_returning_static: false,
-            is_self_returning: false,
-            override_base: None,
-            is_protected: false,
-        };
+        let method = |name: &str| class_method(name, 0, 4);
         let resolved_modules = vec![
             ResolvedModule {
                 file_id: FileId(0),
@@ -2586,8 +2578,6 @@ mod tests {
     }
 
     fn exact_class_method_fixture() -> (tempfile::TempDir, ModuleGraph) {
-        use fallow_types::extract::{MemberInfo, MemberKind};
-
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path();
         let path = root.join("repository.ts");
@@ -2597,17 +2587,7 @@ mod tests {
         let first = source.find("save").unwrap() as u32;
         let second = source.rfind("save").unwrap() as u32;
         let run = source.find("run").unwrap() as u32;
-        let member = |name: &str, start| MemberInfo {
-            name: name.to_string(),
-            kind: MemberKind::ClassMethod,
-            span: oxc_span::Span::new(start, start + 4),
-            has_decorator: false,
-            decorator_names: vec![],
-            is_instance_returning_static: false,
-            is_self_returning: false,
-            override_base: None,
-            is_protected: false,
-        };
+        let member = |name: &str, start| class_method(name, start, start + 4);
         let files = vec![DiscoveredFile {
             id: FileId(0),
             path: path.clone(),
@@ -2746,8 +2726,6 @@ mod tests {
     /// Build a graph where the controller declaring `Ctrl` is NOT imported by
     /// the entry, so its file is unreachable and every member is dead.
     fn build_unreachable_class_member_graph() -> ModuleGraph {
-        use fallow_types::extract::{MemberInfo, MemberKind};
-
         let files = vec![
             DiscoveredFile {
                 id: FileId(0),
@@ -2764,17 +2742,7 @@ mod tests {
             path: PathBuf::from("/project/src/entry.ts"),
             source: EntryPointSource::PackageJsonMain,
         }];
-        let method = |name: &str| MemberInfo {
-            name: name.to_string(),
-            kind: MemberKind::ClassMethod,
-            span: oxc_span::Span::new(0, 4),
-            has_decorator: false,
-            decorator_names: vec![],
-            is_instance_returning_static: false,
-            is_self_returning: false,
-            override_base: None,
-            is_protected: false,
-        };
+        let method = |name: &str| class_method(name, 0, 4);
         let resolved_modules = vec![
             ResolvedModule {
                 file_id: FileId(0),
@@ -2829,7 +2797,6 @@ mod tests {
         // Two exports declare a member of the same name; the tie-break in
         // `max_by_key` must prefer the used, non-type-only owner so the trace
         // reports the reachable class rather than a type-only shadow.
-        use fallow_types::extract::{MemberInfo, MemberKind};
 
         let files = vec![
             DiscoveredFile {
@@ -2847,17 +2814,7 @@ mod tests {
             path: PathBuf::from("/project/src/entry.ts"),
             source: EntryPointSource::PackageJsonMain,
         }];
-        let method = |name: &str| MemberInfo {
-            name: name.to_string(),
-            kind: MemberKind::ClassMethod,
-            span: oxc_span::Span::new(0, 4),
-            has_decorator: false,
-            decorator_names: vec![],
-            is_instance_returning_static: false,
-            is_self_returning: false,
-            override_base: None,
-            is_protected: false,
-        };
+        let method = |name: &str| class_method(name, 0, 4);
         let resolved_modules = vec![
             ResolvedModule {
                 file_id: FileId(0),
