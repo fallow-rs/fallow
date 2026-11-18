@@ -52,6 +52,16 @@ fn a_marker_in_an_astro_script_literal_has_no_effect() {
 }
 
 #[test]
+fn a_marker_in_a_typed_astro_script_literal_has_no_effect() {
+    let source = format!(
+        "---\nconst t = 1;\n---\n<p>{{t}}</p>\n<script>\nconst n: number = 1;\n{IN_TEMPLATE}</script>\n"
+    );
+    assert_eq!(suppressions("Page.astro", &source), Vec::new());
+    let parsed = crate::parse_suppressions_for_file(Path::new("src/Page.astro"), &source);
+    assert!(parsed.suppressions.is_empty(), "{:?}", parsed.suppressions);
+}
+
+#[test]
 fn a_marker_in_an_html_script_literal_has_no_effect() {
     let source = format!(
         "<html><body>\n<script type=\"module\">\n{IN_TEMPLATE}</script>\n<!-- fallow-ignore-file unused-file -->\n</body></html>\n"

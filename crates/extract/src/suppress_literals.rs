@@ -92,7 +92,7 @@ fn host_sections(host: ScriptHost, source: &str) -> Vec<ScriptSection> {
         ScriptHost::Astro => crate::astro::extract_astro_frontmatter(source)
             .iter()
             .map(sfc_section)
-            .chain(crate::html::inline_script_sections(source))
+            .chain(astro_script_sections(source))
             .collect(),
         ScriptHost::Mdx => vec![ScriptSection {
             extraction: crate::mdx::extract_mdx_statements_mapped(source),
@@ -100,6 +100,18 @@ fn host_sections(host: ScriptHost, source: &str) -> Vec<ScriptSection> {
         }],
         ScriptHost::Html => crate::html::page_script_sections(source),
     }
+}
+
+/// Astro compiles its `<script>` blocks as TypeScript, so a typed
+/// declaration must not stop the parse. A plain JavaScript block parses the
+/// same way as TypeScript.
+fn astro_script_sections(source: &str) -> impl Iterator<Item = ScriptSection> {
+    crate::html::inline_script_sections(source)
+        .into_iter()
+        .map(|section| ScriptSection {
+            source_type: SourceType::ts(),
+            ..section
+        })
 }
 
 fn sfc_section(script: &crate::sfc::SfcScript) -> ScriptSection {
