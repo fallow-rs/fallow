@@ -1139,9 +1139,9 @@ pub struct ComplexityOptions {
     /// Request the coverage-gap section.
     pub coverage_gaps: bool,
     /// Let an enabled `coverage-gaps` rule of the config report coverage
-    /// gaps and arm their gate, also when the options request other
-    /// sections. Without a requested section the rule always does so. The
-    /// combined run sets it, as bare `fallow` does.
+    /// gaps, also when the options request other sections. Without a
+    /// requested section the rule always does so. The combined run sets it,
+    /// as bare `fallow` does.
     pub config_activates_coverage_gaps: bool,
     /// Request the churn hotspot section.
     pub hotspots: bool,
