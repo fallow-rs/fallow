@@ -295,6 +295,71 @@ fn report_from_a_saved_file_loads_the_config_silently() {
     }
 }
 
+/// `report --from` reads optional settings from the discovered config. A
+/// discovered config that does not load gives the same report as no config,
+/// with no stderr text and exit 0.
+#[test]
+fn report_from_a_saved_file_ignores_a_broken_discovered_config() {
+    let dir = project();
+    let root = canonical_root(&dir);
+    let saved = run(&root, &["dead-code", "--format", "json", "--quiet"], &[]);
+    let saved_path = root.join("saved.json");
+    std::fs::write(&saved_path, &saved.stdout).unwrap();
+    let saved_path = saved_path.to_str().unwrap();
+    for format in ["sarif", "markdown", "codeclimate"] {
+        let args = ["report", "--from", saved_path, "--format", format];
+        let _ = std::fs::remove_file(root.join(".fallowrc.json"));
+        let without_config = run(&root, &args, &[]);
+        assert_eq!(
+            without_config.code, 0,
+            "{format}: {}",
+            without_config.stderr
+        );
+
+        std::fs::write(root.join(".fallowrc.json"), "{ \"rules\": \n").unwrap();
+        let broken = run(&root, &args, &[]);
+        assert_eq!(broken.code, 0, "{format}: {}", broken.stderr);
+        assert_eq!(broken.stderr, "", "{format}");
+        assert_eq!(broken.stderr, without_config.stderr, "{format}");
+        assert_eq!(broken.stdout, without_config.stdout, "{format}");
+    }
+}
+
+/// `audit-cache prune` reads `cache.dir` from the config. An explicit config
+/// that does not load gives the default cache dir, so prune does not fail.
+#[test]
+fn audit_cache_prune_ignores_a_config_that_does_not_load() {
+    let dir = project();
+    let root = canonical_root(&dir);
+    std::fs::write(root.join("broken.json"), "{ \"rules\": \n").unwrap();
+    let scan = tempfile::tempdir().expect("scan root");
+    let scan_root = scan.path().to_str().unwrap();
+    let envs = [
+        ("TMPDIR", scan_root),
+        ("TMP", scan_root),
+        ("TEMP", scan_root),
+    ];
+    for config in ["broken.json", "missing.json"] {
+        let output = run(
+            &root,
+            &[
+                "audit-cache",
+                "prune",
+                "--dry-run",
+                "--format",
+                "json",
+                "--config",
+                config,
+            ],
+            &envs,
+        );
+        assert_eq!(output.code, 0, "{config}: {}", output.stderr);
+        assert_eq!(output.stderr, "", "{config}");
+        let json = parse_json(&output);
+        assert_eq!(json["complete"], serde_json::json!(true), "{config}");
+    }
+}
+
 #[test]
 fn report_from_a_saved_file_refuses_remote_extends_also_with_the_flag() {
     let dir = project();
