@@ -7,6 +7,7 @@ use std::sync::Arc;
 use oxc_resolver::{Resolution, ResolveError, ResolveOptions};
 use serde_json::Value;
 
+use super::extension_alias::{build_extension_aliases, extension_alias_matches};
 use super::fallbacks::{
     installed_workspace_package_target, lookup_internal_file_id, matches_plugin_path_alias,
     nearest_package_manifest, normalize_path_lexically, package_imports_workspace_target,
@@ -32,9 +33,7 @@ use super::path_info::{
 use super::react_native::{build_condition_names, build_extensions};
 use super::tsconfig_scope::{glob_values_match, resolve_tsconfig_relative_path};
 use super::types::{DenoImportMapEntry, ResolveContext, ResolveResult};
-use super::url_suffix::{
-    resolve_failed_bare_asset_query_specifier, strip_url_suffix, strip_vite_asset_query,
-};
+use super::url_suffix::{resolve_failed_bare_query_specifier, strip_bare_query, strip_url_suffix};
 use super::workspace_alias::{
     resolve_failed_bare_package_specifier, try_aliased_workspace_package_fallback,
 };
@@ -117,31 +116,7 @@ pub(super) fn build_resolve_options(
 ) -> ResolveOptions {
     let mut options = ResolveOptions {
         extensions: build_extensions(active_plugins),
-        extension_alias: vec![
-            (
-                ".js".into(),
-                vec![
-                    ".ts".into(),
-                    ".tsx".into(),
-                    ".gts".into(),
-                    ".js".into(),
-                    ".gjs".into(),
-                    // Last so declaration-only modules resolve (TypeScript maps
-                    // .js to .d.ts too) without shadowing runtime files.
-                    ".d.ts".into(),
-                ],
-            ),
-            (".ts".into(), vec![".gts".into(), ".ts".into()]),
-            (".jsx".into(), vec![".tsx".into(), ".jsx".into()]),
-            (
-                ".mjs".into(),
-                vec![".mts".into(), ".mjs".into(), ".d.mts".into()],
-            ),
-            (
-                ".cjs".into(),
-                vec![".cts".into(), ".cjs".into(), ".d.cts".into()],
-            ),
-        ],
+        extension_alias: build_extension_aliases(),
         condition_names: build_condition_names(active_plugins, extra_conditions),
         main_fields: vec!["module".into(), "main".into()],
         ..Default::default()
@@ -1006,20 +981,6 @@ fn try_tsconfig_alias_extension_alias(
     None
 }
 
-fn extension_alias_matches(import_ext: &str, candidate_ext: &str) -> bool {
-    let candidate_ext = candidate_ext.trim_start_matches('.');
-    let aliases: &[&str] = match import_ext {
-        "js" => &["ts", "tsx", "js"],
-        "jsx" => &["tsx", "jsx"],
-        "mjs" => &["mts", "mjs"],
-        "cjs" => &["cts", "cjs"],
-        _ => return false,
-    };
-    aliases
-        .iter()
-        .any(|alias| candidate_ext == *alias || candidate_ext.ends_with(&format!(".{alias}")))
-}
-
 fn with_exact_extension(path: &Path, extension: &str) -> PathBuf {
     let Some(file_stem) = path.file_stem() else {
         return path.to_path_buf();
@@ -1871,8 +1832,8 @@ fn resolve_failed_regular_specifier(
     if is_plain_css_file(from_file) && is_bare_style_subpath(specifier) {
         return ResolveResult::Unresolvable(specifier.to_string());
     }
-    if is_bare && let Some(base) = strip_vite_asset_query(specifier) {
-        return resolve_failed_bare_asset_query_specifier(
+    if is_bare && let Some(base) = strip_bare_query(specifier) {
+        return resolve_failed_bare_query_specifier(
             ctx,
             from_file,
             specifier,
@@ -2030,14 +1991,13 @@ mod tests {
     use super::super::file_attempt::is_tsconfig_error;
     use super::super::package_credit::package_usage_name_for_resolved_package;
     use super::{
-        SpecifierNormalization, extension_alias_matches, glob_values_match,
-        is_bare_style_package_reference, is_bare_style_subpath, is_js_ts_extension,
-        is_node_modules_path, is_plain_css_file, is_relative_tsconfig_extends,
-        is_safe_static_dir_relative_path, is_style_file, matches_nearest_tsconfig_path_alias,
-        normalize_resolve_specifier, package_usage_name_for_external_bare_specifier,
-        path_alias_capture, path_alias_pattern_matches, path_alias_specificity,
-        resolve_tsconfig_extends_candidate, resolve_tsconfig_extends_path,
-        resolve_tsconfig_reference_path, serves_static_dir_mounts,
+        SpecifierNormalization, glob_values_match, is_bare_style_package_reference,
+        is_bare_style_subpath, is_js_ts_extension, is_node_modules_path, is_plain_css_file,
+        is_relative_tsconfig_extends, is_safe_static_dir_relative_path, is_style_file,
+        matches_nearest_tsconfig_path_alias, normalize_resolve_specifier,
+        package_usage_name_for_external_bare_specifier, path_alias_capture,
+        path_alias_pattern_matches, path_alias_specificity, resolve_tsconfig_extends_candidate,
+        resolve_tsconfig_extends_path, resolve_tsconfig_reference_path, serves_static_dir_mounts,
         should_preserve_node_modules_style_file, static_dir_relative_path, static_mount_url_path,
         tsconfig_extends_values, with_appended_extension, with_exact_extension,
     };
@@ -2611,41 +2571,6 @@ mod tests {
     #[test]
     fn path_alias_specificity_longer_prefix_is_more_specific_than_shorter() {
         assert!(path_alias_specificity("@app/foo/*") > path_alias_specificity("@app/*"));
-    }
-
-    // ---- extension_alias_matches (lines 855-867) ----
-
-    #[test]
-    fn extension_alias_matches_js_to_ts() {
-        assert!(extension_alias_matches("js", ".ts"));
-        assert!(extension_alias_matches("js", ".tsx"));
-        assert!(extension_alias_matches("js", ".js"));
-    }
-
-    #[test]
-    fn extension_alias_matches_jsx_to_tsx() {
-        assert!(extension_alias_matches("jsx", ".tsx"));
-        assert!(extension_alias_matches("jsx", ".jsx"));
-        assert!(!extension_alias_matches("jsx", ".ts"));
-    }
-
-    #[test]
-    fn extension_alias_matches_mjs_to_mts() {
-        assert!(extension_alias_matches("mjs", ".mts"));
-        assert!(extension_alias_matches("mjs", ".mjs"));
-        assert!(!extension_alias_matches("mjs", ".ts"));
-    }
-
-    #[test]
-    fn extension_alias_matches_cjs_to_cts() {
-        assert!(extension_alias_matches("cjs", ".cts"));
-        assert!(extension_alias_matches("cjs", ".cjs"));
-        assert!(!extension_alias_matches("cjs", ".js"));
-    }
-
-    #[test]
-    fn extension_alias_matches_unknown_import_ext_returns_false() {
-        assert!(!extension_alias_matches("ts", ".js"));
     }
 
     // ---- with_appended_extension / with_exact_extension (lines 808-876) ----

@@ -81,7 +81,8 @@ import d from '@scope/mapped-pkg/dist/engine.wasm?url';
 import e from '@scope/mapped-pkg/dist/engine.wasm?init';
 import f from '@scope/mapped-pkg/dist/worker.js?sharedworker';
 import g from '@scope/mapped-pkg/dist/engine.wasm?url&no-inline';
-console.log(a, b, c, d, e, f, g);
+import h from 'plain-pkg/build/worker.min.mjs?binary';
+console.log(a, b, c, d, e, f, g, h);
 ";
 
 #[test]
@@ -128,14 +129,31 @@ fn missing_file_of_an_installed_package_with_query_stays_unresolved() {
 }
 
 #[test]
-fn unknown_query_on_an_uninstalled_package_stays_unresolved() {
+fn bundler_plugin_query_on_an_uninstalled_package_credits_it() {
+    // Bundler plugins define their own queries, for example the esbuild
+    // `?binary` loader, so the query name does not decide the result.
     let dir = project(
-        "import a from 'plain-pkg/build/worker.min.mjs?custom';\nconsole.log(a);\n",
+        "export const a = () => import('plain-pkg/build/mod.wasm?binary');\nimport b from '@scope/mapped-pkg/dist/engine.wasm?custom&inline';\nconsole.log(b);\n",
         false,
+    );
+    let findings = analyze(dir.path());
+    assert!(findings.unresolved.is_empty(), "{:?}", findings.unresolved);
+    assert!(
+        findings.unused_dependencies.is_empty(),
+        "both packages must count as used: {:?}",
+        findings.unused_dependencies
+    );
+}
+
+#[test]
+fn bundler_plugin_query_on_a_missing_file_of_an_installed_package_stays_unresolved() {
+    let dir = project(
+        "import a from 'plain-pkg/build/missing.wasm?binary';\nconsole.log(a);\n",
+        true,
     );
     assert_eq!(
         analyze(dir.path()).unresolved,
-        vec!["plain-pkg/build/worker.min.mjs?custom".to_string()]
+        vec!["plain-pkg/build/missing.wasm?binary".to_string()]
     );
 }
 
