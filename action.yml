@@ -703,7 +703,7 @@ runs:
         FALLOW_ARTIFACTS_DIR: ${{ inputs.artifacts-dir }}
         # The inline annotations step shows the same findings, so the check
         # run leaves out its own copy when that step runs.
-        FALLOW_WORKFLOW_ANNOTATIONS: ${{ inputs.annotations == 'true' && inputs.review-comments != 'true' }}
+        FALLOW_WORKFLOW_ANNOTATIONS: ${{ inputs.annotations == 'true' && inputs.review-comments != 'true' && inputs.command != 'fix' && inputs.command != 'security' }}
         # FALLOW_DIFF_FILE and the FALLOW_MUTATION_* result paths come from
         # the scope and mutation steps through $GITHUB_ENV. Declaring them
         # here would override that value.

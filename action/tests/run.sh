@@ -3222,8 +3222,8 @@ OUT=$(cd "$WORK_DIR" && \
 assert_contains "$(cat "$GATES_SUMMARY_FILE")" "> **Gates:** failed error-severity-findings." \
   "summary.sh: the Gates line lists an unenforced default rule with status fail"
 
-# The native summary states the gates in its own line, so the action does not
-# write a second one above it.
+# A native render that fails leaves no gate line of its own, so the action
+# writes the line of the step outputs.
 NATIVE_GATES_SUMMARY_FILE="$WORK_DIR/native-gates-summary.md"
 : > "$NATIVE_GATES_SUMMARY_FILE"
 (cd "$WORK_DIR" && \
@@ -3234,8 +3234,8 @@ NATIVE_GATES_SUMMARY_FILE="$WORK_DIR/native-gates-summary.md"
   FALLOW_GATES_FAILED="error-severity-findings,health-findings" \
   FALLOW_RESULTS_FILE="missing-results.json" \
   bash "$SCRIPTS_DIR/summary.sh" > /dev/null 2>&1)
-assert_not_contains "$(cat "$NATIVE_GATES_SUMMARY_FILE")" "**Gates:**" \
-  "summary.sh: a report-capable binary leaves the gate line to the native summary"
+assert_contains "$(cat "$NATIVE_GATES_SUMMARY_FILE")" "> **Gates:** failed error-severity-findings, health-findings." \
+  "summary.sh: a failed native render keeps the gate line of the step outputs"
 
 printf '{"annotations":[{"path":"src/a.ts","line":0,"level":"failure","title":"fallow/high-crap-score","message":"Needs work","raw_details":null},{"path":"src/b.ts","line":12,"level":"notice","title":"fallow/info","message":"FYI","raw_details":null}]}\n' > "$CUSTOM_ARTIFACTS/fallow-pr-decision.json"
 OUT=$(cd "$WORK_DIR" && \
@@ -3340,6 +3340,19 @@ else
     FALLOW_RESULTS_FILE="$FASTPATH_ENVELOPE" \
     bash "$FASTPATH_SCRIPTS/summary.sh" > /dev/null 2>&1
   assert_contains "$(cat "$FASTPATH_SUMMARY")" "## Fallow codebase report" "summary.sh native fastpath writes the native heading"
+
+  # The native body states the gates, so the action writes no second line.
+  FASTPATH_GATES_SUMMARY="$FASTPATH_WORK/summary-gates.md"
+  HAS_NATIVE_REPORT=true \
+    FALLOW_BIN="$FASTPATH_BIN" \
+    FALLOW_COMMAND="dead-code" \
+    ACTION_JQ_DIR="$JQ_DIR" \
+    FALLOW_GATES_FAILED="error-severity-findings" \
+    GITHUB_STEP_SUMMARY="$FASTPATH_GATES_SUMMARY" \
+    FALLOW_RESULTS_FILE="$FASTPATH_ENVELOPE" \
+    bash "$FASTPATH_SCRIPTS/summary.sh" > /dev/null 2>&1
+  assert_not_contains "$(cat "$FASTPATH_GATES_SUMMARY")" "> **Gates:**" \
+    "summary.sh native fastpath leaves the gate line to the native body"
 
   # (c2) the architecture envelope has its own kind, and the native report
   # renders it. The fastpath output equals `report --from` and is not empty.

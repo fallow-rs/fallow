@@ -281,6 +281,24 @@ pub fn summary_line(envelope: &Value) -> Option<String> {
     Some(format!("Gates: {}.", clauses.join("; ")))
 }
 
+/// Whether the sticky comment of the same envelope says "Quality gate failed":
+/// an enforced gate failed, or a findings gate failed because a finding has the
+/// `error` severity. An unenforced gate of another kind, for example a stale
+/// baseline, leaves the verdict at "Review needed", as in the comment.
+pub fn verdict_gate_failed(envelope: &Value) -> bool {
+    const FINDINGS_GATES: [&str; 2] = ["error-severity-findings", "health-findings"];
+    envelope
+        .get("gate_outcomes")
+        .and_then(Value::as_object)
+        .is_some_and(|gates| {
+            gates.iter().any(|(name, gate)| {
+                gate.get("status").and_then(Value::as_str) == Some("fail")
+                    && (gate.get("enforced").and_then(Value::as_bool) == Some(true)
+                        || FINDINGS_GATES.contains(&name.as_str()))
+            })
+        })
+}
+
 /// Gates that print their own stderr line in every mode, also under
 /// `--quiet`. The exit-reason line does not repeat them.
 const GATES_WITH_OWN_LINE: [&str; 3] = ["parse-error", "stale-baseline", "baseline-growth"];

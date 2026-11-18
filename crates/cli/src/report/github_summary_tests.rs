@@ -454,3 +454,33 @@ fn health_summary_footer_withholds_totals_for_a_partial_capture() {
     assert!(!out.contains("tracked functions"), "{out}");
     assert!(!out.contains("unhit"), "{out}");
 }
+
+/// The summary verdict is the verdict of the sticky comment: an unenforced
+/// gate of another kind leaves it at "Review needed", and a failed findings
+/// gate means an error finding.
+#[test]
+fn combined_summary_verdict_follows_the_comment() {
+    let env = |gates: serde_json::Value| {
+        serde_json::json!({
+            "check": { "total_issues": 0 },
+            "dupes": { "clone_groups": [], "stats": {} },
+            "health": health_with_baseline(3, 3),
+            "gate_outcomes": gates
+        })
+    };
+    let stale = render_combined_summary(
+        &env(serde_json::json!({ "stale-baseline": { "status": "fail", "enforced": false } })),
+        &no_links(),
+    );
+    assert!(stale.contains("**Review needed**"), "{stale}");
+    let findings = render_combined_summary(
+        &env(serde_json::json!({ "health-findings": { "status": "fail", "enforced": false } })),
+        &no_links(),
+    );
+    assert!(findings.contains("**Quality gate failed**"), "{findings}");
+    let enforced = render_combined_summary(
+        &env(serde_json::json!({ "stale-baseline": { "status": "fail", "enforced": true } })),
+        &no_links(),
+    );
+    assert!(enforced.contains("**Quality gate failed**"), "{enforced}");
+}

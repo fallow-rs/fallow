@@ -3053,18 +3053,6 @@ fn combined_tips(env: &Value) -> String {
 /// The heading of the combined summary: the same title as the sticky comment.
 const COMBINED_TITLE: &str = "## Fallow combined report\n\n";
 
-/// Whether a gate of the run failed, which makes the verdict the same as the
-/// heading of the sticky comment: an error finding fails its findings gate.
-fn any_gate_failed(env: &Value) -> bool {
-    env.get("gate_outcomes")
-        .and_then(Value::as_object)
-        .is_some_and(|gates| {
-            gates
-                .values()
-                .any(|gate| gate.get("status").and_then(Value::as_str) == Some("fail"))
-        })
-}
-
 /// Port of `summary-combined.jq`.
 #[must_use]
 fn render_combined_summary(env: &Value, links: &LinkContext) -> String {
@@ -3073,7 +3061,7 @@ fn render_combined_summary(env: &Value, links: &LinkContext) -> String {
     if counts.total() == 0 {
         return format!("{header}{}", combined_zero_case(env, &counts));
     }
-    let (alert, verdict) = if any_gate_failed(env) {
+    let (alert, verdict) = if crate::report::gate_outcome_text::verdict_gate_failed(env) {
         ("CAUTION", "Quality gate failed")
     } else {
         ("WARNING", "Review needed")

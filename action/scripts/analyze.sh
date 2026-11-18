@@ -28,11 +28,6 @@ artifact_path() {
 # shellcheck source=scope.sh
 . "$(dirname "${BASH_SOURCE[0]}")/scope.sh"
 
-# Run jq and keep its stderr in the step log. Every envelope read in this
-# script discarded it, so a truncated or unreadable `fallow-results.json` read
-# as "no findings": jq wrote the cause to stderr and the caller saw an empty
-# value. Only stdout is captured by a command substitution, so the replay is
-# safe inside one. jq is silent on success.
 # `count_noun 1 issue issues` prints "1 issue"; any other count takes the
 # plural.
 count_noun() {
@@ -43,6 +38,11 @@ count_noun() {
   fi
 }
 
+# Run jq and keep its stderr in the step log. Every envelope read in this
+# script discarded it, so a truncated or unreadable `fallow-results.json` read
+# as "no findings": jq wrote the cause to stderr and the caller saw an empty
+# value. Only stdout is captured by a command substitution, so the replay is
+# safe inside one. jq is silent on success.
 jq_debug() {
   local error_file status
   error_file=$(mktemp)
