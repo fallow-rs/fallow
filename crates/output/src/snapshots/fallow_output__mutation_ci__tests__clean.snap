@@ -6,11 +6,9 @@ expression: both_headings(&view)
 
 The tests detected each mutant that ran.
 
-| Killed | Survived | No coverage | Not measured | Score |
-| --- | --- | --- | --- | --- |
-| 12 | 0 | 0 | 0 | 100.0% |
-
-Scope: the changed lines.
+| Killed | Survived | No coverage | Score |
+| --: | --: | --: | --: |
+| 12 | 0 | 0 | 100.0% |
 
 ===== summary heading =====
 
@@ -18,10 +16,8 @@ Scope: the changed lines.
 
 The tests detected each mutant that ran.
 
-| Killed | Survived | No coverage | Not measured | Score |
-| --- | --- | --- | --- | --- |
-| 12 | 0 | 0 | 0 | 100.0% |
-
-Scope: the changed lines.
+| Killed | Survived | No coverage | Score |
+| --: | --: | --: | --: |
+| 12 | 0 | 0 | 100.0% |
 
 The run took 4m 12s. 3 results came from the cache.

@@ -2,10 +2,10 @@
 source: crates/cli/tests/integration/github_format_tests.rs
 expression: rendered
 ---
-# Fallow Analysis
+## Fallow codebase report
 
 > [!WARNING]
-> **12 issues** found · 321ms
+> **12 issues** found
 
 | Category | Count |
 |----------|------:|

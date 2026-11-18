@@ -221,12 +221,12 @@ fn the_review_comment_body_hedges_next_to_its_fix_intent() {
         "the inline comment must hedge: {body}"
     );
     assert!(
-        body.contains("Fix intent:"),
+        body.contains("**Fix:**"),
         "the guard is only meaningful while the comment still offers the mutation: {body}"
     );
     assert!(
         body.find("caveat:").expect("caveat position")
-            < body.find("Fix intent:").expect("fix intent position"),
+            < body.find("**Fix:**").expect("fix intent position"),
         "the hedge has to be read before the recommendation: {body}"
     );
 }
@@ -464,7 +464,7 @@ fn the_annotation_appends_the_caveat_after_its_remediation_guidance() {
         .find("Caveat: incomplete import graph.")
         .expect("the caveat sentence");
     let guidance = annotation
-        .find("Consider removing it")
+        .find("Remove the file, or import it")
         .expect("the remediation guidance");
 
     assert!(
@@ -491,7 +491,7 @@ fn only_the_review_formats_carry_a_fix_intent_line() {
             "`--format {format}` dropped the caveat: {rendered}"
         );
         assert!(
-            !rendered.contains("Fix intent:"),
+            !rendered.contains("**Fix:**"),
             "`--format {format}` is a summary table and has no fix-intent line: {rendered}"
         );
     }
@@ -499,7 +499,7 @@ fn only_the_review_formats_carry_a_fix_intent_line() {
     for format in ["review-github", "review-gitlab"] {
         let rendered = run_format(&root, format);
         assert!(
-            rendered.contains("Fix intent:"),
+            rendered.contains("**Fix:**"),
             "`--format {format}` is the surface that carries the fix-intent line: {rendered}"
         );
     }

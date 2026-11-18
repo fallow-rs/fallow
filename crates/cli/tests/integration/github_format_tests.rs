@@ -1236,7 +1236,7 @@ fn render_summary_fix_mirrors_render_fix_summary() {
     );
     // The summary-fix.jq sections: heading, headline, count table, details.
     assert!(
-        via_dispatch.starts_with("## Fallow - Auto-fix"),
+        via_dispatch.starts_with("## Fallow fix report"),
         "{via_dispatch}"
     );
     assert!(
@@ -2046,7 +2046,7 @@ fn combined_summary_counts_visible_groups_plus_what_a_cap_withheld() {
 
     let rendered = render_summary(EnvelopeKind::Combined, &filtered, &LinkContext::default());
     assert!(
-        rendered.contains("No duplication"),
+        !rendered.contains("clone group"),
         "nonzero stats with nothing actionable to inspect must still read clean: {rendered}"
     );
 
@@ -2054,7 +2054,7 @@ fn combined_summary_counts_visible_groups_plus_what_a_cap_withheld() {
     capped["dupes"]["clone_groups_omitted"] = json!(4);
     let capped_counts = render_summary(EnvelopeKind::Combined, &capped, &LinkContext::default());
     assert!(
-        capped_counts.contains("**5** clone groups"),
+        capped_counts.contains("5 clone groups"),
         "one listed group plus four withheld by a cap is five: {capped_counts}"
     );
 }

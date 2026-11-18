@@ -1329,6 +1329,7 @@ diff --git a/src/a.ts b/src/a.ts
                 include_guidance: false,
                 suggestion_block: &|_, _| None,
                 guidance_block: &|_| None,
+                docs_url_for_rule: &|_| None,
             },
         );
         let fallow_output::ReviewComment::GitLab(comment) = comment else {

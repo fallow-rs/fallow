@@ -2341,14 +2341,11 @@ fn duplication_codeclimate_description_uses_stable_clone_handle_not_ordinal() {
     let issues = output.as_array().unwrap();
     assert_eq!(issues.len(), 2);
     let desc0 = issues[0]["description"].as_str().unwrap();
-    assert!(desc0.starts_with("Code clone dup:"), "first group: {desc0}");
+    assert!(desc0.contains("(clone group dup:"), "first group: {desc0}");
     assert!(!desc0.contains("group 1"), "ordinal leaked: {desc0}");
     assert!(desc0.contains("8 lines"), "first group line count: {desc0}");
     let desc1 = issues[1]["description"].as_str().unwrap();
-    assert!(
-        desc1.starts_with("Code clone dup:"),
-        "second group: {desc1}"
-    );
+    assert!(desc1.contains("(clone group dup:"), "second group: {desc1}");
     assert!(!desc1.contains("group 2"), "ordinal leaked: {desc1}");
     assert!(
         desc1.contains("6 lines"),

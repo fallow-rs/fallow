@@ -185,13 +185,13 @@ fn combined_summary_counts_health_after_the_baseline() {
     };
     let out = render_combined_summary(&combined(health_with_baseline(76, 0)), &no_links());
     assert!(
-        out.contains(":white_check_mark: No new complex functions (76 in the baseline)"),
+        out.contains("no new complex functions (76 in the baseline)."),
         "{out}"
     );
     assert!(!out.contains("above threshold"), "{out}");
 
     let out = render_combined_summary(&combined(health_with_baseline(76, 2)), &no_links());
-    assert!(out.contains(":warning: **2** health findings"), "{out}");
+    assert!(out.contains("2 health findings."), "{out}");
     assert!(
         out.contains("(2 new functions above threshold, 74 in the baseline)"),
         "{out}"
@@ -212,7 +212,7 @@ fn combined_summary_without_a_baseline_keeps_the_summary_count() {
         "health": health
     });
     let out = render_combined_summary(&env, &no_links());
-    assert!(out.contains(":warning: **3** health findings"), "{out}");
+    assert!(out.contains("3 health findings."), "{out}");
     assert!(out.contains("(3 functions above threshold)"), "{out}");
     assert!(!out.contains("baseline"), "{out}");
 }

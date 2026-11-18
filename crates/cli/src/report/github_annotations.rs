@@ -177,7 +177,8 @@ fn survivor_annotation(issue: &CodeClimateIssue) -> Annotation {
         line: Some(u64::from(issue.location.lines.begin)),
         end_line: None,
         col: None,
-        title: issue.check_name.clone(),
+        // A label, as every other annotation title is, and not the rule id.
+        title: "Survived mutant".to_owned(),
         message: issue.description.clone(),
         introduced: None,
     }
@@ -459,13 +460,13 @@ fn collect_component_shapes(env: &Value, out: &mut Vec<Annotation>) {
         for item in arr(env, collection).filter(|item| s(item, "effective_severity") == "error") {
             let description = if collection == "thin_wrappers" {
                 format!(
-                    "Component '{}' only forwards its props to '{}'. Consider inlining it at its call sites.",
+                    "Component '{}' only forwards its props to '{}'. Inline it at its call sites.",
                     s(item, "component"),
                     s(item, "child_component")
                 )
             } else {
                 format!(
-                    "Component '{}' shares its prop shape with {} components. Consider a shared Props type.",
+                    "Component '{}' shares its prop shape with {} components. Use one shared Props type.",
                     s(item, "component"),
                     u(item, "group_size").saturating_sub(1)
                 )
@@ -489,7 +490,7 @@ fn collect_component_shapes(env: &Value, out: &mut Vec<Annotation>) {
 fn collect_check_files_and_exports(env: &Value, out: &mut Vec<Annotation>) {
     push_each(out, env, "unused_files", "Unused file", no_anchor, |it| {
         format!(
-            "This file is not imported by any other module and unreachable from entry points.\nConsider removing it or importing it where needed.{}",
+            "No module imports this file, and no entry point reaches it.\nRemove the file, or import it where it is needed.{}",
             caveat_note(it),
         )
     });
@@ -501,7 +502,7 @@ fn collect_check_files_and_exports(env: &Value, out: &mut Vec<Annotation>) {
         Anchor::line_col,
         |it| {
             format!(
-                "{} {} '{}' is never imported by other modules.\n\nIf this export is part of a public API, consider adding it to the entry configuration.\nOtherwise, remove the export keyword or delete the declaration.{}",
+                "{} {} '{}' is never imported by other modules.\n\nRemove the export keyword or the declaration. If the export is public API, add its file to the entry configuration.{}",
                 if b(it, "is_re_export") {
                     "Re-exported"
                 } else {
@@ -525,7 +526,7 @@ fn collect_check_files_and_exports(env: &Value, out: &mut Vec<Annotation>) {
         Anchor::line_col,
         |it| {
             format!(
-                "{} type '{}' is never imported by other modules.\n\nIf only used internally, remove the export keyword.{}",
+                "{} type '{}' is never imported by other modules.\n\nRemove the export keyword when only this module uses the type.{}",
                 if b(it, "is_re_export") {
                     "Re-exported"
                 } else {
@@ -639,7 +640,7 @@ fn collect_check_dependencies(env: &Value, pm: PackageManager, out: &mut Vec<Ann
         Anchor::gated_line,
         |it| {
             format!(
-                "Package '{}' is only used via type imports.\n\nMove it from dependencies to devDependencies to reduce production bundle size.",
+                "Package '{}' is only used via type imports.\n\nMove it from dependencies to devDependencies.",
                 s(it, "package_name"),
             )
         },
@@ -652,7 +653,7 @@ fn collect_check_dependencies(env: &Value, pm: PackageManager, out: &mut Vec<Ann
         Anchor::gated_line,
         |it| {
             format!(
-                "Package '{}' is only imported from test or config files.\n\nMove it from dependencies to devDependencies to reduce production bundle size.",
+                "Package '{}' is only imported from test or config files.\n\nMove it from dependencies to devDependencies.",
                 s(it, "package_name"),
             )
         },
@@ -681,7 +682,7 @@ fn collect_check_members(env: &Value, out: &mut Vec<Annotation>) {
         Anchor::line_col,
         |it| {
             format!(
-                "Enum member '{}.{}' is never referenced in the codebase.\n\nConsider removing it to keep the enum minimal.{}",
+                "Enum member '{}.{}' is never referenced in the codebase.\n\nRemove the member.{}",
                 s(it, "parent_name"),
                 s(it, "member_name"),
                 caveat_note(it),
@@ -696,7 +697,7 @@ fn collect_check_members(env: &Value, out: &mut Vec<Annotation>) {
         Anchor::line_col,
         |it| {
             format!(
-                "Class member '{}.{}' is never referenced.\n\nConsider removing it or marking it as private.{}",
+                "Class member '{}.{}' is never referenced.\n\nRemove the member, or make it private.{}",
                 s(it, "parent_name"),
                 s(it, "member_name"),
                 caveat_note(it),
@@ -711,7 +712,7 @@ fn collect_check_members(env: &Value, out: &mut Vec<Annotation>) {
         Anchor::line_col,
         |it| {
             format!(
-                "Protected class member '{}.{}' is never referenced by its class or a subclass.\n\nConsider removing it or marking it as private.{}",
+                "Protected class member '{}.{}' is never referenced by its class or a subclass.\n\nRemove the member, or make it private.{}",
                 s(it, "parent_name"),
                 s(it, "member_name"),
                 caveat_note(it),
@@ -726,7 +727,7 @@ fn collect_check_members(env: &Value, out: &mut Vec<Annotation>) {
         Anchor::line_col,
         |it| {
             format!(
-                "Namespace member '{}.{}' is never referenced.\n\nConsider removing it, or removing its export keyword when only the namespace body uses it.{}",
+                "Namespace member '{}.{}' is never referenced.\n\nRemove the member, or remove its export keyword when only the namespace body uses it.{}",
                 s(it, "parent_name"),
                 s(it, "member_name"),
                 caveat_note(it),
@@ -741,7 +742,7 @@ fn collect_check_members(env: &Value, out: &mut Vec<Annotation>) {
         Anchor::line_col,
         |it| {
             format!(
-                "Store member '{}.{}' is never accessed by any consumer.\n\nConsider removing the unused store state, getter, or action.{}",
+                "Store member '{}.{}' is never accessed by any consumer.\n\nRemove the unused state, getter or action.{}",
                 s(it, "parent_name"),
                 s(it, "member_name"),
                 caveat_note(it),
@@ -759,7 +760,7 @@ fn collect_check_graph(env: &Value, out: &mut Vec<Annotation>) {
         Anchor::line_col,
         |it| {
             format!(
-                "Import '{}' could not be resolved to a file or package.\n\nCheck for typos, missing dependencies, or incorrect path aliases.",
+                "Import '{}' could not be resolved to a file or package.\n\nFix the import path or the path alias, or install the missing package.",
                 s(it, "specifier"),
             )
         },
@@ -769,13 +770,7 @@ fn collect_check_graph(env: &Value, out: &mut Vec<Annotation>) {
         let locations: Vec<&Value> = arr(duplicate, "locations").collect();
         let listing = locations
             .iter()
-            .map(|location| {
-                format!(
-                    "  \u{2022} {}:{}",
-                    s(location, "path"),
-                    num(location, "line")
-                )
-            })
+            .map(|location| format!("- {}:{}", s(location, "path"), num(location, "line")))
             .collect::<Vec<_>>()
             .join("\n");
         for location in &locations {
@@ -786,7 +781,7 @@ fn collect_check_graph(env: &Value, out: &mut Vec<Annotation>) {
                 Anchor::line_col(location).with_introduced(duplicate),
                 "Duplicate export".to_owned(),
                 format!(
-                    "Export '{name}' is defined in {} modules:\n{listing}\n\nThis causes ambiguity for consumers. Keep one canonical location.",
+                    "Export '{name}' is defined in {} modules:\n{listing}\n\nKeep the export in one module.",
                     locations.len(),
                 ),
             );
@@ -802,8 +797,8 @@ fn collect_check_graph(env: &Value, out: &mut Vec<Annotation>) {
             Anchor::gated_line_col(cycle),
             "Circular dependency".to_owned(),
             format!(
-                "Circular import chain detected:\n{} \u{2192} {first}\n\nCircular dependencies can cause initialization bugs and make code harder to reason about.\nConsider extracting shared logic into a separate module.",
-                files.join(" \u{2192} "),
+                "Circular import: {} -> {first}\n\nMove the shared code to a new module that each file imports.",
+                files.join(" -> "),
             ),
         );
     }
@@ -831,7 +826,7 @@ fn collect_check_graph(env: &Value, out: &mut Vec<Annotation>) {
             no_anchor(cycle),
             "Re-export cycle".to_owned(),
             format!(
-                "{headline}\n\nChain propagation through the loop is a no-op, so imports through any member may silently come up empty.\n{remedy}",
+                "{headline}\n\nAn import through a member of the loop can resolve to nothing.\n{remedy}",
             ),
         );
     }
@@ -853,7 +848,7 @@ fn collect_check_package_cycles(env: &Value, out: &mut Vec<Annotation>) {
                     ""
                 };
                 format!(
-                    "  \u{2022} {} \u{2192} {}: {}:{}{type_tag}",
+                    "- {} -> {}: {}:{}{type_tag}",
                     s(edge, "from_package"),
                     s(edge, "to_package"),
                     s(edge, "path"),
@@ -877,8 +872,8 @@ fn collect_check_package_cycles(env: &Value, out: &mut Vec<Annotation>) {
             Anchor::line_col(anchor).with_introduced(cycle),
             "Package cycle".to_owned(),
             format!(
-                "Workspace packages import each other in a loop:\n{} \u{2192} {first}\n{hops}\n\nPackages in a cycle cannot be built in dependency order.\nRemove the imports on one hop to break the cycle.{note}",
-                packages.join(" \u{2192} "),
+                "Workspace packages import each other in a loop: {} -> {first}\n{hops}\n\nRemove the imports on one hop. A package cycle has no build order.{note}",
+                packages.join(" -> "),
             ),
         );
     }
@@ -894,7 +889,7 @@ fn boundary_annotation_message(violation: &Value) -> String {
     );
     if s(violation, "reason") != "internal_file" {
         return format!(
-            "Import from zone '{}' to zone '{}' is not allowed.\n{edge}\n\nRoute the import through an allowed zone or restructure the dependency.",
+            "Import from zone '{}' to zone '{}' is not allowed.\n{edge}\n\nImport through an allowed zone, or move the code.",
             s(violation, "from_zone"),
             s(violation, "to_zone"),
         );
@@ -943,7 +938,7 @@ fn collect_check_boundaries(env: &Value, out: &mut Vec<Annotation>) {
         Anchor::gated_line_col,
         |it| {
             format!(
-                "Call to '{}' matches forbidden pattern '{}' in zone '{}'.\n\nMove the call behind an allowed abstraction or adjust boundaries.calls.forbidden.",
+                "Call to '{}' matches forbidden pattern '{}' in zone '{}'.\n\nMove the call to an allowed zone, or change boundaries.calls.forbidden.",
                 s(it, "callee"),
                 s(it, "pattern"),
                 s(it, "zone"),
@@ -1307,7 +1302,7 @@ fn stale_suppression_message(item: &Value) -> (String, String) {
     (
         "Stale suppression".to_owned(),
         format!(
-            "This '{comment_form}' comment{kind_clause} no longer matches any active issue.\n\nRemove the suppression comment to keep the codebase clean.",
+            "This '{comment_form}' comment{kind_clause} no longer matches any active issue.\n\nRemove the suppression comment.",
         ),
     )
 }
@@ -1455,7 +1450,7 @@ fn collect_dupes(env: &Value, out: &mut Vec<Annotation>) {
                     use std::fmt::Write as _;
                     let _ = write!(
                         acc,
-                        "\n  \u{2192} {}:{}-{}",
+                        "\n- {}:{}-{}",
                         short_path(s(other, "file")),
                         num(other, "start_line"),
                         num(other, "end_line"),
@@ -1470,7 +1465,7 @@ fn collect_dupes(env: &Value, out: &mut Vec<Annotation>) {
                 col: Some(one_based_col(u(instance, "start_col"))),
                 title: "Code duplication".to_owned(),
                 message: format!(
-                    "{} duplicated lines ({} tokens)\n\n{} instances found. Also in:{others}\n\nExtract a shared function to eliminate this duplication.",
+                    "{} duplicated lines ({} tokens)\n\n{} copies. Also in:{others}\n\nMove the duplicate code to one shared function.",
                     num(group, "line_count"),
                     num(group, "token_count"),
                     instances.len(),
@@ -1575,26 +1570,20 @@ fn complexity_annotation(finding: &Value, ctx: &ComplexityThresholds) -> (String
     let crap_line = finding
         .get("crap")
         .filter(|crap| !crap.is_null())
-        .map(|crap| {
-            format!(
-                "  \u{2022} CRAP: {} (threshold: {})\n",
-                fmt_num(crap),
-                ctx.crap
-            )
-        })
+        .map(|crap| format!("- CRAP: {} (threshold: {})\n", fmt_num(crap), ctx.crap))
         .unwrap_or_default();
     match s(finding, "exceeded") {
         "file_lines" => (
             "Long file".to_owned(),
             format!(
-                "File has {lines} lines (threshold: {}).\n\nConsider moving cohesive groups of exports into their own modules.",
+                "File has {lines} lines (threshold: {}).\n\nMove groups of related exports to their own modules.",
                 num(finding, "max_file_lines"),
             ),
         ),
         "crap" | "cyclomatic_crap" | "cognitive_crap" | "all" => (
             format!("High CRAP score ({severity})"),
             format!(
-                "Function '{name}' has a CRAP score of {} (threshold: {}).\n\n  \u{2022} Severity: {severity}\n  \u{2022} Cyclomatic: {cyclomatic}\n  \u{2022} Cognitive: {cognitive}\n{crap_line}  \u{2022} Lines: {lines}\n\nCRAP combines complexity with coverage: high CRAP means changes here carry high risk.\nConsider adding tests, simplifying the function, or both.",
+                "Function '{name}' has a CRAP score of {} (threshold: {}).\n\n- Severity: {severity}\n- Cyclomatic: {cyclomatic}\n- Cognitive: {cognitive}\n{crap_line}- Lines: {lines}\n\nAdd tests for the function, or make it simpler. CRAP grows with complexity and falls with test coverage.",
                 num(finding, "crap"),
                 ctx.crap,
             ),
@@ -1602,21 +1591,21 @@ fn complexity_annotation(finding: &Value, ctx: &ComplexityThresholds) -> (String
         "both" => (
             format!("High complexity ({severity})"),
             format!(
-                "Function '{name}' exceeds both complexity thresholds:\n\n  \u{2022} Severity: {severity}\n  \u{2022} Cyclomatic: {cyclomatic} (threshold: {})\n  \u{2022} Cognitive: {cognitive} (threshold: {})\n{crap_line}  \u{2022} Lines: {lines}\n\nConsider splitting this function into smaller, focused functions.",
+                "Function '{name}' exceeds both complexity thresholds:\n\n- Severity: {severity}\n- Cyclomatic: {cyclomatic} (threshold: {})\n- Cognitive: {cognitive} (threshold: {})\n{crap_line}- Lines: {lines}\n\nSplit the function.",
                 ctx.cyclomatic, ctx.cognitive,
             ),
         ),
         "cyclomatic" => (
             format!("High cyclomatic complexity ({severity})"),
             format!(
-                "Function '{name}' has {cyclomatic} code paths (threshold: {}).\n\n  \u{2022} Severity: {severity}\n  \u{2022} Cyclomatic: {cyclomatic}\n  \u{2022} Cognitive: {cognitive}\n{crap_line}  \u{2022} Lines: {lines}\n\nHigh cyclomatic complexity means many branches to test.\nConsider extracting conditionals or using early returns.",
+                "Function '{name}' has {cyclomatic} code paths (threshold: {}).\n\n- Severity: {severity}\n- Cyclomatic: {cyclomatic}\n- Cognitive: {cognitive}\n{crap_line}- Lines: {lines}\n\nMove conditions to helper functions, or use early returns.",
                 ctx.cyclomatic,
             ),
         ),
         _ => (
             format!("High cognitive complexity ({severity})"),
             format!(
-                "Function '{name}' is hard to understand (cognitive: {cognitive}, threshold: {}).\n\n  \u{2022} Severity: {severity}\n  \u{2022} Cyclomatic: {cyclomatic}\n  \u{2022} Cognitive: {cognitive}\n{crap_line}  \u{2022} Lines: {lines}\n\nHigh cognitive complexity means deeply nested or interleaved logic.\nConsider flattening control flow or extracting helper functions.",
+                "Function '{name}' is hard to understand (cognitive: {cognitive}, threshold: {}).\n\n- Severity: {severity}\n- Cyclomatic: {cyclomatic}\n- Cognitive: {cognitive}\n{crap_line}- Lines: {lines}\n\nReduce the nesting, or move parts to helper functions.",
                 ctx.cognitive,
             ),
         ),
@@ -1717,7 +1706,7 @@ fn collect_runtime_coverage(env: &Value, out: &mut Vec<Annotation>) {
             Anchor::line_only(finding),
             format!("Runtime coverage ({verdict})"),
             format!(
-                "Function '{}' is flagged by runtime coverage.\n\n  \u{2022} Verdict: {verdict}\n  \u{2022} Invocations: {invocations}\n  \u{2022} Confidence: {}\n  \u{2022} Static: {static_status}\n  \u{2022} Tests: {}\n  \u{2022} V8: {tracking}\n\n{advice}",
+                "Function '{}' is flagged by runtime coverage.\n\n- Verdict: {verdict}\n- Invocations: {invocations}\n- Confidence: {}\n- Static: {static_status}\n- Tests: {}\n- V8: {tracking}\n\n{advice}",
                 s(finding, "function"),
                 s(finding, "confidence"),
                 s(&evidence, "test_coverage"),
@@ -1778,7 +1767,7 @@ fn collect_targets(env: &Value, out: &mut Vec<Annotation>) {
                             .get("detail")
                             .and_then(Value::as_str)
                             .map_or_else(|| num(factor, "value"), str::to_owned);
-                        format!("  \u{2022} {}: {detail}", s(factor, "metric"))
+                        format!("- {}: {detail}", s(factor, "metric"))
                     })
                     .collect::<Vec<_>>()
                     .join("\n")
@@ -1791,8 +1780,8 @@ fn collect_targets(env: &Value, out: &mut Vec<Annotation>) {
             Anchor::default(),
             format!("Refactoring target ({} effort)", s(target, "effort")),
             format!(
-                "Priority: {} | Confidence: {}\n\n{}\n\n{factors}",
-                s(target, "priority"),
+                "Priority: {}. Confidence: {}.\n\n{}\n\n{factors}",
+                num(target, "priority"),
                 s(target, "confidence"),
                 s(target, "recommendation"),
             ),
@@ -1824,7 +1813,7 @@ fn collect_security(env: &Value, out: &mut Vec<Annotation>) {
             Anchor::line_col(finding),
             format!("Security candidate ({kind})"),
             format!(
-                "Local security candidate (severity: {severity}).\n\n  \u{2022} Sink: {callee}\n  \u{2022} Evidence: {}\n\nTreat this as a candidate for verification, not a confirmed vulnerability.",
+                "Local security candidate (severity: {severity}).\n\n- Sink: {callee}\n- Evidence: {}\n\nThis is a candidate. Verify it before you treat it as a vulnerability.",
                 s(finding, "evidence"),
             ),
         );
@@ -1939,7 +1928,7 @@ mod tests {
         );
         assert_eq!(
             lines[1],
-            "::warning file=pkg/src/age.ts,line=14,title=fallow/mutation-survived::Changing >= to > in isAdult made no test fail. Mutant 9f3c2a1b."
+            "::warning file=pkg/src/age.ts,line=14,title=Survived mutant::Changing >= to > in isAdult made no test fail. Mutant 9f3c2a1b."
         );
         assert_eq!(
             lines[2],
@@ -1985,7 +1974,7 @@ mod tests {
         assert_eq!(
             mutation_run_notice_line(&partial).as_deref(),
             Some(
-                "::notice title=Mutation testing::Partial run (time-budget). The annotations cover only the mutants that ran."
+                "::notice title=Mutation testing::Partial run: the run reached its time budget. The annotations cover only the mutants that ran."
             )
         );
         let skipped =

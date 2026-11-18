@@ -1,4 +1,5 @@
 use crate::report::sink::outln;
+use std::fmt::Write as _;
 use std::process::ExitCode;
 use std::sync::OnceLock;
 
@@ -125,7 +126,7 @@ pub fn render_pr_comment(
     issues: &[CiIssue],
     conclusion: Option<PrDecisionConclusion>,
 ) -> String {
-    render_pr_comment_body(command, provider, issues, conclusion, None)
+    render_pr_comment_body(command, provider, issues, conclusion, None, None)
 }
 
 fn render_pr_comment_body(
@@ -134,6 +135,7 @@ fn render_pr_comment_body(
     issues: &[CiIssue],
     conclusion: Option<PrDecisionConclusion>,
     trailing_section: Option<&str>,
+    status_note: Option<&str>,
 ) -> String {
     fallow_output::render_pr_comment_with_verdict(
         &fallow_output::PrCommentRenderInput {
@@ -143,7 +145,10 @@ fn render_pr_comment_body(
             marker_id: sticky_marker_id(),
             max_comments: max_comments(),
             category_for_rule: &category_for_rule,
+            docs_url_for_rule: &docs_url_for_rule,
             trailing_section,
+            status_note,
+            layout: pr_comment_layout_from_env(),
         },
         conclusion.map(super::review::review_conclusion),
     )
@@ -193,12 +198,14 @@ fn render_pr_comment_with_mutation(
         crate::report::config_pattern_text::markdown_section(status.config_patterns),
     );
     let heading = heading_conclusion(conclusion, status.gates);
-    let mut body = render_pr_comment_body(command, provider, issues, heading, section.as_deref());
-    if let Some(message) = status.message {
-        body.push_str("\n\n> ");
-        body.push_str(message);
-    }
-    body
+    render_pr_comment_body(
+        command,
+        provider,
+        issues,
+        heading,
+        section.as_deref(),
+        status.message,
+    )
 }
 
 /// The conclusion that the comment heading states.
@@ -238,6 +245,12 @@ fn heading_conclusion(
 #[must_use]
 fn category_for_rule(rule_id: &str) -> &'static str {
     crate::explain::rule_by_id(rule_id).map_or("Other", |def| def.category)
+}
+
+/// The docs URL of a registered rule, for the rule links of the comment and
+/// the review.
+pub(crate) fn docs_url_for_rule(rule_id: &str) -> Option<String> {
+    crate::explain::rule_by_id(rule_id).map(crate::explain::rule_docs_url)
 }
 
 pub(crate) fn max_comments() -> usize {
@@ -419,9 +432,14 @@ fn build_issue_decision_surface(
     }];
     gates.extend(mutation.map(mutation_decision_row));
     gates.extend(status.gates.iter().cloned());
+    let verdict = fallow_output::pr_verdict_title(
+        issues,
+        heading_conclusion(Some(conclusion), status.gates).map(super::review::review_conclusion),
+    );
+    let summary_markdown = decision_summary_markdown(&verdict, issues, &gates, status.message);
     PrDecisionSurface {
         schema: PR_DECISION_SCHEMA.to_owned(),
-        title: "Fallow".to_owned(),
+        title: verdict,
         conclusion,
         gates,
         annotations: issues
@@ -430,7 +448,7 @@ fn build_issue_decision_surface(
             .map(decision_annotation_from_issue)
             .collect(),
         details: PrDecisionDetails {
-            summary_markdown: decision_summary_markdown(conclusion, issues.len(), status.message),
+            summary_markdown,
             full_report_path: None,
             details_url: envelope.details_url.clone(),
         },
@@ -460,39 +478,55 @@ fn decision_summary_label(conclusion: PrDecisionConclusion) -> &'static str {
     }
 }
 
+/// The status column of the check run summary. `Neutral` is a gate that
+/// failed or warned without failing the check.
+const fn gate_status_word(status: PrDecisionConclusion) -> &'static str {
+    match status {
+        PrDecisionConclusion::Success => "passed",
+        PrDecisionConclusion::Failure => "failed",
+        PrDecisionConclusion::Neutral => "needs review",
+        PrDecisionConclusion::Skipped => "skipped",
+    }
+}
+
+fn capitalize(text: &str) -> String {
+    let mut chars = text.chars();
+    chars.next().map_or_else(String::new, |first| {
+        first.to_uppercase().chain(chars).collect()
+    })
+}
+
+/// The check run summary: the verdict of the sticky comment, the status note,
+/// and one row per decision gate, so the check run page states the same
+/// result as the comment without the finding tables.
 fn decision_summary_markdown(
-    conclusion: PrDecisionConclusion,
-    issue_count: usize,
+    verdict: &str,
+    issues: &[CiIssue],
+    gates: &[PrDecisionGate],
     status_message: Option<&str>,
 ) -> String {
-    let summary = if issue_count == 0 {
-        match conclusion {
-            PrDecisionConclusion::Failure => {
-                "Fallow quality gates failed without renderable findings.".to_owned()
-            }
-            PrDecisionConclusion::Neutral => {
-                "Fallow needs review without renderable findings.".to_owned()
-            }
-            PrDecisionConclusion::Success | PrDecisionConclusion::Skipped => {
-                "Fallow found no actionable PR findings.".to_owned()
-            }
-        }
-    } else {
-        let findings = count_label(issue_count, "finding", "findings");
-        match conclusion {
-            PrDecisionConclusion::Failure => {
-                format!("Fallow quality gates failed with {findings}.")
-            }
-            PrDecisionConclusion::Neutral => format!("Fallow found {findings} for review."),
-            PrDecisionConclusion::Success | PrDecisionConclusion::Skipped => {
-                format!("Fallow found {findings}.")
-            }
-        }
-    };
-    match status_message {
-        Some(message) => format!("{summary}\n\n> {message}"),
-        None => summary,
+    let mut out = format!("**{verdict}**");
+    if issues.is_empty() {
+        out.push_str("\n\nNo findings for this pull request.");
     }
+    if let Some(message) = status_message.filter(|message| !message.trim().is_empty()) {
+        out.push_str("\n\n> ");
+        out.push_str(message.trim());
+    }
+    if !gates.is_empty() {
+        out.push_str("\n\n| Check | Status | Result |\n| --- | --- | --- |");
+        for gate in gates {
+            let _ = write!(
+                out,
+                "\n| {} | {} | {} |",
+                fallow_output::markdown_table_text(&capitalize(&gate.label)),
+                gate_status_word(gate.status),
+                fallow_output::markdown_table_text(&gate.observed),
+            );
+        }
+    }
+    out.push_str("\n\nThe sticky comment lists each finding.");
+    out
 }
 
 #[must_use]
@@ -761,7 +795,7 @@ mod tests {
             decision
                 .details
                 .summary_markdown
-                .contains("quality gates failed")
+                .contains("**Quality gate failed")
         );
     }
 
@@ -889,12 +923,12 @@ mod tests {
             &issues,
             None,
             &patterns,
-            Some("Gate outcomes: passed."),
+            Some("Gates: passed."),
         );
         let section = body.find("## Unmatched config patterns").expect("section");
         let footer = body.find("Generated by fallow.").expect("footer");
-        let note = body.find("> Gate outcomes").expect("note");
-        assert!(section < footer && footer < note, "{body}");
+        let note = body.find("> Gates").expect("note");
+        assert!(note < section && section < footer, "{body}");
         assert!(
             body.contains("- `ignoreDependencies`: `@typo/*` matched nothing in this run"),
             "{body}"
@@ -940,7 +974,7 @@ mod tests {
                 &issues,
                 None,
                 PrCommentStatus {
-                    message: Some("Gate outcomes: passed."),
+                    message: Some("Gates: passed."),
                     gates: &[],
                     config_patterns: &[],
                 },
@@ -952,7 +986,7 @@ mod tests {
                 &issues,
                 None,
                 &[],
-                Some("Gate outcomes: passed.")
+                Some("Gates: passed.")
             )
         );
     }

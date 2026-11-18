@@ -5,10 +5,10 @@ expression: "rendered.join(\"\\n\")"
 > **Health: A (90)**
 > _Enable `save-snapshot: true` to track score trends over time._
 
-## Fallow - Code Complexity
+## Fallow health report
 
 > [!NOTE]
-> **4 functions exceed thresholds** · [ELAPSED]
+> **4 functions exceed thresholds**
 
 4 functions analyzed (max cyclomatic: 20, max cognitive: 15, max CRAP: 30). This run does not list the functions. Run `fallow health --complexity` to list them.
 
@@ -21,6 +21,4 @@ Groups selected with `--group` `@team/b`. Project-level sections are not filtere
 | `@team/b` | 90.0 | A | - | 2 | 2 | 0 |
 
 
-Gate outcomes: passed health-findings (0 at or above error).
-
-Request outcomes: applied group-filter.
+Gates: passed health-findings (0 at or above error).

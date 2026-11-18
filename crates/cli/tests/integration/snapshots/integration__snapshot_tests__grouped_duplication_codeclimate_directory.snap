@@ -6,7 +6,7 @@ expression: json_str
   {
     "type": "issue",
     "check_name": "fallow/code-duplication",
-    "description": "Code clone dup:77dc5951 (11 lines, 3 instances)",
+    "description": "11 lines repeat in 3 places (clone group dup:77dc5951)",
     "categories": [
       "Duplication"
     ],
@@ -40,7 +40,7 @@ expression: json_str
   {
     "type": "issue",
     "check_name": "fallow/code-duplication",
-    "description": "Code clone dup:77dc5951 (11 lines, 3 instances)",
+    "description": "11 lines repeat in 3 places (clone group dup:77dc5951)",
     "categories": [
       "Duplication"
     ],
@@ -74,7 +74,7 @@ expression: json_str
   {
     "type": "issue",
     "check_name": "fallow/code-duplication",
-    "description": "Code clone dup:77dc5951 (11 lines, 3 instances)",
+    "description": "11 lines repeat in 3 places (clone group dup:77dc5951)",
     "categories": [
       "Duplication"
     ],
@@ -108,7 +108,7 @@ expression: json_str
   {
     "type": "issue",
     "check_name": "fallow/code-duplication",
-    "description": "Code clone dup:58a0b88d (8 lines, 2 instances)",
+    "description": "8 lines repeat in 2 places (clone group dup:58a0b88d)",
     "categories": [
       "Duplication"
     ],
@@ -135,7 +135,7 @@ expression: json_str
   {
     "type": "issue",
     "check_name": "fallow/code-duplication",
-    "description": "Code clone dup:58a0b88d (8 lines, 2 instances)",
+    "description": "8 lines repeat in 2 places (clone group dup:58a0b88d)",
     "categories": [
       "Duplication"
     ],

@@ -74,7 +74,7 @@ select_summary_script() {
 # The changed-files disclaimer appended when results were scoped to a diff.
 scoping_footnote() {
   local commit_url="${GITHUB_SERVER_URL:-https://github.com}/${GITHUB_REPOSITORY}/commit/${CHANGED_SINCE}"
-  printf '%s' "*Issue counts scoped to files changed since [\`${CHANGED_SINCE:0:7}\`](${commit_url}) · health metrics reflect the full codebase*"
+  printf '%s' "*Issue counts cover the files changed since [\`${CHANGED_SINCE:0:7}\`](${commit_url}). Health metrics cover the whole project.*"
 }
 
 # 1. Native renderer: the purpose-built step-summary rendering, source of truth.
@@ -205,9 +205,10 @@ append_baseline_advisory() {
   printf '%s\n\n' "$line" >> "$GITHUB_STEP_SUMMARY"
 }
 
-# The gate inventory, from the same step outputs. `fallow report` renders its
-# own neutral "Gate outcomes:" line into the body below, so this line lists the
-# verdicts in the gate outputs. `failed` lists each gate with `status: fail`,
+# The gate inventory, from the same step outputs, for a fallow without
+# `fallow report`. The native summary states the same gates in its own "Gates:"
+# line, so a report-capable binary skips this line and the summary names each
+# gate once. `failed` lists each gate with `status: fail`,
 # which is not always a gate that failed the job. A default rule
 # (`error-severity-findings`, `health-findings`, `audit-verdict`) that the count
 # gate leaves unenforced when `fail-on-issues` is false can show as `failed` on
@@ -216,10 +217,12 @@ append_baseline_advisory() {
 append_gate_summary() {
   [ -n "${GITHUB_STEP_SUMMARY:-}" ] || return 0
   local parts=()
-  [ -n "${FALLOW_GATES_FAILED:-}" ] && parts+=("failed ${FALLOW_GATES_FAILED}")
-  [ -n "${FALLOW_GATES_WARNED:-}" ] && parts+=("warned ${FALLOW_GATES_WARNED}")
-  [ -n "${FALLOW_GATES_SKIPPED:-}" ] && parts+=("stood down ${FALLOW_GATES_SKIPPED}")
-  [ -n "${FALLOW_GATES_PASSED:-}" ] && parts+=("passed ${FALLOW_GATES_PASSED}")
+  if [ "${HAS_NATIVE_REPORT:-false}" != "true" ] || [ "$FALLOW_COMMAND" = "fix" ]; then
+    [ -n "${FALLOW_GATES_FAILED:-}" ] && parts+=("failed ${FALLOW_GATES_FAILED//,/, }")
+    [ -n "${FALLOW_GATES_WARNED:-}" ] && parts+=("warned ${FALLOW_GATES_WARNED//,/, }")
+    [ -n "${FALLOW_GATES_SKIPPED:-}" ] && parts+=("stood down ${FALLOW_GATES_SKIPPED//,/, }")
+    [ -n "${FALLOW_GATES_PASSED:-}" ] && parts+=("passed ${FALLOW_GATES_PASSED//,/, }")
+  fi
   if [ ${#parts[@]} -gt 0 ]; then
     local joined=""
     for part in "${parts[@]}"; do

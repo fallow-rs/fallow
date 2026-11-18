@@ -113,7 +113,9 @@ fn read_request_outcomes(envelope: &Value) -> Vec<RequestLine> {
 }
 
 /// A one-line inventory for the job summary, the pull-request comment and the
-/// merge-request note, or `None` when the run was asked for nothing.
+/// merge-request note, or `None` when every request applied over a scope that
+/// was not empty. A request that applied as asked tells the reader nothing new,
+/// so the line appears only when the report is not what was asked for.
 ///
 /// Reads as an inventory ("Request outcomes: not applied X; applied Y.") for
 /// the same reason the gate line does: the comment already carries a heading,
@@ -128,6 +130,12 @@ pub fn summary_line(envelope: &Value) -> Option<String> {
     }
     let (applied, unapplied): (Vec<&RequestLine>, Vec<&RequestLine>) =
         requests.iter().partition(|request| request.applied());
+    let empty_scope = applied
+        .iter()
+        .any(|request| request.applied_over_empty_scope());
+    if unapplied.is_empty() && !empty_scope {
+        return None;
+    }
     let mut clauses: Vec<String> = Vec::new();
     if !unapplied.is_empty() {
         clauses.push(format!("not applied {}", join(&unapplied)));
@@ -154,10 +162,7 @@ pub fn summary_line(envelope: &Value) -> Option<String> {
     // the report under this line is clean because nothing reached the analysis,
     // and the Action and the merge-request template state the same fact from the
     // envelope they captured (issue #2734).
-    if applied
-        .iter()
-        .any(|request| request.applied_over_empty_scope())
-    {
+    if empty_scope {
         line.push_str(
             " A narrowing request applied over an empty scope, so this report is clean \
              because nothing in it was analyzable; check the diff or ref this run was given.",
@@ -294,10 +299,11 @@ mod tests {
         );
     }
 
-    /// The positive case is the whole reason honoured requests are published:
-    /// a reviewer needs "this report IS scoped to the change" to be statable.
+    /// A request that applied as asked tells a reader nothing new, so a
+    /// healthy scoped run has no request line. The JSON envelope keeps the
+    /// entry for a script that needs it.
     #[test]
-    fn an_applied_request_states_the_scope_without_a_warning_clause() {
+    fn an_applied_request_renders_no_line() {
         let value = envelope(&serde_json::json!({
             "diff-filter": {
                 "status": "applied",
@@ -305,10 +311,7 @@ mod tests {
                 "requested": "--diff-file pr.diff"
             }
         }));
-        assert_eq!(
-            summary_line(&value).expect("a request was received"),
-            "Request outcomes: applied diff-filter."
-        );
+        assert_eq!(summary_line(&value), None);
     }
 
     /// A measured, non-empty scope adds nothing, so a healthy scoped run reads
@@ -323,10 +326,7 @@ mod tests {
                 "scope_size": 12
             }
         }));
-        assert_eq!(
-            summary_line(&value).expect("a request was received"),
-            "Request outcomes: applied diff-filter."
-        );
+        assert_eq!(summary_line(&value), None);
     }
 
     /// The fact a clean report cannot state for itself: the narrowing applied,
@@ -361,10 +361,7 @@ mod tests {
                 "scope_size": 0
             }
         }));
-        assert_eq!(
-            summary_line(&value).expect("a request was received"),
-            "Request outcomes: applied sarif-file."
-        );
+        assert_eq!(summary_line(&value), None);
     }
 
     #[test]

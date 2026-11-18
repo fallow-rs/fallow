@@ -135,7 +135,10 @@ fn component_output_pr_comment_render(c: &mut Criterion) {
                     marker_id: "bench".to_string(),
                     max_comments: 50,
                     category_for_rule: &category_for_rule,
+                    docs_url_for_rule: &|_| None,
                     trailing_section: None,
+                    status_note: None,
+                    layout: fallow_output::PrCommentLayout::Default,
                 })
             },
             BatchSize::LargeInput,

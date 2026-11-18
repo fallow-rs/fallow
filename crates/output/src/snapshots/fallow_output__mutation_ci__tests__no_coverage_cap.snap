@@ -6,14 +6,12 @@ expression: both_headings(&view)
 
 The tests detected each mutant that ran.
 
-| Killed | Survived | No coverage | Not measured | Score |
-| --- | --- | --- | --- | --- |
-| 5 | 0 | 12 | 0 | 100.0% |
-
-Scope: the changed lines.
+| Killed | Survived | No coverage | Score |
+| --: | --: | --: | --: |
+| 5 | 0 | 12 | 100.0% |
 
 <details>
-<summary>No test reaches these lines (10 of 12)</summary>
+<summary>No test reaches these lines (12 lines, the first 10 shown)</summary>
 
 - `src/wide.ts:1`
 - `src/wide.ts:2`
@@ -28,7 +26,7 @@ Scope: the changed lines.
 
 </details>
 
-To inspect a mutant, run `fallow mutation inspect <mutant-id> --report fallow-mutation.json` with the `fallow-mutation.json` file of this job.
+To inspect a mutant, run `fallow mutation inspect <mutant-id> --report fallow-mutation.json` with the report that this job writes.
 
 ===== summary heading =====
 
@@ -36,16 +34,14 @@ To inspect a mutant, run `fallow mutation inspect <mutant-id> --report fallow-mu
 
 The tests detected each mutant that ran.
 
-| Killed | Survived | No coverage | Not measured | Score |
-| --- | --- | --- | --- | --- |
-| 5 | 0 | 12 | 0 | 100.0% |
-
-Scope: the changed lines.
+| Killed | Survived | No coverage | Score |
+| --: | --: | --: | --: |
+| 5 | 0 | 12 | 100.0% |
 
 The run took 4m 12s. 3 results came from the cache.
 
 <details>
-<summary>No test reaches these lines (10 of 12)</summary>
+<summary>No test reaches these lines (12 lines, the first 10 shown)</summary>
 
 - `src/wide.ts:1`
 - `src/wide.ts:2`
@@ -60,4 +56,4 @@ The run took 4m 12s. 3 results came from the cache.
 
 </details>
 
-To inspect a mutant, run `fallow mutation inspect <mutant-id> --report fallow-mutation.json` with the `fallow-mutation.json` file of this job.
+To inspect a mutant, run `fallow mutation inspect <mutant-id> --report fallow-mutation.json` with the report that this job writes.

@@ -5,16 +5,13 @@ use fallow_output::CodeClimateIssue;
 use super::diff_filter::DiffIndex;
 use crate::exit_codes::exit_invalid_input;
 use crate::report::emit_json;
-use crate::report::mutation_evidence::MUTATION_SURVIVED_RULE;
 use fallow_output::PrDecisionConclusion;
 use fallow_output::{
     AuditReviewGate, CiIssue, CiProvider as Provider, ReviewCheckConclusion, ReviewEnvelopeOutput,
     ReviewEnvelopeRenderInput, ReviewEnvelopeTruncation, ReviewGitlabDiffRefs as GitlabDiffRefs,
     ReviewId, issues_from_codeclimate_issues,
 };
-use fallow_output::{
-    MutationCiView, MutationHeading, mutation_review_summary_line, render_mutation_section,
-};
+use fallow_output::{MutationCiView, MutationHeading, render_mutation_section};
 
 /// The text a review summary body carries beside its inline-comment line.
 ///
@@ -175,13 +172,7 @@ fn render_review_envelope_with_mutation(
         .flatten();
     let include_guidance = review_guidance_enabled();
     let trailing_section = super::pr_comment::compose_trailing_section(
-        mutation.map(|view| {
-            format!(
-                "{}\n\n{}",
-                mutation_review_summary_line(view, inline_survivor_count(issues, max)),
-                render_mutation_section(view, MutationHeading::Review)
-            )
-        }),
+        mutation.map(|view| render_mutation_section(view, MutationHeading::Review)),
         crate::report::config_pattern_text::markdown_section(notes.config_patterns),
     );
     let status_message = notes.message;
@@ -197,6 +188,7 @@ fn render_review_envelope_with_mutation(
         include_guidance,
         suggestion_block: &super::suggestion::suggestion_block,
         guidance_block: &review_guidance_block,
+        docs_url_for_rule: &super::pr_comment::docs_url_for_rule,
         trailing_section: trailing_section.as_deref(),
     };
     let rendered = match (review_id, conclusion) {
@@ -220,18 +212,6 @@ fn render_review_envelope_with_mutation(
     };
     note_review_truncation(rendered.truncation);
     rendered.envelope
-}
-
-/// The number of survivor findings that get an inline comment: the
-/// survivors inside the first `max_groups` comment groups, as the renderer
-/// groups them.
-fn inline_survivor_count(issues: &[CiIssue], max_groups: usize) -> usize {
-    fallow_output::group_review_issues_by_path_line(issues, max_groups)
-        .groups
-        .iter()
-        .flatten()
-        .filter(|issue| issue.rule_id == MUTATION_SURVIVED_RULE)
-        .count()
 }
 
 /// The analysis findings and the survivor findings in one list for the
@@ -448,6 +428,7 @@ fn render_merged_comment(
         include_guidance,
         suggestion_block: &super::suggestion::suggestion_block,
         guidance_block: &review_guidance_block,
+        docs_url_for_rule: &super::pr_comment::docs_url_for_rule,
     })
 }
 
@@ -653,7 +634,7 @@ mod tests {
     }
 
     #[test]
-    fn review_summary_states_the_mutation_line_and_section_before_the_markers() {
+    fn review_summary_states_the_mutation_section_once_before_the_markers() {
         let root = std::path::Path::new("/project");
         let diagnostics = [fallow_config::WorkspaceDiagnostic::new(
             root,
@@ -688,9 +669,11 @@ mod tests {
             Some(&view),
         ));
         let body = envelope["body"].as_str().expect("body is string");
-        let line = body
-            .find("Mutation testing: score 62.5%, 6 survivors (1 inline).")
-            .expect("summary line");
+        assert!(
+            !body.contains("Mutation testing: score"),
+            "the section states the result once: {body}"
+        );
+        let line = body.find("inline comment").expect("inline comment line");
         let section = body.find("#### Mutation testing").expect("section");
         let patterns = body
             .find("## Unmatched config patterns")
@@ -701,20 +684,6 @@ mod tests {
             "{body}"
         );
         assert_eq!(envelope["comments"].as_array().map(Vec::len), Some(2));
-    }
-
-    #[test]
-    fn the_inline_count_names_only_the_survivors_inside_the_comment_cap() {
-        let survived = crate::report::mutation_evidence::MUTATION_SURVIVED_RULE;
-        let issues = vec![
-            issue("fallow/unused-file", "minor", "src/a.ts", 1, "aaa"),
-            issue(survived, "minor", "src/age.ts", 14, "bbb"),
-            issue(survived, "minor", "src/age.ts", 14, "ccc"),
-            issue(survived, "minor", "src/age.ts", 20, "ddd"),
-        ];
-        assert_eq!(inline_survivor_count(&issues, 50), 3);
-        assert_eq!(inline_survivor_count(&issues, 2), 2);
-        assert_eq!(inline_survivor_count(&issues, 1), 0);
     }
 
     #[test]
@@ -845,37 +814,37 @@ mod tests {
                 A::Introduced,
                 None,
                 new_only(AuditWorsened::Warn),
-                "**error** · introduced `",
+                "**error** (introduced) ",
             ),
             (
                 A::Inherited,
                 None,
                 new_only(AuditWorsened::Warn),
-                "**error** · inherited · not gated (`--gate new-only`) `",
+                "**error** (inherited, not gated: `--gate new-only`) ",
             ),
             (
                 A::Worsened,
                 None,
                 new_only(AuditWorsened::Error),
-                "**error** · worsened `",
+                "**error** (worsened) ",
             ),
             (
                 A::Worsened,
                 None,
                 new_only(AuditWorsened::Warn),
-                "**error** · worsened · not gated (`--worsened warn`) `",
+                "**error** (worsened, not gated: `--worsened warn`) ",
             ),
             (
                 A::Worsened,
                 None,
                 new_only(AuditWorsened::Off),
-                "**error** · worsened · not gated (`--worsened off`) `",
+                "**error** (worsened, not gated: `--worsened off`) ",
             ),
             (
                 A::Introduced,
                 Some(AuditGateExemption::TestFile),
                 new_only(AuditWorsened::Warn),
-                "**error** · introduced · not gated (test file) `",
+                "**error** (introduced, not gated: test file) ",
             ),
             (
                 A::Inherited,
@@ -884,9 +853,9 @@ mod tests {
                     new_only: false,
                     worsened: AuditWorsened::Warn,
                 }),
-                "**error** · inherited `",
+                "**error** (inherited) ",
             ),
-            (A::Inherited, None, None, "**error** · inherited `"),
+            (A::Inherited, None, None, "**error** (inherited) "),
         ];
         for (attribution, exemption, policy, expected) in cases {
             let body = audit_comment_body(&audit_issue(attribution, exemption), policy);

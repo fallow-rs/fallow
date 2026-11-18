@@ -2,10 +2,10 @@
 source: crates/cli/tests/integration/github_format_tests.rs
 expression: rendered
 ---
-## Fallow Security
+## Fallow security report
 
 > [!WARNING]
-> **2 security candidates matched** · 233ms
+> **2 security candidates matched**
 
 Security gate: `new`, verdict: `fail`, matching candidates: **2**.
 

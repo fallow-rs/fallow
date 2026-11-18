@@ -387,6 +387,29 @@ fn validate_saved_report_envelope(
     }
 }
 
+/// Render the sticky comment of a live combined run from its JSON envelope,
+/// through the same path as `fallow report --from`, so the live comment and
+/// the saved render are the same bytes.
+pub fn render_live_combined_pr_comment(
+    provider: Provider,
+    envelope: &serde_json::Value,
+    root: &Path,
+    config_path: Option<&Path>,
+    output: OutputFormat,
+) -> ExitCode {
+    render_saved_ci_target(
+        ReportTarget::PrComment(provider),
+        provider,
+        EnvelopeKind::Combined,
+        envelope,
+        root,
+        config_path,
+        None,
+        output,
+        None,
+    )
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "saved CI dispatch carries the parsed envelope context without rebuilding it"
@@ -659,10 +682,7 @@ mod status_note_tests {
             saved.starts_with("Note. **Baseline matched nothing.**"),
             "{saved}"
         );
-        assert!(
-            saved.ends_with("Gate outcomes: failed stale-baseline."),
-            "{saved}"
-        );
+        assert!(saved.ends_with("Gates: failed stale-baseline."), "{saved}");
     }
 
     /// A grouped envelope rendered into a body that cannot carry groups says
@@ -715,7 +735,7 @@ mod status_note_tests {
             ),
         );
         assert!(
-            saved.starts_with("Note. Gate outcomes:"),
+            saved.starts_with("Note. Gates:"),
             "the type-aware message keeps its place ahead of the verdicts: {saved}"
         );
         assert!(
@@ -764,7 +784,7 @@ mod status_note_tests {
         let baseline = saved
             .find("**Baseline matched nothing.**")
             .expect("the baseline advisory");
-        let gate = saved.find("Gate outcomes:").expect("the gate inventory");
+        let gate = saved.find("Gates:").expect("the gate inventory");
         let request = saved
             .find("Request outcomes:")
             .expect("the request inventory");

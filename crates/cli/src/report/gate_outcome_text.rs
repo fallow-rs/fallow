@@ -247,7 +247,7 @@ fn join(gates: &[&GateLine]) -> String {
 /// A one-line verdict for the job summary, the pull-request comment and the
 /// merge-request note, or `None` when the run armed no gate.
 ///
-/// Reads as an inventory ("Gate outcomes: failed X; passed Y.") rather than as
+/// Reads as an inventory ("Gates: failed X; passed Y.") rather than as
 /// a verdict of its own. The pull-request comment already carries a
 /// check-run-derived heading, and a line starting "Gates failed" sat under a
 /// "Quality gate passed" heading as a flat contradiction; naming the outcomes
@@ -256,9 +256,9 @@ fn join(gates: &[&GateLine]) -> String {
 /// Informational on purpose. Whether a tripped gate should fail the build is
 /// the consumer's decision, not this renderer's: `enforced` describes the
 /// CLI's own exit code, and the GitHub Action deliberately does not pass
-/// `--fail-on-issues` to the CLI, so a gate this line calls enforced may sit on
-/// a job the repository has configured to pass. The line says what happened and
-/// the integration decides what to do about it.
+/// `--fail-on-issues` to the CLI, so the action can fail a job on a gate that
+/// the CLI did not enforce. The line therefore says only what each gate
+/// concluded, never whether it fails the run; the job status says that.
 pub fn summary_line(envelope: &Value) -> Option<String> {
     let gates = read_gate_outcomes(envelope);
     if gates.is_empty() {
@@ -267,13 +267,7 @@ pub fn summary_line(envelope: &Value) -> Option<String> {
     let parts = partition(&gates);
     let mut clauses: Vec<String> = Vec::new();
     if !parts.failed.is_empty() {
-        let enforced = parts.failed.iter().filter(|gate| gate.enforced).count();
-        let suffix = if enforced == 0 {
-            " (none of which fails this run)"
-        } else {
-            ""
-        };
-        clauses.push(format!("failed {}{suffix}", join(&parts.failed)));
+        clauses.push(format!("failed {}", join(&parts.failed)));
     }
     if !parts.warned.is_empty() {
         clauses.push(format!("warned {}", join(&parts.warned)));
@@ -284,7 +278,7 @@ pub fn summary_line(envelope: &Value) -> Option<String> {
     if !parts.passed.is_empty() {
         clauses.push(format!("passed {}", join(&parts.passed)));
     }
-    Some(format!("Gate outcomes: {}.", clauses.join("; ")))
+    Some(format!("Gates: {}.", clauses.join("; ")))
 }
 
 /// Gates that print their own stderr line in every mode, also under
@@ -567,7 +561,7 @@ mod tests {
         }));
         assert_eq!(
             summary_line(&value).expect("a gate ran"),
-            "Gate outcomes: failed health-min-score (85 against 90)."
+            "Gates: failed health-min-score (85 against 90)."
         );
     }
 
@@ -594,7 +588,7 @@ mod tests {
         let line = summary_line(&value).expect("armed gate renders");
         assert_eq!(
             line,
-            "Gate outcomes: failed parse-error (src/f0.ts: 1 parser error, the parser recovered; \
+            "Gates: failed parse-error (src/f0.ts: 1 parser error, the parser recovered; \
              src/f1.ts: 1 parser error, the parser recovered; \
              src/f2.ts: 1 parser error, the parser recovered; \
              src/f3.ts: 1 parser error, the parser recovered; \
@@ -616,15 +610,22 @@ mod tests {
         }
     }
 
+    /// The line never says whether a gate fails the run: the GitHub Action can
+    /// fail a job on a gate that the CLI did not enforce, so only the job
+    /// status can state that.
     #[test]
-    fn an_unenforced_failure_says_it_does_not_fail_the_run() {
-        let value = envelope(&serde_json::json!({
+    fn an_unenforced_failure_reads_like_an_enforced_one() {
+        let unenforced = envelope(&serde_json::json!({
             "stale-baseline": { "status": "fail", "enforced": false }
         }));
+        let enforced = envelope(&serde_json::json!({
+            "stale-baseline": { "status": "fail", "enforced": true }
+        }));
         assert_eq!(
-            summary_line(&value).expect("a gate ran"),
-            "Gate outcomes: failed stale-baseline (none of which fails this run)."
+            summary_line(&unenforced).expect("a gate ran"),
+            "Gates: failed stale-baseline."
         );
+        assert_eq!(summary_line(&unenforced), summary_line(&enforced));
     }
 
     /// A change-scoped pull request stands the baseline gate down, and #2674
@@ -638,7 +639,7 @@ mod tests {
         }));
         assert_eq!(
             summary_line(&value).expect("a gate ran"),
-            "Gate outcomes: stood down stale-baseline."
+            "Gates: stood down stale-baseline."
         );
     }
 
@@ -649,7 +650,7 @@ mod tests {
         }));
         assert_eq!(
             summary_line(&value).expect("a gate ran"),
-            "Gate outcomes: warned audit-verdict."
+            "Gates: warned audit-verdict."
         );
     }
 
@@ -660,7 +661,7 @@ mod tests {
         }));
         assert_eq!(
             summary_line(&value).expect("a gate ran"),
-            "Gate outcomes: passed regression."
+            "Gates: passed regression."
         );
     }
 
@@ -674,7 +675,7 @@ mod tests {
         }));
         assert_eq!(
             summary_line(&value).expect("gates ran"),
-            "Gate outcomes: failed regression; warned audit-verdict; \
+            "Gates: failed regression; warned audit-verdict; \
              stood down stale-baseline; passed duplication-threshold."
         );
     }
@@ -689,7 +690,7 @@ mod tests {
         }));
         assert_eq!(
             summary_line(&value).expect("a gate ran"),
-            "Gate outcomes: failed health-min-severity (3 at or above critical)."
+            "Gates: failed health-min-severity (3 at or above critical)."
         );
     }
 
@@ -700,7 +701,7 @@ mod tests {
         }));
         assert_eq!(
             annotation_line(&value).expect("a gate ran"),
-            "::notice::Fallow: Gate outcomes: failed some-future-gate."
+            "::notice::Fallow: Gates: failed some-future-gate."
         );
     }
 
@@ -713,14 +714,10 @@ mod tests {
         }));
         assert_eq!(
             summary_line(&value).expect("a gate ran"),
-            "Gate outcomes: warned some-future-gate."
+            "Gates: warned some-future-gate."
         );
     }
 
-    /// The "(none of which fails this run)" note is reserved for the case where
-    /// it is true of every failed gate. With a mix, the note would be false of
-    /// the enforced one, and naming a count here would only invite a reader to
-    /// guess which is which; `enforced` on each entry is where that lives.
     #[test]
     fn a_mix_of_enforced_and_unenforced_failures_adds_no_note() {
         let value = envelope(&serde_json::json!({
@@ -729,7 +726,7 @@ mod tests {
         }));
         assert_eq!(
             summary_line(&value).expect("gates ran"),
-            "Gate outcomes: failed regression, stale-baseline."
+            "Gates: failed regression, stale-baseline."
         );
     }
 
