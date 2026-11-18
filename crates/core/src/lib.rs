@@ -2710,8 +2710,8 @@ fn layer_links(
 ///
 /// Each root is classified on its own: the project root plus every workspace
 /// root, and a pattern is judged by the config of the root whose prefix it
-/// carries. One custom `nuxt.config` in a monorepo therefore no longer keeps
-/// every other app's patterns. See issue #2737.
+/// carries. One custom `nuxt.config` in a monorepo does not keep the patterns
+/// of every other app. See issue #2737.
 ///
 /// A surface that KEPT its patterns records one advisory per root and surface,
 /// because the user enabled `autoImports` and did not get the findings it

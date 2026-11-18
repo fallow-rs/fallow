@@ -602,6 +602,8 @@ fn dupes_top_zero_never_reports_a_clean_project() {
 /// `Clone families` and `Clone groups` count the rendered vectors while
 /// `Duplicated lines` and `Duplication rate` describe the measured corpus, so
 /// under `--top` the four aligned numbers come from two different scopes. The
+/// note must name both axes, or the truncated family count reads as a corpus
+/// number.
 #[test]
 fn dupes_summary_discloses_both_axes_a_display_limit_withheld() {
     let full = parse_json(&run_fallow(

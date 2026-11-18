@@ -1036,8 +1036,8 @@ fn collect_large_functions_respects_max_unit_size_override() {
 
     let entries = collect_large_functions(&input);
     // The overridden test-file function drops out (218 <= 500); the src-file
-    // function stays listed (218 > 60). Neuter check: reverting the effective
-    // gate to `> 60` re-lists the test-file `<arrow>` and fails this assertion.
+    // function stays listed (218 > 60). A gate of `> 60` for the test file
+    // would list its `<arrow>` and fail this assertion.
     let listed: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
     assert_eq!(listed, vec!["bigHelper"]);
     assert!(entries.iter().all(|entry| entry.path == src_path));

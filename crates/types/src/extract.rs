@@ -2199,8 +2199,7 @@ pub fn has_dynamic_custom_element_render(module: &ModuleInfo) -> bool {
 /// Typed-first view over semantic extraction facts.
 ///
 /// Extraction populates `semantic_facts` directly. The `member_accesses` slice
-/// remains available for consumers that need ordinary source member accesses,
-/// but it is no longer decoded as a string protocol for semantic facts.
+/// holds only ordinary source member accesses, not encoded semantic facts.
 #[derive(Debug, Clone, Copy)]
 pub struct SemanticFactView<'a> {
     semantic_facts: &'a [SemanticFact],

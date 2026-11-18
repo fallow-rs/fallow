@@ -6048,11 +6048,9 @@ fn count_occurrences(haystack: &str, needle: &str) -> usize {
 
 /// Regression test for issue #557: `fallow --score` (bare combined mode) must
 /// render the health score in human output, and must render it EXACTLY ONCE.
-/// The score has always been present in JSON / SARIF / CodeClimate; only the
-/// terminal renderer was missing the call into `render_health_score`. The
-/// "exactly once" assertion guards the second half of the fix: a naive
-/// orientation-header render would double the line because the downstream
-/// Complexity section's own `print_health_human` call would render it again.
+/// The "exactly once" assertion matters because the Complexity section's own
+/// `print_health_human` call also renders the score, so an extra render in
+/// the orientation header would show the line twice.
 #[test]
 fn combined_score_renders_health_score_exactly_once() {
     let output = run_fallow_combined("complexity-project", &["--score"]);

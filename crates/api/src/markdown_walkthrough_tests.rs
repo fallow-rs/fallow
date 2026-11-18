@@ -131,13 +131,13 @@ fn ungrouped_walkthrough_paths_use_safe_code_spans() {
 
 // The markdown surface honors `--mark-viewed`: a viewed file collapses out of
 // its stage into the Cleared panel, and the summary reports the viewed count
-// (the same on-disk state the human surface reads), no longer ignored.
+// (the same on-disk state the human surface reads).
 #[test]
 fn viewed_file_collapses_into_cleared_in_markdown() {
     let guide = guide_with_question("src/page.ts", "Couple ui to db?");
     let viewed = vec!["src/page.ts".to_string()];
     let md = build_walkthrough_markdown(&guide, Path::new("/project"), &viewed);
-    // The viewed file is no longer rendered in a stage section.
+    // The viewed file is not rendered in a stage section.
     assert!(
         !md.contains("### Stage 1"),
         "viewed file left its stage: {md}"

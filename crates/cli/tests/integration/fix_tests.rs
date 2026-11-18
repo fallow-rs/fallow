@@ -1306,10 +1306,9 @@ fn fix_still_removes_a_dependency_no_degraded_file_could_have_imported() {
 }
 
 /// A project whose only reference to `Color.Blue` lives in a file the size
-/// guard skips before reading it. Reproduced end to end before the fix:
-/// `fix --yes` deleted the member while `huge.ts` still referenced it, because
-/// member usage is collected by walking the member accesses of every module
-/// the run PARSED and no caveat had ever reached `unused_enum_members[]`.
+/// guard skips before reading it. Member usage comes only from modules that
+/// the run PARSED, so without a caveat on `unused_enum_members[]`, `fix --yes`
+/// deletes the member while `huge.ts` still references it.
 fn write_skipped_enum_member_project(root: &std::path::Path) {
     std::fs::create_dir_all(root.join("src")).unwrap();
     std::fs::write(
