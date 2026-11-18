@@ -40,12 +40,13 @@ use crate::keys::{
 };
 use crate::model::{Materialized, ProjectModel, SELECTED_WORKSPACE, project_strategy};
 use crate::surfaces::{
-    Analysis, McpPath, McpServer, Scope, api_audit, api_dead_code_envelope_with_baseline,
-    api_envelope, api_finding_id_query, api_keys, api_security, architecture_envelopes,
-    architecture_keys, cli_analysis_envelope, cli_audit, cli_combined, cli_envelope,
-    cli_finding_id_query, cli_human_verdict_code, cli_keys, cli_save_baseline, cli_security,
-    cli_verdict_envelope, mcp_audit, mcp_bin, mcp_envelope, mcp_finding_id_query, mcp_security,
-    mcp_supports, run_cli, run_cli_format,
+    Analysis, McpPath, McpServer, Scope, api_audit, api_audit_with_health,
+    api_dead_code_envelope_with_baseline, api_envelope, api_finding_id_query, api_keys,
+    api_security, architecture_envelopes, architecture_keys, cli_analysis_envelope, cli_audit,
+    cli_audit_skipping, cli_combined, cli_envelope, cli_finding_id_query, cli_human_verdict_code,
+    cli_keys, cli_save_baseline, cli_security, cli_verdict_envelope, mcp_audit, mcp_audit_skipping,
+    mcp_bin, mcp_envelope, mcp_finding_id_query, mcp_security, mcp_supports, run_cli,
+    run_cli_format,
 };
 
 /// Cases per invariant when `FALLOW_DRIFT_CASES` is unset. Small, so the
@@ -857,11 +858,7 @@ fn type_aware_config_agrees_across_surfaces() {
         r#"{ "typeAware": { "enabled": true } }"#,
         r#"{ "audit": { "typeAware": true } }"#,
     ] {
-        let mut files = audit_control_model(true).materialize(true);
-        for side in [&mut files.base, &mut files.head] {
-            side.insert(".fallowrc.json".to_string(), config.to_string());
-        }
-        let project = Project::from_files(files);
+        let project = audit_config_project(config);
         let root = &project.root;
 
         let cli = cli_audit(root);
@@ -1287,51 +1284,54 @@ fn audit_controls_see_renames_and_manifests() {
         .unwrap_or_else(|err| panic!("{err}"));
 }
 
-/// I5 for the audit sub-analysis keys: with `audit.deadCode` and
-/// `audit.dupes` false, the CLI, the MCP typed route and `fallow_api` skip the
-/// same sub-analyses, mark them in the summary, and report the same keys.
+/// I5 for the audit sub-analysis keys: under each config, the CLI, the MCP
+/// typed route and `fallow_api` skip the same sub-analyses, mark them in the
+/// summary, and report the same keys. With `duplicates.enabled` false, a
+/// `skip` of health also agrees, and on MCP that call takes the CLI route.
 #[test]
 #[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
 fn i5_audit_sub_analysis_keys_agree_across_surfaces() {
-    let mut files = audit_control_model(true).materialize(true);
-    let config = r#"{ "audit": { "deadCode": false, "dupes": false } }"#;
-    files
-        .base
-        .insert(".fallowrc.json".to_string(), config.to_string());
-    files
-        .head
-        .insert(".fallowrc.json".to_string(), config.to_string());
-    let project = Project::from_files(files);
-    let envelopes = vec![
-        ("CLI".to_string(), cli_audit(&project.root)),
-        (
-            "MCP Typed".to_string(),
-            with_typed_server(|server| mcp_audit(server, &project.root)),
-        ),
-        ("fallow_api".to_string(), api_audit(&project.root)),
+    let audit_keys_off = r#"{ "audit": { "deadCode": false, "dupes": false } }"#;
+    let duplicates_off = r#"{ "duplicates": { "enabled": false } }"#;
+    let cases: [(&str, &[&str], &[&str]); 3] = [
+        (audit_keys_off, &[], &["dead_code", "duplication"]),
+        (duplicates_off, &[], &["duplication"]),
+        (duplicates_off, &["health"], &["duplication", "complexity"]),
     ];
-    for (surface, envelope) in &envelopes {
-        for (block, marker) in [
-            ("dead_code", "dead_code_skipped"),
-            ("duplication", "duplication_skipped"),
-        ] {
-            assert!(
-                envelope.get(block).is_none() && envelope["summary"][marker] == true,
-                "{surface} audit ignored the `audit` sub-analysis keys: {envelope}"
-            );
-        }
-        assert!(
-            envelope["summary"].get("complexity_skipped").is_none(),
-            "{surface} audit skipped health: {envelope}"
-        );
+    for (config, skip, skipped) in cases {
+        let project = audit_config_project(config);
+        let root = &project.root;
+        let (mcp_route, mcp) = if skip.is_empty() {
+            (
+                "MCP Typed",
+                with_typed_server(|server| mcp_audit(server, root)),
+            )
+        } else {
+            (
+                "MCP CLI route",
+                with_server(|server| mcp_audit_skipping(server, root, skip)),
+            )
+        };
+        let health = skip.contains(&"health").then_some(false);
+        let envelopes = vec![
+            ("CLI".to_string(), cli_audit_skipping(root, skip)),
+            (mcp_route.to_string(), mcp),
+            (
+                "fallow_api".to_string(),
+                api_audit_with_health(root, health),
+            ),
+        ];
+        project
+            .explain(invariants::i5_audit_skips_agree(&envelopes, skipped))
+            .unwrap_or_else(|err| panic!("{config} with skip {skip:?}: {err}"));
+        let results: Vec<(String, AuditKeys)> = envelopes
+            .iter()
+            .map(|(surface, envelope)| (surface.clone(), audit_keys(envelope)))
+            .collect();
+        project
+            .explain(invariants::i5_audit_surfaces_agree(&results))
+            .unwrap_or_else(|err| panic!("{config} with skip {skip:?}: {err}"));
     }
-    let results: Vec<(String, AuditKeys)> = envelopes
-        .iter()
-        .map(|(surface, envelope)| (surface.clone(), audit_keys(envelope)))
-        .collect();
-    project
-        .explain(invariants::i5_audit_surfaces_agree(&results))
-        .unwrap_or_else(|err| panic!("{err}"));
 }
 
 /// I5 under an `audit` config section. The generator writes no config file,
@@ -1345,18 +1345,8 @@ fn i5_audit_sub_analysis_keys_agree_across_surfaces() {
 #[test]
 #[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
 fn i5_audit_config_section_agrees_across_surfaces() {
-    let with_config = |config: &str| {
-        let mut files = audit_control_model(true).materialize(true);
-        files
-            .base
-            .insert(".fallowrc.json".to_string(), config.to_string());
-        files
-            .head
-            .insert(".fallowrc.json".to_string(), config.to_string());
-        Project::from_files(files)
-    };
-
-    let project = with_config(r#"{ "audit": { "gate": "all", "css": false, "cssDeep": false } }"#);
+    let project =
+        audit_config_project(r#"{ "audit": { "gate": "all", "css": false, "cssDeep": false } }"#);
     let envelopes = vec![
         ("CLI".to_string(), cli_audit(&project.root)),
         (
@@ -1379,10 +1369,10 @@ fn i5_audit_config_section_agrees_across_surfaces() {
         .explain(invariants::i5_audit_surfaces_agree(&results))
         .unwrap_or_else(|err| panic!("{err}"));
 
-    let unbaselined = with_config("{}");
+    let unbaselined = audit_config_project("{}");
     let baseline = unbaselined.scratch.join("dead-code-baseline.json");
     cli_save_baseline(Analysis::DeadCode, &unbaselined.root, &baseline);
-    let project = with_config(&format!(
+    let project = audit_config_project(&format!(
         r#"{{ "audit": {{ "deadCodeBaseline": {} }} }}"#,
         Value::String(baseline.display().to_string())
     ));
@@ -1553,6 +1543,16 @@ fn audit_controls_see_each_stale_suppression() {
     project
         .explain(invariants::i4_audit_attribution(&expected, &cli))
         .unwrap_or_else(|err| panic!("stale suppression control: {err}"));
+}
+
+/// The [`audit_control_model`] project with `config` as `.fallowrc.json` on
+/// the base and the head commit.
+fn audit_config_project(config: &str) -> Project {
+    let mut files = audit_control_model(true).materialize(true);
+    for side in [&mut files.base, &mut files.head] {
+        side.insert(".fallowrc.json".to_string(), config.to_string());
+    }
+    Project::from_files(files)
 }
 
 /// One file with two unused exports, entry-imported, and one unused

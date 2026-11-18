@@ -114,25 +114,22 @@ pub fn run_combined(options: &CombinedOptions) -> ProgrammaticResult<CombinedPro
     })
 }
 
-/// Apply the rule of [`fallow_config::DuplicatesConfig::select`] to the
-/// duplication domain, as the bare `fallow` command does. A run that selects
-/// only the duplication domain names it. A run with another domain runs
-/// duplication by default, so `duplicates.enabled: false` turns it off.
+/// Plan the duplication domain with [`fallow_config::plan_run`], as the bare
+/// `fallow` command does. A run that selects only the duplication domain
+/// names it. A run with another domain runs duplication by default, so
+/// `duplicates.enabled: false` turns it off.
 fn options_with_duplicates_config(
     options: &CombinedOptions,
     resolved: &crate::analysis_context::ProgrammaticAnalysisContext,
 ) -> ProgrammaticResult<CombinedOptions> {
-    let request = if !options.duplication {
-        fallow_config::DuplicationRequest::Excluded
-    } else if options.dead_code || options.health {
-        fallow_config::DuplicationRequest::Default {
-            command_default: None,
-        }
-    } else {
-        fallow_config::DuplicationRequest::Named
-    };
+    let request = fallow_config::RunRequest::from_booleans(
+        fallow_config::RunCommand::Combined,
+        options.dead_code,
+        options.duplication,
+        options.health,
+    );
     Ok(CombinedOptions {
-        duplication: super::duplication_selection(resolved, request)?.runs(),
+        duplication: super::plan_run(resolved, request)?.duplication.runs(),
         ..options.clone()
     })
 }

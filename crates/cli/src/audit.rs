@@ -202,36 +202,9 @@ pub struct AuditOptions<'a> {
     pub scope: Option<std::path::PathBuf>,
 }
 
-/// The sub-analyses one audit runs, resolved from `--only`, `--skip` and the
-/// `audit.deadCode` / `audit.health` / `audit.dupes` config keys.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct AuditAnalysisSelection {
-    pub dead_code: bool,
-    pub health: bool,
-    pub dupes: bool,
-    /// Which dead-code findings stay in the report (`--only architecture`,
-    /// `--skip architecture`).
-    pub architecture: crate::check::ArchitectureSelection,
-}
-
-impl AuditAnalysisSelection {
-    /// Every sub-analysis with every dead-code finding: the default.
-    pub const ALL: Self = Self {
-        dead_code: true,
-        health: true,
-        dupes: true,
-        architecture: crate::check::ArchitectureSelection::All,
-    };
-
-    /// The cache-key label of the architecture selection.
-    pub const fn architecture_label(self) -> &'static str {
-        match self.architecture {
-            crate::check::ArchitectureSelection::All => "all",
-            crate::check::ArchitectureSelection::Only => "only",
-            crate::check::ArchitectureSelection::Exclude => "exclude",
-        }
-    }
-}
+#[path = "audit_selection.rs"]
+mod selection;
+pub use selection::AuditAnalysisSelection;
 
 #[derive(Clone, Copy, Default)]
 pub struct AuditTypeAwareOptions<'a> {

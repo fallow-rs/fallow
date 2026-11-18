@@ -1,7 +1,10 @@
 use std::process::ExitCode;
 use std::time::Instant;
 
-use fallow_config::{DuplicatesConfig, OutputFormat, ProductionAnalysis};
+use fallow_config::{
+    ConfigKey, DuplicatesConfig, OutputFormat, PlannedAnalysis, ProductionAnalysis, RunCommand,
+    RunRequest,
+};
 use fallow_engine::project_config::ProductionFlags;
 
 use crate::check::{ArchitectureSelection, CheckOptions, CheckResult, IssueFilters, TraceOptions};
@@ -103,21 +106,34 @@ pub struct CombinedOptions<'a> {
 /// `architecture` reports a part of the dead-code analysis, so `--only
 /// architecture` runs that analysis. See [`resolve_architecture_selection`].
 pub fn resolve_analyses(only: &[AnalysisKind], skip: &[AnalysisKind]) -> (bool, bool, bool) {
-    if !only.is_empty() {
-        (
-            only.contains(&AnalysisKind::DeadCode) || only.contains(&AnalysisKind::Architecture),
-            only.contains(&AnalysisKind::Dupes),
-            only.contains(&AnalysisKind::Health),
-        )
-    } else if !skip.is_empty() {
-        (
-            !skip.contains(&AnalysisKind::DeadCode),
-            !skip.contains(&AnalysisKind::Dupes),
-            !skip.contains(&AnalysisKind::Health),
-        )
-    } else {
-        (true, true, true)
-    }
+    let (only, skip) = planned_lists(only, skip);
+    let request = RunRequest::from_lists(RunCommand::Combined, &only, &skip);
+    (
+        request.requested(PlannedAnalysis::DeadCode),
+        request.requested(PlannedAnalysis::Duplication),
+        request.requested(PlannedAnalysis::Health),
+    )
+}
+
+/// The analyses of the `--only` and `--skip` lists. `architecture` is a part
+/// of the dead-code analysis: in `--only` it names that analysis, and in
+/// `--skip` it keeps that analysis and narrows only its findings.
+pub fn planned_lists(
+    only: &[AnalysisKind],
+    skip: &[AnalysisKind],
+) -> (Vec<PlannedAnalysis>, Vec<PlannedAnalysis>) {
+    let planned = |kind: &AnalysisKind, architecture: Option<PlannedAnalysis>| match kind {
+        AnalysisKind::DeadCode => Some(PlannedAnalysis::DeadCode),
+        AnalysisKind::Dupes => Some(PlannedAnalysis::Duplication),
+        AnalysisKind::Health => Some(PlannedAnalysis::Health),
+        AnalysisKind::Architecture => architecture,
+    };
+    (
+        only.iter()
+            .filter_map(|kind| planned(kind, Some(PlannedAnalysis::DeadCode)))
+            .collect(),
+        skip.iter().filter_map(|kind| planned(kind, None)).collect(),
+    )
 }
 
 /// The note for a `--dupes-baseline` flag that reads no baseline, because
@@ -148,27 +164,18 @@ pub fn resolve_bare_analyses(
     root: &std::path::Path,
     output: OutputFormat,
 ) -> Result<BareAnalyses, ExitCode> {
-    let (run_check, selected_dupes, run_health) = resolve_analyses(&cli.only, &cli.skip);
-    let request = if !selected_dupes {
-        fallow_config::DuplicationRequest::Excluded
-    } else if cli.only.is_empty() {
-        fallow_config::DuplicationRequest::Default {
-            command_default: None,
-        }
-    } else {
-        fallow_config::DuplicationRequest::Named
-    };
-    let selection = crate::cli_production::duplication_selection(cli, root, output, request)?;
-    let run_dupes = selection.runs();
-    let disabled_by_config = selection.off_by_duplicates_enabled();
+    let (only, skip) = planned_lists(&cli.only, &cli.skip);
+    let request = RunRequest::from_lists(RunCommand::Combined, &only, &skip);
+    let plan = crate::cli_production::load_run_plan(cli, root, output, request)?;
+    let disabled_by_config = plan.duplication.off_by(ConfigKey::DuplicatesEnabled);
     if disabled_by_config && cli.dupes_baseline.is_some() {
         eprintln!("{INERT_DUPES_BASELINE_NOTE}");
     }
-    if run_check || run_dupes || run_health {
+    if plan.runs_any() {
         return Ok(BareAnalyses {
-            run_check,
-            run_dupes,
-            run_health,
+            run_check: plan.dead_code.runs(),
+            run_dupes: plan.duplication.runs(),
+            run_health: plan.health.runs(),
             dupes_off_by_config: disabled_by_config,
         });
     }
@@ -935,6 +942,55 @@ mod tests {
             resolve_analyses(&[], &[AnalysisKind::DeadCode, AnalysisKind::Health]),
             (false, true, false)
         );
+    }
+
+    /// Every valid `--only` and `--skip` list, with the analyses it requests:
+    /// `(dead code, duplication, health)`. `architecture` in `--only` runs the
+    /// dead-code analysis. `architecture` in `--skip` keeps it.
+    #[test]
+    fn resolve_analyses_table_for_every_only_and_skip_list() {
+        use AnalysisKind::{Architecture as A, DeadCode as D, Dupes as U, Health as H};
+        type Row = (
+            &'static [AnalysisKind],
+            &'static [AnalysisKind],
+            (bool, bool, bool),
+        );
+        let rows: [Row; 31] = [
+            (&[], &[], (true, true, true)),
+            (&[D], &[], (true, false, false)),
+            (&[U], &[], (false, true, false)),
+            (&[H], &[], (false, false, true)),
+            (&[A], &[], (true, false, false)),
+            (&[D, U], &[], (true, true, false)),
+            (&[D, H], &[], (true, false, true)),
+            (&[D, A], &[], (true, false, false)),
+            (&[U, H], &[], (false, true, true)),
+            (&[U, A], &[], (true, true, false)),
+            (&[H, A], &[], (true, false, true)),
+            (&[D, U, H], &[], (true, true, true)),
+            (&[D, U, A], &[], (true, true, false)),
+            (&[D, H, A], &[], (true, false, true)),
+            (&[U, H, A], &[], (true, true, true)),
+            (&[D, U, H, A], &[], (true, true, true)),
+            (&[], &[D], (false, true, true)),
+            (&[], &[U], (true, false, true)),
+            (&[], &[H], (true, true, false)),
+            (&[], &[A], (true, true, true)),
+            (&[], &[D, U], (false, false, true)),
+            (&[], &[D, H], (false, true, false)),
+            (&[], &[D, A], (false, true, true)),
+            (&[], &[U, H], (true, false, false)),
+            (&[], &[U, A], (true, false, true)),
+            (&[], &[H, A], (true, true, false)),
+            (&[], &[D, U, H], (false, false, false)),
+            (&[], &[D, U, A], (false, false, true)),
+            (&[], &[D, H, A], (false, true, false)),
+            (&[], &[U, H, A], (true, false, false)),
+            (&[], &[D, U, H, A], (false, false, false)),
+        ];
+        for (row, (only, skip, expected)) in rows.into_iter().enumerate() {
+            assert_eq!(resolve_analyses(only, skip), expected, "row {row}");
+        }
     }
 
     #[test]

@@ -177,6 +177,18 @@ fn duplicates_enabled_false_is_the_default_of_the_duplication_domain() {
     assert!(from_config.get("duplication").is_some(), "{from_config:#}");
 }
 
+/// `audit.deadCode: false` and `duplicates.enabled: false` each skip their
+/// own domain in one run.
+#[test]
+fn audit_dead_code_false_and_duplicates_enabled_false_skip_together() {
+    let dir = repository(r#"{"deadCode": false}, "duplicates": {"enabled": false}"#);
+    let report = audit(&dir.path().join("project"), None);
+
+    assert_skipped(&report);
+    assert!(report.get("duplication").is_none(), "{report:#}");
+    assert_eq!(report["summary"]["duplication_skipped"], true, "{report:#}");
+}
+
 #[test]
 fn a_selection_without_any_domain_is_an_error() {
     let dir = repository(r#"{"deadCode": false, "health": false, "dupes": false}"#);

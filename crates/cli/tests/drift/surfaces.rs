@@ -774,14 +774,21 @@ pub const AUDIT_BASE_REF: &str = "HEAD~1";
 
 /// Run `fallow audit` against the base commit and return its envelope.
 pub fn cli_audit(root: &Path) -> Value {
-    cli_envelope(&run_cli(
-        root,
-        &[
-            "audit".to_string(),
-            "--base".to_string(),
-            AUDIT_BASE_REF.to_string(),
-        ],
-    ))
+    cli_audit_skipping(root, &[])
+}
+
+/// Run `fallow audit` with one `--skip` flag for each entry of `skip` against
+/// the base commit, and return its envelope.
+pub fn cli_audit_skipping(root: &Path, skip: &[&str]) -> Value {
+    let mut args = vec![
+        "audit".to_string(),
+        "--base".to_string(),
+        AUDIT_BASE_REF.to_string(),
+    ];
+    for analysis in skip {
+        args.extend(["--skip".to_string(), (*analysis).to_string()]);
+    }
+    cli_envelope(&run_cli(root, &args))
 }
 
 /// Run the MCP `audit` tool against the base commit and return its envelope.
@@ -798,6 +805,21 @@ pub fn mcp_audit(server: &mut McpServer, root: &Path) -> Value {
     )
 }
 
+/// Run the MCP `audit` tool with `skip` against the base commit. A non-empty
+/// `skip` sends the call to the CLI subprocess, so `server` must be a
+/// [`McpServer::start`] server.
+pub fn mcp_audit_skipping(server: &mut McpServer, root: &Path, skip: &[&str]) -> Value {
+    server.call_tool(
+        "audit",
+        &json!({
+            "root": root.display().to_string(),
+            "base": AUDIT_BASE_REF,
+            "no_cache": true,
+            "skip": skip,
+        }),
+    )
+}
+
 /// Run `fallow_api::run_audit` in this process against the base commit. The
 /// gate stays unset, as in [`cli_audit`] and [`mcp_audit`], so `audit.gate`
 /// in config decides it.
@@ -806,6 +828,16 @@ pub fn mcp_audit(server: &mut McpServer, root: &Path) -> Value {
 ///
 /// Panics when the programmatic run fails.
 pub fn api_audit(root: &Path) -> Value {
+    api_audit_with_health(root, None)
+}
+
+/// [`api_audit`] with the `health` option set to `health`. `Some(false)`
+/// skips the health domain, as `fallow audit --skip health` does.
+///
+/// # Panics
+///
+/// Panics when the programmatic run fails.
+pub fn api_audit_with_health(root: &Path, health: Option<bool>) -> Value {
     let options = fallow_api::AuditOptions {
         analysis: fallow_api::AnalysisOptions {
             root: Some(root.to_path_buf()),
@@ -815,6 +847,7 @@ pub fn api_audit(root: &Path) -> Value {
         },
         base: Some(AUDIT_BASE_REF.to_string()),
         min_invocations_hot: 100,
+        health,
         ..fallow_api::AuditOptions::default()
     };
     fallow_api::run_audit(&options)
