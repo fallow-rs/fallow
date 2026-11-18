@@ -3621,7 +3621,6 @@ fn validate_resolved_boundaries_passes_on_bulletproof_preset() {
 fn parse_config_to_value_strips_utf8_bom() {
     let dir = test_dir("parse-bom");
     let path = dir.path().join("fallow.toml");
-    // Write TOML with a UTF-8 BOM prefix
     let content_with_bom = "\u{FEFF}entry = [\"src/main.ts\"]\n";
     std::fs::write(&path, content_with_bom).unwrap();
 

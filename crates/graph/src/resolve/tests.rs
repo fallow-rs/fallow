@@ -2714,7 +2714,6 @@ fn bare_at_alias_does_not_swallow_scoped_npm_packages() {
     let workspace_roots = FxHashMap::default();
     let package_manifests = Vec::new();
     let condition_names = react_native::build_condition_names(&[], &[]);
-    // Register a bare "@" alias pointing to "./src", the problematic case.
     let aliases = vec![("@".to_string(), "src".to_string())];
     let tsconfig_warned = std::sync::Mutex::new(FxHashSet::default());
     let tsconfig_cache = TsconfigCache::default();

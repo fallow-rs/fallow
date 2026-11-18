@@ -409,13 +409,8 @@ const TOP_WITH_GROUP_BY_HINT: &str = "run one flag or the other; per-bucket stat
 
 /// Refuse `--top` together with `--group-by` instead of dropping one of them.
 ///
-/// The two were previously accepted together and `--top` was silently ignored,
-/// which is the failure mode the shown/omitted disclosure exists to prevent: the
-/// run exited 0 reporting every clone group after being asked for N. Refusing
-/// costs the caller one flag; honouring it per bucket would either recompute
-/// bucket stats over a truncated set (a second contradictory scope inside one
-/// object) or need a per-bucket shown/omitted split the grouped envelope does
-/// not carry.
+/// A grouped bucket describes every finding it contains. A display cap within
+/// a bucket would need separate counts for shown and omitted findings.
 fn validate_dupes_flag_combination(opts: &DupesOptions<'_>) -> Result<(), ExitCode> {
     if opts.top.is_some() && opts.group_by.is_some() {
         return Err(crate::error::emit_error_with_hint(
@@ -1082,10 +1077,7 @@ fn print_dupes_result_with_grouping(input: DupesResultGroupingInput<'_>) -> Exit
         return report_code;
     }
 
-    // The threshold gate lives here, on the single shared renderer, so every
-    // entry point inherits it. Standalone `dupes` and combined mode previously
-    // rendered through two near-identical functions and only the combined one
-    // gated, so `fallow dupes --threshold 1` exited 0 at 100% duplication (#2009).
+    // Standalone and combined output share this gate so both enforce `--threshold` (#2009).
     let threshold_exceeded =
         exceeds_threshold(result.threshold, result.report.stats.duplication_percentage);
     if threshold_exceeded {

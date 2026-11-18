@@ -411,9 +411,7 @@ mod tests {
         assert!(body.contains("fallow-ignore-file unused-file"));
     }
 
-    /// The hint used to name `fallow fix --files`, which the CLI rejects with
-    /// `unexpected argument`. Advice a reader cannot run is worse than no
-    /// advice, so no flag that does not parse may appear here.
+    /// The unused-file hint must not advertise unsupported `fallow fix` flags.
     #[test]
     fn no_hint_names_a_flag_the_cli_does_not_accept() {
         let body = suggestion_block(

@@ -78,10 +78,7 @@ fn check_still_fails_closed_under_require_complete() {
     );
 }
 
-/// The notice is the user's only signal that the report is unrefined, so it has
-/// to arrive once. `check` used to print it twice: once from the shared degrade
-/// policy and once more from the per-warning printer that copied it out of the
-/// metadata.
+/// The notice is the only indication that the report has no type-aware refinement.
 #[test]
 fn human_check_states_the_degradation_once_and_claims_no_success() {
     let output = run_with_missing_companion(&["dead-code", "--type-aware", "--unused-exports"]);

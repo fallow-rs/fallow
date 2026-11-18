@@ -741,7 +741,6 @@ export const activate = async (context: vscode.ExtensionContext): Promise<Extens
     }),
   );
 
-  // Register commands
   context.subscriptions.push(
     vscode.commands.registerCommand("fallow.analyze", runCliAnalysisCommand),
   );

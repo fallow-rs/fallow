@@ -62,15 +62,9 @@ export const parseLicenseJson = (stdout: string): LicenseParseResult => {
 };
 
 /**
- * Whether any license material is present, mirroring the source precedence in
- * `fallow_license::load_raw_jwt` (`crates/license/src/lib.rs`): an inline
- * `$FALLOW_LICENSE` JWT, then a `$FALLOW_LICENSE_PATH` file, then the default
- * `~/.fallow/license.jwt`. Pure: the caller supplies the env values, the
- * resolved default path, and a file-exists predicate, so this stays
- * unit-testable without touching the real filesystem or process env. Keep the
- * precedence in sync with the Rust loader. Used to keep license state out of
- * the status bar item for users who never had a license (the item advertises
- * nothing to free users).
+ * Report whether a license source has material. Follow the same precedence as
+ * `fallow_license::load_raw_jwt`: `$FALLOW_LICENSE`, `$FALLOW_LICENSE_PATH`,
+ * then `~/.fallow/license.jwt`.
  */
 export const hasLicenseMaterial = (
   inlineEnv: string | undefined,

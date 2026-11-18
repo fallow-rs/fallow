@@ -44,7 +44,6 @@ run_wrapped() { # interval, command...
 
 resource_lines() { printf '%s\n' "$out" | grep -c '^resources:.*disk_available_mb=[0-9]'; }
 
-# 1. A passing command: exit code 0, its output stays, resource lines appear.
 run_wrapped 1 sh -c 'echo built; sleep 2'
 check "pass exit code" 0 "$status"
 check "command output kept" 1 "$(printf '%s\n' "$out" | grep -c '^built$')"
@@ -54,7 +53,6 @@ if [ -r /proc/meminfo ]; then
   check "load average on Linux" 1 "$(printf '%s\n' "$out" | grep -c -m1 'load_1m=[0-9.]* disk_available_mb=')"
 fi
 
-# 2. A failing command: the wrapper returns its exit code.
 run_wrapped 1 sh -c 'exit 7'
 check "failure exit code" 7 "$status"
 
@@ -64,13 +62,11 @@ run_wrapped 30 sleep 2
 check "sampler stops with the command" 0 "$status"
 check "first and final resource lines" 2 "$(resource_lines)"
 
-# 4. An invalid interval uses the default, so the sampler does not loop fast.
 run_wrapped abc sleep 2
 check "invalid interval uses the default" 2 "$(resource_lines)"
 run_wrapped 0 sleep 2
 check "zero interval uses the default" 2 "$(resource_lines)"
 
-# 5. No command: usage error.
 bash "$WRAP" >/dev/null 2>&1
 check "usage error" 2 $?
 

@@ -1628,9 +1628,6 @@ fn params_fields_do_not_carry_both_doc_comment_and_schemars_description() {
     );
 }
 
-/// Positive-case gate test: synthetic source with the bad pattern is flagged.
-/// Without this test, a future refactor to the gate logic could silently turn
-/// it into a no-op and the CI would happily pass forever.
 #[test]
 fn gate_trips_on_combined_doc_and_schemars_description() {
     let good = r#"

@@ -4532,15 +4532,6 @@ impl_gated_finding!(
     crate::results::StaleSuppression,
 );
 
-// ── Position-0 invariant golden tests ───────────────────────────
-//
-// These tests document the load-bearing position-0 semantics that flow
-// downstream into the GitHub Action / GitLab CI jq scripts, the MCP server
-// `actions[0].type` pattern-match, and the VS Code LSP code-action
-// rendering. Snapshot tests assert structural equality; these named tests
-// document WHY position 0 has a specific value, so a future refactor that
-// re-orders actions tells you what broke instead of just "the snapshot
-// changed".
 #[path = "output_dead_code_actions.rs"]
 mod output_dead_code_actions;
 use output_dead_code_actions::{
@@ -4551,22 +4542,14 @@ use output_dead_code_actions::{
 #[path = "output_dead_code_caveat_tokens.rs"]
 mod caveat_tokens;
 
-/// The gate, pinned as one property across every finding type rather than as
-/// one test per mutation surface.
-///
-/// Three separate reviewers found three separate mutation paths that had never
-/// learned about the caveat, because each earlier round fixed the door it
-/// found. These tests assert the invariant itself: for every dead-code finding
-/// that can carry a caveat, a caveated finding exposes NO auto-fixable action,
-/// and an uncaveated one is untouched. Adding a caveated finding type without
-/// registering it in `impl_caveated_finding!` fails to compile at the
-/// `set_reachability_caveats` call the annotation pass makes; adding one that
-/// exposes an auto-fixable mutation and never gets annotated is what
-/// `every_auto_fixable_dead_code_mutation_is_gated` catches.
+/// A caveated finding must expose no automatic fix. An uncaveated finding keeps its actions.
+/// The annotation pass requires an implementation of `CaveatedFinding`.
+/// The tests also cover finding types that can expose automatic fixes.
 #[cfg(test)]
 #[path = "output_dead_code_mutation_gate.rs"]
 mod mutation_gate;
 
+// These tests pin the primary action at actions[0] for consumers that read it.
 #[cfg(test)]
 #[path = "output_dead_code_position_0_invariants.rs"]
 mod position_0_invariants;

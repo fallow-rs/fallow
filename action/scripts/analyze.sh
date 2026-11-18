@@ -576,7 +576,6 @@ ARGS=()
 build_common_args json
 build_command_args true
 
-# Parse extra arguments safely
 EXTRA_ARGS=()
 if [ -n "${INPUT_ARGS:-}" ]; then
   read -ra EXTRA_ARGS <<< "$INPUT_ARGS"

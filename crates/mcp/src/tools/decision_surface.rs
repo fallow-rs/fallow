@@ -114,10 +114,8 @@ mod tests {
         assert!(json["decisions"].is_array());
     }
 
-    /// #2699: called without a `base`, `decision_surface` shares the audit
-    /// base-ref detection, and a `root` pointing at a package added on the
-    /// branch has no counterpart in the detected base commit. Both used to
-    /// fail before analysis.
+    /// #2699: with no `base`, use audit's base-ref detection. A package root
+    /// absent from that commit must not stop the analysis.
     #[tokio::test]
     async fn run_decision_surface_auto_detects_the_base_for_a_root_added_on_the_branch() {
         let project = super::super::base_root_fixture::new_package_repo();

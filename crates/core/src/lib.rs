@@ -368,10 +368,8 @@ struct AnalysisSetup {
     progress: progress::AnalysisProgress,
     project: project::ProjectState,
     root_pkg: Option<PackageJson>,
-    /// Non-source config-candidate files captured by the same discovery walk,
-    /// used to resolve plugin config patterns in-memory (empty in production
-    /// mode, where the filesystem path is kept). Carried alongside `project`
-    /// rather than inside it to avoid churning `ProjectState`'s many callers.
+    /// The source walk collects these non-source files for plugin config lookup.
+    /// Production mode uses filesystem lookup and leaves this list empty.
     config_candidates: Vec<std::path::PathBuf>,
     discover_ms: f64,
     workspaces_ms: f64,

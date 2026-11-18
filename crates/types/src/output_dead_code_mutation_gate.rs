@@ -245,24 +245,12 @@ fn a_gated_mutation_keeps_the_note_it_already_had() {
     );
 }
 
-/// The gate is complete only if every finding type that can ever expose an
-/// auto-fixable mutation is in it. The one member type deliberately left
-/// out is safe for a different reason, and this pins that reason rather
-/// than trusting a comment: a store member exposes no fix action at all,
-/// because reflective access via a Pinia plugin or `$onAction` is
-/// invisible to syntactic analysis, so no evidence this run could gather
-/// would open the removal. If it ever ships one, it needs
-/// `reachability_caveats` and a row in `impl_caveated_finding!` first.
+/// Store members expose no fix action because syntactic analysis cannot see
+/// reflective access through a Pinia plugin or `$onAction`. They still carry caveats.
 ///
-/// A class member used to sit here on the weaker argument that its removal
-/// STARTS withheld. That argument covered only the syntactic finding: the
-/// type-aware sidecar reopens the removal through
-/// [`UnusedClassMemberFinding::set_semantic_decision`], and the review
-/// formats rendered a one-click commit for it regardless of
-/// `auto_fixable`. It is inside the gate now, so the assertion here is
-/// only that the SYNTACTIC finding still ships no auto-fix; the reopening
-/// path is pinned by `a_complete_semantic_verdict_cannot_reopen_a_
-/// caveated_class_member`.
+/// Class members also start without an automatic fix. See
+/// [`a_complete_semantic_verdict_cannot_reopen_a_caveated_class_member`]
+/// for the semantic decision case.
 #[test]
 fn a_store_member_exposes_no_mutation_at_all() {
     let store = UnusedStoreMemberFinding::with_actions(member("total"));

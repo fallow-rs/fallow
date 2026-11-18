@@ -1729,11 +1729,8 @@ mod severity_gate {
         }
     }
 
-    /// Cross-check: the two kinds whose LSP severity is required to MATCH the
-    /// core `RulesConfig` default both default to `Error` in core, so the gate
-    /// table's ERROR expectation for them cannot silently drift from core. If a
-    /// future refactor softens either core default, this fails and forces a
-    /// re-think of the LSP ERROR mapping at the same time.
+    /// The LSP gate must report the same severity as the core defaults for
+    /// route collisions and dynamic segment name conflicts.
     #[test]
     fn route_and_dsc_match_core_error_default() {
         let rules = RulesConfig::default();

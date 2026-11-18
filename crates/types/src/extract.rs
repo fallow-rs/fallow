@@ -55,9 +55,6 @@ pub struct ModuleInfo {
     /// Static member access expressions (e.g., `Status.Active`).
     pub member_accesses: Arc<[MemberAccess]>,
     /// Typed semantic facts produced by extraction for cross-layer analysis.
-    ///
-    /// This carries facts that were previously encoded as synthetic
-    /// `member_accesses` strings. Extraction and analysis now use typed facts.
     pub semantic_facts: Arc<[SemanticFact]>,
     /// Identifiers used in whole-object access patterns.
     pub whole_object_uses: Arc<[String]>,
@@ -3541,8 +3538,8 @@ pub struct ParseResult {
     pub modules: Vec<ModuleInfo>,
     /// Files discovered with stable IDs but unreadable by the parser.
     pub read_failures: Vec<SourceReadFailure>,
-    /// Files that parsed with diagnostics, so their extracted module may be
-    /// incomplete. Reported, never used to withhold findings.
+    /// Files whose extracted modules may be incomplete because of parse diagnostics.
+    /// Analysis keeps findings visible and attaches caveats to affected findings.
     pub parse_degradations: Vec<SourceParseDegradation>,
     /// Number of files whose parse results were loaded from cache (unchanged).
     pub cache_hits: usize,

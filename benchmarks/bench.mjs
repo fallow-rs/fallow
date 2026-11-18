@@ -276,7 +276,6 @@ function benchmarkProject(name, dir) {
   // so the first measured warm run is comparable to the cold loop warmups.
   clearFallowCache(dir);
   const fArgsWarm = ["dead-code", "--quiet", "--format", "json"];
-  // Populate cache
   const populate = timeRun(fallowBin, fArgsWarm, dir);
   const populateSummary = summarizeBenchmarkRun(populate);
   if (!populateSummary.valid)

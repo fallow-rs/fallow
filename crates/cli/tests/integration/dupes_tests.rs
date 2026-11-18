@@ -390,14 +390,8 @@ fn dupes_accepts_top_and_group_by_on_their_own() {
     );
 }
 
-/// `--top` narrows the rendered vector, never the measurement.
-///
-/// The envelope used to mix two scopes in one object: `clone_groups` and
-/// `clone_instances` were recomputed from the truncated vector while
-/// `files_with_clones` and `duplication_percentage` still described the whole
-/// corpus, so a consumer reading all four got numbers that cannot come from the
-/// same run. All four now describe the corpus, and the truncation is disclosed
-/// through `clone_groups_shown` / `clone_groups_omitted` instead.
+/// `--top` caps visible groups, not the corpus statistics.
+/// `clone_groups_shown` and `clone_groups_omitted` describe the display cap.
 #[test]
 fn dupes_top_keeps_corpus_stats_and_discloses_the_split() {
     let full = parse_json(&run_fallow(
@@ -551,13 +545,8 @@ fn dupes_human_header_names_the_corpus_under_top() {
     );
 }
 
-/// `--top 0` renders no clone group, and both human surfaces used to read that
-/// empty array as a clean project.
-///
-/// The run still measured the corpus: `stats.clone_groups` is unchanged by a
-/// display cap, so a green "no duplication found" over a non-zero count is the
-/// exact false-clean state the shown/omitted split exists to prevent. `dead-code
-/// --top 0` already kept its sections, so the two commands disagreed.
+/// `--top 0` can hide every group even when the corpus contains duplicates.
+/// The human report must distinguish a display cap from a clean project.
 #[test]
 fn dupes_top_zero_never_reports_a_clean_project() {
     let full = parse_json(&run_fallow(
@@ -613,9 +602,6 @@ fn dupes_top_zero_never_reports_a_clean_project() {
 /// `Clone families` and `Clone groups` count the rendered vectors while
 /// `Duplicated lines` and `Duplication rate` describe the measured corpus, so
 /// under `--top` the four aligned numbers come from two different scopes. The
-/// note used to name the group axis only, which left the truncated family
-/// count reading as a corpus number sitting right above a notice that names
-/// groups.
 #[test]
 fn dupes_summary_discloses_both_axes_a_display_limit_withheld() {
     let full = parse_json(&run_fallow(

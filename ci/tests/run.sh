@@ -2545,8 +2545,7 @@ OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
 assert_contains "$OUT" "ERROR: Fallow regression gate failed" \
   "gitlab gate: regression fails with FALLOW_FAIL_ON_ISSUES false"
 
-# #2685: the security gate keeps exit 8 and used to sit inside the
-# FALLOW_FAIL_ON_ISSUES conditional, where it could not be reached.
+# The security gate keeps exit 8 with FALLOW_FAIL_ON_ISSUES off (#2685).
 ENVELOPE=$(gitlab_gate_envelope '{"security":{"status":"fail","enforced":true}}' '"gate":{"mode":"new","verdict":"fail","new_count":2}')
 OUT=$(run_generated_gitlab_fixture "$GATE_WORK" \
   MOCK_GATE_ENVELOPE="$ENVELOPE" \

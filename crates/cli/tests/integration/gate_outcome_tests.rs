@@ -1534,8 +1534,7 @@ fn the_pull_request_comment_carries_the_same_verdict_as_the_job_summary() {
         "github-annotations",
         "pr-comment-github",
         "pr-comment-gitlab",
-        // Both review targets reach the conclusion-less arm on a dead-code
-        // envelope, which used to drop the line entirely.
+        // Both review formats must show the gate outcome without a conclusion.
         "review-github",
         "review-gitlab",
     ] {

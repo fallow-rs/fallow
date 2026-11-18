@@ -1181,11 +1181,9 @@ fn check_sarif_format_has_schema() {
     );
 }
 
-/// GitHub code scanning keys an alert on `partialFingerprints`, so two results
-/// that share one value are one alert and the second finding is never shown. A
-/// compact `package.json` puts every dependency on one line, which used to give
-/// them the same rule id, URI, and source snippet, and that is the whole of the
-/// fingerprint. CodeClimate never had it: it keys on the package name.
+/// GitHub code scanning merges results with the same partial fingerprint.
+/// A compact manifest puts dependencies on one line, so each finding needs
+/// a distinct fingerprint even when it shares a location and source snippet.
 #[test]
 fn check_sarif_gives_each_finding_its_own_fingerprint() {
     let dir = tempfile::tempdir().expect("temporary project");

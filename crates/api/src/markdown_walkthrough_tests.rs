@@ -106,8 +106,6 @@ fn renders_header_stage_and_code_span_badges() {
     assert!(md.contains("`COUPLING`"), "badges are code spans: {md}");
     assert!(md.contains("`OUT-OF-DIFF`"), "got: {md}");
     assert!(!md.contains('\u{1b}'), "no ANSI in markdown");
-    // The file->description separator is a colon, not the house-style-banned
-    // em-dash that the list items used to lead with.
     assert!(
         md.contains("- `src/page.ts`: "),
         "list items use a colon separator: {md}"

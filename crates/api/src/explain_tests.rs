@@ -904,9 +904,6 @@ fn matcher_entries_from_security_catalogue() -> Vec<MatcherEntry> {
         .collect()
 }
 
-/// A one-edit typo used to get the same hardcoded example list as a
-/// completely novel token, so the caller never saw the token that was
-/// actually one edit away.
 #[test]
 fn unknown_explain_error_names_the_token_one_edit_away() {
     let error = unknown_explain_error("unused-exportz");

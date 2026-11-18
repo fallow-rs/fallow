@@ -193,8 +193,7 @@ const isWindowsLauncherShim = (configured: string): boolean => {
  * Resolve a user-configured `fallow.lspPath` to a concrete, spawnable binary for
  * `name` (`fallow-lsp` for the LSP, `fallow` for the CLI sibling).
  *
- * `configured` is honored as the user typed it, tolerating the common shapes
- * that used to silently fail:
+ * Supported path forms:
  *  - a file path that points straight at the binary (used as-is);
  *  - a file path missing the Windows extension (`...\fallow-lsp`), retried with
  *    `.exe`;
@@ -211,7 +210,6 @@ const isWindowsLauncherShim = (configured: string): boolean => {
 export const resolveConfiguredBinaryPath = (configured: string, name: string): string | null => {
   const ext = getExecutableExtension();
 
-  // Directory: resolve `<dir>/<name>(.exe)` inside it.
   if (isDirectory(configured)) {
     const inDir = path.join(configured, `${name}${ext}`);
     return fs.existsSync(inDir) ? inDir : null;

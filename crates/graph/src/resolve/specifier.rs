@@ -3001,9 +3001,7 @@ mod tests {
         }
     }
 
-    /// The regression this guards: a tsconfig with neither `files` nor
-    /// `include` used to match every file in the repo, so an unrelated sibling
-    /// project claimed ownership of it.
+    /// Without `files` or `include`, a tsconfig must not claim a file in a sibling package.
     #[test]
     #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
     fn tsconfig_without_includes_does_not_apply_to_a_sibling_package() {

@@ -447,9 +447,6 @@ fn the_combined_envelope_carries_the_caveat_under_check() {
     );
 }
 
-/// The annotation appends the caveat, so the message ENDS with the explanation
-/// line and the `Caveat:` sentence sits after the remediation guidance, not
-/// before it. The compatibility entry used to claim the reverse.
 #[test]
 fn the_annotation_appends_the_caveat_after_its_remediation_guidance() {
     let (_dir, root) = project();
