@@ -799,7 +799,7 @@ pub fn merge_test_source_with_all_fields() -> EditorAnalysisResults {
             col: 0,
             via_path: None,
             reason: fallow_types::results::BoundaryViolationReason::DisallowedZone,
-            public_api_paths: vec![],
+            public_files: vec![],
         })],
         boundary_coverage_violations: vec![
             super::editor_results::BoundaryCoverageViolationFinding::with_actions(

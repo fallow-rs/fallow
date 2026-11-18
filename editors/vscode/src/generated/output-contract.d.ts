@@ -5879,7 +5879,7 @@ from_path: string
 /**
  * The imported file that violates the boundary. Through a re-export chain,
  * the origin module that declares the symbol, not the barrel; a chain
- * stops at the first public entry file (`publicApi`), which it then names.
+ * stops at the first public entry file (`publicFiles`), which it then names.
  */
 to_path: string
 /**
@@ -5912,7 +5912,7 @@ reason?: BoundaryViolationReason
  * The public entry files of `to_zone` that the importer can use instead.
  * Set only when `reason` is `internal_file`.
  */
-public_api_paths?: string[]
+public_files?: string[]
 /**
  * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
  * `~<k>` suffix when several findings of one type share an identity.
@@ -15071,11 +15071,11 @@ patterns: string[]
  */
 file_count: number
 /**
- * Globs of the public entry files of the zone (`publicApi` in the
+ * Globs of the public entry files of the zone (`publicFiles` in the
  * boundary config), after the `autoDiscover` expansion. Omitted when
- * empty. Not related to the `public_api` field of dead-code exports.
+ * empty.
  */
-public_api?: string[]
+public_files?: string[]
 }
 /**
  * A boundary import rule, expanded to operate on concrete child zone

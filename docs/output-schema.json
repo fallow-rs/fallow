@@ -5752,7 +5752,7 @@
         },
         "to_path": {
           "type": "string",
-          "description": "The imported file that violates the boundary. Through a re-export chain,\nthe origin module that declares the symbol, not the barrel; a chain\nstops at the first public entry file (`publicApi`), which it then names."
+          "description": "The imported file that violates the boundary. Through a re-export chain,\nthe origin module that declares the symbol, not the barrel; a chain\nstops at the first public entry file (`publicFiles`), which it then names."
         },
         "from_zone": {
           "type": "string",
@@ -5782,10 +5782,10 @@
           "description": "The barrel file that the source file imports directly, when the\nviolation comes from a re-export chain. Absent for a direct import."
         },
         "reason": {
-          "description": "Why the import breaks the boundary rules. Omitted for\n`disallowed_zone`, so a project without `publicApi` keeps its output.",
+          "description": "Why the import breaks the boundary rules. Omitted for\n`disallowed_zone`, so a project without `publicFiles` keeps its output.",
           "$ref": "#/definitions/BoundaryViolationReason"
         },
-        "public_api_paths": {
+        "public_files": {
           "type": "array",
           "items": {
             "type": "string"
@@ -9617,12 +9617,12 @@
           "type": "integer",
           "description": "Number of analyzable files the zone matched."
         },
-        "public_api": {
+        "public_files": {
           "type": "array",
           "items": {
             "type": "string"
           },
-          "description": "Globs of the public entry files of the zone (`publicApi` in the\nboundary config), after the `autoDiscover` expansion. Omitted when\nempty. Not related to the `public_api` field of dead-code exports."
+          "description": "Globs of the public entry files of the zone (`publicFiles` in the\nboundary config), after the `autoDiscover` expansion. Omitted when\nempty."
         }
       },
       "required": [
@@ -11928,7 +11928,7 @@
         },
         "to_path": {
           "type": "string",
-          "description": "The imported file that violates the boundary. Through a re-export chain,\nthe origin module that declares the symbol, not the barrel; a chain\nstops at the first public entry file (`publicApi`), which it then names."
+          "description": "The imported file that violates the boundary. Through a re-export chain,\nthe origin module that declares the symbol, not the barrel; a chain\nstops at the first public entry file (`publicFiles`), which it then names."
         },
         "from_zone": {
           "type": "string",
@@ -11958,10 +11958,10 @@
           "description": "The barrel file that the source file imports directly, when the\nviolation comes from a re-export chain. Absent for a direct import."
         },
         "reason": {
-          "description": "Why the import breaks the boundary rules. Omitted for\n`disallowed_zone`, so a project without `publicApi` keeps its output.",
+          "description": "Why the import breaks the boundary rules. Omitted for\n`disallowed_zone`, so a project without `publicFiles` keeps its output.",
           "$ref": "#/definitions/BoundaryViolationReason"
         },
-        "public_api_paths": {
+        "public_files": {
           "type": "array",
           "items": {
             "type": "string"
@@ -38508,7 +38508,7 @@
         {
           "type": "string",
           "const": "internal_file",
-          "description": "A rule allows the zone, but the imported file is not a public entry\nfile (`publicApi`) of `to_zone`."
+          "description": "A rule allows the zone, but the imported file is not a public entry\nfile (`publicFiles`) of `to_zone`."
         }
       ],
       "description": "The rule that a boundary violation breaks."

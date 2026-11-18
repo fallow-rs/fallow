@@ -287,7 +287,7 @@ fn boundary_violation_through_a_barrel_names_the_barrel() {
             col: 9,
             via_path: Some(root.join("src/shared/index.ts")),
             reason: fallow_types::results::BoundaryViolationReason::DisallowedZone,
-            public_api_paths: vec![],
+            public_files: vec![],
         }));
 
     let lines = build_human_lines(&results, &root, &RulesConfig::default(), None);

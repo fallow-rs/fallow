@@ -196,7 +196,7 @@ impl BoundaryPreset {
             patterns: vec![format!("{source_root}/{name}/**")],
             auto_discover: vec![],
             root: None,
-            public_api: vec![],
+            public_files: vec![],
         }
     }
 
@@ -417,7 +417,7 @@ pub struct BoundaryZone {
     /// glob. The globs use the same base as `patterns`. On an `autoDiscover`
     /// zone, each glob is relative to each discovered folder.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub public_api: Vec<String>,
+    pub public_files: Vec<String>,
 }
 
 /// An import rule between zones.
@@ -526,9 +526,9 @@ pub struct ResolvedZone {
     /// Normalized subtree scope.
     pub root: Option<String>,
     /// Authored public entry globs, after the `autoDiscover` expansion.
-    pub public_api: Vec<String>,
+    pub public_files: Vec<String>,
     /// Compiled public entry matchers.
-    pub public_api_matchers: Vec<globset::GlobMatcher>,
+    pub public_file_matchers: Vec<globset::GlobMatcher>,
 }
 
 impl ResolvedZone {
@@ -769,7 +769,7 @@ fn merge_fallback_auto_discover_zone(
     zone.auto_discover.clear();
     // The public globs are relative to each discovered folder, so they do
     // not apply to the files that only the parent patterns match.
-    zone.public_api.clear();
+    zone.public_files.clear();
     merge_zone_by_name(expanded_zones, zone.clone());
     Some(group_name.to_owned())
 }
@@ -869,9 +869,9 @@ fn authored_rules_for_logical_groups<'a>(
 /// Merge a discovered zone into `zones[]` by name.
 fn merge_zone_by_name(expanded_zones: &mut Vec<BoundaryZone>, zone: BoundaryZone) {
     if let Some(existing) = expanded_zones.iter_mut().find(|z| z.name == zone.name) {
-        for glob in zone.public_api {
-            if !existing.public_api.contains(&glob) {
-                existing.public_api.push(glob);
+        for glob in zone.public_files {
+            if !existing.public_files.contains(&glob) {
+                existing.public_files.push(glob);
             }
         }
         for pattern in zone.patterns {
@@ -938,7 +938,7 @@ fn expand_rules_for_groups(
 }
 
 impl BoundaryConfig {
-    /// Validate that patterns and `publicApi` globs do not repeat the zone root.
+    /// Validate that patterns and `publicFiles` globs do not repeat the zone root.
     #[must_use]
     pub fn validate_root_prefixes(&self) -> Vec<RedundantRootPrefix> {
         let mut errors = Vec::new();
@@ -950,7 +950,7 @@ impl BoundaryConfig {
             if normalized.is_empty() {
                 continue;
             }
-            for pattern in zone.patterns.iter().chain(&zone.public_api) {
+            for pattern in zone.patterns.iter().chain(&zone.public_files) {
                 let normalized_pattern = pattern.replace('\\', "/");
                 let stripped = normalized_pattern
                     .strip_prefix("./")
@@ -1104,13 +1104,13 @@ impl BoundaryConfig {
                             .compile_matcher()
                     })
                     .collect();
-                let public_api_matchers = zone
-                    .public_api
+                let public_file_matchers = zone
+                    .public_files
                     .iter()
                     .map(|pattern| {
                         compile_path_glob(pattern)
                             .expect(
-                                "boundaries.zones[].publicApi was validated at config load time",
+                                "boundaries.zones[].publicFiles was validated at config load time",
                             )
                             .compile_matcher()
                     })
@@ -1121,8 +1121,8 @@ impl BoundaryConfig {
                     patterns: zone.patterns.clone(),
                     matchers,
                     root,
-                    public_api: zone.public_api.clone(),
-                    public_api_matchers,
+                    public_files: zone.public_files.clone(),
+                    public_file_matchers,
                 }
             })
             .collect()
@@ -1308,10 +1308,10 @@ impl ChildZoneAccumulator {
         {
             entry.patterns.push(child_pattern);
         }
-        for glob in &zone.public_api {
+        for glob in &zone.public_files {
             let child_glob = join_relative_path(&child_dir, glob.trim_start_matches("./"));
-            if !entry.public_api.contains(&child_glob) {
-                entry.public_api.push(child_glob);
+            if !entry.public_files.contains(&child_glob) {
+                entry.public_files.push(child_glob);
             }
         }
         self.first_source_index
@@ -1548,24 +1548,24 @@ impl ResolvedBoundaryConfig {
     }
 
     /// Whether the zone named `zone_name` declares public entry files
-    /// (`publicApi`). Other zones may then import only those files.
+    /// (`publicFiles`). Other zones may then import only those files.
     #[must_use]
-    pub fn has_public_api(&self, zone_name: &str) -> bool {
+    pub fn has_public_files(&self, zone_name: &str) -> bool {
         self.zones
             .iter()
-            .any(|zone| zone.name == zone_name && !zone.public_api_matchers.is_empty())
+            .any(|zone| zone.name == zone_name && !zone.public_file_matchers.is_empty())
     }
 
-    /// Whether the project-relative path matches a `publicApi` glob of the
+    /// Whether the project-relative path matches a `publicFiles` glob of the
     /// zone named `zone_name`. The caller checks that the file is in the zone.
     #[must_use]
-    pub fn is_public_api_file(&self, zone_name: &str, relative_path: &str) -> bool {
+    pub fn is_public_file(&self, zone_name: &str, relative_path: &str) -> bool {
         self.zones
             .iter()
             .filter(|zone| zone.name == zone_name)
             .any(|zone| {
                 zone.candidate(relative_path).is_some_and(|candidate| {
-                    zone.public_api_matchers
+                    zone.public_file_matchers
                         .iter()
                         .any(|m| m.is_match_candidate(&candidate))
                 })

@@ -2709,9 +2709,9 @@ Config files are searched in priority order: `.fallowrc.json` > `.fallowrc.jsonc
   // Rules accept an optional `allowTypeOnly: [zones]` list that admits type-only imports
   // (`import type`, inline `{ type Foo }`, namespace type imports, and `export type` re-exports)
   // to the listed zones even when not present in `allow`. Mixed-specifier imports still fire.
-  // A zone can list its public entry files: `"publicApi": ["src/billing/index.ts"]`. Other
+  // A zone can list its public entry files: `"publicFiles": ["src/billing/index.ts"]`. Other
   // zones may then import only those files of the zone. On an autoDiscover zone, each glob
-  // is relative to each discovered folder: `"publicApi": ["index.ts"]`.
+  // is relative to each discovered folder: `"publicFiles": ["index.ts"]`.
   "boundaries": {
     "preset": "bulletproof"
     // Or:

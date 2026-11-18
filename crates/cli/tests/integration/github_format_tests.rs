@@ -2219,7 +2219,7 @@ fn internal_file_boundary_annotation_names_the_public_entry_files() {
                 "line": 1,
                 "col": 0,
                 "reason": "internal_file",
-                "public_api_paths": ["src/billing/index.ts"]
+                "public_files": ["src/billing/index.ts"]
             },
             {
                 "from_path": "src/orders/b.ts",

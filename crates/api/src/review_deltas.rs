@@ -114,7 +114,7 @@ mod tests {
             col: 0,
             via_path: None,
             reason: fallow_types::results::BoundaryViolationReason::DisallowedZone,
-            public_api_paths: vec![],
+            public_files: vec![],
         })
     }
 
