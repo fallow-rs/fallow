@@ -627,7 +627,7 @@ fn render_findings_table(
     if issues.len() > table.max {
         writeln!(
             out,
-            "\nThe table shows {} of {} findings. The CI log has the full report.",
+            "\nThe table shows {} of {} findings. Run fallow locally to see each finding.",
             table.max,
             issues.len(),
         )
@@ -1676,6 +1676,31 @@ mod tests {
         assert_eq!(
             pr_verdict_title(&[], Some(ReviewCheckConclusion::Failure)),
             "Quality gate failed"
+        );
+    }
+
+    #[test]
+    fn a_capped_table_says_how_many_it_shows() {
+        let issues: Vec<CiIssue> = (0..3)
+            .map(|index| pr_comment_issue("fallow/a", &format!("x{index}"), "minor", "src/a.ts"))
+            .collect();
+        let body = render_pr_comment(&PrCommentRenderInput {
+            command: "check",
+            provider: CiProvider::Github,
+            issues: &issues,
+            marker_id: "fallow-results".to_owned(),
+            max_comments: 2,
+            category_for_rule: &category_for_rule,
+            trailing_section: None,
+            docs_url_for_rule: &|_| None,
+            status_note: None,
+            layout: crate::PrCommentLayout::Default,
+        });
+        assert!(
+            body.contains(
+                "The table shows 2 of 3 findings. Run fallow locally to see each finding."
+            ),
+            "{body}"
         );
     }
 
