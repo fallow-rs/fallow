@@ -43,6 +43,14 @@ pub enum ConfigLoadError {
 }
 
 impl ConfigLoadError {
+    /// The top error, without its causes.
+    #[must_use]
+    pub fn message(&self) -> &str {
+        match self {
+            Self::Parse { message, .. } => message,
+        }
+    }
+
     /// The full error text: the error and its causes.
     #[must_use]
     pub fn chain(&self) -> &str {

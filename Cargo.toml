@@ -399,12 +399,10 @@ allow = [
     { path = "crates/cli/src/audit_dead_code.rs", max = 1 },
     { path = "crates/cli/src/audit_staged.rs", max = 1 },
     { path = "crates/cli/src/base_worktree.rs", max = 2 },
-    { path = "crates/cli/src/cli_production.rs", max = 2 },
     { path = "crates/cli/src/cli_report.rs", max = 3 },
     { path = "crates/cli/src/config.rs", max = 2 },
     { path = "crates/cli/src/coverage/upload_common.rs", max = 1 },
     { path = "crates/cli/src/report/sarif.rs", max = 4 },
-    { path = "crates/cli/src/runtime_support.rs", max = 2 },
     { path = "crates/core/src/lib.rs", max = 2 },
     { path = "crates/engine/src/project_config/loader.rs", max = 2 },
 ]

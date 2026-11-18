@@ -129,6 +129,25 @@ impl ProductionFlags {
             dupes: self.effective(ProductionAnalysis::Dupes, config),
         }
     }
+
+    /// The override of each analysis from `self`, else from `fallback`. A
+    /// host that reads production overrides from two sources, such as the
+    /// flags and the environment variables of the CLI, puts the stronger
+    /// source first. The config decides only when neither source sets a
+    /// value.
+    #[must_use]
+    pub fn with_fallback(self, fallback: Self) -> Self {
+        let pick = |analysis| {
+            self.override_for(analysis)
+                .or_else(|| fallback.override_for(analysis))
+        };
+        Self {
+            global: None,
+            dead_code: pick(ProductionAnalysis::DeadCode),
+            health: pick(ProductionAnalysis::Health),
+            dupes: pick(ProductionAnalysis::Dupes),
+        }
+    }
 }
 
 /// The production mode of each analysis of one run.
@@ -143,6 +162,16 @@ pub struct ProductionModes {
 }
 
 impl ProductionModes {
+    /// The production mode of one analysis.
+    #[must_use]
+    pub const fn for_analysis(self, analysis: ProductionAnalysis) -> bool {
+        match analysis {
+            ProductionAnalysis::DeadCode => self.dead_code,
+            ProductionAnalysis::Health => self.health,
+            ProductionAnalysis::Dupes => self.dupes,
+        }
+    }
+
     /// Whether health can reuse the dead-code parse: both run in the same mode.
     #[must_use]
     pub const fn dead_code_matches_health(self) -> bool {
@@ -181,6 +210,79 @@ pub struct ProjectConfig {
     pub inputs: fallow_config::ConfigInputs,
     /// The content of [`Self::inputs`] just before resolution read them.
     pub inputs_before_resolve: fallow_config::ConfigInputsSnapshot,
+}
+
+/// The run settings that resolution records on the config.
+#[derive(Debug, Clone, Copy)]
+pub struct ResolveOptions {
+    /// Output format the resolved config carries into rendering.
+    pub output: OutputFormat,
+    /// Worker thread count recorded on the resolved config.
+    pub threads: usize,
+    /// Bypass the parse cache for this run.
+    pub no_cache: bool,
+    /// Suppress progress notes on stderr.
+    pub quiet: bool,
+}
+
+impl ResolveOptions {
+    /// The settings of a host that resolves a config without a CLI run.
+    fn host_default() -> Self {
+        Self {
+            output: OutputFormat::Human,
+            threads: std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get),
+            no_cache: false,
+            quiet: true,
+        }
+    }
+}
+
+impl ConfigFile {
+    /// Flatten the `production` setting of the config for one analysis: the
+    /// flags decide first, then the config. A project without a config file
+    /// gets the mode of the flags.
+    #[must_use]
+    pub fn for_analysis(mut self, analysis: ProductionAnalysis, flags: ProductionFlags) -> Self {
+        self.config.production = if self.path.is_some() {
+            self.config
+                .production
+                .for_run(flags.effective(analysis, &self.config.production))
+        } else {
+            flags.mode(analysis).into()
+        };
+        self
+    }
+
+    /// Validate the external plugins, the boundaries and the rule packs of
+    /// the config.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error that names the first invalid part and lists each of
+    /// its problems.
+    pub fn validate(&self, root: &Path) -> EngineResult<()> {
+        validate_config(root, &self.config)
+    }
+
+    /// Resolve the config for `root`, then apply the environment variables
+    /// that every host honors.
+    #[must_use]
+    pub fn resolve(self, root: &Path, options: ResolveOptions) -> ResolvedConfig {
+        resolve_with_env(self.config, root, options)
+    }
+}
+
+fn resolve_with_env(config: FallowConfig, root: &Path, options: ResolveOptions) -> ResolvedConfig {
+    let mut resolved = config.resolve(
+        root.to_path_buf(),
+        options.output,
+        options.threads,
+        options.no_cache,
+        options.quiet,
+        None,
+    );
+    apply_env_overrides(&mut resolved);
+    resolved
 }
 
 /// Scalar config-loading knobs for one analysis family.
@@ -233,30 +335,20 @@ pub fn config_for_project_with_load_options(
     config_path: Option<&Path>,
     load_options: ConfigLoadOptions,
 ) -> EngineResult<ProjectConfig> {
-    let ConfigFile { mut config, path } = load_config_file(
+    let ConfigFile { config, path } = load_config_file(
         root,
         config_path,
         ConfigFileOptions {
             allow_remote_extends: load_options.allow_remote_extends,
         },
-    )?;
+    )?
+    .for_analysis(ProductionAnalysis::DeadCode, ProductionFlags::default());
     if path.is_some() {
-        let dead_code = config.production.for_analysis(ProductionAnalysis::DeadCode);
-        config.production = config.production.for_run(dead_code);
         validate_boundaries_and_rule_packs(root, &config)?;
     }
-    let threads = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
     let inputs = fallow_config::ConfigInputs::new(root, &config);
     let inputs_before_resolve = inputs.snapshot();
-    let mut resolved = config.resolve(
-        root.to_path_buf(),
-        OutputFormat::Human,
-        threads,
-        false,
-        true,
-        None,
-    );
-    apply_env_overrides(&mut resolved);
+    let resolved = resolve_with_env(config, root, ResolveOptions::host_default());
     let (workspaces, workspace_diagnostics, workspace_discovery_ms) =
         collect_workspace_metadata(&resolved)?;
     Ok(ProjectConfig {
@@ -281,18 +373,13 @@ pub(crate) fn resolve_cache_max_size_bytes(config: &ResolvedConfig) -> usize {
 }
 
 pub(crate) fn default_project_config(root: &Path) -> ProjectConfig {
-    let threads = std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
     let inputs = fallow_config::ConfigInputs::new(root, &FallowConfig::default());
     let inputs_before_resolve = inputs.snapshot();
-    let mut config = FallowConfig::default().resolve(
-        root.to_path_buf(),
-        OutputFormat::Human,
-        threads,
-        false,
-        true,
-        None,
+    let config = resolve_with_env(
+        FallowConfig::default(),
+        root,
+        ResolveOptions::host_default(),
     );
-    apply_env_overrides(&mut config);
     let (workspaces, workspace_diagnostics, workspace_discovery_ms) =
         collect_workspace_metadata_lossy(&config);
     ProjectConfig {
@@ -350,36 +437,35 @@ fn resolve_project_config_analysis(
     config_path: Option<&Path>,
     options: ProjectConfigOptions,
 ) -> EngineResult<(ProjectConfig, Vec<String>)> {
-    let ConfigFile { mut config, path } = load_config_file(
+    let file = load_config_file(
         root,
         config_path,
         ConfigFileOptions {
             allow_remote_extends: options.allow_remote_extends,
         },
-    )?;
-    config.production = if path.is_some() {
-        let production = ProductionFlags {
+    )?
+    .for_analysis(
+        options.analysis,
+        ProductionFlags {
             global: options.production_override,
             ..ProductionFlags::default()
-        }
-        .effective(options.analysis, &config.production);
-        config.production.for_run(production)
-    } else {
-        options.production_override.unwrap_or(false).into()
-    };
-    validate_config(root, &config)?;
+        },
+    );
+    file.validate(root)?;
+    let ConfigFile { config, path } = file;
     let configured_plugin_paths = config.plugins.clone();
     let inputs = fallow_config::ConfigInputs::new(root, &config);
     let inputs_before_resolve = inputs.snapshot();
-    let mut resolved = config.resolve(
-        root.to_path_buf(),
-        options.output,
-        options.threads,
-        options.no_cache,
-        options.quiet,
-        None,
+    let resolved = resolve_with_env(
+        config,
+        root,
+        ResolveOptions {
+            output: options.output,
+            threads: options.threads,
+            no_cache: options.no_cache,
+            quiet: options.quiet,
+        },
     );
-    apply_env_overrides(&mut resolved);
     let (workspaces, workspace_diagnostics, workspace_discovery_ms) =
         collect_workspace_metadata(&resolved)?;
     Ok((

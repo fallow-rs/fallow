@@ -1,67 +1,12 @@
-use std::path::PathBuf;
 use std::process::ExitCode;
 
-use fallow_config::{OutputFormat, ProductionAnalysis, ProductionConfig, RunPlan, RunRequest};
+use fallow_config::{OutputFormat, RunPlan, RunRequest};
+use fallow_engine::project_config::ProductionFlags;
+pub use fallow_engine::project_config::ProductionModes;
 
 use super::Cli;
 use crate::cli_format::bool_from_env;
-use crate::error::emit_input_error;
-
-#[derive(Clone, Copy)]
-pub struct ProductionModes {
-    pub dead_code: bool,
-    pub health: bool,
-    pub dupes: bool,
-}
-
-impl ProductionModes {
-    pub const fn for_analysis(self, analysis: ProductionAnalysis) -> bool {
-        match analysis {
-            ProductionAnalysis::DeadCode => self.dead_code,
-            ProductionAnalysis::Health => self.health,
-            ProductionAnalysis::Dupes => self.dupes,
-        }
-    }
-}
-
-/// Load the config of `root`, or the file at `config_path`. `None` when the
-/// project has no config file.
-fn load_config_file(
-    root: &std::path::Path,
-    config_path: Option<&PathBuf>,
-    output: OutputFormat,
-    allow_remote_extends: bool,
-) -> Result<Option<fallow_config::FallowConfig>, ExitCode> {
-    let load_options = fallow_config::ConfigLoadOptions {
-        allow_remote_extends,
-    };
-    if let Some(path) = config_path {
-        fallow_config::FallowConfig::load_with_options(path, load_options)
-            .map(Some)
-            .map_err(|e| {
-                emit_input_error(
-                    &format!("failed to load config '{}': {e}", path.display()),
-                    output,
-                )
-            })
-    } else {
-        fallow_config::FallowConfig::find_and_load_with_options(root, load_options)
-            .map(|found| found.map(|(config, _)| config))
-            .map_err(|e| emit_input_error(&e, output))
-    }
-}
-
-fn load_config_production(
-    root: &std::path::Path,
-    config_path: Option<&PathBuf>,
-    output: OutputFormat,
-    allow_remote_extends: bool,
-) -> Result<ProductionConfig, ExitCode> {
-    Ok(
-        load_config_file(root, config_path, output, allow_remote_extends)?
-            .map_or_else(ProductionConfig::default, |config| config.production),
-    )
-}
+use crate::runtime_support::load_config_file;
 
 /// The run plan of the project config for `request`. A project without a
 /// config file has the default config. The config loads only when the plan
@@ -73,16 +18,22 @@ pub fn load_run_plan(
     request: RunRequest,
 ) -> Result<RunPlan, ExitCode> {
     let config = if request.reads_config() {
-        load_config_file(root, cli.config.as_ref(), output, cli.allow_remote_extends)?
+        load_config_file(
+            root,
+            cli.config.as_deref(),
+            cli.allow_remote_extends,
+            output,
+        )?
+        .config
     } else {
-        None
+        fallow_config::FallowConfig::default()
     };
-    Ok(fallow_config::plan_run(
-        config.unwrap_or_default().plan_sections(),
-        request,
-    ))
+    Ok(fallow_config::plan_run(config.plan_sections(), request))
 }
 
+/// The production mode of each analysis: the flag of the analysis, then
+/// `--production` or `--no-production`, then the environment variable of the
+/// analysis, then `FALLOW_PRODUCTION`, then the config.
 pub fn resolve_production_modes(
     cli: &Cli,
     root: &std::path::Path,
@@ -91,41 +42,32 @@ pub fn resolve_production_modes(
     production_health: bool,
     production_dupes: bool,
 ) -> Result<ProductionModes, ExitCode> {
-    let config =
-        load_config_production(root, cli.config.as_ref(), output, cli.allow_remote_extends)?;
-    let env_global = bool_from_env("FALLOW_PRODUCTION");
-
-    let resolve_one = |analysis: ProductionAnalysis, cli_specific: bool, env_name: &str| {
-        if cli.production || cli_specific {
-            true
+    let config = load_config_file(
+        root,
+        cli.config.as_deref(),
+        cli.allow_remote_extends,
+        output,
+    )?
+    .config;
+    let flags = ProductionFlags {
+        global: if cli.production {
+            Some(true)
         } else if cli.no_production {
-            false
-        } else if let Some(value) = bool_from_env(env_name) {
-            value
-        } else if let Some(value) = env_global {
-            value
+            Some(false)
         } else {
-            config.for_analysis(analysis)
-        }
+            None
+        },
+        dead_code: production_dead_code.then_some(true),
+        health: production_health.then_some(true),
+        dupes: production_dupes.then_some(true),
     };
-
-    Ok(ProductionModes {
-        dead_code: resolve_one(
-            ProductionAnalysis::DeadCode,
-            production_dead_code,
-            "FALLOW_PRODUCTION_DEAD_CODE",
-        ),
-        health: resolve_one(
-            ProductionAnalysis::Health,
-            production_health,
-            "FALLOW_PRODUCTION_HEALTH",
-        ),
-        dupes: resolve_one(
-            ProductionAnalysis::Dupes,
-            production_dupes,
-            "FALLOW_PRODUCTION_DUPES",
-        ),
-    })
+    let env = ProductionFlags {
+        global: bool_from_env("FALLOW_PRODUCTION"),
+        dead_code: bool_from_env("FALLOW_PRODUCTION_DEAD_CODE"),
+        health: bool_from_env("FALLOW_PRODUCTION_HEALTH"),
+        dupes: bool_from_env("FALLOW_PRODUCTION_DUPES"),
+    };
+    Ok(flags.with_fallback(env).effective_modes(&config.production))
 }
 
 #[cfg(test)]
