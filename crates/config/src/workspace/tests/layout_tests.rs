@@ -336,3 +336,197 @@ fn nested_pnpm_project_members_with_config_pattern() {
     names.sort_unstable();
     assert_eq!(names, ["site", "site-web"]);
 }
+
+fn write_root(root: &Path, pnpm_workspace: &str) {
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"root","private":true}"#,
+    )
+    .unwrap();
+    std::fs::write(root.join("pnpm-workspace.yaml"), pnpm_workspace).unwrap();
+}
+
+fn relative_workspace_roots(root: &Path, workspaces: &[WorkspaceInfo]) -> Vec<String> {
+    let canonical_root = dunce::canonicalize(root).unwrap();
+    let mut roots: Vec<String> = workspaces
+        .iter()
+        .map(|ws| {
+            let canonical = dunce::canonicalize(&ws.root).unwrap();
+            canonical
+                .strip_prefix(&canonical_root)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect();
+    roots.sort();
+    roots
+}
+
+/// pnpm skips a folder without a `package.json` when it expands `**`, so a
+/// source folder below a workspace is not a missing package. See #4719.
+#[test]
+fn recursive_glob_reports_no_diagnostic_for_source_folders() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    write_root(root, "packages:\n  - packages/**\n");
+    write_package(&root.join("packages/a"), r#"{"name":"a"}"#);
+    write_package(&root.join("packages/b"), r#"{"name":"b"}"#);
+    std::fs::create_dir_all(root.join("packages/a/src/deep")).unwrap();
+    std::fs::create_dir_all(root.join("packages/b/src")).unwrap();
+
+    let (workspaces, diagnostics) =
+        discover_workspaces_with_diagnostics(root, &crate::IgnorePatternSet::empty())
+            .expect("valid root");
+
+    assert_eq!(
+        relative_workspace_roots(root, &workspaces),
+        ["packages/a", "packages/b"]
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+}
+
+/// pnpm reads `**` as zero or more folders, so `pkgs/**` also declares
+/// `pkgs` itself. See #4721.
+#[test]
+fn recursive_glob_includes_its_base_folder() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    write_root(root, "packages:\n  - \"pkgs/**\"\n");
+    write_package(&root.join("pkgs"), r#"{"name":"pkgs-self"}"#);
+    write_package(&root.join("pkgs/sub"), r#"{"name":"sub"}"#);
+
+    let (workspaces, diagnostics) =
+        discover_workspaces_with_diagnostics(root, &crate::IgnorePatternSet::empty())
+            .expect("valid root");
+    let undeclared = find_undeclared_workspaces_with_ignores(
+        root,
+        &workspaces,
+        &crate::IgnorePatternSet::empty(),
+    );
+
+    assert_eq!(
+        relative_workspace_roots(root, &workspaces),
+        ["pkgs", "pkgs/sub"]
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(undeclared.is_empty(), "{undeclared:?}");
+}
+
+/// A root-level `**` pattern never makes the project root a workspace.
+#[test]
+fn root_level_recursive_glob_skips_the_project_root() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    write_root(root, "packages:\n  - \"**\"\n");
+    write_package(&root.join("packages/a"), r#"{"name":"a"}"#);
+
+    let (workspaces, _) =
+        discover_workspaces_with_diagnostics(root, &crate::IgnorePatternSet::empty())
+            .expect("valid root");
+
+    assert_eq!(relative_workspace_roots(root, &workspaces), ["packages/a"]);
+}
+
+/// A folder that a `!` pattern excludes is excluded on purpose, so it gives
+/// no diagnostic. See #4720.
+#[test]
+fn negated_pattern_silences_diagnostics_for_excluded_folders() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    write_root(
+        root,
+        "packages:\n  - apps/*\n  - \"!apps/api\"\n  - \"!apps/proxy\"\n",
+    );
+    write_package(&root.join("apps/web"), r#"{"name":"web"}"#);
+    write_package(&root.join("apps/api"), r#"{"name":"api"}"#);
+    std::fs::create_dir_all(root.join("apps/proxy")).unwrap();
+    std::fs::write(root.join("apps/proxy/Dockerfile"), "").unwrap();
+
+    let (workspaces, diagnostics) =
+        discover_workspaces_with_diagnostics(root, &crate::IgnorePatternSet::empty())
+            .expect("valid root");
+    let undeclared = find_undeclared_workspaces_with_ignores(
+        root,
+        &workspaces,
+        &crate::IgnorePatternSet::empty(),
+    );
+
+    assert_eq!(relative_workspace_roots(root, &workspaces), ["apps/web"]);
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(undeclared.is_empty(), "{undeclared:?}");
+}
+
+/// Only a negated pattern silences the undeclared scan. A folder that no
+/// pattern names is still reported.
+#[test]
+fn negated_pattern_keeps_undeclared_diagnostic_for_other_folders() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    write_root(root, "packages:\n  - apps/*\n  - \"!apps/api\"\n");
+    write_package(&root.join("apps/web"), r#"{"name":"web"}"#);
+    write_package(&root.join("tools/cli"), r#"{"name":"cli"}"#);
+
+    let workspaces = discover_workspaces(root);
+    let undeclared = find_undeclared_workspaces(root, &workspaces);
+
+    assert_eq!(undeclared.len(), 1, "{undeclared:?}");
+    assert!(undeclared[0].path.ends_with("tools/cli"), "{undeclared:?}");
+}
+
+/// A leading `./` names the same folders as the pattern without it, also for
+/// a recursive `**` pattern in `package.json`.
+#[test]
+fn recursive_glob_with_leading_dot_slash_finds_packages() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"root","private":true,"workspaces":["./packages/**"]}"#,
+    )
+    .unwrap();
+    write_package(&root.join("packages/a"), r#"{"name":"a"}"#);
+    write_package(&root.join("packages/b"), r#"{"name":"b"}"#);
+
+    let (workspaces, diagnostics) =
+        discover_workspaces_with_diagnostics(root, &crate::IgnorePatternSet::empty())
+            .expect("valid root");
+    let undeclared = find_undeclared_workspaces_with_ignores(
+        root,
+        &workspaces,
+        &crate::IgnorePatternSet::empty(),
+    );
+
+    assert_eq!(
+        relative_workspace_roots(root, &workspaces),
+        ["packages/a", "packages/b"]
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(undeclared.is_empty(), "{undeclared:?}");
+}
+
+/// The zero-folder match of `./pkgs/**` also accepts a leading `./`.
+#[test]
+fn recursive_glob_with_leading_dot_slash_includes_its_base_folder() {
+    let dir = tempfile::tempdir().expect("create temp dir");
+    let root = dir.path();
+    write_root(root, "packages:\n  - \"./pkgs/**\"\n");
+    write_package(&root.join("pkgs"), r#"{"name":"pkgs-self"}"#);
+    write_package(&root.join("pkgs/sub"), r#"{"name":"sub"}"#);
+
+    let (workspaces, diagnostics) =
+        discover_workspaces_with_diagnostics(root, &crate::IgnorePatternSet::empty())
+            .expect("valid root");
+    let undeclared = find_undeclared_workspaces_with_ignores(
+        root,
+        &workspaces,
+        &crate::IgnorePatternSet::empty(),
+    );
+
+    assert_eq!(
+        relative_workspace_roots(root, &workspaces),
+        ["pkgs", "pkgs/sub"]
+    );
+    assert!(diagnostics.is_empty(), "{diagnostics:?}");
+    assert!(undeclared.is_empty(), "{undeclared:?}");
+}

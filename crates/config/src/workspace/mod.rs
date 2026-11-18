@@ -2,6 +2,7 @@ mod deno_json;
 mod diagnostics;
 mod link_dependencies;
 mod missing_pattern_dirs;
+mod negation;
 mod nested_project;
 mod npm_overrides;
 mod package_json;
@@ -36,6 +37,7 @@ use diagnostics::{emit_diagnostics, is_skip_listed_dir};
 use link_dependencies::collect_link_dependency_workspaces;
 use missing_pattern_dirs::missing_dir_patterns;
 pub use missing_pattern_dirs::{has_missing_workspace_pattern_dirs, nested_member_dirs_missing};
+use negation::NegatedPatterns;
 pub use nested_project::{ManifestPatternMatcher, is_independent_pnpm_project};
 use nested_project::{NestedProjectScan, collect_nested_project_workspaces};
 pub use npm_overrides::{parse_bun_package_json_resolutions, parse_npm_package_json_overrides};
@@ -510,25 +512,16 @@ fn expand_patterns_to_workspaces(
 
     let mut workspaces = Vec::new();
 
-    let (positive, negative): (Vec<&String>, Vec<&String>) =
-        patterns.iter().partition(|p| !p.starts_with('!'));
-    let negation_matchers: Vec<globset::GlobMatcher> = negative
-        .iter()
-        .filter_map(|p| {
-            let stripped = p.strip_prefix('!').unwrap_or(p);
-            globset::Glob::new(stripped)
-                .ok()
-                .map(|g| g.compile_matcher())
-        })
-        .collect();
+    let negated = NegatedPatterns::new(patterns.iter().map(String::as_str));
 
-    for pattern in &positive {
+    for pattern in patterns.iter().filter(|p| !p.starts_with('!')) {
         let glob_pattern = if pattern.ends_with('/') {
             format!("{pattern}*")
         } else {
             (*pattern).clone()
         };
 
+        let first_new = diagnostics.len();
         let matched_dirs = expand_workspace_glob_with_diagnostics(
             root,
             pattern,
@@ -537,11 +530,15 @@ fn expand_patterns_to_workspaces(
             ignore_patterns,
             diagnostics,
         );
+        // A folder that a `!` pattern excludes is excluded on purpose.
+        let new_diagnostics = diagnostics.split_off(first_new);
+        diagnostics.extend(
+            new_diagnostics
+                .into_iter()
+                .filter(|d| !negated.excludes(root, &d.path)),
+        );
         for (dir, canonical_dir) in matched_dirs {
-            if canonical_dir == *canonical_root {
-                continue;
-            }
-            if matches_negation(root, &dir, &negation_matchers) {
+            if canonical_dir == *canonical_root || negated.excludes(root, &dir) {
                 continue;
             }
             register_matched_workspace(root, dir, &mut workspaces, diagnostics, manifest_cache);
@@ -549,15 +546,6 @@ fn expand_patterns_to_workspaces(
     }
 
     workspaces
-}
-
-/// Whether a matched directory is excluded by a negated workspace pattern.
-fn matches_negation(root: &Path, dir: &Path, negation_matchers: &[globset::GlobMatcher]) -> bool {
-    let relative = dir.strip_prefix(root).unwrap_or(dir);
-    let relative_str = relative.to_string_lossy();
-    negation_matchers
-        .iter()
-        .any(|m| m.is_match(relative_str.as_ref()))
 }
 
 /// Load a matched directory's package manifest (`package.json` or `deno.json`)

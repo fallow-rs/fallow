@@ -184,6 +184,7 @@ mod type_aware_scope_tests;
 mod typeorm_datasource_tests;
 mod unresolved_gitignored_target_tests;
 mod workspace_config_patterns_tests;
+mod workspace_missing_entry_tests;
 mod workspace_settings_tests;
 
 mod plugin_config_shapes_tests;
