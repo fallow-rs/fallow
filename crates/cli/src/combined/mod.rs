@@ -118,7 +118,7 @@ pub fn resolve_analyses(only: &[AnalysisKind], skip: &[AnalysisKind]) -> (bool, 
 /// The analyses of the `--only` and `--skip` lists. `architecture` is a part
 /// of the dead-code analysis: in `--only` it names that analysis, and in
 /// `--skip` it keeps that analysis and narrows only its findings.
-fn planned_lists(
+pub fn planned_lists(
     only: &[AnalysisKind],
     skip: &[AnalysisKind],
 ) -> (Vec<PlannedAnalysis>, Vec<PlannedAnalysis>) {

@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use super::{AuditAnalysisSelection, AuditOptions, AuditResult};
+use super::{AuditOptions, AuditResult};
 
 /// Record the run in the Impact store of `host_root`. Finding paths stay
 /// relative to `opts.root`, the analyzed tree.
@@ -17,11 +17,9 @@ pub(super) fn record_audit_impact(
     // Duplication that `duplicates.enabled: false` turned off is no skip of
     // one run: the project has no duplication analysis, and its other
     // findings still need a history.
-    let full_without_dupes = AuditAnalysisSelection {
-        dupes: true,
-        ..opts.analyses
-    } == AuditAnalysisSelection::ALL;
-    if !full_without_dupes || !(opts.analyses.dupes || duplication_is_off_in_config(opts)) {
+    let analyses = opts.analyses;
+    if !(analyses.is_full_without_dupes() && (analyses.dupes || analyses.duplicates_off_in_config))
+    {
         return Ok(());
     }
     let mut findings = result
@@ -67,23 +65,4 @@ pub(super) fn record_audit_impact(
             analysis_identity: &analysis_identity,
         },
     )
-}
-
-/// Whether the config of the audited project has `duplicates.enabled: false`.
-/// A config that does not load counts as on, so the run records nothing.
-fn duplication_is_off_in_config(opts: &AuditOptions<'_>) -> bool {
-    crate::load_config_for_analysis(
-        opts.root,
-        opts.config_path,
-        crate::ConfigLoadOptions {
-            output: opts.output,
-            no_cache: opts.no_cache,
-            threads: opts.threads,
-            production_override: None,
-            quiet: true,
-            allow_remote_extends: opts.allow_remote_extends,
-        },
-        fallow_config::ProductionAnalysis::Dupes,
-    )
-    .is_ok_and(|config| !config.duplicates.runs_by_default())
 }
