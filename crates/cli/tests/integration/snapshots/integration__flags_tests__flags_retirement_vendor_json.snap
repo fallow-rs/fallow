@@ -26,7 +26,6 @@ expression: "serde_json::to_string_pretty(&json[\"retirement\"]).expect(\"pretty
     {
       "flag_name": "beta-typo",
       "kind": "sdk_call",
-      "sdk_name": "LaunchDarkly",
       "sites": [
         {
           "path": "src/index.ts",
@@ -71,7 +70,6 @@ expression: "serde_json::to_string_pretty(&json[\"retirement\"]).expect(\"pretty
     {
       "flag_name": "live-experiment",
       "kind": "sdk_call",
-      "sdk_name": "LaunchDarkly",
       "sites": [
         {
           "path": "src/index.ts",
@@ -113,7 +111,6 @@ expression: "serde_json::to_string_pretty(&json[\"retirement\"]).expect(\"pretty
     {
       "flag_name": "new-checkout",
       "kind": "sdk_call",
-      "sdk_name": "LaunchDarkly",
       "sites": [
         {
           "path": "src/checkout.ts",
@@ -165,7 +162,6 @@ expression: "serde_json::to_string_pretty(&json[\"retirement\"]).expect(\"pretty
     {
       "flag_name": "old-banner",
       "kind": "sdk_call",
-      "sdk_name": "LaunchDarkly",
       "sites": [
         {
           "path": "src/index.ts",

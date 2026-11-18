@@ -246,7 +246,8 @@ pub struct RetirementFlag {
     pub flag_name: String,
     /// How the flag was detected.
     pub kind: RetirementFlagKind,
-    /// Flag SDK, for SDK flags with a known provider.
+    /// Flag SDK, for SDK flags with a known provider. Absent when no flag
+    /// import confirms an SDK call of the flag.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sdk_name: Option<String>,
     /// Workspace root relative to the analysed root, when the project has
@@ -387,7 +388,8 @@ pub struct FlagAgeGateEntry {
     pub flag_name: String,
     /// How the flag was detected.
     pub kind: RetirementFlagKind,
-    /// Flag SDK, for SDK flags with a known provider.
+    /// Flag SDK, for SDK flags with a known provider. Absent when no flag
+    /// import confirms an SDK call of the flag.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sdk_name: Option<String>,
     /// Workspace root of the flag, in a project with workspaces.

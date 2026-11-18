@@ -217,7 +217,7 @@ pub use feature_flags::{
     FEATURE_FLAGS_SCHEMA_VERSION, FeatureFlagAction, FeatureFlagActionType, FeatureFlagConfidence,
     FeatureFlagDeadCodeOverlap, FeatureFlagFinding, FeatureFlagKind, FeatureFlagsConfidenceMeta,
     FeatureFlagsKindMeta, FeatureFlagsMeta, FeatureFlagsMetaDetails, FeatureFlagsOutput,
-    FeatureFlagsOutputInput, build_feature_flags_output, feature_flags_meta,
+    FeatureFlagsOutputInput, build_feature_flags_output, feature_flags_meta, reported_sdk_name,
     serialize_feature_flags_json_output,
 };
 pub use finding_id_query::{FindingIdQuery, FindingIdQueryReason};

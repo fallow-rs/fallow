@@ -22298,7 +22298,7 @@
             "string",
             "null"
           ],
-          "description": "Flag SDK the call belongs to, for SDK-call findings."
+          "description": "Flag SDK the call belongs to, for SDK-call findings. Absent for a\n`medium` confidence call, because no flag import confirms the SDK."
         },
         "dead_code_overlap": {
           "anyOf": [
@@ -30017,7 +30017,7 @@
             "string",
             "null"
           ],
-          "description": "Flag SDK, for SDK flags with a known provider."
+          "description": "Flag SDK, for SDK flags with a known provider. Absent when no flag\nimport confirms an SDK call of the flag."
         },
         "workspace": {
           "type": [
@@ -30585,7 +30585,7 @@
             "string",
             "null"
           ],
-          "description": "Flag SDK, for SDK flags with a known provider."
+          "description": "Flag SDK, for SDK flags with a known provider. Absent when no flag\nimport confirms an SDK call of the flag."
         },
         "workspace": {
           "type": [

@@ -1336,3 +1336,47 @@ fn the_api_route_builds_the_same_retirement_block_as_the_cli() {
     assert_eq!(api["retirement"], cli["retirement"]);
     assert_eq!(api["feature_flags"], cli["feature_flags"]);
 }
+
+#[test]
+fn an_unconfirmed_sdk_call_names_no_sdk() {
+    let out = run_fallow(
+        "flags",
+        "flags-unconfirmed-sdk",
+        &[
+            "--no-cache",
+            "--format",
+            "json",
+            "--quiet",
+            "--retirement",
+            "--flag-age",
+            "off",
+        ],
+    );
+    let json: serde_json::Value = serde_json::from_str(&out.stdout).expect("valid JSON");
+    let flags = json["feature_flags"]
+        .as_array()
+        .expect("feature_flags array");
+    let site = |name: &str| {
+        flags
+            .iter()
+            .find(|flag| flag["flag_name"] == name)
+            .unwrap_or_else(|| panic!("no flag {name}: {json}"))
+    };
+    assert_eq!(site("ext-test")["confidence"], "medium");
+    assert!(site("ext-test").get("sdk_name").is_none(), "{json}");
+    assert_eq!(site("statsig-gate")["sdk_name"], "Statsig");
+    assert!(
+        retirement_row(&json, "ext-test").get("sdk_name").is_none(),
+        "{json}"
+    );
+    assert_eq!(retirement_row(&json, "statsig-gate")["sdk_name"], "Statsig");
+
+    let human = run_fallow("flags", "flags-unconfirmed-sdk", &["--no-cache", "--quiet"]);
+    assert!(human.stdout.contains("ext-test (SDK)"), "{}", human.stdout);
+    assert!(!human.stdout.contains("Unleash"), "{}", human.stdout);
+    assert!(
+        human.stdout.contains("statsig-gate (SDK: Statsig)"),
+        "{}",
+        human.stdout
+    );
+}

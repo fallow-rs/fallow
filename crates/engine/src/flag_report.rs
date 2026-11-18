@@ -8,7 +8,9 @@
 use std::path::Path;
 
 use fallow_config::WorkspaceInfo;
-use fallow_types::flag_retirement::{FlagAgeMode, FlagRetirementReport, RetirementFlagKind};
+use fallow_types::flag_retirement::{
+    FlagAgeMode, FlagRetirementReport, RetirementFlag, RetirementFlagKind,
+};
 use fallow_types::workspace::WorkspaceDiagnosticKind;
 use rustc_hash::FxHashSet;
 
@@ -72,6 +74,7 @@ pub fn build_retirement_report(request: RetirementRequest<'_>) -> RetirementBuil
         .filter(|site| site.kind == RetirementFlagKind::SdkCall)
         .filter_map(|site| site.sdk_name.clone())
         .collect();
+    let confirmed_sdk_flags = confirmed_sdk_flags(&request.sites);
     let mut rows = aggregate_flags(request.sites, root, request.workspaces, request.in_scope);
     let age = apply_flag_ages(
         &mut rows,
@@ -95,6 +98,7 @@ pub fn build_retirement_report(request: RetirementRequest<'_>) -> RetirementBuil
             },
         )
     });
+    hide_unconfirmed_sdk_names(&mut rows, &confirmed_sdk_flags);
     let skip_reason = if request.age_mode == FlagAgeMode::Off {
         Some(AGE_GATE_AGE_OFF)
     } else if age.generated_at_clock.is_none() {
@@ -116,5 +120,41 @@ pub fn build_retirement_report(request: RetirementRequest<'_>) -> RetirementBuil
     RetirementBuild {
         report,
         diagnostics: age.diagnostics,
+    }
+}
+
+/// The `(flag name, SDK name)` pairs that at least one confirmed SDK call
+/// reads. A flag import in the file of the call confirms it.
+fn confirmed_sdk_flags(sites: &[RetirementSiteInput]) -> FxHashSet<(String, String)> {
+    sites
+        .iter()
+        .filter(|site| site.kind == RetirementFlagKind::SdkCall && !site.facts.unconfirmed_sdk())
+        .filter_map(|site| {
+            site.sdk_name
+                .clone()
+                .map(|sdk| (site.flag_name.clone(), sdk))
+        })
+        .collect()
+}
+
+/// Remove the SDK name of a row that only unconfirmed SDK calls read. The
+/// name is only the default provider of a generic method such as
+/// `isEnabled`, so the report must not name it. The vendor-state match runs
+/// before this step and still uses the name.
+fn hide_unconfirmed_sdk_names(
+    rows: &mut [RetirementFlag],
+    confirmed: &FxHashSet<(String, String)>,
+) {
+    for row in rows
+        .iter_mut()
+        .filter(|row| row.kind == RetirementFlagKind::SdkCall)
+    {
+        let is_confirmed = row
+            .sdk_name
+            .as_ref()
+            .is_some_and(|sdk| confirmed.contains(&(row.flag_name.clone(), sdk.clone())));
+        if !is_confirmed {
+            row.sdk_name = None;
+        }
     }
 }

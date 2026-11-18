@@ -18414,7 +18414,8 @@ col: number
  */
 actions: FeatureFlagAction[]
 /**
- * Flag SDK the call belongs to, for SDK-call findings.
+ * Flag SDK the call belongs to, for SDK-call findings. Absent for a
+ * `medium` confidence call, because no flag import confirms the SDK.
  */
 sdk_name?: (string | null)
 /**
@@ -18627,7 +18628,8 @@ export interface FlagAgeGateEntry {
 flag_name: string
 kind: RetirementFlagKind
 /**
- * Flag SDK, for SDK flags with a known provider.
+ * Flag SDK, for SDK flags with a known provider. Absent when no flag
+ * import confirms an SDK call of the flag.
  */
 sdk_name?: (string | null)
 /**
@@ -18649,7 +18651,8 @@ export interface RetirementFlag {
 flag_name: string
 kind: RetirementFlagKind
 /**
- * Flag SDK, for SDK flags with a known provider.
+ * Flag SDK, for SDK flags with a known provider. Absent when no flag
+ * import confirms an SDK call of the flag.
  */
 sdk_name?: (string | null)
 /**
