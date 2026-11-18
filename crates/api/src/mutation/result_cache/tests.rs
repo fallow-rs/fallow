@@ -502,3 +502,47 @@ fn the_key_changes_with_the_runner_project_selection() {
     assert_ne!(key_for(&["unit"]), key_for(&["api"]));
     assert_ne!(key_for(&["a", "b"]), key_for(&["ab"]));
 }
+
+/// Each field of `MutationRunOptions` and its effect on the result key. The
+/// destructure has no `..`, so a new field does not compile until it has a
+/// line here. A field that changes which tests run, or how they run, must
+/// reach the key, or a cached result of other tests comes back.
+#[test]
+fn each_run_option_has_a_result_key_decision() {
+    let crate::mutation::MutationRunOptions {
+        // Not keyed: they select the plan. `key` hashes the mutant, its
+        // file, its tests and each file that the tests reach.
+        analysis: _,
+        scope: _,
+        operators: _,
+        allow_side_effects: _,
+        max_mutants: _,
+        mutants_per_line: _,
+        function_scope: _,
+        mutant_ids: _,
+        // Keyed: `job_key` adds the `matrix:`, `targets:` or `targets-first:`
+        // prefix.
+        kill_matrix: _,
+        kill_matrix_targets: _,
+        kill_matrix_full: _,
+        // Keyed: `key` holds the runtime version of the companion.
+        runtime: _,
+        // Keyed: `key_files` adds the file to the support files.
+        runner_config: _,
+        // Keyed: `keys_only` feeds the selection.
+        runner_projects: _,
+        // Not keyed: they schedule the run and do not change a result.
+        concurrency: _,
+        time_budget: _,
+        runner_timeout: _,
+        // Not keyed: worktree guards, checked before the run.
+        allow_dirty: _,
+        test_changes_only: _,
+        output_paths: _,
+        // Not keyed: they run after the stored results.
+        typecheck: _,
+        record_args: _,
+        // Not keyed: the journal reads its own header.
+        resume: _,
+    } = crate::mutation::MutationRunOptions::default();
+}
