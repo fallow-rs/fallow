@@ -57,7 +57,7 @@ class EvalMetrics:
     true_positives: int = 0
     false_positives: int = 0
     false_negatives: int = 0
-    negative_violations: int = 0  # detections between negative pairs
+    negative_violations: int = 0  # negative pairs that a group joins
     total_groups: int = 0
     matched_groups: set = field(default_factory=set)
     pair_results: list = field(default_factory=list)
@@ -192,15 +192,21 @@ def evaluate_mode(
         metrics.pair_results.append(result)
         metrics.matched_groups.update(matching_groups)
 
-    # Check negative pairs — any detection between these is a false positive
+    # A negative pair is one false positive when any group joins its files.
+    # True positives count per pair too, so a pair that several overlapping
+    # groups join must not count more than once.
     for neg in ground_truth.get("negative_pairs", []):
-        for gid, group in enumerate(clone_groups):
+        violated = False
+        for group in clone_groups:
             found, lines_a, lines_b = files_overlap(
                 group["instances"], neg["file_a"], neg["file_b"], root
             )
             if found and min(lines_a, lines_b) >= 5:
-                metrics.negative_violations += 1
-                metrics.false_positives += 1
+                violated = True
+                break
+        if violated:
+            metrics.negative_violations += 1
+            metrics.false_positives += 1
 
     # Groups that didn't match any ground-truth pair: count as potential FPs
     # But only if they involve files from different categories
