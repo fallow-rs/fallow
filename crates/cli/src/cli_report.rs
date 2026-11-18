@@ -24,7 +24,8 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use fallow_config::{FallowConfig, OutputFormat};
+use fallow_config::OutputFormat;
+use fallow_engine::project_config::{ConfigFileOptions, load_config_file};
 use fallow_output::{GroupByMode, PrDecisionConclusion};
 
 use crate::cli_args::MutationNotRunArg;
@@ -33,6 +34,7 @@ use crate::report::ci::pr_comment::{MutationSurface, Provider};
 use crate::report::github_annotations::{self, EnvelopeKind};
 use crate::report::github_summary;
 use crate::report::mutation_evidence::MutationEvidence;
+use crate::runtime_support::loaded_config;
 use crate::telemetry;
 
 /// The mutation evidence that one `fallow report` call joins to the render.
@@ -74,10 +76,14 @@ pub fn run_report(
     mutation: Option<MutationRequest<'_>>,
 ) -> ExitCode {
     if let Some(path) = config_path
-        && let Err(error) = FallowConfig::load(path)
+        && let Err(error) = load_config_file(root, Some(path), ConfigFileOptions::default())
     {
         return invalid_report_input(
-            &format!("failed to load report config {}: {error}", path.display()),
+            &format!(
+                "failed to load report config {}: {}",
+                path.display(),
+                error.message()
+            ),
             output,
             telemetry::FailureReason::Validation,
         );
@@ -1157,19 +1163,15 @@ fn saved_group_resolver(
     config_path: Option<&Path>,
     output: OutputFormat,
 ) -> Result<Option<crate::report::OwnershipResolver>, ExitCode> {
-    let explicit = config_path.and_then(|path| FallowConfig::load(path).ok());
+    let explicit =
+        config_path.and_then(|path| loaded_config(root, Some(path), ConfigFileOptions::default()));
     // The discovered config is loaded only when the explicit config gives no
     // CODEOWNERS path, as before. The explicit config, when it loads, is the
     // only source of `workspaces.patterns`.
     let discovered = explicit
         .as_ref()
         .is_none_or(|config| config.codeowners.is_none())
-        .then(|| {
-            FallowConfig::find_and_load(root)
-                .ok()
-                .flatten()
-                .map(|(config, _)| config)
-        })
+        .then(|| loaded_config(root, None, ConfigFileOptions::default()))
         .flatten();
     let codeowners = explicit
         .as_ref()

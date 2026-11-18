@@ -402,6 +402,18 @@ pub fn config_load_error_message(err: &ConfigLoadError) -> String {
     }
 }
 
+/// The config file at `config_path`, else the discovered config file. `None`
+/// when the file does not load or when no file exists. A caller that reads
+/// one optional setting uses this, so a broken config never stops it.
+pub fn loaded_config(
+    root: &Path,
+    config_path: Option<&Path>,
+    options: ConfigFileOptions,
+) -> Option<FallowConfig> {
+    let file = fallow_engine::project_config::load_config_file(root, config_path, options).ok()?;
+    file.path.map(|_| file.config)
+}
+
 /// Discover and stash workspace diagnostics, surfacing a one-line stderr notice
 /// in human mode when any are present.
 fn report_workspace_diagnostics(

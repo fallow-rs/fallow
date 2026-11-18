@@ -126,6 +126,38 @@ built-in production patterns only when the run is in production mode, so
 `--production` and `FALLOW_PRODUCTION` also apply them. The globs apply to each
 analysis that runs in production mode, not only to dead-code analysis.
 
+### Config loader adapter
+
+The CLI reads each config file through
+`fallow_engine::project_config::load_config_file`. The source rule
+`config-load-through-engine-loader` in the root `Cargo.toml` denies a direct
+load. `runtime_support::load_config_for_analysis` does these steps:
+
+1. It loads the file through the engine loader.
+   `runtime_support::config_load_error_message` gives the error text, and the
+   error exits 2. An explicit file adds `failed to load config '<path>': ` to
+   the top error. The top error of a discovered file names the path itself.
+2. It prints `loaded config: <path>` on stderr, once for each path, in human
+   mode only, and not under `--quiet`.
+3. `ConfigFile::for_analysis` flattens the `production` setting for the
+   analysis, with `--production` as the global flag.
+4. It records the config shape for telemetry.
+5. `ConfigFile::validate` checks the external plugins, the boundaries and the
+   rule packs.
+6. `ConfigFile::resolve` resolves the config and applies the environment
+   variables that every host honors, such as `FALLOW_MAX_FILE_SIZE` and
+   `FALLOW_CACHE_MAX_SIZE`. The `--max-file-size` flag then replaces the
+   file size limit.
+7. It records the cache notice candidate, reports the workspace diagnostics
+   and warns about unknown security categories.
+
+`cli_production::resolve_production_modes` puts the flags before the
+`FALLOW_PRODUCTION*` variables with `ProductionFlags::with_fallback`, so the
+config decides only when neither source sets a value. A site that reads one
+optional setting, such as the audit cache, `fallow report` or the staged
+audit, uses `runtime_support::loaded_config`. That function gives `None` when
+the file does not load, and the site prints nothing.
+
 Exit 1 on an analysis command means that an enforced gate failed. A config
 load warning never sets it. A workspace diagnostic such as
 `node-modules-missing` or a broken tsconfig `extends` never sets it either.
