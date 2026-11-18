@@ -1,3 +1,0 @@
-### Fixed
-
-- **`hardcoded-secret` no longer reports sentences and public URLs.** The entropy check now skips a value of three or more words with no token-shaped word, such as an error message or a SQL statement under a key that contains `token` or `credential`. It also skips an `http` or `https` URL without user information, a query, a fragment or a high-entropy path piece, such as an OAuth token endpoint or a help link. A header value such as `Authorization: Bearer <token>`, a URL with `user:pass@` or a `?token=` query, and a webhook URL with a secret path piece stay candidates. Provider token shapes do not use these filters. (Closes [#4610](https://github.com/fallow-rs/fallow/issues/4610))
