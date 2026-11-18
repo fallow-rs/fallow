@@ -314,15 +314,7 @@ fn record_root_references(
             }
             ChainUse::Escape => {
                 if let Some(holder) = object_holder(nodes, &chain) {
-                    record_holder_prototype_reads(scoping, nodes, &holder, object, &path, uses);
-                    if holder.can_be_exported {
-                        uses.holder_values.insert((
-                            holder.name,
-                            holder.key,
-                            object.to_string(),
-                            path.clone(),
-                        ));
-                    }
+                    record_holder_value(scoping, nodes, holder, object, &path, uses);
                 }
                 uses.chains.insert((object.to_string(), path, true));
             }
@@ -432,6 +424,28 @@ fn record_any_key_prototype_read(
         );
         uses.chains
             .insert((object.to_string(), join_path(path, &read), false));
+    }
+}
+
+/// Record the reads of a value that a holder holds: through the holder in
+/// this module, and, for a holder that an export can name, through the
+/// holder in another module.
+fn record_holder_value(
+    scoping: &Scoping,
+    nodes: &AstNodes<'_>,
+    holder: Holder,
+    object: &str,
+    path: &str,
+    uses: &mut Uses,
+) {
+    record_holder_prototype_reads(scoping, nodes, &holder, object, path, uses);
+    if holder.can_be_exported {
+        uses.holder_values.insert((
+            holder.name,
+            holder.key,
+            object.to_string(),
+            path.to_string(),
+        ));
     }
 }
 
