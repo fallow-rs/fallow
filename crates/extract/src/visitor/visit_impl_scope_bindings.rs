@@ -787,6 +787,8 @@ impl ModuleInfoExtractor {
             map_scope.extend(map_value_scope);
         }
         self.sanitizer_binding_stack.push(sanitizer_scope);
+        let literal_key_scope = self.parameter_literal_key_scope(params);
+        self.literal_keys.stack.push(literal_key_scope);
         self.literal_allowlist_binding_stack.push(allowlist_scope);
         self.risky_regex_binding_stack.push(risky_regex_scope);
         self.path_sink_binding_stack.push(path_sink_scope);
@@ -804,6 +806,7 @@ impl ModuleInfoExtractor {
         self.scoped_array_binding_element_types
             .push(FxHashMap::default());
         self.sanitizer_binding_stack.push(FxHashMap::default());
+        self.literal_keys.stack.push(FxHashMap::default());
         self.literal_allowlist_binding_stack
             .push(FxHashMap::default());
         self.risky_regex_binding_stack.push(FxHashMap::default());
@@ -820,6 +823,7 @@ impl ModuleInfoExtractor {
         self.scoped_namespace_binding_names.pop();
         self.scoped_array_binding_element_types.pop();
         self.sanitizer_binding_stack.pop();
+        self.literal_keys.stack.pop();
         self.literal_allowlist_binding_stack.pop();
         self.risky_regex_binding_stack.pop();
         self.path_sink_binding_stack.pop();
@@ -865,6 +869,7 @@ impl ModuleInfoExtractor {
             self.scoped_namespace_binding_names.pop();
             self.scoped_array_binding_element_types.pop();
             self.sanitizer_binding_stack.pop();
+            self.literal_keys.stack.pop();
             self.literal_allowlist_binding_stack.pop();
             self.risky_regex_binding_stack.pop();
             self.path_sink_binding_stack.pop();

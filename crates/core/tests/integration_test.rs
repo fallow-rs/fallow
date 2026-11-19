@@ -795,6 +795,8 @@ mod issue_4723_class_value_escape;
 mod issue_4731_base_url_missing_file;
 #[path = "integration_test/issue_4734_ts_import_declaration_file.rs"]
 mod issue_4734_ts_import_declaration_file;
+#[path = "integration_test/issue_4799_computed_literal_key.rs"]
+mod issue_4799_computed_literal_key;
 #[path = "integration_test/issue_609_velite.rs"]
 mod issue_609_velite;
 #[path = "integration_test/issue_704_auto_import_components.rs"]

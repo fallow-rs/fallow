@@ -514,7 +514,7 @@ const VUE_REACTIVITY_WRAPPERS: &[&str] = &[
 /// nullable union of any of those. Returns the element name only when it is a
 /// non-builtin identifier type reference (a class / interface whose members the
 /// analyze layer can credit); `number[]`, `string[]`, `Map[]`, etc. yield `None`.
-pub(super) fn array_element_type_from_type(ty: &TSType<'_>) -> Option<String> {
+pub fn array_element_type_from_type(ty: &TSType<'_>) -> Option<String> {
     array_element_target_from_type(ty).map(|(name, _)| name)
 }
 

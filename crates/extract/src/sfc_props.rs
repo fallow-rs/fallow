@@ -396,7 +396,7 @@ fn collect_define_props_names(
                             // yields None and simply records nothing.
                             if let Some(element_type) =
                                 sig.type_annotation.as_deref().and_then(|annotation| {
-                                    crate::visitor::infer_props_field_array_element_type(
+                                    crate::visitor::array_element_type_from_type(
                                         &annotation.type_annotation,
                                     )
                                 })
