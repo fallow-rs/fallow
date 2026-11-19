@@ -6,7 +6,8 @@
 //! `fallow-api` then decides the production mode of each analysis from the
 //! tool parameters, the `FALLOW_PRODUCTION*` variables that the MCP surface
 //! reads for the command, and the config. In test builds, `TypedTool::entry`
-//! names the programmatic entry of each tool for the parity rows.
+//! names the programmatic entry of each tool for the parity rows. Each
+//! runner names its own entry, so the integration tests check the runners.
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
@@ -98,10 +99,13 @@ impl TypedTool {
         Self::ALL.into_iter().find(|tool| tool.name() == name)
     }
 
-    /// The runner of `fallow-api` that the tool calls, with the production
-    /// parameters of an audit or a combined call. Each runner builds the
-    /// same entry from its options. The parity rows resolve the run of a
-    /// call with this entry.
+    /// The entry that the `fallow-api` runner of the tool uses, with the
+    /// production parameters of an audit or a combined call. The parity rows
+    /// resolve the run of a call with this entry. Each runner names its own
+    /// entry, so this table does not decide the production mode of a tool
+    /// call. The `typed_route_env_production*` integration tests run each tool
+    /// that reads the `FALLOW_PRODUCTION*` variables through its runner and
+    /// compare it with the CLI.
     #[cfg(test)]
     pub(super) fn entry(self, production: ToolProduction) -> ProgrammaticEntry {
         match self {

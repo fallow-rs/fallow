@@ -8,6 +8,11 @@
 //! on the server process and compares the typed route with the CLI command
 //! that runs under the same variable. The CLI route of an MCP tool runs that
 //! command as a child process, which inherits the environment of the server.
+//!
+//! Each `fallow-api` runner names its own programmatic entry, and the
+//! resolver reads the variables from the environment policy row of the
+//! command of that entry. These tests run the real runner of each tool, so a
+//! runner with the entry of another command fails them.
 
 use std::path::Path;
 use std::process::Command;
@@ -194,6 +199,175 @@ fn trace_error_ignores_fallow_production_like_the_cli() {
     );
 }
 
+/// A helper and a package that only a test file uses. The `vitest`
+/// dependency makes the test file an entry point, so production mode
+/// leaves the helper and the package without a user.
+fn write_test_only_project(root: &Path) {
+    write(
+        root,
+        "package.json",
+        r#"{"name":"production-trace","private":true,"main":"src/index.ts","dependencies":{"lodash":"4.17.21"},"devDependencies":{"vitest":"1.0.0"}}"#,
+    );
+    write(root, "src/index.ts", "export const used = 1;\n");
+    write(root, "src/helper.ts", "export const helper = 2;\n");
+    write(
+        root,
+        "src/helper.test.ts",
+        "import { helper } from \"./helper\";\nimport { chunk } from \"lodash\";\nexport const t = chunk([helper], 1);\n",
+    );
+}
+
+/// The `from_file` values of the `direct_references` of an export trace.
+fn reference_files(trace: &serde_json::Value) -> Vec<String> {
+    trace["direct_references"]
+        .as_array()
+        .unwrap_or_else(|| panic!("direct_references: {trace}"))
+        .iter()
+        .filter_map(|reference| reference["from_file"].as_str().map(str::to_owned))
+        .collect()
+}
+
+/// The CLI route of `trace_export` runs `fallow dead-code --trace`, which
+/// reads `FALLOW_PRODUCTION`.
+#[test]
+fn trace_export_typed_route_reads_fallow_production() {
+    let project = tempfile::tempdir().expect("project dir");
+    let root = project.path();
+    write_test_only_project(root);
+    let env = [("FALLOW_PRODUCTION", "1")];
+
+    let cli = cli_json(
+        root,
+        &env,
+        &["dead-code", "--trace", "src/helper.ts:helper"],
+    );
+    let typed = typed_json(
+        &env,
+        "trace_export",
+        root,
+        &serde_json::json!({"file": "src/helper.ts", "export_name": "helper"}),
+    );
+    assert_eq!(
+        reference_files(&cli),
+        Vec::<String>::new(),
+        "the CLI leaves the test file out: {cli}"
+    );
+    assert_eq!(reference_files(&typed), reference_files(&cli), "{typed}");
+    assert_eq!(typed["is_used"], cli["is_used"], "{typed}");
+}
+
+/// The CLI route of `trace_file` runs `fallow dead-code --trace-file`, which
+/// reads `FALLOW_PRODUCTION`.
+#[test]
+fn trace_file_typed_route_reads_fallow_production() {
+    let project = tempfile::tempdir().expect("project dir");
+    let root = project.path();
+    write_test_only_project(root);
+    let env = [("FALLOW_PRODUCTION", "1")];
+
+    let cli = cli_json(root, &env, &["dead-code", "--trace-file", "src/helper.ts"]);
+    let typed = typed_json(
+        &env,
+        "trace_file",
+        root,
+        &serde_json::json!({"file": "src/helper.ts"}),
+    );
+    assert_eq!(
+        cli["imported_by"],
+        serde_json::json!([]),
+        "the CLI leaves the test file out: {cli}"
+    );
+    assert_eq!(typed["imported_by"], cli["imported_by"], "{typed}");
+    assert_eq!(typed["is_reachable"], cli["is_reachable"], "{typed}");
+}
+
+/// The CLI route of `trace_dependency` runs `fallow dead-code
+/// --trace-dependency`, which reads `FALLOW_PRODUCTION`.
+#[test]
+fn trace_dependency_typed_route_reads_fallow_production() {
+    let project = tempfile::tempdir().expect("project dir");
+    let root = project.path();
+    write_test_only_project(root);
+    let env = [("FALLOW_PRODUCTION", "1")];
+
+    let cli = cli_json(root, &env, &["dead-code", "--trace-dependency", "lodash"]);
+    let typed = typed_json(
+        &env,
+        "trace_dependency",
+        root,
+        &serde_json::json!({"package_name": "lodash"}),
+    );
+    assert_eq!(
+        cli["imported_by"],
+        serde_json::json!([]),
+        "the CLI leaves the test file out: {cli}"
+    );
+    assert_eq!(typed["imported_by"], cli["imported_by"], "{typed}");
+    assert_eq!(typed["is_used"], cli["is_used"], "{typed}");
+}
+
+/// Two zones and a test file in `app` that imports `lib` against the rules
+/// and reads a feature flag. Production mode leaves the test file out.
+fn write_test_violation_project(root: &Path) {
+    write(
+        root,
+        "package.json",
+        r#"{"name":"production-arch","private":true,"main":"src/app/index.ts","devDependencies":{"vitest":"1.0.0"}}"#,
+    );
+    write(
+        root,
+        ".fallowrc.json",
+        r#"{"boundaries":{"zones":[{"name":"app","patterns":["src/app/**"]},{"name":"lib","patterns":["src/lib/**"]}],"rules":[{"from":"app","allow":[]}]}}"#,
+    );
+    write(root, "src/app/index.ts", "export const a = 1;\n");
+    write(root, "src/lib/l.ts", "export const l = 1;\n");
+    write(
+        root,
+        "src/app/a.test.ts",
+        "import { l } from \"../lib/l\";\nif (process.env.FEATURE_NEW_UI) { console.log(l); }\nexport const t = l;\n",
+    );
+}
+
+/// The CLI route of `check_architecture` runs `fallow architecture`, which
+/// reads `FALLOW_PRODUCTION`.
+#[test]
+fn check_architecture_typed_route_reads_fallow_production() {
+    let project = tempfile::tempdir().expect("project dir");
+    let root = project.path();
+    write_test_violation_project(root);
+    let env = [("FALLOW_PRODUCTION", "1")];
+
+    let cli = cli_json(root, &env, &["architecture"]);
+    let typed = typed_json(&env, "check_architecture", root, &serde_json::json!({}));
+    assert_eq!(
+        cli["boundary_violations"],
+        serde_json::json!([]),
+        "the CLI leaves the test file out: {cli}"
+    );
+    assert_eq!(
+        typed["boundary_violations"], cli["boundary_violations"],
+        "{typed}"
+    );
+}
+
+/// The CLI route of `feature_flags` runs `fallow flags`, which reads
+/// `FALLOW_PRODUCTION`.
+#[test]
+fn feature_flags_typed_route_reads_fallow_production() {
+    let project = tempfile::tempdir().expect("project dir");
+    let root = project.path();
+    write_test_violation_project(root);
+    let env = [("FALLOW_PRODUCTION", "1")];
+
+    let cli = cli_json(root, &env, &["flags"]);
+    let typed = typed_json(&env, "feature_flags", root, &serde_json::json!({}));
+    assert_eq!(
+        cli["total_flags"], 0,
+        "the CLI leaves the test file out: {cli}"
+    );
+    assert_eq!(typed["total_flags"], cli["total_flags"], "{typed}");
+}
+
 fn git(root: &Path, args: &[&str]) {
     let status = Command::new("git")
         .current_dir(root)
@@ -294,11 +468,8 @@ fn combined_typed_route_reads_fallow_production() {
     );
 }
 
-/// A clone between two story files. Production mode for duplication leaves
-/// story files out.
-#[test]
-fn find_dupes_typed_route_reads_fallow_production_dupes() {
-    const BODY: &str = "export function build(items: number[]): number {
+/// A function that is long enough for a clone group.
+const CLONE_BODY: &str = "export function build(items: number[]): number {
   let total = 0;
   for (const item of items) {
     if (item > 10) {
@@ -314,6 +485,11 @@ fn find_dupes_typed_route_reads_fallow_production_dupes() {
   return shifted > 100 ? shifted / 2 : shifted * 3;
 }
 ";
+
+/// A clone between two story files. Production mode for duplication leaves
+/// story files out.
+#[test]
+fn find_dupes_typed_route_reads_fallow_production_dupes() {
     let project = tempfile::tempdir().expect("project dir");
     let root = project.path();
     write(
@@ -322,8 +498,8 @@ fn find_dupes_typed_route_reads_fallow_production_dupes() {
         r#"{"name":"production-dupes","private":true,"main":"src/index.ts"}"#,
     );
     write(root, "src/index.ts", "export const used = 1;\n");
-    write(root, "src/one.stories.ts", BODY);
-    write(root, "src/two.stories.ts", BODY);
+    write(root, "src/one.stories.ts", CLONE_BODY);
+    write(root, "src/two.stories.ts", CLONE_BODY);
     let clone_groups = |envelope: &serde_json::Value| -> u64 {
         envelope["stats"]["clone_groups"]
             .as_u64()
@@ -337,4 +513,42 @@ fn find_dupes_typed_route_reads_fallow_production_dupes() {
     let typed = typed_json(&env, "find_dupes", root, &serde_json::json!({}));
     assert_eq!(clone_groups(&cli), 0, "the CLI leaves story files out");
     assert_eq!(clone_groups(&typed), clone_groups(&cli));
+}
+
+/// The CLI route of `trace_clone` runs `fallow dupes --trace`, which reads
+/// `FALLOW_PRODUCTION_DUPES`. The clone has one instance in a story file.
+#[test]
+fn trace_clone_typed_route_reads_fallow_production_dupes() {
+    let project = tempfile::tempdir().expect("project dir");
+    let root = project.path();
+    write(
+        root,
+        "package.json",
+        r#"{"name":"production-clone","private":true,"main":"src/index.ts"}"#,
+    );
+    write(root, "src/index.ts", "export const used = 1;\n");
+    write(root, "src/one.ts", CLONE_BODY);
+    write(root, "src/two.ts", CLONE_BODY);
+    write(root, "src/three.stories.ts", CLONE_BODY);
+    let instances = |trace: &serde_json::Value| -> usize {
+        trace["clone_groups"][0]["instances"]
+            .as_array()
+            .unwrap_or_else(|| panic!("instances: {trace}"))
+            .len()
+    };
+    let env = [("FALLOW_PRODUCTION_DUPES", "1")];
+
+    let cli = cli_json(root, &env, &["dupes", "--trace", "src/one.ts:2"]);
+    let typed = typed_json(
+        &env,
+        "trace_clone",
+        root,
+        &serde_json::json!({"file": "src/one.ts", "line": 2}),
+    );
+    assert_eq!(
+        instances(&cli),
+        2,
+        "the CLI leaves the story file out: {cli}"
+    );
+    assert_eq!(instances(&typed), instances(&cli), "{typed}");
 }
