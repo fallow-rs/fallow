@@ -95,9 +95,19 @@ protocol and package parity.
   denies a direct call of `FallowConfig::load`, `load_with_options`,
   `find_and_load` or `find_and_load_with_options` in production code. It
   also denies a function path such as `map(FallowConfig::load)` and an
-  alias such as `use fallow_config::FallowConfig as Config`. Its allow list
-  holds the engine loader and the config parse bench, each with the exact
-  count of calls.
+  alias such as `use fallow_config::FallowConfig as Config`. Config discovery
+  also runs in the engine loader: the rule denies
+  `FallowConfig::find_config_path`, and a site that only checks whether a
+  config file exists, or that writes to it, calls
+  `fallow_engine::project_config::find_config_file`. Its allow list holds the
+  engine loader, the fixability check of `fallow-config` (which cannot call
+  the engine) and the config parse bench, each with the exact count of calls.
+- The base side of a comparison with a base ref resolves through
+  `fallow_engine::resolved_run::resolve_base_run`: the inputs of the head run
+  on the base root, with the config file of a `BaseConfig` rule. `Head` reuses
+  the head config file; `BaseCopy` reads the copy of that file in the base
+  checkout, else discovery from the base root. `fallow security` and the
+  own-config pass of `fallow audit` use `BaseCopy`.
 - Output formatting should work from typed evidence already passed to it. It
   must not crawl arbitrary project files to complete a report.
 - Cache expansion needs invalidation tests and visible fallback behavior before

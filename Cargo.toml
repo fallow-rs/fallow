@@ -374,12 +374,16 @@ allow = [
 
 # Each config file load goes through
 # `fallow_engine::project_config::load_config_file`, so each surface gets the
-# same trust policy for remote `extends` and the same error detail. Each
-# pattern has no `(`, so the rule also finds a function path such as
-# `map(FallowConfig::load)`. The `FallowConfig as` pattern finds an alias,
-# because the rule cannot see a call through the alias. The allow list holds
-# the sites that load the file directly. The engine loader is the one
-# loader. The bench measures the config parse itself.
+# same trust policy for remote `extends` and the same error detail. Config
+# discovery also runs in the engine loader: a site that only checks whether a
+# config file exists, or that writes to it, calls
+# `fallow_engine::project_config::find_config_file`. Each pattern has no `(`,
+# so the rule also finds a function path such as `map(FallowConfig::load)`.
+# The `FallowConfig as` pattern finds an alias, because the rule cannot see a
+# call through the alias. The allow list holds the sites that load or find the
+# file directly. The engine loader is the one loader. `fallow-config` cannot
+# call the engine, so its fixability check finds the file itself. The bench
+# measures the config parse itself.
 [[workspace.metadata.fallow.boundaries.sources]]
 rule = "config-load-through-engine-loader"
 paths = ["crates"]
@@ -388,13 +392,15 @@ deny = [
     "FallowConfig::load_with_options",
     "FallowConfig::find_and_load",
     "FallowConfig::find_and_load_with_options",
+    "FallowConfig::find_config_path",
     "FallowConfig as",
 ]
 scope = "production"
-message = "{path} loads the config file directly. Call fallow_engine::project_config::load_config_file, or add the file to the allow list of this rule in Cargo.toml"
+message = "{path} loads or finds the config file directly. Call fallow_engine::project_config::load_config_file or find_config_file, or add the file to the allow list of this rule in Cargo.toml"
 allow = [
     { path = "crates/benchmarks/benches/component_config.rs", max = 1 },
-    { path = "crates/engine/src/project_config/loader.rs", max = 2 },
+    { path = "crates/config/src/fixability.rs", max = 1 },
+    { path = "crates/engine/src/project_config/loader.rs", max = 3 },
 ]
 
 # The Miri CI job is slow and has a path filter. This rule finds a test path

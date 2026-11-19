@@ -641,7 +641,7 @@ fn run_audit_base_analyses(
     let current_config_path = opts
         .config_path
         .clone()
-        .or_else(|| fallow_config::FallowConfig::find_config_path(opts.root));
+        .or_else(|| fallow_engine::project_config::find_config_file(opts.root));
     let base_coverage =
         fallow_api::audit_run::base_coverage_inputs(opts.root, opts.coverage, opts.coverage_root);
     let base_opts = build_base_audit_options(
