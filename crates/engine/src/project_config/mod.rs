@@ -204,12 +204,64 @@ pub struct ProjectConfig {
     /// Diagnostics from workspace discovery (undeclared or invalid members).
     pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     /// Workspace discovery wall time in milliseconds, when measured.
-    pub workspace_discovery_ms: Option<f64>,
+    pub(crate) workspace_discovery_ms: Option<f64>,
     /// The plugin files, rule packs and `autoDiscover` directories that
     /// config resolution read.
     pub inputs: fallow_config::ConfigInputs,
     /// The content of [`Self::inputs`] just before resolution read them.
-    pub inputs_before_resolve: fallow_config::ConfigInputsSnapshot,
+    pub(crate) inputs_before_resolve: fallow_config::ConfigInputsSnapshot,
+    /// The files that duplication analyzes.
+    pub(crate) duplication: DuplicationScope,
+}
+
+/// The files that duplication analyzes.
+#[derive(Debug, Clone)]
+pub(crate) enum DuplicationScope {
+    /// The production mode of duplication equals the mode of the session
+    /// config, so duplication analyzes the files of the session.
+    SameAsSession,
+    /// The production mode of duplication differs from the mode of the
+    /// session config. The session resolves this config, which has the
+    /// `production` setting of duplication, and walks its files on the first
+    /// duplication call.
+    Own {
+        config: Box<FallowConfig>,
+        options: ResolveOptions,
+        env: EnvLookup,
+    },
+}
+
+impl DuplicationScope {
+    /// The scope of a session config that is flattened for dead code. When
+    /// the flags and the config give duplication another production mode,
+    /// duplication gets a copy of the config flattened for its own mode.
+    fn for_dead_code_session(
+        file: &ConfigFile,
+        flags: ProductionFlags,
+        options: ResolveOptions,
+        env: EnvLookup,
+    ) -> Self {
+        let mode = |analysis| {
+            if file.path.is_some() {
+                flags.effective(analysis, &file.config.production)
+            } else {
+                flags.mode(analysis)
+            }
+        };
+        if mode(ProductionAnalysis::Dupes) == mode(ProductionAnalysis::DeadCode) {
+            return Self::SameAsSession;
+        }
+        let dupes = ConfigFile {
+            config: file.config.clone(),
+            path: file.path.clone(),
+        }
+        .for_analysis(ProductionAnalysis::Dupes, flags);
+        Self::Own {
+            config: Box::new(dupes.config),
+            options,
+            env,
+        }
+    }
 }
 
 /// The run settings that resolution records on the config.
@@ -272,7 +324,26 @@ impl ConfigFile {
     }
 }
 
+/// Reads one environment variable. Hosts read the process environment. A test
+/// gives a fixed set of values.
+pub(crate) type EnvLookup = fn(&str) -> Option<OsString>;
+
+fn process_env(name: &str) -> Option<OsString> {
+    std::env::var_os(name)
+}
+
 fn resolve_with_env(config: FallowConfig, root: &Path, options: ResolveOptions) -> ResolvedConfig {
+    resolve_with_env_from(config, root, options, process_env)
+}
+
+/// Resolve the config for `root`, then apply the environment variables that
+/// `env` gives.
+pub(crate) fn resolve_with_env_from(
+    config: FallowConfig,
+    root: &Path,
+    options: ResolveOptions,
+    env: EnvLookup,
+) -> ResolvedConfig {
     let mut resolved = config.resolve(
         root.to_path_buf(),
         options.output,
@@ -281,7 +352,7 @@ fn resolve_with_env(config: FallowConfig, root: &Path, options: ResolveOptions) 
         options.quiet,
         None,
     );
-    apply_env_overrides(&mut resolved);
+    apply_env_overrides_from(&mut resolved, env);
     resolved
 }
 
@@ -341,7 +412,9 @@ pub fn config_for_project_with_load_options(
 /// Resolve project config with an explicit inheritance trust policy and the
 /// production flags of the run. The flags decide the production mode before
 /// resolution, so the rules that production mode turns off are off, as with
-/// the CLI `--production` flag.
+/// the CLI `--production` flag. The config holds the production mode of dead
+/// code. Duplication in a session of this config uses its own production mode,
+/// as `fallow dupes` does.
 ///
 /// # Errors
 ///
@@ -352,20 +425,49 @@ pub fn config_for_project_with_production(
     load_options: ConfigLoadOptions,
     production: ProductionFlags,
 ) -> EngineResult<ProjectConfig> {
-    let ConfigFile { config, path } = load_config_file(
+    load_project_config(root, config_path, load_options, production, process_env)
+}
+
+/// Load a project config as [`config_for_project_with_production`] does, with
+/// the environment variables of `env` in place of the process environment.
+#[cfg(test)]
+pub(crate) fn config_for_project_with_env(
+    root: &Path,
+    config_path: Option<&Path>,
+    env: EnvLookup,
+) -> EngineResult<ProjectConfig> {
+    load_project_config(
+        root,
+        config_path,
+        ConfigLoadOptions::default(),
+        ProductionFlags::default(),
+        env,
+    )
+}
+
+fn load_project_config(
+    root: &Path,
+    config_path: Option<&Path>,
+    load_options: ConfigLoadOptions,
+    production: ProductionFlags,
+    env: EnvLookup,
+) -> EngineResult<ProjectConfig> {
+    let file = load_config_file(
         root,
         config_path,
         ConfigFileOptions {
             allow_remote_extends: load_options.allow_remote_extends,
         },
-    )?
-    .for_analysis(ProductionAnalysis::DeadCode, production);
+    )?;
+    let options = ResolveOptions::host_default();
+    let duplication = DuplicationScope::for_dead_code_session(&file, production, options, env);
+    let ConfigFile { config, path } = file.for_analysis(ProductionAnalysis::DeadCode, production);
     if path.is_some() {
         validate_boundaries_and_rule_packs(root, &config)?;
     }
     let inputs = fallow_config::ConfigInputs::new(root, &config);
     let inputs_before_resolve = inputs.snapshot();
-    let resolved = resolve_with_env(config, root, ResolveOptions::host_default());
+    let resolved = resolve_with_env_from(config, root, options, env);
     let (workspaces, workspace_diagnostics, workspace_discovery_ms) =
         collect_workspace_metadata(&resolved)?;
     Ok(ProjectConfig {
@@ -376,6 +478,7 @@ pub fn config_for_project_with_production(
         workspaces,
         workspace_diagnostics,
         workspace_discovery_ms: Some(workspace_discovery_ms),
+        duplication,
     })
 }
 
@@ -420,6 +523,7 @@ pub(crate) fn default_project_config(root: &Path) -> ProjectConfig {
         workspaces,
         workspace_diagnostics,
         workspace_discovery_ms: Some(workspace_discovery_ms),
+        duplication: DuplicationScope::SameAsSession,
     }
 }
 
@@ -507,6 +611,10 @@ fn resolve_project_config_analysis(
             workspaces,
             workspace_diagnostics,
             workspace_discovery_ms: Some(workspace_discovery_ms),
+            // The caller names one analysis and owns the production mode of
+            // each other analysis, so a session of this config runs
+            // duplication only when the caller found that the modes match.
+            duplication: DuplicationScope::SameAsSession,
         },
         configured_plugin_paths,
     ))
@@ -515,10 +623,6 @@ fn resolve_project_config_analysis(
 /// Apply the environment variables that every host honors. The CLI, the LSP,
 /// the MCP server and the Node bindings all load config through this module,
 /// so a variable applied here has the same meaning on each surface.
-fn apply_env_overrides(config: &mut ResolvedConfig) {
-    apply_env_overrides_from(config, |name| std::env::var_os(name));
-}
-
 fn apply_env_overrides_from(
     config: &mut ResolvedConfig,
     lookup: impl Fn(&str) -> Option<OsString>,

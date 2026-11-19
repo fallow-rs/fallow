@@ -1344,3 +1344,56 @@ pub fn merge_test_source_with_all_fields() -> EditorAnalysisResults {
         }],
     }
 }
+
+#[test]
+fn editor_session_split_production_runs_dupes_in_dupes_mode() {
+    use std::fmt::Write as _;
+
+    let temp = tempfile::tempdir().expect("temp project");
+    let root = temp.path();
+    let src = root.join("src");
+    std::fs::create_dir_all(&src).expect("src dir");
+    std::fs::write(root.join("package.json"), "{}").expect("package.json");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"production":{"deadCode":true,"dupes":false}}"#,
+    )
+    .expect("config");
+    let mut repeated =
+        String::from("export function repeated(input: number): number {\n  let total = input;\n");
+    for step in 0..36 {
+        writeln!(
+            repeated,
+            "  total = total * {} + {};",
+            step + 2,
+            step * 3 + 1
+        )
+        .expect("write to string");
+    }
+    repeated.push_str("  return total;\n}\n");
+    std::fs::create_dir_all(root.join("tests")).expect("tests dir");
+    std::fs::write(root.join("tests/a.ts"), &repeated).expect("test file");
+    std::fs::write(src.join("b.ts"), &repeated).expect("source file");
+
+    let session = EditorAnalysisSession::load_with_production(
+        root,
+        None,
+        fallow_config::ConfigLoadOptions::default(),
+        None,
+        |_| {},
+    )
+    .expect("session loads");
+    let duplicates = session.config().duplicates.clone();
+    let output = session
+        .analyze_project_with_changed_files(&duplicates, false, None)
+        .expect("analysis runs");
+
+    assert_eq!(output.duplication.clone_groups.len(), 1);
+    assert!(
+        output.duplication.clone_groups[0]
+            .instances
+            .iter()
+            .any(|instance| instance.file.ends_with("tests/a.ts")),
+        "duplication keeps the test file when only dead code is production"
+    );
+}

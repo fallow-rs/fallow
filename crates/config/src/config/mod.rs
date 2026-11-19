@@ -412,7 +412,7 @@ fn extends_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schem
 /// `FallowConfig::resolve` compiles the loaded config (globs, regexes,
 /// plugin and rule-pack discovery) into a [`ResolvedConfig`] for analysis.
 /// Unknown keys are rejected at load so typos fail loud.
-#[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 // Both `.fallowrc.json` and `.fallowrc.jsonc` are read with the JSONC dialect
 // from `crate::jsonc::parse_options`, so the schema declares the same dialect.

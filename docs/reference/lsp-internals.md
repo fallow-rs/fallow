@@ -65,6 +65,13 @@ lifecycle behavior.
   production mode turns off, such as `unused-dev-dependencies`, are off in
   the editor too. Do not set `ResolvedConfig::production` after resolution:
   the rules would keep the values of the other mode.
+- Without the setting, a per-analysis `production` config such as
+  `{"deadCode": true, "dupes": false}` gives the session the dead-code mode.
+  The engine session then walks the files of the duplication mode for the
+  duplication pass, so the clone diagnostics match `fallow dupes`. A
+  `configure` closure of the load does not reach that second walk, so it must
+  not change a discovery input: the root, the ignore patterns, or the
+  production mode.
 - Security candidate diagnostics remain opt-in through the project config.
   `security-sink` and `security-client-server-leak` default to `off`, retain
   those exact diagnostic codes, and publish at information severity because

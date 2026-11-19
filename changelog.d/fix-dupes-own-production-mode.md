@@ -1,0 +1,3 @@
+### Fixed
+
+- **The editor finds duplicates in the same files as `fallow dupes`.** With a per-analysis `production` setting such as `{"deadCode": true, "dupes": false}`, the language server and the VS Code extension ran duplication on the files of the dead-code mode. Duplicates in files that production mode leaves out, such as files under `tests/`, then did not show in the editor, but `fallow dupes` reported them. The reverse setting showed duplicates that `fallow dupes` did not report. Duplication now uses its own production mode on every surface. (Closes [#4784](https://github.com/fallow-rs/fallow/issues/4784))
