@@ -4,7 +4,7 @@ use std::path::Path;
 
 use super::path_info::{extract_package_name, is_bare_specifier};
 use super::types::{ResolveContext, ResolveResult};
-use super::workspace_alias::try_aliased_workspace_package_fallback;
+use super::workspace_alias::{aliased_specifier, try_aliased_workspace_package_fallback};
 
 /// Whether `path` lives under the analyzed project root.
 ///
@@ -40,6 +40,9 @@ pub(super) fn is_inside_project_root(ctx: &ResolveContext<'_>, path: &Path) -> b
 /// of this project, so it resolves into this project. Without this, the
 /// base reports the import as an npm package, and every finding that the
 /// edge carries in the head looks introduced.
+///
+/// A dependency alias such as `"lib-alias": "workspace:@acme/lib@*"` names
+/// the project package `@acme/lib`, so its import resolves the same way.
 pub(super) fn try_project_package_outside_root(
     ctx: &ResolveContext<'_>,
     from_file: &Path,
@@ -50,7 +53,8 @@ pub(super) fn try_project_package_outside_root(
     if !is_bare_specifier(specifier) || is_inside_project_root(ctx, path) {
         return None;
     }
-    let package_name = extract_package_name(specifier);
+    let aliased = aliased_specifier(ctx, from_file, specifier);
+    let package_name = extract_package_name(aliased.as_deref().unwrap_or(specifier));
     if !ctx.workspace_roots.contains_key(package_name.as_str()) {
         return None;
     }
