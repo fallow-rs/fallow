@@ -22,7 +22,8 @@ mod loader;
 #[cfg(any(test, feature = "testing"))]
 pub use loader::load_count;
 pub use loader::{
-    ConfigChainSnapshot, ConfigFile, ConfigFileOptions, ConfigLoadError, load_config_file,
+    ConfigChainSnapshot, ConfigFile, ConfigFileOptions, ConfigLoadError, find_config_file,
+    load_config_file,
 };
 
 /// The production flags of one run: the global `--production` override and one

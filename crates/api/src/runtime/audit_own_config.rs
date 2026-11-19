@@ -14,6 +14,8 @@ pub(super) struct BaseOwnConfigInput<'a> {
     /// The analysis options of the base pass with the head config.
     pub(super) base_analysis: &'a AnalysisOptions,
     pub(super) head_root: &'a Path,
+    /// The head run, for the base copy of its config file.
+    pub(super) head_run: &'a fallow_engine::resolved_run::ResolvedRun,
     /// The config file of the head run.
     pub(super) head_config_path: Option<&'a Path>,
     pub(super) base_root: &'a Path,
@@ -44,7 +46,7 @@ pub(super) fn base_own_config_unused_code(
     if !focus.contains(&input.base_root.join(relative)) {
         return None;
     }
-    let base_config_path = fallow_config::FallowConfig::find_config_path(input.base_root);
+    let base_config_path = base_copy_run(input)?.config_file().value().clone();
     let own_config = base_config_reporting_unused_code(input, base_config_path.as_deref())?;
     let analysis = AnalysisOptions {
         config_path: base_config_path,
@@ -73,6 +75,26 @@ pub(super) fn base_own_config_unused_code(
         input.base_results,
         &dead_code.root,
     ))
+}
+
+/// The base run with the base copy of the head config file, by the rule of
+/// [`fallow_engine::resolved_run::BaseConfig::BaseCopy`]. `None` when the
+/// base config does not resolve.
+fn base_copy_run(
+    input: &BaseOwnConfigInput<'_>,
+) -> Option<fallow_engine::resolved_run::ResolvedRun> {
+    fallow_engine::resolved_run::resolve_base_run(
+        input.head_run,
+        fallow_engine::resolved_run::BaseSide {
+            root: fallow_types::sourced::Given {
+                value: input.base_root.to_path_buf(),
+                origin: fallow_types::sourced::Origin::ApiOption("audit.base"),
+            },
+            config: fallow_engine::resolved_run::BaseConfig::BaseCopy,
+            cache_dir: None,
+        },
+    )
+    .ok()
 }
 
 /// The base config, when it loads and keeps both unused-code rules on.

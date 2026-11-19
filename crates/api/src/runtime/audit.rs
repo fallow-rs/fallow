@@ -222,7 +222,7 @@ impl<'a> AuditBackend for ProgrammaticAuditBackend<'a> {
             .analysis
             .config_path
             .clone()
-            .or_else(|| fallow_config::FallowConfig::find_config_path(head_root));
+            .or_else(|| self.run.config_file().value().clone());
         let base_analysis = AnalysisOptions {
             root: Some(base_root.to_path_buf()),
             config_path,
@@ -246,6 +246,7 @@ impl<'a> AuditBackend for ProgrammaticAuditBackend<'a> {
                 options: self.options,
                 base_analysis: &base_analysis,
                 head_root,
+                head_run: self.run,
                 head_config_path: base_analysis.config_path.as_deref(),
                 base_root,
                 focus,

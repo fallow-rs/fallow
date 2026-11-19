@@ -118,6 +118,14 @@ impl From<ConfigLoadError> for EngineError {
     }
 }
 
+/// The config file that discovery finds from `root` up to the repository
+/// root, without a load. A caller that only checks whether a project has a
+/// config file, or that writes to the config file, calls this function.
+#[must_use]
+pub fn find_config_file(root: &Path) -> Option<PathBuf> {
+    FallowConfig::find_config_path(root)
+}
+
 /// Load the config file of a project: the file at `config_path`, else the
 /// first config file that discovery finds from `root` up to the repository
 /// root. A project without a config file gets the default config.
@@ -149,7 +157,7 @@ pub fn load_config_file(
             })
             .map_err(|err| explicit_load_error(path, &err));
     }
-    let before = ConfigChainSnapshot::read(FallowConfig::find_config_path(root).as_deref());
+    let before = ConfigChainSnapshot::read(find_config_file(root).as_deref());
     match FallowConfig::find_and_load_with_options(root, load_options) {
         Ok(Some((config, path))) => Ok(ConfigFile {
             config,

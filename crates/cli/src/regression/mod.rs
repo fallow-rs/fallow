@@ -30,7 +30,7 @@ pub fn regression_config_target(
 ) -> std::path::PathBuf {
     config.map_or_else(
         || {
-            fallow_config::FallowConfig::find_config_path(root)
+            fallow_engine::project_config::find_config_file(root)
                 .unwrap_or_else(|| root.join(".fallowrc.json"))
         },
         std::path::Path::to_path_buf,

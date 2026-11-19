@@ -187,7 +187,7 @@ fn update_config(ctx: &RulePackContext<'_>, rel_path: &str) -> ConfigUpdateResul
             (ctx.root.join(config_path), Some(ctx.root.to_path_buf()))
         }
     } else {
-        let Some(config_path) = fallow_config::FallowConfig::find_config_path(ctx.root) else {
+        let Some(config_path) = fallow_engine::project_config::find_config_file(ctx.root) else {
             return ConfigUpdateResult::Missing;
         };
         let guard_root = config_path.parent().map(std::path::Path::to_path_buf);

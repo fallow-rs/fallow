@@ -16,7 +16,10 @@ pub mod steps;
 pub mod testing;
 mod view;
 
-pub use resolve::{EmptyCause, InputField, InputProblem, ResolveError, resolve_run};
+pub use resolve::{
+    BaseConfig, BaseSide, EmptyCause, InputField, InputProblem, ResolveError, resolve_base_run,
+    resolve_run,
+};
 
 use std::path::{Path, PathBuf};
 
@@ -66,6 +69,8 @@ pub struct ResolvedRun {
     env_ignored: Vec<EnvVar>,
     /// The config error that made the run use the default config.
     fallback: Option<ResolveError>,
+    /// The raw inputs of the run, for the base side of a comparison.
+    inputs: Box<fallow_config::RunInputs>,
 }
 
 /// The decisions of one analysis.
@@ -449,3 +454,7 @@ mod resolve_tests;
 #[cfg(test)]
 #[path = "run_tests.rs"]
 mod run_tests;
+
+#[cfg(test)]
+#[path = "base_tests.rs"]
+mod base_tests;
