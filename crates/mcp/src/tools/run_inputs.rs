@@ -246,6 +246,7 @@ pub(super) fn typed_call(
     env: EnvSnapshot,
     cancellation: Option<Arc<AtomicBool>>,
 ) -> TypedCall {
+    let shared = shared_analysis_options(shared, tool.env_scope(), &env, cancellation);
     let analysis = AnalysisOptions {
         production: production.production.unwrap_or(false),
         production_override: production.production,
@@ -253,7 +254,7 @@ pub(super) fn typed_call(
             surface: Surface::Mcp,
             env,
         }),
-        ..shared_analysis_options(shared, tool.env_scope(), cancellation)
+        ..shared
     };
     TypedCall {
         #[cfg(test)]

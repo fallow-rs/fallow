@@ -1786,11 +1786,10 @@ fn mcp_api_routes_honor_ambient_changed_since_scope() {
             .unwrap_or_else(|error| panic!("read {name}.rs: {error}"))
     });
     assert!(
-        helper[0].contains("EnvScope::Ambient => (None, env_changed_since(), env_diff_file())")
-            && helper[0]
-                .contains("EnvScope::HardRef => (env_changed_since(), None, env_diff_file())")
+        helper[0].contains("Ambient => (None, env_changed_since(env), env_diff_file(env))")
+            && helper[0].contains("HardRef => (env_changed_since(env), None, env_diff_file(env))")
             && helper[1]
-                .contains("shared_analysis_options(shared, tool.env_scope(), cancellation)")
+                .contains("shared_analysis_options(shared, tool.env_scope(), &env, cancellation)")
             && helper[1].matches("EnvScope::Own").count() == 1,
         "typed_call must read FALLOW_CHANGED_SINCE through the env scope of each tool"
     );

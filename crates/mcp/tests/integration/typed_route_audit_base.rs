@@ -8,7 +8,8 @@
 //! base. The variables are set on the server process, so the typed route
 //! reads them from its environment snapshot and the CLI route from the
 //! environment that the child process inherits. `explain_skipped` sends the
-//! call to the CLI route.
+//! call to the CLI route. The typed `decision_surface` tool uses the same
+//! order, so `FALLOW_CHANGED_SINCE` does not replace its base either.
 
 use std::path::Path;
 use std::process::Command;
@@ -124,4 +125,77 @@ fn typed_and_cli_routes_prefer_the_detected_base_over_fallow_changed_since() {
     let env = [("FALLOW_AUDIT_BASE", ""), ("FALLOW_CHANGED_SINCE", "HEAD")];
     let bases = both_routes(repo.path(), &env, &serde_json::json!({}));
     assert_eq!(bases, ["main", "main"]);
+}
+
+/// [`base_repo`] with a third commit that adds the dependency `left-pad`.
+/// A decision surface against `first` or `main` has a decision for the new
+/// dependency. A decision surface against `HEAD` has no change and no
+/// decision.
+fn dependency_repo() -> tempfile::TempDir {
+    let dir = base_repo();
+    let root = dir.path();
+    let package = root.join("node_modules/left-pad");
+    std::fs::create_dir_all(&package).expect("node_modules");
+    std::fs::write(
+        package.join("package.json"),
+        r#"{"name":"left-pad","version":"1.0.0","main":"index.js"}"#,
+    )
+    .expect("left-pad manifest");
+    std::fs::write(package.join("index.js"), "module.exports = () => 1;\n").expect("left-pad");
+    std::fs::write(
+        root.join("package.json"),
+        "{\n  \"name\": \"base-order\",\n  \"type\": \"module\",\n  \"main\": \"src/index.ts\",\n  \"dependencies\": {\n    \"left-pad\": \"^1.3.0\"\n  }\n}\n",
+    )
+    .expect("package.json");
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import leftPad from 'left-pad';\nconsole.log(leftPad('x', 2));\n",
+    )
+    .expect("entry");
+    commit(root, "add left-pad");
+    dir
+}
+
+/// The `signal_key` of each decision of a `decision_surface` call on a
+/// server started under `env`.
+fn decision_keys(root: &Path, env: &[(&str, &str)]) -> Vec<String> {
+    let arguments = serde_json::json!({
+        "root": root.display().to_string(),
+        "no_cache": true,
+    });
+    let mut server = McpServer::start_with_env(env);
+    let result = server.call_raw("decision_surface", &arguments);
+    let text = result["content"][0]["text"].as_str().expect("text content");
+    let payload: serde_json::Value = serde_json::from_str(text).expect("tool payload");
+    payload["decisions"]
+        .as_array()
+        .unwrap_or_else(|| panic!("decision_surface must list decisions: {payload}"))
+        .iter()
+        .filter_map(|decision| decision["signal_key"].as_str().map(str::to_owned))
+        .collect()
+}
+
+#[test]
+fn typed_decision_surface_prefers_fallow_audit_base_over_fallow_changed_since() {
+    let repo = dependency_repo();
+    let env = [
+        ("FALLOW_AUDIT_BASE", "first"),
+        ("FALLOW_CHANGED_SINCE", "HEAD"),
+    ];
+    let keys = decision_keys(repo.path(), &env);
+    assert!(
+        keys.iter().any(|key| key == "package.json::left-pad"),
+        "{keys:?}"
+    );
+}
+
+#[test]
+fn typed_decision_surface_prefers_the_detected_base_over_fallow_changed_since() {
+    let repo = dependency_repo();
+    let env = [("FALLOW_AUDIT_BASE", ""), ("FALLOW_CHANGED_SINCE", "HEAD")];
+    let keys = decision_keys(repo.path(), &env);
+    assert!(
+        keys.iter().any(|key| key == "package.json::left-pad"),
+        "{keys:?}"
+    );
 }
