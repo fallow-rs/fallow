@@ -161,6 +161,14 @@ pin also records `hash_method`; a change of the hash computation raises it,
 and only then may the writer record a new hash at the same version. Fallow only changes a finding when the checker
 resolves an exact declaration identity. Name-only matches are never enough.
 
+A class-member identity holds the path, the position, the member name and the
+owner. The syntactic pass names the owner after the export, so a member of the
+default-exported class has the owner `default`. The companion accepts that
+owner only for a top-level class with `export default class`, or for a class
+that `export default Name;` or `export { Name as default };` exports from the
+same file. The response keeps the owner of the request, and the native client
+still rejects a response with a different path, position, name or owner.
+
 ### Experimental tsrs backend
 
 `FALLOW_TYPE_AWARE_BACKEND=tsrs` selects [tsrs](https://github.com/oxc-project/tsrs),

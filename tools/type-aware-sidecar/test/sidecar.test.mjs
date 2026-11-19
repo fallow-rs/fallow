@@ -411,6 +411,129 @@ view["execute"]();
   }
 });
 
+const DEFAULT_EXPORTED_RENDERERS = [
+  ["a default class declaration", "export default class Renderer {\n  update(_n: number) {}\n}\n"],
+  [
+    "an export assignment of a class",
+    "class Renderer {\n  update(_n: number) {}\n}\nexport default Renderer;\n",
+  ],
+  [
+    "a default export specifier",
+    "class Renderer {\n  update(_n: number) {}\n}\nexport { Renderer as default };\n",
+  ],
+  ["an anonymous default class", "export default class {\n  update(_n: number) {}\n}\n"],
+];
+
+const writeRefConsumer = (root) => {
+  write(
+    root,
+    "src/react.ts",
+    `export const useRef = <T>(value: T | null): { current: T | null } => ({ current: value });
+export const useEffect = (effect: () => void, _deps: unknown[]): void => effect();
+`,
+  );
+  write(
+    root,
+    "src/index.ts",
+    `import Renderer from "./renderer";
+import { useEffect, useRef } from "./react";
+export const plot = (n: number): void => {
+  const renderer = useRef<Renderer>(null);
+  useEffect(() => {
+    renderer.current = new Renderer();
+  }, []);
+  useEffect(() => {
+    renderer.current?.update(n);
+  }, [n]);
+};
+`,
+  );
+};
+
+for (const [form, rendererSource] of DEFAULT_EXPORTED_RENDERERS) {
+  test(`confirms a member of ${form} that the syntactic owner names default`, () => {
+    const root = makeProject();
+    try {
+      write(
+        root,
+        "tsconfig.json",
+        JSON.stringify({ compilerOptions: { strict: true }, include: ["src"] }),
+      );
+      write(root, "src/renderer.ts", rendererSource);
+      writeRefConsumer(root);
+
+      const response = runSidecar(
+        semanticRequest(root, [
+          classMemberQuery({
+            id: 0,
+            file: "src/renderer.ts",
+            owner: "default",
+            member: "update",
+            ...utf8Position(rendererSource, "update("),
+          }),
+        ]),
+      );
+
+      assert.equal(response.results[0].assertion, "confirmed-used");
+      assert.equal(response.results[0].data.symbol.owner, "default");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test("does not give the default owner to a class that is not the default export", () => {
+  const root = makeProject();
+  try {
+    const source = `export class Renderer {
+  update(_n: number) {}
+}
+class Other {}
+export default Other;
+const make = () => {
+  class Nested {
+    update(_n: number) {}
+  }
+  return new Nested();
+};
+make().update(1);
+new Renderer().update(1);
+`;
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src"] }),
+    );
+    write(root, "src/renderer.ts", source);
+
+    const response = runSidecar(
+      semanticRequest(root, [
+        classMemberQuery({
+          id: 0,
+          file: "src/renderer.ts",
+          owner: "default",
+          member: "update",
+          ...utf8Position(source, "update("),
+        }),
+        classMemberQuery({
+          id: 1,
+          file: "src/renderer.ts",
+          owner: "default",
+          member: "update",
+          ...utf8Position(source, "update(", 2),
+        }),
+      ]),
+    );
+
+    for (const result of response.results) {
+      assert.notEqual(result.assertion, "confirmed-used");
+      assert.equal(result.reason_code, "unknown-symbol");
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("retains Angular template-only members without claiming a checker use", () => {
   const root = makeProject();
   try {

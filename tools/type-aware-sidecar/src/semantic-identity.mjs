@@ -9,13 +9,17 @@ const {
   isClassDeclaration,
   isClassExpression,
   isEnumDeclaration,
+  isExportAssignment,
+  isExportDeclaration,
   isExportSpecifier,
   isFunctionDeclaration,
   isGetAccessorDeclaration,
+  isIdentifier,
   isInterfaceDeclaration,
   isMethodDeclaration,
   isMethodSignatureDeclaration,
   isModuleDeclaration,
+  isNamedExports,
   isNamespaceExport,
   isPropertyDeclaration,
   isPropertySignatureDeclaration,
@@ -56,6 +60,7 @@ const DUAL_NAMESPACE_DECLARATIONS = [
   isSourceFile,
 ];
 const DECLARATION_OWNER_NODES = [isClassDeclaration, isClassExpression, isInterfaceDeclaration];
+const DEFAULT_EXPORT_NAME = "default";
 
 const slash = (value) => value.split(path.sep).join("/");
 const matchesAny = (node, checks) => checks.some((check) => check(node));
@@ -175,16 +180,13 @@ const indexNamespaceExport = (index, node) => {
 const defaultModifierFor = (node) =>
   node.modifiers?.find((modifier) => modifier.getText(node.getSourceFile()) === "default");
 
-const indexNamedDeclaration = (index, node, localName) => {
+const indexNamedDeclaration = (index, node, localName, owners) => {
   for (const position of positions(node)) {
-    const common = {
-      localName,
-      exportedName: localName,
-      owner: declarationOwner(node),
-      ...position,
-    };
-    index.set(anchorKey({ declarationKind: declarationKind(node), ...common }), node);
-    index.set(anchorKey({ declarationKind: "export", ...common }), node);
+    for (const owner of owners) {
+      const common = { localName, exportedName: localName, owner, ...position };
+      index.set(anchorKey({ declarationKind: declarationKind(node), ...common }), node);
+      index.set(anchorKey({ declarationKind: "export", ...common }), node);
+    }
   }
 };
 
@@ -200,12 +202,71 @@ const indexDefaultDeclaration = (index, node, localName, defaultModifier) => {
 const declarationLocalName = (node, defaultModifier) =>
   declarationName(node) ?? (defaultModifier ? "default" : undefined);
 
-const indexDeclarationNode = (index, node) => {
+const isDefaultExportSpecifier = (element) =>
+  !element.isTypeOnly && nodeText(element.name) === DEFAULT_EXPORT_NAME;
+
+const localDefaultExportSpecifierNames = (statement) => {
+  if (!isExportDeclaration(statement) || statement.moduleSpecifier || statement.isTypeOnly) {
+    return [];
+  }
+  if (!statement.exportClause || !isNamedExports(statement.exportClause)) return [];
+  return statement.exportClause.elements
+    .filter(isDefaultExportSpecifier)
+    .map((element) => nodeText(element.propertyName))
+    .filter(Boolean);
+};
+
+const exportAssignmentName = (statement) =>
+  isExportAssignment(statement) && !statement.isExportEquals && isIdentifier(statement.expression)
+    ? [statement.expression.text]
+    : [];
+
+const defaultExportNameSets = new WeakMap();
+
+/**
+ * Local names that `export default Name;` or `export { Name as default };`
+ * export. Only a module-scope binding can carry such a name.
+ */
+const defaultExportedLocalNames = (sourceFile) => {
+  const cached = defaultExportNameSets.get(sourceFile);
+  if (cached) return cached;
+  const names = new Set(
+    sourceFile.statements.flatMap((statement) => [
+      ...exportAssignmentName(statement),
+      ...localDefaultExportSpecifierNames(statement),
+    ]),
+  );
+  defaultExportNameSets.set(sourceFile, names);
+  return names;
+};
+
+const isDefaultExportedOwner = (owner, defaultLocalNames) => {
+  if (!owner?.parent || !isSourceFile(owner.parent)) return false;
+  if (defaultModifierFor(owner)) return true;
+  const name = nodeText(owner.name);
+  return name !== undefined && defaultLocalNames.has(name);
+};
+
+/**
+ * The syntactic pass names a member of the default-exported class after the
+ * export (`default.update`), so its member query carries the owner `default`.
+ * The member keeps its exact position in the key, so the extra owner name can
+ * only match a member of that one class.
+ */
+const declarationOwners = (node, defaultLocalNames) => {
+  const owner = declarationOwner(node);
+  return isDefaultExportedOwner(ownerDeclaration(node), defaultLocalNames) &&
+    owner !== DEFAULT_EXPORT_NAME
+    ? [owner, DEFAULT_EXPORT_NAME]
+    : [owner];
+};
+
+const indexDeclarationNode = (index, node, defaultLocalNames) => {
   if (!isDeclaration(node)) return;
   const defaultModifier = defaultModifierFor(node);
   const localName = declarationLocalName(node, defaultModifier);
   if (!localName) return;
-  indexNamedDeclaration(index, node, localName);
+  indexNamedDeclaration(index, node, localName, declarationOwners(node, defaultLocalNames));
   indexDefaultDeclaration(index, node, localName, defaultModifier);
 };
 
@@ -213,6 +274,7 @@ const declarationIndex = (sourceFile) => {
   const cached = declarationIndexes.get(sourceFile);
   if (cached) return cached;
   const index = new Map();
+  const defaultLocalNames = defaultExportedLocalNames(sourceFile);
   visit(sourceFile, (node) => {
     if (isExportSpecifier(node)) {
       indexExportSpecifier(index, node);
@@ -222,7 +284,7 @@ const declarationIndex = (sourceFile) => {
       indexNamespaceExport(index, node);
       return;
     }
-    indexDeclarationNode(index, node);
+    indexDeclarationNode(index, node, defaultLocalNames);
   });
   declarationIndexes.set(sourceFile, index);
   return index;
@@ -280,14 +342,30 @@ export const stableSymbolIdentity = (root, declaration, namespace, exportedName)
   };
 };
 
+/**
+ * The owner name of the query when the index accepts it for the declaration,
+ * so the response keeps the owner that the client asked for. Otherwise the
+ * owner that the declaration has in the source.
+ */
+const queryOwner = (declaration, requestedOwner) => {
+  const owners = declarationOwners(
+    declaration,
+    defaultExportedLocalNames(declaration.getSourceFile()),
+  );
+  return owners.includes(requestedOwner) ? requestedOwner : owners[0];
+};
+
 export const semanticQueryIdentity = (root, query, resolved) => {
   if (query.symbol.declarationKind !== "export") {
-    return stableSymbolIdentity(
-      root,
-      resolved.declaration,
-      query.symbol.namespace,
-      query.symbol.exportedName,
-    );
+    return {
+      ...stableSymbolIdentity(
+        root,
+        resolved.declaration,
+        query.symbol.namespace,
+        query.symbol.exportedName,
+      ),
+      owner: queryOwner(resolved.declaration, query.symbol.owner),
+    };
   }
   return {
     path: relativePath(root, query.symbol.absolutePath),
