@@ -57,6 +57,7 @@ mod tests {
             health: None,
             workspace_diagnostics: Vec::new(),
             next_steps: Vec::new(),
+            skipped: Vec::new(),
         }
     }
 

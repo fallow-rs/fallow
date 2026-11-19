@@ -227,44 +227,31 @@ fn kill_matrix_mode<'a>(
 /// Loads the analysis session of a mutation run. `operators` is the
 /// operator list of the options, `None` when the options name none.
 fn load_session(
-    resolved: &ProgrammaticAnalysisContext,
+    analysis: &crate::AnalysisOptions,
     operators: Option<&[fallow_engine::mutation::Operator]>,
 ) -> ProgrammaticResult<AnalysisSession> {
-    let mut project = fallow_engine::project_config::config_for_project_with_load_options(
-        resolved.root(),
-        resolved.config_path().as_deref(),
-        fallow_config::ConfigLoadOptions {
-            allow_remote_extends: resolved.allow_remote_extends,
-        },
-    )
-    .map_err(|error| {
-        ProgrammaticError::new(format!("failed to load config: {error}"), 2)
-            .with_code("FALLOW_CONFIG_LOAD_FAILED")
-            .with_context("analysis.configPath")
-    })?;
-    project.config.no_cache = resolved.no_cache;
-    project.config.threads = resolved.threads;
-    // The `constant-parameter` hint of a `negate-condition` survivor reads
-    // the findings of this rule, so the analysis of a mutation run computes
-    // them even when the project leaves the rule off. A mutation run reports
-    // no dead-code finding.
-    let negates = match operators {
-        Some(operators) => operators.contains(&fallow_engine::mutation::Operator::NegateCondition),
-        None => project
-            .config
-            .mutation
-            .operators
-            .as_ref()
-            .is_none_or(|names| {
+    let run =
+        crate::run::resolve_programmatic_run(analysis, &crate::run::ProgrammaticEntry::Mutation)?;
+    let dead_code = crate::run::runnable(&run, fallow_config::PlannedAnalysis::DeadCode)?;
+    crate::run::open_session_adjusted(&dead_code, |config| {
+        // The `constant-parameter` hint of a `negate-condition` survivor reads
+        // the findings of this rule, so the analysis of a mutation run
+        // computes them even when the project leaves the rule off. A mutation
+        // run reports no dead-code finding.
+        let negates = match operators {
+            Some(operators) => {
+                operators.contains(&fallow_engine::mutation::Operator::NegateCondition)
+            }
+            None => config.mutation.operators.as_ref().is_none_or(|names| {
                 names.iter().any(|name| {
                     name.as_str() == fallow_engine::mutation::Operator::NegateCondition.as_str()
                 })
             }),
-    };
-    if negates && project.config.rules.constant_parameters == fallow_config::Severity::Off {
-        project.config.rules.constant_parameters = fallow_config::Severity::Warn;
-    }
-    Ok(AnalysisSession::from_config(project))
+        };
+        if negates && config.rules.constant_parameters == fallow_config::Severity::Off {
+            config.rules.constant_parameters = fallow_config::Severity::Warn;
+        }
+    })
 }
 
 fn scope_output(options: &MutationRunOptions, base_ref: Option<String>) -> MutationScopeOutput {
@@ -407,7 +394,7 @@ pub(super) fn plan_with_wraps(
 ) -> ProgrammaticResult<Planned> {
     validate(options)?;
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
-    let session = load_session(&resolved, options.operators.as_deref())?;
+    let session = load_session(&options.analysis, options.operators.as_deref())?;
     let cache_dir = session.config().cache_dir.clone();
     let configured = session.config().mutation.runner;
     before_plan(resolved.root(), &cache_dir)?;

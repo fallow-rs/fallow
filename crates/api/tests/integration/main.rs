@@ -22,6 +22,7 @@ mod dead_code_baseline;
 mod editor_type_aware_scope_order;
 mod health_rerun_diagnostics;
 mod mutation_explicit_diff;
+mod programmatic_run;
 mod run_error_codes;
 mod schema_conformance;
 mod scope_parity;

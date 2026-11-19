@@ -958,6 +958,7 @@ fn build_combined_json_output(
         workspace_diagnostics,
         next_steps,
         telemetry_analysis_run_id: crate::output_runtime::telemetry_analysis_run_id().as_deref(),
+        skipped: Vec::new(),
     })
     .map(|mut envelope| {
         insert_dupes_baseline_staleness(&mut envelope, input.dupes_result);

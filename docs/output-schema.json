@@ -115,6 +115,13 @@
             "$ref": "#/definitions/NextStep"
           },
           "description": "Read-only follow-up commands aggregated across the combined run's\nfindings. See `CheckOutput::next_steps` for the contract."
+        },
+        "skipped": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/SkippedAnalysis"
+          },
+          "description": "Each analysis that the run skips, with the reason, in the order dead\ncode, duplication, health. The typed programmatic API fills it. The\nCLI leaves it absent. Omitted when the run skips no analysis."
         }
       },
       "required": [
@@ -38512,6 +38519,66 @@
         }
       ],
       "description": "The rule that a boundary violation breaks."
+    },
+    "SkippedAnalysis": {
+      "type": "object",
+      "properties": {
+        "analysis": {
+          "description": "The analysis that the run skips.",
+          "$ref": "#/definitions/SkippedAnalysisName"
+        },
+        "reason": {
+          "description": "Why the run skips the analysis.",
+          "$ref": "#/definitions/SkipReasonName"
+        },
+        "config_key": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The config key that turns the analysis off, for example\n`duplicates.enabled`. Present only for `off-by-config`."
+        }
+      },
+      "required": [
+        "analysis",
+        "reason"
+      ],
+      "description": "One analysis that a combined run skips."
+    },
+    "SkippedAnalysisName": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "dead-code",
+          "description": "The dead-code analysis: the `check` section."
+        },
+        {
+          "type": "string",
+          "const": "duplication",
+          "description": "The duplication analysis: the `dupes` section."
+        },
+        {
+          "type": "string",
+          "const": "health",
+          "description": "The health analysis: the `health` section."
+        }
+      ],
+      "description": "The analysis of a [`SkippedAnalysis`]."
+    },
+    "SkipReasonName": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "not-requested",
+          "description": "The options of the call leave the analysis out."
+        },
+        {
+          "type": "string",
+          "const": "off-by-config",
+          "description": "A config key turns the analysis off."
+        }
+      ],
+      "description": "The reason of a [`SkippedAnalysis`]."
     }
   }
 }

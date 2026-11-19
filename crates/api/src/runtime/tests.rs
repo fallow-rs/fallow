@@ -479,30 +479,6 @@ fn run_health_with_session_reuses_existing_discovery() {
     );
 }
 
-#[test]
-fn effective_production_modes_resolve_per_analysis_config() {
-    let project = tempfile::tempdir().expect("temp dir");
-    std::fs::write(
-        project.path().join("package.json"),
-        r#"{"name":"production-config","type":"module"}"#,
-    )
-    .expect("package json");
-    std::fs::write(
-        project.path().join(".fallowrc.json"),
-        r#"{"production":{"deadCode":false,"health":true,"dupes":false}}"#,
-    )
-    .expect("config");
-
-    let analysis = analysis_at(project.path());
-    let resolved = resolve_programmatic_analysis_context(&analysis).expect("context resolves");
-    let modes =
-        resolve_effective_production_modes(&resolved, None, None, None).expect("modes resolve");
-
-    assert!(!modes.dead_code);
-    assert!(modes.health);
-    assert!(!modes.dupes);
-}
-
 /// Standalone duplication must read the `dupes` entry of a per-analysis
 /// `production` config, not the `deadCode` entry.
 #[test]
@@ -1914,10 +1890,10 @@ fn run_dead_code_honors_per_path_rule_overrides() {
 #[test]
 fn decision_analysis_resolves_severity_against_the_given_config() {
     let project = rule_override_project(true);
-    let resolved = resolve_programmatic_analysis_context(&analysis_at(project.path()))
-        .expect("context resolves");
+    let analysis = analysis_at(project.path());
+    let resolved = resolve_programmatic_analysis_context(&analysis).expect("context resolves");
 
-    let own = super::decision_surface::run_decision_analysis(&resolved, None, None)
+    let own = super::decision_surface::run_decision_analysis(&resolved, &analysis, None, None)
         .expect("analysis with the session's own config");
     let own_paths: Vec<PathBuf> = own
         .results
@@ -1932,9 +1908,13 @@ fn decision_analysis_resolves_severity_against_the_given_config() {
 
     let mut head_config = own.config;
     head_config.overrides.clear();
-    let judged =
-        super::decision_surface::run_decision_analysis(&resolved, None, Some(&head_config))
-            .expect("analysis judged by another config");
+    let judged = super::decision_surface::run_decision_analysis(
+        &resolved,
+        &analysis,
+        None,
+        Some(&head_config),
+    )
+    .expect("analysis judged by another config");
     let judged_paths: Vec<PathBuf> = judged
         .results
         .unused_exports

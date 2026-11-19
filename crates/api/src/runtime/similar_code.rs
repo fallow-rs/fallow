@@ -212,7 +212,7 @@ pub fn inspect_similar_code(
     let root = resolved.root().to_path_buf();
     let mut left = inspect_side(&root, &candidate.left)?;
     let mut right = inspect_side(&root, &candidate.right)?;
-    let session = load_session(&resolved)?;
+    let session = load_session(&options.analysis)?;
     let enrichment = resolved.install(|| {
         enrich_inspect(
             &session,
@@ -411,7 +411,7 @@ fn run_similar_code_inner_with_embedder(
     embedder: &mut dyn RuntimeEmbedder,
 ) -> ProgrammaticResult<SimilarCodeOutput> {
     let started = Instant::now();
-    let session = load_session(resolved)?;
+    let session = load_session(&options.analysis)?;
     let (threshold, min_lines) = detection_parameters(options, &session)?;
     let changed_files = changed_files_for_run(resolved)?;
     let workspace_roots = workspace_roots_for_session(resolved, session.workspaces())?;
@@ -1558,22 +1558,10 @@ fn finite_f64_to_u64(value: f64) -> u64 {
     }
 }
 
-fn load_session(resolved: &ProgrammaticAnalysisContext) -> ProgrammaticResult<AnalysisSession> {
-    let mut project = fallow_engine::project_config::config_for_project_with_load_options(
-        resolved.root(),
-        resolved.config_path().as_deref(),
-        fallow_config::ConfigLoadOptions {
-            allow_remote_extends: resolved.allow_remote_extends(),
-        },
-    )
-    .map_err(|error| {
-        ProgrammaticError::new(format!("failed to load config: {error}"), 2)
-            .with_code("FALLOW_CONFIG_LOAD_FAILED")
-            .with_context("analysis.configPath")
-    })?;
-    project.config.no_cache = resolved.no_cache();
-    project.config.threads = resolved.threads();
-    Ok(AnalysisSession::from_config(project))
+fn load_session(analysis: &crate::AnalysisOptions) -> ProgrammaticResult<AnalysisSession> {
+    let entry = crate::run::ProgrammaticEntry::SimilarCode;
+    let run = crate::run::resolve_programmatic_run(analysis, &entry)?;
+    Ok(crate::run::runnable(&run, fallow_config::PlannedAnalysis::DeadCode)?.open_session())
 }
 
 fn build_ignore_set(patterns: &[String]) -> ProgrammaticResult<GlobSet> {

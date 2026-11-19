@@ -454,16 +454,19 @@ pub fn clear_project_cache(
     config_path: Option<&Path>,
     allow_remote_extends: bool,
 ) -> Result<bool, String> {
-    let project = fallow_engine::project_config::config_for_project_with_load_options(
-        root,
-        config_path,
-        fallow_config::ConfigLoadOptions {
-            allow_remote_extends,
-        },
+    let analysis = crate::AnalysisOptions {
+        root: Some(root.to_path_buf()),
+        config_path: config_path.map(Path::to_path_buf),
+        allow_remote_extends,
+        ..crate::AnalysisOptions::default()
+    };
+    let run = crate::run::resolve_programmatic_run(
+        &analysis,
+        &crate::run::ProgrammaticEntry::SimilarCode,
     )
-    .map_err(|error| format!("failed to load config: {error}"))?;
+    .map_err(|error| error.message)?;
     let provider = status()?;
-    clear_vector_cache(Path::new(&provider.cache_dir), &project.config.root)
+    clear_vector_cache(Path::new(&provider.cache_dir), run.root().value())
 }
 
 pub(crate) fn model_artifact_sha256() -> &'static str {
