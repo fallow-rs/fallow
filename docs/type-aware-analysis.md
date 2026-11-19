@@ -244,9 +244,10 @@ node --test tools/type-aware-sidecar/test/*.test.mjs
 FALLOW_TYPE_AWARE_BACKEND=tsrs node --test tools/type-aware-sidecar/test/*.test.mjs
 ```
 
-tsrs has no Windows or macOS x64 binaries, and the backend stays opt-in while
-tsrs is a 0.x release. The VS Code extension bundles only the default backend,
-so the tsrs backend needs an npm or CLI install. When the extension runs Fallow
+tsrs `0.18.0` has no Windows or macOS x64 binaries. Later releases have them.
+The backend stays opt-in while tsrs has no stable release. The VS Code
+extension bundles only the default backend, so the tsrs backend needs an npm or
+CLI install. When the extension runs Fallow
 from the project `node_modules`, it uses the `fallow-type-aware` package of the
 same install (also from the pnpm store) when its version equals the Fallow
 version. Fallow reads the
