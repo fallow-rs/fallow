@@ -60,6 +60,9 @@ fn translate_params(
     reads_production: impl Fn(&str) -> bool,
 ) -> RowResult {
     let input = &case.inputs[ROW];
+    if input.get("not_expressible").is_some() {
+        return RowResult::NotExpressible;
+    }
     let tool = input["tool"].as_str().unwrap_or_default();
     let (command, selection) = tool_command(tool);
     let (command, surface) = change(command, Surface::Mcp);

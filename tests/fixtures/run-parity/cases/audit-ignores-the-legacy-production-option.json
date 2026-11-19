@@ -1,0 +1,30 @@
+{
+  "name": "audit-ignores-the-legacy-production-option",
+  "files": {
+    ".fallowrc.json": "{\"production\":false}",
+    "package.json": "{}"
+  },
+  "inputs": {
+    "mcp": {
+      "tool": "audit",
+      "params": {}
+    },
+    "api": {
+      "entry": "audit",
+      "options": {
+        "production": true
+      }
+    },
+    "node": {
+      "not_expressible": "The Node bindings have no audit entry point"
+    }
+  },
+  "expected": {
+    "surface": "<row>",
+    "command": "audit",
+    "analyses.dead_code.production": {
+      "value": false,
+      "source": "config-file:production"
+    }
+  }
+}

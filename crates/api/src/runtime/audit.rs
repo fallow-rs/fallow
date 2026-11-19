@@ -1,20 +1,16 @@
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
-use fallow_config::{ProductionAnalysis, ResolvedConfig};
+use fallow_config::{PlannedAnalysis, ResolvedConfig};
 use fallow_engine::change_scope::{ChangeScope, ChangeScopeOwner};
 use fallow_engine::{
     dead_code::DeadCodeAnalysisArtifacts,
     project_analysis::ProjectAnalysisArtifactOptions,
-    project_config::ProjectConfigOptions,
     repo_refs::{self, ResolvedAuditBase, TemporaryBaseWorktree},
     session::AnalysisSession,
 };
 use fallow_output::build_audit_next_steps;
-use fallow_types::{
-    envelope::AuditIntroduced, output::NextStep, output_format::OutputFormat,
-    results::AnalysisResults,
-};
+use fallow_types::{envelope::AuditIntroduced, output::NextStep, results::AnalysisResults};
 use rustc_hash::FxHashSet;
 
 use crate::{
@@ -28,13 +24,14 @@ use crate::{
         AuditAnalyses, AuditAnalysesView, AuditBackend, AuditRun, AuditRunInput, DeadCodeView,
         DuplicationView, HealthView,
     },
+    run::{AnalysisSlot, ProgrammaticEntry, ResolvedRun, RouteSettings, resolve_route_run},
 };
 
 use super::{
     ProgrammaticResult, dead_code::run_dead_code_in_context,
     duplication::run_duplication_in_context, health_may_consume_dead_code_artifacts,
-    health_may_consume_duplication_report, resolve_effective_production_modes,
-    run_health_for_audit, run_health_with_session_artifacts, type_aware_config,
+    health_may_consume_duplication_report, run_health_in_run, run_health_with_session_artifacts,
+    type_aware_config,
 };
 
 /// Error code of [`run_audit`] when the project config sets an `audit`
@@ -62,12 +59,14 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
     let resolved_base = resolve_audit_base_ref(options)?;
     let analysis = analysis_options_for_audit(options, &resolved_base.git_ref);
     let resolved = audit_section_context(&analysis)?;
-    let config = load_programmatic_audit_config(&resolved)?;
-    let options = &options_with_audit_config(options, &config.audit, &config.duplicates);
+    let run = resolve_audit_run(options, &analysis)?;
+    let options =
+        &options_with_audit_config(options, &run.config().audit, &run.config().duplicates);
     let changed_files = changed_files_for_run(&resolved)?.unwrap_or_default();
     let changed_files_count = changed_files.len();
 
     reject_empty_selection(options)?;
+    let config = head_config(&run)?;
 
     if changed_files.is_empty() {
         return Ok(empty_audit_output(
@@ -82,14 +81,15 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
     reject_config_baselines(&config.audit, options)?;
     type_aware_config::reject_config_type_aware(
         &options.analysis.type_aware,
-        &resolved,
+        &run,
         type_aware_config::TypeAwareCommand::Audit,
     )?;
     let backend = ProgrammaticAuditBackend {
         options,
         analysis: &analysis,
         resolved: &resolved,
-        config: &config,
+        run: &run,
+        config,
     };
     let Some(AuditRun {
         analyses,
@@ -162,6 +162,8 @@ struct ProgrammaticAuditBackend<'a> {
     options: &'a AuditOptions,
     analysis: &'a AnalysisOptions,
     resolved: &'a ProgrammaticAnalysisContext,
+    /// The run of the head side.
+    run: &'a ResolvedRun,
     config: &'a ResolvedConfig,
 }
 
@@ -175,11 +177,15 @@ impl<'a> AuditBackend for ProgrammaticAuditBackend<'a> {
         &self,
         changed_files: &FxHashSet<PathBuf>,
     ) -> ProgrammaticResult<ProgrammaticAuditAnalyses<'a>> {
-        let subanalyses = run_audit_subanalyses_with_context(
+        let subanalyses = run_audit_subanalyses_in_context(
             self.options,
             self.analysis,
-            self.resolved,
+            AuditSide {
+                resolved: self.resolved,
+                run: self.run,
+            },
             Some(changed_files),
+            false,
         )?;
         Ok(ProgrammaticAuditAnalyses {
             subanalyses,
@@ -401,12 +407,11 @@ fn reject_empty_selection(options: &AuditOptions) -> ProgrammaticResult<()> {
         && options.health == Some(false)
         && options.duplication == Some(false)
     {
-        return Err(ProgrammaticError::new(
-            "this audit selects no domain: the options, the audit.deadCode, audit.health and audit.dupes config keys, and duplicates.enabled leave nothing to run",
-            2,
-        )
-        .with_code("FALLOW_AUDIT_NO_ANALYSIS")
-        .with_context("audit"));
+        return Err(
+            ProgrammaticError::new(crate::run::AUDIT_NO_ANALYSIS_MESSAGE, 2)
+                .with_code("FALLOW_AUDIT_NO_ANALYSIS")
+                .with_context("audit"),
+        );
     }
     Ok(())
 }
@@ -503,7 +508,7 @@ pub(super) fn resolve_audit_base_ref(
     })
 }
 
-fn analysis_options_for_audit(options: &AuditOptions, base_ref: &str) -> AnalysisOptions {
+pub fn analysis_options_for_audit(options: &AuditOptions, base_ref: &str) -> AnalysisOptions {
     let production_override = options
         .analysis
         .production_override
@@ -516,15 +521,50 @@ fn analysis_options_for_audit(options: &AuditOptions, base_ref: &str) -> Analysi
     }
 }
 
-fn analysis_with_production(
+/// The run of one audit side, with the selection and the production options
+/// of `options`. The source of the mode names the option of the caller, not
+/// the value that [`analysis_options_for_audit`] folds `production` into.
+pub fn resolve_audit_run(
+    options: &AuditOptions,
     analysis: &AnalysisOptions,
-    production_override: Option<bool>,
-) -> AnalysisOptions {
-    AnalysisOptions {
-        production: production_override.unwrap_or(analysis.production),
-        production_override: production_override.or(analysis.production_override),
-        ..analysis.clone()
-    }
+) -> ProgrammaticResult<ResolvedRun> {
+    let mut analysis = analysis.clone();
+    analysis.production_override = options.analysis.production_override;
+    resolve_route_run(
+        &analysis,
+        &ProgrammaticEntry::Audit {
+            dead_code: options.dead_code,
+            duplication: options.duplication,
+            health: options.health,
+            production: options.production,
+            production_dead_code: options.production_dead_code,
+            production_health: options.production_health,
+            production_dupes: options.production_dupes,
+        },
+        RouteSettings {
+            include_entry_exports: options.include_entry_exports,
+        },
+    )
+}
+
+/// The head config, which decides severities and styling gates: the config
+/// of the dead-code analysis, else of the first analysis that runs.
+fn head_config(run: &ResolvedRun) -> ProgrammaticResult<&ResolvedConfig> {
+    [
+        PlannedAnalysis::DeadCode,
+        PlannedAnalysis::Health,
+        PlannedAnalysis::Duplication,
+    ]
+    .into_iter()
+    .find_map(|analysis| match run.analysis(analysis) {
+        AnalysisSlot::Runs(runnable) => Some(runnable.config()),
+        AnalysisSlot::Skipped { .. } => None,
+    })
+    .ok_or_else(|| {
+        ProgrammaticError::new(crate::run::AUDIT_NO_ANALYSIS_MESSAGE, 2)
+            .with_code("FALLOW_AUDIT_NO_ANALYSIS")
+            .with_context("audit")
+    })
 }
 
 fn empty_audit_output(
@@ -590,18 +630,18 @@ fn audit_subanalysis_options(
     AuditSubanalysisOptions {
         dead_code: DeadCodeOptions {
             finding_ids: Vec::new(),
-            analysis: analysis_with_production(analysis, options.production_dead_code),
+            analysis: analysis.clone(),
             filters: DeadCodeFilters::default(),
             files: Vec::new(),
             include_entry_exports: options.include_entry_exports,
             show_cascade: options.show_cascade,
         },
         duplication: DuplicationOptions {
-            analysis: analysis_with_production(analysis, options.production_dupes),
+            analysis: analysis.clone(),
             ..DuplicationOptions::default()
         },
         complexity: ComplexityOptions {
-            analysis: analysis_with_production(analysis, options.production_health),
+            analysis: analysis.clone(),
             max_crap: options.max_crap,
             complexity: true,
             css: options.css.unwrap_or(true),
@@ -627,6 +667,13 @@ fn audit_section_context(
         .with_change_scope_owner(ChangeScopeOwner::CallerKeepingUnusedCode))
 }
 
+/// The context and the run of one audit side.
+#[derive(Clone, Copy)]
+struct AuditSide<'a> {
+    resolved: &'a ProgrammaticAnalysisContext,
+    run: &'a ResolvedRun,
+}
+
 fn run_audit_subanalyses(
     options: &AuditOptions,
     analysis: &AnalysisOptions,
@@ -634,38 +681,29 @@ fn run_audit_subanalyses(
     coverage_relocated: bool,
 ) -> ProgrammaticResult<AuditSubanalyses> {
     let resolved = audit_section_context(analysis)?;
+    let run = resolve_audit_run(options, analysis)?;
     run_audit_subanalyses_in_context(
         options,
         analysis,
-        &resolved,
+        AuditSide {
+            resolved: &resolved,
+            run: &run,
+        },
         changed_files,
         coverage_relocated,
     )
 }
 
-fn run_audit_subanalyses_with_context(
-    options: &AuditOptions,
-    analysis: &AnalysisOptions,
-    resolved: &ProgrammaticAnalysisContext,
-    changed_files: Option<&FxHashSet<PathBuf>>,
-) -> ProgrammaticResult<AuditSubanalyses> {
-    run_audit_subanalyses_in_context(options, analysis, resolved, changed_files, false)
-}
-
 fn run_audit_subanalyses_in_context(
     options: &AuditOptions,
     analysis: &AnalysisOptions,
-    resolved: &ProgrammaticAnalysisContext,
+    side: AuditSide<'_>,
     changed_files: Option<&FxHashSet<PathBuf>>,
     coverage_relocated: bool,
 ) -> ProgrammaticResult<AuditSubanalyses> {
+    let AuditSide { resolved, run } = side;
     let subanalysis_options = audit_subanalysis_options(options, analysis, coverage_relocated);
-    let production_modes = resolve_effective_production_modes(
-        resolved,
-        options.production_dead_code,
-        options.production_health,
-        options.production_dupes,
-    )?;
+    let production_modes = run.production_modes();
 
     // A partial selection runs each chosen domain on its own; the shared
     // sessions below assume all three domains.
@@ -676,65 +714,73 @@ fn run_audit_subanalyses_in_context(
         return Ok(AuditSubanalyses {
             dead_code: dead_code
                 .then(|| {
-                    run_dead_code_in_context(
-                        &subanalysis_options.dead_code,
-                        None,
-                        &audit_section_context(&subanalysis_options.dead_code.analysis)?,
-                    )
+                    run_dead_code_in_context(&subanalysis_options.dead_code, None, resolved, run)
                 })
                 .transpose()?,
             duplication: duplication
                 .then(|| {
-                    run_duplication_in_context(
-                        &subanalysis_options.duplication,
-                        &audit_section_context(&subanalysis_options.duplication.analysis)?,
-                    )
+                    run_duplication_in_context(&subanalysis_options.duplication, resolved, run)
                 })
                 .transpose()?,
             complexity: health
-                .then(|| run_health_for_audit(&subanalysis_options.complexity))
+                .then(|| run_health_in_run(&subanalysis_options.complexity, resolved, run))
                 .transpose()?,
         });
     }
 
     if production_modes.all_match() {
-        return run_shared_project_audit_subanalyses(&subanalysis_options, changed_files);
+        return run_shared_project_audit_subanalyses(&subanalysis_options, side, changed_files);
     }
 
     if production_modes.dead_code_matches_health() {
-        return run_shared_dead_code_health_audit_subanalyses(&subanalysis_options, changed_files);
+        return run_shared_dead_code_health_audit_subanalyses(
+            &subanalysis_options,
+            side,
+            changed_files,
+        );
     }
 
     if production_modes.dead_code_matches_dupes() {
-        return run_shared_dead_code_dupes_audit_subanalyses(&subanalysis_options, changed_files);
+        return run_shared_dead_code_dupes_audit_subanalyses(
+            &subanalysis_options,
+            side,
+            changed_files,
+        );
     }
 
     Ok(AuditSubanalyses {
         dead_code: Some(run_dead_code_in_context(
             &subanalysis_options.dead_code,
             None,
-            &audit_section_context(&subanalysis_options.dead_code.analysis)?,
+            resolved,
+            run,
         )?),
         duplication: Some(run_duplication_in_context(
             &subanalysis_options.duplication,
-            &audit_section_context(&subanalysis_options.duplication.analysis)?,
+            resolved,
+            run,
         )?),
-        complexity: Some(run_health_for_audit(&subanalysis_options.complexity)?),
+        complexity: Some(run_health_in_run(
+            &subanalysis_options.complexity,
+            resolved,
+            run,
+        )?),
     })
 }
 
 fn run_shared_project_audit_subanalyses(
     options: &AuditSubanalysisOptions,
+    side: AuditSide<'_>,
     changed_files: Option<&FxHashSet<PathBuf>>,
 ) -> ProgrammaticResult<AuditSubanalyses> {
-    let resolved = audit_section_context(&options.dead_code.analysis)?;
+    let AuditSide { resolved, run } = side;
     resolved.install(|| {
-        let session = super::dead_code::load_dead_code_session(&options.dead_code, &resolved)?;
+        let session = super::dead_code::load_dead_code_session(&options.dead_code, resolved, run)?;
         run_all_audit_subanalyses_with_project_artifacts(
             &options.dead_code,
             &options.duplication,
             &options.complexity,
-            &resolved,
+            resolved,
             &session,
             changed_files,
         )
@@ -743,26 +789,25 @@ fn run_shared_project_audit_subanalyses(
 
 fn run_shared_dead_code_health_audit_subanalyses(
     options: &AuditSubanalysisOptions,
+    side: AuditSide<'_>,
     changed_files: Option<&FxHashSet<PathBuf>>,
 ) -> ProgrammaticResult<AuditSubanalyses> {
-    let resolved = audit_section_context(&options.dead_code.analysis)?;
+    let AuditSide { resolved, run } = side;
     resolved.install(|| {
-        let dead_code_options = &options.dead_code;
-        let duplication_options = &options.duplication;
-        let complexity_options = &options.complexity;
-        let session = super::dead_code::load_dead_code_session(dead_code_options, &resolved)?;
+        let session = super::dead_code::load_dead_code_session(&options.dead_code, resolved, run)?;
         let (dead_code, complexity) = run_dead_code_and_health_with_session(
-            dead_code_options,
-            complexity_options,
-            &resolved,
+            &options.dead_code,
+            &options.complexity,
+            resolved,
             &session,
             changed_files,
         )?;
         Ok(AuditSubanalyses {
             dead_code: Some(dead_code),
             duplication: Some(run_duplication_in_context(
-                duplication_options,
-                &audit_section_context(&duplication_options.analysis)?,
+                &options.duplication,
+                resolved,
+                run,
             )?),
             complexity: Some(complexity),
         })
@@ -771,16 +816,17 @@ fn run_shared_dead_code_health_audit_subanalyses(
 
 fn run_shared_dead_code_dupes_audit_subanalyses(
     options: &AuditSubanalysisOptions,
+    side: AuditSide<'_>,
     changed_files: Option<&FxHashSet<PathBuf>>,
 ) -> ProgrammaticResult<AuditSubanalyses> {
-    let resolved = audit_section_context(&options.dead_code.analysis)?;
+    let AuditSide { resolved, run } = side;
     resolved.install(|| {
-        let session = super::dead_code::load_dead_code_session(&options.dead_code, &resolved)?;
+        let session = super::dead_code::load_dead_code_session(&options.dead_code, resolved, run)?;
         let (dead_code, duplication, _, _) =
             run_dead_code_and_duplication_with_project_artifacts(ProjectArtifactAuditInput {
                 dead_code_options: &options.dead_code,
                 duplication_options: &options.duplication,
-                resolved: &resolved,
+                resolved,
                 session: &session,
                 changed_files,
                 retain_dead_code_artifacts: false,
@@ -789,7 +835,7 @@ fn run_shared_dead_code_dupes_audit_subanalyses(
         Ok(AuditSubanalyses {
             dead_code: Some(dead_code),
             duplication: Some(duplication),
-            complexity: Some(run_health_for_audit(&options.complexity)?),
+            complexity: Some(run_health_in_run(&options.complexity, resolved, run)?),
         })
     })
 }
@@ -947,30 +993,6 @@ fn run_dead_code_and_health_with_session(
         None,
     )?;
     Ok((dead_code, complexity))
-}
-
-fn load_programmatic_audit_config(
-    resolved: &ProgrammaticAnalysisContext,
-) -> ProgrammaticResult<fallow_config::ResolvedConfig> {
-    fallow_engine::project_config::config_for_project_analysis(
-        resolved.root(),
-        resolved.config_path().as_deref(),
-        ProjectConfigOptions {
-            output: OutputFormat::Json,
-            no_cache: resolved.no_cache(),
-            threads: resolved.threads(),
-            production_override: resolved.production_override(),
-            quiet: true,
-            analysis: ProductionAnalysis::DeadCode,
-            allow_remote_extends: resolved.allow_remote_extends(),
-        },
-    )
-    .map(|project| project.config)
-    .map_err(|err| {
-        ProgrammaticError::new(format!("failed to load config: {err}"), 2)
-            .with_code("FALLOW_CONFIG_LOAD_FAILED")
-            .with_context("analysis.configPath")
-    })
 }
 
 fn audit_next_steps(
@@ -1790,12 +1812,13 @@ mod tests {
         };
         let analysis = analysis_options_for_audit(&options, "HEAD");
         let resolved = audit_section_context(&analysis).expect("context resolves");
-        let config = load_programmatic_audit_config(&resolved).expect("config loads");
+        let run = resolve_audit_run(&options, &analysis).expect("run resolves");
         let backend = ProgrammaticAuditBackend {
             options: &options,
             analysis: &analysis,
             resolved: &resolved,
-            config: &config,
+            run: &run,
+            config: head_config(&run).expect("head config"),
         };
 
         let checkout = backend

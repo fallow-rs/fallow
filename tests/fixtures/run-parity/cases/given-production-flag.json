@@ -5,10 +5,41 @@
     "package.json": "{}"
   },
   "inputs": {
-    "mcp": { "tool": "analyze", "params": { "production": true } }
+    "mcp": {
+      "tool": "analyze",
+      "params": {
+        "production": true
+      }
+    },
+    "api": {
+      "entry": "dead-code",
+      "options": {
+        "production_override": true
+      }
+    },
+    "node": {
+      "function": "detectDeadCode",
+      "options": {
+        "production": true
+      }
+    }
   },
   "expected": {
     "surface": "<row>",
-    "analyses.dead_code.production": { "value": true, "source": "given:production" }
+    "analyses.dead_code.production": {
+      "value": true,
+      "source": "given:production"
+    }
+  },
+  "deviations": {
+    "api": {
+      "reason": "The Rust API names its option analysis.production_override",
+      "expected": {
+        "analyses.dead_code.production": {
+          "value": true,
+          "source": "given:analysis.production_override"
+        }
+      }
+    }
   }
 }

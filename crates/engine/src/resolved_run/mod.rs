@@ -1,27 +1,22 @@
 //! The decisions of one run, each with the input that gave it.
 //!
-//! [`resolve_run`](resolve::resolve_run) takes the raw
+//! [`resolve_run`] takes the raw
 //! [`fallow_config::RunInputs`] of one surface, loads and validates the
 //! config, and decides the selection and the production mode of each analysis
 //! and each run setting. The result is one [`ResolvedRun`] with a resolved
 //! config per production mode.
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "only the tests of this crate read the resolved run; the entry points of `project_config` call the steps"
-    )
-)]
 
 mod env_policy;
 #[cfg(any(test, feature = "testing"))]
-mod parity;
+pub mod parity;
 mod pick;
 mod resolve;
 pub mod steps;
 #[cfg(any(test, feature = "testing"))]
-mod testing;
+pub mod testing;
 mod view;
+
+pub use resolve::{EmptyCause, InputField, InputProblem, ResolveError, resolve_run};
 
 use std::path::{Path, PathBuf};
 
@@ -78,15 +73,25 @@ struct AnalysisDecision {
 /// The settings of one run. Every mode entry of the run has these values.
 #[derive(Debug)]
 pub struct RunSettings {
+    /// The number of worker threads.
     pub threads: Sourced<usize>,
+    /// Whether the run bypasses the parse cache.
     pub no_cache: Sourced<bool>,
+    /// Whether the `extends` chain of the config may name `https://` entries.
     pub allow_remote_extends: Sourced<bool>,
+    /// The largest file to analyze, in bytes. `None` means no limit.
     pub max_file_size_bytes: Sourced<Option<u64>>,
+    /// The cache directory.
     pub cache_dir: Sourced<PathBuf>,
+    /// The size limit of the parse cache, in megabytes.
     pub cache_max_size_mb: Sourced<Option<u32>>,
+    /// Whether the run reads `workspaces.changedSince`.
     pub package_baselines: Sourced<bool>,
+    /// Whether dead code reports the unused exports of entry files.
     pub include_entry_exports: Sourced<bool>,
+    /// The output format.
     pub output: OutputFormat,
+    /// Whether the run suppresses progress output.
     pub quiet: bool,
 }
 
@@ -207,7 +212,8 @@ impl ResolvedRun {
     }
 
     /// The set variables that the run reads.
-    pub fn env_read(&self) -> &[EnvVar] {
+    #[cfg(test)]
+    fn env_read(&self) -> &[EnvVar] {
         &self.env_read
     }
 
@@ -218,7 +224,8 @@ impl ResolvedRun {
 
     /// Whether the run uses the default config because the discovered config
     /// failed to load, to validate or to give workspace metadata.
-    pub const fn fell_back(&self) -> bool {
+    #[cfg(test)]
+    const fn fell_back(&self) -> bool {
         self.fell_back
     }
 
@@ -238,18 +245,18 @@ impl ResolvedRun {
     }
 }
 
-impl Runnable<'_> {
+impl<'run> Runnable<'run> {
     /// The analysis.
     pub const fn analysis(&self) -> PlannedAnalysis {
         self.analysis
     }
 
     /// The production mode of the analysis.
-    pub const fn production(&self) -> &Sourced<bool> {
+    pub const fn production(&self) -> &'run Sourced<bool> {
         self.run.production(self.analysis)
     }
 
-    fn entry(&self) -> &ModeEntry {
+    fn entry(&self) -> &'run ModeEntry {
         let Some(entry) = self.run.entry(*self.production().value()) else {
             unreachable!("the resolver makes a mode entry for each analysis that runs");
         };
@@ -257,18 +264,24 @@ impl Runnable<'_> {
     }
 
     /// The resolved config of the production mode of the analysis.
-    pub fn config(&self) -> &ResolvedConfig {
+    pub fn config(&self) -> &'run ResolvedConfig {
         &self.entry().config
     }
 
     /// The workspaces under the root.
-    pub fn workspaces(&self) -> &[WorkspaceInfo] {
+    pub fn workspaces(&self) -> &'run [WorkspaceInfo] {
         &self.entry().workspaces
+    }
+
+    /// The diagnostics of the workspace discovery.
+    pub fn workspace_diagnostics(&self) -> &'run [fallow_config::WorkspaceDiagnostic] {
+        &self.entry().workspace_diagnostics
     }
 
     /// Whether the two analyses analyze the same files: both run in the same
     /// production mode.
-    pub fn shares_files_with(&self, other: Runnable<'_>) -> bool {
+    #[cfg(test)]
+    fn shares_files_with(&self, other: Runnable<'_>) -> bool {
         self.production().value() == other.production().value()
     }
 
@@ -350,7 +363,9 @@ fn changed_decided_field(
         ),
         (
             "ignore_patterns",
-            format!("{:?}", decided.ignore_patterns) == format!("{:?}", adjusted.ignore_patterns),
+            decided
+                .ignore_patterns
+                .same_globs(&adjusted.ignore_patterns),
         ),
         (
             "workspace_patterns",

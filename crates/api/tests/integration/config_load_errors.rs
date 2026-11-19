@@ -1,8 +1,7 @@
 //! The config load errors of the typed runners. A broken explicit config and
 //! a broken discovered config each give exit code 2, the code
-//! `FALLOW_CONFIG_LOAD_FAILED` and the context `analysis.configPath`. The text
-//! depends on the step that loads the config first: the API loader, or the
-//! engine resolution of one analysis.
+//! `FALLOW_CONFIG_LOAD_FAILED`, the context `analysis.configPath` and the text
+//! of the config loader, whichever step loads the config first.
 
 #![expect(
     clippy::expect_used,
@@ -56,7 +55,7 @@ fn analysis(root: &Path, explicit: bool) -> AnalysisOptions {
     }
 }
 
-/// The detail of the config error, as the API loader and the engine format it.
+/// The detail of the config error, as the config loader formats it.
 fn detail(root: &Path, explicit: bool) -> String {
     if explicit {
         let err = FallowConfig::load(&root.join(CONFIG_NAME)).expect_err("broken config");
@@ -167,14 +166,11 @@ fn runners_report_the_api_loader_text_before_the_analysis_loads() {
 }
 
 #[test]
-fn dead_code_reports_the_engine_text_when_the_analysis_loads_first() {
+fn dead_code_reports_the_loader_text_when_the_analysis_loads_first() {
     for explicit in [true, false] {
         let dir = tempfile::tempdir().expect("tempdir");
         let root = project(dir.path(), Some(SYNTAX_ERROR));
-        let expected = format!(
-            "failed to load config: invalid config: {}",
-            detail(&root, explicit)
-        );
+        let expected = format!("failed to load config: {}", detail(&root, explicit));
         let err = run_dead_code(&DeadCodeOptions {
             analysis: AnalysisOptions {
                 type_aware: TypeAwareOptions {

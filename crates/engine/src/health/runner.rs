@@ -3,14 +3,11 @@
 use std::time::Instant;
 use std::{path::PathBuf, sync::Arc};
 
-use fallow_config::{ProductionAnalysis, WorkspaceInfo};
-use fallow_types::output_format::OutputFormat;
+use fallow_config::WorkspaceInfo;
 use rustc_hash::FxHashSet;
 
 use crate::{
-    duplicates::DuplicationReport,
-    project_config::{ProjectConfigOptions, config_for_project_analysis},
-    results::DeadCodeAnalysisArtifacts,
+    duplicates::DuplicationReport, resolved_run::Runnable, results::DeadCodeAnalysisArtifacts,
     session::AnalysisSession,
 };
 
@@ -37,35 +34,21 @@ pub struct UngroupedHealthSession {
 }
 
 impl UngroupedHealthSession {
-    /// Load the project config and open the analysis session.
+    /// Open the analysis session of the health analysis of a resolved run.
     ///
     /// # Errors
     ///
-    /// Returns the health command exit code for invalid inputs or a config
-    /// that does not load.
-    pub fn load(options: &HealthExecutionOptions<'_>) -> Result<Self, HealthError> {
+    /// Returns the health command exit code for invalid inputs.
+    pub fn load(
+        options: &HealthExecutionOptions<'_>,
+        health: &Runnable<'_>,
+    ) -> Result<Self, HealthError> {
         validate_health_churn_file(options)?;
 
         let start = Instant::now();
-        let project_config = config_for_project_analysis(
-            options.root,
-            options.config_path.as_deref(),
-            ProjectConfigOptions {
-                output: OutputFormat::Human,
-                no_cache: options.no_cache,
-                threads: options.threads,
-                production_override: options.production_override,
-                quiet: true,
-                analysis: ProductionAnalysis::Health,
-                allow_remote_extends: options.allow_remote_extends,
-            },
-        )
-        .map_err(|_| HealthError::message("failed to load health project config", 2))?;
+        let session = health.open_session();
         let config_ms = start.elapsed().as_secs_f64() * 1000.0;
-        Ok(Self {
-            session: AnalysisSession::from_config(project_config),
-            config_ms,
-        })
+        Ok(Self { session, config_ms })
     }
 
     /// The workspaces that the session discovered.

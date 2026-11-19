@@ -308,6 +308,49 @@ pub struct CombinedOutput<Check, Dupes, Health> {
     /// findings. See `CheckOutput::next_steps` for the contract.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub next_steps: Vec<NextStep>,
+    /// Each analysis that the run skips, with the reason, in the order dead
+    /// code, duplication, health. The typed programmatic API fills it. The
+    /// CLI leaves it absent. Omitted when the run skips no analysis.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub skipped: Vec<SkippedAnalysis>,
+}
+
+/// One analysis that a combined run skips.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct SkippedAnalysis {
+    /// The analysis that the run skips.
+    pub analysis: SkippedAnalysisName,
+    /// Why the run skips the analysis.
+    pub reason: SkipReasonName,
+    /// The config key that turns the analysis off, for example
+    /// `duplicates.enabled`. Present only for `off-by-config`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub config_key: Option<String>,
+}
+
+/// The analysis of a [`SkippedAnalysis`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum SkippedAnalysisName {
+    /// The dead-code analysis: the `check` section.
+    DeadCode,
+    /// The duplication analysis: the `dupes` section.
+    Duplication,
+    /// The health analysis: the `health` section.
+    Health,
+}
+
+/// The reason of a [`SkippedAnalysis`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "kebab-case")]
+pub enum SkipReasonName {
+    /// The options of the call leave the analysis out.
+    NotRequested,
+    /// A config key turns the analysis off.
+    OffByConfig,
 }
 
 /// Optional `_meta` block for [`CombinedOutput`].
@@ -653,6 +696,7 @@ mod tests {
                 health: None::<serde_json::Value>,
                 workspace_diagnostics: Vec::new(),
                 next_steps: Vec::new(),
+                skipped: Vec::new(),
             },
             Some("run-combined"),
         )

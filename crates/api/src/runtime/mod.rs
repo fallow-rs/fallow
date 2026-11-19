@@ -2,11 +2,11 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_config::{FallowConfig, HealthConfig, ProductionConfig};
+use fallow_config::{FallowConfig, HealthConfig, PlannedAnalysis};
 use fallow_engine::{
     dead_code::DeadCodeAnalysisArtifacts,
     duplicates::DuplicationReport,
-    project_config::{self, ConfigFileOptions, ConfigLoadError, ProductionFlags, ProductionModes},
+    project_config::{self, ConfigFileOptions, ConfigLoadError},
     session::AnalysisSession,
 };
 use fallow_output::{HealthGrouping, HealthReport};
@@ -43,6 +43,8 @@ pub use crate::runtime_output::{
     serialize_health_report_json,
 };
 pub use audit::{AUDIT_CONFIG_BASELINE_UNSUPPORTED, run_audit};
+#[cfg(test)]
+pub(crate) use audit::{analysis_options_for_audit, resolve_audit_run};
 pub use combined::run_combined;
 pub use dead_code::{
     run_architecture, run_boundary_violations, run_circular_dependencies, run_dead_code,
@@ -72,64 +74,17 @@ use crate::{
     },
     derive_complexity_options,
     next_steps::{audit_changed_applicable, setup_pointer_applicable, suggestions_enabled},
+    run::{ProgrammaticEntry, ResolvedRun, resolve_programmatic_run},
 };
 
 type ProgrammaticResult<T> = Result<T, ProgrammaticError>;
-
-pub(super) fn resolve_effective_production_modes(
-    resolved: &ProgrammaticAnalysisContext,
-    dead_code_override: Option<bool>,
-    health_override: Option<bool>,
-    dupes_override: Option<bool>,
-) -> ProgrammaticResult<ProductionModes> {
-    let config = load_context_production_config(resolved)?;
-    Ok(ProductionFlags {
-        global: resolved.production_override(),
-        dead_code: dead_code_override,
-        health: health_override,
-        dupes: dupes_override,
-    }
-    .effective_modes(&config))
-}
-
-/// The run plan of the project config for `request`. A project without a
-/// config file has the default config. The config loads only when the plan
-/// depends on it.
-pub(super) fn plan_run(
-    resolved: &ProgrammaticAnalysisContext,
-    request: fallow_config::RunRequest,
-) -> ProgrammaticResult<fallow_config::RunPlan> {
-    let config = if request.reads_config() {
-        load_config_file(
-            resolved.root(),
-            resolved.config_path().as_deref(),
-            resolved.allow_remote_extends(),
-        )?
-    } else {
-        None
-    };
-    Ok(fallow_config::plan_run(
-        config.unwrap_or_default().plan_sections(),
-        request,
-    ))
-}
-
-fn load_context_production_config(
-    resolved: &ProgrammaticAnalysisContext,
-) -> ProgrammaticResult<ProductionConfig> {
-    let loaded = load_config_file(
-        resolved.root(),
-        resolved.config_path().as_deref(),
-        resolved.allow_remote_extends(),
-    )?;
-    Ok(loaded.map_or_else(ProductionConfig::default, |config| config.production))
-}
 
 /// Load the `health` section of the project config for adapters that layer
 /// config-sourced coverage inputs before building options (the MCP typed
 /// route; see [`crate::coverage`]). The root and config path resolve exactly
 /// as they do for the analysis itself. Returns `None` when the project has no
-/// config file.
+/// config file. The function parses the config file and does not validate
+/// the rest of the config, so the health analysis reports such errors.
 ///
 /// # Errors
 ///
@@ -266,6 +221,14 @@ pub trait ProgrammaticHealthRunner {
         &self,
         options: &ComplexityOptions,
     ) -> Result<ProgrammaticHealthRun, ProgrammaticError>;
+
+    /// Whether [`Self::run_programmatic_health`] refuses config-sourced
+    /// type-aware analysis itself, from the config that it loads. With the
+    /// default `false`, [`run_health_with_runner`] reads the config for the
+    /// check before the runner starts.
+    fn refuses_config_type_aware(&self) -> bool {
+        false
+    }
 }
 
 /// Default health runner backed directly by `fallow-engine`.
@@ -284,16 +247,52 @@ impl ProgrammaticHealthRunner for EngineHealthRunner {
         options: &ComplexityOptions,
     ) -> Result<ProgrammaticHealthRun, ProgrammaticError> {
         let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
-        resolved.install(|| run_programmatic_health_on_engine(&resolved, options))
+        resolved.install(|| {
+            // The health runner reports a config that does not load with its
+            // own error, as `fallow health` does.
+            let resolve = || {
+                resolve_programmatic_run(&options.analysis, &ProgrammaticEntry::Health)
+                    .map_err(|_| health_config_load_error())
+            };
+            let run = if health_reads_config_type_aware(options) {
+                type_aware_config::resolve_run_refusing_type_aware(
+                    &options.analysis.type_aware,
+                    type_aware_config::TypeAwareCommand::Analysis,
+                    type_aware_config::ConfigLocation::of(&resolved),
+                    resolve,
+                )?
+            } else {
+                resolve()?
+            };
+            run_programmatic_health_on_engine(&resolved, options, &run)
+        })
     }
+
+    fn refuses_config_type_aware(&self) -> bool {
+        true
+    }
+}
+
+/// The error of a health analysis whose config does not load, as
+/// `fallow health` reports it.
+pub(super) fn health_config_load_error() -> ProgrammaticError {
+    programmatic_health_error(
+        "health",
+        fallow_engine::health::HealthError::Message {
+            message: "failed to load health project config".to_owned(),
+            exit_code: 2,
+        },
+    )
 }
 
 fn run_programmatic_health_on_engine(
     resolved: &ProgrammaticAnalysisContext,
     options: &ComplexityOptions,
+    run: &ResolvedRun,
 ) -> ProgrammaticResult<ProgrammaticHealthRun> {
     let health_options = derive_programmatic_health_execution_options(resolved, options);
-    let loaded = fallow_engine::health::UngroupedHealthSession::load(&health_options)
+    let health = crate::run::runnable(run, PlannedAnalysis::Health)?;
+    let loaded = fallow_engine::health::UngroupedHealthSession::load(&health_options, &health)
         .map_err(|error| programmatic_health_error("health", error))?;
     let workspace_roots = workspace_roots_for_session(resolved, loaded.workspaces())?;
     let result = loaded
@@ -481,23 +480,36 @@ pub fn run_complexity_with_runner(
     runner: &impl ProgrammaticHealthRunner,
 ) -> ProgrammaticResult<HealthProgrammaticOutput> {
     crate::validate_complexity_options(options)?;
-    reject_health_config_type_aware(options)?;
+    if !runner.refuses_config_type_aware() {
+        reject_health_config_type_aware(options)?;
+    }
     run_validated_complexity(options, runner)
 }
 
-/// The health section of `fallow audit`. Audit resolves type-aware analysis
-/// with its own precedence, so the `fallow health` check does not apply.
-pub(super) fn run_health_for_audit(
+/// The health section of a combined or audit run that the caller resolved.
+/// The caller checks the type-aware layers with its own precedence, so the
+/// `fallow health` check does not apply.
+pub(super) fn run_health_in_run(
     options: &ComplexityOptions,
+    resolved: &ProgrammaticAnalysisContext,
+    run: &ResolvedRun,
 ) -> ProgrammaticResult<HealthProgrammaticOutput> {
     crate::validate_complexity_options(options)?;
-    run_validated_complexity(options, &EngineHealthRunner)
+    crate::analysis_context::ensure_options_not_cancelled(&options.analysis, "health analysis")?;
+    let health = resolved.install(|| run_programmatic_health_on_engine(resolved, options, run))?;
+    Ok(assemble_health_programmatic_output(options, health))
 }
 
 /// `fallow health` runs type coupling from config only when no section is
 /// selected (`health_type_coupling_is_default_section` in the CLI).
+fn health_reads_config_type_aware(options: &ComplexityOptions) -> bool {
+    !options.css && !crate::derive_complexity_options(options).any_section
+}
+
+/// The type-aware check of [`health_reads_config_type_aware`] for a runner
+/// that does not refuse config-sourced type-aware analysis itself.
 fn reject_health_config_type_aware(options: &ComplexityOptions) -> ProgrammaticResult<()> {
-    if options.css || crate::derive_complexity_options(options).any_section {
+    if !health_reads_config_type_aware(options) {
         return Ok(());
     }
     let root = crate::analysis_context::resolve_analysis_root(options.analysis.root.as_deref())?;

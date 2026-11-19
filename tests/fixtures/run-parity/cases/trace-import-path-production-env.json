@@ -1,13 +1,29 @@
 {
   "name": "trace-import-path-production-env",
-  "files": { "package.json": "{}" },
-  "env": { "FALLOW_PRODUCTION": "1" },
+  "files": {
+    "package.json": "{}"
+  },
+  "env": {
+    "FALLOW_PRODUCTION": "1"
+  },
   "inputs": {
-    "mcp": { "tool": "trace_import_path", "params": {} }
+    "mcp": {
+      "tool": "trace_import_path",
+      "params": {}
+    },
+    "api": {
+      "entry": "trace-path"
+    },
+    "node": {
+      "not_expressible": "The Node bindings have no trace entry point"
+    }
   },
   "expected": {
     "surface": "<row>",
     "command": "trace-path",
-    "analyses.dead_code.production": { "value": false, "source": "default:production-off" }
+    "analyses.dead_code.production": {
+      "value": false,
+      "source": "default:production-off"
+    }
   }
 }

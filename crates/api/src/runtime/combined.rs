@@ -1,12 +1,15 @@
 use std::{path::PathBuf, time::Instant};
 
-use fallow_config::WorkspaceInfo;
+use fallow_config::{PlannedAnalysis, WorkspaceInfo};
 use fallow_engine::{
     dead_code::DeadCodeAnalysisArtifacts,
     project_analysis::{ProjectAnalysisArtifactOptions, ProjectAnalysisArtifacts},
     session::AnalysisSession,
 };
-use fallow_output::{CombinedNextStepsInput, build_combined_next_steps};
+use fallow_output::{
+    CombinedNextStepsInput, SkipReasonName, SkippedAnalysis, SkippedAnalysisName,
+    build_combined_next_steps,
+};
 use rustc_hash::FxHashSet;
 
 use crate::{
@@ -17,13 +20,17 @@ use crate::{
         audit_changed_applicable, default_workspace_ref, default_workspace_ref_for_workspaces,
         setup_pointer_applicable, suggestions_enabled,
     },
+    run::{
+        AnalysisSlot, ProgrammaticEntry, ResolveError, ResolvedRun, RouteSettings,
+        resolve_route_run_raw,
+    },
 };
 
 use super::{
-    ProductionModes, ProgrammaticResult, health_may_consume_dead_code_artifacts,
-    health_may_consume_duplication_report, resolve_effective_production_modes, run_duplication,
-    run_health, run_health_with_session_artifacts,
+    ProgrammaticResult, health_may_consume_dead_code_artifacts,
+    health_may_consume_duplication_report, run_health_in_run, run_health_with_session_artifacts,
 };
+use fallow_engine::project_config::ProductionModes;
 
 struct PreparedCombinedOptions {
     dead_code: DeadCodeOptions,
@@ -42,6 +49,7 @@ struct CombinedSectionRun {
 struct DeadCodeSessionRun<'a> {
     options: &'a CombinedOptions,
     resolved: &'a crate::analysis_context::ProgrammaticAnalysisContext,
+    run: &'a ResolvedRun,
     prepared: &'a PreparedCombinedOptions,
     changed_files: Option<&'a FxHashSet<PathBuf>>,
     session: &'a AnalysisSession,
@@ -58,40 +66,42 @@ struct DeadCodeSessionRun<'a> {
 /// [`super::TYPE_AWARE_CONFIG_UNSUPPORTED`].
 pub fn run_combined(options: &CombinedOptions) -> ProgrammaticResult<CombinedProgrammaticOutput> {
     if !(options.dead_code || options.duplication || options.health) {
-        return Err(ProgrammaticError::new(
-            "combined analysis requires at least one enabled section",
-            2,
-        )
-        .with_code("FALLOW_COMBINED_EMPTY")
-        .with_context("combined"));
+        return Err(
+            ProgrammaticError::new(crate::run::COMBINED_EMPTY_MESSAGE, 2)
+                .with_code("FALLOW_COMBINED_EMPTY")
+                .with_context("combined"),
+        );
     }
 
     let start = Instant::now();
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
-    // Bare `fallow` makes dead code type-aware and adds type coupling to
-    // health from config. The shared-session paths below do not pass through
-    // the checks of `run_dead_code` and `run_health`, so the check runs here.
-    if options.dead_code || options.health {
-        super::type_aware_config::reject_config_type_aware(
-            &options.analysis.type_aware,
-            &resolved,
-            super::type_aware_config::TypeAwareCommand::Analysis,
-        )?;
-    }
-    let options = &options_with_duplicates_config(options, &resolved)?;
     resolved.install(|| {
         resolved.ensure_not_cancelled("combined analysis")?;
-        let production_modes = resolve_effective_production_modes(
-            &resolved,
-            options.production_dead_code,
-            options.production_health,
-            options.production_dupes,
-        )?;
+        let resolve = || resolve_combined_run(options, &resolved);
+        // Bare `fallow` makes dead code type-aware and adds type coupling to
+        // health from config. The shared-session paths below do not pass
+        // through the checks of `run_dead_code` and `run_health`, so the
+        // check runs here.
+        let run = if options.dead_code || options.health {
+            super::type_aware_config::resolve_run_refusing_type_aware(
+                &options.analysis.type_aware,
+                super::type_aware_config::TypeAwareCommand::Analysis,
+                super::type_aware_config::ConfigLocation::of(&resolved),
+                resolve,
+            )?
+        } else {
+            resolve()?
+        };
+        let options = &options_with_run_plan(options, &run);
+        let production_modes = run.production_modes();
         let prepared = prepare_combined_options(options, production_modes);
         let changed_files = changed_files_for_run(&resolved)?;
         let sections = run_combined_sections(
-            options,
-            &resolved,
+            &CombinedRun {
+                options,
+                resolved: &resolved,
+                run: &run,
+            },
             &prepared,
             changed_files.as_ref(),
             production_modes,
@@ -115,28 +125,131 @@ pub fn run_combined(options: &CombinedOptions) -> ProgrammaticResult<CombinedPro
             next_steps,
             telemetry_analysis_run_id: None,
             request_outcomes: resolved.request_outcomes(),
+            skipped: skipped_analyses(&run),
         })
     })
 }
 
-/// Plan the duplication domain with [`fallow_config::plan_run`], as the bare
-/// `fallow` command does. A run that selects only the duplication domain
-/// names it. A run with another domain runs duplication by default, so
-/// `duplicates.enabled: false` turns it off.
-fn options_with_duplicates_config(
+/// The run of a combined call. When the health analysis runs alone, a config
+/// that parses but does not validate gives the error of the health analysis,
+/// as `run_health` reports it.
+fn resolve_combined_run(
     options: &CombinedOptions,
     resolved: &crate::analysis_context::ProgrammaticAnalysisContext,
-) -> ProgrammaticResult<CombinedOptions> {
+) -> ProgrammaticResult<ResolvedRun> {
+    resolve_route_run_raw(
+        &options.analysis,
+        &ProgrammaticEntry::Combined {
+            dead_code: options.dead_code,
+            duplication: options.duplication,
+            health: options.health,
+            production_dead_code: options.production_dead_code,
+            production_health: options.production_health,
+            production_dupes: options.production_dupes,
+        },
+        RouteSettings {
+            include_entry_exports: options.include_entry_exports,
+        },
+    )
+    .map_err(|err| match err {
+        ResolveError::ConfigInvalid { .. } | ResolveError::Workspace { .. }
+            if health_runs_alone(options, resolved) =>
+        {
+            super::health_config_load_error()
+        }
+        _ => crate::run::programmatic_error(&err),
+    })
+}
+
+/// Whether the plan of the call runs the health analysis and no other. The
+/// plan of the duplication analysis reads only the parsed config file.
+fn health_runs_alone(
+    options: &CombinedOptions,
+    resolved: &crate::analysis_context::ProgrammaticAnalysisContext,
+) -> bool {
+    if options.dead_code || !options.health {
+        return false;
+    }
+    if !options.duplication {
+        return true;
+    }
+    let Ok(config) = super::load_config_file(
+        resolved.root(),
+        resolved.config_path().as_deref(),
+        resolved.allow_remote_extends(),
+    ) else {
+        return false;
+    };
     let request = fallow_config::RunRequest::from_booleans(
         fallow_config::RunCommand::Combined,
-        options.dead_code,
-        options.duplication,
-        options.health,
+        false,
+        true,
+        true,
     );
-    Ok(CombinedOptions {
-        duplication: super::plan_run(resolved, request)?.duplication.runs(),
+    !fallow_config::plan_run(config.unwrap_or_default().plan_sections(), request)
+        .duplication
+        .runs()
+}
+
+/// The options with the plan of the run: the run plans each analysis with
+/// [`fallow_config::plan_run`], as the bare `fallow` command does. A run that
+/// selects only the duplication analysis names it. A run with another
+/// analysis runs duplication by default, so `duplicates.enabled: false` turns
+/// it off.
+fn options_with_run_plan(options: &CombinedOptions, run: &ResolvedRun) -> CombinedOptions {
+    let runs = |analysis| matches!(run.analysis(analysis), AnalysisSlot::Runs(_));
+    CombinedOptions {
+        dead_code: runs(PlannedAnalysis::DeadCode),
+        duplication: runs(PlannedAnalysis::Duplication),
+        health: runs(PlannedAnalysis::Health),
         ..options.clone()
+    }
+}
+
+/// Each analysis that the run skips, with the reason.
+fn skipped_analyses(run: &ResolvedRun) -> Vec<SkippedAnalysis> {
+    [
+        (PlannedAnalysis::DeadCode, SkippedAnalysisName::DeadCode),
+        (
+            PlannedAnalysis::Duplication,
+            SkippedAnalysisName::Duplication,
+        ),
+        (PlannedAnalysis::Health, SkippedAnalysisName::Health),
+    ]
+    .into_iter()
+    .filter_map(|(analysis, name)| match run.analysis(analysis) {
+        AnalysisSlot::Runs(_) => None,
+        AnalysisSlot::Skipped { reason } => {
+            let by_config = matches!(
+                reason.value(),
+                fallow_config::AnalysisSelection::Skipped(fallow_config::SkipReason::Config(_))
+            );
+            let config_key = match reason.source() {
+                fallow_types::sourced::Source::ConfigFile { key, .. } if by_config => {
+                    Some((*key).to_owned())
+                }
+                _ => None,
+            };
+            Some(SkippedAnalysis {
+                analysis: name,
+                reason: if by_config {
+                    SkipReasonName::OffByConfig
+                } else {
+                    SkipReasonName::NotRequested
+                },
+                config_key,
+            })
+        }
     })
+    .collect()
+}
+
+/// The inputs that each section of a combined call reads.
+#[derive(Clone, Copy)]
+struct CombinedRun<'a> {
+    options: &'a CombinedOptions,
+    resolved: &'a crate::analysis_context::ProgrammaticAnalysisContext,
+    run: &'a ResolvedRun,
 }
 
 fn prepare_combined_options(
@@ -151,48 +264,48 @@ fn prepare_combined_options(
 }
 
 fn run_combined_sections(
-    options: &CombinedOptions,
-    resolved: &crate::analysis_context::ProgrammaticAnalysisContext,
+    call: &CombinedRun<'_>,
     prepared: &PreparedCombinedOptions,
     changed_files: Option<&FxHashSet<PathBuf>>,
     production_modes: ProductionModes,
 ) -> ProgrammaticResult<CombinedSectionRun> {
+    let options = call.options;
     let share_health =
         options.dead_code && options.health && production_modes.dead_code_matches_health();
     let share_dupes =
         options.dead_code && options.duplication && production_modes.dead_code_matches_dupes();
     if share_health || share_dupes {
         return run_combined_with_dead_code_session(
-            options,
-            resolved,
+            call,
             prepared,
             changed_files,
             share_health,
             share_dupes,
         );
     }
-    run_combined_sections_isolated(options, resolved, prepared)
+    run_combined_sections_isolated(call, prepared)
 }
 
 fn run_combined_with_dead_code_session(
-    options: &CombinedOptions,
-    resolved: &crate::analysis_context::ProgrammaticAnalysisContext,
+    call: &CombinedRun<'_>,
     prepared: &PreparedCombinedOptions,
     changed_files: Option<&FxHashSet<PathBuf>>,
     share_health: bool,
     share_dupes: bool,
 ) -> ProgrammaticResult<CombinedSectionRun> {
-    resolved.ensure_not_cancelled("config load and file discovery")?;
-    let session = super::dead_code::load_dead_code_session_in_mode(
-        &prepared.dead_code,
+    let CombinedRun {
+        options,
         resolved,
-        prepared.dead_code.analysis.production_override,
-    )?;
+        run,
+    } = *call;
+    resolved.ensure_not_cancelled("config load and file discovery")?;
+    let session = super::dead_code::load_dead_code_session(&prepared.dead_code, resolved, run)?;
     super::dead_code::resolve_package_map_before_analysis(resolved, &session)?;
     if share_dupes {
         return run_combined_with_project_artifacts(CombinedProjectArtifactRun {
             options,
             resolved,
+            run,
             prepared,
             changed_files,
             share_health,
@@ -202,6 +315,7 @@ fn run_combined_with_dead_code_session(
     let ctx = DeadCodeSessionRun {
         options,
         resolved,
+        run,
         prepared,
         changed_files,
         session: &session,
@@ -224,6 +338,7 @@ fn run_combined_with_dead_code_session(
 struct CombinedProjectArtifactRun<'a> {
     options: &'a CombinedOptions,
     resolved: &'a crate::analysis_context::ProgrammaticAnalysisContext,
+    run: &'a ResolvedRun,
     prepared: &'a PreparedCombinedOptions,
     changed_files: Option<&'a FxHashSet<PathBuf>>,
     share_health: bool,
@@ -236,6 +351,7 @@ fn run_combined_with_project_artifacts(
     let CombinedProjectArtifactRun {
         options,
         resolved,
+        run: resolved_run,
         prepared,
         changed_files,
         share_health,
@@ -267,6 +383,7 @@ fn run_combined_with_project_artifacts(
         &DeadCodeSessionRun {
             options,
             resolved,
+            run: resolved_run,
             prepared,
             changed_files,
             session,
@@ -393,7 +510,12 @@ fn run_combined_duplication(
         return Ok(None);
     }
     if !share_dupes {
-        return run_duplication(&ctx.prepared.duplication).map(Some);
+        return super::duplication::run_duplication_in_context(
+            &ctx.prepared.duplication,
+            ctx.resolved,
+            ctx.run,
+        )
+        .map(Some);
     }
     super::duplication::run_duplication_with_session(
         &ctx.prepared.duplication,
@@ -415,7 +537,7 @@ fn run_combined_health(
         return Ok(None);
     }
     if !share_health {
-        return run_health(&ctx.prepared.health).map(Some);
+        return run_health_in_run(&ctx.prepared.health, ctx.resolved, ctx.run).map(Some);
     }
     run_health_with_session_artifacts(
         &ctx.prepared.health,
@@ -429,22 +551,30 @@ fn run_combined_health(
 }
 
 fn run_combined_sections_isolated(
-    options: &CombinedOptions,
-    resolved: &crate::analysis_context::ProgrammaticAnalysisContext,
+    call: &CombinedRun<'_>,
     prepared: &PreparedCombinedOptions,
 ) -> ProgrammaticResult<CombinedSectionRun> {
+    let CombinedRun {
+        options,
+        resolved,
+        run,
+    } = *call;
     Ok(CombinedSectionRun {
         dead_code: options
             .dead_code
-            .then(|| super::dead_code::run_dead_code(&prepared.dead_code))
+            .then(|| {
+                super::dead_code::run_dead_code_in_context(&prepared.dead_code, None, resolved, run)
+            })
             .transpose()?,
         duplication: options
             .duplication
-            .then(|| run_duplication(&prepared.duplication))
+            .then(|| {
+                super::duplication::run_duplication_in_context(&prepared.duplication, resolved, run)
+            })
             .transpose()?,
         health: options
             .health
-            .then(|| run_health(&prepared.health))
+            .then(|| run_health_in_run(&prepared.health, resolved, run))
             .transpose()?,
         root: resolved.root().to_path_buf(),
         workspaces: None,

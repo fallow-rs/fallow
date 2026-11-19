@@ -53,7 +53,7 @@ impl GivenSettings {
     /// because [`apply_env_overrides_from`] clears the baselines and
     /// [`Self::apply`] cannot get them back.
     #[must_use]
-    pub fn env_for_steps(&self, env: &EnvSnapshot) -> EnvSnapshot {
+    pub(crate) fn env_for_steps(&self, env: &EnvSnapshot) -> EnvSnapshot {
         env.clone().retain(|var| match var {
             EnvVar::MaxFileSize => self.max_file_size_mb.is_none(),
             EnvVar::CacheDir => self.cache_dir.is_none(),
@@ -70,8 +70,12 @@ impl GivenSettings {
         if let Some(dir) = &self.cache_dir {
             config.override_cache_dir(dir.clone());
         }
-        if let Some(include) = self.include_entry_exports {
-            config.include_entry_exports = include;
+        // A given `true` wins over each workspace setting, as the
+        // `--include-entry-exports` flag does.
+        match self.include_entry_exports {
+            Some(true) => config.force_include_entry_exports(),
+            Some(false) => config.include_entry_exports = false,
+            None => {}
         }
         if self.package_baselines == Some(false) {
             config.workspace_changed_since.clear();
@@ -86,7 +90,7 @@ type WorkspaceMetadata = (Vec<WorkspaceInfo>, Vec<WorkspaceDiagnostic>, f64);
 /// Set the `production` setting of `config` to `on` for every analysis. A
 /// config from a file keeps its production `ignore` globs. A config without a
 /// file gets the bool form.
-pub fn flatten_production(config: &mut FallowConfig, from_file: bool, on: bool) {
+pub(crate) fn flatten_production(config: &mut FallowConfig, from_file: bool, on: bool) {
     config.production = if from_file {
         config.production.for_run(on)
     } else {
@@ -96,7 +100,7 @@ pub fn flatten_production(config: &mut FallowConfig, from_file: bool, on: bool) 
 
 /// Resolve `config` for `root` and collect its workspace metadata. A
 /// workspace discovery error is an error.
-pub fn mode_entry(
+pub(crate) fn mode_entry(
     root: &Path,
     config: FallowConfig,
     options: ResolveOptions,
@@ -116,7 +120,7 @@ pub fn mode_entry(
 }
 
 /// [`mode_entry`], with no workspaces when the workspace discovery fails.
-pub fn mode_entry_lossy(
+pub(crate) fn mode_entry_lossy(
     root: &Path,
     config: FallowConfig,
     options: ResolveOptions,
@@ -149,7 +153,7 @@ fn resolve_with_inputs(
 
 /// Resolve the config for `root`, then apply the environment variables that
 /// `env` gives.
-pub fn resolve_with_env_from(
+pub(crate) fn resolve_with_env_from(
     config: FallowConfig,
     root: &Path,
     options: ResolveOptions,
@@ -168,7 +172,7 @@ pub fn resolve_with_env_from(
 }
 
 /// The `FALLOW_MAX_FILE_SIZE` value in megabytes, when it is a valid number.
-pub fn max_file_size_env(env: &EnvSnapshot) -> Option<u32> {
+pub(crate) fn max_file_size_env(env: &EnvSnapshot) -> Option<u32> {
     env.get(EnvVar::MaxFileSize)
         .and_then(|raw| raw.to_str().and_then(|raw| raw.trim().parse::<u32>().ok()))
 }
@@ -176,7 +180,7 @@ pub fn max_file_size_env(env: &EnvSnapshot) -> Option<u32> {
 /// Apply the environment variables that every host honors. The CLI, the LSP,
 /// the MCP server and the Node bindings all load config through these steps,
 /// so a variable applied here has the same meaning on each surface.
-pub fn apply_env_overrides_from(config: &mut ResolvedConfig, env: &EnvSnapshot) {
+pub(crate) fn apply_env_overrides_from(config: &mut ResolvedConfig, env: &EnvSnapshot) {
     if let Some(max_file_size_mb) = max_file_size_env(env) {
         config.max_file_size_bytes =
             fallow_config::resolve_max_file_size_bytes(Some(max_file_size_mb));
@@ -202,7 +206,9 @@ pub fn apply_env_overrides_from(config: &mut ResolvedConfig, env: &EnvSnapshot) 
 /// # Errors
 ///
 /// Returns an error when the root manifest cannot be parsed.
-pub fn collect_workspace_metadata(config: &ResolvedConfig) -> EngineResult<WorkspaceMetadata> {
+pub(crate) fn collect_workspace_metadata(
+    config: &ResolvedConfig,
+) -> EngineResult<WorkspaceMetadata> {
     let start = std::time::Instant::now();
     let (workspaces, diagnostics) =
         fallow_config::discover_workspaces_with_diagnostics_and_patterns(
@@ -242,14 +248,17 @@ fn with_undeclared_workspace_diagnostics(
 }
 
 /// Validate the external plugins, the boundaries and the rule packs.
-pub fn validate_config(root: &Path, config: &FallowConfig) -> EngineResult<()> {
+pub(crate) fn validate_config(root: &Path, config: &FallowConfig) -> EngineResult<()> {
     fallow_config::discover_and_validate_external_plugins(root, &config.plugins)
         .map_err(|errors| joined_config_errors("invalid external plugin definition", &errors))?;
     validate_boundaries_and_rule_packs(root, config)
 }
 
 /// Validate the boundaries and the rule packs.
-pub fn validate_boundaries_and_rule_packs(root: &Path, config: &FallowConfig) -> EngineResult<()> {
+pub(crate) fn validate_boundaries_and_rule_packs(
+    root: &Path,
+    config: &FallowConfig,
+) -> EngineResult<()> {
     config
         .validate_resolved_boundaries(root)
         .map_err(|errors| joined_config_errors("invalid boundary configuration", &errors))?;

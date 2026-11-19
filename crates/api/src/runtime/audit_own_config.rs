@@ -2,9 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_config::{ProductionAnalysis, ResolvedConfig, Severity};
-use fallow_engine::project_config::ProjectConfigOptions;
-use fallow_types::output_format::OutputFormat;
+use fallow_config::{PlannedAnalysis, ResolvedConfig, Severity};
 use fallow_types::results::AnalysisResults;
 use rustc_hash::FxHashSet;
 
@@ -82,22 +80,18 @@ fn base_config_reporting_unused_code(
     input: &BaseOwnConfigInput<'_>,
     base_config_path: Option<&Path>,
 ) -> Option<ResolvedConfig> {
-    let analysis = input.base_analysis;
-    let project = fallow_engine::project_config::config_for_project_analysis(
-        input.base_root,
-        base_config_path,
-        ProjectConfigOptions {
-            output: OutputFormat::Json,
-            no_cache: analysis.no_cache,
-            threads: analysis.threads.unwrap_or(1),
-            production_override: analysis.production_override,
-            quiet: true,
-            analysis: ProductionAnalysis::DeadCode,
-            allow_remote_extends: analysis.allow_remote_extends,
-        },
-    )
-    .ok()?;
-    let rules = &project.config.rules;
+    let analysis = AnalysisOptions {
+        root: Some(input.base_root.to_path_buf()),
+        config_path: base_config_path.map(Path::to_path_buf),
+        ..input.base_analysis.clone()
+    };
+    let run =
+        crate::run::resolve_programmatic_run(&analysis, &crate::run::ProgrammaticEntry::DeadCode)
+            .ok()?;
+    let config = crate::run::runnable(&run, PlannedAnalysis::DeadCode)
+        .ok()?
+        .config();
+    let rules = &config.rules;
     (rules.unused_files != Severity::Off && rules.unused_exports != Severity::Off)
-        .then_some(project.config)
+        .then(|| config.clone())
 }

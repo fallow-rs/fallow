@@ -48,7 +48,8 @@ pub fn run_decision_surface(
 
     // The caller can be a 2 MiB Tokio blocking thread. Parse on the worker
     // stack of the analysis pool instead.
-    let head = resolved.install(|| run_decision_analysis(&resolved, Some(&changed_files), None))?;
+    let head = resolved
+        .install(|| run_decision_analysis(&resolved, &analysis, Some(&changed_files), None))?;
     let manifests = changed_manifests(&resolved.root, &changed_files);
     let base = compute_base_decision_snapshot(
         options,
@@ -142,13 +143,16 @@ fn manifest_pairs(
 /// rules under review, as the CLI's base worktree pass already does.
 pub(super) fn run_decision_analysis(
     resolved: &ProgrammaticAnalysisContext,
+    analysis: &AnalysisOptions,
     changed_files: Option<&FxHashSet<PathBuf>>,
     severity_config: Option<&fallow_config::ResolvedConfig>,
 ) -> ProgrammaticResult<DecisionAnalysis> {
-    let session = super::dead_code::load_dead_code_session(
-        &super::dead_code::default_dead_code_options_for_context(resolved),
-        resolved,
+    let options = super::dead_code::default_dead_code_options(analysis);
+    let run = super::dead_code::resolve_dead_code_run(
+        &options,
+        &crate::run::ProgrammaticEntry::DecisionSurface,
     )?;
+    let session = super::dead_code::load_dead_code_session(&options, resolved, &run)?;
     let root = session.root().to_path_buf();
     let artifacts = session
         .analyze_dead_code_with_session_artifacts(false, true, changed_files.cloned())
@@ -292,7 +296,8 @@ fn compute_base_decision_snapshot(
         ..options.analysis.clone()
     };
     let resolved = resolve_programmatic_analysis_context(&base_analysis)?;
-    let base = resolved.install(|| run_decision_analysis(&resolved, None, Some(head_config)))?;
+    let base = resolved
+        .install(|| run_decision_analysis(&resolved, &base_analysis, None, Some(head_config)))?;
     let mut snapshot = snapshot_from_decision_analysis(&base);
     snapshot.manifests = base_manifests;
     Ok(snapshot)

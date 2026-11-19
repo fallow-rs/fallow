@@ -204,8 +204,7 @@ pub fn run_list_boundaries(
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
     resolved.install(|| {
         resolved.ensure_not_cancelled("config load and file discovery")?;
-        let project_config = load_list_project_config(&resolved)?;
-        let session = fallow_engine::session::AnalysisSession::from_config(project_config);
+        let session = load_list_session(&options.analysis)?;
         validate_workspace_selection(&resolved, session.workspaces())?;
         resolved.ensure_not_cancelled("the boundary listing")?;
         let changed_files = changed_files_for_run(&resolved)?;
@@ -233,8 +232,7 @@ pub fn run_project_info(
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
     resolved.install(|| {
         resolved.ensure_not_cancelled("config load and file discovery")?;
-        let project_config = load_list_project_config(&resolved)?;
-        let session = fallow_engine::session::AnalysisSession::from_config(project_config);
+        let session = load_list_session(&options.analysis)?;
         validate_workspace_selection(&resolved, session.workspaces())?;
         resolved.ensure_not_cancelled("the project listing")?;
         let config = session.config();
@@ -321,27 +319,13 @@ fn scoped_discovered_files(
         .collect()
 }
 
-fn load_list_project_config(
-    resolved: &crate::ProgrammaticAnalysisContext,
-) -> ProgrammaticResult<fallow_engine::project_config::ProjectConfig> {
-    fallow_engine::project_config::config_for_project_analysis(
-        resolved.root(),
-        resolved.config_path().as_deref(),
-        fallow_engine::project_config::ProjectConfigOptions {
-            output: fallow_types::output_format::OutputFormat::Json,
-            no_cache: resolved.no_cache(),
-            threads: resolved.threads(),
-            production_override: resolved.production_override(),
-            quiet: true,
-            analysis: fallow_config::ProductionAnalysis::DeadCode,
-            allow_remote_extends: resolved.allow_remote_extends(),
-        },
-    )
-    .map_err(|err| {
-        ProgrammaticError::new(format!("failed to load config: {err}"), 2)
-            .with_code("FALLOW_CONFIG_LOAD_FAILED")
-            .with_context("analysis.configPath")
-    })
+/// Open the session of a listing. The listing route opens the dead-code
+/// session of its run.
+fn load_list_session(
+    analysis: &crate::AnalysisOptions,
+) -> ProgrammaticResult<fallow_engine::session::AnalysisSession> {
+    let run = crate::run::resolve_programmatic_run(analysis, &crate::run::ProgrammaticEntry::List)?;
+    Ok(crate::run::runnable(&run, fallow_config::PlannedAnalysis::DeadCode)?.open_session())
 }
 
 const fn project_info_should_show_all(options: &ProjectInfoOptions) -> bool {

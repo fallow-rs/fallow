@@ -8,12 +8,16 @@
 //! layers would report syntactic results where `fallow` reports type-aware
 //! ones, so the typed route fails with a stable code instead.
 
+use std::borrow::Cow;
 use std::path::Path;
 
 use fallow_config::FallowConfig;
 
 use super::{ProgrammaticResult, load_config_file};
-use crate::{ProgrammaticError, TypeAwareOptions, analysis_context::ProgrammaticAnalysisContext};
+use crate::{
+    ProgrammaticError, TypeAwareOptions, analysis_context::ProgrammaticAnalysisContext,
+    run::ResolvedRun,
+};
 
 /// Error code of the typed runners when the environment or the project config
 /// turns on type-aware analysis that the caller did not request through
@@ -34,50 +38,78 @@ pub(super) enum TypeAwareCommand {
 }
 
 /// Fail with [`TYPE_AWARE_CONFIG_UNSUPPORTED`] when the environment or the
-/// config turns on type-aware analysis and `type_aware` leaves the choice
-/// open.
+/// config of `run` turns on type-aware analysis and `type_aware` leaves the
+/// choice open.
 ///
 /// # Errors
 ///
-/// Returns the config load errors, and [`TYPE_AWARE_CONFIG_UNSUPPORTED`] when
-/// a layer turns type-aware analysis on.
+/// Returns [`TYPE_AWARE_CONFIG_UNSUPPORTED`] when a layer turns type-aware
+/// analysis on.
 pub(super) fn reject_config_type_aware(
     type_aware: &TypeAwareOptions,
-    resolved: &ProgrammaticAnalysisContext,
+    run: &ResolvedRun,
     command: TypeAwareCommand,
 ) -> ProgrammaticResult<()> {
-    reject_config_type_aware_at(
-        type_aware,
-        ConfigLocation {
-            root: resolved.root(),
-            config_path: resolved.config_path().as_deref(),
-            allow_remote_extends: resolved.allow_remote_extends(),
-        },
-        command,
-    )
+    reject_type_aware_layers(type_aware, command, || {
+        Ok(Some(Cow::Borrowed(run.config())))
+    })
+}
+
+/// Resolve the run of a route, and fail with
+/// [`TYPE_AWARE_CONFIG_UNSUPPORTED`] when a layer turns type-aware analysis
+/// on and `type_aware` leaves the choice open. The option and
+/// `FALLOW_TYPE_AWARE` decide before the run resolves. The config layer reads
+/// the config of the run. When the run does not resolve, the check reads the
+/// config file at `location`, so a config that parses but does not validate
+/// gives the refusal and not the validation error.
+///
+/// # Errors
+///
+/// Returns [`TYPE_AWARE_CONFIG_UNSUPPORTED`] when a layer turns type-aware
+/// analysis on, and the errors of `resolve` otherwise.
+pub(super) fn resolve_run_refusing_type_aware(
+    type_aware: &TypeAwareOptions,
+    command: TypeAwareCommand,
+    location: ConfigLocation<'_>,
+    resolve: impl FnOnce() -> ProgrammaticResult<ResolvedRun>,
+) -> ProgrammaticResult<ResolvedRun> {
+    if !config_layer_decides(type_aware)? {
+        return resolve();
+    }
+    match resolve() {
+        Ok(run) => {
+            refuse_config_source(run.config(), command)?;
+            Ok(run)
+        }
+        Err(err) => {
+            reject_config_type_aware_at(type_aware, location, command)?;
+            Err(err)
+        }
+    }
 }
 
 /// `fallow dead-code --trace` adds semantic evidence and its completeness
 /// exit when type-aware analysis is on. The typed trace has neither, so it
 /// refuses a type-aware run from every layer, the `type_aware` option
 /// included. `Some(false)` keeps the trace syntactic, as `--no-type-aware`
-/// does.
+/// does. The option check comes before the config load.
 ///
 /// # Errors
 ///
-/// Returns the config load errors, and [`TYPE_AWARE_CONFIG_UNSUPPORTED`] when
-/// the option or a layer turns type-aware analysis on.
-pub(super) fn reject_type_aware_trace(
+/// Returns [`TYPE_AWARE_CONFIG_UNSUPPORTED`] when the option or a layer turns
+/// type-aware analysis on, and the errors of `resolve` otherwise.
+pub(super) fn resolve_trace_run(
     type_aware: &TypeAwareOptions,
-    resolved: &ProgrammaticAnalysisContext,
-) -> ProgrammaticResult<()> {
+    location: ConfigLocation<'_>,
+    resolve: impl FnOnce() -> ProgrammaticResult<ResolvedRun>,
+) -> ProgrammaticResult<ResolvedRun> {
     if type_aware.requested() {
         return Err(type_aware_refusal(
             "analysis.typeAware",
             "the programmatic trace has no semantic evidence; run the `fallow` CLI",
         ));
     }
-    reject_config_type_aware(type_aware, resolved, TypeAwareCommand::Analysis)
+    resolve_run_refusing_type_aware(type_aware, TypeAwareCommand::Analysis, location, resolve)
 }
 
 /// Where the project config of a run lives.
@@ -88,39 +120,82 @@ pub(super) struct ConfigLocation<'a> {
     pub allow_remote_extends: bool,
 }
 
-/// [`reject_config_type_aware`] for a caller without a resolved analysis
-/// context.
+impl<'a> ConfigLocation<'a> {
+    /// The config location of a resolved analysis context.
+    pub(super) fn of(resolved: &'a ProgrammaticAnalysisContext) -> Self {
+        Self {
+            root: resolved.root(),
+            config_path: resolved.config_path().as_deref(),
+            allow_remote_extends: resolved.allow_remote_extends(),
+        }
+    }
+}
+
+/// [`reject_config_type_aware`] for a caller without a resolved run. It
+/// reads the config file only when the environment leaves the choice open.
 pub(super) fn reject_config_type_aware_at(
     type_aware: &TypeAwareOptions,
     location: ConfigLocation<'_>,
     command: TypeAwareCommand,
 ) -> ProgrammaticResult<()> {
+    reject_type_aware_layers(type_aware, command, || {
+        Ok(load_config_file(
+            location.root,
+            location.config_path,
+            location.allow_remote_extends,
+        )?
+        .map(Cow::Owned))
+    })
+}
+
+/// The check of [`reject_config_type_aware`]. `config` gives the config file,
+/// or `None` when the project has none.
+fn reject_type_aware_layers<'config>(
+    type_aware: &TypeAwareOptions,
+    command: TypeAwareCommand,
+    config: impl FnOnce() -> ProgrammaticResult<Option<Cow<'config, FallowConfig>>>,
+) -> ProgrammaticResult<()> {
+    if !config_layer_decides(type_aware)? {
+        return Ok(());
+    }
+    match config()? {
+        Some(config) => refuse_config_source(&config, command),
+        None => Ok(()),
+    }
+}
+
+/// Whether the config decides type-aware analysis: `false` when the
+/// `type_aware` option or `FALLOW_TYPE_AWARE` decides it.
+///
+/// # Errors
+///
+/// Returns [`TYPE_AWARE_CONFIG_UNSUPPORTED`] when `FALLOW_TYPE_AWARE` turns
+/// type-aware analysis on.
+fn config_layer_decides(type_aware: &TypeAwareOptions) -> ProgrammaticResult<bool> {
     // An explicit choice wins over the environment and the config, as the
     // `--type-aware` and `--no-type-aware` flags do.
     if type_aware.enabled.is_some() {
-        return Ok(());
+        return Ok(false);
     }
-    let source = match env_layer(std::env::var(TYPE_AWARE_ENV)) {
-        EnvLayer::Off => return Ok(()),
-        EnvLayer::On => Some(TYPE_AWARE_ENV),
-        EnvLayer::Unset => {
-            let config = load_config_file(
-                location.root,
-                location.config_path,
-                location.allow_remote_extends,
-            )?;
-            config
-                .as_ref()
-                .and_then(|config| config_source(config, command))
-        }
-    };
-    let Some(source) = source else {
-        return Ok(());
-    };
-    Err(type_aware_refusal(
+    match env_layer(std::env::var(TYPE_AWARE_ENV)) {
+        EnvLayer::Off => Ok(false),
+        EnvLayer::On => Err(layer_refusal(TYPE_AWARE_ENV)),
+        EnvLayer::Unset => Ok(true),
+    }
+}
+
+fn refuse_config_source(
+    config: &FallowConfig,
+    command: TypeAwareCommand,
+) -> ProgrammaticResult<()> {
+    config_source(config, command).map_or(Ok(()), |source| Err(layer_refusal(source)))
+}
+
+fn layer_refusal(source: &str) -> ProgrammaticError {
+    type_aware_refusal(
         source,
         "the programmatic API runs it only when the `type_aware` option requests it; set that option or run the `fallow` CLI",
-    ))
+    )
 }
 
 fn type_aware_refusal(source: &str, reason: &str) -> ProgrammaticError {

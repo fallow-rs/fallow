@@ -33,12 +33,16 @@ sha2 = { workspace = true }
 xxhash-rust = { workspace = true }
 
 [features]
+# Test constructors and the parity harness of the resolved run, for the
+# tests of this crate and of other crates. Release builds leave it off.
+testing = ["fallow-engine/testing"]
 schema = ["dep:schemars", "fallow-engine/schema", "fallow-output/schema", "fallow-types/schema"]
 
 [target.'cfg(unix)'.dependencies]
 libc = { workspace = true }
 
 [dev-dependencies]
+fallow-engine = { workspace = true, features = ["testing"] }
 fallow-mutation = { workspace = true }
 jsonschema = { workspace = true }
 tempfile = { workspace = true }

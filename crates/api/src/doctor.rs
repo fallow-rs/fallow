@@ -2,14 +2,14 @@
 
 use std::path::{Path, PathBuf};
 
-use fallow_engine::project_config::{
-    ProjectConfig, ProjectConfigOptions, config_for_project_readiness,
-};
+use fallow_config::{ResolvedConfig, WorkspaceDiagnostic, WorkspaceInfo};
+use fallow_engine::resolved_run::{ResolvedRun, resolve_run};
 use fallow_output::{
     DOCTOR_SCHEMA_VERSION, DoctorCheck, DoctorCheckCategory, DoctorCheckId, DoctorCheckStatus,
     DoctorOutput, DoctorRemediation, DoctorStatus, DoctorSummary,
 };
 use fallow_types::envelope::{SchemaVersion, ToolVersion};
+use fallow_types::sourced::{Given, Origin};
 
 /// Inputs for a deterministic doctor run.
 pub struct DoctorOptions<'a> {
@@ -87,48 +87,82 @@ where
         }
     };
 
-    let project = config_for_project_readiness(
-        &root,
-        options.config_path,
-        ProjectConfigOptions {
-            output: fallow_config::OutputFormat::Json,
-            no_cache: true,
-            threads: 1,
-            production_override: None,
-            quiet: true,
-            analysis: fallow_config::ProductionAnalysis::DeadCode,
-            allow_remote_extends: false,
-        },
-    );
-
-    match project {
-        Ok(mut readiness) => {
-            if let Some(path) = cache_dir.filter(|path| !path.as_os_str().is_empty()) {
-                readiness
-                    .project
-                    .config
-                    .override_cache_dir(path.to_path_buf());
-            }
+    match resolve_doctor_run(&root, options.config_path, cache_dir) {
+        Ok(run) => {
+            let project = ReadyProject::of(&run);
             push_ready_project_checks(
                 &mut checks,
                 &root,
-                &readiness.project,
-                &readiness.configured_plugin_diagnostics,
+                &project,
+                &run.plugin_readiness(),
                 discover_companion,
             );
         }
         Err(error) => {
-            push_project_failure_checks(&mut checks, error.message(), &root, options.config_path);
+            push_project_failure_checks(&mut checks, &error.message(), &root, options.config_path);
         }
     }
 
     build_output(checks)
 }
 
+/// The run of the doctor. A config error is a failed check, not an error of
+/// the doctor, so the caller reads the [`fallow_engine::resolved_run::ResolveError`].
+fn resolve_doctor_run(
+    root: &Path,
+    config_path: Option<&Path>,
+    cache_dir: Option<&Path>,
+) -> Result<ResolvedRun, fallow_engine::resolved_run::ResolveError> {
+    let analysis = crate::AnalysisOptions {
+        root: Some(root.to_path_buf()),
+        config_path: config_path.map(Path::to_path_buf),
+        no_cache: true,
+        threads: Some(1),
+        ..crate::AnalysisOptions::default()
+    };
+    let mut inputs = crate::run::run_inputs(
+        &analysis,
+        &crate::run::ProgrammaticEntry::Doctor,
+        crate::run::RouteSettings::default(),
+    );
+    inputs.cache_dir = cache_dir
+        .filter(|path| !path.as_os_str().is_empty())
+        .map(|path| Given {
+            value: path.to_path_buf(),
+            origin: Origin::ApiOption("cache_dir"),
+        });
+    resolve_run(&inputs)
+}
+
+/// The resolved project of a doctor run: the config file, the resolved
+/// config and the workspace metadata of the dead-code analysis.
+struct ReadyProject {
+    path: Option<PathBuf>,
+    config: ResolvedConfig,
+    workspaces: Vec<WorkspaceInfo>,
+    workspace_diagnostics: Vec<WorkspaceDiagnostic>,
+}
+
+impl ReadyProject {
+    fn of(run: &ResolvedRun) -> Self {
+        let fallow_engine::resolved_run::AnalysisSlot::Runs(dead_code) =
+            run.analysis(fallow_config::PlannedAnalysis::DeadCode)
+        else {
+            unreachable!("the doctor run selects the dead-code analysis");
+        };
+        Self {
+            path: run.config_file().value().clone(),
+            config: dead_code.config().clone(),
+            workspaces: dead_code.workspaces().to_vec(),
+            workspace_diagnostics: dead_code.workspace_diagnostics().to_vec(),
+        }
+    }
+}
+
 fn push_ready_project_checks<F>(
     checks: &mut Vec<DoctorCheck>,
     root: &Path,
-    project: &ProjectConfig,
+    project: &ReadyProject,
     configured_plugin_diagnostics: &[fallow_config::ConfiguredPluginDiagnostic],
     discover_companion: &F,
 ) where
@@ -437,7 +471,7 @@ fn format_size_mb(bytes: u64) -> String {
 
 fn plugin_check(
     root: &Path,
-    project: &ProjectConfig,
+    project: &ReadyProject,
     configured_plugin_diagnostics: &[fallow_config::ConfiguredPluginDiagnostic],
 ) -> DoctorCheck {
     if !configured_plugin_diagnostics.is_empty() {

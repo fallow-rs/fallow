@@ -19,6 +19,8 @@ use crate::resolved_run::{PerAnalysis, ProductionInputs, decide_production};
 
 mod loader;
 
+#[cfg(any(test, feature = "testing"))]
+pub use loader::load_count;
 pub use loader::{ConfigFile, ConfigFileOptions, ConfigLoadError, load_config_file};
 
 /// The production flags of one run: the global `--production` override and one
