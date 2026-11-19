@@ -192,6 +192,17 @@ fn the_host_names_the_surface_and_the_origin() {
             origin: Origin::ApiOption("analysis.production")
         }
     );
+
+    let mut mcp = options(&root, Surface::Mcp, &[]);
+    mcp.production_override = Some(false);
+    let run = resolve_programmatic_run(&mcp, &ProgrammaticEntry::DeadCode).expect("run");
+    assert_eq!(run.surface(), Surface::Mcp);
+    assert_eq!(
+        run.production(PlannedAnalysis::DeadCode).source(),
+        &Source::Given {
+            origin: Origin::ToolParam("production")
+        }
+    );
 }
 
 /// The run of `run_audit` for `audit`, through the same steps.
