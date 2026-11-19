@@ -3285,7 +3285,6 @@ mod tests {
             .filter_map(|value| value.get("n").and_then(serde_json::Value::as_i64))
             .collect();
 
-        // First event delivered (dropped), the 69-event tail capped to the newest 64.
         assert_eq!(
             kept.len(),
             SPOOL_MAX_EVENTS,
@@ -4045,7 +4044,6 @@ mod tests {
             names.contains(&INSTALL_HEADER),
             "transport_headers must list {INSTALL_HEADER}",
         );
-        // Verify purposes are non-empty strings.
         for (header, purpose) in &headers {
             assert!(
                 !purpose.is_empty(),
@@ -4446,7 +4444,6 @@ mod tests {
             .iter()
             .map(|t| t.name)
             .collect();
-        // Verify every manifest entry round-trips.
         for tool_name in &tools {
             let result = mcp_tool_from_value(tool_name);
             assert_eq!(

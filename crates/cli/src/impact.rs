@@ -1164,7 +1164,8 @@ pub struct AttributionInput<'a> {
     pub root: &'a Path,
     pub scope: Scope<'a>,
     pub findings: Vec<FindingInput>,
-    pub clones: Vec<CloneInput>,
+    /// `None` when duplication did not run: keep the clone frontier, credit no clone.
+    pub clones: Option<Vec<CloneInput>>,
     pub suppressions: &'a [ActiveSuppression],
 }
 
@@ -1236,7 +1237,7 @@ fn apply_attribution(
         git_sha,
         timestamp,
     });
-    prune_frontier(&mut frontier, &mut clone_frontier, root);
+    prune_frontier(&mut frontier, root);
     bound_recent_resolved(store);
 
     store_worktree_baseline(store, worktree_key, frontier, clone_frontier);
@@ -1290,7 +1291,7 @@ fn collect_current_state(
     let mut current_supps: FxHashMap<String, FxHashSet<String>> = FxHashMap::default();
     for s in input.suppressions {
         let rel = format_display_path(&s.path, root);
-        if !changed.contains(&rel) {
+        if s.range_problem.is_some() || !changed.contains(&rel) {
             continue;
         }
         let key = s
@@ -1339,7 +1340,7 @@ fn whole_project_scope(
     for f in &input.findings {
         set.insert(format_display_path(&f.path, root));
     }
-    for c in &input.clones {
+    for c in input.clones.iter().flatten() {
         for p in &c.instance_paths {
             set.insert(format_display_path(p, root));
         }
@@ -1441,9 +1442,6 @@ fn update_file_frontier(
     }
 }
 
-/// Inputs to the clone-disappearance classifier, bundled so it takes a single
-/// parameter struct instead of seven (mirrors the sibling
-/// `FileDisappearancesInput` used by `classify_file_disappearances`).
 struct CloneDisappearancesInput<'a> {
     store: &'a mut ImpactStore,
     frontier: &'a FlatFrontier,
@@ -1455,14 +1453,16 @@ struct CloneDisappearancesInput<'a> {
 }
 
 fn classify_clone_disappearances(args: &mut CloneDisappearancesInput<'_>) {
+    let Some(clones) = args.input.clones.as_deref() else {
+        return;
+    };
     let store = &mut *args.store;
     let frontier = args.frontier;
     let clone_frontier = &mut *args.clone_frontier;
-    let input = args.input;
     let changed = args.changed;
     let git_sha = args.git_sha;
     let timestamp = args.timestamp;
-    let current = collect_changed_clone_groups(input, changed);
+    let current = collect_changed_clone_groups(clones, args.input.root, changed);
 
     let still_duplicated: FxHashSet<&String> = current.values().flatten().collect();
 
@@ -1485,17 +1485,19 @@ fn classify_clone_disappearances(args: &mut CloneDisappearancesInput<'_>) {
     for (fp, paths) in current {
         clone_frontier.insert(fp, paths);
     }
+    let root = args.input.root;
+    clone_frontier.retain(|_, paths| paths.iter().any(|p| root.join(p).exists()));
 }
 
 /// Build this run's changed-touching clone groups (fingerprint -> sorted/deduped
 /// display paths), keeping only groups with at least one changed instance path.
 fn collect_changed_clone_groups(
-    input: &AttributionInput<'_>,
+    clones: &[CloneInput],
+    root: &Path,
     changed: &FxHashSet<String>,
 ) -> FxHashMap<String, Vec<String>> {
-    let root = input.root;
     let mut current: FxHashMap<String, Vec<String>> = FxHashMap::default();
-    for c in &input.clones {
+    for c in clones {
         let mut paths: Vec<String> = c
             .instance_paths
             .iter()
@@ -1551,13 +1553,8 @@ fn credit_clone_disappearance(
     }
 }
 
-fn prune_frontier(
-    frontier: &mut FlatFrontier,
-    clone_frontier: &mut FlatCloneFrontier,
-    root: &Path,
-) {
+fn prune_frontier(frontier: &mut FlatFrontier, root: &Path) {
     frontier.retain(|rel, _| root.join(rel).exists());
-    clone_frontier.retain(|_, paths| paths.iter().any(|p| root.join(p).exists()));
 }
 
 fn bound_recent_resolved(store: &mut ImpactStore) {

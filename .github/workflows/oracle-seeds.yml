@@ -123,6 +123,7 @@ jobs:
       - name: Set up Rust
         uses: ./.github/actions/setup-rust
         with:
+          save-if: 'false'
           cache-key: oracle-seeds
 
       - name: Build the cache model tests
@@ -187,6 +188,7 @@ jobs:
       - name: Set up Rust
         uses: ./.github/actions/setup-rust
         with:
+          save-if: 'false'
           cache-key: oracle-seeds-mutation
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -265,6 +267,7 @@ jobs:
       - name: Set up Rust
         uses: ./.github/actions/setup-rust
         with:
+          save-if: 'false'
           cache-key: oracle-seeds-permutation
 
       - name: Build the permutation oracle tests
@@ -329,6 +332,7 @@ jobs:
       - name: Set up Rust
         uses: ./.github/actions/setup-rust
         with:
+          save-if: 'false'
           cache-key: oracle-seeds-surface
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -408,6 +412,7 @@ jobs:
       - name: Set up Rust
         uses: ./.github/actions/setup-rust
         with:
+          save-if: 'false'
           cache-key: oracle-seeds-unicode
 
       - name: Build the Unicode span tests
@@ -472,6 +477,7 @@ jobs:
       - name: Set up Rust
         uses: ./.github/actions/setup-rust
         with:
+          save-if: 'false'
           cache-key: oracle-seeds-platform
 
       - name: Build the platform oracle tests

@@ -257,6 +257,10 @@ pub struct KeyFiles {
     pub test_file_reach: BTreeMap<String, Vec<u32>>,
     /// The runner setup files and their reach.
     pub support_files: Vec<String>,
+    /// The selected Vitest projects, sorted. Two selections can give the
+    /// same test ids, for example one project each, while each project has
+    /// its own setup, so the key holds the selection.
+    pub runner_projects: Vec<String>,
 }
 
 impl KeyFiles {
@@ -267,6 +271,7 @@ impl KeyFiles {
             reach_files: plan.reach_files.clone(),
             test_file_reach: plan.test_file_reach.clone(),
             support_files: plan.support_files.clone(),
+            runner_projects: Vec::new(),
         }
     }
 }
@@ -334,6 +339,13 @@ impl ResultCache {
         for support in &files.support_files {
             feed(&mut hasher, support);
             feed(&mut hasher, &file_hash(&root.join(support)));
+        }
+        // No selection feeds nothing, so a run without one keeps its keys.
+        if !files.runner_projects.is_empty() {
+            hasher.update((files.runner_projects.len() as u64).to_le_bytes());
+            for project in &files.runner_projects {
+                feed(&mut hasher, project);
+            }
         }
         Self {
             root: root.to_path_buf(),

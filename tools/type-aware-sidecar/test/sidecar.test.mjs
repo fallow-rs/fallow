@@ -411,6 +411,179 @@ view["execute"]();
   }
 });
 
+const DEFAULT_EXPORTED_RENDERERS = [
+  ["a default class declaration", "export default class Renderer {\n  update(_n: number) {}\n}\n"],
+  [
+    "an export assignment of a class",
+    "class Renderer {\n  update(_n: number) {}\n}\nexport default Renderer;\n",
+  ],
+  [
+    "a default export specifier",
+    "class Renderer {\n  update(_n: number) {}\n}\nexport { Renderer as default };\n",
+  ],
+  ["an anonymous default class", "export default class {\n  update(_n: number) {}\n}\n"],
+];
+
+const writeRefConsumer = (root) => {
+  write(
+    root,
+    "src/react.ts",
+    `export const useRef = <T>(value: T | null): { current: T | null } => ({ current: value });
+export const useEffect = (effect: () => void, _deps: unknown[]): void => effect();
+`,
+  );
+  write(
+    root,
+    "src/index.ts",
+    `import Renderer from "./renderer";
+import { useEffect, useRef } from "./react";
+export const plot = (n: number): void => {
+  const renderer = useRef<Renderer>(null);
+  useEffect(() => {
+    renderer.current = new Renderer();
+  }, []);
+  useEffect(() => {
+    renderer.current?.update(n);
+  }, [n]);
+};
+`,
+  );
+};
+
+for (const [form, rendererSource] of DEFAULT_EXPORTED_RENDERERS) {
+  test(`confirms a member of ${form} that the syntactic owner names default`, () => {
+    const root = makeProject();
+    try {
+      write(
+        root,
+        "tsconfig.json",
+        JSON.stringify({ compilerOptions: { strict: true }, include: ["src"] }),
+      );
+      write(root, "src/renderer.ts", rendererSource);
+      writeRefConsumer(root);
+
+      const response = runSidecar(
+        semanticRequest(root, [
+          classMemberQuery({
+            id: 0,
+            file: "src/renderer.ts",
+            owner: "default",
+            member: "update",
+            ...utf8Position(rendererSource, "update("),
+          }),
+        ]),
+      );
+
+      assert.equal(response.results[0].assertion, "confirmed-used");
+      assert.equal(response.results[0].data.symbol.owner, "default");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+const NOT_DEFAULT_CLASS_MEMBERS = [
+  ["a default interface", "export default interface Shape {\n  m(): void;\n}\n"],
+  [
+    "an interface that merges with the default class",
+    "class Shape {}\ninterface Shape {\n  m(): void;\n}\nexport default Shape;\n",
+  ],
+  [
+    "a type-only default specifier",
+    "class Shape {\n  m() {}\n}\nexport type { Shape as default };\n",
+  ],
+  ["an export assignment with equals", "class Shape {\n  m() {}\n}\nexport = Shape;\n"],
+  [
+    "a default export of an ambient module",
+    'declare module "shapes" {\n  class Shape {\n    m(): void;\n  }\n  export default Shape;\n}\n',
+  ],
+];
+
+for (const [form, source] of NOT_DEFAULT_CLASS_MEMBERS) {
+  test(`does not resolve the default owner for ${form}`, () => {
+    const root = makeProject();
+    try {
+      write(
+        root,
+        "tsconfig.json",
+        JSON.stringify({ compilerOptions: { strict: true }, include: ["src"] }),
+      );
+      write(root, "src/shape.ts", source);
+
+      const response = runSidecar(
+        semanticRequest(root, [
+          classMemberQuery({
+            id: 0,
+            file: "src/shape.ts",
+            owner: "default",
+            member: "m",
+            ...utf8Position(source, "m("),
+          }),
+        ]),
+      );
+
+      const [result] = response.results;
+      assert.notEqual(result.assertion, "confirmed-used");
+      assert.notEqual(result.assertion, "confirmed-no-static-references");
+      assert.notEqual(result.reason_code, null);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
+test("does not give the default owner to a class that is not the default export", () => {
+  const root = makeProject();
+  try {
+    const source = `export class Renderer {
+  update(_n: number) {}
+}
+class Other {}
+export default Other;
+const make = () => {
+  class Nested {
+    update(_n: number) {}
+  }
+  return new Nested();
+};
+make().update(1);
+new Renderer().update(1);
+`;
+    write(
+      root,
+      "tsconfig.json",
+      JSON.stringify({ compilerOptions: { strict: true }, include: ["src"] }),
+    );
+    write(root, "src/renderer.ts", source);
+
+    const response = runSidecar(
+      semanticRequest(root, [
+        classMemberQuery({
+          id: 0,
+          file: "src/renderer.ts",
+          owner: "default",
+          member: "update",
+          ...utf8Position(source, "update("),
+        }),
+        classMemberQuery({
+          id: 1,
+          file: "src/renderer.ts",
+          owner: "default",
+          member: "update",
+          ...utf8Position(source, "update(", 2),
+        }),
+      ]),
+    );
+
+    for (const result of response.results) {
+      assert.notEqual(result.assertion, "confirmed-used");
+      assert.equal(result.reason_code, "unknown-symbol");
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test("retains Angular template-only members without claiming a checker use", () => {
   const root = makeProject();
   try {
@@ -609,7 +782,7 @@ test("protocol v7 batches exact export and type-use queries through one Program"
       ]),
     );
 
-    assert.equal(response.protocol_version, 7);
+    assert.equal(response.protocol_version, WIRE_PROTOCOL_VERSION);
     assert.equal(response.operation, "semantic-queries");
     assert.equal(response.projects.length, 1);
     assert.equal(response.projects[0].program_reused, true);
@@ -3536,7 +3709,7 @@ test("rejects oversized stdin while reading", async () => {
 test("returns provenance for an empty semantic request", () => {
   const response = runSidecar(semanticRequest(sidecarRoot, [], { projects: [] }));
 
-  assert.equal(response.protocol_version, 7);
+  assert.equal(response.protocol_version, WIRE_PROTOCOL_VERSION);
   assert.equal(response.operation, "semantic-queries");
   assert.equal(response.sidecar_version, sidecarVersion);
   assert.equal(response.backend, BACKEND.family);

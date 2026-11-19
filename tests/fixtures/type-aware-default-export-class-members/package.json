@@ -1,0 +1,6 @@
+{
+  "name": "type-aware-default-export-class-members-fixture",
+  "private": true,
+  "type": "module",
+  "main": "src/index.ts"
+}

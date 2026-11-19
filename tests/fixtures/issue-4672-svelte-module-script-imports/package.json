@@ -1,0 +1,9 @@
+{
+  "name": "issue-4672-svelte-module-script-imports",
+  "private": true,
+  "type": "module",
+  "main": "src/main.ts",
+  "dependencies": {
+    "svelte": "^5.0.0"
+  }
+}

@@ -1036,8 +1036,8 @@ fn collect_large_functions_respects_max_unit_size_override() {
 
     let entries = collect_large_functions(&input);
     // The overridden test-file function drops out (218 <= 500); the src-file
-    // function stays listed (218 > 60). Neuter check: reverting the effective
-    // gate to `> 60` re-lists the test-file `<arrow>` and fails this assertion.
+    // function stays listed (218 > 60). A gate of `> 60` for the test file
+    // would list its `<arrow>` and fail this assertion.
     let listed: Vec<&str> = entries.iter().map(|e| e.name.as_str()).collect();
     assert_eq!(listed, vec!["bigHelper"]);
     assert!(entries.iter().all(|entry| entry.path == src_path));
@@ -2397,10 +2397,8 @@ fn rollup_skipped_when_no_template_unit() {
     assert_eq!(findings.len(), before, "no template means no rollup");
 }
 
-/// The template half comes from extracted complexity, not from the findings
-/// list, so a template that breaches no threshold of its own (including one
-/// that would previously only have fired on CRAP) still feeds the rollup
-/// (issue #2235).
+/// Use extracted template complexity even when the template does not appear
+/// in the findings list (#2235).
 #[test]
 fn rollup_survives_a_template_below_its_own_thresholds() {
     let component_ts = PathBuf::from("/proj/src/quiet-template.component.ts");

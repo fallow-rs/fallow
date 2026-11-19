@@ -228,6 +228,7 @@ impl<'a> ModuleInfoExtractor {
         &mut self,
         prefix: String,
         excludes: &[String],
+        imported_name: &ImportedName,
         span: Span,
     ) {
         if prefix.starts_with("./") || prefix.starts_with("../") {
@@ -237,6 +238,7 @@ impl<'a> ModuleInfoExtractor {
                 span,
                 mechanism: ModuleLoadMechanism::EsModule,
                 excludes: excludes.to_vec(),
+                imported_name: imported_name.clone(),
             });
         }
     }
@@ -250,14 +252,17 @@ impl<'a> ModuleInfoExtractor {
             )
             && let Some(first_arg) = expr.arguments.first()
         {
-            if expr.arguments.get(1).is_some_and(is_eager_glob_options) {
+            let options = expr.arguments.get(1);
+            if options.is_some_and(is_eager_glob_options) {
                 self.mark_import_load_kind(expr.span, ImportLoadKind::Static);
             }
+            let imported_name = glob_options_imported_name(options);
             match first_arg {
                 Argument::StringLiteral(lit) => {
                     self.push_relative_dynamic_import_pattern(
                         lit.value.text().into_owned(),
                         &[],
+                        &imported_name,
                         expr.span,
                     );
                 }
@@ -277,6 +282,7 @@ impl<'a> ModuleInfoExtractor {
                             self.push_relative_dynamic_import_pattern(
                                 entry.to_string(),
                                 &excludes,
+                                &imported_name,
                                 expr.span,
                             );
                         }
@@ -315,6 +321,7 @@ impl<'a> ModuleInfoExtractor {
                     span: expr.span,
                     mechanism: ModuleLoadMechanism::CommonJsRequire,
                     excludes: Vec::new(),
+                    imported_name: ImportedName::Namespace,
                 });
             }
         }
@@ -913,6 +920,7 @@ impl<'a> ModuleInfoExtractor {
                         span,
                         mechanism: ModuleLoadMechanism::EsModule,
                         excludes: Vec::new(),
+                        imported_name: ImportedName::Namespace,
                     });
                 } else if !loads_data_file(source) {
                     self.mark_opaque_module_load(span);
@@ -954,6 +962,7 @@ impl<'a> ModuleInfoExtractor {
             span,
             mechanism: ModuleLoadMechanism::EsModule,
             excludes: Vec::new(),
+            imported_name: ImportedName::Namespace,
         });
         true
     }
@@ -1110,6 +1119,79 @@ fn is_eager_glob_options(argument: &Argument<'_>) -> bool {
                     && matches!(&property.value, Expression::BooleanLiteral(value) if value.value)
         )
     })
+}
+
+/// The Vite query parameters that make `import.meta.glob` load each match as
+/// a string (`raw`) or a URL (`url`) instead of as a module. Vite applies
+/// `inline` only to CSS, asset files and workers, so a script match with
+/// `?inline` still loads as a module.
+const ASSET_GLOB_QUERY_PARAMS: [&str; 2] = ["raw", "url"];
+
+/// The values of the legacy `as` option that load each match as a string or
+/// a URL.
+const ASSET_GLOB_AS_VALUES: [&str; 2] = ["raw", "url"];
+
+/// The value of the `import` option that selects the whole module.
+const GLOB_IMPORT_NAMESPACE: &str = "*";
+
+/// What each match of an `import.meta.glob` call gives the importer, read from
+/// the options argument.
+///
+/// A raw or url query (or the legacy `as: 'raw'` or `as: 'url'`)
+/// reads each match as text or a URL, so no export of a match is used. The
+/// `import` option selects one export. Every other shape keeps the whole
+/// module: no options, an options value that is not an object literal, a
+/// spread, an option value that is not a string literal, and a query that
+/// fallow does not know (a plugin can turn it into a module).
+fn glob_options_imported_name(options: Option<&Argument<'_>>) -> ImportedName {
+    let Some(Argument::ObjectExpression(options)) = options else {
+        return ImportedName::Namespace;
+    };
+    let mut query = None;
+    let mut as_value = None;
+    let mut import = None;
+    for property in &options.properties {
+        let ObjectPropertyKind::ObjectProperty(property) = property else {
+            return ImportedName::Namespace;
+        };
+        let Some(key) = property.key.static_name() else {
+            continue;
+        };
+        let slot = match &*key.text() {
+            "query" => &mut query,
+            "as" => &mut as_value,
+            "import" => &mut import,
+            _ => continue,
+        };
+        let Expression::StringLiteral(value) = &property.value else {
+            return ImportedName::Namespace;
+        };
+        *slot = Some(value.value.text().into_owned());
+    }
+    if let Some(query) = query {
+        return if is_asset_glob_query(&query) {
+            ImportedName::SideEffect
+        } else {
+            ImportedName::Namespace
+        };
+    }
+    if as_value.is_some_and(|value| ASSET_GLOB_AS_VALUES.contains(&value.as_str())) {
+        return ImportedName::SideEffect;
+    }
+    match import.as_deref() {
+        None | Some(GLOB_IMPORT_NAMESPACE) => ImportedName::Namespace,
+        Some("default") => ImportedName::Default,
+        Some(name) => ImportedName::Named(name.to_owned()),
+    }
+}
+
+/// Whether an `import.meta.glob` query, such as `?raw` or `?url&inline`, has
+/// a parameter that loads each match as a string or a URL.
+fn is_asset_glob_query(query: &str) -> bool {
+    query
+        .trim_start_matches('?')
+        .split('&')
+        .any(|param| ASSET_GLOB_QUERY_PARAMS.contains(&param))
 }
 
 /// The receiver of `receiver.then(() => ...)` when the first callback is an

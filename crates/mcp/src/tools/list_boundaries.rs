@@ -4,8 +4,8 @@ use std::sync::atomic::AtomicBool;
 use crate::params::ListBoundariesParams;
 
 use fallow_api::{
-    ListBoundariesOptions, run_list_boundaries as run_api_list_boundaries,
-    serialize_list_boundaries_programmatic_json,
+    AnalysisOptions, ListBoundariesOptions, ProductionAnalysis,
+    run_list_boundaries as run_api_list_boundaries, serialize_list_boundaries_programmatic_json,
 };
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
@@ -13,7 +13,7 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use super::{
     api_runtime::{
         EnvScope, call_cancellation, json_success, programmatic_error_body, run_api_blocking,
-        shared_analysis_options, shared_params,
+        shared_analysis_options, shared_params, typed_production,
     },
     push_global, push_remote_extends,
 };
@@ -77,7 +77,13 @@ fn list_boundaries_options_from_params(
         // This envelope carries no `request_outcomes`, so a ref that stood
         // down would widen the result with nothing to say so: keep the hard
         // error of an explicit ref.
-        analysis: shared_analysis_options(shared_params!(params), EnvScope::HardRef, cancellation),
+        analysis: AnalysisOptions {
+            // `fallow list` turns production mode on from the variables and
+            // never off: a variable that is off leaves the config in charge.
+            production_override: typed_production(None, ProductionAnalysis::DeadCode)
+                .filter(|&production| production),
+            ..shared_analysis_options(shared_params!(params), EnvScope::HardRef, cancellation)
+        },
     }
 }
 

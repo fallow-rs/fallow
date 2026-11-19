@@ -951,7 +951,6 @@ const NOT_A_RECEIVER = new Set([
 ]);
 const CALL_AFTER = /^\s*(?:\?\.\s*)?(?:\(|\.\s*(?:call|apply|bind)\b)/u;
 
-// The index after the `]` that closes the `[` at `open`, or -1.
 const closingBracket = (text, open) => {
   let depth = 0;
   for (let at = open; at < text.length; at += 1) {

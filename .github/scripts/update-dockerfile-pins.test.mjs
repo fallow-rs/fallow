@@ -1,7 +1,6 @@
 // Tests for update-dockerfile-pins.mjs, the release-time rewrite step that
 // keeps the Dockerfile's ARG FALLOW_VERSION and its two per-arch sha256 pins
-// in lockstep with a just-published release. Regression coverage for #1817
-// (the pins previously drifted for 13 releases before a manual fix in #1805).
+// in lockstep with a just-published release (#1817).
 //
 // Run: node --test .github/scripts/update-dockerfile-pins.test.mjs
 

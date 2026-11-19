@@ -4,7 +4,8 @@ use std::sync::atomic::AtomicBool;
 use crate::params::FindDupesParams;
 
 use fallow_api::{
-    AnalysisOptions, DuplicationOptions, run_duplication, serialize_duplication_programmatic_json,
+    AnalysisOptions, DuplicationOptions, ProductionAnalysis, run_duplication,
+    serialize_duplication_programmatic_json,
 };
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
@@ -13,7 +14,8 @@ use super::{
     VALID_DUPES_MODES,
     api_runtime::{
         EnvScope, call_cancellation, json_success, non_empty_string, programmatic_error_body,
-        run_api_blocking, shared_analysis_options, shared_params, workspace_patterns_from_param,
+        run_api_blocking, shared_analysis_options, shared_params, typed_production,
+        workspace_patterns_from_param,
     },
     duplication_mode_from_param,
     fallback_policy::{baseline_requested, duplication_needs_cli},
@@ -108,6 +110,7 @@ fn duplication_options_from_params(
         analysis: AnalysisOptions {
             changed_since: non_empty_string(params.changed_since.as_deref()),
             no_package_baselines: params.no_package_baselines.unwrap_or(false),
+            production_override: typed_production(None, ProductionAnalysis::Dupes),
             workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             explain: true,
             ..shared_analysis_options(shared_params!(params), EnvScope::Ambient, cancellation)

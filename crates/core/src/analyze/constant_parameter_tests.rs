@@ -1131,7 +1131,7 @@ fn an_inline_classic_script_with_a_dynamic_import_abstains() {
         &config,
         &base_with(&[("index.html", html)], MAIN),
     );
-    assert_abstains(&project, "src/format.ts", "format", "template-callers");
+    assert_abstains(&project, "src/format.ts", "format", "dynamic-import");
 }
 
 #[test]

@@ -376,32 +376,26 @@ fn enrich_ranked_security_finding(
 /// before dead, then a deterministic path/line/col/category tiebreak.
 fn compare_ranked_findings(a: &SecurityFinding, b: &SecurityFinding) -> std::cmp::Ordering {
     let (ra, rb) = (a.reachability.as_ref(), b.reachability.as_ref());
-    // Reachable-from-entry findings sort first.
     let reach_a = ra.is_some_and(|r| r.reachable_from_entry);
     let reach_b = rb.is_some_and(|r| r.reachable_from_entry);
     reach_b
         .cmp(&reach_a)
-        // Then same-module source-backed sinks first.
         .then_with(|| b.source_backed.cmp(&a.source_backed))
-        // Then module-level source-reachable sinks first.
         .then_with(|| {
             let source_a = ra.is_some_and(|r| r.reachable_from_untrusted_source);
             let source_b = rb.is_some_and(|r| r.reachable_from_untrusted_source);
             source_b.cmp(&source_a)
         })
-        // Then larger blast radius first.
         .then_with(|| {
             let ba = ra.map_or(0, |r| r.blast_radius);
             let bb = rb.map_or(0, |r| r.blast_radius);
             bb.cmp(&ba)
         })
-        // Then boundary-crossing candidates first.
         .then_with(|| {
             let ca = ra.is_some_and(|r| r.crosses_boundary);
             let cb = rb.is_some_and(|r| r.crosses_boundary);
             cb.cmp(&ca)
         })
-        // Then active-code candidates before dead-code candidates.
         .then_with(|| a.dead_code.is_some().cmp(&b.dead_code.is_some()))
         // Deterministic tiebreak (matches the detectors' own ordering).
         .then_with(|| a.path.cmp(&b.path))

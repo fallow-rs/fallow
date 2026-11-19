@@ -1,5 +1,6 @@
 ---
 source: crates/cli/tests/integration/snapshot_tests.rs
+assertion_line: 1932
 expression: json_str
 ---
 [
@@ -273,7 +274,15 @@ expression: json_str
       "lines": {
         "begin": 1
       }
-    }
+    },
+    "other_locations": [
+      {
+        "path": "src/api/internal/index.ts",
+        "lines": {
+          "begin": 1
+        }
+      }
+    ]
   },
   {
     "type": "issue",

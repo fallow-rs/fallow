@@ -22,6 +22,9 @@ use super::{ModuleInfoExtractor, PendingComponentArrow, PendingTypedReactProps};
 use crate::function_body::BodyRef;
 use crate::js_text::JsText;
 
+/// The callee name of the React `memo` wrapper.
+const MEMO_WRAPPER: &str = "memo";
+
 impl ModuleInfoExtractor {
     /// Pre-scan a variable declaration for named arrow / function-expression
     /// bindings that may be React components, recording per-arrow metadata keyed
@@ -528,6 +531,43 @@ impl ModuleInfoExtractor {
         }
     }
 
+    /// Make the component of `memo(Component, areEqual)` abstain. The
+    /// comparator decides when the component renders again, so it can read a
+    /// prop that the body leaves unread (`prev.nonce !== next.nonce`). The
+    /// prop phase does not follow the comparator. Runs after the walk of the
+    /// call arguments, so an inline component (`memo((props) => ..., eq)`)
+    /// is registered at its function span.
+    pub(crate) fn react_record_memo_comparator(&mut self, call: &CallExpression<'_>) {
+        if !self.jsx_capable || !is_memo_call_with_comparator(call) {
+            return;
+        }
+        let Some(first) = call.arguments.first().and_then(Argument::as_expression) else {
+            return;
+        };
+        match first.without_parentheses() {
+            Expression::Identifier(component) => {
+                self.mark_named_component_unharvestable(component.name.as_str());
+            }
+            Expression::ArrowFunctionExpression(arrow) => {
+                self.mark_component_at_unharvestable(arrow.span.start);
+            }
+            Expression::FunctionExpression(func) => {
+                self.mark_component_at_unharvestable(func.span.start);
+            }
+            _ => {}
+        }
+    }
+
+    fn mark_component_at_unharvestable(&mut self, span_start: u32) {
+        if let Some(found) = self
+            .component_functions
+            .iter_mut()
+            .find(|c| c.span_start == span_start)
+        {
+            found.has_unharvestable_props = true;
+        }
+    }
+
     /// Mark a component (by name) unharvestable. Used by the finalize-time typed
     /// props resolution, where the component is no longer the top of the stack.
     fn mark_named_component_unharvestable(&mut self, component: &str) {
@@ -829,6 +869,11 @@ fn classify_component_init(
     }
 }
 
+/// Whether `call` is `memo(...)` or `React.memo(...)` with a comparator.
+fn is_memo_call_with_comparator(call: &CallExpression<'_>) -> bool {
+    wrapper_callee_name(&call.callee) == Some(MEMO_WRAPPER) && call.arguments.len() > 1
+}
+
 /// Classify a `forwardRef(...)` / `memo(...)` / `React.forwardRef(...)` /
 /// `React.memo(...)` wrapper whose first argument is an arrow / function
 /// expression. The inner function's span is the stack-push key. For a
@@ -841,7 +886,7 @@ fn classify_wrapper_call(
     let wrapper = wrapper_callee_name(&call.callee)?;
     let kind = match wrapper {
         "forwardRef" => ComponentFunctionKind::ForwardRefWrapper,
-        "memo" => ComponentFunctionKind::MemoWrapper,
+        MEMO_WRAPPER => ComponentFunctionKind::MemoWrapper,
         _ => return None,
     };
     // `forwardRef<Ref, Props>(...)`: the props type is the SECOND type arg. `memo`

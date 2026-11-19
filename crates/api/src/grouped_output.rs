@@ -637,6 +637,7 @@ fn duplication_subset_report(
             .collect(),
         clone_families: Vec::new(),
         mirrored_directories: Vec::new(),
+        range_marker_problems: Vec::new(),
         stats: DuplicationStats {
             total_files: report.stats.total_files,
             files_with_clones: 0,

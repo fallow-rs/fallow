@@ -594,11 +594,8 @@ fn promise_all_map_multi_statement_callback_records_no_element_binding() {
 
 #[test]
 fn cyclic_object_binding_candidates_terminate() {
-    // A cycle of object literals referencing each other (with a class
-    // instance seeding real binding targets) used to make the
-    // object-binding fixpoint deepen and multiply every copied path per
-    // iteration: exponential time and memory on minified bundles. The
-    // resolver's per-module caps bound it; this test regresses on hang.
+    // Each object references its predecessor twice, so the cycle can multiply candidate paths.
+    // The class instance seeds those paths and must remain resolvable despite the caps.
     use std::fmt::Write as _;
     let mut source = String::from("class C { m() {} }\nconst c = new C();\n");
     let nodes = 40;

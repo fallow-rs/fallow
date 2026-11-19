@@ -7,7 +7,7 @@ prepare_artifacts "${FALLOW_ARTIFACTS_DIR:-.}" \
   fallow-pr-comment.md \
   fallow-pr-comment-envelope.json fallow-pr-decision.json fallow-pr-details.json \
   fallow-comment-stderr.log fallow-pr-comment-plan.json fallow-check-run.json \
-  fallow-check-run-stderr.log || exit 2
+  fallow-check-run-stderr.log fallow-check-run-decision.json || exit 2
 
 # Post or update a PR comment with analysis results
 # Env contract: see this script's step env block in action.yml, the
@@ -81,10 +81,19 @@ if FALLOW_PR_COMMENT_ENVELOPE_FILE="$PR_COMMENT_ENVELOPE_FILE" \
   fi
   CHECK_HEAD_SHA="${PR_HEAD_SHA:-${GITHUB_SHA:-}}"
   if [ -f "$PR_DECISION_FILE" ] && [ -n "$CHECK_HEAD_SHA" ]; then
+    CHECK_RUN_DECISION_FILE="$PR_DECISION_FILE"
+    # The workflow annotations already mark each finding on the diff. A second
+    # copy from the check run shows every finding twice in the Files changed
+    # tab and in the run's annotation list.
+    if [ "${FALLOW_WORKFLOW_ANNOTATIONS:-false}" = "true" ]; then
+      CHECK_RUN_DECISION_FILE=$(artifact_path fallow-check-run-decision.json)
+      jq '.annotations = []' "$PR_DECISION_FILE" > "$CHECK_RUN_DECISION_FILE" \
+        || CHECK_RUN_DECISION_FILE="$PR_DECISION_FILE"
+    fi
     CHECK_RUN_ARGS=(
       ci post-check-run
       --provider github
-      --decision "$PR_DECISION_FILE"
+      --decision "$CHECK_RUN_DECISION_FILE"
       --repo "$GH_REPO"
       --head-sha "$CHECK_HEAD_SHA"
     )

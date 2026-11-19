@@ -795,6 +795,8 @@ fn boundary_violation(path: &str) -> BoundaryViolationFinding {
         line: 1,
         col: 0,
         via_path: None,
+        reason: fallow_types::results::BoundaryViolationReason::DisallowedZone,
+        public_files: vec![],
     })
 }
 
@@ -1519,6 +1521,7 @@ fn stale_suppression(path: &str, missing_reason: bool) -> StaleSuppression {
                 Some("no longer needed".to_string())
             },
             is_file_level: false,
+            is_range: false,
             kind_known: true,
         },
         missing_reason,

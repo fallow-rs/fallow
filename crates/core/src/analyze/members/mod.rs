@@ -45,6 +45,7 @@ use heritage::*;
 use instance::*;
 use member_probe::propagate_member_name_probe_accesses;
 use namespace::{
+    class_member_credited_by_value_use, credit_holder_prototype_reads,
     credit_namespace_member_uses, drop_members_of_unused_namespaces, enum_member_credited,
     namespace_member_credited,
 };
@@ -1626,6 +1627,15 @@ fn should_skip_member_for_unused_report(member: &MemberInfo, ctx: &MemberSkipCon
         return true;
     }
 
+    if is_class_member_kind(member.kind)
+        && ctx
+            .accessed_members
+            .get(ctx.export_key)
+            .is_some_and(|accessed| class_member_credited_by_value_use(accessed, member))
+    {
+        return true;
+    }
+
     if ctx.is_public_api_class_export && is_class_member_kind(member.kind) {
         return true;
     }
@@ -1918,6 +1928,8 @@ fn collect_direct_member_accesses(
             }
         }
     }
+
+    credit_holder_prototype_reads(graph, resolved_modules, indexes, &mut accessed_members);
 
     MemberAccessCollections {
         accessed_members,

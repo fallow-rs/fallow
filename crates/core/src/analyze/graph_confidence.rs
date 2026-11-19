@@ -913,11 +913,8 @@ mod tests {
         );
     }
 
-    /// An unreachable module that parsed degraded cannot change a reachability
-    /// verdict, so `unused_files[]` stays clean. It CAN hold the member access
-    /// that credits an enum member, because member collection ignores
-    /// reachability entirely. Pinning the divergence keeps a future refactor
-    /// from reusing the reachability narrowing for members.
+    /// An unreachable module with parse errors cannot change a reachability verdict.
+    /// Member collection examines all modules, so a member access can still be absent.
     #[test]
     fn a_degraded_unreachable_module_caveats_a_member_but_not_a_file() {
         let graph = graph();

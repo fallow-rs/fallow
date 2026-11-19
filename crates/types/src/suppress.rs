@@ -611,6 +611,7 @@ pub fn is_valid_policy_identifier(value: &str) -> bool {
 #[derive(Debug, Clone)]
 pub struct Suppression {
     /// 1-based line this suppression applies to. 0 = file-wide suppression.
+    /// For a range, the first line inside the range.
     pub line: u32,
     /// 1-based line where the suppression comment itself appears.
     /// For `fallow-ignore-next-line`, this is `line - 1`.
@@ -620,6 +621,33 @@ pub struct Suppression {
     pub target: Option<SuppressionTarget>,
     /// Human-authored reason after `--`, when present.
     pub reason: Option<String>,
+    /// What the suppression covers: the file, one line, or a range of lines.
+    pub scope: SuppressionScope,
+}
+
+/// What one suppression covers.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SuppressionScope {
+    /// A `fallow-ignore-file` marker. [`Suppression::line`] is 0.
+    File,
+    /// A `fallow-ignore-next-line` marker for [`Suppression::line`].
+    Line,
+    /// A `fallow-ignore-start` / `fallow-ignore-end` pair. The range covers
+    /// the lines from [`Suppression::line`] up to, but not including,
+    /// `end_line`. Only clone detection applies a range: the line and file
+    /// predicates of [`Suppression`] never match a range entry.
+    Range {
+        /// 1-based line of the `fallow-ignore-end` comment.
+        end_line: u32,
+    },
+}
+
+impl SuppressionScope {
+    /// The file or line scope that a plain marker for `line` has.
+    #[must_use]
+    pub const fn for_line(line: u32) -> Self {
+        if line == 0 { Self::File } else { Self::Line }
+    }
 }
 
 impl Suppression {
@@ -631,6 +659,7 @@ impl Suppression {
             comment_line,
             target: None,
             reason: None,
+            scope: SuppressionScope::for_line(line),
         }
     }
 
@@ -642,6 +671,41 @@ impl Suppression {
             comment_line,
             target: Some(SuppressionTarget::Issue(kind)),
             reason: None,
+            scope: SuppressionScope::for_line(line),
+        }
+    }
+
+    /// Build a range suppression for one issue kind.
+    ///
+    /// `first_line` is the first line inside the range, `comment_line` the
+    /// line of the `fallow-ignore-start` comment, and `end_line` the line of
+    /// the `fallow-ignore-end` comment.
+    #[must_use]
+    pub const fn range(first_line: u32, comment_line: u32, end_line: u32, kind: IssueKind) -> Self {
+        Self {
+            line: first_line,
+            comment_line,
+            target: Some(SuppressionTarget::Issue(kind)),
+            reason: None,
+            scope: SuppressionScope::Range { end_line },
+        }
+    }
+
+    /// The `fallow-ignore-end` line when this suppression is a range.
+    #[must_use]
+    pub const fn range_end_line(&self) -> Option<u32> {
+        match self.scope {
+            SuppressionScope::Range { end_line } => Some(end_line),
+            SuppressionScope::File | SuppressionScope::Line => None,
+        }
+    }
+
+    /// Whether this suppression is a range that covers `line`.
+    #[must_use]
+    pub const fn range_covers_line(&self, line: u32) -> bool {
+        match self.scope {
+            SuppressionScope::Range { end_line } => line >= self.line && line < end_line,
+            SuppressionScope::File | SuppressionScope::Line => false,
         }
     }
 
@@ -660,6 +724,7 @@ impl Suppression {
                 pack, rule_id,
             ))),
             reason: None,
+            scope: SuppressionScope::for_line(line),
         }
     }
 
@@ -694,10 +759,14 @@ impl Suppression {
         self.target.as_ref().map(SuppressionTarget::token)
     }
 
-    /// Whether the comment applies to `line`.
+    /// Whether the comment applies to `line`. A range never applies here.
     #[must_use]
     pub const fn applies_to_line(&self, line: u32) -> bool {
-        self.line == 0 || self.line == line
+        match self.scope {
+            SuppressionScope::File => true,
+            SuppressionScope::Line => self.line == line,
+            SuppressionScope::Range { .. } => false,
+        }
     }
 
     /// Whether this suppression covers a regular issue kind on a line.
@@ -740,9 +809,101 @@ pub fn is_suppressed(suppressions: &[Suppression], line: u32, kind: IssueKind) -
 /// Check if the entire file is suppressed for issue types that do not have line numbers.
 #[must_use]
 pub fn is_file_suppressed(suppressions: &[Suppression], kind: IssueKind) -> bool {
-    suppressions
-        .iter()
-        .any(|suppression| suppression.line == 0 && suppression.matches_issue_kind(0, kind))
+    suppressions.iter().any(|suppression| {
+        suppression.scope == SuppressionScope::File && suppression.matches_issue_kind(0, kind)
+    })
+}
+
+/// What is wrong with one `fallow-ignore-start` or `fallow-ignore-end`
+/// marker. A marker with a problem has no effect.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[serde(rename_all = "snake_case")]
+pub enum RangeMarkerProblemKind {
+    /// A `fallow-ignore-start` with no `fallow-ignore-end` after it.
+    UnclosedStart,
+    /// A `fallow-ignore-end` with no open `fallow-ignore-start`.
+    UnmatchedEnd,
+    /// A `fallow-ignore-start` inside an open range. The outer range applies.
+    NestedStart,
+    /// A range marker without an issue kind. A range needs
+    /// `code-duplication`.
+    MissingKind,
+    /// A range marker names an issue kind other than `code-duplication`.
+    /// The `code-duplication` part of the same marker still applies.
+    UnsupportedKind,
+    /// A range marker shares its line with code. A range marker must be on
+    /// its own line.
+    NotOwnLine,
+}
+
+impl RangeMarkerProblemKind {
+    /// Stable one-byte code for cache storage.
+    #[must_use]
+    pub const fn to_code(self) -> u8 {
+        match self {
+            Self::UnclosedStart => 1,
+            Self::UnmatchedEnd => 2,
+            Self::NestedStart => 3,
+            Self::MissingKind => 4,
+            Self::UnsupportedKind => 5,
+            Self::NotOwnLine => 6,
+        }
+    }
+
+    /// Read a code that [`Self::to_code`] wrote.
+    #[must_use]
+    pub const fn from_code(code: u8) -> Option<Self> {
+        match code {
+            1 => Some(Self::UnclosedStart),
+            2 => Some(Self::UnmatchedEnd),
+            3 => Some(Self::NestedStart),
+            4 => Some(Self::MissingKind),
+            5 => Some(Self::UnsupportedKind),
+            6 => Some(Self::NotOwnLine),
+            _ => None,
+        }
+    }
+
+    /// One-sentence description for human output.
+    #[must_use]
+    pub const fn description(self) -> &'static str {
+        match self {
+            Self::UnclosedStart => {
+                "fallow-ignore-start has no fallow-ignore-end, so it suppresses nothing"
+            }
+            Self::UnmatchedEnd => {
+                "fallow-ignore-end has no fallow-ignore-start before it (each range marker must be on its own line)"
+            }
+            Self::NestedStart => {
+                "fallow-ignore-start is inside an open range; the outer range applies"
+            }
+            Self::MissingKind => {
+                "range markers need the code-duplication kind; this marker suppresses nothing"
+            }
+            Self::UnsupportedKind => {
+                "range markers support only code-duplication; this kind is not suppressed"
+            }
+            Self::NotOwnLine => {
+                "range marker shares its line with code, so it suppresses nothing; put it on its own line"
+            }
+        }
+    }
+}
+
+/// One range marker with a problem, at a line of one file.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct RangeMarkerProblem {
+    /// 1-based line of the marker comment.
+    pub line: u32,
+    /// What is wrong with the marker.
+    #[serde(rename = "problem")]
+    pub kind: RangeMarkerProblemKind,
+    /// The kind token that the range does not support. Present only for
+    /// `unsupported_kind`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub token: Option<String>,
 }
 
 /// A suppression token that did not parse to any known `IssueKind`.

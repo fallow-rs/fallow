@@ -194,7 +194,7 @@ fn a_config_change_that_keeps_the_entries_orphans_nothing() {
     let tmp = fixture(ENTRY_INDEX_AND_EXTRA);
     fs::write(
         tmp.path().join(".fallowrc.json"),
-        r#"{"entry": ["src/index.ts", "scripts/extra.ts"], "ignoreDependencies": ["left-pad"]}"#,
+        r#"{"entry": ["src/index.ts", "scripts/extra.ts"], "rules": {"unused-files": "error"}}"#,
     )
     .unwrap();
     commit_all(tmp.path(), "edit the config");
@@ -385,4 +385,26 @@ fn a_config_change_that_makes_an_old_unused_file_reachable_does_not_gate_its_exp
     assert!(!introduced(&result.files), "{:?}", result.files);
     assert!(!introduced(&result.exports), "{:?}", result.exports);
     assert_eq!(result.verdict, "pass");
+}
+
+/// With `--config`, the config of the base commit is the base version of that
+/// file, not a config that discovery finds in the base worktree.
+#[test]
+fn an_explicit_config_change_reports_the_file_it_made_unreachable() {
+    let tmp = fixture("{}");
+    let dir = tmp.path();
+    fs::remove_file(dir.join(".fallowrc.json")).unwrap();
+    fs::create_dir_all(dir.join("ci")).unwrap();
+    fs::write(dir.join("ci/fallow.json"), ENTRY_INDEX_AND_EXTRA).unwrap();
+    commit_all(dir, "move the config");
+    // The branch `head` makes the bare name ambiguous on a file system that
+    // ignores case, so the commit is named by its full ref.
+    git(dir, &["update-ref", "refs/heads/main", "refs/heads/head"]);
+    fs::write(dir.join("ci/fallow.json"), ENTRY_INDEX).unwrap();
+    commit_all(dir, "drop an entry");
+
+    let result = audit(dir, &["--no-cache", "--config", "ci/fallow.json"]);
+
+    assert_eq!(result.files, owned(&[("scripts/extra.ts", true)]));
+    assert_eq!(result.verdict, "fail");
 }

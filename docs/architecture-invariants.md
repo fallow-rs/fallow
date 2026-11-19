@@ -64,6 +64,8 @@ The protocol adapters are `fallow-cli`, `fallow-lsp`, `fallow-mcp`, and
   spawn in an adapter is for a fact the engine does not model, such as worktree
   lifecycle or a coverage upload envelope, and the CLI boundary test names each
   one.
+- `fallow-config` owns the run plan. A surface builds a `RunRequest` and reads
+  no selection key.
 - Public contract crates should avoid CLI-only assumptions. A contract should
   still make sense for API, MCP, LSP, and NAPI consumers.
 
@@ -84,6 +86,18 @@ protocol and package parity.
 
 - Filesystem discovery, config loading, package manager detection, and parse
   cache ownership belong in session/runtime setup, not output formatting.
+- The engine function `fallow_engine::project_config::load_config_file` is
+  the one loader of the config file. The project config entry points of the
+  engine, the config reads of `fallow-api` and each config read of the CLI
+  call it, so each surface gets the same trust policy for remote `extends`
+  and the same error detail. The
+  source rule `config-load-through-engine-loader` in the root `Cargo.toml`
+  denies a direct call of `FallowConfig::load`, `load_with_options`,
+  `find_and_load` or `find_and_load_with_options` in production code. It
+  also denies a function path such as `map(FallowConfig::load)` and an
+  alias such as `use fallow_config::FallowConfig as Config`. Its allow list
+  holds the engine loader and the config parse bench, each with the exact
+  count of calls.
 - Output formatting should work from typed evidence already passed to it. It
   must not crawl arbitrary project files to complete a report.
 - Cache expansion needs invalidation tests and visible fallback behavior before

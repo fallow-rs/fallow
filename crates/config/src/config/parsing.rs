@@ -1587,6 +1587,7 @@ impl FallowConfig {
 
         for zone in &self.boundaries.zones {
             validate_user_globs(&zone.patterns, "boundaries.zones[].patterns", errors);
+            validate_user_globs(&zone.public_files, "boundaries.zones[].publicFiles", errors);
             if let Some(root) = &zone.root
                 && let Err(e) = validate_user_path(root, "boundaries.zones[].root")
             {

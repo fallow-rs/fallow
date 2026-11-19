@@ -241,6 +241,10 @@ variables:
     paths:
       - ${FALLOW_ROOT}/.fallow/
     policy: pull-push
+    # A failed gate fails the job. GitLab saves a cache only after a
+    # successful job by default, so without this a failed run loses its
+    # mutation results and the next run cannot continue a partial run.
+    when: always
   before_script:
     # Install dependencies: detect Alpine (apk) vs Debian/Ubuntu (apt-get)
     - |

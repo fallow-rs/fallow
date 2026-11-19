@@ -860,7 +860,8 @@ fn the_rendered_pr_comment_body_says_a_changed_since_measured_an_empty_scope() {
         "--quiet",
     ]);
     assert!(
-        out.stdout.contains("applied over an empty scope"),
+        out.stdout
+            .contains("No changed file has code that fallow analyzes."),
         "the body must say the ref narrowed the run to nothing: {}",
         out.stdout
     );
@@ -1107,19 +1108,10 @@ fn the_rendered_pr_comment_body_says_an_applied_filter_measured_an_empty_scope()
         "--quiet",
     ]);
     assert!(
-        out.stdout
-            .contains("Request outcomes: applied diff-filter."),
-        "the body must state the honoured request: {}",
-        out.stdout
-    );
-    assert!(
-        out.stdout.contains("applied over an empty scope"),
-        "and that the scope it applied over was empty: {}",
-        out.stdout
-    );
-    assert!(
-        out.stdout.contains("nothing in it was analyzable"),
-        "and what that means for the clean report under it: {}",
+        out.stdout.contains(
+            "No changed file has code that fallow analyzes. Check the diff or the base ref of this run."
+        ),
+        "the body must say the filter applied over an empty scope: {}",
         out.stdout
     );
     assert!(

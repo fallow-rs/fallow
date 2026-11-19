@@ -38,6 +38,19 @@ fn workspace_package_name<'a>(
     workspace_names.get(package_name.as_str()).copied()
 }
 
+/// Whether an import edge with this target credits the workspace package that
+/// its specifier names. An unresolved target also credits it: the entry file of
+/// a workspace package can be missing until a build creates it, and the
+/// import still uses the package.
+const fn credits_workspace_package(target: &resolve::ResolveResult) -> bool {
+    matches!(
+        target,
+        resolve::ResolveResult::InternalModule(_)
+            | resolve::ResolveResult::CommonJsInternalModule(_)
+            | resolve::ResolveResult::Unresolvable(_)
+    )
+}
+
 pub fn credit_workspace_package_usage(
     graph: &mut graph::ModuleGraph,
     resolved: &[resolve::ResolvedModule],
@@ -50,12 +63,9 @@ pub fn credit_workspace_package_usage(
     let workspace_names: FxHashSet<&str> = workspaces.iter().map(|ws| ws.name.as_str()).collect();
     for module in resolved {
         for import in module.all_resolved_imports() {
-            if matches!(
-                import.target,
-                resolve::ResolveResult::InternalModule(_)
-                    | resolve::ResolveResult::CommonJsInternalModule(_)
-            ) && let Some(package_name) =
-                workspace_package_name(&import.info.source, &workspace_names)
+            if credits_workspace_package(&import.target)
+                && let Some(package_name) =
+                    workspace_package_name(&import.info.source, &workspace_names)
             {
                 record_graph_package_usage(
                     graph,
@@ -67,7 +77,7 @@ pub fn credit_workspace_package_usage(
         }
 
         for re_export in &module.re_exports {
-            if matches!(re_export.target, resolve::ResolveResult::InternalModule(_))
+            if credits_workspace_package(&re_export.target)
                 && let Some(package_name) =
                     workspace_package_name(&re_export.info.source, &workspace_names)
             {

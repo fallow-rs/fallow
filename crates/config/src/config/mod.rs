@@ -17,6 +17,7 @@ mod parsing;
 mod resolution;
 mod resolve;
 mod rules;
+mod run_plan;
 mod similar_code;
 mod used_class_members;
 mod workspace_settings;
@@ -73,6 +74,10 @@ pub use rules::{
     KNOWN_RULE_NAMES, PartialRulesConfig, RulesConfig, SEMANTIC_REFINABLE_KINDS,
     SYMBOL_USE_REFINABLE_KINDS, Severity, any_symbol_use_rule_active, closest_known_rule_name,
     default_severity_for_kind, is_opt_in_kind,
+};
+pub use run_plan::{
+    AnalysisRequest, AnalysisSelection, ConfigKey, PlanSections, PlannedAnalysis, RunCommand,
+    RunPlan, RunRequest, SkipReason, plan_run,
 };
 pub use similar_code::SimilarCodeConfig;
 pub use used_class_members::{ScopedUsedClassMemberRule, UsedClassMemberRule};
@@ -407,7 +412,7 @@ fn extends_schema(_generator: &mut schemars::SchemaGenerator) -> schemars::Schem
 /// `FallowConfig::resolve` compiles the loaded config (globs, regexes,
 /// plugin and rule-pack discovery) into a [`ResolvedConfig`] for analysis.
 /// Unknown keys are rejected at load so typos fail loud.
-#[derive(Debug, Default, Deserialize, Serialize, JsonSchema)]
+#[derive(Debug, Clone, Default, Deserialize, Serialize, JsonSchema)]
 #[serde(deny_unknown_fields, rename_all = "camelCase")]
 // Both `.fallowrc.json` and `.fallowrc.jsonc` are read with the JSONC dialect
 // from `crate::jsonc::parse_options`, so the schema declares the same dialect.
@@ -907,7 +912,7 @@ pub struct AuditConfig {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub health: Option<bool>,
 
-    /// Toggles the duplication sub-analysis in `fallow audit`. Defaults to on when unset; set `false` to leave clone groups out of the verdict, summary and attribution, on the head and on the base snapshot. `fallow audit --skip dupes` turns it off for one run and `--only` replaces this selection.
+    /// Toggles the duplication sub-analysis in `fallow audit`. Defaults to the value of `duplicates.enabled` when unset, which is on by default; set `false` to leave clone groups out of the verdict, summary and attribution, on the head and on the base snapshot. `fallow audit --skip dupes` turns it off for one run and `--only` replaces this selection.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub dupes: Option<bool>,
 

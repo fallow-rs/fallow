@@ -22,7 +22,6 @@ use fallow_types::extract::{
 
 use crate::asset_url::normalize_asset_url;
 use crate::function_body::BodyRef;
-use crate::html::is_remote_url;
 
 use super::helpers::{
     array_element_type_from_type, escape_glob_literal, extract_angular_component_metadata,
@@ -67,6 +66,8 @@ mod visit_function_returns;
 pub(super) mod visit_helpers;
 #[path = "visit_impl_html_element_alias.rs"]
 mod visit_html_element_alias;
+#[path = "visit_impl_html_template.rs"]
+mod visit_html_template;
 #[path = "visit_impl_jsx_runtime.rs"]
 mod visit_jsx_runtime;
 #[path = "visit_impl_member_destructuring.rs"]
@@ -3357,6 +3358,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.fluent_chain_inner_calls.clear();
         self.record_top_level_runtime_statement(program);
         self.record_program_directives(program);
+        self.record_html_tag_provenance(program);
         self.is_server_action_module = visit_server_actions::is_server_action_module(program);
         self.is_module_file = program_has_module_syntax(program);
         self.has_global_declarations =
@@ -4197,7 +4199,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         for declarator in &decl.declarations {
             self.record_variable_declarator(decl, declarator);
             self.record_declarator_function_name(declarator);
-            self.record_exported_handler_declarator(declarator);
+            self.record_handler_object_declarator(declarator);
         }
         walk::walk_variable_declaration(self, decl);
     }
@@ -4214,7 +4216,6 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
     fn visit_object_property(&mut self, prop: &ObjectProperty<'a>) {
         self.capture_factory_property_observation(&prop.value);
-        self.record_graphql_resolver_args_source(&prop.value);
 
         if let Some((import_expr, sources)) = try_extract_property_callback_import(prop) {
             self.push_dynamic_import_branches(
@@ -4238,6 +4239,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
 
     fn visit_object_expression(&mut self, obj: &ObjectExpression<'a>) {
         self.record_angular_provider_object(obj);
+        self.record_graphql_resolver_map_sources(obj);
 
         walk::walk_object_expression(self, obj);
     }
@@ -4337,8 +4339,8 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.record_callee_use(&expr.callee, expr.span.start, false);
         self.record_imported_call_site(expr);
         self.record_this_binding_call(expr);
-
         walk::walk_call_expression(self, expr);
+        self.react_record_memo_comparator(expr);
     }
 
     fn visit_for_statement(&mut self, stmt: &ForStatement<'a>) {
@@ -5084,15 +5086,13 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
     /// is ignored rather than producing a garbled, unresolvable specifier.
     fn visit_tagged_template_expression(&mut self, expr: &TaggedTemplateExpression<'a>) {
         self.try_record_command_template(expr);
-        if is_html_tagged_template(&expr.tag) {
+        if visit_html_template::is_html_tagged_template(&expr.tag) {
             for quasi in &expr.quasi.quasis {
                 let text = quasi
                     .value
                     .cooked
                     .map_or_else(|| quasi.value.raw.as_str().into(), JsText::text);
-                for raw in crate::html::collect_asset_refs(&text) {
-                    self.push_html_template_asset_import(&raw);
-                }
+                self.push_html_template_asset_imports(quasi, &text);
                 // Record custom-element tags rendered in the template
                 // (`<x-foo>`), feeding the Lit `unrendered-component` arm's
                 // project-wide rendered-tag union.
@@ -5706,11 +5706,6 @@ fn object_values_or_entries_argument_name(expr: &Expression<'_>) -> Option<Strin
     Some(arg.name.to_string())
 }
 
-/// Returns true when the tagged template's tag is the bare identifier `html`.
-fn is_html_tagged_template(tag: &Expression<'_>) -> bool {
-    matches!(tag, Expression::Identifier(id) if id.name == "html")
-}
-
 /// Collect `(local_name, class_name)` pairs from an `instanceof` guard expression.
 ///
 /// Recurses through `&&`-chained conditions so `a instanceof A && b instanceof B`
@@ -5843,25 +5838,6 @@ impl ModuleInfoExtractor {
                 span_start: call.span.start,
             },
         ));
-    }
-
-    /// Push an HTML-template-sourced asset reference onto `imports`, mirroring
-    /// the HTML parser's remote-url, normalization, and `SideEffect` pipeline.
-    fn push_html_template_asset_import(&mut self, raw: &str) {
-        let trimmed = raw.trim();
-        if trimmed.is_empty() || is_remote_url(trimmed) {
-            return;
-        }
-        self.imports.push(ImportInfo {
-            source: normalize_asset_url(trimmed),
-            imported_name: ImportedName::SideEffect,
-            local_name: String::new(),
-            is_type_only: false,
-            is_type_only_star: false,
-            from_style: false,
-            span: oxc_span::Span::default(),
-            source_span: oxc_span::Span::default(),
-        });
     }
 }
 

@@ -59,6 +59,19 @@ lifecycle behavior.
   no CRAP score, so a function that the health report flags only through
   CRAP (or through `complexity-crap` while the other two rules are `off`) has
   a health finding but no lens.
+- The `fallow.production` setting (`initializationOptions.production`) acts
+  as `--production` or `--no-production`. `EditorAnalysisSession::load_with_production`
+  passes it to the engine loader before config resolution, so the rules that
+  production mode turns off, such as `unused-dev-dependencies`, are off in
+  the editor too. Do not set `ResolvedConfig::production` after resolution:
+  the rules would keep the values of the other mode.
+- Without the setting, a per-analysis `production` config such as
+  `{"deadCode": true, "dupes": false}` gives the session the dead-code mode.
+  The engine session then walks the files of the duplication mode for the
+  duplication pass, so the clone diagnostics match `fallow dupes`. A
+  `configure` closure of the load does not reach that second walk, so it must
+  not change a discovery input: the root, the ignore patterns, or the
+  production mode.
 - Security candidate diagnostics remain opt-in through the project config.
   `security-sink` and `security-client-server-leak` default to `off`, retain
   those exact diagnostic codes, and publish at information severity because

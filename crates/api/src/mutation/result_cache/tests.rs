@@ -32,6 +32,7 @@ fn key_files() -> KeyFiles {
         reach_files: vec!["src/a.ts".to_owned(), "src/dep.ts".to_owned()],
         test_file_reach: BTreeMap::from([("test/a.test.ts".to_owned(), vec![0, 1])]),
         support_files: vec!["test/setup.ts".to_owned()],
+        runner_projects: Vec::new(),
     }
 }
 
@@ -477,4 +478,71 @@ fn incomplete_target_evidence_never_replaces_a_cache_entry() {
         next.get("m1", "k1").is_some(),
         "the normal entry stays in place"
     );
+}
+
+#[test]
+fn the_key_changes_with_the_runner_project_selection() {
+    let dir = tempfile::tempdir().unwrap();
+    project(dir.path());
+    let root = dir.path();
+    let key_for = |projects: &[&str]| {
+        let files = KeyFiles {
+            runner_projects: projects.iter().map(|&name| name.to_owned()).collect(),
+            ..key_files()
+        };
+        ResultCache::open(&root.join(".fallow/mutation"), root, "vitest", files).key(
+            &ready("5.0.4", "v24.0.0"),
+            &mutant("m1"),
+            &["test/a.test.ts::adds".to_owned()],
+            &["test/a.test.ts".to_owned()],
+        )
+    };
+    assert_eq!(key_for(&[]), key(root), "no selection keeps the old key");
+    assert_ne!(key_for(&["unit"]), key_for(&[]));
+    assert_ne!(key_for(&["unit"]), key_for(&["api"]));
+    assert_ne!(key_for(&["a", "b"]), key_for(&["ab"]));
+}
+
+/// Each field of `MutationRunOptions` and its effect on the result key. The
+/// destructure has no `..`, so a new field does not compile until it has a
+/// line here. A field that changes which tests run, or how they run, must
+/// reach the key, or a cached result of other tests comes back.
+#[test]
+fn each_run_option_has_a_result_key_decision() {
+    let crate::mutation::MutationRunOptions {
+        // Not keyed: they select the plan. `key` hashes the mutant, its
+        // file, its tests and each file that the tests reach.
+        analysis: _,
+        scope: _,
+        operators: _,
+        allow_side_effects: _,
+        max_mutants: _,
+        mutants_per_line: _,
+        function_scope: _,
+        mutant_ids: _,
+        // Keyed: `job_key` adds the `matrix:`, `targets:` or `targets-first:`
+        // prefix.
+        kill_matrix: _,
+        kill_matrix_targets: _,
+        kill_matrix_full: _,
+        // Keyed: `key` holds the runtime version of the companion.
+        runtime: _,
+        // Keyed: `key_files` adds the file to the support files.
+        runner_config: _,
+        // Keyed: `keys_only` feeds the selection.
+        runner_projects: _,
+        // Not keyed: they schedule the run and do not change a result.
+        concurrency: _,
+        time_budget: _,
+        runner_timeout: _,
+        // Not keyed: worktree guards, checked before the run.
+        allow_dirty: _,
+        test_changes_only: _,
+        output_paths: _,
+        // Not keyed: they run after the stored results.
+        typecheck: _,
+        record_args: _,
+        // Not keyed: the journal reads its own header.
+        resume: _,
+    } = crate::mutation::MutationRunOptions::default();
 }

@@ -1,6 +1,6 @@
 {
   "name": "fallow-similar-code",
-  "version": "3.43.2",
+  "version": "3.44.0",
   "description": "First-party local embedding sidecar for Fallow similar-code analysis",
   "license": "MIT",
   "repository": {
@@ -16,6 +16,7 @@
   "files": [
     "bin",
     "scripts",
+    "!scripts/*.test.js",
     "README.md",
     "LICENSE"
   ],
@@ -26,13 +27,13 @@
     "detect-libc": "2.1.2"
   },
   "optionalDependencies": {
-    "@fallow-cli/fallow-similar-code-darwin-arm64": "3.43.2",
-    "@fallow-cli/fallow-similar-code-darwin-x64": "3.43.2",
-    "@fallow-cli/fallow-similar-code-linux-x64-gnu": "3.43.2",
-    "@fallow-cli/fallow-similar-code-linux-arm64-gnu": "3.43.2",
-    "@fallow-cli/fallow-similar-code-linux-x64-musl": "3.43.2",
-    "@fallow-cli/fallow-similar-code-linux-arm64-musl": "3.43.2",
-    "@fallow-cli/fallow-similar-code-win32-x64-msvc": "3.43.2",
-    "@fallow-cli/fallow-similar-code-win32-arm64-msvc": "3.43.2"
+    "@fallow-cli/fallow-similar-code-darwin-arm64": "3.44.0",
+    "@fallow-cli/fallow-similar-code-darwin-x64": "3.44.0",
+    "@fallow-cli/fallow-similar-code-linux-x64-gnu": "3.44.0",
+    "@fallow-cli/fallow-similar-code-linux-arm64-gnu": "3.44.0",
+    "@fallow-cli/fallow-similar-code-linux-x64-musl": "3.44.0",
+    "@fallow-cli/fallow-similar-code-linux-arm64-musl": "3.44.0",
+    "@fallow-cli/fallow-similar-code-win32-x64-msvc": "3.44.0",
+    "@fallow-cli/fallow-similar-code-win32-arm64-msvc": "3.44.0"
   }
 }

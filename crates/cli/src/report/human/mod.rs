@@ -1,6 +1,7 @@
 pub(super) mod check;
 mod cross_ref;
 pub(super) mod dupes;
+mod dupes_range_markers;
 pub(super) mod health;
 mod health_crap_notes;
 mod health_hotspots;

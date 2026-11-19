@@ -1208,6 +1208,7 @@ fn json_stale_suppression_unknown_kind_snapshot() {
             issue_kind: Some("complexity-typo".to_string()),
             reason: None,
             is_file_level: false,
+            is_range: false,
             kind_known: false,
         },
         missing_reason: false,
@@ -1223,6 +1224,7 @@ fn json_stale_suppression_unknown_kind_snapshot() {
             issue_kind: Some("unused-export".to_string()),
             reason: None,
             is_file_level: false,
+            is_range: false,
             kind_known: true,
         },
         missing_reason: false,
@@ -3714,6 +3716,7 @@ fn sample_duplication_report(root: &Path) -> DuplicationReport {
         }],
         clone_families: vec![],
         mirrored_directories: vec![],
+        range_marker_problems: Vec::new(),
         stats: DuplicationStats {
             total_files: 100,
             files_with_clones: 2,
@@ -3832,6 +3835,7 @@ fn sample_grouped_duplication_report(root: &Path) -> DuplicationReport {
         ],
         clone_families: vec![],
         mirrored_directories: vec![],
+        range_marker_problems: Vec::new(),
         stats: DuplicationStats {
             total_files: 100,
             files_with_clones: 5,

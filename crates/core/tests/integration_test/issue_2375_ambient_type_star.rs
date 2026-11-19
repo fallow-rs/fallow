@@ -145,9 +145,8 @@ fn ambient_type_star_leaves_the_value_meaning_reporting() {
         .expect("analysis should succeed");
     let unused_exports = unused_export_pairs(&results);
 
-    // The value half of a same-name pair is not forwarded: `export type *`
-    // erases it. On `entry-pair.ts` the entry `.d.ts` star used to launder it
-    // into the entry surface, so this row is new.
+    // A type-only star does not forward the value half of a same-name pair.
+    // This also applies when the declaration file is an entry point.
     for (path, name) in [
         ("src/entry-pair.ts", "EntryPair"),
         ("src/shim-pair.ts", "ShimPair"),

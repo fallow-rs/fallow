@@ -1137,7 +1137,6 @@ mod tests {
         // The contract symbol's declaration line flows onto the decision so a PR
         // review can anchor an inline comment to the exact export.
         assert_eq!(surface.decisions[0].anchor_line, 7);
-        // No rename in this change -> no previous_signal_id (the default).
         assert!(surface.decisions[0].previous_signal_id.is_none());
     }
 

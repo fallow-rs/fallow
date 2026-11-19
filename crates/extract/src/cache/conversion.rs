@@ -14,7 +14,7 @@ use oxc_span::Span;
 
 use crate::ExportName;
 use fallow_types::extract::{NamespaceObjectAlias, VisibilityTag};
-use fallow_types::suppress::{PolicyRuleSuppression, SuppressionTarget};
+use fallow_types::suppress::{PolicyRuleSuppression, SuppressionScope, SuppressionTarget};
 
 /// Seconds-since-Unix-epoch from the wall clock, saturating to 0 if the
 /// system clock is set before the epoch. Used as the LRU bookkeeping
@@ -31,9 +31,9 @@ pub fn current_unix_seconds() -> u64 {
 use super::types::{
     CachedDynamicImport, CachedDynamicImportPattern, CachedExport, CachedImport,
     CachedLocalTypeDeclaration, CachedMember, CachedModule, CachedNamespaceObjectAlias,
-    CachedPublicSignatureTypeReference, CachedReExport, CachedRequireCall, CachedSuppression,
-    CachedUnknownSuppressionKind, IMPORT_KIND_DEFAULT, IMPORT_KIND_NAMED, IMPORT_KIND_NAMESPACE,
-    IMPORT_KIND_SIDE_EFFECT,
+    CachedPublicSignatureTypeReference, CachedRangeMarkerProblem, CachedReExport,
+    CachedRequireCall, CachedSuppression, CachedUnknownSuppressionKind, IMPORT_KIND_DEFAULT,
+    IMPORT_KIND_NAMED, IMPORT_KIND_NAMESPACE, IMPORT_KIND_SIDE_EFFECT,
 };
 
 /// Reconstruct a [`ModuleInfo`](crate::ModuleInfo) from a [`CachedModule`],
@@ -80,6 +80,7 @@ fn cached_exports_to_module(exports: &[CachedExport]) -> Vec<crate::ExportInfo> 
                     is_self_returning: member.is_self_returning,
                     override_base: member.override_base.clone(),
                     is_protected: member.is_protected,
+                    is_static: member.is_static,
                 })
                 .collect(),
             super_class: export.super_class.clone(),
@@ -87,17 +88,30 @@ fn cached_exports_to_module(exports: &[CachedExport]) -> Vec<crate::ExportInfo> 
         .collect()
 }
 
+fn cached_to_imported_name(kind: u8, name: &str) -> crate::ImportedName {
+    match kind {
+        IMPORT_KIND_DEFAULT => crate::ImportedName::Default,
+        IMPORT_KIND_NAMESPACE => crate::ImportedName::Namespace,
+        IMPORT_KIND_SIDE_EFFECT => crate::ImportedName::SideEffect,
+        _ => crate::ImportedName::Named(name.to_owned()),
+    }
+}
+
+fn imported_name_to_cached(imported_name: &crate::ImportedName) -> (u8, String) {
+    match imported_name {
+        crate::ImportedName::Named(name) => (IMPORT_KIND_NAMED, name.clone()),
+        crate::ImportedName::Default => (IMPORT_KIND_DEFAULT, String::new()),
+        crate::ImportedName::Namespace => (IMPORT_KIND_NAMESPACE, String::new()),
+        crate::ImportedName::SideEffect => (IMPORT_KIND_SIDE_EFFECT, String::new()),
+    }
+}
+
 fn cached_imports_to_module(imports: &[CachedImport]) -> Vec<crate::ImportInfo> {
     imports
         .iter()
         .map(|import| crate::ImportInfo {
             source: import.source.clone(),
-            imported_name: match import.kind {
-                IMPORT_KIND_DEFAULT => crate::ImportedName::Default,
-                IMPORT_KIND_NAMESPACE => crate::ImportedName::Namespace,
-                IMPORT_KIND_SIDE_EFFECT => crate::ImportedName::SideEffect,
-                _ => crate::ImportedName::Named(import.imported_name.clone()),
-            },
+            imported_name: cached_to_imported_name(import.kind, &import.imported_name),
             local_name: import.local_name.clone(),
             is_type_only: import.is_type_only,
             is_type_only_star: import.is_type_only_star,
@@ -181,6 +195,7 @@ fn cached_dynamic_patterns_to_module(
             excludes: pattern.excludes.clone(),
             span: Span::new(pattern.span_start, pattern.span_end),
             mechanism: pattern.mechanism,
+            imported_name: cached_to_imported_name(pattern.import_kind, &pattern.imported_name),
         })
         .collect()
 }
@@ -211,7 +226,48 @@ fn cached_suppressions_to_module(
                 comment_line: suppression.comment_line,
                 target,
                 reason: suppression.reason.clone(),
+                scope: cached_scope(suppression.line, suppression.range_end_line),
             }
+        })
+        .collect()
+}
+
+/// The scope of a cached suppression. A range stores its end line; any other
+/// suppression stores 0 there.
+const fn cached_scope(line: u32, range_end_line: u32) -> SuppressionScope {
+    if range_end_line == 0 {
+        SuppressionScope::for_line(line)
+    } else {
+        SuppressionScope::Range {
+            end_line: range_end_line,
+        }
+    }
+}
+
+fn cached_range_problems_to_module(
+    problems: &[CachedRangeMarkerProblem],
+) -> Vec<fallow_types::suppress::RangeMarkerProblem> {
+    problems
+        .iter()
+        .filter_map(|problem| {
+            Some(fallow_types::suppress::RangeMarkerProblem {
+                line: problem.line,
+                kind: fallow_types::suppress::RangeMarkerProblemKind::from_code(problem.kind)?,
+                token: problem.token.clone(),
+            })
+        })
+        .collect()
+}
+
+fn module_range_problems_to_cached(
+    problems: &[fallow_types::suppress::RangeMarkerProblem],
+) -> Vec<CachedRangeMarkerProblem> {
+    problems
+        .iter()
+        .map(|problem| CachedRangeMarkerProblem {
+            line: problem.line,
+            kind: problem.kind.to_code(),
+            token: problem.token.clone(),
         })
         .collect()
 }
@@ -301,6 +357,7 @@ fn module_exports_to_cached(exports: &[crate::ExportInfo]) -> Vec<CachedExport> 
                     is_self_returning: member.is_self_returning,
                     override_base: member.override_base.clone(),
                     is_protected: member.is_protected,
+                    is_static: member.is_static,
                 })
                 .collect(),
             super_class: export.super_class.clone(),
@@ -312,12 +369,7 @@ fn module_imports_to_cached(imports: &[crate::ImportInfo]) -> Vec<CachedImport> 
     imports
         .iter()
         .map(|import| {
-            let (kind, imported_name) = match &import.imported_name {
-                crate::ImportedName::Named(name) => (IMPORT_KIND_NAMED, name.clone()),
-                crate::ImportedName::Default => (IMPORT_KIND_DEFAULT, String::new()),
-                crate::ImportedName::Namespace => (IMPORT_KIND_NAMESPACE, String::new()),
-                crate::ImportedName::SideEffect => (IMPORT_KIND_SIDE_EFFECT, String::new()),
-            };
+            let (kind, imported_name) = imported_name_to_cached(&import.imported_name);
             CachedImport {
                 source: import.source.clone(),
                 imported_name,
@@ -396,13 +448,18 @@ fn module_dynamic_patterns_to_cached(
 ) -> Vec<CachedDynamicImportPattern> {
     dynamic_import_patterns
         .iter()
-        .map(|pattern| CachedDynamicImportPattern {
-            prefix: pattern.prefix.clone(),
-            suffix: pattern.suffix.clone(),
-            excludes: pattern.excludes.clone(),
-            span_start: pattern.span.start,
-            span_end: pattern.span.end,
-            mechanism: pattern.mechanism,
+        .map(|pattern| {
+            let (import_kind, imported_name) = imported_name_to_cached(&pattern.imported_name);
+            CachedDynamicImportPattern {
+                prefix: pattern.prefix.clone(),
+                suffix: pattern.suffix.clone(),
+                excludes: pattern.excludes.clone(),
+                span_start: pattern.span.start,
+                span_end: pattern.span.end,
+                mechanism: pattern.mechanism,
+                import_kind,
+                imported_name,
+            }
         })
         .collect()
 }
@@ -431,6 +488,7 @@ fn module_suppressions_to_cached(
                 policy_pack,
                 policy_rule_id,
                 reason: suppression.reason.clone(),
+                range_end_line: suppression.range_end_line().unwrap_or(0),
             }
         })
         .collect()
@@ -540,6 +598,7 @@ pub fn cached_to_module_opts(
         unknown_suppression_kinds: cached_unknown_suppressions_to_module(
             &cached.unknown_suppression_kinds,
         ),
+        range_marker_problems: cached_range_problems_to_module(&cached.range_marker_problems),
         unused_import_bindings: cached.unused_import_bindings.clone(),
         type_referenced_import_bindings: cached.type_referenced_import_bindings.clone(),
         value_referenced_import_bindings: cached.value_referenced_import_bindings.clone(),
@@ -695,6 +754,7 @@ fn module_to_cached_payload(module: &crate::ModuleInfo) -> CachedModule {
         unknown_suppression_kinds: module_unknown_suppressions_to_cached(
             &module.unknown_suppression_kinds,
         ),
+        range_marker_problems: module_range_problems_to_cached(&module.range_marker_problems),
         line_offsets: module.line_offsets.clone(),
         complexity: module.complexity.clone(),
         complexity_extracted: false,

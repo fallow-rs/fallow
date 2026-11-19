@@ -63,7 +63,7 @@ pub fn run_audit(options: &AuditOptions) -> ProgrammaticResult<AuditProgrammatic
     let analysis = analysis_options_for_audit(options, &resolved_base.git_ref);
     let resolved = audit_section_context(&analysis)?;
     let config = load_programmatic_audit_config(&resolved)?;
-    let options = &options_with_audit_config(options, &config.audit);
+    let options = &options_with_audit_config(options, &config.audit, &config.duplicates);
     let changed_files = changed_files_for_run(&resolved)?.unwrap_or_default();
     let changed_files_count = changed_files.len();
 
@@ -338,7 +338,8 @@ impl AuditAnalyses for ProgrammaticAuditAnalyses<'_> {
 /// precedence of `fallow audit`. `gate` and `css_deep` win over the config,
 /// as `--gate` and `--css-deep` / `--no-css-deep` do. `css` can only turn
 /// styling off, as `--no-css` does: the CLI has no flag that overrides
-/// `audit.css: false`.
+/// `audit.css: false`. [`fallow_config::plan_run`] decides the three domains:
+/// the option wins, then the `audit` key, then `duplicates.enabled`.
 ///
 /// The destructure names every field, so a new `audit` key does not compile
 /// until the typed route applies it, rejects it, or states why it does not
@@ -346,13 +347,15 @@ impl AuditAnalyses for ProgrammaticAuditAnalyses<'_> {
 fn options_with_audit_config(
     options: &AuditOptions,
     config: &fallow_config::AuditConfig,
+    duplicates: &fallow_config::DuplicatesConfig,
 ) -> AuditOptions {
     let fallow_config::AuditConfig {
         gate,
         worsened,
-        dead_code,
-        health,
-        dupes,
+        // The run plan reads these keys.
+        dead_code: _,
+        health: _,
+        dupes: _,
         css,
         css_deep,
         // `reject_config_baselines` refuses these keys.
@@ -368,16 +371,24 @@ fn options_with_audit_config(
     } = config;
     let css = options.css != Some(false) && css.unwrap_or(true);
     let css_deep = css && options.css_deep.or(*css_deep).unwrap_or(true);
+    let plan = fallow_config::plan_run(
+        fallow_config::PlanSections {
+            duplicates,
+            audit: config,
+        },
+        fallow_config::RunRequest::from_options(
+            fallow_config::RunCommand::Audit,
+            options.dead_code,
+            options.duplication,
+            options.health,
+        ),
+    );
     AuditOptions {
         gate: Some(options.gate.unwrap_or(*gate)),
         worsened: Some(options.worsened.unwrap_or(*worsened)),
-        dead_code: Some(
-            options
-                .dead_code
-                .unwrap_or_else(|| dead_code.unwrap_or(true)),
-        ),
-        health: Some(options.health.unwrap_or_else(|| health.unwrap_or(true))),
-        duplication: Some(options.duplication.unwrap_or_else(|| dupes.unwrap_or(true))),
+        dead_code: Some(plan.dead_code.runs()),
+        health: Some(plan.health.runs()),
+        duplication: Some(plan.duplication.runs()),
         css: Some(css),
         css_deep: Some(css_deep),
         ..options.clone()
@@ -391,7 +402,7 @@ fn reject_empty_selection(options: &AuditOptions) -> ProgrammaticResult<()> {
         && options.duplication == Some(false)
     {
         return Err(ProgrammaticError::new(
-            "this audit selects no domain: the options and the audit.deadCode, audit.health and audit.dupes config keys leave nothing to run",
+            "this audit selects no domain: the options, the audit.deadCode, audit.health and audit.dupes config keys, and duplicates.enabled leave nothing to run",
             2,
         )
         .with_code("FALLOW_AUDIT_NO_ANALYSIS")

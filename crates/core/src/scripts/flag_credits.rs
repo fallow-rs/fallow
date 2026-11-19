@@ -14,6 +14,9 @@
 //! scan; it is never consulted by unlisted-dependency detection, so a
 //! synthesized name cannot invent a finding.
 
+#[path = "flag_inline_code.rs"]
+mod inline_code;
+
 use rustc_hash::FxHashMap;
 
 use super::strip_surrounding_quotes;
@@ -192,12 +195,13 @@ fn catalogue() -> &'static Catalogue {
 }
 
 /// Packages a CLI names through a flag value rather than a positional argument.
+/// The inline code of a runtime flag such as `node -e` also names packages.
 ///
 /// `args` are the tokens after the binary itself; scanning stops at `--`
 /// because everything past it belongs to another program.
 pub fn flag_referenced_packages(binary: &str, args: &[&str]) -> Vec<String> {
     let catalogue = catalogue();
-    let mut packages = Vec::new();
+    let mut packages = inline_code::inline_code_packages(binary, args);
     let mut idx = 0;
     while idx < args.len() {
         let token = args[idx];

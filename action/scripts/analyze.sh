@@ -28,6 +28,16 @@ artifact_path() {
 # shellcheck source=scope.sh
 . "$(dirname "${BASH_SOURCE[0]}")/scope.sh"
 
+# `count_noun 1 issue issues` prints "1 issue"; any other count takes the
+# plural.
+count_noun() {
+  if [ "$1" = "1" ]; then
+    printf '%s %s' "$1" "$2"
+  else
+    printf '%s %s' "$1" "$3"
+  fi
+}
+
 # Run jq and keep its stderr in the step log. Every envelope read in this
 # script discarded it, so a truncated or unreadable `fallow-results.json` read
 # as "no findings": jq wrote the cause to stderr and the caller saw an empty
@@ -566,7 +576,6 @@ ARGS=()
 build_common_args json
 build_command_args true
 
-# Parse extra arguments safely
 EXTRA_ARGS=()
 if [ -n "${INPUT_ARGS:-}" ]; then
   read -ra EXTRA_ARGS <<< "$INPUT_ARGS"
@@ -1910,13 +1919,13 @@ if [ "${INPUT_FAIL_ON_ISSUES:-}" = "true" ]; then
     # `health-findings: skipped`. Counting them here would fail a run the CLI
     # deliberately passed, which is the inversion issue #2682 describes.
     case "$INPUT_COMMAND" in
-      dead-code|check) GATE_FAILURES+=("Fallow found ${GATE_ISSUES} unused code issues${GATE_ISSUES_LABEL}.") ;;
-      architecture)    GATE_FAILURES+=("Fallow found ${GATE_ISSUES} architecture issues${GATE_ISSUES_LABEL}.") ;;
-      dupes)           GATE_FAILURES+=("Fallow found ${ISSUES} clone groups.") ;;
-      health)          GATE_FAILURES+=("Fallow found ${ISSUES} health findings.") ;;
-      security)        GATE_FAILURES+=("Fallow found ${ISSUES} security candidates.") ;;
-      fix)             GATE_FAILURES+=("Fallow found ${ISSUES} fixable issues.") ;;
-      "")              GATE_FAILURES+=("Fallow found ${GATE_ISSUES} issues${GATE_ISSUES_LABEL}.") ;;
+      dead-code|check) GATE_FAILURES+=("Fallow found $(count_noun "$GATE_ISSUES" "unused code issue" "unused code issues")${GATE_ISSUES_LABEL}.") ;;
+      architecture)    GATE_FAILURES+=("Fallow found $(count_noun "$GATE_ISSUES" "architecture issue" "architecture issues")${GATE_ISSUES_LABEL}.") ;;
+      dupes)           GATE_FAILURES+=("Fallow found $(count_noun "$ISSUES" "clone group" "clone groups").") ;;
+      health)          GATE_FAILURES+=("Fallow found $(count_noun "$ISSUES" "health finding" "health findings").") ;;
+      security)        GATE_FAILURES+=("Fallow found $(count_noun "$ISSUES" "security candidate" "security candidates").") ;;
+      fix)             GATE_FAILURES+=("Fallow found $(count_noun "$ISSUES" "fixable issue" "fixable issues").") ;;
+      "")              GATE_FAILURES+=("Fallow found $(count_noun "$GATE_ISSUES" issue issues)${GATE_ISSUES_LABEL}.") ;;
     esac
   fi
 fi
@@ -1928,14 +1937,14 @@ fi
 # which the count gate deliberately does not fail on.
 if [ "$ISSUES" -gt 0 ] && [ ${#GATE_FAILURES[@]} -eq "$COUNT_FAILURES_BEFORE" ]; then
   case "$INPUT_COMMAND" in
-    dead-code|check) echo "::warning::Fallow found ${ISSUES} unused code issues" ;;
-    architecture)    echo "::warning::Fallow found ${ISSUES} architecture issues" ;;
-    dupes)           echo "::warning::Fallow found ${ISSUES} clone groups" ;;
-    health)          echo "::warning::Fallow found ${ISSUES} high complexity functions" ;;
-    audit)           echo "::warning::Fallow audit found ${ISSUES} introduced issues in changed files" ;;
-    security)        echo "::warning::Fallow found ${ISSUES} security candidates" ;;
-    fix)             echo "::warning::Fallow proposed ${ISSUES} fixes" ;;
-    "")              echo "::warning::Fallow found ${ISSUES} issues" ;;
+    dead-code|check) echo "::warning::Fallow found $(count_noun "$ISSUES" "unused code issue" "unused code issues")" ;;
+    architecture)    echo "::warning::Fallow found $(count_noun "$ISSUES" "architecture issue" "architecture issues")" ;;
+    dupes)           echo "::warning::Fallow found $(count_noun "$ISSUES" "clone group" "clone groups")" ;;
+    health)          echo "::warning::Fallow found $(count_noun "$ISSUES" "complex function" "complex functions")" ;;
+    audit)           echo "::warning::Fallow audit found $(count_noun "$ISSUES" "introduced issue" "introduced issues") in changed files" ;;
+    security)        echo "::warning::Fallow found $(count_noun "$ISSUES" "security candidate" "security candidates")" ;;
+    fix)             echo "::warning::Fallow proposed $(count_noun "$ISSUES" fix fixes)" ;;
+    "")              echo "::warning::Fallow found $(count_noun "$ISSUES" issue issues)" ;;
   esac
 fi
 

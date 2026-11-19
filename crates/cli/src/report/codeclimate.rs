@@ -16,6 +16,7 @@ use super::github::{AnnotationLevel, resolve_render_options};
 use super::github_annotations::{EnvelopeKind, collect_annotations};
 use super::grouping::OwnershipResolver;
 use super::{emit_json, normalize_uri, relative_path};
+use crate::runtime_support::ConfigFlags;
 #[path = "codeclimate_saved_grouping.rs"]
 mod saved_grouping;
 use saved_grouping::{
@@ -65,7 +66,7 @@ pub fn print_envelope_codeclimate_with_config(
     kind: EnvelopeKind,
     envelope: &serde_json::Value,
     root: &Path,
-    config_path: Option<&Path>,
+    report_config: ConfigFlags<'_>,
     resolver: Option<&OwnershipResolver>,
     survivors: &[CodeClimateIssue],
 ) -> ExitCode {
@@ -73,7 +74,7 @@ pub fn print_envelope_codeclimate_with_config(
         kind,
         envelope,
         root,
-        config_path,
+        report_config,
         resolver,
     ) {
         Ok(issues) => issues,
@@ -96,7 +97,7 @@ fn envelope_codeclimate_issues(
     envelope: &serde_json::Value,
     root: &Path,
 ) -> Vec<CodeClimateIssue> {
-    envelope_codeclimate_issues_with_config(kind, envelope, root, None, None)
+    envelope_codeclimate_issues_with_config(kind, envelope, root, ConfigFlags::default(), None)
         .expect("test envelope should reconstruct as CodeClimate issues")
 }
 
@@ -108,11 +109,11 @@ pub fn envelope_codeclimate_issues_with_config(
     kind: EnvelopeKind,
     envelope: &serde_json::Value,
     root: &Path,
-    config_path: Option<&Path>,
+    report_config: ConfigFlags<'_>,
     resolver: Option<&OwnershipResolver>,
 ) -> Result<Vec<CodeClimateIssue>, String> {
     validate_saved_schema(kind, envelope)?;
-    match saved_native_codeclimate_issues(kind, envelope, root, config_path, resolver) {
+    match saved_native_codeclimate_issues(kind, envelope, root, report_config, resolver) {
         Ok(issues) => Ok(issues),
         Err(native_error)
             // `architecture` has no legacy schema: it first shipped with its
@@ -127,7 +128,7 @@ pub fn envelope_codeclimate_issues_with_config(
             ) && saved_schema_is_legacy(kind, envelope) =>
         {
             let issues =
-                saved_annotation_codeclimate_issues(kind, envelope, root, config_path, resolver);
+                saved_annotation_codeclimate_issues(kind, envelope, root, report_config, resolver);
             if issues.is_empty() {
                 Err(native_error)
             } else {
@@ -142,7 +143,7 @@ fn saved_annotation_codeclimate_issues(
     kind: EnvelopeKind,
     envelope: &serde_json::Value,
     root: &Path,
-    config_path: Option<&Path>,
+    report_config: ConfigFlags<'_>,
     resolver: Option<&OwnershipResolver>,
 ) -> Vec<CodeClimateIssue> {
     let options = resolve_render_options(root);
@@ -161,7 +162,7 @@ fn saved_annotation_codeclimate_issues(
                     kind,
                     &annotation.title,
                     root,
-                    config_path,
+                    report_config,
                 )
                 .as_deref()
                 .map_or_else(
@@ -202,10 +203,10 @@ fn saved_native_codeclimate_issues(
     kind: EnvelopeKind,
     envelope: &serde_json::Value,
     root: &Path,
-    config_path: Option<&Path>,
+    report_config: ConfigFlags<'_>,
     resolver: Option<&OwnershipResolver>,
 ) -> Result<Vec<CodeClimateIssue>, String> {
-    let rules = super::sarif::saved_report_rules(root, config_path);
+    let rules = super::sarif::saved_report_rules(root, report_config);
     match kind {
         EnvelopeKind::DeadCode | EnvelopeKind::Architecture => {
             let mut results =

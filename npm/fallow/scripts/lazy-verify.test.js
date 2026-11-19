@@ -174,10 +174,8 @@ test("ensureVerified returns cached:true on a valid sentinel", (t) => {
   const dir = mkPlatformDir(privateKey);
   t.after(() => cleanup(dir));
 
-  // First call writes sentinel
   ensureVerified(baseInput(dir, (p) => _verifyWithKey(p, rawPub)));
 
-  // Second call should hit cache (verifyFn must NOT be called)
   let verifyCallCount = 0;
   const result = ensureVerified(
     baseInput(dir, (p) => {
@@ -240,45 +238,21 @@ test("ensureVerified invalidates sentinel on packageVersion drift", (t) => {
 test("ensureVerified invalidates sentinel on packageName drift", (t) => {
   _resetWarningState();
   const { privateKey, rawPub } = makeKeypair();
-  const dir = mkPlatformDir(privateKey, { packageName: "@fallow-cli/x" });
+  const dir = mkPlatformDir(privateKey);
   t.after(() => cleanup(dir));
 
-  ensureVerified({
-    ...baseInput(dir, (p) => _verifyWithKey(p, rawPub)),
-    packageName: "@fallow-cli/x",
-  });
+  const input = baseInput(dir, (p) => _verifyWithKey(p, rawPub));
+  const verified = ensureVerified(input);
+  assert.equal(verified.ok, true);
+  assert.equal(ensureVerified(input).cached, true);
 
-  // Now claim a different package name; sentinel becomes stale.
-  const result = ensureVerified({
-    ...baseInput(dir, (p) => _verifyWithKey(p, rawPub)),
-    packageName: "@fallow-cli/y",
-  });
-  // Manifest still says @fallow-cli/x, so sentinel validates against manifest
-  // but the sentinel was originally written for x. Since we pass packageName=y
-  // for the cache lookup but the manifest still says x, the sentinel
-  // .packageName=x matches the manifest.name=x. We must rewrite manifest too
-  // to truly drift. Skip this case and instead force sentinel rewrite to
-  // have a different name:
-  fs.writeFileSync(
-    result.sentinelPath || path.join(dir, SENTINEL_FILENAME),
-    JSON.stringify({
-      schemaVersion: SENTINEL_SCHEMA_VERSION,
-      verifiedAt: new Date().toISOString(),
-      packageVersion: "2.81.0",
-      packageName: "@fallow-cli/wrong-name",
-      binaries: {
-        [binaryNames(DEFAULT_PLATFORM)[0]]: {
-          mtimeMs: fs.statSync(path.join(dir, binaryNames(DEFAULT_PLATFORM)[0])).mtimeMs,
-        },
-      },
-    }),
-  );
+  const sentinel = JSON.parse(fs.readFileSync(verified.sentinelPath, "utf8"));
+  sentinel.packageName = "@fallow-cli/wrong-name";
+  fs.writeFileSync(verified.sentinelPath, JSON.stringify(sentinel));
 
-  const result2 = ensureVerified({
-    ...baseInput(dir, (p) => _verifyWithKey(p, rawPub)),
-    packageName: "@fallow-cli/x",
-  });
-  assert.equal(result2.cached, false);
+  const reverified = ensureVerified(input);
+  assert.equal(reverified.ok, true);
+  assert.equal(reverified.cached, false);
 });
 
 test("ensureVerified invalidates sentinel on malformed JSON", (t) => {
@@ -406,12 +380,10 @@ test("ensureVerified emits one stderr line per outcome when FALLOW_VERIFY_LOG=1"
   t.after(() => cleanup(dir));
 
   const stderr = captureStderr(t);
-  // First invocation: cache miss
   ensureVerified({
     ...baseInput(dir, (p) => _verifyWithKey(p, rawPub)),
     env: { FALLOW_VERIFY_LOG: "1" },
   });
-  // Second invocation: cache hit
   ensureVerified({
     ...baseInput(dir, (p) => _verifyWithKey(p, rawPub)),
     env: { FALLOW_VERIFY_LOG: "1" },
@@ -527,7 +499,6 @@ test("ensureVerified rejects a sentinel where bytes drift but mtime stays", (t) 
   const dir = mkPlatformDir(privateKey);
   t.after(() => cleanup(dir));
 
-  // First invocation writes a sentinel with the clean SHA-256.
   ensureVerified(baseInput(dir, (p) => _verifyWithKey(p, rawPub)));
 
   // Tamper the binary in place AND restore the prior mtime, so the mtime

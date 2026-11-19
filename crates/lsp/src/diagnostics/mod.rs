@@ -194,6 +194,7 @@ mod tests {
             clone_groups: vec![],
             clone_families: vec![],
             mirrored_directories: vec![],
+            range_marker_problems: Vec::new(),
             stats: DuplicationStats {
                 total_files: 0,
                 files_with_clones: 0,
@@ -483,6 +484,7 @@ mod severity_gate {
             clone_groups: vec![],
             clone_families: vec![],
             mirrored_directories: vec![],
+            range_marker_problems: Vec::new(),
             stats: DuplicationStats {
                 total_files: 0,
                 files_with_clones: 0,
@@ -1138,6 +1140,9 @@ mod severity_gate {
                                 line: 1,
                                 col: 0,
                                 via_path: None,
+                                reason:
+                                    fallow_types::results::BoundaryViolationReason::DisallowedZone,
+                                public_files: vec![],
                             },
                         ),
                     );
@@ -1216,6 +1221,7 @@ mod severity_gate {
                                 issue_kind: None,
                                 reason: None,
                                 is_file_level: false,
+                                is_range: false,
                                 kind_known: true,
                             },
                             missing_reason: false,
@@ -1723,11 +1729,8 @@ mod severity_gate {
         }
     }
 
-    /// Cross-check: the two kinds whose LSP severity is required to MATCH the
-    /// core `RulesConfig` default both default to `Error` in core, so the gate
-    /// table's ERROR expectation for them cannot silently drift from core. If a
-    /// future refactor softens either core default, this fails and forces a
-    /// re-think of the LSP ERROR mapping at the same time.
+    /// The LSP gate must report the same severity as the core defaults for
+    /// route collisions and dynamic segment name conflicts.
     #[test]
     fn route_and_dsc_match_core_error_default() {
         let rules = RulesConfig::default();

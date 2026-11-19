@@ -40,7 +40,7 @@ pub use store::{GRAPH_CACHE_FILE, GraphCacheStore};
 /// Never reuse a version number that a published build wrote, even from a
 /// development commit. Git history and the CHANGELOG record the reason for
 /// each bump.
-pub const GRAPH_CACHE_VERSION: u32 = 115;
+pub const GRAPH_CACHE_VERSION: u32 = 121;
 
 /// Cached form of a resolved target.
 ///
@@ -734,6 +734,8 @@ pub(crate) mod member_serde {
         is_self_returning: bool,
         #[serde(default)]
         is_protected: bool,
+        #[serde(default)]
+        is_static: bool,
     }
 
     impl From<&MemberInfo> for CachedMemberInfo {
@@ -747,6 +749,7 @@ pub(crate) mod member_serde {
                 is_instance_returning_static: member.is_instance_returning_static,
                 is_self_returning: member.is_self_returning,
                 is_protected: member.is_protected,
+                is_static: member.is_static,
             }
         }
     }
@@ -763,6 +766,7 @@ pub(crate) mod member_serde {
                 is_self_returning: cached.is_self_returning,
                 override_base: None,
                 is_protected: cached.is_protected,
+                is_static: cached.is_static,
             }
         }
     }
@@ -1295,6 +1299,7 @@ mod tests {
             span: Span::new(0, 1),
             mechanism: ModuleLoadMechanism::EsModule,
             excludes: Vec::new(),
+            imported_name: fallow_types::extract::ImportedName::Namespace,
         };
         let module = ModuleInfo {
             dynamic_import_patterns: vec![pattern.clone()],

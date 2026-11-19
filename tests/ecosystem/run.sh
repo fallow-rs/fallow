@@ -27,7 +27,6 @@ FALLOW_BIN="${FALLOW_BIN:-}"
 ECOSYSTEM_DIR="${ECOSYSTEM_DIR:-/tmp/fallow-ecosystem}"
 export FALLOW_QUIET="${FALLOW_QUIET:-1}"
 
-# Parse arguments
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --fallow-bin)
@@ -45,7 +44,6 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-# Build or locate fallow binary
 if [[ -z "$FALLOW_BIN" ]]; then
     echo "==> Building fallow (release)..."
     cargo build --release -p fallow-cli --manifest-path "$REPO_ROOT/Cargo.toml"
@@ -202,14 +200,12 @@ for entry in "${PROJECTS[@]}"; do
         continue
     fi
 
-    # Install
     if ! install_deps "$project_dir" "$install_cmd"; then
         echo "    SKIP: install failed"
         skipped=$((skipped + 1))
         continue
     fi
 
-    # Run fallow
     output_file="$results_dir/${name}.json"
     exit_code=0
     run_fallow "$project_dir" "$name" "$output_file" || exit_code=$?

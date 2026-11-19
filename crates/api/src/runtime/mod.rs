@@ -6,7 +6,7 @@ use fallow_config::{FallowConfig, HealthConfig, ProductionConfig};
 use fallow_engine::{
     dead_code::DeadCodeAnalysisArtifacts,
     duplicates::DuplicationReport,
-    project_config::{ProductionFlags, ProductionModes},
+    project_config::{self, ConfigFileOptions, ConfigLoadError, ProductionFlags, ProductionModes},
     session::AnalysisSession,
 };
 use fallow_output::{HealthGrouping, HealthReport};
@@ -23,6 +23,7 @@ mod feature_flags;
 mod mutation;
 mod mutation_record;
 mod mutation_replay;
+mod mutation_runner_options;
 mod mutation_witness;
 mod similar_code;
 mod trace;
@@ -91,6 +92,28 @@ pub(super) fn resolve_effective_production_modes(
     .effective_modes(&config))
 }
 
+/// The run plan of the project config for `request`. A project without a
+/// config file has the default config. The config loads only when the plan
+/// depends on it.
+pub(super) fn plan_run(
+    resolved: &ProgrammaticAnalysisContext,
+    request: fallow_config::RunRequest,
+) -> ProgrammaticResult<fallow_config::RunPlan> {
+    let config = if request.reads_config() {
+        load_config_file(
+            resolved.root(),
+            resolved.config_path().as_deref(),
+            resolved.allow_remote_extends(),
+        )?
+    } else {
+        None
+    };
+    Ok(fallow_config::plan_run(
+        config.unwrap_or_default().plan_sections(),
+        request,
+    ))
+}
+
 fn load_context_production_config(
     resolved: &ProgrammaticAnalysisContext,
 ) -> ProgrammaticResult<ProductionConfig> {
@@ -125,26 +148,26 @@ pub fn load_health_config(
     Ok(loaded.map(|config| config.health))
 }
 
+/// The config file of the project, or `None` when the project has no config
+/// file.
 fn load_config_file(
     root: &Path,
     config_path: Option<&Path>,
     allow_remote_extends: bool,
 ) -> ProgrammaticResult<Option<FallowConfig>> {
-    let load_options = fallow_config::ConfigLoadOptions {
-        allow_remote_extends,
-    };
-    if let Some(path) = config_path {
-        return FallowConfig::load_with_options(path, load_options)
-            .map(Some)
-            .map_err(|err| config_load_error(format!("failed to load config: {err:#}")));
-    }
-    FallowConfig::find_and_load_with_options(root, load_options)
-        .map(|found| found.map(|(config, _)| config))
-        .map_err(|err| config_load_error(format!("failed to load config: {err}")))
+    let file = project_config::load_config_file(
+        root,
+        config_path,
+        ConfigFileOptions {
+            allow_remote_extends,
+        },
+    )
+    .map_err(|err| config_load_error(&err))?;
+    Ok(file.path.map(|_| file.config))
 }
 
-fn config_load_error(message: String) -> ProgrammaticError {
-    ProgrammaticError::new(message, 2)
+fn config_load_error(err: &ConfigLoadError) -> ProgrammaticError {
+    ProgrammaticError::new(format!("failed to load config: {}", err.chain()), 2)
         .with_code("FALLOW_CONFIG_LOAD_FAILED")
         .with_context("analysis.configPath")
 }
@@ -407,7 +430,8 @@ fn derive_programmatic_health_execution_options<'a>(
         complexity: run.sections.complexity,
         file_scores: run.sections.file_scores,
         coverage_gaps: run.sections.coverage_gaps,
-        config_activates_coverage_gaps: !run.sections.any_section,
+        config_activates_coverage_gaps: options.config_activates_coverage_gaps
+            || !run.sections.any_section,
         hotspots: run.sections.hotspots,
         ownership: run.sections.ownership,
         targets: run.sections.targets,

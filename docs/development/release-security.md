@@ -14,9 +14,11 @@ creates, moves, or publishes Git tags or GitHub Releases.
 | `build` | Build unsigned binaries, archives, and NAPI addons | Read only |
 | `authenticode` | Add an Authenticode signature to the Windows executables and NAPI addons, then replace their build artifacts | Artifact Signing OIDC in `windows-signing` |
 | `sign` | Sign downloaded raw binaries and stage npm binary payloads on fresh runners | Artifact signing only |
+| `type-aware-bundle` | Build one type-aware bundle per Node platform from the lockfile-pinned TypeScript tarballs, check their integrity, and start the linux-x64 bundle once | Read only |
+| `type-aware-bundle-sign` | Sign the downloaded type-aware bundles on a fresh runner | Artifact signing only |
 | `validate` | Reusable release validation, including the similar-code sidecar dependency audit | Read only |
 | `musl-smoke` | Run the exact unsigned musl binaries in a digest-pinned Alpine container on x64 and arm64 | Read only |
-| `release-verified` | Join build, signing, validation, `similar-code-conformance`, and `musl-smoke` | None |
+| `release-verified` | Join build, signing, validation, `similar-code-conformance`, `musl-smoke`, and `type-aware-bundle-sign` | None |
 | `release-assets` | Flatten and store the complete GitHub asset bundle, including all VSIX targets | Read only |
 | `release-ready` | Join publication jobs and prove the tag is still absent | Read only |
 | `publish-crates` | Publish prevalidated crates in dependency order | crates.io OIDC |
@@ -220,8 +222,8 @@ and [federated app credentials](https://learn.microsoft.com/en-us/entra/workload
 
 ## Invariants
 
-- Run every credential-bearing job in the `release` environment: `sign`
-  (binary signing key), `publish-crates`, `npm-publish`, both VSIX
+- Run every credential-bearing job in the `release` environment: `sign` and
+  `type-aware-bundle-sign` (binary signing key), `publish-crates`, `npm-publish`, both VSIX
   publisher jobs, and `mcp-registry-publish`. Its deployment branch policy admits `main` only. The ref
   check in `release-context` is part of the workflow file, so it stops a
   mistaken dispatch but not an edited copy of the workflow on another ref; the
@@ -263,6 +265,19 @@ and [federated app credentials](https://learn.microsoft.com/en-us/entra/workload
   release artifact names and npm multicall payload names. Every consumer of
   signed binaries must wait for `sign`, including npm preparation and
   similar-code conformance.
+- Keep `type-aware-bundle` outside the `release` environment, with no
+  credential. It downloads only the npm tarballs that
+  `tools/type-aware-sidecar/package-lock.json` pins, rejects a tarball whose
+  integrity differs, and never runs package code or installs dependencies.
+  It uploads the bundles as `unsigned-type-aware-bundles`, a name that does
+  not start with `fallow-`. `type-aware-bundle-sign` follows the `sign` rules:
+  a fresh runner, an exact inventory check before the key is exposed, only
+  Node builtins and the committed signing scripts, and the key only on the
+  signing step. It uploads the bundles and their `.sig` files as
+  `fallow-type-aware-bundles`, so `release-assets` attaches them to the GitHub
+  release. `fallow type-aware setup` checks the signature with the release key
+  that the binary holds. It adds no credential and never contacts the npm
+  registry.
 - Keep `musl-smoke` outside the `release` environment, with `contents: read`
   only and no secrets. It executes the downloaded `unsigned-binaries-<platform>`
   artifact, so it must never receive a credential. It runs the binaries in an

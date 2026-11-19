@@ -7,7 +7,6 @@ import { after, before, describe, test } from "node:test";
 
 import { startCompanion } from "./support/companion-process.mjs";
 
-// Like `bun-test.test.mjs`, the suite is skipped when `bun` is not on PATH.
 const bun = spawnSync("bun", ["--version"], { encoding: "utf8" });
 const hasBun = bun.status === 0;
 if (!hasBun && process.env.FALLOW_REQUIRE_BUN === "1") {

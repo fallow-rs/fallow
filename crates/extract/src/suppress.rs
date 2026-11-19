@@ -1,12 +1,14 @@
 //! Inline suppression comment parsing.
 //!
-//! Parses `fallow-ignore-file` and `fallow-ignore-next-line` comments from
-//! source files, supporting `//`, `/* */`, JSDoc `/** */`, and `<!-- -->` styles.
+//! Parses `fallow-ignore-file`, `fallow-ignore-next-line`, and the
+//! `fallow-ignore-start` / `fallow-ignore-end` range comments from source
+//! files, supporting `//`, `/* */`, JSDoc `/** */`, and `<!-- -->` styles.
 
 use oxc_ast::ast::Comment;
 
 pub use fallow_types::suppress::{
-    IssueKind, Suppression, SuppressionTarget, UnknownSuppressionKind, parse_suppression_target,
+    IssueKind, RangeMarkerProblem, RangeMarkerProblemKind, Suppression, SuppressionScope,
+    SuppressionTarget, UnknownSuppressionKind, parse_suppression_target,
 };
 
 /// Parsed suppressions plus any tokens that did not resolve to a known kind.
@@ -20,6 +22,176 @@ pub struct ParsedSuppressions {
     pub suppressions: Vec<Suppression>,
     /// Tokens from suppression markers that did not parse.
     pub unknown_kinds: Vec<UnknownSuppressionKind>,
+    /// Range markers that [`Self::pair_ranges`] has not paired yet.
+    pub range_markers: Vec<RangeMarker>,
+    /// Range markers with a problem. A marker with a problem has no effect.
+    pub range_problems: Vec<RangeMarkerProblem>,
+    /// Where each `fallow-ignore-file` and `fallow-ignore-next-line` marker
+    /// is, so that a caller with token spans can drop a marker in a string.
+    pub line_markers: Vec<LineMarkerAt>,
+}
+
+/// The place of one `fallow-ignore-file` or `fallow-ignore-next-line` marker.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct LineMarkerAt {
+    /// 1-based line of the marker comment.
+    pub comment_line: u32,
+    /// Byte offset of the marker targets in the source.
+    pub offset: u32,
+}
+
+/// The only issue kind that a range marker supports.
+const RANGE_KIND: IssueKind = IssueKind::CodeDuplication;
+
+/// A `fallow-ignore-start` or `fallow-ignore-end` marker before pairing.
+#[derive(Debug, Clone)]
+pub struct RangeMarker {
+    /// `true` for `fallow-ignore-start`, `false` for `fallow-ignore-end`.
+    is_start: bool,
+    /// 1-based line of the marker comment.
+    pub comment_line: u32,
+    /// 1-based line after the end of the marker comment.
+    next_line: u32,
+    /// Byte offset of the marker text in the source.
+    pub offset: u32,
+    /// Whether the marker comment is the only content of its lines. A
+    /// marker that shares its line with code has no effect.
+    own_line: bool,
+    /// Whether the marker names `code-duplication`.
+    has_range_kind: bool,
+    /// Whether the marker names no kind at all.
+    is_blanket: bool,
+    /// Kind tokens other than `code-duplication`, verbatim.
+    unsupported: Vec<String>,
+    /// Human-authored reason after `--`, when present.
+    reason: Option<String>,
+}
+
+impl ParsedSuppressions {
+    /// Pair the range markers and move the result into `suppressions` and
+    /// `range_problems`.
+    ///
+    /// A start opens a range and the next end closes it. A start inside an
+    /// open range, an end with no open range, and a start that no end closes
+    /// are problems with no effect. A marker without a kind, or with a kind
+    /// other than `code-duplication`, is a problem too. In a mixed list the
+    /// `code-duplication` part still applies.
+    pub fn pair_ranges(&mut self) {
+        let mut markers = std::mem::take(&mut self.range_markers);
+        markers.sort_by_key(|marker| marker.comment_line);
+        let mut open: Option<RangeMarker> = None;
+        for marker in markers {
+            if !marker.own_line {
+                self.push_range_problem(marker.comment_line, RangeMarkerProblemKind::NotOwnLine);
+                continue;
+            }
+            self.push_kind_problems(&marker);
+            if !marker.has_range_kind {
+                continue;
+            }
+            if marker.is_start {
+                if open.is_some() {
+                    self.push_range_problem(
+                        marker.comment_line,
+                        RangeMarkerProblemKind::NestedStart,
+                    );
+                } else {
+                    open = Some(marker);
+                }
+                continue;
+            }
+            match open.take() {
+                Some(start) => self.suppressions.push(
+                    Suppression::range(
+                        start.next_line,
+                        start.comment_line,
+                        marker.comment_line,
+                        RANGE_KIND,
+                    )
+                    .with_reason(start.reason),
+                ),
+                None => {
+                    self.push_range_problem(
+                        marker.comment_line,
+                        RangeMarkerProblemKind::UnmatchedEnd,
+                    );
+                }
+            }
+        }
+        if let Some(start) = open {
+            self.push_range_problem(start.comment_line, RangeMarkerProblemKind::UnclosedStart);
+        }
+        self.range_problems.sort_by_key(|problem| problem.line);
+    }
+
+    /// Remove each marker whose text is inside one of `literal_spans`, the
+    /// byte spans of the string and template literals of the source.
+    ///
+    /// The source scan does not know string context, so a marker in a
+    /// template literal would otherwise suppress the file, a line, or open or
+    /// close a range. Call this before [`Self::pair_ranges`].
+    pub fn drop_markers_in_literals(&mut self, literal_spans: &[(u32, u32)]) {
+        if literal_spans.is_empty() {
+            return;
+        }
+        let in_literal = |offset: u32| {
+            literal_spans
+                .iter()
+                .any(|&(start, end)| start < offset && offset < end)
+        };
+        self.range_markers
+            .retain(|marker| !in_literal(marker.offset));
+        let literal_lines: Vec<u32> = self
+            .line_markers
+            .iter()
+            .filter(|marker| in_literal(marker.offset))
+            .map(|marker| marker.comment_line)
+            .collect();
+        self.drop_line_markers(&literal_lines);
+    }
+
+    /// Whether the scan found a marker that a literal span can drop.
+    #[must_use]
+    pub fn has_markers(&self) -> bool {
+        !self.range_markers.is_empty() || !self.line_markers.is_empty()
+    }
+
+    /// Remove the file and next-line suppressions, and the unknown kinds, of
+    /// the markers on `comment_lines`.
+    pub fn drop_line_markers(&mut self, comment_lines: &[u32]) {
+        if comment_lines.is_empty() {
+            return;
+        }
+        self.suppressions.retain(|suppression| {
+            matches!(suppression.scope, SuppressionScope::Range { .. })
+                || !comment_lines.contains(&suppression.comment_line)
+        });
+        self.unknown_kinds
+            .retain(|unknown| !comment_lines.contains(&unknown.comment_line));
+        self.line_markers
+            .retain(|marker| !comment_lines.contains(&marker.comment_line));
+    }
+
+    fn push_kind_problems(&mut self, marker: &RangeMarker) {
+        if marker.is_blanket {
+            self.push_range_problem(marker.comment_line, RangeMarkerProblemKind::MissingKind);
+        }
+        for token in &marker.unsupported {
+            self.range_problems.push(RangeMarkerProblem {
+                line: marker.comment_line,
+                kind: RangeMarkerProblemKind::UnsupportedKind,
+                token: Some(token.clone()),
+            });
+        }
+    }
+
+    fn push_range_problem(&mut self, line: u32, kind: RangeMarkerProblemKind) {
+        self.range_problems.push(RangeMarkerProblem {
+            line,
+            kind,
+            token: None,
+        });
+    }
 }
 
 /// Convert a byte offset to a 1-based line number.
@@ -113,6 +285,7 @@ fn push_suppressions(parsed: &mut ParsedSuppressions, line: u32, comment_line: u
             comment_line,
             target: Some(target),
             reason: reason.clone(),
+            scope: SuppressionScope::for_line(line),
         }));
 
     parsed
@@ -123,6 +296,43 @@ fn push_suppressions(parsed: &mut ParsedSuppressions, line: u32, comment_line: u
             token,
             reason: reason.clone(),
         }));
+}
+
+/// Record one range marker. `rest` is the text after the marker word.
+fn push_range_marker(parsed: &mut ParsedSuppressions, marker: RangeMarkerAt<'_>) {
+    let (rest, reason) = split_suppression_reason(marker.rest);
+    let (targets, unknown) = parse_suppression_target_list(rest);
+    let mut has_range_kind = false;
+    let mut unsupported = unknown;
+    for target in targets {
+        if target == SuppressionTarget::Issue(RANGE_KIND) {
+            has_range_kind = true;
+        } else {
+            unsupported.push(target.token());
+        }
+    }
+    parsed.range_markers.push(RangeMarker {
+        is_start: marker.is_start,
+        comment_line: marker.comment_line,
+        next_line: marker.next_line,
+        offset: marker.offset,
+        own_line: marker.own_line,
+        has_range_kind,
+        is_blanket: rest.is_empty(),
+        unsupported,
+        reason,
+    });
+}
+
+/// One range marker as the scanners find it, before its targets are parsed.
+#[derive(Clone, Copy)]
+struct RangeMarkerAt<'a> {
+    is_start: bool,
+    own_line: bool,
+    rest: &'a str,
+    comment_line: u32,
+    next_line: u32,
+    offset: u32,
 }
 
 /// Parse all fallow suppression comments from a file's comment list.
@@ -148,17 +358,51 @@ pub(crate) fn parse_suppressions(comments: &[Comment], source: &str) -> ParsedSu
         }
 
         let first_line = byte_offset_to_line(source, comment.span.start);
+        let at = MarkerSite {
+            source,
+            own_line: comment_is_on_own_line(source, comment.span.start, comment.span.end),
+        };
         if comment.is_block() {
             // A block comment may span lines. A next-line marker applies to
             // the line after the comment ENDS, not after the marker line.
             let suppressed_line = byte_offset_to_line(source, comment.span.end) + 1;
-            push_block_markers(&mut parsed, text.lines(), first_line, suppressed_line);
+            push_block_markers(&mut parsed, &at, text.lines(), first_line, suppressed_line);
         } else if let Some(marker) = match_line_marker(text) {
-            push_marker(&mut parsed, marker, first_line, first_line + 1);
+            push_marker(&mut parsed, &at, marker, first_line, first_line + 1);
         }
     }
 
+    parsed.pair_ranges();
     parsed
+}
+
+/// Where a marker was found: the source it is a slice of, and whether its
+/// comment is the only content of its lines. A range marker must be on its
+/// own line.
+struct MarkerSite<'a> {
+    source: &'a str,
+    own_line: bool,
+}
+
+impl MarkerSite<'_> {
+    /// Byte offset of `text` in the source. `text` must be a slice of it.
+    #[expect(
+        clippy::cast_possible_truncation,
+        reason = "source length is bounded by file size"
+    )]
+    fn offset_of(&self, text: &str) -> u32 {
+        (text.as_ptr() as usize).saturating_sub(self.source.as_ptr() as usize) as u32
+    }
+}
+
+/// True when only whitespace stands before `start` and after `end` on their
+/// lines.
+fn comment_is_on_own_line(source: &str, start: u32, end: u32) -> bool {
+    let start = (start as usize).min(source.len());
+    let end = (end as usize).min(source.len());
+    let before = source[..start].rsplit('\n').next().unwrap_or("");
+    let after = source[end..].split('\n').next().unwrap_or("");
+    before.trim().is_empty() && after.trim().is_empty()
 }
 
 /// The text that each suppression marker starts with.
@@ -169,12 +413,17 @@ const MARKER_PREFIX: &str = "fallow-ignore-";
 enum Marker<'a> {
     File(&'a str),
     NextLine(&'a str),
+    RangeStart(&'a str),
+    RangeEnd(&'a str),
 }
 
 impl<'a> Marker<'a> {
     const fn rest(&self) -> &'a str {
         match self {
-            Self::File(rest) | Self::NextLine(rest) => rest,
+            Self::File(rest)
+            | Self::NextLine(rest)
+            | Self::RangeStart(rest)
+            | Self::RangeEnd(rest) => rest,
         }
     }
 }
@@ -183,10 +432,19 @@ impl<'a> Marker<'a> {
 fn split_marker(text: &str) -> Option<Marker<'_>> {
     if let Some(rest) = text.strip_prefix("fallow-ignore-file") {
         Some(Marker::File(rest.trim()))
+    } else if let Some(rest) = text.strip_prefix("fallow-ignore-next-line") {
+        Some(Marker::NextLine(rest.trim()))
+    } else if let Some(rest) = strip_marker_word(text, "fallow-ignore-start") {
+        Some(Marker::RangeStart(rest.trim()))
     } else {
-        text.strip_prefix("fallow-ignore-next-line")
-            .map(|rest| Marker::NextLine(rest.trim()))
+        strip_marker_word(text, "fallow-ignore-end").map(|rest| Marker::RangeEnd(rest.trim()))
     }
+}
+
+/// Strip `word` when it is a whole word at the start of `text`.
+fn strip_marker_word<'a>(text: &'a str, word: &str) -> Option<&'a str> {
+    let rest = text.strip_prefix(word)?;
+    (rest.is_empty() || rest.starts_with(char::is_whitespace)).then_some(rest)
 }
 
 /// Match a marker at the start of a line comment (`//` or `<!-- -->`).
@@ -241,13 +499,31 @@ fn opens_source_block(rest: &str) -> bool {
 
 fn push_marker(
     parsed: &mut ParsedSuppressions,
+    site: &MarkerSite<'_>,
     marker: Marker<'_>,
     comment_line: u32,
     suppressed_line: u32,
 ) {
+    if let Marker::File(rest) | Marker::NextLine(rest) = marker {
+        parsed.line_markers.push(LineMarkerAt {
+            comment_line,
+            offset: site.offset_of(rest),
+        });
+    }
     match marker {
         Marker::File(rest) => push_suppressions(parsed, 0, comment_line, rest),
         Marker::NextLine(rest) => push_suppressions(parsed, suppressed_line, comment_line, rest),
+        Marker::RangeStart(rest) | Marker::RangeEnd(rest) => push_range_marker(
+            parsed,
+            RangeMarkerAt {
+                is_start: matches!(marker, Marker::RangeStart(_)),
+                own_line: site.own_line,
+                rest,
+                comment_line,
+                next_line: suppressed_line,
+                offset: site.offset_of(rest),
+            },
+        ),
     }
 }
 
@@ -258,13 +534,14 @@ fn push_marker(
 /// Only a marker line carries targets: the other lines are prose.
 fn push_block_markers<'a>(
     parsed: &mut ParsedSuppressions,
+    site: &MarkerSite<'_>,
     lines: impl Iterator<Item = &'a str>,
     first_line: u32,
     suppressed_line: u32,
 ) {
     for (line, comment_line) in lines.zip(first_line..) {
         if let Some(marker) = match_block_marker(line) {
-            push_marker(parsed, marker, comment_line, suppressed_line);
+            push_marker(parsed, site, marker, comment_line, suppressed_line);
         }
     }
 }
@@ -275,13 +552,39 @@ fn push_block_markers<'a>(
 /// that starts a line can carry a marker. A block comment may span lines, as
 /// in a multi-line JSDoc comment. A single-line block comment counts only
 /// when `*/` ends the line.
+#[must_use]
+pub fn parse_suppressions_from_source(source: &str) -> ParsedSuppressions {
+    let mut parsed = scan_suppressions_from_source(source);
+    parsed.pair_ranges();
+    parsed
+}
+
+/// Scan raw source text as [`parse_suppressions_from_source`] does, but
+/// leave the range markers unpaired in `range_markers`.
+///
+/// The scan does not know string context. A caller with token spans can drop
+/// the markers whose offset is inside a string: range markers from
+/// `range_markers`, and file and next-line markers with
+/// [`ParsedSuppressions::drop_line_markers`]. Then it calls
+/// [`ParsedSuppressions::pair_ranges`].
+#[must_use]
 #[expect(
     clippy::cast_possible_truncation,
     reason = "line count is bounded by file size"
 )]
-pub fn parse_suppressions_from_source(source: &str) -> ParsedSuppressions {
+pub fn scan_suppressions_from_source(source: &str) -> ParsedSuppressions {
     let mut parsed = ParsedSuppressions::default();
     let lines: Vec<&str> = source.lines().collect();
+    // Each scanned marker starts its line, and a block comment or HTML
+    // comment must end it, so every marker of this scan is on its own line.
+    let site = MarkerSite {
+        source,
+        own_line: true,
+    };
+    let shared_line = MarkerSite {
+        source,
+        own_line: false,
+    };
 
     let mut idx = 0;
     while idx < lines.len() {
@@ -290,19 +593,62 @@ pub fn parse_suppressions_from_source(source: &str) -> ParsedSuppressions {
 
         if let Some(rest) = trimmed.strip_prefix("//") {
             if let Some(marker) = match_line_marker(rest) {
-                push_marker(&mut parsed, marker, comment_line, comment_line + 1);
+                push_marker(&mut parsed, &site, marker, comment_line, comment_line + 1);
             }
         } else if let Some(rest) = trimmed.strip_prefix("<!--") {
             if let Some(marker) = rest.strip_suffix("-->").and_then(match_line_marker) {
-                push_marker(&mut parsed, marker, comment_line, comment_line + 1);
+                push_marker(&mut parsed, &site, marker, comment_line, comment_line + 1);
+            } else {
+                push_shared_line_range_marker(&mut parsed, &shared_line, trimmed, comment_line);
             }
         } else if let Some(rest) = trimmed.strip_prefix("/*") {
-            idx = scan_source_block(&mut parsed, &lines, idx, rest);
+            if rest
+                .find("*/")
+                .is_some_and(|end| end + "*/".len() != rest.len())
+            {
+                push_shared_line_range_marker(&mut parsed, &shared_line, trimmed, comment_line);
+            }
+            idx = scan_source_block(&mut parsed, &site, &lines, idx, rest);
+        } else {
+            push_shared_line_range_marker(&mut parsed, &shared_line, trimmed, comment_line);
         }
         idx += 1;
     }
 
     parsed
+}
+
+/// Record a range marker in a comment that shares its line with code, such as
+/// `foo(); // fallow-ignore-start code-duplication`.
+///
+/// Such a marker has no effect. The scan records it so that the pairing
+/// reports it, instead of a silent drop that leaves only an unmatched end.
+fn push_shared_line_range_marker(
+    parsed: &mut ParsedSuppressions,
+    site: &MarkerSite<'_>,
+    line: &str,
+    comment_line: u32,
+) {
+    let Some(idx) = line.find(MARKER_PREFIX) else {
+        return;
+    };
+    let before = line[..idx].trim_end();
+    if !["//", "/*", "/**", "<!--"]
+        .iter()
+        .any(|opener| before.ends_with(opener))
+    {
+        return;
+    }
+    let text = &line[idx..];
+    let text = text
+        .find("*/")
+        .or_else(|| text.find("-->"))
+        .map_or(text, |end| &text[..end]);
+    if let Some(marker @ (Marker::RangeStart(_) | Marker::RangeEnd(_))) =
+        split_marker(text.trim_end())
+    {
+        push_marker(parsed, site, marker, comment_line, comment_line + 1);
+    }
 }
 
 /// Record the markers of a `/*` comment that starts line `idx` of the source
@@ -316,6 +662,7 @@ pub fn parse_suppressions_from_source(source: &str) -> ParsedSuppressions {
 )]
 fn scan_source_block(
     parsed: &mut ParsedSuppressions,
+    site: &MarkerSite<'_>,
     lines: &[&str],
     idx: usize,
     rest: &str,
@@ -325,7 +672,7 @@ fn scan_source_block(
     if let Some(end) = rest.find(BLOCK_END) {
         if end + BLOCK_END.len() == rest.len() {
             let content = std::iter::once(&rest[..end]);
-            push_block_markers(parsed, content, comment_line, comment_line + 1);
+            push_block_markers(parsed, site, content, comment_line, comment_line + 1);
         }
         return idx;
     }
@@ -340,7 +687,7 @@ fn scan_source_block(
     for (inner_idx, line) in lines.iter().enumerate().take(close_idx).skip(idx + 1) {
         let inner_line = (inner_idx as u32) + 1;
         if let Some(marker) = line.trim().strip_prefix("//").and_then(match_line_marker) {
-            push_marker(parsed, marker, inner_line, inner_line + 1);
+            push_marker(parsed, site, marker, inner_line, inner_line + 1);
         }
     }
     let close_line = lines[close_idx];
@@ -350,9 +697,13 @@ fn scan_source_block(
             &close_line[..close_line.find(BLOCK_END).unwrap_or(close_line.len())],
         ));
     let suppressed_line = (close_idx as u32) + 2;
-    push_block_markers(parsed, content, comment_line, suppressed_line);
+    push_block_markers(parsed, site, content, comment_line, suppressed_line);
     close_idx
 }
+
+#[cfg(test)]
+#[path = "suppress_range_tests.rs"]
+mod range_tests;
 
 #[cfg(test)]
 mod tests {

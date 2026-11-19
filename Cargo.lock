@@ -1090,7 +1090,7 @@ checksum = "f0440157235aa4badd45ea073af8de2ba44ffead74bf8a7833b215533c36f08e"
 
 [[package]]
 name = "fallow-api"
-version = "3.43.2"
+version = "3.44.0"
 dependencies = [
  "dunce",
  "ed25519-dalek",
@@ -1115,7 +1115,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-benchmarks"
-version = "3.43.2"
+version = "3.44.0"
 dependencies = [
  "codspeed-criterion-compat",
  "fallow-api",
@@ -1134,7 +1134,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-cli"
-version = "3.43.2"
+version = "3.44.0"
 dependencies = [
  "base64",
  "bitcode",
@@ -1182,7 +1182,7 @@ dependencies = [
  "sha2",
  "signal-hook",
  "similar 3.2.1",
- "srcmap-sourcemap 0.4.0",
+ "srcmap-sourcemap 0.6.0",
  "syn 3.0.10",
  "tempfile",
  "toml",
@@ -1197,7 +1197,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-config"
-version = "3.43.2"
+version = "3.44.0"
 dependencies = [
  "deser-value",
  "deser-yaml",
@@ -1225,7 +1225,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-core"
-version = "3.43.2"
+version = "3.44.0"
 dependencies = [
  "codspeed-criterion-compat",
  "dunce",
@@ -1271,7 +1271,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-engine"
-version = "3.43.2"
+version = "3.44.0"
 dependencies = [
  "bitcode",
  "codspeed-criterion-compat",
@@ -1303,7 +1303,7 @@ dependencies = [
  "serde",
  "serde_json",
  "sha2",
- "srcmap-sourcemap 0.4.0",
+ "srcmap-sourcemap 0.6.0",
  "tempfile",
  "toml",
  "tracing",
@@ -1315,7 +1315,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-extract"
-version = "3.43.2"
+version = "3.44.0"
 dependencies = [
  "bitcode",
  "cssparser",
@@ -1342,7 +1342,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-graph"
-version = "3.43.2"
+version = "3.44.0"
 dependencies = [
  "dashmap",
  "dunce",
@@ -1364,7 +1364,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-license"
-version = "3.43.2"
+version = "3.44.0"
 dependencies = [
  "base64",
  "ed25519-dalek",
@@ -1374,7 +1374,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-lsp"
-version = "3.43.2"
+version = "3.44.0"
 dependencies = [
  "dunce",
  "fallow-api",
@@ -1398,7 +1398,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-mcp"
-version = "3.43.2"
+version = "3.44.0"
 dependencies = [
  "fallow-api",
  "fallow-output",
@@ -1422,7 +1422,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-multicall"
-version = "3.43.2"
+version = "3.44.0"
 dependencies = [
  "fallow-cli",
  "fallow-lsp",
@@ -1432,7 +1432,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-mutation"
-version = "3.43.2"
+version = "3.44.0"
 dependencies = [
  "insta",
  "oxc_allocator 0.158.0",
@@ -1448,7 +1448,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-node"
-version = "3.43.2"
+version = "3.44.0"
 dependencies = [
  "fallow-api",
  "fallow-types",
@@ -1461,7 +1461,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-output"
-version = "3.43.2"
+version = "3.44.0"
 dependencies = [
  "fallow-config",
  "fallow-report-protocol",
@@ -1477,7 +1477,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-process"
-version = "3.43.2"
+version = "3.44.0"
 dependencies = [
  "libc",
  "rustc-hash",
@@ -1488,7 +1488,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-report-protocol"
-version = "3.43.2"
+version = "3.44.0"
 dependencies = [
  "schemars",
  "serde",
@@ -1497,7 +1497,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-security"
-version = "3.43.2"
+version = "3.44.0"
 dependencies = [
  "fallow-config",
  "fallow-types",
@@ -1510,7 +1510,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-types"
-version = "3.43.2"
+version = "3.44.0"
 dependencies = [
  "bitcode",
  "oxc_span 0.158.0",
@@ -1524,7 +1524,7 @@ dependencies = [
 
 [[package]]
 name = "fallow-v8-coverage"
-version = "3.43.2"
+version = "3.44.0"
 dependencies = [
  "proptest",
  "serde",
@@ -1577,9 +1577,9 @@ checksum = "5905ec755cc8386d7928353e4d356d2be3e89e81e5ca01fe630a1ca4d08dc175"
 
 [[package]]
 name = "flate2"
-version = "1.1.10"
+version = "1.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6e634e2e0ebac1ee034020da1ca582e17ffe4e0f5e985823721e168928136dcb"
+checksum = "626d4928326b646e70f65ed36fc7cf9f206bdb68a0019ee7c6b4709da4e084c4"
 dependencies = [
  "crc32fast",
  "miniz_oxide",
@@ -4518,9 +4518,9 @@ dependencies = [
 
 [[package]]
 name = "srcmap-codec"
-version = "0.4.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cae7e00ed3a2a08f47e8265db91cf082c759d2e78d8328414208c02340950f14"
+checksum = "269a035c8b4f99bf777218fb999d20ec7c1014c17c4e19e02e622490fcfe1562"
 dependencies = [
  "memchr",
 ]
@@ -4558,11 +4558,11 @@ dependencies = [
 
 [[package]]
 name = "srcmap-scopes"
-version = "0.4.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "22a332e089bd164c5a0cc21182ffd98a9051f59b771f21c26c0d4e63a432e739"
+checksum = "74ef86be6747c127768b1e0efaceb412ed93a0717167f3ca9a11042e275cba3d"
 dependencies = [
- "srcmap-codec 0.4.0",
+ "srcmap-codec 0.6.0",
 ]
 
 [[package]]
@@ -4580,15 +4580,15 @@ dependencies = [
 
 [[package]]
 name = "srcmap-sourcemap"
-version = "0.4.0"
+version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8e7081eae3039de3ddeb2f0ad5ee05a39c5c973346f0d580fdef7d32007a4786"
+checksum = "d3c614ebc80728502c4a0ef39f5110bc086bd5bdfdeb7cf97afccf64d7c85d7a"
 dependencies = [
  "memchr",
  "serde",
  "serde_json",
- "srcmap-codec 0.4.0",
- "srcmap-scopes 0.4.0",
+ "srcmap-codec 0.6.0",
+ "srcmap-scopes 0.6.0",
  "url",
 ]
 

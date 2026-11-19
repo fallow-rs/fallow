@@ -1083,12 +1083,9 @@ fn list_workspaces_json_emits_project_relative_diagnostic_paths() {
     }
 }
 
-/// Issue #2366: bare `fallow list --format json` reads the engine session's
-/// diagnostics snapshot, whose fold is keyed on the whole diagnostic kind
-/// rather than its id. Two overlapping workspace globs report the same
-/// package-less directory once per `pattern`, and bare `list` used to collapse
-/// them into one while `list --workspaces`, which reads the workspace value
-/// directly, reported both. Pin the agreement between the two.
+/// Issue #2366: each overlapping workspace glob reports the package-less
+/// directory under its own `pattern`. Bare `list` and `list --workspaces`
+/// must both preserve those distinct diagnostics.
 #[test]
 fn list_json_keeps_both_overlapping_glob_diagnostics() {
     let dir = tempfile::tempdir().expect("create temp dir");

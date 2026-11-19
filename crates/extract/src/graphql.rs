@@ -75,6 +75,7 @@ pub fn parse_graphql_to_module(file_id: FileId, source: &str, content_hash: u64)
         content_hash,
         suppressions: parsed_suppressions.suppressions,
         unknown_suppression_kinds: parsed_suppressions.unknown_kinds,
+        range_marker_problems: parsed_suppressions.range_problems,
         line_offsets: fallow_types::extract::compute_line_offsets(source),
         ..ModuleInfo::empty(file_id)
     }

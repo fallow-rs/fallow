@@ -147,7 +147,6 @@ export { ISSUE_CATEGORY_LABELS } from "./labels.js";
 export type { FallowFixResult, FixAction } from "./fix-types.js";
 export type {
   LicenseActionResult,
-  LicenseErrorJson,
   LicenseKind,
   LicenseParseResult,
   LicenseState,

@@ -165,8 +165,12 @@ impl fmt::Debug for UploadInventoryArgs {
 }
 
 /// Dispatch `fallow coverage upload-inventory`.
-pub fn run(args: &UploadInventoryArgs, root: &Path, allow_remote_extends: bool) -> ExitCode {
-    match run_inner(args, root, allow_remote_extends) {
+pub fn run(
+    args: &UploadInventoryArgs,
+    root: &Path,
+    config_input: crate::runtime_support::ConfigFlags<'_>,
+) -> ExitCode {
+    match run_inner(args, root, config_input) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => err.into_exit(LOG_PREFIX, args.ignore_upload_errors),
     }
@@ -175,12 +179,12 @@ pub fn run(args: &UploadInventoryArgs, root: &Path, allow_remote_extends: bool) 
 fn run_inner(
     args: &UploadInventoryArgs,
     root: &Path,
-    allow_remote_extends: bool,
+    config_input: crate::runtime_support::ConfigFlags<'_>,
 ) -> Result<(), UploadError> {
     let deployment_id =
         super::vercel_upload::resolve_deployment_id(args.vercel_deployment_id.as_deref())
             .map_err(UploadError::Validation)?;
-    let prepared = prepare_inventory_upload(args, root, allow_remote_extends)?;
+    let prepared = prepare_inventory_upload(args, root, config_input)?;
     let caller_edge_limits = prepared.caller_edges.limits();
     let payload = InventoryRequest {
         version: prepared.version,
@@ -241,7 +245,7 @@ struct PreparedInventory {
 fn prepare_inventory_upload(
     args: &UploadInventoryArgs,
     root: &Path,
-    allow_remote_extends: bool,
+    config_input: crate::runtime_support::ConfigFlags<'_>,
 ) -> Result<PreparedInventory, UploadError> {
     let project_id = upload_common::resolve_project_id(args.project_id.as_deref(), root)
         .map_err(UploadError::Validation)?;
@@ -257,7 +261,7 @@ fn prepare_inventory_upload(
         root,
     )?;
 
-    let config = upload_common::load_resolved_config_with_options(root, allow_remote_extends)
+    let config = upload_common::load_resolved_config_with_options(root, config_input)
         .map_err(UploadError::Validation)?;
     let session = AnalysisSession::from_resolved_config(config.clone())
         .map_err(|err| UploadError::Validation(format!("analysis failed: {err}")))?;

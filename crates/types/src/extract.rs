@@ -55,9 +55,6 @@ pub struct ModuleInfo {
     /// Static member access expressions (e.g., `Status.Active`).
     pub member_accesses: Arc<[MemberAccess]>,
     /// Typed semantic facts produced by extraction for cross-layer analysis.
-    ///
-    /// This carries facts that were previously encoded as synthetic
-    /// `member_accesses` strings. Extraction and analysis now use typed facts.
     pub semantic_facts: Arc<[SemanticFact]>,
     /// Identifiers used in whole-object access patterns.
     pub whole_object_uses: Arc<[String]>,
@@ -84,6 +81,8 @@ pub struct ModuleInfo {
     /// typos or obsolete kind names instead of having the entire marker
     /// silently discarded. See issue #449.
     pub unknown_suppression_kinds: Vec<UnknownSuppressionKind>,
+    /// Range suppression markers with a problem. They have no effect.
+    pub range_marker_problems: Vec<crate::suppress::RangeMarkerProblem>,
     /// Local names of import bindings that are never referenced in this file.
     /// Populated via `oxc_semantic` scope analysis. Used at graph-build time
     /// to skip adding references for imports whose binding is never read,
@@ -470,6 +469,7 @@ impl ModuleInfo {
             parse_nesting_too_deep: false,
             suppressions: Vec::new(),
             unknown_suppression_kinds: Vec::new(),
+            range_marker_problems: Vec::new(),
             unused_import_bindings: Vec::new(),
             type_referenced_import_bindings: Vec::new(),
             value_referenced_import_bindings: Vec::new(),
@@ -1744,26 +1744,6 @@ impl ImportLoadKind {
     }
 }
 
-/// A dynamic import with a partially resolved pattern.
-#[derive(Debug, Clone)]
-pub struct DynamicImportPattern {
-    /// Glob prefix of the import path (e.g., "./locales/"). An
-    /// `import.meta.glob` pattern is the full glob. For a template literal, a
-    /// string concatenation, or `require.context`, each glob metacharacter of
-    /// the literal text is escaped as a one-character class, such as `[[]`.
-    pub prefix: String,
-    /// Glob suffix of the import path (e.g., ".json"), if any.
-    pub suffix: Option<String>,
-    /// Globs of the files that the pattern does not load. Vite reads a
-    /// negative `import.meta.glob` array entry, such as `'!./a/skip.js'`, as
-    /// an exclude for every positive entry of the same call.
-    pub excludes: Vec<String>,
-    /// Source span in the original file.
-    pub span: Span,
-    /// Runtime mechanism used to load modules matching this pattern.
-    pub mechanism: ModuleLoadMechanism,
-}
-
 /// Visibility tag from JSDoc/TSDoc comments that suppresses unused-export detection.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -1941,12 +1921,9 @@ pub struct MemberInfo {
     /// string in that case, treated as never-matching by the predicate).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub decorator_names: Vec<String>,
-    /// True when this is a static class method that returns a fresh instance
-    /// of the same class: either via `return new this()` / `return new
-    /// <SameClassName>()` in the body's last statement, or via a declared
-    /// return type matching the class name. Consumers calling such a static
-    /// method receive an instance, so the call result's member accesses are
-    /// credited against the class. See issues #346, #387.
+    /// True for a static method that returns a new instance of its class
+    /// (`return new this()`, `return new C()`, or a declared return type `C`).
+    /// Member accesses on the call result credit the class (#346, #387).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub is_instance_returning_static: bool,
     /// True when this is an instance class method whose call result is an
@@ -1970,6 +1947,9 @@ pub struct MemberInfo {
     /// other consumer that checks class members skips them.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub is_protected: bool,
+    /// True for a `static` class member, which code with the class value reads.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_static: bool,
 }
 
 /// The kind of member.
@@ -2038,7 +2018,7 @@ pub struct DefaultImportWholeObjectUseFact {
 mod semantic;
 pub use semantic::SemanticFact;
 
-pub use crate::extract_namespace_member_uses::NamespaceMemberUseFact;
+pub use crate::extract_namespace_member_uses::{HolderValueFact, NamespaceMemberUseFact};
 
 /// A static member name that a runtime probe checks on an untyped value.
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, bitcode::Encode, bitcode::Decode)]
@@ -2219,8 +2199,7 @@ pub fn has_dynamic_custom_element_render(module: &ModuleInfo) -> bool {
 /// Typed-first view over semantic extraction facts.
 ///
 /// Extraction populates `semantic_facts` directly. The `member_accesses` slice
-/// remains available for consumers that need ordinary source member accesses,
-/// but it is no longer decoded as a string protocol for semantic facts.
+/// holds only ordinary source member accesses, not encoded semantic facts.
 #[derive(Debug, Clone, Copy)]
 pub struct SemanticFactView<'a> {
     semantic_facts: &'a [SemanticFact],
@@ -3481,7 +3460,7 @@ pub struct ImportInfo {
 }
 
 /// How a symbol is imported.
-#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash, serde::Serialize, serde::Deserialize)]
 pub enum ImportedName {
     /// A named import (e.g., `import { foo }`).
     Named(String),
@@ -3508,7 +3487,7 @@ const _: () = assert!(std::mem::size_of::<SemanticFact>() == 80);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<SinkSite>() == 224);
 #[cfg(target_pointer_width = "64")]
-const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1528);
+const _: () = assert!(std::mem::size_of::<ModuleInfo>() == 1552);
 #[cfg(target_pointer_width = "64")]
 const _: () = assert!(std::mem::size_of::<ImportBindingReference>() == 64);
 #[cfg(target_pointer_width = "64")]
@@ -3518,29 +3497,13 @@ const _: () = assert!(std::mem::size_of::<TypeMemberTypeEntry>() == 72);
 mod re_export;
 pub use re_export::ReExportInfo;
 
-/// A dynamic `import()` call.
-#[derive(Debug, Clone)]
-pub struct DynamicImportInfo {
-    /// The import specifier.
-    pub source: String,
-    /// Source span of the `import()` expression.
-    pub span: Span,
-    /// Names destructured from the dynamic import result.
-    /// Non-empty means `const { a, b } = await import(...)` -> Named imports.
-    /// Empty means simple `import(...)` or `const x = await import(...)` -> Namespace.
-    pub destructured_names: Vec<String>,
-    /// The local variable name for `const x = await import(...)`.
-    /// Used for namespace import narrowing via member access tracking.
-    pub local_name: Option<String>,
-    /// True when this dynamic import was synthesised by fallow rather than appearing in user source.
-    pub is_speculative: bool,
-    /// True when the value of an `import()` without a binding escapes, for
-    /// example as a return value, a call argument, or an array element.
-    /// The consumer can then read any export, so the edge credits the whole
-    /// module namespace. False for a discarded `import()` statement, which
-    /// only loads the module.
-    pub value_escapes: bool,
-}
+#[path = "extract_dynamic_pattern.rs"]
+mod dynamic_pattern;
+pub use dynamic_pattern::DynamicImportPattern;
+
+#[path = "extract_dynamic_import.rs"]
+mod dynamic_import;
+pub use dynamic_import::DynamicImportInfo;
 
 /// A `require()` call.
 #[derive(Debug, Clone)]
@@ -3574,8 +3537,8 @@ pub struct ParseResult {
     pub modules: Vec<ModuleInfo>,
     /// Files discovered with stable IDs but unreadable by the parser.
     pub read_failures: Vec<SourceReadFailure>,
-    /// Files that parsed with diagnostics, so their extracted module may be
-    /// incomplete. Reported, never used to withhold findings.
+    /// Files whose extracted modules may be incomplete because of parse diagnostics.
+    /// Analysis keeps findings visible and attaches caveats to affected findings.
     pub parse_degradations: Vec<SourceParseDegradation>,
     /// Number of files whose parse results were loaded from cache (unchanged).
     pub cache_hits: usize,

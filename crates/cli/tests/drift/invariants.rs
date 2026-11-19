@@ -276,6 +276,43 @@ pub fn i5_audit_surfaces_agree(results: &[(String, AuditKeys)]) -> Verdict {
     Err(format!("audit results differ:\n{}", failures.join("\n")))
 }
 
+/// I5 for the audit sub-analysis selection: on every surface, each skipped
+/// sub-analysis has no block and a true skip marker in the summary, and each
+/// other sub-analysis has no skip marker. `skipped` holds block names:
+/// `dead_code`, `duplication` and `complexity` (the health sub-analysis).
+pub fn i5_audit_skips_agree(
+    envelopes: &[(String, serde_json::Value)],
+    skipped: &[&str],
+) -> Verdict {
+    let mut failures = Vec::new();
+    for (surface, envelope) in envelopes {
+        for block in ["dead_code", "duplication", "complexity"] {
+            let marker = format!("{block}_skipped");
+            let marked = envelope["summary"].get(&marker);
+            let agrees = if skipped.contains(&block) {
+                envelope.get(block).is_none() && marked == Some(&serde_json::Value::Bool(true))
+            } else {
+                marked.is_none()
+            };
+            if !agrees {
+                let state = if skipped.contains(&block) {
+                    "run"
+                } else {
+                    "skip"
+                };
+                failures.push(format!("{surface} audit did {state} `{block}`: {envelope}"));
+            }
+        }
+    }
+    if failures.is_empty() {
+        return Ok(());
+    }
+    Err(format!(
+        "audit sub-analysis selection differs:\n{}",
+        failures.join("\n")
+    ))
+}
+
 /// I3: each section of bare `fallow` holds the finding keys of the standalone
 /// command with the same baseline. Each entry is (analysis label, section
 /// keys, standalone keys).

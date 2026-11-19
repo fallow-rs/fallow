@@ -1578,6 +1578,40 @@ fn test_alias_package_to_package_credits_both_no_path_alias() {
 }
 
 #[test]
+fn regexp_alias_find_credits_a_bare_package_replacement() {
+    let source = r"
+        import { defineConfig } from 'vitest/config';
+        const styleMocks = [{ find: /\.scss$/, replacement: '@scope/style-mock' }];
+        export default defineConfig({
+            resolve: {
+                alias: [
+                    { find: /\.(css|less)$/, replacement: 'identity-obj-proxy' },
+                    { find: /^~(.*)$/, replacement: '$1' },
+                    { find: /\.svg$/, replacement: './test/svg-mock.ts' },
+                    ...styleMocks,
+                ],
+            },
+            test: {
+                alias: [{ find: /\.png$/, replacement: 'file-mock/index.js' }],
+            },
+        });
+    ";
+    let result = resolve_abs(source);
+    let mut deps = result.referenced_dependencies.clone();
+    deps.retain(|dep| dep != "vitest");
+    deps.sort();
+    assert_eq!(
+        deps,
+        vec!["@scope/style-mock", "file-mock", "identity-obj-proxy"]
+    );
+    assert!(
+        result.path_aliases.is_empty(),
+        "a suffix RegExp gives no path alias: {:?}",
+        result.path_aliases
+    );
+}
+
+#[test]
 fn test_alias_regexp_key_skipped_without_panic() {
     let source = r#"
         export default {

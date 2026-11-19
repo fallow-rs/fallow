@@ -49,22 +49,20 @@ fn suggestion_or_withheld_hint(provider: Provider, issue: &CiIssue, line: &str) 
 #[must_use]
 pub fn fix_intent(issue: &CiIssue) -> Option<&'static str> {
     match issue.rule_id.as_str() {
-        "fallow/unused-file" => Some("Delete the file or add a real entry-point reference."),
-        "fallow/unused-export" => {
-            Some("Remove the export or mark it public if it is part of the API.")
-        }
-        "fallow/code-duplication" => Some("Extract the repeated block or centralize shared logic."),
+        "fallow/unused-file" => Some("Delete the file, or import it from an entry point."),
+        "fallow/unused-export" => Some("Remove the export, or keep it when it is public API."),
+        "fallow/code-duplication" => Some("Move the repeated code into one shared function."),
         "fallow/high-crap-score" | "fallow/high-complexity" => {
-            Some("Split branches or add focused tests around the risky path.")
+            Some("Split the function, or add tests for the risky branches.")
         }
-        "fallow/unresolved-import" => Some("Fix the import path or install the missing package."),
-        "fallow/long-file" => Some("Move cohesive groups of exports into their own modules."),
+        "fallow/unresolved-import" => Some("Fix the import path, or install the missing package."),
+        "fallow/long-file" => Some("Move groups of related exports to their own modules."),
         _ => None,
     }
 }
 
 fn fix_intent_block(intent: &str) -> String {
-    format!("\n\n> Fix intent: {intent}")
+    format!("\n\n**Fix:** {intent}")
 }
 
 #[must_use]
@@ -254,7 +252,7 @@ mod tests {
 
         assert_eq!(
             fix_intent(&issue),
-            Some("Extract the repeated block or centralize shared logic.")
+            Some("Move the repeated code into one shared function.")
         );
     }
 
@@ -413,9 +411,7 @@ mod tests {
         assert!(body.contains("fallow-ignore-file unused-file"));
     }
 
-    /// The hint used to name `fallow fix --files`, which the CLI rejects with
-    /// `unexpected argument`. Advice a reader cannot run is worse than no
-    /// advice, so no flag that does not parse may appear here.
+    /// The unused-file hint must not advertise unsupported `fallow fix` flags.
     #[test]
     fn no_hint_names_a_flag_the_cli_does_not_accept() {
         let body = suggestion_block(

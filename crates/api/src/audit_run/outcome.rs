@@ -17,6 +17,7 @@ use crate::audit_keys::{
     dead_code_audit_ledger, dupe_group_key, preexisting_dupe_group_keys, styling_ledger_keys,
     styling_ledger_keys_with_diff,
 };
+use crate::audit_moved::{MovedDeadCode, moved_dead_code_keys, moved_dupe_group_keys};
 use crate::diff_risk::clones::BaseCloneGroup;
 use crate::{AuditAttribution, AuditSummary, AuditVerdict};
 
@@ -56,6 +57,72 @@ pub struct SharedDiff<'a> {
     pub label: &'a str,
 }
 
+/// The change of one audit run: its files, and the inputs of its diff.
+#[derive(Clone, Copy)]
+pub struct RunChange<'a> {
+    /// Head analysis root.
+    pub root: &'a Path,
+    /// Resolved base ref, for the merge-base worktree diff.
+    pub base_ref: &'a str,
+    /// The opt-in shared diff of the run.
+    pub shared: Option<SharedDiff<'a>>,
+    /// The files that the change touched or deleted.
+    pub changed_files: &'a FxHashSet<PathBuf>,
+}
+
+impl<'a> RunChange<'a> {
+    /// The change of one run.
+    #[must_use]
+    pub const fn new(
+        root: &'a Path,
+        base_ref: &'a str,
+        shared: Option<SharedDiff<'a>>,
+        changed_files: &'a FxHashSet<PathBuf>,
+    ) -> Self {
+        Self {
+            root,
+            base_ref,
+            shared,
+            changed_files,
+        }
+    }
+
+    /// The diff of the run: the shared diff when one is active, else the
+    /// merge-base worktree diff. `None` when git gives no diff.
+    fn diff_index(&self) -> Option<std::borrow::Cow<'a, fallow_output::DiffIndex>> {
+        if let Some(shared) = self.shared {
+            return Some(std::borrow::Cow::Borrowed(shared.index));
+        }
+        fallow_engine::changed_files::try_get_changed_diff(self.root, self.base_ref)
+            .ok()
+            .map(|diff| std::borrow::Cow::Owned(fallow_output::DiffIndex::from_unified_diff(&diff)))
+    }
+}
+
+/// Whether the diff added a line with `symbol` to the head file `path`, a
+/// root-relative key path.
+fn added_line_names(
+    diff: &fallow_output::DiffIndex,
+    root: &Path,
+    path: &str,
+    symbol: &str,
+) -> bool {
+    let file = root.join(path);
+    let Some(added) = diff
+        .key_for(&file, root)
+        .and_then(|key| diff.added_lines_in(&key))
+    else {
+        return false;
+    };
+    let Ok(source) = std::fs::read_to_string(&file) else {
+        return false;
+    };
+    source
+        .lines()
+        .zip(1_u64..)
+        .any(|(line, number)| added.contains(&number) && line.contains(symbol))
+}
+
 /// Classify every head finding once against the base snapshot.
 ///
 /// With `syntactic_fallback` set (the degraded type-aware path), dead code
@@ -63,20 +130,18 @@ pub struct SharedDiff<'a> {
 /// only semantic evidence produced stays advisory: it has no syntactic base
 /// counterpart to compare with.
 ///
-/// `changed_files` holds the files that the change touched or deleted. A
-/// complexity finding of a function that the change moved between two of
-/// them compares with its base finding (see
-/// [`classify_complexity_attribution_against_all_with_moves`]).
+/// `change` holds the files that the change touched or deleted, and its
+/// diff. A complexity finding of a function that the change moved between
+/// two of those files compares with its base finding (see
+/// [`classify_complexity_attribution_against_all_with_moves`]). An unused
+/// symbol or a clone group that the change moved is inherited (see
+/// `audit_moved.rs`).
 #[must_use]
-#[expect(
-    clippy::implicit_hasher,
-    reason = "fallow standardizes on FxHashSet across the workspace"
-)]
 pub fn compare(
     view: &AuditAnalysesView<'_>,
     base: Option<&AuditKeySnapshot>,
     syntactic_fallback: bool,
-    changed_files: &FxHashSet<PathBuf>,
+    change: &RunChange<'_>,
 ) -> AuditComparison {
     let dead_code =
         view.dead_code
@@ -103,6 +168,24 @@ pub fn compare(
                 if syntactic_fallback && let Some(head_syntactic) = dead_code.syntactic_keys {
                     ledger.demote_unattributable_introductions(head_syntactic);
                 }
+                if let Some(base_keys) = base_keys {
+                    let diff = std::cell::OnceCell::new();
+                    let moved = moved_dead_code_keys(
+                        &ledger,
+                        &MovedDeadCode {
+                            base: base_keys,
+                            changed: &changed_paths_of(change.changed_files, dead_code.root),
+                            also_reported: dead_code.syntactic_keys.filter(|_| syntactic_fallback),
+                            added_line_names: &|path, symbol| {
+                                let index = diff.get_or_init(|| change.diff_index());
+                                index.as_deref().is_some_and(|index| {
+                                    added_line_names(index, dead_code.root, path, symbol)
+                                })
+                            },
+                        },
+                    );
+                    ledger.inherit_introductions(&moved);
+                }
                 ledger
             });
     let health_classes =
@@ -110,7 +193,7 @@ pub fn compare(
             .as_ref()
             .zip(base)
             .map_or_else(Vec::new, |(health, snapshot)| {
-                let changed_paths = changed_paths_of(changed_files, health.root);
+                let changed_paths = changed_paths_of(change.changed_files, health.root);
                 classify_complexity_attribution_against_all_with_moves(
                     &health.report.findings,
                     health.root,
@@ -131,15 +214,7 @@ pub fn compare(
             });
             AuditDomainLedger::from_classified(keys.into_iter().zip(introduced), base.is_some())
         });
-    let dupes = AuditDomainLedger::compare(
-        view.duplication.iter().flat_map(|duplication| {
-            duplication
-                .clone_groups
-                .iter()
-                .map(|group| dupe_group_key(group, duplication.root))
-        }),
-        base.map(|snapshot| &snapshot.dupes),
-    );
+    let dupes = dupes_ledger(view, base, change.changed_files);
     let styling = AuditDomainLedger::compare(
         view.health
             .iter()
@@ -153,6 +228,39 @@ pub fn compare(
         dupes,
         styling,
     }
+}
+
+/// Compare the clone groups of the head with the base keys. An introduced
+/// group that the change moved to other files is inherited (see
+/// [`moved_dupe_group_keys`]).
+fn dupes_ledger(
+    view: &AuditAnalysesView<'_>,
+    base: Option<&AuditKeySnapshot>,
+    changed_files: &FxHashSet<PathBuf>,
+) -> AuditDomainLedger {
+    let Some(duplication) = view.duplication.as_ref() else {
+        return AuditDomainLedger::compare(std::iter::empty(), base.map(|base| &base.dupes));
+    };
+    let keys: Vec<String> = duplication
+        .clone_groups
+        .iter()
+        .map(|group| dupe_group_key(group, duplication.root))
+        .collect();
+    let mut ledger = AuditDomainLedger::compare(keys.iter().cloned(), base.map(|base| &base.dupes));
+    if let Some(base) = base
+        && ledger.introduced_count() > 0
+    {
+        let moved = moved_dupe_group_keys(
+            keys.iter()
+                .map(String::as_str)
+                .filter(|key| ledger.is_introduced(key)),
+            &keys.iter().map(String::as_str).collect(),
+            &base.dupes,
+            &changed_paths_of(changed_files, duplication.root),
+        );
+        ledger.inherit_introductions(&moved);
+    }
+    ledger
 }
 
 /// The changed files as key paths, with the files that the head does not have.

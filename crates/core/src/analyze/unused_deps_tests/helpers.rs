@@ -2,9 +2,8 @@ pub(super) use std::path::{Path, PathBuf};
 
 pub(super) use rustc_hash::{FxHashMap, FxHashSet};
 
-#[expect(unused_imports, reason = "shared re-export for sibling test modules")]
 pub(super) use fallow_config::{
-    BoundaryConfig, FallowConfig, OutputFormat, PackageJson, ResolvedConfig, WorkspaceInfo,
+    FallowConfig, OutputFormat, PackageJson, ResolvedConfig, WorkspaceInfo,
 };
 pub(super) use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource, FileId};
 pub(super) use fallow_types::extract::{ImportInfo, ImportedName, ReExportInfo};

@@ -306,6 +306,7 @@ mod tests {
             baseline_failures: Vec::new(),
             skipped_files: Vec::new(),
             unmatched_paths: Vec::new(),
+            unmatched_path_reasons: Vec::new(),
             unloaded_paths: Vec::new(),
             worktree: MutationWorktreeCheck {
                 checked: true,

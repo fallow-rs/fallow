@@ -77,12 +77,9 @@ pub mod output;
 /// Typed envelope wrappers for the simple 1:1 dead-code findings
 /// (`UnusedFile`, `PrivateTypeLeak`, `UnresolvedImport`, `CircularDependency`,
 /// `BoundaryViolation`). Each wrapper flattens the bare finding via
-/// `#[serde(flatten)]` and carries a typed `actions` array populated at
-/// construction time, replacing the per-finding post-pass injection that
-/// previously grafted `actions[]` and `introduced` onto the schema. The
-/// `introduced` field is set by the audit pass via JSON map insertion and
-/// is `None` when serialized directly from Rust. The `schemars::JsonSchema`
-/// derive is gated per-struct on the `schema` feature.
+/// `#[serde(flatten)]` and creates a typed `actions` array at construction.
+/// The `introduced` field defaults to `None`. The audit pass inserts it into the
+/// JSON output. Each wrapper derives `schemars::JsonSchema` only with `schema`.
 pub mod output_dead_code;
 /// Shared output-format selector used by CLI, config, output, and API layers.
 pub mod output_format;

@@ -155,12 +155,8 @@ fn collect_matching_rules_covers_dependency_and_component_health_findings() {
 
 #[test]
 fn collect_matching_rules_routes_mixed_client_server_barrels() {
-    // A file whose ONLY finding is a mixed-client-server-barrel must still
-    // surface its CODEOWNERS rule in the `--group-by owner` "matched by"
-    // header. Reverting the `mixed_client_server_barrels` loop in
-    // `collect_matching_rules` makes this assertion fail (empty rules),
-    // pinning the fix that was previously missing alongside the sibling
-    // invalid-client-export / misplaced-directive loops.
+    // This file has only a mixed client/server barrel finding. Its CODEOWNERS
+    // rule must still appear in the `--group-by owner` match header.
     let root = PathBuf::from("/project");
     let mut results = AnalysisResults::default();
     results
@@ -286,6 +282,8 @@ fn boundary_violation_through_a_barrel_names_the_barrel() {
             line: 1,
             col: 9,
             via_path: Some(root.join("src/shared/index.ts")),
+            reason: fallow_types::results::BoundaryViolationReason::DisallowedZone,
+            public_files: vec![],
         }));
 
     let lines = build_human_lines(&results, &root, &RulesConfig::default(), None);
@@ -1909,6 +1907,7 @@ fn suppression_footer_names_a_stale_count_only_above_zero() {
             issue_kind: Some("unused-export".to_owned()),
             reason: None,
             is_file_level: false,
+            is_range: false,
             kind_known: true,
         },
         missing_reason: false,

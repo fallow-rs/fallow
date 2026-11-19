@@ -43,6 +43,7 @@ fn plans(
         results: &artifacts.results,
         framework_config_exports: exports,
         setup_files: &[],
+        ignore_patterns: Some(&session.config().ignore_patterns),
     };
     requests
         .iter()
@@ -1104,6 +1105,7 @@ fn a_graph_file_without_module_facts_is_skipped_with_a_reason() {
         results: &artifacts.results,
         framework_config_exports: None,
         setup_files: &[],
+        ignore_patterns: None,
     };
     let plan = plan_mutations(&inputs, &MutationPlanRequest::new(MutationScope::All));
     assert!(plan.skipped_files.contains(&SkippedFile {
@@ -1128,7 +1130,42 @@ fn a_paths_scope_reports_the_paths_that_select_no_file() {
     .remove(0);
     assert_eq!(
         plan.unmatched_paths,
-        vec!["src/math.test.ts".to_owned(), "src/missing.ts".to_owned()]
+        vec![
+            UnmatchedPath {
+                path: "src/math.test.ts".to_owned(),
+                reason: UnmatchedReason::NoSourceFile,
+            },
+            UnmatchedPath {
+                path: "src/missing.ts".to_owned(),
+                reason: UnmatchedReason::NotFound,
+            },
+        ]
+    );
+}
+
+#[test]
+fn a_path_that_ignore_patterns_exclude_is_unmatched_as_ignored() {
+    let root = fixture("mutation-plan-ignored");
+    let plan = plans(
+        &root,
+        None,
+        &[MutationPlanRequest::new(MutationScope::Paths(vec![
+            PathBuf::from("pkg"),
+            PathBuf::from("pkg/src/add.ts"),
+            root.join("pkg"),
+        ]))],
+    )
+    .remove(0);
+    let reasons: Vec<UnmatchedReason> = plan
+        .unmatched_paths
+        .iter()
+        .map(|entry| entry.reason)
+        .collect();
+    assert_eq!(plan.unmatched_paths.len(), 3, "{:?}", plan.unmatched_paths);
+    assert!(
+        reasons
+            .iter()
+            .all(|reason| *reason == UnmatchedReason::Ignored)
     );
 }
 
@@ -1538,6 +1575,7 @@ fn a_runner_setup_file_and_its_imports_are_support_files() {
         results: &artifacts.results,
         framework_config_exports: None,
         setup_files: &setup_files,
+        ignore_patterns: None,
     };
     let plan = plan_mutations(&inputs, &MutationPlanRequest::new(MutationScope::All));
     assert_eq!(

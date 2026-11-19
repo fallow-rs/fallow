@@ -26,6 +26,8 @@ use rustc_hash::FxHashSet;
 use super::config_parser;
 use super::{Plugin, PluginResult};
 
+#[path = "jest_module_name_mapper.rs"]
+mod module_name_mapper;
 #[path = "jest_preset.rs"]
 mod preset;
 
@@ -657,22 +659,6 @@ fn push_setup_entry(entry: &str, root_dir: &Path, root: &Path, result: &mut Plug
     result.setup_files.push(path);
 }
 
-/// The `moduleNameMapper` targets that name one file under `<rootDir>`.
-///
-/// Jest resolves a target without the `<rootDir>` token from the directory
-/// of each importing file, so only the token form names a known file. A target
-/// with a `$1` capture group names many files, and a bare target names a
-/// package.
-fn module_name_mapper_files(parse_source: &str, parse_path: &Path) -> Vec<String> {
-    let mut targets = config_parser::extract_config_property_strings(
-        parse_source,
-        parse_path,
-        "moduleNameMapper",
-    );
-    targets.retain(|target| target.starts_with("<rootDir>") && !target.contains('$'));
-    targets
-}
-
 /// Extract setup files from Jest config (setupFiles, setupFilesAfterEnv, globalSetup, globalTeardown).
 /// `preset_root_dir` is the root directory of the config that names a preset
 /// file, when the config is that preset.
@@ -709,11 +695,13 @@ fn extract_jest_setup_files(
         }
     }
 
-    for target in module_name_mapper_files(parse_source, parse_path) {
+    let mapper = module_name_mapper::targets(parse_source, parse_path);
+    for target in mapper.files {
         result
             .setup_files
             .push(resolve_setup_path(&target, &root_dir, root));
     }
+    result.referenced_dependencies.extend(mapper.packages);
 
     let test_match =
         config_parser::extract_config_string_array(parse_source, parse_path, &["testMatch"]);

@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use fallow_config::{DuplicatesConfig, ResolvedConfig, WorkspaceInfo};
+use fallow_config::{ResolvedConfig, WorkspaceInfo};
 use fallow_types::cache_rejection::CacheRejection;
 use fallow_types::discover::DiscoveredFile;
 use fallow_types::extract::{ModuleInfo, SourceParseDegradation, SourceReadFailure};
@@ -20,13 +20,10 @@ use crate::session_reuse::{
     MAX_INCREMENTAL_REPARSE_FILES, ParseCountCells, changed_file_indices, merge_reparsed_modules,
 };
 use crate::{
-    EngineResult, core_backend, duplicates,
-    project_analysis::{
-        ProjectAnalysisArtifactOptions, ProjectAnalysisArtifacts, ProjectAnalysisOutput,
-    },
-    project_config::{ProjectConfig, config_for_project, default_project_config},
+    EngineResult, core_backend,
+    project_config::{DuplicationScope, ProjectConfig, config_for_project, default_project_config},
     results::{
-        DeadCodeAnalysis, DeadCodeAnalysisArtifacts, DeadCodeAnalysisOutput, DuplicationAnalysis,
+        DeadCodeAnalysis, DeadCodeAnalysisArtifacts, DeadCodeAnalysisOutput,
         SharedDeadCodeAnalysisArtifacts,
     },
     warm_parse::{WarmParse, WarmParseKey, WarmParseStore},
@@ -57,6 +54,7 @@ pub struct AnalysisSession {
     /// An incremental parse changed modules that the persisted parse cache
     /// does not hold yet. [`AnalysisSession::flush_parse_cache`] writes them.
     disk_cache_stale: AtomicBool,
+    duplication: duplication::DuplicationFiles,
 }
 
 #[derive(Debug)]
@@ -173,6 +171,11 @@ impl AnalysisSession {
     /// Load config with an explicit inheritance trust policy, apply one
     /// caller-supplied adjustment, then discover project files.
     ///
+    /// When duplication has another production mode than dead code, the
+    /// session walks the files of duplication from the loaded config. The
+    /// adjustment does not reach that walk, so it must not change the root,
+    /// the ignore patterns or the production mode.
+    ///
     /// # Errors
     ///
     /// Returns an error when config loading fails.
@@ -188,10 +191,9 @@ impl AnalysisSession {
             load_options,
         )?;
         configure(&mut project_config.config);
-        project_config.workspaces.clear();
-        project_config.workspace_diagnostics.clear();
-        project_config.workspace_discovery_ms = None;
-        Ok(Self::from_config(project_config))
+        Ok(Self::from_config(
+            project_config.without_workspace_metadata(),
+        ))
     }
 
     /// Build a session from built-in defaults, ignoring project config files.
@@ -273,6 +275,7 @@ impl AnalysisSession {
             preloaded_workspaces: uses_preloaded_workspaces,
             parse_counts: ParseCountCells::default(),
             disk_cache_stale: AtomicBool::new(false),
+            duplication: duplication::DuplicationFiles::new(project_config.duplication),
         }
     }
 
@@ -361,6 +364,7 @@ impl AnalysisSession {
             self.workspaces = discovery.workspaces().to_vec();
         }
         self.discovery = discovery;
+        self.duplication.forget_files();
         !same_files
     }
 
@@ -464,7 +468,9 @@ impl AnalysisSession {
     }
 
     /// Build a session from a resolved config when the caller already owns
-    /// command-specific config loading.
+    /// command-specific config loading. Duplication analyzes the files of
+    /// this config, so the caller resolves it in the production mode of each
+    /// analysis that the session runs.
     ///
     /// # Errors
     ///
@@ -481,6 +487,7 @@ impl AnalysisSession {
             workspaces,
             workspace_diagnostics,
             workspace_discovery_ms: Some(workspace_discovery_ms),
+            duplication: DuplicationScope::SameAsSession,
         }))
     }
 
@@ -904,107 +911,6 @@ impl AnalysisSession {
         })
     }
 
-    /// Run dead-code and duplication analysis for this session.
-    ///
-    /// When `retain_complexity_artifacts` is true, the dead-code result keeps
-    /// parser artifacts needed by editor overlays such as inline complexity.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if dead-code parsing or analysis fails.
-    pub fn analyze_project_with(
-        &self,
-        duplicates_config: &DuplicatesConfig,
-        retain_complexity_artifacts: bool,
-    ) -> EngineResult<ProjectAnalysisOutput> {
-        self.analyze_project_with_artifacts(
-            duplicates_config,
-            ProjectAnalysisArtifactOptions {
-                retain_complexity_artifacts,
-                ..ProjectAnalysisArtifactOptions::default()
-            },
-        )
-        .map(ProjectAnalysisArtifacts::into_output)
-    }
-
-    /// Run dead-code and duplication analysis with retained session reuse data.
-    ///
-    /// This is the engine-owned project artifact boundary for callers that need
-    /// to hand one analysis result across audit, decision, editor, or follow-up
-    /// analysis surfaces without rediscovering session metadata.
-    ///
-    /// # Errors
-    ///
-    /// Returns an error if dead-code parsing or analysis fails.
-    pub fn analyze_project_with_artifacts(
-        &self,
-        duplicates_config: &DuplicatesConfig,
-        options: ProjectAnalysisArtifactOptions,
-    ) -> EngineResult<ProjectAnalysisArtifacts> {
-        self.ensure_not_cancelled("duplication detection")?;
-        let cache_dir = (!self.config.no_cache).then_some(self.config.cache_dir.as_path());
-        let duplication = if let Some(changed_files) = options.changed_files.as_ref() {
-            let changed_files = changed_files.iter().cloned().collect::<Vec<_>>();
-            self.find_duplicates_touching_files_with_defaults(
-                duplicates_config,
-                &changed_files,
-                cache_dir,
-            )
-            .report
-        } else {
-            self.find_duplicates_with_defaults(duplicates_config, cache_dir)
-                .report
-        };
-        // Duplication detection is infallible, so a token set while it ran can
-        // only be reported here, before its report is handed on as a complete
-        // one.
-        self.ensure_not_cancelled("the dead-code half of project analysis")?;
-        let source_fingerprints = options
-            .collect_source_fingerprints
-            .then(|| self.source_fingerprints());
-        Ok(ProjectAnalysisArtifacts {
-            dead_code: self.analyze_dead_code_with_artifacts(
-                options.retain_complexity_artifacts,
-                options.retain_graph,
-            )?,
-            duplication,
-            changed_files: options.changed_files,
-            source_fingerprints,
-        })
-    }
-
-    /// Run duplication detection and return report sidecar metadata.
-    #[must_use]
-    pub fn find_duplicates_with_defaults(
-        &self,
-        config: &DuplicatesConfig,
-        cache_dir: Option<&Path>,
-    ) -> DuplicationAnalysis {
-        duplicates::find_duplicates_with_defaults(
-            &self.config.root,
-            self.files(),
-            config,
-            cache_dir,
-        )
-    }
-
-    /// Run focused duplication detection for a changed-file set.
-    #[must_use]
-    pub fn find_duplicates_touching_files_with_defaults(
-        &self,
-        config: &DuplicatesConfig,
-        changed_files: &[PathBuf],
-        cache_dir: Option<&Path>,
-    ) -> DuplicationAnalysis {
-        duplicates::find_duplicates_touching_files_with_defaults(
-            &self.config.root,
-            self.files(),
-            config,
-            changed_files,
-            cache_dir,
-        )
-    }
-
     /// Parse the discovered files, reusing the session's warm module cache.
     ///
     /// `cancellation` is threaded through to the per-file parse loop, so a set
@@ -1346,6 +1252,8 @@ struct SourceProblems {
     parse_degradations: Vec<SourceParseDegradation>,
 }
 
+#[path = "session_duplication.rs"]
+mod duplication;
 #[path = "session_parse.rs"]
 mod parsing;
 use parsing::parse_files_with_config;
@@ -3013,3 +2921,7 @@ mod shared_state_tests;
 #[cfg(all(test, unix, not(miri)))]
 #[path = "session_call_facts_tests.rs"]
 mod call_facts_tests;
+
+#[cfg(test)]
+#[path = "session_duplication_tests.rs"]
+mod duplication_tests;

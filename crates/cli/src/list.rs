@@ -1190,11 +1190,13 @@ mod tests {
                     name: "features/auth".to_string(),
                     patterns: vec!["src/features/auth/**".to_string()],
                     file_count: 3,
+                    public_files: vec![],
                 },
                 ZoneInfo {
                     name: "features/billing".to_string(),
                     patterns: vec!["src/features/billing/**".to_string()],
                     file_count: 5,
+                    public_files: vec![],
                 },
             ],
             rules: vec![],
@@ -1281,6 +1283,7 @@ mod tests {
                 name: "features".to_string(),
                 patterns: vec!["src/features/**".to_string()],
                 file_count: 2,
+                public_files: vec![],
             }],
             rules: vec![],
             logical_groups: vec![LogicalGroupInfo {

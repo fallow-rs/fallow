@@ -608,7 +608,7 @@ fn review_comment_body<'a>(review: &'a serde_json::Value, name: &str) -> &'a str
         .unwrap()
         .iter()
         .filter_map(|comment| comment["body"].as_str())
-        .find(|body| body.contains(&format!("'{name}'")))
+        .find(|body| body.contains(&format!("`{name}`")))
         .unwrap_or_else(|| panic!("no review comment for {name}: {review:#}"))
 }
 
@@ -654,17 +654,17 @@ fn review_comments_carry_the_attribution_and_the_gate_context() {
         for review in [&live, &from_saved] {
             let old = review_comment_body(review, "old");
             assert!(
-                old.starts_with("**error** · inherited · not gated (`--gate new-only`) `"),
+                old.starts_with("**error** (inherited, not gated: `--gate new-only`) "),
                 "{format}: {old}"
             );
             let work = review_comment_body(review, "work");
             assert!(
-                work.starts_with("**error** · worsened · not gated (`--worsened warn`) `"),
+                work.starts_with("**error** (worsened, not gated: `--worsened warn`) "),
                 "{format}: {work}"
             );
             let fresh = review_comment_body(review, "fresh");
             assert!(
-                fresh.starts_with("**error** · introduced `"),
+                fresh.starts_with("**error** (introduced) "),
                 "{format}: {fresh}"
             );
         }
@@ -694,7 +694,7 @@ fn review_comments_under_gate_all_keep_the_plain_label() {
         "dupes",
     ]));
     let old = review_comment_body(&review, "old");
-    assert!(old.starts_with("**error** `"), "{old}");
+    assert!(old.starts_with("**error** [`"), "{old}");
 }
 
 /// The `review-github` output of an audit of `dir` against `main`.
@@ -725,7 +725,7 @@ fn inherited_review_comment_names_the_base_values() {
     let review = live_review(tmp.path());
     let old = review_comment_body(&review, "old");
     assert!(
-        old.contains(r"\(inherited from the base: cyclomatic 21 -\> 21, cognitive 20 -\> 20\)"),
+        old.contains("(inherited from the base: cyclomatic 21 -> 21, cognitive 20 -> 20)"),
         "{old}"
     );
 }
@@ -738,7 +738,7 @@ fn inherited_review_comment_shows_a_lower_head_value() {
     let review = live_review(tmp.path());
     let old = review_comment_body(&review, "old");
     assert!(
-        old.contains(r"\(inherited from the base: cyclomatic 23 -\> 19, cognitive 22 -\> 18\)"),
+        old.contains("(inherited from the base: cyclomatic 23 -> 19, cognitive 22 -> 18)"),
         "{old}"
     );
 }

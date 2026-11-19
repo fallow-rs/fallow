@@ -993,7 +993,7 @@
       "type": "object",
       "properties": {
         "enabled": {
-          "description": "Whether duplication detection is enabled.",
+          "description": "Whether duplication detection is enabled. `false` turns off each duplication analysis that a command runs by default: the duplication analysis of the bare `fallow` command, the duplication sub-analysis of `fallow audit`, and the duplication measure and penalty of the health score. A command line that names the analysis still runs it: `--only dupes`, `--include-dupes`, `audit.dupes: true` and the `fallow dupes` command.",
           "type": "boolean",
           "default": true
         },
@@ -1253,6 +1253,16 @@
             "string",
             "null"
           ]
+        },
+        "runnerProjects": {
+          "description": "The names of the Vitest projects that the run uses, as the Vitest\n`--project` flag selects them, for example `[\"unit\"]`. A name can\nhold a `*` wildcard. The run then ignores each other project of the\nconfig, also a project from a separate config file. Only the Vitest\nrunner reads it. Unset uses each project. `--runner-project` wins.",
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
         }
       },
       "additionalProperties": false
@@ -2279,6 +2289,13 @@
             "string",
             "null"
           ]
+        },
+        "publicFiles": {
+          "description": "Globs of the public entry files of this zone.\n\nWhen the list is not empty, a file of another zone may import a file\nof this zone only through a file that is in this zone and matches a\nglob. The globs use the same base as `patterns`. On an `autoDiscover`\nzone, each glob is relative to each discovered folder.",
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       },
       "required": [
@@ -3773,7 +3790,7 @@
           ]
         },
         "dupes": {
-          "description": "Toggles the duplication sub-analysis in `fallow audit`. Defaults to on when unset; set `false` to leave clone groups out of the verdict, summary and attribution, on the head and on the base snapshot. `fallow audit --skip dupes` turns it off for one run and `--only` replaces this selection.",
+          "description": "Toggles the duplication sub-analysis in `fallow audit`. Defaults to the value of `duplicates.enabled` when unset, which is on by default; set `false` to leave clone groups out of the verdict, summary and attribution, on the head and on the base snapshot. `fallow audit --skip dupes` turns it off for one run and `--only` replaces this selection.",
           "type": [
             "boolean",
             "null"

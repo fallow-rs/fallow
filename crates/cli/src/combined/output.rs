@@ -7,12 +7,7 @@ use std::process::ExitCode;
 use colored::Colorize;
 use fallow_api::{CombinedCheckJsonSection, CombinedJsonOutputInput, DupesReportPayload};
 use fallow_config::OutputFormat;
-use fallow_output::{
-    CiIssue, CodeClimateIssue, PR_DECISION_SCHEMA, PrCommentEnvelope, PrDecisionConclusion,
-    PrDecisionDetails, PrDecisionGate, PrDecisionSurface, PrSummaryArea, PrSummaryFinding,
-    PrSummaryInput, PrSummaryScope, PrSummaryStatus, codeclimate_issues_to_value,
-    issues_from_codeclimate_issues, render_pr_summary,
-};
+use fallow_output::{CodeClimateIssue, codeclimate_issues_to_value};
 
 use crate::check::CheckResult;
 use crate::dupes::DupesResult;
@@ -279,47 +274,6 @@ fn combined_provider(github: bool) -> report::ci::pr_comment::Provider {
     }
 }
 
-fn print_combined_pr_comment(
-    opts: &CombinedOptions<'_>,
-    input: CombinedJsonPrintInput<'_>,
-    github: bool,
-) -> Result<Option<u8>, ExitCode> {
-    let CombinedJsonPrintInput {
-        check_result,
-        dupes_result,
-        health_result,
-        ..
-    } = input;
-    let status_note = combined_status_note(input, opts.output)?;
-    let envelope = build_combined_pr_summary(
-        opts.fail_on_issues,
-        check_result,
-        dupes_result,
-        health_result,
-        combined_provider(github),
-        status_note.as_deref(),
-    );
-    let mut decision = build_combined_pr_decision(
-        opts.fail_on_issues,
-        opts.fail_on_stale_baseline,
-        check_result,
-        dupes_result,
-        health_result,
-        &envelope,
-    );
-    // The Check Run summary carries the note too, as the saved render's does.
-    if let Some(note) = status_note.as_deref() {
-        decision.details.summary_markdown =
-            format!("{}\n\n> {note}", decision.details.summary_markdown);
-    }
-    let details = build_combined_pr_details(check_result, dupes_result, health_result);
-    report::ci::pr_comment::write_pr_comment_envelope_sidecar(&envelope);
-    report::ci::pr_comment::write_pr_decision_sidecar(&decision);
-    report::ci::pr_comment::write_pr_details_sidecar(&details);
-    outln!("{}", envelope.body());
-    combined_machine_success(ExitCode::SUCCESS)
-}
-
 /// The status note of the combined comment, read from the envelope that
 /// `--format json` prints for this run.
 ///
@@ -346,288 +300,27 @@ fn combined_status_note(
     })
 }
 
-fn build_combined_pr_summary(
-    fail_on_issues: bool,
-    check_result: Option<&CheckResult>,
-    dupes_result: Option<&DupesResult>,
-    health_result: Option<&HealthResult>,
-    provider: report::ci::pr_comment::Provider,
-    status_note: Option<&str>,
-) -> PrCommentEnvelope {
-    let codeclimate = build_combined_codeclimate_issues(check_result, dupes_result, health_result);
-    let findings = combined_pr_summary_findings(&codeclimate);
-    let areas =
-        combined_pr_summary_areas(fail_on_issues, check_result, dupes_result, health_result);
-
-    render_pr_summary(&PrSummaryInput {
-        command: "combined",
-        provider,
-        marker_id: report::ci::pr_comment::sticky_marker_id(),
-        scope: PrSummaryScope::Project,
-        areas: &areas,
-        findings: &findings,
-        max_findings: report::ci::pr_comment::max_comments(),
-        details_url: None,
-        layout: report::ci::pr_comment::pr_comment_layout_from_env(),
-        status_note,
-        trailing_section: check_result
-            .and_then(|check| {
-                report::config_pattern_text::markdown_section(&check.workspace_diagnostics)
-            })
-            .as_deref(),
-    })
-}
-
-fn build_combined_pr_decision(
-    fail_on_issues: bool,
-    fail_on_stale_baseline: bool,
-    check_result: Option<&CheckResult>,
-    dupes_result: Option<&DupesResult>,
-    health_result: Option<&HealthResult>,
-    envelope: &PrCommentEnvelope,
-) -> PrDecisionSurface {
-    let codeclimate = build_combined_codeclimate_issues(check_result, dupes_result, health_result);
-    let issues = report::ci::diff_filter::filter_issues_for_summary(
-        issues_from_codeclimate_issues(&codeclimate),
-    );
-    let mut gates =
-        combined_pr_summary_areas(fail_on_issues, check_result, dupes_result, health_result)
-            .into_iter()
-            .map(pr_decision_gate_from_summary_area)
-            .collect::<Vec<_>>();
-    // Both derived from the per-area rows alone, and both before the gate rows
-    // join them: the check-run `conclusion` is a documented non-blocker, and a
-    // failing gate row appended first would silently turn every combined run
-    // that armed a gate into a merge blocker.
-    let conclusion = combined_decision_conclusion(&gates);
-    let summary_markdown = combined_decision_summary(conclusion, issues.len(), &gates);
-    gates.extend(report::gate_outcome_text::gate_rows_for_gates(
-        combined_gate_outcomes(
-            check_result,
-            dupes_result,
-            health_result,
-            CombinedGateFlags {
-                fail_on_stale_baseline,
-                fail_on_issues,
-            },
-        )
-        .as_ref(),
-    ));
-
-    PrDecisionSurface {
-        schema: PR_DECISION_SCHEMA.to_owned(),
-        title: "Fallow".to_owned(),
-        conclusion,
-        gates,
-        annotations: issues
-            .iter()
-            .take(report::ci::pr_comment::max_comments())
-            .map(report::ci::pr_comment::decision_annotation_from_issue)
-            .collect(),
-        details: PrDecisionDetails {
-            summary_markdown,
-            full_report_path: None,
-            details_url: envelope.details_url.clone(),
+fn print_combined_pr_comment(
+    opts: &CombinedOptions<'_>,
+    input: CombinedJsonPrintInput<'_>,
+    github: bool,
+) -> Result<Option<u8>, ExitCode> {
+    let envelope = build_combined_json_output(input)?;
+    combined_machine_success(crate::cli_report::render_live_combined_pr_comment(
+        combined_provider(github),
+        &envelope,
+        opts.root,
+        crate::runtime_support::ConfigFlags {
+            path: opts.config_path.as_deref(),
+            allow_remote_extends: opts.allow_remote_extends,
         },
-    }
-}
-
-fn build_combined_pr_details(
-    check_result: Option<&CheckResult>,
-    dupes_result: Option<&DupesResult>,
-    health_result: Option<&HealthResult>,
-) -> fallow_output::PrDetailsArtifact {
-    let codeclimate = build_combined_codeclimate_issues(check_result, dupes_result, health_result);
-    let issues = report::ci::diff_filter::filter_issues_for_summary(
-        issues_from_codeclimate_issues(&codeclimate),
-    );
-    report::ci::pr_comment::build_pr_details_artifact("combined", &issues)
-}
-
-fn pr_decision_gate_from_summary_area(area: PrSummaryArea) -> PrDecisionGate {
-    PrDecisionGate {
-        id: area.name.to_ascii_lowercase().replace(' ', "-"),
-        label: area.name,
-        status: pr_decision_conclusion_from_summary_status(area.status),
-        observed: area.result,
-        threshold: area.threshold,
-        scope: "new code".to_owned(),
-    }
-}
-
-fn pr_decision_conclusion_from_summary_status(status: PrSummaryStatus) -> PrDecisionConclusion {
-    match status {
-        PrSummaryStatus::Fail => PrDecisionConclusion::Failure,
-        PrSummaryStatus::Warn | PrSummaryStatus::Info => PrDecisionConclusion::Neutral,
-        PrSummaryStatus::Pass => PrDecisionConclusion::Success,
-    }
-}
-
-fn combined_decision_conclusion(gates: &[PrDecisionGate]) -> PrDecisionConclusion {
-    if gates
-        .iter()
-        .any(|gate| gate.status == PrDecisionConclusion::Failure)
-    {
-        return PrDecisionConclusion::Failure;
-    }
-    if gates
-        .iter()
-        .any(|gate| gate.status == PrDecisionConclusion::Neutral)
-    {
-        return PrDecisionConclusion::Neutral;
-    }
-    PrDecisionConclusion::Success
-}
-
-fn combined_decision_summary(
-    conclusion: PrDecisionConclusion,
-    issue_count: usize,
-    gates: &[PrDecisionGate],
-) -> String {
-    if issue_count == 0
-        && gates
-            .iter()
-            .all(|gate| gate.status == PrDecisionConclusion::Success)
-    {
-        return "Fallow found no actionable PR findings.".to_owned();
-    }
-    let notable = gates
-        .iter()
-        .filter(|gate| gate.status != PrDecisionConclusion::Success)
-        .map(|gate| format!("{}: {}", gate.label, gate.observed))
-        .collect::<Vec<_>>()
-        .join("; ");
-    let findings = (issue_count > 0).then(|| count_label(issue_count, "finding", "findings"));
-    match conclusion {
-        PrDecisionConclusion::Failure => match findings {
-            Some(findings) => format!("Fallow quality gates failed with {findings}. {notable}"),
-            None => format!("Fallow quality gates failed. {notable}"),
-        },
-        PrDecisionConclusion::Neutral => match findings {
-            Some(findings) => format!("Fallow found {findings} for review. {notable}"),
-            None => format!("Fallow found gate warnings for review. {notable}"),
-        },
-        PrDecisionConclusion::Success | PrDecisionConclusion::Skipped => findings.map_or_else(
-            || "Fallow found no actionable PR findings.".to_owned(),
-            |findings| format!("Fallow found {findings}."),
-        ),
-    }
-}
-
-fn combined_pr_summary_findings(codeclimate: &[CodeClimateIssue]) -> Vec<PrSummaryFinding> {
-    let issues = report::ci::diff_filter::filter_issues_for_summary(
-        issues_from_codeclimate_issues(codeclimate),
-    );
-    issues.iter().map(pr_summary_finding_from_ci).collect()
-}
-
-fn pr_summary_finding_from_ci(issue: &CiIssue) -> PrSummaryFinding {
-    PrSummaryFinding {
-        severity: issue.severity.clone(),
-        rule_id: issue.rule_id.clone(),
-        location: format!("{}:{}", issue.path, issue.line),
-        description: issue.description.clone(),
-        fix: report::ci::suggestion::fix_intent(issue).map(str::to_owned),
-    }
-}
-
-fn combined_pr_summary_areas(
-    fail_on_issues: bool,
-    check_result: Option<&CheckResult>,
-    dupes_result: Option<&DupesResult>,
-    health_result: Option<&HealthResult>,
-) -> Vec<PrSummaryArea> {
-    let mut areas = Vec::new();
-    if let Some(result) = check_result {
-        areas.push(dead_code_pr_summary_area(result, fail_on_issues));
-    }
-    if let Some(result) = dupes_result {
-        areas.push(dupes_pr_summary_area(result, fail_on_issues));
-    }
-    if let Some(result) = health_result {
-        areas.push(health_pr_summary_area(result));
-    }
-    areas
-}
-
-fn dead_code_pr_summary_area(result: &CheckResult, fail_on_issues: bool) -> PrSummaryArea {
-    let count = result.results.total_issues();
-    PrSummaryArea {
-        name: "Dead code".to_owned(),
-        status: if count == 0 {
-            PrSummaryStatus::Pass
-        } else if fail_on_issues {
-            PrSummaryStatus::Fail
-        } else {
-            PrSummaryStatus::Warn
-        },
-        result: count_label(count, "issue", "issues"),
-        threshold: Some("configured rules".to_owned()),
-        details: result
-            .baseline_deltas
-            .as_ref()
-            .map(|deltas| baseline_delta_label(deltas.total_delta)),
-    }
-}
-
-fn dupes_pr_summary_area(result: &DupesResult, fail_on_issues: bool) -> PrSummaryArea {
-    let count = result.report.clone_groups.len();
-    let exceeds_threshold =
-        result.threshold > 0.0 && result.report.stats.duplication_percentage > result.threshold;
-    PrSummaryArea {
-        name: "Duplication".to_owned(),
-        status: if count == 0 {
-            PrSummaryStatus::Pass
-        } else if exceeds_threshold || fail_on_issues {
-            PrSummaryStatus::Fail
-        } else {
-            PrSummaryStatus::Warn
-        },
-        result: count_label(count, "clone group", "clone groups"),
-        threshold: dupes_threshold_label(result.threshold),
-        details: Some(format!(
-            "{:.1}% duplicated lines",
-            result.report.stats.duplication_percentage
-        )),
-    }
-}
-
-fn health_pr_summary_area(result: &HealthResult) -> PrSummaryArea {
-    let count = result.report.findings.len();
-    PrSummaryArea {
-        name: "Health".to_owned(),
-        status: if count == 0 {
-            PrSummaryStatus::Pass
-        } else if result.report.findings.iter().any(|f| f.blocks()) {
-            PrSummaryStatus::Fail
-        } else {
-            PrSummaryStatus::Warn
-        },
-        result: count_label(count, "finding", "findings"),
-        threshold: Some("configured complexity gates".to_owned()),
-        details: result
-            .report
-            .health_score
-            .as_ref()
-            .map(|score| format!("score {:.0} ({})", score.score.round(), score.grade)),
-    }
+        opts.output,
+    ))
 }
 
 fn count_label(count: usize, singular: &str, plural: &str) -> String {
     let noun = if count == 1 { singular } else { plural };
     format!("{count} {noun}")
-}
-
-fn baseline_delta_label(delta: i64) -> String {
-    match delta.cmp(&0) {
-        std::cmp::Ordering::Greater => format!("+{delta} since baseline"),
-        std::cmp::Ordering::Less => format!("{delta} since baseline"),
-        std::cmp::Ordering::Equal => "no baseline change".to_owned(),
-    }
-}
-
-fn dupes_threshold_label(threshold: f64) -> Option<String> {
-    (threshold > 0.0).then(|| format!("<= {threshold:.1}% duplicated lines"))
 }
 
 /// Render the combined review envelope. Its summary body carries the status
@@ -1656,12 +1349,10 @@ mod tests {
     use std::process::ExitCode;
 
     use super::{
-        build_combined_codeclimate, build_combined_pr_summary, combined_decision_summary,
-        combined_machine_success, emit_combined_json_output, exit_code_to_u8,
-        print_combined_codeclimate, print_combined_sarif,
+        build_combined_codeclimate, combined_machine_success, emit_combined_json_output,
+        exit_code_to_u8, print_combined_codeclimate, print_combined_sarif,
     };
     use crate::exit_codes::{exit_gate_failed, exit_invalid_input};
-    use fallow_output::{PrDecisionConclusion, PrDecisionGate};
 
     #[test]
     fn combined_machine_success_maps_success_to_zero_exit() {
@@ -1697,38 +1388,6 @@ mod tests {
             print_combined_codeclimate(None, None, None),
             ExitCode::SUCCESS
         );
-    }
-
-    #[test]
-    fn empty_combined_pr_summary_is_clean() {
-        let envelope = build_combined_pr_summary(
-            false,
-            None,
-            None,
-            None,
-            crate::report::ci::pr_comment::Provider::Github,
-            None,
-        );
-
-        assert!(envelope.is_clean);
-        assert!(envelope.body.contains("No review-visible findings"));
-    }
-
-    #[test]
-    fn combined_decision_summary_names_notable_gates() {
-        let gates = [PrDecisionGate {
-            id: "health".to_owned(),
-            label: "Health".to_owned(),
-            status: PrDecisionConclusion::Failure,
-            observed: "1 finding".to_owned(),
-            threshold: Some("configured complexity gates".to_owned()),
-            scope: "new code".to_owned(),
-        }];
-
-        let summary = combined_decision_summary(PrDecisionConclusion::Failure, 1, &gates);
-
-        assert!(summary.contains("quality gates failed"));
-        assert!(summary.contains("Health: 1 finding"));
     }
 
     #[test]

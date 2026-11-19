@@ -10,10 +10,15 @@ pub use fallow_types::extract::{ModuleInfo, ParseResult, SourceReadFailure};
 type CacheStore = fallow_extract::cache::CacheStore;
 
 /// Parse the `fallow-ignore-next-line` and `fallow-ignore-file` comments of
-/// raw source text, without a parse. Unknown tokens are dropped.
+/// the raw source text of the file at `path`. Unknown tokens are dropped. A
+/// marker inside a string or template literal of the file's scripts has no
+/// effect.
 #[must_use]
-pub fn suppressions_from_text(source: &str) -> Vec<fallow_types::suppress::Suppression> {
-    fallow_extract::suppress::parse_suppressions_from_source(source).suppressions
+pub fn suppressions_from_text(
+    path: &std::path::Path,
+    source: &str,
+) -> Vec<fallow_types::suppress::Suppression> {
+    fallow_extract::parse_suppressions_for_file(path, source).suppressions
 }
 
 /// On-demand, transient function extraction for local similar-code inference.

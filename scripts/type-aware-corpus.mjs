@@ -1766,7 +1766,6 @@ const capabilities = async (manifest, options, publicationMode = "write") => {
   const astroProject = manifest.projects.find(({ id }) => id === "astro");
   if (!astroProject) fail("capability proof requires the Astro corpus project");
   const astroRoot = projectRoot(astroProject, options.outDir);
-  validatePreparedFixture(astroProject, options.outDir);
   const vitestCommit = git(
     SUPPLEMENTAL_VITEST_ROOT,
     ["rev-parse", "HEAD"],

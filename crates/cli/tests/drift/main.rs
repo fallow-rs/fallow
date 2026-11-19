@@ -40,12 +40,13 @@ use crate::keys::{
 };
 use crate::model::{Materialized, ProjectModel, SELECTED_WORKSPACE, project_strategy};
 use crate::surfaces::{
-    Analysis, McpPath, McpServer, Scope, api_audit, api_dead_code_envelope_with_baseline,
-    api_envelope, api_finding_id_query, api_keys, api_security, architecture_envelopes,
-    architecture_keys, cli_analysis_envelope, cli_audit, cli_combined, cli_envelope,
-    cli_finding_id_query, cli_human_verdict_code, cli_keys, cli_save_baseline, cli_security,
-    cli_verdict_envelope, mcp_audit, mcp_bin, mcp_envelope, mcp_finding_id_query, mcp_security,
-    mcp_supports, run_cli, run_cli_format,
+    Analysis, McpPath, McpServer, Scope, api_audit, api_audit_with_health,
+    api_dead_code_envelope_with_baseline, api_envelope, api_finding_id_query, api_keys,
+    api_security, architecture_envelopes, architecture_keys, cli_analysis_envelope, cli_audit,
+    cli_audit_skipping, cli_combined, cli_envelope, cli_finding_id_query, cli_human_verdict_code,
+    cli_keys, cli_save_baseline, cli_security, cli_verdict_envelope, mcp_audit, mcp_audit_skipping,
+    mcp_bin, mcp_envelope, mcp_finding_id_query, mcp_security, mcp_supports, run_cli,
+    run_cli_format,
 };
 
 /// Cases per invariant when `FALLOW_DRIFT_CASES` is unset. Small, so the
@@ -857,11 +858,7 @@ fn type_aware_config_agrees_across_surfaces() {
         r#"{ "typeAware": { "enabled": true } }"#,
         r#"{ "audit": { "typeAware": true } }"#,
     ] {
-        let mut files = audit_control_model(true).materialize(true);
-        for side in [&mut files.base, &mut files.head] {
-            side.insert(".fallowrc.json".to_string(), config.to_string());
-        }
-        let project = Project::from_files(files);
+        let project = audit_config_project(config);
         let root = &project.root;
 
         let cli = cli_audit(root);
@@ -1287,51 +1284,54 @@ fn audit_controls_see_renames_and_manifests() {
         .unwrap_or_else(|err| panic!("{err}"));
 }
 
-/// I5 for the audit sub-analysis keys: with `audit.deadCode` and
-/// `audit.dupes` false, the CLI, the MCP typed route and `fallow_api` skip the
-/// same sub-analyses, mark them in the summary, and report the same keys.
+/// I5 for the audit sub-analysis keys: under each config, the CLI, the MCP
+/// typed route and `fallow_api` skip the same sub-analyses, mark them in the
+/// summary, and report the same keys. With `duplicates.enabled` false, a
+/// `skip` of health also agrees, and on MCP that call takes the CLI route.
 #[test]
 #[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
 fn i5_audit_sub_analysis_keys_agree_across_surfaces() {
-    let mut files = audit_control_model(true).materialize(true);
-    let config = r#"{ "audit": { "deadCode": false, "dupes": false } }"#;
-    files
-        .base
-        .insert(".fallowrc.json".to_string(), config.to_string());
-    files
-        .head
-        .insert(".fallowrc.json".to_string(), config.to_string());
-    let project = Project::from_files(files);
-    let envelopes = vec![
-        ("CLI".to_string(), cli_audit(&project.root)),
-        (
-            "MCP Typed".to_string(),
-            with_typed_server(|server| mcp_audit(server, &project.root)),
-        ),
-        ("fallow_api".to_string(), api_audit(&project.root)),
+    let audit_keys_off = r#"{ "audit": { "deadCode": false, "dupes": false } }"#;
+    let duplicates_off = r#"{ "duplicates": { "enabled": false } }"#;
+    let cases: [(&str, &[&str], &[&str]); 3] = [
+        (audit_keys_off, &[], &["dead_code", "duplication"]),
+        (duplicates_off, &[], &["duplication"]),
+        (duplicates_off, &["health"], &["duplication", "complexity"]),
     ];
-    for (surface, envelope) in &envelopes {
-        for (block, marker) in [
-            ("dead_code", "dead_code_skipped"),
-            ("duplication", "duplication_skipped"),
-        ] {
-            assert!(
-                envelope.get(block).is_none() && envelope["summary"][marker] == true,
-                "{surface} audit ignored the `audit` sub-analysis keys: {envelope}"
-            );
-        }
-        assert!(
-            envelope["summary"].get("complexity_skipped").is_none(),
-            "{surface} audit skipped health: {envelope}"
-        );
+    for (config, skip, skipped) in cases {
+        let project = audit_config_project(config);
+        let root = &project.root;
+        let (mcp_route, mcp) = if skip.is_empty() {
+            (
+                "MCP Typed",
+                with_typed_server(|server| mcp_audit(server, root)),
+            )
+        } else {
+            (
+                "MCP CLI route",
+                with_server(|server| mcp_audit_skipping(server, root, skip)),
+            )
+        };
+        let health = skip.contains(&"health").then_some(false);
+        let envelopes = vec![
+            ("CLI".to_string(), cli_audit_skipping(root, skip)),
+            (mcp_route.to_string(), mcp),
+            (
+                "fallow_api".to_string(),
+                api_audit_with_health(root, health),
+            ),
+        ];
+        project
+            .explain(invariants::i5_audit_skips_agree(&envelopes, skipped))
+            .unwrap_or_else(|err| panic!("{config} with skip {skip:?}: {err}"));
+        let results: Vec<(String, AuditKeys)> = envelopes
+            .iter()
+            .map(|(surface, envelope)| (surface.clone(), audit_keys(envelope)))
+            .collect();
+        project
+            .explain(invariants::i5_audit_surfaces_agree(&results))
+            .unwrap_or_else(|err| panic!("{config} with skip {skip:?}: {err}"));
     }
-    let results: Vec<(String, AuditKeys)> = envelopes
-        .iter()
-        .map(|(surface, envelope)| (surface.clone(), audit_keys(envelope)))
-        .collect();
-    project
-        .explain(invariants::i5_audit_surfaces_agree(&results))
-        .unwrap_or_else(|err| panic!("{err}"));
 }
 
 /// I5 under an `audit` config section. The generator writes no config file,
@@ -1345,18 +1345,8 @@ fn i5_audit_sub_analysis_keys_agree_across_surfaces() {
 #[test]
 #[ignore = "needs the fallow-mcp binary; run with: cargo build -p fallow-mcp && cargo test -p fallow-cli --test drift -- --include-ignored"]
 fn i5_audit_config_section_agrees_across_surfaces() {
-    let with_config = |config: &str| {
-        let mut files = audit_control_model(true).materialize(true);
-        files
-            .base
-            .insert(".fallowrc.json".to_string(), config.to_string());
-        files
-            .head
-            .insert(".fallowrc.json".to_string(), config.to_string());
-        Project::from_files(files)
-    };
-
-    let project = with_config(r#"{ "audit": { "gate": "all", "css": false, "cssDeep": false } }"#);
+    let project =
+        audit_config_project(r#"{ "audit": { "gate": "all", "css": false, "cssDeep": false } }"#);
     let envelopes = vec![
         ("CLI".to_string(), cli_audit(&project.root)),
         (
@@ -1379,10 +1369,10 @@ fn i5_audit_config_section_agrees_across_surfaces() {
         .explain(invariants::i5_audit_surfaces_agree(&results))
         .unwrap_or_else(|err| panic!("{err}"));
 
-    let unbaselined = with_config("{}");
+    let unbaselined = audit_config_project("{}");
     let baseline = unbaselined.scratch.join("dead-code-baseline.json");
     cli_save_baseline(Analysis::DeadCode, &unbaselined.root, &baseline);
-    let project = with_config(&format!(
+    let project = audit_config_project(&format!(
         r#"{{ "audit": {{ "deadCodeBaseline": {} }} }}"#,
         Value::String(baseline.display().to_string())
     ));
@@ -1555,6 +1545,16 @@ fn audit_controls_see_each_stale_suppression() {
         .unwrap_or_else(|err| panic!("stale suppression control: {err}"));
 }
 
+/// The [`audit_control_model`] project with `config` as `.fallowrc.json` on
+/// the base and the head commit.
+fn audit_config_project(config: &str) -> Project {
+    let mut files = audit_control_model(true).materialize(true);
+    for side in [&mut files.base, &mut files.head] {
+        side.insert(".fallowrc.json".to_string(), config.to_string());
+    }
+    Project::from_files(files)
+}
+
 /// One file with two unused exports, entry-imported, and one unused
 /// dependency. The head commit renames the file and, with
 /// `change_manifest`, adds the unused `dep-added` to the manifest.
@@ -1591,6 +1591,10 @@ fn audit_control_model(change_manifest: bool) -> ProjectModel {
 /// The finding kinds that the `new-only` audit keeps outside the changed files.
 const KEPT_OUTSIDE_CHANGED_FILES: [&str; 2] = ["unused_files", "unused_exports"];
 
+/// The dead-code kinds of the model whose finding can move with its code to
+/// another file (the movable rules of `fallow_api::audit_moved`).
+const MOVABLE_KINDS: [&str; 2] = ["unused_exports", "unused_types"];
+
 /// The split that I4 expects, built without the audit code: the head
 /// findings of the standalone commands in scope, each one introduced when no
 /// finding with the same identity exists at the base commit.
@@ -1611,6 +1615,7 @@ const KEPT_OUTSIDE_CHANGED_FILES: [&str; 2] = ["unused_files", "unused_exports"]
 ///   numbers equal keys. The first N head occurrences are inherited, where N
 ///   is the base count of that identity. Two stale suppressions of one kind in
 ///   one file share an identity, so a count and not a set decides.
+/// - Moved code (#4670): see [`inherit_moved_dead_code`].
 fn expected_audit_split(project: &Project) -> AuditKeys {
     let changed = changed_paths(&project.files);
     let base_root = project.scratch.join("base");
@@ -1628,12 +1633,13 @@ fn expected_audit_split(project: &Project) -> AuditKeys {
     let added = project.added_lines();
     let unscoped = Scope::default();
     let mut base_counts: BTreeMap<Identity, usize> = BTreeMap::new();
-    for key in Analysis::ALL
+    let base_keys: Vec<FindingKey> = Analysis::ALL
         .into_iter()
         .flat_map(|analysis| cli_keys(analysis, &base_root, &unscoped, None))
-    {
+        .collect();
+    for key in &base_keys {
         *base_counts
-            .entry(identity(&key, &renames, &project.files.base))
+            .entry(identity(key, &renames, &project.files.base))
             .or_default() += 1;
     }
     let mut head_keys: Vec<FindingKey> = Analysis::ALL
@@ -1643,6 +1649,8 @@ fn expected_audit_split(project: &Project) -> AuditKeys {
     head_keys.sort_by_key(|key| key.line);
     let mut head_seen: BTreeMap<Identity, usize> = BTreeMap::new();
     let mut expected = AuditKeys::default();
+    let head_findings: BTreeSet<(String, String, String)> =
+        head_keys.iter().map(finding_triple).collect();
     for key in head_keys {
         let key_identity = identity(&key, &BTreeMap::new(), &project.files.head);
         let seen = head_seen.entry(key_identity.clone()).or_default();
@@ -1664,7 +1672,77 @@ fn expected_audit_split(project: &Project) -> AuditKeys {
             expected.introduced.insert(key);
         }
     }
+    inherit_moved_dead_code(
+        &mut expected,
+        &base_keys,
+        &head_findings,
+        &project.files,
+        &added,
+    );
     expected
+}
+
+fn finding_triple(key: &FindingKey) -> (String, String, String) {
+    (key.kind.clone(), key.path.clone(), key.symbol.clone())
+}
+
+/// Move each introduced finding of moved code to the inherited split, by the
+/// rule of the audit: the finding has a movable kind, the base has the same
+/// kind and symbol under another path that the change touched or deleted, no
+/// head finding has that base finding, and the change wrote a line with the
+/// symbol in the head file. Each base finding matches one head finding.
+fn inherit_moved_dead_code(
+    expected: &mut AuditKeys,
+    base_keys: &[FindingKey],
+    head_findings: &BTreeSet<(String, String, String)>,
+    files: &Materialized,
+    added: &BTreeMap<String, Vec<(u64, u64)>>,
+) {
+    let mut left_behind: Vec<(String, String, String)> = base_keys
+        .iter()
+        .filter(|key| MOVABLE_KINDS.contains(&key.kind.as_str()))
+        .filter(|key| files.head.get(&key.path) != files.base.get(&key.path))
+        .map(finding_triple)
+        .filter(|triple| !head_findings.contains(triple))
+        .collect();
+    left_behind.sort();
+    let mut introduced: Vec<FindingKey> = expected
+        .introduced
+        .iter()
+        .filter(|key| MOVABLE_KINDS.contains(&key.kind.as_str()))
+        .cloned()
+        .collect();
+    introduced.sort_by(|a, b| (&a.path, a.line).cmp(&(&b.path, b.line)));
+    for key in introduced {
+        let Some(position) = left_behind.iter().position(|(kind, path, symbol)| {
+            *kind == key.kind && *symbol == key.symbol && *path != key.path
+        }) else {
+            continue;
+        };
+        if added_line_names(files, added, &key.path, &key.symbol) {
+            left_behind.remove(position);
+            expected.introduced.remove(&key);
+            expected.inherited.insert(key);
+        }
+    }
+}
+
+/// Whether the change added a line with `symbol` to the head file `path`.
+fn added_line_names(
+    files: &Materialized,
+    added: &BTreeMap<String, Vec<(u64, u64)>>,
+    path: &str,
+    symbol: &str,
+) -> bool {
+    let (Some(source), Some(hunks)) = (files.head.get(path), added.get(path)) else {
+        return false;
+    };
+    source.lines().zip(1_u64..).any(|(line, number)| {
+        line.contains(symbol)
+            && hunks
+                .iter()
+                .any(|&(first, last)| first <= number && number <= last)
+    })
 }
 
 /// Whether an instance of a clone-group symbol holds an added line of its

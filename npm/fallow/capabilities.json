@@ -1,6 +1,6 @@
 {
   "name": "fallow",
-  "version": "3.43.2",
+  "version": "3.44.0",
   "manifest_version": "1",
   "description": "Codebase analyzer for TypeScript/JavaScript: unused code, circular dependencies, code duplication, complexity hotspots, and architecture boundary violations",
   "global_flags": [
@@ -1384,6 +1384,12 @@
           "type": "string",
           "required": false,
           "description": "The config file of the test runner, for example `vitest.integration.config.mjs` (default: the `mutation.runnerConfig` key, else the runner's own discovery). The file must be inside the project root. Only Vitest reads it. This is not `--config`, which selects the Fallow config"
+        },
+        {
+          "name": "--runner-project",
+          "type": "string",
+          "required": false,
+          "description": "Use only this Vitest project, as the Vitest `--project` flag does. Repeat the flag for more projects. A name can hold a `*` wildcard. Each other project of the config stays out of the run, also a project from a separate config file (default: the `mutation.runnerProjects` key, else each project). Only Vitest reads it"
         },
         {
           "name": "--typecheck",

@@ -1969,7 +1969,7 @@ pub fn run_check(opts: &CheckOptions<'_>) -> ExitCode {
     );
     print_architecture_hint(opts, &result.results);
 
-    if opts.include_dupes && result.config.duplicates.enabled {
+    if opts.include_dupes {
         let Some(files) = result.retained_files.as_deref() else {
             return emit_input_error(
                 "internal error: --include-dupes analysis did not retain discovered files",

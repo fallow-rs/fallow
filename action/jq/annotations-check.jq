@@ -6,6 +6,8 @@ def san: tostring | gsub("%"; "%25") | gsub("\r"; "%0D") | gsub("\n"; "%0A");
 def prop: select(type == "string" and length > 0) | san | gsub(","; "%2C") | gsub(":"; "%3A");
 def n(default): if type == "number" then . else default end;
 def nl: "%0A";
+# The marker word of a suppression comment origin.
+def marker_word: if .is_range then "fallow-ignore-start" elif .is_file_level then "fallow-ignore-file" else "fallow-ignore-next-line" end;
 # Newer binaries write `effective_severity` on each finding. `error` gives
 # `::error` and `warn` gives `::warning`. Without the field, or with an
 # unknown value, keep the level these binaries always used.
@@ -128,12 +130,14 @@ def dependency_action(pkg):
   (.dev_dependencies_in_production[]? |
     "::\(lvl("warning")) file=\(.path | prop)\(if .line > 0 then ",line=\(.line | n(1))" else "" end),title=Dev dependency in production::Package '\(.package_name | san)' is a devDependency imported by production code at runtime.\(nl)\(nl)Move it from devDependencies to dependencies so a production-only install does not break at runtime."),
   (.stale_suppressions[]? |
-    if .origin.type == "jsdoc_tag" then
+    if .missing_reason == true then
+      "::\(lvl("warning")) file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Suppression without a reason::This \(if .origin.type == "jsdoc_tag" then "@expected-unused tag" else "'\(.origin | marker_word)' comment" end)\(if .origin.issue_kind then " for '\(.origin.issue_kind | san)'" else "" end) has no reason.\(nl)\(nl)Add a human-authored reason after `--` on the same line."
+    elif .origin.type == "jsdoc_tag" then
       "::\(lvl("warning")) file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Stale @expected-unused::The @expected-unused tag on '\(.origin.export_name | san)' is stale because the export is now used.\(nl)\(nl)Remove the @expected-unused tag."
     elif (.origin.kind_known == false) then
-      "::\(lvl("warning")) file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Unknown suppression kind::'\((.origin.issue_kind // "") | san)' is not a recognized fallow issue kind. Other tokens on this '\(if .origin.is_file_level then "fallow-ignore-file" else "fallow-ignore-next-line" end)' line still apply.\(nl)\(nl)Fix the typo or remove the unknown token."
+      "::\(lvl("warning")) file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Unknown suppression kind::'\((.origin.issue_kind // "") | san)' is not a recognized fallow issue kind. Other tokens on this '\(.origin | marker_word)' line still apply.\(nl)\(nl)Fix the typo or remove the unknown token."
     else
-      "::\(lvl("warning")) file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Stale suppression::This '\(if .origin.is_file_level then "fallow-ignore-file" else "fallow-ignore-next-line" end)' comment\(if .origin.issue_kind then " for '\(.origin.issue_kind | san)'" else "" end) no longer matches any active issue.\(nl)\(nl)Remove the suppression comment to keep the codebase clean."
+      "::\(lvl("warning")) file=\(.path | prop),line=\(.line | n(1)),col=\((.col | n(0)) + 1),title=Stale suppression::This '\(.origin | marker_word)' comment\(if .origin.issue_kind then " for '\(.origin.issue_kind | san)'" else "" end) no longer matches any active issue.\(nl)\(nl)Remove the suppression comment to keep the codebase clean."
     end),
   (.unused_catalog_entries[]? |
     "::\(lvl("warning")) file=\(.path | prop),line=\(.line | n(1)),title=Unused catalog entry::Catalog entry '\(.entry_name | san)' (catalog '\(.catalog_name | san)') is not referenced by any workspace package via the catalog: protocol.\(nl)\(nl)\(if ((.hardcoded_consumers // []) | length) > 0 then "Hardcoded consumers: " + (.hardcoded_consumers | map(san) | join(", ")) + ".\(nl)Switch them to catalog: before removing." else "Remove the entry from pnpm-workspace.yaml." end)"),

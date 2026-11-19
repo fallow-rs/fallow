@@ -408,7 +408,12 @@ fn compute_health_duplication_report(
     input: HealthDuplicationReportInput<'_>,
 ) -> (Option<crate::duplicates::DuplicationReport>, f64) {
     let t = Instant::now();
-    let dupes_report = if input.opts.score || input.opts.targets {
+    // `duplicates.enabled: false` leaves the score without a duplication
+    // measure and the targets without clone evidence. A run that names the
+    // duplication analysis does not change this, so the score of a project
+    // does not depend on the analyses that one run selects.
+    let measures_duplication = input.config.duplicates.runs_by_default();
+    let dupes_report = if measures_duplication && (input.opts.score || input.opts.targets) {
         if let Some(report) = input.pre_computed_duplication {
             // When every file is a candidate, the report covers the same files
             // with the same config as the detection below, so it is already
@@ -482,6 +487,7 @@ fn subset_precomputed_duplication_report(
         clone_groups,
         clone_families: Vec::new(),
         mirrored_directories: Vec::new(),
+        range_marker_problems: Vec::new(),
         stats,
     }
 }

@@ -6,6 +6,8 @@
 //! matching that ignores identifier names and literal values).
 
 mod cache;
+#[cfg(test)]
+mod clone_edge_tests;
 pub mod deepdive;
 pub mod detect;
 pub mod families;
@@ -13,6 +15,9 @@ mod near;
 /// Token normalization and rolling-hash computation for detection modes that
 /// ignore identifier names and literal values.
 pub mod normalize;
+mod range_mask;
+#[cfg(test)]
+mod range_tests;
 mod shingle_filter;
 pub mod token_types;
 mod token_visitor;
@@ -75,6 +80,7 @@ pub(super) struct TokenizedFile {
     metadata: Option<std::fs::Metadata>,
     cache_hit: bool,
     suppressions: Vec<Suppression>,
+    range_problems: Vec<fallow_types::suppress::RangeMarkerProblem>,
 }
 
 struct IgnoreSet {
@@ -225,6 +231,15 @@ fn detect_and_postprocess(
         .filter(|file| !file.suppressions.is_empty())
         .map(|file| (file.path.clone(), file.suppressions.clone()))
         .collect();
+    let ranges_by_file = range_mask::ranges_by_file(&file_data);
+    range_mask::mask_range_tokens(&mut file_data);
+    let mut range_report = DuplicationReport::default();
+    range_mask::collect_problems(&mut range_report, &file_data);
+    if let Some(focus_files) = focus_files {
+        range_report
+            .range_marker_problems
+            .retain(|finding| focus_files.contains(&finding.path));
+    }
     let mut near_result = config.near.then(|| {
         near::detect_near_clones(&near::NearDetectionInput {
             files: &file_data,
@@ -274,6 +289,12 @@ fn detect_and_postprocess(
         report.stats.near_candidates_skipped = result.skipped_candidates;
         report.stats = crate::duplicates::recompute_stats(&report);
     }
+
+    if !ranges_by_file.is_empty() {
+        range_mask::drop_instances_in_ranges(&mut report, &ranges_by_file);
+        report.stats = crate::duplicates::recompute_stats(&report);
+    }
+    report.range_marker_problems = range_report.range_marker_problems;
 
     if !suppressions_by_file.is_empty() {
         apply_line_suppressions(&mut report, &suppressions_by_file);
@@ -410,6 +431,7 @@ fn tokenize_duplication_file(
         .and_then(|cache| cache.get(&file.path, &metadata, ctx.token_cache_mode));
     let cache_hit = cached_entry.is_some();
     let (mut entry, suppressions) = duplication_token_cache_entry(file, ctx, cached_entry)?;
+    let range_problems = std::mem::take(&mut entry.range_problems);
     if entry.file_tokens.tokens.is_empty() || entry.hashed_tokens.len() < ctx.config.min_tokens {
         return None;
     }
@@ -421,6 +443,7 @@ fn tokenize_duplication_file(
         metadata: Some(metadata),
         cache_hit,
         suppressions,
+        range_problems,
     })
 }
 
@@ -458,12 +481,13 @@ fn duplication_token_cache_entry(
 
     let raw = std::fs::read_to_string(&file.path).ok()?;
     let source = without_byte_order_mark(&raw);
-    let suppressions = suppress::parse_suppressions_from_source(source).suppressions;
-    if suppress::is_file_suppressed(&suppressions, IssueKind::CodeDuplication) {
-        return None;
-    }
+    let mut parsed = fallow_extract::suppress::scan_suppressions_from_source(source);
     let file_tokens = tokenize_duplication_source(file, ctx, source);
     if file_tokens.tokens.is_empty() {
+        return None;
+    }
+    range_mask::drop_markers_in_strings(&mut parsed, &file_tokens);
+    if suppress::is_file_suppressed(&parsed.suppressions, IssueKind::CodeDuplication) {
         return None;
     }
     let hashed_tokens = normalize_and_hash_resolved(&file_tokens.tokens, ctx.normalization);
@@ -471,9 +495,10 @@ fn duplication_token_cache_entry(
         TokenCacheEntry {
             hashed_tokens,
             file_tokens,
-            suppressions: suppressions.clone(),
+            suppressions: parsed.suppressions.clone(),
+            range_problems: parsed.range_problems,
         },
-        suppressions,
+        parsed.suppressions,
     ))
 }
 
@@ -529,6 +554,7 @@ fn save_duplication_token_cache(
                     hashed_tokens: &file.hashed_tokens,
                     file_tokens: &file.file_tokens,
                     suppressions: &file.suppressions,
+                    range_problems: &file.range_problems,
                 },
             );
         }
@@ -1410,7 +1436,7 @@ export function blockB(value: number): number {
     }
 
     #[test]
-    fn min_occurrences_evaluates_after_line_suppressions() {
+    fn min_occurrences_evaluates_after_file_suppressions() {
         let dir = tempfile::tempdir().expect("create temp dir");
         let src_dir = dir.path().join("src");
         std::fs::create_dir_all(&src_dir).expect("create src dir");
@@ -1471,6 +1497,82 @@ export function shared(input: string): string {
                 .map(|g| g.instances.len())
                 .collect::<Vec<_>>()
         );
+        assert_eq!(
+            report.stats.clone_groups, 0,
+            "stats.clone_groups must match the empty post-filter array"
+        );
+        assert_eq!(
+            report.stats.clone_instances, 0,
+            "stats.clone_instances must match the empty post-filter array"
+        );
+    }
+
+    #[test]
+    fn min_occurrences_evaluates_after_line_suppressions() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let src_dir = dir.path().join("src");
+        std::fs::create_dir_all(&src_dir).expect("create src dir");
+
+        let block = r#"
+export function shared(input: string): string {
+    const trimmed = input.trim();
+    if (trimmed.length === 0) {
+        return "";
+    }
+    const parts = trimmed.split(",");
+    const filtered = parts.filter(p => p.length > 0);
+    const mapped = filtered.map(p => p.toUpperCase());
+    return mapped.join(", ");
+}
+"#;
+        let mut files = [(0, "a.ts"), (1, "b.ts"), (2, "c.ts")].map(|(id, name)| {
+            let path = src_dir.join(name);
+            std::fs::write(&path, block).expect("write clone");
+            DiscoveredFile {
+                id: FileId(id),
+                path,
+                size_bytes: block.len() as u64,
+            }
+        });
+        let mut config = DuplicatesConfig {
+            min_tokens: 10,
+            min_lines: 2,
+            min_occurrences: 2,
+            ..DuplicatesConfig::default()
+        };
+
+        let original = find_duplicates(dir.path(), &files, &config);
+        let [group] = original.clone_groups.as_slice() else {
+            panic!("expected one clone group before suppression");
+        };
+        assert_eq!(group.instances.len(), 3);
+
+        let suppressed = block.replace(
+            "    return mapped.join",
+            "    // fallow-ignore-next-line code-duplication\n    return mapped.join",
+        );
+        std::fs::write(&files[2].path, &suppressed).expect("write suppressed clone");
+        files[2].size_bytes = suppressed.len() as u64;
+
+        let marked = find_duplicates(dir.path(), &files, &config);
+        let [group] = marked.clone_groups.as_slice() else {
+            panic!("expected one clone group after suppression");
+        };
+        assert_eq!(group.instances.len(), 2);
+
+        config.min_occurrences = 3;
+        let report = find_duplicates(dir.path(), &files, &config);
+        assert!(
+            report.clone_groups.is_empty(),
+            "post-suppression 2-instance group must be hidden by minOccurrences=3, \
+             got groups: {:?}",
+            report
+                .clone_groups
+                .iter()
+                .map(|g| g.instances.len())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(report.stats.clone_groups_below_min_occurrences, 1);
         assert_eq!(
             report.stats.clone_groups, 0,
             "stats.clone_groups must match the empty post-filter array"

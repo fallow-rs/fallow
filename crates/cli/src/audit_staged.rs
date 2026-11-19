@@ -31,7 +31,10 @@ impl StagedTree {
     /// Returns a message when `host_root` is not in a Git repository, `HEAD`
     /// has no commit, the index has unmerged entries, or Git cannot create
     /// the worktree.
-    pub fn create(host_root: &Path) -> Result<Self, String> {
+    pub fn create(
+        host_root: &Path,
+        config: crate::runtime_support::ConfigFlags<'_>,
+    ) -> Result<Self, String> {
         let host_toplevel = fallow_engine::changed_files::resolve_git_toplevel(host_root)
             .map_err(|error| format!("--staged needs a git repository: {}", error.describe()))?;
         let relative_root = relative_root(host_root, &host_toplevel)?;
@@ -57,7 +60,7 @@ impl StagedTree {
             path,
             root,
         };
-        let patterns = workspace_patterns(&tree.root);
+        let patterns = workspace_patterns(&tree.root, config);
         fallow_engine::repo_refs::materialize_base_dependency_context(
             host_root, &tree.root, &patterns,
         );
@@ -127,16 +130,40 @@ fn staged_worktree_path() -> Option<PathBuf> {
     )))
 }
 
-fn workspace_patterns(root: &Path) -> Vec<String> {
-    fallow_config::FallowConfig::find_and_load_with_options(
-        root,
-        fallow_config::ConfigLoadOptions {
-            allow_remote_extends: false,
-        },
-    )
-    .ok()
-    .flatten()
-    .and_then(|(config, _)| config.workspaces)
-    .map(|workspaces| workspaces.patterns)
-    .unwrap_or_default()
+/// The `workspaces.patterns` of the staged tree, from the config that the
+/// audit of the tree reads: the `--config` file, else the config file of the
+/// index that discovery finds from the tree root. A load error gives no
+/// patterns.
+fn workspace_patterns(root: &Path, config: crate::runtime_support::ConfigFlags<'_>) -> Vec<String> {
+    crate::runtime_support::loaded_config(root, config.path, config.file_options())
+        .and_then(|config| config.workspaces)
+        .map(|workspaces| workspaces.patterns)
+        .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::runtime_support::ConfigFlags;
+
+    #[test]
+    fn workspace_patterns_come_from_the_explicit_config() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        std::fs::write(
+            root.join(".fallowrc.json"),
+            r#"{"workspaces":{"patterns":["apps/*"]}}"#,
+        )
+        .expect("discovered config");
+        let explicit = root.join("ci.json");
+        std::fs::write(&explicit, r#"{"workspaces":{"patterns":["packages/*"]}}"#)
+            .expect("explicit config");
+
+        assert_eq!(workspace_patterns(root, ConfigFlags::default()), ["apps/*"]);
+        let flags = ConfigFlags {
+            path: Some(&explicit),
+            ..ConfigFlags::default()
+        };
+        assert_eq!(workspace_patterns(root, flags), ["packages/*"]);
+    }
 }

@@ -201,12 +201,12 @@ fn core_publish_status_matches_engine_dependency() {
 
 #[test]
 fn engine_owns_parse_cache_size_policy() {
-    let project_config = read_source_without_line_comments("crates/engine/src/project_config.rs")
+    let config_src = read_source_without_line_comments("crates/engine/src/project_config/mod.rs")
         .expect("read engine project config");
     let core_backend = read_source_without_line_comments("crates/engine/src/core_backend.rs")
         .expect("read core backend adapter");
     assert!(
-        project_config.contains("fallow_extract::cache::DEFAULT_CACHE_MAX_SIZE"),
+        config_src.contains("fallow_extract::cache::DEFAULT_CACHE_MAX_SIZE"),
         "engine project config must own parse-cache max-size fallback policy"
     );
     assert!(
@@ -1413,10 +1413,10 @@ fn assert_engine_dead_code_facade_has_no_analysis_bypasses() {
         "standalone dupes must use AnalysisSession discovery instead of direct discovery"
     );
 
-    let project_config = read_source_without_line_comments("crates/engine/src/project_config.rs")
+    let config_src = read_source_without_line_comments("crates/engine/src/project_config/mod.rs")
         .expect("read engine project config source");
     assert!(
-        !project_config.contains("core_backend::config_for_project"),
+        !config_src.contains("core_backend::config_for_project"),
         "engine project config must not route through the core backend adapter"
     );
 }

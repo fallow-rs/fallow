@@ -126,6 +126,16 @@ test("a non-required run may be skipped or neutral", () => {
   assert.equal(evaluateRuns(runs, { required: REQUIRED }).state, "pass");
 });
 
+test("a queued nightly benchmark run does not replace the release push run", () => {
+  const required = [...REQUIRED, { name: "Benchmarks", file: "bench.yml" }];
+  const runs = [
+    ...green(),
+    run("bench.yml"),
+    run("bench.yml", { event: "schedule", status: "queued" }),
+  ];
+  assert.equal(evaluateRuns(runs, { required }).state, "pass");
+});
+
 test("ignores pull request runs and the release workflows", () => {
   const runs = [
     ...green(),

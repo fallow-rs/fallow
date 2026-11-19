@@ -763,7 +763,7 @@ fn annotations_end_with_budget_notice() {
     assert_eq!(
         last,
         format!(
-            "::notice::fallow emitted {total} annotations; GitHub shows at most 10 per type per step"
+            "::notice::Fallow wrote {total} annotations. GitHub shows at most 10 of each level for each step."
         )
     );
 }
@@ -782,7 +782,7 @@ fn annotations_single_finding_notice_uses_singular_noun() {
     let last = rendered.lines().last().expect("non-empty");
     assert_eq!(
         last,
-        "::notice::fallow emitted 1 annotation; GitHub shows at most 10 per type per step"
+        "::notice::Fallow wrote 1 annotation. GitHub shows at most 10 of each level for each step."
     );
 }
 
@@ -1236,7 +1236,7 @@ fn render_summary_fix_mirrors_render_fix_summary() {
     );
     // The summary-fix.jq sections: heading, headline, count table, details.
     assert!(
-        via_dispatch.starts_with("## Fallow - Auto-fix"),
+        via_dispatch.starts_with("## Fallow fix report"),
         "{via_dispatch}"
     );
     assert!(
@@ -1379,6 +1379,45 @@ fn fix_summary_does_not_report_an_export_behind_a_kept_re_export_as_removed() {
     );
     assert!(
         !rendered.contains("src/mod.ts:1"),
+        "a withheld export must not be listed as removed: {rendered}"
+    );
+}
+
+/// An export removal that its shared declaration holds back is stated in the
+/// summary and not listed as removed.
+#[test]
+fn fix_summary_does_not_report_an_export_behind_a_shared_declaration_as_removed() {
+    let env = json!({
+        "dry_run": true,
+        "total_fixed": 0,
+        "skipped": 0,
+        "skipped_shared_declarations": 1,
+        "fixes": [
+            {
+                "type": "remove_export",
+                "path": "src/store.ts",
+                "line": 2,
+                "name": "b",
+                "applied": false,
+                "skipped": true,
+                "skip_reason": "shared_declaration_in_use"
+            }
+        ]
+    });
+    let rendered = fallow_cli::report::github_summary::render_fix_summary(&env);
+
+    assert!(
+        !rendered.contains("No fixable issues found"),
+        "a withheld export is not a clean run: {rendered}"
+    );
+    assert!(
+        rendered.contains(
+            "kept 1 unused export(s) whose `export` keyword also exports a name that is in use"
+        ),
+        "the withholding has to be stated: {rendered}"
+    );
+    assert!(
+        !rendered.contains("src/store.ts:2"),
         "a withheld export must not be listed as removed: {rendered}"
     );
 }
@@ -2007,7 +2046,7 @@ fn combined_summary_counts_visible_groups_plus_what_a_cap_withheld() {
 
     let rendered = render_summary(EnvelopeKind::Combined, &filtered, &LinkContext::default());
     assert!(
-        rendered.contains("No duplication"),
+        !rendered.contains("clone group"),
         "nonzero stats with nothing actionable to inspect must still read clean: {rendered}"
     );
 
@@ -2015,7 +2054,7 @@ fn combined_summary_counts_visible_groups_plus_what_a_cap_withheld() {
     capped["dupes"]["clone_groups_omitted"] = json!(4);
     let capped_counts = render_summary(EnvelopeKind::Combined, &capped, &LinkContext::default());
     assert!(
-        capped_counts.contains("**5** clone groups"),
+        capped_counts.contains("5 clone groups"),
         "one listed group plus four withheld by a cap is five: {capped_counts}"
     );
 }
@@ -2162,5 +2201,45 @@ fn audit_summary_lists_diff_risk_findings() {
     assert!(
         rendered.contains("| `added-dependency` | `package.json` | `left-pad` | warn |"),
         "{rendered}"
+    );
+}
+
+/// An `internal_file` boundary finding names the public entry files of the
+/// target zone, because the zone rule allows the import (issue #4760).
+#[test]
+fn internal_file_boundary_annotation_names_the_public_entry_files() {
+    let env = json!({
+        "boundary_violations": [
+            {
+                "from_path": "src/orders/a.ts",
+                "to_path": "src/billing/invoice.ts",
+                "from_zone": "orders",
+                "to_zone": "billing",
+                "import_specifier": "../billing/invoice",
+                "line": 1,
+                "col": 0,
+                "reason": "internal_file",
+                "public_files": ["src/billing/index.ts"]
+            },
+            {
+                "from_path": "src/orders/b.ts",
+                "to_path": "src/payments/charge.ts",
+                "from_zone": "orders",
+                "to_zone": "payments",
+                "import_specifier": "../payments/charge",
+                "line": 1,
+                "col": 0
+            }
+        ]
+    });
+    let rendered = render_annotations(EnvelopeKind::DeadCode, &env, &plain_options());
+    assert!(
+        rendered.contains("src/billing/invoice.ts is not a public entry file of zone 'billing'")
+            && rendered.contains("Import it through src/billing/index.ts."),
+        "got {rendered}"
+    );
+    assert!(
+        rendered.contains("Import from zone 'orders' to zone 'payments' is not allowed."),
+        "a finding without reason keeps the zone-rule text, got {rendered}"
     );
 }

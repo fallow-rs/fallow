@@ -7,7 +7,8 @@
 //!
 //! - `weakened-tests`: a new skip or focus marker, fewer test cases across the
 //!   changed test files, fewer assertions in a test file, a less strict
-//!   coverage threshold, or a less strict rule severity in a Fallow config.
+//!   coverage threshold, a less strict rule severity in the Fallow config, or
+//!   a new or broader ignore entry in the Fallow config.
 //! - `added-suppression`: a new lint, type-check, coverage or Fallow
 //!   suppression comment.
 //! - `test-only-branch`: a new test-environment branch in a non-test source
@@ -17,6 +18,8 @@
 //! - `added-dependency`: a new `package.json` dependency. Off by default.
 
 pub mod clones;
+mod config_chain;
+mod config_change;
 pub mod rule_severity;
 pub mod text;
 
@@ -35,6 +38,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::audit_run::{BaseFileReader, BaseRead};
 use clones::{BaseCloneGroup, CloneSpan, CloneTexts};
+use config_chain::{ConfigChain, ConfigRead};
+use config_change::ConfigSides;
 
 /// Extensions of files that hold JavaScript-style comments, where an added
 /// suppression or a test-only branch is meaningful.
@@ -146,10 +151,8 @@ pub fn detect(input: &DiffRiskInput<'_>) -> DiffRiskReport {
     for file in &files {
         let rules = input.rules.for_path(&file.abs);
         detect_file(input.root, file, &rules, &mut raw);
-        if rule_severity::is_fallow_config_path(&file.rel) {
-            detect_weakened_rules(file, &mut raw);
-        }
     }
+    detect_config_changes(input, &mut base, &mut raw);
     detect_removed_tests(input.root, &files, &mut raw);
     if let Some(base_groups) = input.base_clone_groups {
         detect_diverged_clones(input, &mut base, base_groups, &files, &mut raw);
@@ -338,23 +341,55 @@ fn is_tool_config(rel: &str) -> bool {
     name.contains(".config.") || name.contains(".conf.") || dot_rc
 }
 
-/// Rule severities that the change lowered in a Fallow config file. The
-/// finding keeps the base `weakened-tests` severity as its lowest severity,
-/// so a change that turns off `weakened-tests` still reports.
-fn detect_weakened_rules(file: &FileTexts, raw: &mut Vec<RawFinding>) {
-    let base = file.base.as_deref().unwrap_or("");
-    let head = file.head.as_deref().unwrap_or("");
-    let min_severity = rule_severity::weakened_tests_severity(base);
-    for hit in rule_severity::weakened_rule_hits(base, head) {
+/// Changes of the Fallow config chain that make the analysis less strict.
+/// The finding keeps the base `weakened-tests` severity as its lowest
+/// severity, so a change that turns off `weakened-tests` still reports.
+fn detect_config_changes(
+    input: &DiffRiskInput<'_>,
+    source: &mut BaseSource,
+    raw: &mut Vec<RawFinding>,
+) {
+    let mut read_head = |abs: &Path| match std::fs::read(abs) {
+        Ok(bytes) => ConfigRead::Content(String::from_utf8_lossy(&bytes).into_owned()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => ConfigRead::Missing,
+        Err(_) => ConfigRead::Unreadable,
+    };
+    // Changed-file paths start at the canonical git root, so the chain paths
+    // must start at the canonical analysis root to match them.
+    let root = dunce::canonicalize(input.root).unwrap_or_else(|_| input.root.to_path_buf());
+    let stop = source.git_root.clone();
+    let Some(head) = ConfigChain::resolve(&root, &stop, &mut read_head) else {
+        return;
+    };
+    let mut read_base = |abs: &Path| match source.read(abs) {
+        BaseRead::Content(text) => ConfigRead::Content(text),
+        BaseRead::Missing => ConfigRead::Missing,
+        BaseRead::Error => ConfigRead::Unreadable,
+    };
+    let Some(base) = ConfigChain::resolve(&root, &stop, &mut read_base) else {
+        return;
+    };
+    let sides = ConfigSides { base, head };
+    if !sides.touched_by(input.changed_files) {
+        return;
+    }
+    // An opaque base source can set `weakened-tests`. `Off` keeps the head
+    // severity and still marks the finding as one that no head comment hides.
+    let min_severity = rule_severity::weakened_tests_severity(&sides.base).unwrap_or(Severity::Off);
+    let mut read_base_text = |abs: &Path| match source.read(abs) {
+        BaseRead::Content(text) => Some(text),
+        BaseRead::Missing | BaseRead::Error => None,
+    };
+    for hit in sides.hits(&root, &mut read_base_text) {
         raw.push(RawFinding {
             rule: DiffRiskRule::WeakenedTests,
-            kind: Some(WeakenedTestsKind::RuleSeverity),
-            path: file.rel.clone(),
-            line: (hit.line > 0).then_some(hit.line),
-            message: format!("The change makes a rule less strict ({})", hit.evidence),
+            kind: Some(hit.kind),
+            path: hit.path,
+            line: hit.line,
+            message: hit.message,
             evidence: hit.evidence,
             related: Vec::new(),
-            min_severity,
+            min_severity: Some(min_severity),
         });
     }
 }
@@ -930,7 +965,7 @@ fn finalize(
         if let Some(head) = file.head.as_deref() {
             suppressions.insert(
                 file.rel.as_str(),
-                fallow_engine::source::suppressions_from_text(head),
+                fallow_engine::source::suppressions_from_text(&file.abs, head),
             );
         }
     }
@@ -1050,7 +1085,7 @@ mod tests {
     use super::*;
 
     fn suppressions(src: &str) -> Vec<Suppression> {
-        fallow_engine::source::suppressions_from_text(src)
+        fallow_engine::source::suppressions_from_text(Path::new("src/a.test.ts"), src)
     }
 
     fn file(rel: &str, base: &str, head: &str) -> FileTexts {
@@ -1480,6 +1515,12 @@ mod tests {
             Some(1)
         ));
         assert!(is_suppressed(&list, DiffRiskRule::TestOnlyBranch, Some(2)));
+    }
+
+    #[test]
+    fn a_marker_in_a_template_literal_suppresses_nothing() {
+        let list = suppressions("export const docs = `\n// fallow-ignore-file\n`;\n");
+        assert!(list.is_empty(), "{list:?}");
     }
 
     #[test]

@@ -249,6 +249,7 @@ impl ModuleInfoExtractor {
                     is_self_returning: false,
                     override_base: None,
                     is_protected: false,
+                    is_static: false,
                 })
             })
             .collect();
@@ -429,6 +430,7 @@ impl ModuleInfoExtractor {
             is_self_returning: false,
             override_base: None,
             is_protected: false,
+            is_static: false,
         });
     }
 

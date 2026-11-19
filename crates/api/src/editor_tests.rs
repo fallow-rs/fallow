@@ -33,6 +33,7 @@ fn merges_duplication_stats_and_recomputes_percentage() {
             }],
             clone_families: Vec::new(),
             mirrored_directories: Vec::new(),
+            range_marker_problems: Vec::new(),
             stats: DuplicationStats {
                 clone_groups: 1,
                 clone_families: 0,
@@ -56,6 +57,7 @@ fn merges_duplication_stats_and_recomputes_percentage() {
         clone_groups: Vec::new(),
         clone_families: Vec::new(),
         mirrored_directories: Vec::new(),
+        range_marker_problems: Vec::new(),
         stats: DuplicationStats {
             clone_groups: 0,
             clone_families: 0,
@@ -97,6 +99,7 @@ fn merging_duplication_keeps_the_family_corpus_count_aligned() {
         clone_groups: Vec::new(),
         clone_families: vec![family(path)],
         mirrored_directories: Vec::new(),
+        range_marker_problems: Vec::new(),
         stats: DuplicationStats {
             clone_families: families,
             ..DuplicationStats::default()
@@ -537,6 +540,7 @@ fn merge_duplication_recomputes_percentage() {
         clone_groups: vec![],
         clone_families: vec![],
         mirrored_directories: vec![],
+        range_marker_problems: Vec::new(),
         stats: DuplicationStats {
             total_files: 5,
             files_with_clones: 1,
@@ -557,6 +561,7 @@ fn merge_duplication_recomputes_percentage() {
         clone_groups: vec![],
         clone_families: vec![],
         mirrored_directories: vec![],
+        range_marker_problems: Vec::new(),
         stats: DuplicationStats {
             total_files: 3,
             files_with_clones: 1,
@@ -793,6 +798,8 @@ pub fn merge_test_source_with_all_fields() -> EditorAnalysisResults {
             line: 12,
             col: 0,
             via_path: None,
+            reason: fallow_types::results::BoundaryViolationReason::DisallowedZone,
+            public_files: vec![],
         })],
         boundary_coverage_violations: vec![
             super::editor_results::BoundaryCoverageViolationFinding::with_actions(
@@ -900,6 +907,7 @@ pub fn merge_test_source_with_all_fields() -> EditorAnalysisResults {
                 issue_kind: None,
                 reason: None,
                 is_file_level: false,
+                is_range: false,
                 kind_known: true,
             },
             missing_reason: false,
@@ -1247,6 +1255,8 @@ pub fn merge_test_source_with_all_fields() -> EditorAnalysisResults {
             is_file_level: false,
             reason: None,
             comment_line: 37,
+            range_end_line: None,
+            range_problem: None,
         }],
         feature_flags: vec![super::editor_results::FeatureFlag {
             path: "/f.ts".into(),
@@ -1333,4 +1343,57 @@ pub fn merge_test_source_with_all_fields() -> EditorAnalysisResults {
             members: vec!["render".to_string()],
         }],
     }
+}
+
+#[test]
+fn editor_session_split_production_runs_dupes_in_dupes_mode() {
+    use std::fmt::Write as _;
+
+    let temp = tempfile::tempdir().expect("temp project");
+    let root = temp.path();
+    let src = root.join("src");
+    std::fs::create_dir_all(&src).expect("src dir");
+    std::fs::write(root.join("package.json"), "{}").expect("package.json");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"production":{"deadCode":true,"dupes":false}}"#,
+    )
+    .expect("config");
+    let mut repeated =
+        String::from("export function repeated(input: number): number {\n  let total = input;\n");
+    for step in 0..36 {
+        writeln!(
+            repeated,
+            "  total = total * {} + {};",
+            step + 2,
+            step * 3 + 1
+        )
+        .expect("write to string");
+    }
+    repeated.push_str("  return total;\n}\n");
+    std::fs::create_dir_all(root.join("tests")).expect("tests dir");
+    std::fs::write(root.join("tests/a.ts"), &repeated).expect("test file");
+    std::fs::write(src.join("b.ts"), &repeated).expect("source file");
+
+    let session = EditorAnalysisSession::load_with_production(
+        root,
+        None,
+        fallow_config::ConfigLoadOptions::default(),
+        None,
+        |_| {},
+    )
+    .expect("session loads");
+    let duplicates = session.config().duplicates.clone();
+    let output = session
+        .analyze_project_with_changed_files(&duplicates, false, None)
+        .expect("analysis runs");
+
+    assert_eq!(output.duplication.clone_groups.len(), 1);
+    assert!(
+        output.duplication.clone_groups[0]
+            .instances
+            .iter()
+            .any(|instance| instance.file.ends_with("tests/a.ts")),
+        "duplication keeps the test file when only dead code is production"
+    );
 }

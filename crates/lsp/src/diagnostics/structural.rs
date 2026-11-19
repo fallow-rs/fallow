@@ -445,9 +445,20 @@ fn push_boundary_import_violation_diagnostics(
                 );
                 format!(" (via {via_name})")
             });
-        let message = format!(
-            "Boundary violation: import of {} (zone '{}') is not allowed from zone '{}'{}",
-            to_name, v.violation.to_zone, v.violation.from_zone, via,
+        let file_name = |path: &std::path::Path| {
+            path.file_name().map_or_else(
+                || path.display().to_string(),
+                |n| n.to_string_lossy().into_owned(),
+            )
+        };
+        let message = v.violation.internal_file_message(&file_name).map_or_else(
+            || {
+                format!(
+                    "Boundary violation: import of {} (zone '{}') is not allowed from zone '{}'{}",
+                    to_name, v.violation.to_zone, v.violation.from_zone, via,
+                )
+            },
+            |message| format!("Boundary violation: {message}{via}"),
         );
 
         let related_info = Uri::from_file_path(&v.violation.to_path).map(|target_uri| {
@@ -825,6 +836,7 @@ mod tests {
             clone_groups: vec![],
             clone_families: vec![],
             mirrored_directories: vec![],
+            range_marker_problems: Vec::new(),
             stats: DuplicationStats {
                 total_files: 0,
                 files_with_clones: 0,
@@ -1204,6 +1216,8 @@ mod tests {
                 line: 3,
                 col: 10,
                 via_path: None,
+                reason: fallow_types::results::BoundaryViolationReason::DisallowedZone,
+                public_files: vec![],
             }));
 
         let duplication = empty_duplication();
@@ -1527,6 +1541,8 @@ mod tests {
                 line: 1,
                 col: 0,
                 via_path: None,
+                reason: fallow_types::results::BoundaryViolationReason::DisallowedZone,
+                public_files: vec![],
             }));
 
         let duplication = empty_duplication();
@@ -1556,6 +1572,8 @@ mod tests {
                 line: 5,
                 col: 0,
                 via_path: None,
+                reason: fallow_types::results::BoundaryViolationReason::DisallowedZone,
+                public_files: vec![],
             }));
 
         let duplication = empty_duplication();
@@ -1591,6 +1609,8 @@ mod tests {
                 line: 1,
                 col: 0,
                 via_path: None,
+                reason: fallow_types::results::BoundaryViolationReason::DisallowedZone,
+                public_files: vec![],
             }));
         results
             .boundary_violations
@@ -1603,6 +1623,8 @@ mod tests {
                 line: 2,
                 col: 0,
                 via_path: None,
+                reason: fallow_types::results::BoundaryViolationReason::DisallowedZone,
+                public_files: vec![],
             }));
 
         let duplication = empty_duplication();

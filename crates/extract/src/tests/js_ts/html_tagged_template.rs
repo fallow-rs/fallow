@@ -329,3 +329,121 @@ export const render = (tag) => html`<${tag}></${tag}>`;"#,
         info.used_custom_element_tags
     );
 }
+
+const PROJECT_TAG_FIXTURE: &str = r#"export const fixture = {
+  'index.html': html`
+    <script type="module" src="./src/main.js"></script>
+    <link rel="stylesheet" href="./src/index.css" />
+  `,
+}"#;
+
+fn asset_sources(info: &fallow_types::extract::ModuleInfo) -> Vec<&str> {
+    info.imports
+        .iter()
+        .map(|import| import.source.as_str())
+        .filter(|source| source.starts_with("./src/"))
+        .collect()
+}
+
+#[test]
+fn html_tag_imported_from_project_file_is_plain_text() {
+    let info = parse_ts(&format!(
+        "import {{ html }} from './utils'\n{PROJECT_TAG_FIXTURE}"
+    ));
+    assert!(
+        asset_sources(&info).is_empty(),
+        "{:?}",
+        asset_sources(&info)
+    );
+}
+
+#[test]
+fn html_tag_declared_in_module_is_plain_text() {
+    for declaration in [
+        "const html = String.raw",
+        "export const html = String.raw",
+        "function html(strings) { return strings.join('') }",
+        "const html = require('./utils').html",
+        "const { html } = require('../utils')",
+    ] {
+        let info = parse_ts(&format!("{declaration}\n{PROJECT_TAG_FIXTURE}"));
+        assert!(
+            asset_sources(&info).is_empty(),
+            "{declaration}: {:?}",
+            asset_sources(&info)
+        );
+    }
+}
+
+#[test]
+fn html_tag_from_package_is_markup() {
+    for declaration in [
+        "import { html } from 'lit'",
+        "import { html } from 'hono/html'",
+        "const { html } = require('lit-html')",
+    ] {
+        let info = parse_ts(&format!("{declaration}\n{PROJECT_TAG_FIXTURE}"));
+        assert_eq!(
+            asset_sources(&info),
+            vec!["./src/main.js", "./src/index.css"],
+            "{declaration}"
+        );
+    }
+}
+
+#[test]
+fn html_tagged_template_asset_span_is_the_quoted_attribute_value() {
+    let source = r#"import { html } from 'hono/html'
+
+export const layout = () => html`
+  <!-- <script src="./old.js"></script> -->
+  <script type="module" src="./src/main.js"></script>
+  <link rel="stylesheet" href="./src/index.css" />
+`"#;
+    let info = parse_ts(source);
+    for specifier in ["./src/main.js", "./src/index.css"] {
+        let import = info
+            .imports
+            .iter()
+            .find(|import| import.source == specifier)
+            .expect("asset import");
+        let quoted = format!("\"{specifier}\"");
+        let span = import.source_span;
+        assert_eq!(
+            &source[span.start as usize..span.end as usize],
+            quoted,
+            "{specifier}"
+        );
+        assert_eq!(import.span, span, "{specifier}");
+    }
+}
+
+#[test]
+fn html_tagged_template_with_escape_anchors_asset_at_template_text() {
+    let source = "import { html } from 'hono/html'\nexport const layout = () => html`\\u0020<script src=\"./app.js\"></script>`";
+    let info = parse_ts(source);
+    let import = info
+        .imports
+        .iter()
+        .find(|import| import.source == "./app.js")
+        .expect("asset import");
+    let template_text = source.find("\\u0020").expect("template text") as u32;
+    assert_eq!(import.span.start, template_text);
+    assert!(import.source_span.is_empty());
+}
+
+#[test]
+fn html_tagged_template_with_crlf_anchors_asset_at_template_text() {
+    // The parser turns CRLF into LF in the raw template text, so the offsets
+    // of that text do not match the source after the first CRLF.
+    let source = "import { html } from 'hono/html'\r\nexport const layout = () => html`\r\n\r\n\r\n\r\n<script src=\"./a.js\"></script>`";
+    let info = parse_ts(source);
+    let import = info
+        .imports
+        .iter()
+        .find(|import| import.source == "./a.js")
+        .expect("asset import");
+    let template_text = (source.find('`').expect("template") + 1) as u32;
+    assert_eq!(import.span.start, template_text);
+    assert!(import.source_span.is_empty());
+}

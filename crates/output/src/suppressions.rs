@@ -110,9 +110,18 @@ pub struct SuppressionInventoryEntry {
     /// the JSON contract deliberately keeps `null` so machine consumers
     /// branch on `null` instead of a magic string.
     pub kind: Option<String>,
-    /// Whether the marker is file-wide (`fallow-ignore-file`) or line-scoped
-    /// (`fallow-ignore-next-line`).
+    /// Whether the marker is file-wide (`fallow-ignore-file`), line-scoped
+    /// (`fallow-ignore-next-line`), or a range (`fallow-ignore-start` /
+    /// `fallow-ignore-end`).
     pub level: SuppressionInventoryLevel,
+    /// The `fallow-ignore-end` line of a range. Present only on a range
+    /// marker pair that applies.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_line: Option<u32>,
+    /// What is wrong with a range marker. A marker with a problem has no
+    /// effect. Present only on such a marker; `fallow dupes` reports it too.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub problem: Option<fallow_types::suppress::RangeMarkerProblemKind>,
     /// How the suppression was authored. `"comment"` in v1; `"jsdoc_tag"` is
     /// reserved for a follow-up if `@expected-unused` entries enter the
     /// active inventory.
@@ -132,6 +141,9 @@ pub enum SuppressionInventoryLevel {
     File,
     /// A `fallow-ignore-next-line` marker covering one line.
     Line,
+    /// A `fallow-ignore-start` / `fallow-ignore-end` marker covering a range
+    /// of lines for `code-duplication`.
+    Range,
 }
 
 /// How a suppression in the inventory was authored.
@@ -212,9 +224,13 @@ fn inventory_entry(supp: &ActiveSuppression) -> SuppressionInventoryEntry {
         kind: supp.kind.clone(),
         level: if supp.is_file_level {
             SuppressionInventoryLevel::File
+        } else if supp.range_end_line.is_some() || supp.range_problem.is_some() {
+            SuppressionInventoryLevel::Range
         } else {
             SuppressionInventoryLevel::Line
         },
+        end_line: supp.range_end_line,
+        problem: supp.range_problem,
         origin: SuppressionInventoryOrigin::Comment,
         reason: supp.reason.clone(),
         reason_present: supp.reason.is_some(),
@@ -306,6 +322,8 @@ mod tests {
             is_file_level: file_level,
             reason: reason.map(str::to_owned),
             comment_line: line,
+            range_end_line: None,
+            range_problem: None,
         }
     }
 
@@ -319,6 +337,7 @@ mod tests {
                 issue_kind: kind.map(str::to_owned),
                 reason: None,
                 is_file_level: false,
+                is_range: false,
                 kind_known: true,
             },
             missing_reason,

@@ -708,6 +708,7 @@ pub(super) fn make_duplication_report(groups: Vec<CloneGroup>) -> DuplicationRep
         clone_groups: groups,
         clone_families: vec![],
         mirrored_directories: vec![],
+        range_marker_problems: Vec::new(),
         stats: DuplicationStats {
             total_files: 10,
             files_with_clones: 2,
@@ -1318,6 +1319,7 @@ fn recompute_stats_zero_total_lines() {
         clone_groups: vec![],
         clone_families: vec![],
         mirrored_directories: vec![],
+        range_marker_problems: Vec::new(),
         stats: DuplicationStats {
             total_files: 0,
             files_with_clones: 0,
@@ -2182,6 +2184,8 @@ fn make_full_results() -> AnalysisResults {
                 line: 1,
                 col: 0,
                 via_path: None,
+                reason: fallow_types::results::BoundaryViolationReason::DisallowedZone,
+                public_files: vec![],
             },
         ),
     );
@@ -2374,6 +2378,8 @@ fn filter_keeps_new_boundary_violations() {
             line: 1,
             col: 0,
             via_path: None,
+            reason: fallow_types::results::BoundaryViolationReason::DisallowedZone,
+            public_files: vec![],
         }));
     results
         .boundary_violations
@@ -2386,6 +2392,8 @@ fn filter_keeps_new_boundary_violations() {
             line: 1,
             col: 0,
             via_path: None,
+            reason: fallow_types::results::BoundaryViolationReason::DisallowedZone,
+            public_files: vec![],
         }));
     let filtered = filter_new_issues(results, &baseline, Path::new(""));
     assert_eq!(filtered.boundary_violations.len(), 1);
@@ -2475,6 +2483,8 @@ fn boundary_violation_key_format() {
         line: 1,
         col: 0,
         via_path: None,
+        reason: fallow_types::results::BoundaryViolationReason::DisallowedZone,
+        public_files: vec![],
     };
     let key = super::boundary_violation_key(&v, Path::new(""));
     assert_eq!(key, "src/ui/btn.ts->src/db/query.ts");
@@ -2575,6 +2585,8 @@ fn make_absolute_results(root: &str) -> AnalysisResults {
             line: 1,
             col: 0,
             via_path: None,
+            reason: fallow_types::results::BoundaryViolationReason::DisallowedZone,
+            public_files: vec![],
         })],
         ..Default::default()
     }
@@ -2657,6 +2669,7 @@ fn stale_suppression_baseline_keys_include_missing_reason_state() {
             issue_kind: Some("unused-export".to_string()),
             reason: None,
             is_file_level: false,
+            is_range: false,
             kind_known: true,
         },
         missing_reason: false,
@@ -2808,6 +2821,7 @@ fn line_free_suppression(
             issue_kind: Some("unused-export".to_owned()),
             reason: reason.map(str::to_owned),
             is_file_level: false,
+            is_range: false,
             kind_known: true,
         },
         missing_reason: false,

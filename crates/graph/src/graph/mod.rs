@@ -5,6 +5,7 @@
 
 mod ambiguity;
 mod build;
+mod cycle_edge_span;
 mod cycles;
 mod effective_exports;
 mod effective_re_exports;
@@ -1411,35 +1412,6 @@ impl ModuleGraph {
         }
         summaries.sort_by_key(|summary| summary.source.0);
         summaries
-    }
-
-    /// Find the byte offset of the import statement from `source` to `target`.
-    ///
-    /// Mixed imports to the same target are stored as one edge. Prefer the
-    /// first eager value import, then the first value-carrying import, so
-    /// runtime-cycle diagnostics and line suppressions anchor on the import
-    /// that actually participates in the cycle. With lazy edges skipped, a
-    /// lazy `import()` on a mixed edge is not part of the cycle.
-    /// Returns `None` if no edge exists or the edge has no symbols.
-    #[must_use]
-    pub fn find_import_span_start(&self, source: FileId, target: FileId) -> Option<u32> {
-        let idx = source.0 as usize;
-        if idx >= self.modules.len() {
-            return None;
-        }
-        let range = &self.modules[idx].edge_range;
-        for edge in &self.edges[range.clone()] {
-            if edge.target == target {
-                return edge
-                    .symbols
-                    .iter()
-                    .find(|s| s.is_eager_value())
-                    .or_else(|| edge.symbols.iter().find(|s| !s.is_type_only))
-                    .or_else(|| edge.symbols.first())
-                    .map(|s| s.import_span.start);
-            }
-        }
-        None
     }
 
     /// Iterate the outgoing edges of `file_id` that run their target, with

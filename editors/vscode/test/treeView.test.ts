@@ -377,17 +377,30 @@ describe("DeadCodeTreeProvider", () => {
           origin: { type: "comment", is_file_level: true },
           actions: [],
         },
+        {
+          path: "e.ts",
+          line: 5,
+          col: 0,
+          origin: {
+            type: "comment",
+            issue_kind: "code-duplication",
+            is_file_level: false,
+            is_range: true,
+          },
+          actions: [],
+        },
       ],
     });
 
     const categories = provider.getChildren() as TestTreeItem[];
-    const category = findCategory(categories, "Stale Suppressions (4)");
+    const category = findCategory(categories, "Stale Suppressions (5)");
     const issues = provider.getChildren(category as never) as TestTreeItem[];
     expect(issues.map((i) => i.label)).toEqual([
       "@expected-unused Widget",
       "file unused-export",
       "line suppression",
       "file suppression",
+      "range code-duplication",
     ]);
   });
 

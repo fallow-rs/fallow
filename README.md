@@ -95,7 +95,7 @@ fallow runs in four places. All four read the same config file and use the same 
 
 `npx fallow viz` opens an interactive HTML map of the project with lenses for health, duplication, architecture, and unused code.
 
-Add `--type-aware` for exact TypeScript symbol identity across aliases, re-exports, and packages. This optional pass removes false positives from interfaces and base classes ([how type-aware analysis works](docs/type-aware-analysis.md)). [Runtime coverage](https://fallow.tools/docs/analysis/runtime-coverage/) from production is an optional add-on that fallow merges into health and audit reports.
+Add `--type-aware` for exact TypeScript symbol identity across aliases, re-exports, and packages. This optional pass removes false positives from interfaces and base classes ([how type-aware analysis works](docs/type-aware-analysis.md)). A Homebrew, `cargo install` or release-archive binary gets the type-aware companion with `fallow type-aware setup`. [Runtime coverage](https://fallow.tools/docs/analysis/runtime-coverage/) from production is an optional add-on that fallow merges into health and audit reports.
 
 The [CLI reference](https://fallow.tools/docs/cli/global-flags/) lists every command. `fallow schema` prints all commands, flags, output formats, and exit codes as JSON.
 
@@ -185,7 +185,7 @@ GitLab CI:
 
 ```yaml
 include:
-  - remote: 'https://raw.githubusercontent.com/fallow-rs/fallow/v3.43.2/ci/gitlab-ci.yml'
+  - remote: 'https://raw.githubusercontent.com/fallow-rs/fallow/v3.44.0/ci/gitlab-ci.yml'
 
 fallow:
   extends: .fallow
