@@ -6,15 +6,20 @@ use std::fmt::Write as _;
 
 use super::*;
 
-use crate::session_store::SessionKey;
+/// The session of `root` with the editor setting `production`.
+fn load_session(root: &Path, production: Option<bool>) -> fallow_api::EditorAnalysisSession {
+    let options = LspInitializationOptions {
+        production,
+        ..LspInitializationOptions::default()
+    };
+    let inputs = crate::run_inputs::run_inputs(&options, root, fallow_config::EnvSnapshot::none());
+    analysis::load_project_session(root, &inputs)
+        .expect("session loads")
+        .session
+}
 
 fn unused_dev_dependencies(root: &Path, production_override: Option<bool>) -> Vec<String> {
-    let key = SessionKey {
-        config_path: None,
-        allow_remote_extends: false,
-        production_override,
-    };
-    let (session, _) = analysis::load_project_session(root, &key).expect("session loads");
+    let session = load_session(root, production_override);
     let output = session
         .analyze_project_with(&fallow_config::DuplicatesConfig::default(), false)
         .expect("analysis runs");
@@ -30,7 +35,8 @@ fn unused_dev_dependencies(root: &Path, production_override: Option<bool>) -> Ve
 #[test]
 fn production_setting_turns_unused_dev_dependencies_off() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let root = dir.path();
+    // The resolver gives the canonical root, as the server does.
+    let root = &dunce::canonicalize(dir.path()).expect("canonical root");
     std::fs::create_dir_all(root.join("src")).expect("create src dir");
     std::fs::write(
         root.join("package.json"),
@@ -67,7 +73,8 @@ fn clone_source() -> String {
 /// `tests/` directory out, and the default duplication ignores do not.
 fn clone_files(production: &str) -> Vec<Vec<String>> {
     let dir = tempfile::tempdir().expect("temp dir");
-    let root = dir.path();
+    // The resolver gives the canonical root, as the server does.
+    let root = &dunce::canonicalize(dir.path()).expect("canonical root");
     std::fs::create_dir_all(root.join("src")).expect("create src dir");
     std::fs::write(root.join("package.json"), "{}").expect("write package");
     std::fs::write(
@@ -79,12 +86,7 @@ fn clone_files(production: &str) -> Vec<Vec<String>> {
     std::fs::write(root.join("tests/foo.ts"), clone_source()).expect("write test file");
     std::fs::write(root.join("src/foo.ts"), clone_source()).expect("write source file");
 
-    let key = SessionKey {
-        config_path: None,
-        allow_remote_extends: false,
-        production_override: None,
-    };
-    let (session, _) = analysis::load_project_session(root, &key).expect("session loads");
+    let session = load_session(root, None);
     let duplicates = session.config().duplicates.clone();
     let output = session
         .analyze_project_with_changed_files(&duplicates, false, None)

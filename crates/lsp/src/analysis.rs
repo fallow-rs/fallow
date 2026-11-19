@@ -8,13 +8,14 @@ use fallow_api::{
     EditorAnalysisSession as AnalysisSession, EditorDuplicationReport as DuplicationReport,
     EditorInlineComplexityFinding as InlineComplexityFinding, PackageChangeScope,
 };
-use fallow_config::DuplicatesConfig;
+use fallow_config::{DuplicatesConfig, EnvSnapshot, RunInputs};
 use ls_types::MessageType;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::config_patterns::{self, UnmatchedConfigPattern};
 use crate::document_state::VersionSnapshot;
-use crate::initialization::{LspDuplicationOptions, LspTypeAwareOptions};
+use crate::initialization::{LspDuplicationOptions, LspInitializationOptions, LspTypeAwareOptions};
+use crate::path_utils::canonicalize_for_lsp;
 use crate::protocol::{ChangedSinceScopeState, ChangedSinceScopeStatus, config_load_error_detail};
 use crate::session_store::{ConfigSources, EditorSessionStore, SessionKey, TakenSession};
 
@@ -52,45 +53,59 @@ pub fn flush_sessions(sessions: Vec<AnalysisSession>) {
     }
 }
 
-/// Load the config of a project root and walk the project. Also returns the
-/// config files of the session, so a kept session can tell when its config
-/// changed.
+/// The session of a project root, with its config inputs.
+pub struct LoadedSession {
+    pub session: AnalysisSession,
+    /// The config inputs, so a kept session can tell when its config
+    /// changed.
+    pub sources: ConfigSources,
+    /// The warning of a discovered config that did not load. The session
+    /// then uses the default config with the editor settings.
+    pub fallback_warning: Option<String>,
+}
+
+/// Resolve the run of a project root and open its session. An explicit
+/// editor `fallow.production` (on/off) acts as the CLI
+/// `--production`/`--no-production` of the sidebar, so the two surfaces
+/// agree; `None` leaves the project config in force (issue #1055).
 ///
 /// # Errors
 ///
-/// Returns the engine error message when the project config does not load.
+/// Returns the message for the user when the run does not resolve, for
+/// example when an explicit `configPath` does not load.
 pub fn load_project_session(
     project_root: &Path,
-    key: &SessionKey,
-) -> Result<(AnalysisSession, ConfigSources), String> {
-    let expected_config = key
-        .config_path
-        .clone()
-        .or_else(|| fallow_config::FallowConfig::find_config_path(project_root));
-    let before = ConfigSources::read(expected_config.as_deref());
-    // An explicit editor `fallow.production` (on/off) acts as the CLI
-    // `--production`/`--no-production` of the sidebar, so the two surfaces
-    // agree; `None` leaves the project config in force (issue #1055).
-    let session = AnalysisSession::load_with_production(
-        project_root,
-        key.config_path.as_deref(),
-        fallow_config::ConfigLoadOptions {
-            allow_remote_extends: key.allow_remote_extends,
-        },
-        key.production_override,
-        fallow_config::ResolvedConfig::scope_shared_cache_dir_to_root,
-    )
-    .map_err(|error| error.to_string())?;
-    let after = ConfigSources::read(session.config_path());
-    let sources = ConfigSources::around_load(&before, after).with_inputs(&session);
-    Ok((session, sources))
+    inputs: &RunInputs,
+) -> Result<LoadedSession, String> {
+    let run = fallow_api::run::resolve_run(inputs).map_err(|err| {
+        let explicit = inputs.config_path.as_ref().map(|given| {
+            err.config_file()
+                .map_or_else(|| project_root.join(&given.value), Path::to_path_buf)
+        });
+        config_load_error_detail(project_root, explicit.as_deref(), err.message())
+    })?;
+    let session = AnalysisSession::open(&run).map_err(|err| err.message)?;
+    let fallback_warning = run
+        .fallback_error()
+        .map(|err| config_load_error_detail(project_root, None, err.message()));
+    Ok(LoadedSession {
+        session,
+        sources: ConfigSources::of(run),
+        fallback_warning,
+    })
+}
+
+/// The run inputs of a project root: the editor settings and the
+/// environment of the server process now.
+fn project_inputs(options: &LspInitializationOptions, project_root: &Path) -> RunInputs {
+    crate::run_inputs::run_inputs(options, project_root, EnvSnapshot::capture())
 }
 
 /// The input of a prewarm: the project roots and the settings of the runs
 /// that will reuse the sessions.
 pub struct PrewarmInput {
     pub project_roots: Vec<PathBuf>,
-    pub key: SessionKey,
+    pub run_options: LspInitializationOptions,
     pub inline_complexity_enabled: bool,
     /// Shutdown flag. A set flag stops the parse, and the session is dropped.
     pub cancellation: Arc<AtomicBool>,
@@ -107,18 +122,25 @@ pub fn prewarm_sessions(input: &PrewarmInput) -> usize {
         if input.cancellation.load(Ordering::SeqCst) {
             break;
         }
-        if lock_store(&input.sessions).keeps(project_root, &input.key) {
+        let inputs = project_inputs(&input.run_options, project_root);
+        let key = SessionKey::of(&inputs);
+        if lock_store(&input.sessions).keeps(project_root, &key) {
             continue;
         }
-        let Ok((mut session, sources)) = load_project_session(project_root, &input.key) else {
+        // A fallback session is not kept, so the first run reports the error.
+        let Ok(LoadedSession {
+            mut session,
+            sources,
+            fallback_warning: None,
+        }) = load_project_session(project_root, &inputs)
+        else {
             continue;
         };
         session.set_cancellation(Arc::clone(&input.cancellation));
         if session.prewarm(input.inline_complexity_enabled).is_err() {
             continue;
         }
-        let returned =
-            lock_store(&input.sessions).put(project_root, input.key.clone(), sources, session);
+        let returned = lock_store(&input.sessions).put(project_root, key, sources, session);
         match returned {
             None => kept += 1,
             Some(session) => session.flush_parse_cache(),
@@ -133,10 +155,9 @@ pub fn prewarm_sessions(input: &PrewarmInput) -> usize {
 /// under the 150-line clippy ceiling.
 pub struct ProjectRootAnalysisInput<'a> {
     pub project_root: &'a Path,
-    pub config_path: Option<&'a Path>,
-    pub allow_remote_extends: bool,
+    /// The initialization options that give the run inputs of the root.
+    pub run_options: &'a LspInitializationOptions,
     pub duplication_options: Option<&'a LspDuplicationOptions>,
-    pub production_override: Option<bool>,
     pub inline_complexity_enabled: bool,
     pub type_aware_options: Option<&'a LspTypeAwareOptions>,
     pub type_aware_sessions: &'a Arc<Mutex<FxHashMap<PathBuf, fallow_api::TypeAwareSession>>>,
@@ -146,8 +167,6 @@ pub struct ProjectRootAnalysisInput<'a> {
     pub run_cancellation: &'a Arc<AtomicBool>,
     pub changed_files: Option<&'a FxHashSet<PathBuf>>,
     pub global_changed_since_requested: bool,
-    /// The client turned `workspaces.changedSince` off.
-    pub no_package_baselines: bool,
     pub sessions: &'a SharedSessionStore,
     pub parse_work: &'a mut RunParseWork,
     pub merged_analysis: &'a mut EditorAnalysisOutput,
@@ -160,12 +179,9 @@ pub struct ProjectRootAnalysisInput<'a> {
 
 pub struct BlockingAnalysisInput {
     pub project_roots: Vec<PathBuf>,
-    pub config_path: Option<PathBuf>,
-    pub allow_remote_extends: bool,
+    /// The initialization options that give the run inputs of each root.
+    pub run_options: LspInitializationOptions,
     pub duplication_options: Option<LspDuplicationOptions>,
-    pub production_override: Option<bool>,
-    /// The client turned `workspaces.changedSince` off.
-    pub no_package_baselines: bool,
     pub inline_complexity_enabled: bool,
     pub type_aware_options: Option<LspTypeAwareOptions>,
     pub type_aware_sessions: Arc<Mutex<FxHashMap<PathBuf, fallow_api::TypeAwareSession>>>,
@@ -287,16 +303,13 @@ impl LspAnalysisSnapshot {
 pub fn analyze_project_root(
     input: &mut ProjectRootAnalysisInput<'_>,
 ) -> Result<(), ProjectAnalysisError> {
-    let key = SessionKey {
-        config_path: input.config_path.map(Path::to_path_buf),
-        allow_remote_extends: input.allow_remote_extends,
-        production_override: input.production_override,
-    };
+    let inputs = project_inputs(input.run_options, input.project_root);
+    let key = SessionKey::of(&inputs);
     let kept = lock_store(input.sessions).take(input.project_root, &key);
-    let (mut session, sources) = match kept {
+    let (mut session, sources, fallback_warning) = match kept {
         Some(TakenSession::SameSettings(mut session, sources)) if !sources.changed() => {
             session.refresh_discovery();
-            (session, sources)
+            (session, sources, None)
         }
         outdated => {
             if let Some(
@@ -305,30 +318,34 @@ pub fn analyze_project_root(
             {
                 session.flush_parse_cache();
             }
-            match load_project_session(input.project_root, &key) {
-                Ok(loaded) => {
-                    input.parse_work.sessions_loaded += 1;
-                    loaded
-                }
-                Err(e) => return analyze_project_root_config_fallback(input, &e),
-            }
+            let loaded = load_project_session(input.project_root, &inputs)
+                .map_err(|detail| ProjectAnalysisError::failed(input.project_root, detail))?;
+            input.parse_work.sessions_loaded += 1;
+            (loaded.session, loaded.sources, loaded.fallback_warning)
         }
     };
     session.set_cancellation(Arc::clone(input.run_cancellation));
 
-    let message = (
-        MessageType::INFO,
-        session.config_path().map_or_else(
-            || {
-                format!(
-                    "no config file found for {}, using defaults",
-                    input.project_root.display()
-                )
-            },
-            |path| format!("loaded config: {}", path.display()),
-        ),
+    // A fallback session is not kept, so each run reports the config error
+    // until the config loads.
+    let keep = fallback_warning.is_none();
+    let message = fallback_warning.map_or_else(
+        || {
+            (
+                MessageType::INFO,
+                session.config_path().map_or_else(
+                    || {
+                        format!(
+                            "no config file found for {}, using defaults",
+                            input.project_root.display()
+                        )
+                    },
+                    |path| format!("loaded config: {}", path.display()),
+                ),
+            )
+        },
+        |warning| (MessageType::WARNING, warning),
     );
-
     input.config_messages.push(message);
 
     let duplicates_config = input.duplication_options.map_or_else(
@@ -342,35 +359,12 @@ pub fn analyze_project_root(
     // not trust, so only a finished or cancelled run keeps it.
     let returned = match &result {
         Err(error) if !error.is_cancelled() => Some(session),
+        _ if !keep => Some(session),
         _ => lock_store(input.sessions).put(input.project_root, key, sources, session),
     };
     if let Some(session) = returned {
         session.flush_parse_cache();
     }
-    result
-}
-
-/// Config-load failure path: record the warning, and when no explicit config
-/// path was given, fall back to the path-based analysis + default duplication
-/// scan so the editor still surfaces findings.
-fn analyze_project_root_config_fallback(
-    input: &mut ProjectRootAnalysisInput<'_>,
-    err: &impl std::fmt::Display,
-) -> Result<(), ProjectAnalysisError> {
-    let detail = config_load_error_detail(input.project_root, input.config_path, err);
-    if input.config_path.is_some() {
-        return Err(ProjectAnalysisError::failed(input.project_root, detail));
-    }
-    input.config_messages.push((MessageType::WARNING, detail));
-    let session = AnalysisSession::load_default_with_config(
-        input.project_root,
-        fallow_config::ResolvedConfig::scope_shared_cache_dir_to_root,
-    )
-    .with_cancellation(Arc::clone(input.run_cancellation));
-    input.parse_work.sessions_loaded += 1;
-    let before = session.parse_counts();
-    let result = run_typed_project_analysis(input, &session, &DuplicatesConfig::default());
-    input.parse_work.add(session.parse_counts().since(before));
     result
 }
 
@@ -448,7 +442,7 @@ fn run_typed_project_analysis(
         .unmatched_config_patterns
         .extend(config_patterns::collect(
             input.project_root,
-            session.config_path(),
+            session.config_path().map(canonicalize_for_lsp).as_deref(),
             session.unmatched_config_patterns(),
         ));
     // The type-aware pass reads `unused_files` as its set of unreachable
@@ -480,7 +474,7 @@ fn resolve_project_change_scope(
         global_ref: input.global_changed_since_requested,
         files: input.changed_files,
         cache: None,
-        no_package_baselines: input.no_package_baselines,
+        no_package_baselines: input.run_options.package_baselines == Some(false),
     };
     let scope = match session.change_scope(request) {
         Ok(scope) => scope,
@@ -607,10 +601,8 @@ pub fn run_blocking_analysis(
     for (index, project_root) in input.project_roots.iter().enumerate() {
         analyze_project_root(&mut ProjectRootAnalysisInput {
             project_root,
-            config_path: input.config_path.as_deref(),
-            allow_remote_extends: input.allow_remote_extends,
+            run_options: &input.run_options,
             duplication_options: input.duplication_options.as_ref(),
-            production_override: input.production_override,
             inline_complexity_enabled: input.inline_complexity_enabled,
             type_aware_options: input.type_aware_options.as_ref(),
             type_aware_sessions: &input.type_aware_sessions,
@@ -619,7 +611,6 @@ pub fn run_blocking_analysis(
             run_cancellation: &input.run_cancellation,
             changed_files: changed_scope.files.as_ref(),
             global_changed_since_requested: input.changed_since.is_some(),
-            no_package_baselines: input.no_package_baselines,
             sessions: &input.sessions,
             parse_work: &mut parse_work,
             merged_analysis: &mut analysis,

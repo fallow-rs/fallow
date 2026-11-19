@@ -59,19 +59,36 @@ lifecycle behavior.
   no CRAP score, so a function that the health report flags only through
   CRAP (or through `complexity-crap` while the other two rules are `off`) has
   a health finding but no lens.
+- `run_inputs.rs` is the one translator of the initialization options to
+  `RunInputs`: `configPath`, `allowRemoteExtends`, `production` and
+  `packageBaselines: false`, with `Surface::Lsp`, `CommandKind::Editor` and
+  the environment snapshot of the server process. The snapshot has the
+  project root as its current directory, so a relative `configPath`
+  resolves from the root. For each project root, `load_project_session`
+  calls `fallow_api::run::resolve_run` once and opens the session with
+  `EditorAnalysisSession::open`. The duplication options, `changedSince`
+  and the type-aware options apply per run and are not run inputs.
+- The run plans dead code and duplication, never health. Duplication
+  follows `duplicates.enabled`: when the plan skips it, the session does no
+  duplication work. Inline complexity reads the config of the dead-code
+  session, so it uses the dead-code production mode.
 - The `fallow.production` setting (`initializationOptions.production`) acts
-  as `--production` or `--no-production`. `EditorAnalysisSession::load_with_production`
-  passes it to the engine loader before config resolution, so the rules that
-  production mode turns off, such as `unused-dev-dependencies`, are off in
-  the editor too. Do not set `ResolvedConfig::production` after resolution:
-  the rules would keep the values of the other mode.
-- Without the setting, a per-analysis `production` config such as
+  as `--production` or `--no-production`. The resolver decides the
+  production mode before config resolution, so the rules that production
+  mode turns off, such as `unused-dev-dependencies`, are off in the editor
+  too. Without the setting, a per-analysis `production` config such as
   `{"deadCode": true, "dupes": false}` gives the session the dead-code mode.
   The engine session then walks the files of the duplication mode for the
-  duplication pass, so the clone diagnostics match `fallow dupes`. A
-  `configure` closure of the load does not reach that second walk, so it must
-  not change a discovery input: the root, the ignore patterns, or the
-  production mode.
+  duplication pass, so the clone diagnostics match `fallow dupes`.
+- A discovered config that fails to load, to validate (an external plugin,
+  a boundary or a rule pack) or to give workspace metadata gives the default
+  config with the editor settings, `fallow.production` included. The run
+  logs one warning (`config error for <root>: ...`). The store does not keep
+  a fallback session, so each run reports the error until the config
+  loads. An explicit `configPath` that fails stops the refresh: the
+  diagnostics stay as they were. The resolver puts a cache directory outside
+  the root in a subdirectory for the root, so two editor roots do not write
+  the same cache files.
 - Security candidate diagnostics remain opt-in through the project config.
   `security-sink` and `security-client-server-leak` default to `off`, retain
   those exact diagnostic codes, and publish at information severity because
@@ -121,22 +138,24 @@ lifecycle behavior.
   a config input (`session_input_file`), mark the store stale, and the next
   run loads each session again. `SESSION_INPUT_FILE_NAMES` feeds both
   `session_input_file` and the watched-file globs, so the two lists cannot
-  drift. A kept session also keeps its `ConfigSources`: the content of the
-  config file and of each local `extends` target, read before and after the
-  load. `ConfigSources` also keeps a snapshot of the other inputs that
-  config resolution read (`fallow_config::ConfigInputs`): the external plugin
+  drift. A kept session also keeps its `ConfigSources`: the resolved run of
+  the session. `ResolvedRun::sources_changed` compares the bytes of the
+  config file and of each local `extends` target, which the engine loader
+  read before and after the parse, and the other inputs that config
+  resolution read (`fallow_config::ConfigInputs`): the external plugin
   files (`plugins` paths, `.fallow/plugins/`, root `fallow-plugin-*`), the
-  rule packs, and the child folders of each `autoDiscover` folder. The
-  engine reads them just before config resolution and the LSP reads them
-  after the load. When the two reads differ, an input changed during the
-  load, and the next run loads the session again. A run
-  compares them with the disk and loads the session again when one differs,
+  rule packs, and the child folders of each `autoDiscover` folder, read
+  just before config resolution. A change during the load also counts. A
+  run compares them with the disk and loads the session again when one
+  differs,
   because a `configPath` file, an `extends` target, a configured plugin file
   or a rule pack can have any name and no watched glob covers it. The
   default plugin locations are also watched session inputs. A session that
   puts the estimated memory of all kept sessions over 512 MB (the estimate
   and limit of the MCP warm parse store) is not kept, so each run for that
-  root loads its session. A session kept for other settings goes back to
+  root loads its session. The key of a kept session is the set of run
+  inputs without the environment snapshot (`SessionKey::of`). A session kept
+  for other settings goes back to
   the caller, which writes its parse cache outside the store lock. An
   incremental parse records the read failures and parse degradations of the
   whole project again, so a fixed file loses its entry. A kept session writes its
