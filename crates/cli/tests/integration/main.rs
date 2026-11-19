@@ -181,6 +181,7 @@ mod trace_tooling_credit_tests;
 mod type_aware_backend_tests;
 mod type_aware_constant_parameter_tests;
 mod type_aware_coupling_tests;
+mod type_aware_default_export_tests;
 mod type_aware_degradation_tests;
 mod type_aware_scope_tests;
 mod typeorm_datasource_tests;
