@@ -2006,7 +2006,7 @@
           "name": "--trace",
           "type": "string",
           "required": false,
-          "description": "Trace all clones at a specific location (format: `FILE:LINE`)"
+          "description": "Trace the clones at a location (`FILE:LINE`, for example `src/utils.ts:42`) or the clone group of a fingerprint (`dup:<fingerprint>`, for example `dup:f42424e8`)"
         },
         {
           "name": "path",

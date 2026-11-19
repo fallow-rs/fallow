@@ -949,3 +949,19 @@ fn the_mutation_survived_rule_reports_under_mutation_in_the_tests_category() {
         "https://fallow.tools/docs/cli/mutation/"
     );
 }
+
+#[test]
+fn code_duplication_explanation_describes_each_detection_mode() {
+    let full = DUPES_RULES[0].full;
+    for expected in [
+        "`strict` and `mild` keep identifiers and literal values",
+        "`weak` ignores string values",
+        "`semantic` ignores identifiers, string values and numeric values",
+    ] {
+        assert!(full.contains(expected), "missing `{expected}` in: {full}");
+    }
+    assert!(
+        !full.contains("abstracting identifiers and literals in non-strict modes"),
+        "the explanation must not say that every non-strict mode ignores identifiers"
+    );
+}

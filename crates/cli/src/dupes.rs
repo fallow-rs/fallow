@@ -174,7 +174,7 @@ pub struct DupesOptions<'a> {
 fn parse_trace_spec(spec: &str) -> Result<(&str, usize), &'static str> {
     let (file_path, line_str) = spec
         .rsplit_once(':')
-        .ok_or("--trace requires FILE:LINE format (e.g., src/utils.ts:42)")?;
+        .ok_or("--trace requires FILE:LINE (e.g., src/utils.ts:42) or dup:<fingerprint> (e.g., dup:f42424e8)")?;
     let line: usize = match line_str.parse() {
         Ok(l) if l > 0 => l,
         _ => return Err("--trace LINE must be a positive integer"),

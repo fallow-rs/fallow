@@ -1450,8 +1450,8 @@ pub enum Command {
         #[arg(long)]
         no_fragments: bool,
 
-        /// Trace all clones at a specific location (format: `FILE:LINE`)
-        #[arg(long, value_name = "FILE:LINE")]
+        /// Trace the clones at a location (`FILE:LINE`, for example `src/utils.ts:42`) or the clone group of a fingerprint (`dup:<fingerprint>`, for example `dup:f42424e8`)
+        #[arg(long, value_name = "FILE:LINE|dup:<fingerprint>")]
         trace: Option<String>,
 
         /// Scope reported findings to this file or directory (default: whole project).

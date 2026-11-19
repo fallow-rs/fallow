@@ -1140,7 +1140,7 @@
       "section": "flags:dupes",
       "row": "--trace",
       "column": "Description",
-      "seed": "Trace all clones at a specific location (format: `FILE:LINE`)"
+      "seed": "Trace the clones at a location (`FILE:LINE`, for example `src/utils.ts:42`) or the clone group of a fingerprint (`dup:<fingerprint>`, for example `dup:f42424e8`)"
     },
     {
       "section": "flags:fallow-combined",
