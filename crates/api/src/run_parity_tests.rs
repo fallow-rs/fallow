@@ -43,6 +43,7 @@ struct ApiOptions {
     production_health: Option<bool>,
     production_dupes: Option<bool>,
     type_aware: Option<bool>,
+    base: Option<String>,
 }
 
 fn entry(name: &str, options: &ApiOptions) -> Option<ProgrammaticEntry> {
@@ -82,6 +83,7 @@ fn audit_options(analysis: AnalysisOptions, options: &ApiOptions) -> crate::Audi
         production_dead_code: options.production_dead_code,
         production_health: options.production_health,
         production_dupes: options.production_dupes,
+        base: options.base.clone(),
         ..crate::AuditOptions::default()
     }
 }

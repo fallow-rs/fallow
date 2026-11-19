@@ -83,6 +83,7 @@ pub(super) fn resolve_dead_code_run(
         entry,
         RouteSettings {
             include_entry_exports: options.include_entry_exports,
+            audit_base: None,
         },
     )
 }

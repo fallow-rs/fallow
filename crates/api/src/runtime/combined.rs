@@ -149,6 +149,7 @@ fn resolve_combined_run(
         },
         RouteSettings {
             include_entry_exports: options.include_entry_exports,
+            audit_base: None,
         },
     )
     .map_err(|err| match err {

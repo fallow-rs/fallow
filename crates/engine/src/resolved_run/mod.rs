@@ -6,6 +6,7 @@
 //! and each run setting. The result is one [`ResolvedRun`] with a resolved
 //! config per production mode.
 
+mod audit_base;
 mod env_policy;
 mod notices;
 #[cfg(any(test, feature = "testing"))]
@@ -18,6 +19,7 @@ pub mod testing;
 mod type_aware;
 mod view;
 
+pub use audit_base::{AuditBaseDecision, decide_audit_base};
 pub use resolve::{
     BaseConfig, BaseSide, EmptyCause, InputField, InputProblem, ResolveError, resolve_base_run,
     resolve_base_run_with_head_decisions, resolve_run,
@@ -239,6 +241,13 @@ impl ResolvedRun {
     /// type-aware setting does not fail.
     pub fn type_aware(&self) -> Result<&TypeAwareSettings, ResolveError> {
         self.type_aware.result()
+    }
+
+    /// The base ref candidates of an audit run. A run of another command
+    /// has none.
+    #[must_use]
+    pub fn audit_base(&self) -> AuditBaseDecision {
+        decide_audit_base(&self.inputs)
     }
 
     /// The environment snapshot of the run. It holds only the variables that

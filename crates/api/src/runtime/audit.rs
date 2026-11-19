@@ -27,6 +27,7 @@ use crate::{
     run::{AnalysisSlot, ProgrammaticEntry, ResolvedRun, RouteSettings, resolve_route_run},
 };
 
+use super::audit_base_ref::resolve_audit_base_ref;
 use super::{
     ProgrammaticResult, dead_code::run_dead_code_in_context,
     duplication::run_duplication_in_context, health_may_consume_dead_code_artifacts,
@@ -476,39 +477,6 @@ fn validate_audit_api_options(options: &AuditOptions) -> ProgrammaticResult<()> 
     Ok(())
 }
 
-pub(super) fn resolve_audit_base_ref(
-    options: &AuditOptions,
-) -> ProgrammaticResult<ResolvedAuditBase> {
-    let explicit = options
-        .base
-        .as_deref()
-        .or(options.analysis.changed_since.as_deref());
-    let root = options
-        .analysis
-        .root
-        .clone()
-        .unwrap_or_else(|| std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")));
-    crate::audit_run::resolve_audit_base(&root, explicit).map_err(|error| match error {
-        crate::audit_run::AuditBaseError::InvalidRef {
-            origin,
-            value,
-            reason,
-        } => ProgrammaticError::new(format!("invalid git ref `{value}`: {reason}"), 2)
-            .with_code("FALLOW_INVALID_GIT_REF")
-            .with_context(match origin {
-                crate::audit_run::AuditBaseOrigin::Environment => "FALLOW_AUDIT_BASE",
-                crate::audit_run::AuditBaseOrigin::Explicit
-                | crate::audit_run::AuditBaseOrigin::Detected => "audit.base",
-            }),
-        crate::audit_run::AuditBaseError::NotDetected => ProgrammaticError::new(
-            "could not detect base branch. Set audit.base to specify the comparison target",
-            2,
-        )
-        .with_code("FALLOW_AUDIT_BASE_NOT_FOUND")
-        .with_context("audit.base"),
-    })
-}
-
 pub fn analysis_options_for_audit(options: &AuditOptions, base_ref: &str) -> AnalysisOptions {
     let production_override = options
         .analysis
@@ -544,6 +512,7 @@ pub fn resolve_audit_run(
         },
         RouteSettings {
             include_entry_exports: options.include_entry_exports,
+            audit_base: crate::run::NamedAuditBase::of(options),
         },
     )
 }

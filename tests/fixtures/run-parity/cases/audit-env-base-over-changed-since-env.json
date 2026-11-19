@@ -1,0 +1,54 @@
+{
+  "name": "audit-env-base-over-changed-since-env",
+  "files": {
+    "package.json": "{}"
+  },
+  "env": {
+    "FALLOW_AUDIT_BASE": "main",
+    "FALLOW_CHANGED_SINCE": "HEAD~1"
+  },
+  "inputs": {
+    "mcp": {
+      "tool": "audit",
+      "params": {}
+    },
+    "cli": {
+      "argv": [
+        "fallow",
+        "audit"
+      ]
+    },
+    "api": {
+      "entry": "audit"
+    },
+    "node": {
+      "not_expressible": "The Node bindings have no audit function"
+    },
+    "lsp": {
+      "not_expressible": "The editor runs no audit"
+    },
+    "vscode": {
+      "not_expressible": "The editor runs no audit"
+    }
+  },
+  "expected": {
+    "surface": "<row>",
+    "command": "audit",
+    "settings.audit_base": {
+      "value": "main",
+      "source": "environment:FALLOW_AUDIT_BASE"
+    },
+    "settings.audit_base_fallback": null
+  },
+  "deviations": {
+    "mcp": {
+      "reason": "The MCP server reads FALLOW_CHANGED_SINCE, and the audit tools use it only when the audit detects no base",
+      "expected": {
+        "settings.audit_base_fallback": {
+          "value": "HEAD~1",
+          "source": "environment:FALLOW_CHANGED_SINCE"
+        }
+      }
+    }
+  }
+}

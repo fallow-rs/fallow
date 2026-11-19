@@ -514,6 +514,13 @@ the `EnvScope` of the tool, sets the cancellation flag, and gives the call
 the MCP surface and the snapshot (`AnalysisOptions::host`). A tool sets only
 its own fields on top.
 
+`audit` and `decision_surface` get no `changed_since` from the environment
+(`EnvScope::AuditBase`). The API resolves their base ref from the run inputs
+with `decide_audit_base` in `crates/engine/src/resolved_run/audit_base.rs`:
+the `base` parameter, then `FALLOW_AUDIT_BASE`, then the detected base. The
+CLI route uses the same order. Only when the audit detects no base does the
+typed route use `FALLOW_CHANGED_SINCE`; the CLI route then fails.
+
 The `production` parameter goes into `production_override` as it is. The
 resolver of `fallow-api` decides the production mode of each analysis: the
 parameter, then the `FALLOW_PRODUCTION*` variable of the analysis, then

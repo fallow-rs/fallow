@@ -339,6 +339,10 @@ pub fn command_run_inputs(cli: &Cli, env: EnvSnapshot) -> Option<RunInputs> {
         ));
     }
     inputs.type_aware = type_aware_inputs(cli);
+    // `--changed-since` and its alias `--base` name the base ref of an audit.
+    if route.command == CommandKind::Audit {
+        inputs.audit_base = cli.changed_since.clone().map(|base| given(base, "--base"));
+    }
     inputs.output = OutputFormat::from(cli.format);
     inputs.quiet = cli.quiet;
     Some(inputs)

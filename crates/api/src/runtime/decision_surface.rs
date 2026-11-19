@@ -31,7 +31,7 @@ pub fn run_decision_surface(
 ) -> ProgrammaticResult<DecisionSurfaceProgrammaticOutput> {
     let start = Instant::now();
     let audit_options = audit_options_for_decision_surface(options);
-    let resolved_base = super::audit::resolve_audit_base_ref(&audit_options)?;
+    let resolved_base = super::audit_base_ref::resolve_audit_base_ref(&audit_options)?;
     let analysis = AnalysisOptions {
         changed_since: Some(resolved_base.git_ref.clone()),
         ..options.analysis.clone()

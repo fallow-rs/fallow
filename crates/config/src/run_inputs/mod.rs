@@ -205,6 +205,9 @@ pub struct RunInputs {
     pub analysis_flags: Vec<(PlannedAnalysis, Origin)>,
     /// The type-aware settings that the surface gives.
     pub type_aware: TypeAwareInputs,
+    /// The base ref of an audit that the caller names, such as `--base` or
+    /// the `base` parameter of an MCP tool.
+    pub audit_base: Option<Given<String>>,
     /// The output format.
     pub output: OutputFormat,
     /// Suppress progress output.
@@ -242,6 +245,7 @@ impl RunInputs {
             production_dupes: None,
             analysis_flags: Vec::new(),
             type_aware: TypeAwareInputs::default(),
+            audit_base: None,
             output: OutputFormat::Human,
             quiet: true,
         }

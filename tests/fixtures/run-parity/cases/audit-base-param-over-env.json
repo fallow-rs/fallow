@@ -1,0 +1,68 @@
+{
+  "name": "audit-base-param-over-env",
+  "files": {
+    "package.json": "{}"
+  },
+  "env": {
+    "FALLOW_AUDIT_BASE": "main"
+  },
+  "inputs": {
+    "mcp": {
+      "tool": "audit",
+      "params": {
+        "base": "release"
+      }
+    },
+    "cli": {
+      "argv": [
+        "fallow",
+        "audit",
+        "--base",
+        "release"
+      ]
+    },
+    "api": {
+      "entry": "audit",
+      "options": {
+        "base": "release"
+      }
+    },
+    "node": {
+      "not_expressible": "The Node bindings have no audit function"
+    },
+    "lsp": {
+      "not_expressible": "The editor runs no audit"
+    },
+    "vscode": {
+      "not_expressible": "The editor runs no audit"
+    }
+  },
+  "expected": {
+    "surface": "<row>",
+    "command": "audit",
+    "settings.audit_base": {
+      "value": "release",
+      "source": "given:base"
+    }
+  },
+  "deviations": {
+    "cli": {
+      "reason": "The CLI names the flag --base, an alias of --changed-since",
+      "expected": {
+        "settings.audit_base": {
+          "value": "release",
+          "source": "given:--base"
+        }
+      }
+    },
+    "api": {
+      "reason": "The Rust API names its option audit.base",
+      "expected": {
+        "settings.audit_base": {
+          "value": "release",
+          "source": "given:audit.base"
+        }
+      }
+    }
+  }
+}

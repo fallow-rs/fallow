@@ -54,8 +54,6 @@ pub(super) fn decision_surface_options_from_params(
     DecisionSurfaceOptions {
         analysis: AnalysisOptions {
             workspace: workspace_patterns_from_param(params.workspace.as_deref()),
-            // The base ref of this tool, not a narrowing request: the
-            // runtime reads it from `changed_since`, so it stays there.
             ..call.analysis
         },
         base: non_empty_string(params.base.as_deref()),

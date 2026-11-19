@@ -228,6 +228,11 @@ pub(super) enum EnvScope {
     /// has no `request_outcomes` to state a stand-down, so a bad ref keeps the
     /// hard error of an explicit ref.
     HardRef,
+    /// `FALLOW_DIFF_FILE` only: `FALLOW_CHANGED_SINCE` is not a scope of
+    /// the tool. The audit base reads it from the environment snapshot of
+    /// the call, after the `base` parameter, `FALLOW_AUDIT_BASE` and the
+    /// detected base.
+    AuditBase,
     /// Neither variable: the tool sets its own scope from its params.
     Own,
 }
@@ -244,6 +249,7 @@ pub(super) fn shared_analysis_options(
     let (changed_since, ambient_changed_since, ambient_diff_file) = match env {
         EnvScope::Ambient => (None, env_changed_since(), env_diff_file()),
         EnvScope::HardRef => (env_changed_since(), None, env_diff_file()),
+        EnvScope::AuditBase => (None, None, env_diff_file()),
         EnvScope::Own => (None, None, None),
     };
     AnalysisOptions {

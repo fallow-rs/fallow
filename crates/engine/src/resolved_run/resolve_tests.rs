@@ -457,6 +457,9 @@ var_rows! {
     env_policy_audit_base_cli_audit: Cli, Audit, AuditBase, true;
     env_policy_audit_base_cli_dead_code: Cli, DeadCode, AuditBase, false;
     env_policy_audit_base_mcp_combined: Mcp, Combined, AuditBase, false;
+    env_policy_changed_since_mcp_audit: Mcp, Audit, ChangedSince, true;
+    env_policy_changed_since_api_audit: Api, Audit, ChangedSince, false;
+    env_policy_changed_since_cli_audit: Cli, Audit, ChangedSince, false;
     env_policy_type_aware_lsp_editor: Lsp, Editor, TypeAware, false;
     env_policy_type_aware_api_combined: Api, Combined, TypeAware, true;
     env_policy_type_aware_projects_cli_dead_code: Cli, DeadCode, TypeAwareProjects, true;

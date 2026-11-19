@@ -15,6 +15,7 @@ use fallow_types::workspace::WorkspaceDiagnostic;
 use rustc_hash::FxHashSet;
 
 mod audit;
+mod audit_base_ref;
 mod combined;
 mod dead_code;
 mod decision_surface;
@@ -43,7 +44,7 @@ pub use crate::runtime_output::{
     serialize_health_report_json,
 };
 pub use audit::{AUDIT_CONFIG_BASELINE_UNSUPPORTED, run_audit};
-#[cfg(test)]
+#[cfg(any(test, feature = "testing"))]
 pub(crate) use audit::{analysis_options_for_audit, resolve_audit_run};
 pub use combined::run_combined;
 pub use dead_code::{

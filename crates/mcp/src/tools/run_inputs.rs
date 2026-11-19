@@ -158,13 +158,11 @@ impl TypedTool {
             | Self::CheckHealth
             | Self::FeatureFlags
             | Self::Combined => EnvScope::Ambient,
-            // The base ref of `audit` and `decision_surface`. The other
-            // envelopes carry no `request_outcomes`, so a ref that stood down
-            // would widen the result with nothing to say so: keep the hard
-            // error of an explicit ref.
-            Self::Audit
-            | Self::DecisionSurface
-            | Self::ProjectInfo
+            Self::Audit | Self::DecisionSurface => EnvScope::AuditBase,
+            // These envelopes carry no `request_outcomes`, so a ref that
+            // stood down would widen the result with nothing to say so: keep
+            // the hard error of an explicit ref.
+            Self::ProjectInfo
             | Self::ListBoundaries
             | Self::TraceExport
             | Self::TraceFile
