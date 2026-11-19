@@ -3,9 +3,10 @@ use std::sync::atomic::AtomicBool;
 
 use crate::params::HealthParams;
 
+use fallow_api::run::EnvSnapshot;
 use fallow_api::{
     AnalysisOptions, ComplexityOptions, ComplexitySort, CoverageInputs, OwnershipEmailMode,
-    ProductionAnalysis, ProgrammaticError, TargetEffort, run_health as run_api_health,
+    ProgrammaticError, TargetEffort, run_health as run_api_health,
     serialize_health_programmatic_json,
 };
 use rmcp::ErrorData as McpError;
@@ -13,13 +14,14 @@ use rmcp::model::{CallToolResult, ContentBlock};
 
 use super::{
     api_runtime::{
-        EnvScope, call_cancellation, non_empty_path, non_empty_string,
-        resolve_typed_coverage_inputs, run_api_blocking, shared_analysis_options, shared_params,
-        typed_production, typed_tool_result, typed_type_aware, workspace_patterns_from_param,
+        call_cancellation, non_empty_path, non_empty_string, resolve_typed_coverage_inputs,
+        run_api_blocking, shared_params, typed_tool_result, typed_type_aware,
+        workspace_patterns_from_param,
     },
     fallback_policy::{baseline_requested, filled, grouped_requested, type_aware_requested},
-    push_baseline, push_global, push_remote_extends, push_scope, push_str_flag, run_tool,
-    validation_error_body,
+    push_baseline, push_global, push_remote_extends, push_scope, push_str_flag,
+    run_inputs::{ToolProduction, TypedTool, typed_call},
+    run_tool, validation_error_body,
 };
 
 /// Run `check_health` through the typed API when parameters map cleanly to the
@@ -27,7 +29,11 @@ use super::{
 pub async fn run_health(binary: &str, params: HealthParams) -> Result<CallToolResult, McpError> {
     if !requires_cli_fallback(&params) {
         let cancellation = call_cancellation();
-        let options = match health_options_from_params(&params, Some(Arc::clone(&cancellation))) {
+        let options = match health_options_from_params(
+            &params,
+            Some(Arc::clone(&cancellation)),
+            EnvSnapshot::capture(),
+        ) {
             Ok(options) => options,
             Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
         };
@@ -71,7 +77,7 @@ fn run_health_api_value_with_env(
         return Ok(None);
     }
 
-    let options = health_options_from_params(params, None)?;
+    let options = health_options_from_params(params, None, EnvSnapshot::capture())?;
     super::api_runtime::typed_api_value(health_typed_value(options, env))
 }
 
@@ -353,19 +359,25 @@ fn requires_cli_fallback(params: &HealthParams) -> bool {
         || grouped_requested(params.group_by.as_deref())
 }
 
-fn health_options_from_params(
+pub(super) fn health_options_from_params(
     params: &HealthParams,
     cancellation: Option<Arc<AtomicBool>>,
+    env: EnvSnapshot,
 ) -> Result<ComplexityOptions, String> {
+    let call = typed_call(
+        TypedTool::CheckHealth,
+        shared_params!(params),
+        ToolProduction::global(params.production),
+        env,
+        cancellation,
+    );
     Ok(ComplexityOptions {
         analysis: AnalysisOptions {
-            production: params.production.unwrap_or(false),
-            production_override: typed_production(params.production, ProductionAnalysis::Health),
             changed_since: non_empty_string(params.changed_since.as_deref()),
             workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             explain: true,
             type_aware: typed_type_aware(params.type_aware),
-            ..shared_analysis_options(shared_params!(params), EnvScope::Ambient, cancellation)
+            ..call.analysis
         },
         max_cyclomatic: params.max_cyclomatic,
         max_cognitive: params.max_cognitive,
@@ -448,7 +460,8 @@ mod tests {
         };
 
         assert!(!requires_cli_fallback(&params));
-        let options = health_options_from_params(&params, None).expect("options");
+        let options =
+            health_options_from_params(&params, None, EnvSnapshot::capture()).expect("options");
         assert_eq!(
             options.analysis.workspace,
             Some(vec!["web".to_string(), "admin".to_string()])
@@ -489,7 +502,8 @@ mod tests {
         };
 
         assert!(!requires_cli_fallback(&params));
-        let options = health_options_from_params(&params, None).expect("options");
+        let options =
+            health_options_from_params(&params, None, EnvSnapshot::capture()).expect("options");
         assert!(options.analysis.root.is_none());
         assert!(options.analysis.config_path.is_none());
         assert_eq!(options.analysis.changed_since.as_deref(), Some("main"));
@@ -534,14 +548,16 @@ mod tests {
             sort: Some("weighted".to_string()),
             ..HealthParams::default()
         };
-        let err = health_options_from_params(&bad_sort, None).expect_err("invalid sort");
+        let err = health_options_from_params(&bad_sort, None, EnvSnapshot::capture())
+            .expect_err("invalid sort");
         assert!(err.contains("Invalid sort"));
 
         let bad_effort = HealthParams {
             effort: Some("extreme".to_string()),
             ..HealthParams::default()
         };
-        let err = health_options_from_params(&bad_effort, None).expect_err("invalid effort");
+        let err = health_options_from_params(&bad_effort, None, EnvSnapshot::capture())
+            .expect_err("invalid effort");
         assert!(err.contains("Invalid effort"));
     }
 
@@ -840,7 +856,7 @@ mod route_parity_tests {
             &serde_json::json!({}),
             |params: HealthParams| build_health_args(&params),
             |params: HealthParams| {
-                health_options_from_params(&params, None)
+                health_options_from_params(&params, None, EnvSnapshot::capture())
                     .expect("options")
                     .analysis
             },

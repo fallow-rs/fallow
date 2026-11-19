@@ -3,6 +3,7 @@ use std::sync::atomic::AtomicBool;
 
 use crate::params::DecisionSurfaceParams;
 
+use fallow_api::run::EnvSnapshot;
 use fallow_api::{
     AnalysisOptions, DecisionSurfaceOptions, run_decision_surface as run_decision_surface_api,
     serialize_decision_surface_programmatic_json,
@@ -11,9 +12,10 @@ use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
 
 use super::api_runtime::{
-    EnvScope, call_cancellation, json_success, non_empty_string, programmatic_error_body,
-    run_api_blocking, shared_analysis_options, shared_params, workspace_patterns_from_param,
+    call_cancellation, json_success, non_empty_string, programmatic_error_body, run_api_blocking,
+    shared_params, workspace_patterns_from_param,
 };
+use super::run_inputs::{ToolProduction, TypedTool, typed_call};
 
 /// Run the `decision_surface` tool through the typed programmatic API.
 pub async fn run_decision_surface(
@@ -21,7 +23,11 @@ pub async fn run_decision_surface(
     params: DecisionSurfaceParams,
 ) -> Result<CallToolResult, McpError> {
     let cancellation = call_cancellation();
-    let options = decision_surface_options_from_params(&params, Some(Arc::clone(&cancellation)));
+    let options = decision_surface_options_from_params(
+        &params,
+        Some(Arc::clone(&cancellation)),
+        EnvSnapshot::capture(),
+    );
     let result = run_api_blocking("decision_surface", cancellation, move || {
         run_decision_surface_api(&options).and_then(serialize_decision_surface_programmatic_json)
     })
@@ -33,16 +39,24 @@ pub async fn run_decision_surface(
     Ok(result)
 }
 
-fn decision_surface_options_from_params(
+pub(super) fn decision_surface_options_from_params(
     params: &DecisionSurfaceParams,
     cancellation: Option<Arc<AtomicBool>>,
+    env: EnvSnapshot,
 ) -> DecisionSurfaceOptions {
+    let call = typed_call(
+        TypedTool::DecisionSurface,
+        shared_params!(params),
+        ToolProduction::default(),
+        env,
+        cancellation,
+    );
     DecisionSurfaceOptions {
         analysis: AnalysisOptions {
             workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             // The base ref of this tool, not a narrowing request: the
             // runtime reads it from `changed_since`, so it stays there.
-            ..shared_analysis_options(shared_params!(params), EnvScope::HardRef, cancellation)
+            ..call.analysis
         },
         base: non_empty_string(params.base.as_deref()),
         max_decisions: params.max_decisions,
@@ -58,7 +72,7 @@ mod tests {
     #[test]
     fn default_decision_surface_maps_to_programmatic_api_options() {
         let params = DecisionSurfaceParams::default();
-        let options = decision_surface_options_from_params(&params, None);
+        let options = decision_surface_options_from_params(&params, None, EnvSnapshot::capture());
         assert_eq!(options.max_decisions, None);
     }
 
@@ -69,7 +83,7 @@ mod tests {
             max_decisions: Some(5),
             ..DecisionSurfaceParams::default()
         };
-        let options = decision_surface_options_from_params(&params, None);
+        let options = decision_surface_options_from_params(&params, None, EnvSnapshot::capture());
         assert_eq!(options.base.as_deref(), Some("origin/main"));
         assert_eq!(options.max_decisions, Some(5));
     }
@@ -80,7 +94,7 @@ mod tests {
             workspace: Some("apps/web".to_string()),
             ..DecisionSurfaceParams::default()
         };
-        let options = decision_surface_options_from_params(&params, None);
+        let options = decision_surface_options_from_params(&params, None, EnvSnapshot::capture());
         assert_eq!(
             options.analysis.workspace,
             Some(vec!["apps/web".to_string()])

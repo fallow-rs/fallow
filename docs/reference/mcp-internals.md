@@ -506,21 +506,32 @@ still builds a `FALLOW_MCP_CANCELLED` result, but only tests that call a tool
 directly see it. Only a timeout gives the client a structured error:
 `FALLOW_MCP_SUBPROCESS_TIMEOUT` or `FALLOW_MCP_API_TIMEOUT`.
 
-Each typed options builder starts from `shared_analysis_options` in
-`api_runtime.rs`. It maps root, config, remote extends, cache and threads,
-places `FALLOW_CHANGED_SINCE` and `FALLOW_DIFF_FILE` by `EnvScope`, and sets
-the cancellation flag. A tool sets only its own fields on top. A tool whose
-CLI route honors the `FALLOW_PRODUCTION*` variables sets its production
-override with `api_runtime::typed_production`: the tool parameter, then the
-variable of the analysis, then `FALLOW_PRODUCTION`. The CLI parses the
-variables with the same `fallow_config::ProductionEnv`. `list_boundaries`
-keeps only an override that is on, because `fallow list` turns production
-mode on from the variables and never off. `trace_import_path` and
-`trace_error` take the tool parameter only, because `fallow trace --path` and
-`fallow trace-error` read no variable. `audit` and the Code
-Mode `combined` route set one override per analysis
-(`AuditOptions::production_*`, `CombinedOptions::production_*`).
-`fallow_api` itself does not read the variables.
+Each typed options builder starts from `typed_call` in `run_inputs.rs`. The
+handler passes `EnvSnapshot::capture()` once per call. `typed_call` maps root,
+config, remote extends, cache and threads through `shared_analysis_options`
+in `api_runtime.rs`, places `FALLOW_CHANGED_SINCE` and `FALLOW_DIFF_FILE` by
+the `EnvScope` of the tool, sets the cancellation flag, and gives the call
+the MCP surface and the snapshot (`AnalysisOptions::host`). A tool sets only
+its own fields on top.
+
+The `production` parameter goes into `production_override` as it is. The
+resolver of `fallow-api` decides the production mode of each analysis: the
+parameter, then the `FALLOW_PRODUCTION*` variable of the analysis, then
+`FALLOW_PRODUCTION`, then the config. The env policy of the engine
+(`crates/engine/src/resolved_run/env_policy.rs`) decides for each command
+whether the MCP surface reads the variables. `trace_import_path` and
+`trace_error` read no variable, because `fallow trace --path` and `fallow
+trace-error` read none. `decision_surface` and `mutation_plan` take the
+production mode from the config. `list_boundaries` removes a variable that
+turns the dead-code analysis off from its snapshot, because `fallow list`
+turns production mode on from the variables and never off. `audit` passes a
+per-analysis parameter only when it is `true`, as the CLI flag can only turn
+production mode on.
+
+The parity matrix (`tests/fixtures/run-parity/cases/`) has two MCP rows in
+`tools/run_parity_tests.rs`. The typed row builds the options of a case with
+the options builder of the tool and resolves the run. The CLI route row
+compares the argv of the CLI route with the `cli.argv` of the case.
 
 `fallow_api::run_combined` sets
 `ComplexityOptions::config_activates_coverage_gaps` on its health section, so

@@ -4,20 +4,23 @@ use std::sync::atomic::AtomicBool;
 
 use crate::params::ArchitectureParams;
 
+use fallow_api::run::EnvSnapshot;
 use fallow_api::{
-    AnalysisOptions, ArchitectureOptions, ProductionAnalysis,
-    run_architecture as run_api_architecture, serialize_architecture_programmatic_json,
+    AnalysisOptions, ArchitectureOptions, run_architecture as run_api_architecture,
+    serialize_architecture_programmatic_json,
 };
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
 
 use super::{
     api_runtime::{
-        EnvScope, call_cancellation, json_success, programmatic_error_body, run_api_blocking,
-        shared_analysis_options, shared_params, typed_production, workspace_patterns_from_param,
+        call_cancellation, json_success, programmatic_error_body, run_api_blocking, shared_params,
+        workspace_patterns_from_param,
     },
     fallback_policy::{baseline_requested, filled, grouped_requested},
-    push_baseline, push_global, push_remote_extends, push_scope, push_str_flag, run_tool,
+    push_baseline, push_global, push_remote_extends, push_scope, push_str_flag,
+    run_inputs::{ToolProduction, TypedTool, typed_call},
+    run_tool,
 };
 
 /// Run `check_architecture` through the typed API. A baseline or a grouping
@@ -32,7 +35,11 @@ pub async fn run_architecture(
     }
 
     let cancellation = call_cancellation();
-    let options = architecture_options_from_params(&params, Some(Arc::clone(&cancellation)));
+    let options = architecture_options_from_params(
+        &params,
+        Some(Arc::clone(&cancellation)),
+        EnvSnapshot::capture(),
+    );
     let result = run_api_blocking("check_architecture", cancellation, move || {
         run_api_architecture(&options).and_then(serialize_architecture_programmatic_json)
     })
@@ -91,10 +98,18 @@ fn requires_cli_fallback(params: &ArchitectureParams) -> bool {
         || grouped_requested(params.group_by.as_deref())
 }
 
-fn architecture_options_from_params(
+pub(super) fn architecture_options_from_params(
     params: &ArchitectureParams,
     cancellation: Option<Arc<AtomicBool>>,
+    env: EnvSnapshot,
 ) -> ArchitectureOptions {
+    let call = typed_call(
+        TypedTool::CheckArchitecture,
+        shared_params!(params),
+        ToolProduction::global(params.production),
+        env,
+        cancellation,
+    );
     let changed_since = params
         .changed_since
         .as_deref()
@@ -103,12 +118,10 @@ fn architecture_options_from_params(
     ArchitectureOptions {
         shared_state: false,
         analysis: AnalysisOptions {
-            production: params.production.unwrap_or(false),
-            production_override: typed_production(params.production, ProductionAnalysis::DeadCode),
             changed_since,
             workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             explain: true,
-            ..shared_analysis_options(shared_params!(params), EnvScope::Ambient, cancellation)
+            ..call.analysis
         },
         files: params
             .file
@@ -251,6 +264,7 @@ mod tests {
                 ..ArchitectureParams::default()
             },
             None,
+            EnvSnapshot::capture(),
         );
         assert!(options.boundaries && !options.cycles && !options.policy);
         assert!(options.analysis.explain);
@@ -268,7 +282,9 @@ mod route_parity_tests {
             "check_architecture",
             &serde_json::json!({}),
             |params: ArchitectureParams| build_architecture_args(&params),
-            |params: ArchitectureParams| architecture_options_from_params(&params, None).analysis,
+            |params: ArchitectureParams| {
+                architecture_options_from_params(&params, None, EnvSnapshot::capture()).analysis
+            },
         );
     }
 }

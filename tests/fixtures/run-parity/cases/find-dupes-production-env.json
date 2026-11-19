@@ -1,0 +1,75 @@
+{
+  "name": "find-dupes-production-env",
+  "files": {
+    "package.json": "{}"
+  },
+  "env": {
+    "FALLOW_PRODUCTION_DUPES": "1"
+  },
+  "inputs": {
+    "mcp": {
+      "tool": "find_dupes",
+      "params": {}
+    },
+    "cli": {
+      "argv": [
+        "fallow",
+        "dupes",
+        "--no-fragments"
+      ]
+    },
+    "api": {
+      "entry": "duplication"
+    },
+    "node": {
+      "function": "detectDuplication"
+    },
+    "lsp": {
+      "initializationOptions": {}
+    },
+    "vscode": {
+      "settings": {},
+      "compare_keys": [
+        "production"
+      ]
+    }
+  },
+  "expected": {
+    "surface": "<row>",
+    "command": "dupes",
+    "analyses.duplication.production": {
+      "value": true,
+      "source": "environment:FALLOW_PRODUCTION_DUPES"
+    }
+  },
+  "deviations": {
+    "api": {
+      "reason": "The Rust API and the Node bindings read no FALLOW_PRODUCTION* variable",
+      "expected": {
+        "analyses.duplication.production": {
+          "value": false,
+          "source": "default:production-off"
+        }
+      }
+    },
+    "node": {
+      "reason": "The Rust API and the Node bindings read no FALLOW_PRODUCTION* variable",
+      "expected": {
+        "analyses.duplication.production": {
+          "value": false,
+          "source": "default:production-off"
+        }
+      }
+    },
+    "lsp": {
+      "reason": "The language server has one editor command, which plans dead code and duplication. The language server reads no FALLOW_PRODUCTION* variable",
+      "expected": {
+        "command": "editor",
+        "analyses.duplication.production": {
+          "value": false,
+          "source": "default:production-off"
+        }
+      }
+    }
+  }
+}

@@ -291,9 +291,8 @@ fn source_label(source: &Value) -> String {
 
 /// The argv of an MCP CLI route without the arguments that the MCP server
 /// adds to each command: `--format json`, `--quiet` and `--explain`.
-#[cfg(test)]
 #[must_use]
-fn normalize_mcp_cli_argv(argv: &[String]) -> Vec<String> {
+pub fn normalize_mcp_cli_argv(argv: &[String]) -> Vec<String> {
     let mut normalized = Vec::with_capacity(argv.len());
     let mut args = argv.iter().peekable();
     while let Some(arg) = args.next() {

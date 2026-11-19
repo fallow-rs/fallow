@@ -30,6 +30,7 @@ mod project_info;
 mod recommend;
 #[cfg(test)]
 mod route_parity;
+mod run_inputs;
 mod rust;
 mod security;
 mod semantic;

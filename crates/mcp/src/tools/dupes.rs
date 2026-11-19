@@ -3,9 +3,9 @@ use std::sync::atomic::AtomicBool;
 
 use crate::params::FindDupesParams;
 
+use fallow_api::run::EnvSnapshot;
 use fallow_api::{
-    AnalysisOptions, DuplicationOptions, ProductionAnalysis, run_duplication,
-    serialize_duplication_programmatic_json,
+    AnalysisOptions, DuplicationOptions, run_duplication, serialize_duplication_programmatic_json,
 };
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
@@ -13,13 +13,13 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use super::{
     VALID_DUPES_MODES,
     api_runtime::{
-        EnvScope, call_cancellation, json_success, non_empty_string, programmatic_error_body,
-        run_api_blocking, shared_analysis_options, shared_params, typed_production,
-        workspace_patterns_from_param,
+        call_cancellation, json_success, non_empty_string, programmatic_error_body,
+        run_api_blocking, shared_params, workspace_patterns_from_param,
     },
     duplication_mode_from_param,
     fallback_policy::{baseline_requested, duplication_needs_cli},
     min_occurrences_from_param, push_baseline, push_global, push_remote_extends, push_str_flag,
+    run_inputs::{ToolProduction, TypedTool, typed_call},
     run_tool, validation_error_body,
 };
 
@@ -37,7 +37,11 @@ pub async fn run_find_dupes(
     }
 
     let cancellation = call_cancellation();
-    let options = match duplication_options_from_params(&params, Some(Arc::clone(&cancellation))) {
+    let options = match duplication_options_from_params(
+        &params,
+        Some(Arc::clone(&cancellation)),
+        EnvSnapshot::capture(),
+    ) {
         Ok(options) => options,
         Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
     };
@@ -102,18 +106,25 @@ fn requires_cli_fallback(params: &FindDupesParams) -> bool {
         )
 }
 
-fn duplication_options_from_params(
+pub(super) fn duplication_options_from_params(
     params: &FindDupesParams,
     cancellation: Option<Arc<AtomicBool>>,
+    env: EnvSnapshot,
 ) -> Result<DuplicationOptions, String> {
+    let call = typed_call(
+        TypedTool::FindDupes,
+        shared_params!(params),
+        ToolProduction::default(),
+        env,
+        cancellation,
+    );
     Ok(DuplicationOptions {
         analysis: AnalysisOptions {
             changed_since: non_empty_string(params.changed_since.as_deref()),
             no_package_baselines: params.no_package_baselines.unwrap_or(false),
-            production_override: typed_production(None, ProductionAnalysis::Dupes),
             workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             explain: true,
-            ..shared_analysis_options(shared_params!(params), EnvScope::Ambient, cancellation)
+            ..call.analysis
         },
         mode: duplication_mode_from_param(params.mode.as_deref())?,
         near: params.near,
@@ -252,7 +263,8 @@ mod tests {
         };
 
         assert!(!requires_cli_fallback(&params));
-        let options = duplication_options_from_params(&params, None).expect("options");
+        let options = duplication_options_from_params(&params, None, EnvSnapshot::capture())
+            .expect("options");
         assert!(options.analysis.root.is_none());
         assert!(options.analysis.config_path.is_none());
         assert_eq!(
@@ -280,7 +292,8 @@ mod tests {
             mode: Some("SEMANTIC".to_string()),
             ..FindDupesParams::default()
         };
-        let err = duplication_options_from_params(&params, None).expect_err("invalid mode");
+        let err = duplication_options_from_params(&params, None, EnvSnapshot::capture())
+            .expect_err("invalid mode");
         assert!(err.contains("Invalid mode"));
     }
 
@@ -290,8 +303,8 @@ mod tests {
             min_occurrences: Some(1),
             ..FindDupesParams::default()
         };
-        let err =
-            duplication_options_from_params(&params, None).expect_err("invalid min occurrences");
+        let err = duplication_options_from_params(&params, None, EnvSnapshot::capture())
+            .expect_err("invalid min occurrences");
         assert!(err.contains("min_occurrences must be at least 2"));
     }
 
@@ -321,8 +334,12 @@ mod tests {
 
     #[test]
     fn fragments_are_opt_in_over_mcp() {
-        let default_options =
-            duplication_options_from_params(&FindDupesParams::default(), None).expect("options");
+        let default_options = duplication_options_from_params(
+            &FindDupesParams::default(),
+            None,
+            EnvSnapshot::capture(),
+        )
+        .expect("options");
         assert_eq!(default_options.include_fragments, Some(false));
 
         let requested = duplication_options_from_params(
@@ -331,6 +348,7 @@ mod tests {
                 ..FindDupesParams::default()
             },
             None,
+            EnvSnapshot::capture(),
         )
         .expect("options");
         assert_eq!(requested.include_fragments, Some(true));
@@ -410,7 +428,7 @@ mod route_parity_tests {
             &serde_json::json!({}),
             |params: FindDupesParams| build_find_dupes_args(&params).expect("argv"),
             |params: FindDupesParams| {
-                duplication_options_from_params(&params, None)
+                duplication_options_from_params(&params, None, EnvSnapshot::capture())
                     .expect("options")
                     .analysis
             },
