@@ -11,7 +11,7 @@ use fallow_types::sourced::{Given, Layer, Origin, Sourced};
 
 use crate::EngineResult;
 use crate::resolved_run::steps::{
-    ModeEntry, flatten_production, mode_entry, mode_entry_lossy,
+    GivenSettings, ModeEntry, flatten_production, mode_entry, mode_entry_lossy,
     validate_boundaries_and_rule_packs, validate_config,
 };
 pub(crate) use crate::resolved_run::steps::{collect_workspace_metadata, resolve_with_env_from};
@@ -261,6 +261,9 @@ pub(crate) enum DuplicationScope {
         config: Box<FallowConfig>,
         options: ResolveOptions,
         env: Box<EnvSnapshot>,
+        /// The settings that win over `env`. The session writes them on the
+        /// config after it resolves the config with `env`.
+        given: Box<GivenSettings>,
     },
 }
 
@@ -293,6 +296,7 @@ impl DuplicationScope {
             config: Box::new(dupes.config),
             options,
             env: Box::new(env.clone()),
+            given: Box::default(),
         }
     }
 }
@@ -547,7 +551,20 @@ pub fn config_for_project_analysis(
     config_path: Option<&Path>,
     options: ProjectConfigOptions,
 ) -> EngineResult<ProjectConfig> {
-    resolve_project_config_analysis(root, config_path, options).map(|(project, _)| project)
+    resolve_project_config_analysis(root, config_path, options, &EnvSnapshot::capture())
+        .map(|(project, _)| project)
+}
+
+/// [`config_for_project_analysis`] with the environment variables of `env`
+/// in place of the process environment.
+#[cfg(test)]
+pub(crate) fn config_for_project_analysis_with_env(
+    root: &Path,
+    config_path: Option<&Path>,
+    options: ProjectConfigOptions,
+    env: &EnvSnapshot,
+) -> EngineResult<ProjectConfig> {
+    resolve_project_config_analysis(root, config_path, options, env).map(|(project, _)| project)
 }
 
 /// Resolve project configuration and collect typed readiness diagnostics for
@@ -562,7 +579,7 @@ pub fn config_for_project_readiness(
     options: ProjectConfigOptions,
 ) -> EngineResult<ProjectConfigReadiness> {
     let (project, configured_plugin_paths) =
-        resolve_project_config_analysis(root, config_path, options)?;
+        resolve_project_config_analysis(root, config_path, options, &EnvSnapshot::capture())?;
     let configured_plugin_diagnostics =
         fallow_config::diagnose_configured_external_plugins(root, &configured_plugin_paths);
     Ok(ProjectConfigReadiness {
@@ -575,6 +592,7 @@ fn resolve_project_config_analysis(
     root: &Path,
     config_path: Option<&Path>,
     options: ProjectConfigOptions,
+    env: &EnvSnapshot,
 ) -> EngineResult<(ProjectConfig, Vec<String>)> {
     let file = load_config_file(
         root,
@@ -599,7 +617,7 @@ fn resolve_project_config_analysis(
         no_cache: options.no_cache,
         quiet: options.quiet,
     };
-    let entry = mode_entry(root, config, options, &EnvSnapshot::capture())?;
+    let entry = mode_entry(root, config, options, env)?;
     // The caller names one analysis and owns the production mode of each
     // other analysis, so a session of this config runs duplication only when
     // the caller found that the modes match.

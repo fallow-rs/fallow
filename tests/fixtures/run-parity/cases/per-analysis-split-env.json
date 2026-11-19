@@ -10,16 +10,9 @@
   },
   "expected": {
     "surface": "<row>",
+    "command": "audit",
     "analyses.dead_code.production": { "value": true, "source": "config-file:production.deadCode" },
     "analyses.duplication.production": { "value": false, "source": "config-file:production.dupes" },
     "analyses.health.production": { "value": true, "source": "environment:FALLOW_PRODUCTION_HEALTH" }
-  },
-  "deviations": {
-    "api": {
-      "reason": "The Rust API and the Node bindings read no FALLOW_PRODUCTION* variable",
-      "expected": {
-        "analyses.health.production": { "value": false, "source": "default:production-off" }
-      }
-    }
   }
 }

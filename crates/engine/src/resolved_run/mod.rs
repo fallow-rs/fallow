@@ -37,7 +37,7 @@ pub use pick::{PerAnalysis, ProductionInputs, decide_production};
 use crate::project_config::{DuplicationScope, ProductionModes, ResolveOptions};
 use crate::session::AnalysisSession;
 use crate::{EngineError, EngineResult};
-use steps::ModeEntry;
+use steps::{GivenSettings, ModeEntry};
 
 /// Every decision of one run, with its cause. The fields are private and the
 /// type has no `Default`, no `Clone` and no `&mut self` method, so a run
@@ -58,6 +58,8 @@ pub struct ResolvedRun {
     /// The mode entry of the analyses that run in production mode.
     on: Option<ModeEntry>,
     settings: RunSettings,
+    /// The settings that the surface gives and that win over the environment.
+    given: GivenSettings,
     /// The environment snapshot of the run, without the variables that the
     /// run does not read.
     env: EnvSnapshot,
@@ -328,7 +330,8 @@ impl Runnable<'_> {
         DuplicationScope::Own {
             config: Box::new(config),
             options: self.run.settings.resolve_options(),
-            env: Box::new(self.run.env.clone()),
+            env: Box::new(self.run.given.env_for_steps(&self.run.env)),
+            given: Box::new(self.run.given.clone()),
         }
     }
 }

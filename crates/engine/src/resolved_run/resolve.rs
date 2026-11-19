@@ -4,14 +4,14 @@ use std::path::{Path, PathBuf};
 
 use fallow_config::{
     AnalysisRequest, AnalysisSelection, CommandKind, ConfigFallback, EnvSnapshot, EnvVar,
-    FallowConfig, PlannedAnalysis, ResolvedConfig, RunCommand, RunInputs, RunPlan, RunRequest,
-    SelectionInput, Surface,
+    FallowConfig, PlannedAnalysis, RunCommand, RunInputs, RunPlan, RunRequest, SelectionInput,
+    Surface,
 };
 use fallow_types::sourced::{Given, Scope, Source, Sourced};
 
 use super::env_policy::applies;
 use super::pick::{PerAnalysis, ProductionInputs, decide_production};
-use super::steps::{self, ModeEntry};
+use super::steps::{self, GivenSettings, ModeEntry};
 use super::{AnalysisDecision, ResolvedRun, RunSettings, config_key_name, join_cwd, skip_key};
 use crate::project_config::{ConfigFile, ConfigFileOptions, ConfigLoadError, load_config_file};
 
@@ -191,6 +191,7 @@ fn resolve_with(inputs: &RunInputs, source: FileSource) -> Result<ResolvedRun, R
         env: &env,
         root: root.value(),
     };
+    let given = ctx.given_settings();
     let loaded = match source {
         FileSource::Load => ctx.load(config_path.as_ref()),
         FileSource::Inline(config) => ctx.inline(*config),
@@ -224,6 +225,7 @@ fn resolve_with(inputs: &RunInputs, source: FileSource) -> Result<ResolvedRun, R
         off,
         on,
         settings,
+        given,
         env,
         env_read,
         env_ignored,
@@ -507,40 +509,34 @@ impl Context<'_> {
             let mut config = file.clone();
             steps::flatten_production(&mut config, from_file, on);
             let options = settings.resolve_options();
+            let given = self.given_settings();
+            let env = given.env_for_steps(self.env);
             let mut entry = if lossy {
-                steps::mode_entry_lossy(self.root, config, options, self.env)
+                steps::mode_entry_lossy(self.root, config, options, &env)
             } else {
-                steps::mode_entry(self.root, config, options, self.env).map_err(|err| {
+                steps::mode_entry(self.root, config, options, &env).map_err(|err| {
                     ResolveError::Workspace {
                         message: err.to_string(),
                     }
                 })?
             };
-            self.apply_given_settings(&mut entry.config);
+            given.apply(&mut entry.config);
             Ok(Some(entry))
         };
         Ok((entry(false)?, entry(true)?))
     }
 
-    /// Apply the given settings that win over the environment.
-    fn apply_given_settings(&self, config: &mut ResolvedConfig) {
-        if let Some(given) = &self.inputs.max_file_size_mb {
-            config.max_file_size_bytes =
-                fallow_config::resolve_max_file_size_bytes(Some(given.value));
-        }
-        if let Some(given) = &self.inputs.cache_dir {
-            config.override_cache_dir(given.value.clone());
-        }
-        if let Some(given) = &self.inputs.include_entry_exports {
-            config.include_entry_exports = given.value;
-        }
-        if self
-            .inputs
-            .package_baselines
-            .as_ref()
-            .is_some_and(|given| !given.value)
-        {
-            config.workspace_changed_since.clear();
+    /// The given settings that win over the environment.
+    fn given_settings(&self) -> GivenSettings {
+        let inputs = self.inputs;
+        GivenSettings {
+            max_file_size_mb: inputs.max_file_size_mb.as_ref().map(|given| given.value),
+            cache_dir: inputs.cache_dir.as_ref().map(|given| given.value.clone()),
+            include_entry_exports: inputs
+                .include_entry_exports
+                .as_ref()
+                .map(|given| given.value),
+            package_baselines: inputs.package_baselines.as_ref().map(|given| given.value),
         }
     }
 }

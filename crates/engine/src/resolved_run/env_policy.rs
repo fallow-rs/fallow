@@ -15,7 +15,7 @@ struct ProductionRow {
 /// The rows of the production variables. A command that is in no row reads
 /// no production variable. The Rust API, the Node bindings and the language
 /// server read no production variable for any command.
-const PRODUCTION_ROWS: [ProductionRow; 7] = [
+const PRODUCTION_ROWS: [ProductionRow; 8] = [
     // Flags, then variables, then config: `crates/cli/src/lib.rs:1059`,
     // `crates/cli/src/dispatch_audit_inputs.rs:32`,
     // `crates/cli/src/dispatch.rs:1652`, `:1762`, `:2284`. MCP: the `analyze`,
@@ -82,8 +82,16 @@ const PRODUCTION_ROWS: [ProductionRow; 7] = [
         cli: false,
         mcp: false,
     },
-    // Config only or a local flag: `crates/cli/src/inspect.rs:321`,
-    // `crates/cli/src/coverage/analyze.rs:502`,
+    // The CLI starts each analysis of `inspect` as a child process that
+    // inherits the environment (`crates/cli/src/inspect.rs:917`), and
+    // `build_child_args` (`:954`) passes a production flag only when one is
+    // given. So the children read the variables.
+    ProductionRow {
+        commands: &[CommandKind::Inspect],
+        cli: true,
+        mcp: false,
+    },
+    // Config only or a local flag: `crates/cli/src/coverage/analyze.rs:502`,
     // `crates/cli/src/coverage/upload_common.rs:362`,
     // `crates/cli/src/guard.rs:28`, `crates/cli/src/rule_pack/list.rs:11`,
     // `crates/api/src/runtime/mutation.rs:233`,
@@ -93,7 +101,6 @@ const PRODUCTION_ROWS: [ProductionRow; 7] = [
     // `fallow.production` setting.
     ProductionRow {
         commands: &[
-            CommandKind::Inspect,
             CommandKind::CoverageAnalyze,
             CommandKind::CoverageUpload,
             CommandKind::Guard,
@@ -125,18 +132,43 @@ pub fn applies(var: EnvVar, surface: Surface, command: CommandKind) -> bool {
         | EnvVar::CacheMaxSize
         | EnvVar::PackageBaselines
         | EnvVar::ExtendsTimeoutSecs => true,
-        // The analysis scope of the MCP ambient fields.
-        EnvVar::ChangedSince | EnvVar::DiffFile => surface == Surface::Mcp,
-        // `docs/environment-variables.md:99`: the CLI and the MCP `audit` and
-        // `check_health` tools.
-        EnvVar::Coverage | EnvVar::CoverageRoot => matches!(surface, Surface::Cli | Surface::Mcp),
-        // `crates/api/src/runtime/type_aware_config.rs`, the audit base of
-        // `crates/api/src/audit_run/base_ref.rs`: every surface except the
-        // language server.
-        EnvVar::AuditBase
-        | EnvVar::TypeAware
-        | EnvVar::TypeAwareProjects
-        | EnvVar::TypeAwareRequire => surface != Surface::Lsp,
+        // The analysis scope of the MCP ambient fields
+        // (`crates/mcp/src/tools/api_runtime.rs:180`).
+        EnvVar::ChangedSince => surface == Surface::Mcp,
+        // MCP: `crates/mcp/src/tools/api_runtime.rs:116`. The CLI sets up the
+        // diff filter for every command (`crates/cli/src/cli_startup.rs:844`),
+        // and the filter reads the variable when no flag gives a diff
+        // (`crates/cli/src/report/ci/diff_filter.rs:150`).
+        EnvVar::DiffFile => matches!(surface, Surface::Cli | Surface::Mcp),
+        // `docs/environment-variables.md:99`: the `health`, bare, `audit` and
+        // `viz` CLI commands (`crates/cli/src/dispatch.rs:2179`), and the MCP
+        // `audit` and `check_health` tools
+        // (`crates/mcp/src/tools/api_runtime.rs:136`).
+        EnvVar::Coverage | EnvVar::CoverageRoot => coverage_applies(surface, command),
+        // Only the audit base of `crates/api/src/audit_run/base_ref.rs:64`
+        // reads it.
+        EnvVar::AuditBase => command == CommandKind::Audit,
+        // `crates/api/src/runtime/type_aware_config.rs:24`: every surface
+        // except the language server.
+        EnvVar::TypeAware => surface != Surface::Lsp,
+        // `crates/cli/src/check/mod.rs:906`, `crates/cli/src/health/mod.rs:541`.
+        EnvVar::TypeAwareProjects => surface == Surface::Cli,
+        // `crates/cli/src/check/mod.rs:914`, `crates/cli/src/health/mod.rs:553`,
+        // and the doctor of the API (`crates/api/src/doctor.rs:713`).
+        EnvVar::TypeAwareRequire => {
+            surface == Surface::Cli || (surface == Surface::Api && command == CommandKind::Doctor)
+        }
+    }
+}
+
+const fn coverage_applies(surface: Surface, command: CommandKind) -> bool {
+    match surface {
+        Surface::Cli => matches!(
+            command,
+            CommandKind::Health | CommandKind::Combined | CommandKind::Audit | CommandKind::Viz
+        ),
+        Surface::Mcp => matches!(command, CommandKind::Health | CommandKind::Audit),
+        Surface::Api | Surface::Node | Surface::Lsp => false,
     }
 }
 

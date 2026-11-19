@@ -278,6 +278,120 @@ fn input_errors_name_the_field() {
     ));
 }
 
+const MB: u64 = 1024 * 1024;
+
+/// A combined CLI run of `root` with the variables of `pairs`.
+fn combined_with_env(root: &Path, pairs: &[(&str, &str)]) -> RunInputs {
+    let mut inputs = RunInputs::new(
+        Surface::Cli,
+        EnvSnapshot::from_pairs(pairs, Some(root)),
+        CommandKind::Combined,
+        combined(root).selection,
+    );
+    inputs.threads = Some(given(2));
+    inputs
+}
+
+fn runnable(run: &ResolvedRun, analysis: PlannedAnalysis) -> super::Runnable<'_> {
+    match run.analysis(analysis) {
+        AnalysisSlot::Runs(runnable) => runnable,
+        AnalysisSlot::Skipped { .. } => panic!("{analysis:?} runs"),
+    }
+}
+
+/// The config that a dead-code session resolves for duplication, which runs
+/// in another production mode.
+fn own_duplication_config(run: &ResolvedRun) -> fallow_config::ResolvedConfig {
+    let session = runnable(run, PlannedAnalysis::DeadCode).open_session();
+    session
+        .own_duplication_config()
+        .expect("duplication has its own production mode")
+        .clone()
+}
+
+#[test]
+fn the_own_duplication_scope_keeps_the_given_settings() {
+    let (_dir, root) = project(Some(SPLIT_CONFIG));
+    let mut inputs = combined_with_env(&root, &[("FALLOW_MAX_FILE_SIZE", "5")]);
+    inputs.max_file_size_mb = Some(given(1));
+    inputs.cache_dir = Some(given(PathBuf::from("given-cache")));
+    inputs.include_entry_exports = Some(given(true));
+    let run = resolve(&inputs);
+    let dupes = runnable(&run, PlannedAnalysis::Duplication);
+    assert_eq!(dupes.config().max_file_size_bytes, Some(MB));
+    let own = own_duplication_config(&run);
+    assert!(!own.production);
+    assert_eq!(own.max_file_size_bytes, Some(MB));
+    assert_eq!(own.cache_dir, root.join("given-cache"));
+    assert!(own.include_entry_exports);
+    assert_eq!(own.cache_dir, dupes.config().cache_dir);
+}
+
+#[test]
+fn the_own_duplication_scope_reads_the_environment() {
+    let (_dir, root) = project(Some(SPLIT_CONFIG));
+    let run = resolve(&combined_with_env(
+        &root,
+        &[
+            ("FALLOW_MAX_FILE_SIZE", "5"),
+            ("FALLOW_CACHE_MAX_SIZE", "33"),
+        ],
+    ));
+    let own = own_duplication_config(&run);
+    assert_eq!(own.max_file_size_bytes, Some(5 * MB));
+    assert_eq!(own.cache_max_size_mb, Some(33));
+}
+
+/// A split production config with a package baseline.
+const BASELINE_CONFIG: &str = r#"{
+  "production": { "deadCode": true, "health": true, "dupes": false },
+  "workspaces": { "changedSince": { "packages/web": "main" } }
+}"#;
+
+fn baselines(run: &ResolvedRun) -> Vec<String> {
+    runnable(run, PlannedAnalysis::DeadCode)
+        .config()
+        .workspace_changed_since
+        .keys()
+        .cloned()
+        .collect()
+}
+
+#[test]
+fn a_given_package_baselines_wins_over_the_environment() {
+    let web = vec!["packages/web".to_owned()];
+    let (_dir, root) = project(Some(BASELINE_CONFIG));
+    let off = [("FALLOW_PACKAGE_BASELINES", "off")];
+
+    let run = resolve(&combined_with_env(&root, &off));
+    assert!(!*run.settings().package_baselines.value());
+    assert!(baselines(&run).is_empty(), "the variable clears the map");
+
+    let mut inputs = combined_with_env(&root, &off);
+    inputs.package_baselines = Some(given(true));
+    let run = resolve(&inputs);
+    assert!(*run.settings().package_baselines.value());
+    assert_eq!(baselines(&run), web);
+    assert_eq!(
+        own_duplication_config(&run)
+            .workspace_changed_since
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>(),
+        web
+    );
+
+    let mut inputs = combined_with_env(&root, &[]);
+    inputs.package_baselines = Some(given(false));
+    let run = resolve(&inputs);
+    assert!(baselines(&run).is_empty());
+    assert!(
+        own_duplication_config(&run)
+            .workspace_changed_since
+            .is_empty()
+    );
+}
+
 #[test]
 fn a_selection_error_does_not_fall_back() {
     let (_dir, root) = project(None);
