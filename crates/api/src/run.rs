@@ -195,8 +195,17 @@ pub(crate) fn resolve_route_run(
     entry: &ProgrammaticEntry,
     route: RouteSettings,
 ) -> ProgrammaticResult<ResolvedRun> {
+    resolve_route_run_raw(options, entry, route).map_err(|err| programmatic_error(&err))
+}
+
+/// [`resolve_route_run`] with the error of the resolver, for a runner that
+/// maps some errors to its own code.
+pub(crate) fn resolve_route_run_raw(
+    options: &AnalysisOptions,
+    entry: &ProgrammaticEntry,
+    route: RouteSettings,
+) -> Result<ResolvedRun, ResolveError> {
     fallow_engine::resolved_run::resolve_run(&run_inputs(options, entry, route))
-        .map_err(|err| programmatic_error(&err))
 }
 
 /// The names of one option on the Rust API and on the Node bindings.

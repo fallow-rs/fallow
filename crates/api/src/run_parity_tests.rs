@@ -1,6 +1,7 @@
 //! The Rust API row of the run parity matrix. The translator is
 //! [`resolve_programmatic_run`] on the options of a case, read through a
-//! test-local mirror of [`AnalysisOptions`] and [`ProgrammaticEntry`].
+//! test-local mirror of [`AnalysisOptions`] and [`ProgrammaticEntry`]. An
+//! audit case resolves through the steps of `run_audit`.
 
 use std::path::Path;
 
@@ -58,18 +59,45 @@ fn entry(name: &str, options: &ApiOptions) -> Option<ProgrammaticEntry> {
             production_health: options.production_health,
             production_dupes: options.production_dupes,
         },
-        "audit" => ProgrammaticEntry::Audit {
-            dead_code: options.dead_code,
-            duplication: options.duplication,
-            health: options.health,
-            production: options.audit_production,
-            production_dead_code: options.production_dead_code,
-            production_health: options.production_health,
-            production_dupes: options.production_dupes,
-        },
         _ => return None,
     };
     Some(entry)
+}
+
+/// The audit options of an `audit` input.
+fn audit_options(analysis: AnalysisOptions, options: &ApiOptions) -> crate::AuditOptions {
+    crate::AuditOptions {
+        analysis,
+        dead_code: options.dead_code,
+        duplication: options.duplication,
+        health: options.health,
+        production: options.audit_production,
+        production_dead_code: options.production_dead_code,
+        production_health: options.production_health,
+        production_dupes: options.production_dupes,
+        ..crate::AuditOptions::default()
+    }
+}
+
+/// The run of `analysis` for the entry `name`. An audit resolves through the
+/// steps of `run_audit`, which fold the audit options into the analysis
+/// options first.
+fn resolve(
+    name: &str,
+    analysis: AnalysisOptions,
+    options: &ApiOptions,
+) -> Result<ResolvedRun, String> {
+    let result = if name == "audit" {
+        let audit = audit_options(analysis, options);
+        let folded = crate::runtime::analysis_options_for_audit(&audit, "HEAD");
+        crate::runtime::resolve_audit_run(&audit, &folded)
+    } else {
+        let Some(entry) = entry(name, options) else {
+            return Err(format!("the row has no entry `{name}`"));
+        };
+        resolve_programmatic_run(&analysis, &entry)
+    };
+    result.map_err(|err| err.message)
 }
 
 /// The translator of the row, with a hook that changes the options before
@@ -88,9 +116,6 @@ fn translate_with(
         Ok(input) => input,
         Err(err) => return RowResult::Failed(format!("the api input does not parse: {err}")),
     };
-    let Some(entry) = entry(&input.entry, &input.options) else {
-        return RowResult::Failed(format!("the row has no entry `{}`", input.entry));
-    };
     let mut options = AnalysisOptions {
         root: Some(root.to_path_buf()),
         production: input.options.production,
@@ -105,9 +130,9 @@ fn translate_with(
         ..AnalysisOptions::default()
     };
     change(&mut options);
-    match resolve_programmatic_run(&options, &entry) {
+    match resolve(&input.entry, options, &input.options) {
         Ok(run) => RowResult::Run(Box::new(run)),
-        Err(err) => RowResult::Failed(err.message),
+        Err(message) => RowResult::Failed(message),
     }
 }
 

@@ -357,3 +357,64 @@ fn trace_export_refuses_every_type_aware_request() {
     assert_refused(trace(&type_aware, None), "typeAware.enabled");
     trace(&type_aware, Some(false)).expect("`Some(false)` keeps the trace syntactic");
 }
+
+/// An external plugin with an entry pattern outside the project root. The
+/// config parses, but it does not validate.
+const TRAVERSAL_PLUGIN: &str = r#"{ "name": "escape", "entryPoints": ["../outside/**"] }"#;
+
+/// An explicit trace request is refused before the config is read, so a
+/// config that does not parse does not hide the refusal.
+#[test]
+fn trace_refuses_a_type_aware_request_before_the_config_loads() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let broken = project(dir.path(), r#"{ "rules": "#);
+    let trace = run_trace_export(&TraceExportOptions {
+        analysis: AnalysisOptions {
+            type_aware: TypeAwareOptions {
+                enabled: Some(true),
+                ..TypeAwareOptions::default()
+            },
+            ..analysis(&broken)
+        },
+        file: "src/lib.ts".to_owned(),
+        export_name: "make".to_owned(),
+    });
+    assert_refused(trace.map(drop), "analysis.typeAware");
+}
+
+/// The refusal reads the parsed config, so a config that parses but does not
+/// validate gives the refusal and not the validation error.
+#[test]
+fn type_aware_refusal_comes_before_a_config_validation_error() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = project(dir.path(), r#"{"typeAware":{"enabled":true}}"#);
+    write(&root, ".fallow/plugins/escape.json", TRAVERSAL_PLUGIN);
+    assert_refused(
+        run_dead_code(&dead_code_options(&root)).map(drop),
+        "typeAware.enabled",
+    );
+    assert_refused(
+        run_circular_dependencies(&dead_code_options(&root)).map(drop),
+        "typeAware.enabled",
+    );
+    assert_refused(
+        run_boundary_violations(&dead_code_options(&root)).map(drop),
+        "typeAware.enabled",
+    );
+    assert_refused(health(&root), "typeAware.enabled");
+    for (dead_code, health) in [(true, true), (false, true), (true, false)] {
+        let combined = run_combined(&CombinedOptions {
+            analysis: analysis(&root),
+            dead_code,
+            health,
+            ..CombinedOptions::default()
+        });
+        assert_refused(combined.map(drop), "typeAware.enabled");
+    }
+    let trace = run_trace_export(&TraceExportOptions {
+        analysis: analysis(&root),
+        file: "src/lib.ts".to_owned(),
+        export_name: "make".to_owned(),
+    });
+    assert_refused(trace.map(drop), "typeAware.enabled");
+}

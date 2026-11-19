@@ -194,15 +194,26 @@ fn the_host_names_the_surface_and_the_origin() {
     );
 }
 
+/// The run of `run_audit` for `audit`, through the same steps.
+fn audit_run(audit: &crate::AuditOptions) -> ResolvedRun {
+    let analysis = crate::runtime::analysis_options_for_audit(audit, "HEAD");
+    crate::runtime::resolve_audit_run(audit, &analysis).expect("run")
+}
+
 #[test]
 fn audit_reads_audit_production_and_not_the_legacy_option() {
     let (_dir, root) = project(None);
-    let mut analysis = options(&root, Surface::Api, &[]);
-    analysis.production = true;
-    let run = resolve_programmatic_run(&analysis, &audit(false)).expect("run");
+    let mut audit = crate::AuditOptions {
+        analysis: options(&root, Surface::Api, &[]),
+        ..crate::AuditOptions::default()
+    };
+    audit.analysis.production = true;
+    let run = audit_run(&audit);
     assert!(!*run.production(PlannedAnalysis::DeadCode).value());
 
-    let run = resolve_programmatic_run(&analysis, &audit(true)).expect("run");
+    audit.production = true;
+    let run = audit_run(&audit);
+    assert!(*run.production(PlannedAnalysis::DeadCode).value());
     assert_eq!(
         run.production(PlannedAnalysis::DeadCode).source(),
         &Source::Given {
@@ -210,9 +221,15 @@ fn audit_reads_audit_production_and_not_the_legacy_option() {
         }
     );
 
-    analysis.production_override = Some(false);
-    let run = resolve_programmatic_run(&analysis, &audit(true)).expect("run");
+    audit.analysis.production_override = Some(false);
+    let run = audit_run(&audit);
     assert!(!*run.production(PlannedAnalysis::DeadCode).value());
+    assert_eq!(
+        run.production(PlannedAnalysis::DeadCode).source(),
+        &Source::Given {
+            origin: Origin::ApiOption("analysis.production_override")
+        }
+    );
 }
 
 #[test]

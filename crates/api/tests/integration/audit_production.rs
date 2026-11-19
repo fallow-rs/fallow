@@ -51,7 +51,12 @@ fn dead_code_text(root: &Path, audit_production: bool, analysis_production: bool
     })
     .and_then(serialize_audit_programmatic_json)
     .expect("audit runs");
-    output["dead_code"].to_string()
+    let dead_code = &output["dead_code"];
+    assert!(
+        dead_code["summary"].is_object(),
+        "the audit has no dead-code section: {output:#}"
+    );
+    dead_code.to_string()
 }
 
 #[test]

@@ -67,8 +67,7 @@ pub fn run_dead_code_with_baseline(
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
     resolved.install(|| {
         resolved.ensure_not_cancelled("config load and file discovery")?;
-        let run = resolve_dead_code_run(options, &ProgrammaticEntry::DeadCode)?;
-        reject_config_type_aware(options, &run)?;
+        let run = resolve_dead_code_run_refusing_type_aware(options, &resolved)?;
         run_dead_code_in_context(options, baseline, &resolved, &run)
     })
 }
@@ -88,17 +87,18 @@ pub(super) fn resolve_dead_code_run(
     )
 }
 
-/// `fallow dead-code` turns type-aware analysis on from the environment and
-/// `typeAware.enabled`. The typed route runs it only on request, see
-/// [`super::TYPE_AWARE_CONFIG_UNSUPPORTED`].
-fn reject_config_type_aware(
+/// The run of a dead-code route. `fallow dead-code` turns type-aware analysis
+/// on from the environment and `typeAware.enabled`. The typed route runs it
+/// only on request, see [`super::TYPE_AWARE_CONFIG_UNSUPPORTED`].
+fn resolve_dead_code_run_refusing_type_aware(
     options: &DeadCodeOptions,
-    run: &ResolvedRun,
-) -> ProgrammaticResult<()> {
-    super::type_aware_config::reject_config_type_aware(
+    resolved: &ProgrammaticAnalysisContext,
+) -> ProgrammaticResult<ResolvedRun> {
+    super::type_aware_config::resolve_run_refusing_type_aware(
         &options.analysis.type_aware,
-        run,
         super::type_aware_config::TypeAwareCommand::Analysis,
+        super::type_aware_config::ConfigLocation::of(resolved),
+        || resolve_dead_code_run(options, &ProgrammaticEntry::DeadCode),
     )
 }
 
@@ -352,8 +352,7 @@ fn run_dead_code_inner(
 ) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
     let start = Instant::now();
     resolved.ensure_not_cancelled("config load and file discovery")?;
-    let run = resolve_dead_code_run(options, &ProgrammaticEntry::DeadCode)?;
-    reject_config_type_aware(options, &run)?;
+    let run = resolve_dead_code_run_refusing_type_aware(options, resolved)?;
     let session = load_dead_code_session(options, resolved, &run)?;
     resolve_package_map_before_analysis(resolved, &session)?;
     run_dead_code_with_session(options, resolved, &session, None, post_filter, start)

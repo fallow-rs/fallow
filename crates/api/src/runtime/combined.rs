@@ -20,7 +20,10 @@ use crate::{
         audit_changed_applicable, default_workspace_ref, default_workspace_ref_for_workspaces,
         setup_pointer_applicable, suggestions_enabled,
     },
-    run::{AnalysisSlot, ProgrammaticEntry, ResolvedRun, RouteSettings, resolve_route_run},
+    run::{
+        AnalysisSlot, ProgrammaticEntry, ResolveError, ResolvedRun, RouteSettings,
+        resolve_route_run_raw,
+    },
 };
 
 use super::{
@@ -74,18 +77,21 @@ pub fn run_combined(options: &CombinedOptions) -> ProgrammaticResult<CombinedPro
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
     resolved.install(|| {
         resolved.ensure_not_cancelled("combined analysis")?;
-        let run = resolve_combined_run(options)?;
+        let resolve = || resolve_combined_run(options, &resolved);
         // Bare `fallow` makes dead code type-aware and adds type coupling to
         // health from config. The shared-session paths below do not pass
         // through the checks of `run_dead_code` and `run_health`, so the
         // check runs here.
-        if options.dead_code || options.health {
-            super::type_aware_config::reject_config_type_aware(
+        let run = if options.dead_code || options.health {
+            super::type_aware_config::resolve_run_refusing_type_aware(
                 &options.analysis.type_aware,
-                &run,
                 super::type_aware_config::TypeAwareCommand::Analysis,
-            )?;
-        }
+                super::type_aware_config::ConfigLocation::of(&resolved),
+                resolve,
+            )?
+        } else {
+            resolve()?
+        };
         let options = &options_with_run_plan(options, &run);
         let production_modes = run.production_modes();
         let prepared = prepare_combined_options(options, production_modes);
@@ -124,9 +130,14 @@ pub fn run_combined(options: &CombinedOptions) -> ProgrammaticResult<CombinedPro
     })
 }
 
-/// The run of a combined call.
-fn resolve_combined_run(options: &CombinedOptions) -> ProgrammaticResult<ResolvedRun> {
-    resolve_route_run(
+/// The run of a combined call. When the health analysis runs alone, a config
+/// that parses but does not validate gives the error of the health analysis,
+/// as `run_health` reports it.
+fn resolve_combined_run(
+    options: &CombinedOptions,
+    resolved: &crate::analysis_context::ProgrammaticAnalysisContext,
+) -> ProgrammaticResult<ResolvedRun> {
+    resolve_route_run_raw(
         &options.analysis,
         &ProgrammaticEntry::Combined {
             dead_code: options.dead_code,
@@ -140,6 +151,44 @@ fn resolve_combined_run(options: &CombinedOptions) -> ProgrammaticResult<Resolve
             include_entry_exports: options.include_entry_exports,
         },
     )
+    .map_err(|err| match err {
+        ResolveError::ConfigInvalid { .. } | ResolveError::Workspace { .. }
+            if health_runs_alone(options, resolved) =>
+        {
+            super::health_config_load_error()
+        }
+        _ => crate::run::programmatic_error(&err),
+    })
+}
+
+/// Whether the plan of the call runs the health analysis and no other. The
+/// plan of the duplication analysis reads only the parsed config file.
+fn health_runs_alone(
+    options: &CombinedOptions,
+    resolved: &crate::analysis_context::ProgrammaticAnalysisContext,
+) -> bool {
+    if options.dead_code || !options.health {
+        return false;
+    }
+    if !options.duplication {
+        return true;
+    }
+    let Ok(config) = super::load_config_file(
+        resolved.root(),
+        resolved.config_path().as_deref(),
+        resolved.allow_remote_extends(),
+    ) else {
+        return false;
+    };
+    let request = fallow_config::RunRequest::from_booleans(
+        fallow_config::RunCommand::Combined,
+        false,
+        true,
+        true,
+    );
+    !fallow_config::plan_run(config.unwrap_or_default().plan_sections(), request)
+        .duplication
+        .runs()
 }
 
 /// The options with the plan of the run: the run plans each analysis with

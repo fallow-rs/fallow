@@ -12,8 +12,8 @@ use std::path::{Path, PathBuf};
 use fallow_api::{
     AnalysisOptions, AuditOptions, CombinedOptions, ComplexityOptions, DeadCodeOptions,
     DuplicationOptions, FeatureFlagsOptions, ListBoundariesOptions, MutationRunOptions,
-    MutationRunScope, ProgrammaticError, ProjectInfoOptions, plan_mutation, run_audit,
-    run_combined, run_dead_code, run_duplication, run_feature_flags, run_health,
+    MutationRunScope, ProgrammaticError, ProjectInfoOptions, load_health_config, plan_mutation,
+    run_audit, run_combined, run_dead_code, run_duplication, run_feature_flags, run_health,
     run_list_boundaries, run_project_info,
 };
 
@@ -21,6 +21,9 @@ use crate::common::{commit, git, write};
 
 const BROKEN_CONFIG: &str = r#"{ "rules": "#;
 const CONFIG_FAILED: (&str, &str) = ("FALLOW_CONFIG_LOAD_FAILED", "analysis.configPath");
+/// An external plugin with an entry pattern outside the project root. The
+/// config parses, but it does not validate.
+const TRAVERSAL_PLUGIN: &str = r#"{ "name": "escape", "entryPoints": ["../outside/**"] }"#;
 
 /// A git repository with two commits, so an audit has a base. `config` is the
 /// body of `.fallowrc.json` of the head commit.
@@ -208,4 +211,76 @@ fn a_broken_config_keeps_the_code_of_each_route() {
     })
     .expect_err("health fails");
     assert_pair("health", &health, ("FALLOW_HEALTH_FAILED", "fallow health"));
+}
+
+/// A config that parses but does not validate: an external plugin with an
+/// entry pattern outside the project root. Each route keeps the code of the
+/// step that finds the problem, as before the routes shared one run. The
+/// health analysis reports a config that does not load with its own code.
+#[test]
+fn an_invalid_config_keeps_the_code_of_each_route() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = project(dir.path(), Some(r#"{"health": {"maxCyclomatic": 7}}"#));
+    write(&root, ".fallow/plugins/escape.json", TRAVERSAL_PLUGIN);
+    let options = analysis(&root);
+    let health_failed = ("FALLOW_HEALTH_FAILED", "fallow health");
+
+    assert_pair("dead code", &dead_code(options.clone()), CONFIG_FAILED);
+    let combined = |dead_code: bool, duplication: bool, health: bool| {
+        run_combined(&CombinedOptions {
+            analysis: options.clone(),
+            dead_code,
+            duplication,
+            health,
+            ..CombinedOptions::default()
+        })
+        .expect_err("combined fails")
+    };
+    assert_pair("combined", &combined(true, true, true), CONFIG_FAILED);
+    assert_pair(
+        "combined duplication and health",
+        &combined(false, true, true),
+        CONFIG_FAILED,
+    );
+    assert_pair(
+        "combined health only",
+        &combined(false, false, true),
+        health_failed,
+    );
+    let health = run_health(&ComplexityOptions {
+        analysis: options.clone(),
+        complexity: true,
+        ..ComplexityOptions::default()
+    })
+    .expect_err("health fails");
+    assert_pair("health", &health, health_failed);
+
+    // `duplicates.enabled: false` leaves the health analysis alone.
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = project(dir.path(), Some(r#"{"duplicates": {"enabled": false}}"#));
+    write(&root, ".fallow/plugins/escape.json", TRAVERSAL_PLUGIN);
+    let combined = run_combined(&CombinedOptions {
+        analysis: analysis(&root),
+        dead_code: false,
+        ..CombinedOptions::default()
+    })
+    .expect_err("combined fails");
+    assert_pair(
+        "combined duplication off by config",
+        &combined,
+        health_failed,
+    );
+}
+
+/// The coverage layer of the typed health route reads the `health` section
+/// only, so a config that parses but does not validate gives that section.
+#[test]
+fn the_health_config_layer_reads_a_config_that_does_not_validate() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = project(dir.path(), Some(r#"{"health": {"maxCyclomatic": 7}}"#));
+    write(&root, ".fallow/plugins/escape.json", TRAVERSAL_PLUGIN);
+    let config = load_health_config(&analysis(&root))
+        .expect("the health section loads")
+        .expect("the project has a config file");
+    assert_eq!(config.max_cyclomatic, 7);
 }

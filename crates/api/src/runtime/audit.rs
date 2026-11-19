@@ -508,7 +508,7 @@ pub(super) fn resolve_audit_base_ref(
     })
 }
 
-fn analysis_options_for_audit(options: &AuditOptions, base_ref: &str) -> AnalysisOptions {
+pub fn analysis_options_for_audit(options: &AuditOptions, base_ref: &str) -> AnalysisOptions {
     let production_override = options
         .analysis
         .production_override
@@ -522,13 +522,16 @@ fn analysis_options_for_audit(options: &AuditOptions, base_ref: &str) -> Analysi
 }
 
 /// The run of one audit side, with the selection and the production options
-/// of `options`.
-fn resolve_audit_run(
+/// of `options`. The source of the mode names the option of the caller, not
+/// the value that [`analysis_options_for_audit`] folds `production` into.
+pub fn resolve_audit_run(
     options: &AuditOptions,
     analysis: &AnalysisOptions,
 ) -> ProgrammaticResult<ResolvedRun> {
+    let mut analysis = analysis.clone();
+    analysis.production_override = options.analysis.production_override;
     resolve_route_run(
-        analysis,
+        &analysis,
         &ProgrammaticEntry::Audit {
             dead_code: options.dead_code,
             duplication: options.duplication,
