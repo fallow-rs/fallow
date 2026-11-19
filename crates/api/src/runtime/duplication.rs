@@ -183,29 +183,24 @@ pub(super) fn load_duplication_session(
     Ok(super::dead_code::attach_cancellation(session, resolved))
 }
 
+/// The duplication config of a programmatic run: each option over the
+/// config, through [`DuplicatesConfig::merged_for_selected_run`].
 pub(super) fn build_dupes_config(
     options: &DuplicationOptions,
     config: &DuplicatesConfig,
 ) -> DuplicatesConfig {
-    DuplicatesConfig {
-        enabled: true,
-        mode: options.mode.map_or(config.mode, duplication_mode_to_config),
-        near: options.near.unwrap_or(config.near),
-        min_tokens: options.min_tokens.unwrap_or(config.min_tokens),
-        min_lines: options.min_lines.unwrap_or(config.min_lines),
-        min_occurrences: options.min_occurrences.unwrap_or(config.min_occurrences),
-        threshold: options.threshold.unwrap_or(config.threshold),
-        ignore: config.ignore.clone(),
-        ignored_clones: config.ignored_clones.clone(),
-        ignore_defaults: config.ignore_defaults,
-        skip_local: options.skip_local.unwrap_or(config.skip_local),
-        ignore_symlinks: options.ignore_symlinks.unwrap_or(config.ignore_symlinks),
-        cross_language: options.cross_language.unwrap_or(config.cross_language),
-        ignore_imports: options.ignore_imports.unwrap_or(config.ignore_imports),
-        normalization: config.normalization.clone(),
-        min_corpus_size_for_shingle_filter: config.min_corpus_size_for_shingle_filter,
-        min_corpus_size_for_token_cache: config.min_corpus_size_for_token_cache,
-    }
+    config.merged_for_selected_run(&fallow_config::DupesInputs {
+        mode: options.mode.map(duplication_mode_to_config),
+        near: options.near,
+        min_tokens: options.min_tokens,
+        min_lines: options.min_lines,
+        min_occurrences: options.min_occurrences,
+        threshold: options.threshold,
+        skip_local: options.skip_local,
+        cross_language: options.cross_language,
+        ignore_imports: options.ignore_imports,
+        ignore_symlinks: options.ignore_symlinks,
+    })
 }
 
 const fn duplication_mode_to_config(mode: DuplicationMode) -> DetectionMode {

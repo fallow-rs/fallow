@@ -5,6 +5,7 @@
 //! tool parameters into one [`RunInputs`]. The engine resolves the inputs,
 //! the config file and the [`EnvSnapshot`] into one decision per setting.
 
+mod dupes;
 mod env;
 
 use std::path::PathBuf;
@@ -13,6 +14,7 @@ use fallow_types::output_format::OutputFormat;
 use fallow_types::sourced::{Given, Origin};
 use serde::Serialize;
 
+pub use dupes::DupesInputs;
 pub use env::{EnvProblem, EnvSnapshot, EnvValue, EnvVar};
 
 use crate::{PlannedAnalysis, TypeAwareRequire};

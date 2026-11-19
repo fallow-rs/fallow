@@ -700,7 +700,7 @@ fn build_combined_dupes_options<'a>(
     opts: &'a CombinedOptions<'a>,
     dupes_cfg: &DuplicatesConfig,
 ) -> DupesOptions<'a> {
-    let overrides = &opts.dupes;
+    let merged = dupes_cfg.merged(&opts.dupes.inputs());
     DupesOptions {
         root: opts.root,
         config_path: opts.config_path,
@@ -711,26 +711,18 @@ fn build_combined_dupes_options<'a>(
         quiet: opts.quiet,
         allow_remote_extends: opts.allow_remote_extends,
         overrides: DupesOverrides {
-            mode: Some(
-                overrides
-                    .mode
-                    .unwrap_or_else(|| DupesMode::from(dupes_cfg.mode)),
-            ),
-            near: overrides.near || dupes_cfg.near,
-            min_tokens: Some(overrides.min_tokens.unwrap_or(dupes_cfg.min_tokens)),
-            min_lines: Some(overrides.min_lines.unwrap_or(dupes_cfg.min_lines)),
-            min_occurrences: Some(
-                overrides
-                    .min_occurrences
-                    .unwrap_or(dupes_cfg.min_occurrences),
-            ),
-            threshold: Some(overrides.threshold.unwrap_or(dupes_cfg.threshold)),
-            skip_local: overrides.skip_local || dupes_cfg.skip_local,
-            ignore_symlinks: overrides.ignore_symlinks,
-            cross_language: overrides.cross_language || dupes_cfg.cross_language,
+            mode: Some(DupesMode::from(merged.mode)),
+            near: merged.near,
+            min_tokens: Some(merged.min_tokens),
+            min_lines: Some(merged.min_lines),
+            min_occurrences: Some(merged.min_occurrences),
+            threshold: Some(merged.threshold),
+            skip_local: merged.skip_local,
+            ignore_symlinks: opts.dupes.ignore_symlinks,
+            cross_language: merged.cross_language,
             // `None` defers to config inside `build_dupes_config`; an explicit
             // `--dupes-no-ignore-imports` (`Some(false)`) overrides config.
-            ignore_imports: overrides.ignore_imports,
+            ignore_imports: opts.dupes.ignore_imports,
         },
         top: None,
         baseline_path: opts.dupes_baseline,

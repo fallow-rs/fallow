@@ -199,7 +199,7 @@ use fallow_config::DetectionMode;
 use fallow_config::DuplicatesConfig;
 use initialization::{
     LspDuplicationOptions, LspInitializationOptions, LspTypeAwareOptions,
-    parse_initialization_options,
+    invalid_initialization_options, parse_initialization_options,
 };
 use path_utils::canonicalize_for_lsp;
 #[cfg(test)]
@@ -427,6 +427,16 @@ impl LanguageServer for FallowLspServer {
 
         if let Some(opts) = &params.initialization_options {
             let parsed_options = parse_initialization_options(Some(opts));
+            for name in invalid_initialization_options(Some(opts)) {
+                self.client
+                    .log_message(
+                        MessageType::WARNING,
+                        format!(
+                            "the `{name}` initialization option does not parse and has no effect"
+                        ),
+                    )
+                    .await;
+            }
             *self.disabled_diagnostic_codes.write().await =
                 disabled_diagnostic_codes(&parsed_options);
 
