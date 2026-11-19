@@ -72,7 +72,7 @@ pub(super) fn resolve_audit_inputs(
     // and the run goes on.
     let dupes_off_by_duplicates_enabled = plan.duplication.off_by(ConfigKey::DuplicatesEnabled);
     if dupes_off_by_duplicates_enabled && args.dupes_baseline.is_some() {
-        eprintln!("{}", combined::INERT_DUPES_BASELINE_NOTE);
+        combined::note_inert_dupes_baseline(run.root().value(), output, dispatch.quiet);
     }
     let resolved_dupes_baseline = baseline(
         analyses.dupes,

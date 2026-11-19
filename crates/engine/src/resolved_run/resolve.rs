@@ -306,9 +306,24 @@ fn resolve_with(
         config_snapshot,
         decisions,
         settings,
-        off,
-        on,
+        mut off,
+        mut on,
     } = loaded;
+    let notices = super::notices::run_notices(&super::notices::NoticeInput {
+        root: root.value(),
+        env: &env,
+        file: &file,
+        config_file: &config_file,
+        fallback: fallback.as_ref(),
+    });
+    // Each session of the run carries the notices with the diagnostics of
+    // workspace discovery, so every output of the run holds them.
+    for entry in [off.as_mut(), on.as_mut()].into_iter().flatten() {
+        entry.workspace_diagnostics = fallow_types::workspace::merge_workspace_diagnostics(
+            std::mem::take(&mut entry.workspace_diagnostics),
+            notices.clone(),
+        );
+    }
     Ok(ResolvedRun {
         surface,
         command: inputs.command,
@@ -327,6 +342,7 @@ fn resolve_with(
         env_read,
         env_ignored,
         fallback,
+        notices,
         inputs: Box::new(inputs.clone()),
     })
 }

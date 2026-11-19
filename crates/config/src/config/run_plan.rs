@@ -19,6 +19,19 @@ pub enum PlannedAnalysis {
     Health,
 }
 
+impl PlannedAnalysis {
+    /// The name of the analysis in JSON output: `dead-code`, `duplication`
+    /// or `health`.
+    #[must_use]
+    pub const fn wire_name(self) -> &'static str {
+        match self {
+            Self::DeadCode => "dead-code",
+            Self::Duplication => "duplication",
+            Self::Health => "health",
+        }
+    }
+}
+
 /// How a run asks for one analysis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AnalysisRequest {

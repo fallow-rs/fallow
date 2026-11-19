@@ -222,6 +222,12 @@ pub struct AuditOutput<Verdict, Summary, Attribution, DeadCode, Duplication, Com
     /// the change has no diff-risk finding.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub diff_risk: Option<crate::DiffRiskReport>,
+    /// The run notices of the audit, such as a flag without effect or an
+    /// environment variable whose value the run ignores. The sub-analysis
+    /// sections carry the other workspace diagnostics. Absent when the run
+    /// has no notice.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
     /// Read-only follow-up commands computed from this run's findings. See
     /// `CheckOutput::next_steps` for the contract.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -668,6 +674,7 @@ mod tests {
                 duplication: None::<serde_json::Value>,
                 complexity: None::<serde_json::Value>,
                 diff_risk: None,
+                workspace_diagnostics: Vec::new(),
                 next_steps: Vec::new(),
             },
             Some("run-audit"),
@@ -678,6 +685,10 @@ mod tests {
         assert_eq!(value["command"], "audit");
         assert_eq!(value["dead_code"]["summary"]["total_issues"], 0);
         assert_eq!(value["_meta"]["telemetry"]["analysis_run_id"], "run-audit");
+        assert!(
+            value.get("workspace_diagnostics").is_none(),
+            "an audit without a run notice has no root member: {value}"
+        );
     }
 
     #[test]

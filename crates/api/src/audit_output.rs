@@ -129,8 +129,31 @@ pub struct AuditJsonOutputInput<DeadCode, Duplication, Complexity> {
     pub complexity: Option<Complexity>,
     /// Diff-risk findings; an empty report omits the section.
     pub diff_risk: fallow_output::DiffRiskReport,
+    /// The run notices of the audit; an empty list omits the root member.
+    /// See [`audit_run_notices`].
+    pub workspace_diagnostics: Vec<fallow_types::workspace::WorkspaceDiagnostic>,
     /// Suggested follow-up commands for the consumer.
     pub next_steps: Vec<NextStep>,
+}
+
+/// The run notices among the workspace diagnostics of the audit sections,
+/// once each, for the root `workspace_diagnostics` of the audit envelope.
+pub fn audit_run_notices<'a>(
+    sections: impl IntoIterator<Item = &'a [fallow_types::workspace::WorkspaceDiagnostic]>,
+) -> Vec<fallow_types::workspace::WorkspaceDiagnostic> {
+    sections
+        .into_iter()
+        .map(|diagnostics| {
+            diagnostics
+                .iter()
+                .filter(|diagnostic| diagnostic.kind.is_run_notice())
+                .cloned()
+                .collect()
+        })
+        .fold(
+            Vec::new(),
+            fallow_types::workspace::merge_workspace_diagnostics,
+        )
 }
 
 /// Typed audit SARIF assembly input.
@@ -280,6 +303,7 @@ where
         duplication: input.duplication,
         complexity,
         diff_risk: (!input.diff_risk.is_empty()).then_some(input.diff_risk),
+        workspace_diagnostics: input.workspace_diagnostics,
         next_steps: input.next_steps,
     };
     let mut value = fallow_output::serialize_audit_json_output(output, analysis_run_id)?;
@@ -650,6 +674,7 @@ mod tests {
                 duplication: None::<serde_json::Value>,
                 complexity: None::<serde_json::Value>,
                 diff_risk: fallow_output::DiffRiskReport::default(),
+                workspace_diagnostics: Vec::new(),
                 next_steps: Vec::new(),
             },
             Some("run-1"),

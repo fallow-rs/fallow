@@ -32,6 +32,8 @@ mod merge;
 mod plugin_text;
 #[path = "workspace_production_text.rs"]
 mod production_text;
+#[path = "workspace_run_notices.rs"]
+mod run_notices;
 
 pub use config_entry::{OVERRIDE_REASON_BASE_RULE_OFF, OVERRIDE_REASON_PROJECT_LEVEL};
 pub use merge::{dedupe_workspace_diagnostics, merge_workspace_diagnostics};
@@ -743,6 +745,55 @@ pub enum WorkspaceDiagnosticKind {
         /// The install state of this run.
         run_node_modules: NodeModulesState,
     },
+    /// A flag of the request had no effect on the run, for example
+    /// `--dupes-baseline` when the config turns the duplication analysis off,
+    /// or `--production` on a command that does not read the production mode.
+    /// The run goes on. `path` is the root. Not degraded: the run measured
+    /// what the config and the command ask for.
+    InertFlag {
+        /// The flag, as the user spelled it, such as `--dupes-baseline`.
+        flag: String,
+        /// The analysis that the flag is for: `dead-code`, `duplication` or
+        /// `health`.
+        analysis: String,
+        /// Why the flag has no effect, as a kebab-case token: `off-by-config`
+        /// (a config key turns the analysis off) or `not-read-by-command`.
+        /// The token set is open.
+        reason: String,
+        /// The config key that turns the analysis off, for `off-by-config`.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        key: Option<String>,
+    },
+    /// The discovered config did not load, validate or give workspace
+    /// metadata, so the run used the default config. Only a surface that
+    /// keeps running on a broken config, such as the language server, falls
+    /// back. `path` is the root.
+    ConfigLoadFellBack {
+        /// The error of the discovered config.
+        error: String,
+    },
+    /// Two or more config files exist in one directory. The run loaded the
+    /// file with the highest precedence and ignored the other one. One entry
+    /// per ignored file. `path` is the ignored file.
+    ConfigFileShadowed {
+        /// The file name that the run loaded.
+        used: String,
+        /// The file name that the run ignored.
+        ignored: String,
+    },
+    /// The `security.categories` config names a category that fallow does not
+    /// know, so the run ignores that entry. `path` is the root.
+    UnknownSecurityCategory {
+        /// The category id, as written in the config.
+        id: String,
+    },
+    /// An environment variable that the run reads has a value that fallow
+    /// cannot read, so the run ignores the variable. The entry holds the name
+    /// of the variable and never its value. `path` is the root.
+    EnvValueIgnored {
+        /// The name of the variable, such as `FALLOW_PRODUCTION`.
+        name: String,
+    },
 }
 
 /// Render a byte count as a megabyte figure with one decimal place for
@@ -1254,6 +1305,13 @@ fn render_message(root: &Path, path: &Path, kind: &WorkspaceDiagnosticKind) -> S
         | WorkspaceDiagnosticKind::TrendGroupBaselineUnavailable { .. }
         | WorkspaceDiagnosticKind::CoverageAutoDetected => {
             health_text::health_stage_message(&display, kind)
+        }
+        WorkspaceDiagnosticKind::InertFlag { .. }
+        | WorkspaceDiagnosticKind::ConfigLoadFellBack { .. }
+        | WorkspaceDiagnosticKind::ConfigFileShadowed { .. }
+        | WorkspaceDiagnosticKind::UnknownSecurityCategory { .. }
+        | WorkspaceDiagnosticKind::EnvValueIgnored { .. } => {
+            run_notices::run_notice_message(&display, kind)
         }
         WorkspaceDiagnosticKind::FlagAgeShallowClone => {
             "This is a shallow clone, so the flag retirement report gives no flag age. Run git \

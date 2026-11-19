@@ -7,6 +7,7 @@
 //! config per production mode.
 
 mod env_policy;
+mod notices;
 #[cfg(any(test, feature = "testing"))]
 pub mod parity;
 mod pick;
@@ -69,6 +70,8 @@ pub struct ResolvedRun {
     env_ignored: Vec<EnvVar>,
     /// The config error that made the run use the default config.
     fallback: Option<ResolveError>,
+    /// The notices of the run, as diagnostics at the root.
+    notices: Vec<fallow_config::WorkspaceDiagnostic>,
     /// The raw inputs of the run, for the base side of a comparison.
     inputs: Box<fallow_config::RunInputs>,
 }
@@ -244,6 +247,14 @@ impl ResolvedRun {
     /// workspace metadata.
     pub const fn fallback_error(&self) -> Option<&ResolveError> {
         self.fallback.as_ref()
+    }
+
+    /// The notices of the run: the decisions of the resolver that a surface
+    /// shows as one note each, such as an environment variable whose value
+    /// the run ignores. Each session of the run also carries them in its
+    /// workspace diagnostics.
+    pub fn notices(&self) -> &[fallow_config::WorkspaceDiagnostic] {
+        &self.notices
     }
 
     /// Whether a config input changed since the load or during the load: the

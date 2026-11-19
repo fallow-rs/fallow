@@ -55,6 +55,7 @@ impl crate::DispatchContext<'_> {
                         self.output,
                         self.quiet,
                     );
+                    self.note_inert_production(run);
                 }
                 Ok(run)
             }
@@ -103,6 +104,26 @@ impl crate::DispatchContext<'_> {
         crate::dispatch::resolve_coverage_inputs(coverage, coverage_root, self.output, health)
     }
 
+    /// `--production` on a trace of a path, a re-export chain or an error
+    /// has no effect: these commands read the production mode from the
+    /// config only.
+    fn note_inert_production(&self, run: &ResolvedRun) {
+        let reads_config_only = matches!(
+            run.command(),
+            CommandKind::TracePath | CommandKind::TraceChain | CommandKind::TraceError
+        );
+        if self.cli.production && reads_config_only {
+            crate::report::notices::record_inert_flag(
+                run.root().value(),
+                "--production",
+                PlannedAnalysis::DeadCode,
+                crate::report::notices::InertReason::NotReadByCommand,
+                self.output,
+                self.quiet,
+            );
+        }
+    }
+
     fn emit_resolve_error(&self, err: &ResolveError) -> ExitCode {
         let message = match err {
             ResolveError::NothingSelected { command, cause } => {
@@ -110,7 +131,7 @@ impl crate::DispatchContext<'_> {
                     && *cause == EmptyCause::Config
                     && self.cli.dupes_baseline.is_some()
                 {
-                    eprintln!("{}", crate::combined::INERT_DUPES_BASELINE_NOTE);
+                    crate::combined::note_inert_dupes_baseline(self.root, self.output, self.quiet);
                 }
                 nothing_selected_message(*command, *cause)
                     .map_or_else(|| err.message(), str::to_owned)

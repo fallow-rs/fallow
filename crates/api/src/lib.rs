@@ -86,9 +86,10 @@ pub use audit_output::{
     AuditAttribution, AuditCodeClimateOutputInput, AuditJsonHeaderInput, AuditJsonOutputInput,
     AuditSarifOutputInput, AuditSummary, AuditVerdict, attach_audit_diff_risk_attribution,
     attach_audit_duplication_demotion_attribution, attach_audit_styling_attribution,
-    attach_audit_wire_attribution, build_audit_codeclimate, build_audit_codeclimate_issues,
-    build_audit_header_json, build_audit_header_map, build_audit_sarif,
-    build_diff_risk_codeclimate, build_review_brief_header, serialize_audit_json,
+    attach_audit_wire_attribution, audit_run_notices, build_audit_codeclimate,
+    build_audit_codeclimate_issues, build_audit_header_json, build_audit_header_map,
+    build_audit_sarif, build_diff_risk_codeclimate, build_review_brief_header,
+    serialize_audit_json,
 };
 pub use combined_output::{
     CombinedCheckJsonSection, CombinedJsonOutputInput, serialize_combined_dupes_json,

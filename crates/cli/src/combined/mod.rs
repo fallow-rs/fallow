@@ -136,11 +136,21 @@ pub fn planned_lists(
     )
 }
 
-/// The note for a `--dupes-baseline` flag that reads no baseline, because
-/// `duplicates.enabled: false` turned the duplication analysis off. The run
-/// does not fail on the flag: it had an effect before the command read that
-/// key, so a CI script that passes it must keep its exit code.
-pub const INERT_DUPES_BASELINE_NOTE: &str = "Note: --dupes-baseline has no effect: duplicates.enabled is false in the config, so the duplication analysis does not run.";
+/// Record the inert-flag notice of a `--dupes-baseline` flag that reads no
+/// baseline, because `duplicates.enabled: false` turned the duplication
+/// analysis off. The run does not fail on the flag: it had an effect before
+/// the command read that key, so a CI script that passes it must keep its
+/// exit code.
+pub fn note_inert_dupes_baseline(root: &std::path::Path, output: OutputFormat, quiet: bool) {
+    crate::report::notices::record_inert_flag(
+        root,
+        "--dupes-baseline",
+        fallow_config::PlannedAnalysis::Duplication,
+        crate::report::notices::InertReason::OffByConfig("duplicates.enabled"),
+        output,
+        quiet,
+    );
+}
 
 /// Which analyses the bare `fallow` run executes.
 #[derive(Clone, Copy)]
@@ -158,12 +168,14 @@ pub struct BareAnalyses {
 /// the bare run. `--only dupes` names the analysis and runs it. The resolver
 /// fails a run that selects no analysis.
 pub fn bare_analyses(
-    cli: &crate::Cli,
+    dispatch: &crate::DispatchContext<'_>,
     run: &fallow_engine::resolved_run::ResolvedRun,
 ) -> BareAnalyses {
     let plan = crate::cli_production::run_plan(run);
-    if plan.duplication.off_by(ConfigKey::DuplicatesEnabled) && cli.dupes_baseline.is_some() {
-        eprintln!("{INERT_DUPES_BASELINE_NOTE}");
+    if plan.duplication.off_by(ConfigKey::DuplicatesEnabled)
+        && dispatch.cli.dupes_baseline.is_some()
+    {
+        note_inert_dupes_baseline(run.root().value(), dispatch.output, dispatch.quiet);
     }
     BareAnalyses {
         run_check: plan.dead_code.runs(),
@@ -179,7 +191,7 @@ pub fn begin_bare_run(
     dispatch: &crate::DispatchContext<'_>,
 ) -> Result<(crate::cli_production::PendingRun, BareAnalyses), ExitCode> {
     let pending = dispatch.begin_run()?;
-    let analyses = bare_analyses(dispatch.cli, dispatch.checked_run(&pending)?);
+    let analyses = bare_analyses(dispatch, dispatch.checked_run(&pending)?);
     Ok((pending, analyses))
 }
 

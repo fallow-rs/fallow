@@ -60,6 +60,11 @@ impl WorkspaceDiagnosticKind {
             Self::OverrideRuleIneffective { .. } => "override-rule-ineffective",
             Self::RequestedRuleOff { .. } => "requested-rule-off",
             Self::BaselineInstallStateMismatch { .. } => "baseline-install-state-mismatch",
+            Self::InertFlag { .. } => "inert-flag",
+            Self::ConfigLoadFellBack { .. } => "config-load-fell-back",
+            Self::ConfigFileShadowed { .. } => "config-file-shadowed",
+            Self::UnknownSecurityCategory { .. } => "unknown-security-category",
+            Self::EnvValueIgnored { .. } => "env-value-ignored",
         }
     }
 
@@ -107,6 +112,7 @@ impl WorkspaceDiagnosticKind {
             | Self::CircularDependenciesAllowUnmatched { .. }
             | Self::OverrideRuleIneffective { .. }
             | Self::RequestedRuleOff { .. }
+            | Self::InertFlag { .. }
             | Self::NestedProjectRoot => false,
             Self::UndeclaredWorkspace
             | Self::MalformedPackageJson { .. }
@@ -140,7 +146,11 @@ impl WorkspaceDiagnosticKind {
             | Self::FlagAgeShallowClone
             | Self::FlagAgeUnavailable { .. }
             | Self::ProductionExcludedFileImported { .. }
-            | Self::BaselineInstallStateMismatch { .. } => true,
+            | Self::BaselineInstallStateMismatch { .. }
+            | Self::ConfigLoadFellBack { .. }
+            | Self::ConfigFileShadowed { .. }
+            | Self::UnknownSecurityCategory { .. }
+            | Self::EnvValueIgnored { .. } => true,
         }
     }
 
@@ -285,7 +295,12 @@ impl WorkspaceDiagnosticKind {
             | Self::CircularDependenciesAllowUnmatched { .. }
             | Self::OverrideRuleIneffective { .. }
             | Self::RequestedRuleOff { .. }
-            | Self::BaselineInstallStateMismatch { .. } => false,
+            | Self::BaselineInstallStateMismatch { .. }
+            | Self::InertFlag { .. }
+            | Self::ConfigLoadFellBack { .. }
+            | Self::ConfigFileShadowed { .. }
+            | Self::UnknownSecurityCategory { .. }
+            | Self::EnvValueIgnored { .. } => false,
         }
     }
 
@@ -355,7 +370,12 @@ impl WorkspaceDiagnosticKind {
             | Self::CircularDependenciesAllowUnmatched { .. }
             | Self::OverrideRuleIneffective { .. }
             | Self::RequestedRuleOff { .. }
-            | Self::BaselineInstallStateMismatch { .. } => false,
+            | Self::BaselineInstallStateMismatch { .. }
+            | Self::InertFlag { .. }
+            | Self::ConfigLoadFellBack { .. }
+            | Self::ConfigFileShadowed { .. }
+            | Self::UnknownSecurityCategory { .. }
+            | Self::EnvValueIgnored { .. } => false,
         }
     }
 
@@ -427,7 +447,12 @@ impl WorkspaceDiagnosticKind {
             | Self::CircularDependenciesAllowUnmatched { .. }
             | Self::OverrideRuleIneffective { .. }
             | Self::RequestedRuleOff { .. }
-            | Self::BaselineInstallStateMismatch { .. } => false,
+            | Self::BaselineInstallStateMismatch { .. }
+            | Self::InertFlag { .. }
+            | Self::ConfigLoadFellBack { .. }
+            | Self::ConfigFileShadowed { .. }
+            | Self::UnknownSecurityCategory { .. }
+            | Self::EnvValueIgnored { .. } => false,
         }
     }
 
@@ -500,7 +525,29 @@ impl WorkspaceDiagnosticKind {
             | Self::CircularDependenciesAllowUnmatched { .. }
             | Self::OverrideRuleIneffective { .. }
             | Self::RequestedRuleOff { .. }
-            | Self::BaselineInstallStateMismatch { .. } => false,
+            | Self::BaselineInstallStateMismatch { .. }
+            | Self::InertFlag { .. }
+            | Self::ConfigLoadFellBack { .. }
+            | Self::ConfigFileShadowed { .. }
+            | Self::UnknownSecurityCategory { .. }
+            | Self::EnvValueIgnored { .. } => false,
         }
+    }
+}
+
+impl WorkspaceDiagnosticKind {
+    /// Whether this kind is a notice of the run: a decision of the resolver
+    /// or a flag of the request, not a finding of a discovery or an analysis.
+    /// A surface shows these as one note each.
+    #[must_use]
+    pub const fn is_run_notice(&self) -> bool {
+        matches!(
+            self,
+            Self::InertFlag { .. }
+                | Self::ConfigLoadFellBack { .. }
+                | Self::ConfigFileShadowed { .. }
+                | Self::UnknownSecurityCategory { .. }
+                | Self::EnvValueIgnored { .. }
+        )
     }
 }

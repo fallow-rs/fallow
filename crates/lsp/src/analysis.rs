@@ -62,6 +62,9 @@ pub struct LoadedSession {
     /// The warning of a discovered config that did not load. The session
     /// then uses the default config with the editor settings.
     pub fallback_warning: Option<String>,
+    /// The log lines of the other run notices, such as a shadowed config
+    /// file: a warning for a notice that degrades the analysis.
+    pub notices: Vec<(MessageType, String)>,
 }
 
 /// Resolve the run of a project root and open its session. An explicit
@@ -88,10 +91,32 @@ pub fn load_project_session(
     let fallback_warning = run
         .fallback_error()
         .map(|err| config_load_error_detail(project_root, None, err.message()));
+    let notices = run
+        .notices()
+        .iter()
+        .filter(|notice| {
+            !matches!(
+                notice.kind,
+                fallow_config::WorkspaceDiagnosticKind::ConfigLoadFellBack { .. }
+            )
+        })
+        .map(|notice| {
+            let level = if notice.degrades_analysis {
+                MessageType::WARNING
+            } else {
+                MessageType::INFO
+            };
+            (
+                level,
+                format!("{}: {}", project_root.display(), notice.message),
+            )
+        })
+        .collect();
     Ok(LoadedSession {
         session,
         sources: ConfigSources::of(run),
         fallback_warning,
+        notices,
     })
 }
 
@@ -132,6 +157,7 @@ pub fn prewarm_sessions(input: &PrewarmInput) -> usize {
             mut session,
             sources,
             fallback_warning: None,
+            ..
         }) = load_project_session(project_root, &inputs)
         else {
             continue;
@@ -321,6 +347,7 @@ pub fn analyze_project_root(
             let loaded = load_project_session(input.project_root, &inputs)
                 .map_err(|detail| ProjectAnalysisError::failed(input.project_root, detail))?;
             input.parse_work.sessions_loaded += 1;
+            input.config_messages.extend(loaded.notices);
             (loaded.session, loaded.sources, loaded.fallback_warning)
         }
     };

@@ -15,6 +15,7 @@ mod human;
 mod json;
 mod markdown;
 pub(crate) mod mutation_evidence;
+pub(crate) mod notices;
 pub(crate) mod request_outcome_text;
 pub(crate) mod sarif;
 mod shared;

@@ -158,6 +158,7 @@ mod request_outcome_tests;
 mod requested_rule_off_tests;
 mod rule_pack_gdp_tests;
 mod rule_pack_tests;
+mod run_notice_tests;
 mod sarif_run_category_tests;
 mod schema_conformance;
 mod schema_tests;

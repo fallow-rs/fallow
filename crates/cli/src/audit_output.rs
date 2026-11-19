@@ -1246,6 +1246,7 @@ pub(super) fn build_audit_json_output(result: &AuditResult) -> Result<serde_json
             duplication,
             complexity,
             diff_risk: result.diff_risk.clone(),
+            workspace_diagnostics: crate::report::notices::audit_run_notices(result),
             next_steps: audit_next_steps(result),
         },
         crate::output_runtime::telemetry_analysis_run_id().as_deref(),

@@ -292,6 +292,23 @@ fn discovered_broken_workspace_glob_falls_back() {
 }
 
 #[test]
+fn a_shadowed_config_file_logs_a_warning_notice() {
+    let (_dir, root) = project();
+    std::fs::write(root.join(".fallowrc.json"), "{}").expect("config");
+    std::fs::write(root.join("fallow.toml"), "").expect("shadowed config");
+
+    let outcome = analyze(&root, &json!({}));
+
+    assert_eq!(outcome.result, Ok(()));
+    let warnings = outcome.warnings();
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(
+        warnings[0].contains("Two fallow config files exist"),
+        "{warnings:?}"
+    );
+}
+
+#[test]
 fn explicit_invalid_config_is_an_error() {
     let (_dir, root) = project();
     std::fs::write(root.join(".fallowrc.json"), INVALID_BOUNDARY_CONFIG).expect("config");

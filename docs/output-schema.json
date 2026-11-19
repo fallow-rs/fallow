@@ -258,6 +258,13 @@
           ],
           "description": "Diff-risk findings: facts about the change itself, such as weakened\ntests or added suppressions. Every finding is introduced. Absent when\nthe change has no diff-risk finding."
         },
+        "workspace_diagnostics": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/WorkspaceDiagnostic"
+          },
+          "description": "The run notices of the audit, such as a flag without effect or an\nenvironment variable whose value the run ignores. The sub-analysis\nsections carry the other workspace diagnostics. Absent when the run\nhas no notice."
+        },
         "next_steps": {
           "type": "array",
           "items": {
@@ -14103,6 +14110,118 @@
             "run_node_modules"
           ],
           "description": "The dead-code baseline was saved in a different install state than\nthis run: one of the two runs had `node_modules` and the other did not.\nFindings that need installed packages (dependency, unlisted,\nunresolved-import and script-binary findings) can differ, so the run\ncan report baseline findings as new. `path` is the baseline file.\n\nOnly a baseline that records its install state can report this. A\nlegacy baseline has no record, so the state is unknown."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "inert-flag"
+            },
+            "flag": {
+              "type": "string",
+              "description": "The flag, as the user spelled it, such as `--dupes-baseline`."
+            },
+            "analysis": {
+              "type": "string",
+              "description": "The analysis that the flag is for: `dead-code`, `duplication` or\n`health`."
+            },
+            "reason": {
+              "type": "string",
+              "description": "Why the flag has no effect, as a kebab-case token: `off-by-config`\n(a config key turns the analysis off) or `not-read-by-command`.\nThe token set is open."
+            },
+            "key": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "The config key that turns the analysis off, for `off-by-config`."
+            }
+          },
+          "required": [
+            "kind",
+            "flag",
+            "analysis",
+            "reason"
+          ],
+          "description": "A flag of the request had no effect on the run, for example\n`--dupes-baseline` when the config turns the duplication analysis off,\nor `--production` on a command that does not read the production mode.\nThe run goes on. `path` is the root. Not degraded: the run measured\nwhat the config and the command ask for."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "config-load-fell-back"
+            },
+            "error": {
+              "type": "string",
+              "description": "The error of the discovered config."
+            }
+          },
+          "required": [
+            "kind",
+            "error"
+          ],
+          "description": "The discovered config did not load, validate or give workspace\nmetadata, so the run used the default config. Only a surface that\nkeeps running on a broken config, such as the language server, falls\nback. `path` is the root."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "config-file-shadowed"
+            },
+            "used": {
+              "type": "string",
+              "description": "The file name that the run loaded."
+            },
+            "ignored": {
+              "type": "string",
+              "description": "The file name that the run ignored."
+            }
+          },
+          "required": [
+            "kind",
+            "used",
+            "ignored"
+          ],
+          "description": "Two or more config files exist in one directory. The run loaded the\nfile with the highest precedence and ignored the other one. One entry\nper ignored file. `path` is the ignored file."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "unknown-security-category"
+            },
+            "id": {
+              "type": "string",
+              "description": "The category id, as written in the config."
+            }
+          },
+          "required": [
+            "kind",
+            "id"
+          ],
+          "description": "The `security.categories` config names a category that fallow does not\nknow, so the run ignores that entry. `path` is the root."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "env-value-ignored"
+            },
+            "name": {
+              "type": "string",
+              "description": "The name of the variable, such as `FALLOW_PRODUCTION`."
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "description": "An environment variable that the run reads has a value that fallow\ncannot read, so the run ignores the variable. The entry holds the name\nof the variable and never its value. `path` is the root."
         }
       ],
       "description": "A diagnostic about a workspace-discovery candidate.\n\nThe `message` field is a human-readable rendering derived from `kind`. It\nalways ends with a concrete next step (\"fix the JSON syntax\", \"remove from\n`workspaces`\", \"add to `ignorePatterns`\") so first-time users have a path\nforward."
