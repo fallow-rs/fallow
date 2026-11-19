@@ -1,7 +1,7 @@
-//! The `FALLOW_PRODUCTION*` environment variables. The CLI and the typed MCP
-//! routes read them at their own boundary through [`ProductionEnv`], so both
-//! give one value the same meaning. The programmatic API and the Node bindings
-//! do not read them: their callers pass explicit options.
+//! The `FALLOW_PRODUCTION*` environment variables. The resolver of the engine
+//! reads them from the `EnvSnapshot` of a run and decides the production mode
+//! of each analysis. [`ProductionEnv`] parses the values from a lookup
+//! function; it does not read the process environment.
 
 use crate::ProductionAnalysis;
 
@@ -41,12 +41,6 @@ pub struct ProductionEnv {
 }
 
 impl ProductionEnv {
-    /// Read the variables from the environment of the process.
-    #[must_use]
-    pub fn from_process() -> Self {
-        Self::from_lookup(|name| std::env::var(name).ok())
-    }
-
     /// Read the variables through `lookup`, which returns the value of one
     /// variable.
     #[must_use]

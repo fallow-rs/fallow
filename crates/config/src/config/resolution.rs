@@ -524,16 +524,6 @@ fn hash_str(hasher: &mut xxhash_rust::xxh3::Xxh3, value: &str) {
 /// Environment variable that moves the persistent analysis cache.
 pub const CACHE_DIR_ENV: &str = "FALLOW_CACHE_DIR";
 
-/// Read the non-empty `FALLOW_CACHE_DIR` value from the process environment.
-///
-/// Every host that loads a project config (CLI, LSP, MCP, Node bindings)
-/// applies this value with [`ResolvedConfig::override_cache_dir`], so the
-/// variable has one meaning on every surface. It wins over `cache.dir`.
-#[must_use]
-pub fn cache_dir_env_override() -> Option<PathBuf> {
-    std::env::var_os(CACHE_DIR_ENV).and_then(cache_dir_from_env_value)
-}
-
 /// Parse a raw `FALLOW_CACHE_DIR` value. An empty value is no override.
 #[must_use]
 pub fn cache_dir_from_env_value(raw: OsString) -> Option<PathBuf> {
@@ -546,7 +536,8 @@ pub fn cache_dir_from_env_value(raw: OsString) -> Option<PathBuf> {
 pub const CACHE_MAX_SIZE_ENV: &str = "FALLOW_CACHE_MAX_SIZE";
 
 /// Read `FALLOW_CACHE_MAX_SIZE` from the process environment. It wins over
-/// `cache.maxSizeMb` on every host, like [`cache_dir_env_override`].
+/// `cache.maxSizeMb` on every host, like `FALLOW_CACHE_DIR` wins over
+/// `cache.dir`.
 #[must_use]
 pub fn cache_max_size_env_override() -> Option<u32> {
     std::env::var_os(CACHE_MAX_SIZE_ENV)

@@ -520,9 +520,7 @@ impl Context<'_> {
     /// `explicit` is a config file with its source; `None` discovers the
     /// config from the root.
     fn load(&self, explicit: Option<(&Path, Source)>) -> Result<Loaded, ResolveError> {
-        let options = ConfigFileOptions {
-            allow_remote_extends: *self.allow_remote_extends().value(),
-        };
+        let options = ConfigFileOptions::new(*self.allow_remote_extends().value(), self.env);
         let ConfigFile {
             config,
             path,

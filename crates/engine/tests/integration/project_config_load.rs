@@ -97,9 +97,7 @@ fn load_with_trust(
         Wrapper::WithLoadOptions => config_for_project_with_load_options(
             root,
             config_path,
-            ConfigLoadOptions {
-                allow_remote_extends,
-            },
+            ConfigLoadOptions::new(allow_remote_extends),
         ),
         Wrapper::Analysis(analysis, production) => config_for_project_analysis(
             root,

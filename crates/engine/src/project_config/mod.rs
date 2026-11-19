@@ -502,9 +502,7 @@ fn load_project_config(
     let file = load_config_file(
         root,
         config_path,
-        ConfigFileOptions {
-            allow_remote_extends: load_options.allow_remote_extends,
-        },
+        ConfigFileOptions::new(load_options.allow_remote_extends, env),
     )?;
     let options = ResolveOptions::host_default();
     let duplication = DuplicationScope::for_dead_code_session(&file, production, options, env);
@@ -610,9 +608,7 @@ fn resolve_project_config_analysis(
     let file = load_config_file(
         root,
         config_path,
-        ConfigFileOptions {
-            allow_remote_extends: options.allow_remote_extends,
-        },
+        ConfigFileOptions::new(options.allow_remote_extends, env),
     )?
     .for_analysis(
         options.analysis,

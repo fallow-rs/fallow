@@ -43,11 +43,6 @@ const NAME_OWNERS: &[NameOwner] = &[
         why: "the constants of the cache and package baseline variables",
     },
     NameOwner {
-        path: "crates/config/src/config/parsing.rs",
-        literals: 1,
-        why: "the fetcher of a remote extends entry reads the timeout variable",
-    },
-    NameOwner {
         path: "crates/cli/src/schema/environment.rs",
         literals: 15,
         why: "the schema of the environment variables names each one",

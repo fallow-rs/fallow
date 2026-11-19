@@ -964,9 +964,7 @@ fn remote_parent_and_requested_url_secrets_are_redacted_in_errors() {
 
     let error = load_with_fetcher(
         &dir.path().join(".fallowrc.json"),
-        ConfigLoadOptions {
-            allow_remote_extends: true,
-        },
+        ConfigLoadOptions::new(true),
         &mut fetcher,
     )
     .unwrap_err()
@@ -1002,7 +1000,7 @@ fn remote_fetch_network_error_redacts_requested_url_and_source() {
     let url = "https://request-user:request-password@127.0.0.1:0/config.json?token=request-token#request-fragment";
     let source = "https://source-user:source-password@source.example/parent.json?token=source-token#source-fragment";
 
-    let error = fetch_url_config(url, source)
+    let error = fetch_url_config(url, source, ConfigLoadOptions::default().extends_timeout)
         .expect_err("the reserved local port must reject the request")
         .to_string();
 
@@ -1082,9 +1080,7 @@ fn remote_extends_dispatch_when_explicitly_allowed() {
 
     let config = load_with_fetcher(
         &dir.path().join(".fallowrc.json"),
-        ConfigLoadOptions {
-            allow_remote_extends: true,
-        },
+        ConfigLoadOptions::new(true),
         &mut fetcher,
     )
     .unwrap();
@@ -1107,9 +1103,7 @@ fn uppercase_https_remote_extends_dispatch_when_allowed() {
 
     let config = load_with_fetcher(
         &dir.path().join(".fallowrc.json"),
-        ConfigLoadOptions {
-            allow_remote_extends: true,
-        },
+        ConfigLoadOptions::new(true),
         &mut fetcher,
     )
     .unwrap();
@@ -1151,9 +1145,7 @@ fn remote_extends_diamond_reuses_mocked_base() {
 
     let config = load_with_fetcher(
         &dir.path().join(".fallowrc.json"),
-        ConfigLoadOptions {
-            allow_remote_extends: true,
-        },
+        ConfigLoadOptions::new(true),
         &mut fetcher,
     )
     .unwrap();
@@ -1188,9 +1180,7 @@ fn remote_extends_active_cycle_still_fails() {
 
     let error = load_with_fetcher(
         &dir.path().join(".fallowrc.json"),
-        ConfigLoadOptions {
-            allow_remote_extends: true,
-        },
+        ConfigLoadOptions::new(true),
         &mut fetcher,
     )
     .unwrap_err()
@@ -1224,9 +1214,7 @@ fn query_distinct_remote_extends_remain_distinct() {
 
     let config = load_with_fetcher(
         &dir.path().join(".fallowrc.json"),
-        ConfigLoadOptions {
-            allow_remote_extends: true,
-        },
+        ConfigLoadOptions::new(true),
         &mut fetcher,
     )
     .unwrap();
@@ -3262,7 +3250,7 @@ fn extract_extends_none() {
 
 #[test]
 fn url_timeout_default() {
-    let timeout = url_timeout();
+    let timeout = ConfigLoadOptions::default().extends_timeout;
     assert!(timeout.as_secs() <= 300, "Timeout should be reasonable");
 }
 
@@ -3813,18 +3801,18 @@ fn normalize_url_fragment_only_stripped() {
 // url_timeout: env var override
 // ------------------------------------------------------------------
 
-// These exercise the pure `url_timeout_from` parser rather than mutating the
+// These exercise the pure `extends_timeout_from_env_value` parser rather than mutating the
 // process-global env var, so they stay deterministic under parallel test
 // execution (an env-mutating version raced and failed on Windows CI).
 #[test]
 fn url_timeout_uses_env_var_when_set() {
-    assert_eq!(url_timeout_from(Some("15")).as_secs(), 15);
+    assert_eq!(extends_timeout_from_env_value(Some("15")).as_secs(), 15);
 }
 
 #[test]
 fn url_timeout_zero_falls_back_to_default() {
     assert_eq!(
-        url_timeout_from(Some("0")),
+        extends_timeout_from_env_value(Some("0")),
         Duration::from_secs(DEFAULT_URL_TIMEOUT_SECS),
         "zero should fall back to the hardcoded default"
     );
@@ -3833,7 +3821,7 @@ fn url_timeout_zero_falls_back_to_default() {
 #[test]
 fn url_timeout_non_numeric_falls_back_to_default() {
     assert_eq!(
-        url_timeout_from(Some("not-a-number")),
+        extends_timeout_from_env_value(Some("not-a-number")),
         Duration::from_secs(DEFAULT_URL_TIMEOUT_SECS),
         "non-numeric value should fall back to the hardcoded default"
     );
@@ -3842,7 +3830,7 @@ fn url_timeout_non_numeric_falls_back_to_default() {
 #[test]
 fn url_timeout_absent_uses_default() {
     assert_eq!(
-        url_timeout_from(None),
+        extends_timeout_from_env_value(None),
         Duration::from_secs(DEFAULT_URL_TIMEOUT_SECS)
     );
 }

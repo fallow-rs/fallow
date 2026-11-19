@@ -36,11 +36,44 @@ const HTTP_PREFIX: &str = "http://";
 /// Default timeout for fetching remote configs via URL extends.
 const DEFAULT_URL_TIMEOUT_SECS: u64 = 5;
 
-/// Host-controlled trust policy for loading a fallow config.
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+/// Host-controlled trust policy and fetch limit for loading a fallow config.
+///
+/// The default refuses remote `extends` entries and gives each fetch the
+/// default time limit.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[non_exhaustive]
 pub struct ConfigLoadOptions {
     /// Permit `https://` entries in the config inheritance graph.
     pub allow_remote_extends: bool,
+    /// The time limit of the fetch of one remote `extends` entry. The host
+    /// reads it from `FALLOW_EXTENDS_TIMEOUT_SECS` with
+    /// [`extends_timeout_from_env_value`].
+    pub extends_timeout: Duration,
+}
+
+impl ConfigLoadOptions {
+    /// The options with the trust policy `allow_remote_extends` and the
+    /// default time limit of a remote fetch.
+    #[must_use]
+    pub const fn new(allow_remote_extends: bool) -> Self {
+        Self {
+            allow_remote_extends,
+            extends_timeout: Duration::from_secs(DEFAULT_URL_TIMEOUT_SECS),
+        }
+    }
+
+    /// The options with `timeout` as the time limit of a remote fetch.
+    #[must_use]
+    pub const fn with_extends_timeout(mut self, timeout: Duration) -> Self {
+        self.extends_timeout = timeout;
+        self
+    }
+}
+
+impl Default for ConfigLoadOptions {
+    fn default() -> Self {
+        Self::new(false)
+    }
 }
 
 /// Detect config format from file extension.
@@ -410,15 +443,11 @@ fn starts_with_url_prefix(value: &str, prefix: &str) -> bool {
         .is_some_and(|candidate| candidate.eq_ignore_ascii_case(prefix))
 }
 
-/// Read the `FALLOW_EXTENDS_TIMEOUT_SECS` env var, falling back to [`DEFAULT_URL_TIMEOUT_SECS`].
-fn url_timeout() -> Duration {
-    url_timeout_from(std::env::var("FALLOW_EXTENDS_TIMEOUT_SECS").ok().as_deref())
-}
-
-/// Parse a raw `FALLOW_EXTENDS_TIMEOUT_SECS` value into a timeout, falling back
-/// to [`DEFAULT_URL_TIMEOUT_SECS`] for absent, zero, or non-numeric input. Pure
-/// so the parsing branches stay testable without mutating the process env.
-fn url_timeout_from(raw: Option<&str>) -> Duration {
+/// Parse a raw `FALLOW_EXTENDS_TIMEOUT_SECS` value into the time limit of a
+/// remote fetch. An absent, zero or non-numeric value gives the default limit
+/// of 5 seconds.
+#[must_use]
+pub fn extends_timeout_from_env_value(raw: Option<&str>) -> Duration {
     raw.and_then(|v| v.parse::<u64>().ok().filter(|&n| n > 0))
         .map_or(
             Duration::from_secs(DEFAULT_URL_TIMEOUT_SECS),
@@ -430,10 +459,13 @@ fn url_timeout_from(raw: Option<&str>) -> Duration {
 const MAX_URL_CONFIG_BYTES: u64 = 1024 * 1024;
 
 /// Fetch a remote JSON config from an HTTPS URL.
-fn fetch_url_config(url: &str, source: &str) -> Result<serde_json::Value, miette::Report> {
+fn fetch_url_config(
+    url: &str,
+    source: &str,
+    timeout: Duration,
+) -> Result<serde_json::Value, miette::Report> {
     let url_display = remote_config_display(url);
     let source_display = remote_config_display(source);
-    let timeout = url_timeout();
     let agent = ureq::Agent::config_builder()
         .timeout_global(Some(timeout))
         .https_only(true)
@@ -474,11 +506,15 @@ trait RemoteConfigFetcher {
     fn fetch(&mut self, url: &str, source: &str) -> Result<serde_json::Value, miette::Report>;
 }
 
-struct NetworkRemoteConfigFetcher;
+/// The fetcher of remote `extends` entries over HTTPS, with the time limit
+/// of one fetch.
+struct NetworkRemoteConfigFetcher {
+    timeout: Duration,
+}
 
 impl RemoteConfigFetcher for NetworkRemoteConfigFetcher {
     fn fetch(&mut self, url: &str, source: &str) -> Result<serde_json::Value, miette::Report> {
-        fetch_url_config(url, source)
+        fetch_url_config(url, source, self.timeout)
     }
 }
 
@@ -773,7 +809,7 @@ impl<'a, Fetcher: RemoteConfigFetcher> ExtendsResolver<'a, Fetcher> {
             return Err(miette::miette!(
                 "Remote config extends '{url_display}' is disabled by default. \
                  CLI users can pass --allow-remote-extends. Library callers can use \
-                 ConfigLoadOptions {{ allow_remote_extends: true }}"
+                 ConfigLoadOptions::new(true)"
             ));
         }
 
@@ -894,14 +930,11 @@ fn resolve_url_extends(
     _visited: &mut FxHashSet<String>,
     depth: usize,
 ) -> Result<serde_json::Value, miette::Report> {
-    let mut fetcher = NetworkRemoteConfigFetcher;
-    ExtendsResolver::new(
-        ConfigLoadOptions {
-            allow_remote_extends: true,
-        },
-        &mut fetcher,
-    )
-    .resolve_remote(url, depth)
+    let options = ConfigLoadOptions::new(true);
+    let mut fetcher = NetworkRemoteConfigFetcher {
+        timeout: options.extends_timeout,
+    };
+    ExtendsResolver::new(options, &mut fetcher).resolve_remote(url, depth)
 }
 
 fn sealed_config_dir(config_dir: &Path, sealed: bool) -> Result<Option<PathBuf>, miette::Report> {
@@ -975,8 +1008,11 @@ fn resolve_extends(
     _visited: &mut FxHashSet<String>,
     depth: usize,
 ) -> Result<serde_json::Value, miette::Report> {
-    let mut fetcher = NetworkRemoteConfigFetcher;
-    ExtendsResolver::new(ConfigLoadOptions::default(), &mut fetcher).resolve_local(path, depth)
+    let options = ConfigLoadOptions::default();
+    let mut fetcher = NetworkRemoteConfigFetcher {
+        timeout: options.extends_timeout,
+    };
+    ExtendsResolver::new(options, &mut fetcher).resolve_local(path, depth)
 }
 
 /// Collect every unknown key under `rules` or `overrides[].rules` in a merged
@@ -1319,7 +1355,9 @@ impl FallowConfig {
         path: &Path,
         options: ConfigLoadOptions,
     ) -> Result<Self, miette::Report> {
-        let mut fetcher = NetworkRemoteConfigFetcher;
+        let mut fetcher = NetworkRemoteConfigFetcher {
+            timeout: options.extends_timeout,
+        };
         load_with_fetcher(path, options, &mut fetcher)
     }
 
@@ -1336,12 +1374,7 @@ impl FallowConfig {
     #[must_use]
     pub fn local_source_files(path: &Path) -> Vec<PathBuf> {
         let mut fetcher = NoRemoteFetcher;
-        let mut resolver = ExtendsResolver::new(
-            ConfigLoadOptions {
-                allow_remote_extends: true,
-            },
-            &mut fetcher,
-        );
+        let mut resolver = ExtendsResolver::new(ConfigLoadOptions::new(true), &mut fetcher);
         let _ = resolver.resolve_local(path, 0);
         resolver.local_files
     }
@@ -1351,13 +1384,8 @@ impl FallowConfig {
     /// earlier one. A remote `https://` source is `None` and is not fetched.
     pub(super) fn merge_order(path: &Path) -> Option<Vec<Option<PathBuf>>> {
         let mut fetcher = NoRemoteFetcher;
-        let mut resolver = ExtendsResolver::new(
-            ConfigLoadOptions {
-                allow_remote_extends: true,
-            },
-            &mut fetcher,
-        )
-        .recording_merge_order();
+        let mut resolver = ExtendsResolver::new(ConfigLoadOptions::new(true), &mut fetcher)
+            .recording_merge_order();
         resolver.resolve_local(path, 0).ok()?;
         let sources = resolver
             .merge_order

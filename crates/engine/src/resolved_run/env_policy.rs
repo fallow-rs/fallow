@@ -128,8 +128,8 @@ pub fn applies(var: EnvVar, surface: Surface, command: CommandKind) -> bool {
         | EnvVar::ProductionDupes => production_applies(surface, command),
         // Every host applies them after resolution:
         // `crates/engine/src/project_config/mod.rs`, `apply_env_overrides_from`.
-        // The fetcher of a remote `extends` entry reads the timeout:
-        // `crates/config/src/config/parsing.rs:415`.
+        // Each config load passes the timeout of the snapshot to the fetcher
+        // of a remote `extends` entry: `ConfigFileOptions::new`.
         EnvVar::MaxFileSize
         | EnvVar::CacheDir
         | EnvVar::CacheMaxSize
