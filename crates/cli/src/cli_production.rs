@@ -310,3 +310,7 @@ const fn nothing_selected_message(command: CommandKind, cause: EmptyCause) -> Op
 #[cfg(test)]
 #[path = "selection_key_guard_tests.rs"]
 mod selection_key_guard_tests;
+
+#[cfg(test)]
+#[path = "config_load_guard_tests.rs"]
+mod config_load_guard_tests;

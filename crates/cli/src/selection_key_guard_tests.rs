@@ -143,7 +143,7 @@ fn read_key(read: &str) -> &str {
 /// Each Rust file under `crates` that holds tests only: a file in a `tests`
 /// folder, a file with `#![cfg(test)]`, and each file that a `#[cfg(test)]`
 /// module declaration pulls in, with the files that it declares in turn.
-fn test_sources() -> &'static FxHashSet<String> {
+pub(super) fn test_sources() -> &'static FxHashSet<String> {
     static TEST_SOURCES: std::sync::OnceLock<FxHashSet<String>> = std::sync::OnceLock::new();
     TEST_SOURCES.get_or_init(collect_test_sources)
 }
@@ -489,7 +489,7 @@ enum Token {
     Other,
 }
 
-fn is_cfg_test(attrs: &[syn::Attribute]) -> bool {
+pub(super) fn is_cfg_test(attrs: &[syn::Attribute]) -> bool {
     attrs.iter().any(|attr| {
         if !attr.path().is_ident("cfg") {
             return false;
