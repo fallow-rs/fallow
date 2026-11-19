@@ -263,12 +263,27 @@ Shared extraction result types live in `crates/types/src/extract.rs`.
   feed the security secret-source index, so MDX prose records a dotted chain
   only when its root is an import local of the file: prose never creates
   member accesses on foreign roots such as `process.env`.
+- A computed member access credits the members that its key can name
+  (`visit_impl_computed_keys.rs`, issue #4799). A key names members when it
+  is a string literal, a conditional of string literals, or an identifier
+  whose parameter or variable is typed as a union of string literals. The
+  receiver is an identifier or a static member chain such as `this.view`. A
+  key of another type can name any member, so the receiver is a whole-object
+  use. The visitor does not resolve scopes, so a typed key narrows only when
+  no other binding of its name can be the one that the key reads: a
+  parameter must be the only declaration of its name in its function, and a
+  variable must be the only declaration of its name in the file. A pass over
+  the program counts every binding identifier before the main walk. A
+  `catch` parameter, a hoisted `var`, a later `const`, an import or a
+  function name with the same name then keeps the whole-object use. A `const`
+  with a string literal value and no type annotation is no key binding.
 - A reference to an `import * as NS` local that the visitor cannot resolve to
   one member is a whole-object use, so the graph credits every export of the
   target instead of narrowing to the dotted accesses
   (`record_bare_namespace_reference` in
   `crates/extract/src/visitor/visit_impl.rs`). The resolved positions are the
-  exclusions: the object of a static or string-computed access, the root of a
+  exclusions: the object of a static access or of a computed access whose key
+  names members (see the computed member access rule), the root of a
   JSX member tag, the left side of a dotted type name, a destructure
   initializer, a re-export specifier local (which the graph credits through
   its own rule), and a placement in an object literal bound to a local, whose
