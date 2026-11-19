@@ -199,11 +199,11 @@ pub(super) struct BaseOwnConfigInput<'a> {
 /// `fallow_api::audit_run::AuditKeySnapshot::own_config_unused_code`).
 ///
 /// This second dead-code pass runs only when the change touched the config
-/// file of the head run. It returns `None` when the change did not touch it,
-/// when the base config does not resolve, when it gives dead code another
-/// production mode, and when the base config turns the `unused-files` or
-/// `unused-exports` rule off. Then the base pass with the
-/// head config is the only evidence. A finding of that pass in code that the
+/// file of the head run, with the dead-code production mode of the head run.
+/// It returns `None` when the change did not touch it, when the base config
+/// does not resolve, and when the base config turns the `unused-files` or
+/// `unused-exports` rule off. Then the base pass with the head config is the
+/// only evidence. A finding of that pass in code that the
 /// base config ignores also counts as unused under the base config (see
 /// `fallow_api::audit_run::own_config_unused_code_keys`).
 pub(super) fn base_own_config_unused_code(
@@ -226,7 +226,7 @@ pub(super) fn base_own_config_unused_code(
     }
     // With `--config`, the base config is the base version of that file. A
     // file that the change added has no base version, so discovery decides.
-    let run = runs::own_config_run(head, base_root)?;
+    let run = runs::own_config_run(head, base_root, opts.no_cache)?;
     let base_config_path = run.config_file().value().clone();
     let own_opts = build_base_audit_options(
         opts,

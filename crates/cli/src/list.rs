@@ -869,7 +869,14 @@ fn format_bytes(bytes: u64) -> String {
 ///
 /// The `explicit` flag distinguishes the two cases.
 fn print_workspace_data_human(root: &std::path::Path, ws: &WorkspaceData, explicit: bool) {
-    if ws.workspaces.is_empty() && ws.diagnostics.is_empty() {
+    // A run notice is a decision of the run, not of workspace discovery. The
+    // run already printed it as a note.
+    let diagnostics: Vec<_> = ws
+        .diagnostics
+        .iter()
+        .filter(|diagnostic| !diagnostic.kind.is_run_notice())
+        .collect();
+    if ws.workspaces.is_empty() && diagnostics.is_empty() {
         if explicit {
             eprintln!("No workspaces declared (single-package project).");
         }
@@ -890,13 +897,13 @@ fn print_workspace_data_human(root: &std::path::Path, ws: &WorkspaceData, explic
             crate::report::sink::stdoutln!("  {} -> {path_str}{suffix}", w.name);
         }
     }
-    if !ws.diagnostics.is_empty() {
+    if !diagnostics.is_empty() {
         eprintln!(
             "{} workspace discovery diagnostic{}:",
-            ws.diagnostics.len(),
-            if ws.diagnostics.len() == 1 { "" } else { "s" }
+            diagnostics.len(),
+            if diagnostics.len() == 1 { "" } else { "s" }
         );
-        for d in &ws.diagnostics {
+        for d in diagnostics {
             eprintln!("  - {}", d.message);
         }
     }

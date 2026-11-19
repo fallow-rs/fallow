@@ -19,7 +19,7 @@ mod view;
 
 pub use resolve::{
     BaseConfig, BaseSide, EmptyCause, InputField, InputProblem, ResolveError, resolve_base_run,
-    resolve_run,
+    resolve_base_run_with_head_decisions, resolve_run,
 };
 
 use std::path::{Path, PathBuf};

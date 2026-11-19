@@ -7,7 +7,8 @@ use fallow_config::{
     CommandKind, EnvSnapshot, PlannedAnalysis, RunInputs, SelectionInput, Surface,
 };
 use fallow_engine::resolved_run::{
-    BaseConfig, BaseSide, ResolvedRun, Runnable, resolve_base_run, resolve_run,
+    BaseConfig, BaseSide, ResolveError, ResolvedRun, Runnable,
+    resolve_base_run_with_head_decisions, resolve_run,
 };
 use fallow_types::sourced::{Given, Origin};
 use rustc_hash::FxHashSet;
@@ -75,10 +76,13 @@ pub(super) fn options_run(opts: &AuditOptions<'_>) -> Result<ResolvedRun, ExitCo
 
 /// The run of an audit side in a temporary worktree: the inputs of `head` on
 /// `root`, with the config file of the head run. A head run without a config
-/// file discovers the config from `root`. The run keeps its caches in the
-/// cache directory of the worktree that the audit lends the parse cache to,
-/// so a shared cache directory never gets the caches of a temporary root.
-/// `origin` names the flag that made the worktree: `--base` or `--staged`.
+/// file discovers the config from `root`. The run keeps the plan and the
+/// production modes of the head run, so the config of the worktree cannot
+/// turn an analysis off or change a production mode. The run keeps its caches
+/// in the cache directory of the worktree that the audit lends the parse
+/// cache to, so a shared cache directory never gets the caches of a temporary
+/// root. `origin` names the flag that made the worktree: `--base` or
+/// `--staged`.
 ///
 /// # Errors
 ///
@@ -90,8 +94,7 @@ pub(super) fn worktree_run(
     opts: &AuditOptions<'_>,
     origin: &'static str,
 ) -> Result<ResolvedRun, ExitCode> {
-    let cache_dir = (!opts.no_cache).then(|| flag(origin)(super::worktree_cache::cache_dir(root)));
-    resolve_base_run(head, base_side(root, BaseConfig::Head, cache_dir)).map_err(|err| {
+    worktree_side_run(head, root, opts.no_cache, origin).map_err(|err| {
         emit_input_error(
             &crate::cli_production::resolve_error_message(&err, None),
             opts.output,
@@ -99,15 +102,41 @@ pub(super) fn worktree_run(
     })
 }
 
+fn worktree_side_run(
+    head: &ResolvedRun,
+    root: &Path,
+    no_cache: bool,
+    origin: &'static str,
+) -> Result<ResolvedRun, ResolveError> {
+    resolve_base_run_with_head_decisions(
+        head,
+        worktree_side(root, origin, BaseConfig::Head, no_cache),
+    )
+}
+
 /// The base side of the own-config pass: the base copy of the config file of
-/// `head`. `None` when that config does not resolve, or when it gives the
-/// dead-code analysis another production mode than the head run. The base
+/// `head`, with the plan and the production modes of the head run, as the
+/// worktree side has them. `None` when that config does not resolve. The base
 /// pass with the head config is then the only evidence.
-pub(super) fn own_config_run(head: &ResolvedRun, base_root: &Path) -> Option<ResolvedRun> {
-    let side = base_side(base_root, BaseConfig::BaseCopy, None);
-    let run = resolve_base_run(head, side).ok()?;
-    let dead_code = PlannedAnalysis::DeadCode;
-    (run.production(dead_code).value() == head.production(dead_code).value()).then_some(run)
+pub(super) fn own_config_run(
+    head: &ResolvedRun,
+    base_root: &Path,
+    no_cache: bool,
+) -> Option<ResolvedRun> {
+    let side = worktree_side(base_root, "--base", BaseConfig::BaseCopy, no_cache);
+    resolve_base_run_with_head_decisions(head, side).ok()
+}
+
+/// The side of a worktree at `root`. Without `no_cache`, the side keeps its
+/// caches in the cache directory of the worktree.
+fn worktree_side(
+    root: &Path,
+    origin: &'static str,
+    config: BaseConfig,
+    no_cache: bool,
+) -> BaseSide {
+    let cache_dir = (!no_cache).then(|| flag(origin)(super::worktree_cache::cache_dir(root)));
+    base_side(root, config, cache_dir)
 }
 
 fn base_side(root: &Path, config: BaseConfig, cache_dir: Option<Given<PathBuf>>) -> BaseSide {
@@ -146,3 +175,7 @@ pub(super) fn canonical_changed_files(
         .collect();
     (canonical, files)
 }
+
+#[cfg(test)]
+#[path = "audit_runs_tests.rs"]
+mod tests;

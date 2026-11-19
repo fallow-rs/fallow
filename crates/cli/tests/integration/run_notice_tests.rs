@@ -201,3 +201,23 @@ fn production_on_trace_path_is_an_inert_flag_note() {
         output.stderr
     );
 }
+
+#[test]
+fn list_does_not_count_a_run_notice_as_a_workspace_diagnostic() {
+    let tmp = project("{}");
+    fs::create_dir_all(tmp.path().join("node_modules")).unwrap();
+    let root = root_arg(&tmp);
+    let output = run_fallow_raw_with_env(
+        &["list", "--root", &root],
+        &[("FALLOW_PRODUCTION", "maybe")],
+    );
+
+    assert_eq!(output.code, 0, "{}", output.stderr);
+    assert!(
+        !output.stderr.contains("workspace discovery diagnostic")
+            && !output.stderr.contains("No workspaces discovered")
+            && !output.stderr.contains("FALLOW_PRODUCTION"),
+        "{}",
+        output.stderr
+    );
+}

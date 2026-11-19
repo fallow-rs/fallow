@@ -38698,6 +38698,760 @@
         }
       ],
       "description": "The reason of a [`SkippedAnalysis`]."
+    },
+    "ResolvedRunView": {
+      "type": "object",
+      "properties": {
+        "schema_version": {
+          "description": "The schema version of this view.",
+          "$ref": "#/definitions/ResolvedRunViewSchemaVersion"
+        },
+        "kind": {
+          "description": "The kind discriminator: always `resolved-run`.",
+          "$ref": "#/definitions/ResolvedRunKind"
+        },
+        "surface": {
+          "description": "The surface that started the run.",
+          "$ref": "#/definitions/Surface"
+        },
+        "command": {
+          "description": "The command of the run.",
+          "$ref": "#/definitions/CommandKind"
+        },
+        "root": {
+          "description": "The project root.",
+          "$ref": "#/definitions/Sourced_for_string"
+        },
+        "config_file": {
+          "description": "The config file. `null` when the run uses the default config.",
+          "$ref": "#/definitions/Sourced_for_Nullable_string"
+        },
+        "analyses": {
+          "description": "The decisions of each analysis.",
+          "$ref": "#/definitions/AnalysesView"
+        },
+        "settings": {
+          "description": "The settings of the run.",
+          "$ref": "#/definitions/RunSettingsView"
+        },
+        "env": {
+          "description": "The environment variables of the run, by name. The view never holds a\nvalue.",
+          "$ref": "#/definitions/EnvView"
+        },
+        "fell_back": {
+          "type": "boolean",
+          "description": "Whether the run uses the default config because the discovered config\nfailed."
+        }
+      },
+      "required": [
+        "schema_version",
+        "kind",
+        "surface",
+        "command",
+        "root",
+        "config_file",
+        "analyses",
+        "settings",
+        "env",
+        "fell_back"
+      ],
+      "title": "fallow config --resolved --format json",
+      "description": "Every decision of one run, with the input that gave it."
+    },
+    "ResolvedRunViewSchemaVersion": {
+      "type": "integer",
+      "const": 1,
+      "description": "Schema projection for the exact version of the resolved run view."
+    },
+    "ResolvedRunKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "resolved-run",
+          "description": "The only value: `resolved-run`."
+        }
+      ],
+      "description": "The kind discriminator of [`ResolvedRunView`]."
+    },
+    "Surface": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "cli",
+          "description": "The `fallow` command line."
+        },
+        {
+          "type": "string",
+          "const": "api",
+          "description": "The Rust API of `fallow-api`."
+        },
+        {
+          "type": "string",
+          "const": "node",
+          "description": "The Node bindings."
+        },
+        {
+          "type": "string",
+          "const": "lsp",
+          "description": "The language server."
+        },
+        {
+          "type": "string",
+          "const": "mcp",
+          "description": "The MCP server."
+        }
+      ],
+      "description": "The surface that starts a run."
+    },
+    "CommandKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "combined",
+          "description": "The bare `fallow` run and the combined API route."
+        },
+        {
+          "type": "string",
+          "const": "audit",
+          "description": "`fallow audit`."
+        },
+        {
+          "type": "string",
+          "const": "dead-code",
+          "description": "`fallow dead-code` and the dead-code routes."
+        },
+        {
+          "type": "string",
+          "const": "dupes",
+          "description": "`fallow dupes` and the duplication routes."
+        },
+        {
+          "type": "string",
+          "const": "health",
+          "description": "`fallow health` and the health routes."
+        },
+        {
+          "type": "string",
+          "const": "list",
+          "description": "`fallow list`."
+        },
+        {
+          "type": "string",
+          "const": "fix",
+          "description": "`fallow fix`."
+        },
+        {
+          "type": "string",
+          "const": "watch",
+          "description": "`fallow watch`."
+        },
+        {
+          "type": "string",
+          "const": "viz",
+          "description": "`fallow viz`."
+        },
+        {
+          "type": "string",
+          "const": "flags",
+          "description": "`fallow flags`."
+        },
+        {
+          "type": "string",
+          "const": "suppressions",
+          "description": "`fallow suppressions`."
+        },
+        {
+          "type": "string",
+          "const": "trace-dependency",
+          "description": "`fallow trace` for a dependency."
+        },
+        {
+          "type": "string",
+          "const": "trace-path",
+          "description": "`fallow trace --path`."
+        },
+        {
+          "type": "string",
+          "const": "trace-chain",
+          "description": "`fallow trace` for a re-export chain."
+        },
+        {
+          "type": "string",
+          "const": "trace-error",
+          "description": "`fallow trace-error`."
+        },
+        {
+          "type": "string",
+          "const": "security",
+          "description": "`fallow security`."
+        },
+        {
+          "type": "string",
+          "const": "inspect",
+          "description": "`fallow inspect`."
+        },
+        {
+          "type": "string",
+          "const": "coverage-analyze",
+          "description": "`fallow coverage analyze`."
+        },
+        {
+          "type": "string",
+          "const": "coverage-upload",
+          "description": "`fallow coverage upload`."
+        },
+        {
+          "type": "string",
+          "const": "guard",
+          "description": "`fallow guard`."
+        },
+        {
+          "type": "string",
+          "const": "rule-pack",
+          "description": "`fallow rule-pack`."
+        },
+        {
+          "type": "string",
+          "const": "baselines-prune",
+          "description": "`fallow baselines prune`."
+        },
+        {
+          "type": "string",
+          "const": "mutation",
+          "description": "`fallow mutation`."
+        },
+        {
+          "type": "string",
+          "const": "similar-code",
+          "description": "`fallow similar-code`."
+        },
+        {
+          "type": "string",
+          "const": "plugin-check",
+          "description": "`fallow plugin-check`."
+        },
+        {
+          "type": "string",
+          "const": "decision-surface",
+          "description": "The MCP decision surface."
+        },
+        {
+          "type": "string",
+          "const": "doctor",
+          "description": "`fallow doctor`."
+        },
+        {
+          "type": "string",
+          "const": "editor",
+          "description": "An editor session of the language server."
+        }
+      ],
+      "description": "The command of a run. There is one variant per distinct rule for the\nenvironment variables and for the selection of analyses."
+    },
+    "Source": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "default"
+            },
+            "rule": {
+              "type": "string",
+              "description": "The name of the default."
+            }
+          },
+          "required": [
+            "kind",
+            "rule"
+          ],
+          "description": "A built-in default. `rule` names the default."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "derived"
+            },
+            "from": {
+              "type": "string",
+              "description": "The name of the decision or input."
+            }
+          },
+          "required": [
+            "kind",
+            "from"
+          ],
+          "description": "A value that follows from another decision or input. `from` names it."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "config-file"
+            },
+            "file": {
+              "type": "string",
+              "description": "The top config file."
+            },
+            "key": {
+              "type": "string",
+              "description": "The config key, for example `production.deadCode`."
+            }
+          },
+          "required": [
+            "kind",
+            "file",
+            "key"
+          ],
+          "description": "A key of the config file. `file` is the top file of the `extends`\nchain, because the merge of the chain keeps no file per key."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "environment"
+            },
+            "name": {
+              "type": "string",
+              "description": "The name of the variable, for example `FALLOW_PRODUCTION`."
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "description": "An environment variable."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "given"
+            },
+            "origin": {
+              "description": "The surface input.",
+              "$ref": "#/definitions/Origin"
+            }
+          },
+          "required": [
+            "kind",
+            "origin"
+          ],
+          "description": "A value that the caller gives."
+        }
+      ],
+      "description": "The input that gave a value."
+    },
+    "Origin": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "flag"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "description": "A CLI flag, for example `--production`."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "tool-param"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "description": "An MCP tool parameter, for example `production_dead_code`."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "editor-setting"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "description": "An editor setting, for example `fallow.production`."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "api-option"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "description": "An option of the Rust API, for example `analysis.production_override`."
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "const": "node-option"
+            },
+            "name": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "name"
+          ],
+          "description": "An option of the Node bindings, for example `production`."
+        }
+      ],
+      "description": "The surface input that gave a [`Layer::Given`] value. The name is the\nspelling of the input on that surface."
+    },
+    "Scope": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "global",
+          "description": "The input applies to every analysis, for example `--production`."
+        },
+        {
+          "type": "string",
+          "const": "analysis",
+          "description": "The input applies to one analysis, for example `--production-health`."
+        }
+      ],
+      "description": "The scope of an input. In one layer, an input of one analysis wins over an\ninput of every analysis."
+    },
+    "AnalysesView": {
+      "type": "object",
+      "properties": {
+        "dead_code": {
+          "description": "The dead-code analysis.",
+          "$ref": "#/definitions/AnalysisView"
+        },
+        "duplication": {
+          "description": "The duplication analysis.",
+          "$ref": "#/definitions/AnalysisView"
+        },
+        "health": {
+          "description": "The health analysis.",
+          "$ref": "#/definitions/AnalysisView"
+        }
+      },
+      "required": [
+        "dead_code",
+        "duplication",
+        "health"
+      ],
+      "description": "The decisions of each analysis."
+    },
+    "AnalysisView": {
+      "type": "object",
+      "properties": {
+        "selection": {
+          "description": "Whether the analysis runs.",
+          "$ref": "#/definitions/Sourced_for_SelectionView"
+        },
+        "production": {
+          "description": "The production mode of the analysis.",
+          "$ref": "#/definitions/Sourced_for_boolean"
+        }
+      },
+      "required": [
+        "selection",
+        "production"
+      ],
+      "description": "The decisions of one analysis."
+    },
+    "SelectionView": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "run",
+          "description": "The analysis runs."
+        },
+        {
+          "type": "string",
+          "const": "not-requested",
+          "description": "The request excludes the analysis."
+        },
+        {
+          "type": "string",
+          "const": "off-by-config",
+          "description": "A config key turns the analysis off."
+        }
+      ],
+      "description": "Whether an analysis runs, and why it does not."
+    },
+    "RunSettingsView": {
+      "type": "object",
+      "properties": {
+        "threads": {
+          "description": "The number of worker threads.",
+          "$ref": "#/definitions/Sourced_for_uint"
+        },
+        "no_cache": {
+          "description": "Whether the run bypasses the parse cache.",
+          "$ref": "#/definitions/Sourced_for_boolean"
+        },
+        "allow_remote_extends": {
+          "description": "Whether the `extends` chain can name `https://` entries.",
+          "$ref": "#/definitions/Sourced_for_boolean"
+        },
+        "max_file_size_bytes": {
+          "description": "The largest file to analyze, in bytes. `null` means no limit.",
+          "$ref": "#/definitions/Sourced_for_Nullable_uint64"
+        },
+        "cache_dir": {
+          "description": "The cache directory.",
+          "$ref": "#/definitions/Sourced_for_string"
+        },
+        "cache_max_size_mb": {
+          "description": "The size limit of the parse cache, in megabytes.",
+          "$ref": "#/definitions/Sourced_for_Nullable_uint32"
+        },
+        "package_baselines": {
+          "description": "Whether the run reads `workspaces.changedSince`.",
+          "$ref": "#/definitions/Sourced_for_boolean"
+        },
+        "include_entry_exports": {
+          "description": "Whether the run reports unused exports of entry files.",
+          "$ref": "#/definitions/Sourced_for_boolean"
+        }
+      },
+      "required": [
+        "threads",
+        "no_cache",
+        "allow_remote_extends",
+        "max_file_size_bytes",
+        "cache_dir",
+        "cache_max_size_mb",
+        "package_baselines",
+        "include_entry_exports"
+      ],
+      "description": "The settings of one run."
+    },
+    "EnvView": {
+      "type": "object",
+      "properties": {
+        "read": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The set variables that the run reads."
+        },
+        "ignored": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The set variables that the run ignores: a variable that the run does\nnot read on its surface and command, and a variable whose value the\nrun rejects, such as a production variable that is not a bool."
+        }
+      },
+      "required": [
+        "read",
+        "ignored"
+      ],
+      "description": "The environment variables of one run, by name."
+    },
+    "Sourced_for_string": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "string",
+          "description": "The value."
+        },
+        "source": {
+          "description": "The input that gave the value.",
+          "$ref": "#/definitions/Source"
+        },
+        "scope": {
+          "description": "The scope of that input.",
+          "$ref": "#/definitions/Scope"
+        }
+      },
+      "required": [
+        "value",
+        "source",
+        "scope"
+      ],
+      "description": "A value with the input that gave it and the scope of that input."
+    },
+    "Sourced_for_Nullable_string": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The value."
+        },
+        "source": {
+          "description": "The input that gave the value.",
+          "$ref": "#/definitions/Source"
+        },
+        "scope": {
+          "description": "The scope of that input.",
+          "$ref": "#/definitions/Scope"
+        }
+      },
+      "required": [
+        "source",
+        "scope"
+      ],
+      "description": "A value with the input that gave it and the scope of that input."
+    },
+    "Sourced_for_SelectionView": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "description": "The value.",
+          "$ref": "#/definitions/SelectionView"
+        },
+        "source": {
+          "description": "The input that gave the value.",
+          "$ref": "#/definitions/Source"
+        },
+        "scope": {
+          "description": "The scope of that input.",
+          "$ref": "#/definitions/Scope"
+        }
+      },
+      "required": [
+        "value",
+        "source",
+        "scope"
+      ],
+      "description": "A value with the input that gave it and the scope of that input."
+    },
+    "Sourced_for_boolean": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "boolean",
+          "description": "The value."
+        },
+        "source": {
+          "description": "The input that gave the value.",
+          "$ref": "#/definitions/Source"
+        },
+        "scope": {
+          "description": "The scope of that input.",
+          "$ref": "#/definitions/Scope"
+        }
+      },
+      "required": [
+        "value",
+        "source",
+        "scope"
+      ],
+      "description": "A value with the input that gave it and the scope of that input."
+    },
+    "Sourced_for_uint": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": "integer",
+          "description": "The value."
+        },
+        "source": {
+          "description": "The input that gave the value.",
+          "$ref": "#/definitions/Source"
+        },
+        "scope": {
+          "description": "The scope of that input.",
+          "$ref": "#/definitions/Scope"
+        }
+      },
+      "required": [
+        "value",
+        "source",
+        "scope"
+      ],
+      "description": "A value with the input that gave it and the scope of that input."
+    },
+    "Sourced_for_Nullable_uint64": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "The value."
+        },
+        "source": {
+          "description": "The input that gave the value.",
+          "$ref": "#/definitions/Source"
+        },
+        "scope": {
+          "description": "The scope of that input.",
+          "$ref": "#/definitions/Scope"
+        }
+      },
+      "required": [
+        "source",
+        "scope"
+      ],
+      "description": "A value with the input that gave it and the scope of that input."
+    },
+    "Sourced_for_Nullable_uint32": {
+      "type": "object",
+      "properties": {
+        "value": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "The value."
+        },
+        "source": {
+          "description": "The input that gave the value.",
+          "$ref": "#/definitions/Source"
+        },
+        "scope": {
+          "description": "The scope of that input.",
+          "$ref": "#/definitions/Scope"
+        }
+      },
+      "required": [
+        "source",
+        "scope"
+      ],
+      "description": "A value with the input that gave it and the scope of that input."
     }
   }
 }

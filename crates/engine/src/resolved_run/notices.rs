@@ -236,6 +236,23 @@ mod tests {
     }
 
     #[test]
+    fn a_fallback_notice_holds_no_absolute_path() {
+        let (_dir, root) = project(&[(".fallowrc.json", "{ not json")]);
+        let run = resolve(&root, Surface::Lsp, &[]);
+        let host = root.display().to_string();
+        let notice = serde_json::to_string(run.notices()).expect("notices serialize");
+        assert!(notice.contains(".fallowrc.json"), "{notice}");
+        assert!(!notice.contains(&host), "{notice}");
+        let super::super::AnalysisSlot::Runs(runnable) = run.analysis(PlannedAnalysis::DeadCode)
+        else {
+            panic!("dead code runs");
+        };
+        let session =
+            serde_json::to_string(runnable.workspace_diagnostics()).expect("diagnostics serialize");
+        assert!(!session.contains(&host), "{session}");
+    }
+
+    #[test]
     fn an_unknown_security_category_is_a_notice_in_each_session() {
         let (_dir, root) = project(&[(
             ".fallowrc.json",

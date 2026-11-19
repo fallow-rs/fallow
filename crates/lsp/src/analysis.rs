@@ -62,9 +62,6 @@ pub struct LoadedSession {
     /// The warning of a discovered config that did not load. The session
     /// then uses the default config with the editor settings.
     pub fallback_warning: Option<String>,
-    /// The log lines of the other run notices, such as a shadowed config
-    /// file: a warning for a notice that degrades the analysis.
-    pub notices: Vec<(MessageType, String)>,
 }
 
 /// Resolve the run of a project root and open its session. An explicit
@@ -91,8 +88,20 @@ pub fn load_project_session(
     let fallback_warning = run
         .fallback_error()
         .map(|err| config_load_error_detail(project_root, None, err.message()));
-    let notices = run
-        .notices()
+    Ok(LoadedSession {
+        session,
+        sources: ConfigSources::of(run),
+        fallback_warning,
+    })
+}
+
+/// The log lines of the run notices other than the config fallback, such as
+/// a shadowed config file: a warning for a notice that degrades the analysis.
+fn notice_messages(
+    project_root: &Path,
+    notices: &[fallow_config::WorkspaceDiagnostic],
+) -> impl Iterator<Item = (MessageType, String)> {
+    notices
         .iter()
         .filter(|notice| {
             !matches!(
@@ -100,7 +109,7 @@ pub fn load_project_session(
                 fallow_config::WorkspaceDiagnosticKind::ConfigLoadFellBack { .. }
             )
         })
-        .map(|notice| {
+        .map(move |notice| {
             let level = if notice.degrades_analysis {
                 MessageType::WARNING
             } else {
@@ -111,13 +120,6 @@ pub fn load_project_session(
                 format!("{}: {}", project_root.display(), notice.message),
             )
         })
-        .collect();
-    Ok(LoadedSession {
-        session,
-        sources: ConfigSources::of(run),
-        fallback_warning,
-        notices,
-    })
 }
 
 /// The run inputs of a project root: the editor settings and the
@@ -157,7 +159,6 @@ pub fn prewarm_sessions(input: &PrewarmInput) -> usize {
             mut session,
             sources,
             fallback_warning: None,
-            ..
         }) = load_project_session(project_root, &inputs)
         else {
             continue;
@@ -347,7 +348,6 @@ pub fn analyze_project_root(
             let loaded = load_project_session(input.project_root, &inputs)
                 .map_err(|detail| ProjectAnalysisError::failed(input.project_root, detail))?;
             input.parse_work.sessions_loaded += 1;
-            input.config_messages.extend(loaded.notices);
             (loaded.session, loaded.sources, loaded.fallback_warning)
         }
     };
@@ -374,6 +374,9 @@ pub fn analyze_project_root(
         |warning| (MessageType::WARNING, warning),
     );
     input.config_messages.push(message);
+    input
+        .config_messages
+        .extend(notice_messages(input.project_root, sources.notices()));
 
     let duplicates_config = input.duplication_options.map_or_else(
         || session.config().duplicates.clone(),

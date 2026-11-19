@@ -1,6 +1,6 @@
 //! The serializable view of a resolved run.
 
-use fallow_config::{AnalysisSelection, SkipReason};
+use fallow_config::{AnalysisSelection, SkipReason, WorkspaceDiagnosticKind};
 use fallow_output::{
     AnalysesView, AnalysisView, EnvView, RESOLVED_RUN_VIEW_SCHEMA_VERSION, ResolvedRunKind,
     ResolvedRunView, RunSettingsView, SelectionView,
@@ -55,11 +55,30 @@ impl ResolvedRun {
                 package_baselines: cloned(&settings.package_baselines),
                 include_entry_exports: cloned(&settings.include_entry_exports),
             },
-            env: EnvView {
-                read: self.env_read.iter().map(|var| var.name()).collect(),
-                ignored: self.env_ignored.iter().map(|var| var.name()).collect(),
-            },
+            env: self.env_view(),
             fell_back: self.fallback.is_some(),
         }
+    }
+
+    /// The variables by name. A variable that the run reads but whose value
+    /// it rejects is in `ignored`, as a variable that the run does not read.
+    fn env_view(&self) -> EnvView {
+        let rejected: Vec<&str> = self
+            .notices
+            .iter()
+            .filter_map(|notice| match &notice.kind {
+                WorkspaceDiagnosticKind::EnvValueIgnored { name } => Some(name.as_str()),
+                _ => None,
+            })
+            .collect();
+        let (ignored_values, read): (Vec<&'static str>, Vec<&'static str>) = self
+            .env_read
+            .iter()
+            .map(|var| var.name())
+            .partition(|name| rejected.contains(name));
+        let mut ignored: Vec<&'static str> =
+            self.env_ignored.iter().map(|var| var.name()).collect();
+        ignored.extend(ignored_values);
+        EnvView { read, ignored }
     }
 }

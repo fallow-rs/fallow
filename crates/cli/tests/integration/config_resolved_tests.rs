@@ -191,3 +191,82 @@ fn resolved_view_of_a_broken_config_is_a_structured_error() {
     let error = parse_json(&output);
     assert_eq!(error["error"], true, "{error:#}");
 }
+
+#[test]
+fn resolved_view_lists_a_rejected_value_as_ignored_and_prints_its_note() {
+    let tmp = project(&[]);
+    let output = config(&tmp, &["--resolved"], &[("FALLOW_PRODUCTION", "maybe")]);
+
+    assert_eq!(
+        output.code, 0,
+        "stdout: {}\nstderr: {}",
+        output.stdout, output.stderr
+    );
+    let view = parse_json(&output);
+    let names = |list: &str| -> Vec<&str> {
+        view["env"][list]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|name| name.as_str().unwrap())
+            .collect()
+    };
+    assert!(!names("read").contains(&"FALLOW_PRODUCTION"), "{view:#}");
+    assert!(names("ignored").contains(&"FALLOW_PRODUCTION"), "{view:#}");
+    assert!(
+        output
+            .stderr
+            .contains("Note: The value of FALLOW_PRODUCTION is not a bool"),
+        "{}",
+        output.stderr
+    );
+    assert!(!output.stdout.contains("maybe"), "{}", output.stdout);
+
+    let quiet = config(
+        &tmp,
+        &["--resolved", "--quiet"],
+        &[("FALLOW_PRODUCTION", "maybe")],
+    );
+    assert!(!quiet.stderr.contains("Note:"), "{}", quiet.stderr);
+}
+
+#[test]
+fn resolved_view_of_one_analysis_rejects_only_and_skip() {
+    let tmp = project(&[]);
+    for (for_command, flag) in [
+        ("dead-code", "--only"),
+        ("dupes", "--only"),
+        ("health", "--skip"),
+    ] {
+        let output = config(
+            &tmp,
+            &[
+                "--resolved",
+                "--for",
+                for_command,
+                flag,
+                "health",
+                "--format",
+                "json",
+            ],
+            &[],
+        );
+        assert_eq!(
+            output.code, 2,
+            "{for_command} {flag}\nstdout: {}\nstderr: {}",
+            output.stdout, output.stderr
+        );
+        let error = parse_json(&output);
+        assert_eq!(error["error"], true, "{error:#}");
+        assert!(
+            error["message"].as_str().unwrap().contains(flag),
+            "{error:#}"
+        );
+    }
+    let audit = config(
+        &tmp,
+        &["--resolved", "--for", "audit", "--only", "health"],
+        &[],
+    );
+    assert_eq!(audit.code, 0, "{}", audit.stderr);
+}

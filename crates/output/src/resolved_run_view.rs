@@ -9,10 +9,23 @@ use serde::Serialize;
 /// The schema version of [`ResolvedRunView`].
 pub const RESOLVED_RUN_VIEW_SCHEMA_VERSION: u32 = 1;
 
+/// Schema projection for the exact version of the resolved run view.
+#[cfg(feature = "schema")]
+#[expect(dead_code, reason = "schema-only type used by the field projection")]
+#[derive(schemars::JsonSchema)]
+#[schemars(extend("const" = RESOLVED_RUN_VIEW_SCHEMA_VERSION))]
+struct ResolvedRunViewSchemaVersion(u32);
+
 /// Every decision of one run, with the input that gave it.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(
+    feature = "schema",
+    schemars(title = "fallow config --resolved --format json")
+)]
 pub struct ResolvedRunView {
     /// The schema version of this view.
+    #[cfg_attr(feature = "schema", schemars(with = "ResolvedRunViewSchemaVersion"))]
     pub schema_version: u32,
     /// The kind discriminator: always `resolved-run`.
     pub kind: ResolvedRunKind,
@@ -38,6 +51,7 @@ pub struct ResolvedRunView {
 
 /// The kind discriminator of [`ResolvedRunView`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum ResolvedRunKind {
     /// The only value: `resolved-run`.
@@ -46,6 +60,7 @@ pub enum ResolvedRunKind {
 
 /// The decisions of each analysis.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AnalysesView {
     /// The dead-code analysis.
     pub dead_code: AnalysisView,
@@ -57,6 +72,7 @@ pub struct AnalysesView {
 
 /// The decisions of one analysis.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct AnalysisView {
     /// Whether the analysis runs.
     pub selection: Sourced<SelectionView>,
@@ -66,6 +82,7 @@ pub struct AnalysisView {
 
 /// Whether an analysis runs, and why it does not.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum SelectionView {
     /// The analysis runs.
@@ -78,6 +95,7 @@ pub enum SelectionView {
 
 /// The settings of one run.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct RunSettingsView {
     /// The number of worker threads.
     pub threads: Sourced<usize>,
@@ -99,10 +117,13 @@ pub struct RunSettingsView {
 
 /// The environment variables of one run, by name.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 pub struct EnvView {
     /// The set variables that the run reads.
     pub read: Vec<&'static str>,
-    /// The set variables that the run ignores on its surface and command.
+    /// The set variables that the run ignores: a variable that the run does
+    /// not read on its surface and command, and a variable whose value the
+    /// run rejects, such as a production variable that is not a bool.
     pub ignored: Vec<&'static str>,
 }
 

@@ -28,6 +28,7 @@ pub enum Layer {
 /// The scope of an input. In one layer, an input of one analysis wins over an
 /// input of every analysis.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(rename_all = "kebab-case")]
 pub enum Scope {
     /// The input applies to every analysis, for example `--production`.
@@ -39,6 +40,7 @@ pub enum Scope {
 /// The surface input that gave a [`Layer::Given`] value. The name is the
 /// spelling of the input on that surface.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", content = "name", rename_all = "kebab-case")]
 pub enum Origin {
     /// A CLI flag, for example `--production`.
@@ -55,6 +57,7 @@ pub enum Origin {
 
 /// The input that gave a value.
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum Source {
     /// A built-in default. `rule` names the default.
@@ -72,6 +75,7 @@ pub enum Source {
     ConfigFile {
         /// The top config file.
         #[serde(serialize_with = "crate::serde_path::serialize")]
+        #[cfg_attr(feature = "schema", schemars(with = "String"))]
         file: PathBuf,
         /// The config key, for example `production.deadCode`.
         key: &'static str,
@@ -104,9 +108,14 @@ impl Source {
 
 /// A value with the input that gave it and the scope of that input.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+#[cfg_attr(feature = "schema", schemars(rename = "Sourced_for_{T}"))]
 pub struct Sourced<T> {
+    /// The value.
     value: T,
+    /// The input that gave the value.
     source: Source,
+    /// The scope of that input.
     scope: Scope,
 }
 

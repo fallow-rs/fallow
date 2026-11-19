@@ -137,7 +137,7 @@ pub fn run_config_command(
     args: &crate::cli_args::ConfigArgs,
 ) -> ExitCode {
     if args.resolved {
-        return run_resolved_view(dispatch);
+        return run_resolved_view(dispatch, args);
     }
     run_config_with_options(RunConfigInput {
         root: dispatch.root,
@@ -155,10 +155,18 @@ pub fn run_config_command(
 /// Run `fallow config --resolved`: resolve the run of the command that
 /// `--for` names, without its side effects, and print the view of the run as
 /// JSON on stdout for each output format. A path under the root prints
-/// relative to the root. A resolve error prints as a structured error and
-/// gives exit code 2.
-pub fn run_resolved_view(dispatch: &crate::DispatchContext<'_>) -> ExitCode {
+/// relative to the root. The run notices print as notes on stderr when the
+/// user selected the human format. A resolve error, and `--only` or `--skip`
+/// with a `--for` command of one analysis, print as a structured error and
+/// give exit code 2.
+pub fn run_resolved_view(
+    dispatch: &crate::DispatchContext<'_>,
+    args: &crate::cli_args::ConfigArgs,
+) -> ExitCode {
     let output = dispatch.output;
+    if let Some(message) = single_analysis_list_error(args) {
+        return emit_input_error(&message, output);
+    }
     let Some(inputs) = dispatch.run_inputs else {
         return emit_input_error("this command resolves no run", output);
     };
@@ -176,6 +184,8 @@ pub fn run_resolved_view(dispatch: &crate::DispatchContext<'_>) -> ExitCode {
         Ok(view) => view,
         Err(e) => return emit_input_error(&format!("failed to serialize the run: {e}"), output),
     };
+    let notes = crate::cli_format::selected_output(dispatch.cli);
+    crate::report::notices::print_run_notices(run.notices(), notes, dispatch.quiet);
     relativize_paths(&mut view, run.root().value());
     match dispatch.json_style.serialize(&view) {
         Ok(json) => {
@@ -184,6 +194,29 @@ pub fn run_resolved_view(dispatch: &crate::DispatchContext<'_>) -> ExitCode {
         }
         Err(e) => emit_input_error(&format!("failed to serialize the run: {e}"), output),
     }
+}
+
+/// The error for `--only` or `--skip` with a `--for` command that runs one
+/// analysis: that command has no selection, so the flag would have no effect.
+fn single_analysis_list_error(args: &crate::cli_args::ConfigArgs) -> Option<String> {
+    use crate::cli_args::ForCommand;
+    let command = match args.for_command? {
+        ForCommand::Combined | ForCommand::Audit => return None,
+        ForCommand::DeadCode => "dead-code",
+        ForCommand::Dupes => "dupes",
+        ForCommand::Health => "health",
+    };
+    let flag = if !args.only.is_empty() {
+        "--only"
+    } else if !args.skip.is_empty() {
+        "--skip"
+    } else {
+        return None;
+    };
+    Some(format!(
+        "{flag} has no effect with --for {command}, because that command runs one analysis. \
+         Use --for combined or --for audit."
+    ))
 }
 
 /// Rewrite every path string under `root` relative to `root`. The `root`

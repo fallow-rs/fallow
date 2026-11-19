@@ -73,7 +73,7 @@ mod tests {
     }
 
     #[test]
-    fn only_the_inert_flag_does_not_degrade_the_run() {
+    fn the_inert_flag_and_the_unknown_security_category_do_not_degrade_the_run() {
         let notices = [
             WorkspaceDiagnosticKind::InertFlag {
                 flag: "--production".to_owned(),
@@ -94,7 +94,9 @@ mod tests {
             },
         ];
         let degrading: Vec<bool> = notices.iter().map(|kind| kind.warns_on_stderr()).collect();
-        assert_eq!(degrading, [false, true, true, true, true]);
+        // The run ignores an unknown category id, and each analysis runs on
+        // its full input, so the kind is not a reason to distrust findings.
+        assert_eq!(degrading, [false, true, true, false, true]);
         assert!(notices.iter().all(WorkspaceDiagnosticKind::is_run_notice));
         assert!(
             notices

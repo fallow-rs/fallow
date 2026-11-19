@@ -93,6 +93,12 @@ impl WorkspaceDiagnosticKind {
     /// not model. Its sibling `plugin-config-unreadable` answers true, because
     /// there a declaration the user wrote did not reach the analysis and
     /// findings can be wrong in either direction.
+    ///
+    /// `unknown-security-category` answers false for the first reason too:
+    /// the run ignores the unknown id and each analysis runs on its full
+    /// input. The run carries the kind in the diagnostics of every analysis,
+    /// so a true answer would mark a dead-code, duplication or health result
+    /// as degraded by a security setting.
     #[must_use]
     pub const fn warns_on_stderr(&self) -> bool {
         match self {
@@ -113,6 +119,7 @@ impl WorkspaceDiagnosticKind {
             | Self::OverrideRuleIneffective { .. }
             | Self::RequestedRuleOff { .. }
             | Self::InertFlag { .. }
+            | Self::UnknownSecurityCategory { .. }
             | Self::NestedProjectRoot => false,
             Self::UndeclaredWorkspace
             | Self::MalformedPackageJson { .. }
@@ -149,7 +156,6 @@ impl WorkspaceDiagnosticKind {
             | Self::BaselineInstallStateMismatch { .. }
             | Self::ConfigLoadFellBack { .. }
             | Self::ConfigFileShadowed { .. }
-            | Self::UnknownSecurityCategory { .. }
             | Self::EnvValueIgnored { .. } => true,
         }
     }

@@ -988,6 +988,11 @@ fn normalise_payload_paths(root: &Path, kind: WorkspaceDiagnosticKind) -> Worksp
                 error: normalise(error),
             }
         }
+        WorkspaceDiagnosticKind::ConfigLoadFellBack { error } => {
+            WorkspaceDiagnosticKind::ConfigLoadFellBack {
+                error: normalise(error),
+            }
+        }
         WorkspaceDiagnosticKind::GlobMatchedNoPackageJson { pattern } => {
             WorkspaceDiagnosticKind::GlobMatchedNoPackageJson {
                 pattern: canonical_glob_pattern(pattern),

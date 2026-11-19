@@ -68,9 +68,8 @@ use fallow_output::{
     SecuritySurvivorsSummary, SecurityUnresolvedCalleeDiagnostics,
     SecurityUnresolvedCalleeReasonCount, SecurityUnresolvedCalleeSample,
     SecurityUnresolvedCalleeTopFile, SecurityVerifierVerdict, SecurityVerifierVerdictStatus,
-    SimilarCodeCacheClearOutput, SimilarCodeCacheClearSchemaVersion, SimilarCodeInspectOutput,
-    SimilarCodeOutput, SimilarCodeReviewOutput, SimilarCodeStatusOutput,
-    SimilarCodeStatusSchemaVersion, SimilarCodeVerdictInput,
+    SimilarCodeCacheClearOutput, SimilarCodeInspectOutput, SimilarCodeOutput,
+    SimilarCodeReviewOutput, SimilarCodeStatusOutput, SimilarCodeVerdictInput,
     StandardReviewBriefOutput as ReviewBriefOutput, StandardWalkthroughGuide as WalkthroughGuide,
     SuppressionInventoryEntry, SuppressionInventoryFile, SuppressionInventoryLevel,
     SuppressionInventoryOrigin, SuppressionInventoryOutput, SuppressionInventorySchemaVersion,
@@ -1036,9 +1035,7 @@ fn register_similar_code_definitions(generator: &mut schemars::SchemaGenerator) 
     let _ = generator.subschema_for::<SimilarCodeReviewOutput>();
     let _ = generator.subschema_for::<SimilarCodeVerdictInput>();
     let _ = generator.subschema_for::<SimilarCodeStatusOutput>();
-    let _ = generator.subschema_for::<SimilarCodeStatusSchemaVersion>();
     let _ = generator.subschema_for::<SimilarCodeCacheClearOutput>();
-    let _ = generator.subschema_for::<SimilarCodeCacheClearSchemaVersion>();
 }
 
 fn register_health_action_definitions(generator: &mut schemars::SchemaGenerator) {
@@ -1107,6 +1104,7 @@ fn register_per_command_envelope_definitions(generator: &mut schemars::SchemaGen
     let _ = generator.subschema_for::<SemanticSymbolTrace>();
     let _ = generator.subschema_for::<SemanticSymbolImpact>();
     let _ = generator.subschema_for::<DoctorOutput>();
+    let _ = generator.subschema_for::<fallow_output::ResolvedRunView>();
     let _ = generator.subschema_for::<DoctorCheck>();
     let _ = generator.subschema_for::<DoctorCheckCategory>();
     let _ = generator.subschema_for::<DoctorCheckId>();

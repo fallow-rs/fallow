@@ -84,6 +84,29 @@ fn quiet_from_env() -> bool {
 }
 
 pub fn resolve_format(cli: &Cli) -> FormatConfig {
+    let (output, quiet, fail_on_issues) = selected_format(cli);
+    let output = resolve_command_output(cli, output);
+    let payload_is_json = command_payload_is_json(cli, output);
+
+    FormatConfig {
+        output,
+        payload_is_json,
+        quiet,
+        fail_on_issues,
+        json_style: resolve_json_style(cli),
+    }
+}
+
+/// The output format that the user selected, before a command that always
+/// prints JSON replaces it. `fallow config` prints JSON on stdout for each
+/// format, and prints its notes on stderr only for the human format.
+pub fn selected_output(cli: &Cli) -> OutputFormat {
+    selected_format(cli).0
+}
+
+/// The output format, the quiet mode and the fail-on-issues mode that the
+/// flags, `FALLOW_FORMAT`, `FALLOW_QUIET` and `--ci` select.
+fn selected_format(cli: &Cli) -> (OutputFormat, bool, bool) {
     let cli_format_was_explicit = std::env::args_os().any(|arg| {
         let a = arg.to_string_lossy();
         a == "--format"
@@ -100,23 +123,13 @@ pub fn resolve_format(cli: &Cli) -> FormatConfig {
     };
 
     let quiet = cli.quiet || quiet_from_env();
-    let (output, quiet, fail_on_issues) = apply_ci_defaults(
+    apply_ci_defaults(
         cli.ci,
         cli.fail_on_issues,
         format.into(),
         quiet,
         cli_format_was_explicit,
-    );
-    let output = resolve_command_output(cli, output);
-    let payload_is_json = command_payload_is_json(cli, output);
-
-    FormatConfig {
-        output,
-        payload_is_json,
-        quiet,
-        fail_on_issues,
-        json_style: resolve_json_style(cli),
-    }
+    )
 }
 
 fn resolve_json_style(cli: &Cli) -> JsonStyle {
