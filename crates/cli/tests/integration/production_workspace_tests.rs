@@ -256,31 +256,31 @@ fn audit_accepts_production_health_flag() {
     source.push_str("\n// touched for audit\n");
     std::fs::write(path, source).unwrap();
 
-    let output = run_fallow_raw(&[
-        "audit",
-        "--root",
-        dir.path().to_str().unwrap(),
-        "--base",
-        "HEAD",
-        "--production-health",
-        "--format",
-        "json",
-        "--quiet",
-    ]);
+    let complexity_findings = |extra: &[&str]| {
+        let root = dir.path().to_str().unwrap();
+        let mut args = vec!["audit", "--root", root, "--base", "HEAD"];
+        args.extend_from_slice(extra);
+        args.extend_from_slice(&["--format", "json", "--quiet"]);
+        let output = run_fallow_raw(&args);
+        assert!(
+            output.code == 0 || output.code == 1,
+            "{args:?}. stdout: {}\nstderr: {}",
+            output.stdout,
+            output.stderr
+        );
+        parse_json(&output)["complexity"]["findings"]
+            .as_array()
+            .cloned()
+            .expect("audit JSON has complexity findings")
+    };
     assert!(
-        output.code == 0 || output.code == 1,
-        "audit should accept --production-health. stdout: {}\nstderr: {}",
-        output.stdout,
-        output.stderr
+        !complexity_findings(&[]).is_empty(),
+        "audit without production mode reports the complex test file"
     );
-    let json = parse_json(&output);
-    let findings = json["health"]["findings"]
-        .as_array()
-        .cloned()
-        .unwrap_or_default();
+    let production = complexity_findings(&["--production-health"]);
     assert!(
-        findings.is_empty(),
-        "audit --production-health should exclude test complexity findings: {findings:?}"
+        production.is_empty(),
+        "audit --production-health should exclude test complexity findings: {production:?}"
     );
 }
 

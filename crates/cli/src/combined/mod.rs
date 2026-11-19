@@ -172,6 +172,17 @@ pub fn bare_analyses(
     }
 }
 
+/// The pending run of a bare `fallow` invocation and its analyses. The plan
+/// needs the run, so a config that fails validation stops the bare run here,
+/// before its flag checks.
+pub fn begin_bare_run(
+    dispatch: &crate::DispatchContext<'_>,
+) -> Result<(crate::cli_production::PendingRun, BareAnalyses), ExitCode> {
+    let pending = dispatch.begin_run()?;
+    let analyses = bare_analyses(dispatch.cli, dispatch.checked_run(&pending)?);
+    Ok((pending, analyses))
+}
+
 /// Resolve which dead-code findings the bare run reports from `--only` and
 /// `--skip`.
 ///

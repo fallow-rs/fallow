@@ -1651,8 +1651,8 @@ fn dispatch_list(dispatch: &DispatchContext<'_>, args: &ListDispatchArgs) -> Exi
 
 fn dispatch_check(dispatch: &DispatchContext<'_>, args: &CheckDispatchArgs) -> ExitCode {
     let cli = dispatch.cli;
-    let run = match dispatch.resolve_run() {
-        Ok(run) => run,
+    let pending = match dispatch.begin_run() {
+        Ok(pending) => pending,
         Err(code) => return code,
     };
     if let Some(code) = validate_type_aware_check_options(dispatch, args) {
@@ -1665,7 +1665,7 @@ fn dispatch_check(dispatch: &DispatchContext<'_>, args: &CheckDispatchArgs) -> E
     baseline_growth::run_gated(
         &dispatch.growth_ctx(baseline_growth::GrowthOwner::DeadCode),
         &growth_targets,
-        || dispatch_check_run(dispatch, args, &run),
+        || dispatch.with_run(&pending, |run| dispatch_check_run(dispatch, args, run)),
     )
 }
 
@@ -1763,8 +1763,8 @@ struct DupesDispatchArgs {
 
 fn dispatch_dupes(dispatch: &DispatchContext<'_>, args: &DupesDispatchArgs) -> ExitCode {
     let cli = dispatch.cli;
-    let run = match dispatch.resolve_run() {
-        Ok(run) => run,
+    let pending = match dispatch.begin_run() {
+        Ok(pending) => pending,
         Err(code) => return code,
     };
     let growth_targets = baseline_growth::targets(&[(
@@ -1774,7 +1774,7 @@ fn dispatch_dupes(dispatch: &DispatchContext<'_>, args: &DupesDispatchArgs) -> E
     baseline_growth::run_gated(
         &dispatch.growth_ctx(baseline_growth::GrowthOwner::Dupes),
         &growth_targets,
-        || dispatch_dupes_run(dispatch, args, &run),
+        || dispatch.with_run(&pending, |run| dispatch_dupes_run(dispatch, args, run)),
     )
 }
 
@@ -2185,17 +2185,6 @@ pub fn resolve_coverage_inputs(
         .map_err(|err| emit_input_error(&err.to_string(), output))
 }
 
-/// [`resolve_coverage_inputs`] with the health config of a resolved run.
-pub fn resolve_health_coverage_inputs(
-    dispatch: &DispatchContext<'_>,
-    run: &fallow_engine::resolved_run::ResolvedRun,
-    cli_coverage: Option<&std::path::Path>,
-    cli_coverage_root: Option<&std::path::Path>,
-) -> Result<ResolvedHealthCoverageInputs, ExitCode> {
-    let health = || Ok(run.config().health.clone());
-    resolve_coverage_inputs(cli_coverage, cli_coverage_root, dispatch.output, health)
-}
-
 fn path_from_env(name: &str) -> Option<PathBuf> {
     std::env::var_os(name)
         .filter(|value| !value.is_empty())
@@ -2263,19 +2252,17 @@ fn dispatch_health(dispatch: &DispatchContext<'_>, args: &HealthDispatchArgs<'_>
         Ok(options) => options,
         Err(code) => return code,
     };
-    let resolved_run = match dispatch.resolve_run() {
-        Ok(run) => run,
+    let pending = match dispatch.begin_run() {
+        Ok(pending) => pending,
         Err(code) => return code,
     };
     let (cov, cov_root) = (args.coverage, args.coverage_root);
-    let coverage_inputs =
-        match resolve_health_coverage_inputs(dispatch, &resolved_run, cov, cov_root) {
-            Ok(inputs) => inputs,
-            Err(code) => return code,
-        };
+    let coverage_inputs = match dispatch.health_coverage_inputs(&pending, cov, cov_root) {
+        Ok(inputs) => inputs,
+        Err(code) => return code,
+    };
     let run = derive_health_dispatch_run(args, output, &coverage_inputs, runtime_coverage);
-    let health = crate::cli_production::runnable(&resolved_run, PlannedAnalysis::Health);
-    let resolved = ResolvedHealthDispatch { run, health };
+    let resolved = ResolvedHealthDispatch { run };
     // `--report-only` is a request never to fail, so the gate stands down and
     // says so instead of judging a baseline whose verdict cannot count.
     if args.report_only && cli.fail_on_baseline_growth {
@@ -2283,7 +2270,9 @@ fn dispatch_health(dispatch: &DispatchContext<'_>, args: &HealthDispatchArgs<'_>
             dispatch.growth_flags(),
             "health --report-only never fails a run",
         );
-        return run_health_dispatch(dispatch, args, resolved);
+        return dispatch.with_run(&pending, |run| {
+            run_health_dispatch(dispatch, args, resolved, run)
+        });
     }
     let growth_targets = baseline_growth::targets(&[(
         cli.baseline.as_deref(),
@@ -2292,7 +2281,11 @@ fn dispatch_health(dispatch: &DispatchContext<'_>, args: &HealthDispatchArgs<'_>
     baseline_growth::run_gated(
         &dispatch.growth_ctx(baseline_growth::GrowthOwner::Health),
         &growth_targets,
-        || run_health_dispatch(dispatch, args, resolved),
+        || {
+            dispatch.with_run(&pending, |run| {
+                run_health_dispatch(dispatch, args, resolved, run)
+            })
+        },
     )
 }
 
@@ -2377,19 +2370,18 @@ fn health_coverage_inputs(
 }
 
 /// Resolved inputs threaded from `dispatch_health` into the `HealthOptions`
-/// builder. Owns the normalized engine run contract and resolved production
-/// mode.
+/// builder. Owns the normalized engine run contract.
 struct ResolvedHealthDispatch<'a> {
     run: fallow_engine::health::HealthRunOptions<'a>,
-    health: Option<fallow_engine::resolved_run::Runnable<'a>>,
 }
 
 /// Build `HealthOptions` from the parsed args plus the resolved dispatch inputs,
-/// then run the health analysis.
+/// then run the health analysis of `resolved_run`.
 fn run_health_dispatch(
     dispatch: &DispatchContext<'_>,
     args: &HealthDispatchArgs<'_>,
     resolved: ResolvedHealthDispatch<'_>,
+    resolved_run: &ResolvedRun,
 ) -> ExitCode {
     let cli = dispatch.cli;
     let (output, quiet, fail_on_issues) =
@@ -2397,9 +2389,8 @@ fn run_health_dispatch(
     let mut run = resolved.run;
     run.gates.fail_on_issues = fail_on_issues;
     let sections = run.sections;
-    let production = resolved
-        .health
-        .is_some_and(|health| *health.production().value());
+    let health = crate::cli_production::runnable(resolved_run, PlannedAnalysis::Health);
+    let production = health.is_some_and(|health| *health.production().value());
     health::run_health(
         &HealthOptions {
             root: dispatch.root,
@@ -2458,7 +2449,7 @@ fn run_health_dispatch(
             trend_from: args.trend_from,
             scope: args.scope.clone(),
         },
-        resolved.health,
+        health,
         dispatch.json_style,
         &health::TypeAwareHealthOptions {
             enabled: cli.type_aware_override(),

@@ -116,10 +116,7 @@ mod write_scope;
 
 use cli_args::{AuditCacheCli, Cli, Command, CoverageCli, RulePackCli};
 pub use cli_args::{AuditGateArg, BaselineModeArg, EffortFilter, EmailModeArg, HealthSeverityCli};
-use dispatch::{
-    ResolvedHealthCoverageInputs, dispatch_subcommand, map_telemetry_subcommand,
-    resolve_health_coverage_inputs,
-};
+use dispatch::{ResolvedHealthCoverageInputs, dispatch_subcommand, map_telemetry_subcommand};
 /// Structured error output for CLI and JSON formats.
 pub(crate) mod error;
 use cli_format::FormatConfig;
@@ -1040,32 +1037,29 @@ fn regression_save_targets(cli: &Cli) -> (Option<std::path::PathBuf>, bool) {
 
 fn dispatch_bare_command(dispatch: &DispatchContext<'_>) -> ExitCode {
     let cli = dispatch.cli;
-    let run = match dispatch.resolve_run() {
-        Ok(run) => run,
+    let (pending, analyses) = match combined::begin_bare_run(dispatch) {
+        Ok(begun) => begun,
         Err(code) => return code,
     };
-    let analyses = combined::bare_analyses(cli, &run);
-    // Coverage only feeds health scoring, and resolving it validates the
-    // winning root. A bare run that excludes health (`--only check`,
-    // `--skip health`) must not reject a relative `health.coverageRoot` it
-    // never reads.
+    // Coverage feeds only health scoring, and its resolve validates the
+    // winning root. A run without health ignores `health.coverageRoot`.
     let coverage_inputs = if analyses.run_health {
         let (coverage, root) = (cli.coverage.as_deref(), cli.coverage_root.as_deref());
-        match resolve_health_coverage_inputs(dispatch, &run, coverage, root) {
+        match dispatch.health_coverage_inputs(&pending, coverage, root) {
             Ok(inputs) => inputs,
             Err(code) => return code,
         }
     } else {
         ResolvedHealthCoverageInputs::default()
     };
-    run_bare_combined(dispatch, &run, &coverage_inputs, analyses)
+    run_bare_combined(dispatch, &pending, &coverage_inputs, analyses)
 }
 
 /// Build `CombinedOptions` for a bare `fallow` invocation and run the combined
 /// pipeline.
 fn run_bare_combined(
     dispatch: &DispatchContext<'_>,
-    run: &fallow_engine::resolved_run::ResolvedRun,
+    pending: &cli_production::PendingRun,
     coverage_inputs: &ResolvedHealthCoverageInputs,
     analyses: combined::BareAnalyses,
 ) -> ExitCode {
@@ -1105,7 +1099,11 @@ fn run_bare_combined(
     baseline_growth::run_gated(
         &dispatch.growth_ctx(baseline_growth::GrowthOwner::Combined),
         &growth_targets,
-        || run_combined_scoped(dispatch, run, coverage_inputs, analyses, scope),
+        || {
+            dispatch.with_run(pending, |run| {
+                run_combined_scoped(dispatch, run, coverage_inputs, analyses, scope)
+            })
+        },
     )
 }
 

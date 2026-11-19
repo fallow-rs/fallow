@@ -328,3 +328,7 @@ fn production_switches_on_only(env: EnvSnapshot) -> EnvSnapshot {
 #[cfg(test)]
 #[path = "run_parity_tests.rs"]
 mod parity_tests;
+
+#[cfg(test)]
+#[path = "run_inputs_tests.rs"]
+mod tests;

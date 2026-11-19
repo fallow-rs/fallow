@@ -1,6 +1,7 @@
-//! The bare run resolves its config once before the first analysis: an
-//! invalid config stops the run with no analysis output, and analyses with
-//! the same production mode share one parse.
+//! The bare run resolves its config once before the first analysis, so an
+//! invalid config stops the run with no analysis output. The parse share of
+//! analyses with the same production mode is a guard: the bare run shared
+//! that parse before the run resolved once, and it must keep it.
 
 #![allow(
     clippy::unwrap_used,
@@ -111,6 +112,8 @@ fn health_reuses_the_parse(root: &Path) -> bool {
         .is_some_and(|line| line.contains("(measured above)"))
 }
 
+/// A guard of the parse share: a per-analysis `production` config with equal
+/// modes keeps one parse, and a split config keeps two parses.
 #[test]
 fn per_analysis_equal_modes_share_one_parse() {
     let equal = project(r#"{"production":{"deadCode":true,"health":true,"dupes":true}}"#);

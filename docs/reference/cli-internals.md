@@ -162,17 +162,24 @@ The bare run, `audit`, `decision-surface`, `dead-code`, `architecture`,
    `fallow_config::RunInputs`: the `CommandKind`, the selection of `--only`
    and `--skip`, the global flags and the production flags that the command
    reads. `main` captures one `EnvSnapshot` for the inputs.
-2. `DispatchContext::resolve_run` calls
+2. `DispatchContext::begin_run` calls
    `fallow_engine::resolved_run::resolve_run` once, at the point where the
-   command loaded its config. The resolver loads and validates the config
+   command parsed its config. The resolver loads and validates the config
    before the first analysis, decides the selection and the production mode
    of each analysis, and resolves one config for each production mode. A
    resolve error exits 2 with the text of the config loader. A run that selects
    no analysis keeps the CLI text of the bare run and of `audit`.
-3. `runtime_support::on_run_resolved` applies the side effects of the load
-   once: the `loaded config` line, the config shape for telemetry, the cache
-   notice candidate, the workspace diagnostics and the security category
-   warning.
+3. `DispatchContext::finish_run` applies the side effects of the load once,
+   through `runtime_support::on_run_resolved`: the `loaded config` line, the
+   config shape for telemetry, the cache notice candidate, the workspace
+   discovery diagnostics and the security category warning. The notice counts
+   the diagnostics of workspace discovery only, not the undeclared workspaces.
+   `dead-code`, `dupes` and `health` call it after their flag checks, so a flag
+   usage error prints before the `loaded config` line. A config that fails
+   validation and a failed workspace discovery also exit 2 there.
+   `DispatchContext::resolve_run` does both steps at once for `audit`. The bare
+   run needs the plan of the run, so `DispatchContext::checked_run` stops it on
+   a validation error before the flag checks.
 4. The command reads its plan, its production modes, its cache directory and
    its coverage config from the run. Each analysis takes the resolved config of
    its production mode from the run through the `run` field of `CheckOptions`

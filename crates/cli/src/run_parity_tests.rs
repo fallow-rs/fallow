@@ -1,6 +1,6 @@
 //! The CLI row of the run parity matrix. The translator is the path of the
-//! CLI: `Cli::try_parse_from` on the `argv` of a case with `--root` set to
-//! the case root, then [`command_run_inputs`], then
+//! CLI: `Cli::try_parse_from` and the `review` alias rewrite on the `argv` of
+//! a case with `--root` set to the case root, then [`command_run_inputs`], then
 //! [`fallow_engine::resolved_run::resolve_run`].
 
 use std::path::Path;
@@ -13,6 +13,13 @@ use super::command_run_inputs;
 use crate::cli_args::Cli;
 
 const ROW: &str = "cli";
+
+/// Parse `args` as `main` parses the process arguments.
+fn parse_argv(args: &[String]) -> Result<Cli, clap::Error> {
+    let mut cli = Cli::try_parse_from(args)?;
+    crate::cli_startup::apply_review_alias(&mut cli, args.iter().cloned());
+    Ok(cli)
+}
 
 /// The translator of the row, with a hook that changes the run inputs before
 /// the resolve.
@@ -35,7 +42,7 @@ fn translate_with(
         .collect();
     args.push("--root".to_owned());
     args.push(root.display().to_string());
-    let cli = match Cli::try_parse_from(&args) {
+    let cli = match parse_argv(&args) {
         Ok(cli) => cli,
         Err(err) => return RowResult::Failed(format!("argv {args:?} does not parse: {err}")),
     };
@@ -90,6 +97,17 @@ fn a_translator_that_drops_the_production_flag_fails() {
         failed_cases(&failures).contains(&"given-production-flag"),
         "{failures:?}"
     );
+}
+
+#[test]
+fn the_row_reads_the_review_alias_as_the_brief() {
+    let argv = ["fallow", "review"].map(str::to_owned);
+    let cli = parse_argv(&argv).expect("argv parses");
+    let inputs = command_run_inputs(&cli, EnvSnapshot::none()).expect("review loads a config");
+    let brief = parse_argv(&["fallow", "audit", "--brief"].map(str::to_owned)).expect("parses");
+    let expected = command_run_inputs(&brief, EnvSnapshot::none()).expect("audit loads a config");
+    assert_eq!(inputs.command, CommandKind::Audit);
+    assert_eq!(inputs.selection, expected.selection);
 }
 
 #[test]

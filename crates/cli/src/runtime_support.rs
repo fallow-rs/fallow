@@ -437,7 +437,20 @@ pub fn on_run_resolved(
         fallow_engine::resolved_run::AnalysisSlot::Skipped { .. } => None,
     });
     if let Some(runnable) = runnable {
-        let diagnostics = runnable.workspace_diagnostics().to_vec();
+        // The notice and the stash hold the diagnostics of workspace
+        // discovery only. The session adds the undeclared workspaces to its
+        // own list, so they reach the reports without the notice.
+        let diagnostics: Vec<_> = runnable
+            .workspace_diagnostics()
+            .iter()
+            .filter(|diagnostic| {
+                !matches!(
+                    diagnostic.kind,
+                    fallow_config::WorkspaceDiagnosticKind::UndeclaredWorkspace
+                )
+            })
+            .cloned()
+            .collect();
         if !diagnostics.is_empty() && matches!(output, OutputFormat::Human) && !quiet {
             eprintln!("{}", workspace_diagnostics_notice(diagnostics.len()));
         }

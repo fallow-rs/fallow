@@ -13,6 +13,19 @@ impl crate::DispatchContext<'_> {
     /// of the config load. An error prints on the error channel of the output
     /// format and gives exit code 2.
     pub(crate) fn resolve_run(&self) -> Result<ResolvedRun, ExitCode> {
+        let pending = self.begin_run()?;
+        self.finish_run(&pending)?;
+        let PendingRun { result, .. } = pending;
+        result.map_err(|err| self.emit_resolve_error(&err))
+    }
+
+    /// Resolve the run of the command line, and keep the side effects of the
+    /// config load for [`Self::finish_run`]. A config that does not load, an
+    /// invalid input and an empty selection exit 2 here. A config that fails
+    /// validation and a failed workspace discovery exit 2 in
+    /// [`Self::finish_run`]. So a command checks its flags after the config
+    /// parses and before the config validates.
+    pub(crate) fn begin_run(&self) -> Result<PendingRun, ExitCode> {
         let Some(inputs) = self.run_inputs else {
             return Err(crate::error::emit_input_error(
                 "this command resolves no run",
@@ -20,17 +33,68 @@ impl crate::DispatchContext<'_> {
             ));
         };
         match fallow_engine::resolved_run::resolve_run(inputs) {
-            Ok(run) => {
-                crate::runtime_support::on_run_resolved(
-                    &run,
-                    self.cli.config.as_deref(),
-                    self.output,
-                    self.quiet,
-                );
-                Ok(run)
+            Err(err @ (ResolveError::ConfigInvalid { .. } | ResolveError::Workspace { .. })) => {
+                Ok(PendingRun::new(Err(err)))
             }
             Err(err) => Err(self.emit_resolve_error(&err)),
+            Ok(run) => Ok(PendingRun::new(Ok(run))),
         }
+    }
+
+    /// The run of `pending`. The first call applies the side effects of the
+    /// config load, or prints the error that [`Self::begin_run`] kept.
+    pub(crate) fn finish_run<'run>(
+        &self,
+        pending: &'run PendingRun,
+    ) -> Result<&'run ResolvedRun, ExitCode> {
+        match &pending.result {
+            Ok(run) => {
+                if !pending.finished.replace(true) {
+                    crate::runtime_support::on_run_resolved(
+                        run,
+                        self.cli.config.as_deref(),
+                        self.output,
+                        self.quiet,
+                    );
+                }
+                Ok(run)
+            }
+            Err(err) => Err(self.emit_resolve_error(err)),
+        }
+    }
+
+    /// The run of `pending` without the side effects of the config load, or
+    /// the error that [`Self::begin_run`] kept.
+    pub(crate) fn checked_run<'run>(
+        &self,
+        pending: &'run PendingRun,
+    ) -> Result<&'run ResolvedRun, ExitCode> {
+        pending
+            .result
+            .as_ref()
+            .map_err(|err| self.emit_resolve_error(err))
+    }
+
+    /// Run `command` with the run of `pending`, after [`Self::finish_run`].
+    pub(crate) fn with_run(
+        &self,
+        pending: &PendingRun,
+        command: impl FnOnce(&ResolvedRun) -> ExitCode,
+    ) -> ExitCode {
+        self.finish_run(pending).map_or_else(|code| code, command)
+    }
+
+    /// [`crate::dispatch::resolve_coverage_inputs`] with the health config of
+    /// a pending run. The config load applies only when a coverage input
+    /// comes from the config.
+    pub(crate) fn health_coverage_inputs(
+        &self,
+        pending: &PendingRun,
+        coverage: Option<&std::path::Path>,
+        coverage_root: Option<&std::path::Path>,
+    ) -> Result<crate::dispatch::ResolvedHealthCoverageInputs, ExitCode> {
+        let health = || Ok(self.finish_run(pending)?.config().health.clone());
+        crate::dispatch::resolve_coverage_inputs(coverage, coverage_root, self.output, health)
     }
 
     fn emit_resolve_error(&self, err: &ResolveError) -> ExitCode {
@@ -77,6 +141,22 @@ impl crate::DispatchContext<'_> {
     ) -> Result<bool, ExitCode> {
         self.production_modes(false, false, false)
             .map(|modes| modes.for_analysis(analysis))
+    }
+}
+
+/// A resolved run whose config load side effects did not apply yet. See
+/// [`crate::DispatchContext::begin_run`].
+pub struct PendingRun {
+    result: Result<ResolvedRun, ResolveError>,
+    finished: std::cell::Cell<bool>,
+}
+
+impl PendingRun {
+    const fn new(result: Result<ResolvedRun, ResolveError>) -> Self {
+        Self {
+            result,
+            finished: std::cell::Cell::new(false),
+        }
     }
 }
 
