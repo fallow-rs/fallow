@@ -1,9 +1,9 @@
 //! The steps of a config load: validate, flatten the production mode,
 //! resolve with the environment, and collect the workspace metadata.
 //!
-//! [`super::resolve_run`] and the `config_for_project*` entry points of
-//! [`crate::project_config`] call the same steps, so each step has one
-//! implementation.
+//! [`super::resolve::resolve_run`] and the `config_for_project*` entry
+//! points of [`crate::project_config`] call the same steps, so each step has
+//! one implementation.
 
 use std::path::{Path, PathBuf};
 

@@ -1,9 +1,10 @@
 //! The decisions of one run, each with the input that gave it.
 //!
-//! [`resolve_run`] takes the raw [`fallow_config::RunInputs`] of one surface,
-//! loads and validates the config, and decides the selection and the
-//! production mode of each analysis and each run setting. The result is one
-//! [`ResolvedRun`] with a resolved config per production mode.
+//! [`resolve_run`](resolve::resolve_run) takes the raw
+//! [`fallow_config::RunInputs`] of one surface, loads and validates the
+//! config, and decides the selection and the production mode of each analysis
+//! and each run setting. The result is one [`ResolvedRun`] with a resolved
+//! config per production mode.
 #![cfg_attr(
     not(test),
     expect(
