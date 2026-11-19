@@ -27,7 +27,8 @@ const ROW_PLACEHOLDER: &str = "<row>";
 
 /// The folder of the case files.
 fn cases_dir() -> PathBuf {
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures/run-parity/cases")
+    Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"))
+        .join("../../tests/fixtures/run-parity/cases")
 }
 
 /// One case of the parity matrix.
