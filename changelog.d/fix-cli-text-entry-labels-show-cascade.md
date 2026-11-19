@@ -15,6 +15,12 @@
 
 ### Fixed
 
+- **`fallow dead-code --show-cascade` lists the hidden findings in the human report.**
+  The JSON report listed the unused exports and unused types of unused files
+  with the flag, but the human report still left them out and printed only a
+  count line. The human report and its summary line now list and count them,
+  as the help text says. Without the flag the report hides them as before.
+  (Closes [#4832](https://github.com/fallow-rs/fallow/issues/4832))
 - **CLI texts match the behavior.** The help and the input error of `fallow dupes --trace` name
   both accepted forms, `FILE:LINE` and `dup:<fingerprint>`. The
   `code-duplication` explanation describes each `duplicates.mode` value

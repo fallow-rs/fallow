@@ -27,7 +27,7 @@ fn every_counted_finding_type_has_a_status_line_label() {
         .filter(|key| {
             let results = results_with(key, 1);
             assert_eq!(results.total_issues(), 1, "fixture entry for `{key}`");
-            !build_summary_footer(&results, 0, 0).starts_with("1 ")
+            !build_summary_footer(&results).starts_with("1 ")
         })
         .collect();
     assert_eq!(unlabeled, Vec::<&str>::new());
@@ -91,11 +91,11 @@ fn status_line_labels_use_the_singular_and_the_plural() {
     ];
     for (key, singular, plural) in labels {
         assert_eq!(
-            build_summary_footer(&results_with(key, 1), 0, 0),
+            build_summary_footer(&results_with(key, 1)),
             format!("1 {singular}")
         );
         assert_eq!(
-            build_summary_footer(&results_with(key, 2), 0, 0),
+            build_summary_footer(&results_with(key, 2)),
             format!("2 {plural}")
         );
     }
@@ -119,5 +119,5 @@ fn status_line_leaves_out_advisory_component_health_findings() {
     };
 
     assert_eq!(results.total_issues(), 0);
-    assert_eq!(build_summary_footer(&results, 0, 0), "");
+    assert_eq!(build_summary_footer(&results), "");
 }
