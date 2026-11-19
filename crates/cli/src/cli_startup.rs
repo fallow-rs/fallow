@@ -110,7 +110,7 @@ pub fn validate_inputs(
 
     let threads = cli
         .threads
-        .unwrap_or_else(|| std::thread::available_parallelism().map_or(4, std::num::NonZero::get));
+        .unwrap_or_else(fallow_engine::resolved_run::available_threads);
 
     crate::process_clock::time(crate::process_clock::ProcessSpan::ThreadPool, || {
         rayon_pool::configure_global_pool(threads);
