@@ -410,6 +410,8 @@ fn graph_boundary_catalog_override_results(root: &std::path::Path) -> AnalysisRe
             line: 1,
             col: 0,
             via_path: None,
+            reason: fallow_types::results::BoundaryViolationReason::DisallowedZone,
+            public_files: vec![],
         }));
     results
         .boundary_coverage_violations
@@ -441,6 +443,7 @@ fn graph_boundary_catalog_override_results(root: &std::path::Path) -> AnalysisRe
             issue_kind: Some("unused-export".to_string()),
             reason: None,
             is_file_level: false,
+            is_range: false,
             kind_known: true,
         },
         missing_reason: false,
@@ -456,6 +459,7 @@ fn graph_boundary_catalog_override_results(root: &std::path::Path) -> AnalysisRe
             issue_kind: Some("unused-export".to_string()),
             reason: None,
             is_file_level: false,
+            is_range: false,
             kind_known: true,
         },
         missing_reason: true,
@@ -1343,6 +1347,7 @@ fn make_duplication_report(groups: Vec<CloneGroup>) -> DuplicationReport {
         clone_groups: groups,
         clone_families: Vec::new(),
         mirrored_directories: Vec::new(),
+        range_marker_problems: Vec::new(),
         stats: fallow_types::duplicates::DuplicationStats::default(),
     }
 }
@@ -1811,6 +1816,7 @@ fn stale_suppression_fallback_preserves_introduced_annotation() {
             issue_kind: Some("unused-export".to_string()),
             reason: None,
             is_file_level: false,
+            is_range: false,
             kind_known: true,
         },
         missing_reason: false,
@@ -2191,6 +2197,7 @@ fn audit_suppression(root: &Path, line: u32, reason: Option<&str>) -> StaleSuppr
             issue_kind: Some("unused-export".to_string()),
             reason: reason.map(str::to_owned),
             is_file_level: false,
+            is_range: false,
             kind_known: true,
         },
         missing_reason: false,

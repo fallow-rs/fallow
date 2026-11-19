@@ -29,3 +29,17 @@ failure-output = "immediate-final"
 
 [profile.ci.junit]
 path = "junit.xml"
+
+# Nextest starts tests in binary and name order. A slow test that sorts late
+# then runs alone at the end of a partition, and the partition waits for it:
+# the surface differential test ended a CI partition in each sampled run. These tests take 25 seconds or more each, so they start first.
+[[profile.ci.overrides]]
+filter = """
+test(/^permutation::oracle::/)
+| test(/^surface_differential::/)
+| test(/^mutation::cache_model::sequences::/)
+| test(/^mutation_tests::interrupt::/)
+| test(=opt_in_mutants_run_like_the_applied_mutant)
+| test(=schema_tests::json_schema_vec_and_option_skip_fields_have_serde_default)
+"""
+priority = 100

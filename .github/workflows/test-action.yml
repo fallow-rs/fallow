@@ -72,10 +72,8 @@ jobs:
           fi
           echo "SARIF file: $SARIF_PATH"
 
-          # Validate JSON
           jq empty "$SARIF_PATH"
 
-          # Verify SARIF schema structure
           SCHEMA=$(jq -r '.["$schema"] // .version' "$SARIF_PATH")
           if [ -z "$SCHEMA" ]; then
             echo "::error::SARIF file missing schema or version field"
@@ -127,7 +125,6 @@ jobs:
           fi
           echo "Results file: $RESULTS_PATH"
 
-          # Validate JSON
           jq empty "$RESULTS_PATH"
 
           # Verify expected fields
@@ -296,7 +293,6 @@ jobs:
             exit 1
           fi
 
-          # Validate JSON
           jq empty "$RESULTS_PATH"
 
           # Verify dupes-specific fields
@@ -349,7 +345,6 @@ jobs:
             exit 1
           fi
 
-          # Validate JSON
           jq empty "$RESULTS_PATH"
 
           # Verify fix-specific fields

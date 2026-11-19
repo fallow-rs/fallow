@@ -79,16 +79,8 @@ pub(super) fn apply_dependency_fixes(input: &mut DependencyFixInput<'_>) {
     }
 }
 
-/// The project-root-relative, forward-slash form of a `package.json` path.
-///
-/// Every other fix entry reports a project-relative path: `remove_export`
-/// strips the root, and the catalog fixers normalize separators on top of
-/// that. A dependency entry used to carry the absolute host path instead, so a
-/// single `fixes` array mixed `"path": "src/index.ts"` with an absolute
-/// `"file"`, and an agent holding fallow to its project-root-relative contract
-/// read a machine path that means nothing on its side of the wire. The
-/// absolute path the applier needs stays on the orchestrator-private
-/// `__target` field.
+/// Use a project-relative path with `/` separators in the fix report.
+/// Only the private `__target` field carries the absolute path for the applier.
 fn relative_package_path(root: &Path, pkg_path: &Path) -> String {
     pkg_path
         .strip_prefix(root)

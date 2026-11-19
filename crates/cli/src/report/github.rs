@@ -137,7 +137,7 @@ pub(crate) fn budget_notice(total: usize) -> Option<String> {
             "annotations"
         };
         format!(
-            "::notice::fallow emitted {total} {noun}; GitHub shows at most 10 per type per step"
+            "::notice::Fallow wrote {total} {noun}. GitHub shows at most 10 of each level for each step."
         )
     })
 }
@@ -222,7 +222,7 @@ impl PathRebase {
     pub(crate) fn apply(&self, path: &str) -> String {
         match self {
             Self::None => path.to_owned(),
-            Self::Prefix(prefix) => format!("{prefix}/{path}"),
+            Self::Prefix(prefix) => fallow_output::apply_path_prefix(prefix, path),
         }
     }
 
@@ -546,7 +546,7 @@ mod tests {
         assert_eq!(
             budget_notice(12).as_deref(),
             Some(
-                "::notice::fallow emitted 12 annotations; GitHub shows at most 10 per type per step"
+                "::notice::Fallow wrote 12 annotations. GitHub shows at most 10 of each level for each step."
             )
         );
     }
@@ -556,7 +556,7 @@ mod tests {
         assert_eq!(
             budget_notice(1).as_deref(),
             Some(
-                "::notice::fallow emitted 1 annotation; GitHub shows at most 10 per type per step"
+                "::notice::Fallow wrote 1 annotation. GitHub shows at most 10 of each level for each step."
             )
         );
     }

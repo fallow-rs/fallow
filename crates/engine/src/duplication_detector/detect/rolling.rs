@@ -193,6 +193,7 @@ pub(super) fn detect(input: RollingDetectInput<'_>) -> DuplicationReport {
         clone_groups,
         clone_families: vec![],
         mirrored_directories: vec![],
+        range_marker_problems: Vec::new(),
         stats,
     }
 }

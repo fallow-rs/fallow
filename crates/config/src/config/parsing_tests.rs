@@ -3443,12 +3443,14 @@ fn validate_resolved_boundaries_passes_on_valid_config() {
                     patterns: vec!["src/components/**".to_string()],
                     auto_discover: vec![],
                     root: None,
+                    public_files: vec![],
                 },
                 crate::BoundaryZone {
                     name: "db".to_string(),
                     patterns: vec!["src/db/**".to_string()],
                     auto_discover: vec![],
                     root: None,
+                    public_files: vec![],
                 },
             ],
             rules: vec![crate::BoundaryRule {
@@ -3477,6 +3479,7 @@ fn validate_resolved_boundaries_aggregates_unknown_zone_refs() {
                 patterns: vec!["src/ui/**".to_string()],
                 auto_discover: vec![],
                 root: None,
+                public_files: vec![],
             }],
             rules: vec![
                 crate::BoundaryRule {
@@ -3534,6 +3537,7 @@ fn validate_resolved_boundaries_flags_redundant_root_prefix() {
                 patterns: vec!["packages/app/src/**".to_string()],
                 auto_discover: vec![],
                 root: Some("packages/app/".to_string()),
+                public_files: vec![],
             }],
             rules: vec![],
         },
@@ -3562,6 +3566,7 @@ fn validate_resolved_boundaries_aggregates_unknown_zones_and_root_prefixes() {
                 patterns: vec!["packages/app/src/**".to_string()],
                 auto_discover: vec![],
                 root: Some("packages/app/".to_string()),
+                public_files: vec![],
             }],
             rules: vec![crate::BoundaryRule {
                 from: "ui".to_string(),
@@ -3616,7 +3621,6 @@ fn validate_resolved_boundaries_passes_on_bulletproof_preset() {
 fn parse_config_to_value_strips_utf8_bom() {
     let dir = test_dir("parse-bom");
     let path = dir.path().join("fallow.toml");
-    // Write TOML with a UTF-8 BOM prefix
     let content_with_bom = "\u{FEFF}entry = [\"src/main.ts\"]\n";
     std::fs::write(&path, content_with_bom).unwrap();
 
@@ -4689,4 +4693,63 @@ fn parse_config_to_value_rejects_toml_nesting_that_evades_the_parser_limit() {
 
     let err = parse_config_to_value(&path).unwrap_err().to_string();
     assert!(err.contains("Failed to parse config file"), "{err}");
+}
+
+#[test]
+fn boundary_zone_parses_public_files_and_omits_them_when_empty() {
+    let config: FallowConfig = serde_json::from_str(
+        r#"{"boundaries": {"zones": [
+            {"name": "billing", "patterns": ["src/billing/**"], "publicFiles": ["src/billing/index.ts"]},
+            {"name": "orders", "patterns": ["src/orders/**"]}
+        ]}}"#,
+    )
+    .expect("publicFiles must parse");
+
+    let zones = &config.boundaries.zones;
+    assert_eq!(zones[0].public_files, vec!["src/billing/index.ts"]);
+    assert!(
+        zones[1].public_files.is_empty(),
+        "publicFiles defaults to empty"
+    );
+    let rendered = serde_json::to_string(&zones[1]).expect("zone serializes");
+    assert!(
+        !rendered.contains("publicFiles"),
+        "an empty publicFiles is omitted, got {rendered}"
+    );
+}
+
+#[test]
+fn public_file_globs_use_the_zone_root() {
+    let config: crate::BoundaryConfig = serde_json::from_str(
+        r#"{"zones": [
+            {"name": "billing", "root": "packages/app/", "patterns": ["src/billing/**"], "publicFiles": ["src/billing/index.ts"]}
+        ]}"#,
+    )
+    .expect("config parses");
+    let resolved = config.resolve();
+    assert!(resolved.has_public_files("billing"));
+    assert!(resolved.is_public_file("billing", "packages/app/src/billing/index.ts"));
+    assert!(!resolved.is_public_file("billing", "src/billing/index.ts"));
+    assert!(!resolved.is_public_file("unknown", "packages/app/src/billing/index.ts"));
+}
+
+#[test]
+fn validate_resolved_boundaries_flags_a_public_file_glob_that_repeats_the_root() {
+    let dir = test_dir("boundaries-public-api-root-prefix");
+    let config: FallowConfig = serde_json::from_str(
+        r#"{"boundaries": {"zones": [
+            {"name": "billing", "root": "packages/app", "patterns": ["src/billing/**"],
+             "publicFiles": ["packages/app/src/billing/index.ts"]}
+        ]}}"#,
+    )
+    .expect("config parses");
+
+    let errors = config
+        .validate_resolved_boundaries(dir.path())
+        .expect_err("a publicFiles glob that repeats the root must fail");
+    let rendered: Vec<String> = errors.iter().map(ToString::to_string).collect();
+    assert!(
+        rendered.len() == 1 && rendered[0].contains("packages/app/src/billing/index.ts"),
+        "got: {rendered:?}"
+    );
 }

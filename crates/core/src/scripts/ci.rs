@@ -12,6 +12,8 @@ use rustc_hash::{FxHashMap, FxHashSet};
 
 #[path = "ci_references.rs"]
 mod references;
+#[path = "ci_run_scalar.rs"]
+mod run_scalar;
 
 use super::ci_action_inputs::StepActionInputs;
 use super::shell_helpers::HelperBase;
@@ -19,6 +21,10 @@ use super::{
     IgnoredCommandEntries, ScriptCatalog, analyze_commands_with_context, could_be_file_path,
 };
 use references::{expand_matrix_runs, github_script_files};
+use run_scalar::{
+    MultilineRunState, is_multiline_run_marker, push_multiline_run_command, quoted_scalar_value,
+    run_key_column, yaml_run_value,
+};
 
 /// Result of scanning CI config files: package names used by CI tooling AND
 /// project-relative file paths referenced as command-line arguments.
@@ -500,6 +506,9 @@ pub(super) fn extract_ci_steps(content: &str) -> Vec<CiCommand> {
     let mut commands = Vec::new();
     let mut multiline_run = MultilineRunState::default();
     let mut scope = WorkingDirectoryScope::default();
+    // A quoted `run:` value can fold over lines, so it is decoded after its
+    // last line is read.
+    let mut quoted_runs = Vec::new();
 
     for (line_index, line) in content.lines().enumerate() {
         let trimmed = line.trim();
@@ -526,6 +535,9 @@ pub(super) fn extract_ci_steps(content: &str) -> Vec<CiCommand> {
             if is_multiline_run_marker(rest) {
                 multiline_run.start(run_key_column(line, trimmed), false);
             } else if !rest.is_empty() {
+                if rest.starts_with(['\'', '"']) {
+                    quoted_runs.push(commands.len());
+                }
                 commands.push(CiCommand {
                     text: rest.to_string(),
                     working_directory: default_dir,
@@ -540,6 +552,13 @@ pub(super) fn extract_ci_steps(content: &str) -> Vec<CiCommand> {
     }
 
     scope.close_step(&mut commands);
+    for index in quoted_runs {
+        if let Some(command) = commands.get_mut(index)
+            && let Some(value) = quoted_scalar_value(&command.text)
+        {
+            command.text = value;
+        }
+    }
     commands
 }
 
@@ -758,108 +777,8 @@ fn substitute_variable<'a>(command: &'a str, name: &str, value: &str) -> Cow<'a,
     }
 }
 
-#[derive(Default)]
-struct MultilineRunState {
-    active: bool,
-    indent: usize,
-    folding: bool,
-}
-
-impl MultilineRunState {
-    /// Anchor at the `run` key column so sibling step keys (`env:`, `with:`),
-    /// which sit at the same column, terminate the scalar instead of being
-    /// swallowed as continuation lines. `folding` marks a plain scalar whose
-    /// continuations fold into the already-pushed command.
-    fn start(&mut self, key_column: usize, folding: bool) {
-        self.active = true;
-        self.indent = key_column;
-        self.folding = folding;
-    }
-
-    fn stop(&mut self) {
-        self.active = false;
-        self.folding = false;
-    }
-}
-
-/// Column of the `run` key itself, past any leading `- ` list indicator.
-fn run_key_column(line: &str, trimmed: &str) -> usize {
-    let base = line.len() - line.trim_start().len();
-    match trimmed.strip_prefix("- ") {
-        Some(rest) => base + 2 + (rest.len() - rest.trim_start().len()),
-        None => base,
-    }
-}
-
 fn should_skip_ci_line(trimmed: &str) -> bool {
     trimmed.is_empty() || trimmed.starts_with('#')
-}
-
-fn push_multiline_run_command(
-    line: &str,
-    line_index: usize,
-    state: &mut MultilineRunState,
-    commands: &mut Vec<CiCommand>,
-    working_directory: Option<String>,
-) -> bool {
-    if !state.active {
-        return false;
-    }
-
-    let trimmed = line.trim();
-    let indent = line.len() - line.trim_start().len();
-    if indent > state.indent && !trimmed.is_empty() {
-        if state.folding {
-            if let Some(last) = commands.last_mut() {
-                last.text.push(' ');
-                last.text.push_str(trimmed);
-            }
-        } else {
-            commands.push(CiCommand {
-                text: trimmed.to_string(),
-                working_directory,
-                line: line_index,
-            });
-        }
-        return true;
-    }
-
-    state.stop();
-    false
-}
-
-fn yaml_run_value(trimmed: &str) -> Option<&str> {
-    strip_yaml_key(trimmed, "run")
-        .or_else(|| {
-            trimmed
-                .strip_prefix("- ")
-                .and_then(|rest| strip_yaml_key(rest.trim(), "run"))
-        })
-        .map(str::trim)
-}
-
-/// Recognize a YAML block scalar header on a `run:` value.
-///
-/// Accepts the literal (`|`) and folded (`>`) styles with any combination of a
-/// chomping indicator (`-`, `+`) and an explicit indentation indicator (`1`-`9`),
-/// in either order, matching the YAML block header grammar. A header carrying a
-/// trailing comment is still not recognized.
-fn is_multiline_run_marker(value: &str) -> bool {
-    let mut chars = value.chars();
-    if !matches!(chars.next(), Some('|' | '>')) {
-        return false;
-    }
-
-    let mut chomping = false;
-    let mut indentation = false;
-    for ch in chars {
-        match ch {
-            '-' | '+' if !chomping => chomping = true,
-            '1'..='9' if !indentation => indentation = true,
-            _ => return false,
-        }
-    }
-    true
 }
 
 fn push_yaml_list_command(
@@ -878,7 +797,7 @@ fn push_yaml_list_command(
         && !is_yaml_mapping(rest)
     {
         commands.push(CiCommand {
-            text: rest.to_string(),
+            text: quoted_scalar_value(rest).unwrap_or_else(|| rest.to_string()),
             working_directory,
             line: line_index,
         });

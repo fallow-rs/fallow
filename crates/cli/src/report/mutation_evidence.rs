@@ -826,7 +826,7 @@ mod tests {
         assert_eq!(issue.location.lines.begin, 14);
         assert_eq!(
             issue.description,
-            "Changing >= to > in isAdult made no test fail. Mutant 9f3c2a1b."
+            "Changing `>=` to `>` in `isAdult` made no test fail. Mutant `9f3c2a1b`."
         );
         assert_eq!(
             issue.fingerprint,

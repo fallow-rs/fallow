@@ -708,3 +708,353 @@ fn a_new_config_that_turns_off_weakened_tests_still_reports() {
     );
     assert_eq!(findings(&json)[0]["severity"], "warn");
 }
+
+const SKIPPED_TEST: &str = "import { price } from './index';\n\nit.skip('doubles', () => {\n  expect(price(1)).toBe(2);\n});\n\nit('keeps zero', () => {\n  expect(price(0)).toBe(0);\n});\n";
+
+/// A fixture whose root config extends `fallow.base.json`.
+fn extends_fixture(root_config: &str, base_config: &str) -> TempDir {
+    let tmp = fixture(Some(root_config));
+    let dir = tmp.path();
+    fs::write(dir.join("fallow.base.json"), base_config).unwrap();
+    commit_all(dir, "extends");
+    tmp
+}
+
+fn config_findings(json: &serde_json::Value) -> Vec<(String, String, Option<u64>, String)> {
+    findings(json)
+        .iter()
+        .filter(|finding| finding["kind"] == "rule-severity" || finding["kind"] == "ignore-pattern")
+        .map(|finding| {
+            (
+                finding["kind"].as_str().unwrap().to_owned(),
+                finding["path"].as_str().unwrap().to_owned(),
+                finding["line"].as_u64(),
+                finding["evidence"].as_str().unwrap().to_owned(),
+            )
+        })
+        .collect()
+}
+
+fn config_finding(
+    kind: &str,
+    path: &str,
+    line: Option<u64>,
+    evidence: &str,
+) -> (String, String, Option<u64>, String) {
+    (kind.to_owned(), path.to_owned(), line, evidence.to_owned())
+}
+
+#[test]
+fn a_lower_severity_in_an_extended_file_reports_on_that_file() {
+    let tmp = extends_fixture(
+        r#"{"extends": "./fallow.base.json"}"#,
+        "{\n  \"rules\": {\n    \"weakened-tests\": \"error\"\n  }\n}\n",
+    );
+    let dir = tmp.path();
+    fs::write(
+        dir.join("fallow.base.json"),
+        "{\n  \"rules\": {\n    \"weakened-tests\": \"off\"\n  }\n}\n",
+    )
+    .unwrap();
+    fs::write(dir.join("src/index.test.ts"), SKIPPED_TEST).unwrap();
+    let (code, json) = audit_json(dir, &[]);
+    assert_eq!(
+        config_findings(&json),
+        vec![config_finding(
+            "rule-severity",
+            "fallow.base.json",
+            Some(3),
+            "weakened-tests: error -> off"
+        )],
+        "{json}"
+    );
+    assert_eq!(json["verdict"], "fail", "{json}");
+    assert_eq!(code, 1);
+}
+
+#[test]
+fn a_removed_extends_entry_reports_the_lost_severity() {
+    let tmp = extends_fixture(
+        "{\n  \"extends\": [\"./fallow.base.json\"]\n}\n",
+        r#"{"rules": {"unused-exports": "error", "weakened-tests": "error"}}"#,
+    );
+    let dir = tmp.path();
+    fs::write(dir.join(".fallowrc.json"), "{\n  \"extends\": []\n}\n").unwrap();
+    let (_, json) = audit_json(dir, &[]);
+    assert_eq!(
+        config_findings(&json),
+        vec![config_finding(
+            "rule-severity",
+            ".fallowrc.json",
+            Some(2),
+            "weakened-tests: error -> warn"
+        )],
+        "{json}"
+    );
+    assert_eq!(findings(&json)[0]["severity"], "error");
+}
+
+#[test]
+fn a_rule_that_moves_between_config_files_does_not_report() {
+    let tmp = extends_fixture(
+        r#"{"extends": "./fallow.base.json"}"#,
+        r#"{"rules": {"weakened-tests": "error", "unused-files": "warn"}}"#,
+    );
+    let dir = tmp.path();
+    fs::write(
+        dir.join(".fallowrc.json"),
+        r#"{"extends": "./fallow.base.json", "rules": {"weakened-tests": "error"}}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("fallow.base.json"),
+        r#"{"rules": {"unused-files": "warn"}}"#,
+    )
+    .unwrap();
+    let (_, json) = audit_json(dir, &[]);
+    assert!(config_findings(&json).is_empty(), "{json}");
+}
+
+#[test]
+fn a_package_extends_target_compares_only_what_both_sides_resolve() {
+    let tmp = TempDir::new().expect("temp dir");
+    let dir = tmp.path();
+    let package = dir.join("node_modules/@acme/fallow-config");
+    fs::create_dir_all(&package).unwrap();
+    fs::write(
+        package.join("package.json"),
+        r#"{"name": "@acme/fallow-config", "main": "fallow.json"}"#,
+    )
+    .unwrap();
+    fs::write(package.join("fallow.json"), r#"{"rules": {}}"#).unwrap();
+    fs::write(dir.join(".gitignore"), "node_modules\n").unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name": "diff-risk", "main": "src/index.ts"}"#,
+    )
+    .unwrap();
+    fs::create_dir_all(dir.join("src")).unwrap();
+    fs::write(dir.join("src/index.ts"), "export const a = 1;\n").unwrap();
+    fs::write(
+        dir.join(".fallowrc.json"),
+        "{\n  \"extends\": \"npm:@acme/fallow-config\",\n  \"rules\": {\n    \"unused-files\": \"error\",\n    \"unused-exports\": \"error\"\n  }\n}\n",
+    )
+    .unwrap();
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "base");
+    fs::write(
+        dir.join(".fallowrc.json"),
+        "{\n  \"extends\": \"npm:@acme/fallow-config\",\n  \"rules\": {\n    \"unused-exports\": \"warn\"\n  }\n}\n",
+    )
+    .unwrap();
+    let (_, json) = audit_json(dir, &[]);
+    assert_eq!(
+        config_findings(&json),
+        vec![config_finding(
+            "rule-severity",
+            ".fallowrc.json",
+            Some(4),
+            "unused-exports: error -> warn"
+        )],
+        "{json}"
+    );
+}
+
+#[test]
+fn new_ignore_entries_report_at_the_base_weakened_tests_severity() {
+    let tmp = fixture(Some(
+        "{\n  \"rules\": {\n    \"weakened-tests\": \"error\"\n  }\n}\n",
+    ));
+    let dir = tmp.path();
+    fs::write(
+        dir.join(".fallowrc.json"),
+        "{\n  \"ignorePatterns\": [\n    \"src/index.test.ts\"\n  ],\n  \"ignoreFindings\": [\"src/**\"]\n}\n",
+    )
+    .unwrap();
+    let (_, json) = audit_json(dir, &[]);
+    let ignore: Vec<_> = config_findings(&json)
+        .into_iter()
+        .filter(|finding| finding.0 == "ignore-pattern")
+        .collect();
+    assert_eq!(
+        ignore,
+        vec![
+            config_finding(
+                "ignore-pattern",
+                ".fallowrc.json",
+                Some(3),
+                "ignorePatterns: + src/index.test.ts"
+            ),
+            config_finding(
+                "ignore-pattern",
+                ".fallowrc.json",
+                Some(5),
+                "ignoreFindings: + src/**"
+            ),
+        ],
+        "{json}"
+    );
+    assert!(
+        findings(&json)
+            .iter()
+            .filter(|finding| finding["kind"] == "ignore-pattern")
+            .all(|finding| finding["severity"] == "error"),
+        "{json}"
+    );
+}
+
+#[test]
+fn a_removed_ignore_exception_reports_and_a_narrower_pattern_does_not() {
+    let tmp = fixture(Some(
+        r#"{"ignorePatterns": ["src/**", "!src/index.test.ts"], "ignoreFindings": ["src/**"]}"#,
+    ));
+    let dir = tmp.path();
+    fs::write(
+        dir.join(".fallowrc.json"),
+        r#"{"ignorePatterns": ["src/**"], "ignoreFindings": ["src/legacy/**"]}"#,
+    )
+    .unwrap();
+    let (_, json) = audit_json(dir, &[]);
+    assert_eq!(
+        config_findings(&json),
+        vec![config_finding(
+            "ignore-pattern",
+            ".fallowrc.json",
+            None,
+            "ignorePatterns: - !src/index.test.ts"
+        )],
+        "{json}"
+    );
+}
+
+#[test]
+fn a_new_ignore_pattern_in_an_extended_file_reports() {
+    let tmp = extends_fixture(r#"{"extends": "./fallow.base.json"}"#, "{}\n");
+    let dir = tmp.path();
+    fs::write(
+        dir.join("fallow.base.json"),
+        "{\n  \"ignorePatterns\": [\"src/index.test.ts\"]\n}\n",
+    )
+    .unwrap();
+    let (_, json) = audit_json(dir, &[]);
+    assert_eq!(
+        config_findings(&json),
+        vec![config_finding(
+            "ignore-pattern",
+            "fallow.base.json",
+            Some(2),
+            "ignorePatterns: + src/index.test.ts"
+        )],
+        "{json}"
+    );
+}
+
+#[test]
+fn a_config_in_a_parent_directory_of_the_root_reports_with_a_relative_path() {
+    let tmp = TempDir::new().expect("temp dir");
+    let dir = tmp.path();
+    let app = dir.join("packages/app");
+    fs::create_dir_all(app.join("src")).unwrap();
+    fs::write(
+        dir.join(".fallowrc.json"),
+        "{\n  \"rules\": {\n    \"weakened-tests\": \"error\"\n  }\n}\n",
+    )
+    .unwrap();
+    fs::write(
+        app.join("package.json"),
+        r#"{"name": "app", "main": "src/index.ts"}"#,
+    )
+    .unwrap();
+    fs::write(app.join("src/index.ts"), "export const a = 1;\n").unwrap();
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "base");
+    fs::write(
+        dir.join(".fallowrc.json"),
+        "{\n  \"rules\": {\n    \"weakened-tests\": \"off\"\n  }\n}\n",
+    )
+    .unwrap();
+    let (_, json) = audit_json(&app, &[]);
+    assert_eq!(
+        config_findings(&json),
+        vec![config_finding(
+            "rule-severity",
+            "../../.fallowrc.json",
+            Some(3),
+            "weakened-tests: error -> off"
+        )],
+        "{json}"
+    );
+}
+
+#[test]
+fn new_entries_in_other_ignore_keys_report_with_the_key_name() {
+    let tmp = fixture(Some(
+        r#"{"ignoreDependencies": ["left-pad"], "ignoreExports": [{"file": "src/a.ts", "exports": ["a"]}]}"#,
+    ));
+    let dir = tmp.path();
+    fs::write(
+        dir.join(".fallowrc.json"),
+        "{\n  \"entry\": [\"src/index.test.ts\"],\n  \"ignoreDependencies\": [\"left-pad\", \"@acme/*\"],\n  \"ignoreExports\": [{\"file\": \"src/a.ts\", \"exports\": [\"a\"]}, {\"file\": \"src/index.ts\", \"exports\": [\"*\"]}],\n  \"ignoreUnresolvedImports\": [\"virtual:*\"],\n  \"production\": {\"ignore\": [\"src/legacy/**\"]},\n  \"health\": {\"ignore\": [\"src/index.ts\"]}\n}\n",
+    )
+    .unwrap();
+    let (_, json) = audit_json(dir, &[]);
+    let mut hits = config_findings(&json);
+    hits.sort();
+    assert_eq!(
+        hits,
+        vec![
+            config_finding(
+                "ignore-pattern",
+                ".fallowrc.json",
+                Some(2),
+                "entry: + src/index.test.ts"
+            ),
+            config_finding(
+                "ignore-pattern",
+                ".fallowrc.json",
+                Some(3),
+                "ignoreDependencies: + @acme/*"
+            ),
+            config_finding(
+                "ignore-pattern",
+                ".fallowrc.json",
+                Some(4),
+                r#"ignoreExports: + {"file":"src/index.ts","exports":["*"]}"#
+            ),
+            config_finding(
+                "ignore-pattern",
+                ".fallowrc.json",
+                Some(5),
+                "ignoreUnresolvedImports: + virtual:*"
+            ),
+            config_finding(
+                "ignore-pattern",
+                ".fallowrc.json",
+                Some(6),
+                "production.ignore: + src/legacy/**"
+            ),
+            config_finding(
+                "ignore-pattern",
+                ".fallowrc.json",
+                Some(7),
+                "health.ignore: + src/index.ts"
+            ),
+        ],
+        "{json}"
+    );
+}
+
+#[test]
+fn narrower_entries_in_other_ignore_keys_do_not_report() {
+    let tmp = fixture(Some(
+        r#"{"entry": ["src/**/*.ts"], "ignoreDependencies": ["@acme/*"], "ignoreExports": [{"file": "src/**", "exports": ["*"]}], "production": {"ignore": ["src/**"]}}"#,
+    ));
+    let dir = tmp.path();
+    fs::write(
+        dir.join(".fallowrc.json"),
+        r#"{"entry": ["src/index.ts"], "ignoreDependencies": ["@acme/ui"], "ignoreExports": [{"file": "src/index.ts", "exports": ["price"]}], "production": true}"#,
+    )
+    .unwrap();
+    let (_, json) = audit_json(dir, &[]);
+    assert!(config_findings(&json).is_empty(), "{json}");
+}

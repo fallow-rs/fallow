@@ -24,7 +24,8 @@
 use std::path::Path;
 use std::process::ExitCode;
 
-use fallow_config::{FallowConfig, OutputFormat};
+use fallow_config::OutputFormat;
+use fallow_engine::project_config::load_config_file;
 use fallow_output::{GroupByMode, PrDecisionConclusion};
 
 use crate::cli_args::MutationNotRunArg;
@@ -33,6 +34,7 @@ use crate::report::ci::pr_comment::{MutationSurface, Provider};
 use crate::report::github_annotations::{self, EnvelopeKind};
 use crate::report::github_summary;
 use crate::report::mutation_evidence::MutationEvidence;
+use crate::runtime_support::ConfigFlags;
 use crate::telemetry;
 
 /// The mutation evidence that one `fallow report` call joins to the render.
@@ -69,15 +71,19 @@ pub fn run_report(
     from: &Path,
     output: OutputFormat,
     root: &Path,
-    config_path: Option<&Path>,
+    report_config: ConfigFlags<'_>,
     quiet: bool,
     mutation: Option<MutationRequest<'_>>,
 ) -> ExitCode {
-    if let Some(path) = config_path
-        && let Err(error) = FallowConfig::load(path)
+    if let Some(path) = report_config.path
+        && let Err(error) = load_config_file(root, Some(path), report_config.file_options())
     {
         return invalid_report_input(
-            &format!("failed to load report config {}: {error}", path.display()),
+            &format!(
+                "failed to load report config {}: {}",
+                path.display(),
+                error.message()
+            ),
             output,
             telemetry::FailureReason::Validation,
         );
@@ -137,7 +143,7 @@ pub fn run_report(
         view: evidence.view(),
         survivors: &survivors,
     });
-    let resolver = match saved_group_resolver(saved.grouped_by, root, config_path, output) {
+    let resolver = match saved_group_resolver(saved.grouped_by, root, report_config, output) {
         Ok(resolver) => resolver,
         Err(code) => return code,
     };
@@ -146,7 +152,7 @@ pub fn run_report(
             kind,
             &saved.envelope,
             root,
-            config_path,
+            report_config,
         );
     }
     crate::report::config_pattern_text::print_stderr_notes(
@@ -160,7 +166,7 @@ pub fn run_report(
         &SavedRender {
             envelope: &saved.envelope,
             root,
-            config_path,
+            report_config,
             resolver: resolver.as_ref(),
             output,
             quiet,
@@ -173,7 +179,7 @@ pub fn run_report(
 struct SavedRender<'a> {
     envelope: &'a serde_json::Value,
     root: &'a Path,
-    config_path: Option<&'a Path>,
+    report_config: ConfigFlags<'a>,
     resolver: Option<&'a crate::report::OwnershipResolver>,
     output: OutputFormat,
     quiet: bool,
@@ -190,7 +196,7 @@ fn print_saved_target(
     let SavedRender {
         envelope,
         root,
-        config_path,
+        report_config,
         resolver,
         output,
         quiet,
@@ -211,7 +217,7 @@ fn print_saved_target(
                 kind,
                 envelope,
                 root,
-                config_path,
+                report_config,
                 resolver,
                 mutation.map_or(&[], |mutation| mutation.survivors),
             )
@@ -220,7 +226,7 @@ fn print_saved_target(
             kind,
             envelope,
             root,
-            config_path,
+            report_config,
             resolver,
             quiet,
         ),
@@ -231,7 +237,7 @@ fn print_saved_target(
                 kind,
                 envelope,
                 root,
-                config_path,
+                report_config,
                 resolver,
                 output,
                 mutation,
@@ -387,6 +393,29 @@ fn validate_saved_report_envelope(
     }
 }
 
+/// Render the sticky comment of a live combined run from its JSON envelope,
+/// through the same path as `fallow report --from`, so the live comment and
+/// the saved render are the same bytes.
+pub fn render_live_combined_pr_comment(
+    provider: Provider,
+    envelope: &serde_json::Value,
+    root: &Path,
+    report_config: ConfigFlags<'_>,
+    output: OutputFormat,
+) -> ExitCode {
+    render_saved_ci_target(
+        ReportTarget::PrComment(provider),
+        provider,
+        EnvelopeKind::Combined,
+        envelope,
+        root,
+        report_config,
+        None,
+        output,
+        None,
+    )
+}
+
 #[expect(
     clippy::too_many_arguments,
     reason = "saved CI dispatch carries the parsed envelope context without rebuilding it"
@@ -397,7 +426,7 @@ fn render_saved_ci_target(
     kind: EnvelopeKind,
     envelope: &serde_json::Value,
     root: &Path,
-    config_path: Option<&Path>,
+    report_config: ConfigFlags<'_>,
     resolver: Option<&crate::report::OwnershipResolver>,
     output: OutputFormat,
     mutation: Option<MutationSurface<'_>>,
@@ -406,7 +435,7 @@ fn render_saved_ci_target(
         kind,
         envelope,
         root,
-        config_path,
+        report_config,
         resolver,
     ) {
         Ok(issues) => issues,
@@ -659,10 +688,7 @@ mod status_note_tests {
             saved.starts_with("Note. **Baseline matched nothing.**"),
             "{saved}"
         );
-        assert!(
-            saved.ends_with("Gate outcomes: failed stale-baseline."),
-            "{saved}"
-        );
+        assert!(saved.ends_with("Gates: failed stale-baseline."), "{saved}");
     }
 
     /// A grouped envelope rendered into a body that cannot carry groups says
@@ -715,7 +741,7 @@ mod status_note_tests {
             ),
         );
         assert!(
-            saved.starts_with("Note. Gate outcomes:"),
+            saved.starts_with("Note. Gates:"),
             "the type-aware message keeps its place ahead of the verdicts: {saved}"
         );
         assert!(
@@ -764,7 +790,7 @@ mod status_note_tests {
         let baseline = saved
             .find("**Baseline matched nothing.**")
             .expect("the baseline advisory");
-        let gate = saved.find("Gate outcomes:").expect("the gate inventory");
+        let gate = saved.find("Gates:").expect("the gate inventory");
         let request = saved
             .find("Request outcomes:")
             .expect("the request inventory");
@@ -1154,22 +1180,17 @@ fn parse_group_by_mode(value: &str) -> Option<GroupByMode> {
 fn saved_group_resolver(
     grouped_by: Option<GroupByMode>,
     root: &Path,
-    config_path: Option<&Path>,
+    report_config: ConfigFlags<'_>,
     output: OutputFormat,
 ) -> Result<Option<crate::report::OwnershipResolver>, ExitCode> {
-    let explicit = config_path.and_then(|path| FallowConfig::load(path).ok());
+    let explicit = report_config.explicit(root);
     // The discovered config is loaded only when the explicit config gives no
     // CODEOWNERS path, as before. The explicit config, when it loads, is the
     // only source of `workspaces.patterns`.
     let discovered = explicit
         .as_ref()
         .is_none_or(|config| config.codeowners.is_none())
-        .then(|| {
-            FallowConfig::find_and_load(root)
-                .ok()
-                .flatten()
-                .map(|(config, _)| config)
-        })
+        .then(|| report_config.discovered(root))
         .flatten();
     let codeowners = explicit
         .as_ref()

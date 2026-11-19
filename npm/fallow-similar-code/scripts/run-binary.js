@@ -15,10 +15,10 @@ const SETUP_HARD_EXIT_GRACE_MS = 1000;
 const SETUP_TIMEOUT_EXIT_CODE = 124;
 const SETUP_TIMEOUT_MESSAGE =
   "local model setup timed out; check DNS, proxy, and network connectivity before retrying";
-const SIGNAL_EXIT_CODES = new Map([
+const SIGNAL_EXIT_CODES = [
   ["SIGINT", 130],
   ["SIGTERM", 143],
-]);
+];
 
 const detectLibc = () => {
   try {
@@ -122,7 +122,7 @@ const superviseSetup = async (
   });
   let forceTimer;
   let hardExitTimer;
-  let forwardedSignal;
+  let forwardedExit;
   let timedOut = false;
   let resolveHardExit;
   const hardExit = new Promise((resolve) => {
@@ -144,11 +144,11 @@ const superviseSetup = async (
   };
 
   const signalHandlers = new Map();
-  for (const signal of SIGNAL_EXIT_CODES.keys()) {
+  for (const [signal, status] of SIGNAL_EXIT_CODES) {
     const handler = () => {
       if (child.exitCode !== null || child.signalCode !== null) return;
-      forwardedSignal ??= signal;
-      terminate(signal, SIGNAL_EXIT_CODES.get(forwardedSignal) ?? 1);
+      forwardedExit ??= { signal, status, timedOut: false };
+      terminate(signal, forwardedExit.status);
     };
     signalHandlers.set(signal, handler);
     process.on(signal, handler);
@@ -165,14 +165,7 @@ const superviseSetup = async (
     if (timedOut) {
       return { status: SETUP_TIMEOUT_EXIT_CODE, signal: null, timedOut: true };
     }
-    if (forwardedSignal) {
-      return {
-        status: SIGNAL_EXIT_CODES.get(forwardedSignal) ?? 1,
-        signal: forwardedSignal,
-        timedOut: false,
-      };
-    }
-    return { status: status ?? 1, signal, timedOut: false };
+    return forwardedExit ?? { status: status ?? 1, signal, timedOut: false };
   } finally {
     clearTimeout(timeout);
     if (forceTimer) clearTimeout(forceTimer);

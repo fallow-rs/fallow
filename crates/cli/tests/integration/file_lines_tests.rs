@@ -428,7 +428,7 @@ fn markdown_and_review_name_a_long_file_as_a_file() {
     let review = health_text(tmp.path(), "review-github");
     assert!(review.contains("fallow/long-file"), "{review}");
     assert!(
-        review.contains("Fix intent: Move cohesive groups of exports"),
+        review.contains("**Fix:** Move groups of related exports"),
         "{review}"
     );
 }

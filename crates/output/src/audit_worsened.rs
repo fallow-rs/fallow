@@ -72,7 +72,7 @@ pub enum AuditReviewGate {
 
 impl AuditReviewContext {
     /// The label text after the severity, for example
-    /// `inherited · not gated (`--gate new-only`)`.
+    /// `inherited, not gated: `--gate new-only``.
     #[must_use]
     pub fn label(&self) -> String {
         let class = match self.attribution {
@@ -89,7 +89,7 @@ impl AuditReviewContext {
         };
         reason.map_or_else(
             || class.to_owned(),
-            |reason| format!("{class} \u{00b7} not gated ({reason})"),
+            |reason| format!("{class}, not gated: {reason}"),
         )
     }
 }

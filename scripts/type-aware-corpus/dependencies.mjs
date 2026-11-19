@@ -29,8 +29,6 @@ const realPath = (path) => {
   return join(realpathSync.native(existing), relative(existing, lexical));
 };
 
-const realApprovedRoot = (approvedDependencyRoot) => realPath(approvedDependencyRoot);
-
 const assertRealPathInside = (label, path, realApproved) => {
   const real = realPath(path);
   if (real.startsWith(`${realApproved}${sep}`)) return real;
@@ -41,7 +39,7 @@ const assertRealPathInside = (label, path, realApproved) => {
 
 /** Fail before any fixture is created when the artifact directory leaves the workspace. */
 export const assertArtifactDirectoryInWorkspace = (outDir, approvedDependencyRoot = REPO_ROOT) => {
-  assertRealPathInside("artifact directory", outDir, realApprovedRoot(approvedDependencyRoot));
+  assertRealPathInside("artifact directory", outDir, realPath(approvedDependencyRoot));
 };
 
 export const fixtureDependencyEnvironment = (
@@ -52,7 +50,7 @@ export const fixtureDependencyEnvironment = (
   if (!existsSync(root)) {
     throw new Error(`${projectId} fixture is missing: ${root}; run prepare or supplemental first`);
   }
-  const realApproved = realApprovedRoot(approvedDependencyRoot);
+  const realApproved = realPath(approvedDependencyRoot);
   const realRoot = assertRealPathInside(`${projectId} fixture path`, root, realApproved);
   const dependencyRoots = ancestorDirectories(realRoot).filter(containsInstalledDependencies);
   if (dependencyRoots.some((dependencyRoot) => dependencyRoot !== realApproved)) {

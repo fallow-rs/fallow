@@ -65,7 +65,7 @@ export const verifyProofSignature = (signature, challenge, publicKey) => {
 };
 
 /** Validate the standalone environment signature against the unchanged public anchor. */
-export const validateProof = (receipt, expected) => {
+const validateProof = (receipt, expected) => {
   const fields = [
     "schema",
     "mode",

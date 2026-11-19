@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use super::{AuditAnalysisSelection, AuditOptions, AuditResult};
+use super::{AuditOptions, AuditResult};
 
 /// Record the run in the Impact store of `host_root`. Finding paths stay
 /// relative to `opts.root`, the analyzed tree.
@@ -12,9 +12,7 @@ pub(super) fn record_audit_impact(
     gate_marker: Option<&str>,
     result: &AuditResult,
 ) -> Result<(), String> {
-    // A skipped sub-analysis reports no findings, which Impact would credit as
-    // resolved. Like the bare run, only a full selection writes Impact.
-    if opts.analyses != AuditAnalysisSelection::ALL {
+    if !opts.analyses.records_impact() {
         return Ok(());
     }
     let mut findings = result
@@ -28,8 +26,7 @@ pub(super) fn record_audit_impact(
     let clones = result
         .dupes
         .as_ref()
-        .map(|d| crate::impact::collect_clone_findings(&d.report))
-        .unwrap_or_default();
+        .map(|d| crate::impact::collect_clone_findings(&d.report));
     let empty_supps: Vec<fallow_types::results::ActiveSuppression> = Vec::new();
     let suppressions = result.check.as_ref().map_or(empty_supps.as_slice(), |c| {
         c.results.active_suppressions.as_slice()

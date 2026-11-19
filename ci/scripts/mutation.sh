@@ -56,9 +56,11 @@ check_cache_stamp() {
   fi
 }
 
+# The stamp is written before the run. A job that stops during the run then
+# still saves results that the next run can keep.
 write_cache_stamp() {
   local digest=$1
-  [ -d "$(dirname -- "$STAMP_FILE")" ] || return 0
+  mkdir -p "$(dirname -- "$STAMP_FILE")"
   printf '%s\n' "$digest" > "$STAMP_FILE"
 }
 
@@ -70,11 +72,11 @@ if [ -z "$FALLOW_MUTATION_REFUSE_REASON" ]; then
   use_change_scope
   DIGEST=$(fallow_mutation_cache_digest "$FALLOW_MUTATION_ROOT")
   check_cache_stamp "$DIGEST"
+  write_cache_stamp "$DIGEST"
 fi
 
 RC=0
 fallow_mutation_main || RC=$?
-[ -n "$DIGEST" ] && write_cache_stamp "$DIGEST"
 
 STATUS="${FALLOW_MUTATION_OUT_DIR}/fallow-mutation-status.json"
 echo "Mutation testing: $(jq -r '[.outcome, (.not_run_reason // empty)] | join(", ")' "$STATUS") (exit ${RC})"

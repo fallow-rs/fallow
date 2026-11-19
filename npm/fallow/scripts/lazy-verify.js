@@ -146,9 +146,6 @@ function sentinelStructureMatches(parsed, manifest, platformPkgDir) {
   return parsed.binaries && typeof parsed.binaries === "object";
 }
 
-// Compute a hex SHA-256 of a file's bytes. Used to bind the sentinel to the
-// exact binary bytes that passed verification, so a tampered binary with the
-// same mtime cannot ride a stale cache entry.
 function sha256OfFile(absPath) {
   try {
     return crypto.createHash("sha256").update(fs.readFileSync(absPath)).digest("hex");
@@ -344,7 +341,6 @@ function ensureVerified(input) {
     buildSentinelOptions(input || {}, platformPkgDir, packageName, env, platform),
   );
 
-  // Cache hit: sentinel exists, schema matches, mtimes match, version matches.
   if (sentinel.path && isSentinelValid(sentinel.path, platformPkgDir, manifest, platform)) {
     emitVerifyLog(env, { outcome: "ok", cache: "hit", sentinel: sentinel.path });
     return { ok: true, cached: true, sentinelPath: sentinel.path };

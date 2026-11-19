@@ -16,10 +16,17 @@
 //! `lodash` from `/^lodash$/` also matches `lodash/fp`, which Vite does not
 //! alias. A capture key also matches `<prefix>` without a rest.
 
-use oxc_ast::ast::{Expression, ObjectExpression, RegExpFlags, RegExpLiteral, TemplateLiteral};
+use std::path::Path;
+
+use oxc_ast::ast::{
+    ArrayExpressionElement, Expression, ObjectExpression, Program, RegExpFlags, RegExpLiteral,
+    TemplateLiteral,
+};
 
 use super::{
-    PathScope, alias_replacement_kinded, expression_to_string, find_property, path_string_in,
+    MAX_ALIAS_RESOLVE_DEPTH, PathScope, alias_replacement_kinded, expression_to_string,
+    extract_from_source, find_property, find_variable_init_expression, get_nested_expression,
+    is_package_specifier, path_string_in, read_each_config,
 };
 
 /// The capture group text that matches the rest of the specifier.
@@ -57,6 +64,84 @@ pub(super) fn object_alias_pair(
             .map(|(key, replacement)| (key, replacement, is_bare)),
         other => expression_to_string(other).map(|key| (key, replacement, is_bare)),
     }
+}
+
+/// Extract the packages that alias entries with a regular expression `find`
+/// name as their replacement, such as `identity-obj-proxy` in
+/// `{ find: /\.css$/, replacement: 'identity-obj-proxy' }`.
+///
+/// The prefix alias model can not express most of these entries, but Vite
+/// still loads the replacement package. The walk follows array spreads and
+/// local bindings. It does not read imported alias modules.
+#[must_use]
+pub fn extract_config_regex_alias_packages(
+    source: &str,
+    path: &Path,
+    prop_path: &[&str],
+) -> Vec<String> {
+    extract_from_source(source, path, |program| {
+        read_each_config(program, |obj| {
+            let expr = get_nested_expression(obj, prop_path)?;
+            let mut packages = Vec::new();
+            regex_alias_packages(program, expr, 0, &mut packages);
+            (!packages.is_empty()).then_some(packages)
+        })
+    })
+    .unwrap_or_default()
+}
+
+fn regex_alias_packages(
+    program: &Program<'_>,
+    expr: &Expression<'_>,
+    depth: usize,
+    packages: &mut Vec<String>,
+) {
+    if depth >= MAX_ALIAS_RESOLVE_DEPTH {
+        return;
+    }
+    match expr.get_inner_expression() {
+        Expression::ArrayExpression(arr) => {
+            for element in &arr.elements {
+                match element {
+                    ArrayExpressionElement::SpreadElement(spread) => {
+                        regex_alias_packages(program, &spread.argument, depth + 1, packages);
+                    }
+                    _ => {
+                        if let Some(Expression::ObjectExpression(obj)) = element.as_expression()
+                            && let Some(package) =
+                                regex_find_package(obj, PathScope::Program(program))
+                        {
+                            packages.push(package);
+                        }
+                    }
+                }
+            }
+        }
+        Expression::Identifier(id) => {
+            if let Some(init) = find_variable_init_expression(program, id.name.as_str()) {
+                regex_alias_packages(program, init, depth + 1, packages);
+            }
+        }
+        _ => {}
+    }
+}
+
+/// The package that one `{ find, replacement }` entry names, when `find` is a
+/// regular expression and `replacement` is a bare package string. A `$`
+/// reference in the package name gives no package, because the capture
+/// decides the name.
+fn regex_find_package(obj: &ObjectExpression<'_>, scope: PathScope<'_>) -> Option<String> {
+    let find = &find_property(obj, "find")?.value;
+    if !matches!(find.without_parentheses(), Expression::RegExpLiteral(_)) {
+        return None;
+    }
+    let (replacement, is_bare) = find_property(obj, "replacement")
+        .and_then(|prop| alias_replacement_kinded(&prop.value, scope))?;
+    if !is_bare || !is_package_specifier(&replacement) {
+        return None;
+    }
+    let package = crate::resolve::extract_package_name(&replacement);
+    (!package.contains('$')).then_some(package)
 }
 
 /// Evaluate an alias replacement path. A template literal that starts with a

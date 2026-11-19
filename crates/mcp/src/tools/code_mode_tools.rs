@@ -12,7 +12,7 @@ use crate::params::{
 
 use fallow_api::{
     AnalysisOptions, CombinedOptions, ComplexityOptions, CoverageInputs, DuplicationMode,
-    DuplicationOptions, run_combined, serialize_combined_programmatic_json,
+    DuplicationOptions, ProductionAnalysis, run_combined, serialize_combined_programmatic_json,
     serialize_explain_programmatic_json,
 };
 
@@ -21,7 +21,7 @@ use super::super::{
     api_runtime::{
         EnvScope, non_empty_path, non_empty_string, programmatic_error_body,
         resolve_typed_coverage_inputs, shared_analysis_options, shared_params, typed_api_value,
-        workspace_patterns_from_param,
+        typed_production, workspace_patterns_from_param,
     },
     build_analyze_args, build_architecture_args, build_audit_args, build_check_changed_args,
     build_check_runtime_coverage_args, build_explain_args, build_feature_flags_args,
@@ -592,6 +592,9 @@ fn combined_options_from_params(
     .map_err(|error| programmatic_error_body(&error))?;
     Ok(CombinedOptions {
         analysis,
+        production_dead_code: typed_production(params.production, ProductionAnalysis::DeadCode),
+        production_health: typed_production(params.production, ProductionAnalysis::Health),
+        production_dupes: typed_production(params.production, ProductionAnalysis::Dupes),
         include_entry_exports: params.include_entry_exports.unwrap_or(false),
         show_cascade: params.show_cascade.unwrap_or(false),
         duplication_options: DuplicationOptions {
@@ -987,6 +990,46 @@ mod tests {
         assert_eq!(file_finding["path"], "index.ts");
         assert_eq!(file_finding["line_count"], 4);
         assert_eq!(file_finding["max_file_lines"], 3);
+    }
+
+    /// An enabled `coverage-gaps` rule reports coverage gaps on the
+    /// in-process route, as it does on bare `fallow`. Without the rule the
+    /// section stays out.
+    #[test]
+    fn combined_reports_coverage_gaps_that_the_config_turns_on() {
+        let project = tempfile::tempdir().expect("project");
+        std::fs::write(
+            project.path().join("package.json"),
+            r#"{"name":"fixture","main":"index.ts"}"#,
+        )
+        .expect("write package");
+        std::fs::write(project.path().join("index.ts"), "export const a = 1;\n")
+            .expect("write source");
+        std::fs::write(
+            project.path().join(".fallowrc.json"),
+            r#"{"rules":{"coverage-gaps":"error"}}"#,
+        )
+        .expect("write config");
+        let params = CombinedParams {
+            root: Some(project.path().display().to_string()),
+            no_cache: Some(true),
+            ..CombinedParams::default()
+        };
+
+        let run = || {
+            run_combined_api_value(&params, None)
+                .expect("combined run")
+                .expect("in-process result")
+        };
+        let json = run();
+        assert_eq!(
+            json["health"]["coverage_gaps"]["summary"]["untested_files"], 1,
+            "{json}"
+        );
+
+        std::fs::write(project.path().join(".fallowrc.json"), "{}").expect("write config");
+        let json = run();
+        assert!(json["health"].get("coverage_gaps").is_none(), "{json}");
     }
 
     /// Bare `fallow` runs type-aware analysis when the config turns it on.

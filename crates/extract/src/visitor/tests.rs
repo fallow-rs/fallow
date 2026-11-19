@@ -1011,10 +1011,8 @@ fn merge_into_extends_imports() {
 
 #[test]
 fn merge_into_extends_semantic_facts() {
-    // Issue #1785 review finding: the SFC merge path must carry typed
-    // semantic facts; a fact emitted by a `<script>` block extractor was
-    // previously dropped, making every cross-module fact join inert for
-    // Vue/Svelte files.
+    // Cross-module analysis of Vue and Svelte needs typed facts from extracted script blocks.
+    // The merge must preserve those facts (issue #1785).
     let mut base = parse("export const x = 1;");
     assert!(base.semantic_facts.is_empty());
 

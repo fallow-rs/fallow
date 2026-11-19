@@ -638,7 +638,7 @@ fn build_client_server_trace(
             break;
         }
     }
-    chain.reverse(); // now [client_id, ..., sink_id]
+    chain.reverse();
 
     let mut trace: Vec<TraceHop> = Vec::with_capacity(chain.len());
     for (idx, &file_id) in chain.iter().enumerate() {

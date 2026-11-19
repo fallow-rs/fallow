@@ -1189,6 +1189,9 @@ pub(crate) fn filter_duplication_by_path_scope(
             .iter()
             .any(|instance| scope.contains(&instance.file))
     });
+    report
+        .range_marker_problems
+        .retain(|finding| scope.contains(&finding.path));
     duplicates::refresh_scoped_report(report, root);
 }
 
@@ -1637,6 +1640,7 @@ mod tests {
             ],
             clone_families: Vec::new(),
             mirrored_directories: Vec::new(),
+            range_marker_problems: Vec::new(),
             stats: DuplicationStats {
                 total_files: 4,
                 files_with_clones: 4,
@@ -1693,6 +1697,7 @@ mod tests {
             ],
             clone_families: Vec::new(),
             mirrored_directories: Vec::new(),
+            range_marker_problems: Vec::new(),
             stats: DuplicationStats::default(),
         };
         let changed: FxHashSet<PathBuf> = ["/repo/a.ts", "/repo/y.ts"]

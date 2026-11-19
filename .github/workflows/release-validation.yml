@@ -43,6 +43,7 @@ jobs:
 
       - uses: ./.github/actions/setup-rust
         with:
+          save-if: ${{ github.event_name != 'schedule' && github.ref == 'refs/heads/main' }}
           components: clippy, rustfmt
           cache-key: release-windows-verify
 
@@ -152,6 +153,7 @@ jobs:
 
       - uses: ./.github/actions/setup-rust
         with:
+          save-if: ${{ github.event_name != 'schedule' && github.ref == 'refs/heads/main' }}
           cache-key: release-arm64-verify-${{ matrix.os }}
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
@@ -239,6 +241,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
         with:
+          save-if: ${{ github.event_name != 'schedule' && github.ref == 'refs/heads/main' }}
           cache-key: release-vscode-target-${{ matrix.target }}
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
         with:
@@ -329,6 +332,7 @@ jobs:
           persist-credentials: false
       - uses: ./.github/actions/setup-rust
         with:
+          save-if: ${{ github.event_name != 'schedule' && github.ref == 'refs/heads/main' }}
           components: rustfmt
           targets: wasm32-wasip2
       - name: Run tests
@@ -357,11 +361,11 @@ jobs:
         with:
           node-version: '26'
 
-      - uses: taiki-e/install-action@b80e2bb2635f28eb98b9fce1e2f0887e1535c6b2 # v2.90.0
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-audit
 
-      - uses: taiki-e/install-action@b80e2bb2635f28eb98b9fce1e2f0887e1535c6b2 # v2.90.0
+      - uses: taiki-e/install-action@cfdb7ed4ccc7c7dce37759eae89dc5674b469b39 # v2.90.3
         with:
           tool: cargo-deny
 
@@ -432,6 +436,7 @@ jobs:
 
       - uses: ./.github/actions/setup-rust
         with:
+          save-if: ${{ github.event_name != 'schedule' && github.ref == 'refs/heads/main' }}
           cache-key: release-drift-full
 
       # One invocation for both packages builds each crate once. See the
@@ -459,6 +464,7 @@ jobs:
 
       - uses: ./.github/actions/setup-rust
         with:
+          save-if: ${{ github.event_name != 'schedule' && github.ref == 'refs/heads/main' }}
           components: clippy, rustfmt
 
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1

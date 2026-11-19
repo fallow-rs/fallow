@@ -1,0 +1,5 @@
+{
+  "name": "issue-4724-cross-file-holder-prototype-reads",
+  "private": true,
+  "main": "src/index.ts"
+}

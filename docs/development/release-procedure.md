@@ -419,7 +419,8 @@ invariants in this file.
       own, so a later merge cannot cancel its runs. When the release commit
       has another message, its runs can be cancelled. Re-run a cancelled run
       with `gh run rerun <id>`, or prepare the release again with the correct
-      commit message.
+      commit message. A re-run of an ordinary `CI` push run joins the shared
+      push group, so it replaces a newer `CI` run that waits in the queue.
     - A timeout: the runner queue was too long. Wait until the runs finish,
       then dispatch the release again. The runs of the release commit keep
       their state.
@@ -507,6 +508,8 @@ invariants in this file.
     artifacts against the committed F32 Candle baseline before
     `release-verified`. Also require both `musl smoke`
     legs to pass before `release-verified` (see [musl smoke](#musl-smoke)),
+    and require `type-aware-bundle-sign` to pass before `release-verified`
+    (see [Type-aware bundles](#type-aware-bundles)),
     and require the `Publish VS Code Marketplace
     targets`, `Publish Open VSX targets`, `Verify public VS Code registry
     targets`, `Publish to the MCP Registry`, and `Release ready for signed
@@ -517,7 +520,9 @@ invariants in this file.
 
     Download the `release-assets` artifact from that exact run and confirm it
     is non-empty. Confirm it contains the seven target VSIX files,
-    `inventory.json`, and `SHA256SUMS`. Only then create and push the signed tag
+    `inventory.json`, `SHA256SUMS`, and the four
+    `fallow-type-aware-<platform>-<arch>.tar.gz` bundles with their `.sig`
+    files. Only then create and push the signed tag
     and create the immutable GitHub Release. Do this right after
     `release-ready` without other work in between: from the moment the VSIX is
     public until the GitHub Release exists, an extension that updates cannot
@@ -556,6 +561,42 @@ invariants in this file.
     exists, and retry release creation. Never recreate or move the signed tag.
     Update the rolling Action tags from maintainer credentials only after the
     immutable release is published.
+
+## Type-aware bundles
+
+`fallow type-aware setup` installs the type-aware companion for a binary that
+did not come from npm. It downloads
+`fallow-type-aware-<platform>-<arch>.tar.gz` and its `.sig` file from the
+GitHub release of its own version. The platforms are the Node platforms
+`darwin-arm64`, `darwin-x64`, `linux-arm64` and `linux-x64`.
+
+Two release jobs make the bundles:
+
+1. `type-aware-bundle` runs `node scripts/type-aware-bundle.mjs --out
+   unsigned-type-aware`. The script reads the `typescript` package and the
+   TypeScript platform packages from
+   `tools/type-aware-sidecar/package-lock.json`, downloads each tarball, and
+   stops when its integrity differs from the lockfile. It writes a
+   reproducible archive: sorted paths, zero times and owners, regular files
+   only. The launcher loads `platform-check.cjs` before the companion, so a
+   `node` of another platform or architecture than the bundle stops with a
+   clear message. The job then unpacks the linux-x64 bundle and checks that the
+   companion answers a `status` request with the release version.
+2. `type-aware-bundle-sign` signs each bundle with the binary signing key,
+   checks the signature with the public key, and uploads the bundles as
+   `fallow-type-aware-bundles`. `release-assets` takes them into the GitHub
+   asset bundle.
+
+To build a bundle on a local machine, run the script with one platform:
+
+```bash
+node scripts/type-aware-bundle.mjs --out /tmp/bundles --platform darwin-arm64
+```
+
+A local bundle has no release signature. A debug build with the
+`test-sidecar-key` feature accepts a bundle that the public test seed
+`[0xAA; 32]` signed, so `fallow type-aware setup --yes --from <file>` can run
+end to end without a release.
 
 ## musl smoke
 

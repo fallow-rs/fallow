@@ -517,6 +517,18 @@ mod issue_346_static_factory_method;
 mod issue_3489_import_meta_glob_extglob;
 #[path = "integration_test/issue_3886_shell_helper_scripts.rs"]
 mod issue_3886_shell_helper_scripts;
+#[path = "integration_test/issue_4532_import_meta_glob_query.rs"]
+mod issue_4532_import_meta_glob_query;
+#[path = "integration_test/issue_4672_sfc_module_script_imports.rs"]
+mod issue_4672_sfc_module_script_imports;
+#[path = "integration_test/issue_4714_4715_svelte_template_tags.rs"]
+mod issue_4714_4715_svelte_template_tags;
+#[path = "integration_test/issue_4716_vite_workspace_rollup_input.rs"]
+mod issue_4716_vite_workspace_rollup_input;
+#[path = "integration_test/issue_4724_cross_file_holder_prototype_reads.rs"]
+mod issue_4724_cross_file_holder_prototype_reads;
+#[path = "integration_test/issue_4771_vite_alias_interface_members.rs"]
+mod issue_4771_vite_alias_interface_members;
 #[path = "integration_test/issue_604_vite_rollup_path_helpers.rs"]
 mod issue_604_vite_rollup_path_helpers;
 #[path = "integration_test/issue_605_new_class_member.rs"]
@@ -775,6 +787,12 @@ mod issue_4552_method_call_result_local;
 mod issue_4578_enum_member_alias;
 #[path = "integration_test/issue_4603_nested_class_binding_shadow.rs"]
 mod issue_4603_nested_class_binding_shadow;
+#[path = "integration_test/issue_4723_class_value_escape.rs"]
+mod issue_4723_class_value_escape;
+#[path = "integration_test/issue_4731_base_url_missing_file.rs"]
+mod issue_4731_base_url_missing_file;
+#[path = "integration_test/issue_4734_ts_import_declaration_file.rs"]
+mod issue_4734_ts_import_declaration_file;
 #[path = "integration_test/issue_609_velite.rs"]
 mod issue_609_velite;
 #[path = "integration_test/issue_704_auto_import_components.rs"]

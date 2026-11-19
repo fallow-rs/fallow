@@ -1,0 +1,2094 @@
+use super::*;
+
+#[test]
+fn empty_config() {
+    let config = BoundaryConfig::default();
+    assert!(config.is_empty());
+    assert!(config.validate_zone_references().is_empty());
+}
+
+#[test]
+fn deserialize_json() {
+    let json = r#"{
+        "zones": [
+            { "name": "ui", "patterns": ["src/components/**", "src/pages/**"] },
+            { "name": "db", "patterns": ["src/db/**"] },
+            { "name": "shared", "patterns": ["src/shared/**"] }
+        ],
+        "rules": [
+            { "from": "ui", "allow": ["shared"] },
+            { "from": "db", "allow": ["shared"] }
+        ]
+    }"#;
+    let config: BoundaryConfig = serde_json::from_str(json).unwrap();
+    assert_eq!(config.zones.len(), 3);
+    assert_eq!(config.rules.len(), 2);
+    assert_eq!(config.zones[0].name, "ui");
+    assert_eq!(
+        config.zones[0].patterns,
+        vec!["src/components/**", "src/pages/**"]
+    );
+    assert_eq!(config.rules[0].from, "ui");
+    assert_eq!(config.rules[0].allow, vec!["shared"]);
+}
+
+#[test]
+fn deserialize_boundary_coverage() {
+    let json = r#"{
+        "coverage": {
+            "requireAllFiles": true,
+            "allowUnmatched": ["src/generated/**"]
+        }
+    }"#;
+    let config: BoundaryConfig = serde_json::from_str(json).unwrap();
+
+    assert!(config.coverage.require_all_files);
+    assert_eq!(config.coverage.allow_unmatched, vec!["src/generated/**"]);
+    assert!(!config.is_empty());
+}
+
+#[test]
+fn deserialize_toml() {
+    let toml_str = r#"
+[[zones]]
+name = "ui"
+patterns = ["src/components/**"]
+
+[[zones]]
+name = "db"
+patterns = ["src/db/**"]
+
+[[rules]]
+from = "ui"
+allow = ["db"]
+"#;
+    let config: BoundaryConfig = toml::from_str(toml_str).unwrap();
+    assert_eq!(config.zones.len(), 2);
+    assert_eq!(config.rules.len(), 1);
+}
+
+#[test]
+fn deserialize_boundary_calls_single_and_array() {
+    let json = r#"{
+        "zones": [{ "name": "domain", "patterns": ["src/domain/**"] }],
+        "calls": {
+            "forbidden": [
+                { "from": "domain", "callee": "child_process.*" },
+                { "from": "domain", "callee": ["console.*", "process.exit"] }
+            ]
+        }
+    }"#;
+    let config: BoundaryConfig = serde_json::from_str(json).unwrap();
+
+    assert_eq!(config.calls.forbidden.len(), 2);
+    assert_eq!(
+        config.calls.forbidden[0].callee.iter().collect::<Vec<_>>(),
+        vec!["child_process.*"]
+    );
+    assert_eq!(
+        config.calls.forbidden[1].callee.iter().collect::<Vec<_>>(),
+        vec!["console.*", "process.exit"]
+    );
+    assert!(!config.is_empty());
+    assert!(config.validate_zone_references().is_empty());
+    assert!(config.validate_call_rules().is_empty());
+}
+
+#[test]
+fn deserialize_boundary_calls_toml() {
+    let toml_str = r#"
+[[zones]]
+name = "domain"
+patterns = ["src/domain/**"]
+
+[[calls.forbidden]]
+from = "domain"
+callee = "child_process.*"
+
+[[calls.forbidden]]
+from = "domain"
+callee = ["console.*"]
+"#;
+    let config: BoundaryConfig = toml::from_str(toml_str).unwrap();
+    assert_eq!(config.calls.forbidden.len(), 2);
+    assert_eq!(
+        config.calls.forbidden[0].callee.iter().collect::<Vec<_>>(),
+        vec!["child_process.*"]
+    );
+    assert_eq!(
+        config.calls.forbidden[1].callee.iter().collect::<Vec<_>>(),
+        vec!["console.*"]
+    );
+}
+
+#[test]
+fn validate_zone_references_calls_from_unknown() {
+    let json = r#"{
+        "zones": [{ "name": "domain", "patterns": ["src/domain/**"] }],
+        "calls": { "forbidden": [{ "from": "nonexistent", "callee": "console.*" }] }
+    }"#;
+    let config: BoundaryConfig = serde_json::from_str(json).unwrap();
+    let errors = config.validate_zone_references();
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].kind, ZoneReferenceKind::CallsFrom);
+    assert_eq!(errors[0].zone_name, "nonexistent");
+    let rendered = ZoneValidationError::UnknownZoneReference(errors[0].clone()).to_string();
+    assert!(
+        rendered.contains("boundaries.calls.forbidden[0].from"),
+        "unexpected rendering: {rendered}"
+    );
+}
+
+#[test]
+fn validate_call_rules_rejects_inert_patterns() {
+    let json = r#"{
+        "zones": [{ "name": "domain", "patterns": ["src/domain/**"] }],
+        "calls": {
+            "forbidden": [
+                { "from": "domain", "callee": "*" },
+                { "from": "domain", "callee": "  " },
+                { "from": "domain", "callee": "foo..bar" },
+                { "from": "domain", "callee": [] }
+            ]
+        }
+    }"#;
+    let config: BoundaryConfig = serde_json::from_str(json).unwrap();
+    let errors = config.validate_call_rules();
+    assert_eq!(errors.len(), 4);
+    assert!(errors[0].reason.contains("matches nothing"));
+    assert!(errors[1].reason.contains("must not be empty"));
+    assert!(errors[2].reason.contains("empty path segment"));
+    assert!(errors[3].reason.contains("at least one callee pattern"));
+}
+
+#[test]
+fn validate_call_rules_rejects_misplaced_wildcards() {
+    let json = r#"{
+        "zones": [{ "name": "domain", "patterns": ["src/domain/**"] }],
+        "calls": {
+            "forbidden": [
+                { "from": "domain", "callee": "a.*.b" },
+                { "from": "domain", "callee": "*.query.*" },
+                { "from": "domain", "callee": "con*ole.log" },
+                { "from": "domain", "callee": ["console.*", "*.innerHTML", "child_process.exec"] }
+            ]
+        }
+    }"#;
+    let config: BoundaryConfig = serde_json::from_str(json).unwrap();
+    let errors = config.validate_call_rules();
+    assert_eq!(errors.len(), 3);
+    assert!(errors[0].reason.contains("not both and not mid-path"));
+    assert!(errors[1].reason.contains("not both and not mid-path"));
+    assert!(errors[2].reason.contains("not globs"));
+}
+
+#[test]
+fn resolve_groups_calls_by_zone() {
+    let json = r#"{
+        "zones": [
+            { "name": "domain", "patterns": ["src/domain/**"] },
+            { "name": "ui", "patterns": ["src/ui/**"] }
+        ],
+        "calls": {
+            "forbidden": [
+                { "from": "domain", "callee": "child_process.*" },
+                { "from": "domain", "callee": ["console.*"] },
+                { "from": "ui", "callee": "process.exit" }
+            ]
+        }
+    }"#;
+    let config: BoundaryConfig = serde_json::from_str(json).unwrap();
+    let resolved = config.resolve();
+    assert_eq!(
+        resolved.calls_forbidden_by_zone.get("domain"),
+        Some(&vec![
+            "child_process.*".to_string(),
+            "console.*".to_string()
+        ])
+    );
+    assert_eq!(
+        resolved.calls_forbidden_by_zone.get("ui"),
+        Some(&vec!["process.exit".to_string()])
+    );
+    assert!(!resolved.is_empty());
+}
+
+#[test]
+fn auto_discover_expands_child_zones_and_parent_rules() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
+    std::fs::create_dir_all(temp.path().join("src/features/billing")).unwrap();
+
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![
+            BoundaryZone {
+                name: "app".to_string(),
+                patterns: vec!["src/app/**".to_string()],
+                ..BoundaryZone::default()
+            },
+            BoundaryZone {
+                name: "features".to_string(),
+                auto_discover: vec!["src/features".to_string()],
+                ..BoundaryZone::default()
+            },
+        ],
+        rules: vec![
+            BoundaryRule {
+                from: "app".to_string(),
+                allow: vec!["features".to_string()],
+                allow_type_only: vec![],
+            },
+            BoundaryRule {
+                from: "features".to_string(),
+                allow: vec![],
+                allow_type_only: vec![],
+            },
+        ],
+    };
+
+    config.expand_auto_discover(temp.path());
+
+    let zone_names: Vec<_> = config.zones.iter().map(|zone| zone.name.as_str()).collect();
+    assert_eq!(zone_names, vec!["app", "features/auth", "features/billing"]);
+    assert_eq!(
+        config.zones[1].patterns,
+        vec!["src/features/auth/**".to_string()]
+    );
+    assert_eq!(
+        config.zones[2].patterns,
+        vec!["src/features/billing/**".to_string()]
+    );
+    let app_rule = config
+        .rules
+        .iter()
+        .find(|rule| rule.from == "app")
+        .expect("app rule should be preserved");
+    assert_eq!(
+        app_rule.allow,
+        vec!["features/auth".to_string(), "features/billing".to_string()]
+    );
+    assert!(
+        config
+            .rules
+            .iter()
+            .any(|rule| rule.from == "features/auth" && rule.allow.is_empty())
+    );
+    assert!(
+        config
+            .rules
+            .iter()
+            .any(|rule| rule.from == "features/billing" && rule.allow.is_empty())
+    );
+    assert!(config.validate_zone_references().is_empty());
+}
+
+#[test]
+fn auto_discover_parent_fallback_allows_children_without_relaxing_child_rules() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
+    std::fs::create_dir_all(temp.path().join("src/features/billing")).unwrap();
+
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![
+            BoundaryZone {
+                name: "app".to_string(),
+                patterns: vec!["src/app/**".to_string()],
+                ..BoundaryZone::default()
+            },
+            BoundaryZone {
+                name: "features".to_string(),
+                patterns: vec!["src/features/**".to_string()],
+                auto_discover: vec!["src/features".to_string()],
+                ..BoundaryZone::default()
+            },
+            BoundaryZone {
+                name: "shared".to_string(),
+                patterns: vec!["src/shared/**".to_string()],
+                ..BoundaryZone::default()
+            },
+        ],
+        rules: vec![
+            BoundaryRule {
+                from: "app".to_string(),
+                allow: vec!["features".to_string(), "shared".to_string()],
+                allow_type_only: vec![],
+            },
+            BoundaryRule {
+                from: "features".to_string(),
+                allow: vec!["shared".to_string()],
+                allow_type_only: vec![],
+            },
+        ],
+    };
+
+    config.expand_auto_discover(temp.path());
+
+    let zone_names: Vec<_> = config.zones.iter().map(|zone| zone.name.as_str()).collect();
+    assert_eq!(
+        zone_names,
+        vec![
+            "app",
+            "features/auth",
+            "features/billing",
+            "features",
+            "shared"
+        ]
+    );
+
+    let app_rule = config
+        .rules
+        .iter()
+        .find(|rule| rule.from == "app")
+        .expect("app rule should be preserved");
+    assert_eq!(
+        app_rule.allow,
+        vec![
+            "features/auth".to_string(),
+            "features/billing".to_string(),
+            "features".to_string(),
+            "shared".to_string()
+        ]
+    );
+
+    let parent_rule = config
+        .rules
+        .iter()
+        .find(|rule| rule.from == "features")
+        .expect("parent fallback rule should be preserved");
+    assert_eq!(
+        parent_rule.allow,
+        vec![
+            "shared".to_string(),
+            "features/auth".to_string(),
+            "features/billing".to_string()
+        ]
+    );
+
+    let auth_rule = config
+        .rules
+        .iter()
+        .find(|rule| rule.from == "features/auth")
+        .expect("auth child rule should be generated");
+    assert_eq!(auth_rule.allow, vec!["shared".to_string()]);
+
+    let billing_rule = config
+        .rules
+        .iter()
+        .find(|rule| rule.from == "features/billing")
+        .expect("billing child rule should be generated");
+    assert_eq!(billing_rule.allow, vec!["shared".to_string()]);
+    assert!(config.validate_zone_references().is_empty());
+}
+
+#[test]
+fn auto_discover_explicit_child_rule_wins_over_generated_parent_rule() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
+    std::fs::create_dir_all(temp.path().join("src/features/billing")).unwrap();
+
+    for explicit_child_first in [true, false] {
+        let explicit_child_rule = BoundaryRule {
+            from: "features/auth".to_string(),
+            allow: vec!["shared".to_string(), "features/billing".to_string()],
+            allow_type_only: vec![],
+        };
+        let parent_rule = BoundaryRule {
+            from: "features".to_string(),
+            allow: vec!["shared".to_string()],
+            allow_type_only: vec![],
+        };
+        let rules = if explicit_child_first {
+            vec![explicit_child_rule, parent_rule]
+        } else {
+            vec![parent_rule, explicit_child_rule]
+        };
+
+        let mut config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
+            preset: None,
+            zones: vec![
+                BoundaryZone {
+                    name: "features".to_string(),
+                    auto_discover: vec!["src/features".to_string()],
+                    ..BoundaryZone::default()
+                },
+                BoundaryZone {
+                    name: "shared".to_string(),
+                    patterns: vec!["src/shared/**".to_string()],
+                    ..BoundaryZone::default()
+                },
+            ],
+            rules,
+        };
+
+        config.expand_auto_discover(temp.path());
+
+        let auth_rule = config
+            .rules
+            .iter()
+            .find(|rule| rule.from == "features/auth")
+            .expect("explicit child rule should remain");
+        assert_eq!(
+            auth_rule.allow,
+            vec!["shared".to_string(), "features/billing".to_string()],
+            "explicit child rule should win regardless of rule order"
+        );
+
+        let billing_rule = config
+            .rules
+            .iter()
+            .find(|rule| rule.from == "features/billing")
+            .expect("parent rule should still generate sibling child rule");
+        assert_eq!(billing_rule.allow, vec!["shared".to_string()]);
+        assert!(config.validate_zone_references().is_empty());
+    }
+}
+
+#[test]
+fn logical_groups_returned_for_simple_auto_discover_zone() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
+    std::fs::create_dir_all(temp.path().join("src/features/billing")).unwrap();
+
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![
+            BoundaryZone {
+                name: "app".to_string(),
+                patterns: vec!["src/app/**".to_string()],
+                ..BoundaryZone::default()
+            },
+            BoundaryZone {
+                name: "features".to_string(),
+                auto_discover: vec!["src/features".to_string()],
+                ..BoundaryZone::default()
+            },
+        ],
+        rules: vec![BoundaryRule {
+            from: "features".to_string(),
+            allow: vec!["app".to_string()],
+            allow_type_only: vec![],
+        }],
+    };
+
+    let groups = config.expand_auto_discover(temp.path());
+    assert_eq!(groups.len(), 1);
+    let g = &groups[0];
+    assert_eq!(g.name, "features");
+    assert_eq!(g.children, vec!["features/auth", "features/billing"]);
+    assert_eq!(g.auto_discover, vec!["src/features"]);
+    assert_eq!(g.source_zone_index, 1);
+    assert_eq!(g.status, LogicalGroupStatus::Ok);
+    assert!(g.fallback_zone.is_none());
+    let rule = g
+        .authored_rule
+        .as_ref()
+        .expect("authored rule preserved verbatim");
+    assert_eq!(rule.allow, vec!["app"]);
+    assert!(rule.allow_type_only.is_empty());
+}
+
+#[test]
+fn logical_groups_preserve_verbatim_auto_discover_strings() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
+
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![BoundaryZone {
+            name: "features".to_string(),
+            auto_discover: vec!["./src/features/".to_string()],
+            ..BoundaryZone::default()
+        }],
+        rules: vec![],
+    };
+
+    let groups = config.expand_auto_discover(temp.path());
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].auto_discover, vec!["./src/features/"]);
+    assert_eq!(groups[0].children, vec!["features/auth"]);
+}
+
+#[test]
+fn logical_groups_bulletproof_keeps_fallback_zone_cross_reference() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
+
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![BoundaryZone {
+            name: "features".to_string(),
+            patterns: vec!["src/features/**".to_string()],
+            auto_discover: vec!["src/features".to_string()],
+            ..BoundaryZone::default()
+        }],
+        rules: vec![],
+    };
+
+    let groups = config.expand_auto_discover(temp.path());
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].fallback_zone.as_deref(), Some("features"));
+    assert!(config.zones.iter().any(|z| z.name == "features"));
+}
+
+#[test]
+fn logical_groups_status_empty_when_no_child_dirs() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("src/features")).unwrap();
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![BoundaryZone {
+            name: "features".to_string(),
+            auto_discover: vec!["src/features".to_string()],
+            ..BoundaryZone::default()
+        }],
+        rules: vec![],
+    };
+
+    let groups = config.expand_auto_discover(temp.path());
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].status, LogicalGroupStatus::Empty);
+    assert!(groups[0].children.is_empty());
+}
+
+#[test]
+fn logical_groups_status_invalid_path_when_dir_missing() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![BoundaryZone {
+            name: "features".to_string(),
+            auto_discover: vec!["src/features".to_string()],
+            ..BoundaryZone::default()
+        }],
+        rules: vec![],
+    };
+
+    let groups = config.expand_auto_discover(temp.path());
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].status, LogicalGroupStatus::InvalidPath);
+    assert!(groups[0].children.is_empty());
+}
+
+#[test]
+fn logical_groups_status_ok_wins_over_invalid_when_mixed() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![BoundaryZone {
+            name: "features".to_string(),
+            auto_discover: vec!["src/features".to_string(), "src/modules".to_string()],
+            ..BoundaryZone::default()
+        }],
+        rules: vec![],
+    };
+
+    let groups = config.expand_auto_discover(temp.path());
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].status, LogicalGroupStatus::Ok);
+    assert_eq!(groups[0].children, vec!["features/auth"]);
+}
+
+#[test]
+fn logical_groups_preserve_declaration_order() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("src/zeta/a")).unwrap();
+    std::fs::create_dir_all(temp.path().join("src/alpha/a")).unwrap();
+    std::fs::create_dir_all(temp.path().join("src/mid/a")).unwrap();
+
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![
+            BoundaryZone {
+                name: "zeta".to_string(),
+                auto_discover: vec!["src/zeta".to_string()],
+                ..BoundaryZone::default()
+            },
+            BoundaryZone {
+                name: "alpha".to_string(),
+                auto_discover: vec!["src/alpha".to_string()],
+                ..BoundaryZone::default()
+            },
+            BoundaryZone {
+                name: "mid".to_string(),
+                auto_discover: vec!["src/mid".to_string()],
+                ..BoundaryZone::default()
+            },
+        ],
+        rules: vec![],
+    };
+
+    let groups = config.expand_auto_discover(temp.path());
+    let names: Vec<&str> = groups.iter().map(|g| g.name.as_str()).collect();
+    assert_eq!(names, vec!["zeta", "alpha", "mid"]);
+}
+
+#[test]
+fn logical_groups_merged_from_records_duplicate_indices() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
+    std::fs::create_dir_all(temp.path().join("src/extra/billing")).unwrap();
+
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![
+            BoundaryZone {
+                name: "features".to_string(),
+                auto_discover: vec!["src/features".to_string()],
+                ..BoundaryZone::default()
+            },
+            BoundaryZone {
+                name: "other".to_string(),
+                patterns: vec!["src/other/**".to_string()],
+                ..BoundaryZone::default()
+            },
+            BoundaryZone {
+                name: "features".to_string(),
+                auto_discover: vec!["src/extra".to_string()],
+                ..BoundaryZone::default()
+            },
+        ],
+        rules: vec![],
+    };
+    let groups = config.expand_auto_discover(temp.path());
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].merged_from.as_deref(), Some(&[0_usize, 2][..]));
+    assert_eq!(groups[0].source_zone_index, 0);
+}
+
+#[test]
+fn logical_groups_merged_from_none_on_single_declaration() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
+
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![BoundaryZone {
+            name: "features".to_string(),
+            auto_discover: vec!["src/features".to_string()],
+            ..BoundaryZone::default()
+        }],
+        rules: vec![],
+    };
+    let groups = config.expand_auto_discover(temp.path());
+    assert!(groups[0].merged_from.is_none());
+}
+
+#[test]
+fn logical_groups_echo_original_zone_root() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("packages/app/src/features/auth")).unwrap();
+
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![BoundaryZone {
+            name: "features".to_string(),
+            auto_discover: vec!["src/features".to_string()],
+            root: Some("packages/app/".to_string()),
+            ..BoundaryZone::default()
+        }],
+        rules: vec![],
+    };
+    let groups = config.expand_auto_discover(temp.path());
+    assert_eq!(
+        groups[0].original_zone_root.as_deref(),
+        Some("packages/app/")
+    );
+}
+
+#[test]
+fn logical_groups_original_zone_root_none_when_unset() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
+
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![BoundaryZone {
+            name: "features".to_string(),
+            auto_discover: vec!["src/features".to_string()],
+            ..BoundaryZone::default()
+        }],
+        rules: vec![],
+    };
+    let groups = config.expand_auto_discover(temp.path());
+    assert!(groups[0].original_zone_root.is_none());
+}
+
+#[test]
+fn logical_groups_child_source_indices_populated_for_multi_path() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
+    std::fs::create_dir_all(temp.path().join("src/modules/billing")).unwrap();
+
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![BoundaryZone {
+            name: "features".to_string(),
+            auto_discover: vec!["src/features".to_string(), "src/modules".to_string()],
+            ..BoundaryZone::default()
+        }],
+        rules: vec![],
+    };
+    let groups = config.expand_auto_discover(temp.path());
+    assert_eq!(
+        groups[0].children,
+        vec!["features/auth", "features/billing"]
+    );
+    assert_eq!(groups[0].child_source_indices, vec![0, 1]);
+}
+
+#[test]
+fn logical_groups_child_source_indices_empty_for_single_path() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
+    std::fs::create_dir_all(temp.path().join("src/features/billing")).unwrap();
+
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![BoundaryZone {
+            name: "features".to_string(),
+            auto_discover: vec!["src/features".to_string()],
+            ..BoundaryZone::default()
+        }],
+        rules: vec![],
+    };
+    let groups = config.expand_auto_discover(temp.path());
+    assert!(groups[0].child_source_indices.is_empty());
+}
+
+#[test]
+fn logical_groups_child_source_indices_after_duplicate_merge_shifted() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
+    std::fs::create_dir_all(temp.path().join("src/extra/billing")).unwrap();
+
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![
+            BoundaryZone {
+                name: "features".to_string(),
+                auto_discover: vec!["src/features".to_string()],
+                ..BoundaryZone::default()
+            },
+            BoundaryZone {
+                name: "features".to_string(),
+                auto_discover: vec!["src/extra".to_string()],
+                ..BoundaryZone::default()
+            },
+        ],
+        rules: vec![],
+    };
+    let groups = config.expand_auto_discover(temp.path());
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].auto_discover, vec!["src/features", "src/extra"]);
+    let auth_idx = groups[0]
+        .children
+        .iter()
+        .position(|c| c == "features/auth")
+        .unwrap();
+    let billing_idx = groups[0]
+        .children
+        .iter()
+        .position(|c| c == "features/billing")
+        .unwrap();
+    assert_eq!(groups[0].child_source_indices[auth_idx], 0);
+    assert_eq!(groups[0].child_source_indices[billing_idx], 1);
+}
+
+#[test]
+fn logical_groups_merge_duplicate_parent_zone_declarations() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
+    std::fs::create_dir_all(temp.path().join("src/extra/billing")).unwrap();
+
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![
+            BoundaryZone {
+                name: "features".to_string(),
+                auto_discover: vec!["src/features".to_string()],
+                ..BoundaryZone::default()
+            },
+            BoundaryZone {
+                name: "features".to_string(),
+                auto_discover: vec!["src/extra".to_string()],
+                ..BoundaryZone::default()
+            },
+        ],
+        rules: vec![],
+    };
+
+    let groups = config.expand_auto_discover(temp.path());
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].name, "features");
+    assert_eq!(groups[0].auto_discover, vec!["src/features", "src/extra"]);
+    assert!(groups[0].children.iter().any(|c| c == "features/auth"));
+    assert!(groups[0].children.iter().any(|c| c == "features/billing"));
+    assert_eq!(groups[0].source_zone_index, 0);
+}
+
+#[test]
+fn logical_groups_duplicate_identical_declarations_no_double_count() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
+    std::fs::create_dir_all(temp.path().join("src/features/billing")).unwrap();
+
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![
+            BoundaryZone {
+                name: "features".to_string(),
+                auto_discover: vec!["src/features".to_string()],
+                ..BoundaryZone::default()
+            },
+            BoundaryZone {
+                name: "features".to_string(),
+                auto_discover: vec!["src/features".to_string()],
+                ..BoundaryZone::default()
+            },
+        ],
+        rules: vec![],
+    };
+
+    let groups = config.expand_auto_discover(temp.path());
+    assert_eq!(groups.len(), 1);
+    let zone_names: Vec<&str> = config.zones.iter().map(|z| z.name.as_str()).collect();
+    assert_eq!(zone_names, vec!["features/auth", "features/billing"]);
+    assert_eq!(
+        groups[0].children,
+        vec!["features/auth", "features/billing"]
+    );
+    assert_eq!(
+        groups[0].auto_discover,
+        vec!["src/features", "src/features"]
+    );
+    assert_eq!(groups[0].merged_from.as_deref(), Some(&[0_usize, 1][..]));
+}
+
+#[test]
+fn logical_groups_empty_when_no_auto_discover_present() {
+    let temp = tempfile::tempdir().unwrap();
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![BoundaryZone {
+            name: "ui".to_string(),
+            patterns: vec!["src/components/**".to_string()],
+            ..BoundaryZone::default()
+        }],
+        rules: vec![],
+    };
+    let groups = config.expand_auto_discover(temp.path());
+    assert!(groups.is_empty());
+}
+
+#[test]
+fn logical_groups_propagate_through_resolve() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
+
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![BoundaryZone {
+            name: "features".to_string(),
+            auto_discover: vec!["src/features".to_string()],
+            ..BoundaryZone::default()
+        }],
+        rules: vec![],
+    };
+    let groups = config.expand_auto_discover(temp.path());
+    let mut resolved = config.resolve();
+    resolved.logical_groups = groups;
+    assert_eq!(resolved.logical_groups.len(), 1);
+    assert_eq!(resolved.logical_groups[0].name, "features");
+    assert_eq!(resolved.logical_groups[0].children, vec!["features/auth"]);
+}
+
+#[test]
+fn validate_zone_references_valid() {
+    let config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![
+            BoundaryZone {
+                name: "ui".to_string(),
+                ..BoundaryZone::default()
+            },
+            BoundaryZone {
+                name: "db".to_string(),
+                ..BoundaryZone::default()
+            },
+        ],
+        rules: vec![BoundaryRule {
+            from: "ui".to_string(),
+            allow: vec!["db".to_string()],
+            allow_type_only: vec![],
+        }],
+    };
+    assert!(config.validate_zone_references().is_empty());
+}
+
+#[test]
+fn validate_zone_references_invalid_from() {
+    let config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![BoundaryZone {
+            name: "ui".to_string(),
+            ..BoundaryZone::default()
+        }],
+        rules: vec![BoundaryRule {
+            from: "nonexistent".to_string(),
+            allow: vec!["ui".to_string()],
+            allow_type_only: vec![],
+        }],
+    };
+    let errors = config.validate_zone_references();
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].zone_name, "nonexistent");
+    assert_eq!(errors[0].kind, ZoneReferenceKind::From);
+    assert_eq!(errors[0].rule_index, 0);
+}
+
+#[test]
+fn validate_zone_references_invalid_allow() {
+    let config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![BoundaryZone {
+            name: "ui".to_string(),
+            ..BoundaryZone::default()
+        }],
+        rules: vec![BoundaryRule {
+            from: "ui".to_string(),
+            allow: vec!["nonexistent".to_string()],
+            allow_type_only: vec![],
+        }],
+    };
+    let errors = config.validate_zone_references();
+    assert_eq!(errors.len(), 1);
+    assert_eq!(errors[0].zone_name, "nonexistent");
+    assert_eq!(errors[0].kind, ZoneReferenceKind::Allow);
+}
+
+#[test]
+fn validate_zone_references_invalid_allow_type_only() {
+    let config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![BoundaryZone {
+            name: "ui".to_string(),
+            ..BoundaryZone::default()
+        }],
+        rules: vec![BoundaryRule {
+            from: "ui".to_string(),
+            allow: vec![],
+            allow_type_only: vec!["nonexistent_type_zone".to_string()],
+        }],
+    };
+    let errors = config.validate_zone_references();
+    assert_eq!(errors.len(), 1, "got: {errors:?}");
+    assert_eq!(errors[0].zone_name, "nonexistent_type_zone");
+    assert_eq!(errors[0].kind, ZoneReferenceKind::AllowTypeOnly);
+}
+
+#[test]
+fn resolve_and_classify() {
+    let config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![
+            BoundaryZone {
+                name: "ui".to_string(),
+                patterns: vec!["src/components/**".to_string()],
+                ..BoundaryZone::default()
+            },
+            BoundaryZone {
+                name: "db".to_string(),
+                patterns: vec!["src/db/**".to_string()],
+                ..BoundaryZone::default()
+            },
+        ],
+        rules: vec![],
+    };
+    let resolved = config.resolve();
+    assert_eq!(
+        resolved.classify_zone("src/components/Button.tsx"),
+        Some("ui")
+    );
+    assert_eq!(resolved.classify_zone("src/db/queries.ts"), Some("db"));
+    assert_eq!(resolved.classify_zone("src/utils/helpers.ts"), None);
+}
+
+#[test]
+fn first_match_wins() {
+    let config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![
+            BoundaryZone {
+                name: "specific".to_string(),
+                patterns: vec!["src/shared/db-utils/**".to_string()],
+                ..BoundaryZone::default()
+            },
+            BoundaryZone {
+                name: "shared".to_string(),
+                patterns: vec!["src/shared/**".to_string()],
+                ..BoundaryZone::default()
+            },
+        ],
+        rules: vec![],
+    };
+    let resolved = config.resolve();
+    assert_eq!(
+        resolved.classify_zone("src/shared/db-utils/pool.ts"),
+        Some("specific")
+    );
+    assert_eq!(
+        resolved.classify_zone("src/shared/helpers.ts"),
+        Some("shared")
+    );
+}
+
+#[test]
+fn self_import_always_allowed() {
+    let config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![BoundaryZone {
+            name: "ui".to_string(),
+            ..BoundaryZone::default()
+        }],
+        rules: vec![BoundaryRule {
+            from: "ui".to_string(),
+            allow: vec![],
+            allow_type_only: vec![],
+        }],
+    };
+    let resolved = config.resolve();
+    assert!(resolved.is_import_allowed("ui", "ui"));
+}
+
+#[test]
+fn unrestricted_zone_allows_all() {
+    let config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![
+            BoundaryZone {
+                name: "shared".to_string(),
+                ..BoundaryZone::default()
+            },
+            BoundaryZone {
+                name: "db".to_string(),
+                ..BoundaryZone::default()
+            },
+        ],
+        rules: vec![],
+    };
+    let resolved = config.resolve();
+    assert!(resolved.is_import_allowed("shared", "db"));
+}
+
+#[test]
+fn restricted_zone_blocks_unlisted() {
+    let config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![
+            BoundaryZone {
+                name: "ui".to_string(),
+                ..BoundaryZone::default()
+            },
+            BoundaryZone {
+                name: "db".to_string(),
+                ..BoundaryZone::default()
+            },
+            BoundaryZone {
+                name: "shared".to_string(),
+                ..BoundaryZone::default()
+            },
+        ],
+        rules: vec![BoundaryRule {
+            from: "ui".to_string(),
+            allow: vec!["shared".to_string()],
+            allow_type_only: vec![],
+        }],
+    };
+    let resolved = config.resolve();
+    assert!(resolved.is_import_allowed("ui", "shared"));
+    assert!(!resolved.is_import_allowed("ui", "db"));
+}
+
+#[test]
+fn empty_allow_blocks_all_except_self() {
+    let config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![
+            BoundaryZone {
+                name: "isolated".to_string(),
+                ..BoundaryZone::default()
+            },
+            BoundaryZone {
+                name: "other".to_string(),
+                ..BoundaryZone::default()
+            },
+        ],
+        rules: vec![BoundaryRule {
+            from: "isolated".to_string(),
+            allow: vec![],
+            allow_type_only: vec![],
+        }],
+    };
+    let resolved = config.resolve();
+    assert!(resolved.is_import_allowed("isolated", "isolated"));
+    assert!(!resolved.is_import_allowed("isolated", "other"));
+}
+
+#[test]
+fn zone_root_filters_classification_to_subtree() {
+    let config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![
+            BoundaryZone {
+                name: "ui".to_string(),
+                patterns: vec!["src/**".to_string()],
+                root: Some("packages/app/".to_string()),
+                ..BoundaryZone::default()
+            },
+            BoundaryZone {
+                name: "domain".to_string(),
+                patterns: vec!["src/**".to_string()],
+                root: Some("packages/core/".to_string()),
+                ..BoundaryZone::default()
+            },
+        ],
+        rules: vec![],
+    };
+    let resolved = config.resolve();
+    assert_eq!(
+        resolved.classify_zone("packages/app/src/login.tsx"),
+        Some("ui")
+    );
+    assert_eq!(
+        resolved.classify_zone("packages/core/src/order.ts"),
+        Some("domain")
+    );
+    assert_eq!(resolved.classify_zone("src/login.tsx"), None);
+    assert_eq!(resolved.classify_zone("packages/utils/src/x.ts"), None);
+}
+
+/// `root` matching is case-sensitive.
+#[test]
+fn zone_root_is_case_sensitive() {
+    let config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![BoundaryZone {
+            name: "ui".to_string(),
+            patterns: vec!["src/**".to_string()],
+            root: Some("packages/app/".to_string()),
+            ..BoundaryZone::default()
+        }],
+        rules: vec![],
+    };
+    let resolved = config.resolve();
+    assert_eq!(
+        resolved.classify_zone("packages/app/src/login.tsx"),
+        Some("ui"),
+        "exact-case path classifies"
+    );
+    assert_eq!(
+        resolved.classify_zone("packages/App/src/login.tsx"),
+        None,
+        "case-different path does not classify (root is case-sensitive)"
+    );
+    assert_eq!(
+        resolved.classify_zone("Packages/app/src/login.tsx"),
+        None,
+        "case-different prefix does not classify"
+    );
+}
+
+#[test]
+fn zone_root_normalizes_trailing_slash_and_dot_prefix() {
+    let config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![
+            BoundaryZone {
+                name: "no-slash".to_string(),
+                patterns: vec!["src/**".to_string()],
+                root: Some("packages/app".to_string()),
+                ..BoundaryZone::default()
+            },
+            BoundaryZone {
+                name: "dot-prefixed".to_string(),
+                patterns: vec!["src/**".to_string()],
+                root: Some("./packages/lib/".to_string()),
+                ..BoundaryZone::default()
+            },
+        ],
+        rules: vec![],
+    };
+    let resolved = config.resolve();
+    assert_eq!(resolved.zones[0].root.as_deref(), Some("packages/app/"));
+    assert_eq!(resolved.zones[1].root.as_deref(), Some("packages/lib/"));
+    assert_eq!(
+        resolved.classify_zone("packages/app/src/x.ts"),
+        Some("no-slash")
+    );
+    assert_eq!(
+        resolved.classify_zone("packages/lib/src/x.ts"),
+        Some("dot-prefixed")
+    );
+}
+
+#[test]
+fn validate_root_prefixes_flags_redundant_pattern() {
+    let config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![BoundaryZone {
+            name: "ui".to_string(),
+            patterns: vec!["packages/app/src/**".to_string()],
+            root: Some("packages/app/".to_string()),
+            ..BoundaryZone::default()
+        }],
+        rules: vec![],
+    };
+    let errors = config.validate_root_prefixes();
+    assert_eq!(errors.len(), 1, "expected one redundant-prefix error");
+    assert_eq!(errors[0].zone_name, "ui");
+    assert_eq!(errors[0].pattern, "packages/app/src/**");
+    assert_eq!(errors[0].root, "packages/app/");
+    let rendered = ZoneValidationError::RedundantRootPrefix(errors[0].clone()).to_string();
+    assert!(
+        rendered.contains("FALLOW-BOUNDARY-ROOT-REDUNDANT-PREFIX"),
+        "Display should carry legacy tag: {rendered}"
+    );
+    assert!(
+        rendered.contains("zone 'ui'"),
+        "Display rendering: {rendered}"
+    );
+    assert!(
+        rendered.contains("packages/app/src/**"),
+        "Display rendering: {rendered}"
+    );
+}
+
+#[test]
+fn validate_root_prefixes_handles_unnormalized_root() {
+    let config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![BoundaryZone {
+            name: "ui".to_string(),
+            patterns: vec!["./packages/app/src/**".to_string()],
+            root: Some("packages/app".to_string()),
+            ..BoundaryZone::default()
+        }],
+        rules: vec![],
+    };
+    let errors = config.validate_root_prefixes();
+    assert_eq!(errors.len(), 1);
+}
+
+#[test]
+fn validate_root_prefixes_empty_when_no_overlap() {
+    let config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![BoundaryZone {
+            name: "ui".to_string(),
+            patterns: vec!["src/**".to_string()],
+            root: Some("packages/app/".to_string()),
+            ..BoundaryZone::default()
+        }],
+        rules: vec![],
+    };
+    assert!(config.validate_root_prefixes().is_empty());
+}
+
+#[test]
+fn validate_root_prefixes_skips_zones_without_root() {
+    let json = r#"{
+        "zones": [{ "name": "ui", "patterns": ["src/**"] }],
+        "rules": []
+    }"#;
+    let config: BoundaryConfig = serde_json::from_str(json).unwrap();
+    assert!(config.validate_root_prefixes().is_empty());
+}
+
+/// Empty-normalized roots must be ignored.
+#[test]
+fn validate_root_prefixes_skips_empty_root() {
+    for raw_root in ["", ".", "./"] {
+        let config = BoundaryConfig {
+            coverage: BoundaryCoverageConfig::default(),
+            calls: BoundaryCallsConfig::default(),
+            preset: None,
+            zones: vec![BoundaryZone {
+                name: "ui".to_string(),
+                patterns: vec!["src/**".to_string(), "lib/**".to_string()],
+                root: Some(raw_root.to_string()),
+                ..BoundaryZone::default()
+            }],
+            rules: vec![],
+        };
+        let errors = config.validate_root_prefixes();
+        assert!(
+            errors.is_empty(),
+            "empty-normalized root {raw_root:?} produced spurious errors: {errors:?}"
+        );
+    }
+}
+
+#[test]
+fn deserialize_zone_with_root() {
+    let json = r#"{
+        "zones": [
+            { "name": "ui", "patterns": ["src/**"], "root": "packages/app/" }
+        ],
+        "rules": []
+    }"#;
+    let config: BoundaryConfig = serde_json::from_str(json).unwrap();
+    assert_eq!(config.zones[0].root.as_deref(), Some("packages/app/"));
+}
+
+#[test]
+fn deserialize_preset_json() {
+    let json = r#"{ "preset": "layered" }"#;
+    let config: BoundaryConfig = serde_json::from_str(json).unwrap();
+    assert_eq!(config.preset, Some(BoundaryPreset::Layered));
+    assert!(config.zones.is_empty());
+}
+
+#[test]
+fn deserialize_preset_hexagonal_json() {
+    let json = r#"{ "preset": "hexagonal" }"#;
+    let config: BoundaryConfig = serde_json::from_str(json).unwrap();
+    assert_eq!(config.preset, Some(BoundaryPreset::Hexagonal));
+}
+
+#[test]
+fn deserialize_preset_feature_sliced_json() {
+    let json = r#"{ "preset": "feature-sliced" }"#;
+    let config: BoundaryConfig = serde_json::from_str(json).unwrap();
+    assert_eq!(config.preset, Some(BoundaryPreset::FeatureSliced));
+}
+
+#[test]
+fn deserialize_preset_toml() {
+    let toml_str = r#"preset = "layered""#;
+    let config: BoundaryConfig = toml::from_str(toml_str).unwrap();
+    assert_eq!(config.preset, Some(BoundaryPreset::Layered));
+}
+
+#[test]
+fn deserialize_invalid_preset_rejected() {
+    let json = r#"{ "preset": "invalid_preset" }"#;
+    let result: Result<BoundaryConfig, _> = serde_json::from_str(json);
+    assert!(result.is_err());
+}
+
+#[test]
+fn preset_absent_by_default() {
+    let config = BoundaryConfig::default();
+    assert!(config.preset.is_none());
+    assert!(config.is_empty());
+}
+
+#[test]
+fn preset_makes_config_non_empty() {
+    let config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: Some(BoundaryPreset::Layered),
+        zones: vec![],
+        rules: vec![],
+    };
+    assert!(!config.is_empty());
+}
+
+#[test]
+fn expand_layered_produces_four_zones() {
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: Some(BoundaryPreset::Layered),
+        zones: vec![],
+        rules: vec![],
+    };
+    config.expand("src");
+    assert_eq!(config.zones.len(), 4);
+    assert_eq!(config.rules.len(), 4);
+    assert!(config.preset.is_none(), "preset cleared after expand");
+    assert_eq!(config.zones[0].name, "presentation");
+    assert_eq!(config.zones[0].patterns, vec!["src/presentation/**"]);
+}
+
+#[test]
+fn expand_layered_rules_correct() {
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: Some(BoundaryPreset::Layered),
+        zones: vec![],
+        rules: vec![],
+    };
+    config.expand("src");
+    let pres_rule = config
+        .rules
+        .iter()
+        .find(|r| r.from == "presentation")
+        .unwrap();
+    assert_eq!(pres_rule.allow, vec!["application"]);
+    let app_rule = config
+        .rules
+        .iter()
+        .find(|r| r.from == "application")
+        .unwrap();
+    assert_eq!(app_rule.allow, vec!["domain"]);
+    let dom_rule = config.rules.iter().find(|r| r.from == "domain").unwrap();
+    assert!(dom_rule.allow.is_empty());
+    let infra_rule = config
+        .rules
+        .iter()
+        .find(|r| r.from == "infrastructure")
+        .unwrap();
+    assert_eq!(infra_rule.allow, vec!["domain", "application"]);
+}
+
+#[test]
+fn expand_hexagonal_produces_three_zones() {
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: Some(BoundaryPreset::Hexagonal),
+        zones: vec![],
+        rules: vec![],
+    };
+    config.expand("src");
+    assert_eq!(config.zones.len(), 3);
+    assert_eq!(config.rules.len(), 3);
+    assert_eq!(config.zones[0].name, "adapters");
+    assert_eq!(config.zones[1].name, "ports");
+    assert_eq!(config.zones[2].name, "domain");
+}
+
+#[test]
+fn expand_feature_sliced_produces_six_zones() {
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: Some(BoundaryPreset::FeatureSliced),
+        zones: vec![],
+        rules: vec![],
+    };
+    config.expand("src");
+    assert_eq!(config.zones.len(), 6);
+    assert_eq!(config.rules.len(), 6);
+    let app_rule = config.rules.iter().find(|r| r.from == "app").unwrap();
+    assert_eq!(
+        app_rule.allow,
+        vec!["pages", "widgets", "features", "entities", "shared"]
+    );
+    let shared_rule = config.rules.iter().find(|r| r.from == "shared").unwrap();
+    assert!(shared_rule.allow.is_empty());
+    let ent_rule = config.rules.iter().find(|r| r.from == "entities").unwrap();
+    assert_eq!(ent_rule.allow, vec!["shared"]);
+}
+
+#[test]
+fn expand_bulletproof_produces_four_zones() {
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: Some(BoundaryPreset::Bulletproof),
+        zones: vec![],
+        rules: vec![],
+    };
+    config.expand("src");
+    assert_eq!(config.zones.len(), 4);
+    assert_eq!(config.rules.len(), 4);
+    assert_eq!(config.zones[0].name, "app");
+    assert_eq!(config.zones[1].name, "features");
+    assert_eq!(config.zones[2].name, "shared");
+    assert_eq!(config.zones[3].name, "server");
+    assert!(config.zones[2].patterns.len() > 1);
+    assert!(
+        config.zones[2]
+            .patterns
+            .contains(&"src/components/**".to_string())
+    );
+    assert!(
+        config.zones[2]
+            .patterns
+            .contains(&"src/hooks/**".to_string())
+    );
+    assert!(config.zones[2].patterns.contains(&"src/lib/**".to_string()));
+    assert!(
+        config.zones[2]
+            .patterns
+            .contains(&"src/providers/**".to_string())
+    );
+}
+
+#[test]
+fn expand_bulletproof_rules_correct() {
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: Some(BoundaryPreset::Bulletproof),
+        zones: vec![],
+        rules: vec![],
+    };
+    config.expand("src");
+    let app_rule = config.rules.iter().find(|r| r.from == "app").unwrap();
+    assert_eq!(app_rule.allow, vec!["features", "shared", "server"]);
+    let feat_rule = config.rules.iter().find(|r| r.from == "features").unwrap();
+    assert_eq!(feat_rule.allow, vec!["shared", "server"]);
+    let srv_rule = config.rules.iter().find(|r| r.from == "server").unwrap();
+    assert_eq!(srv_rule.allow, vec!["shared"]);
+    let shared_rule = config.rules.iter().find(|r| r.from == "shared").unwrap();
+    assert!(shared_rule.allow.is_empty());
+}
+
+#[test]
+fn expand_bulletproof_then_resolve_classifies() {
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: Some(BoundaryPreset::Bulletproof),
+        zones: vec![],
+        rules: vec![],
+    };
+    config.expand("src");
+    let resolved = config.resolve();
+    assert_eq!(
+        resolved.classify_zone("src/app/dashboard/page.tsx"),
+        Some("app")
+    );
+    assert_eq!(
+        resolved.classify_zone("src/features/auth/hooks/useAuth.ts"),
+        Some("features"),
+        "without expand_auto_discover, src/features/... falls back to the parent zone"
+    );
+    assert_eq!(
+        resolved.classify_zone("src/components/Button/Button.tsx"),
+        Some("shared")
+    );
+    assert_eq!(
+        resolved.classify_zone("src/hooks/useFormatters.ts"),
+        Some("shared")
+    );
+    assert_eq!(
+        resolved.classify_zone("src/server/db/schema/users.ts"),
+        Some("server")
+    );
+    assert!(resolved.is_import_allowed("features", "shared"));
+    assert!(resolved.is_import_allowed("features", "server"));
+    assert!(!resolved.is_import_allowed("features", "app"));
+    assert!(!resolved.is_import_allowed("shared", "features"));
+    assert!(!resolved.is_import_allowed("server", "features"));
+}
+
+/// Bulletproof barrels should not violate child boundaries.
+#[test]
+fn bulletproof_features_barrel_can_import_children() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("src/features/auth")).unwrap();
+    std::fs::create_dir_all(temp.path().join("src/features/billing")).unwrap();
+
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: Some(BoundaryPreset::Bulletproof),
+        zones: vec![],
+        rules: vec![],
+    };
+    config.expand("src");
+    config.expand_auto_discover(temp.path());
+    let resolved = config.resolve();
+
+    assert_eq!(
+        resolved.classify_zone("src/features/index.ts"),
+        Some("features"),
+        "src/features/index.ts barrel should classify as the parent features zone"
+    );
+    assert_eq!(
+        resolved.classify_zone("src/features/auth/login.ts"),
+        Some("features/auth")
+    );
+    assert_eq!(
+        resolved.classify_zone("src/features/billing/invoice.ts"),
+        Some("features/billing")
+    );
+    assert!(resolved.is_import_allowed("features", "features/auth"));
+    assert!(resolved.is_import_allowed("features", "features/billing"));
+    assert!(!resolved.is_import_allowed("features/auth", "features/billing"));
+}
+
+#[test]
+fn expand_uses_custom_source_root() {
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: Some(BoundaryPreset::Hexagonal),
+        zones: vec![],
+        rules: vec![],
+    };
+    config.expand("lib");
+    assert_eq!(config.zones[0].patterns, vec!["lib/adapters/**"]);
+    assert_eq!(config.zones[2].patterns, vec!["lib/domain/**"]);
+}
+
+#[test]
+fn user_zone_replaces_preset_zone() {
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: Some(BoundaryPreset::Hexagonal),
+        zones: vec![BoundaryZone {
+            name: "domain".to_string(),
+            patterns: vec!["src/core/**".to_string()],
+            ..BoundaryZone::default()
+        }],
+        rules: vec![],
+    };
+    config.expand("src");
+    assert_eq!(config.zones.len(), 3);
+    let domain = config.zones.iter().find(|z| z.name == "domain").unwrap();
+    assert_eq!(domain.patterns, vec!["src/core/**"]);
+}
+
+#[test]
+fn user_zone_adds_to_preset() {
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: Some(BoundaryPreset::Hexagonal),
+        zones: vec![BoundaryZone {
+            name: "shared".to_string(),
+            patterns: vec!["src/shared/**".to_string()],
+            ..BoundaryZone::default()
+        }],
+        rules: vec![],
+    };
+    config.expand("src");
+    assert_eq!(config.zones.len(), 4);
+    assert!(config.zones.iter().any(|z| z.name == "shared"));
+}
+
+#[test]
+fn user_rule_replaces_preset_rule() {
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: Some(BoundaryPreset::Hexagonal),
+        zones: vec![],
+        rules: vec![BoundaryRule {
+            from: "adapters".to_string(),
+            allow: vec!["ports".to_string(), "domain".to_string()],
+            allow_type_only: vec![],
+        }],
+    };
+    config.expand("src");
+    let adapter_rule = config.rules.iter().find(|r| r.from == "adapters").unwrap();
+    assert_eq!(adapter_rule.allow, vec!["ports", "domain"]);
+    assert_eq!(
+        config.rules.iter().filter(|r| r.from == "adapters").count(),
+        1
+    );
+}
+
+#[test]
+fn expand_without_preset_is_noop() {
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![BoundaryZone {
+            name: "ui".to_string(),
+            patterns: vec!["src/ui/**".to_string()],
+            ..BoundaryZone::default()
+        }],
+        rules: vec![],
+    };
+    config.expand("src");
+    assert_eq!(config.zones.len(), 1);
+    assert_eq!(config.zones[0].name, "ui");
+}
+
+#[test]
+fn expand_then_validate_succeeds() {
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: Some(BoundaryPreset::Layered),
+        zones: vec![],
+        rules: vec![],
+    };
+    config.expand("src");
+    assert!(config.validate_zone_references().is_empty());
+}
+
+#[test]
+fn expand_then_resolve_classifies() {
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: Some(BoundaryPreset::Hexagonal),
+        zones: vec![],
+        rules: vec![],
+    };
+    config.expand("src");
+    let resolved = config.resolve();
+    assert_eq!(
+        resolved.classify_zone("src/adapters/http/handler.ts"),
+        Some("adapters")
+    );
+    assert_eq!(resolved.classify_zone("src/domain/user.ts"), Some("domain"));
+    assert!(!resolved.is_import_allowed("adapters", "domain"));
+    assert!(resolved.is_import_allowed("adapters", "ports"));
+}
+
+#[test]
+fn resolved_boundary_config_empty() {
+    let resolved = ResolvedBoundaryConfig::default();
+    assert!(resolved.is_empty());
+}
+
+#[test]
+fn resolved_boundary_config_with_zones_not_empty() {
+    let config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![BoundaryZone {
+            name: "ui".to_string(),
+            patterns: vec!["src/ui/**".to_string()],
+            ..BoundaryZone::default()
+        }],
+        rules: vec![],
+    };
+    let resolved = config.resolve();
+    assert!(!resolved.is_empty());
+}
+
+#[test]
+fn resolved_boundary_config_with_only_logical_groups_not_empty() {
+    let resolved = ResolvedBoundaryConfig {
+        zones: vec![],
+        rules: vec![],
+        logical_groups: vec![LogicalGroup {
+            name: "features".to_string(),
+            children: vec![],
+            auto_discover: vec!["src/features".to_string()],
+            authored_rule: None,
+            fallback_zone: None,
+            source_zone_index: 0,
+            status: LogicalGroupStatus::Empty,
+            merged_from: None,
+            original_zone_root: None,
+            child_source_indices: vec![],
+        }],
+        coverage: ResolvedBoundaryCoverageConfig::default(),
+        calls_forbidden_by_zone: rustc_hash::FxHashMap::default(),
+    };
+    assert!(!resolved.is_empty());
+}
+
+#[test]
+fn boundary_config_with_only_rules_is_empty() {
+    let config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![],
+        rules: vec![BoundaryRule {
+            from: "ui".to_string(),
+            allow: vec!["db".to_string()],
+            allow_type_only: vec![],
+        }],
+    };
+    assert!(config.is_empty());
+}
+
+#[test]
+fn boundary_config_with_zones_not_empty() {
+    let config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![BoundaryZone {
+            name: "ui".to_string(),
+            ..BoundaryZone::default()
+        }],
+        rules: vec![],
+    };
+    assert!(!config.is_empty());
+}
+
+#[test]
+fn zone_with_multiple_patterns_matches_any() {
+    let config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![BoundaryZone {
+            name: "ui".to_string(),
+            patterns: vec![
+                "src/components/**".to_string(),
+                "src/pages/**".to_string(),
+                "src/views/**".to_string(),
+            ],
+            ..BoundaryZone::default()
+        }],
+        rules: vec![],
+    };
+    let resolved = config.resolve();
+    assert_eq!(
+        resolved.classify_zone("src/components/Button.tsx"),
+        Some("ui")
+    );
+    assert_eq!(resolved.classify_zone("src/pages/Home.tsx"), Some("ui"));
+    assert_eq!(
+        resolved.classify_zone("src/views/Dashboard.tsx"),
+        Some("ui")
+    );
+    assert_eq!(resolved.classify_zone("src/utils/helpers.ts"), None);
+}
+
+#[test]
+fn validate_zone_references_multiple_errors() {
+    let config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![BoundaryZone {
+            name: "ui".to_string(),
+            ..BoundaryZone::default()
+        }],
+        rules: vec![
+            BoundaryRule {
+                from: "nonexistent_from".to_string(),
+                allow: vec!["nonexistent_allow".to_string()],
+                allow_type_only: vec![],
+            },
+            BoundaryRule {
+                from: "ui".to_string(),
+                allow: vec!["also_nonexistent".to_string()],
+                allow_type_only: vec![],
+            },
+        ],
+    };
+    let errors = config.validate_zone_references();
+    assert_eq!(errors.len(), 3);
+}
+
+#[test]
+fn expand_feature_sliced_with_custom_root() {
+    let mut config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: Some(BoundaryPreset::FeatureSliced),
+        zones: vec![],
+        rules: vec![],
+    };
+    config.expand("lib");
+    assert_eq!(config.zones[0].patterns, vec!["lib/app/**"]);
+    assert_eq!(config.zones[5].patterns, vec!["lib/shared/**"]);
+}
+
+#[test]
+fn zone_not_in_rules_is_unrestricted() {
+    let config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![
+            BoundaryZone {
+                name: "a".to_string(),
+                ..BoundaryZone::default()
+            },
+            BoundaryZone {
+                name: "b".to_string(),
+                ..BoundaryZone::default()
+            },
+            BoundaryZone {
+                name: "c".to_string(),
+                ..BoundaryZone::default()
+            },
+        ],
+        rules: vec![BoundaryRule {
+            from: "a".to_string(),
+            allow: vec!["b".to_string()],
+            allow_type_only: vec![],
+        }],
+    };
+    let resolved = config.resolve();
+    assert!(resolved.is_import_allowed("a", "b"));
+    assert!(!resolved.is_import_allowed("a", "c"));
+    assert!(resolved.is_import_allowed("b", "a"));
+    assert!(resolved.is_import_allowed("b", "c"));
+    assert!(resolved.is_import_allowed("c", "a"));
+}
+
+#[test]
+fn boundary_preset_json_roundtrip() {
+    let presets = [
+        BoundaryPreset::Layered,
+        BoundaryPreset::Hexagonal,
+        BoundaryPreset::FeatureSliced,
+        BoundaryPreset::Bulletproof,
+    ];
+    for preset in presets {
+        let json = serde_json::to_string(&preset).unwrap();
+        let restored: BoundaryPreset = serde_json::from_str(&json).unwrap();
+        assert_eq!(restored, preset);
+    }
+}
+
+#[test]
+fn deserialize_preset_bulletproof_json() {
+    let json = r#"{ "preset": "bulletproof" }"#;
+    let config: BoundaryConfig = serde_json::from_str(json).unwrap();
+    assert_eq!(config.preset, Some(BoundaryPreset::Bulletproof));
+}
+
+#[test]
+#[should_panic(expected = "validated at config load time")]
+fn resolve_panics_on_unvalidated_invalid_zone_glob() {
+    let config = BoundaryConfig {
+        coverage: BoundaryCoverageConfig::default(),
+        calls: BoundaryCallsConfig::default(),
+        preset: None,
+        zones: vec![BoundaryZone {
+            name: "broken".to_string(),
+            patterns: vec!["[invalid".to_string()],
+            ..BoundaryZone::default()
+        }],
+        rules: vec![],
+    };
+    let _ = config.resolve();
+}
+
+fn zone_with(name: &str, pattern: &str, public_files: &[&str]) -> BoundaryZone {
+    BoundaryZone {
+        name: name.to_string(),
+        patterns: vec![pattern.to_string()],
+        public_files: public_files
+            .iter()
+            .map(|glob| (*glob).to_string())
+            .collect(),
+        ..BoundaryZone::default()
+    }
+}
+
+#[test]
+fn merging_zones_by_name_joins_public_file_globs() {
+    let mut zones = vec![zone_with(
+        "billing",
+        "src/billing/**",
+        &["src/billing/index.ts"],
+    )];
+    merge_zone_by_name(
+        &mut zones,
+        zone_with("billing", "src/billing/**", &["src/billing/*.routes.ts"]),
+    );
+    assert_eq!(zones.len(), 1);
+    assert_eq!(
+        zones[0].public_files,
+        vec!["src/billing/index.ts", "src/billing/*.routes.ts"]
+    );
+}
+
+#[test]
+fn auto_discover_scopes_public_file_globs_to_each_child() {
+    let temp = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(temp.path().join("src/modules/billing")).unwrap();
+    std::fs::create_dir_all(temp.path().join("src/modules/orders")).unwrap();
+    let mut config = BoundaryConfig {
+        zones: vec![BoundaryZone {
+            name: "modules".to_string(),
+            patterns: vec!["src/modules/*.ts".to_string()],
+            auto_discover: vec!["src/modules".to_string()],
+            public_files: vec!["./index.ts".to_string()],
+            ..BoundaryZone::default()
+        }],
+        ..BoundaryConfig::default()
+    };
+    config.expand_auto_discover(temp.path());
+    let resolved = config.resolve();
+
+    assert!(resolved.is_public_file("modules/billing", "src/modules/billing/index.ts"));
+    assert!(!resolved.is_public_file("modules/billing", "src/modules/orders/index.ts"));
+    assert!(resolved.has_public_files("modules/orders"));
+    assert!(
+        !resolved.has_public_files("modules"),
+        "the fallback zone of the parent patterns has no public files"
+    );
+}

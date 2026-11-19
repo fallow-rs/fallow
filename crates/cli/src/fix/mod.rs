@@ -12,6 +12,7 @@ mod config;
 mod deps;
 mod enum_helpers;
 mod enum_members;
+mod export_declarations;
 mod export_list;
 mod exports;
 mod io;
@@ -304,7 +305,14 @@ fn finalize_fix_run(
             low_confidence_count: skip_counts.low_confidence,
             low_confidence_dependency_count: count_withheld_dependency_fixes(fixes),
             low_confidence_member_count: count_withheld_member_fixes(fixes),
-            kept_re_export_count: count_kept_re_export_fixes(fixes),
+            kept_re_export_count: count_withheld_export_fixes(
+                fixes,
+                plan::SkipReason::KeptReExport,
+            ),
+            shared_declaration_count: count_withheld_export_fixes(
+                fixes,
+                plan::SkipReason::SharedDeclarationInUse,
+            ),
         })
     {
         return code;
@@ -422,6 +430,7 @@ fn emit_empty_fix_output(opts: &FixOptions<'_>) -> ExitCode {
             skipped_low_confidence_dependencies: 0,
             skipped_low_confidence_members: 0,
             skipped_kept_re_exports: 0,
+            skipped_shared_declarations: 0,
         }) {
             Ok(envelope) if matches!(opts.output, OutputFormat::GithubSummary) => {
                 return crate::report::github_summary::print_fix_summary(&envelope);
@@ -602,6 +611,7 @@ struct FixOutputInput<'a> {
     low_confidence_dependency_count: usize,
     low_confidence_member_count: usize,
     kept_re_export_count: usize,
+    shared_declaration_count: usize,
 }
 
 struct CatalogFixTotals {
@@ -699,14 +709,13 @@ fn count_withheld_member_fixes(fixes: &[serde_json::Value]) -> usize {
         .count()
 }
 
-/// Count the export removals withheld because a kept re-export still names
-/// the export. Withheld per export, so they are read off the emitted entries.
-fn count_kept_re_export_fixes(fixes: &[serde_json::Value]) -> usize {
+/// Count the export removals withheld for `reason`. Withheld per export, so
+/// they are read off the emitted entries.
+fn count_withheld_export_fixes(fixes: &[serde_json::Value], reason: plan::SkipReason) -> usize {
     fixes
         .iter()
         .filter(|fix| {
-            fix.get("skip_reason").and_then(serde_json::Value::as_str)
-                == Some(plan::SkipReason::KeptReExport.as_wire_str())
+            fix.get("skip_reason").and_then(serde_json::Value::as_str) == Some(reason.as_wire_str())
         })
         .count()
 }
@@ -770,6 +779,7 @@ fn emit_fix_output(input: &FixOutputInput<'_>) -> Result<(), ExitCode> {
             skipped_low_confidence_dependencies: input.low_confidence_dependency_count,
             skipped_low_confidence_members: input.low_confidence_member_count,
             skipped_kept_re_exports: input.kept_re_export_count,
+            skipped_shared_declarations: input.shared_declaration_count,
         }) {
             Ok(envelope) if matches!(input.output, OutputFormat::GithubSummary) => {
                 let _ = crate::report::github_summary::print_fix_summary(&envelope);
@@ -803,6 +813,7 @@ fn emit_fix_output(input: &FixOutputInput<'_>) -> Result<(), ExitCode> {
             low_confidence_dependency_count: input.low_confidence_dependency_count,
             low_confidence_member_count: input.low_confidence_member_count,
             kept_re_export_count: input.kept_re_export_count,
+            shared_declaration_count: input.shared_declaration_count,
         });
     }
     Ok(())
@@ -914,6 +925,7 @@ struct HumanSummaryInput<'a> {
     low_confidence_dependency_count: usize,
     low_confidence_member_count: usize,
     kept_re_export_count: usize,
+    shared_declaration_count: usize,
 }
 
 /// Emit the human fix summary, split by what `--quiet` may drop.
@@ -1030,7 +1042,7 @@ impl SkipWarning {
     }
 }
 
-fn residual_skip_warnings(input: &HumanSummaryInput<'_>) -> [SkipWarning; 7] {
+fn residual_skip_warnings(input: &HumanSummaryInput<'_>) -> [SkipWarning; 8] {
     [
         SkipWarning {
             count: input.catalog_skipped,
@@ -1080,6 +1092,13 @@ fn residual_skip_warnings(input: &HumanSummaryInput<'_>) -> [SkipWarning; 7] {
             singular: "unused export",
             plural: "unused exports",
             suffix: " that a kept re-export still names. Removing them would break that re-export. Remove the re-export first (run with --format json for each entry), then re-run `fallow fix`.",
+        },
+        SkipWarning {
+            count: input.shared_declaration_count,
+            prefix: "Kept ",
+            singular: "unused export",
+            plural: "unused exports",
+            suffix: " whose `export` keyword also exports a name that is in use, as in `export const { a, b } = x;`. Move each unused name to a declaration without `export` by hand (run with --format json for each entry).",
         },
     ]
 }

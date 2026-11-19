@@ -47,9 +47,36 @@ env:
   CARGO_INCREMENTAL: 0
 
 jobs:
+  # Most pull request edits of Cargo.toml and release.yml cannot change a PGO
+  # build, and the comparison takes more than an hour on macOS.
+  # scripts/pgo-validate-inputs.mjs keeps the run for a release profile change
+  # or a change of the release jobs that train and use the profile.
+  changes:
+    name: Detect PGO inputs
+    runs-on: ubuntu-26.04
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    outputs:
+      run: ${{ steps.inputs.outputs.run }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          filter: blob:none
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26'
+      - name: Decide whether the pull request changes a PGO input
+        id: inputs
+        run: node scripts/pgo-validate-inputs.mjs
+
   train:
     name: Train PGO profile (${{ matrix.target }})
-    if: ${{ !startsWith(github.head_ref, 'dependabot/cargo/') }}
+    needs: changes
+    # A failed detector job leaves the output empty, so the comparison runs.
+    if: ${{ always() && !cancelled() && needs.changes.outputs.run != 'false' && !startsWith(github.head_ref, 'dependabot/cargo/') }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 90
     # The same runners and container as the pgo-profile job in release.yml.
@@ -72,6 +99,7 @@ jobs:
 
       - uses: ./.github/actions/setup-rust
         with:
+          save-if: 'false'
           targets: ${{ matrix.target }}
           components: llvm-tools
           cache-key: pgo-validate-instrumented-${{ matrix.target }}
@@ -85,12 +113,10 @@ jobs:
           # pnpm 10 and later switch to the packageManager version of each project.
           version: 12.6.0
 
-      - name: Cache training fixtures
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: benchmarks/fixtures/real-world
-          key: pgo-train-fixtures-v1-${{ runner.os }}-${{ hashFiles('benchmarks/download-fixtures.mjs') }}
 
+      # The fixtures are not cached: GitHub evicts the repository caches
+      # within hours, so a weekly or pull request save is gone before the
+      # next run and only evicts the caches that pull request jobs restore.
       - name: Fetch training fixtures
         shell: bash
         run: node benchmarks/download-fixtures.mjs --only preact,fastify,zod,vue-core,svelte
@@ -156,6 +182,7 @@ jobs:
 
       - uses: ./.github/actions/setup-rust
         with:
+          save-if: 'false'
           targets: ${{ matrix.target }}
           components: llvm-tools
           cache-key: pgo-validate-${{ matrix.target }}
@@ -253,11 +280,6 @@ jobs:
             exit 1
           fi
 
-      - name: Cache held-out fixtures
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
-        with:
-          path: benchmarks/fixtures/real-world
-          key: pgo-heldout-fixtures-v1-${{ runner.os }}-${{ hashFiles('benchmarks/download-fixtures.mjs') }}
 
       - name: Fetch held-out fixtures
         run: node benchmarks/download-fixtures.mjs --only query,vite,astro

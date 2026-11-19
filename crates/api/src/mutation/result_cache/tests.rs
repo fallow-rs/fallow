@@ -32,6 +32,7 @@ fn key_files() -> KeyFiles {
         reach_files: vec!["src/a.ts".to_owned(), "src/dep.ts".to_owned()],
         test_file_reach: BTreeMap::from([("test/a.test.ts".to_owned(), vec![0, 1])]),
         support_files: vec!["test/setup.ts".to_owned()],
+        runner_projects: Vec::new(),
     }
 }
 
@@ -477,4 +478,27 @@ fn incomplete_target_evidence_never_replaces_a_cache_entry() {
         next.get("m1", "k1").is_some(),
         "the normal entry stays in place"
     );
+}
+
+#[test]
+fn the_key_changes_with_the_runner_project_selection() {
+    let dir = tempfile::tempdir().unwrap();
+    project(dir.path());
+    let root = dir.path();
+    let key_for = |projects: &[&str]| {
+        let files = KeyFiles {
+            runner_projects: projects.iter().map(|&name| name.to_owned()).collect(),
+            ..key_files()
+        };
+        ResultCache::open(&root.join(".fallow/mutation"), root, "vitest", files).key(
+            &ready("5.0.4", "v24.0.0"),
+            &mutant("m1"),
+            &["test/a.test.ts::adds".to_owned()],
+            &["test/a.test.ts".to_owned()],
+        )
+    };
+    assert_eq!(key_for(&[]), key(root), "no selection keeps the old key");
+    assert_ne!(key_for(&["unit"]), key_for(&[]));
+    assert_ne!(key_for(&["unit"]), key_for(&["api"]));
+    assert_ne!(key_for(&["a", "b"]), key_for(&["ab"]));
 }

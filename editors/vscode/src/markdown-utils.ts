@@ -1,7 +1,5 @@
 /**
- * Shared text helpers for trusted `MarkdownString` tooltips. Extracted from the
- * verbatim copies that previously lived in both `statusBar-utils.ts` and
- * `audit-utils.ts`; behavior is identical, the single source removes drift.
+ * Shared text helpers for trusted `MarkdownString` tooltips.
  *
  * No `vscode` import, so the escaping rules can be unit-tested in isolation.
  */

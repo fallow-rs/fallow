@@ -949,16 +949,16 @@ mod tests {
             .map(|i| {
                 make_score(|s| {
                     s.path = std::path::PathBuf::from(format!("/src/{i}.ts"));
-                    s.fan_in = i % 5; // 0..4
-                    s.fan_out = i % 8; // 0..7
+                    s.fan_in = i % 5;
+                    s.fan_out = i % 8;
                 })
             })
             .collect();
         for i in 80..100 {
             scores.push(make_score(|s| {
                 s.path = std::path::PathBuf::from(format!("/src/{i}.ts"));
-                s.fan_in = 15 + (i - 80); // 15..34
-                s.fan_out = 10 + (i - 80); // 10..29
+                s.fan_in = 15 + (i - 80);
+                s.fan_out = 10 + (i - 80);
             }));
         }
         let t = compute_thresholds(&scores);

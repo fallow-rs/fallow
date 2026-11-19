@@ -211,13 +211,22 @@ where
 /// Inline suppression comment emitted for code duplication findings.
 pub const DUPES_SUPPRESS_COMMENT: &str = "// fallow-ignore-next-line code-duplication";
 
+/// Range start comment for the `suppress-range` action on a clone group.
+pub const DUPES_SUPPRESS_RANGE_START: &str = "// fallow-ignore-start code-duplication -- <reason>";
+
+/// Range end comment for the `suppress-range` action on a clone group.
+pub const DUPES_SUPPRESS_RANGE_END: &str = "// fallow-ignore-end code-duplication";
+
+/// Description for the `suppress-range` action on a clone group.
+pub const DUPES_SUPPRESS_RANGE_DESCRIPTION: &str = "Suppress only this clone: put the start comment above the whole duplicated block or function and the end comment below it. Neighbor clones that reach into the range stop at its border";
+
 /// Shared description for the suppression action emitted on duplication findings.
 pub const DUPES_SUPPRESS_DESCRIPTION: &str =
     "Suppress with an inline comment above the duplicated code";
 
 /// Per-action wire shape attached to each `CloneGroupFinding` and
 /// `AttributedCloneGroupFinding` (see `crates/api/src/dupes_output.rs`):
-/// `extract-shared` plus `suppress-line`. The typed wrappers replaced the
+/// `extract-shared`, `suppress-line`, and `suppress-range`. The typed wrappers replaced the
 /// legacy JSON post-pass injection that used to live in the CLI report layer.
 #[derive(Debug, Clone, Serialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -225,7 +234,7 @@ pub struct CloneGroupAction {
     /// Action type identifier.
     #[serde(rename = "type")]
     pub kind: CloneGroupActionType,
-    /// Whether `fallow fix` can auto-apply this action. Both variants are
+    /// Whether `fallow fix` can auto-apply this action. All variants are
     /// manual today; the field is non-singleton so a future auto-applier
     /// does not need a schema change.
     pub auto_fixable: bool,
@@ -233,9 +242,13 @@ pub struct CloneGroupAction {
     pub description: String,
     /// The inline comment to insert (e.g.,
     /// `// fallow-ignore-next-line code-duplication`). Present on
-    /// `suppress-line`; absent on `extract-shared`.
+    /// `suppress-line` and `suppress-range` (the start comment); absent on
+    /// `extract-shared`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub comment: Option<String>,
+    /// The comment that closes the range. Present on `suppress-range` only.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end_comment: Option<String>,
 }
 
 /// Discriminant for [`CloneGroupAction::kind`]. Mirrors the action types
@@ -248,6 +261,9 @@ pub enum CloneGroupActionType {
     ExtractShared,
     /// Suppress the finding with an inline comment above the duplicated code.
     SuppressLine,
+    /// Suppress only this clone with a `fallow-ignore-start` /
+    /// `fallow-ignore-end` range around the duplicated block.
+    SuppressRange,
 }
 
 /// Per-action wire shape attached to each `CloneFamilyFinding`. Mirrors
@@ -302,12 +318,21 @@ pub fn clone_group_actions(line_count: usize, instance_count: usize) -> Vec<Clon
                 if instance_count == 1 { "" } else { "s" },
             ),
             comment: None,
+            end_comment: None,
         },
         CloneGroupAction {
             kind: CloneGroupActionType::SuppressLine,
             auto_fixable: false,
             description: DUPES_SUPPRESS_DESCRIPTION.to_string(),
             comment: Some(DUPES_SUPPRESS_COMMENT.to_string()),
+            end_comment: None,
+        },
+        CloneGroupAction {
+            kind: CloneGroupActionType::SuppressRange,
+            auto_fixable: false,
+            description: DUPES_SUPPRESS_RANGE_DESCRIPTION.to_string(),
+            comment: Some(DUPES_SUPPRESS_RANGE_START.to_string()),
+            end_comment: Some(DUPES_SUPPRESS_RANGE_END.to_string()),
         },
     ]
 }
@@ -393,6 +418,11 @@ mod tests {
         let actions = clone_group_actions(20, 2);
         assert_eq!(actions[0].kind, CloneGroupActionType::ExtractShared);
         assert_eq!(actions[1].kind, CloneGroupActionType::SuppressLine);
+        assert_eq!(actions[2].kind, CloneGroupActionType::SuppressRange);
+        assert_eq!(
+            actions[2].end_comment.as_deref(),
+            Some("// fallow-ignore-end code-duplication")
+        );
         assert_eq!(actions[1].comment.as_deref(), Some(DUPES_SUPPRESS_COMMENT));
     }
 

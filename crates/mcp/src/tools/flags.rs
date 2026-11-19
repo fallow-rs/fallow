@@ -4,7 +4,7 @@ use std::sync::atomic::AtomicBool;
 use crate::params::FeatureFlagsParams;
 
 use fallow_api::{
-    AnalysisOptions, FeatureFlagsOptions, FeatureFlagsRetirementOptions,
+    AnalysisOptions, FeatureFlagsOptions, FeatureFlagsRetirementOptions, ProductionAnalysis,
     run_feature_flags as run_api_feature_flags, serialize_feature_flags_programmatic_json,
 };
 use fallow_types::flag_retirement::FlagAgeMode;
@@ -13,7 +13,8 @@ use rmcp::model::{CallToolResult, ContentBlock};
 
 use super::api_runtime::{
     EnvScope, call_cancellation, json_success, non_empty_path, programmatic_error_body,
-    run_api_blocking, shared_analysis_options, shared_params, workspace_patterns_from_param,
+    run_api_blocking, shared_analysis_options, shared_params, typed_production,
+    workspace_patterns_from_param,
 };
 use super::{push_global, push_remote_extends, push_scope};
 
@@ -126,7 +127,7 @@ fn feature_flags_options_from_params(
     Ok(FeatureFlagsOptions {
         analysis: AnalysisOptions {
             production: params.production == Some(true),
-            production_override: params.production,
+            production_override: typed_production(params.production, ProductionAnalysis::DeadCode),
             workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             explain: true,
             ..shared_analysis_options(shared_params!(params), EnvScope::Ambient, cancellation)

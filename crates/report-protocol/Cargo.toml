@@ -17,7 +17,9 @@ doctest = false
 
 [dependencies]
 serde = { workspace = true }
-schemars = { workspace = true, optional = true }
+# Not the workspace entry: its `chrono04` feature would put chrono into each
+# consumer of the published crate, and no type of this crate uses chrono.
+schemars = { version = "1", optional = true }
 
 [dev-dependencies]
 serde_json = { workspace = true }

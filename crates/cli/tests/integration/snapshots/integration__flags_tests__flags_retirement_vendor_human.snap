@@ -4,19 +4,19 @@ expression: vendor_format(format)
 ---
 ● Feature flags (6)
   src/checkout.ts
-    :2 new-checkout (SDK: LaunchDarkly)
+    :2 new-checkout (SDK)
   src/index.ts
-    :4 new-checkout (SDK: LaunchDarkly)
-    :7 old-banner (SDK: LaunchDarkly)
-    :10 beta-typo (SDK: LaunchDarkly)
+    :4 new-checkout (SDK)
+    :7 old-banner (SDK)
+    :10 beta-typo (SDK)
     :13 statsig-gate (SDK: Statsig)
-    :16 live-experiment (SDK: LaunchDarkly)
+    :16 live-experiment (SDK)
 
 ● Retirement candidates (6 of 6 flags)
-  beta-typo (SDK: LaunchDarkly) src/index.ts:10 · 1 read site · single-read-site, missing-in-vendor
-  live-experiment (SDK: LaunchDarkly) src/index.ts:16 · 1 read site · single-read-site
-  new-checkout (SDK: LaunchDarkly) src/checkout.ts:2 · 2 read sites · fully-rolled-out
-  old-banner (SDK: LaunchDarkly) src/index.ts:7 · 1 read site · single-read-site, archived-in-vendor
+  beta-typo (SDK) src/index.ts:10 · 1 read site · single-read-site, missing-in-vendor
+  live-experiment (SDK) src/index.ts:16 · 1 read site · single-read-site
+  new-checkout (SDK) src/checkout.ts:2 · 2 read sites · fully-rolled-out
+  old-banner (SDK) src/index.ts:7 · 1 read site · single-read-site, archived-in-vendor
   removed-long-ago (vendor export) flag-state.json:15 · 0 read sites · vendor-only
   statsig-gate (SDK: Statsig) src/index.ts:13 · 1 read site · single-read-site
   Fallow does not remove flags. Use --format json for the evidence of each reason.

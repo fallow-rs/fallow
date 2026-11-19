@@ -62,7 +62,7 @@ const VERSION_FILES = [
  * checkout with `FALLOW_SOURCE_DIR` set to a checkout of the pin. The first
  * failure stops the sync before the commit.
  */
-export const COMPANION_CHECKS = [
+const COMPANION_CHECKS = [
   ["node", "scripts/check-source-contract.mjs"],
   ["python3", "scripts/plugin_release.py", "newer-than", OLD_VERSION_ARG],
   ["python3", "scripts/validate_skill_frontmatter.py", "."],
@@ -313,7 +313,7 @@ const checkPrerequisites = (env, skipChecks) => {
  * companion CI fails when it differs from the plugin. The sync rebuilds each
  * folder that exists after it writes the skills and the version.
  */
-export const COMPANION_BUILDS = [
+const COMPANION_BUILDS = [
   {
     path: "claude-directory",
     command: ["python3", "scripts/plugin_release.py", "directory-bundle"],

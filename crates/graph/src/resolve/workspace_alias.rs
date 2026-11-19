@@ -7,6 +7,7 @@
 
 use std::path::Path;
 
+use super::base_url_directory::names_undeclared_base_url_directory;
 use super::fallbacks::{nearest_package_manifest, try_workspace_package_fallback};
 use super::path_info::extract_package_name;
 use super::types::{ResolveContext, ResolveResult};
@@ -86,7 +87,9 @@ fn workspace_fallback_through_alias(
 /// fallbacks could not resolve.
 ///
 /// A project package (or the project package that a dependency alias names)
-/// gives an unresolved import. Any other package is an npm package.
+/// gives an unresolved import. A specifier that matches a tsconfig `paths`
+/// alias or names a directory under `baseUrl` is a project file, so it gives
+/// an unresolved import too. Any other package is an npm package.
 pub(super) fn resolve_failed_bare_package_specifier(
     ctx: &ResolveContext<'_>,
     from_file: &Path,
@@ -100,7 +103,8 @@ pub(super) fn resolve_failed_bare_package_specifier(
     {
         return result;
     }
-    if matches_tsconfig_path_alias {
+    if matches_tsconfig_path_alias || names_undeclared_base_url_directory(ctx, from_file, specifier)
+    {
         return ResolveResult::Unresolvable(specifier.to_string());
     }
     let pkg_name = extract_package_name(specifier);

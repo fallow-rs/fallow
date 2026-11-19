@@ -10,7 +10,7 @@ use fallow_output::{
 };
 use fallow_types::duplicates::{
     CloneFamily, CloneGroup, CloneInstance, DuplicationReport, DuplicationStats, MirroredDirectory,
-    RefactoringSuggestion, clone_location_spread,
+    RangeMarkerFinding, RefactoringSuggestion, clone_location_spread,
 };
 use fallow_types::envelope::AuditIntroduced;
 use fallow_types::serde_path;
@@ -347,6 +347,10 @@ pub struct DupesReportPayload {
     /// Mirrored directory pairs.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mirrored_directories: Vec<MirroredDirectory>,
+    /// `fallow-ignore-start` and `fallow-ignore-end` markers with a problem.
+    /// A marker with a problem has no effect on clone detection.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub range_marker_problems: Vec<RangeMarkerFinding>,
     /// Aggregate duplication statistics.
     pub stats: DuplicationStats,
 }
@@ -392,6 +396,7 @@ impl DupesReportPayload {
                 .map(|family| CloneFamilyFinding::with_fingerprints(family.clone(), &fingerprints))
                 .collect(),
             mirrored_directories: report.mirrored_directories.clone(),
+            range_marker_problems: report.range_marker_problems.clone(),
             stats: report.stats.clone(),
         }
     }
@@ -445,8 +450,8 @@ pub fn build_duplication_codeclimate(
     root: &Path,
 ) -> Vec<CodeClimateIssue> {
     let mut issues = Vec::new();
-    let fingerprints = CloneFingerprintSet::from_groups(&report.clone_groups);
 
+    let fingerprints = CloneFingerprintSet::from_groups(&report.clone_groups);
     for group in &report.clone_groups {
         let clone_fingerprint = fingerprints.fingerprint_for_group(group);
         let token_str = group.token_count.to_string();
@@ -477,7 +482,7 @@ pub fn build_duplication_codeclimate(
             let mut issue = fallow_output::build_codeclimate_issue(CodeClimateIssueInput {
                 check_name: "fallow/code-duplication",
                 description: &format!(
-                    "Code clone {clone_fingerprint} ({} lines, {} instances)",
+                    "{} lines repeat in {} places (clone group {clone_fingerprint})",
                     group.line_count,
                     group.instances.len()
                 ),
@@ -589,6 +594,7 @@ mod tests {
             clone_groups: vec![clones],
             clone_families: Vec::new(),
             mirrored_directories: Vec::new(),
+            range_marker_problems: Vec::new(),
             stats: DuplicationStats::default(),
         }
     }
@@ -639,6 +645,7 @@ mod tests {
             clone_groups: vec![group(2), group(3)],
             clone_families: Vec::new(),
             mirrored_directories: Vec::new(),
+            range_marker_problems: Vec::new(),
             stats: DuplicationStats::default(),
         };
         let root = Path::new("/root");
@@ -672,9 +679,10 @@ mod tests {
     #[test]
     fn clone_group_finding_position_0_is_extract_shared() {
         let finding = CloneGroupFinding::with_fingerprint(group(2), TEST_FINGERPRINT.to_string());
-        assert_eq!(finding.actions.len(), 2);
+        assert_eq!(finding.actions.len(), 3);
         assert_eq!(finding.actions[0].kind, CloneGroupActionType::ExtractShared);
         assert_eq!(finding.actions[1].kind, CloneGroupActionType::SuppressLine);
+        assert_eq!(finding.actions[2].kind, CloneGroupActionType::SuppressRange);
         assert!(finding.introduced.is_none());
         assert!(finding.demotion_reason.is_none());
     }
@@ -706,6 +714,7 @@ mod tests {
             clone_groups: vec![with_text],
             clone_families: vec![family],
             mirrored_directories: Vec::new(),
+            range_marker_problems: Vec::new(),
             stats: DuplicationStats::default(),
         };
 
@@ -767,9 +776,10 @@ mod tests {
         };
         let finding =
             AttributedCloneGroupFinding::with_fingerprint(attributed, TEST_FINGERPRINT.to_string());
-        assert_eq!(finding.actions.len(), 2);
+        assert_eq!(finding.actions.len(), 3);
         assert_eq!(finding.actions[0].kind, CloneGroupActionType::ExtractShared);
         assert_eq!(finding.actions[1].kind, CloneGroupActionType::SuppressLine);
+        assert_eq!(finding.actions[2].kind, CloneGroupActionType::SuppressRange);
     }
 
     #[test]
@@ -859,9 +869,10 @@ mod tests {
         assert_eq!(finding.actions[3].kind, CloneFamilyActionType::SuppressLine);
         assert_eq!(finding.groups.len(), 2);
         for inner in &finding.groups {
-            assert_eq!(inner.actions.len(), 2);
+            assert_eq!(inner.actions.len(), 3);
             assert_eq!(inner.actions[0].kind, CloneGroupActionType::ExtractShared);
             assert_eq!(inner.actions[1].kind, CloneGroupActionType::SuppressLine);
+            assert_eq!(inner.actions[2].kind, CloneGroupActionType::SuppressRange);
         }
     }
 
@@ -896,13 +907,14 @@ mod tests {
                 suggestions: Vec::new(),
             }],
             mirrored_directories: Vec::new(),
+            range_marker_problems: Vec::new(),
             stats: DuplicationStats::default(),
         };
         let payload = DupesReportPayload::from_report(&report);
         assert_eq!(payload.clone_groups.len(), 2);
         assert_eq!(payload.clone_families.len(), 1);
         for finding in &payload.clone_groups {
-            assert_eq!(finding.actions.len(), 2);
+            assert_eq!(finding.actions.len(), 3);
         }
         assert_eq!(payload.clone_families[0].actions.len(), 2);
     }
@@ -926,6 +938,7 @@ mod tests {
             }],
             clone_families: Vec::new(),
             mirrored_directories: Vec::new(),
+            range_marker_problems: Vec::new(),
             stats: DuplicationStats::default(),
         };
 
@@ -937,7 +950,11 @@ mod tests {
         assert_eq!(issue.location.path, "app/%5Bid%5D/page.tsx");
         assert_eq!(issue.location.lines.begin, 4);
         assert_eq!(issue.categories, vec!["Duplication"]);
-        assert!(issue.description.starts_with("Code clone dup:"));
+        assert!(
+            issue.description.contains("(clone group dup:"),
+            "{}",
+            issue.description
+        );
         assert_eq!(issue.location.lines.end, Some(8));
     }
 }

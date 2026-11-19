@@ -61,10 +61,10 @@ test("config lists one benchmark per project, command and cache state", () => {
 // crates/cli/tests/integration/check_tests.rs proves that dead-code starts
 // none under these settings.
 test("the benchmark runs turn off the git-backed next steps", () => {
-  const workflow = readFileSync(
-    join(REPO_ROOT, ".github", "workflows", "bench-cli-instructions.yml"),
-    "utf8",
-  );
-  assert.match(workflow, /^ {2}FALLOW_SUGGESTIONS: 'off'$/m);
+  const workflow = readFileSync(join(REPO_ROOT, ".github", "workflows", "bench.yml"), "utf8");
+  for (const job of ["cli-instructions", "walltime-cli"]) {
+    const block = workflow.split(`\n  ${job}:\n`)[1]?.split(/\n {2}\S/u)[0] ?? "";
+    assert.match(block, /^ {6}FALLOW_SUGGESTIONS: 'off'$/m, job);
+  }
   assert.match(readFileSync(SCRIPT, "utf8"), /^export FALLOW_SUGGESTIONS=off$/m);
 });

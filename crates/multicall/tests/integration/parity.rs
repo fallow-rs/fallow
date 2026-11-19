@@ -1,7 +1,6 @@
 #![allow(
-    clippy::unwrap_used,
     clippy::expect_used,
-    reason = "tests use unwrap and expect to keep fixture setup concise"
+    reason = "tests use expect to keep fixture setup concise"
 )]
 
 //! Parity guard for the multicall binary.

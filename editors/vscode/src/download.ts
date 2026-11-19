@@ -66,9 +66,8 @@ interface GithubRelease {
 const REQUEST_HEADERS = { "User-Agent": "fallow-vscode" };
 const EXTENSION_ID = "fallow-rs.fallow-vscode";
 
-// Socket-inactivity guard. A proxy that accepts the TCP connection but never
-// sends bytes fires no 'error' event, which used to park the download (and the
-// LSP startup awaiting it) forever behind the progress notification.
+// A proxy can accept the connection and send no bytes. The socket may emit no error.
+// Reject idle downloads so LSP startup does not wait indefinitely.
 const REQUEST_TIMEOUT_MS = 30_000;
 // GitHub asset URLs redirect once to the CDN; anything deeper is a
 // misconfigured proxy or a loop, and unbounded recursion here never settles.

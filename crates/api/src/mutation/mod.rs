@@ -114,6 +114,8 @@ pub struct MutationReplayOptions {
     pub runtime: Option<PathBuf>,
     /// The config file of the test runner, as for a run.
     pub runner_config: Option<PathBuf>,
+    /// The selected Vitest projects, as for a run.
+    pub runner_projects: Vec<String>,
     /// The time limit of one call, at most 10 minutes. `None` uses 5
     /// seconds.
     pub call_timeout: Option<Duration>,
@@ -226,6 +228,11 @@ pub struct MutationRunOptions {
     /// uses the `mutation.runnerConfig` config key, else the default config
     /// discovery of the runner. Only the Vitest runner reads a config file.
     pub runner_config: Option<PathBuf>,
+    /// The names of the Vitest projects that the run uses, as the Vitest
+    /// `--project` flag selects them. Empty uses the
+    /// `mutation.runnerProjects` config key, else each project. Only the
+    /// Vitest runner reads it.
+    pub runner_projects: Vec<String>,
     /// The files that the caller writes after the run, for example the
     /// `--output-file` report. The worktree check leaves them out, so an old
     /// report does not make the worktree dirty. A relative path is relative

@@ -14,6 +14,7 @@ mod ranking;
 mod rolling;
 mod statistics;
 mod suffix_array;
+mod trim;
 mod utils;
 
 #[cfg(test)]
@@ -172,6 +173,7 @@ impl CloneDetector {
         } else {
             raw_groups
         };
+        let raw_groups = trim::trim_leading_semicolons(raw_groups, files, self.min_tokens);
 
         let t0 = std::time::Instant::now();
         let clone_groups =
@@ -207,6 +209,7 @@ impl CloneDetector {
             clone_groups,
             clone_families: vec![], // Populated by the caller after suppression filtering
             mirrored_directories: vec![],
+            range_marker_problems: Vec::new(),
             stats,
         }
     }
@@ -458,6 +461,7 @@ const fn empty_report(totals: CorpusTotals) -> DuplicationReport {
         clone_groups: Vec::new(),
         clone_families: Vec::new(),
         mirrored_directories: Vec::new(),
+        range_marker_problems: Vec::new(),
         stats: DuplicationStats {
             total_files: totals.files,
             files_with_clones: 0,

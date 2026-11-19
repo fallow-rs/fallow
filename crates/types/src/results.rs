@@ -33,10 +33,13 @@ use crate::output_dead_code::{
 pub use crate::output_dead_code::{
     UnproducedCatchTagFinding, UnusedEffectLayerFinding, UnusedTaggedErrorFinding,
 };
+#[path = "results_boundary.rs"]
+mod boundary;
 #[path = "results_caller_review.rs"]
 mod caller_review;
 #[path = "results_component_health.rs"]
 mod component_health;
+pub use boundary::{BoundaryViolation, BoundaryViolationReason};
 pub use caller_review::*;
 
 pub use component_health::ERROR_ONLY_RESULT_KEYS;
@@ -47,6 +50,9 @@ use crate::suppress::closest_known_kind_name;
 mod ignore_findings;
 use ignore_findings::classify_ignore_findings_fields;
 
+#[path = "results_active_suppression.rs"]
+mod active_suppression;
+pub use active_suppression::ActiveSuppression;
 #[path = "results_inventory_merge.rs"]
 mod inventory_merge;
 #[path = "results_merge_parts.rs"]
@@ -3821,38 +3827,6 @@ impl PackageCycle {
     }
 }
 
-/// An import that crosses an architecture boundary rule.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
-pub struct BoundaryViolation {
-    /// The file making the disallowed import.
-    #[serde(serialize_with = "serde_path::serialize")]
-    pub from_path: PathBuf,
-    /// The file being imported that violates the boundary. When the import
-    /// goes through a re-export chain, this is the origin module that
-    /// declares the imported symbol, not the barrel.
-    #[serde(serialize_with = "serde_path::serialize")]
-    pub to_path: PathBuf,
-    /// The zone the importing file belongs to.
-    pub from_zone: String,
-    /// The zone the imported file belongs to.
-    pub to_zone: String,
-    /// The raw import specifier from the source file.
-    pub import_specifier: String,
-    /// 1-based line number of the import statement in the source file.
-    pub line: u32,
-    /// 0-based byte column offset of the import statement.
-    pub col: u32,
-    /// The barrel file that the source file imports directly, when the
-    /// violation comes from a re-export chain. Absent for a direct import.
-    #[serde(
-        default,
-        serialize_with = "serde_path::serialize_option",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub via_path: Option<PathBuf>,
-}
-
 /// A source file that does not match any configured architecture boundary zone.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
@@ -3972,6 +3946,10 @@ pub enum SuppressionOrigin {
         reason: Option<String>,
         /// Whether this was a file-level suppression.
         is_file_level: bool,
+        /// Whether this was a `fallow-ignore-start` range marker (then
+        /// `is_file_level` is `false`). Omitted from the wire when `false`.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        is_range: bool,
         /// Whether `issue_kind` parses to a known `IssueKind`. False when the
         /// token is a typo or refers to a kind that was renamed or removed in
         /// a newer fallow release. JSON consumers (CI annotations, MCP agents,
@@ -4094,9 +4072,12 @@ impl StaleSuppression {
                 issue_kind,
                 reason,
                 is_file_level,
+                is_range,
                 ..
             } => {
-                let directive = if *is_file_level {
+                let directive = if *is_range {
+                    "fallow-ignore-start"
+                } else if *is_file_level {
                     "fallow-ignore-file"
                 } else {
                     "fallow-ignore-next-line"
@@ -4189,35 +4170,6 @@ impl StaleSuppression {
             }
         }
     }
-}
-
-/// A suppression comment present in an analyzed file this run.
-///
-/// This is the "active-suppression state" the Fallow Impact value report needs
-/// to tell a genuinely resolved finding (the code was fixed) from one merely
-/// silenced by a newly-added `fallow-ignore`. It captures every PRESENT marker,
-/// not only the ones a detector consumed: complexity and code-duplication
-/// suppressions are consumed in the CLI layer rather than the core suppression
-/// context, so presence is the single uniform signal that covers all impact
-/// categories. A present-but-stale marker is harmless because impact keys on a
-/// suppression that newly appeared between two recorded runs. It is internal:
-/// never serialized into the public JSON output schema (the field on
-/// [`AnalysisResults`] is `#[serde(skip)]`), only read in-process by
-/// `fallow impact`.
-#[derive(Debug, Clone)]
-pub struct ActiveSuppression {
-    /// Absolute path to the file carrying the suppression comment.
-    pub path: PathBuf,
-    /// The suppressed issue kind in kebab-case (e.g. `"unused-export"`), or
-    /// `None` for a blanket marker that suppresses every kind on its target.
-    pub kind: Option<String>,
-    /// Whether this is a `fallow-ignore-file` (file-level) marker rather than a
-    /// `fallow-ignore-next-line` marker.
-    pub is_file_level: bool,
-    /// Human-authored reason after `--`, when present.
-    pub reason: Option<String>,
-    /// 1-based line of the suppression comment itself; 0 only if unknown.
-    pub comment_line: u32,
 }
 
 /// The detection method used to identify a feature flag.

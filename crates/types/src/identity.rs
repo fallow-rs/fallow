@@ -1654,6 +1654,7 @@ mod tests {
                 issue_kind: Some("unused-export".to_owned()),
                 reason: reason.map(str::to_owned),
                 is_file_level: false,
+                is_range: false,
                 kind_known: true,
             },
             missing_reason: false,

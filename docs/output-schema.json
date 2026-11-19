@@ -3014,6 +3014,13 @@
           },
           "description": "Detected mirrored directory trees (directories with many identical files)."
         },
+        "range_marker_problems": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RangeMarkerFinding"
+          },
+          "description": "`fallow-ignore-start` and `fallow-ignore-end` markers with a problem.\nA marker with a problem has no effect on clone detection."
+        },
         "stats": {
           "description": "Aggregate statistics.",
           "$ref": "#/definitions/DuplicationStats"
@@ -3295,6 +3302,13 @@
             "$ref": "#/definitions/MirroredDirectory"
           },
           "description": "Mirrored directory pairs."
+        },
+        "range_marker_problems": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RangeMarkerFinding"
+          },
+          "description": "`fallow-ignore-start` and `fallow-ignore-end` markers with a problem.\nA marker with a problem has no effect on clone detection."
         },
         "stats": {
           "description": "Aggregate duplication statistics.",
@@ -5296,7 +5310,7 @@
         },
         "auto_fixable": {
           "type": "boolean",
-          "description": "Whether `fallow fix` can auto-apply this action. Both variants are\nmanual today; the field is non-singleton so a future auto-applier\ndoes not need a schema change."
+          "description": "Whether `fallow fix` can auto-apply this action. All variants are\nmanual today; the field is non-singleton so a future auto-applier\ndoes not need a schema change."
         },
         "description": {
           "type": "string",
@@ -5307,7 +5321,14 @@
             "string",
             "null"
           ],
-          "description": "The inline comment to insert (e.g.,\n`// fallow-ignore-next-line code-duplication`). Present on\n`suppress-line`; absent on `extract-shared`."
+          "description": "The inline comment to insert (e.g.,\n`// fallow-ignore-next-line code-duplication`). Present on\n`suppress-line` and `suppress-range` (the start comment); absent on\n`extract-shared`."
+        },
+        "end_comment": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The comment that closes the range. Present on `suppress-range` only."
         }
       },
       "required": [
@@ -5315,7 +5336,7 @@
         "auto_fixable",
         "description"
       ],
-      "description": "Per-action wire shape attached to each `CloneGroupFinding` and\n`AttributedCloneGroupFinding` (see `crates/api/src/dupes_output.rs`):\n`extract-shared` plus `suppress-line`. The typed wrappers replaced the\nlegacy JSON post-pass injection that used to live in the CLI report layer."
+      "description": "Per-action wire shape attached to each `CloneGroupFinding` and\n`AttributedCloneGroupFinding` (see `crates/api/src/dupes_output.rs`):\n`extract-shared`, `suppress-line`, and `suppress-range`. The typed wrappers replaced the\nlegacy JSON post-pass injection that used to live in the CLI report layer."
     },
     "UnusedFile": {
       "type": "object",
@@ -5731,7 +5752,7 @@
         },
         "to_path": {
           "type": "string",
-          "description": "The file being imported that violates the boundary. When the import\ngoes through a re-export chain, this is the origin module that\ndeclares the imported symbol, not the barrel."
+          "description": "The imported file that violates the boundary. Through a re-export chain,\nthe origin module that declares the symbol, not the barrel; a chain\nstops at the first public entry file (`publicFiles`), which it then names."
         },
         "from_zone": {
           "type": "string",
@@ -5759,6 +5780,17 @@
             "null"
           ],
           "description": "The barrel file that the source file imports directly, when the\nviolation comes from a re-export chain. Absent for a direct import."
+        },
+        "reason": {
+          "description": "Why the import breaks the boundary rules. Omitted for\n`disallowed_zone`, so a project without `publicFiles` keeps its output.",
+          "$ref": "#/definitions/BoundaryViolationReason"
+        },
+        "public_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The public entry files of `to_zone` that the importer can use instead.\nSet only when `reason` is `internal_file`."
         }
       },
       "required": [
@@ -7644,6 +7676,10 @@
             "is_file_level": {
               "type": "boolean",
               "description": "Whether this was a file-level suppression."
+            },
+            "is_range": {
+              "type": "boolean",
+              "description": "Whether this was a `fallow-ignore-start` range marker (then\n`is_file_level` is `false`). Omitted from the wire when `false`."
             },
             "kind_known": {
               "type": "boolean",
@@ -9580,6 +9616,13 @@
         "file_count": {
           "type": "integer",
           "description": "Number of analyzable files the zone matched."
+        },
+        "public_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Globs of the public entry files of the zone (`publicFiles` in the\nboundary config), after the `autoDiscover` expansion. Omitted when\nempty."
         }
       },
       "required": [
@@ -11885,7 +11928,7 @@
         },
         "to_path": {
           "type": "string",
-          "description": "The file being imported that violates the boundary. When the import\ngoes through a re-export chain, this is the origin module that\ndeclares the imported symbol, not the barrel."
+          "description": "The imported file that violates the boundary. Through a re-export chain,\nthe origin module that declares the symbol, not the barrel; a chain\nstops at the first public entry file (`publicFiles`), which it then names."
         },
         "from_zone": {
           "type": "string",
@@ -11913,6 +11956,17 @@
             "null"
           ],
           "description": "The barrel file that the source file imports directly, when the\nviolation comes from a re-export chain. Absent for a direct import."
+        },
+        "reason": {
+          "description": "Why the import breaks the boundary rules. Omitted for\n`disallowed_zone`, so a project without `publicFiles` keeps its output.",
+          "$ref": "#/definitions/BoundaryViolationReason"
+        },
+        "public_files": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "The public entry files of `to_zone` that the importer can use instead.\nSet only when `reason` is `internal_file`."
         },
         "finding_id": {
           "type": [
@@ -12969,6 +13023,11 @@
           "type": "string",
           "const": "suppress-line",
           "description": "Suppress the finding with an inline comment above the duplicated code."
+        },
+        {
+          "type": "string",
+          "const": "suppress-range",
+          "description": "Suppress only this clone with a `fallow-ignore-start` /\n`fallow-ignore-end` range around the duplicated block."
         }
       ],
       "description": "Discriminant for [`CloneGroupAction::kind`]. Mirrors the action types\nemitted by the legacy `build_clone_group_actions` walker."
@@ -13073,6 +13132,13 @@
             "$ref": "#/definitions/MirroredDirectory"
           },
           "description": "Mirrored directory pairs."
+        },
+        "range_marker_problems": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RangeMarkerFinding"
+          },
+          "description": "`fallow-ignore-start` and `fallow-ignore-end` markers with a problem.\nA marker with a problem has no effect on clone detection."
         },
         "stats": {
           "description": "Aggregate duplication statistics.",
@@ -22257,7 +22323,7 @@
             "string",
             "null"
           ],
-          "description": "Flag SDK the call belongs to, for SDK-call findings."
+          "description": "Flag SDK the call belongs to, for SDK-call findings. Absent for a\n`medium` confidence call, because no flag import confirms the SDK."
         },
         "dead_code_overlap": {
           "anyOf": [
@@ -23310,8 +23376,26 @@
           "description": "The suppressed issue kind in kebab-case (e.g. `\"unused-export\"`), or\n`null` for a blanket marker that suppresses every kind on its target.\nHuman output renders the blanket case as the literal word \"blanket\";\nthe JSON contract deliberately keeps `null` so machine consumers\nbranch on `null` instead of a magic string."
         },
         "level": {
-          "description": "Whether the marker is file-wide (`fallow-ignore-file`) or line-scoped\n(`fallow-ignore-next-line`).",
+          "description": "Whether the marker is file-wide (`fallow-ignore-file`), line-scoped\n(`fallow-ignore-next-line`), or a range (`fallow-ignore-start` /\n`fallow-ignore-end`).",
           "$ref": "#/definitions/SuppressionInventoryLevel"
+        },
+        "end_line": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "The `fallow-ignore-end` line of a range. Present only on a range\nmarker pair that applies."
+        },
+        "problem": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/RangeMarkerProblemKind"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "What is wrong with a range marker. A marker with a problem has no\neffect. Present only on such a marker; `fallow dupes` reports it too."
         },
         "origin": {
           "description": "How the suppression was authored. `\"comment\"` in v1; `\"jsdoc_tag\"` is\nreserved for a follow-up if `@expected-unused` entries enter the\nactive inventory.",
@@ -23348,6 +23432,11 @@
           "type": "string",
           "const": "line",
           "description": "A `fallow-ignore-next-line` marker covering one line."
+        },
+        {
+          "type": "string",
+          "const": "range",
+          "description": "A `fallow-ignore-start` / `fallow-ignore-end` marker covering a range\nof lines for `code-duplication`."
         }
       ],
       "description": "Suppression marker scope."
@@ -29390,6 +29479,13 @@
           },
           "description": "Mirrored directory pairs."
         },
+        "range_marker_problems": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/RangeMarkerFinding"
+          },
+          "description": "`fallow-ignore-start` and `fallow-ignore-end` markers with a problem.\nA marker with a problem has no effect on clone detection."
+        },
         "stats": {
           "description": "Aggregate duplication statistics.",
           "$ref": "#/definitions/DuplicationStats"
@@ -29946,7 +30042,7 @@
             "string",
             "null"
           ],
-          "description": "Flag SDK, for SDK flags with a known provider."
+          "description": "Flag SDK, for SDK flags with a known provider. Absent when no flag\nimport confirms an SDK call of the flag."
         },
         "workspace": {
           "type": [
@@ -30514,7 +30610,7 @@
             "string",
             "null"
           ],
-          "description": "Flag SDK, for SDK flags with a known provider."
+          "description": "Flag SDK, for SDK flags with a known provider. Absent when no flag\nimport confirms an SDK call of the flag."
         },
         "workspace": {
           "type": [
@@ -32774,7 +32870,7 @@
         },
         "path": {
           "type": "string",
-          "description": "Root-relative path of the changed file, with forward slashes."
+          "description": "Root-relative path of the changed file, with forward slashes. A\nfinding on a Fallow config file in a parent directory of the root has\na path that starts with `../`."
         },
         "line": {
           "type": [
@@ -32892,6 +32988,11 @@
           "type": "string",
           "const": "rule-severity",
           "description": "A rule severity in a Fallow config that the change made less strict."
+        },
+        {
+          "type": "string",
+          "const": "ignore-pattern",
+          "description": "A new or broader entry in a Fallow config key that removes files or\nfindings from the analysis, or makes code count as used, such as\n`ignorePatterns`, `entry` or `ignoreDependencies`. A removed `!`\nexception also has this kind. The evidence names the key."
         }
       ],
       "description": "How a `weakened-tests` finding weakened the tests."
@@ -33317,6 +33418,13 @@
           },
           "description": "The paths of a `paths` scope that select no file."
         },
+        "unmatched_path_reasons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MutationUnmatchedPath"
+          },
+          "description": "The reason for each entry of `unmatched_paths`, at the same index.\nEach path is relative to the project root. Absent when\n`unmatched_paths` is empty."
+        },
         "unloaded_paths": {
           "type": "array",
           "items": {
@@ -33500,6 +33608,13 @@
             "type": "string"
           },
           "description": "The paths of a `paths` scope that select no file."
+        },
+        "unmatched_path_reasons": {
+          "type": "array",
+          "items": {
+            "$ref": "#/definitions/MutationUnmatchedPath"
+          },
+          "description": "The reason for each entry of `unmatched_paths`, at the same index.\nEach path is relative to the project root. Absent when\n`unmatched_paths` is empty."
         },
         "runner": {
           "description": "The selected test runner and the verdict on its installed version.",
@@ -38299,6 +38414,104 @@
         }
       ],
       "description": "How a `--kill-matrix-for` run selects the tests of each mutant."
+    },
+    "RangeMarkerFinding": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "Path to the file that holds the marker."
+        },
+        "line": {
+          "type": "integer",
+          "description": "1-based line of the marker comment."
+        },
+        "problem": {
+          "description": "What is wrong with the marker.",
+          "$ref": "#/definitions/RangeMarkerProblemKind"
+        },
+        "token": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The kind token that the range does not support. Present only for\n`unsupported_kind`."
+        }
+      },
+      "required": [
+        "path",
+        "line",
+        "problem"
+      ],
+      "description": "A `fallow-ignore-start` or `fallow-ignore-end` marker with a problem, in\none file."
+    },
+    "RangeMarkerProblemKind": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "unclosed_start",
+          "description": "A `fallow-ignore-start` with no `fallow-ignore-end` after it."
+        },
+        {
+          "type": "string",
+          "const": "unmatched_end",
+          "description": "A `fallow-ignore-end` with no open `fallow-ignore-start`."
+        },
+        {
+          "type": "string",
+          "const": "nested_start",
+          "description": "A `fallow-ignore-start` inside an open range. The outer range applies."
+        },
+        {
+          "type": "string",
+          "const": "missing_kind",
+          "description": "A range marker without an issue kind. A range needs\n`code-duplication`."
+        },
+        {
+          "type": "string",
+          "const": "unsupported_kind",
+          "description": "A range marker names an issue kind other than `code-duplication`.\nThe `code-duplication` part of the same marker still applies."
+        },
+        {
+          "type": "string",
+          "const": "not_own_line",
+          "description": "A range marker shares its line with code. A range marker must be on\nits own line."
+        }
+      ],
+      "description": "What is wrong with one `fallow-ignore-start` or `fallow-ignore-end`\nmarker. A marker with a problem has no effect."
+    },
+    "MutationUnmatchedPath": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string",
+          "description": "The path relative to the project root, with forward slashes. The\nentry at the same index of `unmatched_paths` holds the path as given,\nso match the two fields by index, not by value."
+        },
+        "reason": {
+          "type": "string",
+          "description": "Why the path selects no file, kebab-case: `not-found` (the path does\nnot exist), `ignored` (the ignore globs of the config exclude the\npath or a file under it) or `no-source-file` (the path holds only\ntest code, declaration files or files outside the module graph)."
+        }
+      },
+      "required": [
+        "path",
+        "reason"
+      ],
+      "description": "A path of a `paths` scope that selects no file, with the reason."
+    },
+    "BoundaryViolationReason": {
+      "oneOf": [
+        {
+          "type": "string",
+          "const": "disallowed_zone",
+          "description": "No rule of `from_zone` allows an import from `to_zone`."
+        },
+        {
+          "type": "string",
+          "const": "internal_file",
+          "description": "A rule allows the zone, but the imported file is not a public entry\nfile (`publicFiles`) of `to_zone`."
+        }
+      ],
+      "description": "The rule that a boundary violation breaks."
     }
   }
 }

@@ -200,11 +200,9 @@ impl ExportLookup {
 
 /// Which lanes of one exported name are claimed by the module itself.
 ///
-/// Seeding used to carry this in two `(file, name, lane)` hash sets alongside
-/// the resolution table. The bits live on the resolution entry instead, so a
-/// seed or observer registration hashes the name once instead of three times.
-/// Build-time only: the flags are rebuilt with the index and stay out of the
-/// serialized cache.
+/// The resolution entry stores these bits so seeding and observer registration
+/// need no separate hash lookup for each lane. Index construction rebuilds the
+/// flags, so the serialized cache omits them.
 #[derive(Debug, Clone, Copy, Default)]
 struct SeededLanes(u8);
 

@@ -314,3 +314,25 @@ fn wide_pattern_over_wide_source_records_bounded_entries() {
         info.member_accesses.len()
     );
 }
+
+#[test]
+fn deep_inline_html_script_skips_its_body() {
+    // The quotes on the first line make the whole-file scan read the deep
+    // script as one string, so only the guard of the inline parse sees the
+    // depth.
+    let source = format!(
+        "<p>'</p><script type=\"module\">import \"./deep.js\"; const x = {}1{};</script><p>'</p>\n\
+         <script type=\"module\">import \"./ok.js\";</script>\n",
+        "[".repeat(DEEP),
+        "]".repeat(DEEP)
+    );
+    let info = parse("index.html", &source);
+    assert!(!info.parse_panicked, "the page itself must still parse");
+    let sources: Vec<&str> = info
+        .imports
+        .iter()
+        .map(|import| import.source.as_str())
+        .collect();
+    assert!(sources.contains(&"./ok.js"), "{sources:?}");
+    assert!(!sources.contains(&"./deep.js"), "{sources:?}");
+}

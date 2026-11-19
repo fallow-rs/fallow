@@ -1288,6 +1288,129 @@ jobs:
             npm-payload/fallow-similar-code${{ matrix.ext }}
             npm-payload/fallow-similar-code${{ matrix.ext }}.sig
 
+  # One type-aware bundle per Node platform: the companion, the pinned
+  # `typescript` package and its platform package. `fallow type-aware setup`
+  # downloads it for a binary that did not come from npm. This job holds no
+  # credentials. The script downloads the npm tarballs that
+  # tools/type-aware-sidecar/package-lock.json pins, checks their integrity,
+  # and never runs package code. `type-aware-bundle-sign` signs the bundles.
+  type-aware-bundle:
+    name: Build type-aware bundles
+    if: ${{ !inputs.auth_check }}
+    needs: release-context
+    runs-on: ubuntu-26.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26'
+
+      - name: Build type-aware bundles
+        run: node scripts/type-aware-bundle.mjs --out unsigned-type-aware
+
+      # The runner is linux-x64, so the bundle of that platform can start.
+      - name: Smoke-test the linux-x64 bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir smoke
+          tar -xzf unsigned-type-aware/fallow-type-aware-linux-x64.tar.gz -C smoke
+          protocol="$(node -p 'require("./crates/api/type-aware-protocol.json").wire_protocol_version')"
+          printf '{"protocol_version":%s,"operation":"status"}' "$protocol" \
+            | smoke/fallow-type-aware > status.json
+          node --input-type=module - "$protocol" <<'NODE'
+          import assert from 'node:assert/strict';
+          import { readFileSync } from 'node:fs';
+          const status = JSON.parse(readFileSync('status.json', 'utf8'));
+          const pkg = JSON.parse(readFileSync('tools/type-aware-sidecar/package.json', 'utf8'));
+          assert.equal(status.protocol_version, Number(process.argv[2]));
+          assert.equal(status.package_version, pkg.version);
+          assert.equal(status.backend_version, pkg.dependencies.typescript);
+          console.log(`type-aware bundle answers status: ${JSON.stringify(status)}`);
+          NODE
+
+      - name: Upload unsigned type-aware bundles
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: unsigned-type-aware-bundles
+          path: unsigned-type-aware/
+          if-no-files-found: error
+          retention-days: 7
+
+  # Signs the type-aware bundles with the release key, like `sign` signs the
+  # binaries. The signing runner only reads and signs bytes: it installs and
+  # runs nothing from the bundles or the repository dependencies.
+  type-aware-bundle-sign:
+    name: Sign type-aware bundles
+    if: ${{ !inputs.auth_check }}
+    needs: type-aware-bundle
+    environment: release
+    runs-on: ubuntu-26.04
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26'
+
+      - name: Download unsigned type-aware bundles
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
+        with:
+          name: unsigned-type-aware-bundles
+          path: unsigned-type-aware
+
+      - name: Validate unsigned type-aware bundle inventory
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import { lstatSync, readdirSync } from 'node:fs';
+          const platforms = ['darwin-arm64', 'darwin-x64', 'linux-arm64', 'linux-x64'];
+          const expected = platforms.map(platform => `fallow-type-aware-${platform}.tar.gz`).sort();
+          assert.deepEqual(readdirSync('unsigned-type-aware').sort(), expected, 'Unexpected type-aware bundle inventory');
+          for (const name of expected) {
+            const stat = lstatSync(`unsigned-type-aware/${name}`);
+            assert.ok(stat.isFile() && stat.size > 0, `Expected a nonempty regular bundle: ${name}`);
+          }
+          NODE
+
+      - name: Verify binary-signing public key parity
+        shell: bash
+        env:
+          ED25519_BINARY_SIGNING_PUBLIC_KEY: ${{ vars.ED25519_BINARY_SIGNING_PUBLIC_KEY }}
+        run: node scripts/signing-key-parity.mjs --release-env
+
+      - name: Sign type-aware bundles
+        shell: bash
+        env:
+          ED25519_BINARY_SIGNING_PRIVATE_KEY: ${{ secrets.ED25519_BINARY_SIGNING_PRIVATE_KEY }}
+          ED25519_BINARY_SIGNING_PUBLIC_KEY: ${{ vars.ED25519_BINARY_SIGNING_PUBLIC_KEY }}
+        run: |
+          set -euo pipefail
+          for bundle in unsigned-type-aware/fallow-type-aware-*.tar.gz; do
+            node .github/scripts/sign-binary.mjs "$bundle" "${bundle}.sig"
+            node .github/scripts/verify-binary.mjs "$bundle" "${bundle}.sig"
+          done
+
+      - name: Upload signed type-aware bundles
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: fallow-type-aware-bundles
+          path: |
+            unsigned-type-aware/fallow-type-aware-*.tar.gz
+            unsigned-type-aware/fallow-type-aware-*.tar.gz.sig
+          if-no-files-found: error
+
   validate:
     name: Release validation
     if: ${{ !inputs.auth_check }}
@@ -1541,7 +1664,7 @@ jobs:
   release-verified:
     name: Release verified
     if: ${{ !inputs.auth_check }}
-    needs: [build, sign, validate, similar-code-conformance, musl-smoke]
+    needs: [build, sign, validate, similar-code-conformance, musl-smoke, type-aware-bundle-sign]
     runs-on: ubuntu-26.04
     timeout-minutes: 10
     permissions: {}

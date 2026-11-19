@@ -66,7 +66,7 @@ pub(super) fn supports_guarded_fix(family: &str, version: &str) -> bool {
     family == BACKEND_FAMILY && version == BACKEND_VERSION
 }
 
-fn version_core(version: &str) -> Option<(u64, u64, u64)> {
+pub(super) fn version_core(version: &str) -> Option<(u64, u64, u64)> {
     let end = version.find(['-', '+']).unwrap_or(version.len());
     let mut parts = version[..end].split('.').map(str::parse::<u64>);
     let core = (

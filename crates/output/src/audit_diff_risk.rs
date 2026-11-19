@@ -84,6 +84,11 @@ pub enum WeakenedTestsKind {
     CoverageThreshold,
     /// A rule severity in a Fallow config that the change made less strict.
     RuleSeverity,
+    /// A new or broader entry in a Fallow config key that removes files or
+    /// findings from the analysis, or makes code count as used, such as
+    /// `ignorePatterns`, `entry` or `ignoreDependencies`. A removed `!`
+    /// exception also has this kind. The evidence names the key.
+    IgnorePattern,
 }
 
 impl WeakenedTestsKind {
@@ -96,6 +101,7 @@ impl WeakenedTestsKind {
             Self::AssertionDrop => "assertion-drop",
             Self::CoverageThreshold => "coverage-threshold",
             Self::RuleSeverity => "rule-severity",
+            Self::IgnorePattern => "ignore-pattern",
         }
     }
 }
@@ -172,7 +178,9 @@ pub struct DiffRiskFinding {
     /// How the tests were weakened. Present only on `weakened-tests`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<WeakenedTestsKind>,
-    /// Root-relative path of the changed file, with forward slashes.
+    /// Root-relative path of the changed file, with forward slashes. A
+    /// finding on a Fallow config file in a parent directory of the root has
+    /// a path that starts with `../`.
     pub path: String,
     /// 1-based head line. Absent when the finding is about the whole file,
     /// for example removed tests or a deleted file.
@@ -250,6 +258,7 @@ mod tests {
             WeakenedTestsKind::AssertionDrop,
             WeakenedTestsKind::CoverageThreshold,
             WeakenedTestsKind::RuleSeverity,
+            WeakenedTestsKind::IgnorePattern,
         ] {
             assert_eq!(serde_json::json!(kind), kind.code());
         }

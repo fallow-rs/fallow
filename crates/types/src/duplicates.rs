@@ -564,8 +564,25 @@ pub struct DuplicationReport {
     /// Detected mirrored directory trees (directories with many identical files).
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mirrored_directories: Vec<MirroredDirectory>,
+    /// `fallow-ignore-start` and `fallow-ignore-end` markers with a problem.
+    /// A marker with a problem has no effect on clone detection.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub range_marker_problems: Vec<RangeMarkerFinding>,
     /// Aggregate statistics.
     pub stats: DuplicationStats,
+}
+
+/// A `fallow-ignore-start` or `fallow-ignore-end` marker with a problem, in
+/// one file.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[cfg_attr(feature = "schema", derive(schemars::JsonSchema))]
+pub struct RangeMarkerFinding {
+    /// Path to the file that holds the marker.
+    #[serde(serialize_with = "serde_path::serialize")]
+    pub path: PathBuf,
+    /// The line and the problem of the marker.
+    #[serde(flatten)]
+    pub problem: crate::suppress::RangeMarkerProblem,
 }
 
 impl DuplicationReport {

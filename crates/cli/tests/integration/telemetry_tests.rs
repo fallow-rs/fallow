@@ -757,11 +757,8 @@ fn code_quality_review_reports_cold_then_warm_cache_state() {
         second_event["workflow"].as_str(),
         Some("code_quality_review")
     );
-    // Warm, not partial: a combined run's health pass used to count every
-    // entry the dead-code pass had written without complexity as a miss,
-    // because an empty complexity vector doubled as the "not cached" sentinel.
-    // Entries now record whether complexity was extracted, so the second run
-    // has no misses at all.
+    // An empty complexity vector is a cache hit if the cache entry records
+    // that extraction ran.
     assert_eq!(second_event["cache_state"].as_str(), Some("warm"));
 }
 

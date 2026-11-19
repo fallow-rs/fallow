@@ -80,6 +80,7 @@ mod tests {
             clone_groups: groups,
             clone_families: vec![],
             mirrored_directories: vec![],
+            range_marker_problems: Vec::new(),
             stats: DuplicationStats {
                 total_files: 10,
                 total_lines: 1000,
@@ -179,7 +180,7 @@ mod tests {
         let owners: Vec<&str> = cg.instances.iter().map(|i| i.owner.as_str()).collect();
         assert!(owners.contains(&"src"));
         assert!(owners.contains(&"lib"));
-        assert_eq!(finding.actions.len(), 2);
+        assert_eq!(finding.actions.len(), 3);
     }
 
     #[test]

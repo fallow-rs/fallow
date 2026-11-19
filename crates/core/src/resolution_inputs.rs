@@ -145,7 +145,7 @@ pub fn resolution_inputs_hash(
 /// Return `(path, exists)` for the `node_modules` directory of the project
 /// root and of each workspace root.
 ///
-/// The resolver reports a bare import with a Vite asset query as unresolved
+/// The resolver reports a bare import with a query string as unresolved
 /// only when the package is installed, so an install changes the result
 /// without an edit to a source file or a manifest. Only the existence keys the
 /// mode: a modification time changes on every fresh install in CI and would

@@ -83,15 +83,6 @@ fn quiet_from_env() -> bool {
     std::env::var("FALLOW_QUIET").is_ok_and(|v| v == "1" || v.eq_ignore_ascii_case("true"))
 }
 
-pub fn bool_from_env(name: &str) -> Option<bool> {
-    let value = std::env::var(name).ok()?;
-    match value.trim().to_ascii_lowercase().as_str() {
-        "1" | "true" | "yes" | "on" => Some(true),
-        "0" | "false" | "no" | "off" => Some(false),
-        _ => None,
-    }
-}
-
 pub fn resolve_format(cli: &Cli) -> FormatConfig {
     let cli_format_was_explicit = std::env::args_os().any(|arg| {
         let a = arg.to_string_lossy();

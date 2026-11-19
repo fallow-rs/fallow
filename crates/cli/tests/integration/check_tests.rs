@@ -1181,11 +1181,9 @@ fn check_sarif_format_has_schema() {
     );
 }
 
-/// GitHub code scanning keys an alert on `partialFingerprints`, so two results
-/// that share one value are one alert and the second finding is never shown. A
-/// compact `package.json` puts every dependency on one line, which used to give
-/// them the same rule id, URI, and source snippet, and that is the whole of the
-/// fingerprint. CodeClimate never had it: it keys on the package name.
+/// GitHub code scanning merges results with the same partial fingerprint.
+/// A compact manifest puts dependencies on one line, so each finding needs
+/// a distinct fingerprint even when it shares a location and source snippet.
 #[test]
 fn check_sarif_gives_each_finding_its_own_fingerprint() {
     let dir = tempfile::tempdir().expect("temporary project");
@@ -2093,9 +2091,8 @@ const HEALTH_STAGE_KINDS: [&str; 7] = [
 /// envelope: it carries every entry that envelope carries, in the same order,
 /// and anything extra comes from a section the standalone run never executed.
 ///
-/// Equality was the right assertion while only the walks contributed. The
-/// health section now records its own degraded inputs, so an extra entry is
-/// expected and a MISSING one is still a failure.
+/// The health section records its own degraded inputs, so an extra entry is
+/// expected. A MISSING entry is a failure.
 fn assert_combined_root_covers_standalone(
     standalone: &serde_json::Value,
     combined: &serde_json::Value,
@@ -2559,13 +2556,10 @@ fn unconfigured_check_diagnostics_stay_out_of_stderr_but_reach_json() {
 ///
 /// Under this split the dead-code and duplication walks run under
 /// `rayon::join` on one root, and each walk replaces the registry's
-/// source-discovery set. While the dead-code analysis folded a live registry
-/// read into its own list, whether the duplication walk had already written
-/// decided whether its skip arrived inside the dead-code section's list or
-/// later from the duplication section's, so the same command emitted two
-/// different orders across repeat runs. Every analysis now carries its own
-/// walk's skips by value and the live read drops walk-recorded entries, so the
-/// order is fixed by section order alone.
+/// source-discovery set. Every analysis carries the skips of its own walk by
+/// value, and the live registry read drops walk-recorded entries. Section
+/// order alone fixes the order. A live read inside the dead-code list would
+/// make the order depend on whether the duplication walk already wrote.
 #[test]
 fn combined_json_root_workspace_diagnostics_are_byte_identical_across_repeat_runs() {
     let dir = split_production_two_large_files_project(
@@ -4060,9 +4054,8 @@ fn a_built_in_ignore_exclusion_raises_no_reachability_caveat() {
 
 // --- `baseline_staleness` on the dead-code envelope (issue #2673) ---------
 //
-// 3.26.0 published the staleness verdict on stderr only, which put it out of
-// reach of every consumer that runs `--quiet --format json`. These pin the
-// envelope half of the fix.
+// Consumers that run `--quiet --format json` read the staleness verdict from
+// the envelope, not from stderr. These tests pin the envelope field.
 
 /// Read the dead-code envelope's `baseline_staleness` object.
 fn envelope_staleness(output: &crate::common::CommandOutput) -> serde_json::Value {
@@ -4436,7 +4429,7 @@ impl GitShim {
     }
 }
 
-/// The CodSpeed CPU simulation in `.github/workflows/bench-cli-instructions.yml`
+/// The CodSpeed CPU simulation in `.github/workflows/bench.yml` (job `cli-instructions`)
 /// rejects a measured process that starts a child process. Under the settings
 /// of that workflow (`CI` set, `FALLOW_SUGGESTIONS=off`) and with the flags of
 /// `benchmarks/cli-instructions.sh`, `dead-code` must start no git process.

@@ -374,6 +374,109 @@ export class MyClass {
     );
 }
 
+fn method_member_starts(source: &str, class: &str, member: &str) -> Vec<u32> {
+    let info = crate::tests::parse_ts(source);
+    let export = info
+        .exports
+        .iter()
+        .find(|e| e.name.matches_str(class))
+        .expect("class export expected");
+    export
+        .members
+        .iter()
+        .filter(|m| m.name == member)
+        .map(|m| m.span.start)
+        .collect()
+}
+
+#[test]
+fn overloaded_method_is_one_member_at_the_implementation() {
+    // Issue #4735: overload signatures and the implementation are one member.
+    let source = r"
+export class Svc {
+  public propfind(handler: () => void): void
+  public propfind(path: string, handler: () => void): void
+  public propfind(...args: any[]): void {
+    void args
+  }
+}
+";
+    let implementation = u32::try_from(source.find("public propfind(...args").unwrap()).unwrap();
+    assert_eq!(
+        method_member_starts(source, "Svc", "propfind"),
+        vec![implementation]
+    );
+}
+
+#[test]
+fn bodyless_methods_without_implementation_stay_one_member() {
+    let abstract_source = r"
+export abstract class Base {
+  abstract run(): void
+  abstract run(value: string): void
+}
+";
+    assert_eq!(
+        method_member_starts(abstract_source, "Base", "run").len(),
+        1
+    );
+    let single_abstract = r"
+export abstract class Base {
+  abstract run(): void
+}
+";
+    assert_eq!(
+        method_member_starts(single_abstract, "Base", "run").len(),
+        1
+    );
+}
+
+#[test]
+fn static_and_instance_overloads_stay_separate_members() {
+    let source = r"
+export class Svc {
+  static make(): Svc
+  static make(value?: string): Svc { return new Svc() }
+  make(): void
+  make(value?: string): void {}
+}
+";
+    assert_eq!(method_member_starts(source, "Svc", "make").len(), 2);
+}
+
+fn method_member<'a>(
+    info: &'a crate::ModuleInfo,
+    class: &str,
+    member: &str,
+) -> &'a crate::MemberInfo {
+    info.exports
+        .iter()
+        .find(|e| e.name.matches_str(class))
+        .expect("class export expected")
+        .members
+        .iter()
+        .find(|m| m.name == member)
+        .expect("member expected")
+}
+
+#[test]
+fn overload_signature_return_type_marks_the_kept_member() {
+    // Only the signatures name the class as return type. The implementation
+    // returns `any`, so the kept member must take the flags of the signatures.
+    let source = r"
+export class Foo {
+  static from(x: string): Foo
+  static from(x: number): Foo
+  static from(x: unknown): any { return build(x) }
+  chain(x: string): Foo
+  chain(x: unknown): any { return x }
+}
+";
+    let info = crate::tests::parse_ts(source);
+    assert!(method_member(&info, "Foo", "from").is_instance_returning_static);
+    assert!(method_member(&info, "Foo", "chain").is_self_returning);
+}
+
 // --- build_property_member: angular signal initializer (lines 592-597) ---
 
 #[test]

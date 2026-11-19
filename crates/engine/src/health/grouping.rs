@@ -507,6 +507,7 @@ fn subset_duplication_report(
         clone_groups: group_clones.into_iter().map(|group| group.clone).collect(),
         clone_families: Vec::new(),
         mirrored_directories: Vec::new(),
+        range_marker_problems: Vec::new(),
     }
 }
 

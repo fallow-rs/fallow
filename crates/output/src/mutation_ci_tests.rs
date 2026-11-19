@@ -217,27 +217,30 @@ fn each_state_matches_its_snapshot_with_both_headings() {
 fn spec_example_renders_the_documented_comment_section() {
     let expected = "#### Mutation testing
 
-**Partial run** (`time-budget`). The counts cover only the mutants that ran. The next run with the same budget continues from the result cache.
+**Partial run:** the run reached its time budget. The counts cover only the mutants that ran. The next run with the same budget continues from the result cache.
 
 **Score below the minimum.** The score is 62.5%, and the minimum is 80%.
 
-| Killed | Survived | No coverage | Not measured | Score |
-| --- | --- | --- | --- | --- |
-| 10 | 6 | 2 | 0 | 62.5% |
+<details>
+<summary>Counts and details</summary>
 
-Scope: the changed lines.
+| Killed | Survived | No coverage | Score |
+| --: | --: | --: | --: |
+| 10 | 6 | 2 | 62.5% |
 
-Each survived mutant is a small code change that made no test fail. The **Tests** findings above show the survived mutants on the changed lines. Add a test that fails on the change.
+A survived mutant is a code change that no test detects. The **Tests** section above lists the survived mutants on the changed lines. Add a test that fails on the change.
 
 <details>
-<summary>No test reaches these lines (2)</summary>
+<summary>No test reaches these lines (2 lines)</summary>
 
 - `src/age.ts:30`, function `formatAge`
 - `src/age.ts:41`
 
 </details>
 
-To inspect a mutant, run `fallow mutation inspect <mutant-id> --report fallow-mutation.json` with the `fallow-mutation.json` file of this job.";
+To inspect a mutant, run `fallow mutation inspect <mutant-id> --report fallow-mutation.json` with the report that this job writes.
+
+</details>";
     assert_eq!(
         render_mutation_section(&spec_example(), MutationHeading::Comment),
         expected
@@ -378,11 +381,11 @@ fn survivors_without_a_finding_get_no_pointer_to_the_findings() {
 
 #[test]
 fn each_surface_points_at_the_place_where_its_survivors_are() {
+    let compact = render_mutation_section(&survivors(), MutationHeading::CompactComment);
+    assert!(!compact.contains("section above"), "{compact}");
+    assert!(compact.starts_with("#### Mutation testing"), "{compact}");
     let comment = render_mutation_section(&survivors(), MutationHeading::Comment);
-    assert!(
-        comment.contains("The **Tests** findings above"),
-        "{comment}"
-    );
+    assert!(comment.contains("The **Tests** section above"), "{comment}");
 
     // A review summary has no findings tables: the survivors are inline comments.
     let review = render_mutation_section(&survivors(), MutationHeading::Review);
@@ -423,7 +426,9 @@ fn optional_lines_appear_only_when_their_count_is_not_zero() {
 fn no_coverage_list_is_capped_with_a_count_in_the_summary() {
     let out = render_mutation_section(&no_coverage_cap(), MutationHeading::Comment);
     assert!(
-        out.contains("<summary>No test reaches these lines (10 of 12)</summary>"),
+        out.contains(
+            "<summary>No test reaches these lines (12 lines, the first 10 shown)</summary>"
+        ),
         "{out}"
     );
     let items = out
@@ -495,11 +500,11 @@ fn oversized_section_keeps_the_heading_the_headline_and_the_table() {
         out.len()
     );
     assert!(
-        out.starts_with("#### Mutation testing\n\n**Partial run**"),
+        out.starts_with("#### Mutation testing\n\n**Partial run:**"),
         "{out}"
     );
     assert!(out.contains("**Score below the minimum.**"), "{out}");
-    assert!(out.contains("| 10 | 6 | 2 | 0 | 62.5% |"), "{out}");
+    assert!(out.contains("| 10 | 6 | 2 | 62.5% |"), "{out}");
     assert!(
         out.ends_with(
             "The mutation section is shortened. The fallow-mutation.json file of this job has all results."
@@ -567,8 +572,9 @@ fn assert_inert(out: &str, own_details: usize) {
 
 #[test]
 fn hostile_strings_stay_inert_in_every_state() {
-    for heading in [MutationHeading::Comment, MutationHeading::Summary] {
-        assert_inert(&render_mutation_section(&hostile_view(), heading), 1);
+    // The comment folds its details into one more block than the summary.
+    for (heading, details) in [(MutationHeading::Comment, 2), (MutationHeading::Summary, 1)] {
+        assert_inert(&render_mutation_section(&hostile_view(), heading), details);
         assert_inert(&render_mutation_section(&hostile_failed(), heading), 0);
         assert_inert(&render_mutation_section(&hostile_unreadable(), heading), 0);
     }
@@ -602,7 +608,6 @@ fn no_output_has_a_suggestion_fence() {
                 "{out}"
             );
         }
-        assert!(!mutation_review_summary_line(view, 3).contains("```"));
     }
 }
 
@@ -720,7 +725,7 @@ fn survived_description_names_the_change_the_function_and_the_mutant() {
             Some("isAdult"),
             "9f3c2a1b"
         ),
-        "Changing >= to > in isAdult made no test fail. Mutant 9f3c2a1b."
+        "Changing `>=` to `>` in `isAdult` made no test fail. Mutant `9f3c2a1b`."
     );
     let removal = MutantChange {
         from: "<call>".to_owned(),
@@ -728,11 +733,11 @@ fn survived_description_names_the_change_the_function_and_the_mutant() {
     };
     assert_eq!(
         survived_description("statement-removal", Some(&removal), None, "ab12"),
-        "Removing <call> made no test fail. Mutant ab12."
+        "Removing `<call>` made no test fail. Mutant `ab12`."
     );
     assert_eq!(
         survived_description("statement-removal", None, Some(""), "ab12"),
-        "A statement-removal change made no test fail. Mutant ab12."
+        "A `statement-removal` change made no test fail. Mutant `ab12`."
     );
 }
 
@@ -745,39 +750,7 @@ fn survived_description_is_one_line() {
     let text = survived_description("op\n", Some(&change), Some("f\ng"), "id\r\n");
     assert_eq!(
         text,
-        "Changing a b to c d in f g made no test fail. Mutant id."
-    );
-}
-
-#[test]
-fn review_summary_line_counts_survivors_and_inline_comments() {
-    assert_eq!(
-        mutation_review_summary_line(&survivors(), 4),
-        "Mutation testing: score 62.5%, 6 survivors (4 inline)."
-    );
-    assert_eq!(
-        mutation_review_summary_line(&ran(counts(3, 1, 0, 0), Some(0.75)), 1),
-        "Mutation testing: score 75.0%, 1 survivor (1 inline)."
-    );
-    assert_eq!(
-        mutation_review_summary_line(&partial_time_budget(), 0),
-        "Mutation testing: partial run, score 75.0%, 10 survivors (0 inline)."
-    );
-    assert_eq!(
-        mutation_review_summary_line(&empty_scope(), 0),
-        "Mutation testing: no score, 0 survivors (0 inline)."
-    );
-    assert_eq!(
-        mutation_review_summary_line(&not_run(MutationNotRunReason::EventRefused), 0),
-        "Mutation testing: not run."
-    );
-    assert_eq!(
-        mutation_review_summary_line(&MutationCiView::new(MutationCiState::Interrupted), 0),
-        "Mutation testing: stopped."
-    );
-    assert_eq!(
-        mutation_review_summary_line(&unreadable(), 0),
-        "Mutation testing: failed."
+        "Changing `a b` to `c d` in `f g` made no test fail. Mutant `id`."
     );
 }
 
@@ -793,7 +766,7 @@ fn run_notice_states_failures_and_partial_runs() {
         Some(MutationRunNotice {
             level: PrDecisionAnnotationLevel::Notice,
             title: "Mutation testing",
-            message: "Partial run (time-budget). The annotations cover only the mutants that ran."
+            message: "Partial run: the run reached its time budget. The annotations cover only the mutants that ran."
                 .to_owned(),
         })
     );
@@ -843,4 +816,14 @@ fn headline_of_a_target_first_run_says_why_it_has_no_score() {
         headline(&ran(target_first, None)),
         "**The target-first kill matrix has no score.** 1 mutant was not killed by a target; pass `--kill-matrix-full` to score each mutant."
     );
+}
+
+#[test]
+fn only_a_complete_run_with_no_mutant_is_an_empty_scope() {
+    assert!(mutation_scope_was_empty(&empty_scope()));
+    assert!(!mutation_scope_was_empty(&survivors()));
+    assert!(!mutation_scope_was_empty(&partial_time_budget()));
+    assert!(!mutation_scope_was_empty(&not_run(
+        MutationNotRunReason::EventRefused
+    )));
 }

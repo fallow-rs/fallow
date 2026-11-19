@@ -21,10 +21,10 @@ use crate::common::{commit_all, git, parse_json, run_fallow_raw};
 
 const CONFIG: &str = r#"{"entry": ["src/index.ts"], "rules": {"css-selector-complexity": "error"}, "duplicates": {"minTokens": 20, "minLines": 3}, "health": {"maxCrap": 999999999}}"#;
 
-const INHERITED_LABEL: &str = "**error** · inherited · not gated (`--gate new-only`) `";
-const INHERITED_WARN_LABEL: &str = "**warn** · inherited · not gated (`--gate new-only`) `";
-const INTRODUCED_LABEL: &str = "**error** · introduced `";
-const INTRODUCED_WARN_LABEL: &str = "**warn** · introduced `";
+const INHERITED_LABEL: &str = "**error** (inherited, not gated: `--gate new-only`) ";
+const INHERITED_WARN_LABEL: &str = "**warning** (inherited, not gated: `--gate new-only`) ";
+const INTRODUCED_LABEL: &str = "**error** (introduced) ";
+const INTRODUCED_WARN_LABEL: &str = "**warning** (introduced) ";
 
 /// A function that the duplication analysis finds in each file that holds
 /// it. `statement` sets the shape of the loop body, so two different

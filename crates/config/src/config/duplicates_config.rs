@@ -101,7 +101,7 @@ const fn default_min_corpus_size_for_token_cache() -> usize {
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[serde(rename_all = "camelCase")]
 pub struct DuplicatesConfig {
-    /// Whether duplication detection is enabled.
+    /// Whether duplication detection is enabled. `false` turns off each duplication analysis that a command runs by default: the duplication analysis of the bare `fallow` command, the duplication sub-analysis of `fallow audit`, and the duplication measure and penalty of the health score. A command line that names the analysis still runs it: `--only dupes`, `--include-dupes`, `audit.dupes: true` and the `fallow dupes` command.
     #[serde(default = "default_true")]
     pub enabled: bool,
 
@@ -211,6 +211,46 @@ pub struct DuplicatesConfig {
     #[serde(default = "default_min_corpus_size_for_token_cache")]
     pub min_corpus_size_for_token_cache: usize,
 }
+
+impl DuplicatesConfig {
+    /// Whether a consumer of duplication data that no flag selects measures
+    /// duplication: the health score and the editor diagnostics. The flags of
+    /// the run do not change this answer, so the health score of a project
+    /// does not depend on the analyses that one run selects.
+    #[must_use]
+    pub const fn runs_by_default(&self) -> bool {
+        super::plan_run(
+            super::PlanSections {
+                duplicates: self,
+                audit: &NO_AUDIT_KEYS,
+            },
+            super::RunRequest {
+                command: super::RunCommand::Combined,
+                dead_code: super::AnalysisRequest::Default,
+                duplication: super::AnalysisRequest::Default,
+                health: super::AnalysisRequest::Default,
+            },
+        )
+        .duplication
+        .runs()
+    }
+}
+
+/// An `audit` section without keys. The combined plan reads no `audit` key.
+const NO_AUDIT_KEYS: super::AuditConfig = super::AuditConfig {
+    gate: super::AuditGate::NewOnly,
+    worsened: super::AuditWorsened::Warn,
+    dead_code: None,
+    health: None,
+    dupes: None,
+    css: None,
+    css_deep: None,
+    dead_code_baseline: None,
+    health_baseline: None,
+    dupes_baseline: None,
+    cache_max_age_days: None,
+    type_aware: None,
+};
 
 impl Default for DuplicatesConfig {
     fn default() -> Self {

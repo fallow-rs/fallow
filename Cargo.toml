@@ -3,7 +3,7 @@ resolver = "3"
 members = ["crates/*"]
 
 [workspace.package]
-version = "3.43.2"
+version = "3.44.0"
 edition = "2024"
 rust-version = "1.97"
 license = "MIT"
@@ -14,18 +14,18 @@ keywords = ["typescript", "javascript", "lint", "static-analysis", "code-quality
 categories = ["command-line-utilities", "development-tools"]
 
 [workspace.dependencies]
-fallow-api = { version = "3.43.2", path = "crates/api" }
-fallow-core = { version = "3.43.2", path = "crates/core" }
-fallow-config = { version = "3.43.2", path = "crates/config" }
-fallow-extract = { version = "3.43.2", path = "crates/extract" }
-fallow-engine = { version = "3.43.2", path = "crates/engine" }
-fallow-graph = { version = "3.43.2", path = "crates/graph" }
-fallow-mutation = { version = "3.43.2", path = "crates/mutation" }
-fallow-output = { version = "3.43.2", path = "crates/output" }
-fallow-process = { version = "3.43.2", path = "crates/process" }
-fallow-report-protocol = { version = "3.43.2", path = "crates/report-protocol" }
-fallow-security = { version = "3.43.2", path = "crates/security" }
-fallow-types = { version = "3.43.2", path = "crates/types" }
+fallow-api = { version = "3.44.0", path = "crates/api" }
+fallow-core = { version = "3.44.0", path = "crates/core" }
+fallow-config = { version = "3.44.0", path = "crates/config" }
+fallow-extract = { version = "3.44.0", path = "crates/extract" }
+fallow-engine = { version = "3.44.0", path = "crates/engine" }
+fallow-graph = { version = "3.44.0", path = "crates/graph" }
+fallow-mutation = { version = "3.44.0", path = "crates/mutation" }
+fallow-output = { version = "3.44.0", path = "crates/output" }
+fallow-process = { version = "3.44.0", path = "crates/process" }
+fallow-report-protocol = { version = "3.44.0", path = "crates/report-protocol" }
+fallow-security = { version = "3.44.0", path = "crates/security" }
+fallow-types = { version = "3.44.0", path = "crates/types" }
 
 # Parsing & analysis
 oxc_allocator = "0.157"
@@ -58,6 +58,8 @@ clap = { version = "4", features = ["derive"] }
 # (fallow-mcp) enables. A package-scoped build such as `cargo build -p
 # fallow-cli` then resolves the same feature set as a workspace build, and a
 # switch between the two does not rebuild the dependents.
+# fallow-report-protocol declares schemars without `chrono04`, because its
+# published manifest must not pull chrono into each consumer.
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = { version = "1", features = ["preserve_order"] }
 deser-value = "0.10"
@@ -130,7 +132,7 @@ open = "5"
 # Testing
 criterion = { package = "codspeed-criterion-compat", version = "=4.7.0", default-features = false }
 insta = { version = "1", features = ["yaml"] }
-jsonschema = { version = "0.60", default-features = false }
+jsonschema = { version = "0.61", default-features = false }
 proptest = "1"
 tempfile = "3"
 libc = "0.2"
@@ -341,6 +343,7 @@ message = "{path} calls a parser outside the listed sites. Run the parse inside 
 allow = [
     { path = "crates/core/src/plugins/config_parser.rs", max = 1, require = ["parse_bounded("] },
     { path = "crates/engine/src/duplication_detector/tokenize/mod.rs", max = 4, require = ["parse_bounded("] },
+    { path = "crates/engine/src/export_declarations.rs", max = 1, require = ["parse_bounded("] },
     { path = "crates/engine/src/search_visibility.rs", max = 2, require = ["parse_bounded("] },
     { path = "crates/extract/src/alchemy.rs", max = 1 },
     { path = "crates/extract/src/astro/mod.rs", max = 3 },
@@ -348,6 +351,7 @@ allow = [
     { path = "crates/extract/src/css_metrics.rs", max = 1 },
     { path = "crates/extract/src/federation_runtime.rs", max = 1 },
     { path = "crates/extract/src/function_contracts.rs", max = 1, require = ["parse_bounded("] },
+    { path = "crates/extract/src/html.rs", max = 1, require = ["parse_bounded("] },
     { path = "crates/extract/src/inventory.rs", max = 1, require = ["parse_bounded("] },
     { path = "crates/extract/src/mdx.rs", max = 1 },
     { path = "crates/extract/src/nesting.rs", max = 1, require = ["parse_bounded("] },
@@ -357,6 +361,7 @@ allow = [
     { path = "crates/extract/src/sfc_template/component_contracts.rs", max = 1 },
     { path = "crates/extract/src/similar_code.rs", max = 1, require = ["parse_bounded("] },
     { path = "crates/extract/src/sink_identity.rs", max = 1, require = ["parse_bounded("] },
+    { path = "crates/extract/src/suppress_literals.rs", max = 1, require = ["parse_bounded("] },
     { path = "crates/extract/src/template_usage.rs", max = 3 },
     # fallow-mutation has no fallow dependencies. The engine calls it only
     # inside parse_bounded (crates/engine/src/mutation/layout.rs). regex.rs
@@ -364,6 +369,33 @@ allow = [
     { path = "crates/mutation/src/exports.rs", max = 1 },
     { path = "crates/mutation/src/lib.rs", max = 1 },
     { path = "crates/mutation/src/regex.rs", max = 1 },
+]
+
+# Each config file load goes through
+# `fallow_engine::project_config::load_config_file`, so each surface gets the
+# same trust policy for remote `extends` and the same error detail. Each
+# pattern has no `(`, so the rule also finds a function path such as
+# `map(FallowConfig::load)`. The `FallowConfig as` pattern finds an alias,
+# because the rule cannot see a call through the alias. The allow list holds
+# the sites that load the file directly. The engine loader is the one
+# loader. fallow-core sits below the engine and cannot call it. The bench
+# measures the config parse itself.
+[[workspace.metadata.fallow.boundaries.sources]]
+rule = "config-load-through-engine-loader"
+paths = ["crates"]
+deny = [
+    "FallowConfig::load",
+    "FallowConfig::load_with_options",
+    "FallowConfig::find_and_load",
+    "FallowConfig::find_and_load_with_options",
+    "FallowConfig as",
+]
+scope = "production"
+message = "{path} loads the config file directly. Call fallow_engine::project_config::load_config_file, or add the file to the allow list of this rule in Cargo.toml"
+allow = [
+    { path = "crates/benchmarks/benches/component_config.rs", max = 1 },
+    { path = "crates/core/src/lib.rs", max = 2 },
+    { path = "crates/engine/src/project_config/loader.rs", max = 2 },
 ]
 
 # The Miri CI job is slow and has a path filter. This rule finds a test path

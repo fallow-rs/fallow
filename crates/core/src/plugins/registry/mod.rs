@@ -1270,10 +1270,8 @@ impl PluginRegistry {
 
 /// Process-wide dedupe key cache for plugin-system diagnostic warnings.
 ///
-/// Combined-mode runs `PluginRegistry::run_with_search_roots` three times
-/// (check + dupes + health) per analysis, so a naive warn would triple-emit
-/// every diagnostic. Each warn helper builds a unique key, inserts it here,
-/// and only emits when the key was previously absent.
+/// Analysis passes in the same process can encounter the same plugin diagnostic.
+/// The shared set lets them emit the warning only once per key.
 fn plugin_warn_dedupe() -> &'static std::sync::Mutex<FxHashSet<String>> {
     static WARNED: std::sync::OnceLock<std::sync::Mutex<FxHashSet<String>>> =
         std::sync::OnceLock::new();

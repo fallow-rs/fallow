@@ -201,7 +201,6 @@ function compareProject(name, dir) {
   return summary;
 }
 
-// Run on all real-world projects
 const d = join(__dirname, "fixtures", "real-world");
 if (!existsSync(d)) {
   console.error("No real-world fixtures. Run: npm run download-fixtures");

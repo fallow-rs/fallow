@@ -53,7 +53,15 @@ error by suppressing a downstream detector.
   direct import of the origin wins over a barrel import. When a hop in the
   chain breaks the rules of the zone that owns the re-exporting file, only
   that hop gets a finding. Namespace and side-effect imports stay judged by
-  the direct target (issue #2939).
+  the direct target (issue #2939). A zone can list the globs of its public
+  entry files in `publicFiles`. A file of another zone may then import only
+  those files of the zone, also a zone without a rule. A zone rule is
+  checked first, so a forbidden deep import gets one zone-rule finding, which
+  omits `reason`. An allowed deep import gets `reason: "internal_file"` and
+  `public_files`. The chain walk stops at the first public entry
+  file and judges the import by that file. On an `autoDiscover` zone, each
+  glob is relative to each discovered folder, and the fallback zone of the
+  parent patterns gets no public files (issue #4760).
 - Framework and component intelligence:
   `crates/core/src/analyze/react_intel.rs`, route and render analyzers, and
   `crates/core/src/plugins/`.
@@ -173,13 +181,35 @@ error by suppressing a downstream detector.
   use of the qualifier. The member pass stores a whole
   use as the marker `*` or `Inner.*` in the accessed-member set, so the
   re-export propagation carries it like any other member name. The marker
-  applies to namespace members only, so an escaping class keeps its member
-  findings. The pass records the same uses for every import binding and for
-  each exported enum, because it does not know at extraction time which
-  binding is a namespace or an enum. When a whole enum leaves its chain
-  (`takesEnum(Shape)`, `{ ref: Size }`), the member pass stores the marker
-  `(escape)` and counts each member of the enum as used, as for
-  `Object.values(Shape)`. A class field alias (`levels = Level`) is an
+  applies to namespace members only. The pass records the same uses for
+  every import binding and for each exported enum and class, because it does
+  not know at extraction time which binding is a namespace, an enum or a
+  class. When a whole enum or class value leaves its chain
+  (`takesEnum(Shape)`, `{ ref: Size }`, `run(Adapter)`), the member pass
+  stores the marker `(escape)`. The marker counts each member of the enum as
+  used, as for `Object.values(Shape)`, and each static member of the class.
+  An instance member of an escaping class keeps its finding, because only an
+  instance reads it. A chain `Class.prototype.member` counts the instance
+  member `member` as used. When a class is a property value of a `const`
+  object literal in the same module (`const holders = { ws: Socket }`),
+  `holders.ws.prototype.member` and `holders[name].prototype.member` count
+  `member` as used too. A computed key that is not a string literal can
+  select each class of the holder. The holder can also be exported
+  (`export const holders = { ... }`, `export default { ... }`, or a `const`
+  that `export default holders` names). For each value under a static key,
+  extraction stores a `HolderValue` fact with the export name, the key, and
+  the root binding of the value. Another module can then import the holder
+  and read `holders[name].prototype.member`: extraction records the read as
+  `[].prototype.member` on the import (a static or string-literal key keeps
+  its key). After the direct accesses of all modules are collected, the
+  member pass follows one hop: from the holder export, also behind
+  re-exports, to the class under each key that the read selects. A value
+  can also be an export of a namespace import (`{ csv: formats.Csv }`). The
+  pass does not follow objects built at runtime, spreads, or values passed
+  through function calls. A key that contains `.` is not followed. A
+  string-literal key `'[]'` has the path of the any-key read, so a read
+  through it selects each class of the holder. The superclass call of
+  `class Sub extends mixin(Base)` is not an escape. A class field alias (`levels = Level`) is an
   escape for a namespace but not for an enum: the fact carries
   `class_field`, and the visitor follows the reads of the field through
   `this.levels` and the component template. A declaration file, an export of an entry point, and a
@@ -292,10 +322,13 @@ error by suppressing a downstream detector.
   #2373) is seed-agnostic. Its seeds are every target whose whole namespace
   object a consumer observes in Phase 2 (an ambient-module star, a
   dynamic-import pattern match through `import()`, `import.meta.glob`, or
-  `require.context`, a bare side-effect `require('./barrel')` with no binding,
-  an `import()` without a binding whose value escapes (a return value, a call
-  argument, or an array element; only a discarded `import()` statement stays
-  a side-effect edge), a member read on an un-awaited `import()` binding,
+  `require.context` (an `import.meta.glob` with an `import` option observes
+  only that export, and one with a `raw` or `url` query, or the legacy
+  `as: 'raw'` or `as: 'url'`, observes no export, issue #4532), a bare
+  side-effect `require('./barrel')` with no binding, an `import()` without
+  a binding whose value escapes (a return value, a call argument, or an
+  array element; only a discarded `import()` statement stays a side-effect
+  edge), a member read on an un-awaited `import()` binding,
   and a namespace import the graph cannot narrow: a whole-object use, a
   binding handed on without member access, or a binding exported under its own
   name from any module, entry point included) plus every `export * as ns`
@@ -1388,6 +1421,44 @@ is useful when tests compare its result with production across meaningful
 inputs. A test-only copy that is never compared with production is not such an
 oracle. Performance assertions must observe actual operations, rather than
 infer an operation count from a result enum or other derived label.
+
+## Clone range suppressions
+
+`// fallow-ignore-start code-duplication` and `// fallow-ignore-end
+code-duplication` suppress clones in a range of lines (issue #4706).
+
+- `fallow_types::suppress::Suppression` has a `scope`: `File`, `Line`, or
+  `Range { end_line }`. `applies_to_line`, `is_suppressed` and
+  `is_file_suppressed` never match a range entry, so no line-based detector
+  applies a range by mistake.
+- One pairing function, `ParsedSuppressions::pair_ranges` in
+  `crates/extract/src/suppress.rs`, serves the AST path and the line scanner.
+  A start with no end, an end with no start, a nested start, a marker with no
+  kind, and a kind other than `code-duplication` become a
+  `RangeMarkerProblem` with no effect. In a mixed kind list the
+  `code-duplication` part applies. A range marker must be on its own line.
+  A marker that shares its line with code has no effect and becomes a
+  `not_own_line` problem, so the user sees it on the marker line, not only
+  as an unmatched end.
+- Clone detection uses the line scanner that it already runs. It drops a
+  range marker whose offset is inside a string or template literal token,
+  then pairs the rest (`range_mask::pair_ranges_outside_strings`).
+- `detect_and_postprocess` gives each hashed token inside a range a unique
+  hash value before the near-clone, shingle, suffix array and rolling paths,
+  and after the token cache save. No repeat can hold a unique value, so a
+  clone inside a range is gone and a clone that reaches into it is cut at the
+  border. A cut part then meets the normal `minTokens` and `minLines`
+  thresholds or is not reported. Near clones come from their own token
+  stream, so the detector drops each near instance that overlaps a range.
+- `fallow dupes` (and so `fallow audit`) reports the problems in
+  `range_marker_problems`. `fallow suppressions` lists a range with
+  `level: "range"` and `end_line`, and a marker with a problem with its
+  `problem`. A range is never a stale suppression, the same as a next-line
+  `code-duplication` marker. `require-suppression-reason` reads the reason
+  of the start marker.
+- The token cache stores the range scope and the problems, so a change of
+  the marker semantics needs a `DUPES_CACHE_VERSION` bump. `ModuleInfo`
+  carries the problems for the inventory, which `CACHE_VERSION` covers.
 
 ## Adding or changing an analyzer
 

@@ -8,12 +8,12 @@ expression: vendor_format(format)
 
 | File | Line | Flag | Kind |
 |------|------|------|------|
-| `src/checkout.ts` | 2 | `new-checkout` | SDK: LaunchDarkly |
-| `src/index.ts` | 4 | `new-checkout` | SDK: LaunchDarkly |
-| `src/index.ts` | 7 | `old-banner` | SDK: LaunchDarkly |
-| `src/index.ts` | 10 | `beta-typo` | SDK: LaunchDarkly |
+| `src/checkout.ts` | 2 | `new-checkout` | SDK |
+| `src/index.ts` | 4 | `new-checkout` | SDK |
+| `src/index.ts` | 7 | `old-banner` | SDK |
+| `src/index.ts` | 10 | `beta-typo` | SDK |
 | `src/index.ts` | 13 | `statsig-gate` | SDK: Statsig |
-| `src/index.ts` | 16 | `live-experiment` | SDK: LaunchDarkly |
+| `src/index.ts` | 16 | `live-experiment` | SDK |
 
 ### Retirement candidates (6 of 6 flags)
 

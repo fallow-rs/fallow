@@ -19,7 +19,7 @@ use super::layout::Layout;
 use super::{
     FunctionFacts, MutantDisposition, MutantTestReach, MutationPlan, MutationPlanCounts,
     MutationPlanInputs, MutationPlanRequest, MutationScope, PlannedFile, PlannedMutant,
-    PruneReason, SkipReason, SkippedFile,
+    PruneReason, SkipReason, SkippedFile, UnmatchedPath,
 };
 use crate::graph::{ModuleGraph, is_declaration_file_path};
 use crate::module_graph::{
@@ -291,7 +291,7 @@ fn skipped_tests(context: &Context<'_>) -> Vec<super::SkippedTest> {
 /// Test code is a test entry point of the graph (a file that the runner
 /// config makes a test) or a file that the test path rule matches.
 /// The second value holds the `Paths` scope entries that select no file.
-fn select_files<'a>(context: &Context<'a>) -> (Vec<Candidate<'a>>, Vec<String>) {
+fn select_files<'a>(context: &Context<'a>) -> (Vec<Candidate<'a>>, Vec<UnmatchedPath>) {
     let root = context.inputs.root;
     let mut matched = match &context.request.scope {
         MutationScope::Paths(paths) => vec![false; paths.len()],
@@ -343,12 +343,19 @@ fn select_files<'a>(context: &Context<'a>) -> (Vec<Candidate<'a>>, Vec<String>) 
         })
         .collect();
     candidates.sort_by(|left, right| left.rel.cmp(&right.rel));
-    let mut unmatched: Vec<String> = match &context.request.scope {
+    let mut unmatched: Vec<UnmatchedPath> = match &context.request.scope {
         MutationScope::Paths(paths) => paths
             .iter()
             .zip(&matched)
             .filter(|(_, matched)| !**matched)
-            .map(|(path, _)| path.to_string_lossy().replace('\\', "/"))
+            .map(|(path, _)| UnmatchedPath {
+                path: path.to_string_lossy().replace('\\', "/"),
+                reason: super::unmatched::reason(
+                    root,
+                    &root.join(path),
+                    context.inputs.ignore_patterns,
+                ),
+            })
             .collect(),
         _ => Vec::new(),
     };

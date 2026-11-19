@@ -286,7 +286,12 @@ fn start_companion(
         config_path: planned.runner_config.clone(),
         run_dir: run_dir.dir.to_string_lossy().into_owned(),
         path_map: run_dir.path_map,
-        options: init_options(runner, &root, &planned.plan.test_files),
+        options: init_options(
+            runner,
+            &root,
+            &planned.plan.test_files,
+            &planned.runner_projects,
+        ),
     };
     let spawner = ProcessSpawner {
         runtime: runtime.path,
@@ -378,6 +383,7 @@ pub fn replay_mutation(
         scope: MutationRunScope::Paths(vec![options.file.clone().into()]),
         runtime: options.runtime.clone(),
         runner_config: options.runner_config.clone(),
+        runner_projects: options.runner_projects.clone(),
         allow_dirty: true,
         ..MutationRunOptions::default()
     };

@@ -616,7 +616,7 @@ fn workspace_of(path: &Path, root: &Path, workspaces: &[WorkspaceInfo]) -> Optio
         .map(|ws| relative(&ws.root, root))
 }
 
-fn relative(path: &Path, root: &Path) -> String {
+pub(crate) fn relative(path: &Path, root: &Path) -> String {
     path.strip_prefix(root)
         .unwrap_or(path)
         .to_string_lossy()

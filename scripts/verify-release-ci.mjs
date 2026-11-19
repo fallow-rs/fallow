@@ -42,7 +42,6 @@ export const REQUIRED_WORKFLOWS = Object.freeze([
   { name: "Cross-Architecture", file: "cross-arch.yml" },
   { name: "Fuzz Smoke", file: "fuzz-smoke.yml" },
   { name: "Benchmarks", file: "bench.yml" },
-  { name: "Type-aware Benchmarks", file: "bench-type-aware.yml" },
   { name: "Protocol parity", file: "protocol-parity.yml" },
   { name: "Scorecard", file: "scorecard.yml" },
   { name: "osv-scanner ignores", file: "osv-ignores.yml" },
@@ -59,6 +58,14 @@ const IGNORED_EVENTS = new Set(["pull_request", "pull_request_target", "merge_gr
 
 /** The release workflows themselves. An earlier failed release attempt must not block a retry. */
 const IGNORED_FILES = new Set(["release.yml", "release-published.yml"]);
+
+/**
+ * Scheduled runs that do not count for the release commit. The nightly
+ * Benchmarks run adds walltime jobs on a macro runner from a shared monthly
+ * minute pool. It can stay queued, and a release must not wait on it. The push
+ * run of the release commit is the result that counts.
+ */
+const IGNORED_SCHEDULED_FILES = new Set(["bench.yml"]);
 
 const PASSING_CONCLUSIONS = new Set(["success", "skipped", "neutral"]);
 
@@ -90,6 +97,7 @@ export const latestRunPerWorkflow = (runs) => {
     if (IGNORED_EVENTS.has(run.event)) continue;
     const file = workflowFile(run);
     if (IGNORED_FILES.has(file)) continue;
+    if (run.event === "schedule" && IGNORED_SCHEDULED_FILES.has(file)) continue;
     const current = latest.get(file);
     if (current === undefined || run.id > current.id) latest.set(file, run);
   }

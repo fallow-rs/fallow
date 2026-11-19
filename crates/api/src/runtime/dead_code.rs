@@ -820,6 +820,18 @@ pub(super) fn load_dead_code_session(
     options: &DeadCodeOptions,
     resolved: &ProgrammaticAnalysisContext,
 ) -> ProgrammaticResult<AnalysisSession> {
+    load_dead_code_session_in_mode(options, resolved, resolved.production_override)
+}
+
+/// [`load_dead_code_session`] with the production override of the session.
+/// A combined run resolves one mode per section after the context resolves,
+/// so its shared session takes the dead-code mode, not the override of the
+/// context.
+pub(super) fn load_dead_code_session_in_mode(
+    options: &DeadCodeOptions,
+    resolved: &ProgrammaticAnalysisContext,
+    production_override: Option<bool>,
+) -> ProgrammaticResult<AnalysisSession> {
     let project_config = fallow_engine::project_config::config_for_project_analysis(
         &resolved.root,
         resolved.config_path.as_deref(),
@@ -827,7 +839,7 @@ pub(super) fn load_dead_code_session(
             output: OutputFormat::Json,
             no_cache: resolved.no_cache,
             threads: resolved.threads,
-            production_override: resolved.production_override,
+            production_override,
             quiet: true,
             analysis: ProductionAnalysis::DeadCode,
             allow_remote_extends: resolved.allow_remote_extends,

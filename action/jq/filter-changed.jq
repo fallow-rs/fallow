@@ -219,7 +219,6 @@ def filter_dupes:
     .clone_families |= map(select(.groups | length > 0))
   else . end);
 
-# Filter health results
 def filter_health:
   (if .findings then
     .findings |= map(select(.path | in_changed))
@@ -243,22 +242,16 @@ def filter_health:
     .targets |= map(select(.path | in_changed))
   else . end);
 
-# Detect format and apply appropriate filter
 if .check or .dupes or .health then
-  # Combined format
   (if .check  then .check  |= filter_check  else . end) |
   (if .dupes  then .dupes  |= filter_dupes  else . end) |
   (if .health then .health |= filter_health else . end)
 elif .total_issues != null then
-  # Check (dead-code) format
   filter_check
 elif .clone_groups then
-  # Dupes format
   filter_dupes
 elif .findings then
-  # Health format
   filter_health
 else
-  # Unknown format — pass through unchanged
   .
 end

@@ -12,6 +12,7 @@ mod object_pattern_defaults;
 mod regex_compile;
 mod sfc;
 mod store_aliases;
+mod suppress_literals;
 
 use std::path::Path;
 

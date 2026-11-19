@@ -72,6 +72,7 @@ fn zone(name: &str, pattern: &str) -> BoundaryZone {
         patterns: vec![pattern.to_owned()],
         auto_discover: Vec::new(),
         root: None,
+        public_files: vec![],
     }
 }
 
@@ -108,6 +109,8 @@ fn violation_finding(from_path: PathBuf, to_path: PathBuf) -> BoundaryViolationF
         line: 2,
         col: 0,
         via_path: None,
+        reason: fallow_types::results::BoundaryViolationReason::DisallowedZone,
+        public_files: vec![],
     })
 }
 

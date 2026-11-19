@@ -135,4 +135,7 @@ pub enum SemanticFact {
     SharedState(crate::shared_state::StateAccessFact),
     /// The per-file shared-state fact limit was reached.
     SharedStateTruncated,
+    /// A value under a static key of an exported object literal.
+    /// Appended because bitcode encodes enum variants by ordinal.
+    HolderValue(Box<HolderValueFact>),
 }

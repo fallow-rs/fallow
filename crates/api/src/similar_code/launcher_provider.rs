@@ -12,24 +12,14 @@
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
-use ed25519_dalek::{Signature, VerifyingKey};
-
 use super::protocol::SIDECAR_BINARY;
+use crate::release_signature::{RELEASE_BINARY_SIGNING_KEY, SIGNATURE_BYTES, verify_detached};
 
 /// Environment variable through which the `fallow` npm launcher passes the
 /// companion binary.
 pub(super) const PROVIDER_ENV: &str = "FALLOW_SIMILAR_CODE_PROVIDER";
 
-/// Ed25519 public key of the release binary signatures. It must equal
-/// `EMBEDDED_PUBLIC_KEY` in `npm/fallow/scripts/verify-binary.js`;
-/// `scripts/signing-key-parity.mjs` checks this.
-const RELEASE_BINARY_SIGNING_KEY: [u8; 32] = [
-    131, 78, 111, 215, 115, 51, 230, 238, 223, 119, 147, 71, 199, 16, 172, 180, 3, 210, 216, 35,
-    77, 85, 159, 94, 215, 200, 126, 85, 42, 222, 11, 209,
-];
-
 const SIGNATURE_SUFFIX: &str = ".sig";
-const SIGNATURE_BYTES: usize = 64;
 const MAX_PROVIDER_BYTES: u64 = 256 * 1024 * 1024;
 
 /// The verified provider from [`PROVIDER_ENV`], or `None` when it is unset.
@@ -72,9 +62,7 @@ pub(super) fn verified_provider(path: &Path, key: &[u8; 32]) -> Result<PathBuf, 
     let binary =
         std::fs::read(path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
     let signature = read_signature(&signature_path(path))?;
-    let key = VerifyingKey::from_bytes(key)
-        .map_err(|error| format!("the compiled-in release key is invalid: {error}"))?;
-    key.verify_strict(&binary, &signature).map_err(|_| {
+    verify_detached(&binary, &signature, key).map_err(|_| {
         format!(
             "the signature of {} does not match the Fallow release key",
             path.display()
@@ -100,7 +88,7 @@ fn signature_path(path: &Path) -> PathBuf {
     clippy::filetype_is_file,
     reason = "the signature must be a regular file; symlinks and special files are rejected"
 )]
-fn read_signature(path: &Path) -> Result<Signature, String> {
+fn read_signature(path: &Path) -> Result<Vec<u8>, String> {
     let metadata = path
         .symlink_metadata()
         .map_err(|error| format!("missing signature {}: {error}", path.display()))?;
@@ -116,14 +104,14 @@ fn read_signature(path: &Path) -> Result<Signature, String> {
     }
     let bytes =
         std::fs::read(path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
-    let bytes: [u8; SIGNATURE_BYTES] = bytes.as_slice().try_into().map_err(|_| {
-        format!(
+    if bytes.len() != SIGNATURE_BYTES {
+        return Err(format!(
             "{} has {} bytes, expected {SIGNATURE_BYTES}",
             path.display(),
             bytes.len()
-        )
-    })?;
-    Ok(Signature::from_bytes(&bytes))
+        ));
+    }
+    Ok(bytes)
 }
 
 #[cfg(test)]

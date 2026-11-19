@@ -77,6 +77,12 @@ fn utf8(path: &Path) -> &str {
     path.to_str().expect("utf-8 path")
 }
 
+fn folder_name(path: &Path) -> &str {
+    path.file_name()
+        .and_then(|name| name.to_str())
+        .expect("utf-8 folder name")
+}
+
 /// Save the dead-code JSON of `root` to a file next to it.
 fn save_json(root: &Path, extra: &[&str], out: &Path) -> Value {
     let mut args = vec![
@@ -424,6 +430,46 @@ fn old_report_note_counts_one_finding_in_the_singular() {
         "expected the singular note, stderr:\n{}",
         output.stderr
     );
+}
+
+/// A discovered config that does not load counts as no config: the old report
+/// gets the same output and the same note as without a config.
+#[test]
+fn old_report_treats_a_discovered_config_that_does_not_load_as_missing() {
+    let project = split_project();
+    let store = empty_root();
+    let saved = saved_path(&store, "saved.json");
+    let mut envelope = save_json(project.path(), &[], &saved);
+    strip_severity(&mut envelope);
+    let old = saved_path(&store, "old.json");
+    std::fs::write(&old, envelope.to_string()).expect("write old report");
+
+    let missing_root = empty_root();
+    let broken_root = empty_root();
+    write(broken_root.path(), ".fallowrc.json", "{ \"rules\": \n");
+    for format in ["codeclimate", "sarif"] {
+        let missing = report_from(&old, missing_root.path(), format, &[]);
+        assert!(
+            missing.stderr.contains(NOTE),
+            "{format}: expected the note without a config, stderr:\n{}",
+            missing.stderr
+        );
+        let broken = report_from(&old, broken_root.path(), format, &[]);
+        // Replace only the unique temp folder name. A Windows runner can give
+        // the temp directory as an 8.3 short path while the note prints the
+        // long path, so the full path is not a reliable match.
+        let expected = missing.stderr.replace(
+            folder_name(missing_root.path()),
+            folder_name(broken_root.path()),
+        );
+        assert!(
+            broken.stderr.contains(folder_name(broken_root.path())),
+            "{format}: the note names the root of the run, stderr:\n{}",
+            broken.stderr
+        );
+        assert_eq!(broken.stderr, expected, "{format}");
+        assert_eq!(broken.stdout, missing.stdout, "{format}");
+    }
 }
 
 #[test]

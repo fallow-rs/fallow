@@ -182,6 +182,16 @@ test("changed files can be injected for local tests", () => {
   assert.deepEqual(files, ["crates/output/src/lib.rs", "README.md"]);
 });
 
+test("scheduled and manual runs select every fast shard", () => {
+  // The nightly run is the main baseline. It must not narrow the matrix to the
+  // files of the last commit.
+  for (const event of ["schedule", "workflow_dispatch"]) {
+    const files = changedFilesFromEnvironment({ GITHUB_EVENT_NAME: event });
+    assert.equal(files, null, event);
+    assert.deepEqual(names(selectFastTargets(files)), names(allFastTargets()), event);
+  }
+});
+
 test("a CI run of generate-benchmark-matrix.mjs prints the matrix for the changed files", () => {
   const repoRoot = fileURLToPath(new URL("../..", import.meta.url));
   const result = spawnSync(process.execPath, [".github/scripts/generate-benchmark-matrix.mjs"], {

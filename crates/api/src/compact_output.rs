@@ -1604,6 +1604,7 @@ mod tests {
             }],
             clone_families: Vec::new(),
             mirrored_directories: Vec::new(),
+            range_marker_problems: Vec::new(),
             stats: DuplicationStats::default(),
         };
 
@@ -1639,6 +1640,7 @@ mod tests {
             }],
             clone_families: Vec::new(),
             mirrored_directories: Vec::new(),
+            range_marker_problems: Vec::new(),
             stats: DuplicationStats::default(),
         };
 

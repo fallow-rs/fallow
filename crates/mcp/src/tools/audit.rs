@@ -4,8 +4,8 @@ use std::sync::atomic::AtomicBool;
 use crate::params::AuditParams;
 
 use fallow_api::{
-    AnalysisOptions, AuditGate, AuditOptions, AuditWorsened, CoverageInputs, ProgrammaticError,
-    run_audit as run_audit_api, serialize_audit_programmatic_json,
+    AnalysisOptions, AuditGate, AuditOptions, AuditWorsened, CoverageInputs, ProductionAnalysis,
+    ProgrammaticError, run_audit as run_audit_api, serialize_audit_programmatic_json,
 };
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
@@ -15,7 +15,7 @@ use super::{
     api_runtime::{
         EnvScope, call_cancellation, non_empty_path, non_empty_string,
         resolve_typed_coverage_inputs, run_api_blocking, shared_analysis_options, shared_params,
-        typed_tool_result, typed_type_aware, workspace_patterns_from_param,
+        typed_production, typed_tool_result, typed_type_aware, workspace_patterns_from_param,
     },
     fallback_policy::{baseline_requested, filled, grouped_requested, type_aware_requested},
     push_global, push_remote_extends, push_scope, push_str_flag, run_tool, validation_error_body,
@@ -163,6 +163,13 @@ pub fn build_audit_args(params: &AuditParams) -> Result<Vec<String>, String> {
     push_audit_coverage_flags(&mut args, params);
 
     Ok(args)
+}
+
+/// The production parameter of one audit analysis. Like the CLI flag, the
+/// parameter of an analysis can only turn production mode on, so `false`
+/// counts as not set and the `production` parameter decides.
+fn audit_production_param(analysis: Option<bool>, global: Option<bool>) -> Option<bool> {
+    analysis.filter(|&on| on).or(global)
 }
 
 /// Push the per-analysis production-mode flags for the `audit` tool.
@@ -343,9 +350,18 @@ fn audit_options_from_params(
         },
         base: non_empty_string(params.base.as_deref()),
         production: params.production.unwrap_or(false),
-        production_dead_code: params.production_dead_code,
-        production_health: params.production_health,
-        production_dupes: params.production_dupes,
+        production_dead_code: typed_production(
+            audit_production_param(params.production_dead_code, params.production),
+            ProductionAnalysis::DeadCode,
+        ),
+        production_health: typed_production(
+            audit_production_param(params.production_health, params.production),
+            ProductionAnalysis::Health,
+        ),
+        production_dupes: typed_production(
+            audit_production_param(params.production_dupes, params.production),
+            ProductionAnalysis::Dupes,
+        ),
         // The typed route runs only without `only` and `skip`, so the config
         // decides the selection.
         dead_code: None,
@@ -401,6 +417,17 @@ mod tests {
     use super::super::base_root_fixture::{git, git_capture};
     use super::super::coverage_fixture::{COVERAGE_ROOT, CoverageFixture, branchy_finding};
     use super::*;
+
+    /// The typed route and the CLI route must agree: the CLI route pushes a
+    /// per-analysis flag only for `true`.
+    #[test]
+    fn a_false_analysis_production_parameter_counts_as_not_set() {
+        assert_eq!(audit_production_param(Some(true), Some(false)), Some(true));
+        assert_eq!(audit_production_param(Some(false), Some(true)), Some(true));
+        assert_eq!(audit_production_param(Some(false), None), None);
+        assert_eq!(audit_production_param(None, Some(false)), Some(false));
+        assert_eq!(audit_production_param(None, None), None);
+    }
 
     /// #2699: called without a `base` on a repository that has remote-tracking
     /// refs, the typed route must auto-detect the base and return a verdict.

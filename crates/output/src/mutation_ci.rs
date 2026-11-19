@@ -89,6 +89,9 @@ pub enum MutationHeading {
     /// `####`, under the `### Fallow <title>` heading of the sticky comment.
     /// The comment has the findings tables, so the text points at them.
     Comment,
+    /// `####`, under the heading of a compact sticky comment, which has no
+    /// findings tables, so the text points at no section.
+    CompactComment,
     /// `####`, in the summary body of an inline review. The survived mutants
     /// are inline comments there, not table rows.
     Review,
@@ -167,6 +170,17 @@ pub struct MutationRunNotice {
     pub message: String,
 }
 
+/// Whether a complete run had no mutant in its scope and no score gate, so a
+/// PR comment or review has nothing to say about it. The job summary and the
+/// decision row still state the run.
+#[must_use]
+pub fn mutation_scope_was_empty(view: &MutationCiView) -> bool {
+    matches!(view.state, MutationCiState::Ran)
+        && view.counts.total == 0
+        && !is_partial(view)
+        && view.min_score_gate.is_none()
+}
+
 /// Render the mutation section for `heading`.
 ///
 /// A not-run, failed, stopped or unreadable state replaces everything after
@@ -176,14 +190,25 @@ pub struct MutationRunNotice {
 #[must_use]
 pub fn render_mutation_section(view: &MutationCiView, heading: MutationHeading) -> String {
     let title = match heading {
-        MutationHeading::Comment | MutationHeading::Review => "#### Mutation testing",
+        MutationHeading::Comment | MutationHeading::CompactComment | MutationHeading::Review => {
+            "#### Mutation testing"
+        }
         MutationHeading::Summary => "## Mutation testing",
     };
     let body = section_body(view, heading);
-    let full = join_paragraphs(title, &body.core, &body.extra);
-    if full.chars().count() <= MUTATION_SECTION_MAX_CHARS {
-        return full;
+    let shown = if heading == MutationHeading::Summary {
+        body.clone()
+    } else {
+        collapse_details(view, body.clone())
+    };
+    // The cap is measured on the open section, so the fold wrapper does not
+    // push a section that fits over it.
+    let open = join_paragraphs(title, &body.core, &body.extra);
+    if open.chars().count() <= MUTATION_SECTION_MAX_CHARS {
+        return join_paragraphs(title, &shown.core, &shown.extra);
     }
+    // The shortened section keeps the count table in view: the details it
+    // would fold are the part that the cap removed.
     join_paragraphs(title, &body.core, &[SHORTENED_SECTION_NOTE.to_owned()])
 }
 
@@ -210,10 +235,11 @@ pub fn mutation_decision_row(view: &MutationCiView) -> PrDecisionGate {
 /// The plain-text description of a survived mutant, for the finding of the
 /// rule `fallow/mutation-survived`.
 ///
-/// For example `Changing >= to > in isAdult made no test fail. Mutant
-/// 9f3c2a1b.` The text has no markdown, because each surface escapes a
-/// finding description for its own format. Each value becomes one line, and
-/// a long value is cut.
+/// For example ``Changing `>=` to `>` in `isAdult` made no test fail.
+/// Mutant `9f3c2a1b`.`` The code values are code spans, as in the other
+/// finding descriptions, so a Markdown surface shows an operator such as `<`
+/// as code and not as escaped text. Each value becomes one line, and a long
+/// value is cut.
 #[must_use]
 pub fn survived_description(
     operator: &str,
@@ -222,50 +248,25 @@ pub fn survived_description(
     mutant_id: &str,
 ) -> String {
     let token = |value: &str| single_line(value, TOKEN_MAX_CHARS);
+    let code = |value: &str| markdown_code_span(&token(value));
     let action = match change.map(|change| (token(&change.from), token(&change.to))) {
         Some((from, to)) if !from.is_empty() && !to.is_empty() => {
-            format!("Changing {from} to {to}")
+            format!("Changing {} to {}", code(&from), code(&to))
         }
-        Some((from, _)) if !from.is_empty() => format!("Removing {from}"),
-        Some((_, to)) if !to.is_empty() => format!("Adding {to}"),
-        _ => format!("A {} change", token(operator)),
+        Some((from, _)) if !from.is_empty() => format!("Removing {}", code(&from)),
+        Some((_, to)) if !to.is_empty() => format!("Adding {}", code(&to)),
+        _ => format!("A {} change", code(operator)),
     };
     let place = function
         .map(|name| single_line(name, INLINE_VALUE_MAX_CHARS))
         .filter(|name| !name.is_empty())
-        .map_or_else(String::new, |name| format!(" in {name}"));
+        .map_or_else(String::new, |name| {
+            format!(" in {}", markdown_code_span(&name))
+        });
     format!(
         "{action}{place} made no test fail. Mutant {}.",
-        token(mutant_id)
+        code(mutant_id)
     )
-}
-
-/// The mutation line of the review summary, for example `Mutation testing:
-/// score 62.5%, 6 survivors (4 inline).`
-///
-/// `inline_count` is the number of survivor comments that the review posts.
-#[must_use]
-pub fn mutation_review_summary_line(view: &MutationCiView, inline_count: usize) -> String {
-    match &view.state {
-        MutationCiState::NotRun(_) => "Mutation testing: not run.".to_owned(),
-        MutationCiState::Interrupted => "Mutation testing: stopped.".to_owned(),
-        MutationCiState::Failed { .. } | MutationCiState::Unreadable { .. } => {
-            "Mutation testing: failed.".to_owned()
-        }
-        MutationCiState::Ran => {
-            let partial = if is_partial(view) {
-                "partial run, "
-            } else {
-                ""
-            };
-            let score = view.score.map_or_else(
-                || "no score".to_owned(),
-                |score| format!("score {}", score_percent(score)),
-            );
-            let survivors = count_noun(view.counts.survived, "survivor", "survivors");
-            format!("Mutation testing: {partial}{score}, {survivors} ({inline_count} inline).")
-        }
-    }
 }
 
 /// The workflow annotation that states the run state, when the state needs
@@ -281,14 +282,12 @@ pub fn mutation_run_notice(view: &MutationCiView) -> Option<MutationRunNotice> {
             let reasons = completion
                 .reasons
                 .iter()
-                .map(|reason| reason_token(*reason))
+                .map(|reason| reason_text(*reason))
                 .collect::<Vec<_>>()
                 .join(", ");
             (
                 PrDecisionAnnotationLevel::Notice,
-                format!(
-                    "Partial run ({reasons}). The annotations cover only the mutants that ran."
-                ),
+                format!("Partial run: {reasons}. The annotations cover only the mutants that ran."),
             )
         }
         MutationCiState::Failed {
@@ -355,9 +354,33 @@ const SECONDS_PER_HOUR: u64 = 3600;
 
 /// The paragraphs of a section. `core` survives the section cap, and `extra`
 /// does not.
+#[derive(Clone)]
 struct SectionBody {
     core: Vec<String>,
     extra: Vec<String>,
+}
+
+/// The PR comment and the review show the partial-run line and the headline,
+/// and fold the count table and the other paragraphs into one `<details>`
+/// block, so the section is two lines until a reader opens it. The job
+/// summary keeps every paragraph open.
+fn collapse_details(view: &MutationCiView, mut body: SectionBody) -> SectionBody {
+    if !matches!(view.state, MutationCiState::Ran) {
+        return body;
+    }
+    let mut hidden = Vec::new();
+    if view.counts.total > 0 && body.core.len() > 1 {
+        hidden.extend(body.core.pop());
+    }
+    hidden.append(&mut body.extra);
+    if hidden.is_empty() {
+        return body;
+    }
+    body.extra = vec![format!(
+        "<details>\n<summary>Counts and details</summary>\n\n{}\n\n</details>",
+        hidden.join("\n\n")
+    )];
+    body
 }
 
 fn join_paragraphs(title: &str, core: &[String], extra: &[String]) -> String {
@@ -436,7 +459,9 @@ fn ran_body(view: &MutationCiView, heading: MutationHeading) -> SectionBody {
         core.push(count_table(view));
     }
     let facts = match heading {
-        MutationHeading::Comment | MutationHeading::Review => None,
+        MutationHeading::Comment | MutationHeading::CompactComment | MutationHeading::Review => {
+            None
+        }
         MutationHeading::Summary => run_facts_line(view),
     };
     let extra = [
@@ -478,13 +503,13 @@ fn partial_line(view: &MutationCiView) -> Option<String> {
     let reasons = completion
         .reasons
         .iter()
-        .map(|reason| markdown_code_span(reason_token(*reason)))
+        .map(|reason| reason_text(*reason))
         .collect::<Vec<_>>()
         .join(", ");
     let mut line = if reasons.is_empty() {
         "**Partial run.** The counts cover only the mutants that ran.".to_owned()
     } else {
-        format!("**Partial run** ({reasons}). The counts cover only the mutants that ran.")
+        format!("**Partial run:** {reasons}. The counts cover only the mutants that ran.")
     };
     if completion
         .reasons
@@ -495,21 +520,21 @@ fn partial_line(view: &MutationCiView) -> Option<String> {
     Some(line)
 }
 
-/// The kebab-case wire name of a reason. The match is exhaustive, so a new
-/// reason does not compile until it has a name here.
-const fn reason_token(reason: MutationIncompleteReason) -> &'static str {
+/// Why a run is partial, in words. The match is exhaustive, so a new reason
+/// does not compile until it has a text here.
+const fn reason_text(reason: MutationIncompleteReason) -> &'static str {
     match reason {
-        MutationIncompleteReason::RuntimeError => "runtime-error",
-        MutationIncompleteReason::MutantLimit => "mutant-limit",
-        MutationIncompleteReason::SampledOut => "sampled-out",
-        MutationIncompleteReason::TimeBudget => "time-budget",
-        MutationIncompleteReason::SkippedFiles => "skipped-files",
-        MutationIncompleteReason::UnloadedFiles => "unloaded-files",
-        MutationIncompleteReason::TestFilesNotDiscovered => "test-files-not-discovered",
-        MutationIncompleteReason::BaselineFailure => "baseline-failure",
-        MutationIncompleteReason::WorktreeChanged => "worktree-changed",
-        MutationIncompleteReason::TypecheckFailed => "typecheck-failed",
-        MutationIncompleteReason::WorktreeUnchecked => "worktree-unchecked",
+        MutationIncompleteReason::RuntimeError => "some mutants stopped with a runtime error",
+        MutationIncompleteReason::MutantLimit => "the run reached the mutant limit",
+        MutationIncompleteReason::SampledOut => "the run tested a sample of the mutants",
+        MutationIncompleteReason::TimeBudget => "the run reached its time budget",
+        MutationIncompleteReason::SkippedFiles => "the run skipped some files",
+        MutationIncompleteReason::UnloadedFiles => "the test runner did not load some files",
+        MutationIncompleteReason::TestFilesNotDiscovered => "the run found no test files",
+        MutationIncompleteReason::BaselineFailure => "the tests failed before any change",
+        MutationIncompleteReason::WorktreeChanged => "files changed during the run",
+        MutationIncompleteReason::TypecheckFailed => "the type check failed",
+        MutationIncompleteReason::WorktreeUnchecked => "the run could not check the worktree",
     }
 }
 
@@ -573,22 +598,32 @@ fn count_table(view: &MutationCiView) -> String {
         .saturating_add(counts.compile_error)
         .saturating_add(counts.not_killed_by_target);
     let score = view.score.map_or_else(|| "-".to_owned(), score_percent);
+    let killed = counts.killed.saturating_add(counts.timeout);
+    // The column shows only when it has a count, so a normal run reads as
+    // four columns.
+    if not_measured == 0 {
+        return format!(
+            "| Killed | Survived | No coverage | Score |\n\
+             | --: | --: | --: | --: |\n\
+             | {killed} | {} | {} | {score} |",
+            counts.survived, counts.no_coverage,
+        );
+    }
     format!(
         "| Killed | Survived | No coverage | Not measured | Score |\n\
-         | --- | --- | --- | --- | --- |\n\
-         | {} | {} | {} | {not_measured} | {score} |",
-        counts.killed.saturating_add(counts.timeout),
-        counts.survived,
-        counts.no_coverage,
+         | --: | --: | --: | --: | --: |\n\
+         | {killed} | {} | {} | {not_measured} | {score} |",
+        counts.survived, counts.no_coverage,
     )
 }
 
 const fn scope_line(scope: Option<MutationScopeKind>) -> Option<&'static str> {
     match scope {
-        Some(MutationScopeKind::Changed) => Some("Scope: the changed lines."),
+        // The changed lines are the default scope of a pull request, so the
+        // section states only a scope that a reader would not expect.
+        Some(MutationScopeKind::Changed) | None => None,
         Some(MutationScopeKind::All) => Some("Scope: all files."),
         Some(MutationScopeKind::Paths) => Some("Scope: the selected paths."),
-        None => None,
     }
 }
 
@@ -625,7 +660,7 @@ fn duration_text(ms: u64) -> String {
 }
 
 fn survivor_explanation(view: &MutationCiView, heading: MutationHeading) -> Option<String> {
-    const FIRST: &str = "Each survived mutant is a small code change that made no test fail.";
+    const FIRST: &str = "A survived mutant is a code change that no test detects.";
     const LAST: &str = "Add a test that fails on the change.";
     if view.counts.survived == 0 {
         return None;
@@ -647,9 +682,9 @@ fn survivor_explanation(view: &MutationCiView, heading: MutationHeading) -> Opti
     // The job summary has no findings, so only the comment and the review
     // point at the place where the survived mutants are.
     Some(match heading {
-        MutationHeading::Summary => format!("{FIRST} {LAST}"),
+        MutationHeading::Summary | MutationHeading::CompactComment => format!("{FIRST} {LAST}"),
         MutationHeading::Comment => {
-            format!("{FIRST} The **Tests** findings above show the survived mutants{lines}. {LAST}")
+            format!("{FIRST} The **Tests** section above lists the survived mutants{lines}. {LAST}")
         }
         MutationHeading::Review => {
             format!("{FIRST} The inline comments show the survived mutants{lines}. {LAST}")
@@ -674,9 +709,9 @@ fn no_coverage_details(locations: &[MutationCiLocation]) -> Option<String> {
     sorted.dedup();
     let total = sorted.len();
     let count = if total > MUTATION_NO_COVERAGE_ITEMS {
-        format!("{MUTATION_NO_COVERAGE_ITEMS} of {total}")
+        format!("{total} lines, the first {MUTATION_NO_COVERAGE_ITEMS} shown")
     } else {
-        total.to_string()
+        count_noun(total, "line", "lines")
     };
     let items = sorted
         .iter()
@@ -717,7 +752,7 @@ fn inspect_line(view: &MutationCiView) -> Option<String> {
         command.push_str(&shell_quote(&root));
     }
     Some(format!(
-        "To inspect a mutant, run {} with the `{REPORT_FILE}` file of this job.",
+        "To inspect a mutant, run {} with the report that this job writes.",
         markdown_code_span(&command)
     ))
 }

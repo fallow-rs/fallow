@@ -1369,7 +1369,6 @@ fn closure_listed_names<'a>(
         .collect()
 }
 
-/// Compute the package-usage indices used to decide whether a dependency is used.
 fn collect_dependency_usage_indices<'a>(
     graph: &'a ModuleGraph,
     config: &ResolvedConfig,

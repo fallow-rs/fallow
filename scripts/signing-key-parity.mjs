@@ -102,7 +102,7 @@ export const assertSigningKeyParity = ({
   const rustProviderKey = parseRustPublicKey(
     rustProviderSource,
     "RELEASE_BINARY_SIGNING_KEY",
-    "similar-code Rust provider check",
+    "Rust release signature check",
   );
   const documented = parseDocumentedPublicKey(securityPolicy);
 
@@ -115,7 +115,7 @@ export const assertSigningKeyParity = ({
   assert.deepEqual(
     rustProviderKey,
     vscodeKey,
-    "similar-code Rust provider check: embedded public key differs from VS Code",
+    "Rust release signature check: embedded public key differs from VS Code",
   );
   assert.deepEqual(
     documented.fingerprint,
@@ -150,10 +150,7 @@ export const checkRepositorySigningKeyParity = ({
       resolve(root, "npm/fallow-similar-code/scripts/verify-binary.js"),
       "utf8",
     ),
-    rustProviderSource: readFileSync(
-      resolve(root, "crates/api/src/similar_code/launcher_provider.rs"),
-      "utf8",
-    ),
+    rustProviderSource: readFileSync(resolve(root, "crates/api/src/release_signature.rs"), "utf8"),
     securityPolicy: readFileSync(resolve(root, "SECURITY.md"), "utf8"),
     releasePublicKey,
   });
