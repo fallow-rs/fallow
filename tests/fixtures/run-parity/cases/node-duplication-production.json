@@ -19,6 +19,19 @@
       "options": {
         "noPackageBaselines": true
       }
+    },
+    "lsp": {
+      "initializationOptions": {
+        "packageBaselines": false
+      }
+    },
+    "vscode": {
+      "settings": {
+        "fallow.packageBaselines": false
+      },
+      "compare_keys": [
+        "packageBaselines"
+      ]
     }
   },
   "expected": {
@@ -40,6 +53,16 @@
         "settings.package_baselines": {
           "value": false,
           "source": "given:analysis.no_package_baselines"
+        }
+      }
+    },
+    "lsp": {
+      "reason": "The language server has one editor command, which plans dead code and duplication. The editor names the setting fallow.packageBaselines",
+      "expected": {
+        "command": "editor",
+        "settings.package_baselines": {
+          "value": false,
+          "source": "given:fallow.packageBaselines"
         }
       }
     }

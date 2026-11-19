@@ -1,0 +1,48 @@
+{
+  "name": "editor-discovered-config-fallback",
+  "files": {
+    ".fallowrc.json": "{\"boundaries\":{\"zones\":[{\"name\":\"ui\",\"patterns\":[\"src/ui/**\"]}],\"rules\":[{\"from\":\"ui\",\"allow\":[\"typo-zone\"]}]}}",
+    "package.json": "{}"
+  },
+  "inputs": {
+    "mcp": {
+      "not_expressible": "Only the language server falls back to the default config. The other surfaces fail on an invalid config"
+    },
+    "api": {
+      "not_expressible": "Only the language server falls back to the default config. The other surfaces fail on an invalid config"
+    },
+    "node": {
+      "not_expressible": "Only the language server falls back to the default config. The other surfaces fail on an invalid config"
+    },
+    "lsp": {
+      "initializationOptions": {
+        "production": true
+      }
+    },
+    "vscode": {
+      "settings": {
+        "fallow.production": "on"
+      },
+      "compare_keys": [
+        "production"
+      ]
+    }
+  },
+  "expected": {
+    "surface": "<row>",
+    "command": "editor",
+    "fell_back": true,
+    "config_file": {
+      "value": null,
+      "source": "derived:config-fallback"
+    },
+    "analyses.dead_code.production": {
+      "value": true,
+      "source": "given:fallow.production"
+    },
+    "analyses.duplication.production": {
+      "value": true,
+      "source": "given:fallow.production"
+    }
+  }
+}

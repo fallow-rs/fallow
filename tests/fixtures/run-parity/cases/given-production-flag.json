@@ -22,6 +22,19 @@
       "options": {
         "production": true
       }
+    },
+    "lsp": {
+      "initializationOptions": {
+        "production": true
+      }
+    },
+    "vscode": {
+      "settings": {
+        "fallow.production": "on"
+      },
+      "compare_keys": [
+        "production"
+      ]
     }
   },
   "expected": {
@@ -38,6 +51,15 @@
         "analyses.dead_code.production": {
           "value": true,
           "source": "given:analysis.production_override"
+        }
+      }
+    },
+    "lsp": {
+      "reason": "The editor names the setting fallow.production",
+      "expected": {
+        "analyses.dead_code.production": {
+          "value": true,
+          "source": "given:fallow.production"
         }
       }
     }

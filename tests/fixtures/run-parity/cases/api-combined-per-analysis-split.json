@@ -16,6 +16,17 @@
     },
     "node": {
       "not_expressible": "The Node bindings have no combined entry point"
+    },
+    "lsp": {
+      "initializationOptions": {}
+    },
+    "vscode": {
+      "settings": {
+        "fallow.production": "auto"
+      },
+      "compare_keys": [
+        "production"
+      ]
     }
   },
   "expected": {
@@ -32,6 +43,14 @@
     "analyses.health.production": {
       "value": false,
       "source": "config-file:production.health"
+    }
+  },
+  "deviations": {
+    "lsp": {
+      "reason": "The language server has one editor command, which plans dead code and duplication",
+      "expected": {
+        "command": "editor"
+      }
     }
   }
 }
