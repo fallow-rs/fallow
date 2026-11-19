@@ -39,6 +39,7 @@ mod audit_test_file_gate_tests;
 mod audit_test_reach_tests;
 mod audit_tests;
 mod audit_unprovable_base_tests;
+mod audit_worktree_cache_tests;
 mod audit_worsened_tests;
 mod banned_call_new_tests;
 mod banned_import_allow_names_tests;

@@ -9,7 +9,7 @@ use fallow_engine::project_config::{
     ConfigFile, ConfigFileOptions, ConfigLoadError, ProductionFlags, ResolveOptions,
 };
 use fallow_output::GroupByMode;
-use rustc_hash::FxHashSet;
+use rustc_hash::{FxHashMap, FxHashSet};
 
 static CONFIG_LOADED_LOGGED: LazyLock<Mutex<FxHashSet<PathBuf>>> =
     LazyLock::new(|| Mutex::new(FxHashSet::default()));
@@ -118,6 +118,32 @@ pub fn set_max_file_size_override(max_file_size_mb: Option<u32>) {
 /// the flag then replaces that value. `Some(0)` means unlimited.
 fn max_file_size_flag_mb() -> Option<u32> {
     MAX_FILE_SIZE_OVERRIDE.get().copied().flatten()
+}
+
+/// The cache directories of the analysis roots in the temporary worktrees of
+/// `fallow audit`: the staged index of `--staged`, and the base snapshot. The
+/// config of such a root uses its directory here, also when
+/// `FALLOW_CACHE_DIR` or `cache.dir` names another one. A shared directory
+/// would get the caches of a temporary root, and the module graph cache of
+/// the checkout would no longer match.
+static ROOT_CACHE_DIR_OVERRIDES: LazyLock<Mutex<FxHashMap<PathBuf, PathBuf>>> =
+    LazyLock::new(|| Mutex::new(FxHashMap::default()));
+
+/// Give the config of `root` the cache directory `cache_dir` for the rest of
+/// the process.
+pub fn set_root_cache_dir_override(root: &Path, cache_dir: PathBuf) {
+    ROOT_CACHE_DIR_OVERRIDES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .insert(root.to_path_buf(), cache_dir);
+}
+
+fn root_cache_dir_override(root: &Path) -> Option<PathBuf> {
+    ROOT_CACHE_DIR_OVERRIDES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .get(root)
+        .cloned()
 }
 
 /// Analysis types for --only/--skip selection.
@@ -354,6 +380,9 @@ pub fn load_config_for_analysis(
     );
     if let Some(mb) = max_file_size_flag_mb() {
         resolved.max_file_size_bytes = fallow_config::resolve_max_file_size_bytes(Some(mb));
+    }
+    if let Some(cache_dir) = root_cache_dir_override(root) {
+        resolved.cache_dir = cache_dir;
     }
     crate::cache_notice::record_candidate(
         root,

@@ -230,6 +230,8 @@ impl AuditTypeAwareOptions<'_> {
 
 #[path = "audit_staged.rs"]
 pub mod staged;
+#[path = "audit_worktree_cache.rs"]
+pub mod worktree_cache;
 
 #[path = "audit_base_ref.rs"]
 mod base_ref;
@@ -634,11 +636,8 @@ fn run_audit_base_analyses(
     let base_root = roots.base;
     // The head and base passes run at the same time, so the base pass gets
     // its own cache directory inside the base worktree.
-    let base_cache_dir = fallow_engine::repo_refs::remap_cache_dir_for_base_worktree(
-        roots.host,
-        base_root,
-        opts.cache_dir,
-    );
+    let base_cache_dir = worktree_cache::cache_dir(base_root);
+    let _base_parse_cache = worktree_cache::lend_to_base(opts, roots.host, base_root);
     let current_config_path = opts
         .config_path
         .clone()

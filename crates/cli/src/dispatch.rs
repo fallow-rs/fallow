@@ -1893,15 +1893,8 @@ fn dispatch_audit(dispatch: &DispatchContext<'_>, args: &AuditDispatchArgs) -> E
         Ok(inputs) => inputs,
         Err(code) => return code,
     };
-    if let Some(host) = args.staged_host.as_deref() {
-        // The temporary worktree is removed after the run, so the caches of
-        // a staged audit stay in the checkout.
-        inputs.cache_dir = fallow_engine::repo_refs::remap_cache_dir_for_base_worktree(
-            dispatch.root,
-            host,
-            &inputs.cache_dir,
-        );
-    }
+    // Drop writes the parse cache of a staged audit back to the checkout.
+    let _staged_parse_cache = audit_staged::lend_parse_cache(dispatch, args, &mut inputs);
     if (!args.only.is_empty() || !args.skip.is_empty()) && audit_renders_brief(args) {
         eprintln!(
             "Note: --only and --skip have no effect on the review brief, which keeps every \

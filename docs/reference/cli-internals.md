@@ -148,6 +148,10 @@ load. `runtime_support::load_config_for_analysis` does these steps:
    variables that every host honors, such as `FALLOW_MAX_FILE_SIZE` and
    `FALLOW_CACHE_MAX_SIZE`. The `--max-file-size` flag then replaces the
    file size limit.
+   For a root in a temporary worktree of `fallow audit`, the cache
+   directory that `runtime_support::set_root_cache_dir_override` registered
+   then replaces the resolved one (see
+   [Parse cache of the audit worktrees](#parse-cache-of-the-audit-worktrees)).
 7. It records the cache notice candidate, reports the workspace diagnostics
    and warns about unknown security categories.
 
@@ -1232,6 +1236,40 @@ reads `duplicates.enabled`, `audit.deadCode`, `audit.health` or `audit.dupes`:
   owns. A reverse check fails when a named file no longer reads a key.
 - The visitor cannot see the return type of a method that is bound to an
   untyped `let`.
+
+## Parse cache of the audit worktrees
+
+`fallow audit` analyzes two kinds of temporary worktree: the base snapshot,
+and the staged index of `--staged`. Each worktree root has another path than
+the checkout, so the config of the root resolves another cache directory.
+`crates/cli/src/audit_worktree_cache.rs` gives each worktree root the cache
+directory `<worktree root>/.fallow`, also when `FALLOW_CACHE_DIR` or
+`cache.dir` names another directory. `WorktreeParseCache::lend` copies the
+parse cache (`cache.bin`) of the checkout into that directory when the
+directory has no parse cache yet.
+
+- The parse cache keys each entry by the root-relative path and the content
+  hash. A worktree file whose content differs from the cached entry is parsed
+  again, so the checkout cache cannot give stale results. On Unix, a file in
+  a new worktree never matches the size, mtime and ctime of a cached entry. On
+  Windows, the cache does not record a ctime and never trusts metadata alone.
+  On both, the run hashes the content of each file.
+- The module graph cache records the project root, and the duplication token
+  cache records absolute paths. A worktree writes these caches only in its
+  own directory. Otherwise a shared `FALLOW_CACHE_DIR` gets the module graph
+  cache of a worktree root, and the next run of the checkout rejects it with
+  `root-mismatch`.
+- The staged run writes its updated parse cache back to the checkout after
+  the run (`WriteBack::Yes`), so the next staged run of the same content
+  parses no file. It skips the write when another run replaced the parse
+  cache of the checkout during the staged run. The base pass does not write
+  back (`WriteBack::No`): its parse cache holds the base content, and the
+  reused base worktree keeps it.
+- The cost of the write-back is a reparse, never a wrong result. The entries
+  carry the size and times of the worktree files, so the next run of the
+  checkout hashes each file once and stores its own times again. The staged
+  worktree has no untracked file of the checkout, so the save of the staged
+  run drops the entries of those files.
 
 ## Audit cache maintenance
 
