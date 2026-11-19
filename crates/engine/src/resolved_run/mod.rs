@@ -246,7 +246,7 @@ impl ResolvedRun {
     /// The base ref candidates of an audit run. A run of another command
     /// has none.
     #[must_use]
-    pub fn audit_base(&self) -> AuditBaseDecision {
+    fn audit_base(&self) -> AuditBaseDecision {
         decide_audit_base(&self.inputs)
     }
 
