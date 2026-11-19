@@ -1769,33 +1769,30 @@ fn api_consumers_do_not_reference_engine_core_or_cli_sources() {
 
 #[test]
 fn mcp_api_routes_honor_ambient_changed_since_scope() {
-    for source_path in [
-        "crates/mcp/src/tools/analyze.rs",
-        "crates/mcp/src/tools/audit.rs",
-        "crates/mcp/src/tools/code_mode_tools.rs",
-        "crates/mcp/src/tools/decision_surface.rs",
-        "crates/mcp/src/tools/dupes.rs",
-        "crates/mcp/src/tools/flags.rs",
-        "crates/mcp/src/tools/health.rs",
-        "crates/mcp/src/tools/list_boundaries.rs",
-        "crates/mcp/src/tools/project_info.rs",
-        "crates/mcp/src/tools/trace.rs",
-    ] {
-        let source = read_source_without_line_comments(source_path)
+    let tools = "analyze audit code_mode_tools decision_surface dupes flags health \
+                 list_boundaries project_info trace";
+    for name in tools.split_whitespace() {
+        let source_path = format!("crates/mcp/src/tools/{name}.rs");
+        let source = read_source_without_line_comments(&source_path)
             .unwrap_or_else(|error| panic!("read {source_path}: {error}"));
         assert!(
-            source.contains("shared_analysis_options(") && !source.contains("EnvScope::Own"),
-            "{source_path} must apply FALLOW_CHANGED_SINCE through shared_analysis_options \
+            source.contains("typed_call(") && !source.contains("EnvScope::Own"),
+            "{source_path} must apply FALLOW_CHANGED_SINCE through typed_call \
              when tool params omit changed_since"
         );
     }
-    let helper_path = "crates/mcp/src/tools/api_runtime.rs";
-    let helper = read_source_without_line_comments(helper_path)
-        .unwrap_or_else(|error| panic!("read {helper_path}: {error}"));
+    let helper = ["api_runtime", "run_inputs"].map(|name| {
+        read_source_without_line_comments(&format!("crates/mcp/src/tools/{name}.rs"))
+            .unwrap_or_else(|error| panic!("read {name}.rs: {error}"))
+    });
     assert!(
-        helper.contains("EnvScope::Ambient => (None, env_changed_since(), env_diff_file())")
-            && helper.contains("EnvScope::HardRef => (env_changed_since(), None, env_diff_file())"),
-        "{helper_path} must read FALLOW_CHANGED_SINCE for the ambient and hard-ref scopes"
+        helper[0].contains("EnvScope::Ambient => (None, env_changed_since(), env_diff_file())")
+            && helper[0]
+                .contains("EnvScope::HardRef => (env_changed_since(), None, env_diff_file())")
+            && helper[1]
+                .contains("shared_analysis_options(shared, tool.env_scope(), cancellation)")
+            && helper[1].matches("EnvScope::Own").count() == 1,
+        "typed_call must read FALLOW_CHANGED_SINCE through the env scope of each tool"
     );
 }
 
