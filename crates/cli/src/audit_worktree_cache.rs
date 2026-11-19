@@ -61,10 +61,16 @@ impl WorktreeParseCache {
         let host_file = host_dir.join(PARSE_CACHE_FILE);
         let worktree_file = worktree_dir.join(PARSE_CACHE_FILE);
         let host_stamp = FileStamp::read(&host_file);
+        // The worktree holds committed files, so `.fallow` or `cache.bin` can
+        // be a symlink. The copy goes through the symlink check of the cache
+        // target and replaces the file through a rename, and a symlink counts
+        // as an existing entry.
         if host_stamp.is_some()
-            && !worktree_file.exists()
-            && let Err(error) = std::fs::create_dir_all(&worktree_dir)
-                .and_then(|()| std::fs::copy(&host_file, &worktree_file))
+            && std::fs::symlink_metadata(&worktree_file).is_err()
+            && let Err(error) = std::fs::read(&host_file).and_then(|data| {
+                fallow_types::path_guard::CacheTarget::new(worktree_root, &worktree_dir)
+                    .write_file(PARSE_CACHE_FILE, &data)
+            })
         {
             tracing::warn!("could not copy the parse cache into the audit worktree: {error}");
         }
@@ -131,8 +137,13 @@ struct FileStamp {
 }
 
 impl FileStamp {
+    /// The stamp of the regular file at `path`. A symlink gives `None`, so
+    /// the write-back never reads a file outside the cache directory.
     fn read(path: &Path) -> Option<Self> {
-        let metadata = std::fs::metadata(path).ok()?;
+        let metadata = std::fs::symlink_metadata(path).ok()?;
+        if !metadata.is_file() {
+            return None;
+        }
         Some(Self {
             len: metadata.len(),
             modified: metadata.modified().ok(),

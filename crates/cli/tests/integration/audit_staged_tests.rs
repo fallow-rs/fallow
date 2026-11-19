@@ -486,3 +486,37 @@ fn a_staged_run_with_no_cache_writes_no_parse_cache() {
     assert_eq!(output.code, 0, "stderr: {}", output.stderr);
     assert!(!dir.join(".fallow/cache.bin").exists());
 }
+
+/// The staged worktree holds committed files. A committed `.fallow/cache.bin`
+/// symlink to a path outside the worktree must not receive the parse cache of
+/// the checkout.
+#[cfg(unix)]
+#[test]
+fn a_committed_cache_symlink_does_not_receive_the_parse_cache() {
+    let tmp = fixture();
+    let dir = tmp.path();
+    let outside = TempDir::new().unwrap();
+    let target = outside.path().join("written-through-link");
+    fs::create_dir_all(dir.join(".fallow")).unwrap();
+    std::os::unix::fs::symlink(&target, dir.join(".fallow/cache.bin")).unwrap();
+    commit_all(dir, "commit a cache symlink");
+
+    // The checkout gets a real parse cache. The index still holds the link.
+    fs::remove_file(dir.join(".fallow/cache.bin")).unwrap();
+    let warm = dead_code(dir, &[], None);
+    assert!(warm.code <= 1, "stderr: {}", warm.stderr);
+    assert!(
+        fs::symlink_metadata(dir.join(".fallow/cache.bin"))
+            .unwrap()
+            .is_file()
+    );
+    fs::write(dir.join("src/index.ts"), "export const a = 2;\n").unwrap();
+    git(dir, &["add", "src/index.ts"]);
+
+    let staged = run(audit_staged_command(dir, &[]).env_remove("FALLOW_CACHE_DIR"));
+    assert!(staged.code <= 1, "stderr: {}", staged.stderr);
+    assert!(
+        !target.exists(),
+        "the staged run wrote through the committed symlink"
+    );
+}
