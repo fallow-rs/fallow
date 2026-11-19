@@ -7,8 +7,7 @@
 use std::path::PathBuf;
 
 use fallow_config::{
-    CommandKind, EnvSnapshot, FallowConfig, PlannedAnalysis, ResolvedConfig, RunInputs,
-    SelectionInput, Surface,
+    CommandKind, EnvSnapshot, FallowConfig, PlannedAnalysis, RunInputs, SelectionInput, Surface,
 };
 use fallow_types::sourced::{Given, Origin};
 
@@ -164,7 +163,7 @@ impl ResolvedRunBuilder {
     /// # Errors
     ///
     /// Returns the [`ResolveError`] of the resolver.
-    pub fn try_build(self) -> Result<ResolvedRun, ResolveError> {
+    fn try_build(self) -> Result<ResolvedRun, ResolveError> {
         let inputs = self.inputs();
         match self.inline {
             Some(config) => resolve_run_inline(&inputs, config),
@@ -178,8 +177,12 @@ impl ResolvedRunBuilder {
     /// # Panics
     ///
     /// Panics when the run does not resolve.
+    #[cfg(test)]
     #[must_use]
-    pub fn build_adjusted(self, mut adjust: impl FnMut(&mut ResolvedConfig)) -> ResolvedRun {
+    fn build_adjusted(
+        self,
+        mut adjust: impl FnMut(&mut fallow_config::ResolvedConfig),
+    ) -> ResolvedRun {
         let mut run = self.build();
         for entry in [run.off.as_mut(), run.on.as_mut()].into_iter().flatten() {
             adjust(&mut entry.config);
