@@ -1240,6 +1240,31 @@ impl ResolvedPathContext<'_, '_> {
         }
     }
 
+    /// A bare import of a project package whose install link points outside
+    /// the project root.
+    ///
+    /// The base worktree of `fallow audit` links `node_modules` to the
+    /// `node_modules` of the checkout under review, so its workspace links
+    /// reach the packages of that checkout. The import still names the package
+    /// of this project, so it resolves into this project. Without this, the
+    /// base reports the import as an npm package, and every finding that the
+    /// edge carries in the head looks introduced.
+    fn project_package_outside_root(&self, path: &Path) -> Option<ResolveResult> {
+        if !is_bare_specifier(self.specifier) || is_inside_project_root(self.ctx, path) {
+            return None;
+        }
+        let package_name = extract_package_name(self.specifier);
+        if !self.ctx.workspace_roots.contains_key(package_name.as_str()) {
+            return None;
+        }
+        try_aliased_workspace_package_fallback(
+            self.ctx,
+            self.from_file,
+            self.specifier,
+            self.from_style || is_style_file(self.from_file),
+        )
+    }
+
     fn resolve_uncanonicalized_path(&self, resolved_path: &Path) -> ResolveResult {
         if let Some(file_id) = try_source_fallback(resolved_path, self.ctx.path_to_id) {
             ResolveResult::InternalModule(file_id)
@@ -1257,6 +1282,9 @@ impl ResolvedPathContext<'_, '_> {
     }
 
     fn package_or_external_result(&self, path: &Path) -> Option<ResolveResult> {
+        if let Some(result) = self.project_package_outside_root(path) {
+            return Some(result);
+        }
         if let Some(pkg_name) =
             package_usage_name_for_import(self.ctx, self.from_file, self.specifier, path)
         {
