@@ -161,6 +161,34 @@ fn blocking_run(
 }
 
 #[test]
+fn dupes_do_not_run_when_the_plan_skips_them() {
+    let (_on_dir, on_root) = project();
+    assert_eq!(analyze(&on_root, &json!({})).result, Ok(()));
+    assert_eq!(
+        fallow_api::run::testing::duplication_runs::count(&on_root),
+        1,
+        "the counter sees the duplication run of a default plan"
+    );
+
+    let (_dir, root) = project();
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"duplicates":{"enabled":false}}"#,
+    )
+    .expect("config");
+
+    let outcome = analyze(&root, &json!({}));
+
+    assert_eq!(outcome.result, Ok(()));
+    assert!(outcome.output.duplication.clone_groups.is_empty());
+    assert_eq!(
+        fallow_api::run::testing::duplication_runs::count(&root),
+        0,
+        "the plan skips duplication, so no session runs it"
+    );
+}
+
+#[test]
 fn discovered_broken_workspace_glob_falls_back() {
     let (_dir, root) = project();
     std::fs::write(root.join("package.json"), r#"{"workspaces": ["#).expect("manifest");
