@@ -159,6 +159,8 @@ impl AnalysisSession {
         config: &DuplicatesConfig,
         cache_dir: Option<&Path>,
     ) -> DuplicationAnalysis {
+        #[cfg(any(test, feature = "testing"))]
+        crate::resolved_run::testing::duplication_runs::record(&self.config.root);
         duplicates::find_duplicates_with_defaults(
             &self.config.root,
             self.duplication_files(),
@@ -175,6 +177,8 @@ impl AnalysisSession {
         changed_files: &[PathBuf],
         cache_dir: Option<&Path>,
     ) -> DuplicationAnalysis {
+        #[cfg(any(test, feature = "testing"))]
+        crate::resolved_run::testing::duplication_runs::record(&self.config.root);
         duplicates::find_duplicates_touching_files_with_defaults(
             &self.config.root,
             self.duplication_files(),

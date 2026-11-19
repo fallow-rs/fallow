@@ -33,6 +33,8 @@ rustc-hash = { workspace = true }
 mimalloc = { workspace = true }
 
 [dev-dependencies]
+# The parity harness of the resolved run and the test counters.
+fallow-api = { workspace = true, features = ["testing"] }
 proptest = { workspace = true }
 # The runtime stack probe drives the global Rayon pool that analysis uses.
 rayon = { workspace = true }
