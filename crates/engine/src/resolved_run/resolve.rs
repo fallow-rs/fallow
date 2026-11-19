@@ -158,7 +158,98 @@ fn given_value<T: Clone>(given: &Given<T>, scope: Scope) -> Sourced<T> {
 /// Returns a [`ResolveError`] for an invalid input, a config error, a
 /// workspace error, or a run that selects no analysis.
 pub fn resolve_run(inputs: &RunInputs) -> Result<ResolvedRun, ResolveError> {
-    resolve_with(inputs, |ctx, config_path| ctx.load(config_path))
+    resolve_with(inputs, |ctx, config_path| {
+        ctx.load(config_path.map(|given| (given.value.as_path(), given_source(given))))
+    })
+}
+
+/// Which config file the base side of a comparison with a base ref reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BaseConfig {
+    /// The config file of the head run. A head run without a config file
+    /// gives discovery from the base root.
+    Head,
+    /// The base copy of the config file. An explicit config file under the
+    /// head root gives the file at the same path under the base root. A file
+    /// that the base does not have, and a discovered head config, give
+    /// discovery from the base root. An explicit file outside the head root
+    /// has no base copy, so the base side reads that file.
+    BaseCopy,
+}
+
+/// The base side of a comparison with a base ref.
+#[derive(Debug, Clone)]
+pub struct BaseSide {
+    /// The analysis root in the base checkout.
+    pub root: Given<PathBuf>,
+    /// The config file rule of the base side.
+    pub config: BaseConfig,
+    /// The cache directory of the base side. `None` keeps the cache input of
+    /// the head run.
+    pub cache_dir: Option<Given<PathBuf>>,
+}
+
+/// Resolve the base side of a comparison with a base ref: the inputs of
+/// `head` on the base root, with the config file of the [`BaseConfig`] rule.
+/// The base run prints no progress.
+///
+/// # Errors
+///
+/// Returns a [`ResolveError`] as [`resolve_run`] does.
+pub fn resolve_base_run(head: &ResolvedRun, base: BaseSide) -> Result<ResolvedRun, ResolveError> {
+    let BaseSide {
+        root,
+        config,
+        cache_dir,
+    } = base;
+    let file = base_config_file(head, &root.value, config);
+    let mut inputs = (*head.inputs).clone();
+    inputs.root = Some(root);
+    inputs.config_path = None;
+    inputs.config_fallback = ConfigFallback::Fail;
+    if cache_dir.is_some() {
+        inputs.cache_dir = cache_dir;
+    }
+    inputs.quiet = true;
+    resolve_with(&inputs, |ctx, _| {
+        ctx.load(
+            file.as_ref()
+                .map(|(path, source)| (path.as_path(), source.clone())),
+        )
+    })
+}
+
+/// The config file of a base side with its source, or `None` for discovery
+/// from the base root.
+fn base_config_file(
+    head: &ResolvedRun,
+    base_root: &Path,
+    rule: BaseConfig,
+) -> Option<(PathBuf, Source)> {
+    let path = head.config_file.value().as_ref()?;
+    let source = head.config_file.source();
+    let explicit = matches!(source, Source::Given { .. });
+    match rule {
+        BaseConfig::Head if explicit => Some((path.clone(), source.clone())),
+        BaseConfig::Head => Some((
+            path.clone(),
+            Source::Derived {
+                from: "head-config",
+            },
+        )),
+        BaseConfig::BaseCopy if !explicit => None,
+        BaseConfig::BaseCopy => {
+            let canonical = dunce::canonicalize(path).unwrap_or_else(|_| path.clone());
+            match canonical.strip_prefix(head.root.value()) {
+                Ok(relative) => {
+                    let copy = base_root.join(relative);
+                    copy.is_file()
+                        .then_some((copy, Source::Derived { from: "base-copy" }))
+                }
+                Err(_) => Some((path.clone(), source.clone())),
+            }
+        }
+    }
 }
 
 /// Resolve the raw inputs of one run with `config` in place of a config file.
@@ -236,6 +327,7 @@ fn resolve_with(
         env_read,
         env_ignored,
         fallback,
+        inputs: Box::new(inputs.clone()),
     })
 }
 
@@ -349,7 +441,9 @@ impl Context<'_> {
     }
 
     /// Load, validate, plan, decide and resolve the config of the run.
-    fn load(&self, config_path: Option<&Given<PathBuf>>) -> Result<Loaded, ResolveError> {
+    /// `explicit` is a config file with its source; `None` discovers the
+    /// config from the root.
+    fn load(&self, explicit: Option<(&Path, Source)>) -> Result<Loaded, ResolveError> {
         let options = ConfigFileOptions {
             allow_remote_extends: *self.allow_remote_extends().value(),
         };
@@ -357,20 +451,16 @@ impl Context<'_> {
             config,
             path,
             chain,
-        } = load_config_file(
-            self.root,
-            config_path.map(|given| given.value.as_path()),
-            options,
-        )
-        .map_err(ResolveError::ConfigLoad)?;
-        steps::validate_config(self.root, &config).map_err(|err| ResolveError::ConfigInvalid {
-            file: path.clone(),
-            message: err.to_string(),
-        })?;
-        let config_file = match (config_path, path) {
-            (Some(given), Some(path)) => {
-                Sourced::new(Some(path), given_source(given), Scope::Global)
+        } = load_config_file(self.root, explicit.as_ref().map(|(path, _)| *path), options)
+            .map_err(ResolveError::ConfigLoad)?;
+        steps::validate_command_config(self.inputs.command, self.root, &config).map_err(|err| {
+            ResolveError::ConfigInvalid {
+                file: path.clone(),
+                message: err.to_string(),
             }
+        })?;
+        let config_file = match (explicit, path) {
+            (Some((_, source)), Some(path)) => Sourced::new(Some(path), source, Scope::Global),
             (None, Some(path)) => Sourced::new(
                 Some(path),
                 Source::Derived { from: "discovery" },

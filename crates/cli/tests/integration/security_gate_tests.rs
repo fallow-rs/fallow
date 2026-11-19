@@ -248,3 +248,57 @@ fn newly_reachable_gate_exits_2_with_diff_only_input() {
         "newly-reachable gate requires a base ref, not only a diff"
     );
 }
+
+/// The base side reads the config file of the base commit. The base config
+/// ignores the component, so its sink is not reachable on the base side, and
+/// the head config analyzes it: the gate reports the sink as newly
+/// reachable.
+#[test]
+fn newly_reachable_gate_reads_the_base_config_on_the_base_side() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    git(dir.path(), &["init", "-q"]);
+    write_reachability_project(dir.path(), true);
+    std::fs::write(
+        dir.path().join(".fallowrc.json"),
+        r#"{"ignorePatterns": ["src/component.tsx"]}"#,
+    )
+    .expect("base config");
+    commit_all(dir.path(), "base");
+    std::fs::write(dir.path().join(".fallowrc.json"), "{}").expect("head config");
+    commit_all(dir.path(), "head");
+    let (code, stdout) = run_security_gate(
+        dir.path(),
+        "newly-reachable",
+        &["--changed-since", "HEAD~1", "--no-cache"],
+        None,
+    );
+    assert_eq!(code, 8, "stdout: {stdout}");
+    assert_eq!(parse_gate(&stdout)["gate"]["verdict"], "fail");
+}
+
+/// A base config file that does not load gives the base side the config file
+/// of the head run, as the base pass of `fallow audit` does. The sink is
+/// reachable on both sides, so the gate passes.
+#[test]
+fn newly_reachable_gate_reads_the_head_config_when_the_base_config_does_not_load() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    git(dir.path(), &["init", "-q"]);
+    write_reachability_project(dir.path(), true);
+    std::fs::write(dir.path().join(".fallowrc.json"), "{ bad").expect("base config");
+    commit_all(dir.path(), "base");
+    std::fs::write(dir.path().join(".fallowrc.json"), "{}").expect("head config");
+    std::fs::write(
+        dir.path().join("src/change.ts"),
+        "export const marker = 1;\n",
+    )
+    .expect("head change");
+    commit_all(dir.path(), "head");
+    let (code, stdout) = run_security_gate(
+        dir.path(),
+        "newly-reachable",
+        &["--changed-since", "HEAD~1", "--no-cache"],
+        None,
+    );
+    assert_eq!(code, 0, "stdout: {stdout}");
+    assert_eq!(parse_gate(&stdout)["gate"]["verdict"], "pass");
+}

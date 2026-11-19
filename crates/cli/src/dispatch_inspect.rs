@@ -5,7 +5,6 @@ use std::process::ExitCode;
 use crate::cli_args::{CloudCli, Command};
 use crate::coverage::login as cloud_login;
 use crate::error::emit_input_error;
-use crate::runtime_support::{ConfigLoadOptions, load_config_for_analysis};
 use crate::{DispatchContext, inspect, json_style, selector};
 
 /// Run `fallow cloud login` or `fallow cloud logout`.
@@ -98,21 +97,9 @@ fn dispatch_inspect_command(
         }
     };
 
-    let churn_config = if churn {
-        match load_config_for_analysis(
-            dispatch.root,
-            &dispatch.cli.config,
-            ConfigLoadOptions {
-                output: dispatch.output,
-                no_cache: dispatch.cli.no_cache,
-                threads: dispatch.threads,
-                production_override: None,
-                quiet: dispatch.quiet,
-                allow_remote_extends: dispatch.cli.allow_remote_extends,
-            },
-            fallow_config::ProductionAnalysis::Health,
-        ) {
-            Ok(config) => Some(config),
+    let churn_run = if churn {
+        match dispatch.resolve_run() {
+            Ok(run) => Some(run),
             Err(code) => return code,
         }
     } else {
@@ -126,15 +113,17 @@ fn dispatch_inspect_command(
         json_style: dispatch.json_style,
         no_cache: dispatch.cli.no_cache,
         no_production: dispatch.cli.no_production,
+        allow_remote_extends: dispatch.cli.allow_remote_extends,
+        resolve: Some(&|| dispatch.resolve_run()),
         max_file_size: dispatch.cli.max_file_size,
         threads: dispatch.threads,
         quiet: dispatch.quiet,
         production: dispatch.cli.production,
         workspace: dispatch.cli.workspace.as_ref(),
         target,
-        churn_cache_dir: churn_config
+        churn_cache_dir: churn_run
             .as_ref()
-            .map(|config| config.cache_dir.as_path()),
+            .map(|run| run.settings().cache_dir.value().as_path()),
         symbol_chain,
         cloud: cloud.then_some(inspect::InspectCloudOptions { repo }),
         type_aware: dispatch.cli.type_aware_override(),

@@ -1,0 +1,45 @@
+{
+  "name": "trace-dependency-route-production-env-off",
+  "files": {
+    ".fallowrc.json": "{\"production\":true}",
+    "package.json": "{}"
+  },
+  "env": {
+    "FALLOW_PRODUCTION": "false"
+  },
+  "inputs": {
+    "cli": {
+      "argv": [
+        "fallow",
+        "dead-code",
+        "--trace-dependency",
+        "react"
+      ]
+    },
+    "lsp": {
+      "not_expressible": "The language server has no trace-dependency command"
+    },
+    "vscode": {
+      "not_expressible": "The editor has no trace-dependency input for the language server"
+    },
+    "node": {
+      "not_expressible": "The Node bindings have no trace-dependency function"
+    },
+    "api": {
+      "not_expressible": "The case trace-dependency-production-env-off covers the API dependency trace"
+    },
+    "mcp": {
+      "tool": "trace_dependency",
+      "params": {
+        "package_name": "react"
+      }
+    }
+  },
+  "expected": {
+    "surface": "<row>",
+    "analyses.dead_code.production": {
+      "value": false,
+      "source": "environment:FALLOW_PRODUCTION"
+    }
+  }
+}

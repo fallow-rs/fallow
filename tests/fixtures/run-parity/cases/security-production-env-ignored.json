@@ -1,0 +1,41 @@
+{
+  "name": "security-production-env-ignored",
+  "files": {
+    ".fallowrc.json": "{\"production\":true}",
+    "package.json": "{}"
+  },
+  "env": {
+    "FALLOW_PRODUCTION": "false"
+  },
+  "inputs": {
+    "cli": {
+      "argv": [
+        "fallow",
+        "security"
+      ]
+    },
+    "lsp": {
+      "not_expressible": "The language server has no security command"
+    },
+    "vscode": {
+      "not_expressible": "The editor has no security input for the language server"
+    },
+    "node": {
+      "not_expressible": "The Node bindings have no security function"
+    },
+    "api": {
+      "not_expressible": "The Rust API has no security entry point"
+    },
+    "mcp": {
+      "not_expressible": "The MCP server has no typed security tool"
+    }
+  },
+  "expected": {
+    "surface": "<row>",
+    "command": "security",
+    "analyses.dead_code.production": {
+      "value": true,
+      "source": "config-file:production"
+    }
+  }
+}

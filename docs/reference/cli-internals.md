@@ -156,8 +156,11 @@ load. `runtime_support::load_config_for_analysis` does these steps:
    and warns about unknown security categories.
 
 The bare run, `audit`, `decision-surface`, `dead-code`, `architecture`,
-`dupes`, `health`, `list`, `workspaces`, `fix`, `watch`, `viz`, `flags` and
-`suppressions` resolve one run instead:
+`dupes`, `health`, `list`, `workspaces`, `fix`, `watch`, `viz`, `flags`,
+`suppressions`, `trace`, `trace-error`, `security`, `inspect`, `coverage
+analyze`, the coverage uploads, `guard`, `rule-pack list` and `rule-pack test`,
+`baselines prune`, `plugin-check`, `mutation` and `similar-code` resolve one
+run instead:
 
 1. `run_inputs::command_run_inputs` maps the parsed command line to
    `fallow_config::RunInputs`: the `CommandKind`, the selection of `--only`
@@ -197,22 +200,36 @@ The bare run, `audit`, `decision-surface`, `dead-code`, `architecture`,
    so duplication in `viz` runs on the files of the duplication production
    mode. `watch` takes `DispatchContext::resolve_run` as its `resolve` step,
    and resolves the run again on each config reload.
+6. The trace commands, `guard` and `rule-pack` take
+   `cli_production::ResolveRun`, a borrowed `|| dispatch.resolve_run()`, and
+   call it after their own checks of the command line. `security`,
+   `baselines prune` and `plugin-check` resolve in the dispatch. `inspect`
+   resolves for its churn cache directory and for the type-aware evidence of a
+   symbol, and passes `--allow-remote-extends` to each child process.
+   `coverage analyze` and the uploads resolve through `coverage::RunContext`,
+   which clones the run inputs of the command line. Without `--production`,
+   `coverage analyze` reads the production mode from the config. `mutation`
+   and `similar-code` run through `fallow-api` with the host of
+   `run_inputs::cli_host`, so their runs resolve as `Surface::Cli`.
+7. The base side of `fallow security --gate newly-reachable` resolves with
+   `fallow_engine::resolved_run::resolve_base_run` and `BaseConfig::BaseCopy`,
+   so it reads the config file of the base commit.
+8. A benchmark hook or a unit test without a command line resolves the run of
+   `cli_production::benchmark_run`: the root with the discovered config, no
+   parse cache, JSON output and no progress.
 
 The sub-analyses of `audit` and its base worktree still load the config
-through `runtime_support::load_config_for_analysis`.
-
-`cli_production::resolve_production_modes` puts the flags before the
-`FALLOW_PRODUCTION*` variables with `ProductionFlags::with_fallback`, so the
-config decides only when neither source sets a value. The variables are parsed
-by `fallow_config::ProductionEnv`, which the typed MCP routes use too. A site
+through `runtime_support::load_config_for_analysis`. A command option struct
+with `run: None` (a benchmark hook or a unit test) also loads the config
+there. A site
 that reads one optional setting, such as the audit cache, `fallow report` or
 the staged audit, uses `runtime_support::loaded_config`. That function gives
 `None` when the file does not load, and the site prints nothing.
 
 A command that loads the config outside the analysis loader gets the
 `--config` path and the `--allow-remote-extends` policy together as one
-`runtime_support::ConfigFlags` value. `fallow report --from`, `plugin-check`,
-the staged audit and the coverage uploads use it, so each load of one command
+`runtime_support::ConfigFlags` value. `fallow report --from` and the staged
+audit use it, so each load of one command
 reads the same file with the same trust policy. The own-config pass of
 `fallow audit` reads the base version of the `--config` file. When the change
 added that file, discovery in the base worktree decides.
@@ -1407,12 +1424,12 @@ Shared invariants (`crates/cli/src/base_worktree.rs`):
   the base `DependencyTrace` with one engine function,
   `fallow_engine::trace::build_dependency_trace`. The programmatic API uses
   it too. Do not add a fourth copy of the source, credit and manifest steps.
-- The dependency runner honors `--production`, `--no-production` and
-  `--workspace` as `fallow dead-code` does: the production mode goes into
-  `load_config_for_analysis` through
-  `ProductionFlags::single_analysis_override`, and the workspace scope is
-  validated with `check::resolve_workspace_scope`. The scope does not narrow
-  the trace. The `--path` and symbol runners pass `production_override: None`.
+- The dependency runner honors `--production`, `--no-production`, the
+  `FALLOW_PRODUCTION*` variables and `--workspace` as `fallow dead-code` does:
+  the resolver decides the production mode of the `TraceDependency` run, and
+  the workspace scope is validated with `check::resolve_workspace_scope`. The
+  scope does not narrow the trace. The `--path`, symbol and `trace-error`
+  runners read the production mode from the config only.
 - The usage walk (`crates/engine/src/trace_usage_impl.rs`) reads
   `ModuleInfo.import_binding_references`, `imported_call_sites`, imports,
   re-exports, dynamic imports and `require` calls. It needs modules that

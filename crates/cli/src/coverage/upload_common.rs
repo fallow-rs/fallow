@@ -5,7 +5,9 @@ use std::process::Command;
 use std::process::ExitCode;
 
 use colored::Colorize as _;
+#[cfg(test)]
 use fallow_config::{OutputFormat, ProductionAnalysis, ResolvedConfig};
+#[cfg(test)]
 use fallow_engine::project_config::{self, ProductionFlags};
 
 use crate::api::{
@@ -350,11 +352,35 @@ pub(super) fn dirty_worktree(root: &Path) -> bool {
     output.stdout.iter().any(|b| !b.is_ascii_whitespace())
 }
 
+/// Resolves the run of an upload. The upload calls it after its own checks.
+pub type UploadRun<'a> = &'a dyn Fn() -> Result<fallow_engine::resolved_run::ResolvedRun, String>;
+
+/// The dead-code analysis of the run of an upload.
+pub(super) fn dead_code(
+    run: &fallow_engine::resolved_run::ResolvedRun,
+) -> Result<fallow_engine::resolved_run::Runnable<'_>, UploadError> {
+    crate::cli_production::runnable(run, fallow_config::PlannedAnalysis::DeadCode)
+        .ok_or_else(|| UploadError::Validation("the run skips the dead-code analysis".to_owned()))
+}
+
+/// The run of an upload in a unit test.
+#[cfg(test)]
+pub(super) fn test_run(root: &Path) -> Result<fallow_engine::resolved_run::ResolvedRun, String> {
+    let inputs = crate::cli_production::benchmark_inputs(
+        root,
+        fallow_config::CommandKind::CoverageUpload,
+        1,
+    );
+    fallow_engine::resolved_run::resolve_run(&inputs).map_err(|err| err.message())
+}
+
 #[cfg(test)]
 pub(super) fn load_resolved_config(root: &Path) -> Result<ResolvedConfig, String> {
     load_resolved_config_with_options(root, crate::runtime_support::ConfigFlags::default())
 }
 
+/// The resolved config of a unit test, without a resolved run.
+#[cfg(test)]
 pub(super) fn load_resolved_config_with_options(
     root: &Path,
     input: crate::runtime_support::ConfigFlags<'_>,

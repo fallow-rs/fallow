@@ -102,17 +102,14 @@ pub struct RunContext<'a> {
     pub threads: usize,
     pub explain: bool,
     pub allow_remote_extends: bool,
+    /// The run inputs of the command line. `None` in a benchmark hook and a
+    /// unit test, which resolve the inputs of
+    /// [`crate::cli_production::benchmark_inputs`].
+    pub run_inputs: Option<&'a fallow_config::RunInputs>,
 }
 
-impl RunContext<'_> {
-    /// The config inputs of an upload.
-    fn upload_config(&self) -> crate::runtime_support::ConfigFlags<'_> {
-        crate::runtime_support::ConfigFlags {
-            path: self.config_path.as_deref(),
-            allow_remote_extends: self.allow_remote_extends,
-        }
-    }
-}
+#[path = "run_context.rs"]
+mod run_context;
 
 /// Arguments for `fallow coverage setup`.
 #[derive(Debug, Clone, Copy, Default)]
@@ -392,11 +389,11 @@ pub fn run(subcommand: CoverageSubcommand, ctx: &RunContext<'_>) -> ExitCode {
         CoverageSubcommand::SetupCloud(args) => setup_cloud::run(&args, ctx.root, ctx.json_style),
         CoverageSubcommand::Analyze(args) => analyze::run(&args, ctx),
         CoverageSubcommand::UploadInventory(args) => {
-            upload_inventory::run(&args, ctx.root, ctx.upload_config())
+            upload_inventory::run(&args, ctx.root, &|| ctx.upload_run())
         }
         CoverageSubcommand::UploadSourceMaps(args) => upload_source_maps::run(&args, ctx.root),
         CoverageSubcommand::UploadStaticFindings(args) => {
-            upload_static_findings::run(&args, ctx.root, ctx.upload_config())
+            upload_static_findings::run(&args, ctx.root, &|| ctx.upload_run())
         }
         CoverageSubcommand::ReviewPacket(args) => cloud_reads::run_review_packet(&args, ctx),
         CoverageSubcommand::DeploymentChanges(args) => {

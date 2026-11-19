@@ -103,9 +103,9 @@ impl fmt::Debug for UploadStaticFindingsArgs {
 pub fn run(
     args: &UploadStaticFindingsArgs,
     root: &Path,
-    config_input: crate::runtime_support::ConfigFlags<'_>,
+    resolve: upload_common::UploadRun<'_>,
 ) -> ExitCode {
-    match run_inner(args, root, config_input) {
+    match run_inner(args, root, resolve) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => err.into_exit(LOG_PREFIX, args.ignore_upload_errors),
     }
@@ -114,7 +114,7 @@ pub fn run(
 fn run_inner(
     args: &UploadStaticFindingsArgs,
     root: &Path,
-    config_input: crate::runtime_support::ConfigFlags<'_>,
+    resolve: upload_common::UploadRun<'_>,
 ) -> Result<(), UploadError> {
     let project_id = upload_common::resolve_project_id(args.project_id.as_deref(), root)
         .map_err(UploadError::Validation)?;
@@ -129,10 +129,12 @@ fn run_inner(
         root,
     )?;
 
-    let config = upload_common::load_resolved_config_with_options(root, config_input)
-        .map_err(UploadError::Validation)?;
-    let results = fallow_engine::session::AnalysisSession::from_resolved_config(config.clone())
-        .and_then(|session| session.analyze_dead_code_with_artifacts(false, false))
+    let run = resolve().map_err(UploadError::Validation)?;
+    let dead_code = upload_common::dead_code(&run)?;
+    let config = dead_code.config().clone();
+    let results = dead_code
+        .open_session()
+        .analyze_dead_code_with_artifacts(false, false)
         .map(|analysis| analysis.results)
         .map_err(|err| UploadError::Validation(format!("analysis failed: {err}")))?;
     let findings = collect_findings(&config, &results);
@@ -653,11 +655,9 @@ mod tests {
     fn run_dry_run_analyzes_and_exits_zero() {
         let project = project_with_unused_export();
         // Explicit project_id + git_sha keep this env- and git-free.
-        let code = run(
-            &dry_run_args(),
-            project.path(),
-            crate::runtime_support::ConfigFlags::default(),
-        );
+        let code = run(&dry_run_args(), project.path(), &|| {
+            crate::coverage::upload_common::test_run(project.path())
+        });
         assert_eq!(code, ExitCode::SUCCESS);
     }
 }

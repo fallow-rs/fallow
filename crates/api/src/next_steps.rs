@@ -26,7 +26,7 @@ pub fn suggestions_enabled() -> bool {
 /// it. Embedders can suppress all suggestions with `FALLOW_SUGGESTIONS`.
 pub fn setup_pointer_applicable(root: &Path) -> bool {
     root.exists()
-        && fallow_config::FallowConfig::find_config_path(root).is_none()
+        && fallow_engine::project_config::find_config_file(root).is_none()
         && !fallow_engine::ci_env::is_ci()
 }
 

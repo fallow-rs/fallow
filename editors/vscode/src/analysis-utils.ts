@@ -7,6 +7,7 @@ import {
   type TypeAwareArgsOptions,
 } from "./type-aware-utils.js";
 import {
+  ALLOW_REMOTE_EXTENDS_MIN_CLI_VERSION,
   appendCommonScopeArgs,
   compareVersions,
   isStructuredError,
@@ -30,7 +31,7 @@ const VERSION_GATED_FLAGS: Readonly<Record<string, string>> = {
   // spawn-failing (issue #1055).
   "--no-production": "2.90.0",
   "--no-package-baselines": "3.31.0",
-  "--allow-remote-extends": "3.4.2",
+  "--allow-remote-extends": ALLOW_REMOTE_EXTENDS_MIN_CLI_VERSION,
   "--dupes-min-occurrences": "2.88.0",
   "--dupes-min-tokens": "2.88.3",
   "--dupes-min-lines": "2.88.3",

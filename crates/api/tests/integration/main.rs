@@ -12,6 +12,7 @@ mod audit_analysis_selection;
 mod audit_attribution;
 mod audit_config_patterns;
 mod audit_config_section;
+mod audit_own_config;
 mod audit_production;
 mod capability_parity;
 mod combined_duplicates_enabled;

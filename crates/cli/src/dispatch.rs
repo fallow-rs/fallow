@@ -24,14 +24,14 @@ use crate::cli_startup::cli_global_baseline_flag;
 use crate::dupes::{DupesOptions, DupesOverrides};
 use crate::health::HealthOptions;
 use crate::list::ListOptions;
-use crate::runtime_support::{AnalysisKind, LoadConfigArgs, load_config};
+use crate::runtime_support::AnalysisKind;
 use crate::{
     DEFAULT_MIN_INVOCATIONS_HOT, DispatchContext, audit, audit_cache_prune, base_worktree,
     baseline_gate, baseline_growth, baselines, check, ci, ci_template, cli_report, combined,
-    config, coverage, dupes, error, explain, fix, flags, guard, health, init, json_style, license,
-    list, migrate, mutation_cli, onboarding, plugin_check, regression, regression_save_targets,
-    report, resolve_audit_baseline_path, rule_pack, security, setup_hooks, similar_code_cli,
-    suppressions, telemetry, trace_chain, trace_dependency, trace_error, trace_path, viz, watch,
+    config, coverage, dupes, explain, fix, flags, guard, health, init, json_style, license, list,
+    migrate, onboarding, plugin_check, regression, regression_save_targets, report,
+    resolve_audit_baseline_path, rule_pack, security, setup_hooks, suppressions, telemetry,
+    trace_chain, trace_dependency, trace_error, trace_path, viz, watch,
 };
 use crate::{error::emit_input_error, exit_codes::exit_invalid_input};
 use fallow_config::PlannedAnalysis;
@@ -61,69 +61,9 @@ use audit_command::dispatch_audit_command;
 #[path = "dispatch_audit_staged.rs"]
 mod audit_staged;
 
-fn dispatch_mutation_command(
-    dispatch: &DispatchContext<'_>,
-    subcommand: Option<mutation_cli::MutationSubcommand>,
-    args: mutation_cli::MutationArgs,
-) -> ExitCode {
-    let cli = dispatch.cli;
-    let workspace_flag = if cli.workspace.is_some() {
-        Some("--workspace")
-    } else if cli.changed_workspaces.is_some() {
-        Some("--changed-workspaces")
-    } else {
-        None
-    };
-    if let Some(flag) = workspace_flag {
-        return error::emit_input_error_with_style(
-            &format!(
-                "{flag} does not narrow `fallow mutation` yet; pass the workspace directory as a path, for example `fallow mutation packages/app`"
-            ),
-            dispatch.output,
-            dispatch.json_style,
-        );
-    }
-    let config = if matches!(
-        subcommand,
-        Some(mutation_cli::MutationSubcommand::Inspect { .. })
-    ) {
-        fallow_config::MutationConfig::default()
-    } else {
-        match fallow_engine::project_config::config_for_project_with_load_options(
-            dispatch.root,
-            cli.config.as_deref(),
-            fallow_config::ConfigLoadOptions {
-                allow_remote_extends: cli.allow_remote_extends,
-            },
-        ) {
-            Ok(project) => project.config.mutation,
-            Err(error) => {
-                return error::emit_input_error_with_style(
-                    &format!("failed to load config: {error}"),
-                    dispatch.output,
-                    dispatch.json_style,
-                );
-            }
-        }
-    };
-    mutation_cli::run(&mutation_cli::MutationCliInput {
-        root: dispatch.root,
-        config_path: cli.config.as_deref(),
-        root_flag: cli.root.as_deref(),
-        output_file: cli.output_file.as_deref(),
-        allow_remote_extends: cli.allow_remote_extends,
-        no_cache: cli.no_cache,
-        threads: dispatch.threads,
-        changed_since: cli.changed_since.as_deref(),
-        diff_file: cli.diff_file.as_deref(),
-        quiet: dispatch.quiet,
-        output: dispatch.output,
-        json_style: dispatch.json_style,
-        config,
-        args,
-        subcommand,
-    })
-}
+#[path = "dispatch_mutation.rs"]
+mod mutation_dispatch;
+use mutation_dispatch::{dispatch_mutation_command, dispatch_similar_code};
 
 #[expect(
     clippy::too_many_lines,
@@ -144,44 +84,7 @@ pub fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> 
             type_aware_status::dispatch_type_aware_command(dispatch, subcommand)
         }
         Command::Doctor => unreachable!("doctor bypasses the normal dispatch epilogue"),
-        Command::SimilarCode {
-            subcommand,
-            threshold,
-            min_lines,
-            top,
-            file,
-            path,
-        } => {
-            let scope = match crate::scope_path::resolve_command_scope(
-                dispatch.root,
-                dispatch.output,
-                path,
-            ) {
-                Ok(scope) => scope,
-                Err(code) => return code,
-            };
-            similar_code_cli::run(similar_code_cli::SimilarCodeCliInput {
-                root,
-                config_path: cli.config.as_deref(),
-                allow_remote_extends: cli.allow_remote_extends,
-                no_cache: cli.no_cache,
-                threads: dispatch.threads,
-                changed_since: cli.changed_since.as_deref(),
-                diff_file: cli.diff_file.as_deref(),
-                workspace: cli.workspace.as_deref(),
-                changed_workspaces: cli.changed_workspaces.as_deref(),
-                explain: cli.explain,
-                quiet,
-                output,
-                json_style: dispatch.json_style,
-                threshold,
-                min_lines,
-                top,
-                files: file,
-                scope,
-                subcommand,
-            })
-        }
+        similar @ Command::SimilarCode { .. } => dispatch_similar_code(dispatch, similar),
         Command::Mutation { subcommand, args } => {
             dispatch_mutation_command(dispatch, subcommand, args)
         }
@@ -228,13 +131,10 @@ pub fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> 
         Command::TraceError { trace_file } => {
             trace_error::run_trace_error(&trace_error::TraceErrorOptions {
                 root: dispatch.root,
-                config_path: &dispatch.cli.config,
                 output: dispatch.output,
                 json_style: dispatch.json_style,
-                no_cache: dispatch.cli.no_cache,
-                threads: dispatch.threads,
                 quiet: dispatch.quiet,
-                allow_remote_extends: dispatch.cli.allow_remote_extends,
+                resolve: &|| dispatch.resolve_run(),
                 trace_file: trace_file.as_deref(),
             })
         }
@@ -494,20 +394,12 @@ fn dispatch_trace_dependency(
     dispatch: &DispatchContext<'_>,
     target: trace_dependency::TraceDependencyTarget,
 ) -> ExitCode {
-    let production = match dispatch.production_for(fallow_config::ProductionAnalysis::DeadCode) {
-        Ok(production) => production,
-        Err(code) => return code,
-    };
     trace_dependency::run_trace_dependency(&trace_dependency::TraceDependencyOptions {
         root: dispatch.root,
-        config_path: &dispatch.cli.config,
         output: dispatch.output,
         json_style: dispatch.json_style,
-        no_cache: dispatch.cli.no_cache,
-        threads: dispatch.threads,
         quiet: dispatch.quiet,
-        allow_remote_extends: dispatch.cli.allow_remote_extends,
-        production,
+        resolve: &|| dispatch.resolve_run(),
         workspace: dispatch.cli.workspace.as_deref(),
         changed_workspaces: dispatch.cli.changed_workspaces.as_deref(),
         target,
@@ -528,14 +420,10 @@ fn dispatch_trace_command(
     } = chain;
     if let [from, to] = path {
         return trace_path::run_trace_path(&trace_path::TracePathOptions {
-            root: dispatch.root,
-            config_path: &dispatch.cli.config,
             output: dispatch.output,
             json_style: dispatch.json_style,
-            no_cache: dispatch.cli.no_cache,
-            threads: dispatch.threads,
             quiet: dispatch.quiet,
-            allow_remote_extends: dispatch.cli.allow_remote_extends,
+            resolve: &|| dispatch.resolve_run(),
             from,
             to,
             eager_only,
@@ -548,14 +436,10 @@ fn dispatch_trace_command(
         );
     };
     trace_chain::run_trace(&trace_chain::TraceChainOptions {
-        root: dispatch.root,
-        config_path: &dispatch.cli.config,
         output: dispatch.output,
         json_style: dispatch.json_style,
-        no_cache: dispatch.cli.no_cache,
-        threads: dispatch.threads,
         quiet: dispatch.quiet,
-        allow_remote_extends: dispatch.cli.allow_remote_extends,
+        resolve: &|| dispatch.resolve_run(),
         target: symbol,
         callers,
         callees,
@@ -639,44 +523,53 @@ fn run_security_blind_spots_or_default(
     inputs: &SecurityRunInputs<'_>,
     derived_flags: &SecurityDerivedFlagState<'_>,
 ) -> ExitCode {
-    let cli = dispatch.cli;
-    let (output, quiet, fail_on_issues) =
-        (dispatch.output, dispatch.quiet, dispatch.fail_on_issues);
-    let opts = security::SecurityOptions {
-        root: dispatch.root,
-        config_path: &cli.config,
-        output,
-        json_style: dispatch.json_style,
-        no_cache: cli.no_cache,
-        threads: dispatch.threads,
-        quiet,
-        allow_remote_extends: cli.allow_remote_extends,
-        fail_on_issues,
-        sarif_file: cli.sarif_file.as_deref(),
-        summary: cli.summary,
-        changed_since: cli.changed_since.as_deref(),
-        use_shared_diff_index: true,
-        workspace: cli.workspace.as_deref(),
-        changed_workspaces: cli.changed_workspaces.as_deref(),
-        file: inputs.scoped_files,
-        surface: inputs.surface,
-        scope: inputs.scope.clone(),
-        gate: inputs.gate,
-        runtime_coverage: inputs.runtime_coverage,
-        min_invocations_hot: inputs.min_invocations_hot,
-        explain: cli.explain,
-    };
-    if matches!(
+    let blind_spots = matches!(
         inputs.subcommand,
         Some(SecuritySubcommand::BlindSpots { .. })
-    ) {
-        if let Some(code) = validate_security_blind_spots_flags(derived_flags) {
-            return code;
-        }
-        security::run_blind_spots(&opts)
-    } else {
-        security::run(&opts)
+    );
+    if blind_spots && let Some(code) = validate_security_blind_spots_flags(derived_flags) {
+        return code;
     }
+    // The format error comes before a config error.
+    let format = if blind_spots {
+        security::validate_derived_security_output(dispatch.output, "blind-spots")
+    } else {
+        security::validate_security_output(dispatch.output)
+    };
+    if let Err(code) = format {
+        return code;
+    }
+    dispatch.run_resolved(|run| {
+        let opts = security::SecurityOptions {
+            root: dispatch.root,
+            run,
+            output: dispatch.output,
+            json_style: dispatch.json_style,
+            no_cache: dispatch.cli.no_cache,
+            threads: dispatch.threads,
+            quiet: dispatch.quiet,
+            allow_remote_extends: dispatch.cli.allow_remote_extends,
+            fail_on_issues: dispatch.fail_on_issues,
+            sarif_file: dispatch.cli.sarif_file.as_deref(),
+            summary: dispatch.cli.summary,
+            changed_since: dispatch.cli.changed_since.as_deref(),
+            use_shared_diff_index: true,
+            workspace: dispatch.cli.workspace.as_deref(),
+            changed_workspaces: dispatch.cli.changed_workspaces.as_deref(),
+            file: inputs.scoped_files,
+            surface: inputs.surface,
+            scope: inputs.scope.clone(),
+            gate: inputs.gate,
+            runtime_coverage: inputs.runtime_coverage,
+            min_invocations_hot: inputs.min_invocations_hot,
+            explain: dispatch.cli.explain,
+        };
+        if blind_spots {
+            security::run_blind_spots(&opts)
+        } else {
+            security::run(&opts)
+        }
+    })
 }
 
 /// Handle `fallow security survivors` as an early return. Returns `Some(code)`
@@ -985,17 +878,7 @@ fn dispatch_coverage_command(dispatch: &DispatchContext<'_>, subcommand: &Covera
     let cli = dispatch.cli;
     coverage::run(
         map_coverage_subcommand(subcommand, cli.explain, cli.changed_since.as_deref()),
-        &coverage::RunContext {
-            root: dispatch.root,
-            config_path: &cli.config,
-            output: dispatch.output,
-            json_style: dispatch.json_style,
-            quiet: dispatch.quiet,
-            no_cache: cli.no_cache,
-            threads: dispatch.threads,
-            explain: cli.explain,
-            allow_remote_extends: cli.allow_remote_extends,
-        },
+        &coverage::RunContext::of(dispatch),
     )
 }
 
@@ -1270,12 +1153,9 @@ fn dispatch_suppressions_command(
 
 fn dispatch_guard_command(dispatch: &DispatchContext<'_>, files: &[String]) -> ExitCode {
     guard::run_guard(&guard::GuardOptions {
-        root: dispatch.root,
-        config_path: &dispatch.cli.config,
         output: dispatch.output,
         json_style: dispatch.json_style,
-        quiet: dispatch.quiet,
-        allow_remote_extends: dispatch.cli.allow_remote_extends,
+        resolve: &|| dispatch.resolve_run(),
         files,
     })
 }
@@ -1286,10 +1166,8 @@ fn dispatch_rule_pack_command(dispatch: &DispatchContext<'_>, subcommand: RulePa
         config_path: &dispatch.cli.config,
         output: dispatch.output,
         json_style: dispatch.json_style,
-        quiet: dispatch.quiet,
-        no_cache: dispatch.cli.no_cache,
         threads: Some(dispatch.threads),
-        allow_remote_extends: dispatch.cli.allow_remote_extends,
+        resolve: Some(&|| dispatch.resolve_run()),
     };
     rule_pack::run(&map_rule_pack_subcommand(subcommand), &ctx)
 }

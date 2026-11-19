@@ -52,6 +52,10 @@ fn entry(name: &str, options: &ApiOptions) -> Option<ProgrammaticEntry> {
         "feature-flags" => ProgrammaticEntry::FeatureFlags,
         "trace-path" => ProgrammaticEntry::TracePath,
         "trace-chain" => ProgrammaticEntry::TraceChain,
+        "trace-error" => ProgrammaticEntry::TraceError,
+        "trace-dependency" => ProgrammaticEntry::TraceDependency,
+        "mutation" => ProgrammaticEntry::Mutation,
+        "similar-code" => ProgrammaticEntry::SimilarCode,
         "list" => ProgrammaticEntry::List,
         "combined" => ProgrammaticEntry::Combined {
             dead_code: options.dead_code.unwrap_or(true),

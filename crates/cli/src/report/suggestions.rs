@@ -48,7 +48,7 @@ fn suggestions_enabled_from(value: Option<&str>) -> bool {
 #[must_use]
 pub fn setup_pointer_applicable(root: &Path) -> bool {
     root.exists()
-        && fallow_config::FallowConfig::find_config_path(root).is_none()
+        && fallow_engine::project_config::find_config_file(root).is_none()
         && !fallow_engine::ci_env::is_ci()
         && !crate::impact::load(root).onboarding_declined
 }

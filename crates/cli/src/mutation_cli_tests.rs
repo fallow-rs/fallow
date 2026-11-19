@@ -74,7 +74,21 @@ fn input(root: &Path, args: MutationArgs, config: MutationConfig) -> MutationCli
         config,
         args,
         subcommand: None,
+        host: None,
     }
+}
+
+#[test]
+fn mutation_cli_resolves_as_cli_surface() {
+    let root = Path::new("/repo");
+    let host = crate::run_inputs::cli_host(None);
+    let options = run_options(&MutationCliInput {
+        host: Some(host),
+        ..input(root, MutationArgs::default(), MutationConfig::default())
+    })
+    .expect("run options");
+    let surface = options.analysis.host.map(|host| host.surface);
+    assert_eq!(surface, Some(fallow_config::Surface::Cli));
 }
 
 #[test]

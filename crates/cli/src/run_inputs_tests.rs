@@ -174,3 +174,32 @@ fn workspaces_resolves_the_run_of_list() {
     assert_eq!(workspaces.command, fallow_config::CommandKind::List);
     assert_eq!(workspaces.production, Some(flag(false, "--no-production")));
 }
+
+/// `--include-entry-exports` reaches the resolved config of each analysis of
+/// a bare run, not only the dead-code config: the resolver applies the given
+/// settings to each mode entry.
+#[test]
+fn include_entry_exports_reaches_every_analysis_config() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    std::fs::write(dir.path().join("package.json"), "{}").expect("package.json");
+    std::fs::write(
+        dir.path().join(".fallowrc.json"),
+        r#"{"production": {"deadCode": false, "health": true, "dupes": true}}"#,
+    )
+    .expect("config");
+    let root = dir.path().to_string_lossy().into_owned();
+    let mut inputs = inputs(&["fallow", "--include-entry-exports", "--root", &root]);
+    inputs.threads = Some(flag(1, "--threads"));
+    let run = fallow_engine::resolved_run::resolve_run(&inputs).expect("run resolves");
+    for analysis in [
+        PlannedAnalysis::DeadCode,
+        PlannedAnalysis::Duplication,
+        PlannedAnalysis::Health,
+    ] {
+        let runnable = crate::cli_production::runnable(&run, analysis).expect("analysis runs");
+        assert!(
+            runnable.config().include_entry_exports,
+            "{analysis:?} config keeps the flag"
+        );
+    }
+}

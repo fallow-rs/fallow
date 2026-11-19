@@ -17,8 +17,30 @@ const baseAuditArgsOptions = {
   workspace: "",
   configPath: "",
   gate: "new-only" as const,
+  allowRemoteExtends: false,
   cliVersion: null,
 };
+
+describe("buildAuditArgs remote extends", () => {
+  it("includes --allow-remote-extends when the setting is on", () => {
+    expect(buildAuditArgs(baseAuditArgsOptions).args).not.toContain("--allow-remote-extends");
+    const { args, skipped } = buildAuditArgs({ ...baseAuditArgsOptions, allowRemoteExtends: true });
+    expect(args).toContain("--allow-remote-extends");
+    expect(skipped).toEqual([]);
+  });
+
+  it("skips --allow-remote-extends on a CLI that predates it", () => {
+    const { args, skipped } = buildAuditArgs({
+      ...baseAuditArgsOptions,
+      allowRemoteExtends: true,
+      cliVersion: "3.4.1",
+    });
+    expect(args).not.toContain("--allow-remote-extends");
+    expect(skipped).toEqual([
+      { flag: "--allow-remote-extends", requires: "3.4.2", cliVersion: "3.4.1" },
+    ]);
+  });
+});
 
 /**
  * Trimmed from a real `fallow audit --format json` pass envelope (no changed
@@ -175,6 +197,7 @@ describe("buildAuditArgs", () => {
       workspace: "pkg-a",
       configPath: "/abs/.fallowrc.json",
       gate: "all",
+      allowRemoteExtends: false,
       cliVersion: null,
     });
     expect(args).toEqual([
@@ -207,6 +230,7 @@ describe("buildAuditArgs", () => {
       workspace: "",
       configPath: "",
       gate: "new-only",
+      allowRemoteExtends: false,
       cliVersion: null,
     });
     expect(args).not.toContain("--changed-since");

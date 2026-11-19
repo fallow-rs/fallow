@@ -506,17 +506,15 @@ fn execute_dupes_inner(
             (report, skips, change_scope)
         }
         None => {
-            let session =
-                match fallow_engine::session::AnalysisSession::from_resolved_config(config.clone())
-                {
-                    Ok(session) => session,
-                    Err(err) => {
-                        return Err(emit_input_error(
-                            &format!("Analysis error: {err}"),
-                            opts.output,
-                        ));
-                    }
-                };
+            let session = match crate::cli_production::open_session(opts.run, &config) {
+                Ok(session) => session,
+                Err(err) => {
+                    return Err(emit_input_error(
+                        &format!("Analysis error: {err}"),
+                        opts.output,
+                    ));
+                }
+            };
             crate::requests::measure_changed_since_scope(session.files());
             let change_scope =
                 resolve_change_scope(opts, &config, change_scope_request, session.workspaces())?;

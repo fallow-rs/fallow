@@ -16,7 +16,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::time::Instant;
 
-use fallow_config::{OutputFormat, ProductionAnalysis, Severity};
+use fallow_config::{OutputFormat, Severity};
 use fallow_engine::dead_code::{
     derive_security_severity, enable_security_rules, resolve_security_finding_severity,
     security_catalogue_title, security_rule_id as canonical_security_rule_id,
@@ -43,7 +43,6 @@ use xxhash_rust::xxh3::xxh3_64;
 use crate::base_worktree::{BaseWorktree, git_rev_parse};
 use crate::error::emit_input_error;
 use crate::health::HealthOptions;
-use crate::load_config_for_analysis;
 use fallow_output::{
     RuntimeCoverageFinding, RuntimeCoverageHotPath, RuntimeCoverageReport, RuntimeCoverageVerdict,
 };
@@ -114,8 +113,8 @@ pub type SecurityOutput = fallow_output::SecurityOutput<SecurityOutputConfig, Se
 pub struct SecurityOptions<'a> {
     /// Project root.
     pub root: &'a Path,
-    /// Explicit config path (global `--config`).
-    pub config_path: &'a Option<PathBuf>,
+    /// The run of the command line: the config file and the settings.
+    pub run: &'a fallow_engine::resolved_run::ResolvedRun,
     /// Output format.
     pub output: OutputFormat,
     /// Presentation style for JSON output.
@@ -278,11 +277,12 @@ pub fn run(opts: &SecurityOptions<'_>) -> ExitCode {
 /// pipeline. This is not a supported API.
 #[doc(hidden)]
 pub fn benchmark_security_json(root: &Path, threads: usize) -> Result<(usize, usize), ExitCode> {
-    let config_path = None;
+    let run =
+        crate::cli_production::benchmark_run(root, fallow_config::CommandKind::Security, threads)?;
     let files: &[PathBuf] = &[];
     let opts = SecurityOptions {
         root,
-        config_path: &config_path,
+        run: &run,
         output: OutputFormat::Json,
         json_style: crate::json_style::JsonStyle::Compact,
         no_cache: true,
@@ -326,11 +326,12 @@ pub fn create_security_survivors_benchmark_corpus(
     root: &Path,
     threads: usize,
 ) -> Result<SecuritySurvivorsBenchmarkCorpus, ExitCode> {
-    let config_path = None;
+    let run =
+        crate::cli_production::benchmark_run(root, fallow_config::CommandKind::Security, threads)?;
     let files: &[PathBuf] = &[];
     let opts = SecurityOptions {
         root,
-        config_path: &config_path,
+        run: &run,
         output: OutputFormat::Json,
         json_style: crate::json_style::JsonStyle::Compact,
         no_cache: true,
@@ -497,19 +498,9 @@ fn build_security_command_output(
 ) -> Result<(SecurityOutput, SecurityAdvisoryRules), ExitCode> {
     validate_security_output(opts.output)?;
 
-    let mut config = load_config_for_analysis(
-        opts.root,
-        opts.config_path,
-        crate::ConfigLoadOptions {
-            output: opts.output,
-            no_cache: opts.no_cache,
-            threads: opts.threads,
-            production_override: None,
-            quiet: opts.quiet,
-            allow_remote_extends: opts.allow_remote_extends,
-        },
-        ProductionAnalysis::DeadCode,
-    )?;
+    let mut config = crate::cli_production::dead_code_runnable(opts.run, opts.output)?
+        .config()
+        .clone();
 
     let configured_severities = security_rule_severities(&config);
     enable_security_rules(&mut config);
@@ -608,7 +599,7 @@ struct SecurityOutputInput<'a, 'b> {
     workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
 }
 
-fn validate_security_output(output: OutputFormat) -> Result<(), ExitCode> {
+pub fn validate_security_output(output: OutputFormat) -> Result<(), ExitCode> {
     if matches!(
         output,
         OutputFormat::Human
@@ -626,7 +617,7 @@ fn validate_security_output(output: OutputFormat) -> Result<(), ExitCode> {
     }
 }
 
-fn validate_derived_security_output(
+pub fn validate_derived_security_output(
     output: OutputFormat,
     subcommand: &'static str,
 ) -> Result<(), ExitCode> {
@@ -1108,33 +1099,31 @@ fn compute_base_security_snapshot(
         ));
     };
     let base_root = fallow_engine::repo_refs::base_analysis_root(opts.root, worktree.path());
-    let current_config_path = opts
-        .config_path
-        .clone()
-        .or_else(|| fallow_config::FallowConfig::find_config_path(opts.root));
-    let mut base_config = load_config_for_analysis(
-        &base_root,
-        &current_config_path,
-        crate::ConfigLoadOptions {
-            output: opts.output,
-            no_cache: opts.no_cache,
-            threads: opts.threads,
-            production_override: None,
-            quiet: true,
-            allow_remote_extends: opts.allow_remote_extends,
-        },
-        ProductionAnalysis::DeadCode,
-    )?;
-    base_config.cache_dir = fallow_engine::repo_refs::remap_cache_dir_for_base_worktree(
-        opts.root,
-        &base_root,
-        &config.cache_dir,
-    );
+    let given = |value| fallow_types::sourced::Given {
+        value,
+        origin: fallow_types::sourced::Origin::Flag("--changed-since"),
+    };
+    let base_side = fallow_engine::resolved_run::BaseSide {
+        root: given(base_root.clone()),
+        config: fallow_engine::resolved_run::BaseConfig::BaseCopy,
+        cache_dir: Some(given(
+            fallow_engine::repo_refs::remap_cache_dir_for_base_worktree(
+                opts.root,
+                &base_root,
+                &config.cache_dir,
+            ),
+        )),
+    };
+    let base_run = crate::cli_production::base_copy_run(opts.run, base_side)
+        .map_err(|message| emit_input_error(&message, opts.output))?;
+    // The findings of the base run name files under its canonical root.
+    let base_root = base_run.root().value().clone();
+    let base_opts = base_snapshot_security_options(opts, &base_root, &base_run);
+    let mut base_config = crate::cli_production::dead_code_runnable(&base_run, opts.output)?
+        .config()
+        .clone();
     enable_security_rules(&mut base_config);
-    let mut base_analysis = analyze_security_candidates(
-        &base_snapshot_security_options(opts, &base_root, &current_config_path),
-        &base_config,
-    )?;
+    let mut base_analysis = analyze_security_candidates(&base_opts, &base_config)?;
     scope_base_snapshot_to_workspaces(
         opts,
         &base_root,
@@ -1148,18 +1137,14 @@ fn compute_base_security_snapshot(
 
 /// Build the quiet, non-gating `SecurityOptions` used to re-analyze the base
 /// worktree for the `--gate newly-reachable` snapshot.
-#[expect(
-    clippy::ref_option,
-    reason = "config_path mirrors the SecurityOptions.config_path field which is &Option<PathBuf>"
-)]
 fn base_snapshot_security_options<'a>(
     opts: &SecurityOptions<'a>,
     base_root: &'a Path,
-    config_path: &'a Option<PathBuf>,
+    run: &'a fallow_engine::resolved_run::ResolvedRun,
 ) -> SecurityOptions<'a> {
     SecurityOptions {
         root: base_root,
-        config_path,
+        run,
         output: opts.output,
         json_style: opts.json_style,
         no_cache: opts.no_cache,
@@ -1280,7 +1265,9 @@ fn analyze_security_candidates(
     opts: &SecurityOptions<'_>,
     config: &fallow_config::ResolvedConfig,
 ) -> Result<SecurityAnalysisState, ExitCode> {
-    let session = fallow_engine::session::AnalysisSession::from_resolved_config(config.clone())
+    // The security rules of the command leave the decided fields of the run.
+    let session = crate::cli_production::dead_code_runnable(opts.run, opts.output)?
+        .open_session_adjusted(|decided| *decided = config.clone())
         .map_err(|err| emit_input_error(&format!("Analysis error: {err}"), opts.output))?;
     let changed_since_files = if opts.changed_since.is_some() {
         session.files().to_vec()
@@ -1373,7 +1360,7 @@ fn security_runtime_health_options<'a>(
 ) -> HealthOptions<'a> {
     HealthOptions {
         root: opts.root,
-        config_path: opts.config_path,
+        config_path: opts.run.config_file().value(),
         output: opts.output,
         no_cache: opts.no_cache,
         threads: opts.threads,
@@ -3868,8 +3855,13 @@ mod tests {
         assert_eq!(sarif["version"], "2.1.0");
     }
 
-    /// No explicit `--config`; static so the `&'a Option<PathBuf>` field borrows it.
-    const NO_CONFIG: Option<PathBuf> = None;
+    /// The run of a fixture, leaked so that the `&'a ResolvedRun` field
+    /// borrows it.
+    fn test_run(root: &Path) -> &'static fallow_engine::resolved_run::ResolvedRun {
+        let run =
+            crate::cli_production::benchmark_run(root, fallow_config::CommandKind::Security, 1);
+        Box::leak(Box::new(run.expect("fixture run")))
+    }
 
     fn leak_fixture_root() -> PathBuf {
         std::path::PathBuf::from(
@@ -3888,7 +3880,7 @@ mod tests {
     fn run_opts(root: &Path, output: OutputFormat, fail_on_issues: bool) -> SecurityOptions<'_> {
         SecurityOptions {
             root,
-            config_path: &NO_CONFIG,
+            run: test_run(root),
             output,
             json_style: crate::json_style::JsonStyle::Compact,
             no_cache: true,
@@ -3915,23 +3907,10 @@ mod tests {
     #[test]
     fn source_reachability_fixture_marks_cross_module_sink() {
         let root = source_reachability_fixture_root();
-        let mut config = load_config_for_analysis(
-            &root,
-            &NO_CONFIG,
-            crate::ConfigLoadOptions {
-                output: OutputFormat::Json,
-                no_cache: true,
-                threads: 1,
-                production_override: None,
-                quiet: true,
-                allow_remote_extends: false,
-            },
-            ProductionAnalysis::DeadCode,
-        )
-        .expect("fixture config loads");
-        config.rules.security_sink = Severity::Warn;
-
-        let analysis = fallow_engine::session::AnalysisSession::from_resolved_config(config)
+        let run = crate::cli_production::dead_code_runnable(test_run(&root), OutputFormat::Json)
+            .expect("fixture runs dead code");
+        let analysis = run
+            .open_session_adjusted(|config| config.rules.security_sink = Severity::Warn)
             .expect("fixture session")
             .analyze_dead_code_with_artifacts(false, false)
             .expect("fixture analyzes");

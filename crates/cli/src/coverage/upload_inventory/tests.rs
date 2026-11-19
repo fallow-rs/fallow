@@ -554,11 +554,9 @@ fn dry_run_args() -> UploadInventoryArgs {
 fn run_dry_run_emits_inventory_and_exits_zero() {
     let project = project_with_one_function();
     // Explicit project_id + git_sha keep this env- and git-free.
-    let code = run(
-        &dry_run_args(),
-        project.path(),
-        crate::runtime_support::ConfigFlags::default(),
-    );
+    let code = run(&dry_run_args(), project.path(), &|| {
+        crate::coverage::upload_common::test_run(project.path())
+    });
     assert_eq!(code, ExitCode::SUCCESS);
 }
 
@@ -575,11 +573,9 @@ fn run_with_no_functions_is_a_validation_exit() {
         "export declare const x: number;\n",
     )
     .unwrap();
-    let code = run(
-        &dry_run_args(),
-        root,
-        crate::runtime_support::ConfigFlags::default(),
-    );
+    let code = run(&dry_run_args(), root, &|| {
+        crate::coverage::upload_common::test_run(root)
+    });
     assert_eq!(code, ExitCode::from(EXIT_VALIDATION));
 }
 

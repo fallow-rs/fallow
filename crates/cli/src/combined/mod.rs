@@ -526,7 +526,7 @@ fn run_combined_health(
             health_opts.analysis_identity = identity;
         }
         let mut result =
-            crate::health::execute_health_with_config(&health_opts, config, config_ms)?;
+            crate::health::execute_health_with_config(&health_opts, config, config_ms, health)?;
         result.type_aware_meta = semantic
             .map(|outcome| outcome.type_aware.meta)
             .or(degraded_meta);

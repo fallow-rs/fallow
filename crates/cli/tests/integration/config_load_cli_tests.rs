@@ -507,6 +507,113 @@ fn coverage_upload_reads_the_explicit_config() {
     );
 }
 
+/// The arguments of a dry-run `coverage upload-static-findings`.
+const UPLOAD_DRY_RUN: &[&str] = &[
+    "coverage",
+    "upload-static-findings",
+    "--dry-run",
+    "--allow-dirty",
+    "--project-id",
+    "acme/app",
+    "--git-sha",
+    "0123456789abcdef0123456789abcdef01234567",
+];
+
+/// A coverage upload names an explicit config that does not load once, with
+/// the cause of the parser.
+#[test]
+fn coverage_upload_names_a_broken_explicit_config_once() {
+    let dir = project();
+    let root = canonical_root(&dir);
+    let broken = root.join("broken.json");
+    std::fs::write(&broken, "{ \"rules\": \n").unwrap();
+    let output = run(
+        &root,
+        &with_args(UPLOAD_DRY_RUN, &["--config", "broken.json"]),
+        &[],
+    );
+    assert_ne!(output.code, 0, "{}", output.stdout);
+    let cause = FallowConfig::load(&broken).expect_err("does not load");
+    assert!(
+        output
+            .stderr
+            .contains(&format!("error: config load failed: {cause}")),
+        "{}",
+        output.stderr
+    );
+    assert!(
+        !output.stderr.contains("failed to load config"),
+        "{}",
+        output.stderr
+    );
+}
+
+/// A coverage upload reads the project as the config file gives it. A rule
+/// pack that does not exist does not stop the upload.
+#[test]
+fn coverage_upload_does_not_validate_the_config() {
+    let dir = project();
+    let root = canonical_root(&dir);
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"rulePacks":["./packs/missing.json"]}"#,
+    )
+    .unwrap();
+    let output = run(&root, UPLOAD_DRY_RUN, &[]);
+    assert_eq!(output.code, 0, "{}", output.stderr);
+}
+
+/// `plugin-check` reports an external plugin that fails validation, as the
+/// command exists to check such a plugin.
+#[test]
+fn plugin_check_reports_a_plugin_with_an_invalid_glob() {
+    let dir = project();
+    let root = canonical_root(&dir);
+    std::fs::create_dir_all(root.join(".fallow/plugins")).unwrap();
+    std::fs::write(
+        root.join(".fallow/plugins/escape.json"),
+        r#"{"name":"escape","entryPoints":["../outside/**"]}"#,
+    )
+    .unwrap();
+    let output = run(&root, &["plugin-check", "--format", "json"], &[]);
+    assert_eq!(output.code, 0, "{}{}", output.stdout, output.stderr);
+    let names: Vec<String> = parse_json(&output)["plugins"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter_map(|plugin| plugin["name"].as_str().map(str::to_owned))
+        .collect();
+    assert_eq!(names, ["escape"]);
+}
+
+/// `fallow security` rejects an unsupported `--format` before it loads the
+/// config, so the format error shows also when the config is invalid.
+#[test]
+fn security_reports_an_unsupported_format_before_a_config_error() {
+    let dir = project();
+    let root = canonical_root(&dir);
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"rulePacks":["./packs/missing.json"]}"#,
+    )
+    .unwrap();
+    let cases: [(&[&str], &str); 2] = [
+        (
+            &["security", "--format", "compact"],
+            "Error: fallow security supports --format human, json, sarif, github-annotations, or github-summary only.\n",
+        ),
+        (
+            &["security", "blind-spots", "--format", "sarif"],
+            "Error: fallow security blind-spots supports --format human or json only.\n",
+        ),
+    ];
+    for (args, expected) in cases {
+        let output = run(&root, args, &[]);
+        assert_eq!(output.code, 2, "{args:?}: {}", output.stderr);
+        assert_eq!(output.stderr, expected, "{args:?}");
+    }
+}
+
 fn workspace_notices(output: &CommandOutput) -> usize {
     output
         .stderr

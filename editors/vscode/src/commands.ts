@@ -55,7 +55,7 @@ import {
   getExtensionVersion,
   getInstalledCliPath,
 } from "./download.js";
-import { compareVersions } from "./cli-args-utils.js";
+import { buildWorkspacesArgs, compareVersions } from "./cli-args-utils.js";
 import { buildFixArgs, createFixPreviewItems, resolveFixLocation } from "./fix-utils.js";
 import { buildHealthArgs, parseUnknownHealthSubcommand } from "./health-utils.js";
 import { registerChild, unregisterChild } from "./process-registry.js";
@@ -838,7 +838,7 @@ export const runWorkspaces = async (
     return null;
   }
 
-  const { binary } = await resolveCliForRun(context, outputChannel);
+  const { binary, version: cliVersion } = await resolveCliForRun(context, outputChannel);
   if (!binary) {
     if (!silent) {
       void vscode.window.showErrorMessage(
@@ -856,7 +856,11 @@ export const runWorkspaces = async (
   }
 
   try {
-    const output = await execFallow(binary, ["workspaces", "--format", "json", "--quiet"], root);
+    const { args, skipped } = buildWorkspacesArgs(getAllowRemoteExtends(), cliVersion);
+    if (!silent) {
+      noteSkippedCapabilities(skipped, binary, outputChannel);
+    }
+    const output = await execFallow(binary, args, root);
     const parsed = parseWorkspacesOutput(output);
     if (!parsed) {
       outputChannel?.appendLine(
@@ -928,6 +932,7 @@ export const runAudit = async (
       changedSince: getChangedSince(),
       workspace: resolveActiveWorkspaceScope(context),
       configPath: getResolvedConfigPath(),
+      allowRemoteExtends: getAllowRemoteExtends(),
       gate: getAuditGate(),
       worsened: getAuditWorsened(),
       typeAware: getTypeAwareSettings(),
@@ -1094,16 +1099,22 @@ export const runFix = async (
   }
 
   try {
-    const fixArgs = buildFixArgs(dryRun, getProductionOverride());
+    const { binary, version: cliVersion } = await resolveCliForRun(context);
+    const { args: fixArgs, skipped: skippedRemote } = buildFixArgs(
+      dryRun,
+      getProductionOverride(),
+      getAllowRemoteExtends(),
+      cliVersion,
+    );
     const configPath = getResolvedConfigPath();
     if (configPath) {
       fixArgs.push("--config", configPath);
     }
 
-    const { binary, version: cliVersion } = await resolveCliForRun(context);
-    const skipped = appendTypeAwareArgs(fixArgs, getTypeAwareSettings(), cliVersion);
-    if (skipped) {
-      noteSkippedCapabilities([skipped], binary);
+    const skippedTypeAware = appendTypeAwareArgs(fixArgs, getTypeAwareSettings(), cliVersion);
+    const skipped = skippedTypeAware ? [...skippedRemote, skippedTypeAware] : skippedRemote;
+    if (skipped.length > 0) {
+      noteSkippedCapabilities(skipped, binary);
     }
     const output = await execFallowTolerant(fixArgs, root, binary);
     const result = JSON.parse(output) as FallowFixResult;
@@ -1190,6 +1201,7 @@ export const runHealthAnalysis = async (
       production: getProductionOverride(),
       workspace: resolveActiveWorkspaceScope(context),
       complexityBreakdown: breakdownEnabled,
+      allowRemoteExtends: getAllowRemoteExtends(),
       typeAware: getTypeAwareSettings(),
       cliVersion,
     });

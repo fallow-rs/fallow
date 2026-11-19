@@ -168,7 +168,7 @@ fn print_machine_combined_report(
         elapsed: total_elapsed,
         explain: opts.explain,
         config_fixable: opts.config_path.is_some()
-            || fallow_config::FallowConfig::find_config_path(opts.root).is_some(),
+            || fallow_engine::project_config::find_config_file(opts.root).is_some(),
         gate_flags: CombinedGateFlags {
             fail_on_stale_baseline: opts.fail_on_stale_baseline,
             fail_on_issues: opts.fail_on_issues,

@@ -5,10 +5,14 @@ use fallow_types::output_dead_code::PolicyViolationFinding;
 use serde_json::json;
 
 use super::{RulePackContext, TestArgs};
-use crate::runtime_support::{LoadConfigArgs, load_config};
+use fallow_engine::resolved_run::ResolvedRun;
 
 pub fn run(args: &TestArgs, ctx: &RulePackContext<'_>) -> ExitCode {
-    let mut config = match load_test_config(args, ctx) {
+    let run = match ctx.run() {
+        Ok(run) => run,
+        Err(code) => return code,
+    };
+    let mut config = match load_test_config(args, ctx, &run) {
         Ok(config) => config,
         Err(code) => return code,
     };
@@ -18,7 +22,7 @@ pub fn run(args: &TestArgs, ctx: &RulePackContext<'_>) -> ExitCode {
         eprintln!("note: rules.policy-violation is off; forcing warn for this test run");
     }
 
-    let (summaries, findings) = match analyze_rule_pack(&config, ctx.output) {
+    let (summaries, findings) = match analyze_rule_pack(&run, &config, ctx.output) {
         Ok(result) => result,
         Err(code) => return code,
     };
@@ -45,10 +49,13 @@ fn enable_policy_violations(config: &mut ResolvedConfig) -> bool {
 }
 
 fn analyze_rule_pack(
+    run: &ResolvedRun,
     config: &ResolvedConfig,
     output: OutputFormat,
 ) -> Result<(Vec<RuleSummary>, Vec<PolicyViolationFinding>), ExitCode> {
-    let analysis = fallow_engine::session::AnalysisSession::from_resolved_config(config.clone())
+    // The rule packs of the command leave the decided fields of the run.
+    let analysis = crate::cli_production::dead_code_runnable(run, output)?
+        .open_session_adjusted(|decided| *decided = config.clone())
         .and_then(|session| session.analyze_dead_code())
         .map_err(|error| crate::error::emit_input_error(error.message(), output))?;
     let mut findings = analysis.results.policy_violations;
@@ -64,19 +71,11 @@ fn analyze_rule_pack(
 fn load_test_config(
     args: &TestArgs,
     ctx: &RulePackContext<'_>,
+    run: &ResolvedRun,
 ) -> Result<ResolvedConfig, ExitCode> {
-    let mut config = load_config(
-        ctx.root,
-        ctx.config_path,
-        LoadConfigArgs {
-            output: ctx.output,
-            no_cache: ctx.no_cache,
-            threads: ctx.threads.unwrap_or_else(default_threads),
-            production: false,
-            quiet: ctx.quiet,
-            allow_remote_extends: ctx.allow_remote_extends,
-        },
-    )?;
+    let mut config = crate::cli_production::dead_code_runnable(run, ctx.output)?
+        .config()
+        .clone();
 
     if let Some(pack) = &args.pack {
         let pack_path = pack_arg_to_config_path(ctx.root, pack);
@@ -189,14 +188,13 @@ pub fn benchmark_rule_pack_test_json(
         config_path: &config_path,
         output: OutputFormat::Json,
         json_style: crate::json_style::JsonStyle::Compact,
-        quiet: true,
-        no_cache: true,
         threads: Some(threads),
-        allow_remote_extends: false,
+        resolve: None,
     };
-    let mut config = load_test_config(&TestArgs { pack: None }, &ctx)?;
+    let run = ctx.run()?;
+    let mut config = load_test_config(&TestArgs { pack: None }, &ctx, &run)?;
     let forced_severity = enable_policy_violations(&mut config);
-    let (summaries, findings) = analyze_rule_pack(&config, ctx.output)?;
+    let (summaries, findings) = analyze_rule_pack(&run, &config, ctx.output)?;
     let output = build_json_output(&config, forced_severity, &summaries, &findings);
     let rendered = ctx.json_style.serialize(&output).map_err(|error| {
         crate::error::emit_input_error(
@@ -277,8 +275,4 @@ fn pack_arg_to_config_path(root: &std::path::Path, pack: &std::path::Path) -> St
         pack
     };
     path.to_string_lossy().replace('\\', "/")
-}
-
-fn default_threads() -> usize {
-    std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get)
 }

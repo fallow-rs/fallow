@@ -7,28 +7,24 @@
 //! with `reachable: false`; an endpoint that names no module or an ambiguous
 //! abbreviation exits 2.
 
-use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use fallow_config::{OutputFormat, ProductionAnalysis};
+use fallow_config::OutputFormat;
 use fallow_engine::trace::{ImportPathEndpoint, ImportPathTrace};
 
 use crate::error::emit_input_error;
 use crate::exit_codes::INVALID_INPUT;
 use crate::report;
 use crate::report::sink::outln;
-use crate::{ConfigLoadOptions, load_config_for_analysis};
 
 /// Options for `fallow trace --path`.
 pub struct TracePathOptions<'a> {
-    pub root: &'a Path,
-    pub config_path: &'a Option<PathBuf>,
     pub output: OutputFormat,
     pub json_style: crate::json_style::JsonStyle,
-    pub no_cache: bool,
-    pub threads: usize,
     pub quiet: bool,
-    pub allow_remote_extends: bool,
+    /// Resolves the run of the command line. The command calls it after its
+    /// own checks of the command line.
+    pub resolve: crate::cli_production::ResolveRun<'a>,
     /// The module the walk starts from.
     pub from: &'a str,
     /// The module the walk is looking for.
@@ -39,26 +35,13 @@ pub struct TracePathOptions<'a> {
 
 /// Resolve the shortest import path and emit it on the trace surface.
 pub fn run_trace_path(opts: &TracePathOptions<'_>) -> ExitCode {
-    let config = match load_config_for_analysis(
-        opts.root,
-        opts.config_path,
-        ConfigLoadOptions {
-            output: opts.output,
-            no_cache: opts.no_cache,
-            threads: opts.threads,
-            production_override: None,
-            quiet: opts.quiet,
-            allow_remote_extends: opts.allow_remote_extends,
-        },
-        ProductionAnalysis::DeadCode,
-    ) {
-        Ok(config) => config,
+    let run = match (opts.resolve)() {
+        Ok(run) => run,
         Err(code) => return code,
     };
-
-    let session = match fallow_engine::session::AnalysisSession::from_resolved_config(config) {
-        Ok(session) => session,
-        Err(err) => return emit_input_error(&format!("Analysis error: {err}"), opts.output),
+    let session = match crate::cli_production::dead_code_runnable(&run, opts.output) {
+        Ok(runnable) => runnable.open_session(),
+        Err(code) => return code,
     };
 
     let trace = match fallow_engine::trace::trace_import_path_with_session(

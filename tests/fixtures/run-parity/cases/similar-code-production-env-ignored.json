@@ -1,0 +1,41 @@
+{
+  "name": "similar-code-production-env-ignored",
+  "files": {
+    ".fallowrc.json": "{\"production\":true}",
+    "package.json": "{}"
+  },
+  "env": {
+    "FALLOW_PRODUCTION": "false"
+  },
+  "inputs": {
+    "cli": {
+      "argv": [
+        "fallow",
+        "similar-code"
+      ]
+    },
+    "lsp": {
+      "not_expressible": "The language server has no similar-code command"
+    },
+    "vscode": {
+      "not_expressible": "The editor has no similar-code input for the language server"
+    },
+    "node": {
+      "not_expressible": "The Node bindings have no similar-code function"
+    },
+    "api": {
+      "entry": "similar-code"
+    },
+    "mcp": {
+      "not_expressible": "The MCP server has no typed similar-code tool"
+    }
+  },
+  "expected": {
+    "surface": "<row>",
+    "command": "similar-code",
+    "analyses.dead_code.production": {
+      "value": true,
+      "source": "config-file:production"
+    }
+  }
+}

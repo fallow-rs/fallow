@@ -1,7 +1,12 @@
 import { escapeMarkdownMultiline } from "./markdown-utils.js";
 import type { FindingSeverity, HealthReport, HealthScorePenalties } from "./types.js";
 import { appendTypeAwareArgs, type TypeAwareArgsOptions } from "./type-aware-utils.js";
-import { appendCommonScopeArgs, type BuiltCliArgs } from "./cli-args-utils.js";
+import {
+  appendAllowRemoteExtends,
+  appendCommonScopeArgs,
+  type BuiltCliArgs,
+  type SkippedCliCapability,
+} from "./cli-args-utils.js";
 
 /**
  * Options for {@link buildHealthArgs}. Kept as a plain data object (no config
@@ -34,6 +39,11 @@ export interface HealthArgsOptions {
    * forwarded when true. Drives the inline editor decorations.
    */
   readonly complexityBreakdown?: boolean;
+  /**
+   * `true` forwards `--allow-remote-extends` (version-gated), so the Health
+   * view reads a config with an `https://` extends entry.
+   */
+  readonly allowRemoteExtends: boolean;
   readonly typeAware?: TypeAwareArgsOptions;
   /** Version of the exact CLI binary this argv will be passed to. */
   readonly cliVersion: string | null;
@@ -51,7 +61,7 @@ export interface HealthArgsOptions {
  */
 export const buildHealthArgs = (options: HealthArgsOptions): BuiltCliArgs => {
   const args = ["health", "--format", "json", "--quiet", "--score", "--complexity", "--targets"];
-  const skipped = [];
+  const skipped: SkippedCliCapability[] = [];
 
   if (options.hotspots) {
     args.push("--hotspots");
@@ -67,6 +77,15 @@ export const buildHealthArgs = (options: HealthArgsOptions): BuiltCliArgs => {
 
   if (options.production) {
     args.push("--production");
+  }
+
+  const skippedRemote = appendAllowRemoteExtends(
+    args,
+    options.allowRemoteExtends,
+    options.cliVersion,
+  );
+  if (skippedRemote) {
+    skipped.push(skippedRemote);
   }
 
   appendCommonScopeArgs(args, options);

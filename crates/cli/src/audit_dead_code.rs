@@ -219,7 +219,7 @@ pub(super) fn base_own_config_unused_code(
         .as_ref()
         .map(|_| base_root.join(&relative))
         .filter(|path| path.is_file())
-        .or_else(|| fallow_config::FallowConfig::find_config_path(base_root));
+        .or_else(|| fallow_engine::project_config::find_config_file(base_root));
     // A config that does not load would make the pass print an error.
     if let Some(path) = base_config_path.as_deref()
         && project_config::load_config_file(

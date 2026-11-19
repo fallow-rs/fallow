@@ -1,6 +1,5 @@
 //! `fallow guard` subcommand: report architecture rules before editing files.
 
-use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use fallow_config::OutputFormat;
@@ -10,38 +9,28 @@ use serde_json::{Value, json};
 
 use crate::error::emit_input_error;
 use crate::report::sink::outln;
-use crate::runtime_support::{LoadConfigArgs, load_config};
 
 /// Options for the `fallow guard` subcommand.
 pub struct GuardOptions<'a> {
-    pub root: &'a Path,
-    pub config_path: &'a Option<PathBuf>,
     pub output: OutputFormat,
     pub json_style: crate::json_style::JsonStyle,
-    pub quiet: bool,
-    pub allow_remote_extends: bool,
+    /// Resolves the run of the command line.
+    pub resolve: crate::cli_production::ResolveRun<'a>,
     pub files: &'a [String],
 }
 
 /// Run the `fallow guard` subcommand.
 pub fn run_guard(opts: &GuardOptions<'_>) -> ExitCode {
-    let config = match load_config(
-        opts.root,
-        opts.config_path,
-        LoadConfigArgs {
-            output: opts.output,
-            no_cache: false,
-            threads: 1,
-            production: false,
-            quiet: opts.quiet,
-            allow_remote_extends: opts.allow_remote_extends,
-        },
-    ) {
-        Ok(config) => config,
+    let run = match (opts.resolve)() {
+        Ok(run) => run,
+        Err(code) => return code,
+    };
+    let config = match crate::cli_production::dead_code_runnable(&run, opts.output) {
+        Ok(dead_code) => dead_code.config(),
         Err(code) => return code,
     };
 
-    let report = match build_guard_report(&config, opts.files) {
+    let report = match build_guard_report(config, opts.files) {
         Ok(report) => report,
         Err(GuardError::OutsideRoot(path)) => {
             return emit_input_error(

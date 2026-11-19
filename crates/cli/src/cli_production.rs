@@ -3,12 +3,9 @@ use std::process::ExitCode;
 use fallow_config::{
     AnalysisSelection, CommandKind, OutputFormat, PlannedAnalysis, ResolvedConfig, RunPlan,
 };
+use fallow_engine::project_config::ConfigLoadError;
 pub use fallow_engine::project_config::ProductionModes;
-use fallow_engine::project_config::{ConfigLoadError, ProductionFlags};
 use fallow_engine::resolved_run::{AnalysisSlot, EmptyCause, ResolveError, ResolvedRun, Runnable};
-
-use super::Cli;
-use crate::runtime_support::load_config_file;
 
 impl crate::DispatchContext<'_> {
     /// Resolve the run of the command line once, and apply the side effects
@@ -77,6 +74,13 @@ impl crate::DispatchContext<'_> {
             .map_err(|err| self.emit_resolve_error(err))
     }
 
+    /// Run `command` with the run of the command line. A resolve error prints
+    /// as [`Self::resolve_run`] prints it and gives exit code 2.
+    pub(crate) fn run_resolved(&self, command: impl FnOnce(&ResolvedRun) -> ExitCode) -> ExitCode {
+        self.resolve_run()
+            .map_or_else(|code| code, |run| command(&run))
+    }
+
     /// Run `command` with the run of `pending`, after [`Self::finish_run`].
     pub(crate) fn with_run(
         &self,
@@ -100,20 +104,8 @@ impl crate::DispatchContext<'_> {
     }
 
     fn emit_resolve_error(&self, err: &ResolveError) -> ExitCode {
-        let message = match (err, self.cli.config.as_deref()) {
-            // The message names an explicit config file as the user wrote it.
-            (
-                ResolveError::ConfigLoad(ConfigLoadError::Parse {
-                    path: Some(_),
-                    message,
-                    ..
-                }),
-                Some(given),
-            ) => format!("failed to load config '{}': {message}", given.display()),
-            (ResolveError::ConfigLoad(load), _) => {
-                crate::runtime_support::config_load_error_message(load)
-            }
-            (ResolveError::NothingSelected { command, cause }, _) => {
+        let message = match err {
+            ResolveError::NothingSelected { command, cause } => {
                 if *command == CommandKind::Combined
                     && *cause == EmptyCause::Config
                     && self.cli.dupes_baseline.is_some()
@@ -123,27 +115,62 @@ impl crate::DispatchContext<'_> {
                 nothing_selected_message(*command, *cause)
                     .map_or_else(|| err.message(), str::to_owned)
             }
-            (_, _) => err.message(),
+            _ => resolve_error_message(err, self.cli.config.as_deref()),
         };
         crate::error::emit_input_error(&message, self.output)
     }
+}
 
-    pub(crate) fn production_modes(
-        &self,
-        dead_code: bool,
-        health: bool,
-        dupes: bool,
-    ) -> Result<ProductionModes, ExitCode> {
-        resolve_production_modes(self.cli, self.root, self.output, dead_code, health, dupes)
+/// The CLI text of a resolve error. `given_config` is the `--config` path as
+/// the user wrote it, so a load error names an explicit file as given.
+pub fn resolve_error_message(err: &ResolveError, given_config: Option<&std::path::Path>) -> String {
+    match (err, given_config) {
+        (
+            ResolveError::ConfigLoad(ConfigLoadError::Parse {
+                path: Some(_),
+                message,
+                ..
+            }),
+            Some(given),
+        ) => format!("failed to load config '{}': {message}", given.display()),
+        (ResolveError::ConfigLoad(load), _) => {
+            crate::runtime_support::config_load_error_message(load)
+        }
+        _ => err.message(),
     }
+}
 
-    pub(crate) fn production_for(
-        &self,
-        analysis: fallow_config::ProductionAnalysis,
-    ) -> Result<bool, ExitCode> {
-        self.production_modes(false, false, false)
-            .map(|modes| modes.for_analysis(analysis))
-    }
+/// The base side of a comparison with a base ref, with the base copy of the
+/// config file of `head`. A base copy that does not resolve gives the config
+/// file of the head run, as the base pass of `fallow audit` reads it.
+///
+/// # Errors
+///
+/// Returns the CLI text of the resolve error of the head config file.
+pub fn base_copy_run(
+    head: &ResolvedRun,
+    side: fallow_engine::resolved_run::BaseSide,
+) -> Result<ResolvedRun, String> {
+    use fallow_engine::resolved_run::{BaseConfig, BaseSide, resolve_base_run};
+    let head_side = BaseSide {
+        config: BaseConfig::Head,
+        ..side.clone()
+    };
+    resolve_base_run(
+        head,
+        BaseSide {
+            config: BaseConfig::BaseCopy,
+            ..side
+        },
+    )
+    .or_else(|err| {
+        tracing::debug!(
+            "the base copy of the config does not resolve: {}",
+            err.message()
+        );
+        resolve_base_run(head, head_side)
+    })
+    .map_err(|err| resolve_error_message(&err, None))
 }
 
 /// A resolved run whose config load side effects did not apply yet. See
@@ -183,13 +210,69 @@ impl<'a> DeadCodeRun<'a> {
     /// output format and gives exit code 2.
     pub fn runnable(self) -> Result<Runnable<'a>, ExitCode> {
         let run = self.dispatch.finish_run(self.pending)?;
-        runnable(run, PlannedAnalysis::DeadCode).ok_or_else(|| {
-            crate::error::emit_input_error(
-                "the run skips the dead-code analysis",
-                self.dispatch.output,
-            )
-        })
+        dead_code_runnable(run, self.dispatch.output)
     }
+}
+
+/// The resolver of a command that reads its config after its own checks of
+/// the command line. The dispatch passes `&|| dispatch.resolve_run()`.
+pub type ResolveRun<'a> = &'a dyn Fn() -> Result<ResolvedRun, ExitCode>;
+
+/// The run of a benchmark hook or a unit test: `command` on `root` with the
+/// config file that discovery finds, `threads` worker threads, no parse
+/// cache, JSON output and no progress output. This is not a supported API.
+///
+/// # Errors
+///
+/// Prints a resolve error as JSON and gives exit code 2.
+pub fn benchmark_run(
+    root: &std::path::Path,
+    command: CommandKind,
+    threads: usize,
+) -> Result<ResolvedRun, ExitCode> {
+    fallow_engine::resolved_run::resolve_run(&benchmark_inputs(root, command, threads))
+        .map_err(|err| crate::error::emit_input_error(&err.message(), OutputFormat::Json))
+}
+
+/// The run inputs of [`benchmark_run`].
+pub fn benchmark_inputs(
+    root: &std::path::Path,
+    command: CommandKind,
+    threads: usize,
+) -> fallow_config::RunInputs {
+    let flag = |value| fallow_types::sourced::Given {
+        value,
+        origin: fallow_types::sourced::Origin::Flag("--root"),
+    };
+    let mut inputs = fallow_config::RunInputs::new(
+        fallow_config::Surface::Cli,
+        fallow_config::EnvSnapshot::capture(),
+        command,
+        fallow_config::SelectionInput::Single(PlannedAnalysis::DeadCode),
+    );
+    inputs.root = Some(flag(root.to_path_buf()));
+    inputs.threads = Some(fallow_types::sourced::Given {
+        value: threads.max(1),
+        origin: fallow_types::sourced::Origin::Flag("--threads"),
+    });
+    inputs.no_cache = Some(fallow_types::sourced::Given {
+        value: true,
+        origin: fallow_types::sourced::Origin::Flag("--no-cache"),
+    });
+    inputs.output = OutputFormat::Json;
+    inputs.quiet = true;
+    inputs
+}
+
+/// The dead-code analysis of `run`. A run that skips it prints an error on
+/// the error channel of `output` and gives exit code 2.
+pub fn dead_code_runnable(
+    run: &ResolvedRun,
+    output: OutputFormat,
+) -> Result<Runnable<'_>, ExitCode> {
+    runnable(run, PlannedAnalysis::DeadCode).ok_or_else(|| {
+        crate::error::emit_input_error("the run skips the dead-code analysis", output)
+    })
 }
 
 /// The resolved config of a dead-code command: the config of `run`, or the
@@ -257,46 +340,10 @@ const fn nothing_selected_message(command: CommandKind, cause: EmptyCause) -> Op
     }
 }
 
-/// The production mode of each analysis: the flag of the analysis, then
-/// `--production` or `--no-production`, then the environment variable of the
-/// analysis, then `FALLOW_PRODUCTION`, then the config.
-pub fn resolve_production_modes(
-    cli: &Cli,
-    root: &std::path::Path,
-    output: OutputFormat,
-    production_dead_code: bool,
-    production_health: bool,
-    production_dupes: bool,
-) -> Result<ProductionModes, ExitCode> {
-    let config = load_config_file(
-        root,
-        cli.config.as_deref(),
-        cli.allow_remote_extends,
-        output,
-    )?
-    .config;
-    let flags = ProductionFlags {
-        global: if cli.production {
-            Some(true)
-        } else if cli.no_production {
-            Some(false)
-        } else {
-            None
-        },
-        dead_code: production_dead_code.then_some(true),
-        health: production_health.then_some(true),
-        dupes: production_dupes.then_some(true),
-    };
-    let env = fallow_config::ProductionEnv::from_process();
-    let env = ProductionFlags {
-        global: env.global,
-        dead_code: env.dead_code,
-        health: env.health,
-        dupes: env.dupes,
-    };
-    Ok(flags.with_fallback(env).effective_modes(&config.production))
-}
-
 #[cfg(test)]
 #[path = "selection_key_guard_tests.rs"]
 mod selection_key_guard_tests;
+
+#[cfg(test)]
+#[path = "config_load_guard_tests.rs"]
+mod config_load_guard_tests;

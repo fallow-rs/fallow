@@ -17,10 +17,25 @@ pub struct RulePackContext<'a> {
     pub config_path: &'a Option<PathBuf>,
     pub output: OutputFormat,
     pub json_style: crate::json_style::JsonStyle,
-    pub quiet: bool,
-    pub no_cache: bool,
+    /// The worker threads of a benchmark hook.
     pub threads: Option<usize>,
-    pub allow_remote_extends: bool,
+    /// Resolves the run of the command line. `None` in a benchmark hook,
+    /// which resolves the run of [`crate::cli_production::benchmark_run`].
+    pub resolve: Option<crate::cli_production::ResolveRun<'a>>,
+}
+
+impl RulePackContext<'_> {
+    /// The run of the command line, or the run of a benchmark hook.
+    fn run(&self) -> Result<fallow_engine::resolved_run::ResolvedRun, ExitCode> {
+        match self.resolve {
+            Some(resolve) => resolve(),
+            None => crate::cli_production::benchmark_run(
+                self.root,
+                fallow_config::CommandKind::RulePack,
+                self.threads.unwrap_or(1),
+            ),
+        }
+    }
 }
 
 fn render_json(
