@@ -1,3 +1,4 @@
+use super::configuration::apply_type_aware_private_leak_default;
 use super::*;
 use fallow_types::extract::MemberKind;
 use fallow_types::output_dead_code::*;

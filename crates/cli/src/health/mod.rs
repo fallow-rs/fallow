@@ -28,6 +28,7 @@ use fallow_engine::health::{
     HealthPipelineInputs, HealthScopeInputs, HealthSeams, HealthSharedParseData, HealthSort,
     RuntimeCoverageSeamInput, execute_health_inner, validate_health_churn_file,
 };
+use fallow_engine::resolved_run::Runnable;
 
 use crate::check::resolve_workspace_scope;
 use crate::error::{emit_error, emit_input_error};
@@ -215,6 +216,15 @@ fn health_err_to_exit(error: HealthError, output: OutputFormat) -> ExitCode {
 pub fn load_health_config(
     opts: &HealthOptions<'_>,
 ) -> Result<(fallow_config::ResolvedConfig, f64), ExitCode> {
+    load_health_config_in(opts, None)
+}
+
+/// The config of a health run and the time to get it: the config of the
+/// health analysis of the resolved run, else a config load.
+pub fn load_health_config_in(
+    opts: &HealthOptions<'_>,
+    run: Option<Runnable<'_>>,
+) -> Result<(fallow_config::ResolvedConfig, f64), ExitCode> {
     if let Some(code) = crate::baseline_gate::refuse_save_before_analysis(
         opts.save_baseline,
         fallow_engine::baseline::BaselineKind::Health,
@@ -226,23 +236,26 @@ pub fn load_health_config(
         .map_err(|e| emit_input_error(&e, opts.output))?;
     validate_health_churn_file(opts).map_err(|e| health_err_to_exit(e, opts.output))?;
     let t = Instant::now();
-    let mut config = crate::load_config_for_analysis(
-        opts.root,
-        opts.config_path,
-        crate::ConfigLoadOptions {
-            output: opts.output,
-            no_cache: opts.no_cache,
-            threads: opts.threads,
-            production_override:
-                fallow_engine::project_config::ProductionFlags::single_analysis_override(
-                    opts.production,
-                    opts.production_override,
-                ),
-            quiet: opts.quiet,
-            allow_remote_extends: opts.allow_remote_extends,
-        },
-        fallow_config::ProductionAnalysis::Health,
-    )?;
+    let mut config = match run {
+        Some(runnable) => runnable.config().clone(),
+        None => crate::load_config_for_analysis(
+            opts.root,
+            opts.config_path,
+            crate::ConfigLoadOptions {
+                output: opts.output,
+                no_cache: opts.no_cache,
+                threads: opts.threads,
+                production_override:
+                    fallow_engine::project_config::ProductionFlags::single_analysis_override(
+                        opts.production,
+                        opts.production_override,
+                    ),
+                quiet: opts.quiet,
+                allow_remote_extends: opts.allow_remote_extends,
+            },
+            fallow_config::ProductionAnalysis::Health,
+        )?,
+    };
     if opts.gates.fail_on_parse_error {
         config.fail_on_parse_error = true;
     }
@@ -260,7 +273,18 @@ pub fn execute_health_with_shared_parse(
     shared: HealthSharedParseData,
     pre_computed_duplication: Option<fallow_engine::duplicates::DuplicationReport>,
 ) -> Result<HealthResult, ExitCode> {
-    let (config, config_ms) = load_health_config(opts)?;
+    execute_health_with_shared_parse_in(opts, shared, pre_computed_duplication, None)
+}
+
+/// [`execute_health_with_shared_parse`] with the health analysis of a
+/// resolved run.
+pub fn execute_health_with_shared_parse_in(
+    opts: &HealthOptions<'_>,
+    shared: HealthSharedParseData,
+    pre_computed_duplication: Option<fallow_engine::duplicates::DuplicationReport>,
+    run: Option<Runnable<'_>>,
+) -> Result<HealthResult, ExitCode> {
+    let (config, config_ms) = load_health_config_in(opts, run)?;
     let scope_inputs = build_health_scope_inputs(opts, &config, &shared.files)?;
     let workspace_diagnostics = fallow_config::workspace_diagnostics_for(&config.root);
     let workspaces = shared.workspaces;
@@ -292,7 +316,16 @@ pub fn execute_health_with_shared_parse(
 }
 
 pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode> {
-    let (config, config_ms) = load_health_config(opts)?;
+    execute_health_in(opts, None)
+}
+
+/// [`execute_health`] with the health analysis of a resolved run. `None`
+/// loads the config.
+pub fn execute_health_in(
+    opts: &HealthOptions<'_>,
+    run: Option<Runnable<'_>>,
+) -> Result<HealthResult, ExitCode> {
+    let (config, config_ms) = load_health_config_in(opts, run)?;
     execute_health_with_config(opts, config, config_ms)
 }
 
@@ -400,8 +433,11 @@ pub fn benchmark_execute_health_with_response(
     execute_health_with_config_and_seams(opts, config, config_ms, &seams)
 }
 
+/// Run `fallow health` and print the report. `run` is the health analysis
+/// of the resolved run; `None` loads the config.
 pub fn run_health(
     opts: &HealthOptions<'_>,
+    run: Option<Runnable<'_>>,
     json_style: crate::json_style::JsonStyle,
     type_aware: &TypeAwareHealthOptions<'_>,
     mutation_report: Option<&std::path::Path>,
@@ -412,7 +448,7 @@ pub fn run_health(
         }
         evidence => evidence.and_then(Result::ok),
     };
-    let (config, config_ms) = match load_health_config(opts) {
+    let (config, config_ms) = match load_health_config_in(opts, run) {
         Ok(config) => config,
         Err(code) => return code,
     };

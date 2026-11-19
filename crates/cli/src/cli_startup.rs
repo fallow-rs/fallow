@@ -110,7 +110,7 @@ pub fn validate_inputs(
 
     let threads = cli
         .threads
-        .unwrap_or_else(|| std::thread::available_parallelism().map_or(4, std::num::NonZero::get));
+        .unwrap_or_else(fallow_engine::resolved_run::available_threads);
 
     crate::process_clock::time(crate::process_clock::ProcessSpan::ThreadPool, || {
         rayon_pool::configure_global_pool(threads);
@@ -378,8 +378,16 @@ fn raw_args_use_legacy_check_alias() -> bool {
     args_use_legacy_check_alias(std::env::args_os().map(|arg| arg.to_string_lossy().into_owned()))
 }
 
-fn raw_args_invoked_review_alias() -> bool {
-    args_invoked_review_alias(std::env::args_os().map(|arg| arg.to_string_lossy().into_owned()))
+/// Set `--brief` on the audit of `cli` when `args` invoke the `review` alias.
+pub fn apply_review_alias<I>(cli: &mut Cli, args: I)
+where
+    I: IntoIterator<Item = String>,
+{
+    if args_invoked_review_alias(args)
+        && let Some(Command::Audit { brief, .. }) = cli.command.as_mut()
+    {
+        *brief = true;
+    }
 }
 
 fn warn_legacy_check_alias_if_needed(used_legacy_check_alias: bool, quiet: bool) {
@@ -395,11 +403,10 @@ pub fn parse_cli_args() -> Result<(Cli, FormatConfig), ExitCode> {
     let used_legacy_check_alias = raw_args_use_legacy_check_alias();
     let mut cli = Cli::try_parse().map_err(|err| handle_cli_parse_error(&err))?;
     warn_legacy_check_alias_if_needed(used_legacy_check_alias, cli.quiet);
-    if raw_args_invoked_review_alias()
-        && let Some(Command::Audit { brief, .. }) = cli.command.as_mut()
-    {
-        *brief = true;
-    }
+    apply_review_alias(
+        &mut cli,
+        std::env::args_os().map(|arg| arg.to_string_lossy().into_owned()),
+    );
     runtime_support::set_max_file_size_override(cli.max_file_size);
 
     if let Some(workspaces) = cli.workspace.as_ref()

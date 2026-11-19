@@ -247,6 +247,7 @@ fn combined_options<'a>(opts: &'a BaselinesPruneOptions<'a>) -> CombinedOptions<
         production_dead_code: Some(opts.production.dead_code),
         production_health: Some(opts.production.health),
         production_dupes: Some(opts.production.dupes),
+        run: None,
         workspace: None,
         changed_workspaces: None,
         group_by: None,

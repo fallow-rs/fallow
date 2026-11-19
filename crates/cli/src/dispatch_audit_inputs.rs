@@ -1,6 +1,6 @@
 //! Resolves the inputs of `fallow audit` from the command flags.
 
-use fallow_config::{ConfigKey, RunCommand, RunPlan, RunRequest};
+use fallow_config::{ConfigKey, RunPlan};
 
 use super::*;
 
@@ -8,42 +8,17 @@ pub(super) fn resolve_audit_inputs(
     dispatch: &DispatchContext<'_>,
     args: &AuditDispatchArgs,
 ) -> Result<ResolvedAuditInputs, ExitCode> {
-    let cli = dispatch.cli;
     let root = dispatch.root;
     let output = dispatch.output;
-    let config = load_config(
-        root,
-        &cli.config,
-        LoadConfigArgs {
-            output,
-            no_cache: cli.no_cache,
-            threads: dispatch.threads,
-            production: cli.production,
-            quiet: dispatch.quiet,
-            allow_remote_extends: cli.allow_remote_extends,
-        },
-    )?;
-    let cache_dir = config.cache_dir.clone();
-    // Plan before `config.audit` moves out below.
-    let plan = fallow_config::plan_run(config.plan_sections(), audit_request(args));
+    let run = dispatch.resolve_run()?;
+    let config = run.config();
+    let cache_dir = run.settings().cache_dir.value().clone();
+    let plan = crate::cli_production::run_plan(&run);
     let duplicates_off_in_config = !config.duplicates.runs_by_default();
-    let audit_cfg = config.audit;
+    let audit_cfg = config.audit.clone();
     let file_lines_check = config.health.file_lines_check_enabled();
-    let production = resolve_production_modes(
-        cli,
-        root,
-        output,
-        args.production_dead_code,
-        args.production_health,
-        args.production_dupes,
-    )?;
+    let production = run.production_modes();
     let analyses = audit_selection(plan, args, duplicates_off_in_config);
-    if !(analyses.dead_code || analyses.health || analyses.dupes) {
-        return Err(emit_input_error(
-            "this audit selects no sub-analysis: --skip, the audit.deadCode, audit.health and audit.dupes config keys, and duplicates.enabled leave nothing to run",
-            output,
-        ));
-    }
     // A skipped sub-analysis reads no baseline. An explicit flag for one is a
     // mistake; a configured one is dropped so the baseline gates do not see it.
     let baseline = |enabled: bool, flag: &str, cli_path: Option<&Path>, cfg_path: Option<&str>| {
@@ -92,7 +67,7 @@ pub(super) fn resolve_audit_inputs(
         args.coverage.as_deref(),
         args.coverage_root.as_deref(),
         output,
-        || Ok(config.health),
+        || Ok(config.health.clone()),
     )?;
 
     Ok(ResolvedAuditInputs {
@@ -107,19 +82,6 @@ pub(super) fn resolve_audit_inputs(
         coverage_root: coverage_inputs.coverage_root,
         file_lines_check,
     })
-}
-
-/// The request of this audit. The review brief names every sub-analysis, so
-/// `--only`, `--skip` and the config keys do not change it. Otherwise
-/// `--only` names the listed sub-analyses, and without `--only` the
-/// `audit.deadCode`, `audit.health` and `audit.dupes` keys decide, then
-/// `duplicates.enabled`.
-fn audit_request(args: &AuditDispatchArgs) -> RunRequest {
-    if audit_renders_brief(args) {
-        return RunRequest::all_named(RunCommand::Audit);
-    }
-    let (only, skip) = combined::planned_lists(&args.only, &args.skip);
-    RunRequest::from_lists(RunCommand::Audit, &only, &skip)
 }
 
 /// The sub-analyses of this audit from its run `plan`.

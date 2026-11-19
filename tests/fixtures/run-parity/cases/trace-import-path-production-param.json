@@ -29,6 +29,16 @@
     },
     "vscode": {
       "not_expressible": "The editor has no trace input for the language server"
+    },
+    "cli": {
+      "argv": [
+        "fallow",
+        "trace",
+        "--path",
+        "src/a.ts",
+        "src/b.ts",
+        "--production"
+      ]
     }
   },
   "expected": {
@@ -46,6 +56,15 @@
         "analyses.dead_code.production": {
           "value": true,
           "source": "given:analysis.production_override"
+        }
+      }
+    },
+    "cli": {
+      "reason": "fallow trace --path reads the production mode from the config only and ignores --production",
+      "expected": {
+        "analyses.dead_code.production": {
+          "value": false,
+          "source": "default:production-off"
         }
       }
     }

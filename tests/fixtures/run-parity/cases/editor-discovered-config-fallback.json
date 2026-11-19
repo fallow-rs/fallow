@@ -26,6 +26,9 @@
       "compare_keys": [
         "production"
       ]
+    },
+    "cli": {
+      "not_expressible": "Only the language server falls back to the default config. The other surfaces fail on an invalid config"
     }
   },
   "expected": {

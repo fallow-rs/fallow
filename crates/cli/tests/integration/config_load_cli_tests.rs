@@ -520,8 +520,9 @@ fn workspace_notices(output: &CommandOutput) -> usize {
 
 /// A glob of the `workspaces` field that matches two directories without a
 /// `package.json` gives a workspace discovery diagnostic. Each config load of
-/// the main CLI loader prints the notice in human mode, so a command that
-/// loads the config more than one time prints it more than one time.
+/// the main CLI loader prints the notice in human mode. The bare run,
+/// `dead-code`, `dupes`, `health` and `audit` resolve their run once, so they
+/// print the notice once.
 #[test]
 fn the_workspace_diagnostics_notice_prints_once_per_config_load() {
     let dir = project();
@@ -541,10 +542,10 @@ fn the_workspace_diagnostics_notice_prints_once_per_config_load() {
         &["-c", "commit.gpgsign=false", "commit", "-m", "pkgs", "-q"],
     );
     let commands: [(&[&str], usize); 8] = [
-        (&[], 5),
+        (&[], 1),
         (&["dead-code"], 1),
         (&["dupes"], 1),
-        (&["health"], 2),
+        (&["health"], 1),
         (&["audit", "--base", "HEAD"], 1),
         // `fallow list` loads the config in quiet mode and prints its own
         // diagnostics block.
@@ -568,6 +569,169 @@ fn the_workspace_diagnostics_notice_prints_once_per_config_load() {
         let quiet = run(&root, &with_args(command, &["--quiet"]), &[]);
         assert_eq!(workspace_notices(&quiet), 0, "{command:?}");
     }
+}
+
+/// The lines of the workspace discovery notice, singular or plural.
+fn discovery_notice_lines(output: &CommandOutput) -> Vec<&str> {
+    output
+        .stderr
+        .lines()
+        .filter(|line| line.contains("workspace discovery diagnostic"))
+        .collect()
+}
+
+/// The notice counts only the diagnostics of workspace discovery. A
+/// `package.json` that no `workspaces` glob matches is an undeclared
+/// workspace: `fallow workspaces` lists it, but the notice does not count it.
+#[test]
+fn the_workspace_discovery_notice_leaves_out_undeclared_workspaces() {
+    let dir = project();
+    let root = canonical_root(&dir);
+    for package in ["packages/a", "tools/x"] {
+        std::fs::create_dir_all(root.join(package)).unwrap();
+        let name = package.replace('/', "-");
+        std::fs::write(
+            root.join(package).join("package.json"),
+            format!(r#"{{"name":"{name}"}}"#),
+        )
+        .unwrap();
+    }
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"config-load","main":"src/index.ts","workspaces":["packages/*"]}"#,
+    )
+    .unwrap();
+    git(&root, &["add", "."]);
+    git(
+        &root,
+        &[
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-m",
+            "packages",
+            "-q",
+        ],
+    );
+    let commands: [&[&str]; 5] = [
+        &[],
+        &["dead-code"],
+        &["dupes"],
+        &["health"],
+        &["audit", "--base", "HEAD"],
+    ];
+    for command in commands {
+        let human = run(&root, command, &[]);
+        assert!(
+            human.code == 0 || human.code == 1,
+            "{command:?}: {}",
+            human.stderr
+        );
+        assert_eq!(
+            discovery_notice_lines(&human),
+            Vec::<&str>::new(),
+            "{command:?}"
+        );
+    }
+
+    std::fs::create_dir_all(root.join("packages/nopkg")).unwrap();
+    std::fs::write(root.join("packages/nopkg/readme.txt"), "no manifest\n").unwrap();
+    // A commit keeps the audit free of changed files, so it loads the config
+    // one time.
+    git(&root, &["add", "."]);
+    git(
+        &root,
+        &["-c", "commit.gpgsign=false", "commit", "-m", "nopkg", "-q"],
+    );
+    for command in commands {
+        let human = run(&root, command, &[]);
+        assert_eq!(
+            discovery_notice_lines(&human),
+            ["fallow: 1 workspace discovery diagnostic. Run `fallow workspaces`."],
+            "{command:?}"
+        );
+    }
+}
+
+/// A flag usage error prints before the config loads: the run prints the
+/// error and no `loaded config` line. For `dead-code` and `dupes`, the flag
+/// error also wins over a config that fails validation. The bare run needs
+/// the valid config for its plan, so it stops on the config error first.
+#[test]
+fn a_flag_usage_error_prints_before_the_config_loads() {
+    let dir = project();
+    let root = canonical_root(&dir);
+    std::fs::write(root.join(".fallowrc.json"), "{}").unwrap();
+    let growth = "Error: --baseline-base needs --fail-on-baseline-growth.";
+    let cases: [(&[&str], &str); 6] = [
+        (
+            &["dead-code", "--type-aware-project", "tsconfig.json"],
+            "Error: --type-aware-project requires --type-aware",
+        ),
+        (&["dead-code", "--baseline-base", "main"], growth),
+        (&["dupes", "--baseline-base", "main"], growth),
+        (&["--only", "dupes", "--baseline-base", "main"], growth),
+        (
+            &[
+                "health",
+                "--coverage-root",
+                "rel/path",
+                "--coverage",
+                "cov.json",
+            ],
+            "Error: ",
+        ),
+        (
+            &["health", "--report-only", "--min-score", "50"],
+            "Error: --report-only cannot be combined",
+        ),
+    ];
+    let assert_usage_errors = |cases: &[(&[&str], &str)]| {
+        for (args, error) in cases {
+            let human = run(&root, args, &[]);
+            assert_eq!(human.code, 2, "{args:?}: {}", human.stderr);
+            assert!(
+                human.stderr.starts_with(error),
+                "{args:?}: {}",
+                human.stderr
+            );
+            assert_eq!(human.stderr.matches("Error: ").count(), 1, "{args:?}");
+            assert_eq!(loaded_config_lines(&human), Vec::<&str>::new(), "{args:?}");
+        }
+    };
+    assert_usage_errors(&cases);
+
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"plugins":["plugins/escape.json"]}"#,
+    )
+    .unwrap();
+    std::fs::create_dir_all(root.join("plugins")).unwrap();
+    std::fs::write(
+        root.join("plugins/escape.json"),
+        r#"{ "name": "escape", "entryPoints": ["../outside/**"] }"#,
+    )
+    .unwrap();
+    assert_usage_errors(&cases[..3]);
+}
+
+/// An audit that selects no sub-analysis stops when the run resolves, before
+/// the `loaded config` line, so the error is the only line.
+#[test]
+fn an_audit_with_an_empty_selection_prints_only_the_error() {
+    let dir = project();
+    let root = canonical_root(&dir);
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"audit":{"deadCode":false,"health":false,"dupes":false}}"#,
+    )
+    .unwrap();
+    let human = run(&root, &["audit", "--base", "HEAD"], &[]);
+    assert_eq!(human.code, 2, "{}", human.stderr);
+    assert_eq!(
+        human.stderr,
+        "Error: this audit selects no sub-analysis: --skip, the audit.deadCode, audit.health and audit.dupes config keys, and duplicates.enabled leave nothing to run\n"
+    );
 }
 
 /// Whether the dead-code run of `root` skips `src/huge.ts` for its size.

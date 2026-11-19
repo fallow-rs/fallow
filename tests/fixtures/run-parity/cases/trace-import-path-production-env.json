@@ -25,6 +25,15 @@
     },
     "vscode": {
       "not_expressible": "The editor has no trace input for the language server"
+    },
+    "cli": {
+      "argv": [
+        "fallow",
+        "trace",
+        "--path",
+        "src/a.ts",
+        "src/b.ts"
+      ]
     }
   },
   "expected": {

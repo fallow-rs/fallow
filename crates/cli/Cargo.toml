@@ -135,6 +135,8 @@ doctest = false
 [dev-dependencies]
 # The permutation oracle runs the test build of the binary with the hook on.
 fallow-config = { workspace = true, features = ["permutation-hook"] }
+# The run parity matrix harness.
+fallow-engine = { workspace = true, features = ["testing"] }
 insta = { workspace = true }
 jsonschema = { workspace = true }
 fallow-types = { workspace = true }

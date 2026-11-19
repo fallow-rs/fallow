@@ -399,6 +399,67 @@ pub fn load_config_for_analysis(
     Ok(resolved)
 }
 
+/// The side effects of a config load for a resolved run: the `loaded config`
+/// line, the config shape of the telemetry, the cache notice candidate, the
+/// stash and the notice of the workspace diagnostics, the warning for an
+/// unknown security category and the workspace patterns of the output.
+///
+/// `given_config` is the `--config` path as the user wrote it, so the line
+/// names an explicit file as given.
+pub fn on_run_resolved(
+    run: &fallow_engine::resolved_run::ResolvedRun,
+    given_config: Option<&Path>,
+    output: OutputFormat,
+    quiet: bool,
+) {
+    let config_file = run.config_file().value().as_deref();
+    if let Some(path) = given_config.or(config_file) {
+        log_config_loaded(path, output, quiet);
+    }
+    crate::telemetry::note_config_shape(config_shape_for(run.config(), config_file.is_some()));
+    let root = run.root().value();
+    let settings = run.settings();
+    crate::cache_notice::record_candidate(
+        root,
+        settings.cache_dir.value(),
+        output,
+        quiet,
+        *settings.no_cache.value(),
+    );
+    let runnable = [
+        fallow_config::PlannedAnalysis::DeadCode,
+        fallow_config::PlannedAnalysis::Health,
+        fallow_config::PlannedAnalysis::Duplication,
+    ]
+    .into_iter()
+    .find_map(|analysis| match run.analysis(analysis) {
+        fallow_engine::resolved_run::AnalysisSlot::Runs(runnable) => Some(runnable),
+        fallow_engine::resolved_run::AnalysisSlot::Skipped { .. } => None,
+    });
+    if let Some(runnable) = runnable {
+        // The notice and the stash hold the diagnostics of workspace
+        // discovery only. The session adds the undeclared workspaces to its
+        // own list, so they reach the reports without the notice.
+        let diagnostics: Vec<_> = runnable
+            .workspace_diagnostics()
+            .iter()
+            .filter(|diagnostic| {
+                !matches!(
+                    diagnostic.kind,
+                    fallow_config::WorkspaceDiagnosticKind::UndeclaredWorkspace
+                )
+            })
+            .cloned()
+            .collect();
+        if !diagnostics.is_empty() && matches!(output, OutputFormat::Human) && !quiet {
+            eprintln!("{}", workspace_diagnostics_notice(diagnostics.len()));
+        }
+        fallow_config::stash_workspace_diagnostics(root, diagnostics);
+        crate::output_runtime::set_workspace_patterns(&runnable.config().workspace_patterns);
+    }
+    warn_unknown_security_categories(&run.config().security);
+}
+
 /// Load the config file through the engine loader: the file at `config_path`,
 /// else the discovered file. A load error prints on the error channel of
 /// `output` and gives exit code 2.

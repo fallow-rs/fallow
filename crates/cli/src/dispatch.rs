@@ -34,6 +34,8 @@ use crate::{
     suppressions, telemetry, trace_chain, trace_dependency, trace_error, trace_path, viz, watch,
 };
 use crate::{error::emit_input_error, exit_codes::exit_invalid_input};
+use fallow_config::PlannedAnalysis;
+use fallow_engine::resolved_run::ResolvedRun;
 
 #[path = "dispatch_inspect.rs"]
 mod inspect_dispatch;
@@ -1649,8 +1651,8 @@ fn dispatch_list(dispatch: &DispatchContext<'_>, args: &ListDispatchArgs) -> Exi
 
 fn dispatch_check(dispatch: &DispatchContext<'_>, args: &CheckDispatchArgs) -> ExitCode {
     let cli = dispatch.cli;
-    let production = match dispatch.production_for(fallow_config::ProductionAnalysis::DeadCode) {
-        Ok(production) => production,
+    let pending = match dispatch.begin_run() {
+        Ok(pending) => pending,
         Err(code) => return code,
     };
     if let Some(code) = validate_type_aware_check_options(dispatch, args) {
@@ -1663,16 +1665,17 @@ fn dispatch_check(dispatch: &DispatchContext<'_>, args: &CheckDispatchArgs) -> E
     baseline_growth::run_gated(
         &dispatch.growth_ctx(baseline_growth::GrowthOwner::DeadCode),
         &growth_targets,
-        || dispatch_check_run(dispatch, args, production),
+        || dispatch.with_run(&pending, |run| dispatch_check_run(dispatch, args, run)),
     )
 }
 
 fn dispatch_check_run(
     dispatch: &DispatchContext<'_>,
     args: &CheckDispatchArgs,
-    production: bool,
+    run: &ResolvedRun,
 ) -> ExitCode {
     let cli = dispatch.cli;
+    let production = *run.production(PlannedAnalysis::DeadCode).value();
     let (output, quiet, fail_on_issues) =
         (dispatch.output, dispatch.quiet, dispatch.fail_on_issues);
     check::run_check(&CheckOptions {
@@ -1699,6 +1702,7 @@ fn dispatch_check_run(
         sarif_file: cli.sarif_file.as_deref(),
         production,
         production_override: Some(production),
+        run: crate::cli_production::runnable(run, PlannedAnalysis::DeadCode),
         workspace: cli.workspace.as_deref(),
         changed_workspaces: cli.changed_workspaces.as_deref(),
         group_by: cli.group_by,
@@ -1759,8 +1763,8 @@ struct DupesDispatchArgs {
 
 fn dispatch_dupes(dispatch: &DispatchContext<'_>, args: &DupesDispatchArgs) -> ExitCode {
     let cli = dispatch.cli;
-    let production = match dispatch.production_for(fallow_config::ProductionAnalysis::Dupes) {
-        Ok(production) => production,
+    let pending = match dispatch.begin_run() {
+        Ok(pending) => pending,
         Err(code) => return code,
     };
     let growth_targets = baseline_growth::targets(&[(
@@ -1770,16 +1774,17 @@ fn dispatch_dupes(dispatch: &DispatchContext<'_>, args: &DupesDispatchArgs) -> E
     baseline_growth::run_gated(
         &dispatch.growth_ctx(baseline_growth::GrowthOwner::Dupes),
         &growth_targets,
-        || dispatch_dupes_run(dispatch, args, production),
+        || dispatch.with_run(&pending, |run| dispatch_dupes_run(dispatch, args, run)),
     )
 }
 
 fn dispatch_dupes_run(
     dispatch: &DispatchContext<'_>,
     args: &DupesDispatchArgs,
-    production: bool,
+    run: &ResolvedRun,
 ) -> ExitCode {
     let cli = dispatch.cli;
+    let production = *run.production(PlannedAnalysis::Duplication).value();
     let (output, quiet) = (dispatch.output, dispatch.quiet);
     dupes::run_dupes(&DupesOptions {
         root: dispatch.root,
@@ -1799,6 +1804,7 @@ fn dispatch_dupes_run(
         fail_on_issues: dispatch.fail_on_issues,
         production,
         production_override: Some(production),
+        run: crate::cli_production::runnable(run, PlannedAnalysis::Duplication),
         trace: args.trace.as_deref(),
         changed_since: cli.changed_since.as_deref(),
         diff_index: None,
@@ -1820,9 +1826,6 @@ fn dispatch_dupes_run(
 }
 
 struct AuditDispatchArgs {
-    production_dead_code: bool,
-    production_health: bool,
-    production_dupes: bool,
     dead_code_baseline: Option<PathBuf>,
     health_baseline: Option<PathBuf>,
     dupes_baseline: Option<PathBuf>,
@@ -2182,30 +2185,6 @@ pub fn resolve_coverage_inputs(
         .map_err(|err| emit_input_error(&err.to_string(), output))
 }
 
-/// [`resolve_coverage_inputs`] for commands that load config lazily: the
-/// config is read only when a flag and env var are both absent.
-pub fn resolve_health_coverage_inputs(
-    dispatch: &DispatchContext<'_>,
-    cli_coverage: Option<&std::path::Path>,
-    cli_coverage_root: Option<&std::path::Path>,
-) -> Result<ResolvedHealthCoverageInputs, ExitCode> {
-    resolve_coverage_inputs(cli_coverage, cli_coverage_root, dispatch.output, || {
-        Ok(load_config(
-            dispatch.root,
-            &dispatch.cli.config,
-            LoadConfigArgs {
-                output: dispatch.output,
-                no_cache: dispatch.cli.no_cache,
-                threads: dispatch.threads,
-                production: dispatch.cli.production,
-                quiet: dispatch.quiet,
-                allow_remote_extends: dispatch.cli.allow_remote_extends,
-            },
-        )?
-        .health)
-    })
-}
-
 fn path_from_env(name: &str) -> Option<PathBuf> {
     std::env::var_os(name)
         .filter(|value| !value.is_empty())
@@ -2253,7 +2232,6 @@ fn resolve_runtime_coverage_options(
 
 fn dispatch_health(dispatch: &DispatchContext<'_>, args: &HealthDispatchArgs<'_>) -> ExitCode {
     let cli = dispatch.cli;
-    let root = dispatch.root;
     let (output, _quiet, _fail_on_issues) =
         (dispatch.output, dispatch.quiet, dispatch.fail_on_issues);
     if let Err(code) = validate_health_report_only_gate(
@@ -2274,17 +2252,17 @@ fn dispatch_health(dispatch: &DispatchContext<'_>, args: &HealthDispatchArgs<'_>
         Ok(options) => options,
         Err(code) => return code,
     };
-    let production = match resolve_production_modes(cli, root, output, false, false, false) {
-        Ok(modes) => modes.for_analysis(fallow_config::ProductionAnalysis::Health),
+    let pending = match dispatch.begin_run() {
+        Ok(pending) => pending,
         Err(code) => return code,
     };
-    let coverage_inputs =
-        match resolve_health_coverage_inputs(dispatch, args.coverage, args.coverage_root) {
-            Ok(inputs) => inputs,
-            Err(code) => return code,
-        };
+    let (cov, cov_root) = (args.coverage, args.coverage_root);
+    let coverage_inputs = match dispatch.health_coverage_inputs(&pending, cov, cov_root) {
+        Ok(inputs) => inputs,
+        Err(code) => return code,
+    };
     let run = derive_health_dispatch_run(args, output, &coverage_inputs, runtime_coverage);
-    let resolved = ResolvedHealthDispatch { run, production };
+    let resolved = ResolvedHealthDispatch { run };
     // `--report-only` is a request never to fail, so the gate stands down and
     // says so instead of judging a baseline whose verdict cannot count.
     if args.report_only && cli.fail_on_baseline_growth {
@@ -2292,7 +2270,9 @@ fn dispatch_health(dispatch: &DispatchContext<'_>, args: &HealthDispatchArgs<'_>
             dispatch.growth_flags(),
             "health --report-only never fails a run",
         );
-        return run_health_dispatch(dispatch, args, resolved);
+        return dispatch.with_run(&pending, |run| {
+            run_health_dispatch(dispatch, args, resolved, run)
+        });
     }
     let growth_targets = baseline_growth::targets(&[(
         cli.baseline.as_deref(),
@@ -2301,7 +2281,11 @@ fn dispatch_health(dispatch: &DispatchContext<'_>, args: &HealthDispatchArgs<'_>
     baseline_growth::run_gated(
         &dispatch.growth_ctx(baseline_growth::GrowthOwner::Health),
         &growth_targets,
-        || run_health_dispatch(dispatch, args, resolved),
+        || {
+            dispatch.with_run(&pending, |run| {
+                run_health_dispatch(dispatch, args, resolved, run)
+            })
+        },
     )
 }
 
@@ -2386,19 +2370,18 @@ fn health_coverage_inputs(
 }
 
 /// Resolved inputs threaded from `dispatch_health` into the `HealthOptions`
-/// builder. Owns the normalized engine run contract and resolved production
-/// mode.
+/// builder. Owns the normalized engine run contract.
 struct ResolvedHealthDispatch<'a> {
     run: fallow_engine::health::HealthRunOptions<'a>,
-    production: bool,
 }
 
 /// Build `HealthOptions` from the parsed args plus the resolved dispatch inputs,
-/// then run the health analysis.
+/// then run the health analysis of `resolved_run`.
 fn run_health_dispatch(
     dispatch: &DispatchContext<'_>,
     args: &HealthDispatchArgs<'_>,
     resolved: ResolvedHealthDispatch<'_>,
+    resolved_run: &ResolvedRun,
 ) -> ExitCode {
     let cli = dispatch.cli;
     let (output, quiet, fail_on_issues) =
@@ -2406,7 +2389,8 @@ fn run_health_dispatch(
     let mut run = resolved.run;
     run.gates.fail_on_issues = fail_on_issues;
     let sections = run.sections;
-    let production = resolved.production;
+    let health = crate::cli_production::runnable(resolved_run, PlannedAnalysis::Health);
+    let production = health.is_some_and(|health| *health.production().value());
     health::run_health(
         &HealthOptions {
             root: dispatch.root,
@@ -2465,6 +2449,7 @@ fn run_health_dispatch(
             trend_from: args.trend_from,
             scope: args.scope.clone(),
         },
+        health,
         dispatch.json_style,
         &health::TypeAwareHealthOptions {
             enabled: cli.type_aware_override(),

@@ -675,9 +675,11 @@ impl Context<'_> {
         };
         let threads = inputs.threads.as_ref().map_or_else(
             || {
-                let threads =
-                    std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get);
-                Sourced::new(threads, default("available-parallelism"), Scope::Global)
+                Sourced::new(
+                    super::available_threads(),
+                    default("available-parallelism"),
+                    Scope::Global,
+                )
             },
             |given| given_value(given, Scope::Global),
         );

@@ -753,3 +753,11 @@ fn relative_config_path_joins_snapshot_cwd() {
         }
     );
 }
+
+#[test]
+fn thread_fallback_is_one() {
+    let unavailable = Err(std::io::Error::other("no parallelism"));
+    assert_eq!(super::threads_or_one(unavailable), 1);
+    let four = std::num::NonZeroUsize::new(4).expect("non-zero");
+    assert_eq!(super::threads_or_one(Ok(four)), 4);
+}

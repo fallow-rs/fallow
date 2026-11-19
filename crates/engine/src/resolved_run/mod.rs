@@ -420,6 +420,19 @@ fn changed_decided_field(
         .find_map(|(field, same)| (!same).then_some(field))
 }
 
+/// The default thread count of a run: the available parallelism of the host,
+/// else 1.
+#[must_use]
+pub fn available_threads() -> usize {
+    threads_or_one(std::thread::available_parallelism())
+}
+
+/// The thread count of an `available_parallelism` result. One thread when the
+/// host cannot tell, so a run never starts more workers than it can prove.
+fn threads_or_one(parallelism: std::io::Result<std::num::NonZeroUsize>) -> usize {
+    parallelism.map_or(1, std::num::NonZeroUsize::get)
+}
+
 /// The root of a path input: absolute paths stay, relative paths join `cwd`.
 fn join_cwd(path: &Path, cwd: Option<&Path>) -> Option<PathBuf> {
     if path.is_absolute() {

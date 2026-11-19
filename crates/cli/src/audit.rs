@@ -1213,8 +1213,7 @@ fn compute_brief_package_importers(
 ///
 /// Maps each changed absolute path to its graph `FileId`, computes the per-file
 /// blast + confidence signals, and path-resolves them. Returns `None` when the
-/// graph was not retained (off the brief path) or no changed file maps to a known
-/// module.
+/// graph was not retained (off the brief path) or no changed file maps to a known module.
 fn compute_brief_focus_facts(
     root: &std::path::Path,
     check: &CheckResult,
@@ -2507,6 +2506,7 @@ fn build_audit_dupes_options<'a>(
         fail_on_issues: false,
         production: audit_production_flags(opts).mode(ProductionAnalysis::Dupes),
         production_override: opts.production_dupes,
+        run: None,
         trace: None,
         changed_since,
         diff_index: None,

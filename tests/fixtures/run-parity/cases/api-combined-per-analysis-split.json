@@ -27,6 +27,11 @@
       "compare_keys": [
         "production"
       ]
+    },
+    "cli": {
+      "argv": [
+        "fallow"
+      ]
     }
   },
   "expected": {
@@ -50,6 +55,15 @@
       "reason": "The language server has one editor command, which plans dead code and duplication",
       "expected": {
         "command": "editor"
+      }
+    },
+    "cli": {
+      "reason": "The CLI reads the FALLOW_PRODUCTION* variables for the bare run",
+      "expected": {
+        "analyses.health.production": {
+          "value": true,
+          "source": "environment:FALLOW_PRODUCTION_HEALTH"
+        }
       }
     }
   }

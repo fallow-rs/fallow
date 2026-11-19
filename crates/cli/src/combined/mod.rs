@@ -59,6 +59,9 @@ pub struct CombinedOptions<'a> {
     pub production_dead_code: Option<bool>,
     pub production_health: Option<bool>,
     pub production_dupes: Option<bool>,
+    /// The resolved run of the bare `fallow` command. `None` loads the config
+    /// for each analysis.
+    pub run: Option<&'a fallow_engine::resolved_run::ResolvedRun>,
     pub workspace: Option<&'a [String]>,
     pub changed_workspaces: Option<&'a str>,
     pub group_by: Option<crate::GroupBy>,
@@ -147,39 +150,37 @@ pub struct BareAnalyses {
     pub run_health: bool,
 }
 
-/// Resolve which analyses the bare `fallow` run executes.
+/// The analyses that the bare `fallow` run executes, from its resolved run.
 ///
 /// `--only` and `--skip` select as in [`resolve_analyses`]. Without `--only`,
 /// `duplicates.enabled: false` in the config also turns duplication off, so a
 /// project that turned duplication detection off gets no clone groups from
-/// the bare run. `--only dupes` names the analysis and runs it.
-pub fn resolve_bare_analyses(
+/// the bare run. `--only dupes` names the analysis and runs it. The resolver
+/// fails a run that selects no analysis.
+pub fn bare_analyses(
     cli: &crate::Cli,
-    root: &std::path::Path,
-    output: OutputFormat,
-) -> Result<BareAnalyses, ExitCode> {
-    let (only, skip) = planned_lists(&cli.only, &cli.skip);
-    let request = RunRequest::from_lists(RunCommand::Combined, &only, &skip);
-    let plan = crate::cli_production::load_run_plan(cli, root, output, request)?;
-    let disabled_by_config = plan.duplication.off_by(ConfigKey::DuplicatesEnabled);
-    if disabled_by_config && cli.dupes_baseline.is_some() {
+    run: &fallow_engine::resolved_run::ResolvedRun,
+) -> BareAnalyses {
+    let plan = crate::cli_production::run_plan(run);
+    if plan.duplication.off_by(ConfigKey::DuplicatesEnabled) && cli.dupes_baseline.is_some() {
         eprintln!("{INERT_DUPES_BASELINE_NOTE}");
     }
-    if plan.runs_any() {
-        return Ok(BareAnalyses {
-            run_check: plan.dead_code.runs(),
-            run_dupes: plan.duplication.runs(),
-            run_health: plan.health.runs(),
-        });
+    BareAnalyses {
+        run_check: plan.dead_code.runs(),
+        run_dupes: plan.duplication.runs(),
+        run_health: plan.health.runs(),
     }
-    Err(crate::error::emit_input_error(
-        if disabled_by_config {
-            "--skip leaves no analysis to run: duplicates.enabled is false in the config, so dupes does not run. Keep dead-code or health, or pass --only dupes"
-        } else {
-            "--skip leaves no analysis to run: pass at most two of dead-code, dupes and health"
-        },
-        output,
-    ))
+}
+
+/// The pending run of a bare `fallow` invocation and its analyses. The plan
+/// needs the run, so a config that fails validation stops the bare run here,
+/// before its flag checks.
+pub fn begin_bare_run(
+    dispatch: &crate::DispatchContext<'_>,
+) -> Result<(crate::cli_production::PendingRun, BareAnalyses), ExitCode> {
+    let pending = dispatch.begin_run()?;
+    let analyses = bare_analyses(dispatch.cli, dispatch.checked_run(&pending)?);
+    Ok((pending, analyses))
 }
 
 /// Resolve which dead-code findings the bare run reports from `--only` and
@@ -342,6 +343,7 @@ fn build_combined_check_options<'a>(
         sarif_file: opts.sarif_file,
         production: combined_production_flags(opts).mode(ProductionAnalysis::DeadCode),
         production_override: opts.production_dead_code,
+        run: runnable(opts, PlannedAnalysis::DeadCode),
         workspace: opts.workspace,
         changed_workspaces: opts.changed_workspaces,
         group_by: opts.group_by,
@@ -482,7 +484,8 @@ fn run_combined_health(
 
     let mut health_opts = build_health_opts(opts);
     if check_result.is_none() {
-        let (config, config_ms) = crate::health::load_health_config(&health_opts)?;
+        let health = runnable(opts, PlannedAnalysis::Health);
+        let (config, config_ms) = crate::health::load_health_config_in(&health_opts, health)?;
         let resolved = crate::health::resolve_type_aware_health_options(
             &crate::health::TypeAwareHealthOptions {
                 enabled: opts.type_aware,
@@ -549,13 +552,14 @@ fn run_combined_health(
         let pre_computed_duplication = dupes_result
             .as_mut()
             .and_then(|dupes| dupes.unfiltered_report.take());
-        crate::health::execute_health_with_shared_parse(
+        crate::health::execute_health_with_shared_parse_in(
             &health_opts,
             shared_data,
             pre_computed_duplication,
+            runnable(opts, PlannedAnalysis::Health),
         )?
     } else {
-        crate::health::execute_health(&health_opts)?
+        crate::health::execute_health_in(&health_opts, runnable(opts, PlannedAnalysis::Health))?
     };
     attach_combined_type_coupling(opts, check_result, &mut result)?;
     *health_result = Some(result);
@@ -659,6 +663,9 @@ fn run_combined_dupes(
 }
 
 fn load_combined_dupes_config(opts: &CombinedOptions<'_>) -> Result<DuplicatesConfig, ExitCode> {
+    if let Some(dupes) = runnable(opts, PlannedAnalysis::Duplication) {
+        return Ok(dupes.config().duplicates.clone());
+    }
     Ok(load_config_for_analysis(
         opts.root,
         opts.config_path,
@@ -720,6 +727,7 @@ fn build_combined_dupes_options<'a>(
         fail_on_issues: opts.fail_on_issues,
         production: combined_production_flags(opts).mode(ProductionAnalysis::Dupes),
         production_override: opts.production_dupes,
+        run: runnable(opts, PlannedAnalysis::Duplication),
         trace: None,
         changed_since: opts.changed_since,
         diff_index: None,
@@ -770,6 +778,15 @@ fn shared_dupes_files(
     }
 
     check_result.and_then(|r| r.shared_parse.as_ref().map(|sp| sp.files.clone()))
+}
+
+/// The analysis of the resolved run of the combined run, when it has one.
+fn runnable<'a>(
+    opts: &CombinedOptions<'a>,
+    analysis: PlannedAnalysis,
+) -> Option<fallow_engine::resolved_run::Runnable<'a>> {
+    opts.run
+        .and_then(|run| crate::cli_production::runnable(run, analysis))
 }
 
 /// The production flags of the combined run.
@@ -1089,6 +1106,7 @@ mod tests {
             production_dead_code: None,
             production_health: None,
             production_dupes: None,
+            run: None,
             workspace: None,
             changed_workspaces: None,
             group_by: None,
