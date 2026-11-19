@@ -15,12 +15,13 @@ struct ProductionRow {
 /// The rows of the production variables. A command that is in no row reads
 /// no production variable. The Rust API, the Node bindings and the language
 /// server read no production variable for any command.
-const PRODUCTION_ROWS: [ProductionRow; 8] = [
+const PRODUCTION_ROWS: [ProductionRow; 9] = [
     // Flags, then variables, then config: `crates/cli/src/lib.rs:1059`,
     // `crates/cli/src/dispatch_audit_inputs.rs:32`,
     // `crates/cli/src/dispatch.rs:1652`, `:1762`, `:2284`. MCP: the `analyze`,
-    // `audit`, `dupes`, `check_health` and combined tools call
-    // `typed_production` (`crates/mcp/src/tools/api_runtime.rs:201`).
+    // `check_changed`, `check_architecture`, `audit`, `find_dupes`,
+    // `trace_clone`, `check_health` and Code Mode `combined` tools
+    // (`crates/mcp/src/tools/run_inputs.rs`).
     ProductionRow {
         commands: &[
             CommandKind::Combined,
@@ -33,9 +34,10 @@ const PRODUCTION_ROWS: [ProductionRow; 8] = [
         mcp: true,
     },
     // `crates/cli/src/dispatch.rs:1626`, `:1575`, `:1542`, `:1522`, `:1207`,
-    // `:1254`. MCP: `flags` calls `typed_production`
-    // (`crates/mcp/src/tools/flags.rs:130`); `fix` and `suppressions` run the
-    // CLI (`crates/mcp/src/tools/fix.rs:44`,
+    // `:1254`. MCP: `feature_flags` and `project_info`; `list_boundaries`
+    // reads only a value that turns production mode on
+    // (`crates/mcp/src/tools/run_inputs.rs`); `fix` and `suppressions` run
+    // the CLI (`crates/mcp/src/tools/fix.rs:44`,
     // `crates/mcp/src/tools/suppressions.rs:45`).
     ProductionRow {
         commands: &[
@@ -49,8 +51,7 @@ const PRODUCTION_ROWS: [ProductionRow; 8] = [
         cli: true,
         mcp: true,
     },
-    // `crates/cli/src/dispatch.rs:495`. MCP: `trace_dependency` calls
-    // `typed_production` (`crates/mcp/src/tools/trace.rs:619`).
+    // `crates/cli/src/dispatch.rs:495`. MCP: `trace_dependency`.
     ProductionRow {
         commands: &[CommandKind::TraceDependency],
         cli: true,
@@ -63,16 +64,19 @@ const PRODUCTION_ROWS: [ProductionRow; 8] = [
         mcp: false,
     },
     // Config only: `crates/cli/src/trace_path.rs`, `docs/environment-variables.md:69`.
-    // MCP: `trace_import_path` and `trace_error` take the parameter only
-    // (`crates/mcp/src/tools/trace.rs:629`).
+    // MCP: `trace_import_path` and `trace_error` take the parameter only.
     ProductionRow {
-        commands: &[
-            CommandKind::TracePath,
-            CommandKind::TraceChain,
-            CommandKind::TraceError,
-        ],
+        commands: &[CommandKind::TracePath, CommandKind::TraceError],
         cli: false,
         mcp: false,
+    },
+    // The export and file traces. The CLI runs them as `fallow dead-code
+    // --trace` and `--trace-file`, a dead-code command. The MCP tools
+    // `trace_export` and `trace_file` read the variables on both routes.
+    ProductionRow {
+        commands: &[CommandKind::TraceChain],
+        cli: false,
+        mcp: true,
     },
     // Config only, a production flag is an error: `crates/cli/src/lib.rs:216`
     // (security), `crates/cli/src/lib.rs:980` with `crates/api/src/doctor.rs:90`
@@ -133,17 +137,18 @@ pub fn applies(var: EnvVar, surface: Surface, command: CommandKind) -> bool {
         | EnvVar::PackageBaselines
         | EnvVar::ExtendsTimeoutSecs => true,
         // The analysis scope of the MCP ambient fields
-        // (`crates/mcp/src/tools/api_runtime.rs:180`).
+        // (`shared_analysis_options` in `crates/mcp/src/tools/api_runtime.rs`).
         EnvVar::ChangedSince => surface == Surface::Mcp,
-        // MCP: `crates/mcp/src/tools/api_runtime.rs:116`. The CLI sets up the
+        // MCP: `env_diff_file` in `crates/mcp/src/tools/api_runtime.rs`. The CLI sets up the
         // diff filter for every command (`crates/cli/src/cli_startup.rs:844`),
         // and the filter reads the variable when no flag gives a diff
         // (`crates/cli/src/report/ci/diff_filter.rs:150`).
         EnvVar::DiffFile => matches!(surface, Surface::Cli | Surface::Mcp),
         // `docs/environment-variables.md:99`: the `health`, bare, `audit` and
         // `viz` CLI commands (`crates/cli/src/dispatch.rs:2179`), and the MCP
-        // `audit` and `check_health` tools
-        // (`crates/mcp/src/tools/api_runtime.rs:136`).
+        // `audit` and `check_health` tools and the Code Mode `combined` call
+        // (`resolve_typed_coverage_inputs` in
+        // `crates/mcp/src/tools/api_runtime.rs`).
         EnvVar::Coverage | EnvVar::CoverageRoot => coverage_applies(surface, command),
         // Only the audit base of `crates/api/src/audit_run/base_ref.rs:64`
         // reads it.
@@ -167,7 +172,10 @@ const fn coverage_applies(surface: Surface, command: CommandKind) -> bool {
             command,
             CommandKind::Health | CommandKind::Combined | CommandKind::Audit | CommandKind::Viz
         ),
-        Surface::Mcp => matches!(command, CommandKind::Health | CommandKind::Audit),
+        Surface::Mcp => matches!(
+            command,
+            CommandKind::Health | CommandKind::Audit | CommandKind::Combined
+        ),
         Surface::Api | Surface::Node | Surface::Lsp => false,
     }
 }
