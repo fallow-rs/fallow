@@ -105,10 +105,14 @@ pub(in crate::resolve) fn try_package_source_or_output(
 
 /// Map a package subpath that names build output to its source file.
 ///
-/// The package root (an empty `subpath`) maps through `main`. A deep import
-/// such as `pkg/dist/util` names the output file `dist/util.js` or
-/// `dist/util/index.js`. Node resolves these paths at run time, so they get
-/// the same output-to-source mapping as a package map target.
+/// The package root (an empty `subpath`) maps through `main`, then through
+/// `types` and `typings`. TypeScript resolves a package that has only a
+/// declaration entry, such as a native module that ships its specification
+/// file.
+///
+/// A deep import such as `pkg/dist/util` names the output file `dist/util.js`
+/// or `dist/util/index.js`. Node resolves these paths at run time, so they
+/// get the same output-to-source mapping as a package map target.
 fn try_output_subpath_source(
     ctx: &ResolveContext<'_>,
     manifest: &PackageManifestInfo,
@@ -116,9 +120,16 @@ fn try_output_subpath_source(
 ) -> Option<FileId> {
     let resolve = |target: &str| resolve_package_map_target(ctx, manifest, target, None);
     if subpath.is_empty() {
-        let main = manifest.package_json.main.as_deref()?;
-        safe_relative_package_source_path(main)?;
-        return resolve(&format!("./{}", main.trim_start_matches("./")));
+        let package_json = &manifest.package_json;
+        return [
+            &package_json.main,
+            &package_json.types,
+            &package_json.typings,
+        ]
+        .into_iter()
+        .flatten()
+        .filter(|entry| safe_relative_package_source_path(entry).is_some())
+        .find_map(|entry| resolve(&format!("./{}", entry.trim_start_matches("./"))));
     }
     safe_relative_package_source_path(subpath)?;
     let has_output_extension = Path::new(subpath)

@@ -9,12 +9,17 @@ const FIXTURE: &str = "effect-schema-exports-as-types";
 /// Exports that stay value exports with the option on. A forwarded decoder,
 /// a forwarded plain value, an alias of a plain value, a `pipe` on a plain
 /// value and a re-export whose name matches a schema import are not schemas.
+/// A `pipe` whose argument is an `HttpApiSchema` member that is not a
+/// transform call (a guard, or a transform factory that is not called) is not
+/// a schema.
 const VALUE_EXPORTS_WITH_OPTION_ON: &[&str] = &[
     "Collided",
     "NotEffectSchema",
     "aliasedPlain",
+    "bareHttpTransform",
     "decodeBaseRule",
     "decodeUsed",
+    "httpStatusProbe",
     "notDerived",
     "plainValue",
     "unusedHelper",
@@ -65,8 +70,10 @@ fn option_off_reports_schemas_as_unused_exports() {
             "AnnotatedRule",
             "ChainedError",
             "Collided",
+            "CreatedBody",
             "DerivedRule",
             "DerivedTwice",
+            "FormRequest",
             "ForwardedDefault",
             "ForwardedUnion",
             "NotEffectSchema",
@@ -76,11 +83,13 @@ fn option_off_reports_schemas_as_unused_exports() {
             "UnusedPayload",
             "UnusedUser",
             "aliasedPlain",
+            "bareHttpTransform",
             "decodeBaseRule",
             "decodeUsed",
             "default",
             "default",
             "default",
+            "httpStatusProbe",
             "notDerived",
             "plainValue",
             "unusedHelper",
@@ -103,8 +112,10 @@ fn option_on_reports_schemas_as_unused_types() {
             "AliasedRule",
             "AnnotatedRule",
             "ChainedError",
+            "CreatedBody",
             "DerivedRule",
             "DerivedTwice",
+            "FormRequest",
             "ForwardedDefault",
             "ForwardedUnion",
             "PairedSchema",

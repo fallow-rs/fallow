@@ -1,0 +1,6 @@
+{
+  "name": "@fixture/native-spec",
+  "version": "0.0.0",
+  "private": true,
+  "types": "./src/Spec.ts"
+}

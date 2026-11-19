@@ -261,6 +261,8 @@ mod tsdown_root_workspace_globs;
 mod type_test_entries;
 #[path = "integration_test/typed_receiver_scoping.rs"]
 mod typed_receiver_scoping;
+#[path = "integration_test/types_only_package_entry.rs"]
+mod types_only_package_entry;
 #[path = "integration_test/unmeasured_zero_diagnostics.rs"]
 mod unmeasured_zero_diagnostics;
 #[path = "integration_test/unplugin_icons_plugin.rs"]

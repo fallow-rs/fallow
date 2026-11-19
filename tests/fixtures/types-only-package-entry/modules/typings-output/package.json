@@ -1,0 +1,6 @@
+{
+  "name": "@fixture/typings-output",
+  "version": "0.0.0",
+  "private": true,
+  "typings": "./dist/index.d.ts"
+}

@@ -120,6 +120,23 @@ pub(super) const PIPE_TRANSFORMS: &[&str] = &[
     "withDecodingDefaultTypeKey",
 ];
 
+/// `HttpApiSchema` functions whose call gives a function from a schema to a
+/// schema, for `pipe`. The list comes from the typings of `@effect/platform`
+/// 0.97.2 (`asEmpty`, `withEncoding`) and effect 4.1.3. It leaves out
+/// `annotations` of `@effect/platform`, which returns an annotations object.
+pub(super) const HTTP_API_PIPE_TRANSFORMS: &[&str] = &[
+    "asEmpty",
+    "asFormUrlEncoded",
+    "asJson",
+    "asMultipart",
+    "asMultipartStream",
+    "asNoContent",
+    "asText",
+    "asUint8Array",
+    "status",
+    "withEncoding",
+];
+
 /// PascalCase `Schema` names that are only a type or an interface in
 /// effect 3.22.4 and effect 4.0.5, such as `Schema.Schema` and `Schema.Top`.
 pub(super) const TYPE_ONLY_NAMES: &[&str] = &[
