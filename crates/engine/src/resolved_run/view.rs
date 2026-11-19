@@ -2,8 +2,8 @@
 
 use fallow_config::{AnalysisSelection, SkipReason};
 use fallow_output::{
-    AnalysesView, AnalysisView, EnvView, RESOLVED_RUN_VIEW_SCHEMA_VERSION, ResolvedRunView,
-    RunSettingsView, SelectionView,
+    AnalysesView, AnalysisView, EnvView, RESOLVED_RUN_VIEW_SCHEMA_VERSION, ResolvedRunKind,
+    ResolvedRunView, RunSettingsView, SelectionView,
 };
 use fallow_types::sourced::Sourced;
 
@@ -35,6 +35,7 @@ impl ResolvedRun {
         let settings = &self.settings;
         ResolvedRunView {
             schema_version: RESOLVED_RUN_VIEW_SCHEMA_VERSION,
+            kind: ResolvedRunKind::ResolvedRun,
             surface: self.surface,
             command: self.command,
             root: cloned(&self.root),

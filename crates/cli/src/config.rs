@@ -130,6 +130,98 @@ pub fn run_config_with_options(input: RunConfigInput<'_>) -> ExitCode {
     }
 }
 
+/// Run `fallow config`: the view of the run with `--resolved`, else the
+/// loaded config file.
+pub fn run_config_command(
+    dispatch: &crate::DispatchContext<'_>,
+    args: &crate::cli_args::ConfigArgs,
+) -> ExitCode {
+    if args.resolved {
+        return run_resolved_view(dispatch);
+    }
+    run_config_with_options(RunConfigInput {
+        root: dispatch.root,
+        explicit_config: dispatch.cli.config.as_deref(),
+        path_only: args.path,
+        output: dispatch.output,
+        quiet: dispatch.quiet,
+        json_style: dispatch.json_style,
+        load_options: fallow_config::ConfigLoadOptions {
+            allow_remote_extends: dispatch.cli.allow_remote_extends,
+        },
+    })
+}
+
+/// Run `fallow config --resolved`: resolve the run of the command that
+/// `--for` names, without its side effects, and print the view of the run as
+/// JSON on stdout for each output format. A path under the root prints
+/// relative to the root. A resolve error prints as a structured error and
+/// gives exit code 2.
+pub fn run_resolved_view(dispatch: &crate::DispatchContext<'_>) -> ExitCode {
+    let output = dispatch.output;
+    let Some(inputs) = dispatch.run_inputs else {
+        return emit_input_error("this command resolves no run", output);
+    };
+    let run = match fallow_engine::resolved_run::resolve_run(inputs) {
+        Ok(run) => run,
+        Err(err) => {
+            let given = dispatch.cli.config.as_deref();
+            return emit_input_error(
+                &crate::cli_production::resolve_error_message(&err, given),
+                output,
+            );
+        }
+    };
+    let mut view = match serde_json::to_value(run.view()) {
+        Ok(view) => view,
+        Err(e) => return emit_input_error(&format!("failed to serialize the run: {e}"), output),
+    };
+    relativize_paths(&mut view, run.root().value());
+    match dispatch.json_style.serialize(&view) {
+        Ok(json) => {
+            crate::report::sink::stdoutln!("{json}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => emit_input_error(&format!("failed to serialize the run: {e}"), output),
+    }
+}
+
+/// Rewrite every path string under `root` relative to `root`. The `root`
+/// member keeps its absolute path, so a reader can join the others to it.
+fn relativize_paths(view: &mut serde_json::Value, root: &Path) {
+    fn walk(value: &mut serde_json::Value, prefixes: &[String]) {
+        match value {
+            serde_json::Value::String(text) => {
+                if let Some(rest) = prefixes.iter().find_map(|prefix| text.strip_prefix(prefix)) {
+                    *text = rest.replace('\\', "/");
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for item in items {
+                    walk(item, prefixes);
+                }
+            }
+            serde_json::Value::Object(members) => {
+                members
+                    .values_mut()
+                    .for_each(|member| walk(member, prefixes));
+            }
+            _ => {}
+        }
+    }
+    let display = root.display().to_string();
+    let prefixes = [
+        format!("{display}/"),
+        format!("{display}\\"),
+        format!("{}/", display.replace('\\', "/")),
+    ];
+    let root_member = view.get("root").cloned();
+    walk(view, &prefixes);
+    if let (Some(member), Some(object)) = (root_member, view.as_object_mut()) {
+        object.insert("root".to_owned(), member);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

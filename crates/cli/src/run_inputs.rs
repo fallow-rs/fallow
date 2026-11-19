@@ -164,9 +164,29 @@ fn analysis_route(command: &Command) -> Option<CommandRoute> {
             };
             CommandRoute::single(kind, DeadCode, production)
         }
+        Command::Config(args) if args.resolved => config_view_route(args),
         _ => return None,
     };
     Some(route)
+}
+
+/// The route of `fallow config --resolved`: the route of the command that
+/// `--for` names, with the selection and production flags of `config`.
+fn config_view_route(args: &crate::cli_args::ConfigArgs) -> CommandRoute {
+    use crate::cli_args::ForCommand;
+    use PlannedAnalysis::{DeadCode, Duplication, Health};
+    use ProductionRule::Full;
+    match args.for_command.unwrap_or(ForCommand::Combined) {
+        ForCommand::Combined => {
+            CommandRoute::new(CommandKind::Combined, lists(&args.only, &args.skip), Full)
+        }
+        ForCommand::Audit => {
+            CommandRoute::new(CommandKind::Audit, lists(&args.only, &args.skip), Full)
+        }
+        ForCommand::DeadCode => CommandRoute::single(CommandKind::DeadCode, DeadCode, Full),
+        ForCommand::Dupes => CommandRoute::single(CommandKind::Dupes, Duplication, Full),
+        ForCommand::Health => CommandRoute::single(CommandKind::Health, Health, Full),
+    }
 }
 
 /// The command that runs on the files of the dead-code production mode and
@@ -238,6 +258,11 @@ const fn per_analysis_flags(cli: &Cli) -> [bool; 3] {
             production_dupes,
             ..
         }) => [*production_dead_code, *production_health, *production_dupes],
+        Some(Command::Config(args)) => [
+            args.production_dead_code,
+            args.production_health,
+            args.production_dupes,
+        ],
         Some(_) => [false; 3],
     }
 }

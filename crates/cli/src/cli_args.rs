@@ -1303,11 +1303,7 @@ pub enum Command {
     /// behavior, the extension only signals to editors that comments are
     /// expected. If two config files coexist in one directory, fallow loads the
     /// higher-precedence one and warns on stderr naming the file it ignored.
-    Config {
-        /// Print only the config file path (one line, no JSON)
-        #[arg(long)]
-        path: bool,
-    },
+    Config(ConfigArgs),
 
     /// Recommend a project-tailored config for an agent to author.
     ///
@@ -2788,6 +2784,9 @@ pub use report_args::*;
 #[path = "cli_args_security.rs"]
 mod cli_args_security;
 pub use cli_args_security::SecuritySubcommand;
+#[path = "config_args.rs"]
+mod config_args;
+pub use config_args::{ConfigArgs, ForCommand};
 #[path = "cli_args_type_aware.rs"]
 mod type_aware_args;
 pub use type_aware_args::TypeAwareCli;

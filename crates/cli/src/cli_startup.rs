@@ -736,7 +736,7 @@ pub fn command_without_global_baseline(command: &Command) -> Option<&'static str
         Command::RulePackSchema => Some("rule-pack-schema"),
         Command::RulePack { .. } => Some("rule-pack"),
         Command::Guard { .. } => Some("guard"),
-        Command::Config { .. } => Some("config"),
+        Command::Config(_) => Some("config"),
         Command::Recommend => Some("recommend"),
         Command::List { .. } => Some("list"),
         Command::Workspaces => Some("workspaces"),
@@ -792,7 +792,7 @@ fn command_rejects_output_gate(command: Option<&Command>) -> bool {
                 | Command::Schema
                 | Command::Explain { .. }
                 | Command::CiTemplate { .. }
-                | Command::Config { .. }
+                | Command::Config(_)
                 | Command::Ci { .. }
                 | Command::List { .. }
                 | Command::Inspect { .. }

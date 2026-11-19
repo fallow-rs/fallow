@@ -188,7 +188,7 @@ fn resolve_command_output(cli: &Cli, selected: OutputFormat) -> OutputFormat {
             | Command::RulePack {
                 subcommand: RulePackCli::Schema,
             }
-            | Command::Config { path: false }
+            | Command::Config(crate::cli_args::ConfigArgs { path: false, .. })
             | Command::Coverage {
                 subcommand:
                     CoverageCli::Setup {
@@ -216,7 +216,7 @@ fn command_payload_is_json(cli: &Cli, selected: OutputFormat) -> bool {
                 subcommand: RulePackCli::Schema,
             },
         ) => true,
-        Some(Command::Config { path }) => !path,
+        Some(Command::Config(args)) => !args.path,
         Some(Command::Coverage {
             subcommand: CoverageCli::Setup { args },
         }) => args.json,

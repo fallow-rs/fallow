@@ -14,6 +14,8 @@ pub const RESOLVED_RUN_VIEW_SCHEMA_VERSION: u32 = 1;
 pub struct ResolvedRunView {
     /// The schema version of this view.
     pub schema_version: u32,
+    /// The kind discriminator: always `resolved-run`.
+    pub kind: ResolvedRunKind,
     /// The surface that started the run.
     pub surface: Surface,
     /// The command of the run.
@@ -32,6 +34,14 @@ pub struct ResolvedRunView {
     /// Whether the run uses the default config because the discovered config
     /// failed.
     pub fell_back: bool,
+}
+
+/// The kind discriminator of [`ResolvedRunView`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ResolvedRunKind {
+    /// The only value: `resolved-run`.
+    ResolvedRun,
 }
 
 /// The decisions of each analysis.

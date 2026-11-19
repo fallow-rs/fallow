@@ -154,17 +154,7 @@ pub fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> 
         Command::RulePack { subcommand } => dispatch_rule_pack_command(dispatch, subcommand),
         Command::Guard { files } => dispatch_guard_command(dispatch, &files),
         Command::CiTemplate { subcommand } => dispatch_ci_template_command(subcommand),
-        Command::Config { path } => config::run_config_with_options(config::RunConfigInput {
-            root,
-            explicit_config: cli.config.as_deref(),
-            path_only: path,
-            output,
-            quiet,
-            json_style: dispatch.json_style,
-            load_options: fallow_config::ConfigLoadOptions {
-                allow_remote_extends: cli.allow_remote_extends,
-            },
-        }),
+        Command::Config(args) => config::run_config_command(dispatch, &args),
         Command::Recommend => onboarding::run_recommend(root, output, dispatch.json_style),
         list @ (Command::Workspaces | Command::List { .. }) => {
             dispatch_list_command(&list, dispatch)

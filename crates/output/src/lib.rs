@@ -406,8 +406,8 @@ pub use report_contract::{
 };
 pub use request_outcomes::{RequestName, RequestOutcome, RequestOutcomes, RequestStatus};
 pub use resolved_run_view::{
-    AnalysesView, AnalysisView, EnvView, RESOLVED_RUN_VIEW_SCHEMA_VERSION, ResolvedRunView,
-    RunSettingsView, SelectionView,
+    AnalysesView, AnalysisView, EnvView, RESOLVED_RUN_VIEW_SCHEMA_VERSION, ResolvedRunKind,
+    ResolvedRunView, RunSettingsView, SelectionView,
 };
 pub use review_envelopes::{
     GitHubReviewComment, GitHubReviewSide, GitLabReviewComment, GitLabReviewPosition,
