@@ -23,6 +23,7 @@ mod path_utils;
 mod position;
 mod protocol;
 mod publish;
+mod run_inputs;
 mod runtime;
 mod schedule;
 mod server_capabilities;
@@ -198,7 +199,7 @@ use fallow_config::DetectionMode;
 use fallow_config::DuplicatesConfig;
 use initialization::{
     LspDuplicationOptions, LspInitializationOptions, LspTypeAwareOptions,
-    initialization_config_path, parse_initialization_options,
+    parse_initialization_options,
 };
 use path_utils::canonicalize_for_lsp;
 #[cfg(test)]
@@ -337,24 +338,13 @@ struct FallowLspServer {
     /// analysis results and duplication reports are scoped to files changed
     /// since this ref, mirroring the CLI's `--changed-since`.
     changed_since: Arc<RwLock<Option<String>>>,
-    /// Optional explicit config path from `initializationOptions.configPath`.
-    /// Mirrors the CLI's `--config` flag for editor clients.
-    config_path: Arc<RwLock<Option<PathBuf>>>,
-    /// Per-client opt-in for trusted HTTPS config inheritance.
-    allow_remote_extends: Arc<RwLock<bool>>,
+    /// The initialization options that give the run inputs of each project
+    /// root: `configPath`, `allowRemoteExtends`, `production` and
+    /// `packageBaselines`. See `run_inputs::run_inputs`.
+    run_options: Arc<RwLock<LspInitializationOptions>>,
     /// Optional duplication overrides from `initializationOptions.duplication`.
     /// VS Code sends these so live diagnostics match the sidebar CLI run.
     duplication_options: Arc<RwLock<Option<LspDuplicationOptions>>>,
-    /// Optional production-mode override from `initializationOptions.production`.
-    /// `Some(true)`/`Some(false)` force production on/off so the editor's
-    /// diagnostics match the CLI-driven sidebar (which receives
-    /// `--production`/`--no-production`); `None` defers to the project config,
-    /// mirroring the CLI default. Without this the sidebar and editor squiggles
-    /// disagree whenever `fallow.production` is set (issue #1055).
-    production_override: Arc<RwLock<Option<bool>>>,
-    /// `initializationOptions.packageBaselines: false` turns
-    /// `workspaces.changedSince` off, as `--no-package-baselines` does.
-    no_package_baselines: Arc<AtomicBool>,
     /// Whether the client opted in to heuristic complexity code lenses.
     inline_complexity_enabled: Arc<RwLock<bool>>,
     /// Optional semantic TypeScript refinement for editor diagnostics.
@@ -449,15 +439,8 @@ impl LanguageServer for FallowLspServer {
                 };
             }
 
-            *self.config_path.write().await =
-                initialization_config_path(opts, canonical_root.as_deref());
-            *self.allow_remote_extends.write().await = parsed_options.allow_remote_extends;
+            *self.run_options.write().await = parsed_options.clone();
             *self.duplication_options.write().await = parsed_options.duplication;
-            *self.production_override.write().await = parsed_options.production;
-            self.no_package_baselines.store(
-                parsed_options.package_baselines == Some(false),
-                Ordering::SeqCst,
-            );
             *self.inline_complexity_enabled.write().await = parsed_options
                 .health
                 .and_then(|health| health.inline_complexity)
@@ -789,11 +772,8 @@ impl FallowLspServer {
             startup_analysis_started: Arc::new(AtomicBool::new(false)),
             disabled_diagnostic_codes: Arc::new(RwLock::new(FxHashSet::default())),
             changed_since: Arc::new(RwLock::new(None)),
-            config_path: Arc::new(RwLock::new(None)),
-            allow_remote_extends: Arc::new(RwLock::new(false)),
+            run_options: Arc::default(),
             duplication_options: Arc::new(RwLock::new(None)),
-            production_override: Arc::new(RwLock::new(None)),
-            no_package_baselines: Arc::new(AtomicBool::new(false)),
             inline_complexity_enabled: Arc::new(RwLock::new(false)),
             type_aware_options: Arc::new(RwLock::new(None)),
             type_aware_sessions: Arc::new(StdMutex::new(FxHashMap::default())),
@@ -888,11 +868,7 @@ impl FallowLspServer {
         let slot = Arc::clone(&self.analysis_guard).lock_owned().await;
         let input = analysis::PrewarmInput {
             project_roots: find_project_roots(&root),
-            key: session_store::SessionKey {
-                config_path: self.config_path.read().await.clone(),
-                allow_remote_extends: *self.allow_remote_extends.read().await,
-                production_override: *self.production_override.read().await,
-            },
+            run_options: self.run_options.read().await.clone(),
             inline_complexity_enabled: *self.inline_complexity_enabled.read().await,
             cancellation: Arc::clone(&self.cancellation),
             sessions: Arc::clone(&self.editor_sessions),
@@ -1051,11 +1027,8 @@ impl FallowLspServer {
             .await;
 
         let changed_since = self.changed_since.read().await.clone();
-        let config_path = self.config_path.read().await.clone();
-        let allow_remote_extends = *self.allow_remote_extends.read().await;
+        let run_options = self.run_options.read().await.clone();
         let duplication_options = self.duplication_options.read().await.clone();
-        let production_override = *self.production_override.read().await;
-        let no_package_baselines = self.no_package_baselines.load(Ordering::SeqCst);
         let inline_complexity_enabled = *self.inline_complexity_enabled.read().await;
         let type_aware_options = self.type_aware_options.read().await.clone();
         let type_aware_sessions = Arc::clone(&self.type_aware_sessions);
@@ -1078,11 +1051,8 @@ impl FallowLspServer {
         let join_result = tokio::task::spawn_blocking(move || {
             let input = BlockingAnalysisInput {
                 project_roots,
-                config_path,
-                allow_remote_extends,
+                run_options,
                 duplication_options,
-                production_override,
-                no_package_baselines,
                 inline_complexity_enabled,
                 type_aware_options,
                 type_aware_sessions,

@@ -1,10 +1,7 @@
 use std::collections::BTreeMap;
-use std::path::{Path, PathBuf};
 
 use fallow_config::{DetectionMode, DuplicatesConfig};
 use serde::Deserialize;
-
-use crate::path_utils::canonicalize_for_lsp;
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -99,32 +96,6 @@ pub fn parse_initialization_options(opts: Option<&serde_json::Value>) -> LspInit
             .and_then(serde_json::Value::as_bool)
             .unwrap_or(false),
     }
-}
-
-fn resolve_config_path(raw: Option<&str>, root: Option<&Path>) -> Option<PathBuf> {
-    let raw = raw?.trim();
-    if raw.is_empty() {
-        return None;
-    }
-
-    let path = PathBuf::from(raw);
-    let path = if path.is_absolute() {
-        path
-    } else if let Some(root) = root {
-        root.join(path)
-    } else {
-        path
-    };
-
-    Some(canonicalize_for_lsp(&path))
-}
-
-pub fn initialization_config_path(
-    opts: &serde_json::Value,
-    root: Option<&Path>,
-) -> Option<PathBuf> {
-    let parsed = parse_initialization_options(Some(opts));
-    resolve_config_path(parsed.config_path.as_deref(), root)
 }
 
 #[derive(Clone, Debug, Default, Deserialize, PartialEq)]

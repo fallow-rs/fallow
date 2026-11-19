@@ -98,6 +98,15 @@ pub(crate) fn flatten_production(config: &mut FallowConfig, from_file: bool, on:
     };
 }
 
+/// Put a cache directory outside the root in a subdirectory of the root, as
+/// [`ResolvedConfig::scope_shared_cache_dir_to_root`] does. Returns whether
+/// the directory changed.
+pub(crate) fn scope_cache_dir_to_root(config: &mut ResolvedConfig) -> bool {
+    let shared = config.cache_dir.clone();
+    config.scope_shared_cache_dir_to_root();
+    config.cache_dir != shared
+}
+
 /// Resolve `config` for `root` and collect its workspace metadata. A
 /// workspace discovery error is an error.
 pub(crate) fn mode_entry(

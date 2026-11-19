@@ -11,6 +11,8 @@
 use std::path::{Path, PathBuf};
 
 use fallow_api::EditorAnalysisSession;
+use fallow_api::run::ResolvedRun;
+use fallow_config::RunInputs;
 use rustc_hash::FxHashMap;
 
 /// Set to `0`, `false`, `off` or `no` to load a new session on each run, as
@@ -66,86 +68,54 @@ pub fn session_input_file(path: &Path) -> bool {
         || fallow_config::is_default_external_plugin_file(path)
 }
 
-/// The editor settings that shape the config of a session. A run reuses a
-/// session only for the same settings.
-#[derive(Clone, Debug, PartialEq, Eq)]
+/// The run inputs that shape the config of a session, without the
+/// environment snapshot. A run reuses a session only for the same key.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct SessionKey {
     pub config_path: Option<PathBuf>,
-    pub allow_remote_extends: bool,
-    pub production_override: Option<bool>,
+    pub allow_remote_extends: Option<bool>,
+    pub production: Option<bool>,
+    pub package_baselines: Option<bool>,
 }
 
-/// The config inputs of a session and their content when the session
-/// loaded: the config file, each local `extends` target, and the plugin
-/// files, rule packs and `autoDiscover` directories that config resolution
-/// read.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
+impl SessionKey {
+    /// The key of the session of `inputs`. The editor translator sets no
+    /// other input of the run.
+    #[must_use]
+    pub fn of(inputs: &RunInputs) -> Self {
+        Self {
+            config_path: inputs.config_path.as_ref().map(|given| given.value.clone()),
+            allow_remote_extends: inputs
+                .allow_remote_extends
+                .as_ref()
+                .map(|given| given.value),
+            production: inputs.production.as_ref().map(|given| given.value),
+            package_baselines: inputs.package_baselines.as_ref().map(|given| given.value),
+        }
+    }
+}
+
+/// The config inputs of a session: the resolved run that the session opened
+/// from. See [`ResolvedRun::sources_changed`].
+#[derive(Debug, Default)]
 pub struct ConfigSources {
-    /// Each file with its content, or `None` when the file did not read.
-    files: Vec<(PathBuf, Option<Vec<u8>>)>,
-    /// A config file changed while the session loaded.
-    changed_during_load: bool,
-    inputs: fallow_config::ConfigInputs,
-    inputs_snapshot: fallow_config::ConfigInputsSnapshot,
+    run: Option<Box<ResolvedRun>>,
 }
 
 impl ConfigSources {
-    /// Read the config file at `config_path` and each local file that it
-    /// extends. No config file gives an empty set.
+    /// The config inputs of the session of `run`.
     #[must_use]
-    pub fn read(config_path: Option<&Path>) -> Self {
-        let files = config_path
-            .into_iter()
-            .flat_map(fallow_config::FallowConfig::local_source_files)
-            .map(|path| {
-                let content = std::fs::read(&path).ok();
-                (path, content)
-            })
-            .collect();
+    pub fn of(run: ResolvedRun) -> Self {
         Self {
-            files,
-            ..Self::default()
+            run: Some(Box::new(run)),
         }
     }
 
-    /// Add the other config inputs of a loaded session, with their content
-    /// now. The session also holds their content from just before config
-    /// resolution read them. When the two differ, an input changed during
-    /// the load, and the next run loads the session again.
-    #[must_use]
-    pub fn with_inputs(self, session: &EditorAnalysisSession) -> Self {
-        let inputs = session.config_inputs();
-        let inputs_snapshot = inputs.snapshot();
-        Self {
-            changed_during_load: self.changed_during_load
-                || inputs_snapshot != *session.config_inputs_before_resolve(),
-            inputs: inputs.clone(),
-            inputs_snapshot,
-            ..self
-        }
-    }
-
-    /// The config files of a session. `before` was read before the session
-    /// loaded its config, and `after` was read after. When the two differ, a
-    /// config file changed during the load, and the session can hold either
-    /// version. The next run then loads the session again.
-    #[must_use]
-    pub fn around_load(before: &Self, after: Self) -> Self {
-        Self {
-            changed_during_load: *before != after,
-            ..after
-        }
-    }
-
-    /// Whether a config input changed since the session loaded.
+    /// Whether a config input changed since the session loaded, or changed
+    /// while it loaded. No run means no input.
     #[must_use]
     pub fn changed(&self) -> bool {
-        self.changed_during_load
-            || self
-                .files
-                .iter()
-                .any(|(path, content)| std::fs::read(path).ok() != *content)
-            || self.inputs.snapshot() != self.inputs_snapshot
+        self.run.as_ref().is_some_and(|run| run.sources_changed())
     }
 }
 
@@ -331,11 +301,7 @@ mod tests {
     use super::*;
 
     fn key() -> SessionKey {
-        SessionKey {
-            config_path: None,
-            allow_remote_extends: false,
-            production_override: None,
-        }
+        SessionKey::default()
     }
 
     fn session(root: &Path) -> EditorAnalysisSession {
@@ -372,56 +338,24 @@ mod tests {
     #[test]
     fn config_sources_see_an_edit_to_an_extended_file() {
         let dir = tempfile::tempdir().expect("temp dir");
-        let config = dir.path().join("fallow.json");
-        let base = dir.path().join("base.json");
-        std::fs::write(&config, r#"{"extends":"./base.json"}"#).expect("config");
+        let root = dunce::canonicalize(dir.path()).expect("canonical root");
+        std::fs::create_dir_all(root.join(".git")).expect("git marker");
+        let base = root.join("base.json");
+        std::fs::write(root.join(".fallowrc.json"), r#"{"extends":"./base.json"}"#)
+            .expect("config");
         std::fs::write(&base, r#"{"entry":["a.ts"]}"#).expect("base");
+        let inputs = crate::run_inputs::run_inputs(
+            &crate::initialization::LspInitializationOptions::default(),
+            &root,
+            fallow_config::EnvSnapshot::none(),
+        );
 
-        let sources = ConfigSources::read(Some(&config));
+        let sources =
+            ConfigSources::of(fallow_api::run::resolve_run(&inputs).expect("the run resolves"));
         assert!(!sources.changed());
         std::fs::write(&base, r#"{"entry":["b.ts"]}"#).expect("same-size edit");
         assert!(sources.changed());
-        assert!(!ConfigSources::read(None).changed());
-    }
-
-    #[test]
-    fn a_plugin_edit_during_the_load_counts_as_changed() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let root = dir.path();
-        let config = root.join(".fallowrc.json");
-        let plugin = root.join("tools/entries.json");
-        std::fs::create_dir_all(root.join("tools")).expect("plugin dir");
-        std::fs::write(&config, r#"{"plugins":["tools/entries.json"]}"#).expect("config");
-        std::fs::write(&plugin, r#"{"name":"entries","entryPoints":["a.ts"]}"#).expect("plugin");
-
-        let session = EditorAnalysisSession::load_with_config_options(
-            root,
-            Some(&config),
-            fallow_config::ConfigLoadOptions::default(),
-            |_| {},
-        )
-        .expect("load");
-        std::fs::write(&plugin, r#"{"name":"entries","entryPoints":["b.ts"]}"#)
-            .expect("an edit after the loader read the plugin");
-        let sources = ConfigSources::read(Some(&config)).with_inputs(&session);
-
-        assert!(
-            sources.changed(),
-            "the session holds the older plugin, so the next run must load it again"
-        );
-    }
-
-    #[test]
-    fn config_sources_that_moved_during_the_load_count_as_changed() {
-        let dir = tempfile::tempdir().expect("temp dir");
-        let config = dir.path().join("fallow.json");
-        std::fs::write(&config, "{}").expect("config");
-        let before = ConfigSources::read(Some(&config));
-        std::fs::write(&config, r#"{"entry":[]}"#).expect("edit during the load");
-        let after = ConfigSources::read(Some(&config));
-
-        assert!(ConfigSources::around_load(&before, after.clone()).changed());
-        assert!(!ConfigSources::around_load(&after.clone(), after).changed());
+        assert!(!ConfigSources::default().changed());
     }
 
     #[test]
@@ -436,7 +370,7 @@ mod tests {
                 .is_none()
         );
         let other = SessionKey {
-            production_override: Some(true),
+            production: Some(true),
             ..key()
         };
         assert!(

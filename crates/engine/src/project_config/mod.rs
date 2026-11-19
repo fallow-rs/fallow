@@ -21,7 +21,9 @@ mod loader;
 
 #[cfg(any(test, feature = "testing"))]
 pub use loader::load_count;
-pub use loader::{ConfigFile, ConfigFileOptions, ConfigLoadError, load_config_file};
+pub use loader::{
+    ConfigChainSnapshot, ConfigFile, ConfigFileOptions, ConfigLoadError, load_config_file,
+};
 
 /// The production flags of one run: the global `--production` override and one
 /// override per analysis (`--production-dead-code`, `--production-health`,
@@ -292,6 +294,7 @@ impl DuplicationScope {
         let dupes = ConfigFile {
             config: file.config.clone(),
             path: file.path.clone(),
+            chain: file.chain.clone(),
         }
         .for_analysis(ProductionAnalysis::Dupes, flags);
         Self::Own {
@@ -498,7 +501,8 @@ fn load_project_config(
     )?;
     let options = ResolveOptions::host_default();
     let duplication = DuplicationScope::for_dead_code_session(&file, production, options, env);
-    let ConfigFile { config, path } = file.for_analysis(ProductionAnalysis::DeadCode, production);
+    let ConfigFile { config, path, .. } =
+        file.for_analysis(ProductionAnalysis::DeadCode, production);
     if path.is_some() {
         validate_boundaries_and_rule_packs(root, &config)?;
     }
@@ -611,7 +615,7 @@ fn resolve_project_config_analysis(
         },
     );
     file.validate(root)?;
-    let ConfigFile { config, path } = file;
+    let ConfigFile { config, path, .. } = file;
     let configured_plugin_paths = config.plugins.clone();
     let options = ResolveOptions {
         output: options.output,

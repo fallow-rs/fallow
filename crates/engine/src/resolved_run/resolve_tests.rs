@@ -514,6 +514,100 @@ fn explicit_path_never_falls_back() {
     run_inputs.config_path = Some(given(root.join(".fallowrc.json")));
     let err = resolve_run(&run_inputs).expect_err("an explicit path fails");
     assert!(matches!(err, ResolveError::ConfigInvalid { .. }), "{err:?}");
+    assert_eq!(
+        err.config_file(),
+        Some(root.join(".fallowrc.json").as_path())
+    );
+}
+
+#[test]
+fn fallback_keeps_the_error_of_the_discovered_config() {
+    let (_dir, root) = project(&[(".fallowrc.json", INVALID_BOUNDARY_CONFIG)]);
+    let run = resolve_run(&editor_inputs(&root)).expect("the defaults apply");
+    let err = run.fallback_error().expect("the run fell back");
+    assert!(
+        err.message().contains("invalid boundary configuration"),
+        "{err:?}"
+    );
+    assert_eq!(
+        err.config_file(),
+        Some(root.join(".fallowrc.json").as_path())
+    );
+    let clean = project(&[(".fallowrc.json", "{}")]);
+    let run = resolve_run(&editor_inputs(&clean.1)).expect("the config loads");
+    assert!(run.fallback_error().is_none());
+}
+
+#[test]
+fn sources_change_with_a_file_of_the_extends_chain() {
+    let (_dir, root) = project(&[
+        (".fallowrc.json", r#"{"extends":"./base.json"}"#),
+        ("base.json", r#"{"entry":["a.ts"]}"#),
+    ]);
+    let run = resolve_run(&editor_inputs(&root)).expect("the config loads");
+    assert!(!run.sources_changed());
+    std::fs::write(root.join("base.json"), r#"{"entry":["b.ts"]}"#).expect("same-size edit");
+    assert!(run.sources_changed());
+}
+
+#[test]
+fn sources_change_with_a_plugin_file() {
+    let (_dir, root) = project(&[(".fallowrc.json", r#"{"plugins":["entries.json"]}"#)]);
+    let plugin = root.join("entries.json");
+    std::fs::write(&plugin, r#"{"name":"entries","entryPoints":["a.ts"]}"#).expect("plugin");
+    let run = resolve_run(&editor_inputs(&root)).expect("the config loads");
+    assert!(!run.sources_changed());
+    std::fs::write(&plugin, r#"{"name":"entries","entryPoints":["b.ts"]}"#).expect("edit");
+    assert!(run.sources_changed());
+}
+
+#[test]
+fn the_editor_scopes_a_shared_cache_dir_to_the_root() {
+    let (_dir, root) = project(&[]);
+    let shared = tempfile::tempdir().expect("shared cache dir");
+    let shared = dunce::canonicalize(shared.path()).expect("canonical cache dir");
+    let shared_text = shared.to_string_lossy().into_owned();
+    let env =
+        || EnvSnapshot::from_pairs(&[("FALLOW_CACHE_DIR", shared_text.as_str())], Some(&root));
+    let editor = inputs(
+        &root,
+        Surface::Lsp,
+        env(),
+        CommandKind::Editor,
+        SelectionInput::Single(PlannedAnalysis::DeadCode),
+    );
+    let api = inputs(
+        &root,
+        Surface::Api,
+        env(),
+        CommandKind::DeadCode,
+        SelectionInput::Single(PlannedAnalysis::DeadCode),
+    );
+
+    let editor_run = resolve_run(&editor).expect("the editor run resolves");
+    let api_run = resolve_run(&api).expect("the API run resolves");
+
+    let editor_dir = editor_run.settings().cache_dir.value();
+    assert_ne!(editor_dir, &shared);
+    assert!(editor_dir.starts_with(&shared), "{}", editor_dir.display());
+    assert_eq!(
+        editor_run.settings().cache_dir.source(),
+        &Source::Derived {
+            from: "editor-cache-per-root"
+        }
+    );
+    let AnalysisSlot::Runs(runnable) = editor_run.analysis(PlannedAnalysis::DeadCode) else {
+        panic!("dead code runs");
+    };
+    assert_eq!(&runnable.config().cache_dir, editor_dir);
+    assert_eq!(api_run.settings().cache_dir.value(), &shared);
+
+    let own = resolve_run(&editor_inputs(&root)).expect("the editor run resolves");
+    assert_eq!(
+        own.settings().cache_dir.source(),
+        &Source::Default { rule: "cache-dir" },
+        "a cache dir inside the root stays"
+    );
 }
 
 fn nothing_selected(result: Result<ResolvedRun, ResolveError>) -> Option<EmptyCause> {

@@ -384,9 +384,36 @@ pub type EditorSessionParseCounts = fallow_engine::session::SessionParseCounts;
 #[derive(Debug)]
 pub struct EditorAnalysisSession {
     inner: fallow_engine::session::AnalysisSession,
+    /// Whether a project analysis of the session runs duplication.
+    runs_duplication: bool,
 }
 
 impl EditorAnalysisSession {
+    /// Open the session of the dead-code analysis of a resolved run. The
+    /// project analyses of the session run duplication only when the run
+    /// plans it.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error when the run skips the dead-code analysis.
+    pub fn open(run: &crate::run::ResolvedRun) -> Result<Self, crate::ProgrammaticError> {
+        use crate::run::AnalysisSlot;
+        use fallow_config::PlannedAnalysis;
+        let AnalysisSlot::Runs(dead_code) = run.analysis(PlannedAnalysis::DeadCode) else {
+            return Err(crate::ProgrammaticError::new(
+                "an editor session needs a run that plans the dead-code analysis",
+                2,
+            ));
+        };
+        Ok(Self {
+            inner: dead_code.open_session(),
+            runs_duplication: matches!(
+                run.analysis(PlannedAnalysis::Duplication),
+                AnalysisSlot::Runs(_)
+            ),
+        })
+    }
+
     /// Load config and discover files for an editor project root.
     ///
     /// # Errors
@@ -673,26 +700,30 @@ impl EditorAnalysisSession {
         retain_complexity_artifacts: bool,
         changed_files: Option<&FxHashSet<PathBuf>>,
     ) -> fallow_engine::EngineResult<EditorProjectAnalysisOutput> {
-        self.inner
-            .analyze_project_with_artifacts(
+        let artifacts = if self.runs_duplication {
+            self.inner.analyze_project_with_artifacts(
                 duplicates_config,
                 fallow_engine::project_analysis::ProjectAnalysisArtifactOptions {
                     retain_complexity_artifacts,
                     changed_files: changed_files.cloned(),
                     ..fallow_engine::project_analysis::ProjectAnalysisArtifactOptions::default()
                 },
-            )
-            .map(|mut artifacts| {
-                // No editor action names the duplication analysis, so
-                // `duplicates.enabled: false` leaves the editor without
-                // clone groups, as it leaves the bare `fallow` run.
-                if !duplicates_config.runs_by_default() {
-                    artifacts.duplication = fallow_types::duplicates::DuplicationReport::default();
-                }
-                artifacts.into_output()
-            })
-            .map(EditorProjectAnalysisOutput::from_engine)
-            .map(|output| self.with_resolved_rule_severities(output))
+            )?
+        } else {
+            fallow_engine::project_analysis::ProjectAnalysisArtifacts {
+                dead_code: self
+                    .inner
+                    .analyze_dead_code_with_artifacts(retain_complexity_artifacts, false)?,
+                duplication: fallow_types::duplicates::DuplicationReport::default(),
+                changed_files: changed_files.cloned(),
+                source_fingerprints: None,
+            }
+        };
+        Ok(
+            self.with_resolved_rule_severities(EditorProjectAnalysisOutput::from_engine(
+                artifacts.into_output(),
+            )),
+        )
     }
 
     /// Narrow the dead-code findings and clone groups of this project to a
@@ -745,8 +776,14 @@ impl EditorAnalysisSession {
         output
     }
 
-    const fn from_engine(inner: fallow_engine::session::AnalysisSession) -> Self {
-        Self { inner }
+    /// A session of an editor constructor. No editor action names the
+    /// duplication analysis, so `duplicates.enabled: false` leaves the
+    /// editor without clone groups, as it leaves the bare `fallow` run.
+    fn from_engine(inner: fallow_engine::session::AnalysisSession) -> Self {
+        Self {
+            runs_duplication: inner.config().duplicates.runs_by_default(),
+            inner,
+        }
     }
 }
 

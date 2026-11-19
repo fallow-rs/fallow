@@ -10,7 +10,9 @@
 use std::path::PathBuf;
 
 pub use fallow_config::{CommandKind, EnvSnapshot, HostInputs, SelectionInput, Surface};
-pub use fallow_engine::resolved_run::{AnalysisSlot, ResolveError, ResolvedRun, Runnable};
+pub use fallow_engine::resolved_run::{
+    AnalysisSlot, ResolveError, ResolvedRun, Runnable, resolve_run,
+};
 #[cfg(feature = "testing")]
 pub use fallow_engine::resolved_run::{parity, testing};
 

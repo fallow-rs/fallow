@@ -33,12 +33,15 @@ fn analyze_project_root_for_test(
     let type_aware_sessions = Arc::new(StdMutex::new(FxHashMap::default()));
     let type_aware_changes = fallow_api::TypeAwareFileChanges::default();
     let mut package_scopes = Vec::new();
+    let run_options = LspInitializationOptions {
+        config_path: config_path.map(|path| path.to_string_lossy().into_owned()),
+        production: production_override,
+        ..LspInitializationOptions::default()
+    };
     analyze_project_root(&mut ProjectRootAnalysisInput {
         project_root,
-        config_path,
-        allow_remote_extends: false,
+        run_options: &run_options,
         duplication_options,
-        production_override,
         inline_complexity_enabled,
         type_aware_options: None,
         type_aware_sessions: &type_aware_sessions,
@@ -47,7 +50,6 @@ fn analyze_project_root_for_test(
         run_cancellation: &cancellation,
         changed_files: None,
         global_changed_since_requested: false,
-        no_package_baselines: false,
         sessions: &Arc::default(),
         parse_work: &mut analysis::RunParseWork::default(),
         merged_analysis: &mut merged_analysis,
@@ -309,11 +311,8 @@ fn blocking_analysis_surfaces_project_analysis_errors() {
 
     let result = run_blocking_analysis(&BlockingAnalysisInput {
         project_roots: vec![root.clone()],
-        config_path: None,
-        allow_remote_extends: false,
+        run_options: LspInitializationOptions::default(),
         duplication_options: None,
-        production_override: None,
-        no_package_baselines: false,
         inline_complexity_enabled: false,
         type_aware_options: None,
         type_aware_sessions: Arc::new(StdMutex::new(FxHashMap::default())),
@@ -430,7 +429,7 @@ async fn explicit_config_failure_preserves_last_valid_snapshot_and_diagnostics()
 
     let invalid_config = root.join("invalid.fallow.jsonc");
     std::fs::write(&invalid_config, "{ invalid json").expect("write invalid config");
-    *backend.config_path.write().await = Some(invalid_config);
+    backend.run_options.write().await.config_path = Some(path_text(&invalid_config));
     // A real config change bumps the epoch; without the bump the coalescing
     // skip would make this re-run a no-op.
     backend.analysis_epoch.fetch_add(1, Ordering::SeqCst);
@@ -1176,60 +1175,9 @@ async fn fallow_refresh_diagnostics_request_is_served() {
     );
 }
 
-#[test]
-fn initialization_config_path_resolves_workspace_relative_path() {
-    let opts = json!({"configPath": "config/fallow.json"});
-    let root = Path::new("/workspace");
-
-    assert_eq!(
-        initialization_config_path(&opts, Some(root)),
-        Some(PathBuf::from("/workspace/config/fallow.json"))
-    );
-}
-
-#[test]
-fn initialization_config_path_ignores_blank_path() {
-    let opts = json!({"configPath": "   "});
-
-    assert_eq!(initialization_config_path(&opts, None), None);
-}
-
-#[test]
-fn initialization_config_path_passes_through_absolute_path() {
-    #[cfg(windows)]
-    let absolute = "C:/configs/fallow.json";
-    #[cfg(not(windows))]
-    let absolute = "/etc/fallow.json";
-
-    let opts = json!({ "configPath": absolute });
-    assert_eq!(
-        initialization_config_path(&opts, None),
-        Some(PathBuf::from(absolute))
-    );
-}
-
-#[test]
-fn initialization_config_path_keeps_relative_path_without_root() {
-    let opts = json!({"configPath": "config/fallow.json"});
-
-    assert_eq!(
-        initialization_config_path(&opts, None),
-        Some(PathBuf::from("config/fallow.json"))
-    );
-}
-
-#[test]
-fn initialization_config_path_returns_none_for_missing_key() {
-    let opts = json!({});
-
-    assert_eq!(initialization_config_path(&opts, None), None);
-}
-
-#[test]
-fn initialization_config_path_returns_none_for_non_string_value() {
-    let opts = json!({"configPath": 42});
-
-    assert_eq!(initialization_config_path(&opts, None), None);
+/// The text of a path, as a client sends it in `configPath`.
+fn path_text(path: &Path) -> String {
+    path.to_string_lossy().into_owned()
 }
 
 #[test]
@@ -1998,7 +1946,7 @@ fn analyze_project_root_keeps_inline_complexity_off_by_default() {
 #[test]
 fn analyze_project_root_collects_opt_in_inline_complexity() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let root = dir.path();
+    let root = &dunce::canonicalize(dir.path()).expect("canonical root");
     write_inline_complexity_fixture(root);
 
     let mut results = AnalysisResults::default();
@@ -2126,7 +2074,7 @@ fn analyze_project_root_drops_inline_complexity_when_the_rules_are_off() {
 #[test]
 fn analyze_project_root_applies_rule_overrides_to_inline_complexity() {
     let dir = tempfile::tempdir().expect("temp dir");
-    let root = dir.path();
+    let root = &dunce::canonicalize(dir.path()).expect("canonical root");
     write_inline_complexity_fixture(root);
     let source = std::fs::read_to_string(root.join("src/index.ts")).expect("read source");
     std::fs::create_dir_all(root.join("src/legacy")).expect("create legacy dir");
@@ -2381,7 +2329,10 @@ fn package_baselines_false_keeps_every_package_in_full_scope() {
     .expect("package analysis succeeds");
     let opted_out = run_blocking_analysis(&BlockingAnalysisInput {
         changed_since: None,
-        no_package_baselines: true,
+        run_options: LspInitializationOptions {
+            package_baselines: Some(false),
+            ..LspInitializationOptions::default()
+        },
         ..changed_since_input(root, "HEAD", None)
     })
     .expect("full-scope analysis succeeds");
@@ -2397,7 +2348,7 @@ fn package_baselines_false_keeps_every_package_in_full_scope() {
 #[test]
 fn package_baselines_scope_lsp_results_and_stamp_each_document_ref() {
     let temp = package_baseline_fixture();
-    let root = temp.path();
+    let root = &dunce::canonicalize(temp.path()).expect("canonical root");
     let input = BlockingAnalysisInput {
         changed_since: None,
         ..changed_since_input(root, "HEAD", None)
@@ -2529,11 +2480,8 @@ fn changed_since_input(
 ) -> BlockingAnalysisInput {
     BlockingAnalysisInput {
         project_roots: vec![root.to_path_buf()],
-        config_path: None,
-        allow_remote_extends: false,
+        run_options: LspInitializationOptions::default(),
         duplication_options,
-        production_override: None,
-        no_package_baselines: false,
         inline_complexity_enabled: false,
         type_aware_options: None,
         type_aware_sessions: Arc::new(StdMutex::new(FxHashMap::default())),
@@ -5571,7 +5519,7 @@ async fn an_edit_to_the_config_path_file_loads_the_project_session_again() {
     let custom = server.root.join("cfg/custom.json");
     std::fs::create_dir_all(custom.parent().expect("config dir")).expect("create config dir");
     std::fs::write(&custom, r#"{"rules":{"unused-exports":"warn"}}"#).expect("write the config");
-    *server.backend().config_path.write().await = Some(custom.clone());
+    server.backend().run_options.write().await.config_path = Some(path_text(&custom));
     server.save(&source).await;
 
     std::fs::write(&custom, r#"{"rules":{"unused-exports":"off"}}"#).expect("edit the config");
@@ -6084,7 +6032,7 @@ fn analyzed_security_diagnostics_carry_the_cli_finding_id() {
 #[test]
 fn absent_component_prop_editor_analysis_severity_and_live_suppression() {
     let project = tempfile::tempdir().expect("project");
-    let root = project.path();
+    let root = &dunce::canonicalize(project.path()).expect("canonical root");
     let card = root.join("Card.tsx");
     std::fs::write(
         root.join("package.json"),
@@ -6240,7 +6188,7 @@ const ABSENT_PROP_FRAMEWORK_CASES: &[(&str, &str, &str, &str, &str)] = &[
 fn absent_prop_framework_code_comments_roundtrip_through_shared_analysis() {
     for &(dependency, extension, caller, source, name) in ABSENT_PROP_FRAMEWORK_CASES {
         let project = tempfile::tempdir().expect("project");
-        let root = project.path();
+        let root = &dunce::canonicalize(project.path()).expect("canonical root");
         let entry = format!("App.{extension}");
         let card = root.join(format!("{name}.{extension}"));
         std::fs::write(
@@ -6327,7 +6275,7 @@ fn absent_prop_framework_code_comments_roundtrip_through_shared_analysis() {
 #[tokio::test(flavor = "current_thread")]
 async fn absent_prop_actions_require_the_saved_analysed_document_version() {
     let project = tempfile::tempdir().expect("project");
-    let root = project.path();
+    let root = &dunce::canonicalize(project.path()).expect("canonical root");
     let card = root.join("Card.tsx");
     let source = "export function Card({highlight=false}: {\n  /*😀*/highlight?:boolean\n}) {return <p>{highlight ? 'yes' : 'no'}</p>}\n";
     std::fs::write(
@@ -6371,7 +6319,7 @@ async fn absent_prop_actions_require_the_saved_analysed_document_version() {
     let uri = Uri::from_file_path(&card).expect("uri");
     let (service, _) = LspService::build(FallowLspServer::new).finish();
     let backend = service.inner();
-    *backend.root.write().await = Some(root.to_path_buf());
+    *backend.root.write().await = Some(root.clone());
     *backend.analysis.write().await = Some(
         analysis::LspAnalysisSnapshot::new(results, duplication, vec![])
             .with_document_versions(snapshot_for(&uri, 7)),
