@@ -398,6 +398,7 @@ fn add_grown_counts(
             let now = bucket_count(Some(count));
             let mut before = bucket_count(base_counts.and_then(|counts| counts.get(finding)));
             if !base_counts_file_lines_apart
+                && is_file_lines_identity_bucket(path)
                 && let Some(severity) = finding.strip_prefix(HEALTH_FILE_LINES_PREFIX)
             {
                 before += freed_complexity_slots(base_counts, finding_counts, severity);
@@ -415,6 +416,18 @@ fn add_grown_counts(
     if !added.is_empty() {
         grown.entry(category.to_owned()).or_default().extend(added);
     }
+}
+
+/// `true` for an identity bucket `path\0<file>`, which holds only file-length
+/// findings.
+///
+/// A count bucket (`path`) also holds function findings, so a freed
+/// complexity slot there can be a fixed function. The growth check then counts
+/// a long file in that bucket as growth, also on the first save from a file
+/// without the marker.
+fn is_file_lines_identity_bucket(key: &str) -> bool {
+    key.split_once('\0')
+        .is_some_and(|(_, name)| name == fallow_output::FILE_LINES_FINDING_NAME)
 }
 
 /// The `complexity_<severity>` slots of a base bucket that the head bucket no
@@ -767,40 +780,45 @@ mod tests {
 
     #[test]
     fn a_long_file_moved_out_of_a_complexity_slot_is_not_growth() {
+        let file = "src/a.ts\u{0}<file>";
         let base = json!({
-            "finding_counts": { "src/a.ts": { "complexity_moderate": { "count": 2 } } },
+            "finding_counts": { "src/a.ts": { "complexity_moderate": { "count": 1 } } },
+            "identity_finding_counts": { file: { "complexity_moderate": { "count": 1 } } },
         });
         let head = json!({
             "file_lines_categories": true,
-            "finding_counts": { "src/a.ts": {
-                "complexity_moderate": { "count": 1 },
-                "file_lines_moderate": { "count": 1 },
-            } },
+            "finding_counts": { "src/a.ts": { "file_lines_moderate": { "count": 1 } } },
+            "identity_finding_counts": { file: { "file_lines_moderate": { "count": 1 } } },
         });
         assert!(baseline_growth(BaselineKind::Health, &base, &head).is_empty());
 
-        let grown_head = json!({
+        let marked_base = json!({
             "file_lines_categories": true,
-            "finding_counts": { "src/a.ts": {
-                "complexity_moderate": { "count": 2 },
-                "file_lines_moderate": { "count": 1 },
-            } },
+            "identity_finding_counts": { file: { "complexity_moderate": { "count": 1 } } },
         });
-        let growth = baseline_growth(BaselineKind::Health, &base, &grown_head);
+        assert_eq!(
+            baseline_growth(BaselineKind::Health, &marked_base, &head).added_entries(),
+            1
+        );
+    }
+
+    #[test]
+    fn a_count_bucket_gives_a_long_file_no_freed_complexity_slot() {
+        // The base slot can be a function that was fixed, so the long file is new.
+        let base = json!({
+            "finding_counts": { "src/a.ts": { "complexity_moderate": { "count": 1 } } },
+        });
+        let head = json!({
+            "file_lines_categories": true,
+            "finding_counts": { "src/a.ts": { "file_lines_moderate": { "count": 1 } } },
+        });
+        let growth = baseline_growth(BaselineKind::Health, &base, &head);
         assert_eq!(
             keys(&growth),
             vec![(
                 HEALTH_FILE_COUNTS.to_owned(),
                 vec!["src/a.ts file_lines_moderate (count 1)".to_owned()]
             )]
-        );
-        let marked_base = json!({
-            "file_lines_categories": true,
-            "finding_counts": { "src/a.ts": { "complexity_moderate": { "count": 2 } } },
-        });
-        assert_eq!(
-            baseline_growth(BaselineKind::Health, &marked_base, &head).added_entries(),
-            1
         );
     }
 
