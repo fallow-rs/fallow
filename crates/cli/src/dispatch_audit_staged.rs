@@ -35,8 +35,17 @@ pub(super) fn dispatch_staged_audit(
     args.coverage = args.coverage.take().map(|path| host.join(path));
     args.runtime_coverage = args.runtime_coverage.take().map(|path| host.join(path));
     args.staged_host = Some(host.to_path_buf());
+    let staged_inputs = dispatch.run_inputs.map(|inputs| {
+        let mut inputs = inputs.clone();
+        inputs.root = Some(fallow_types::sourced::Given {
+            value: staged_root.to_path_buf(),
+            origin: fallow_types::sourced::Origin::Flag("--staged"),
+        });
+        inputs
+    });
     let staged_dispatch = DispatchContext {
         root: staged_root,
+        run_inputs: staged_inputs.as_ref(),
         ..*dispatch
     };
     dispatch_audit(&staged_dispatch, &args)

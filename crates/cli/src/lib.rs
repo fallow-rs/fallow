@@ -88,7 +88,6 @@ mod regression;
 pub mod report;
 mod requests;
 mod rule_pack;
-#[cfg(test)]
 mod run_inputs;
 mod runtime_support;
 mod schema;
@@ -127,7 +126,6 @@ use cli_format::FormatConfig;
 #[cfg(test)]
 use cli_format::parse_format_arg;
 use cli_impact::ImpactCli;
-use cli_production::ProductionModes;
 use cli_startup::{
     bare_combined_baseline_subcommand_error_message, bare_coverage_subcommand_error_message,
     cli_bare_combined_baseline_flag, cli_has_bare_coverage_input, parse_cli_args,
@@ -253,6 +251,8 @@ struct DispatchContext<'a> {
     tolerance: regression::Tolerance,
     save_regression_file: Option<&'a std::path::PathBuf>,
     save_to_config: bool,
+    /// The run inputs of the command line. `None` for a command that loads no config.
+    run_inputs: Option<&'a fallow_config::RunInputs>,
 }
 
 impl DispatchContext<'_> {
@@ -501,6 +501,8 @@ fn run_command() -> ExitCode {
     }
 
     let (save_regression_file, save_to_config) = regression_save_targets(&cli);
+    let run_inputs =
+        run_inputs::dispatch_inputs(&cli, fallow_config::EnvSnapshot::capture(), output, quiet);
 
     // The agent and hooks commands manage the Claude Code setup themselves.
     // A plugin hint after `agent uninstall` would ask the user to install
@@ -523,6 +525,7 @@ fn run_command() -> ExitCode {
         tolerance,
         save_regression_file: save_regression_file.as_ref(),
         save_to_config,
+        run_inputs: run_inputs.as_ref(),
     };
     let exit_code = match dispatch_and_finalize(&dispatch, command) {
         Ok(code) => code,
@@ -1037,42 +1040,32 @@ fn regression_save_targets(cli: &Cli) -> (Option<std::path::PathBuf>, bool) {
 
 fn dispatch_bare_command(dispatch: &DispatchContext<'_>) -> ExitCode {
     let cli = dispatch.cli;
-    let analyses = match combined::resolve_bare_analyses(cli, dispatch.root, dispatch.output) {
-        Ok(analyses) => analyses,
+    let run = match dispatch.resolve_run() {
+        Ok(run) => run,
         Err(code) => return code,
     };
-    let production = match dispatch.production_modes(
-        cli.production_dead_code,
-        cli.production_health,
-        cli.production_dupes,
-    ) {
-        Ok(production) => production,
-        Err(code) => return code,
-    };
+    let analyses = combined::bare_analyses(cli, &run);
     // Coverage only feeds health scoring, and resolving it validates the
     // winning root. A bare run that excludes health (`--only check`,
-    // `--skip health`) must neither load config for coverage nor reject a
-    // relative `health.coverageRoot` it never reads.
+    // `--skip health`) must not reject a relative `health.coverageRoot` it
+    // never reads.
     let coverage_inputs = if analyses.run_health {
-        match resolve_health_coverage_inputs(
-            dispatch,
-            cli.coverage.as_deref(),
-            cli.coverage_root.as_deref(),
-        ) {
+        let (coverage, root) = (cli.coverage.as_deref(), cli.coverage_root.as_deref());
+        match resolve_health_coverage_inputs(dispatch, &run, coverage, root) {
             Ok(inputs) => inputs,
             Err(code) => return code,
         }
     } else {
         ResolvedHealthCoverageInputs::default()
     };
-    run_bare_combined(dispatch, production, &coverage_inputs, analyses)
+    run_bare_combined(dispatch, &run, &coverage_inputs, analyses)
 }
 
 /// Build `CombinedOptions` for a bare `fallow` invocation and run the combined
 /// pipeline.
 fn run_bare_combined(
     dispatch: &DispatchContext<'_>,
-    production: ProductionModes,
+    run: &fallow_engine::resolved_run::ResolvedRun,
     coverage_inputs: &ResolvedHealthCoverageInputs,
     analyses: combined::BareAnalyses,
 ) -> ExitCode {
@@ -1112,13 +1105,13 @@ fn run_bare_combined(
     baseline_growth::run_gated(
         &dispatch.growth_ctx(baseline_growth::GrowthOwner::Combined),
         &growth_targets,
-        || run_combined_scoped(dispatch, production, coverage_inputs, analyses, scope),
+        || run_combined_scoped(dispatch, run, coverage_inputs, analyses, scope),
     )
 }
 
 fn run_combined_scoped(
     dispatch: &DispatchContext<'_>,
-    production: ProductionModes,
+    run: &fallow_engine::resolved_run::ResolvedRun,
     coverage_inputs: &ResolvedHealthCoverageInputs,
     analyses: combined::BareAnalyses,
     scope: Option<PathBuf>,
@@ -1127,6 +1120,7 @@ fn run_combined_scoped(
     let (output, quiet, fail_on_issues) =
         (dispatch.output, dispatch.quiet, dispatch.fail_on_issues);
     let scoped_run = scope.is_some();
+    let production = run.production_modes();
     let architecture = combined::resolve_architecture_selection(&cli.only, &cli.skip);
     // A narrowed dead-code section saves narrowed regression counts.
     let narrowed_report = architecture != check::ArchitectureSelection::All;
@@ -1155,6 +1149,7 @@ fn run_combined_scoped(
         production_dead_code: Some(production.dead_code),
         production_health: Some(production.health),
         production_dupes: Some(production.dupes),
+        run: Some(run),
         workspace: cli.workspace.as_deref(),
         changed_workspaces: cli.changed_workspaces.as_deref(),
         group_by: cli.group_by,

@@ -69,9 +69,6 @@ pub(super) fn decision_surface_audit_options<'a>(
 /// gate, coverage and baseline input left at its default.
 pub(super) fn decision_surface_audit_args(max_decisions: usize) -> AuditDispatchArgs {
     AuditDispatchArgs {
-        production_dead_code: false,
-        production_health: false,
-        production_dupes: false,
         dead_code_baseline: None,
         health_baseline: None,
         dupes_baseline: None,

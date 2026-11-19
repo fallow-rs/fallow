@@ -537,6 +537,8 @@ pub struct CheckOptions<'a> {
     pub sarif_file: Option<&'a std::path::Path>,
     pub production: bool,
     pub production_override: Option<bool>,
+    /// The dead-code analysis of the resolved run. `None` loads the config.
+    pub run: Option<fallow_engine::resolved_run::Runnable<'a>>,
     pub workspace: Option<&'a [String]>,
     pub changed_workspaces: Option<&'a str>,
     pub group_by: Option<crate::GroupBy>,
@@ -783,8 +785,13 @@ fn run_check_analysis(
     opts: &CheckOptions<'_>,
     config: &ResolvedConfig,
 ) -> Result<CheckAnalysisData, ExitCode> {
-    let session = fallow_engine::session::AnalysisSession::from_resolved_config(config.clone())
-        .map_err(|e| emit_input_error(&format!("Analysis error: {e}"), opts.output))?;
+    // The command settings of a resolved run must leave its decided fields as
+    // the resolver set them.
+    let session = match opts.run {
+        Some(runnable) => runnable.open_session_adjusted(|decided| *decided = config.clone()),
+        None => fallow_engine::session::AnalysisSession::from_resolved_config(config.clone()),
+    }
+    .map_err(|e| emit_input_error(&format!("Analysis error: {e}"), opts.output))?;
     // Resolve the package map before the analysis, so a map that names no
     // workspace fails fast. The run-wide memo keeps the result for the scope.
     fallow_engine::change_scope::ChangeScope::resolve(
@@ -844,33 +851,6 @@ fn drop_in_background<T: Send + 'static>(value: T) {
         .name("fallow-drop".to_owned())
         .spawn(move || drop(value));
     drop(spawned);
-}
-
-/// Default the opt-in `private-type-leaks` rule to `warn` for type-aware runs,
-/// where semantic confirmation makes it trustworthy. An explicit user setting
-/// always wins: `"private-type-leaks": "off"` stays off (issue #2170).
-fn apply_type_aware_private_leak_default(config: &mut ResolvedConfig, filters_active: bool) {
-    if config.type_aware.enabled
-        && !filters_active
-        && config.rules.private_type_leaks == Severity::Off
-        && !config.rules.private_type_leaks_configured
-    {
-        config.rules.private_type_leaks = Severity::Warn;
-    }
-}
-
-fn apply_type_aware_overrides(
-    opts: &CheckOptions<'_>,
-    config: &mut ResolvedConfig,
-) -> Result<(), ExitCode> {
-    apply_type_aware_overrides_from(
-        opts.output,
-        opts.type_aware,
-        opts.type_aware_config_override,
-        opts.type_aware_projects,
-        opts.type_aware_require,
-        config,
-    )
 }
 
 pub fn apply_type_aware_overrides_from(

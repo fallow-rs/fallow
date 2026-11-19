@@ -126,14 +126,15 @@ pub struct DupesOptions<'a> {
     /// passes `--dupes-baseline`; every other caller passes `--baseline`.
     pub baseline_flag: &'a str,
     pub save_baseline_path: Option<&'a std::path::Path>,
-    /// Fail the run when a loaded `baseline_path` has entries that match
-    /// nothing.
+    /// Fail the run when a loaded `baseline_path` has entries that match nothing.
     pub fail_on_stale_baseline: bool,
     /// `--fail-on-issues` or `--ci`: fail the run when a clone group remains
     /// after the baseline and suppression filters.
     pub fail_on_issues: bool,
     pub production: bool,
     pub production_override: Option<bool>,
+    /// The duplication analysis of the resolved run. `None` loads the config.
+    pub run: Option<fallow_engine::resolved_run::Runnable<'a>>,
     pub trace: Option<&'a str>,
     pub changed_since: Option<&'a str>,
     pub diff_index: Option<&'a crate::report::ci::diff_filter::DiffIndex>,
@@ -154,10 +155,8 @@ pub struct DupesOptions<'a> {
     /// standalone report remains ungrouped, but the shared resolver still
     /// validates unsupported modes so global-flag errors are consistent.
     pub group_by: Option<crate::GroupBy>,
-    /// When true, emit a timing panel after the duplication report. Mirrors
-    /// the global `--performance` flag handling for `check` and `health`.
-    /// Standalone `fallow dupes` reads this; combined-mode invocations rely
-    /// on the bare `fallow` pipeline panel and ignore this field.
+    /// Emit a timing panel after the report of standalone `fallow dupes`. The
+    /// bare run prints its own panel and ignores this field.
     pub performance: bool,
     /// Emit the verbatim source text on each clone instance in `--format json`
     /// output. `false` is `--no-fragments`: the five location fields still
@@ -334,9 +333,12 @@ pub fn execute_dupes_with_files(
     execute_dupes_inner(opts, Some(files))
 }
 
-/// Load the resolved config for a duplication run, folding the CLI/config
-/// production precedence into the `production_override`.
+/// The resolved config of a duplication run: the config of the resolved run,
+/// else a load with the CLI/config production precedence.
 fn load_dupes_config_for_analysis(opts: &DupesOptions<'_>) -> Result<ResolvedConfig, ExitCode> {
+    if let Some(runnable) = opts.run {
+        return Ok(runnable.config().clone());
+    }
     load_config_for_analysis(
         opts.root,
         opts.config_path,
@@ -1448,12 +1450,9 @@ mod tests {
         }
     }
 
-    /// Build a `DupesOptions` with the command-default scalars preset
-    /// (`min_tokens=50`, `min_lines=5`, `threshold=0.0`). Tests that exercise
-    /// CLI-override semantics still need a concrete value, so we wrap each
-    /// scalar in `Some(...)` here. Tests that want the config-fallback path
-    /// should mutate the returned struct's scalars to `None` before calling
-    /// `build_dupes_config`.
+    /// A `DupesOptions` with the command-default scalars (`min_tokens=50`,
+    /// `min_lines=5`, `threshold=0.0`) as override values. A test of the config
+    /// fallback sets the scalars to `None` before `build_dupes_config`.
     fn default_opts_for_config(root: &Path, mode: DupesMode) -> DupesOptions<'_> {
         DupesOptions {
             root,
@@ -1480,6 +1479,7 @@ mod tests {
             fail_on_issues: false,
             production: false,
             production_override: None,
+            run: None,
             trace: None,
             changed_since: None,
             diff_index: None,

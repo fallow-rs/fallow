@@ -85,6 +85,7 @@ pub(super) fn run_audit_check<'a>(
         sarif_file: None,
         production: audit_production_flags(opts).mode(ProductionAnalysis::DeadCode),
         production_override: opts.production_dead_code,
+        run: None,
         workspace: opts.workspace,
         changed_workspaces: opts.changed_workspaces,
         group_by: opts.group_by,

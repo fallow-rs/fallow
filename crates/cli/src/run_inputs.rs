@@ -291,6 +291,21 @@ pub fn command_run_inputs(cli: &Cli, env: EnvSnapshot) -> Option<RunInputs> {
     Some(inputs)
 }
 
+/// The run inputs of the command that the CLI dispatches, with the output
+/// format and the quiet flag that the CLI resolved from `--format`,
+/// `--quiet`, `--ci`, `FALLOW_FORMAT` and `FALLOW_QUIET`.
+pub fn dispatch_inputs(
+    cli: &Cli,
+    env: EnvSnapshot,
+    output: OutputFormat,
+    quiet: bool,
+) -> Option<RunInputs> {
+    let mut inputs = command_run_inputs(cli, env)?;
+    inputs.output = output;
+    inputs.quiet = quiet;
+    Some(inputs)
+}
+
 /// A command of the [`ProductionRule::OnOnly`] rule turns production mode on
 /// from the variables and never off: a variable that turns the dead-code
 /// analysis off leaves the config in charge. So the snapshot loses the

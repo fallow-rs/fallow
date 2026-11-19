@@ -2,23 +2,26 @@
 use super::*;
 
 pub(super) fn prepare_check_config(opts: &CheckOptions<'_>) -> Result<ResolvedConfig, ExitCode> {
-    let mut config = load_config_for_analysis(
-        opts.root,
-        opts.config_path,
-        crate::ConfigLoadOptions {
-            output: opts.output,
-            no_cache: opts.no_cache,
-            threads: opts.threads,
-            production_override:
-                fallow_engine::project_config::ProductionFlags::single_analysis_override(
-                    opts.production,
-                    opts.production_override,
-                ),
-            quiet: opts.quiet,
-            allow_remote_extends: opts.allow_remote_extends,
-        },
-        fallow_config::ProductionAnalysis::DeadCode,
-    )?;
+    let mut config = match opts.run {
+        Some(runnable) => runnable.config().clone(),
+        None => load_config_for_analysis(
+            opts.root,
+            opts.config_path,
+            crate::ConfigLoadOptions {
+                output: opts.output,
+                no_cache: opts.no_cache,
+                threads: opts.threads,
+                production_override:
+                    fallow_engine::project_config::ProductionFlags::single_analysis_override(
+                        opts.production,
+                        opts.production_override,
+                    ),
+                quiet: opts.quiet,
+                allow_remote_extends: opts.allow_remote_extends,
+            },
+            fallow_config::ProductionAnalysis::DeadCode,
+        )?,
+    };
     if opts.filters.shared_state {
         config.request_shared_state();
     }
@@ -36,6 +39,36 @@ pub(super) fn prepare_check_config(opts: &CheckOptions<'_>) -> Result<ResolvedCo
     opts.filters.activate_explicit_opt_ins(&mut config.rules);
     apply_type_aware_private_leak_default(&mut config, opts.filters.any_active());
     Ok(config)
+}
+
+/// Default the opt-in `private-type-leaks` rule to `warn` for type-aware runs,
+/// where semantic confirmation makes it trustworthy. An explicit user setting
+/// always wins: `"private-type-leaks": "off"` stays off (issue #2170).
+pub(super) fn apply_type_aware_private_leak_default(
+    config: &mut ResolvedConfig,
+    filters_active: bool,
+) {
+    if config.type_aware.enabled
+        && !filters_active
+        && config.rules.private_type_leaks == Severity::Off
+        && !config.rules.private_type_leaks_configured
+    {
+        config.rules.private_type_leaks = Severity::Warn;
+    }
+}
+
+fn apply_type_aware_overrides(
+    opts: &CheckOptions<'_>,
+    config: &mut ResolvedConfig,
+) -> Result<(), ExitCode> {
+    apply_type_aware_overrides_from(
+        opts.output,
+        opts.type_aware,
+        opts.type_aware_config_override,
+        opts.type_aware_projects,
+        opts.type_aware_require,
+        config,
+    )
 }
 
 pub(super) fn parse_type_aware_bool(value: &str, output: OutputFormat) -> Result<bool, ExitCode> {

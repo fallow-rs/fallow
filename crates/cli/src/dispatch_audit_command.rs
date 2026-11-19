@@ -5,9 +5,6 @@ use crate::cli_args::AuditGateRunArgs;
 
 pub(super) fn dispatch_audit_command(command: Command, dispatch: &DispatchContext<'_>) -> ExitCode {
     let Command::Audit {
-        production_dead_code,
-        production_health,
-        production_dupes,
         dead_code_baseline,
         health_baseline,
         dupes_baseline,
@@ -37,6 +34,7 @@ pub(super) fn dispatch_audit_command(command: Command, dispatch: &DispatchContex
         show_cleared,
         show_deprioritized,
         path,
+        ..
     } = command
     else {
         unreachable!("audit dispatcher only handles audit commands");
@@ -53,9 +51,6 @@ pub(super) fn dispatch_audit_command(command: Command, dispatch: &DispatchContex
     };
 
     let args = AuditDispatchArgs {
-        production_dead_code,
-        production_health,
-        production_dupes,
         dead_code_baseline,
         health_baseline,
         dupes_baseline,

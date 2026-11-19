@@ -520,8 +520,9 @@ fn workspace_notices(output: &CommandOutput) -> usize {
 
 /// A glob of the `workspaces` field that matches two directories without a
 /// `package.json` gives a workspace discovery diagnostic. Each config load of
-/// the main CLI loader prints the notice in human mode, so a command that
-/// loads the config more than one time prints it more than one time.
+/// the main CLI loader prints the notice in human mode. The bare run,
+/// `dead-code`, `dupes`, `health` and `audit` resolve their run once, so they
+/// print the notice once.
 #[test]
 fn the_workspace_diagnostics_notice_prints_once_per_config_load() {
     let dir = project();
@@ -541,10 +542,10 @@ fn the_workspace_diagnostics_notice_prints_once_per_config_load() {
         &["-c", "commit.gpgsign=false", "commit", "-m", "pkgs", "-q"],
     );
     let commands: [(&[&str], usize); 8] = [
-        (&[], 5),
+        (&[], 1),
         (&["dead-code"], 1),
         (&["dupes"], 1),
-        (&["health"], 2),
+        (&["health"], 1),
         (&["audit", "--base", "HEAD"], 1),
         // `fallow list` loads the config in quiet mode and prints its own
         // diagnostics block.

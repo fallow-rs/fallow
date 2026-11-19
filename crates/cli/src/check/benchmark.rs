@@ -40,6 +40,7 @@ pub fn benchmark_dead_code_json(
         sarif_file: None,
         production: false,
         production_override: Some(false),
+        run: None,
         workspace: None,
         changed_workspaces: None,
         group_by: None,
