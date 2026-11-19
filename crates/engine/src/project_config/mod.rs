@@ -8,8 +8,10 @@ use fallow_config::{
     WorkspaceInfo,
 };
 use fallow_types::output_format::OutputFormat;
+use fallow_types::sourced::{Given, Layer, Origin, Sourced};
 use rustc_hash::FxHashSet;
 
+use crate::resolved_run::{PerAnalysis, ProductionInputs, decide_production};
 use crate::{EngineError, EngineResult};
 
 mod loader;
@@ -106,27 +108,24 @@ impl ProductionFlags {
     /// The effective production mode of one analysis: the flags first, then
     /// the `production` setting of the config.
     #[must_use]
-    pub const fn effective(
+    pub fn effective(
         self,
         analysis: ProductionAnalysis,
         config: &fallow_config::ProductionConfig,
     ) -> bool {
-        match self.override_for(analysis) {
-            Some(value) => value,
-            None => config.for_analysis(analysis),
-        }
+        *decide_production(&self.as_inputs(), config, None)
+            .get(analysis)
+            .value()
     }
 
     /// The effective production mode of each analysis.
     #[must_use]
-    pub const fn effective_modes(
-        self,
-        config: &fallow_config::ProductionConfig,
-    ) -> ProductionModes {
+    pub fn effective_modes(self, config: &fallow_config::ProductionConfig) -> ProductionModes {
+        let decided = decide_production(&self.as_inputs(), config, None);
         ProductionModes {
-            dead_code: self.effective(ProductionAnalysis::DeadCode, config),
-            health: self.effective(ProductionAnalysis::Health, config),
-            dupes: self.effective(ProductionAnalysis::Dupes, config),
+            dead_code: decided.dead_code.into_value(),
+            health: decided.health.into_value(),
+            dupes: decided.dupes.into_value(),
         }
     }
 
@@ -134,18 +133,49 @@ impl ProductionFlags {
     /// host that reads production overrides from two sources, such as the
     /// flags and the environment variables of the CLI, puts the stronger
     /// source first. The config decides only when neither source sets a
-    /// value.
+    /// value. `fallback` has the rank of the environment variables in
+    /// `decide_production`.
     #[must_use]
     pub fn with_fallback(self, fallback: Self) -> Self {
-        let pick = |analysis| {
-            self.override_for(analysis)
-                .or_else(|| fallback.override_for(analysis))
+        let inputs = ProductionInputs {
+            global_env: fallback.global,
+            own_env: PerAnalysis {
+                dead_code: fallback.dead_code,
+                health: fallback.health,
+                dupes: fallback.dupes,
+            },
+            ..self.as_inputs()
+        };
+        let decided = decide_production(&inputs, &fallow_config::ProductionConfig::default(), None);
+        let given = |decision: &Sourced<bool>| {
+            (decision.source().layer() != Layer::Default).then_some(*decision.value())
         };
         Self {
             global: None,
-            dead_code: pick(ProductionAnalysis::DeadCode),
-            health: pick(ProductionAnalysis::Health),
-            dupes: pick(ProductionAnalysis::Dupes),
+            dead_code: given(&decided.dead_code),
+            health: given(&decided.health),
+            dupes: given(&decided.dupes),
+        }
+    }
+
+    /// The flags as caller-given production inputs, without environment
+    /// variables.
+    fn as_inputs(self) -> ProductionInputs {
+        let given = |value: Option<bool>, name| {
+            value.map(|value| Given {
+                value,
+                origin: Origin::ApiOption(name),
+            })
+        };
+        ProductionInputs {
+            global_flag: given(self.global, "ProductionFlags.global"),
+            own_flag: PerAnalysis {
+                dead_code: given(self.dead_code, "ProductionFlags.dead_code"),
+                health: given(self.health, "ProductionFlags.health"),
+                dupes: given(self.dupes, "ProductionFlags.dupes"),
+            },
+            global_env: None,
+            own_env: PerAnalysis::default(),
         }
     }
 }
