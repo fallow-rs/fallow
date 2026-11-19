@@ -410,6 +410,10 @@ export type MemberKind = ("enum_member" | "class_method" | "class_property" | "n
  */
 export type ReExportCycleKind = ("multi-node" | "self-loop")
 /**
+ * The rule that a boundary violation breaks.
+ */
+export type BoundaryViolationReason = ("disallowed_zone" | "internal_file")
+/**
  * Which rule-pack rule kind produced a [`PolicyViolation`].
  */
 export type PolicyRuleKind = ("banned-call" | "banned-import" | "banned-effect" | "banned-export" | "gdp-proof-producer")
@@ -437,6 +441,11 @@ reason?: (string | null)
  * Whether this was a file-level suppression.
  */
 is_file_level: boolean
+/**
+ * Whether this was a `fallow-ignore-start` range marker (then
+ * `is_file_level` is `false`). Omitted from the wire when `false`.
+ */
+is_range?: boolean
 /**
  * Whether `issue_kind` parses to a known `IssueKind`. False when the
  * token is a typo or refers to a kind that was renamed or removed in
@@ -944,7 +953,7 @@ export type NodeModulesState = ("present" | "missing")
  * Discriminant for [`CloneGroupAction::kind`]. Mirrors the action types
  * emitted by the legacy `build_clone_group_actions` walker.
  */
-export type CloneGroupActionType = ("extract-shared" | "suppress-line")
+export type CloneGroupActionType = ("extract-shared" | "suppress-line" | "suppress-range")
 /**
  * Why the audit new-only gate demoted an introduced clone group to
  * inherited. Serializes as a kebab-case string on the wire (for example
@@ -962,6 +971,11 @@ export type RefactoringKind = ("ExtractFunction" | "ExtractModule")
  * Discriminant for [`CloneFamilyAction::kind`].
  */
 export type CloneFamilyActionType = ("extract-shared" | "apply-suggestion" | "suppress-line")
+/**
+ * What is wrong with one `fallow-ignore-start` or `fallow-ignore-end`
+ * marker. A marker with a problem has no effect.
+ */
+export type RangeMarkerProblemKind = ("unclosed_start" | "unmatched_end" | "nested_start" | "missing_kind" | "unsupported_kind" | "not_own_line")
 /**
  * Which complexity threshold was exceeded.
  */
@@ -1744,7 +1758,7 @@ export type SuppressionInventorySchemaVersion = "1"
 /**
  * Suppression marker scope.
  */
-export type SuppressionInventoryLevel = ("file" | "line")
+export type SuppressionInventoryLevel = ("file" | "line" | "range")
 /**
  * How a suppression in the inventory was authored.
  */
@@ -5863,9 +5877,9 @@ export interface BoundaryViolationFinding {
  */
 from_path: string
 /**
- * The file being imported that violates the boundary. When the import
- * goes through a re-export chain, this is the origin module that
- * declares the imported symbol, not the barrel.
+ * The imported file that violates the boundary. Through a re-export chain,
+ * the origin module that declares the symbol, not the barrel; a chain
+ * stops at the first public entry file (`publicFiles`), which it then names.
  */
 to_path: string
 /**
@@ -5893,6 +5907,12 @@ col: number
  * violation comes from a re-export chain. Absent for a direct import.
  */
 via_path?: (string | null)
+reason?: BoundaryViolationReason
+/**
+ * The public entry files of `to_zone` that the importer can use instead.
+ * Set only when `reason` is `internal_file`.
+ */
+public_files?: string[]
 /**
  * Stable id of this finding: `dc1:<rule>:<16 hex digits>`, with a
  * `~<k>` suffix when several findings of one type share an identity.
@@ -8309,6 +8329,11 @@ clone_families: CloneFamilyFinding[]
  * Mirrored directory pairs.
  */
 mirrored_directories?: MirroredDirectory[]
+/**
+ * `fallow-ignore-start` and `fallow-ignore-end` markers with a problem.
+ * A marker with a problem has no effect on clone detection.
+ */
+range_marker_problems?: RangeMarkerFinding[]
 stats: DuplicationStats
 }
 /**
@@ -8421,13 +8446,13 @@ is_symlink?: boolean
 /**
  * Per-action wire shape attached to each `CloneGroupFinding` and
  * `AttributedCloneGroupFinding` (see `crates/api/src/dupes_output.rs`):
- * `extract-shared` plus `suppress-line`. The typed wrappers replaced the
+ * `extract-shared`, `suppress-line`, and `suppress-range`. The typed wrappers replaced the
  * legacy JSON post-pass injection that used to live in the CLI report layer.
  */
 export interface CloneGroupAction {
 type: CloneGroupActionType
 /**
- * Whether `fallow fix` can auto-apply this action. Both variants are
+ * Whether `fallow fix` can auto-apply this action. All variants are
  * manual today; the field is non-singleton so a future auto-applier
  * does not need a schema change.
  */
@@ -8439,9 +8464,14 @@ description: string
 /**
  * The inline comment to insert (e.g.,
  * `// fallow-ignore-next-line code-duplication`). Present on
- * `suppress-line`; absent on `extract-shared`.
+ * `suppress-line` and `suppress-range` (the start comment); absent on
+ * `extract-shared`.
  */
 comment?: (string | null)
+/**
+ * The comment that closes the range. Present on `suppress-range` only.
+ */
+end_comment?: (string | null)
 }
 /**
  * Wire-shape envelope for a [`CloneFamily`] finding.
@@ -8551,6 +8581,26 @@ shared_files: string[]
  * Total duplicated lines across all shared files.
  */
 total_lines: number
+}
+/**
+ * A `fallow-ignore-start` or `fallow-ignore-end` marker with a problem, in
+ * one file.
+ */
+export interface RangeMarkerFinding {
+/**
+ * Path to the file that holds the marker.
+ */
+path: string
+/**
+ * 1-based line of the marker comment.
+ */
+line: number
+problem: RangeMarkerProblemKind
+/**
+ * The kind token that the range does not support. Present only for
+ * `unsupported_kind`.
+ */
+token?: (string | null)
 }
 /**
  * Aggregate duplication statistics.
@@ -15020,6 +15070,12 @@ patterns: string[]
  * Number of analyzable files the zone matched.
  */
 file_count: number
+/**
+ * Globs of the public entry files of the zone (`publicFiles` in the
+ * boundary config), after the `autoDiscover` expansion. Omitted when
+ * empty.
+ */
+public_files?: string[]
 }
 /**
  * A boundary import rule, expanded to operate on concrete child zone
@@ -15525,6 +15581,11 @@ clone_families: CloneFamilyFinding[]
  * Mirrored directory pairs.
  */
 mirrored_directories?: MirroredDirectory[]
+/**
+ * `fallow-ignore-start` and `fallow-ignore-end` markers with a problem.
+ * A marker with a problem has no effect on clone detection.
+ */
+range_marker_problems?: RangeMarkerFinding[]
 stats: DuplicationStats
 /**
  * Number of clone groups carried in `clone_groups[]`.
@@ -18259,6 +18320,11 @@ clone_families: CloneFamilyFinding[]
  * Mirrored directory pairs.
  */
 mirrored_directories?: MirroredDirectory[]
+/**
+ * `fallow-ignore-start` and `fallow-ignore-end` markers with a problem.
+ * A marker with a problem has no effect on clone detection.
+ */
+range_marker_problems?: RangeMarkerFinding[]
 stats: DuplicationStats
 /**
  * This run's view of the loaded duplication baseline, present only when
@@ -18358,7 +18424,8 @@ col: number
  */
 actions: FeatureFlagAction[]
 /**
- * Flag SDK the call belongs to, for SDK-call findings.
+ * Flag SDK the call belongs to, for SDK-call findings. Absent for a
+ * `medium` confidence call, because no flag import confirms the SDK.
  */
 sdk_name?: (string | null)
 /**
@@ -18571,7 +18638,8 @@ export interface FlagAgeGateEntry {
 flag_name: string
 kind: RetirementFlagKind
 /**
- * Flag SDK, for SDK flags with a known provider.
+ * Flag SDK, for SDK flags with a known provider. Absent when no flag
+ * import confirms an SDK call of the flag.
  */
 sdk_name?: (string | null)
 /**
@@ -18593,7 +18661,8 @@ export interface RetirementFlag {
 flag_name: string
 kind: RetirementFlagKind
 /**
- * Flag SDK, for SDK flags with a known provider.
+ * Flag SDK, for SDK flags with a known provider. Absent when no flag
+ * import confirms an SDK call of the flag.
  */
 sdk_name?: (string | null)
 /**
@@ -20430,6 +20499,16 @@ line: number
  */
 kind?: (string | null)
 level: SuppressionInventoryLevel
+/**
+ * The `fallow-ignore-end` line of a range. Present only on a range
+ * marker pair that applies.
+ */
+end_line?: (number | null)
+/**
+ * What is wrong with a range marker. A marker with a problem has no
+ * effect. Present only on such a marker; `fallow dupes` reports it too.
+ */
+problem?: (RangeMarkerProblemKind | null)
 origin: SuppressionInventoryOrigin
 /**
  * Human-authored reason after `--`; `null` when absent.
@@ -21223,6 +21302,12 @@ skipped_files: MutationSkippedFile[]
  */
 unmatched_paths: string[]
 /**
+ * The reason for each entry of `unmatched_paths`, at the same index.
+ * Each path is relative to the project root. Absent when
+ * `unmatched_paths` is empty.
+ */
+unmatched_path_reasons?: MutationUnmatchedPath[]
+/**
  * The instrumented files that the runner never loaded.
  */
 unloaded_paths: string[]
@@ -21869,6 +21954,24 @@ path: string
 reason: string
 }
 /**
+ * A path of a `paths` scope that selects no file, with the reason.
+ */
+export interface MutationUnmatchedPath {
+/**
+ * The path relative to the project root, with forward slashes. The
+ * entry at the same index of `unmatched_paths` holds the path as given,
+ * so match the two fields by index, not by value.
+ */
+path: string
+/**
+ * Why the path selects no file, kebab-case: `not-found` (the path does
+ * not exist), `ignored` (the ignore globs of the config exclude the
+ * path or a file under it) or `no-source-file` (the path holds only
+ * test code, declaration files or files outside the module graph).
+ */
+reason: string
+}
+/**
  * The git worktree check of a run: a run refuses a dirty worktree unless
  * `--allow-dirty` is set, and it compares the worktree after the run.
  */
@@ -22267,6 +22370,12 @@ skipped_files: MutationSkippedFile[]
  * The paths of a `paths` scope that select no file.
  */
 unmatched_paths: string[]
+/**
+ * The reason for each entry of `unmatched_paths`, at the same index.
+ * Each path is relative to the project root. Absent when
+ * `unmatched_paths` is empty.
+ */
+unmatched_path_reasons?: MutationUnmatchedPath[]
 runner: MutationPlanRunner
 }
 /**

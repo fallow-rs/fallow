@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use fallow_api::{
-    AnalysisOptions, DeadCodeFilters, DeadCodeOptions, run_dead_code,
+    AnalysisOptions, DeadCodeFilters, DeadCodeOptions, ProductionAnalysis, run_dead_code,
     serialize_dead_code_programmatic_json,
 };
 use rmcp::ErrorData as McpError;
@@ -13,7 +13,7 @@ use crate::params::CheckChangedParams;
 use super::{
     api_runtime::{
         EnvScope, call_cancellation, run_api_blocking, shared_analysis_options, shared_params,
-        typed_api_value, typed_tool_result, workspace_patterns_from_param,
+        typed_api_value, typed_production, typed_tool_result, workspace_patterns_from_param,
     },
     fallback_policy::{baseline_requested, regression_requested},
     push_baseline, push_global, push_regression, push_remote_extends, push_scope, run_tool,
@@ -116,7 +116,7 @@ fn check_changed_options_from_params(
         finding_ids: Vec::new(),
         analysis: AnalysisOptions {
             production: params.production.unwrap_or(false),
-            production_override: params.production,
+            production_override: typed_production(params.production, ProductionAnalysis::DeadCode),
             // The tool's own `since` wins over any inherited ref.
             changed_since: Some(params.since.clone()),
             workspace: workspace_patterns_from_param(params.workspace.as_deref()),

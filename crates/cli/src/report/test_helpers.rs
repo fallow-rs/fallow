@@ -179,6 +179,8 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
             line: 2,
             col: 0,
             via_path: None,
+            reason: fallow_types::results::BoundaryViolationReason::DisallowedZone,
+            public_files: vec![],
         }));
     r.unprovided_injects
         .push(UnprovidedInjectFinding::with_actions(UnprovidedInject {
@@ -273,6 +275,7 @@ pub fn sample_results(root: &Path) -> AnalysisResults {
             issue_kind: Some("unused-exports".to_string()),
             reason: None,
             is_file_level: false,
+            is_range: false,
             kind_known: false,
         },
         missing_reason: false,

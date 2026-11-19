@@ -5,6 +5,9 @@ use std::sync::{LazyLock, Mutex, OnceLock};
 use fallow_config::{
     FallowConfig, OutputFormat, PartialRulesConfig, ProductionAnalysis, ResolvedConfig, RulesConfig,
 };
+use fallow_engine::project_config::{
+    ConfigFile, ConfigFileOptions, ConfigLoadError, ProductionFlags, ResolveOptions,
+};
 use fallow_output::GroupByMode;
 use rustc_hash::FxHashSet;
 
@@ -110,16 +113,11 @@ pub fn set_max_file_size_override(max_file_size_mb: Option<u32>) {
     let _ = MAX_FILE_SIZE_OVERRIDE.set(max_file_size_mb);
 }
 
-/// Resolve the effective per-file size ceiling override (in megabytes): the
-/// `--max-file-size` flag wins, then `FALLOW_MAX_FILE_SIZE`, else `None` (the
-/// built-in default applies). `Some(0)` from either source means unlimited.
-fn resolve_max_file_size_mb() -> Option<u32> {
-    if let Some(Some(mb)) = MAX_FILE_SIZE_OVERRIDE.get() {
-        return Some(*mb);
-    }
-    std::env::var("FALLOW_MAX_FILE_SIZE")
-        .ok()
-        .and_then(|raw| raw.trim().parse::<u32>().ok())
+/// The `--max-file-size` flag value in megabytes, when the flag was passed.
+/// The engine applies `FALLOW_MAX_FILE_SIZE` when it resolves the config, and
+/// the flag then replaces that value. `Some(0)` means unlimited.
+fn max_file_size_flag_mb() -> Option<u32> {
+    MAX_FILE_SIZE_OVERRIDE.get().copied().flatten()
 }
 
 /// Analysis types for --only/--skip selection.
@@ -320,45 +318,43 @@ pub fn load_config_for_analysis(
     options: ConfigLoadOptions,
     analysis: ProductionAnalysis,
 ) -> Result<ResolvedConfig, ExitCode> {
-    let user_config = load_user_config(root, config_path, &options)?;
-
-    let loaded_user_config = user_config.is_some();
-    let final_config = match user_config {
-        Some(mut config) => {
-            let production = options
-                .production_override
-                .unwrap_or_else(|| config.production.for_analysis(analysis));
-            config.production = config.production.for_run(production);
-            config
-        }
-        None => FallowConfig {
-            production: options.production_override.unwrap_or(false).into(),
-            ..FallowConfig::default()
-        },
-    };
-    crate::telemetry::note_config_shape(config_shape_for(&final_config, loaded_user_config));
-
-    validate_config_extensions(root, &final_config, &options)?;
-
-    let cache_max_size_mb = fallow_config::cache_max_size_env_override();
-    let mut resolved = final_config.resolve(
-        root.to_path_buf(),
+    let file = load_config_file(
+        root,
+        config_path.as_deref(),
+        options.allow_remote_extends,
         options.output,
-        options.threads,
-        options.no_cache,
-        options.quiet,
-        cache_max_size_mb,
+    )?;
+    if let Some(path) = &file.path {
+        log_config_loaded(path, options.output, options.quiet);
+    }
+    let loaded_user_config = file.path.is_some();
+    let file = file.for_analysis(
+        analysis,
+        ProductionFlags {
+            global: options.production_override,
+            ..ProductionFlags::default()
+        },
     );
-    if let Some(mb) = resolve_max_file_size_mb() {
+    crate::telemetry::note_config_shape(config_shape_for(&file.config, loaded_user_config));
+
+    // A rule pack that fails to load must fail the run: silently skipping
+    // policy is the exact failure mode rule packs document themselves as
+    // preventing.
+    file.validate(root)
+        .map_err(|err| crate::error::emit_input_error(err.message(), options.output))?;
+
+    let mut resolved = file.resolve(
+        root,
+        ResolveOptions {
+            output: options.output,
+            threads: options.threads,
+            no_cache: options.no_cache,
+            quiet: options.quiet,
+        },
+    );
+    if let Some(mb) = max_file_size_flag_mb() {
         resolved.max_file_size_bytes = fallow_config::resolve_max_file_size_bytes(Some(mb));
     }
-    if let Some(dir) = fallow_config::cache_dir_env_override() {
-        resolved.override_cache_dir(dir);
-    }
-    // The engine applies the same override for the LSP, MCP and Node hosts.
-    resolved.apply_package_baselines_env(
-        std::env::var_os(fallow_config::PACKAGE_BASELINES_ENV).as_deref(),
-    );
     crate::cache_notice::record_candidate(
         root,
         &resolved.cache_dir,
@@ -374,101 +370,94 @@ pub fn load_config_for_analysis(
     Ok(resolved)
 }
 
-/// Load the user config from an explicit `--config` path or via auto-discovery,
-/// logging the resolved path. Returns `None` when no config file is found.
-#[expect(clippy::ref_option, reason = "&Option matches clap's field type")]
-fn load_user_config(
+/// Load the config file through the engine loader: the file at `config_path`,
+/// else the discovered file. A load error prints on the error channel of
+/// `output` and gives exit code 2.
+pub fn load_config_file(
     root: &Path,
-    config_path: &Option<PathBuf>,
-    options: &ConfigLoadOptions,
-) -> Result<Option<FallowConfig>, ExitCode> {
-    let load_options = fallow_config::ConfigLoadOptions {
-        allow_remote_extends: options.allow_remote_extends,
-    };
-    if let Some(path) = config_path {
-        return match FallowConfig::load_with_options(path, load_options) {
-            Ok(c) => {
-                log_config_loaded(path, options.output, options.quiet);
-                Ok(Some(c))
-            }
-            Err(e) => {
-                let msg = format!("failed to load config '{}': {e}", path.display());
-                Err(crate::error::emit_input_error(&msg, options.output))
-            }
-        };
-    }
-    match FallowConfig::find_and_load_with_options(root, load_options) {
-        Ok(Some((config, found_path))) => {
-            log_config_loaded(&found_path, options.output, options.quiet);
-            Ok(Some(config))
-        }
-        Ok(None) => Ok(None),
-        Err(e) => Err(crate::error::emit_input_error(&e, options.output)),
-    }
-}
-
-/// Join a list of validation errors into one indented `emit_error` exit code.
-fn emit_joined_config_errors<E: ToString>(
-    label: &str,
-    errors: &[E],
+    config_path: Option<&Path>,
+    allow_remote_extends: bool,
     output: OutputFormat,
-) -> ExitCode {
-    let joined = errors
-        .iter()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>()
-        .join("\n  - ");
-    crate::error::emit_input_error(&format!("{label}:\n  - {joined}"), output)
+) -> Result<ConfigFile, ExitCode> {
+    fallow_engine::project_config::load_config_file(
+        root,
+        config_path,
+        ConfigFileOptions {
+            allow_remote_extends,
+        },
+    )
+    .map_err(|err| crate::error::emit_input_error(&config_load_error_message(&err), output))
 }
 
-/// Validate external plugins, resolved boundaries, and rule packs. A rule pack
-/// that fails to load must fail the run: silently skipping policy is the exact
-/// failure mode rule packs document themselves as preventing.
-fn validate_config_extensions(
-    root: &Path,
-    config: &FallowConfig,
-    options: &ConfigLoadOptions,
-) -> Result<(), ExitCode> {
-    if let Err(errors) =
-        fallow_config::discover_and_validate_external_plugins(root, &config.plugins)
-    {
-        return Err(emit_joined_config_errors(
-            "invalid external plugin definition",
-            &errors,
-            options.output,
-        ));
+/// The CLI text of a config load error. An explicit file adds its path to the
+/// top error. The top error of a discovered file names the path itself.
+pub fn config_load_error_message(err: &ConfigLoadError) -> String {
+    match err {
+        ConfigLoadError::Parse {
+            path: Some(path),
+            message,
+            ..
+        } => format!("failed to load config '{}': {message}", path.display()),
+        _ => err.message().to_owned(),
     }
-    if let Err(errors) = config.validate_resolved_boundaries(root) {
-        return Err(emit_joined_config_errors(
-            "invalid boundary configuration",
-            &errors,
-            options.output,
-        ));
-    }
-    let packs = match fallow_config::load_rule_packs(root, &config.rule_packs) {
-        Ok(packs) => packs,
-        Err(errors) => {
-            return Err(emit_joined_config_errors(
-                "invalid rule pack",
-                &errors,
-                options.output,
-            ));
+}
+
+/// The config inputs of a command line: the `--config` path and the trust
+/// policy of `--allow-remote-extends`. A command that reads optional settings
+/// passes both to each config load, so every load reads the same file with
+/// the same policy.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct ConfigFlags<'a> {
+    /// The `--config` path. `None` lets discovery find the config.
+    pub path: Option<&'a Path>,
+    /// Permit `https://` entries in the `extends` chain.
+    pub allow_remote_extends: bool,
+}
+
+impl ConfigFlags<'_> {
+    /// The load options of these flags.
+    #[must_use]
+    pub const fn file_options(self) -> ConfigFileOptions {
+        ConfigFileOptions {
+            allow_remote_extends: self.allow_remote_extends,
         }
-    };
-    let zone_errors = fallow_config::validate_rule_pack_zones(
-        root,
-        &config.boundaries,
-        &config.rule_packs,
-        &packs,
-    );
-    if !zone_errors.is_empty() {
-        return Err(emit_joined_config_errors(
-            "invalid rule pack",
-            &zone_errors,
-            options.output,
-        ));
     }
-    Ok(())
+
+    /// The `--config` file, when it loads.
+    #[must_use]
+    pub fn explicit(self, root: &Path) -> Option<FallowConfig> {
+        self.path
+            .and_then(|path| loaded_config(root, Some(path), self.file_options()))
+    }
+
+    /// The config that discovery finds from `root`, when it loads.
+    #[must_use]
+    pub fn discovered(self, root: &Path) -> Option<FallowConfig> {
+        loaded_config(root, None, self.file_options())
+    }
+}
+
+impl<'a> ConfigFlags<'a> {
+    /// The config flags of `cli`.
+    #[must_use]
+    pub fn from_cli(cli: &'a crate::cli_args::Cli) -> Self {
+        Self {
+            path: cli.config.as_deref(),
+            allow_remote_extends: cli.allow_remote_extends,
+        }
+    }
+}
+
+/// The config file at `config_path`, else the discovered config file. `None`
+/// when the file does not load or when no file exists. A caller that reads
+/// one optional setting uses this, so a broken config never stops it.
+pub fn loaded_config(
+    root: &Path,
+    config_path: Option<&Path>,
+    options: ConfigFileOptions,
+) -> Option<FallowConfig> {
+    let file = fallow_engine::project_config::load_config_file(root, config_path, options).ok()?;
+    file.path.map(|_| file.config)
 }
 
 /// Discover and stash workspace diagnostics, surfacing a one-line stderr notice
@@ -552,6 +541,35 @@ mod tests {
     use super::*;
 
     #[test]
+    fn config_flags_read_the_explicit_file_and_keep_the_discovered_file_apart() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        std::fs::create_dir(root.join(".git")).expect("git marker");
+        std::fs::write(
+            root.join(".fallowrc.json"),
+            r#"{"entry":["discovered.ts"]}"#,
+        )
+        .expect("discovered config");
+        let explicit = root.join("ci.json");
+        std::fs::write(&explicit, r#"{"entry":["explicit.ts"]}"#).expect("explicit config");
+        let flags = ConfigFlags {
+            path: Some(&explicit),
+            allow_remote_extends: true,
+        };
+
+        assert!(flags.file_options().allow_remote_extends);
+        assert_eq!(
+            flags.explicit(root).expect("explicit").entry,
+            ["explicit.ts"]
+        );
+        assert_eq!(
+            flags.discovered(root).expect("discovered").entry,
+            ["discovered.ts"]
+        );
+        assert!(ConfigFlags::default().explicit(root).is_none());
+    }
+
+    #[test]
     fn find_unknown_security_categories_flags_typos_with_suggestion() {
         let security = fallow_config::SecurityConfig {
             categories: Some(fallow_config::SecurityCategories {
@@ -603,6 +621,35 @@ mod tests {
             workspace_diagnostics_notice(1234),
             "fallow: 1234 workspace discovery diagnostics. Run `fallow workspaces`."
         );
+    }
+
+    #[test]
+    fn config_load_error_message_names_only_an_explicit_path() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(".git")).unwrap();
+        let path = dir.path().join(".fallowrc.json");
+        std::fs::write(&path, r#"{ "production": "yes" }"#).unwrap();
+
+        let cause = FallowConfig::load(&path).expect_err("wrong type");
+        let explicit = fallow_engine::project_config::load_config_file(
+            dir.path(),
+            Some(&path),
+            ConfigFileOptions::default(),
+        )
+        .expect_err("wrong type");
+        assert_eq!(
+            config_load_error_message(&explicit),
+            format!("failed to load config '{}': {cause}", path.display())
+        );
+
+        let cause = FallowConfig::find_and_load(dir.path()).expect_err("wrong type");
+        let discovered = fallow_engine::project_config::load_config_file(
+            dir.path(),
+            None,
+            ConfigFileOptions::default(),
+        )
+        .expect_err("wrong type");
+        assert_eq!(config_load_error_message(&discovered), cause);
     }
 
     #[test]

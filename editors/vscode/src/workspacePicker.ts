@@ -51,12 +51,7 @@ const getWorkspaceStateOverride = (context: vscode.ExtensionContext): string =>
 export const resolveActiveWorkspaceScope = (context: vscode.ExtensionContext): string =>
   resolveWorkspaceScope(getWorkspaceStateOverride(context), getWorkspaceScope());
 
-/**
- * The scope that remains in effect once the picker override is cleared: the
- * `fallow.workspace` setting still scopes the analysis when pinned. Empty means
- * truly whole-project. Used to phrase the clear toast honestly (the override no
- * longer wins, but a pinned setting still scopes).
- */
+/** The `fallow.workspace` setting still applies after the user clears the picker override. */
 const resolveResidualScope = (): string =>
   resolveWorkspaceScope(CLEAR_WORKSPACE_SCOPE, getWorkspaceScope());
 
@@ -171,8 +166,6 @@ export const showWorkspacePicker = async (
     await context.workspaceState.update(WORKSPACE_STATE_KEY, next);
     onScopeChange();
 
-    // On clear, report the ACTUAL residual scope: a pinned `fallow.workspace`
-    // setting still scopes the analysis, so "whole project" would be false.
     const message =
       next === CLEAR_WORKSPACE_SCOPE
         ? clearedScopeToast(resolveResidualScope())
@@ -185,15 +178,13 @@ export const showWorkspacePicker = async (
 };
 
 /**
- * Clear the per-folder scope override back to whole-project. Returns true when
- * a change was made (so the caller can skip a no-op re-analysis).
+ * Clear the per-folder picker override. The `fallow.workspace` setting still applies.
+ * Return true only if the override changed, so callers can skip a no-op analysis.
  */
 export const clearWorkspaceScope = async (context: vscode.ExtensionContext): Promise<boolean> => {
   const previous = getWorkspaceStateOverride(context);
   const residual = resolveResidualScope();
   if (previous === CLEAR_WORKSPACE_SCOPE) {
-    // No picker override to clear. Report the residual scope honestly: a pinned
-    // `fallow.workspace` setting still scopes the analysis.
     const message =
       residual === CLEAR_WORKSPACE_SCOPE
         ? "Fallow: already analyzing the whole project."

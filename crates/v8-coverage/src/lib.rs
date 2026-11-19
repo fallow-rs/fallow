@@ -178,17 +178,11 @@ impl LineOffsetTable {
     /// Node fallback behavior and advances one source position between lines.
     #[must_use]
     pub fn from_v8_line_lengths(line_lengths: &[u32]) -> Option<Self> {
-        if line_lengths.is_empty() {
-            return None;
-        }
-
+        let (_, preceding_lines) = line_lengths.split_last()?;
         let mut line_starts = Vec::with_capacity(line_lengths.len());
         line_starts.push(0);
         let mut offset = 0u32;
-        for length in line_lengths
-            .iter()
-            .take(line_lengths.len().saturating_sub(1))
-        {
+        for length in preceding_lines {
             offset = offset.saturating_add(*length).saturating_add(1);
             line_starts.push(offset);
         }

@@ -7,6 +7,7 @@ use std::sync::Arc;
 use oxc_resolver::{Resolution, ResolveError, ResolveOptions};
 use serde_json::Value;
 
+use super::extension_alias::{build_extension_aliases, extension_alias_matches};
 use super::fallbacks::{
     installed_workspace_package_target, lookup_internal_file_id, matches_plugin_path_alias,
     nearest_package_manifest, normalize_path_lexically, package_imports_workspace_target,
@@ -30,11 +31,10 @@ use super::path_info::{
     normalize_npm_specifier,
 };
 use super::react_native::{build_condition_names, build_extensions};
+use super::root_relative::try_root_relative_specifier;
 use super::tsconfig_scope::{glob_values_match, resolve_tsconfig_relative_path};
 use super::types::{DenoImportMapEntry, ResolveContext, ResolveResult};
-use super::url_suffix::{
-    resolve_failed_bare_asset_query_specifier, strip_url_suffix, strip_vite_asset_query,
-};
+use super::url_suffix::{resolve_failed_bare_query_specifier, strip_bare_query, strip_url_suffix};
 use super::workspace_alias::{
     resolve_failed_bare_package_specifier, try_aliased_workspace_package_fallback,
 };
@@ -117,31 +117,7 @@ pub(super) fn build_resolve_options(
 ) -> ResolveOptions {
     let mut options = ResolveOptions {
         extensions: build_extensions(active_plugins),
-        extension_alias: vec![
-            (
-                ".js".into(),
-                vec![
-                    ".ts".into(),
-                    ".tsx".into(),
-                    ".gts".into(),
-                    ".js".into(),
-                    ".gjs".into(),
-                    // Last so declaration-only modules resolve (TypeScript maps
-                    // .js to .d.ts too) without shadowing runtime files.
-                    ".d.ts".into(),
-                ],
-            ),
-            (".ts".into(), vec![".gts".into(), ".ts".into()]),
-            (".jsx".into(), vec![".tsx".into(), ".jsx".into()]),
-            (
-                ".mjs".into(),
-                vec![".mts".into(), ".mjs".into(), ".d.mts".into()],
-            ),
-            (
-                ".cjs".into(),
-                vec![".cts".into(), ".cjs".into(), ".d.cts".into()],
-            ),
-        ],
+        extension_alias: build_extension_aliases(),
         condition_names: build_condition_names(active_plugins, extra_conditions),
         main_fields: vec!["module".into(), "main".into()],
         ..Default::default()
@@ -188,96 +164,6 @@ fn find_yarn_pnp_manifest_dir(root: &Path) -> Option<PathBuf> {
     root.ancestors()
         .find(|dir| dir.join(YARN_PNP_MANIFEST).traced_is_file())
         .map(Path::to_path_buf)
-}
-
-fn try_root_relative_specifier(
-    ctx: &ResolveContext<'_>,
-    from_file: &Path,
-    specifier: &str,
-    from_style: bool,
-) -> Option<ResolveResult> {
-    if !specifier.starts_with('/') || !is_root_relative_importer(from_file) {
-        return None;
-    }
-
-    let relative = format!(".{specifier}");
-    let source_dir = from_file.parent().unwrap_or(ctx.root);
-    if let Some(result) = resolve_root_relative_from_dir(ctx, source_dir, &relative, from_style) {
-        return Some(result);
-    }
-    if let Some(package_dir) = nearest_package_dir_below_root(ctx.root, source_dir)
-        && let Some(result) =
-            resolve_root_relative_from_dir(ctx, package_dir, &relative, from_style)
-    {
-        return Some(result);
-    }
-    if source_dir != ctx.root
-        && let Some(result) = resolve_root_relative_from_dir(ctx, ctx.root, &relative, from_style)
-    {
-        return Some(result);
-    }
-    if let Some(result) = try_html_root_relative_asset(ctx, from_file, specifier) {
-        return Some(result);
-    }
-    Some(ResolveResult::Unresolvable(specifier.to_string()))
-}
-
-/// Return the nearest directory above `source_dir` that holds a
-/// `package.json`, when that directory is below the project root.
-///
-/// A Vite root is usually the package directory, so a root-relative
-/// specifier in a nested package resolves against that package. The source
-/// directory and the project root are tried separately.
-fn nearest_package_dir_below_root<'p>(root: &Path, source_dir: &'p Path) -> Option<&'p Path> {
-    source_dir
-        .ancestors()
-        .skip(1)
-        .take_while(|dir| *dir != root && dir.starts_with(root))
-        .find(|dir| dir.join("package.json").traced_is_file())
-}
-
-fn is_root_relative_importer(from_file: &Path) -> bool {
-    from_file.extension().is_some_and(|extension| {
-        matches!(
-            extension.to_str(),
-            Some(
-                "html"
-                    | "jsx"
-                    | "tsx"
-                    | "js"
-                    | "ts"
-                    | "mjs"
-                    | "cjs"
-                    | "mts"
-                    | "cts"
-                    | "gts"
-                    | "gjs"
-            )
-        )
-    })
-}
-
-fn resolve_root_relative_from_dir(
-    ctx: &ResolveContext<'_>,
-    source_dir: &Path,
-    relative: &str,
-    style_context: bool,
-) -> Option<ResolveResult> {
-    let resolved = resolve_with_extension_policy(ctx, source_dir, relative, style_context).ok()?;
-    let resolved_path = resolved.path();
-    if let Some(&file_id) = ctx.raw_path_to_id.get(resolved_path) {
-        return Some(ResolveResult::InternalModule(file_id));
-    }
-    let canonical = ctx.canonicalize_cache.get(resolved_path)?;
-    if let Some(&file_id) = ctx.path_to_id.get(canonical.as_path()) {
-        return Some(ResolveResult::InternalModule(file_id));
-    }
-    if let Some(fallback) = ctx.canonical_fallback
-        && let Some(file_id) = fallback.get(&canonical)
-    {
-        return Some(ResolveResult::InternalModule(file_id));
-    }
-    None
 }
 
 fn nearest_tsconfig_path(root: &Path, from_file: &Path) -> Option<PathBuf> {
@@ -556,7 +442,7 @@ fn try_static_dir_mapping(
     })
 }
 
-fn try_html_root_relative_asset(
+pub(super) fn try_html_root_relative_asset(
     ctx: &ResolveContext<'_>,
     from_file: &Path,
     specifier: &str,
@@ -1006,20 +892,6 @@ fn try_tsconfig_alias_extension_alias(
     None
 }
 
-fn extension_alias_matches(import_ext: &str, candidate_ext: &str) -> bool {
-    let candidate_ext = candidate_ext.trim_start_matches('.');
-    let aliases: &[&str] = match import_ext {
-        "js" => &["ts", "tsx", "js"],
-        "jsx" => &["tsx", "jsx"],
-        "mjs" => &["mts", "mjs"],
-        "cjs" => &["cts", "cjs"],
-        _ => return false,
-    };
-    aliases
-        .iter()
-        .any(|alias| candidate_ext == *alias || candidate_ext.ends_with(&format!(".{alias}")))
-}
-
 fn with_exact_extension(path: &Path, extension: &str) -> PathBuf {
     let Some(file_stem) = path.file_stem() else {
         return path.to_path_buf();
@@ -1303,7 +1175,7 @@ fn resolve_style_canonical_path(
 /// outside the root is a workspace package reached through its install symlink,
 /// which must keep npm-package accounting so the declared dependency is credited
 /// (see `package_usage_name_for_external_bare_specifier`).
-fn is_inside_project_root(ctx: &ResolveContext<'_>, path: &Path) -> bool {
+pub(super) fn is_inside_project_root(ctx: &ResolveContext<'_>, path: &Path) -> bool {
     if path.starts_with(ctx.root) {
         return true;
     }
@@ -1871,8 +1743,8 @@ fn resolve_failed_regular_specifier(
     if is_plain_css_file(from_file) && is_bare_style_subpath(specifier) {
         return ResolveResult::Unresolvable(specifier.to_string());
     }
-    if is_bare && let Some(base) = strip_vite_asset_query(specifier) {
-        return resolve_failed_bare_asset_query_specifier(
+    if is_bare && let Some(base) = strip_bare_query(specifier) {
+        return resolve_failed_bare_query_specifier(
             ctx,
             from_file,
             specifier,
@@ -2030,14 +1902,13 @@ mod tests {
     use super::super::file_attempt::is_tsconfig_error;
     use super::super::package_credit::package_usage_name_for_resolved_package;
     use super::{
-        SpecifierNormalization, extension_alias_matches, glob_values_match,
-        is_bare_style_package_reference, is_bare_style_subpath, is_js_ts_extension,
-        is_node_modules_path, is_plain_css_file, is_relative_tsconfig_extends,
-        is_safe_static_dir_relative_path, is_style_file, matches_nearest_tsconfig_path_alias,
-        normalize_resolve_specifier, package_usage_name_for_external_bare_specifier,
-        path_alias_capture, path_alias_pattern_matches, path_alias_specificity,
-        resolve_tsconfig_extends_candidate, resolve_tsconfig_extends_path,
-        resolve_tsconfig_reference_path, serves_static_dir_mounts,
+        SpecifierNormalization, glob_values_match, is_bare_style_package_reference,
+        is_bare_style_subpath, is_js_ts_extension, is_node_modules_path, is_plain_css_file,
+        is_relative_tsconfig_extends, is_safe_static_dir_relative_path, is_style_file,
+        matches_nearest_tsconfig_path_alias, normalize_resolve_specifier,
+        package_usage_name_for_external_bare_specifier, path_alias_capture,
+        path_alias_pattern_matches, path_alias_specificity, resolve_tsconfig_extends_candidate,
+        resolve_tsconfig_extends_path, resolve_tsconfig_reference_path, serves_static_dir_mounts,
         should_preserve_node_modules_style_file, static_dir_relative_path, static_mount_url_path,
         tsconfig_extends_values, with_appended_extension, with_exact_extension,
     };
@@ -2613,41 +2484,6 @@ mod tests {
         assert!(path_alias_specificity("@app/foo/*") > path_alias_specificity("@app/*"));
     }
 
-    // ---- extension_alias_matches (lines 855-867) ----
-
-    #[test]
-    fn extension_alias_matches_js_to_ts() {
-        assert!(extension_alias_matches("js", ".ts"));
-        assert!(extension_alias_matches("js", ".tsx"));
-        assert!(extension_alias_matches("js", ".js"));
-    }
-
-    #[test]
-    fn extension_alias_matches_jsx_to_tsx() {
-        assert!(extension_alias_matches("jsx", ".tsx"));
-        assert!(extension_alias_matches("jsx", ".jsx"));
-        assert!(!extension_alias_matches("jsx", ".ts"));
-    }
-
-    #[test]
-    fn extension_alias_matches_mjs_to_mts() {
-        assert!(extension_alias_matches("mjs", ".mts"));
-        assert!(extension_alias_matches("mjs", ".mjs"));
-        assert!(!extension_alias_matches("mjs", ".ts"));
-    }
-
-    #[test]
-    fn extension_alias_matches_cjs_to_cts() {
-        assert!(extension_alias_matches("cjs", ".cts"));
-        assert!(extension_alias_matches("cjs", ".cjs"));
-        assert!(!extension_alias_matches("cjs", ".js"));
-    }
-
-    #[test]
-    fn extension_alias_matches_unknown_import_ext_returns_false() {
-        assert!(!extension_alias_matches("ts", ".js"));
-    }
-
     // ---- with_appended_extension / with_exact_extension (lines 808-876) ----
 
     #[test]
@@ -3165,9 +3001,7 @@ mod tests {
         }
     }
 
-    /// The regression this guards: a tsconfig with neither `files` nor
-    /// `include` used to match every file in the repo, so an unrelated sibling
-    /// project claimed ownership of it.
+    /// Without `files` or `include`, a tsconfig must not claim a file in a sibling package.
     #[test]
     #[cfg_attr(miri, ignore = "tempdir is blocked by Miri isolation")]
     fn tsconfig_without_includes_does_not_apply_to_a_sibling_package() {

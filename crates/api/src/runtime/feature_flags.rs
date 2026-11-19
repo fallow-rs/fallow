@@ -134,11 +134,15 @@ fn run_feature_flags_inner(
 fn load_feature_flags_session(
     resolved: &ProgrammaticAnalysisContext,
 ) -> ProgrammaticResult<AnalysisSession> {
-    let project_config = fallow_engine::project_config::config_for_project_with_load_options(
+    let project_config = fallow_engine::project_config::config_for_project_with_production(
         &resolved.root,
         resolved.config_path.as_deref(),
         fallow_config::ConfigLoadOptions {
             allow_remote_extends: resolved.allow_remote_extends(),
+        },
+        fallow_engine::project_config::ProductionFlags {
+            global: resolved.production_override,
+            ..fallow_engine::project_config::ProductionFlags::default()
         },
     )
     .map_err(|err| {
@@ -162,9 +166,6 @@ fn configure_project_for_feature_flags(
     project_config.config.output = OutputFormat::Json;
     project_config.config.no_cache = resolved.no_cache;
     project_config.config.threads = resolved.threads;
-    project_config.config.production = resolved
-        .production_override
-        .unwrap_or(project_config.config.production);
     project_config
 }
 
@@ -244,5 +245,33 @@ fn sort_and_limit_feature_flags(flags: &mut Vec<FeatureFlag>, top: Option<usize>
 
     if let Some(top) = top {
         flags.truncate(top);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::AnalysisOptions;
+
+    #[test]
+    fn production_override_gives_the_rules_of_production_mode() {
+        let project = tempfile::tempdir().expect("temp dir");
+        std::fs::write(project.path().join("package.json"), r#"{"name":"flags"}"#)
+            .expect("package");
+        let resolved = resolve_programmatic_analysis_context(&AnalysisOptions {
+            root: Some(project.path().to_path_buf()),
+            production_override: Some(true),
+            ..AnalysisOptions::default()
+        })
+        .expect("context resolves");
+
+        let session = load_feature_flags_session(&resolved).expect("session loads");
+
+        assert!(session.config().production);
+        assert_eq!(
+            session.config().rules.unused_dev_dependencies,
+            fallow_config::Severity::Off,
+            "production mode turns unused-dev-dependencies off, as `--production` does"
+        );
     }
 }

@@ -1281,7 +1281,7 @@ mod tests {
             ),
             [false, false]
         );
-        // First one removed: the second one keeps its own base finding.
+        // The second function moves to the first function's line but keeps its own base finding.
         assert_eq!(
             classify(base.clone(), &[finding("run", 1, 21, 20)]),
             [false]

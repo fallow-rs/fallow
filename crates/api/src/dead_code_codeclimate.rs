@@ -694,178 +694,6 @@ fn push_unlisted_binary_issues(
     }
 }
 
-fn push_circular_dep_issues(
-    issues: &mut Vec<CodeClimateIssue>,
-    cycles: &[fallow_types::output_dead_code::CircularDependencyFinding],
-    root: &Path,
-    severity: Severity,
-) {
-    if cycles.is_empty() {
-        return;
-    }
-    for entry in cycles {
-        let level = finding_codeclimate(entry, severity);
-        let cycle = &entry.cycle;
-        let Some(first) = cycle.files.first() else {
-            continue;
-        };
-        let path = cc_path(first, root);
-        let chain: Vec<String> = cycle.files.iter().map(|f| cc_path(f, root)).collect();
-        let chain_str = chain.join(":");
-        let fp = codeclimate_fingerprint_hash(&["fallow/circular-dependency", &chain_str]);
-        let line = if cycle.line > 0 {
-            Some(cycle.line)
-        } else {
-            None
-        };
-        issues.push(dead_code_issue(
-            entry.finding_id.as_deref(),
-            entry.introduced,
-            &[],
-            CodeClimateIssueInput {
-                check_name: "fallow/circular-dependency",
-                description: &format!(
-                    "Circular dependency{}: {}",
-                    if cycle.is_cross_package {
-                        " (cross-package)"
-                    } else {
-                        ""
-                    },
-                    chain.join(" \u{2192} ")
-                ),
-                severity: level,
-                category: "Bug Risk",
-                path: &path,
-                begin_line: line,
-                fingerprint: &fp,
-            },
-        ));
-    }
-}
-
-fn push_re_export_cycle_issues(
-    issues: &mut Vec<CodeClimateIssue>,
-    cycles: &[fallow_types::output_dead_code::ReExportCycleFinding],
-    root: &Path,
-    severity: Severity,
-) {
-    if cycles.is_empty() {
-        return;
-    }
-    for entry in cycles {
-        let level = finding_codeclimate(entry, severity);
-        let cycle = &entry.cycle;
-        let Some(first) = cycle.files.first() else {
-            continue;
-        };
-        let path = cc_path(first, root);
-        let chain: Vec<String> = cycle.files.iter().map(|f| cc_path(f, root)).collect();
-        let chain_str = chain.join(":");
-        let kind_token = match cycle.kind {
-            fallow_types::results::ReExportCycleKind::SelfLoop => "self-loop",
-            fallow_types::results::ReExportCycleKind::MultiNode => "multi-node",
-        };
-        let kind_tag = match cycle.kind {
-            fallow_types::results::ReExportCycleKind::SelfLoop => " (self-loop)",
-            fallow_types::results::ReExportCycleKind::MultiNode => "",
-        };
-        let fp = codeclimate_fingerprint_hash(&["fallow/re-export-cycle", kind_token, &chain_str]);
-        issues.push(dead_code_issue(
-            entry.finding_id.as_deref(),
-            entry.introduced,
-            &[],
-            CodeClimateIssueInput {
-                check_name: "fallow/re-export-cycle",
-                description: &format!("Re-export cycle{}: {}", kind_tag, chain.join(" <-> ")),
-                severity: level,
-                category: "Bug Risk",
-                path: &path,
-                begin_line: None,
-                fingerprint: &fp,
-            },
-        ));
-    }
-}
-
-fn push_package_cycle_issues(
-    issues: &mut Vec<CodeClimateIssue>,
-    cycles: &[fallow_types::output_dead_code::PackageCycleFinding],
-    root: &Path,
-    severity: Severity,
-) {
-    for entry in cycles {
-        let level = finding_codeclimate(entry, severity);
-        let cycle = &entry.cycle;
-        let Some(anchor) = cycle.edges.first() else {
-            continue;
-        };
-        let path = cc_path(&anchor.path, root);
-        let packages = cycle.packages.join(":");
-        let fp = codeclimate_fingerprint_hash(&["fallow/package-cycle", &packages]);
-        let note = if cycle.group_truncated {
-            format!(
-                " ({})",
-                fallow_types::results::PackageCycle::GROUP_TRUNCATED_NOTE
-            )
-        } else {
-            String::new()
-        };
-        let mut issue = build_codeclimate_issue(CodeClimateIssueInput {
-            check_name: "fallow/package-cycle",
-            description: &format!("Package cycle: {}{note}", cycle.chain(" \u{2192} ")),
-            severity: level,
-            category: "Bug Risk",
-            path: &path,
-            begin_line: (anchor.line > 0).then_some(anchor.line),
-            fingerprint: &fp,
-        });
-        issue.audit = entry
-            .introduced
-            .map(|AuditIntroduced(introduced)| audit_review_context(introduced));
-        issues.push(issue);
-    }
-}
-
-fn push_boundary_violation_issues(
-    issues: &mut Vec<CodeClimateIssue>,
-    violations: &[fallow_types::output_dead_code::BoundaryViolationFinding],
-    root: &Path,
-    severity: Severity,
-) {
-    if violations.is_empty() {
-        return;
-    }
-    for entry in violations {
-        let level = finding_codeclimate(entry, severity);
-        let v = &entry.violation;
-        let path = cc_path(&v.from_path, root);
-        let to = cc_path(&v.to_path, root);
-        let fp = codeclimate_fingerprint_hash(&["fallow/boundary-violation", &path, &to]);
-        let line = if v.line > 0 { Some(v.line) } else { None };
-        let via = v
-            .via_path
-            .as_ref()
-            .map_or_else(String::new, |via| format!(", via {}", cc_path(via, root)));
-        issues.push(dead_code_issue(
-            entry.finding_id.as_deref(),
-            entry.introduced,
-            &[],
-            CodeClimateIssueInput {
-                check_name: "fallow/boundary-violation",
-                description: &format!(
-                    "Boundary violation: {} -> {} ({} -> {}{})",
-                    path, to, v.from_zone, v.to_zone, via
-                ),
-                severity: level,
-                category: "Bug Risk",
-                path: &path,
-                begin_line: line,
-                fingerprint: &fp,
-            },
-        ));
-    }
-}
-
 fn push_boundary_coverage_issues(
     issues: &mut Vec<CodeClimateIssue>,
     violations: &[fallow_types::output_dead_code::BoundaryCoverageViolationFinding],
@@ -2131,6 +1959,14 @@ impl CodeClimateBuilder<'_> {
 #[path = "dead_code_codeclimate_duplicates.rs"]
 mod dead_code_codeclimate_duplicates;
 use dead_code_codeclimate_duplicates::push_duplicate_export_issues;
+
+#[path = "dead_code_codeclimate_boundary.rs"]
+mod boundary_render;
+use boundary_render::push_boundary_violation_issues;
+
+#[path = "dead_code_codeclimate_cycles.rs"]
+mod cycles;
+use cycles::{push_circular_dep_issues, push_package_cycle_issues, push_re_export_cycle_issues};
 
 #[cfg(test)]
 #[path = "dead_code_codeclimate_tests.rs"]

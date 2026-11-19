@@ -6,13 +6,13 @@ paths:
 
 # Plugin system
 
-154 built-in plugins implementing the `Plugin` trait with enablers (package.json detection), static patterns, and optional `resolve_config()` for AST-based config parsing.
+156 built-in plugins implementing the `Plugin` trait with enablers (package.json detection), static patterns, and optional `resolve_config()` for AST-based config parsing.
 
-## Rich config parsing (23 plugins)
+## Rich config parsing (26 plugins)
 
 - **ESLint**: Legacy plugin/extends/parser short-name resolution (top-level AND inside `overrides[*]`), flat config plugin keys, JSON config, shared config following (reads imported config packages' entry points one level deep to discover peer deps), relative-path `extends` chain following (`./config/base.js`, `../shared/eslintrc.json`) with cycle protection and depth cap, settings["import/resolver"] (string/array/object formats)
-- **Vite**: rollupOptions.input, lib.entry, optimizeDeps include/exclude, ssr.external/noExternal
-- **Jest**: preset, setupFiles, globalSetup/Teardown, testMatch, transform, reporters, testEnvironment, watchPlugins, resolver, snapshotSerializers, testRunner, runner, JSON config
+- **Vite**: rollupOptions.input (top-level `build` and each `environments.<name>.build`), lib.entry, optimizeDeps include/exclude, ssr.external/noExternal, package replacements of regex `resolve.alias` entries
+- **Jest**: preset, setupFiles, globalSetup/Teardown, moduleNameMapper (`<rootDir>` file targets and package targets), testMatch, transform, reporters, testEnvironment, watchPlugins, resolver, snapshotSerializers, testRunner, runner, JSON config
 - **Storybook**: addons, framework (string/object), stories, core.builder, typescript.reactDocgen
 - **Tailwind**: content globs, plugins (require/strings), presets
 - **Webpack**: entry (string/array/object/descriptor with context), resolve.alias mappings, plugins require(), externals, module.rules loader extraction
@@ -20,6 +20,7 @@ paths:
 - **Babel**: presets/plugins with short-name resolution, extends, JSON/.babelrc
 - **Rollup**: input entries, external deps
 - **Electron**: electron-vite `main` / `preload` / `renderer` `build.rollupOptions.input` (string/array/object forms, path-helper calls resolved) seeded as entry points relative to `electron.vite.config.*`, so multi-window renderer HTML entries keep their `<script src>` trees reachable; static main/preload globs cover `{ts,tsx,js,jsx,mts,mjs}`
+- **Playwright**: `globalSetup` / `globalTeardown` and custom `reporter` paths (each branch of `a ? x : y`, `a || x`, `a ?? x`) credited as loaded modules with their default export used; reporter package names credited; `webServer.command` (object or array form, with `cwd`) analyzed for packages and entry files; `testDir` / `testMatch` of the top level and each `projects[]` element turned into test entry patterns, with `defineConfig(a, b, ...)` merge order; named `playwright.<name>.config.*` configs and configs passed with `--config` / `-c` in package scripts
 - **PostCSS**: plugins (object keys, require() calls, string arrays)
 - **Prettier**: plugins array (JSON/.prettierrc and JS configs)
 - **Nuxt**: modules, css, plugins, extends, postcss plugins; path aliases (`~`, `~~`, `#shared`)

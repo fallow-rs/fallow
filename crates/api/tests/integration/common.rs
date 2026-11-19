@@ -50,6 +50,26 @@ pub fn commit(root: &Path, message: &str) {
     git(root, &["commit", "-q", "-m", message]);
 }
 
+/// Run one test again in a child process without the environment variable
+/// `name`, and fail the test when the child run fails. A test must not change
+/// the environment of its own process.
+///
+/// `test_name` is the full test name in the `integration` binary. The child
+/// run filters on it with `--exact`, so it includes the module path.
+pub fn rerun_without_env(test_name: &str, name: &str) {
+    let output = Command::new(std::env::current_exe().expect("test binary path"))
+        .args(["--exact", test_name, "--nocapture", "--test-threads=1"])
+        .env_remove(name)
+        .output()
+        .expect("run the test in a child process");
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(
+        output.status.success() && stdout.contains("1 passed"),
+        "child run failed:\n{stdout}\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+}
+
 /// Run one test again in a child process with the sidecar path in its
 /// environment. The type-aware session reads the path only from the process
 /// environment, and a test must not change the environment of its own process.

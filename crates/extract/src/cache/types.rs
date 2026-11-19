@@ -10,12 +10,12 @@ use crate::MemberKind;
 /// extraction semantics change, and give the reason in the commit message and
 /// the CHANGELOG. A stale version serves old extraction results from a warm
 /// cache. The `assert_cached_type_size!` guards below catch shape changes.
-pub(super) const CACHE_VERSION: u32 = 452;
+pub(super) const CACHE_VERSION: u32 = 460;
 
 /// Duplication token cache version. Bump it when duplicate tokenization,
 /// normalization, or the on-disk token cache schema changes, and give the
 /// reason in the commit message and the CHANGELOG.
-pub const DUPES_CACHE_VERSION: u32 = 23;
+pub const DUPES_CACHE_VERSION: u32 = 25;
 
 /// Default maximum cache size (256 MB). Overridable per-project via
 /// `cache.maxSizeMb` in the config file or `FALLOW_CACHE_MAX_SIZE` env var.
@@ -56,7 +56,7 @@ macro_rules! assert_cached_type_size {
     };
 }
 
-assert_cached_type_size!(CachedModule, 1568);
+assert_cached_type_size!(CachedModule, 1592);
 assert_cached_type_size!(CachedNamespaceObjectAlias, 72);
 // The call facts blob of `CachedModule` encodes these types. A blob that an
 // older shape wrote does not decode, and the entry then parses again on each
@@ -76,6 +76,7 @@ assert_cached_type_size!(fallow_types::extract::LocalFunctionEscape, 8);
 assert_cached_type_size!(CachedLocalTypeDeclaration, 32);
 assert_cached_type_size!(CachedPublicSignatureTypeReference, 64);
 assert_cached_type_size!(CachedSuppression, 88);
+assert_cached_type_size!(CachedRangeMarkerProblem, 32);
 assert_cached_type_size!(CachedUnknownSuppressionKind, 56);
 assert_cached_type_size!(CachedExport, 152);
 assert_cached_type_size!(CachedImport, 96);
@@ -83,7 +84,7 @@ assert_cached_type_size!(CachedDynamicImport, 88);
 assert_cached_type_size!(CachedRequireCall, 120);
 assert_cached_type_size!(CachedReExport, 128);
 assert_cached_type_size!(CachedMember, 88);
-assert_cached_type_size!(CachedDynamicImportPattern, 88);
+assert_cached_type_size!(CachedDynamicImportPattern, 112);
 assert_cached_type_size!(crate::MemberAccess, 48);
 assert_cached_type_size!(fallow_types::extract::SemanticFact, 80);
 assert_cached_type_size!(fallow_types::extract::CalleeUse, 56);
@@ -179,6 +180,8 @@ pub struct CachedModule {
     pub suppressions: Vec<CachedSuppression>,
     /// Suppression tokens that did not parse to any known `IssueKind`. See #449.
     pub unknown_suppression_kinds: Vec<CachedUnknownSuppressionKind>,
+    /// Range markers with a problem.
+    pub range_marker_problems: Vec<CachedRangeMarkerProblem>,
     /// Pre-computed line-start byte offsets for O(log N) byte-to-line/col conversion.
     pub line_offsets: Vec<u32>,
     /// Per-function complexity metrics.
@@ -455,6 +458,19 @@ pub struct CachedSuppression {
     pub(crate) policy_rule_id: String,
     /// Human-authored reason after `--`, when present.
     pub(crate) reason: Option<String>,
+    /// 1-based `fallow-ignore-end` line of a range. 0 = not a range.
+    pub(crate) range_end_line: u32,
+}
+
+/// Cached range marker with a problem.
+#[derive(Debug, Clone, Encode, Decode)]
+pub struct CachedRangeMarkerProblem {
+    /// 1-based line of the marker comment.
+    pub line: u32,
+    /// `RangeMarkerProblemKind` discriminant, see `range_problem_code`.
+    pub kind: u8,
+    /// The unsupported kind token, when present.
+    pub token: Option<String>,
 }
 
 /// Cached unknown suppression kind token (see #449).
@@ -636,6 +652,8 @@ pub struct CachedMember {
     pub(crate) override_base: Option<String>,
     /// True for a class member with the `protected` modifier.
     pub(crate) is_protected: bool,
+    /// True for a class member with the `static` modifier.
+    pub(crate) is_static: bool,
 }
 
 /// Cached dynamic import pattern data (template literals, `import.meta.glob`).
@@ -653,4 +671,9 @@ pub struct CachedDynamicImportPattern {
     pub(crate) span_end: u32,
     /// Runtime mechanism used to load modules matching this pattern.
     pub(crate) mechanism: crate::ModuleLoadMechanism,
+    /// Import kind discriminant of what each match gives the importer
+    /// (see `IMPORT_KIND_*`).
+    pub(crate) import_kind: u8,
+    /// Export name for a named import kind, empty otherwise.
+    pub(crate) imported_name: String,
 }

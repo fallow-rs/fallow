@@ -19,7 +19,7 @@ use super::scheduler::ScheduleOutcome;
 use crate::ProgrammaticError;
 
 /// The kebab-case name of a serde enum value.
-fn kebab<T: serde::Serialize>(value: &T) -> String {
+pub fn kebab<T: serde::Serialize>(value: &T) -> String {
     serde_json::to_value(value)
         .ok()
         .and_then(|value| value.as_str().map(str::to_owned))
@@ -91,6 +91,14 @@ pub fn skipped_files(plan: &MutationPlan) -> Vec<MutationSkippedFile> {
             path: file.path.clone(),
             reason: kebab(&file.reason),
         })
+        .collect()
+}
+
+/// The paths of a `paths` scope that select no file.
+pub fn unmatched_paths(plan: &MutationPlan) -> Vec<String> {
+    plan.unmatched_paths
+        .iter()
+        .map(|entry| entry.path.clone())
         .collect()
 }
 

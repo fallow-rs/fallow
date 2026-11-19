@@ -9,7 +9,8 @@
 #   - `CI` is set (GitHub Actions sets it), so no impact identity probe runs.
 #   - `FALLOW_SUGGESTIONS=off`, so no git probe runs for the next steps.
 # `audit` is not in the list, because it reads the changeset with git. This script owns the corpus and the
-# benchmark list. `.github/workflows/bench-cli-instructions.yml` calls it.
+# benchmark list. The `cli-instructions` and `walltime-cli` jobs of
+# `.github/workflows/bench.yml` call it.
 #
 # Subcommands:
 #   prepare   Clone the corpus at pinned commits, write the bench config and

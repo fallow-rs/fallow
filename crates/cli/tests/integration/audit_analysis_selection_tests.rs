@@ -437,4 +437,50 @@ fn a_dupes_baseline_flag_is_dropped_with_duplicates_enabled_false() {
     let json = report(&output);
 
     assert_eq!(sections(&json), [true, true, false], "{json:#}");
+    assert!(
+        output
+            .stderr
+            .contains("--dupes-baseline has no effect: duplicates.enabled is false"),
+        "stderr: {}",
+        output.stderr
+    );
+}
+
+/// The review brief keeps every sub-analysis, also when
+/// `duplicates.enabled: false` turns duplication off in a plain audit.
+#[test]
+fn review_brief_runs_duplication_with_duplicates_enabled_false() {
+    let tmp = fixture(&config_without_duplicates(None));
+    let json = report(&audit(tmp.path(), &["--brief"]));
+
+    assert!(json.get("duplication").is_some(), "{json:#}");
+}
+
+/// `audit.dupes: false` is a skip of this command, so an explicit
+/// `--dupes-baseline` is an error. `duplicates.enabled: false` turns the
+/// analysis off for the project, so the same flag gets a note and the run
+/// goes on.
+#[test]
+fn a_dupes_baseline_flag_fails_under_audit_dupes_false_only() {
+    let args = ["--skip", "dead-code", "--dupes-baseline", "baseline.json"];
+
+    let tmp = fixture(&config_with_audit(r#"{"dupes": false}"#));
+    let output = audit(tmp.path(), &args);
+    assert_eq!(output.code, 2, "{}", output.stdout);
+    assert!(
+        output.stdout.contains("--dupes-baseline"),
+        "{}",
+        output.stdout
+    );
+
+    let tmp = fixture(&config_without_duplicates(None));
+    let output = audit(tmp.path(), &args);
+    assert_eq!(output.code, 0, "stdout: {}", output.stdout);
+    assert!(
+        output
+            .stderr
+            .contains("--dupes-baseline has no effect: duplicates.enabled is false"),
+        "stderr: {}",
+        output.stderr
+    );
 }

@@ -37,10 +37,12 @@ if [ "${1:-}" = "mutation" ]; then
     [ "$prev" = "-o" ] && out=$arg
     prev=$arg
   done
-  if [ -n "${MOCK_MUTATION_DIRTY_CHECK:-}" ] && [ -n "$(git status --porcelain 2>/dev/null)" ]; then
+  # Like the real check, the mutation cache directory is not part of it.
+  if [ -n "${MOCK_MUTATION_DIRTY_CHECK:-}" ] && [ -n "$(git status --porcelain -- . ':(exclude).fallow/mutation' 2>/dev/null)" ]; then
     printf '{"error":true,"message":"dirty worktree","exit_code":2,"code":"FALLOW_MUTATION_DIRTY_WORKTREE"}\n'
     exit 2
   fi
+  [ -f .fallow/mutation/ci-cache-key ] && printf 'stamp-at-run %s\n' "$(cat .fallow/mutation/ci-cache-key)" >> "$MOCK_LOG"
   [ -n "${MOCK_MUTATION_REPORT:-}" ] && [ -n "$out" ] && cp "$MOCK_MUTATION_REPORT" "$out"
   [ -n "${MOCK_MUTATION_STDOUT:-}" ] && printf '%s\n' "$MOCK_MUTATION_STDOUT"
   exit "${MOCK_MUTATION_EXIT:-0}"
@@ -403,6 +405,23 @@ printf 'stale\n' > "$W/.fallow/mutation/ci-cache-key"
 STAMP=$(cat "$W/.fallow/mutation/ci-cache-key")
 EXPECTED=$(cd "$W" && bash -c "source '$MUT_SCRIPTS/mutation_common.sh'; fallow_mutation_cache_digest .")
 mut_assert_eq "$STAMP" "$EXPECTED" "gitlab mutation: the stamp records the digest of this run"
+
+# A job that stops during a first run saves results without a later stamp
+# write, and the next run would delete them. The stamp must exist when the run
+# starts, also when no .fallow directory was restored.
+W="$MUT_TMP/gl-stamp-first"
+rm -rf "$W"; mkdir -p "$W"
+printf '{"lockfileVersion":3}\n' > "$W/package-lock.json"
+(
+  cd "$W" || exit 99
+  export PATH="$MUT_BIN:$PATH" MOCK_LOG="$W/mock.log" TMPDIR="$MUT_TMP"
+  export FALLOW_MUTATION_SCOPE=all MOCK_MUTATION_REPORT="$FIXTURES/mutation-clean.json"
+  : > "$MOCK_LOG"
+  bash "$MUT_SCRIPTS/mutation.sh" > /dev/null 2>&1
+)
+FIRST=$(cd "$W" && bash -c "source '$MUT_SCRIPTS/mutation_common.sh'; fallow_mutation_cache_digest .")
+mut_assert_eq "$(sed -n 's/^stamp-at-run //p' "$W/mock.log")" "$FIRST" \
+  "gitlab mutation: a first run writes the stamp before the mutation run starts"
 printf '{}\n' > "$W/.fallow/mutation/results.json"
 (
   cd "$W" || exit 99

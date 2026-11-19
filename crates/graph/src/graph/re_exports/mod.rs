@@ -109,6 +109,13 @@ struct ReExportTuple {
     is_type_only: bool,
 }
 
+impl ReExportTuple {
+    /// `export * as ns from './x'`, see [`is_namespace_re_export`].
+    fn is_namespace(&self) -> bool {
+        self.imported_name == "*" && self.exported_name != "*"
+    }
+}
+
 struct ReExportContext<'a> {
     entry_star_targets: &'a FxHashSet<FileId>,
     edges_by_target: &'a FxHashMap<FileId, Vec<usize>>,
@@ -1181,6 +1188,9 @@ fn build_re_export_node_index(
 
 /// Build the adjacency list for the re-export subgraph, emitting a self-loop
 /// `GraphReExportCycle` for any barrel that re-exports from itself.
+///
+/// `export * as ns` edges stay out of the subgraph. They expose one namespace
+/// object and forward no names, so chain propagation cannot loop through them.
 fn build_re_export_adjacency(
     re_export_info: &[ReExportTuple],
     node_index: &FxHashMap<FileId, usize>,
@@ -1191,6 +1201,9 @@ fn build_re_export_adjacency(
     let mut seen_edge: FxHashSet<(usize, usize)> = FxHashSet::default();
     let mut seen_self_loop: FxHashSet<FileId> = FxHashSet::default();
     for entry in re_export_info {
+        if entry.is_namespace() {
+            continue;
+        }
         let from = node_index[&entry.barrel];
         let to = node_index[&entry.source];
         if from == to {

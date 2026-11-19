@@ -990,9 +990,8 @@ mod tests {
 
     #[test]
     fn pathologically_deep_nesting_is_dropped_without_crashing() {
-        // ~5000 nested parens previously recursed until the stack overflowed
-        // (SIGABRT under release panic = "abort"). The depth guard now bails
-        // past MAX_TEMPLATE_EXPR_DEPTH and the synthetic finding is dropped.
+        // Deep nesting must return an error before recursion can overflow the stack.
+        // A stack overflow aborts the release process.
         let depth = 5000;
         let source = format!("{}a{}", "(".repeat(depth), ")".repeat(depth));
 

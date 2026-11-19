@@ -59,6 +59,9 @@ pub struct JournalHeader {
     /// instrumented text.
     pub run_dir: String,
     pub runner_config: Option<String>,
+    /// The selected Vitest project names. Empty uses each project.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub runner_projects: Vec<String>,
     /// The scope, for example `all` or `changed against main`.
     pub scope: String,
     /// The operator names. `None` uses the default set.
@@ -84,11 +87,11 @@ impl JournalHeader {
                 .map_or_else(|| "default set".to_owned(), |names| names.join(","))
         };
         let config = |config: &Option<String>| config.clone().unwrap_or_else(|| "none".to_owned());
-        let targets = |targets: &[String]| {
-            if targets.is_empty() {
+        let names = |names: &[String]| {
+            if names.is_empty() {
                 "none".to_owned()
             } else {
-                targets.join(",")
+                names.join(",")
             }
         };
         let hash = |hash: &str| hash.chars().take(SHOWN_HASH_LEN).collect::<String>();
@@ -115,6 +118,11 @@ impl JournalHeader {
                 config(&self.runner_config),
                 config(&current.runner_config),
             ),
+            (
+                "runner projects",
+                names(&self.runner_projects),
+                names(&current.runner_projects),
+            ),
             ("scope", self.scope.clone(), current.scope.clone()),
             (
                 "kill matrix",
@@ -123,8 +131,8 @@ impl JournalHeader {
             ),
             (
                 "kill matrix targets",
-                targets(&self.kill_matrix_targets),
-                targets(&current.kill_matrix_targets),
+                names(&self.kill_matrix_targets),
+                names(&current.kill_matrix_targets),
             ),
             (
                 "kill matrix full",

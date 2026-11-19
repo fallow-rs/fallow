@@ -4,7 +4,7 @@ use super::*;
 
 /// The withholding counters of the fix envelope, with the clause each one
 /// adds to the headline: `, {before}{count}{after}`.
-const SKIP_CLAUSES: [(&str, &str, &str); 6] = [
+const SKIP_CLAUSES: [(&str, &str, &str); 7] = [
     (
         "skipped_content_changed",
         "skipped ",
@@ -35,6 +35,11 @@ const SKIP_CLAUSES: [(&str, &str, &str); 6] = [
         "kept ",
         " unused export(s) that a kept re-export still names",
     ),
+    (
+        "skipped_shared_declarations",
+        "kept ",
+        " unused export(s) whose `export` keyword also exports a name that is in use",
+    ),
 ];
 
 /// Port of `summary-fix.jq`.
@@ -47,10 +52,10 @@ pub fn render_fix_summary(env: &Value) -> String {
     let dry_run = b(env, "dry_run");
 
     if fix_attempts == 0 && skip_counts.iter().all(|count| *count == 0) {
-        return "## Fallow - Auto-fix\n\nNo fixable issues found.".to_owned();
+        return "## Fallow fix report\n\nNo fixable issues found.".to_owned();
     }
 
-    let mut out = String::from("## Fallow - Auto-fix\n\n");
+    let mut out = String::from("## Fallow fix report\n\n");
     out.push_str(if dry_run {
         "**Dry run**: would apply"
     } else {

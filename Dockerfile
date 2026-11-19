@@ -8,9 +8,8 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 # The sha256 pins below are bound to FALLOW_VERSION above; bump both together.
-# The maintainer release flow refreshes all three after publication, via
-# .github/scripts/update-dockerfile-pins.mjs. There is no CI job that does it:
-# the docker-lockstep job that used to open a PR here was removed in v3.7.1.
+# The release flow refreshes the version and pins with
+# .github/scripts/update-dockerfile-pins.mjs.
 RUN set -eux; \
   case "${TARGETARCH}" in \
     amd64) \

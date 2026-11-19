@@ -188,10 +188,9 @@ impl AnalysisSession {
             load_options,
         )?;
         configure(&mut project_config.config);
-        project_config.workspaces.clear();
-        project_config.workspace_diagnostics.clear();
-        project_config.workspace_discovery_ms = None;
-        Ok(Self::from_config(project_config))
+        Ok(Self::from_config(
+            project_config.without_workspace_metadata(),
+        ))
     }
 
     /// Build a session from built-in defaults, ignoring project config files.

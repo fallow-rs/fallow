@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use fallow_api::{
-    AnalysisOptions, DeadCodeFilters, DeadCodeOptions, run_boundary_violations,
+    AnalysisOptions, DeadCodeFilters, DeadCodeOptions, ProductionAnalysis, run_boundary_violations,
     run_circular_dependencies, run_dead_code, serialize_boundary_violations_programmatic_json,
     serialize_circular_dependencies_programmatic_json, serialize_dead_code_programmatic_json,
 };
@@ -17,7 +17,7 @@ use super::{
     ISSUE_TYPE_FLAGS,
     api_runtime::{
         EnvScope, call_cancellation, run_api_blocking, shared_analysis_options, shared_params,
-        typed_tool_result, typed_type_aware, workspace_patterns_from_param,
+        typed_production, typed_tool_result, typed_type_aware, workspace_patterns_from_param,
     },
     fallback_policy::{
         baseline_requested, grouped_requested, regression_requested, type_aware_requested,
@@ -181,7 +181,7 @@ fn dead_code_options_from_params(
         finding_ids: params.finding_ids.clone().unwrap_or_default(),
         analysis: AnalysisOptions {
             production: params.production.unwrap_or(false),
-            production_override: params.production,
+            production_override: typed_production(params.production, ProductionAnalysis::DeadCode),
             no_package_baselines: params.no_package_baselines.unwrap_or(false),
             workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             explain: true,
@@ -225,13 +225,8 @@ fn apply_issue_type_filter(filters: &mut DeadCodeFilters, issue_type: &str) -> R
 
 /// Refusal for an issue-type selector the `analyze` tool does not accept.
 ///
-/// The accepted vocabulary is in hand at the refusal point, so a near miss
-/// names the selector the caller meant instead of leaving them to diff their
-/// token against the full list. Two matchers answer two different misses: the
-/// edit-distance one catches a slipped keystroke, and the affinity scorer
-/// catches a caller who spelled out a name fallow abbreviates
-/// (`unused-dependencies`), which is many edits away and used to fall through
-/// to a bare dump of the whole vocabulary.
+/// Edit distance catches typos. The affinity score catches names that spell
+/// out an abbreviation, such as `unused-dependencies`.
 fn unknown_issue_type_error(issue_type: &str) -> String {
     let names = ISSUE_TYPE_FLAGS.iter().map(|&(name, _)| name);
     let suggestion = nearest_name(issue_type, names.clone())

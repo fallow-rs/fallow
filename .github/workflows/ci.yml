@@ -9,13 +9,16 @@ on:
 # Deny all permissions by default, grant per-job as needed
 permissions: {}
 
-# A newer run of a pull request cancels the older one. Every other run gets a
-# group of its own and is never cancelled. A cancelled main run turns the
-# README badge red, and Miri takes longer than the gap between most merges,
-# so a cancelling main group left no finished run on main.
-# scripts/verify-release-ci.mjs also needs a finished run on the release commit.
+# A newer run of a pull request cancels the older one. Pushes to main share
+# one group and never cancel: a started run always finishes, and a newer push
+# replaces only the run that waits in the queue. Miri takes longer than the gap
+# between most merges, so a group that cancelled started runs left no finished
+# run on main. A replaced queued run shows as cancelled, and the README badge
+# can show it until the next run finishes. The release commit and
+# manual or scheduled runs get a group of their own, because
+# scripts/verify-release-ci.mjs needs a finished run on the release commit.
 concurrency:
-  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+  group: "ci-${{ (github.event_name == 'pull_request' || (github.event_name == 'push' && !startsWith(github.event.head_commit.message, 'chore: release v'))) && github.ref || github.run_id }}"
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 
 env:
@@ -34,6 +37,7 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
+      actions: read
       contents: read
       pull-requests: read
     outputs:
@@ -73,6 +77,8 @@ jobs:
       - name: Decide whether main requires full checks
         id: policy
         if: github.event_name == 'push'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/ci-change-policy.mjs
       - uses: dorny/paths-filter@ceb8a2b8f2d89434be7ff52d3de7ec3738c5cc9d # v4.0.3
         id: filter
@@ -553,12 +559,12 @@ jobs:
 
   # Check, Lint and contracts, and NAPI package share no step, so they run in
   # parallel, and each one ends with its own check for uncommitted changes.
-  # Check splits the nextest run over two jobs. The Blacksmith credit model in
+  # Check splits the nextest run over three jobs. The Blacksmith credit model in
   # scripts/select-heavy-runner.mjs reserves one Check job and Lint and
   # contracts, so only partition 1 and Lint and contracts may use the runner
   # that the heavy-runner step selects.
   check:
-    name: Check (${{ matrix.partition }}/2)
+    name: Check (${{ matrix.partition }}/3)
     needs: changes
     if: always() && !cancelled() && (needs.changes.outputs.rust == 'true' || (github.event_name == 'push' && needs.changes.outputs.main-full != 'false'))
     runs-on: ${{ matrix.partition == 1 && github.run_attempt == 1 && needs.changes.outputs.heavy-runner == 'blacksmith-4vcpu-ubuntu-2404' && 'blacksmith-4vcpu-ubuntu-2404' || 'ubuntu-26.04' }}
@@ -568,7 +574,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        partition: [1, 2]
+        partition: [1, 2, 3]
 
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -602,12 +608,15 @@ jobs:
         # process, which spreads the large integration binaries over all
         # cores. It selects the same targets as `cargo test` with these flags;
         # neither runs doctests. The `ci` profile is in .config/nextest.toml.
-        # Each partition builds every test binary and runs half of the tests.
+        # Each partition builds every test binary and runs a third of the
+        # tests. The third partition adds a build that runs in parallel, and
+        # it cuts the test time of each job from a half to a third of the
+        # suite, about 48 CPU-minutes.
         # FALLOW_MUTATION_E2E_REQUIRED makes a missing runner dependency fail
         # the end-to-end mutation tests instead of a skip.
         env:
           FALLOW_MUTATION_E2E_REQUIRED: '1'
-        run: cargo nextest run --profile ci --workspace --lib --bins --tests --examples --partition hash:${{ matrix.partition }}/2
+        run: cargo nextest run --profile ci --workspace --lib --bins --tests --examples --partition hash:${{ matrix.partition }}/3
 
       - name: Upload test report
         if: always()
@@ -628,14 +637,15 @@ jobs:
         # the `git diff --exit-code` step at the end of this job checks.
         run: npm run check:coverage-producers
 
-      # Partition 2 runs these tests and partition 1 runs the other two extra
-      # steps. Partition 1 took about 3 minutes longer when it ran all three.
+      # Each partition runs one extra step: partition 1 the coverage producer
+      # check, partition 2 these tests and partition 3 the schema drift gate.
+      # Partition 1 took about 3 minutes longer when it ran all three.
       - name: Run runtime-coverage integration tests (feature-gated stub sidecar)
         if: matrix.partition == 2
         run: cargo test -p fallow-cli --features test-sidecar-key --test runtime_coverage_tests --test audit_brief_runtime_focus_tests
 
       - name: Run schema drift gate (feature-gated schema-emit binary)
-        if: matrix.partition == 1
+        if: matrix.partition == 3
         run: cargo test -p fallow-cli --features schema-emit --bin fallow-schema-emit
 
       - name: Check for uncommitted changes
@@ -1165,11 +1175,14 @@ jobs:
           # can use a local, version-matched $schema. Refs #3851.
           cp rule-pack-schema.json npm/fallow/rule-pack-schema.json
           diff rule-pack-schema.json npm/fallow/rule-pack-schema.json
-          npm pack --dry-run --json ./npm/fallow > /tmp/fallow-pack.json
-          node <<'NODE'
-          const fs = require('fs');
-          const [pack] = JSON.parse(fs.readFileSync('/tmp/fallow-pack.json', 'utf8'));
-          const files = new Set(pack.files.map((file) => file.path));
+          pack_dir=$(mktemp -d "$RUNNER_TEMP/fallow-pack.XXXXXXXX")
+          npm pack ./npm/fallow --pack-destination "$pack_dir"
+          tarball="$RUNNER_TEMP/fallow.tgz"
+          mv "$pack_dir"/fallow-*.tgz "$tarball"
+          node - "$tarball" <<'NODE'
+          const { execFileSync } = require('node:child_process');
+          const content = execFileSync('tar', ['-tzf', process.argv[2]], { encoding: 'utf8' });
+          const files = new Set(content.split('\n'));
           const required = [
             'package.json',
             'README.md',
@@ -1188,7 +1201,7 @@ jobs:
             'capabilities.json',
             'issue-registry.json',
           ];
-          const missing = required.filter((file) => !files.has(file));
+          const missing = required.filter((file) => !files.has(`package/${file}`));
           if (missing.length > 0) {
             throw new Error(`npm package is missing expected files: ${missing.join(', ')}`);
           }
@@ -1204,22 +1217,11 @@ jobs:
         run: npm --prefix npm/fallow test
 
       - name: Smoke that no postinstall runs on install
-        # Phase 2 of RFC 868 will block postinstall hooks by default. fallow
-        # must not regress to depending on postinstall. Pack the candidate
-        # tarball and install with --ignore-scripts; confirm the bin wrappers
-        # land and the postinstall file is gone.
+        # The bin wrappers must work when npm disables lifecycle scripts.
         shell: bash
         run: |
           set -euo pipefail
-          mkdir -p /tmp/fallow-tarball
-          npm pack ./npm/fallow --pack-destination /tmp/fallow-tarball > /tmp/fallow-pack.log
-          shopt -s nullglob
-          tarballs=(/tmp/fallow-tarball/fallow-*.tgz)
-          if [ ${#tarballs[@]} -eq 0 ]; then
-            echo "::error::npm pack produced no tarball"
-            exit 1
-          fi
-          TARBALL="${tarballs[0]}"
+          TARBALL="$RUNNER_TEMP/fallow.tgz"
           mkdir -p /tmp/fallow-smoke && cd /tmp/fallow-smoke
           printf '%s' '{"name":"fallow-smoke","version":"0.0.0","private":true}' > package.json
           # Skip the optional platform-binary fetch: the smoke checks install
@@ -1701,7 +1703,7 @@ jobs:
       # step of the "Fallow Self Analysis" job checks .mjs and .ts files.
       - name: Static checks
         if: always() && !cancelled() && (github.event_name != 'pull_request' || steps.structure-inputs.outcome != 'success' || steps.structure-inputs.outputs.scan != 'false')
-        uses: fallow-rs/cargo-fallow@88f4aa8bd66d9671af5478a2275562f2793eb13c # optional SARIF output
+        uses: fallow-rs/cargo-fallow@bc4b52320f53b080b1e77160c145dfc94b41049c # v0.4.0
         with:
           install: release
           baseline: cargo-fallow-baseline.json

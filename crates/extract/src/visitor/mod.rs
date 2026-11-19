@@ -5,6 +5,7 @@ mod helpers;
 mod independent_this;
 mod local_class_heritage;
 mod re_export_records;
+mod record_extend;
 mod remap;
 mod requirements;
 mod semantic_calls;
@@ -20,6 +21,7 @@ pub(crate) mod react;
 mod visit_impl;
 #[path = "visit_impl_worker_env.rs"]
 mod worker_env;
+pub(crate) use record_extend::{extend_member_accesses, extend_whole_object_uses};
 pub(crate) use semantic_calls::mark_template_callers;
 pub(crate) use ssr_load_module::{ssr_load_module_call, ssr_load_module_source};
 pub(crate) use visit_impl::push_member_tag_accesses;
@@ -52,6 +54,7 @@ use fallow_types::extract::{
 };
 use helpers::LitCustomElementDecorator;
 use helpers::array_element_type_from_type;
+use helpers::finish_package_resolve_sites;
 use interface_types::InterfaceTypeLinks;
 use worker_env::WorkerEnvBodies;
 mod static_imports;
@@ -929,6 +932,9 @@ pub(crate) struct ModuleInfoExtractor {
     /// templates receive raw values, so interpolation should not credit
     /// `toString` coercion for the quasi itself.
     in_tagged_template_quasi: bool,
+    /// The module binds `html` to its own value, so `` html`...` `` is plain
+    /// text and not page markup.
+    html_tag_is_project_value: bool,
     class_super_stack: Vec<Option<(String, Option<Span>)>>,
     /// Monotonic per-module class-scope id source: incremented each time a
     /// class body is entered so every class gets a unique id, paired with
@@ -1563,13 +1569,10 @@ impl ModuleInfoExtractor {
         self.subclass_binding_writes = binding_writes;
     }
 
-    /// Store the import binding references that the semantic pass found.
-    pub(crate) fn push_namespace_member_uses(
-        &mut self,
-        uses: Vec<fallow_types::extract::NamespaceMemberUseFact>,
-    ) {
-        self.semantic_facts
-            .extend(uses.into_iter().map(SemanticFact::NamespaceMemberUse));
+    /// Store the namespace member uses and holder values that the semantic
+    /// pass found.
+    pub(crate) fn push_namespace_member_uses(&mut self, facts: Vec<SemanticFact>) {
+        self.semantic_facts.extend(facts);
     }
 
     /// Record the template that a `defineOgImage('Name')` or
@@ -3430,6 +3433,7 @@ impl ModuleInfoExtractor {
             parse_nesting_too_deep: false,
             suppressions: parsed.suppressions,
             unknown_suppression_kinds: parsed.unknown_kinds,
+            range_marker_problems: parsed.range_problems,
             unused_import_bindings: Vec::new(),
             type_referenced_import_bindings: Vec::new(),
             value_referenced_import_bindings: Vec::new(),
@@ -3648,14 +3652,6 @@ impl ModuleInfoExtractor {
     }
 }
 
-/// Keep the start offset of each final resolve-call span.
-fn finish_package_resolve_sites(sites: Vec<(String, Span)>) -> Box<[(String, u32)]> {
-    sites
-        .into_iter()
-        .map(|(package_name, span)| (package_name, span.start))
-        .collect()
-}
-
 /// The statically named keys of a destructuring pattern, or `None` when the pattern
 /// can expose properties it does not name: a rest element captures every remaining
 /// property, and a computed key names one that cannot be read from source.
@@ -3693,47 +3689,6 @@ fn extract_destructured_names(obj_pat: &ObjectPattern<'_>) -> Vec<String> {
         .iter()
         .filter_map(|prop| prop.key.static_name().map(|n| n.text().into_owned()))
         .collect()
-}
-
-/// Append template-scanned member accesses to a finished module record,
-/// skipping pairs the record already holds: a dotted tag inside an Astro
-/// expression region is seen by both the template tag scan and the region
-/// visitor, and no consumer counts repeats. The accesses live behind an
-/// `Arc<[_]>` once the extractor is consumed, so the slice is rebuilt only when
-/// there is something to add.
-pub(crate) fn extend_member_accesses(info: &mut ModuleInfo, extra: Vec<MemberAccess>) {
-    if extra.is_empty() {
-        return;
-    }
-    let mut accesses = std::mem::take(&mut info.member_accesses).to_vec();
-    let mut seen: FxHashSet<(String, String)> = accesses
-        .iter()
-        .map(|access| (access.object.clone(), access.member.clone()))
-        .collect();
-    for access in extra {
-        if seen.insert((access.object.clone(), access.member.clone())) {
-            accesses.push(access);
-        }
-    }
-    info.member_accesses = accesses.into();
-}
-
-/// Append template-scanned whole-object uses to a finished module record, the
-/// `whole_object_uses` counterpart of `extend_member_accesses`: names the
-/// record already holds are skipped, so the region pass, the template guard,
-/// and the script guard can each report the same binding without the
-/// persisted record growing duplicates.
-pub(crate) fn extend_whole_object_uses(info: &mut ModuleInfo, extra: Vec<String>) {
-    if extra.is_empty() {
-        return;
-    }
-    let mut uses = std::mem::take(&mut info.whole_object_uses).to_vec();
-    for name in extra {
-        if !uses.contains(&name) {
-            uses.push(name);
-        }
-    }
-    info.whole_object_uses = uses.into();
 }
 
 fn try_extract_property_callback_import<'a, 'b>(

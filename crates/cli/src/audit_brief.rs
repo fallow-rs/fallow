@@ -443,9 +443,6 @@ pub fn build_brief_output_with_diff(
         },
         |check| derive_graph_facts(&check.results),
     );
-    // The exports-aware delta fills the previously-stubbed export facts:
-    // `exports_added` / `api_width_delta` count the public-API surface the change
-    // widened, not raw internal churn.
     let added = deltas.public_api_added.len();
     graph_facts.exports_added = added;
     graph_facts.api_width_delta = i64::try_from(added).unwrap_or(i64::MAX);
@@ -1255,8 +1252,7 @@ fn wrap_prose(
 /// Render one focus unit: the label and its file, then the reason wrapped
 /// underneath, then any confidence flags.
 ///
-/// The reason used to share the file's line, which put an un-elided path and an
-/// unbounded sentence on one row; on a real project that reached 103 columns.
+/// Separate lines let the renderer shorten the path and wrap the reason independently.
 fn focus_unit_lines(unit: &crate::audit_focus::FocusUnit) -> Vec<String> {
     let mut lines = vec![format!(
         "    [{}] {}",
@@ -2304,9 +2300,7 @@ mod tests {
 
     #[test]
     fn graph_facts_carry_no_file_list() {
-        // The blast radius is Stage 3's alone. Stage 1 used to clone it verbatim,
-        // which put the same list on the wire twice and made half the envelope a
-        // duplicate.
+        // Keep the blast radius in Stage 3 only so the report does not repeat the file list.
         let facts = derive_graph_facts(&AnalysisResults::default());
         let value = serde_json::to_value(&facts).expect("graph facts serialize");
         let keys: Vec<&str> = value

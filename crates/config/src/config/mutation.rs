@@ -226,6 +226,14 @@ pub struct MutationConfig {
     /// default config discovery of the runner. `--runner-config` wins.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub runner_config: Option<String>,
+
+    /// The names of the Vitest projects that the run uses, as the Vitest
+    /// `--project` flag selects them, for example `["unit"]`. A name can
+    /// hold a `*` wildcard. The run then ignores each other project of the
+    /// config, also a project from a separate config file. Only the Vitest
+    /// runner reads it. Unset uses each project. `--runner-project` wins.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub runner_projects: Option<Vec<String>>,
 }
 
 impl MutationConfig {
@@ -249,7 +257,7 @@ mod tests {
         let config = parse(
             r#"{"runner":"vitest","operators":["arithmetic-operator","removed-call"],
                 "minScore":80,"concurrency":4,"mutantsPerLine":2,"functionScope":true,"typecheck":true,
-                "runnerConfig":"vitest.integration.config.mjs"}"#,
+                "runnerConfig":"vitest.integration.config.mjs","runnerProjects":["unit"]}"#,
         )
         .expect("valid config");
         assert_eq!(config.runner, MutationRunner::Vitest);
@@ -269,6 +277,7 @@ mod tests {
             config.runner_config.as_deref(),
             Some("vitest.integration.config.mjs")
         );
+        assert_eq!(config.runner_projects, Some(vec!["unit".to_owned()]));
     }
 
     #[test]

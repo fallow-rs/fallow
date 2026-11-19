@@ -553,18 +553,11 @@ fn load_audit_config(
     config_path: Option<&PathBuf>,
     allow_remote_extends: bool,
 ) -> Option<fallow_config::AuditConfig> {
-    let options = fallow_config::ConfigLoadOptions {
+    let options = fallow_engine::project_config::ConfigFileOptions {
         allow_remote_extends,
     };
-    if let Some(path) = config_path {
-        return fallow_config::FallowConfig::load_with_options(path, options)
-            .ok()
-            .map(|config| config.audit);
-    }
-    fallow_config::FallowConfig::find_and_load_with_options(root, options)
-        .ok()
-        .flatten()
-        .map(|(config, _path)| config.audit)
+    crate::runtime_support::loaded_config(root, config_path.map(PathBuf::as_path), options)
+        .map(|config| config.audit)
 }
 
 /// Reclaim persistent reusable base-snapshot worktree caches.

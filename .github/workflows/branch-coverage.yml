@@ -44,6 +44,7 @@ jobs:
       - name: Set up Rust
         uses: ./.github/actions/setup-rust
         with:
+          save-if: 'false'
           toolchain: ${{ env.NIGHTLY_TOOLCHAIN }}
           components: llvm-tools-preview
           cache-key: branch-coverage-${{ env.NIGHTLY_TOOLCHAIN }}

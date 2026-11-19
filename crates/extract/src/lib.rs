@@ -75,6 +75,7 @@ mod sink_identity;
 mod source_map;
 mod stack;
 pub mod suppress;
+mod suppress_literals;
 /// Tailwind CSS arbitrary-value detection.
 pub mod tailwind;
 pub(crate) mod template_complexity;
@@ -146,6 +147,7 @@ pub use similar_code::extract_similar_code_functions;
 pub use sink_identity::sink_identity_text;
 pub use source_map::{ExtractionResult, ScriptSection, embedded_script_sections};
 pub use stack::register_thread_stack;
+pub use suppress_literals::parse_suppressions_for_file;
 pub use tailwind::{TailwindArbitraryUse, scan_tailwind_arbitrary_values};
 pub use template_usage::TEMPLATE_SINK_CALLEE_PREFIX;
 

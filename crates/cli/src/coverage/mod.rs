@@ -104,6 +104,16 @@ pub struct RunContext<'a> {
     pub allow_remote_extends: bool,
 }
 
+impl RunContext<'_> {
+    /// The config inputs of an upload.
+    fn upload_config(&self) -> crate::runtime_support::ConfigFlags<'_> {
+        crate::runtime_support::ConfigFlags {
+            path: self.config_path.as_deref(),
+            allow_remote_extends: self.allow_remote_extends,
+        }
+    }
+}
+
 /// Arguments for `fallow coverage setup`.
 #[derive(Debug, Clone, Copy, Default)]
 pub struct SetupArgs {
@@ -382,11 +392,11 @@ pub fn run(subcommand: CoverageSubcommand, ctx: &RunContext<'_>) -> ExitCode {
         CoverageSubcommand::SetupCloud(args) => setup_cloud::run(&args, ctx.root, ctx.json_style),
         CoverageSubcommand::Analyze(args) => analyze::run(&args, ctx),
         CoverageSubcommand::UploadInventory(args) => {
-            upload_inventory::run(&args, ctx.root, ctx.allow_remote_extends)
+            upload_inventory::run(&args, ctx.root, ctx.upload_config())
         }
         CoverageSubcommand::UploadSourceMaps(args) => upload_source_maps::run(&args, ctx.root),
         CoverageSubcommand::UploadStaticFindings(args) => {
-            upload_static_findings::run(&args, ctx.root, ctx.allow_remote_extends)
+            upload_static_findings::run(&args, ctx.root, ctx.upload_config())
         }
         CoverageSubcommand::ReviewPacket(args) => cloud_reads::run_review_packet(&args, ctx),
         CoverageSubcommand::DeploymentChanges(args) => {

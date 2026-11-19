@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use super::{
     WorkspaceDiagnostic, WorkspaceDiagnosticKind, WorkspaceInfo, collect_declared_patterns,
-    deno_json::manifest_declares_package, dir_has_package_manifest,
+    deno_json::manifest_declares_package, dir_has_package_manifest, negation::NegatedPatterns,
     nested_project::is_nested_project_dir,
 };
 
@@ -36,10 +36,12 @@ pub fn find_undeclared_workspaces_with_ignores(
     declared: &[WorkspaceInfo],
     ignore_patterns: &crate::IgnorePatternSet,
 ) -> Vec<WorkspaceDiagnostic> {
-    let declares_workspaces = collect_declared_patterns(root, &[]).is_ok_and(|p| !p.is_empty());
-    if !declares_workspaces {
+    let declared_patterns = collect_declared_patterns(root, &[]).unwrap_or_default();
+    if declared_patterns.is_empty() {
         return Vec::new();
     }
+    // A user who excludes a folder with a `!` pattern needs no hint to declare it.
+    let negated = NegatedPatterns::new(declared_patterns.iter().map(|p| p.pattern.as_str()));
 
     let declared_roots: rustc_hash::FxHashSet<PathBuf> = declared
         .iter()
@@ -65,16 +67,10 @@ pub fn find_undeclared_workspaces_with_ignores(
             canonical_root: &canonical_root,
             declared_roots: &declared_roots,
             ignore_patterns,
+            negated: &negated,
             undeclared: &mut undeclared,
         };
-        check_undeclared(
-            &path,
-            input.root,
-            input.canonical_root,
-            input.declared_roots,
-            input.ignore_patterns,
-            input.undeclared,
-        );
+        check_undeclared(&path, &mut input);
         // The children of an independent pnpm project belong to that project.
         if !is_nested_project_dir(&path) {
             scan_child_dirs_for_undeclared(&path, &mut input);
@@ -95,6 +91,7 @@ struct UndeclaredScanInput<'a> {
     canonical_root: &'a Path,
     declared_roots: &'a rustc_hash::FxHashSet<PathBuf>,
     ignore_patterns: &'a crate::IgnorePatternSet,
+    negated: &'a NegatedPatterns,
     undeclared: &'a mut Vec<WorkspaceDiagnostic>,
 }
 
@@ -109,41 +106,26 @@ fn scan_child_dirs_for_undeclared(parent: &Path, input: &mut UndeclaredScanInput
         {
             continue;
         }
-        check_undeclared(
-            &child_path,
-            input.root,
-            input.canonical_root,
-            input.declared_roots,
-            input.ignore_patterns,
-            input.undeclared,
-        );
+        check_undeclared(&child_path, input);
     }
 }
 
 /// Check a single directory for an undeclared workspace.
-fn check_undeclared(
-    dir: &Path,
-    root: &Path,
-    canonical_root: &Path,
-    declared_roots: &rustc_hash::FxHashSet<PathBuf>,
-    ignore_patterns: &crate::IgnorePatternSet,
-    undeclared: &mut Vec<WorkspaceDiagnostic>,
-) {
+fn check_undeclared(dir: &Path, input: &mut UndeclaredScanInput<'_>) {
     if !dir_has_package_manifest(dir) || !manifest_declares_package(dir) {
         return;
     }
     let canonical = dunce::canonicalize(dir).unwrap_or_else(|_| dir.to_path_buf());
-    if canonical == *canonical_root {
+    if canonical == *input.canonical_root || input.declared_roots.contains(&canonical) {
         return;
     }
-    if declared_roots.contains(&canonical) {
+    if is_ignored_scan_dir(input.root, dir, input.ignore_patterns)
+        || input.negated.excludes(input.root, dir)
+    {
         return;
     }
-    if is_ignored_scan_dir(root, dir, ignore_patterns) {
-        return;
-    }
-    undeclared.push(WorkspaceDiagnostic::new(
-        root,
+    input.undeclared.push(WorkspaceDiagnostic::new(
+        input.root,
         dir.to_path_buf(),
         WorkspaceDiagnosticKind::UndeclaredWorkspace,
     ));

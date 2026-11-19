@@ -507,6 +507,15 @@ test("CI caches are scoped to the analyzed root", () => {
     /fallback_keys/,
     "GitLab cache keys are exact matches; a fallback key list would reintroduce prefix bleed",
   );
+  // A survived mutant or another error finding fails the job by default.
+  // GitLab saves a cache only after a successful job unless `when: always` is
+  // set, so without it a failed run loses its mutation results and the next
+  // run cannot continue a partial run.
+  assert.match(
+    gitlabCache,
+    /^\s+when: always$/m,
+    "the GitLab cache must be saved when the job fails, as the Action saves its mutation cache with always()",
+  );
 });
 
 // A predicate that names Windows or excludes Unix selects code that only
@@ -831,12 +840,12 @@ test("release runs the test suite natively on arm64 Linux and Apple Silicon", ()
   assert.match(job, /cd crates\/napi && npm test/);
 });
 
-test("CodeQL analyze jobs always report so the required checks resolve", () => {
+test("CodeQL analyze jobs always report a result", () => {
   const workflow = readWorkflow(".github/workflows/codeql.yml");
   const job = indentedBlock(workflow, "analyze", 2);
 
-  // A job that a job-level `if` skips leaves a required check waiting
-  // forever, so only the steps may skip.
+  // A job that a job-level `if` skips reports no result for its check, so
+  // only the steps may skip.
   assert.doesNotMatch(job, /^ {4}if:/mu);
   assert.match(job, /language: \[rust, javascript-typescript, actions\]/u);
   assert.match(
@@ -844,6 +853,91 @@ test("CodeQL analyze jobs always report so the required checks resolve", () => {
     /ANALYZE: \$\{\{ matrix\.language != 'rust' \|\| github\.event_name != 'pull_request' \|\| needs\.changes\.outputs\.rust == 'true' \}\}/u,
   );
   assert.match(job, /codeql-action\/analyze@[0-9a-f]{40}[^\n]*\n\s+if: env\.ANALYZE == 'true'/u);
+});
+
+test("CodeQL analyzes Rust on main, and on a pull request only for its own configuration", async () => {
+  const { runInNewContext } = await import("node:vm");
+  const workflow = readWorkflow(".github/workflows/codeql.yml");
+  const filter = indentedBlock(workflow, "changes", 2);
+  const concurrency = indentedBlock(workflow, "concurrency", 0);
+
+  // The Rust leg takes about 20 minutes, so a Rust source change must not
+  // start it on a pull request. Pushes to main analyze every commit that
+  // reaches a runner.
+  assert.deepEqual(
+    [...filter.matchAll(/^ {14}- '([^']+)'$/gmu)].map((match) => match[1]),
+    [".github/codeql/**", ".github/workflows/codeql.yml"],
+  );
+  assert.match(concurrency, /^ {2}cancel-in-progress: false$/mu);
+  const group = concurrency.match(/^ {2}group: (.+)$/mu)[1];
+  const evaluate = (event_name, run_id) => {
+    const ref = event_name === "pull_request" ? "refs/pull/1/merge" : "refs/heads/main";
+    const github = { event_name, ref, run_id };
+    return group.replace(/\$\{\{ (.+?) \}\}/gu, (_, expression) =>
+      runInNewContext(expression, { github }),
+    );
+  };
+  // A newer push replaces a queued analysis; a started one always finishes.
+  assert.equal(evaluate("push", 1), evaluate("push", 2));
+  assert.equal(evaluate("pull_request", 1), evaluate("pull_request", 2));
+  assert.notEqual(evaluate("push", 1), evaluate("pull_request", 1));
+  for (const event of ["schedule", "workflow_dispatch"]) {
+    assert.notEqual(evaluate(event, 1), evaluate(event, 2));
+  }
+});
+
+test("workflows without a push trigger never save a Rust cache", () => {
+  // GitHub evicts the oldest caches when the repository is over its cache
+  // limit, and this repository evicts within hours. A cache that a daily or
+  // weekly run saves is gone before its next run, and it evicts the caches
+  // that pull request jobs restore. A release keeps its caches, because a
+  // re-run of a failed release job reuses them within minutes.
+  // release-validation.yml also runs every week; that run saves nothing.
+  const KEEPS_CACHE = new Set(["release.yml"]);
+  const SAVE_IF = new Map([
+    [
+      "release-validation.yml",
+      "${{ github.event_name != 'schedule' && github.ref == 'refs/heads/main' }}",
+    ],
+  ]);
+  const checked = [];
+  for (const file of readdirSync(".github/workflows").filter((name) => name.endsWith(".yml"))) {
+    const workflow = readWorkflow(join(".github/workflows", file));
+    if (!workflow.includes("uses: ./.github/actions/setup-rust")) continue;
+    const triggers = [...indentedBlock(workflow, "on", 0).matchAll(/^ {2}([a-z_]+):/gmu)].map(
+      (match) => match[1],
+    );
+    if (triggers.includes("push") || KEEPS_CACHE.has(file)) continue;
+    checked.push(file);
+    const expected = SAVE_IF.get(file) ?? "'false'";
+    const lines = workflow.split("\n");
+    let steps = 0;
+    lines.forEach((line, index) => {
+      const step = /^( *)(- )?uses: \.\/\.github\/actions\/setup-rust\b/u.exec(line);
+      if (!step) return;
+      steps += 1;
+      // The indent of the list item that holds this `uses:` key.
+      const item = step[2] ? step[1].length : step[1].length - 2;
+      const body = [];
+      for (const next of lines.slice(index + 1)) {
+        if (next.trim() !== "" && next.search(/\S/u) <= item) break;
+        body.push(next);
+      }
+      // The input sits in the `with:` block, two levels below the list item.
+      const input = `${" ".repeat(item + 4)}save-if: ${expected}`;
+      assert.ok(body.includes(input), `${file}:${index + 1} needs ${input.trim()}`);
+    });
+    assert.equal(steps, workflow.split("uses: ./.github/actions/setup-rust").length - 1, file);
+  }
+  // A parser that misses the triggers of a known file would skip it silently.
+  for (const file of [
+    "branch-coverage.yml",
+    "ecosystem-full.yml",
+    "oracle-seeds.yml",
+    "pgo-validate.yml",
+    "release-validation.yml",
+  ])
+    assert.ok(checked.includes(file), file);
 });
 
 test("NAPI builds preserve the maintained native loader", () => {
@@ -1650,9 +1744,17 @@ test("push runs of the release commit are never cancelled", async () => {
     if (cancel === undefined || cancel === "false") continue;
     const concurrency = indentedBlock(workflow, "concurrency", 0);
     if (cancel === "${{ github.event_name == 'pull_request' }}") {
-      // Push runs never cancel. A group per commit also keeps a queued run
-      // from being dropped when a newer run of the group queues.
+      // Push runs never cancel a started run. A newer run of a shared group
+      // still drops the queued run, so the release commit needs a group of
+      // its own.
       assert.match(concurrency, /github\.(sha|run_id)/, `${file} needs a group per push run`);
+      if (/github\.event_name == 'push'/.test(concurrency)) {
+        assert.match(
+          concurrency.match(/^ {2}group: (.+)$/m)?.[1] ?? "",
+          /!startsWith\(github\.event\.head_commit\.message, 'chore: release v'\)/,
+          `${file} group must exempt the release commit`,
+        );
+      }
       continue;
     }
     for (const key of ["group", "cancel-in-progress"]) {
@@ -1665,25 +1767,52 @@ test("push runs of the release commit are never cancelled", async () => {
   }
 });
 
-test("every CI push run on main finishes so the README badge shows a result", async () => {
+test("a started CI run on main always finishes, and a queued one gives way", async () => {
   const { runInNewContext } = await import("node:vm");
   const concurrency = indentedBlock(readWorkflow(".github/workflows/ci.yml"), "concurrency", 0);
-  const group = concurrency.match(/^  group: (.+)$/m)[1];
+  const group = concurrency.match(/^  group: "(.+)"$/m)[1];
   const cancel = concurrency.match(/^  cancel-in-progress: \$\{\{ (.+) \}\}$/m)[1];
-  const evaluate = (event_name, run_id) => {
-    const github = { event_name, ref: "refs/heads/main", run_id };
+  const evaluate = (event_name, run_id, message = "fix: a change") => {
+    const github = {
+      event_name,
+      ref: event_name === "pull_request" ? "refs/pull/1/merge" : "refs/heads/main",
+      run_id,
+      event: { head_commit: { message } },
+    };
     return {
       group: group.replace(/\$\{\{ (.+?) \}\}/g, (_, expression) =>
-        runInNewContext(expression, { github }),
+        runInNewContext(expression, { github, startsWith: (a, b) => a.startsWith(b) }),
       ),
       cancel: runInNewContext(cancel, { github }),
     };
   };
   assert.equal(evaluate("pull_request", 100).cancel, true);
   assert.equal(evaluate("pull_request", 100).group, evaluate("pull_request", 101).group);
-  for (const event of ["push", "workflow_dispatch", "schedule"]) {
+  // The README badge shows the last CI run on main, and a cancelled run
+  // shows as failing, so a push run never cancels a started run.
+  assert.equal(evaluate("push", 100).cancel, false);
+  assert.equal(evaluate("push", 100).group, evaluate("push", 101).group);
+  assert.notEqual(evaluate("push", 100).group, evaluate("pull_request", 100).group);
+  const release = (id) => evaluate("push", id, "chore: release v1.2.3").group;
+  assert.notEqual(release(100), release(101));
+  assert.notEqual(release(100), evaluate("push", 100).group);
+  for (const event of ["workflow_dispatch", "schedule"]) {
     assert.equal(evaluate(event, 100).cancel, false);
     assert.notEqual(evaluate(event, 100).group, evaluate(event, 101).group);
+  }
+});
+
+test("main change detection reads the previous run through the Actions API", () => {
+  for (const file of ["ci.yml", "coverage.yml"]) {
+    const job = indentedBlock(readWorkflow(`.github/workflows/${file}`), "changes", 2);
+    // A replaced queued run leaves the previous commit without a result, so
+    // the prose-only skip must check that run.
+    assert.match(job, /^ {6}actions: read$/mu, file);
+    assert.match(
+      job,
+      /env:\n {10}GITHUB_TOKEN: \$\{\{ github\.token \}\}\n {8}run: node scripts\/ci-change-policy\.mjs/u,
+      file,
+    );
   }
 });
 
@@ -2122,7 +2251,7 @@ test("no PGO workflow sets a global RUSTFLAGS that drops the Windows stack flags
   }
 });
 
-test("pgo-validate gates PGO on the held-out fixtures for the PGO paths", () => {
+test("pgo-validate gates PGO on the held-out fixtures for the PGO paths", async () => {
   const workflow = readWorkflow(".github/workflows/pgo-validate.yml");
   const release = readWorkflow(".github/workflows/release.yml");
   const pullRequest = indentedBlock(workflow, "pull_request", 2);
@@ -2144,10 +2273,18 @@ test("pgo-validate gates PGO on the held-out fixtures for the PGO paths", () => 
     "rust-toolchain.toml",
   ]);
   assert.match(workflow, /^ {2}schedule:\n {4}- cron: '40 3 \* \* 0'$/mu);
+  // A failed detector leaves the output empty, so only a proven "false" skips.
   assert.match(
     train,
-    /^ {4}if: \$\{\{ !startsWith\(github\.head_ref, 'dependabot\/cargo\/'\) \}\}$/mu,
+    /^ {4}if: \$\{\{ always\(\) && !cancelled\(\) && needs\.changes\.outputs\.run != 'false' && !startsWith\(github\.head_ref, 'dependabot\/cargo\/'\) \}\}$/mu,
   );
+  assert.match(train, /^ {4}needs: changes$/mu);
+  assert.match(
+    indentedBlock(workflow, "changes", 2),
+    /fetch-depth: 0[\s\S]*run: node scripts\/pgo-validate-inputs\.mjs/u,
+  );
+  const { PGO_PATHS } = await import("./pgo-validate-inputs.mjs");
+  assert.deepEqual(listedPaths(pullRequest), PGO_PATHS, "the detector lists the same paths");
   assert.match(workflow, /^ {2}workflow_dispatch:$/mu);
   assert.match(workflow, /^permissions: \{\}$/mu);
   assert.match(train, /scripts\/pgo-train\.sh/u);
@@ -2255,7 +2392,7 @@ test("Miri allocation uses a trusted optional helper and routing edits trigger M
   const changes = indentedBlock(workflow, "changes", 2);
   assert.match(
     changes,
-    /permissions:\n      contents: read\n      pull-requests: read\n    outputs:/,
+    /permissions:\n      actions: read\n      contents: read\n      pull-requests: read\n    outputs:/,
   );
   assert.doesNotMatch(changes, /secrets\.|id-token:|actions: write|contents: write/);
   const checkout = changesStep(workflow, "Check out the runner selectors from main");
@@ -2452,47 +2589,93 @@ test("CodSpeed simulation keeps its compatible runner without downgrading wallti
 
   assert.ok(simulationJobs.includes("bench.yml/benchmark"));
   assert.ok(simulationJobs.includes("bench.yml/benchmark-full"));
-  assert.ok(simulationJobs.includes("bench-cli-instructions.yml/instructions"));
+  assert.ok(simulationJobs.includes("bench.yml/cli-instructions"));
   const benchmark = readWorkflow(".github/workflows/bench.yml");
   for (const name of ["benchmark-harness", "determine-matrix"]) {
     assert.match(indentedBlock(benchmark, name, 2), /runs-on: ubuntu-26\.04/u);
   }
-  const walltime = readWorkflow(".github/workflows/bench-type-aware.yml");
-  assert.match(walltime, /mode: walltime/u);
-  assert.match(walltime, /runs-on: ubuntu-26\.04/u);
+  for (const name of ["walltime-cli", "type-aware"]) {
+    const job = indentedBlock(benchmark, name, 2);
+    assert.match(job, /mode: walltime/u);
+    assert.match(job, /^    runs-on: codspeed-macro-arm64-graviton-ubuntu-22-04$/mu);
+  }
 });
 
-test("type-aware benchmarks supersede only the same pull request", async () => {
+test("only bench.yml uploads to CodSpeed", () => {
+  // CodSpeed takes the results for one commit from one workflow run. A second
+  // workflow on the same commit gets "Benchmarks ran in several CI workflows".
+  const uploaders = readdirSync(".github/workflows")
+    .filter((file) => file.endsWith(".yml"))
+    .filter((file) => /uses: CodSpeedHQ\/action@/u.test(readWorkflow(`.github/workflows/${file}`)));
+  assert.deepEqual(uploaders, ["bench.yml"]);
+});
+
+test("bench.yml measures main nightly and a push only for the release commit", async () => {
   const { runInNewContext } = await import("node:vm");
-  const concurrency = indentedBlock(
-    readWorkflow(".github/workflows/bench-type-aware.yml"),
-    "concurrency",
-    0,
+  const benchmark = readWorkflow(".github/workflows/bench.yml");
+  const triggers = [...indentedBlock(benchmark, "on", 0).matchAll(/^ {2}(\w+):/gmu)].map(
+    (match) => match[1],
   );
-  const group = concurrency.match(/^  group: (.+)$/m)[1];
-  const cancel = concurrency.match(/^  cancel-in-progress: \$\{\{ (.+) \}\}$/m)[1];
-  const evaluate = (event_name, number, run_id) => {
-    const github = {
-      workflow: "Type-aware Benchmarks",
-      event_name,
-      event: { pull_request: { number } },
-      run_id,
-    };
-    return {
-      group: group.replace(/\$\{\{ (.+?) \}\}/g, (_, expression) =>
-        runInNewContext(expression, { github }),
-      ),
-      cancel: runInNewContext(cancel, { github }),
-    };
-  };
-  assert.deepEqual(evaluate("pull_request", 42, 100), evaluate("pull_request", 42, 101));
-  assert.notEqual(evaluate("pull_request", 42, 100).group, evaluate("pull_request", 43, 101).group);
-  assert.equal(evaluate("pull_request", 42, 100).cancel, true);
-  for (const event of ["push", "workflow_dispatch"]) {
-    assert.equal(evaluate(event, undefined, 100).cancel, false);
-    assert.notEqual(evaluate(event, undefined, 100).group, evaluate(event, undefined, 101).group);
-    assert.notEqual(evaluate(event, undefined, 100).group, evaluate("pull_request", 42, 100).group);
+  assert.deepEqual(triggers, ["pull_request", "push", "schedule", "workflow_dispatch"]);
+
+  const gate = indentedBlock(benchmark, "benchmark-harness", 2)
+    .match(/^    if: >-\n((?: {6}.+\n)+)/mu)[1]
+    .replace(/\s+/gu, " ")
+    .trim();
+  const expression = gate
+    .replaceAll("github.event.pull_request.labels.*.name", "__labels")
+    .replaceAll("startsWith(", "__startsWith(")
+    .replaceAll("contains(", "__contains(");
+  const runs = (event_name, { labels = [], ...event } = {}) =>
+    runInNewContext(expression, {
+      __labels: labels,
+      __startsWith: (value, prefix) => String(value ?? "").startsWith(prefix),
+      __contains: (list, value) => list.includes(value),
+      github: { event_name, event: { head_commit: {}, label: {}, ...event } },
+    });
+  assert.equal(runs("schedule"), true);
+  assert.equal(runs("workflow_dispatch"), true);
+  assert.equal(runs("push", { head_commit: { message: "chore: release v3.44.0" } }), true);
+  assert.equal(runs("push", { head_commit: { message: "fix: something" } }), false);
+  assert.equal(runs("pull_request", { action: "synchronize" }), false);
+  assert.equal(runs("pull_request", { action: "synchronize", labels: ["ci:perf"] }), true);
+  // A label event for another label must not start a second ci:perf run.
+  assert.equal(
+    runs("pull_request", { action: "labeled", label: { name: "other" }, labels: ["ci:perf"] }),
+    false,
+  );
+  assert.equal(
+    runs("pull_request", { action: "labeled", label: { name: "ci:perf" }, labels: ["ci:perf"] }),
+    true,
+  );
+  // The release push must not wait on a release build of the CLI corpus.
+  assert.match(
+    indentedBlock(benchmark, "cli-instructions", 2),
+    /^    if: github\.event_name != 'push'$/mu,
+  );
+  for (const trigger of ["pull_request", "push"]) {
+    assert.match(
+      indentedBlock(indentedBlock(benchmark, "on", 0), trigger, 2),
+      /- 'benchmarks\/cli-instructions\.sh'/u,
+      trigger,
+    );
   }
+
+  // The organization shares 600 free macro runner minutes per month, so the
+  // walltime jobs run only at night and on demand. The release build runs on
+  // a free GitHub runner with the Ubuntu release of the macro runner image.
+  for (const name of ["walltime-build-cli", "type-aware"]) {
+    assert.match(
+      indentedBlock(benchmark, name, 2),
+      /^    if: github\.event_name == 'schedule' \|\| \(github\.event_name == 'workflow_dispatch' && inputs\.walltime\)$/mu,
+      name,
+    );
+  }
+  assert.match(
+    indentedBlock(benchmark, "walltime-build-cli", 2),
+    /^    runs-on: ubuntu-22\.04-arm$/mu,
+  );
+  assert.match(indentedBlock(benchmark, "walltime-cli", 2), /^    needs: walltime-build-cli$/mu);
 });
 
 test("failed selector steps discard partial Blacksmith output despite continue-on-error", async () => {
@@ -2967,7 +3150,7 @@ test("the Check, Lint and contracts, and Windows jobs run each step exactly once
   }
   assert.equal(
     indentedBlock(workflow, "check", 2).match(/^    name: (.+)$/m)?.[1],
-    "Check (${{ matrix.partition }}/2)",
+    "Check (${{ matrix.partition }}/3)",
   );
   assert.equal(
     indentedBlock(workflow, "windows-rust", 2).match(/^    name: (.+)$/m)?.[1],
@@ -2979,14 +3162,14 @@ test("the Check, Lint and contracts, and Windows jobs run each step exactly once
   assert.doesNotMatch(lint, /cargo nextest run|cargo test /);
   const napi = indentedBlock(workflow, "napi", 2);
   assert.doesNotMatch(lint, /napi build/);
-  assert.match(check, /--partition hash:\$\{\{ matrix\.partition \}\}\/2/);
-  // Partition 1 runs the producer check and the schema drift gate, and
-  // partition 2 runs the runtime-coverage tests. The two partitions then take
-  // about the same time.
+  assert.match(check, /--partition hash:\$\{\{ matrix\.partition \}\}\/3/);
+  // Each partition runs one extra step: partition 1 the producer check,
+  // partition 2 the runtime-coverage tests and partition 3 the schema drift
+  // gate.
   for (const [step, partition] of [
     ["Run coverage producer conformance", 1],
     ["Run runtime-coverage integration tests (feature-gated stub sidecar)", 2],
-    ["Run schema drift gate (feature-gated schema-emit binary)", 1],
+    ["Run schema drift gate (feature-gated schema-emit binary)", 3],
   ]) {
     const escaped = escapeRegExp(step);
     assert.match(
@@ -2995,7 +3178,7 @@ test("the Check, Lint and contracts, and Windows jobs run each step exactly once
       `"${step}" must run in partition ${partition}`,
     );
   }
-  assert.match(check, /partition: \[1, 2\]/);
+  assert.match(check, /partition: \[1, 2, 3\]/);
   for (const job of [check, lint, napi]) {
     assert.match(job, /^    needs: changes$/m);
     assert.equal(job.match(/^    if: (.+)$/m)?.[1], check.match(/^    if: (.+)$/m)?.[1]);
@@ -3154,7 +3337,7 @@ test("root npm installs disable lifecycle scripts by default", (t) => {
 });
 
 test("ordinary workflow npm installs suppress dependency lifecycle scripts", () => {
-  for (const path of ["bench-type-aware.yml", "ci.yml"]) {
+  for (const path of ["bench.yml", "ci.yml"]) {
     const workflow = readWorkflow(`.github/workflows/${path}`);
     const installs = workflow
       .split("\n")
@@ -3665,8 +3848,6 @@ test("optional Marketplace publisher proof installs only the frozen CLI before A
 // request. A new workflow with a pull request trigger must pass the "Rule for
 // new workflows" in docs/development/quality-gates.md before it joins this list.
 const PULL_REQUEST_WORKFLOWS = [
-  "bench-cli-instructions.yml",
-  "bench-type-aware.yml",
   "bench.yml",
   "ci.yml",
   "codeql.yml",

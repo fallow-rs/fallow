@@ -23,6 +23,10 @@ pub struct InitOptions {
     /// flag with a value is two entries.
     #[serde(skip_serializing_if = "Vec::is_empty")]
     pub node_args: Vec<String>,
+    /// The names of the Vitest projects that the run uses. Empty uses each
+    /// project.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub projects: Vec<String>,
 }
 
 /// The body of an `init` request.

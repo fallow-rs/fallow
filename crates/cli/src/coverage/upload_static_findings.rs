@@ -100,8 +100,12 @@ impl fmt::Debug for UploadStaticFindingsArgs {
 }
 
 /// Dispatch `fallow coverage upload-static-findings`.
-pub fn run(args: &UploadStaticFindingsArgs, root: &Path, allow_remote_extends: bool) -> ExitCode {
-    match run_inner(args, root, allow_remote_extends) {
+pub fn run(
+    args: &UploadStaticFindingsArgs,
+    root: &Path,
+    config_input: crate::runtime_support::ConfigFlags<'_>,
+) -> ExitCode {
+    match run_inner(args, root, config_input) {
         Ok(()) => ExitCode::SUCCESS,
         Err(err) => err.into_exit(LOG_PREFIX, args.ignore_upload_errors),
     }
@@ -110,7 +114,7 @@ pub fn run(args: &UploadStaticFindingsArgs, root: &Path, allow_remote_extends: b
 fn run_inner(
     args: &UploadStaticFindingsArgs,
     root: &Path,
-    allow_remote_extends: bool,
+    config_input: crate::runtime_support::ConfigFlags<'_>,
 ) -> Result<(), UploadError> {
     let project_id = upload_common::resolve_project_id(args.project_id.as_deref(), root)
         .map_err(UploadError::Validation)?;
@@ -125,7 +129,7 @@ fn run_inner(
         root,
     )?;
 
-    let config = upload_common::load_resolved_config_with_options(root, allow_remote_extends)
+    let config = upload_common::load_resolved_config_with_options(root, config_input)
         .map_err(UploadError::Validation)?;
     let results = fallow_engine::session::AnalysisSession::from_resolved_config(config.clone())
         .and_then(|session| session.analyze_dead_code_with_artifacts(false, false))
@@ -649,7 +653,11 @@ mod tests {
     fn run_dry_run_analyzes_and_exits_zero() {
         let project = project_with_unused_export();
         // Explicit project_id + git_sha keep this env- and git-free.
-        let code = run(&dry_run_args(), project.path(), false);
+        let code = run(
+            &dry_run_args(),
+            project.path(),
+            crate::runtime_support::ConfigFlags::default(),
+        );
         assert_eq!(code, ExitCode::SUCCESS);
     }
 }

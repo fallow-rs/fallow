@@ -2,20 +2,20 @@
 source: crates/cli/tests/integration/github_format_tests.rs
 expression: rendered
 ---
-> **Health: C (71.3)** · -8.8 pts vs previous (B 80) · dead exports 6% (+2.5%) [suppress?](https://fallow.tools/docs/configuration/suppression/) · avg cyclomatic 3.6 (-0.4)
+> **Health: C (71.3)**, -8.8 points against the previous run (B 80), dead exports 6% (+2.5%) [suppress?](https://fallow.tools/docs/configuration/suppression/), avg cyclomatic 3.6 (-0.4)
 
-## Fallow - Health
+## Fallow health report
 
 > [!WARNING]
-> **3 complexity findings and 2 runtime coverage findings** · 954ms
+> **3 complexity findings and 2 runtime coverage findings**
 
 ### Complexity
 
 | File | Function | Severity | Cyclomatic | Cognitive | CRAP | Lines |
 |:-----|:---------|:---------|:-----------|:----------|:-----|:------|
-| `src/z-last.ts:3` | `criticalMess` | critical | 33 **!** | 41 **!** | 156.5 **!** | 120 |
-| `src/a-first.ts:9` | `moderateBranch` | moderate | 22 **!** | 9 | - | 40 |
-| `src/mid.ts:5` | `highCog` | high | 8 | 19 **!** | - | 33 |
+| `src/z-last.ts:3` | `criticalMess` | critical | **33** | **41** | **156.5** | 120 |
+| `src/a-first.ts:9` | `moderateBranch` | moderate | **22** | 9 | - | 40 |
+| `src/mid.ts:5` | `highCog` | high | 8 | **19** | - | 33 |
 
 ### Runtime Coverage
 
@@ -30,6 +30,6 @@ expression: rendered
 |:-----|:---------|------------:|-----------:|
 | `src/hot.ts:2` | `handleRequest` | 91234 | 99 |
 
-**!** marks the dimension that breached.
+A bold value exceeds its threshold.
 
 **210** files, **1400** functions analyzed (thresholds: cyclomatic > 20, cognitive > 15, CRAP >= 30)

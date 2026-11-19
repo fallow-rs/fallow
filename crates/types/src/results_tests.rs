@@ -241,6 +241,8 @@ fn results_total_counts_all_types() {
             line: 3,
             col: 0,
             via_path: None,
+            reason: crate::results::BoundaryViolationReason::DisallowedZone,
+            public_files: vec![],
         })],
         ..Default::default()
     };
@@ -741,6 +743,8 @@ fn sort_boundary_violations() {
             line,
             col,
             via_path: None,
+            reason: crate::results::BoundaryViolationReason::DisallowedZone,
+            public_files: vec![],
         })
     };
     r.boundary_violations.push(mk("z.ts", 1, 0, "a.ts"));
@@ -937,6 +941,8 @@ fn serialize_boundary_violation_fields() {
         line: 3,
         col: 0,
         via_path: None,
+        reason: crate::results::BoundaryViolationReason::DisallowedZone,
+        public_files: vec![],
     };
     let json = serde_json::to_value(&v).unwrap();
     assert_eq!(json["from_path"], "src/ui/button.tsx");
@@ -944,6 +950,26 @@ fn serialize_boundary_violation_fields() {
     assert_eq!(json["from_zone"], "ui");
     assert_eq!(json["to_zone"], "db");
     assert_eq!(json["import_specifier"], "../db/queries");
+    assert!(
+        json.get("reason").is_none() && json.get("public_files").is_none(),
+        "a zone-rule finding keeps the output of a project without publicFiles, got {json}"
+    );
+
+    let internal = BoundaryViolation {
+        reason: crate::results::BoundaryViolationReason::InternalFile,
+        public_files: vec![PathBuf::from("src/db/index.ts")],
+        ..v
+    };
+    let json = serde_json::to_value(&internal).unwrap();
+    assert_eq!(json["reason"], "internal_file");
+    assert_eq!(json["public_files"], serde_json::json!(["src/db/index.ts"]));
+    let message = internal
+        .internal_file_message(&|path| path.display().to_string())
+        .expect("an internal_file finding has a message");
+    assert_eq!(
+        message,
+        "src/db/queries.ts is not a public entry file of zone 'db'; import it through src/db/index.ts"
+    );
 }
 
 #[test]
@@ -1086,6 +1112,8 @@ fn protected_architecture_findings(path: &Path) -> AnalysisResults {
             line: 1,
             col: 0,
             via_path: None,
+            reason: crate::results::BoundaryViolationReason::DisallowedZone,
+            public_files: vec![],
         })],
         boundary_coverage_violations: vec![BoundaryCoverageViolationFinding::with_actions(
             BoundaryCoverageViolation {
@@ -1124,6 +1152,7 @@ fn protected_architecture_findings(path: &Path) -> AnalysisResults {
                 issue_kind: Some("unused-file".to_string()),
                 reason: None,
                 is_file_level: false,
+                is_range: false,
                 kind_known: true,
             },
             missing_reason: false,

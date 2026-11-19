@@ -126,6 +126,47 @@ built-in production patterns only when the run is in production mode, so
 `--production` and `FALLOW_PRODUCTION` also apply them. The globs apply to each
 analysis that runs in production mode, not only to dead-code analysis.
 
+### Config loader adapter
+
+The CLI reads each config file through
+`fallow_engine::project_config::load_config_file`. The source rule
+`config-load-through-engine-loader` in the root `Cargo.toml` denies a direct
+load. `runtime_support::load_config_for_analysis` does these steps:
+
+1. It loads the file through the engine loader.
+   `runtime_support::config_load_error_message` gives the error text, and the
+   error exits 2. An explicit file adds `failed to load config '<path>': ` to
+   the top error. The top error of a discovered file names the path itself.
+2. It prints `loaded config: <path>` on stderr, once for each path, in human
+   mode only, and not under `--quiet`.
+3. `ConfigFile::for_analysis` flattens the `production` setting for the
+   analysis, with `--production` as the global flag.
+4. It records the config shape for telemetry.
+5. `ConfigFile::validate` checks the external plugins, the boundaries and the
+   rule packs.
+6. `ConfigFile::resolve` resolves the config and applies the environment
+   variables that every host honors, such as `FALLOW_MAX_FILE_SIZE` and
+   `FALLOW_CACHE_MAX_SIZE`. The `--max-file-size` flag then replaces the
+   file size limit.
+7. It records the cache notice candidate, reports the workspace diagnostics
+   and warns about unknown security categories.
+
+`cli_production::resolve_production_modes` puts the flags before the
+`FALLOW_PRODUCTION*` variables with `ProductionFlags::with_fallback`, so the
+config decides only when neither source sets a value. The variables are parsed
+by `fallow_config::ProductionEnv`, which the typed MCP routes use too. A site
+that reads one optional setting, such as the audit cache, `fallow report` or
+the staged audit, uses `runtime_support::loaded_config`. That function gives
+`None` when the file does not load, and the site prints nothing.
+
+A command that loads the config outside the analysis loader gets the
+`--config` path and the `--allow-remote-extends` policy together as one
+`runtime_support::ConfigFlags` value. `fallow report --from`, `plugin-check`,
+the staged audit and the coverage uploads use it, so each load of one command
+reads the same file with the same trust policy. The own-config pass of
+`fallow audit` reads the base version of the `--config` file. When the change
+added that file, discovery in the base worktree decides.
+
 Exit 1 on an analysis command means that an enforced gate failed. A config
 load warning never sets it. A workspace diagnostic such as
 `node-modules-missing` or a broken tsconfig `extends` never sets it either.
@@ -1079,6 +1120,118 @@ complete result.
   context and the JSON schema does not make these sections optional.
 - The review brief and the walkthrough modes keep their own output
   contracts.
+
+## Analysis selection
+
+`fallow_config::plan_run` in `crates/config/src/config/run_plan.rs` is the one
+rule that decides which of the dead-code, duplication and health analyses a
+run executes. A surface builds a `RunRequest`, gives it to `plan_run` with the
+`PlanSections` of its config (`plan_sections()` on `FallowConfig` and
+`ResolvedConfig`), and reads the `RunPlan` that comes back.
+
+A `RunRequest` holds a `RunCommand` and one `AnalysisRequest` for each
+analysis:
+
+- `RunCommand::Combined`: no command key applies. The bare `fallow` run,
+  `fallow_api::run_combined`, the health score and the editor use it.
+- `RunCommand::Audit`: the `audit.deadCode`, `audit.health` and `audit.dupes`
+  keys apply.
+- `Named`: the run names the analysis. The analysis runs.
+- `Default`: the run does not name the analysis. The config decides.
+- `Excluded`: the run leaves the analysis out.
+
+The constructors map each surface to a request:
+
+- `RunRequest::from_lists`: the `--only` and `--skip` lists of the bare run and
+  of `fallow audit`. A non-empty `only` names each listed analysis and
+  excludes the others. Otherwise `skip` excludes each listed analysis.
+- `RunRequest::from_booleans`: the options of `fallow_api::run_combined`.
+  `false` excludes the analysis. `true` names the analysis only when it is the
+  one option that is `true`. Otherwise the config decides.
+- `RunRequest::from_options`: the options of `fallow_api::run_audit`.
+  `Some(true)` names, `Some(false)` excludes and `None` gives `Default`.
+- `RunRequest::all_named`: the review brief, which runs every analysis.
+
+`from_lists` and `from_booleans` have different rules for `Named` on purpose.
+Do not merge them. The tests in `run_plan_tests.rs` pin both.
+
+`planned_lists` in `crates/cli/src/combined/mod.rs` maps the `AnalysisKind`
+lists to `PlannedAnalysis` lists. The `Architecture` mapping is asymmetric:
+
+- In `--only`, `architecture` maps to the dead-code analysis, because the
+  architecture findings are a part of it.
+- In `--skip`, `architecture` maps to no analysis. The dead-code analysis
+  still runs, and `resolve_architecture_selection` removes only its
+  architecture findings. That function reads no config key.
+
+`plan_run` applies this rule to each analysis:
+
+1. `Named` gives `Run`.
+2. `Excluded` gives `Skipped(SkipReason::NotRequested)`.
+3. For `Default` with `RunCommand::Audit`, the `audit` key decides first.
+   `false` gives `Skipped(SkipReason::Config(key))`. `true` gives `Run`, also
+   when `duplicates.enabled` is `false`.
+4. For the duplication analysis, `duplicates.enabled: false` gives
+   `Skipped(SkipReason::Config(ConfigKey::DuplicatesEnabled))`.
+5. Otherwise the analysis runs.
+
+`RunRequest::reads_config` tells whether the plan depends on the config. The
+bare run (`load_run_plan` in `crates/cli/src/cli_production.rs`) and the API
+runtime load the config only when it does.
+
+`AnalysisSelection::off_by` tells which key turned an analysis off. The
+`--dupes-baseline` flag uses it:
+
+- When `duplicates.enabled` alone turned duplication off, the flag gives a
+  note and the exit code does not change.
+- When `audit.dupes: false` turned duplication off, the flag is an error with
+  exit code 2.
+
+The health score and the editor analysis call
+`DuplicatesConfig::runs_by_default`, which is the plan of a `Combined` request
+with every analysis `Default`. The flags of a run do not change that answer:
+`--only dupes,health` prints the clone groups and keeps the score without a
+duplication penalty.
+
+An audit and a bare `fallow` run write an Impact record only for a full
+selection. Both commands use one rule, `AuditAnalysisSelection::records_impact`:
+
+- `is_full_without_dupes` must be true: the dead-code and health analyses run,
+  with every dead-code finding.
+- The duplication analysis must also run, or `duplicates_off_in_config` must
+  be true. That field holds `!DuplicatesConfig::runs_by_default()`, so it does
+  not depend on the flags.
+
+With `duplicates.enabled: false`, `--skip dupes` and `--only dead-code,health`
+narrow nothing, so both commands write a record. When `--only` and `--skip`
+leave out duplication, the project has duplication on, and Impact writes no
+record in either command. `audit.dupes: false` writes no audit record, because
+the bare run ignores that key and runs duplication.
+
+A record fills the stored clone frontier only when its run executed the
+duplication analysis. With duplication off, a run with
+`--only dead-code,dupes,health` executes it, and so does a run before the
+config change. `AttributionInput::clones` is `None` when the run did not
+execute duplication. Impact then credits no clone group as resolved and keeps
+the clone frontier. A later run with duplication compares with that frontier:
+a clone that is still there gives no credit, and a removed clone gives one.
+A run that executed duplication and found no clone gives `Some` with an empty
+list, so it credits each stored clone group that touches the changed files.
+
+Do not read a selection key outside the config crate. The tests in
+`crates/cli/src/selection_key_guard_tests.rs` fail when a production file
+reads `duplicates.enabled`, `audit.deadCode`, `audit.health` or `audit.dupes`:
+
+- A text needle finds `.duplicates.enabled` in every Rust file under `crates/`.
+- A `syn` visitor finds each read of a selection key outside test code: a
+  field read on a `duplicates` or `audit` field access, on a binding of a
+  `DuplicatesConfig` or `AuditConfig` type, or on an untyped `let` of such a
+  field access. It also finds a destructure that binds a key, and the same
+  token sequence inside a macro body.
+- `SELECTION_KEY_OWNERS` names each file that may read a key, with the fact it
+  owns. A reverse check fails when a named file no longer reads a key.
+- The visitor cannot see the return type of a method that is bound to an
+  untyped `let`.
 
 ## Audit cache maintenance
 

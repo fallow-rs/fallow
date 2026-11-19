@@ -83,10 +83,6 @@ function packageIdToFilename(packageName) {
   return `${packageName.replace(/^@/, "").replace(/[/\\]/g, "__")}.json`;
 }
 
-// Each cascade step is a small helper that returns a resolved sentinel
-// descriptor or null. Resolving in this shape keeps `resolveSentinelPath`
-// itself a flat for-loop so cyclomatic complexity stays low.
-
 function tryPlatformPkgDir(platformPkgDir, writableProbe) {
   if (typeof platformPkgDir !== "string" || platformPkgDir.length === 0) {
     return null;

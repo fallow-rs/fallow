@@ -3,10 +3,9 @@
 // sibling files in `static/` stay reachable from this entry point.
 //
 // Models the exact pattern from issue #105 (till's follow-up comment): a
-// `.ts` file, no JSX, bare `html` tag. A local stub stands in for
-// `hono/html` so the fixture has no external dependencies.
-const html = (strings: TemplateStringsArray, ...values: unknown[]): string =>
-  String.raw(strings, ...values);
+// `.ts` file, no JSX, bare `html` tag. The tag comes from `hono/html`; fallow
+// reads a tag that the module declares itself as plain text (issue #4730).
+import { html } from 'hono/html';
 
 export const Layout = ({ title, body }: { title: string; body: string }) => html`
   <!doctype html>

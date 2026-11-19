@@ -61,10 +61,9 @@ pub(super) fn render_audit_summary(env: &Value) -> String {
     .join("\n");
 
     let mut out = format!(
-        "## Fallow Audit\n\n> {} \u{b7} {} \u{b7} {}ms\n\n| Category | Findings | Introduced | Inherited |\n|:---------|---------:|-----------:|----------:|\n{rows}\n\n",
+        "## Fallow audit report\n\n> {}, {}\n\n| Category | Findings | Introduced | Inherited |\n|:---------|---------:|-----------:|----------:|\n{rows}\n\n",
         audit_verdict_label(verdict),
         plural_n(u(env, "changed_files_count") as usize, "changed file"),
-        num(env, "elapsed_ms"),
     );
     out.push_str(&audit_worsened_note(env, &attribution));
     if !dead_rows.is_empty() {

@@ -1548,6 +1548,9 @@ OUT_UNKNOWN_KIND_SUMMARY=$(jq '.unused_files = [] | .unused_exports = [] | .unus
 assert_contains "$OUT_UNKNOWN_KIND_SUMMARY" 'unknown kind' "summary unknown kind: prefix renders"
 assert_contains "$OUT_UNKNOWN_KIND_SUMMARY" 'complexity-typo' "summary unknown kind: verbatim token renders"
 
+OUT_MISSING_REASON_SUMMARY=$(jq '.stale_suppressions = [{"path": "src/utils.ts", "line": 3, "col": 0, "missing_reason": true, "origin": {"type": "comment", "issue_kind": "code-duplication", "is_file_level": false, "kind_known": true}}] | .total_issues = 1' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/summary-check.jq" 2>&1)
+assert_contains "$OUT_MISSING_REASON_SUMMARY" 'missing reason for `code-duplication`' "summary missing reason: row names the missing reason"
+
 echo "  summary-security.jq:"
 OUT=$(jq -n '{
   kind: "security",
@@ -1629,6 +1632,13 @@ OUT_KEPT_RE_EXPORT=$(printf '%s' "$FIX_DEP_WITHHELD" \
 assert_not_contains "$OUT_KEPT_RE_EXPORT" "No fixable issues found" "export held back by a kept re-export is not reported as clean"
 assert_contains "$OUT_KEPT_RE_EXPORT" "kept 1 unused export(s) that a kept re-export still names" "export held back by a kept re-export reaches the headline"
 assert_not_contains "$OUT_KEPT_RE_EXPORT" "Export removals | 1" "export held back by a kept re-export is not counted as removed"
+
+OUT_SHARED_DECLARATION=$(printf '%s' "$FIX_DEP_WITHHELD" \
+  | jq '.skipped_low_confidence_dependencies = 0 | .skipped_shared_declarations = 1 | .fixes = [{"type": "remove_export", "path": "src/store.ts", "line": 2, "name": "b", "applied": false, "skipped": true, "skip_reason": "shared_declaration_in_use"}]' \
+  | jq -r -f "$JQ_DIR/summary-fix.jq" 2>&1)
+assert_not_contains "$OUT_SHARED_DECLARATION" "No fixable issues found" "export held back by its shared declaration is not reported as clean"
+assert_contains "$OUT_SHARED_DECLARATION" "kept 1 unused export(s) whose \`export\` keyword also exports a name that is in use" "export held back by its shared declaration reaches the headline"
+assert_not_contains "$OUT_SHARED_DECLARATION" "Export removals | 1" "export held back by its shared declaration is not counted as removed"
 
 echo "  summary-dupes.jq:"
 OUT=$(jq -r -f "$JQ_DIR/summary-dupes.jq" "$FIXTURES/dupes.json" 2>&1)
@@ -1934,7 +1944,6 @@ assert_contains "$OUT_SINGULAR" "**1** clone group " "status-bar: singular clone
 assert_not_contains "$OUT_SINGULAR" "**1** clone groups" "status-bar: no '1 clone groups' grammar"
 assert_not_contains "$OUT_SINGULAR" "**1** health findings" "status-bar: no '1 health findings' grammar"
 
-# Complexity <details> summary pluralizes when functions_above_threshold == 1
 assert_contains "$OUT_SINGULAR" "(1 function above threshold)" "complexity dropdown: singular function"
 assert_not_contains "$OUT_SINGULAR" "(1 functions above threshold)" "complexity dropdown: no '1 functions' grammar"
 
@@ -1945,8 +1954,6 @@ assert_contains "$OUT_RSC" "| [Invalid client exports](" "combined: RSC invalid-
 assert_contains "$OUT_RSC" "| [Mixed client/server barrels](" "combined: RSC mixed-barrel row in breakdown"
 assert_contains "$OUT_RSC" "| [Misplaced directives](" "combined: RSC misplaced-directives row in breakdown"
 
-# Next.js routing keys (route_collisions + dynamic_segment_name_conflicts) were previously
-# absent from the combined-mode Code issues breakdown; assert they now render.
 OUT_ROUTING=$(jq '.check.route_collisions = [{"path": "src/app/(a)/p/page.tsx", "url": "/p", "conflicting_paths": ["src/app/(b)/p/page.tsx"], "actions": []}] | .check.dynamic_segment_name_conflicts = [{"path": "src/app/[id]/page.tsx", "position": "0", "conflicting_segments": ["id", "slug"], "actions": []}] | .check.total_issues = (.check.total_issues + 2)' "$FIXTURES/combined.json" | jq -r -f "$JQ_DIR/summary-combined.jq" 2>&1)
 assert_contains "$OUT_ROUTING" "| [Route collisions](" "combined: route-collisions row in breakdown"
 assert_contains "$OUT_ROUTING" "| [Dynamic segment conflicts](" "combined: dynamic-segment-conflicts row in breakdown"
@@ -2029,10 +2036,8 @@ echo "  summary-combined.jq (no scoped row when unfiltered):"
 assert_not_contains "$OUT" "changed files" "unfiltered: no scoped maintainability row"
 
 echo "  summary-combined.jq (conditional tips):"
-# Fixture has unused_exports and unused_dependencies → fix tip + @public tip
 assert_contains "$OUT" "fallow fix --dry-run" "tip: shows fix tip when fixable issues present"
 assert_contains "$OUT" "@public" "tip: shows @public tip when unused exports present"
-# Remove fixable categories → no tip block
 OUT_NO_FIX=$(jq '.check.unused_exports = [] | .check.unused_dependencies = [] | .check.unused_enum_members = [] | .check.circular_dependencies = [{"files":["a.ts","b.ts"],"length":2}] | .check.total_issues = 1' "$FIXTURES/combined.json" | jq -r -f "$JQ_DIR/summary-combined.jq" 2>&1)
 assert_not_contains "$OUT_NO_FIX" "fallow fix" "tip: no fix tip when no fixable issues"
 assert_not_contains "$OUT_NO_FIX" "@public" "tip: no @public tip when no unused exports"
@@ -2127,6 +2132,18 @@ assert_contains "$OUT_UNKNOWN_KIND" "Unknown suppression kind" "unknown kind: ty
 assert_contains "$OUT_UNKNOWN_KIND" "complexity-typo" "unknown kind: verbatim token in message"
 assert_contains "$OUT_UNKNOWN_KIND" "fallow-ignore-next-line" "unknown kind: directive type preserved"
 assert_contains "$OUT_UNKNOWN_KIND" "Fix the typo" "unknown kind: actionable next step"
+
+OUT_MISSING_REASON=$(jq '.unused_files = [] | .unused_exports = [] | .unused_types = [] | .unused_dependencies = [] | .unused_dev_dependencies = [] | .unused_optional_dependencies = [] | .unused_enum_members = [] | .unused_class_members = [] | .unresolved_imports = [] | .unlisted_dependencies = [] | .duplicate_exports = [] | .circular_dependencies = [] | .boundary_violations = [] | .type_only_dependencies = [] | .test_only_dependencies = [] | .unused_catalog_entries = [] | .empty_catalog_groups = [] | .unresolved_catalog_references = [] | .unused_dependency_overrides = [] | .misconfigured_dependency_overrides = [] | .private_type_leaks = [] | .stale_suppressions = [{"path": "src/utils.ts", "line": 3, "col": 0, "missing_reason": true, "origin": {"type": "comment", "issue_kind": "code-duplication", "is_file_level": false, "kind_known": true}}] | .total_issues = 1' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/annotations-check.jq" 2>&1)
+assert_contains "$OUT_MISSING_REASON" "title=Suppression without a reason" "missing reason: own title"
+assert_contains "$OUT_MISSING_REASON" "after \`--\`" "missing reason: says where the reason goes"
+assert_not_contains "$OUT_MISSING_REASON" "Remove the suppression comment" "missing reason: does not tell the user to remove the comment"
+
+# A missing reason on a fallow-ignore-start range names the range marker,
+# not the next-line marker.
+OUT_RANGE_REASON=$(jq '.unused_files = [] | .unused_exports = [] | .unused_types = [] | .unused_dependencies = [] | .unused_dev_dependencies = [] | .unused_optional_dependencies = [] | .unused_enum_members = [] | .unused_class_members = [] | .unresolved_imports = [] | .unlisted_dependencies = [] | .duplicate_exports = [] | .circular_dependencies = [] | .boundary_violations = [] | .type_only_dependencies = [] | .test_only_dependencies = [] | .unused_catalog_entries = [] | .empty_catalog_groups = [] | .unresolved_catalog_references = [] | .unused_dependency_overrides = [] | .misconfigured_dependency_overrides = [] | .private_type_leaks = [] | .stale_suppressions = [{"path": "src/utils.ts", "line": 3, "col": 0, "origin": {"type": "comment", "issue_kind": "code-duplication", "is_file_level": false, "is_range": true}, "missing_reason": true}] | .total_issues = 1' "$FIXTURES/check.json" | jq -r -f "$JQ_DIR/annotations-check.jq" 2>&1)
+assert_contains "$OUT_RANGE_REASON" "title=Suppression without a reason" "range marker: missing-reason title"
+assert_contains "$OUT_RANGE_REASON" "fallow-ignore-start" "range marker: directive is fallow-ignore-start"
+assert_not_contains "$OUT_RANGE_REASON" "fallow-ignore-next-line" "range marker: no next-line directive"
 
 echo "  annotations-dupes.jq:"
 OUT=$(jq -r -f "$JQ_DIR/annotations-dupes.jq" "$FIXTURES/dupes.json" 2>&1)
@@ -2403,7 +2420,7 @@ case "$format" in
     fi
     printf '<!-- fallow-id: fallow-results -->\n### Fallow smoke\n\nGenerated by fallow.\n'
     if [ "${MOCK_BASELINE_ADVISORY:-}" = "1" ]; then
-      printf '\n> **Baseline matched nothing.** All 8 saved entries went unmatched. Paths may have changed, or the baseline was saved elsewhere. Re-save it from a whole-project run. Gate outcomes: failed stale-baseline.\n'
+      printf '\n> **Baseline matched nothing.** All 8 saved entries went unmatched. Paths may have changed, or the baseline was saved elsewhere. Re-save it from a whole-project run. Gates: failed stale-baseline.\n'
     fi
     ;;
   review-github)
@@ -2606,13 +2623,38 @@ ACTION_BASELINE_BODY=$(cat "$ACTION_TYPED_WORK/fallow-pr-comment.md")
 ACTION_BASELINE_DECISION=$(cat "$ACTION_TYPED_WORK/fallow-pr-decision.json")
 assert_contains "$ACTION_BASELINE_BODY" "**Baseline matched nothing.**" \
   "the posted PR comment body carries the baseline advisory"
-assert_contains "$ACTION_BASELINE_BODY" "Gate outcomes: failed stale-baseline." \
+assert_contains "$ACTION_BASELINE_BODY" "Gates: failed stale-baseline." \
   "the posted PR comment body keeps the gate inventory beside the advisory"
 assert_contains "$ACTION_BASELINE_DECISION" '"id":"stale-baseline"' \
   "the decision sidecar carries the stale-baseline gate row"
 assert_contains "$(cat "$ACTION_BASELINE_LOG")" \
   "ci post-check-run --provider github --decision fallow-pr-decision.json" \
   "the sidecar carrying the gate row is the one posted as the Check Run"
+
+# The inline annotations step marks each finding on the diff, so the check
+# run that the same job posts leaves out its copy of the annotations.
+ACTION_DEDUPE_LOG="$ACTION_TYPED_WORK/dedupe-comment.log"
+: > "$ACTION_DEDUPE_LOG"
+(
+  cd "$ACTION_TYPED_WORK"
+  PATH="$ACTION_TYPED_BIN:$PATH" \
+    MOCK_LOG="$ACTION_DEDUPE_LOG" \
+    MOCK_BASELINE_ADVISORY="1" \
+    FALLOW_WORKFLOW_ANNOTATIONS="true" \
+    GH_TOKEN="test" \
+    PR_NUMBER="123" \
+    GH_REPO="owner/repo" \
+    PR_HEAD_SHA="head456" \
+    FALLOW_COMMAND="check" \
+    bash "$SCRIPTS_DIR/comment.sh" > /dev/null
+)
+assert_contains "$(cat "$ACTION_DEDUPE_LOG")" \
+  "ci post-check-run --provider github --decision fallow-check-run-decision.json" \
+  "with workflow annotations on, the check run posts the decision without annotations"
+assert_contains "$(jq -c '.annotations' "$ACTION_TYPED_WORK/fallow-check-run-decision.json")" "[]" \
+  "the posted check-run decision has no annotations"
+assert_contains "$(jq -c '.gates' "$ACTION_TYPED_WORK/fallow-check-run-decision.json")" '"id":"stale-baseline"' \
+  "the posted check-run decision keeps the gate rows"
 
 : > "$ACTION_TYPED_LOG"
 (
@@ -3002,7 +3044,6 @@ echo "  comment.sh filtering with pre-computed file:"
 # Create a pre-computed changed files list (what analyze.sh produces)
 echo '["src/helpers/api.ts"]' > "$WORK_DIR/fallow-changed-files.json"
 
-# Run the filtering logic from comment.sh in the work dir
 OUT=$(cd "$WORK_DIR" && \
   CHANGED_SINCE="abc123" \
   INPUT_ROOT="." \
@@ -3122,7 +3163,9 @@ if [ "$cmd_status" -eq 0 ] && [ -f "$CUSTOM_ARTIFACTS/fallow-results-scoped.json
 else
   fail "summary.sh: custom artifacts path writes scoped results beside source" "exit $cmd_status, output: $OUT"
 fi
-assert_contains "$(cat "$SUMMARY_FILE")" "Issue counts scoped" "summary.sh: custom artifacts path still appends scoping note"
+assert_contains "$(cat "$SUMMARY_FILE")" "Issue counts cover the files changed since" "summary.sh: custom artifacts path still appends scoping note"
+assert_not_contains "$(cat "$SUMMARY_FILE")" "Health metrics" \
+  "summary.sh: a dead-code scoping note names no health metrics"
 
 TYPED_SUMMARY_FILE="$WORK_DIR/typed-summary.md"
 printf '{"body":"# Fallow typed summary\\n\\nGenerated by fallow."}\n' > "$CUSTOM_ARTIFACTS/fallow-pr-comment-envelope.json"
@@ -3174,6 +3217,21 @@ OUT=$(cd "$WORK_DIR" && \
   bash "$SCRIPTS_DIR/summary.sh" 2>&1)
 assert_contains "$(cat "$GATES_SUMMARY_FILE")" "> **Gates:** failed error-severity-findings." \
   "summary.sh: the Gates line lists an unenforced default rule with status fail"
+
+# A native render that fails leaves no gate line of its own, so the action
+# writes the line of the step outputs.
+NATIVE_GATES_SUMMARY_FILE="$WORK_DIR/native-gates-summary.md"
+: > "$NATIVE_GATES_SUMMARY_FILE"
+(cd "$WORK_DIR" && \
+  GITHUB_STEP_SUMMARY="$NATIVE_GATES_SUMMARY_FILE" \
+  FALLOW_COMMAND="dead-code" \
+  ACTION_JQ_DIR="$JQ_DIR" \
+  HAS_NATIVE_REPORT="true" \
+  FALLOW_GATES_FAILED="error-severity-findings,health-findings" \
+  FALLOW_RESULTS_FILE="missing-results.json" \
+  bash "$SCRIPTS_DIR/summary.sh" > /dev/null 2>&1)
+assert_contains "$(cat "$NATIVE_GATES_SUMMARY_FILE")" "> **Gates:** failed error-severity-findings, health-findings." \
+  "summary.sh: a failed native render keeps the gate line of the step outputs"
 
 printf '{"annotations":[{"path":"src/a.ts","line":0,"level":"failure","title":"fallow/high-crap-score","message":"Needs work","raw_details":null},{"path":"src/b.ts","line":12,"level":"notice","title":"fallow/info","message":"FYI","raw_details":null}]}\n' > "$CUSTOM_ARTIFACTS/fallow-pr-decision.json"
 OUT=$(cd "$WORK_DIR" && \
@@ -3277,7 +3335,20 @@ else
     GITHUB_STEP_SUMMARY="$FASTPATH_SUMMARY" \
     FALLOW_RESULTS_FILE="$FASTPATH_ENVELOPE" \
     bash "$FASTPATH_SCRIPTS/summary.sh" > /dev/null 2>&1
-  assert_contains "$(cat "$FASTPATH_SUMMARY")" "# Fallow Analysis" "summary.sh native fastpath writes the native heading"
+  assert_contains "$(cat "$FASTPATH_SUMMARY")" "## Fallow codebase report" "summary.sh native fastpath writes the native heading"
+
+  # The native body states the gates, so the action writes no second line.
+  FASTPATH_GATES_SUMMARY="$FASTPATH_WORK/summary-gates.md"
+  HAS_NATIVE_REPORT=true \
+    FALLOW_BIN="$FASTPATH_BIN" \
+    FALLOW_COMMAND="dead-code" \
+    ACTION_JQ_DIR="$JQ_DIR" \
+    FALLOW_GATES_FAILED="error-severity-findings" \
+    GITHUB_STEP_SUMMARY="$FASTPATH_GATES_SUMMARY" \
+    FALLOW_RESULTS_FILE="$FASTPATH_ENVELOPE" \
+    bash "$FASTPATH_SCRIPTS/summary.sh" > /dev/null 2>&1
+  assert_not_contains "$(cat "$FASTPATH_GATES_SUMMARY")" "> **Gates:**" \
+    "summary.sh native fastpath leaves the gate line to the native body"
 
   # (c2) the architecture envelope has its own kind, and the native report
   # renders it. The fastpath output equals `report --from` and is not empty.
@@ -3317,7 +3388,7 @@ else
   # baseline, and the accepted functions are context.
   for baselined_case in \
     'health|health-baselined.json|No new functions exceed complexity thresholds (76 in the baseline)' \
-    '|combined-health-baselined.json|No new complex functions (3 in the baseline)' \
+    '|combined-health-baselined.json|no new complex functions (3 in the baseline)' \
     ; do
     IFS='|' read -r baselined_command baselined_fixture baselined_expected <<< "$baselined_case"
     FASTPATH_BASELINED_SUMMARY="$FASTPATH_WORK/baselined-${baselined_fixture%.json}.md"
@@ -5148,7 +5219,7 @@ assert_contains "$GATE_STDOUT" "cannot be combined with the min-score" "gate: re
 # print. Keying it on `fail-on-issues` alone left both silent about the count.
 run_gate_analyze "$(gate_envelope '{"health-min-score":{"status":"pass","enforced":true},"health-findings":{"status":"skipped","enforced":false}}' '"summary":{"functions_above_threshold":3}')" \
   INPUT_COMMAND="health" INPUT_FAIL_ON_ISSUES="true" INPUT_MIN_SCORE="1"
-assert_contains "$GATE_STDOUT" "::warning::Fallow found 3 high complexity functions" \
+assert_contains "$GATE_STDOUT" "::warning::Fallow found 3 complex functions" \
   "count: a health run whose count gate stood down still reports the count"
 if [ "$GATE_EXIT" = "0" ]; then
   pass "count: that run still passes"
@@ -5222,7 +5293,7 @@ for severity_command in dead-code check architecture; do
 done
 run_gate_analyze "$(gate_envelope "$SEVERITY_ONE_ERROR" | jq -c '.total_issues = 3 | .summary.total_issues = 3')" \
   INPUT_COMMAND="dead-code" INPUT_FAIL_ON_ISSUES="true"
-assert_contains "$GATE_STDOUT" "::error::Fallow found 1 unused code issues at error severity (3 in total)." \
+assert_contains "$GATE_STDOUT" "::error::Fallow found 1 unused code issue at error severity (3 in total)." \
   "severity count: the failure counts only the findings at error severity"
 if [ "$GATE_EXIT" = "1" ]; then
   pass "severity count: an error finding fails the job"

@@ -419,7 +419,8 @@ invariants in this file.
       own, so a later merge cannot cancel its runs. When the release commit
       has another message, its runs can be cancelled. Re-run a cancelled run
       with `gh run rerun <id>`, or prepare the release again with the correct
-      commit message.
+      commit message. A re-run of an ordinary `CI` push run joins the shared
+      push group, so it replaces a newer `CI` run that waits in the queue.
     - A timeout: the runner queue was too long. Wait until the runs finish,
       then dispatch the release again. The runs of the release commit keep
       their state.

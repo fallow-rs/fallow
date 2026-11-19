@@ -185,13 +185,13 @@ fn combined_summary_counts_health_after_the_baseline() {
     };
     let out = render_combined_summary(&combined(health_with_baseline(76, 0)), &no_links());
     assert!(
-        out.contains(":white_check_mark: No new complex functions (76 in the baseline)"),
+        out.contains("no new complex functions (76 in the baseline)."),
         "{out}"
     );
     assert!(!out.contains("above threshold"), "{out}");
 
     let out = render_combined_summary(&combined(health_with_baseline(76, 2)), &no_links());
-    assert!(out.contains(":warning: **2** health findings"), "{out}");
+    assert!(out.contains("2 health findings."), "{out}");
     assert!(
         out.contains("(2 new functions above threshold, 74 in the baseline)"),
         "{out}"
@@ -212,7 +212,7 @@ fn combined_summary_without_a_baseline_keeps_the_summary_count() {
         "health": health
     });
     let out = render_combined_summary(&env, &no_links());
-    assert!(out.contains(":warning: **3** health findings"), "{out}");
+    assert!(out.contains("3 health findings."), "{out}");
     assert!(out.contains("(3 functions above threshold)"), "{out}");
     assert!(!out.contains("baseline"), "{out}");
 }
@@ -453,4 +453,34 @@ fn health_summary_footer_withholds_totals_for_a_partial_capture() {
     );
     assert!(!out.contains("tracked functions"), "{out}");
     assert!(!out.contains("unhit"), "{out}");
+}
+
+/// The summary verdict is the verdict of the sticky comment: an unenforced
+/// gate of another kind leaves it at "Review needed", and a failed findings
+/// gate means an error finding.
+#[test]
+fn combined_summary_verdict_follows_the_comment() {
+    let env = |gates: serde_json::Value| {
+        serde_json::json!({
+            "check": { "total_issues": 0 },
+            "dupes": { "clone_groups": [], "stats": {} },
+            "health": health_with_baseline(3, 3),
+            "gate_outcomes": gates
+        })
+    };
+    let stale = render_combined_summary(
+        &env(serde_json::json!({ "stale-baseline": { "status": "fail", "enforced": false } })),
+        &no_links(),
+    );
+    assert!(stale.contains("**Review needed**"), "{stale}");
+    let findings = render_combined_summary(
+        &env(serde_json::json!({ "health-findings": { "status": "fail", "enforced": false } })),
+        &no_links(),
+    );
+    assert!(findings.contains("**Quality gate failed**"), "{findings}");
+    let enforced = render_combined_summary(
+        &env(serde_json::json!({ "stale-baseline": { "status": "fail", "enforced": true } })),
+        &no_links(),
+    );
+    assert!(enforced.contains("**Quality gate failed**"), "{enforced}");
 }

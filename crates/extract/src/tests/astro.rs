@@ -92,9 +92,6 @@ import { tmplOnly } from '../lib/util.ts';
 
 #[test]
 fn astro_frontmatter_import_used_nowhere_is_unused() {
-    // `Dead` is imported but referenced in neither the frontmatter script nor the
-    // markup, so it is a genuinely-unused binding (the precision the semantic pass
-    // restores; previously Astro left every import referenced).
     let info = parse_source_to_module(
         FileId(0),
         Path::new("Page.astro"),

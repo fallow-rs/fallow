@@ -1413,15 +1413,9 @@ fn collect_prop_drilling_findings(
 
 /// Build the raw (as-discovered) module-path -> `FileId` index.
 ///
-/// Public-API entry-point resolution previously also canonicalized every module
-/// here (one `realpath` syscall per module, ~21k on a large monorepo) so the map
-/// could match an entry point expressed in a module's canonical form. That eager
-/// sweep is almost entirely wasted: the consumer
-/// ([`add_package_public_api_entry_points`]) already canonicalizes the ENTRY and
-/// matches it against raw module paths, which covers every project without
-/// intra-project symlinks. The residual symlinked-module case is handled lazily
-/// and package-scoped by `ModuleGraph::package_entry_resolver`, so the common
-/// path pays zero canonicalize syscalls.
+/// The package entry resolver checks this index for both forms of an entry path.
+/// After a miss, it can build a canonical index for the package to find symlinked modules.
+/// This avoids filesystem probes for every module when the raw index is sufficient.
 fn graph_file_ids_by_path(graph: &ModuleGraph) -> FxHashMap<&std::path::Path, FileId> {
     graph
         .modules

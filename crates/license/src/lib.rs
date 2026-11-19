@@ -545,11 +545,7 @@ fn skew_tolerance_seconds_from(getenv: impl Fn(&str) -> Option<String>) -> i64 {
     let Some(raw) = getenv(SKEW_TOLERANCE_ENV) else {
         return DEFAULT_SKEW_TOLERANCE_SECONDS;
     };
-    let trimmed = raw.trim();
-    if trimmed.is_empty() {
-        return DEFAULT_SKEW_TOLERANCE_SECONDS;
-    }
-    match trimmed.parse::<u64>() {
+    match raw.trim().parse::<u64>() {
         Ok(value) => i64::try_from(value).unwrap_or(i64::MAX),
         Err(_) => DEFAULT_SKEW_TOLERANCE_SECONDS,
     }

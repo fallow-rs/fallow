@@ -437,7 +437,7 @@ fn write_type_aware_trace_project(root: &Path) {
 
 /// The built `fallow-mcp` binary as a child process, spoken to over the stdio
 /// transport's newline-delimited JSON-RPC.
-struct McpServer {
+pub struct McpServer {
     child: Child,
     stdin: ChildStdin,
     lines: Receiver<String>,
@@ -479,7 +479,7 @@ impl McpServer {
     }
 
     /// Start the server with the default options and extra environment.
-    fn start_with_env(extra_env: &[(&str, &str)]) -> Self {
+    pub fn start_with_env(extra_env: &[(&str, &str)]) -> Self {
         let mut command = Self::command(false, None, false, None, None, None);
         for (name, value) in extra_env {
             command.env(name, value);
@@ -660,7 +660,7 @@ impl McpServer {
 
     /// Call `name` with `arguments` and return the raw `result` object, error
     /// or not.
-    fn call_raw(&mut self, name: &str, arguments: &serde_json::Value) -> serde_json::Value {
+    pub fn call_raw(&mut self, name: &str, arguments: &serde_json::Value) -> serde_json::Value {
         let request = serde_json::json!({
             "jsonrpc": "2.0",
             "id": 2,

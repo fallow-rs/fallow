@@ -4552,10 +4552,8 @@ fn run_gated_audit_with(
     run_fallow_raw_with_env(&args, env)
 }
 
-/// #2359: `health.coverage` / `health.coverageRoot` from config must feed the
-/// audit health sub-pass exactly like `--coverage` / `--coverage-root`. Audit
-/// previously never consulted the config keys and scored CRAP from the
-/// reachability estimate while `fallow health` scored from real coverage.
+/// #2359: `health.coverage` and `health.coverageRoot` must supply the same CRAP
+/// values and attribution as `--coverage` and `--coverage-root`.
 #[test]
 fn audit_config_coverage_fallback_matches_cli_coverage_attribution() {
     let dir = create_audit_fixture("coverage-config");
@@ -4656,10 +4654,8 @@ fn audit_cli_coverage_flags_override_config_coverage() {
     assert_eq!(parse_json(&cli_root)["verdict"].as_str(), Some("pass"));
 }
 
-/// #2359 precedence: `FALLOW_COVERAGE` / `FALLOW_COVERAGE_ROOT` win over the
-/// config keys, the same order `fallow health` uses. Audit previously read
-/// only `FALLOW_COVERAGE`, so the root half also pins that the env root is
-/// honored at all.
+/// #2359: `FALLOW_COVERAGE` and `FALLOW_COVERAGE_ROOT` each override their
+/// config key, in the same order as `fallow health`.
 #[test]
 fn audit_env_coverage_overrides_config_coverage() {
     let dir = create_audit_fixture("coverage-config-env-precedence");
@@ -5324,7 +5320,6 @@ fn audit_json_only_change_is_behavioral() {
         String::from_utf8_lossy(&output.stdout).trim().to_string()
     };
 
-    // Remove the unused dependency from package.json: a plausible behavioral change.
     fs::write(
         root.join("package.json"),
         r#"{"name": "audit-test", "main": "src/index.ts", "dependencies": {}}"#,
@@ -6901,11 +6896,9 @@ fn w2_walkthrough_cleared_panel_collapses_then_expands() {
 #[test]
 fn w2_walkthrough_viewed_state_round_trips() {
     let tmp = create_boundary_walkthrough_fixture();
-    // First render to learn the current snapshot hash.
     let guide = run_walkthrough_guide(tmp.path());
     let hash = guide["graph_snapshot_hash"].as_str().unwrap().to_string();
 
-    // Write a viewed-state ledger keyed on the changed file.
     let state_dir = tmp.path().join(".fallow");
     fs::create_dir_all(&state_dir).unwrap();
     let state = serde_json::json!({

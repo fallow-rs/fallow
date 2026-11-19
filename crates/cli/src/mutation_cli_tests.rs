@@ -461,6 +461,7 @@ fn report(mutants: Vec<MutantResult>, reasons: Vec<MutationIncompleteReason>) ->
         baseline_failures: Vec::new(),
         skipped_files: Vec::new(),
         unmatched_paths: Vec::new(),
+        unmatched_path_reasons: Vec::new(),
         unloaded_paths: Vec::new(),
         worktree: MutationWorktreeCheck {
             checked: true,
@@ -998,6 +999,7 @@ fn empty_plan() -> MutationPlanOutput {
         framework_config_checked: true,
         skipped_files: Vec::new(),
         unmatched_paths: Vec::new(),
+        unmatched_path_reasons: Vec::new(),
         runner: fallow_output::MutationPlanRunner {
             name: "vitest".to_owned(),
             package: "vitest".to_owned(),
@@ -1008,6 +1010,47 @@ fn empty_plan() -> MutationPlanOutput {
             help: None,
         },
     }
+}
+
+fn ignored_path() -> Vec<fallow_output::MutationUnmatchedPath> {
+    vec![fallow_output::MutationUnmatchedPath {
+        path: "pkg".to_owned(),
+        reason: "ignored".to_owned(),
+    }]
+}
+
+#[test]
+fn an_ignored_path_is_the_status_of_an_empty_plan_not_missing_tests() {
+    let plan = MutationPlanOutput {
+        scope: MutationScopeOutput {
+            kind: MutationScopeKind::Paths,
+            base_ref: None,
+        },
+        no_test_files: true,
+        unmatched_paths: vec!["/project/pkg".to_owned()],
+        unmatched_path_reasons: ignored_path(),
+        ..empty_plan()
+    };
+    let text = plain(&render_plan(&plan));
+    assert!(
+        text.contains("Unmatched path: pkg (ignorePatterns or a built-in ignore excludes it)\n"),
+        "{text}"
+    );
+    assert!(!text.contains("No tests"), "{text}");
+}
+
+#[test]
+fn an_ignored_path_is_the_status_of_an_empty_run_not_missing_tests() {
+    let mut empty = report(Vec::new(), Vec::new());
+    empty.no_test_files = true;
+    empty.unmatched_paths = vec!["/project/pkg".to_owned()];
+    empty.unmatched_path_reasons = ignored_path();
+    let text = run_text(&empty, &OPTIONS);
+    assert!(
+        text.contains("Unmatched path: pkg (ignorePatterns or a built-in ignore excludes it)\n"),
+        "{text}"
+    );
+    assert!(!text.contains("No tests"), "{text}");
 }
 
 #[test]
@@ -2159,6 +2202,17 @@ fn the_runner_config_flag_resolves_inside_the_root() {
         "{}",
         error.message
     );
+}
+
+#[test]
+fn the_runner_project_flags_reach_the_run_options() {
+    let project = tempfile::tempdir().expect("dir");
+    let args = MutationArgs {
+        runner_projects: vec!["unit".to_owned(), "api".to_owned()],
+        ..MutationArgs::default()
+    };
+    let options = run_options(&input(project.path(), args, MutationConfig::default())).unwrap();
+    assert_eq!(options.runner_projects, ["unit", "api"]);
 }
 
 fn kill_matrix_fixture() -> fallow_output::MutationKillMatrix {

@@ -332,16 +332,8 @@ fn partition_minified_generated_js(
         .partition(|(path, size)| !is_probably_minified_generated_js(path, *size))
 }
 
-/// Build the typed diagnostics for the over-limit files this walk dropped and
-/// emit one aggregated `tracing::warn!` so a human running `fallow` sees what
-/// was dropped. Mirrors the JSON-plus-gated-warn pattern used for undeclared
-/// workspaces. The caller writes the returned list to the registry.
-/// Report an uninstalled dependency tree as part of the walk's own
-/// source-discovery set.
-///
-/// It belongs here rather than beside the two pipelines that used to warn
-/// about it: the walk owns this root's source-discovery diagnostics, and any
-/// second writer would be replaced by whichever walk finished last.
+/// Include the missing dependency tree in the walk's source-discovery diagnostics.
+/// The walk replaces the root's full set, so a separate write can be lost.
 fn report_missing_node_modules(config: &ResolvedConfig) -> Vec<WorkspaceDiagnostic> {
     let Some(diagnostic) = fallow_config::missing_node_modules_diagnostic(&config.root) else {
         return Vec::new();
@@ -354,6 +346,7 @@ fn report_missing_node_modules(config: &ResolvedConfig) -> Vec<WorkspaceDiagnost
     vec![diagnostic]
 }
 
+/// Return diagnostics for skipped large files and emit at most one warning for the batch.
 fn report_skipped_large_files(
     config: &ResolvedConfig,
     skipped: &[SizedFile],

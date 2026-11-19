@@ -91,6 +91,10 @@ export const validateInit = (init) => {
   );
   expectRequest(isOptional(options.env, isStringMap), "options.env must map names to strings");
   expectRequest(
+    isOptional(options.projects, isStringList),
+    "options.projects must be a list of project names",
+  );
+  expectRequest(
     isOptional(options.node_args, isStringList),
     "options.node_args must be a list of strings",
   );

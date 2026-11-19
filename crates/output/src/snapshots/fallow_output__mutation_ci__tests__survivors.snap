@@ -6,15 +6,18 @@ expression: both_headings(&view)
 
 **6 mutants survived.** Score 62.5%.
 
-| Killed | Survived | No coverage | Not measured | Score |
-| --- | --- | --- | --- | --- |
-| 10 | 6 | 0 | 0 | 62.5% |
+<details>
+<summary>Counts and details</summary>
 
-Scope: the changed lines.
+| Killed | Survived | No coverage | Score |
+| --: | --: | --: | --: |
+| 10 | 6 | 0 | 62.5% |
 
-Each survived mutant is a small code change that made no test fail. The **Tests** findings above show the survived mutants on the changed lines. Add a test that fails on the change.
+A survived mutant is a code change that no test detects. The **Tests** section above lists the survived mutants on the changed lines. Add a test that fails on the change.
 
-To inspect a mutant, run `fallow mutation inspect <mutant-id> --report fallow-mutation.json` with the `fallow-mutation.json` file of this job.
+To inspect a mutant, run `fallow mutation inspect <mutant-id> --report fallow-mutation.json` with the report that this job writes.
+
+</details>
 
 ===== summary heading =====
 
@@ -22,14 +25,12 @@ To inspect a mutant, run `fallow mutation inspect <mutant-id> --report fallow-mu
 
 **6 mutants survived.** Score 62.5%.
 
-| Killed | Survived | No coverage | Not measured | Score |
-| --- | --- | --- | --- | --- |
-| 10 | 6 | 0 | 0 | 62.5% |
-
-Scope: the changed lines.
+| Killed | Survived | No coverage | Score |
+| --: | --: | --: | --: |
+| 10 | 6 | 0 | 62.5% |
 
 The run took 4m 12s. 3 results came from the cache.
 
-Each survived mutant is a small code change that made no test fail. Add a test that fails on the change.
+A survived mutant is a code change that no test detects. Add a test that fails on the change.
 
-To inspect a mutant, run `fallow mutation inspect <mutant-id> --report fallow-mutation.json` with the `fallow-mutation.json` file of this job.
+To inspect a mutant, run `fallow mutation inspect <mutant-id> --report fallow-mutation.json` with the report that this job writes.

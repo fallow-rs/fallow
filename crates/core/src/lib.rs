@@ -368,10 +368,8 @@ struct AnalysisSetup {
     progress: progress::AnalysisProgress,
     project: project::ProjectState,
     root_pkg: Option<PackageJson>,
-    /// Non-source config-candidate files captured by the same discovery walk,
-    /// used to resolve plugin config patterns in-memory (empty in production
-    /// mode, where the filesystem path is kept). Carried alongside `project`
-    /// rather than inside it to avoid churning `ProjectState`'s many callers.
+    /// The source walk collects these non-source files for plugin config lookup.
+    /// Production mode uses filesystem lookup and leaves this list empty.
     config_candidates: Vec<std::path::PathBuf>,
     discover_ms: f64,
     workspaces_ms: f64,
@@ -1970,16 +1968,6 @@ struct ScriptDependencyContext<'a> {
     registry: &'a plugins::PluginRegistry,
 }
 
-/// The directory of a workspace package relative to the project root, with
-/// `/` separators.
-fn workspace_dir(root: &std::path::Path, ws: &fallow_config::WorkspaceInfo) -> String {
-    ws.root
-        .strip_prefix(root)
-        .unwrap_or(&ws.root)
-        .to_string_lossy()
-        .replace('\\', "/")
-}
-
 /// Gather the scripts declared by the root and workspace packages.
 fn collect_all_scripts(
     root_pkg: Option<&PackageJson>,
@@ -2115,7 +2103,7 @@ fn analyze_one_workspace_scripts(
     let mut used_packages = Vec::new();
     let mut discovered_always_used: Vec<(String, String)> = Vec::new();
     let mut entry_patterns: Vec<(plugins::PathRule, String)> = Vec::new();
-    let ws_prefix = workspace_dir(&config.root, ws);
+    let ws_prefix = workspace_prefix(&config.root, &ws.root);
     let ws_scripts = ws_pkg.scripts.clone().unwrap_or_default();
     let mut scripts_to_analyze = if config.production {
         scripts::filter_production_scripts(&ws_scripts)
@@ -2590,13 +2578,14 @@ fn merge_workspace_plugin_results(
 
 /// The project-relative prefix of a workspace root, empty for the project root
 /// itself. A root outside the project tree keeps its own path, which is also the
-/// prefix its patterns carry.
+/// prefix its patterns carry. It uses `/` separators, because plugin patterns
+/// and scopes built from it match `/`-separated project-relative paths.
 fn workspace_prefix(root: &Path, workspace_root: &Path) -> String {
     workspace_root
         .strip_prefix(root)
         .unwrap_or(workspace_root)
         .to_string_lossy()
-        .into_owned()
+        .replace('\\', "/")
 }
 
 /// Make the auto-imports of a Nuxt app and of each layer it extends visible to
@@ -2712,8 +2701,8 @@ fn layer_links(
 ///
 /// Each root is classified on its own: the project root plus every workspace
 /// root, and a pattern is judged by the config of the root whose prefix it
-/// carries. One custom `nuxt.config` in a monorepo therefore no longer keeps
-/// every other app's patterns. See issue #2737.
+/// carries. One custom `nuxt.config` in a monorepo does not keep the patterns
+/// of every other app. See issue #2737.
 ///
 /// A surface that KEPT its patterns records one advisory per root and surface,
 /// because the user enabled `autoImports` and did not get the findings it
@@ -3892,5 +3881,11 @@ mod tests {
             .map(|export| export.name.to_string())
             .collect();
         assert_eq!(exports, vec!["bravo".to_string()]);
+    }
+
+    #[test]
+    fn workspace_prefix_uses_forward_slashes() {
+        let prefix = super::workspace_prefix(Path::new("/r"), Path::new("/r/packages\\web"));
+        assert_eq!(prefix, "packages/web");
     }
 }

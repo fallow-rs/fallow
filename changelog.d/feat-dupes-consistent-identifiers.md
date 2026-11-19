@@ -1,7 +1,0 @@
-### Added
-
-- **`duplicates.normalization.consistentIdentifiers` finds renamed copies without false matches.** Use it together with `ignoreIdentifiers`. A clone then needs a one-to-one mapping between the names of its instances: `a = b + c` matches `x = y + z`, but not `x = x + x`. When a token breaks the mapping, fallow keeps each longest part of the clone that maps one-to-one and has `minTokens` or more tokens. An instance that breaks the mapping does not shorten the clone of the other instances. The option is off by default, and no `mode` turns it on. `fallow migrate` now maps the `ignoreIdentifiers` and `ignoreLiterals` options of an imported duplication config, and keeps string values compared when an imported `weak` mode did not ignore literals. (Closes [#4626](https://github.com/fallow-rs/fallow/issues/4626))
-
-### Changed
-
-- **`fallow dupes` now compares the static text of template literals.** Before, every template literal matched every other template literal. Now the text outside the `${...}` expressions must match, as for string literals. Escapes compare by their value, so `` `\x41` `` matches `` `A` ``. Thus code that differs only in template text is no longer a clone, and default results can show fewer clone groups. Set `normalization.ignoreStringValues: true`, or use `mode: "weak"` or `"semantic"`, to match template literals with different text again. ([#4626](https://github.com/fallow-rs/fallow/issues/4626))

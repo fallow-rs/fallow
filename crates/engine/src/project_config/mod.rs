@@ -1,0 +1,753 @@
+//! Project config resolution owned by the engine boundary.
+
+use std::ffi::OsString;
+use std::path::{Path, PathBuf};
+
+use fallow_config::{
+    ConfigLoadOptions, FallowConfig, ProductionAnalysis, ResolvedConfig, WorkspaceDiagnostic,
+    WorkspaceInfo,
+};
+use fallow_types::output_format::OutputFormat;
+use rustc_hash::FxHashSet;
+
+use crate::{EngineError, EngineResult};
+
+mod loader;
+
+pub use loader::{ConfigFile, ConfigFileOptions, ConfigLoadError, load_config_file};
+
+/// The production flags of one run: the global `--production` override and one
+/// override per analysis (`--production-dead-code`, `--production-health`,
+/// `--production-dupes`).
+///
+/// Every command and surface that runs more than one analysis reads the
+/// production mode of each analysis from here, so the precedence has one
+/// implementation: the flag of the analysis, then the global override, then
+/// the config.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ProductionFlags {
+    /// The global override. The CLI sets `Some(true)` for `--production` and
+    /// `None` without it. The programmatic API can also pass `Some(false)`.
+    pub global: Option<bool>,
+    /// Override for the dead-code analysis.
+    pub dead_code: Option<bool>,
+    /// Override for the health analysis.
+    pub health: Option<bool>,
+    /// Override for the duplication analysis.
+    pub dupes: Option<bool>,
+}
+
+impl ProductionFlags {
+    /// The flags of a CLI run, where `--production` can only switch the mode
+    /// on.
+    #[must_use]
+    pub const fn from_cli(
+        production: bool,
+        dead_code: Option<bool>,
+        health: Option<bool>,
+        dupes: Option<bool>,
+    ) -> Self {
+        Self {
+            global: if production { Some(true) } else { None },
+            dead_code,
+            health,
+            dupes,
+        }
+    }
+
+    /// The production override of a command that runs one analysis
+    /// (`dead-code`, `dupes`, `health`): its own override, else
+    /// `--production`. `None` means that the config decides.
+    #[must_use]
+    pub const fn single_analysis_override(production: bool, own: Option<bool>) -> Option<bool> {
+        Self::from_cli(production, own, None, None).override_for(ProductionAnalysis::DeadCode)
+    }
+
+    /// The override flag of one analysis, without the global override.
+    #[must_use]
+    const fn own(self, analysis: ProductionAnalysis) -> Option<bool> {
+        match analysis {
+            ProductionAnalysis::DeadCode => self.dead_code,
+            ProductionAnalysis::Health => self.health,
+            ProductionAnalysis::Dupes => self.dupes,
+        }
+    }
+
+    /// The production override of one analysis: its own flag, else the global
+    /// override. `None` means that the config decides.
+    #[must_use]
+    pub const fn override_for(self, analysis: ProductionAnalysis) -> Option<bool> {
+        match self.own(analysis) {
+            Some(value) => Some(value),
+            None => self.global,
+        }
+    }
+
+    /// The production mode of one analysis as far as the flags decide, before
+    /// the config is loaded. A missing flag reads as `false`.
+    #[must_use]
+    pub const fn mode(self, analysis: ProductionAnalysis) -> bool {
+        match self.override_for(analysis) {
+            Some(value) => value,
+            None => false,
+        }
+    }
+
+    /// The production mode of each analysis as far as the flags decide.
+    #[must_use]
+    pub const fn modes(self) -> ProductionModes {
+        ProductionModes {
+            dead_code: self.mode(ProductionAnalysis::DeadCode),
+            health: self.mode(ProductionAnalysis::Health),
+            dupes: self.mode(ProductionAnalysis::Dupes),
+        }
+    }
+
+    /// The effective production mode of one analysis: the flags first, then
+    /// the `production` setting of the config.
+    #[must_use]
+    pub const fn effective(
+        self,
+        analysis: ProductionAnalysis,
+        config: &fallow_config::ProductionConfig,
+    ) -> bool {
+        match self.override_for(analysis) {
+            Some(value) => value,
+            None => config.for_analysis(analysis),
+        }
+    }
+
+    /// The effective production mode of each analysis.
+    #[must_use]
+    pub const fn effective_modes(
+        self,
+        config: &fallow_config::ProductionConfig,
+    ) -> ProductionModes {
+        ProductionModes {
+            dead_code: self.effective(ProductionAnalysis::DeadCode, config),
+            health: self.effective(ProductionAnalysis::Health, config),
+            dupes: self.effective(ProductionAnalysis::Dupes, config),
+        }
+    }
+
+    /// The override of each analysis from `self`, else from `fallback`. A
+    /// host that reads production overrides from two sources, such as the
+    /// flags and the environment variables of the CLI, puts the stronger
+    /// source first. The config decides only when neither source sets a
+    /// value.
+    #[must_use]
+    pub fn with_fallback(self, fallback: Self) -> Self {
+        let pick = |analysis| {
+            self.override_for(analysis)
+                .or_else(|| fallback.override_for(analysis))
+        };
+        Self {
+            global: None,
+            dead_code: pick(ProductionAnalysis::DeadCode),
+            health: pick(ProductionAnalysis::Health),
+            dupes: pick(ProductionAnalysis::Dupes),
+        }
+    }
+}
+
+/// The production mode of each analysis of one run.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct ProductionModes {
+    /// Production mode of the dead-code analysis.
+    pub dead_code: bool,
+    /// Production mode of the health analysis.
+    pub health: bool,
+    /// Production mode of the duplication analysis.
+    pub dupes: bool,
+}
+
+impl ProductionModes {
+    /// The production mode of one analysis.
+    #[must_use]
+    pub const fn for_analysis(self, analysis: ProductionAnalysis) -> bool {
+        match analysis {
+            ProductionAnalysis::DeadCode => self.dead_code,
+            ProductionAnalysis::Health => self.health,
+            ProductionAnalysis::Dupes => self.dupes,
+        }
+    }
+
+    /// Whether health can reuse the dead-code parse: both run in the same mode.
+    #[must_use]
+    pub const fn dead_code_matches_health(self) -> bool {
+        self.dead_code == self.health
+    }
+
+    /// Whether duplication can reuse the dead-code files: both run in the same
+    /// mode.
+    #[must_use]
+    pub const fn dead_code_matches_dupes(self) -> bool {
+        self.dead_code == self.dupes
+    }
+
+    /// Whether all three analyses run in the same mode.
+    #[must_use]
+    pub const fn all_match(self) -> bool {
+        self.dead_code_matches_health() && self.dead_code_matches_dupes()
+    }
+}
+
+/// Resolved project config plus the config file path when one was loaded.
+#[derive(Debug)]
+pub struct ProjectConfig {
+    /// Fully resolved config for the project.
+    pub config: ResolvedConfig,
+    /// Path of the loaded config file; `None` when defaults were used.
+    pub path: Option<PathBuf>,
+    /// Workspace metadata discovered under the project root.
+    pub workspaces: Vec<WorkspaceInfo>,
+    /// Diagnostics from workspace discovery (undeclared or invalid members).
+    pub workspace_diagnostics: Vec<WorkspaceDiagnostic>,
+    /// Workspace discovery wall time in milliseconds, when measured.
+    pub workspace_discovery_ms: Option<f64>,
+    /// The plugin files, rule packs and `autoDiscover` directories that
+    /// config resolution read.
+    pub inputs: fallow_config::ConfigInputs,
+    /// The content of [`Self::inputs`] just before resolution read them.
+    pub inputs_before_resolve: fallow_config::ConfigInputsSnapshot,
+}
+
+/// The run settings that resolution records on the config.
+#[derive(Debug, Clone, Copy)]
+pub struct ResolveOptions {
+    /// Output format the resolved config carries into rendering.
+    pub output: OutputFormat,
+    /// Worker thread count recorded on the resolved config.
+    pub threads: usize,
+    /// Bypass the parse cache for this run.
+    pub no_cache: bool,
+    /// Suppress progress notes on stderr.
+    pub quiet: bool,
+}
+
+impl ResolveOptions {
+    /// The settings of a host that resolves a config without a CLI run.
+    fn host_default() -> Self {
+        Self {
+            output: OutputFormat::Human,
+            threads: std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get),
+            no_cache: false,
+            quiet: true,
+        }
+    }
+}
+
+impl ConfigFile {
+    /// Flatten the `production` setting of the config for one analysis: the
+    /// flags decide first, then the config. A project without a config file
+    /// gets the mode of the flags.
+    #[must_use]
+    pub fn for_analysis(mut self, analysis: ProductionAnalysis, flags: ProductionFlags) -> Self {
+        self.config.production = if self.path.is_some() {
+            self.config
+                .production
+                .for_run(flags.effective(analysis, &self.config.production))
+        } else {
+            flags.mode(analysis).into()
+        };
+        self
+    }
+
+    /// Validate the external plugins, the boundaries and the rule packs of
+    /// the config.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error that names the first invalid part and lists each of
+    /// its problems.
+    pub fn validate(&self, root: &Path) -> EngineResult<()> {
+        validate_config(root, &self.config)
+    }
+
+    /// Resolve the config for `root`, then apply the environment variables
+    /// that every host honors.
+    #[must_use]
+    pub fn resolve(self, root: &Path, options: ResolveOptions) -> ResolvedConfig {
+        resolve_with_env(self.config, root, options)
+    }
+}
+
+fn resolve_with_env(config: FallowConfig, root: &Path, options: ResolveOptions) -> ResolvedConfig {
+    let mut resolved = config.resolve(
+        root.to_path_buf(),
+        options.output,
+        options.threads,
+        options.no_cache,
+        options.quiet,
+        None,
+    );
+    apply_env_overrides(&mut resolved);
+    resolved
+}
+
+/// Scalar config-loading knobs for one analysis family.
+#[derive(Debug, Clone, Copy)]
+pub struct ProjectConfigOptions {
+    /// Output format the resolved config carries into rendering.
+    pub output: OutputFormat,
+    /// Bypass the parse cache for this run.
+    pub no_cache: bool,
+    /// Worker thread count recorded on the resolved config.
+    pub threads: usize,
+    /// Tri-state production override: `Some` forces production-only analysis
+    /// on or off regardless of config, `None` defers to the config value.
+    pub production_override: Option<bool>,
+    /// Suppress progress notes on stderr.
+    pub quiet: bool,
+    /// Which analysis family's per-analysis production config to flatten.
+    pub analysis: ProductionAnalysis,
+    /// Permit `extends` config inheritance from remote URLs.
+    pub allow_remote_extends: bool,
+}
+
+/// Resolved project configuration plus doctor-specific plugin diagnostics.
+#[derive(Debug)]
+#[non_exhaustive]
+pub struct ProjectConfigReadiness {
+    /// The same resolved configuration returned by [`config_for_project_analysis`].
+    pub project: ProjectConfig,
+    /// Unresolved resources named explicitly by the `plugins` config field.
+    pub configured_plugin_diagnostics: Vec<fallow_config::ConfiguredPluginDiagnostic>,
+}
+
+/// Resolve the analysis config for a project.
+///
+/// # Errors
+///
+/// Returns an error when an explicit config cannot be loaded or automatic
+/// config discovery finds an invalid config.
+pub fn config_for_project(root: &Path, config_path: Option<&Path>) -> EngineResult<ProjectConfig> {
+    config_for_project_with_load_options(root, config_path, ConfigLoadOptions::default())
+}
+
+/// Resolve project config with an explicit inheritance trust policy.
+///
+/// # Errors
+///
+/// Returns an error when config loading or validation fails.
+pub fn config_for_project_with_load_options(
+    root: &Path,
+    config_path: Option<&Path>,
+    load_options: ConfigLoadOptions,
+) -> EngineResult<ProjectConfig> {
+    config_for_project_with_production(root, config_path, load_options, ProductionFlags::default())
+}
+
+/// Resolve project config with an explicit inheritance trust policy and the
+/// production flags of the run. The flags decide the production mode before
+/// resolution, so the rules that production mode turns off are off, as with
+/// the CLI `--production` flag.
+///
+/// # Errors
+///
+/// Returns an error when config loading or validation fails.
+pub fn config_for_project_with_production(
+    root: &Path,
+    config_path: Option<&Path>,
+    load_options: ConfigLoadOptions,
+    production: ProductionFlags,
+) -> EngineResult<ProjectConfig> {
+    let ConfigFile { config, path } = load_config_file(
+        root,
+        config_path,
+        ConfigFileOptions {
+            allow_remote_extends: load_options.allow_remote_extends,
+        },
+    )?
+    .for_analysis(ProductionAnalysis::DeadCode, production);
+    if path.is_some() {
+        validate_boundaries_and_rule_packs(root, &config)?;
+    }
+    let inputs = fallow_config::ConfigInputs::new(root, &config);
+    let inputs_before_resolve = inputs.snapshot();
+    let resolved = resolve_with_env(config, root, ResolveOptions::host_default());
+    let (workspaces, workspace_diagnostics, workspace_discovery_ms) =
+        collect_workspace_metadata(&resolved)?;
+    Ok(ProjectConfig {
+        inputs,
+        inputs_before_resolve,
+        config: resolved,
+        path,
+        workspaces,
+        workspace_diagnostics,
+        workspace_discovery_ms: Some(workspace_discovery_ms),
+    })
+}
+
+impl ProjectConfig {
+    /// Drop the workspace metadata of the load, so that a session built from
+    /// this config discovers the workspaces again. A caller that changes the
+    /// resolved config after the load uses this.
+    #[must_use]
+    pub fn without_workspace_metadata(mut self) -> Self {
+        self.workspaces.clear();
+        self.workspace_diagnostics.clear();
+        self.workspace_discovery_ms = None;
+        self
+    }
+}
+
+/// Resolve the parse-cache size limit for a resolved config.
+#[must_use]
+pub(crate) fn resolve_cache_max_size_bytes(config: &ResolvedConfig) -> usize {
+    config
+        .cache_max_size_mb
+        .map_or(fallow_extract::cache::DEFAULT_CACHE_MAX_SIZE, |mb| {
+            (mb as usize).saturating_mul(1024 * 1024)
+        })
+}
+
+pub(crate) fn default_project_config(root: &Path) -> ProjectConfig {
+    let inputs = fallow_config::ConfigInputs::new(root, &FallowConfig::default());
+    let inputs_before_resolve = inputs.snapshot();
+    let config = resolve_with_env(
+        FallowConfig::default(),
+        root,
+        ResolveOptions::host_default(),
+    );
+    let (workspaces, workspace_diagnostics, workspace_discovery_ms) =
+        collect_workspace_metadata_lossy(&config);
+    ProjectConfig {
+        inputs,
+        inputs_before_resolve,
+        config,
+        path: None,
+        workspaces,
+        workspace_diagnostics,
+        workspace_discovery_ms: Some(workspace_discovery_ms),
+    }
+}
+
+/// Resolve config for a specific analysis without depending on the CLI crate.
+///
+/// This mirrors the CLI's core config semantics: explicit production overrides
+/// are applied before resolution, per-analysis production config is flattened
+/// for the requested analysis, and boundary / external plugin / rule-pack
+/// validation happens before the resolved config reaches the engine.
+///
+/// # Errors
+///
+/// Returns an engine error when config loading or validation fails.
+pub fn config_for_project_analysis(
+    root: &Path,
+    config_path: Option<&Path>,
+    options: ProjectConfigOptions,
+) -> EngineResult<ProjectConfig> {
+    resolve_project_config_analysis(root, config_path, options).map(|(project, _)| project)
+}
+
+/// Resolve project configuration and collect typed readiness diagnostics for
+/// plugin resources named explicitly by the user configuration.
+///
+/// # Errors
+///
+/// Returns an engine error when config loading or validation fails.
+pub fn config_for_project_readiness(
+    root: &Path,
+    config_path: Option<&Path>,
+    options: ProjectConfigOptions,
+) -> EngineResult<ProjectConfigReadiness> {
+    let (project, configured_plugin_paths) =
+        resolve_project_config_analysis(root, config_path, options)?;
+    let configured_plugin_diagnostics =
+        fallow_config::diagnose_configured_external_plugins(root, &configured_plugin_paths);
+    Ok(ProjectConfigReadiness {
+        project,
+        configured_plugin_diagnostics,
+    })
+}
+
+fn resolve_project_config_analysis(
+    root: &Path,
+    config_path: Option<&Path>,
+    options: ProjectConfigOptions,
+) -> EngineResult<(ProjectConfig, Vec<String>)> {
+    let file = load_config_file(
+        root,
+        config_path,
+        ConfigFileOptions {
+            allow_remote_extends: options.allow_remote_extends,
+        },
+    )?
+    .for_analysis(
+        options.analysis,
+        ProductionFlags {
+            global: options.production_override,
+            ..ProductionFlags::default()
+        },
+    );
+    file.validate(root)?;
+    let ConfigFile { config, path } = file;
+    let configured_plugin_paths = config.plugins.clone();
+    let inputs = fallow_config::ConfigInputs::new(root, &config);
+    let inputs_before_resolve = inputs.snapshot();
+    let resolved = resolve_with_env(
+        config,
+        root,
+        ResolveOptions {
+            output: options.output,
+            threads: options.threads,
+            no_cache: options.no_cache,
+            quiet: options.quiet,
+        },
+    );
+    let (workspaces, workspace_diagnostics, workspace_discovery_ms) =
+        collect_workspace_metadata(&resolved)?;
+    Ok((
+        ProjectConfig {
+            inputs,
+            inputs_before_resolve,
+            config: resolved,
+            path,
+            workspaces,
+            workspace_diagnostics,
+            workspace_discovery_ms: Some(workspace_discovery_ms),
+        },
+        configured_plugin_paths,
+    ))
+}
+
+/// Apply the environment variables that every host honors. The CLI, the LSP,
+/// the MCP server and the Node bindings all load config through this module,
+/// so a variable applied here has the same meaning on each surface.
+fn apply_env_overrides(config: &mut ResolvedConfig) {
+    apply_env_overrides_from(config, |name| std::env::var_os(name));
+}
+
+fn apply_env_overrides_from(
+    config: &mut ResolvedConfig,
+    lookup: impl Fn(&str) -> Option<OsString>,
+) {
+    let max_file_size_mb = lookup("FALLOW_MAX_FILE_SIZE")
+        .and_then(|raw| raw.to_str().and_then(|raw| raw.trim().parse::<u32>().ok()));
+    if let Some(max_file_size_mb) = max_file_size_mb {
+        config.max_file_size_bytes =
+            fallow_config::resolve_max_file_size_bytes(Some(max_file_size_mb));
+    }
+    if let Some(dir) =
+        lookup(fallow_config::CACHE_DIR_ENV).and_then(fallow_config::cache_dir_from_env_value)
+    {
+        config.override_cache_dir(dir);
+    }
+    if let Some(mb) = lookup(fallow_config::CACHE_MAX_SIZE_ENV)
+        .as_deref()
+        .and_then(fallow_config::cache_max_size_from_env_value)
+    {
+        config.cache_max_size_mb = Some(mb);
+    }
+    config.apply_package_baselines_env(lookup(fallow_config::PACKAGE_BASELINES_ENV).as_deref());
+}
+
+pub(crate) fn collect_workspace_metadata(
+    config: &ResolvedConfig,
+) -> EngineResult<(Vec<WorkspaceInfo>, Vec<WorkspaceDiagnostic>, f64)> {
+    let start = std::time::Instant::now();
+    let (workspaces, diagnostics) =
+        fallow_config::discover_workspaces_with_diagnostics_and_patterns(
+            &config.root,
+            &config.ignore_patterns,
+            &config.workspace_patterns,
+        )
+        .map_err(|err| EngineError::new(err.to_string()))?;
+    let diagnostics = with_undeclared_workspace_diagnostics(config, &workspaces, diagnostics);
+    let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+    Ok((workspaces, diagnostics, elapsed_ms))
+}
+
+fn collect_workspace_metadata_lossy(
+    config: &ResolvedConfig,
+) -> (Vec<WorkspaceInfo>, Vec<WorkspaceDiagnostic>, f64) {
+    collect_workspace_metadata(config).unwrap_or_default()
+}
+
+fn with_undeclared_workspace_diagnostics(
+    config: &ResolvedConfig,
+    workspaces: &[WorkspaceInfo],
+    mut diagnostics: Vec<WorkspaceDiagnostic>,
+) -> Vec<WorkspaceDiagnostic> {
+    let mut existing: FxHashSet<PathBuf> = diagnostics
+        .iter()
+        .map(|diagnostic| {
+            dunce::canonicalize(&diagnostic.path).unwrap_or_else(|_| diagnostic.path.clone())
+        })
+        .collect();
+    for diagnostic in fallow_config::find_undeclared_workspaces_with_ignores(
+        &config.root,
+        workspaces,
+        &config.ignore_patterns,
+    ) {
+        let canonical =
+            dunce::canonicalize(&diagnostic.path).unwrap_or_else(|_| diagnostic.path.clone());
+        if existing.insert(canonical) {
+            diagnostics.push(diagnostic);
+        }
+    }
+    diagnostics
+}
+
+fn validate_config(root: &Path, config: &FallowConfig) -> EngineResult<()> {
+    fallow_config::discover_and_validate_external_plugins(root, &config.plugins)
+        .map_err(|errors| joined_config_errors("invalid external plugin definition", &errors))?;
+    validate_boundaries_and_rule_packs(root, config)
+}
+
+fn validate_boundaries_and_rule_packs(root: &Path, config: &FallowConfig) -> EngineResult<()> {
+    config
+        .validate_resolved_boundaries(root)
+        .map_err(|errors| joined_config_errors("invalid boundary configuration", &errors))?;
+    let packs = fallow_config::load_rule_packs(root, &config.rule_packs)
+        .map_err(|errors| joined_config_errors("invalid rule pack", &errors))?;
+    let zone_errors = fallow_config::validate_rule_pack_zones(
+        root,
+        &config.boundaries,
+        &config.rule_packs,
+        &packs,
+    );
+    if !zone_errors.is_empty() {
+        return Err(joined_config_errors("invalid rule pack", &zone_errors));
+    }
+    Ok(())
+}
+
+fn joined_config_errors(label: &str, errors: &[impl ToString]) -> EngineError {
+    let joined = errors
+        .iter()
+        .map(ToString::to_string)
+        .collect::<Vec<_>>()
+        .join("\n  - ");
+    EngineError::new(format!("{label}:\n  - {joined}"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn lookup_from(
+        vars: &'static [(&'static str, &'static str)],
+    ) -> impl Fn(&str) -> Option<OsString> {
+        move |name| {
+            vars.iter()
+                .find(|(key, _)| *key == name)
+                .map(|(_, value)| OsString::from(value))
+        }
+    }
+
+    #[test]
+    fn env_overrides_reach_every_host_config() {
+        let root = Path::new("/repo");
+        let mut config = default_project_config(root).config;
+
+        apply_env_overrides_from(
+            &mut config,
+            lookup_from(&[
+                ("FALLOW_MAX_FILE_SIZE", "7"),
+                ("FALLOW_CACHE_DIR", ".cache/fallow"),
+                ("FALLOW_CACHE_MAX_SIZE", "64"),
+            ]),
+        );
+
+        assert_eq!(
+            config.max_file_size_bytes,
+            fallow_config::resolve_max_file_size_bytes(Some(7))
+        );
+        assert_eq!(config.cache_dir, root.join(".cache/fallow"));
+        assert_eq!(config.cache_max_size_mb, Some(64));
+    }
+
+    /// `FALLOW_CACHE_MAX_SIZE` gives the same limit when a host passes it to
+    /// `resolve` and when the engine applies it after `resolve`.
+    #[test]
+    fn cache_max_size_env_gives_one_limit_before_and_after_resolve() {
+        let root = Path::new("/repo");
+        let resolve = |configured: Option<u32>, argument: Option<u32>| {
+            FallowConfig {
+                cache: fallow_config::CacheConfig {
+                    dir: None,
+                    max_size_mb: configured,
+                },
+                ..FallowConfig::default()
+            }
+            .resolve(
+                root.to_path_buf(),
+                OutputFormat::Human,
+                1,
+                false,
+                true,
+                argument,
+            )
+        };
+        let values: [&'static [(&'static str, &'static str)]; 5] = [
+            &[],
+            &[("FALLOW_CACHE_MAX_SIZE", "64")],
+            &[("FALLOW_CACHE_MAX_SIZE", " 8 ")],
+            &[("FALLOW_CACHE_MAX_SIZE", "0")],
+            &[("FALLOW_CACHE_MAX_SIZE", "many")],
+        ];
+        for configured in [None, Some(5)] {
+            for vars in values {
+                let argument = lookup_from(vars)("FALLOW_CACHE_MAX_SIZE")
+                    .as_deref()
+                    .and_then(fallow_config::cache_max_size_from_env_value);
+                let before = resolve(configured, argument);
+                let mut after = resolve(configured, None);
+                apply_env_overrides_from(&mut after, lookup_from(vars));
+                assert_eq!(
+                    before.cache_max_size_mb, after.cache_max_size_mb,
+                    "{configured:?} {vars:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn invalid_or_empty_env_values_keep_the_config() {
+        let root = Path::new("/repo");
+        let mut config = default_project_config(root).config;
+        let before_dir = config.cache_dir.clone();
+        let before_max = config.cache_max_size_mb;
+
+        apply_env_overrides_from(
+            &mut config,
+            lookup_from(&[("FALLOW_CACHE_DIR", ""), ("FALLOW_CACHE_MAX_SIZE", "0")]),
+        );
+
+        assert_eq!(config.cache_dir, before_dir);
+        assert_eq!(config.cache_max_size_mb, before_max);
+    }
+
+    #[test]
+    fn package_baselines_env_turns_the_map_off_only_for_a_false_value() {
+        let root = Path::new("/repo");
+        let with_map = || {
+            let mut config = default_project_config(root).config;
+            config
+                .workspace_changed_since
+                .insert("packages/web".to_owned(), "main".to_owned());
+            config
+        };
+
+        let mut disabled = with_map();
+        apply_env_overrides_from(
+            &mut disabled,
+            lookup_from(&[("FALLOW_PACKAGE_BASELINES", " Off ")]),
+        );
+        assert!(disabled.workspace_changed_since.is_empty());
+
+        for value in ["true", "1", "maybe", ""] {
+            let mut kept = with_map();
+            let vars: &'static [(&'static str, &'static str)] = match value {
+                "true" => &[("FALLOW_PACKAGE_BASELINES", "true")],
+                "1" => &[("FALLOW_PACKAGE_BASELINES", "1")],
+                "maybe" => &[("FALLOW_PACKAGE_BASELINES", "maybe")],
+                _ => &[("FALLOW_PACKAGE_BASELINES", "")],
+            };
+            apply_env_overrides_from(&mut kept, lookup_from(vars));
+            assert_eq!(kept.workspace_changed_since.len(), 1, "{value:?}");
+        }
+    }
+}

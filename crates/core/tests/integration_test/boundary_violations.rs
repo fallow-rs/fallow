@@ -89,18 +89,21 @@ fn detects_boundary_violation() {
                 patterns: vec!["src/ui/**".to_string()],
                 auto_discover: vec![],
                 root: None,
+                public_files: vec![],
             },
             BoundaryZone {
                 name: "db".to_string(),
                 patterns: vec!["src/db/**".to_string()],
                 auto_discover: vec![],
                 root: None,
+                public_files: vec![],
             },
             BoundaryZone {
                 name: "shared".to_string(),
                 patterns: vec!["src/shared/**".to_string()],
                 auto_discover: vec![],
                 root: None,
+                public_files: vec![],
             },
         ],
         rules: vec![
@@ -174,6 +177,7 @@ fn reports_unmatched_files_when_boundary_coverage_is_required() {
             patterns: vec!["src/ui/**".to_string()],
             auto_discover: vec![],
             root: None,
+            public_files: vec![],
         }],
         coverage: BoundaryCoverageConfig {
             require_all_files: true,
@@ -204,6 +208,7 @@ fn allow_unmatched_excludes_boundary_coverage_findings() {
             patterns: vec!["src/ui/**".to_string()],
             auto_discover: vec![],
             root: None,
+            public_files: vec![],
         }],
         coverage: BoundaryCoverageConfig {
             require_all_files: true,
@@ -233,12 +238,14 @@ fn calls_boundaries(forbidden: Vec<fallow_config::ForbiddenCallRule>) -> Boundar
                 patterns: vec!["src/domain/**".to_string()],
                 auto_discover: vec![],
                 root: None,
+                public_files: vec![],
             },
             BoundaryZone {
                 name: "ui".to_string(),
                 patterns: vec!["src/ui/**".to_string()],
                 auto_discover: vec![],
                 root: None,
+                public_files: vec![],
             },
         ],
         calls: BoundaryCallsConfig { forbidden },
@@ -347,12 +354,14 @@ fn no_violations_when_rule_is_off() {
                 patterns: vec!["src/ui/**".to_string()],
                 auto_discover: vec![],
                 root: None,
+                public_files: vec![],
             },
             BoundaryZone {
                 name: "db".to_string(),
                 patterns: vec!["src/db/**".to_string()],
                 auto_discover: vec![],
                 root: None,
+                public_files: vec![],
             },
         ],
         rules: vec![BoundaryRule {
@@ -528,12 +537,14 @@ fn root_field_classifies_per_subtree() {
                 patterns: vec!["src/**".to_string()],
                 auto_discover: vec![],
                 root: Some("packages/app/".to_string()),
+                public_files: vec![],
             },
             BoundaryZone {
                 name: "domain".to_string(),
                 patterns: vec!["src/**".to_string()],
                 auto_discover: vec![],
                 root: Some("packages/core/".to_string()),
+                public_files: vec![],
             },
         ],
         rules: vec![
@@ -660,6 +671,7 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
             patterns: vec!["packages/*/src/**".to_string()],
             auto_discover: vec![],
             root: None,
+            public_files: vec![],
         }],
         rules: vec![BoundaryRule {
             from: "ui".to_string(),
@@ -739,12 +751,14 @@ fn root_field_genuinely_disambiguates_flat_patterns() {
                 patterns: vec!["src/**".to_string()],
                 auto_discover: vec![],
                 root: Some("packages/app/".to_string()),
+                public_files: vec![],
             },
             BoundaryZone {
                 name: "domain".to_string(),
                 patterns: vec!["src/**".to_string()],
                 auto_discover: vec![],
                 root: Some("packages/core/".to_string()),
+                public_files: vec![],
             },
         ],
         rules: vec![BoundaryRule {
@@ -833,18 +847,21 @@ fn auto_discover_isolates_child_boundary_zones() {
                 patterns: vec!["src/app/**".to_string()],
                 auto_discover: vec![],
                 root: None,
+                public_files: vec![],
             },
             BoundaryZone {
                 name: "features".to_string(),
                 patterns: vec![],
                 auto_discover: vec!["src/features".to_string()],
                 root: None,
+                public_files: vec![],
             },
             BoundaryZone {
                 name: "shared".to_string(),
                 patterns: vec!["src/shared/**".to_string()],
                 auto_discover: vec![],
                 root: None,
+                public_files: vec![],
             },
         ],
         rules: vec![
@@ -1040,18 +1057,21 @@ fn type_only_boundaries(allow_type_only_db: Vec<String>) -> BoundaryConfig {
                 patterns: vec!["src/ui/**".to_string()],
                 auto_discover: vec![],
                 root: None,
+                public_files: vec![],
             },
             BoundaryZone {
                 name: "db".to_string(),
                 patterns: vec!["src/db/**".to_string()],
                 auto_discover: vec![],
                 root: None,
+                public_files: vec![],
             },
             BoundaryZone {
                 name: "shared".to_string(),
                 patterns: vec!["src/shared/**".to_string()],
                 auto_discover: vec![],
                 root: None,
+                public_files: vec![],
             },
         ],
         rules: vec![
@@ -1237,6 +1257,7 @@ fn zone(name: &str, patterns: &[&str]) -> BoundaryZone {
         patterns: patterns.iter().map(|p| (*p).to_string()).collect(),
         auto_discover: vec![],
         root: None,
+        public_files: vec![],
     }
 }
 
@@ -1507,3 +1528,6 @@ fn re_export_chain_violations_name_the_barrel_in_via_path() {
         "the finding anchors on the import line"
     );
 }
+
+#[path = "boundary_public_files.rs"]
+mod public_files;

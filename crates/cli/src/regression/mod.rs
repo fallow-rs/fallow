@@ -12,8 +12,6 @@ pub use baseline::{
     save_regression_baseline_with_identity,
 };
 pub use counts::{CheckCounts, FlagsCounts};
-#[expect(unused_imports, reason = "re-exports for lib.rs public API")]
-pub use counts::{DupesCounts, RegressionBaseline};
 pub use entry_weight::{
     EntryWeightCounts, EntryWeightGate, compare_entry_weight, load_entry_weight_baseline,
     save_entry_weight_baseline,

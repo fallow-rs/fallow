@@ -14,7 +14,6 @@ check() { # description, expected, actual
   if [ "$2" = "$3" ]; then pass=$((pass + 1)); else fail=$((fail + 1)); echo "FAIL: $1 (expected $2, got $3)"; fi
 }
 
-# 1. Invalid arguments: usage error.
 bash "$SWAP" >/dev/null 2>&1
 check "no arguments" 2 $?
 bash "$SWAP" /tmp/x.swap 0 >/dev/null 2>&1
@@ -22,14 +21,11 @@ check "zero size" 2 $?
 bash "$SWAP" /tmp/x.swap 8G >/dev/null 2>&1
 check "size with unit" 2 $?
 
-# 2. A missing directory: warning, exit code 0, no file.
 out="$(bash "$SWAP" /nonexistent-dir-for-swap-test/x.swap 1 2>&1)"
 check "missing directory exit code" 0 $?
 check "missing directory warning" 1 "$(printf '%s\n' "$out" | grep -c '^::warning::No extra swap: .* does not exist$')"
-# The warning ends the script, so no other command prints anything.
 check "missing directory stops at the warning" 1 "$(printf '%s\n' "$out" | wc -l | tr -d ' ')"
 
-# 3. Too little free space: warning, exit code 0, no file.
 dir="$(mktemp -d)"
 trap 'rm -rf "$dir"' EXIT
 out="$(bash "$SWAP" "$dir/x.swap" 999999 2>&1)"

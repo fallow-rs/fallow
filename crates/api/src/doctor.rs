@@ -212,9 +212,7 @@ fn push_ready_project_checks<F>(
 ///
 /// Advisory, never required: analysis runs without `node_modules`, it just
 /// runs blind to package `exports`, to plugins that activate on an installed
-/// package, and to a dependency's installed shape. Doctor used to report
-/// `pass` on a tree that had never been installed, which is the one state this
-/// command exists to catch.
+/// package, and to a dependency's installed shape.
 fn dependencies_check(root: &Path) -> DoctorCheck {
     if !fallow_config::node_modules_missing(root) {
         return check(

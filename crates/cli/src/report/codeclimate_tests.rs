@@ -100,7 +100,7 @@ fn malformed_current_dead_code_envelope_does_not_fall_back_to_partial_issues() {
         EnvelopeKind::DeadCode,
         &envelope,
         root,
-        None,
+        crate::runtime_support::ConfigFlags::default(),
         None,
     )
     .expect_err("current malformed envelope must fail closed");
@@ -121,7 +121,7 @@ fn current_dead_code_envelope_rejects_an_inconsistent_finding_total() {
         EnvelopeKind::DeadCode,
         &envelope,
         Path::new("/project"),
-        None,
+        crate::runtime_support::ConfigFlags::default(),
         None,
     )
     .expect_err("inconsistent current finding total must fail closed");
@@ -148,7 +148,7 @@ fn prior_strict_schemas_preserve_validation_and_block_partial_fallback() {
                     kind,
                     value,
                     Path::new("/project"),
-                    None,
+                    crate::runtime_support::ConfigFlags::default(),
                     None,
                 )
             };
@@ -190,7 +190,7 @@ fn current_parents_accept_prior_check_schema_but_reject_older_child_shapes() {
                 kind,
                 &envelope,
                 Path::new("/project"),
-                None,
+                crate::runtime_support::ConfigFlags::default(),
                 None,
             );
             if matches!(version, 10 | 11) {
@@ -277,7 +277,7 @@ fn current_parent_envelopes_accept_null_optional_sections() {
         EnvelopeKind::Combined,
         &combined,
         Path::new("/project"),
-        None,
+        crate::runtime_support::ConfigFlags::default(),
         None,
     )
     .expect("null optional sections render empty");
@@ -332,7 +332,7 @@ fn saved_fix_envelope_preserves_empty_codeclimate_compatibility() {
         EnvelopeKind::Fix,
         &serde_json::json!({ "actions": [] }),
         Path::new("/project"),
-        None,
+        crate::runtime_support::ConfigFlags::default(),
         None,
     )
     .expect("saved fix CodeClimate compatibility");
@@ -471,7 +471,7 @@ fn stored_grouped_dead_code_preserves_native_owner_contract() {
         EnvelopeKind::DeadCode,
         &envelope,
         root.path(),
-        None,
+        crate::runtime_support::ConfigFlags::default(),
         Some(&resolver),
     )
     .expect("saved envelope should reconstruct");
@@ -531,6 +531,7 @@ fn codeclimate_missing_suppression_reason_uses_reason_rule_severity() {
             issue_kind: Some("unused-exports".to_string()),
             reason: None,
             is_file_level: false,
+            is_range: false,
             kind_known: true,
         },
         missing_reason: true,
@@ -557,6 +558,7 @@ fn codeclimate_stale_and_missing_suppression_have_distinct_identities() {
         issue_kind: Some("unused-exports".to_string()),
         reason: None,
         is_file_level: false,
+        is_range: false,
         kind_known: true,
     };
     results.stale_suppressions.push(StaleSuppression {
@@ -822,19 +824,9 @@ fn codeclimate_dep_with_zero_line_omits_line_number() {
     assert_eq!(output[0]["location"]["lines"]["begin"], 1);
 }
 
-/// Production-mode regression: rules can flip to `Severity::Off` while
-/// the matching findings slice arrives empty (the analyzer's own off-
-/// rule short-circuit clears the vec, but the generic-iterator helpers
-/// previously called `severity_to_codeclimate` before checking
-/// emptiness and panicked at `Severity::Off`).
-/// `fallow dead-code --format codeclimate --production` on any project
-/// with a `--production`-suppressed dep / export / member rule used to
-/// exit 101 with `entered unreachable code` at the `Severity::Off` arm
-/// of `severity_to_codeclimate`. Both those helpers and that mapper now
-/// live in `crates/api/src/dead_code_codeclimate.rs`.
-/// This test exercises all three previously-vulnerable helpers
-/// (`push_dep_cc_issues`, `push_unused_export_issues`,
-/// `push_unused_member_issues`) through `api_codeclimate_issues`.
+/// Production mode can turn a rule off and return an empty findings slice.
+/// The CodeClimate helpers must check that slice before they map its severity.
+/// `Severity::Off` has no CodeClimate equivalent.
 #[test]
 fn api_codeclimate_issues_with_off_severity_and_empty_findings_does_not_panic() {
     let root = PathBuf::from("/project");
@@ -2272,6 +2264,7 @@ fn duplication_codeclimate_one_issue_per_instance() {
         }],
         clone_families: vec![],
         mirrored_directories: vec![],
+        range_marker_problems: Vec::new(),
         stats: DuplicationStats::default(),
     };
     let output = codeclimate_issues_to_value(&api_duplication_codeclimate_issues(&report, &root));
@@ -2331,20 +2324,18 @@ fn duplication_codeclimate_description_uses_stable_clone_handle_not_ordinal() {
         ],
         clone_families: vec![],
         mirrored_directories: vec![],
+        range_marker_problems: Vec::new(),
         stats: DuplicationStats::default(),
     };
     let output = codeclimate_issues_to_value(&api_duplication_codeclimate_issues(&report, &root));
     let issues = output.as_array().unwrap();
     assert_eq!(issues.len(), 2);
     let desc0 = issues[0]["description"].as_str().unwrap();
-    assert!(desc0.starts_with("Code clone dup:"), "first group: {desc0}");
+    assert!(desc0.contains("(clone group dup:"), "first group: {desc0}");
     assert!(!desc0.contains("group 1"), "ordinal leaked: {desc0}");
     assert!(desc0.contains("8 lines"), "first group line count: {desc0}");
     let desc1 = issues[1]["description"].as_str().unwrap();
-    assert!(
-        desc1.starts_with("Code clone dup:"),
-        "second group: {desc1}"
-    );
+    assert!(desc1.contains("(clone group dup:"), "second group: {desc1}");
     assert!(!desc1.contains("group 2"), "ordinal leaked: {desc1}");
     assert!(
         desc1.contains("6 lines"),
@@ -2389,6 +2380,7 @@ fn duplication_codeclimate_empty_report_produces_empty_array() {
         clone_groups: vec![],
         clone_families: vec![],
         mirrored_directories: vec![],
+        range_marker_problems: Vec::new(),
         stats: DuplicationStats::default(),
     };
     let output = codeclimate_issues_to_value(&api_duplication_codeclimate_issues(&report, &root));
@@ -2429,6 +2421,7 @@ fn duplication_codeclimate_fingerprints_are_unique_across_instances() {
         }],
         clone_families: vec![],
         mirrored_directories: vec![],
+        range_marker_problems: Vec::new(),
         stats: DuplicationStats::default(),
     };
     let output = codeclimate_issues_to_value(&api_duplication_codeclimate_issues(&report, &root));

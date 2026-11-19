@@ -5,6 +5,32 @@ Fallow uses Criterion-compatible Rust benchmarks with CodSpeed simulation in
 shards so PR feedback stays useful and noisy suites do not hide real
 regressions.
 
+## When CodSpeed runs
+
+Every CodSpeed job lives in `.github/workflows/bench.yml`. CodSpeed takes the
+results for one commit from one workflow run. When a second workflow uploads
+for the same commit, CodSpeed marks the run with "Benchmarks ran in several CI
+workflows". One run may carry simulation and walltime results, and two runs of
+the same workflow on one commit are fine.
+
+- Each night at 06:00 UTC, a full run measures the `main` HEAD: every
+  simulation shard, the CLI instruction counts and the walltime jobs.
+- A push to `main` measures only the release commit (`chore: release v`),
+  because `scripts/verify-release-ci.mjs` reads that result before a release.
+  That run has the Rust shards only. The other pushes skip every job.
+- A pull request with the `ci:perf` label runs the affected simulation shards
+  and the CLI instruction counts. CodSpeed compares it with the latest `main`
+  commit that has a run, usually the last nightly run. The comparison then
+  also holds the changes merged after that run. For a precise result, start a
+  run on `main` first with `gh workflow run bench.yml`.
+- `gh workflow run bench.yml --ref <branch>` measures a branch with the
+  simulation jobs. Add `-f walltime=true` for the walltime jobs too. A plain
+  dispatch never waits on a macro runner, so the dispatch of
+  `scripts/verify-release-ci.mjs --dispatch-missing` cannot hold a release.
+
+Only the release push saves the Rust caches of these jobs. The repository
+cache is over its limit, and a nightly cache is gone before the next night.
+
 Simulation jobs run with `RAYON_NUM_THREADS=1`. Rayon splits work adaptively
 when a thread steals a job, so with more than one thread the simulated
 instruction count changes between runs of the same code. A benchmark takes its
@@ -19,7 +45,17 @@ CPU. Benchmarks outside `crates/benchmarks` include the same helper with a
 
 Simulation leaves syscall time out of the value. A benchmark that CodSpeed
 marks "dominated by syscalls" does not show file-system cost, so do not use it
-to judge an I/O change.
+to judge an I/O change. The nightly walltime jobs (below) measure that cost.
+
+Most fallow benchmarks get this warning even when they do no I/O. The analysis
+runs on a rayon pool, and the bench thread waits on a futex until a pool worker
+finishes. CodSpeed counts that wait as syscall time. For example,
+`workspace_file_bucketing` is pure in-memory work, but CodSpeed reports 10
+syscalls that take more time than the work itself. The simulated value still
+counts the instructions of the worker, so the warning alone is no reason to
+distrust a result. A change in the result between runs of the same code
+usually comes from the CPU model of the hosted runner. Compare complete runs of
+the same commit before you act on a flagged change.
 
 `cargo codspeed build` and `cargo bench` use `[profile.bench]` in the root
 `Cargo.toml`. It inherits `release` but uses thin LTO, because fat LTO of the
@@ -40,11 +76,42 @@ swap and the available disk every 30 seconds. When a runner stops in "Build
 benchmark shard" with exit code 143 and no compiler error, read the last
 `resources:` lines of the job log to find the resource that ran out.
 
-The optional TypeScript semantic companion is measured separately with
-CodSpeed walltime. Simulation cannot measure the interpreted Node.js process or
-its child process, so `tools/type-aware-sidecar/bench/session.mjs` uses the
-supported Tinybench integration to track cold Program construction and warm
-persistent-session reuse as distinct benchmarks.
+The Rust benchmark crates use CodSpeed's official Criterion compatibility
+layer. Keep its major version aligned with `cargo-codspeed` so both simulation
+and walltime result collection remain available.
+
+Fast PR shards are selected by `.github/scripts/generate-benchmark-matrix.mjs`.
+Like Oxc's benchmark workflow, this keeps the tracked surface broad while only
+running the shards affected by a given change. Manual and merge-queue runs use
+the full fast matrix, and global benchmark or Cargo changes fall back to all
+fast shards. The shared fixtures under `crates/benchmarks/benches/support/`
+count as a global benchmark change.
+
+## Nightly walltime jobs
+
+The `walltime-cli` and `type-aware` jobs of `.github/workflows/bench.yml` run
+walltime benchmarks on a CodSpeed Macro Runner, a dedicated bare-metal ARM64
+(Graviton) machine.
+The hardware is the same each night, so the values are comparable between
+runs. CodSpeed marks walltime from a shared GitHub-hosted runner as unreliable,
+so no other job uses walltime.
+
+- The release CLI on the pinned corpus of `benchmarks/cli-instructions.sh`,
+  cold and warm. This is the real cost of file reads and other syscalls that
+  the simulation leaves out.
+- The optional TypeScript semantic companion. Simulation cannot measure the
+  interpreted Node.js process or its child process, so
+  `tools/type-aware-sidecar/bench/session.mjs` uses the supported Tinybench
+  integration to track cold Program construction and warm persistent-session
+  reuse as distinct benchmarks.
+
+The fallow-rs organization shares 600 free macro runner minutes per month, so
+these jobs run only in the nightly run and in a dispatch with
+`-f walltime=true`. The release build runs on
+a free `ubuntu-22.04-arm` GitHub runner, the same Ubuntu release as the macro
+runner image, and the macro runner job only measures.
+
+## Local walltime retain gates
 
 Rust walltime retain gates are a local, manual procedure. Trustworthy
 wall-clock numbers for release-LTO builds need dedicated hardware, and a shared
@@ -66,17 +133,6 @@ finishes, so a `Waiting for results...` timeout is server-side processing
 rather than a failed run: read the numbers from the CodSpeed dashboard instead
 of waiting on the poll. Simulation mode cannot run locally on macOS, since its
 valgrind executor is unsupported there.
-
-The Rust benchmark crates use CodSpeed's official Criterion compatibility
-layer. Keep its major version aligned with `cargo-codspeed` so both simulation
-and walltime result collection remain available.
-
-Fast PR shards are selected by `.github/scripts/generate-benchmark-matrix.mjs`.
-Like Oxc's benchmark workflow, this keeps the tracked surface broad while only
-running the shards affected by a given change. Manual and merge-queue runs use
-the full fast matrix, and global benchmark or Cargo changes fall back to all
-fast shards. The shared fixtures under `crates/benchmarks/benches/support/`
-count as a global benchmark change.
 
 ## Work counters and the process clock
 
@@ -125,7 +181,7 @@ thread count.
 
 The Criterion shards measure code paths in process. They do not see process
 startup, config loading, the report output or the interaction between stages.
-`.github/workflows/bench-cli-instructions.yml` runs the release binary under
+The `cli-instructions` job of `.github/workflows/bench.yml` runs the release binary under
 CodSpeed CPU simulation with the exec harness, so each run of the whole CLI
 gets an instruction-based value:
 
@@ -150,9 +206,8 @@ The simulation does not count the child processes, for example `git` in
 Under callgrind with one thread, the instruction count of each benchmark
 differed by less than 0.1% between runs. A regression threshold of 2% is safe.
 
-The job needs a release build, so it does not run on every push. It runs once
-a day on main and on a pull request with the `ci:perf` label. Run the same
-steps locally on Linux:
+The job needs a release build. It runs in the nightly run on main and on a
+pull request with the `ci:perf` label. Run the same steps locally on Linux:
 
 ```bash
 cargo build --release -p fallow-cli

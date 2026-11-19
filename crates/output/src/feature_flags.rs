@@ -130,7 +130,8 @@ pub struct FeatureFlagFinding {
     pub col: u32,
     /// Suggested follow-up actions (investigate / suppress).
     pub actions: Vec<FeatureFlagAction>,
-    /// Flag SDK the call belongs to, for SDK-call findings.
+    /// Flag SDK the call belongs to, for SDK-call findings. Absent for a
+    /// `medium` confidence call, because no flag import confirms the SDK.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sdk_name: Option<String>,
     /// Overlap with dead-code findings when the flag guards unused exports.
@@ -325,6 +326,21 @@ pub const fn feature_flags_meta() -> FeatureFlagsMeta {
     }
 }
 
+/// The SDK name that the output of a flag site shows.
+///
+/// A generic SDK method such as `isEnabled` in a file that imports no flag
+/// SDK has `Medium` confidence. Its SDK name is only the default provider of
+/// the method name, so the output names no SDK for it. The engine keeps the
+/// name, because the vendor-state match uses it.
+#[must_use]
+pub fn reported_sdk_name(flag: &FeatureFlag) -> Option<&str> {
+    let unconfirmed = flag.kind == FlagKind::SdkCall && flag.confidence == FlagConfidence::Medium;
+    if unconfirmed {
+        return None;
+    }
+    flag.sdk_name.as_deref()
+}
+
 fn feature_flag_finding(flag: &FeatureFlag, root: &Path) -> FeatureFlagFinding {
     let path = flag
         .path
@@ -340,7 +356,7 @@ fn feature_flag_finding(flag: &FeatureFlag, root: &Path) -> FeatureFlagFinding {
         line: flag.line,
         col: flag.col,
         actions: feature_flag_actions(&flag.flag_name),
-        sdk_name: flag.sdk_name.clone(),
+        sdk_name: reported_sdk_name(flag).map(str::to_string),
         dead_code_overlap: feature_flag_dead_code_overlap(flag),
     }
 }

@@ -3,10 +3,7 @@ use crate::output::FixActionType;
 use crate::results::{DependencyOverrideSource, DuplicateLocation};
 use std::path::PathBuf;
 
-/// Helper: extract the kebab-case `type` discriminant from an
-/// [`IssueAction`] at a specific position. Returns `None` when the
-/// position is out of bounds or the action shape lacks a discriminant
-/// (today every variant has one).
+/// Return the kebab-case `type` discriminant for the test assertions.
 fn action_type(action: &IssueAction) -> &'static str {
     match action {
         IssueAction::Fix(fix) => match fix.kind {

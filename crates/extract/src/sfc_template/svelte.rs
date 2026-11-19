@@ -44,6 +44,8 @@ static SVELTE_THEN_RE: LazyLock<regex::Regex> =
 static SVELTE_CATCH_RE: LazyLock<regex::Regex> =
     LazyLock::new(|| crate::static_regex(r"(?is)^:catch(?:\s+(?P<binding>.+))?$"));
 
+const SVELTE_DECLARATION_KEYWORD: &str = "const";
+
 static SVELTE_SNIPPET_RE: LazyLock<regex::Regex> = LazyLock::new(|| {
     crate::static_regex(r"(?is)^#snippet\s+[A-Za-z_$][\w$]*\s*\((?P<params>.*)\)\s*$")
 });
@@ -468,7 +470,13 @@ fn apply_svelte_expression_directive(input: &mut SvelteExpressionDirectiveInput<
         return true;
     }
 
-    if let Some(stmt) = input.tag.strip_prefix("@const") {
+    // `{@const x = ...}` and the declaration tag `{const x = ...}` both declare
+    // a template local from an expression.
+    if let Some(stmt) = input
+        .tag
+        .strip_prefix("@const")
+        .or_else(|| declaration_tag_statement(input.tag))
+    {
         apply_const_tag(
             stmt,
             input.imported_bindings,
@@ -490,6 +498,14 @@ fn apply_svelte_expression_directive(input: &mut SvelteExpressionDirectiveInput<
     }
 
     input.tag.starts_with(":else")
+}
+
+/// The full statement of a Svelte declaration tag (`{const x = ...}`). The
+/// keyword must be followed by whitespace, so an expression tag such as
+/// `{constant}` stays an expression.
+fn declaration_tag_statement(tag: &str) -> Option<&str> {
+    let rest = tag.strip_prefix(SVELTE_DECLARATION_KEYWORD)?;
+    rest.starts_with(char::is_whitespace).then_some(rest)
 }
 
 /// Merge a directive's expression operand into template usage.
@@ -630,7 +646,11 @@ fn apply_await_tag(
     scopes: &mut Vec<SvelteScopeFrame>,
     usage: &mut TemplateUsage,
 ) {
-    let expr = captures.name("expr").map_or("", |m| m.as_str()).trim();
+    let body = captures.name("expr").map_or("", |m| m.as_str()).trim();
+    // The shorthand `{#await promise then value}` and `{#await promise catch error}`
+    // put the branch binding in the opening tag, after the promise expression.
+    let (expr, binding) =
+        crate::template_complexity::split_svelte_await(body).unwrap_or((body, ""));
     merge_expression_usage_allow_dollar_refs_with_bound_targets(
         usage,
         expr,
@@ -640,7 +660,7 @@ fn apply_await_tag(
     );
     scopes.push(SvelteScopeFrame {
         kind: SvelteBlockKind::Await,
-        locals: Vec::new(),
+        locals: extract_pattern_binding_names(binding),
     });
 }
 
@@ -1591,6 +1611,66 @@ mod tests {
         );
 
         assert!(usage.used_bindings.contains("loadData"));
+    }
+
+    #[test]
+    fn await_then_shorthand_without_binding_credits_expression() {
+        let usage = collect_template_usage(
+            "{#await delay(1) then}<p>Done</p>{/await}",
+            &imported(&["delay"]),
+        );
+
+        assert!(usage.used_bindings.contains("delay"));
+    }
+
+    #[test]
+    fn await_then_shorthand_binding_shadows_import_name() {
+        let usage = collect_template_usage(
+            "{#await load() then value}<p>{value}</p>{/await}",
+            &imported(&["load", "value"]),
+        );
+
+        assert!(usage.used_bindings.contains("load"));
+        assert!(!usage.used_bindings.contains("value"));
+    }
+
+    #[test]
+    fn await_catch_shorthand_binding_shadows_import_name() {
+        let usage = collect_template_usage(
+            "{#await load() catch error}<p>{error}</p>{/await}",
+            &imported(&["load", "error"]),
+        );
+
+        assert!(usage.used_bindings.contains("load"));
+        assert!(!usage.used_bindings.contains("error"));
+    }
+
+    #[test]
+    fn await_shorthand_keyword_inside_expression_is_not_a_branch() {
+        let usage = collect_template_usage(
+            "{#await load(\"a then b\").then((x) => x) then value}<p>{value}</p>{/await}",
+            &imported(&["load"]),
+        );
+
+        assert!(usage.used_bindings.contains("load"));
+    }
+
+    #[test]
+    fn declaration_tag_credits_expression() {
+        let usage = collect_template_usage(
+            "{#if true}{const label = $derived(format(item))}<p>{label}</p>{/if}",
+            &imported(&["format", "item"]),
+        );
+
+        assert!(usage.used_bindings.contains("format"));
+        assert!(usage.used_bindings.contains("item"));
+    }
+
+    #[test]
+    fn expression_starting_with_const_prefix_is_not_a_declaration_tag() {
+        let usage = collect_template_usage("<p>{constant}</p>", &imported(&["constant"]));
+
+        assert!(usage.used_bindings.contains("constant"));
     }
 
     #[test]

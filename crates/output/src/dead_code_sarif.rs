@@ -57,14 +57,6 @@ struct SarifCtx<'a> {
     rules: &'a RulesConfig,
 }
 
-fn severity_to_sarif_level(s: Severity) -> &'static str {
-    match s {
-        Severity::Error => "error",
-        Severity::Warn => "warning",
-        Severity::Off => unreachable!(),
-    }
-}
-
 /// The SARIF level for one finding: its saved severity when the finding
 /// carries one, otherwise the configured rule severity (a saved report from an
 /// older version has no saved severity).
@@ -76,15 +68,16 @@ fn finding_level(finding: &impl GatedFinding, rule: Severity) -> &'static str {
         Some(EffectiveSeverity::Error) => "error",
         Some(EffectiveSeverity::Warn) => "warning",
         None => match rule {
-            Severity::Off => "warning",
-            Severity::Error | Severity::Warn => severity_to_sarif_level(rule),
+            Severity::Error => "error",
+            Severity::Warn | Severity::Off => "warning",
         },
     }
 }
 
 fn configured_sarif_level(s: Severity) -> &'static str {
     match s {
-        Severity::Error | Severity::Warn => severity_to_sarif_level(s),
+        Severity::Error => "error",
+        Severity::Warn => "warning",
         Severity::Off => "none",
     }
 }
@@ -467,34 +460,6 @@ fn sarif_package_cycle_fields(
             "package_roots": package_roots,
             "group_truncated": cycle.group_truncated,
         })),
-    }
-}
-
-fn sarif_boundary_violation_fields(
-    violation: &BoundaryViolation,
-    root: &Path,
-    level: &'static str,
-) -> SarifFields {
-    let from_uri = relative_uri(&violation.from_path, root);
-    let to_uri = relative_uri(&violation.to_path, root);
-    let via = violation.via_path.as_ref().map_or_else(String::new, |via| {
-        format!(", via {}", relative_uri(via, root))
-    });
-    SarifFields {
-        rule_id: "fallow/boundary-violation",
-        level,
-        message: format!(
-            "Import from zone '{}' to zone '{}' is not allowed ({}{})",
-            violation.from_zone, violation.to_zone, to_uri, via,
-        ),
-        uri: from_uri,
-        region: if violation.line > 0 {
-            Some((violation.line, violation.col + 1))
-        } else {
-            None
-        },
-        source_path: (violation.line > 0).then(|| violation.from_path.clone()),
-        properties: None,
     }
 }
 
@@ -2073,6 +2038,10 @@ fn push_dependency_override_sarif_results(
 #[path = "dead_code_sarif_severity.rs"]
 mod dead_code_sarif_severity;
 use dead_code_sarif_severity::dead_code_rule_severity;
+
+#[path = "dead_code_sarif_boundary.rs"]
+mod boundary_render;
+use boundary_render::sarif_boundary_violation_fields;
 
 #[cfg(test)]
 #[path = "dead_code_sarif_tests.rs"]

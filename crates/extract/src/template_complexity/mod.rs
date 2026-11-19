@@ -23,6 +23,7 @@ use engine::{
 
 pub use astro::compute_astro_template_complexity;
 pub use svelte::compute_svelte_template_complexity;
+pub use svelte::split_svelte_await;
 pub use vue::compute_vue_template_complexity;
 
 struct TemplateScanner<'a> {

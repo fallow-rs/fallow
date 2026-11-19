@@ -1,0 +1,8 @@
+{
+  "name": "issue-4716-vite-workspace-rollup-input",
+  "private": true,
+  "workspaces": ["packages/*"],
+  "devDependencies": {
+    "vite": "^6.0.0"
+  }
+}

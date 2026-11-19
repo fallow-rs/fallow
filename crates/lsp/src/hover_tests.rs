@@ -597,6 +597,7 @@ fn hover_on_duplication() {
         }],
         clone_families: vec![],
         mirrored_directories: vec![],
+        range_marker_problems: Vec::new(),
         stats: DuplicationStats {
             total_files: 2,
             files_with_clones: 2,
@@ -653,6 +654,7 @@ fn hover_outside_duplication_range_returns_none() {
         }],
         clone_families: vec![],
         mirrored_directories: vec![],
+        range_marker_problems: Vec::new(),
         stats: DuplicationStats {
             total_files: 1,
             files_with_clones: 1,
@@ -822,6 +824,7 @@ fn hover_duplication_multiple_instances() {
         }],
         clone_families: vec![],
         mirrored_directories: vec![],
+        range_marker_problems: Vec::new(),
         stats: DuplicationStats {
             total_files: 3,
             files_with_clones: 3,
@@ -1105,6 +1108,7 @@ fn hover_duplication_with_more_than_10_other_instances() {
         }],
         clone_families: vec![],
         mirrored_directories: vec![],
+        range_marker_problems: Vec::new(),
         stats: DuplicationStats::default(),
     };
 
@@ -2124,6 +2128,7 @@ fn hover_duplication_single_other_shows_singular_word() {
         }],
         clone_families: vec![],
         mirrored_directories: vec![],
+        range_marker_problems: Vec::new(),
         stats: DuplicationStats {
             total_files: 2,
             files_with_clones: 2,
@@ -2193,6 +2198,7 @@ fn hover_duplication_more_than_10_others_shows_overflow_line() {
         }],
         clone_families: vec![],
         mirrored_directories: vec![],
+        range_marker_problems: Vec::new(),
         stats: DuplicationStats {
             total_files: 13,
             files_with_clones: 13,

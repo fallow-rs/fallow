@@ -19,12 +19,16 @@ use fallow_output::{
     MutationReplayOutput, MutationReplaySide, MutationReplayVerdict, MutationReport,
     MutationResumeOutput, MutationScopeKind, MutationScopeOutput, MutationSkippedFile,
     MutationStaleReason, MutationTargetOnlyKill, MutationTestKillRow, MutationTypecheckOutput,
-    SKIPPED_TESTS_CODE, TestReachClass,
+    MutationUnmatchedPath, SKIPPED_TESTS_CODE, TestReachClass,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::report::{HumanStatus, Level, build_section_header, format_path, human_status_line};
 
+/// The `reason` of an unmatched path that does not exist.
+const UNMATCHED_NOT_FOUND: &str = "not-found";
+/// The `reason` of an unmatched path that the ignore globs exclude.
+const UNMATCHED_IGNORED: &str = "ignored";
 /// The longest code fragment that a survivor line shows.
 const MAX_FRAGMENT_CHARS: usize = 60;
 /// The marker of a cut at the start or the end of a fragment.
@@ -533,6 +537,26 @@ fn write_skipped_files(out: &mut String, skipped: &[MutationSkippedFile]) {
     }
 }
 
+/// Writes one line for each path of a `paths` scope that selects no file.
+/// Returns true when it wrote a line.
+fn write_unmatched_paths(out: &mut String, unmatched: &[MutationUnmatchedPath]) -> bool {
+    for entry in unmatched {
+        let reason = match entry.reason.as_str() {
+            UNMATCHED_NOT_FOUND => "the path does not exist",
+            UNMATCHED_IGNORED => "ignorePatterns or a built-in ignore excludes it",
+            _ => {
+                "it selects only test files, declaration files or files that fallow does not analyze"
+            }
+        };
+        let _ = writeln!(
+            out,
+            "Unmatched path: {} ({reason})",
+            format_path(&entry.path)
+        );
+    }
+    !unmatched.is_empty()
+}
+
 fn render_footer_lines(out: &mut String, report: &MutationReport) {
     let mut footer = String::new();
     let pruned = prune_counts(
@@ -642,7 +666,11 @@ fn render_status_lines(out: &mut String, report: &MutationReport, min_score: Opt
             counts.no_coverage
         );
     }
-    if report.no_test_files && counts.no_coverage > 0 {
+    // An unmatched path explains an empty scope better than a missing test.
+    let explained = write_unmatched_paths(out, &report.unmatched_path_reasons) && counts.total == 0;
+    if explained {
+        // The unmatched lines are the status.
+    } else if report.no_test_files && counts.no_coverage > 0 {
         let _ = writeln!(
             out,
             "No tests: the project has no test files, so the {} {} no coverage.",
@@ -1114,7 +1142,11 @@ pub fn render_plan(plan: &MutationPlanOutput) -> String {
             "test files reach"
         )
     );
-    if plan.no_test_files {
+    let explained =
+        write_unmatched_paths(&mut out, &plan.unmatched_path_reasons) && counts.total == 0;
+    if explained {
+        // The unmatched lines are the status.
+    } else if plan.no_test_files {
         out.push_str("No tests: the project has no test files, so no mutant can be killed.\n");
     } else if counts.total == 0 {
         out.push_str(&no_data_line(&plan.scope));

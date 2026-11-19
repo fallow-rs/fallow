@@ -27,7 +27,7 @@ pub(crate) use multi_config::{
 #[path = "config_parser_alias_constant.rs"]
 mod alias_constant;
 #[path = "config_parser_alias_entry.rs"]
-mod alias_entry;
+pub(super) mod alias_entry;
 #[path = "config_parser_vite_plugin_call.rs"]
 pub(crate) mod vite_plugin_call;
 pub(crate) use vite_plugin_call::extract_vite_plugin_call_option_path;

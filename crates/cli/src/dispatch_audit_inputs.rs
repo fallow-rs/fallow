@@ -1,5 +1,7 @@
 //! Resolves the inputs of `fallow audit` from the command flags.
 
+use fallow_config::{ConfigKey, RunCommand, RunPlan, RunRequest};
+
 use super::*;
 
 pub(super) fn resolve_audit_inputs(
@@ -22,6 +24,9 @@ pub(super) fn resolve_audit_inputs(
         },
     )?;
     let cache_dir = config.cache_dir.clone();
+    // Plan before `config.audit` moves out below.
+    let plan = fallow_config::plan_run(config.plan_sections(), audit_request(args));
+    let duplicates_off_in_config = !config.duplicates.runs_by_default();
     let audit_cfg = config.audit;
     let file_lines_check = config.health.file_lines_check_enabled();
     let production = resolve_production_modes(
@@ -32,7 +37,7 @@ pub(super) fn resolve_audit_inputs(
         args.production_health,
         args.production_dupes,
     )?;
-    let analyses = resolve_audit_analyses(&audit_cfg, config.duplicates.enabled, args);
+    let analyses = audit_selection(plan, args, duplicates_off_in_config);
     if !(analyses.dead_code || analyses.health || analyses.dupes) {
         return Err(emit_input_error(
             "this audit selects no sub-analysis: --skip, the audit.deadCode, audit.health and audit.dupes config keys, and duplicates.enabled leave nothing to run",
@@ -69,9 +74,12 @@ pub(super) fn resolve_audit_inputs(
     )?;
     // `duplicates.enabled: false` alone turns the sub-analysis off here. A
     // `--dupes-baseline` flag is then no mistake of this command line: the
-    // flag had an effect before the audit read that key, so it is dropped.
-    let dupes_off_by_duplicates_enabled =
-        !analyses.dupes && resolve_audit_analyses(&audit_cfg, true, args).dupes;
+    // flag had an effect before the audit read that key, so it gets a note
+    // and the run goes on.
+    let dupes_off_by_duplicates_enabled = plan.duplication.off_by(ConfigKey::DuplicatesEnabled);
+    if dupes_off_by_duplicates_enabled && args.dupes_baseline.is_some() {
+        eprintln!("{}", combined::INERT_DUPES_BASELINE_NOTE);
+    }
     let resolved_dupes_baseline = baseline(
         analyses.dupes,
         "--dupes-baseline",
@@ -101,36 +109,35 @@ pub(super) fn resolve_audit_inputs(
     })
 }
 
-/// The sub-analyses of this audit.
-///
-/// `duplicates_enabled` is the `duplicates.enabled` config key. It is the
-/// default of the duplication sub-analysis, so a project that turns
-/// duplication detection off gets no clone groups from `fallow audit`. An
-/// explicit `audit.dupes` value or `--only` selects the sub-analysis without
-/// that default.
-fn resolve_audit_analyses(
-    config: &fallow_config::AuditConfig,
-    duplicates_enabled: bool,
-    args: &AuditDispatchArgs,
-) -> audit::AuditAnalysisSelection {
+/// The request of this audit. The review brief names every sub-analysis, so
+/// `--only`, `--skip` and the config keys do not change it. Otherwise
+/// `--only` names the listed sub-analyses, and without `--only` the
+/// `audit.deadCode`, `audit.health` and `audit.dupes` keys decide, then
+/// `duplicates.enabled`.
+fn audit_request(args: &AuditDispatchArgs) -> RunRequest {
     if audit_renders_brief(args) {
-        return audit::AuditAnalysisSelection::ALL;
+        return RunRequest::all_named(RunCommand::Audit);
     }
-    let architecture = combined::resolve_architecture_selection(&args.only, &args.skip);
-    if !args.only.is_empty() {
-        let (dead_code, dupes, health) = combined::resolve_analyses(&args.only, &[]);
-        return audit::AuditAnalysisSelection {
-            dead_code,
-            health,
-            dupes,
-            architecture,
-        };
-    }
-    let (dead_code, dupes, health) = combined::resolve_analyses(&[], &args.skip);
+    let (only, skip) = combined::planned_lists(&args.only, &args.skip);
+    RunRequest::from_lists(RunCommand::Audit, &only, &skip)
+}
+
+/// The sub-analyses of this audit from its run `plan`.
+fn audit_selection(
+    plan: RunPlan,
+    args: &AuditDispatchArgs,
+    duplicates_off_in_config: bool,
+) -> audit::AuditAnalysisSelection {
+    let architecture = if audit_renders_brief(args) {
+        crate::check::ArchitectureSelection::All
+    } else {
+        combined::resolve_architecture_selection(&args.only, &args.skip)
+    };
     audit::AuditAnalysisSelection {
-        dead_code: dead_code && config.dead_code.unwrap_or(true),
-        health: health && config.health.unwrap_or(true),
-        dupes: dupes && config.dupes.unwrap_or(duplicates_enabled),
+        dead_code: plan.dead_code.runs(),
+        health: plan.health.runs(),
+        dupes: plan.duplication.runs(),
         architecture,
+        duplicates_off_in_config,
     }
 }

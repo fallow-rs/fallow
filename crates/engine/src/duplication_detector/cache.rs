@@ -5,7 +5,10 @@ use std::path::{Path, PathBuf};
 use bitcode::{Decode, Encode};
 use fallow_config::ResolvedNormalization;
 use fallow_types::source_fingerprint::SourceFingerprint;
-use fallow_types::suppress::{PolicyRuleSuppression, SuppressionTarget};
+use fallow_types::suppress::{
+    PolicyRuleSuppression, RangeMarkerProblem, RangeMarkerProblemKind, SuppressionScope,
+    SuppressionTarget,
+};
 use oxc_span::Span;
 use rustc_hash::FxHashMap;
 use tempfile::NamedTempFile;
@@ -23,6 +26,7 @@ pub(super) struct TokenPayload<'a> {
     pub(super) hashed_tokens: &'a [HashedToken],
     pub(super) file_tokens: &'a FileTokens,
     pub(super) suppressions: &'a [Suppression],
+    pub(super) range_problems: &'a [RangeMarkerProblem],
 }
 
 #[derive(Debug, Encode, Decode)]
@@ -52,6 +56,14 @@ struct CachedTokenFile {
     source: String,
     line_count: u64,
     suppressions: Vec<CachedSuppression>,
+    range_problems: Vec<CachedRangeMarkerProblem>,
+}
+
+#[derive(Debug, Clone, Encode, Decode)]
+struct CachedRangeMarkerProblem {
+    line: u32,
+    kind: u8,
+    token: Option<String>,
 }
 
 impl CachedTokenFile {
@@ -79,6 +91,8 @@ struct CachedSuppression {
     kind: u8,
     policy_pack: String,
     policy_rule_id: String,
+    /// `fallow-ignore-end` line of a range. 0 = not a range.
+    range_end_line: u32,
 }
 
 #[derive(Debug, Clone)]
@@ -86,6 +100,7 @@ pub(super) struct TokenCacheEntry {
     pub hashed_tokens: Vec<HashedToken>,
     pub file_tokens: FileTokens,
     pub suppressions: Vec<Suppression>,
+    pub range_problems: Vec<RangeMarkerProblem>,
 }
 
 #[derive(Debug)]
@@ -225,6 +240,7 @@ impl TokenCache {
                 payload.hashed_tokens,
                 payload.file_tokens,
                 payload.suppressions,
+                payload.range_problems,
             ),
         );
         self.dirty = true;
@@ -320,6 +336,7 @@ impl CachedTokenFile {
         hashed_tokens: &[HashedToken],
         file_tokens: &FileTokens,
         suppressions: &[Suppression],
+        range_problems: &[RangeMarkerProblem],
     ) -> Self {
         Self {
             mtime_ns: fingerprint.mtime_ns,
@@ -361,6 +378,14 @@ impl CachedTokenFile {
             source: file_tokens.source.clone(),
             line_count: file_tokens.line_count as u64,
             suppressions: suppressions.iter().map(cached_suppression).collect(),
+            range_problems: range_problems
+                .iter()
+                .map(|problem| CachedRangeMarkerProblem {
+                    line: problem.line,
+                    kind: problem.kind.to_code(),
+                    token: problem.token.clone(),
+                })
+                .collect(),
         }
     }
 
@@ -423,13 +448,32 @@ impl CachedTokenFile {
                     comment_line: suppression.comment_line,
                     target,
                     reason: None,
+                    scope: if suppression.range_end_line == 0 {
+                        SuppressionScope::for_line(suppression.line)
+                    } else {
+                        SuppressionScope::Range {
+                            end_line: suppression.range_end_line,
+                        }
+                    },
                 }
+            })
+            .collect();
+        let range_problems = self
+            .range_problems
+            .iter()
+            .filter_map(|problem| {
+                Some(RangeMarkerProblem {
+                    line: problem.line,
+                    kind: RangeMarkerProblemKind::from_code(problem.kind)?,
+                    token: problem.token.clone(),
+                })
             })
             .collect();
         TokenCacheEntry {
             hashed_tokens,
             file_tokens,
             suppressions,
+            range_problems,
         }
     }
 }
@@ -462,6 +506,7 @@ fn cached_suppression(suppression: &Suppression) -> CachedSuppression {
         kind,
         policy_pack,
         policy_rule_id,
+        range_end_line: suppression.range_end_line().unwrap_or(0),
     }
 }
 
@@ -503,6 +548,7 @@ mod tests {
                 line_count: 1,
             },
             suppressions: vec![Suppression::issue(2, 1, IssueKind::CodeDuplication)],
+            range_problems: Vec::new(),
         }
     }
 
@@ -522,6 +568,7 @@ mod tests {
                 hashed_tokens: &entry.hashed_tokens,
                 file_tokens: &entry.file_tokens,
                 suppressions: &entry.suppressions,
+                range_problems: &entry.range_problems,
             },
         );
     }
@@ -655,12 +702,80 @@ mod tests {
                 &entry.hashed_tokens,
                 &entry.file_tokens,
                 &entry.suppressions,
+                &entry.range_problems,
             ),
         );
         std::fs::write(cache_dir.join("cache.bin"), bitcode::encode(&store)).expect("write cache");
 
         let loaded = TokenCache::load(dir.path(), dir.path());
         assert!(loaded.get(&file, &metadata, mode()).is_none());
+    }
+
+    /// A token cache that the previous version wrote holds no range data. A
+    /// run that reads it would report the clone inside the range.
+    #[test]
+    fn range_run_does_not_read_the_previous_version_cache() {
+        use crate::discover::{DiscoveredFile, FileId};
+        use crate::duplicates::DuplicatesConfig;
+
+        let dir = tempfile::tempdir().expect("temp dir");
+        let cache_root = tempfile::tempdir().expect("cache root");
+        let body = "export function shared(items: number[], factor: number): number {\n  let total = 0;\n  for (const item of items) {\n    if (item > 1) {\n      total += item * factor;\n    } else {\n      total -= item;\n    }\n  }\n  const scaled = total / items.length;\n  console.log(\"result\", scaled, factor);\n  return Math.round(scaled * 100) / 100;\n}\n";
+        let wrapped = format!(
+            "// fallow-ignore-start code-duplication -- kept\n{body}// fallow-ignore-end code-duplication\n"
+        );
+        let files: Vec<DiscoveredFile> = [("a.ts", body.to_string()), ("b.ts", wrapped)]
+            .into_iter()
+            .enumerate()
+            .map(|(index, (name, content))| {
+                let path = dir.path().join(name);
+                std::fs::write(&path, &content).expect("write source");
+                DiscoveredFile {
+                    id: FileId(u32::try_from(index).expect("small index")),
+                    path,
+                    size_bytes: content.len() as u64,
+                }
+            })
+            .collect();
+        let config = DuplicatesConfig {
+            min_corpus_size_for_token_cache: 0,
+            ..DuplicatesConfig::default()
+        };
+        let run = || {
+            super::super::detect_duplicates(
+                dir.path(),
+                &files,
+                &config,
+                None,
+                Some(cache_root.path()),
+            )
+            .report
+        };
+        assert!(
+            run().clone_groups.is_empty(),
+            "the range applies on a cold run"
+        );
+
+        // Rewrite the cache as the previous version stored it: its own
+        // directory and version, and no range in the suppressions.
+        let cache_dir = cache_root.path().join("cache");
+        let current = cache_dir.join(format!("dupes-tokens-v{DUPES_CACHE_VERSION}"));
+        let previous = cache_dir.join(format!("dupes-tokens-v{}", DUPES_CACHE_VERSION - 1));
+        let bytes = std::fs::read(current.join("cache.bin")).expect("read cache");
+        let mut store: CacheStore = bitcode::decode(&bytes).expect("decode cache");
+        store.version = DUPES_CACHE_VERSION - 1;
+        for entry in store.entries.values_mut() {
+            entry.suppressions.clear();
+            entry.range_problems.clear();
+        }
+        std::fs::create_dir_all(&previous).expect("previous cache dir");
+        std::fs::write(previous.join("cache.bin"), bitcode::encode(&store)).expect("write cache");
+        std::fs::remove_dir_all(&current).expect("remove current cache");
+
+        assert!(
+            run().clone_groups.is_empty(),
+            "a range run must not read the previous version cache"
+        );
     }
 
     #[test]
@@ -816,6 +931,7 @@ mod tests {
                 &entry.hashed_tokens,
                 &entry.file_tokens,
                 &entry.suppressions,
+                &entry.range_problems,
             ),
         );
 
@@ -851,6 +967,7 @@ mod tests {
                 &entry.hashed_tokens,
                 &entry.file_tokens,
                 &entry.suppressions,
+                &entry.range_problems,
             ),
         );
 
@@ -887,6 +1004,7 @@ mod tests {
                 &entry.hashed_tokens,
                 &entry.file_tokens,
                 &entry.suppressions,
+                &entry.range_problems,
             ),
         );
 
@@ -940,6 +1058,7 @@ mod tests {
                 hashed_tokens: &entry.hashed_tokens,
                 file_tokens: &entry.file_tokens,
                 suppressions: &entry.suppressions,
+                range_problems: &entry.range_problems,
             },
         );
 
@@ -966,6 +1085,7 @@ mod tests {
                 hashed_tokens: &entry.hashed_tokens,
                 file_tokens: &entry.file_tokens,
                 suppressions: &entry.suppressions,
+                range_problems: &entry.range_problems,
             },
         );
         let stored = |cache: &TokenCache| {

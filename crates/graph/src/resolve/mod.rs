@@ -16,7 +16,9 @@
 //! output-to-source directory fallback.
 
 mod auto_imports;
+mod base_url_directory;
 mod dynamic_imports;
+mod extension_alias;
 pub(crate) mod fallbacks;
 mod file_attempt;
 mod inline_loaders;
@@ -29,6 +31,7 @@ mod path_info;
 mod re_exports;
 mod react_native;
 mod require_imports;
+mod root_relative;
 mod specifier;
 mod static_imports;
 #[cfg(test)]

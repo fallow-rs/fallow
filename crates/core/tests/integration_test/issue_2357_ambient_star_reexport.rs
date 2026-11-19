@@ -104,8 +104,7 @@ fn ambient_star_re_exports_credit_every_target_export() {
     // `export * from './impl'` (entry-point ambient.d.ts), `export * as impl
     // from './ns-impl'` (ambient-ns.d.ts), and `export * from './shim-impl'`
     // (shim.ts, a reachable non-entry module) credit every named export of
-    // their target. The non-entry module is the case that previously credited
-    // nothing. `helperE` and `DeepMerged` only reach impl.ts through its own
+    // their target. `helperE` and `DeepMerged` only reach impl.ts through its own
     // `export *`; `subOne`, `SubPair`, `nested`, `nestedOne`, and
     // `subDeepOne` only through its `export * as sub` namespace and sub.ts's
     // own star and namespace chains; `shimSubOne` through shim-impl.ts's

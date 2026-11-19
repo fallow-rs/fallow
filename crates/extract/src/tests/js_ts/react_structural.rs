@@ -1883,3 +1883,49 @@ fn component_contract_namespace_members_and_export_aliases() {
                     })
     );
 }
+
+fn unharvestable_components(info: &crate::ModuleInfo) -> Vec<&str> {
+    info.component_functions
+        .iter()
+        .filter(|c| c.has_unharvestable_props)
+        .map(|c| c.name.as_str())
+        .collect()
+}
+
+#[test]
+fn memo_comparator_makes_a_named_component_abstain() {
+    // Issue #4725: the comparator reads props that the body does not read.
+    let info = parse_tsx(
+        "import React from 'react';
+type CanvasProps = { label: string; nonce: string };
+const Canvas = (props: CanvasProps) => <canvas aria-label={props.label} />;
+const areEqual = (prev: CanvasProps, next: CanvasProps) => prev.nonce === next.nonce;
+export default React.memo(Canvas, areEqual);",
+    );
+    assert_eq!(unharvestable_components(&info), vec!["Canvas"]);
+}
+
+#[test]
+fn memo_comparator_makes_an_inline_component_abstain() {
+    let info = parse_tsx(
+        "import { memo } from 'react';
+type CardProps = { label: string; nonce: string };
+const Card = memo(
+  ({ label }: CardProps) => <div>{label}</div>,
+  (prev, next) => prev.nonce === next.nonce,
+);
+export const App = () => <Card label=\"a\" nonce=\"n\" />;",
+    );
+    assert_eq!(unharvestable_components(&info), vec!["Card"]);
+}
+
+#[test]
+fn memo_without_comparator_keeps_props_harvestable() {
+    let info = parse_tsx(
+        "import React from 'react';
+type CanvasProps = { label: string; nonce: string };
+const Canvas = (props: CanvasProps) => <canvas aria-label={props.label} />;
+export default React.memo(Canvas);",
+    );
+    assert!(unharvestable_components(&info).is_empty());
+}

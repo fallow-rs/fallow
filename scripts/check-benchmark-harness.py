@@ -19,16 +19,19 @@ from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 BENCH_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "bench.yml"
-# The walltime instrument lives in its own workflow so each CodSpeed run carries
-# a single instrument; see issue #2024.
-TYPE_AWARE_WORKFLOW = REPO_ROOT / ".github" / "workflows" / "bench-type-aware.yml"
 MATRIX_SCRIPT = REPO_ROOT / ".github" / "scripts" / "generate-benchmark-matrix.mjs"
 
 FAST_JOB = "benchmark"
 FULL_JOB = "benchmark-full"
 EXPECTED_MODE = "simulation"
-TYPE_AWARE_JOB = "benchmark-type-aware"
-TYPE_AWARE_MODE = "walltime"
+# CodSpeed takes the results for one commit from one workflow run, so every
+# CodSpeed job lives in the bench workflow. These jobs use the walltime
+# instrument; all others use simulation.
+WALLTIME_JOBS = ("walltime-cli", "type-aware")
+SIMULATION_JOBS = (FAST_JOB, FULL_JOB, "cli-instructions")
+TYPE_AWARE_JOB = "type-aware"
+# CodSpeed marks walltime from a shared GitHub-hosted runner as unreliable.
+MACRO_RUNNER = "codspeed-macro-arm64-graviton-ubuntu-22-04"
 TYPE_AWARE_BENCH = REPO_ROOT / "tools" / "type-aware-sidecar" / "bench" / "session.mjs"
 TYPE_AWARE_MANIFEST = REPO_ROOT / "tools" / "type-aware-sidecar" / "package.json"
 MAX_BENCHES_PER_SHARD = 1_000
@@ -189,37 +192,32 @@ def benchmark_names(path: Path) -> list[str]:
     return re.findall(r'bench_function\(\s*"([^"]+)"', text)
 
 
-def assert_codspeed_action_modes(text: str, type_aware_text: str) -> list[str]:
+def assert_codspeed_action_modes(text: str) -> list[str]:
     errors: list[str] = []
-    # Both workflows upload through the same action, so the pin is checked across
-    # the pair: splitting them must not let one drift to another version.
-    action_refs = re.findall(
-        r"uses:\s*CodSpeedHQ/action@([^\s]+)", f"{text}\n{type_aware_text}"
-    )
+    action_refs = re.findall(r"uses:\s*CodSpeedHQ/action@([^\s]+)", text)
     if not action_refs:
-        errors.append("benchmark workflows do not use CodSpeedHQ/action")
+        errors.append("bench workflow does not use CodSpeedHQ/action")
     elif len(set(action_refs)) != 1:
         errors.append(f"CodSpeed action refs differ: {sorted(set(action_refs))}")
 
-    if f"  {TYPE_AWARE_JOB}:" not in type_aware_text:
-        errors.append(f"type-aware workflow is missing {TYPE_AWARE_JOB}")
-    elif re.findall(r"mode:\s*([^\s]+)", type_aware_text) != [TYPE_AWARE_MODE]:
-        errors.append(f"{TYPE_AWARE_JOB} must use {TYPE_AWARE_MODE} mode")
-    if TYPE_AWARE_JOB in text:
-        errors.append(
-            f"{TYPE_AWARE_JOB} must stay out of the bench workflow: a CodSpeed run "
-            "carries one instrument"
-        )
-
-    modes = re.findall(r"mode:\s*([^\s]+)", text)
-    codspeed_modes = [mode for mode in modes if mode in {"simulation", "walltime", "memory"}]
-    if not codspeed_modes:
-        errors.append("bench workflow does not declare a CodSpeed mode")
-    elif any(mode != EXPECTED_MODE for mode in codspeed_modes):
-        errors.append(f"Rust CodSpeed modes must all be {EXPECTED_MODE}: {codspeed_modes}")
-
-    if "id-token: write" not in text:
-        errors.append("bench workflow must keep OIDC id-token permission for CodSpeed shards")
+    jobs = re.findall(r"^  ([\w-]+):\n", text.split("\njobs:\n", 1)[-1], re.M)
+    for job in jobs:
+        block = job_block(text, job)
+        modes = set(re.findall(r"^\s+mode:\s*(\S+)", block, re.M))
+        if not modes:
+            continue
+        expected = "walltime" if job in WALLTIME_JOBS else "simulation"
+        if modes != {expected}:
+            errors.append(f"{job} must use only {expected} mode, found {sorted(modes)}")
+        if expected == "walltime" and f"runs-on: {MACRO_RUNNER}" not in block:
+            errors.append(f"{job} must run on {MACRO_RUNNER}")
+        if "id-token: write" not in block:
+            errors.append(f"{job} must keep the OIDC id-token permission for CodSpeed")
+    for job in (*SIMULATION_JOBS, *WALLTIME_JOBS):
+        if job not in jobs:
+            errors.append(f"bench workflow is missing the {job} job")
+        elif "uses: CodSpeedHQ/action@" not in job_block(text, job):
+            errors.append(f"{job} must upload with CodSpeedHQ/action")
     return errors
 
 
@@ -242,10 +240,8 @@ def validate_type_aware_benchmark(text: str) -> list[str]:
         errors.append("type-aware package must expose the stable bench/session.mjs command")
     if "@codspeed/tinybench-plugin" not in manifest.get("devDependencies", {}):
         errors.append("type-aware benchmark must use CodSpeed's walltime-compatible Tinybench plugin")
-    if "npm run bench --prefix tools/type-aware-sidecar" not in text:
+    if "npm run bench --prefix tools/type-aware-sidecar" not in job_block(text, TYPE_AWARE_JOB):
         errors.append("type-aware CodSpeed job does not run the package benchmark")
-    if "tools/type-aware-sidecar/**" not in text:
-        errors.append("type-aware benchmark paths do not trigger the benchmark workflow")
     return errors
 
 
@@ -378,10 +374,6 @@ def validate_thread_determinism(text: str) -> list[str]:
 
 def main() -> int:
     text = BENCH_WORKFLOW.read_text(encoding="utf-8")
-    if not TYPE_AWARE_WORKFLOW.is_file():
-        error(f"type-aware benchmark workflow is missing at {TYPE_AWARE_WORKFLOW}")
-        return 1
-    type_aware_text = TYPE_AWARE_WORKFLOW.read_text(encoding="utf-8")
     try:
         static_targets = extract_matrix_targets(text)
         targets = fast_targets_from_generator() + [
@@ -392,12 +384,12 @@ def main() -> int:
         return 1
 
     errors = []
-    errors.extend(assert_codspeed_action_modes(text, type_aware_text))
+    errors.extend(assert_codspeed_action_modes(text))
     errors.extend(validate_targets(targets))
     errors.extend(validate_required_targets(targets))
     errors.extend(validate_unique_names())
     errors.extend(validate_thread_determinism(text))
-    errors.extend(validate_type_aware_benchmark(type_aware_text))
+    errors.extend(validate_type_aware_benchmark(text))
 
     if not any(target.job == FAST_JOB for target in targets):
         errors.append("fast benchmark job has no matrix targets")

@@ -538,7 +538,6 @@ fn analysis_root_at_the_toplevel_is_unchanged() {
 fn ambiguous_diff_base_warns_instead_of_guessing_silently() {
     let dir = monorepo();
     let root = dir.path();
-    // Now `src/complex.js` resolves under the toplevel AND under packages/pkg.
     std::fs::create_dir_all(root.join("src")).expect("mkdir");
     std::fs::write(root.join("src/complex.js"), COMPLEX_JS).expect("write");
     git(root, &["add", "-A"]);
@@ -731,8 +730,8 @@ fn duplication_review_peer_locations_use_repository_root_paths() {
         .filter_map(|comment| comment["body"].as_str())
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(bodies.contains("Code clone dup:"), "{bodies}");
-    assert!(bodies.contains("Other locations:"), "{bodies}");
+    assert!(bodies.contains("(clone group dup:"), "{bodies}");
+    assert!(bodies.contains("Also in:"), "{bodies}");
     assert!(bodies.contains("packages/pkg/src/clone-a.js"), "{bodies}");
     assert!(bodies.contains("packages/pkg/src/clone-b.js"), "{bodies}");
 }

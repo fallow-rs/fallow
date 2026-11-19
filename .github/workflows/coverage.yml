@@ -36,6 +36,7 @@ jobs:
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
+      actions: read
       contents: read
     outputs:
       main-full: ${{ steps.policy.outputs.main-full }}
@@ -50,6 +51,8 @@ jobs:
           node-version: '26'
       - name: Decide whether coverage is required
         id: policy
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: node scripts/ci-change-policy.mjs
 
   coverage:

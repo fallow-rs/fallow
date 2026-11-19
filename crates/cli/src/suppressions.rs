@@ -269,15 +269,14 @@ fn print_suppression_file(file: &SuppressionInventoryFile) {
     print_file_path(&display);
 
     for entry in &file.suppressions {
-        let level_tag = if entry.level == SuppressionInventoryLevel::File {
-            " (file-wide)"
-        } else {
-            ""
+        let level_tag = inventory_level_tag(entry);
+        let reason = match entry.problem {
+            Some(problem) => problem.description().to_string(),
+            None => entry
+                .reason
+                .as_deref()
+                .map_or_else(|| "reason: missing".to_string(), |r| format!("reason: {r}")),
         };
-        let reason = entry
-            .reason
-            .as_deref()
-            .map_or_else(|| "reason: missing".to_string(), |r| format!("reason: {r}"));
         println!(
             "    {} {}{} {}",
             format!(":{}", entry.line).dimmed(),
@@ -285,6 +284,17 @@ fn print_suppression_file(file: &SuppressionInventoryFile) {
             level_tag.dimmed(),
             reason.dimmed(),
         );
+    }
+}
+
+/// The dimmed scope tag after the kind: file-wide, the range end, or a
+/// range marker with a problem.
+fn inventory_level_tag(entry: &fallow_output::SuppressionInventoryEntry) -> String {
+    match (entry.level, entry.end_line) {
+        (SuppressionInventoryLevel::File, _) => " (file-wide)".to_string(),
+        (SuppressionInventoryLevel::Range, Some(end)) => format!(" (range to :{end})"),
+        (SuppressionInventoryLevel::Range, None) => " (range marker, no effect)".to_string(),
+        (SuppressionInventoryLevel::Line, _) => String::new(),
     }
 }
 
@@ -402,6 +412,8 @@ mod tests {
             is_file_level: false,
             reason: None,
             comment_line: 1,
+            range_end_line: None,
+            range_problem: None,
         }
     }
 }

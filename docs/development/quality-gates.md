@@ -340,10 +340,14 @@ stops a release until `main` is green.
 Concurrency follows the same goal. On a pull request, a new push cancels the
 older run. On `main`, a new push cancels the older push run of most
 workflows, because `main` gets many merges a day and only the newest commit
-needs a result. `CI` is the exception: each push run on `main` gets a group of
-its own and always finishes. The README badge shows the last `CI` run on
-`main`, and a cancelled run shows as failing. Miri takes longer than the gap
-between most merges, so a cancelling group left no finished `CI` run on `main`.
+needs a result. `CI` is the exception: a started push run on `main` always
+finishes. The README badge shows the last `CI` run on `main`, and a cancelled
+run shows as failing. Miri takes longer than the gap between most merges, so a
+cancelling group left no finished `CI` run on `main`. The push runs of `CI`
+still share one group, so a newer push replaces a run that waits in the queue.
+In a burst of merges, `CI` then tests the newest commit and skips the queued
+ones between. A replaced queued run shows as cancelled, and the README badge
+can show that state until the next run finishes.
 The release commit, with a message that starts with `chore: release v`, and
 manual or scheduled runs get a concurrency group of their own. Nothing cancels
 them, so the release gate always gets a result for the release commit.
@@ -352,13 +356,17 @@ On pull requests:
 
 - `CI` (`ci.yml`). Its jobs include the required status checks on `main`.
 - `Commitlint` (job `Commit messages`).
-- `Type-aware Benchmarks`, when `tools/type-aware-sidecar/**` changes.
 - `Protocol parity`, when `crates/cli/Cargo.toml` or `Cargo.lock` changes.
 - `PGO Validate`, when `scripts/pgo-train.sh`,
   `.github/scripts/pgo-compare.mjs`, `.github/scripts/pgo-profile-match.mjs`,
   `benchmarks/download-fixtures.mjs`, `.github/actions/setup-rust/**`,
   `.cargo/config.toml`, `release.yml`, `pgo-validate.yml`, `Cargo.toml`, or
-  `rust-toolchain.toml` changes. It skips Dependabot Cargo branches. It
+  `rust-toolchain.toml` changes. It skips Dependabot Cargo branches. For
+  `Cargo.toml`, it runs only when a `[profile.release]` or
+  `[profile.release.package.*]` section changes. For `release.yml`, it runs
+  only when the top-level `env` or the `pgo-profile` or `build` job changes.
+  `scripts/pgo-validate-inputs.mjs` makes this decision and runs the
+  comparison when it cannot read the diff. It
   compares a PGO build with a base build of the same pull request. A weekly
   run on `main` covers dependency changes.
 - `Test GitHub Action`, when its own paths change.
@@ -372,12 +380,22 @@ On push to `main` only (each one also has `workflow_dispatch`):
   pull requests.
 - `Fuzz Smoke`, which also runs every week.
 - `Scorecard`.
+- The Rust leg of `CodeQL`. Its analysis takes about 20 minutes, longer than
+  `CI` on most pull requests. A pull request analyzes Rust only when it
+  changes `.github/codeql/**` or `codeql.yml`. The JavaScript and TypeScript
+  leg and the Actions leg still run on each pull request. On `main`, a newer
+  push replaces a queued analysis but never cancels a started one, because a
+  cancelled analysis uploads a failed run to code scanning.
 - `osv-scanner ignores`, which also runs every week. It fails when an
   `IgnoredVulns` entry matches no advisory in its lockfile.
 
-On push to `main`, and on a pull request only with the `ci:perf` label:
+Each night on `main`, on the push of the release commit, and on a pull
+request only with the `ci:perf` label:
 
-- `Benchmarks` (CodSpeed).
+- `Benchmarks` (CodSpeed). Every CodSpeed job lives in this workflow, because
+  CodSpeed takes the results for one commit from one workflow run. Other
+  pushes to `main` start the workflow, but every job skips. See
+  [Benchmarking](../benchmarking.md#when-codspeed-runs).
 
 Add the `ci:perf` label to a pull request that changes a hot path. The label event starts the run. A pull request
 without the label starts these workflows, but every job skips and uses no
@@ -499,6 +517,11 @@ skip heavy CI jobs and fresh coverage. Typos, script policy tests, formatting,
 and documentation checks still run. These guides have no runtime or build
 consumers. Keep the allowlist explicit and review consumers before extending it.
 
+A newer push can replace the queued run of the previous commit. The helper
+skips only when the push run of the same workflow on the `before` commit
+succeeded. It reads that run through the Actions API with the job token. A
+missing, cancelled, skipped or failed run, or an API error, runs full checks.
+
 Mixed changes, other Markdown (including embedded documentation), generated
 contracts, unknown paths, additions, deletions, renames, empty ranges and failed
 detection run full checks. The release subject `chore: release v` always runs
@@ -508,16 +531,31 @@ Coverage falls back to computation on detector failure and publishes only after
 successful fresh computation. Supersession and release concurrency remain as
 specified above.
 
+### Rust cache retention
+
+`.github/actions/setup-rust` saves a Rust cache only on `main`, and pull
+request jobs restore it. The repository uses more than the GitHub cache limit,
+so GitHub evicts the oldest entries within hours. A cache that a daily or
+weekly run saves is gone before its next run, and it evicts the caches that
+pull request jobs restore. On pull requests, a cache miss made `Windows path
+and subprocess handling` about 4 minutes slower. Each workflow without a push
+trigger therefore passes `save-if: 'false'`. `release.yml` keeps its caches,
+because a re-run of a failed release job reuses them. `release-validation.yml`
+saves only for a release or a manual run on `main`, not for its weekly run.
+`PGO Validate` does not cache its fixtures. `scripts/workflow-policy.test.mjs`
+checks this rule.
+
 ### Parallel heavy jobs
 
 The slowest `CI` jobs have parts that run in parallel:
 
-- `Check (1/2)` and `Check (2/2)` each build every test binary and run half
-  of the nextest suite (`--partition hash:N/2`). The suite uses about 29
-  CPU-minutes, so one 4-vCPU runner needs more than 7 minutes for it.
-  `Check (1/2)` also runs the schema drift gate and the coverage producer
-  conformance check. `Check (2/2)` also runs the runtime-coverage feature
-  tests. The two partitions then take about the same time.
+- `Check (1/3)`, `Check (2/3)` and `Check (3/3)` each build every test binary
+  and run a third of the nextest suite (`--partition hash:N/3`). The build
+  takes about 3 minutes, and the suite uses about 48 CPU-minutes. With two
+  partitions, the slowest `Check` job was the last job of most pull request
+  runs. `Check (1/3)` also runs the coverage producer conformance check,
+  `Check (2/3)` the runtime-coverage feature tests, and `Check (3/3)` the
+  schema drift gate.
 - `Lint and contracts` runs both Clippy passes, `cargo fmt --check`, the
   contract bundle drift gate and the staged subgenerator tests.
 - `NAPI package` runs the NAPI build and smoke test. On `main` the build uses
@@ -543,7 +581,7 @@ The slowest `CI` jobs have parts that run in parallel:
   `.github/workflows/ci.yml`.
 
 `Check`, `Lint and contracts` and `NAPI package` have the same trigger. Only
-`Check (1/2)` and `Lint and contracts` may use the runner that the
+`Check (1/3)` and `Lint and contracts` may use the runner that the
 `heavy-runner` selector step picks, because the Blacksmith credit model
 reserves those two jobs. Each split job uses one more runner slot in a run. `scripts/workflow-policy.test.mjs` asserts that each moved step runs in
 exactly one of these jobs.

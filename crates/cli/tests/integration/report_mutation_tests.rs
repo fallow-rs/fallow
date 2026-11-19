@@ -540,7 +540,7 @@ fn reviews_keep_the_survivor_on_an_added_line_and_drop_the_unchanged_one() {
             .expect("survivor comment");
         let body = survivor["body"].as_str().expect("comment body");
         assert!(
-            body.contains("made no test fail. Mutant aaaa0002."),
+            body.contains("made no test fail. Mutant `aaaa0002`."),
             "{format}: {body}"
         );
         assert!(
@@ -549,8 +549,8 @@ fn reviews_keep_the_survivor_on_an_added_line_and_drop_the_unchanged_one() {
         );
         let summary = review_summary_text(&review);
         assert!(
-            summary.contains("Mutation testing: score 50.0%, 2 survivors (1 inline)."),
-            "{format}: summary line\n{summary}"
+            !summary.contains("Mutation testing: score"),
+            "{format}: the section states the result once\n{summary}"
         );
 
         let guided = fixture.report(
@@ -652,7 +652,7 @@ fn github_annotations_append_the_run_state_and_the_survivors_for_each_flag() {
         .enumerate()
         .filter(|(_, line)| {
             line.starts_with("::warning file=src/age.ts,line=")
-                && line.contains("title=fallow/mutation-survived::")
+                && line.contains("title=Survived mutant::")
         })
         .map(|(index, _)| index)
         .collect();
@@ -660,7 +660,9 @@ fn github_annotations_append_the_run_state_and_the_survivors_for_each_flag() {
     let last_analysis = lines
         .iter()
         .rposition(|line| {
-            line.starts_with("::") && line.contains("file=") && !line.contains(SURVIVED_RULE)
+            line.starts_with("::")
+                && line.contains("file=")
+                && !line.contains("title=Survived mutant")
         })
         .expect("analysis annotations");
     assert!(

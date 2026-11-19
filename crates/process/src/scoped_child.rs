@@ -24,7 +24,6 @@
 //! small (one async-write to a Mutex), the consequence is one stray
 //! SIGKILL during shutdown, and recovery requires a more invasive
 //! design (an `Arc<Mutex<Option<Child>>>` shared with the registry).
-//! Documented here so future maintainers don't re-derive the trade-off.
 
 use std::io;
 use std::process::{

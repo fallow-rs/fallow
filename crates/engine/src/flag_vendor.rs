@@ -242,6 +242,9 @@ fn date_epoch(text: &str) -> Option<u64> {
     crate::clock::utc_midnight_epoch(text.get(..10)?)
 }
 
+/// The location of a flag site: project-relative path, line and column.
+pub(crate) type SiteLocation = (String, u32, u32);
+
 /// Inputs to match an export with the rows of the report.
 pub struct VendorMatch<'a> {
     /// The export.
@@ -254,6 +257,9 @@ pub struct VendorMatch<'a> {
     /// The SDK label of every SDK site in the project, also outside the
     /// scope of the run.
     pub project_sdk_labels: &'a FxHashSet<String>,
+    /// The default provider of each SDK call that the report shows without
+    /// an SDK name, keyed by the location of the call.
+    pub hidden_sdk_labels: &'a FxHashMap<SiteLocation, String>,
     /// Whether to add `vendor-only` rows. A run narrowed to part of the
     /// project cannot tell that no code reads a key, so it adds none.
     pub add_vendor_only: bool,
@@ -287,9 +293,7 @@ pub(crate) fn apply_vendor_state(
         .any(|sdk| label_matches_source(sdk, &source));
     for row in rows.iter_mut() {
         if row.kind != RetirementFlagKind::SdkCall
-            || (source_is_project_sdk
-                && row.sdk_name.is_some()
-                && !sdk_matches_source(row, &source))
+            || (source_is_project_sdk && !row_matches_source(row, &source, input.hidden_sdk_labels))
         {
             continue;
         }
@@ -334,13 +338,22 @@ fn normalize_label(label: &str) -> String {
         .collect()
 }
 
-fn sdk_matches_source(row: &RetirementFlag, source: &str) -> bool {
-    if row.kind != RetirementFlagKind::SdkCall || source.is_empty() {
-        return false;
+/// Whether a row can belong to the vendor of the export. A row without an
+/// SDK name uses the default provider of each of its calls, and a call
+/// without a provider can belong to every vendor. `source` is normalized.
+fn row_matches_source(
+    row: &RetirementFlag,
+    source: &str,
+    hidden: &FxHashMap<SiteLocation, String>,
+) -> bool {
+    if let Some(sdk) = row.sdk_name.as_deref() {
+        return label_matches_source(sdk, source);
     }
-    row.sdk_name
-        .as_deref()
-        .is_some_and(|sdk| label_matches_source(sdk, source))
+    row.sites.iter().any(|site| {
+        hidden
+            .get(&(site.path.clone(), site.line, site.col))
+            .is_none_or(|sdk| label_matches_source(sdk, source))
+    })
 }
 
 /// Whether an SDK label names the vendor of the export. `source` is
@@ -521,6 +534,7 @@ mod tests {
                 key_prefix: Some("web."),
                 code_flag_names: &names,
                 project_sdk_labels: labels,
+                hidden_sdk_labels: &FxHashMap::default(),
                 add_vendor_only,
                 clock_epoch_secs: CLOCK,
             },
@@ -637,6 +651,51 @@ mod tests {
     }
 
     #[test]
+    fn a_row_without_a_name_uses_the_default_provider_of_its_calls() {
+        // Both rows show no SDK name. The calls of `hidden` default to
+        // Statsig, so the LaunchDarkly export does not cover them. The
+        // `mixed` row has a call that defaults to LaunchDarkly.
+        let mut hidden_row = sdk_row("hidden", None);
+        hidden_row.sites[0].line = 7;
+        let mut mixed_row = sdk_row("mixed", None);
+        mixed_row.sites[0].line = 8;
+        let mut second = mixed_row.sites[0].clone();
+        second.line = 9;
+        mixed_row.sites.push(second);
+        let mut rows = vec![hidden_row, mixed_row];
+        let hidden: FxHashMap<SiteLocation, String> = [
+            (("src/app.ts".to_string(), 7, 2), "Statsig".to_string()),
+            (("src/app.ts".to_string(), 8, 2), "Statsig".to_string()),
+            (("src/app.ts".to_string(), 9, 2), "LaunchDarkly".to_string()),
+        ]
+        .into_iter()
+        .collect();
+        let labels: FxHashSet<String> = ["Statsig", "LaunchDarkly"]
+            .into_iter()
+            .map(str::to_string)
+            .collect();
+        let export = export();
+        let names: FxHashSet<String> = rows.iter().map(|row| row.flag_name.clone()).collect();
+        apply_vendor_state(
+            &mut rows,
+            &VendorMatch {
+                export: &export,
+                key_prefix: Some("web."),
+                code_flag_names: &names,
+                project_sdk_labels: &labels,
+                hidden_sdk_labels: &hidden,
+                add_vendor_only: false,
+                clock_epoch_secs: CLOCK,
+            },
+        );
+        assert!(reasons_of(&rows, "hidden").is_empty());
+        assert_eq!(
+            reasons_of(&rows, "mixed"),
+            [RetirementReason::MissingInVendor]
+        );
+    }
+
+    #[test]
     fn a_narrowed_run_reads_the_sdk_labels_of_the_whole_project() {
         // Only the Statsig row is in scope, but the project also has
         // LaunchDarkly sites, so the LaunchDarkly export does not cover it.
@@ -668,6 +727,7 @@ mod tests {
                 key_prefix: None,
                 code_flag_names: &FxHashSet::default(),
                 project_sdk_labels: &std::iter::once("Statsig".to_string()).collect(),
+                hidden_sdk_labels: &FxHashMap::default(),
                 add_vendor_only: true,
                 clock_epoch_secs: CLOCK,
             },

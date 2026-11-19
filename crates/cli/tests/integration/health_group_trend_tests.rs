@@ -555,7 +555,11 @@ fn assert_formula_trend_outputs(
             }
             if format == "github-summary" {
                 assert!(!output.contains("Enable `save-snapshot: true`"), "{output}");
-                assert_eq!(output.contains("pts vs previous"), comparable, "{output}");
+                assert_eq!(
+                    output.contains("points against the previous run"),
+                    comparable,
+                    "{output}"
+                );
                 if !previous_scored {
                     assert!(
                         output.contains("Score comparison unavailable for this snapshot."),

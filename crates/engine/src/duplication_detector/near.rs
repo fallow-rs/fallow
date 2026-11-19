@@ -717,6 +717,7 @@ mod tests {
             metadata: None,
             cache_hit: false,
             suppressions: Vec::new(),
+            range_problems: Vec::new(),
         }
     }
 

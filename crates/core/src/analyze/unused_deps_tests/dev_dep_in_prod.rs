@@ -301,11 +301,8 @@ fn dev_dep_not_flagged_when_importing_file_is_unreachable() {
     );
 }
 
-/// A framework's own packages are build-time tooling, and the plugin that
-/// recognizes the framework already declares which they are. Every sibling
-/// dependency rule reads that declaration; this one used to skip it, so a
-/// scaffold that keeps its framework in devDependencies (which is what the
-/// SvelteKit scaffold generates) was told to promote the framework itself.
+/// SvelteKit scaffolds list `@sveltejs/kit` in `devDependencies`.
+/// A route may import it without a promotion finding when the plugin identifies it as tooling.
 #[test]
 fn plugin_declared_framework_tooling_is_not_promoted() {
     let (graph, _) = graph_with_import_from(
