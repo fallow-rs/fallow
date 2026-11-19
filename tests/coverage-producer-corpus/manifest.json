@@ -5,7 +5,7 @@
     "platform": "linux-x64",
     "coverage_root": "/fallow/corpus",
     "producers_lock_file": "producers/package-lock.json",
-    "producers_lock_sha256": "059e65ed2784fa16b4e8526598de71f890cdd3d8c99784a49a267ffc735ba088"
+    "producers_lock_sha256": "87fc7fe5985b13ad4b396f9f0346fa4cb66bb47819fab9f377aff9554f81167b"
   },
   "invariants": [
     {
@@ -88,7 +88,7 @@
     {
       "id": "oxc-coverage-instrument",
       "package": "oxc-coverage-instrument",
-      "version": "0.19.0",
+      "version": "0.20.0",
       "profile": "default",
       "driver": "producers/drivers/oxc-coverage-instrument.mjs",
       "consumers": "oxc-coverage-instrument vitest integration",
@@ -98,7 +98,7 @@
     {
       "id": "oxc-coverage-instrument-istanbul",
       "package": "oxc-coverage-instrument",
-      "version": "0.19.0",
+      "version": "0.20.0",
       "profile": "compat:istanbul",
       "driver": "producers/drivers/oxc-coverage-instrument-istanbul.mjs",
       "consumers": "oxc-coverage-instrument callers asking for Istanbul-shaped output",
