@@ -406,6 +406,26 @@ fn health_prune_removes_a_bucket_whose_findings_are_gone() {
 }
 
 #[test]
+fn health_prune_keeps_the_long_file_slot_of_a_baseline_without_file_lines_categories() {
+    let root = Path::new(ROOT);
+    let content = r#"{"kind":"health","finding_counts":{"src/utils.ts":{"complexity_moderate":{"count":2}}}}"#;
+    let current = [
+        finding("parse", FindingSeverity::Moderate),
+        make_health_finding_with(
+            root,
+            fallow_output::FILE_LINES_FINDING_NAME,
+            1,
+            ExceededThreshold::FileLines,
+            FindingSeverity::Moderate,
+        ),
+    ];
+
+    let pruned = prune_health_baseline(content, &current, root, false).unwrap();
+    assert!(pruned.removed.is_empty(), "{:?}", pruned.removed);
+    assert!(pruned.content.is_none());
+}
+
+#[test]
 fn health_prune_keeps_the_saved_key_of_a_moved_identity_bucket() {
     let root = Path::new("/nonexistent-fallow-prune-root");
     let mut saved = make_health_finding_with(

@@ -8,7 +8,10 @@ use rustc_hash::{FxHashMap, FxHashSet};
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use super::{HealthBaselineCount, HealthBaselineMode, HealthFindingCountMap, health_bucket_key};
+use super::{
+    HealthBaselineCount, HealthBaselineData, HealthBaselineMode, HealthFindingCountMap,
+    effective_identity_counts, health_bucket_key, health_finding_key,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum HealthFindingDimension {
@@ -61,16 +64,34 @@ pub(super) const HEALTH_FINDING_DIMENSIONS: [HealthFindingDimension; 3] = [
     HealthFindingDimension::FileLength,
 ];
 
+/// The category that a health baseline gives a file-length finding.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum FileLengthCounting {
+    /// `file_lines_<severity>`, which every save of this version writes. A
+    /// function finding that the baseline accepted and that was fixed then
+    /// leaves no slot for a file that became too long.
+    Separate,
+    /// `complexity_<severity>`, which a baseline saved before the
+    /// `file_lines_categories` marker holds. A run reads such a file as it
+    /// was saved, so the save of a new version does not report its long files
+    /// as new.
+    AsComplexity,
+}
+
 pub(super) fn health_finding_counts(
     findings: &[fallow_output::ComplexityViolation],
     root: &Path,
     mode: HealthBaselineMode,
+    counting: FileLengthCounting,
 ) -> HealthFindingCountMap {
     let mut counts = BTreeMap::new();
     for finding in findings {
         let bucket = health_bucket_key(finding, root, mode);
         let file_counts = counts.entry(bucket).or_insert_with(BTreeMap::new);
-        for category in health_finding_categories(finding).into_iter().flatten() {
+        for category in health_finding_categories(finding, counting)
+            .into_iter()
+            .flatten()
+        {
             file_counts
                 .entry(category.key().to_string())
                 .and_modify(|entry: &mut HealthBaselineCount| entry.count += 1)
@@ -82,15 +103,18 @@ pub(super) fn health_finding_counts(
 
 pub(super) fn health_finding_categories(
     finding: &fallow_output::ComplexityViolation,
+    counting: FileLengthCounting,
 ) -> [Option<HealthFindingCategory>; 2] {
     let category = |dimension| HealthFindingCategory {
         dimension,
         severity: finding.severity,
     };
-    // A file-length finding has its own category, so a function finding that
-    // the baseline accepted and that was fixed leaves no slot for it.
     if finding.exceeded.is_file_lines() {
-        return [Some(category(HealthFindingDimension::FileLength)), None];
+        let dimension = match counting {
+            FileLengthCounting::Separate => HealthFindingDimension::FileLength,
+            FileLengthCounting::AsComplexity => HealthFindingDimension::Complexity,
+        };
+        return [Some(category(dimension)), None];
     }
     let has_complexity =
         finding.exceeded.includes_cyclomatic() || finding.exceeded.includes_cognitive();
@@ -215,4 +239,53 @@ pub(super) fn health_overlap_entry_count(
     }
 
     overlap
+}
+
+impl HealthBaselineData {
+    /// The category that this file gives a file-length finding.
+    pub(super) const fn file_length_counting(&self) -> FileLengthCounting {
+        if self.file_lines_categories {
+            FileLengthCounting::Separate
+        } else {
+            FileLengthCounting::AsComplexity
+        }
+    }
+}
+
+/// Filter health findings to only include those not present in the baseline.
+pub fn filter_new_health_findings(
+    mut findings: Vec<fallow_output::ComplexityViolation>,
+    baseline: &HealthBaselineData,
+    root: &Path,
+    mode: HealthBaselineMode,
+) -> Vec<fallow_output::ComplexityViolation> {
+    let baseline_counts = baseline.counts_for(mode);
+    if !baseline_counts.is_empty() {
+        let counting = baseline.file_length_counting();
+        let current_counts = health_finding_counts(&findings, root, mode, counting);
+        let remapped = (mode == HealthBaselineMode::Identity)
+            .then(|| effective_identity_counts(baseline_counts, &current_counts, root))
+            .flatten();
+        let overflow_categories = health_overflow_categories(
+            &current_counts,
+            remapped.as_ref().unwrap_or(baseline_counts),
+        );
+        findings.retain(|finding| {
+            let bucket = health_bucket_key(finding, root, mode);
+            overflow_categories.get(&bucket).is_some_and(|categories| {
+                health_finding_categories(finding, counting)
+                    .into_iter()
+                    .flatten()
+                    .any(|category| categories.contains(category.key()))
+            })
+        });
+        return findings;
+    }
+
+    let baseline_keys: FxHashSet<&str> = baseline.findings.iter().map(String::as_str).collect();
+    findings.retain(|f| {
+        let key = health_finding_key(f, root);
+        !baseline_keys.contains(key.as_str())
+    });
+    findings
 }

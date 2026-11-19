@@ -125,10 +125,10 @@ mod install_state;
 use finding_counts::{baseline_finding_count, cascade_hidden_matches};
 mod caller_review_keys;
 mod health_categories;
+pub(crate) use health_categories::filter_new_health_findings;
 use health_categories::{
-    HEALTH_FINDING_DIMENSIONS, HealthFindingCategory, health_finding_categories,
-    health_finding_counts, health_overflow_categories, health_overlap_entry_count,
-    severity_counts_for_dimension, severity_index,
+    FileLengthCounting, HEALTH_FINDING_DIMENSIONS, HealthFindingCategory, health_finding_counts,
+    health_overlap_entry_count, severity_counts_for_dimension, severity_index,
 };
 mod identity_counts;
 use identity_counts::identity_counts_with_placeholder_allowance;
@@ -2199,6 +2199,11 @@ pub struct HealthBaselineData {
     /// Refactoring target keys: `relative_path:category`.
     #[serde(default)]
     pub(crate) target_keys: Vec<String>,
+    /// `true` when the counts hold file-length findings as `file_lines_*`. A
+    /// file without the marker holds them as `complexity_*`, and a run reads
+    /// it that way. See `FileLengthCounting`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) file_lines_categories: bool,
 }
 
 /// Serialized per-bucket finding tally inside a health baseline file.
@@ -2258,7 +2263,12 @@ impl HealthBaselineData {
             kind: Some(BaselineKind::Health),
             scope_reasons: Vec::new(),
             findings: Vec::new(),
-            finding_counts: health_finding_counts(findings, root, HealthBaselineMode::Count),
+            finding_counts: health_finding_counts(
+                findings,
+                root,
+                HealthBaselineMode::Count,
+                FileLengthCounting::Separate,
+            ),
             identity_finding_counts: HealthFindingCountMap::new(),
             runtime_coverage_findings: runtime_coverage_findings
                 .iter()
@@ -2272,6 +2282,7 @@ impl HealthBaselineData {
                 .iter()
                 .map(|t| target_baseline_key(t, root))
                 .collect(),
+            file_lines_categories: true,
         }
     }
 
@@ -2297,8 +2308,12 @@ impl HealthBaselineData {
         findings: &[fallow_output::ComplexityViolation],
         root: &Path,
     ) -> Self {
-        self.identity_finding_counts =
-            health_finding_counts(findings, root, HealthBaselineMode::Identity);
+        self.identity_finding_counts = health_finding_counts(
+            findings,
+            root,
+            HealthBaselineMode::Identity,
+            self.file_length_counting(),
+        );
         self
     }
 
@@ -2335,7 +2350,8 @@ impl HealthBaselineData {
                 moved_entries: 0,
             }
         } else {
-            let current_counts = health_finding_counts(findings, root, mode);
+            let current_counts =
+                health_finding_counts(findings, root, mode, self.file_length_counting());
             let direct = health_overlap_entry_count(&current_counts, baseline_counts);
             if mode != HealthBaselineMode::Identity {
                 return HealthBaselineOverlap {
@@ -2549,43 +2565,6 @@ fn runtime_coverage_source_hash_key(
             hash
         )
     })
-}
-
-/// Filter health findings to only include those not present in the baseline.
-pub(crate) fn filter_new_health_findings(
-    mut findings: Vec<fallow_output::ComplexityViolation>,
-    baseline: &HealthBaselineData,
-    root: &Path,
-    mode: HealthBaselineMode,
-) -> Vec<fallow_output::ComplexityViolation> {
-    let baseline_counts = baseline.counts_for(mode);
-    if !baseline_counts.is_empty() {
-        let current_counts = health_finding_counts(&findings, root, mode);
-        let remapped = (mode == HealthBaselineMode::Identity)
-            .then(|| effective_identity_counts(baseline_counts, &current_counts, root))
-            .flatten();
-        let overflow_categories = health_overflow_categories(
-            &current_counts,
-            remapped.as_ref().unwrap_or(baseline_counts),
-        );
-        findings.retain(|finding| {
-            let bucket = health_bucket_key(finding, root, mode);
-            overflow_categories.get(&bucket).is_some_and(|categories| {
-                health_finding_categories(finding)
-                    .into_iter()
-                    .flatten()
-                    .any(|category| categories.contains(category.key()))
-            })
-        });
-        return findings;
-    }
-
-    let baseline_keys: FxHashSet<&str> = baseline.findings.iter().map(String::as_str).collect();
-    findings.retain(|f| {
-        let key = health_finding_key(f, root);
-        !baseline_keys.contains(key.as_str())
-    });
-    findings
 }
 
 pub(crate) fn filter_new_runtime_coverage_findings(

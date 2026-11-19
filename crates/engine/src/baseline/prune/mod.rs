@@ -469,7 +469,8 @@ pub fn prune_health_baseline(
     )?;
 
     let mut removed = Vec::new();
-    let current_counts = health_finding_counts(findings, root, HealthBaselineMode::Count);
+    let counting = baseline.file_length_counting();
+    let current_counts = health_finding_counts(findings, root, HealthBaselineMode::Count, counting);
     prune_count_buckets(
         &mut baseline.finding_counts,
         &current_counts,
@@ -481,7 +482,8 @@ pub fn prune_health_baseline(
         .finding_counts
         .retain(|_, counts| !counts.is_empty());
     if !baseline.identity_finding_counts.is_empty() {
-        let current_identity = health_finding_counts(findings, root, HealthBaselineMode::Identity);
+        let current_identity =
+            health_finding_counts(findings, root, HealthBaselineMode::Identity, counting);
         let remaps: FxHashMap<String, String> = moved_identity_bucket_remaps(
             &baseline.identity_finding_counts,
             &current_identity,

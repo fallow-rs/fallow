@@ -132,6 +132,9 @@ const DUPES_LEGACY_GROUPS: &str = "clone_groups";
 const HEALTH_KEY_CATEGORIES: [&str; 3] = ["findings", "runtime_coverage_findings", "target_keys"];
 const HEALTH_FILE_COUNTS: &str = "finding_counts";
 const HEALTH_IDENTITY_COUNTS: &str = "identity_finding_counts";
+const HEALTH_FILE_LINES_MARKER: &str = "file_lines_categories";
+const HEALTH_FILE_LINES_PREFIX: &str = "file_lines_";
+const HEALTH_COMPLEXITY_PREFIX: &str = "complexity_";
 
 /// The string members of the array `category`, as a set.
 fn key_set<'a>(object: &'a Map<String, Value>, category: &str) -> BTreeSet<&'a str> {
@@ -381,18 +384,24 @@ fn add_grown_counts(
         return;
     };
     let base_buckets = base.get(category).and_then(Value::as_object);
+    let base_counts_file_lines_apart = base
+        .get(HEALTH_FILE_LINES_MARKER)
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
     let mut added = Vec::new();
     for (path, finding_counts) in head_buckets {
         let Some(finding_counts) = finding_counts.as_object() else {
             continue;
         };
+        let base_counts = base_buckets.and_then(|buckets| buckets.get(path));
         for (finding, count) in finding_counts {
             let now = bucket_count(Some(count));
-            let before = bucket_count(
-                base_buckets
-                    .and_then(|buckets| buckets.get(path))
-                    .and_then(|counts| counts.get(finding)),
-            );
+            let mut before = bucket_count(base_counts.and_then(|counts| counts.get(finding)));
+            if !base_counts_file_lines_apart
+                && let Some(severity) = finding.strip_prefix(HEALTH_FILE_LINES_PREFIX)
+            {
+                before += freed_complexity_slots(base_counts, finding_counts, severity);
+            }
             if now > before {
                 let key = display_key(path);
                 added.push(if before == 0 {
@@ -406,6 +415,22 @@ fn add_grown_counts(
     if !added.is_empty() {
         grown.entry(category.to_owned()).or_default().extend(added);
     }
+}
+
+/// The `complexity_<severity>` slots of a base bucket that the head bucket no
+/// longer uses.
+///
+/// A base file without the `file_lines_categories` marker counts a long file
+/// as complexity. The first save of a newer version moves that slot to
+/// `file_lines_<severity>`, and the move is not growth.
+fn freed_complexity_slots(
+    base_counts: Option<&Value>,
+    head_counts: &Map<String, Value>,
+    severity: &str,
+) -> u64 {
+    let complexity = format!("{HEALTH_COMPLEXITY_PREFIX}{severity}");
+    let base = bucket_count(base_counts.and_then(|counts| counts.get(&complexity)));
+    base.saturating_sub(bucket_count(head_counts.get(&complexity)))
 }
 
 fn bucket_count(bucket: Option<&Value>) -> u64 {
@@ -738,6 +763,45 @@ mod tests {
             ]
         );
         assert_eq!(growth.added_entries(), 3);
+    }
+
+    #[test]
+    fn a_long_file_moved_out_of_a_complexity_slot_is_not_growth() {
+        let base = json!({
+            "finding_counts": { "src/a.ts": { "complexity_moderate": { "count": 2 } } },
+        });
+        let head = json!({
+            "file_lines_categories": true,
+            "finding_counts": { "src/a.ts": {
+                "complexity_moderate": { "count": 1 },
+                "file_lines_moderate": { "count": 1 },
+            } },
+        });
+        assert!(baseline_growth(BaselineKind::Health, &base, &head).is_empty());
+
+        let grown_head = json!({
+            "file_lines_categories": true,
+            "finding_counts": { "src/a.ts": {
+                "complexity_moderate": { "count": 2 },
+                "file_lines_moderate": { "count": 1 },
+            } },
+        });
+        let growth = baseline_growth(BaselineKind::Health, &base, &grown_head);
+        assert_eq!(
+            keys(&growth),
+            vec![(
+                HEALTH_FILE_COUNTS.to_owned(),
+                vec!["src/a.ts file_lines_moderate (count 1)".to_owned()]
+            )]
+        );
+        let marked_base = json!({
+            "file_lines_categories": true,
+            "finding_counts": { "src/a.ts": { "complexity_moderate": { "count": 2 } } },
+        });
+        assert_eq!(
+            baseline_growth(BaselineKind::Health, &marked_base, &head).added_entries(),
+            1
+        );
     }
 
     #[test]
