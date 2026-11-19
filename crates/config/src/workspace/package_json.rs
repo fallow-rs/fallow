@@ -305,6 +305,28 @@ impl From<PackageEntryField> for fallow_types::discover::EntryPointSource {
     }
 }
 
+/// Collects the paths of a field that holds one string or a map of strings.
+/// `keep_map_value` filters the map values: a `browser` map also holds bare
+/// package names, which are not files of the package.
+fn push_string_values(
+    entries: &mut Vec<(PackageEntryField, String)>,
+    field: PackageEntryField,
+    value: &serde_json::Value,
+    keep_map_value: impl Fn(&str) -> bool,
+) {
+    match value {
+        serde_json::Value::String(path) => entries.push((field, path.clone())),
+        serde_json::Value::Object(map) => {
+            let paths = map
+                .values()
+                .filter_map(serde_json::Value::as_str)
+                .filter(|path| keep_map_value(path));
+            entries.extend(paths.map(|path| (field, path.to_owned())));
+        }
+        _ => {}
+    }
+}
+
 impl PackageJson {
     /// The raw value of the tool config key `key`, such as `prettier` or
     /// `nodemonConfig`. Returns `None` when the manifest has no such key, or
@@ -420,35 +442,13 @@ impl PackageJson {
         }
 
         if let Some(browser) = &self.browser {
-            match browser {
-                serde_json::Value::String(s) => {
-                    entries.push((PackageEntryField::Browser, s.clone()));
-                }
-                serde_json::Value::Object(map) => {
-                    for v in map.values() {
-                        if let serde_json::Value::String(s) = v
-                            && (s.starts_with("./") || s.starts_with("../"))
-                        {
-                            entries.push((PackageEntryField::Browser, s.clone()));
-                        }
-                    }
-                }
-                _ => {}
-            }
+            push_string_values(&mut entries, PackageEntryField::Browser, browser, |path| {
+                path.starts_with("./") || path.starts_with("../")
+            });
         }
 
         if let Some(bin) = &self.bin {
-            match bin {
-                serde_json::Value::String(s) => entries.push((PackageEntryField::Bin, s.clone())),
-                serde_json::Value::Object(map) => {
-                    for v in map.values() {
-                        if let serde_json::Value::String(s) = v {
-                            entries.push((PackageEntryField::Bin, s.clone()));
-                        }
-                    }
-                }
-                _ => {}
-            }
+            push_string_values(&mut entries, PackageEntryField::Bin, bin, |_| true);
         }
 
         if let Some(exports) = &self.exports {
