@@ -569,7 +569,7 @@ fn prune_count_buckets(
 }
 
 /// The saved slots per severity that the greedy match of
-/// [`super::overflowing_severities`] uses for the current findings.
+/// [`super::health_categories::overflowing_severities`] uses for the current findings.
 ///
 /// A saved slot covers a current finding of the same or a lower severity. The
 /// match takes the lowest compatible slot first, so keeping exactly the used
