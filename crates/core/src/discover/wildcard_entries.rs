@@ -1,15 +1,17 @@
-//! Expansion of wildcard subpath `exports` targets to entry points.
+//! Expansion of wildcard package.json entry targets to entry points.
 
 use std::path::{Path, PathBuf};
 
-use fallow_config::PackageJson;
+use fallow_config::{PackageEntryField, PackageJson};
 use fallow_graph::resolve::{MISSING_ONLY_OUTPUT_DIRS, OUTPUT_DIRS};
 use fallow_types::discover::{DiscoveredFile, EntryPoint, EntryPointSource};
 use rustc_hash::FxHashMap;
 
 use crate::plugins::config_parser::lexical_normalize;
 
-/// Expand a wildcard subpath export target to the discovered files it matches.
+/// Expand a wildcard package.json entry target to the discovered files it
+/// matches. Each match gets the source of `field`, the package.json field
+/// that declares the target.
 ///
 /// Follows the Node subpath pattern rule: every `*` in the target stands for
 /// the same substring, and that substring can contain `/`. So the target
@@ -28,27 +30,29 @@ use crate::plugins::config_parser::lexical_normalize;
 pub(super) fn expand_wildcard_entries(
     base: &Path,
     pattern: &str,
+    field: PackageEntryField,
     files: &[DiscoveredFile],
     entries: &mut Vec<EntryPoint>,
 ) {
+    let source = EntryPointSource::from(field);
     if is_root_output_target(pattern) {
         let before = entries.len();
         for source_pattern in wildcard_source_patterns(pattern, false) {
-            push_wildcard_matches(base, &source_pattern, files, entries, Capture::Any);
+            push_wildcard_matches(base, &source_pattern, files, entries, Capture::Any, &source);
         }
         let capture = if entries.len() == before {
             Capture::Any
         } else {
             Capture::SingleSegment
         };
-        push_wildcard_matches(base, pattern, files, entries, capture);
+        push_wildcard_matches(base, pattern, files, entries, capture, &source);
         return;
     }
     let before = entries.len();
-    push_wildcard_matches(base, pattern, files, entries, Capture::Any);
+    push_wildcard_matches(base, pattern, files, entries, Capture::Any, &source);
     let has_direct_match = entries.len() > before;
     for source_pattern in wildcard_source_patterns(pattern, has_direct_match) {
-        push_wildcard_matches(base, &source_pattern, files, entries, Capture::Any);
+        push_wildcard_matches(base, &source_pattern, files, entries, Capture::Any, &source);
     }
 }
 
@@ -150,13 +154,15 @@ enum Capture {
     SingleSegment,
 }
 
-/// Push the discovered files that match one wildcard target.
+/// Push the discovered files that match one wildcard target, each with
+/// `source`.
 fn push_wildcard_matches(
     base: &Path,
     pattern: &str,
     files: &[DiscoveredFile],
     entries: &mut Vec<EntryPoint>,
     capture: Capture,
+    source: &EntryPointSource,
 ) {
     let target = lexical_normalize(&base.join(pattern));
     let literal_dir: PathBuf = target
@@ -180,7 +186,7 @@ fn push_wildcard_matches(
         {
             entries.push(EntryPoint {
                 path: file.path.clone(),
-                source: EntryPointSource::PackageJsonExports,
+                source: source.clone(),
             });
         }
     }
@@ -295,7 +301,13 @@ mod tests {
 
         let files = discovered_files_under(dir.path());
         let mut entries = Vec::new();
-        expand_wildcard_entries(dir.path(), "./src/themes/*.css", &files, &mut entries);
+        expand_wildcard_entries(
+            dir.path(),
+            "./src/themes/*.css",
+            PackageEntryField::Exports,
+            &files,
+            &mut entries,
+        );
 
         assert_eq!(entries.len(), 2, "should expand wildcard to 2 CSS files");
         let paths: Vec<String> = entries
@@ -318,7 +330,13 @@ mod tests {
 
         let files = discovered_files_under(dir.path());
         let mut entries = Vec::new();
-        expand_wildcard_entries(dir.path(), "./src/themes/*.css", &files, &mut entries);
+        expand_wildcard_entries(
+            dir.path(),
+            "./src/themes/*.css",
+            PackageEntryField::Exports,
+            &files,
+            &mut entries,
+        );
 
         assert!(
             entries.is_empty(),
@@ -336,7 +354,13 @@ mod tests {
 
         let files = discovered_files_under(dir.path());
         let mut entries = Vec::new();
-        expand_wildcard_entries(dir.path(), "./src/themes/*.css", &files, &mut entries);
+        expand_wildcard_entries(
+            dir.path(),
+            "./src/themes/*.css",
+            PackageEntryField::Exports,
+            &files,
+            &mut entries,
+        );
 
         assert_eq!(entries.len(), 1, "should only match CSS files");
         assert!(
@@ -362,7 +386,13 @@ mod tests {
 
         let files = discovered_files_under(dir.path());
         let mut entries = Vec::new();
-        expand_wildcard_entries(dir.path(), "./src/*.ts", &files, &mut entries);
+        expand_wildcard_entries(
+            dir.path(),
+            "./src/*.ts",
+            PackageEntryField::Exports,
+            &files,
+            &mut entries,
+        );
 
         assert_eq!(
             entry_names(&entries, dir.path()),
@@ -385,7 +415,13 @@ mod tests {
 
         let files = discovered_files_under(dir.path());
         let mut entries = Vec::new();
-        expand_wildcard_entries(dir.path(), "./src/*", &files, &mut entries);
+        expand_wildcard_entries(
+            dir.path(),
+            "./src/*",
+            PackageEntryField::Exports,
+            &files,
+            &mut entries,
+        );
 
         assert_eq!(
             entry_names(&entries, dir.path()),
@@ -434,7 +470,13 @@ mod tests {
 
         let files = discovered_files_under(dir.path());
         let mut entries = Vec::new();
-        expand_wildcard_entries(dir.path(), "./src/*/*.ts", &files, &mut entries);
+        expand_wildcard_entries(
+            dir.path(),
+            "./src/*/*.ts",
+            PackageEntryField::Exports,
+            &files,
+            &mut entries,
+        );
 
         assert_eq!(
             entry_names(&entries, dir.path()),
@@ -452,7 +494,13 @@ mod tests {
 
         let files = discovered_files_under(dir.path());
         let mut entries = Vec::new();
-        expand_wildcard_entries(dir.path(), "./*.js", &files, &mut entries);
+        expand_wildcard_entries(
+            dir.path(),
+            "./*.js",
+            PackageEntryField::Exports,
+            &files,
+            &mut entries,
+        );
 
         assert_eq!(entry_names(&entries, dir.path()), vec!["src/middleware.ts"],);
     }
@@ -469,7 +517,13 @@ mod tests {
 
         let files = discovered_files_under(dir.path());
         let mut entries = Vec::new();
-        expand_wildcard_entries(dir.path(), "./*.js", &files, &mut entries);
+        expand_wildcard_entries(
+            dir.path(),
+            "./*.js",
+            PackageEntryField::Exports,
+            &files,
+            &mut entries,
+        );
 
         assert_eq!(
             entry_names(&entries, dir.path()),
@@ -484,7 +538,13 @@ mod tests {
 
         let files = discovered_files_under(dir.path());
         let mut entries = Vec::new();
-        expand_wildcard_entries(dir.path(), "./*.js", &files, &mut entries);
+        expand_wildcard_entries(
+            dir.path(),
+            "./*.js",
+            PackageEntryField::Exports,
+            &files,
+            &mut entries,
+        );
 
         assert_eq!(entry_names(&entries, dir.path()), vec!["plugin.js"]);
     }
@@ -503,7 +563,13 @@ mod tests {
 
         let files = discovered_files_under(dir.path());
         let mut entries = Vec::new();
-        expand_wildcard_entries(dir.path(), "./src/*/index.ts", &files, &mut entries);
+        expand_wildcard_entries(
+            dir.path(),
+            "./src/*/index.ts",
+            PackageEntryField::Exports,
+            &files,
+            &mut entries,
+        );
 
         assert_eq!(
             entry_names(&entries, dir.path()),
@@ -523,7 +589,13 @@ mod tests {
 
         let files = discovered_files_under(dir.path());
         let mut entries = Vec::new();
-        expand_wildcard_entries(dir.path(), "./*", &files, &mut entries);
+        expand_wildcard_entries(
+            dir.path(),
+            "./*",
+            PackageEntryField::Exports,
+            &files,
+            &mut entries,
+        );
 
         assert_eq!(entry_names(&entries, dir.path()), vec!["src/top.ts"]);
     }

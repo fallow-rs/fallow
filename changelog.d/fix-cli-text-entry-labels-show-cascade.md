@@ -4,8 +4,9 @@
   `fallow list --entry-points`, its JSON `entry_points[].source` value and the
   entry weight listing used the label `package.json main` for each field of the
   root package and of a workspace package, and `package.json exports` for each
-  field of a nested package. The label now names the real field:
-  `package.json main`, `package.json module`, `package.json types`,
+  field of a nested package. A wildcard target such as `"main": "./src/*.ts"`
+  used `package.json exports` in each package. The label now names the real
+  field: `package.json main`, `package.json module`, `package.json types`,
   `package.json typings`, `package.json source`, `package.json browser`,
   `package.json bin` or `package.json exports`. The four labels `types`,
   `typings`, `source` and `browser` are new values. A script that matches
@@ -19,7 +20,9 @@
   The JSON report listed the unused exports and unused types of unused files
   with the flag, but the human report still left them out and printed only a
   count line. The human report and its summary line now list and count them,
-  as the help text says. Without the flag the report hides them as before.
+  as the help text says. The same applies when the config sets
+  `showCascade: true`. Without the flag or the config key, the report hides
+  them as before.
   (Closes [#4832](https://github.com/fallow-rs/fallow/issues/4832))
 - **CLI texts match the behavior.** The help and the input error of `fallow dupes --trace` name
   both accepted forms, `FILE:LINE` and `dup:<fingerprint>`. The

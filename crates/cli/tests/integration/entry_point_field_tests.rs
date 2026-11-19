@@ -159,3 +159,58 @@ fn list_entry_points_human_names_the_package_json_field() {
         assert!(output.stdout.contains(line), "stdout: {}", output.stdout);
     }
 }
+
+/// A project whose packages declare wildcard targets in fields other than
+/// `exports`: the root and workspace packages in `main`, the nested package
+/// in `bin`.
+fn wildcard_field_project(workspaces: bool) -> TempDir {
+    let dir = TempDir::new().expect("temp project");
+    let root = dir.path();
+    let workspaces_field = if workspaces {
+        r#""workspaces": ["packages/*"],"#
+    } else {
+        ""
+    };
+    write(
+        root,
+        "package.json",
+        &format!(
+            r#"{{ "name": "wildcard-app", "private": true, {workspaces_field} "main": "./src/*.ts" }}"#
+        ),
+    );
+    write(root, "src/a.ts", "export const a = 1;\n");
+    write(root, "src/b.ts", "export const b = 1;\n");
+    let package_dir = if workspaces { "packages" } else { "tools" };
+    write(
+        root,
+        &format!("{package_dir}/lib/package.json"),
+        r#"{ "name": "lib", "private": true, "main": "./src/*.ts", "bin": { "lib": "./bin/*.js" } }"#,
+    );
+    write(
+        root,
+        &format!("{package_dir}/lib/src/c.ts"),
+        "export const c = 1;\n",
+    );
+    write(
+        root,
+        &format!("{package_dir}/lib/bin/run.js"),
+        "export const run = 1;\n",
+    );
+    dir
+}
+
+#[test]
+fn list_entry_points_json_names_the_field_of_a_wildcard_target() {
+    for (workspaces, package_dir) in [(true, "packages"), (false, "tools")] {
+        let dir = wildcard_field_project(workspaces);
+        let entries = entry_points_json(dir.path());
+        for (path, source) in [
+            ("src/a.ts".to_owned(), "package.json main"),
+            ("src/b.ts".to_owned(), "package.json main"),
+            (format!("{package_dir}/lib/src/c.ts"), "package.json main"),
+            (format!("{package_dir}/lib/bin/run.js"), "package.json bin"),
+        ] {
+            assert_eq!(source_of(&entries, &path), source, "entry point {path}");
+        }
+    }
+}

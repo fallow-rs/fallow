@@ -1054,9 +1054,9 @@ pub fn discover_root_entry_points(
             IgnoredCommandEntries::new(&config.ignore_command_entries),
             workspaces,
         );
-        for entry_path in pkg.entry_points() {
-            if entry_path.contains('*') {
-                expand_wildcard_entries(&config.root, &entry_path, files, &mut discovery.entries);
+        for (field, path) in pkg.entry_points_by_field() {
+            if path.contains('*') {
+                expand_wildcard_entries(&config.root, &path, field, files, &mut discovery.entries);
             }
         }
     }
@@ -1228,7 +1228,7 @@ fn collect_nested_package_entries(
     let output_map = TsconfigOutputMap::from_project(pkg_dir);
     for (field, entry_path) in pkg.entry_points_by_field() {
         if entry_path.contains('*') {
-            expand_wildcard_entries(pkg_dir, &entry_path, search.files, entries.runtime);
+            expand_wildcard_entries(pkg_dir, &entry_path, field, search.files, entries.runtime);
         } else if let Some(ep) = resolve_entry_path_with_output_map(
             pkg_dir,
             &entry_path,
@@ -1269,12 +1269,12 @@ pub fn discover_workspace_package_entry_points(
         let canonical_ws_root =
             dunce::canonicalize(ws_root).unwrap_or_else(|_| ws_root.to_path_buf());
         let output_map = TsconfigOutputMap::from_project(ws_root);
-        for (field, entry_path) in pkg.entry_points_by_field() {
-            if entry_path.contains('*') {
-                expand_wildcard_entries(ws_root, &entry_path, all_files, &mut discovery.entries);
+        for (field, path) in pkg.entry_points_by_field() {
+            if path.contains('*') {
+                expand_wildcard_entries(ws_root, &path, field, all_files, &mut discovery.entries);
             } else if let Some(ep) = resolve_entry_path_with_output_map(
                 ws_root,
-                &entry_path,
+                &path,
                 &canonical_ws_root,
                 EntryPointSource::from(field),
                 Some(&mut discovery.skipped_entries),
