@@ -66,9 +66,35 @@ const ATAN2_LEVELS: usize = 3;
 /// panic, see [`math_function_panics`]. The walk recurses once per block, so
 /// call it on a stack that the parse of `source` fits on.
 pub fn style_parse_is_safe(source: &str) -> bool {
+    if !may_open_checked_function(source) {
+        return true;
+    }
     let mut input = ParserInput::new(source);
     let mut parser = Parser::new(&mut input);
     walk(&mut parser, Context::default(), true).is_ok()
+}
+
+/// Whether `source` can hold a color or a math function, so the walk can
+/// find something. A function token is its name right before a `(`. An
+/// escape can spell any name, so a source with a `\` always gets the walk.
+fn may_open_checked_function(source: &str) -> bool {
+    let bytes = source.as_bytes();
+    bytes.contains(&b'\\')
+        || bytes.iter().enumerate().any(|(open, &byte)| {
+            byte == b'(' && {
+                let start = bytes[..open]
+                    .iter()
+                    .rposition(|&before| !is_name_byte(before))
+                    .map_or(0, |index| index + 1);
+                let name = &source[start..open];
+                is_one_of(name, COLOR_FUNCTIONS) || is_one_of(name, MATH_FUNCTIONS)
+            }
+        })
+}
+
+/// Whether `byte` can be a part of a CSS name.
+const fn is_name_byte(byte: u8) -> bool {
+    byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_') || byte >= 0x80
 }
 
 /// The open color and math functions around a token, and the declaration
