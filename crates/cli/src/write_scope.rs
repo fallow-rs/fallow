@@ -82,8 +82,12 @@ pub fn write_path_error(cli: &Cli, root: &Path) -> Option<String> {
 /// project, for example through a committed symlink, return a note and do not
 /// use it for the cache. `FALLOW_CACHE_DIR` and `--no-cache` skip the check,
 /// because the default directory is then not used for the cache.
-pub fn default_cache_dir_note(cli: &Cli, root: &Path) -> Option<String> {
-    if cli.no_cache || fallow_config::cache_dir_env_override().is_some() {
+pub fn default_cache_dir_note(
+    cli: &Cli,
+    root: &Path,
+    env: &fallow_config::EnvSnapshot,
+) -> Option<String> {
+    if cli.no_cache || env.cache_dir().is_some() {
         return None;
     }
     let cache_dir = root.join(".fallow");

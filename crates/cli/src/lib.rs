@@ -492,14 +492,14 @@ fn run_command() -> ExitCode {
             Err(code) => return code,
         };
 
-    if let Some(note) = write_scope::default_cache_dir_note(&cli, &root) {
+    let env = fallow_config::EnvSnapshot::capture();
+    if let Some(note) = write_scope::default_cache_dir_note(&cli, &root, &env) {
         eprintln!("{note}");
         cli.no_cache = true;
     }
 
     let (save_regression_file, save_to_config) = regression_save_targets(&cli);
-    let run_inputs =
-        run_inputs::dispatch_inputs(&cli, fallow_config::EnvSnapshot::capture(), output, quiet);
+    let run_inputs = run_inputs::dispatch_inputs(&cli, env, output, quiet);
 
     // The agent and hooks commands manage the Claude Code setup themselves.
     // A plugin hint after `agent uninstall` would ask the user to install

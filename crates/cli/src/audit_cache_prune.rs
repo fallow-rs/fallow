@@ -89,7 +89,7 @@ pub fn run_audit_cache_prune(opts: &AuditCachePruneOptions<'_>) -> ExitCode {
 /// outside the project is ignored. A config that does not load gives the
 /// default, so prune never fails on a bad config.
 fn project_cache_dir(opts: &AuditCachePruneOptions<'_>) -> PathBuf {
-    if let Some(dir) = fallow_config::cache_dir_env_override() {
+    if let Some(dir) = fallow_config::EnvSnapshot::capture().cache_dir() {
         return opts.root.join(dir);
     }
     let options = fallow_engine::project_config::ConfigFileOptions {

@@ -196,6 +196,15 @@ impl EnvSnapshot {
             .filter(|var| self.get(*var).is_some())
     }
 
+    /// The cache directory of `FALLOW_CACHE_DIR`, parsed with
+    /// [`crate::cache_dir_from_env_value`]. An empty value gives `None`.
+    #[must_use]
+    pub fn cache_dir(&self) -> Option<PathBuf> {
+        self.get(EnvVar::CacheDir)
+            .map(OsStr::to_os_string)
+            .and_then(crate::cache_dir_from_env_value)
+    }
+
     /// The bool value of `var`, parsed with [`bool_env_value`].
     #[must_use]
     pub fn bool(&self, var: EnvVar) -> EnvValue<bool> {
