@@ -413,3 +413,81 @@ fn coverage_analyze_cloud_keeps_the_cloud_context_of_each_row() {
         Some(serde_json::json!(0))
     );
 }
+
+/// One never-called function that only a test file references.
+const TEST_ONLY_BODY: &str = r#"{
+  "data": {
+    "repo": "acme/web",
+    "window": { "period_days": 30 },
+    "summary": {
+      "trace_count": 100, "deployments_seen": 2, "functions_tracked": 1,
+      "functions_hit": 0, "functions_unhit": 1, "functions_untracked": 0,
+      "coverage_percent": 0, "last_received_at": "2026-04-30T10:00:00.000Z"
+    },
+    "functions": [{
+      "file_path": "src/helpers.ts", "function_name": "resetForTests",
+      "line_number": 1, "start_line": 1, "end_line": 3, "hit_count": 0,
+      "tracking_state": "never_called", "never_called_source": "runtime_observed",
+      "deployments_observed": 2
+    }],
+    "warnings": []
+  }
+}"#;
+
+/// Without `--production`, the config decides the production mode, as in
+/// `fallow dead-code`. Production mode drops the test file, so the evidence
+/// says that only a test references the function.
+#[test]
+fn coverage_analyze_reads_production_from_the_config() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"fixture","type":"module","main":"src/index.ts"}"#,
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/helpers.ts"),
+        "export const resetForTests = () => {\n  return 'reset';\n};\n\nexport const handler = (input: string) => input.trim();\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/helpers.test.ts"),
+        "import { resetForTests } from './helpers';\n\nresetForTests();\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join("src/index.ts"),
+        "import { handler } from './helpers';\n\nexport const main = (input: string) => handler(input);\n",
+    )
+    .unwrap();
+    std::fs::write(root.join(".fallowrc.json"), r#"{"production": true}"#).unwrap();
+    crate::common::git(root, &["init", "-q"]);
+    let (endpoint, _request, handle) = serve_once(TEST_ONLY_BODY);
+    let output = std::process::Command::new(fallow_bin())
+        .args(["coverage", "analyze", "--cloud", "--repo", "acme/web"])
+        .args(["--api-endpoint", &endpoint, "--format", "json", "--quiet"])
+        .arg("--root")
+        .arg(root)
+        .env("NO_COLOR", "1")
+        .env("RUST_LOG", "")
+        .env("FALLOW_API_KEY", "fallow_live_test")
+        .env_remove("FALLOW_RUNTIME_COVERAGE_SOURCE")
+        .env_remove("FALLOW_PRODUCTION")
+        .output()
+        .expect("run fallow");
+    handle.join().expect("server joins");
+    let command_output = crate::common::CommandOutput {
+        stdout: String::from_utf8_lossy(&output.stdout).into_owned(),
+        stderr: String::from_utf8_lossy(&output.stderr).into_owned(),
+        code: output.status.code().unwrap_or(-1),
+    };
+    assert_eq!(command_output.code, 0, "stderr={}", command_output.stderr);
+    let json = parse_json(&command_output);
+    assert_eq!(
+        json.pointer("/runtime_coverage/findings/0/evidence/test_only_reference"),
+        Some(&serde_json::json!(true)),
+        "{json}"
+    );
+}

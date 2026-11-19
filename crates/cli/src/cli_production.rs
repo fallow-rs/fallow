@@ -104,20 +104,8 @@ impl crate::DispatchContext<'_> {
     }
 
     fn emit_resolve_error(&self, err: &ResolveError) -> ExitCode {
-        let message = match (err, self.cli.config.as_deref()) {
-            // The message names an explicit config file as the user wrote it.
-            (
-                ResolveError::ConfigLoad(ConfigLoadError::Parse {
-                    path: Some(_),
-                    message,
-                    ..
-                }),
-                Some(given),
-            ) => format!("failed to load config '{}': {message}", given.display()),
-            (ResolveError::ConfigLoad(load), _) => {
-                crate::runtime_support::config_load_error_message(load)
-            }
-            (ResolveError::NothingSelected { command, cause }, _) => {
+        let message = match err {
+            ResolveError::NothingSelected { command, cause } => {
                 if *command == CommandKind::Combined
                     && *cause == EmptyCause::Config
                     && self.cli.dupes_baseline.is_some()
@@ -127,9 +115,28 @@ impl crate::DispatchContext<'_> {
                 nothing_selected_message(*command, *cause)
                     .map_or_else(|| err.message(), str::to_owned)
             }
-            (_, _) => err.message(),
+            _ => resolve_error_message(err, self.cli.config.as_deref()),
         };
         crate::error::emit_input_error(&message, self.output)
+    }
+}
+
+/// The CLI text of a resolve error. `given_config` is the `--config` path as
+/// the user wrote it, so a load error names an explicit file as given.
+pub fn resolve_error_message(err: &ResolveError, given_config: Option<&std::path::Path>) -> String {
+    match (err, given_config) {
+        (
+            ResolveError::ConfigLoad(ConfigLoadError::Parse {
+                path: Some(_),
+                message,
+                ..
+            }),
+            Some(given),
+        ) => format!("failed to load config '{}': {message}", given.display()),
+        (ResolveError::ConfigLoad(load), _) => {
+            crate::runtime_support::config_load_error_message(load)
+        }
+        _ => err.message(),
     }
 }
 
@@ -190,6 +197,16 @@ pub fn benchmark_run(
     command: CommandKind,
     threads: usize,
 ) -> Result<ResolvedRun, ExitCode> {
+    fallow_engine::resolved_run::resolve_run(&benchmark_inputs(root, command, threads))
+        .map_err(|err| crate::error::emit_input_error(&err.message(), OutputFormat::Json))
+}
+
+/// The run inputs of [`benchmark_run`].
+pub fn benchmark_inputs(
+    root: &std::path::Path,
+    command: CommandKind,
+    threads: usize,
+) -> fallow_config::RunInputs {
     let flag = |value| fallow_types::sourced::Given {
         value,
         origin: fallow_types::sourced::Origin::Flag("--root"),
@@ -211,8 +228,7 @@ pub fn benchmark_run(
     });
     inputs.output = OutputFormat::Json;
     inputs.quiet = true;
-    fallow_engine::resolved_run::resolve_run(&inputs)
-        .map_err(|err| crate::error::emit_input_error(&err.message(), OutputFormat::Json))
+    inputs
 }
 
 /// The dead-code analysis of `run`. A run that skips it prints an error on

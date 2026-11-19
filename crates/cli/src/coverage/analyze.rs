@@ -7,7 +7,7 @@ use std::process::Command;
 use std::process::ExitCode;
 use std::time::Instant;
 
-use fallow_config::OutputFormat;
+use fallow_config::{OutputFormat, PlannedAnalysis};
 use fallow_cov_protocol::function_identity_id;
 use fallow_engine::source::inventory::{
     InventoryComplexity, InventoryEntry, walk_source_with_complexity,
@@ -88,6 +88,10 @@ impl fmt::Debug for AnalyzeArgs {
     }
 }
 
+#[path = "analyze_run.rs"]
+mod static_run;
+use static_run::{command_run, run_static_analysis, static_run};
+
 pub fn run(args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode {
     if let Err(message) = validate_output_format(ctx.output) {
         return emit_input_error(&message, ctx.output);
@@ -152,8 +156,7 @@ fn run_local(path: &Path, args: &AnalyzeArgs, ctx: &RunContext<'_>) -> ExitCode 
         Ok(options) => options,
         Err(code) => return code,
     };
-    let options = local_health_options(args, ctx, runtime_coverage);
-    let result = match crate::health::execute_health(&options) {
+    let result = match static_run::local_health(args, ctx, runtime_coverage) {
         Ok(result) => result,
         Err(code) => return code,
     };
@@ -185,6 +188,7 @@ pub fn benchmark_local_json(
         threads,
         explain: false,
         allow_remote_extends: false,
+        run_inputs: None,
     };
     let runtime_coverage = fallow_engine::health::RuntimeCoverageOptions {
         path: runtime_coverage_path.to_path_buf(),
@@ -486,41 +490,11 @@ struct StaticIndex {
     paths_by_file_name: FxHashMap<String, Vec<String>>,
 }
 
-/// One dead-code analysis run, kept together with the session so callers can
-/// still read the resolved root and config after the artifacts are produced.
-struct StaticAnalysisRun {
-    session: fallow_engine::session::AnalysisSession,
-    artifacts: fallow_engine::dead_code::DeadCodeAnalysisArtifacts,
-}
-
-/// Run dead-code analysis over the project, with or without the production
-/// file filter.
-fn run_static_analysis(
-    ctx: &RunContext<'_>,
-    production: bool,
-) -> Result<StaticAnalysisRun, ExitCode> {
-    let config = crate::load_config_for_analysis(
-        ctx.root,
-        ctx.config_path,
-        crate::ConfigLoadOptions {
-            output: ctx.output,
-            no_cache: ctx.no_cache,
-            threads: ctx.threads,
-            production_override: Some(production),
-            quiet: ctx.quiet,
-            allow_remote_extends: ctx.allow_remote_extends,
-        },
-        fallow_config::ProductionAnalysis::Health,
-    )?;
-    let session = fallow_engine::session::AnalysisSession::from_resolved_config(config)
-        .map_err(|err| emit_input_error(&format!("analysis failed: {err}"), ctx.output))?;
-    let artifacts = session
-        .analyze_dead_code_with_artifacts(true, true)
-        .map_err(|err| emit_input_error(&format!("analysis failed: {err}"), ctx.output))?;
-    Ok(StaticAnalysisRun { session, artifacts })
-}
-
+/// The static index of the project. Without `--production`, the config
+/// decides the production mode, as in `fallow dead-code`.
 fn build_static_index(ctx: &RunContext<'_>, production: bool) -> Result<StaticIndex, ExitCode> {
+    let command = command_run(ctx, production)?;
+    let production = *command.production(PlannedAnalysis::DeadCode).value();
     // Production mode drops test, spec, story, and fixture files from
     // discovery, so an export that only a test references reads as statically
     // unused and, with zero production invocations, as safe to delete. A
@@ -528,13 +502,14 @@ fn build_static_index(ctx: &RunContext<'_>, production: bool) -> Result<StaticIn
     // separates a genuinely dead export from a test-only one. It runs only in
     // production mode, where the first answer is the ambiguous one.
     let full_tree = if production {
+        let full = static_run(ctx, Some(false))?;
         Some(UnusedStaticSets::from_analysis(
-            &run_static_analysis(ctx, false)?.artifacts,
+            &run_static_analysis(&full, ctx.output)?.artifacts,
         ))
     } else {
         None
     };
-    let run = run_static_analysis(ctx, production)?;
+    let run = run_static_analysis(&command, ctx.output)?;
     let analysis_output = &run.artifacts;
     let Some(modules) = analysis_output.modules.as_deref() else {
         return Err(emit_input_error(
@@ -2325,6 +2300,7 @@ export const register = (app: { get: (path: string, handler: () => string) => vo
             threads: 1,
             explain: false,
             allow_remote_extends: false,
+            run_inputs: None,
         };
         let index = build_static_index(&ctx, false).expect("static index should build");
         (dir, index)
@@ -2379,6 +2355,7 @@ export const orphan = () => {
             threads: 1,
             explain: false,
             allow_remote_extends: false,
+            run_inputs: None,
         };
         let index = build_static_index(&ctx, true).expect("static index should build");
         (dir, index)

@@ -966,17 +966,7 @@ fn dispatch_coverage_command(dispatch: &DispatchContext<'_>, subcommand: &Covera
     let cli = dispatch.cli;
     coverage::run(
         map_coverage_subcommand(subcommand, cli.explain, cli.changed_since.as_deref()),
-        &coverage::RunContext {
-            root: dispatch.root,
-            config_path: &cli.config,
-            output: dispatch.output,
-            json_style: dispatch.json_style,
-            quiet: dispatch.quiet,
-            no_cache: cli.no_cache,
-            threads: dispatch.threads,
-            explain: cli.explain,
-            allow_remote_extends: cli.allow_remote_extends,
-        },
+        &coverage::RunContext::of(dispatch),
     )
 }
 

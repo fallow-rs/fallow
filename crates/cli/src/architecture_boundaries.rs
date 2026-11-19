@@ -663,8 +663,8 @@ fn coverage_upload_dead_code_routes_through_analysis_session() {
         let source =
             read_source_without_line_comments(source_path).expect("read coverage upload module");
         assert!(
-            source.contains("AnalysisSession::from_resolved_config"),
-            "{source_path} must build an AnalysisSession before dead-code analysis"
+            source.contains(".open_session()"),
+            "{source_path} must open the AnalysisSession of its run before dead-code analysis"
         );
         for forbidden in [
             "fallow_engine::dead_code::analyze(",
@@ -764,8 +764,8 @@ fn coverage_inventory_reuses_session_discovery() {
         read_source_without_line_comments("crates/cli/src/coverage/upload_inventory/mod.rs")
             .expect("read coverage upload inventory");
     assert!(
-        source.contains("AnalysisSession::from_resolved_config"),
-        "coverage upload-inventory must create one AnalysisSession for inventory discovery"
+        source.contains(".open_session()"),
+        "coverage upload-inventory must open one AnalysisSession for inventory discovery"
     );
     // Whitespace-collapsed so the assertion pins the parameter, not the line
     // wrapping rustfmt happens to choose for the signature.
