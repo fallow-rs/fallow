@@ -5,6 +5,10 @@
 //! object and materializes that tree in a temporary worktree at `HEAD`. In
 //! that worktree, `git diff HEAD` shows exactly the staged changes. Untracked
 //! files and unstaged edits of the checkout are not in it.
+//!
+//! The worktree is new on each run, so its own cache directory is empty.
+//! [`super::worktree_cache::WorktreeParseCache`] gives the run the parse
+//! cache of the checkout.
 
 use std::ffi::OsString;
 use std::path::{Path, PathBuf};

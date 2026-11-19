@@ -42,6 +42,32 @@ pub(super) fn dispatch_staged_audit(
     dispatch_audit(&staged_dispatch, &args)
 }
 
+/// Point the caches of a staged audit at the checkout, and lend the parse
+/// cache of the checkout to the temporary worktree. Drop of the result writes
+/// the parse cache back, after the run and before the worktree is removed.
+pub(super) fn lend_parse_cache(
+    dispatch: &DispatchContext<'_>,
+    args: &AuditDispatchArgs,
+    inputs: &mut ResolvedAuditInputs,
+) -> Option<audit::worktree_cache::WorktreeParseCache> {
+    let host = args.staged_host.as_deref()?;
+    // The temporary worktree is removed after the run, so the caches of a
+    // staged audit stay in the checkout.
+    inputs.cache_dir = fallow_engine::repo_refs::remap_cache_dir_for_base_worktree(
+        dispatch.root,
+        host,
+        &inputs.cache_dir,
+    );
+    (!dispatch.cli.no_cache).then(|| {
+        audit::worktree_cache::WorktreeParseCache::lend(
+            host,
+            &inputs.cache_dir,
+            dispatch.root,
+            audit::worktree_cache::WriteBack::Yes,
+        )
+    })
+}
+
 fn move_into(path: &Path, from: &Path, to: &Path) -> PathBuf {
     path.strip_prefix(from)
         .map_or_else(|_| path.to_path_buf(), |relative| to.join(relative))
