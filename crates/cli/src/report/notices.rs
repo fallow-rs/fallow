@@ -62,7 +62,8 @@ pub fn record_inert_flag(
             reason: reason.to_owned(),
             key,
         },
-    );
+    )
+    .into_root_relative(root);
     print_run_notices(std::slice::from_ref(&notice), output, quiet);
     fallow_config::append_workspace_diagnostics(root, vec![notice]);
 }

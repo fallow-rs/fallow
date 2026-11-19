@@ -101,6 +101,7 @@ fn inert_dupes_baseline_note_is_quiet_in_json() {
     assert_eq!(inert[0]["flag"], "--dupes-baseline");
     assert_eq!(inert[0]["analysis"], "duplication");
     assert_eq!(inert[0]["key"], "duplicates.enabled");
+    assert_eq!(inert[0]["path"], ".", "no host path: {json:#}");
 }
 
 #[test]
@@ -145,6 +146,7 @@ fn env_value_ignored_names_the_variable_not_the_value() {
     let ignored = notices(&json["workspace_diagnostics"], "env-value-ignored");
     assert_eq!(ignored.len(), 1, "{json:#}");
     assert_eq!(ignored[0]["name"], "FALLOW_PRODUCTION");
+    assert_eq!(ignored[0]["path"], ".", "no host path: {json:#}");
     assert_eq!(ignored[0]["degrades_analysis"], true);
 }
 

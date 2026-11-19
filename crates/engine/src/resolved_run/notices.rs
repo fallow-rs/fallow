@@ -39,7 +39,11 @@ pub(super) struct NoticeInput<'a> {
 /// The notices of one run, in a fixed order: the ignored variables, the
 /// fallback, the shadowed config files and the unknown security categories.
 pub(super) fn run_notices(input: &NoticeInput<'_>) -> Vec<WorkspaceDiagnostic> {
-    let notice = |path: PathBuf, kind| WorkspaceDiagnostic::new(input.root, path, kind);
+    // A notice names its path relative to the root, as every root-anchored
+    // diagnostic does, so no output holds the absolute path of the host.
+    let notice = |path: PathBuf, kind| {
+        WorkspaceDiagnostic::new(input.root, path, kind).into_root_relative(input.root)
+    };
     let mut notices: Vec<WorkspaceDiagnostic> = PRODUCTION_VARS
         .into_iter()
         .filter(|var| input.env.bool(*var) == EnvValue::Invalid)
@@ -194,6 +198,7 @@ mod tests {
         assert!(value.contains("FALLOW_PRODUCTION_HEALTH"), "{value}");
         assert!(!value.contains("perhaps"), "{value}");
         assert_eq!(kinds(&run), ["env-value-ignored"]);
+        assert_eq!(run.notices()[0].path, std::path::Path::new("."));
     }
 
     #[test]
@@ -227,7 +232,7 @@ mod tests {
         let (_dir, root) = project(&[(".fallowrc.json", "{}"), ("fallow.toml", "")]);
         let run = resolve(&root, Surface::Cli, &[]);
         assert_eq!(kinds(&run), ["config-file-shadowed"]);
-        assert!(run.notices()[0].path.ends_with("fallow.toml"));
+        assert_eq!(run.notices()[0].path, std::path::Path::new("fallow.toml"));
     }
 
     #[test]
