@@ -70,8 +70,12 @@ impl GivenSettings {
         if let Some(dir) = &self.cache_dir {
             config.override_cache_dir(dir.clone());
         }
-        if let Some(include) = self.include_entry_exports {
-            config.include_entry_exports = include;
+        // A given `true` wins over each workspace setting, as the
+        // `--include-entry-exports` flag does.
+        match self.include_entry_exports {
+            Some(true) => config.force_include_entry_exports(),
+            Some(false) => config.include_entry_exports = false,
+            None => {}
         }
         if self.package_baselines == Some(false) {
             config.workspace_changed_since.clear();

@@ -24,7 +24,7 @@ const GLOB_META: &[char] = &['*', '?', '[', ']', '{', '}', '\\'];
 
 /// What one `!` exception can reach, read from its literal segments. Used to
 /// decide which hidden directories the walk must open.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 struct ExceptionScope {
     /// The leading segments of the pattern that have no glob syntax.
     prefix: PathBuf,
@@ -144,6 +144,19 @@ impl IgnorePatternSet {
             })
         });
         self
+    }
+
+    /// Whether `other` has the globs of this set: the same number of ignore
+    /// globs and exceptions, the same exception scopes and the same project
+    /// globs. A clone of a set is the same set. The compiled globs have no
+    /// stable text form, so the check compares the shape and the sources.
+    #[must_use]
+    pub fn same_globs(&self, other: &Self) -> bool {
+        let user = |set: &Self| set.user.as_deref().map(|user| user.patterns.clone());
+        self.patterns.len() == other.patterns.len()
+            && self.exceptions.len() == other.exceptions.len()
+            && self.exception_scopes == other.exception_scopes
+            && user(self) == user(other)
     }
 
     /// Number of the project's own globs at the front of the set.
@@ -348,6 +361,17 @@ mod tests {
         }
         IgnorePatternSet::new(builder.build().expect("valid set"), &[])
             .with_user_patterns(user.iter().map(|pattern| (*pattern).to_owned()).collect())
+    }
+
+    #[test]
+    fn a_used_clone_has_the_same_globs() {
+        let ignores = user_set(&["gen/**"], &["**/dist/**"]);
+        let clone = ignores.clone();
+        assert!(clone.excludes("gen/a.ts"));
+        assert!(ignores.same_globs(&clone));
+        assert!(!ignores.same_globs(&user_set(&["src/**"], &["**/dist/**"])));
+        assert!(!ignores.same_globs(&user_set(&["gen/**"], &[])));
+        assert!(!set(&["a/**"], &["a/keep/**"]).same_globs(&set(&["a/**"], &[])));
     }
 
     #[test]
