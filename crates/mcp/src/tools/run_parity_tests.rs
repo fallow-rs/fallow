@@ -402,6 +402,21 @@ fn audit_false_per_analysis_param_is_not_set() {
     );
 }
 
+#[test]
+fn list_boundaries_honors_an_off_env_value() {
+    let (_dir, root) = project(Some(r#"{"production":true}"#));
+    let cwd = tempfile::tempdir().expect("cwd");
+    let env = EnvSnapshot::from_pairs(&[("FALLOW_PRODUCTION", "0")], Some(cwd.path()));
+    let params = serde_json::json!({ "root": root.display().to_string() });
+    let (entry, analysis) =
+        tool_call(TypedTool::ListBoundaries, &params, env, table).expect("list_boundaries call");
+    let run = resolve_programmatic_run(&analysis, &entry).expect("list_boundaries run");
+    assert_eq!(
+        production_of(&run, "dead_code"),
+        (false, "environment:FALLOW_PRODUCTION".to_owned())
+    );
+}
+
 /// The analyses whose production mode a tool decides.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Analysis {
@@ -485,8 +500,7 @@ fn reference_env(value: Option<&str>) -> Option<bool> {
 /// [`typed_production_matches_the_resolver`]. `None` lets the config decide.
 /// A tool with a CLI route that reads the `FALLOW_PRODUCTION*` variables
 /// takes the parameter, then the variable of the analysis, then
-/// `FALLOW_PRODUCTION`. `list_boundaries` keeps only a variable that turns
-/// production mode on. An audit parameter of one analysis counts only when
+/// `FALLOW_PRODUCTION`. An audit parameter of one analysis counts only when
 /// it is `true`.
 fn reference_override(
     tool: TypedTool,
@@ -506,8 +520,10 @@ fn reference_override(
         | TypedTool::TraceFile
         | TypedTool::TraceDependency
         | TypedTool::Combined => param.or(env),
-        TypedTool::FindDupes | TypedTool::TraceClone | TypedTool::ProjectInfo => env,
-        TypedTool::ListBoundaries => env.filter(|&on| on),
+        TypedTool::FindDupes
+        | TypedTool::TraceClone
+        | TypedTool::ProjectInfo
+        | TypedTool::ListBoundaries => env,
         TypedTool::TraceImportPath | TypedTool::TraceError => param,
         TypedTool::DecisionSurface | TypedTool::MutationPlan => None,
         TypedTool::Audit => own_param.filter(|&on| on).or(param).or(env),

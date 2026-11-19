@@ -119,10 +119,10 @@ fn list_boundaries_typed_route_reads_fallow_production() {
     assert_eq!(zone_file_count(&typed), zone_file_count(&cli));
 }
 
-/// `fallow list` turns production mode on from the variables and never off,
-/// so a variable that is off leaves the `production` config field in charge.
+/// `fallow list` reads the variables before the config, so a variable that is
+/// off turns off the `production` config field.
 #[test]
-fn list_boundaries_typed_route_keeps_the_config_when_fallow_production_is_off() {
+fn list_boundaries_typed_route_lets_an_off_fallow_production_beat_the_config() {
     let project = tempfile::tempdir().expect("project dir");
     let root = project.path();
     write_zone_project(root);
@@ -135,7 +135,11 @@ fn list_boundaries_typed_route_keeps_the_config_when_fallow_production_is_off() 
 
     let cli = cli_json(root, &env, &["list", "--boundaries"]);
     let typed = typed_json(&env, "list_boundaries", root, &serde_json::json!({}));
-    assert_eq!(zone_file_count(&cli), 2, "the config production mode wins");
+    assert_eq!(
+        zone_file_count(&cli),
+        3,
+        "the variable turns production off"
+    );
     assert_eq!(zone_file_count(&typed), zone_file_count(&cli));
 }
 

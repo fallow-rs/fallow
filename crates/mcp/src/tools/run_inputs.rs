@@ -15,7 +15,7 @@ use std::sync::atomic::AtomicBool;
 use fallow_api::AnalysisOptions;
 #[cfg(test)]
 use fallow_api::run::ProgrammaticEntry;
-use fallow_api::run::{EnvSnapshot, EnvVar, HostInputs, Surface};
+use fallow_api::run::{EnvSnapshot, HostInputs, Surface};
 
 use super::api_runtime::{EnvScope, SharedParams, shared_analysis_options};
 
@@ -248,11 +248,6 @@ pub(super) fn typed_call(
     env: EnvSnapshot,
     cancellation: Option<Arc<AtomicBool>>,
 ) -> TypedCall {
-    let env = if tool == TypedTool::ListBoundaries {
-        production_switches_on_only(env)
-    } else {
-        env
-    };
     let analysis = AnalysisOptions {
         production: production.production.unwrap_or(false),
         production_override: production.production,
@@ -266,19 +261,6 @@ pub(super) fn typed_call(
         #[cfg(test)]
         entry: tool.entry(production),
         analysis,
-    }
-}
-
-/// `fallow list` turns production mode on from the variables and never off:
-/// a variable that turns the dead-code analysis off leaves the config in
-/// charge. So the snapshot loses the variables that decide an off value.
-fn production_switches_on_only(env: EnvSnapshot) -> EnvSnapshot {
-    let value = |var| env.bool(var).set();
-    let decided = value(EnvVar::ProductionDeadCode).or_else(|| value(EnvVar::Production));
-    if decided == Some(false) {
-        env.retain(|var| !matches!(var, EnvVar::Production | EnvVar::ProductionDeadCode))
-    } else {
-        env
     }
 }
 
