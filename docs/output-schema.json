@@ -39248,6 +39248,17 @@
         "include_entry_exports": {
           "description": "Whether the run reports unused exports of entry files.",
           "$ref": "#/definitions/Sourced_for_boolean"
+        },
+        "type_aware": {
+          "anyOf": [
+            {
+              "$ref": "#/definitions/Sourced_for_boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Whether the run refines its findings with the type-aware companion.\n`null` when `FALLOW_TYPE_AWARE` or `FALLOW_TYPE_AWARE_REQUIRE` has a\nvalue that the run cannot use."
         }
       },
       "required": [

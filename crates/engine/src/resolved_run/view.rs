@@ -54,6 +54,10 @@ impl ResolvedRun {
                 cache_max_size_mb: cloned(&settings.cache_max_size_mb),
                 package_baselines: cloned(&settings.package_baselines),
                 include_entry_exports: cloned(&settings.include_entry_exports),
+                type_aware: self
+                    .type_aware()
+                    .ok()
+                    .map(|type_aware| type_aware.enabled.clone()),
             },
             env: self.env_view(),
             fell_back: self.fallback.is_some(),

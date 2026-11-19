@@ -42,6 +42,7 @@ struct ApiOptions {
     production_dead_code: Option<bool>,
     production_health: Option<bool>,
     production_dupes: Option<bool>,
+    type_aware: Option<bool>,
 }
 
 fn entry(name: &str, options: &ApiOptions) -> Option<ProgrammaticEntry> {
@@ -129,6 +130,10 @@ fn translate_with(
         no_package_baselines: input.options.no_package_baselines,
         no_cache: input.options.no_cache,
         threads: input.options.threads.or(Some(1)),
+        type_aware: crate::TypeAwareOptions {
+            enabled: input.options.type_aware,
+            ..crate::TypeAwareOptions::default()
+        },
         host: Some(HostInputs {
             surface: Surface::Api,
             env,

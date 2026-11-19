@@ -285,6 +285,11 @@ const PRODUCTION_DUPES: OptionName = OptionName {
     node: "productionDupes",
     mcp: "production_dupes",
 };
+const TYPE_AWARE: OptionName = OptionName {
+    api: "analysis.type_aware.enabled",
+    node: "typeAware.enabled",
+    mcp: "type_aware",
+};
 
 /// The environment snapshot of one programmatic call: the snapshot of
 /// `options.host`, else a snapshot of the process environment.
@@ -334,6 +339,10 @@ pub(crate) fn run_inputs(
         .no_package_baselines
         .then(|| given(false, NO_PACKAGE_BASELINES));
     inputs.include_entry_exports = when_true(route.include_entry_exports, INCLUDE_ENTRY_EXPORTS);
+    inputs.type_aware.enabled = options
+        .type_aware
+        .enabled
+        .map(|enabled| given(enabled, TYPE_AWARE));
     inputs.output = OutputFormat::Json;
     inputs.quiet = true;
     if entry.reads_production() {
