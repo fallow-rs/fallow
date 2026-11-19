@@ -46,7 +46,7 @@ pub(super) enum TypedTool {
 impl TypedTool {
     /// Every typed tool.
     #[cfg(test)]
-    pub(super) const ALL: [Self; 18] = [
+    const ALL: [Self; 18] = [
         Self::Analyze,
         Self::CheckChanged,
         Self::CheckArchitecture,
@@ -95,7 +95,7 @@ impl TypedTool {
 
     /// The tool with the wire name `name`.
     #[cfg(test)]
-    pub(super) fn from_name(name: &str) -> Option<Self> {
+    fn from_name(name: &str) -> Option<Self> {
         Self::ALL.into_iter().find(|tool| tool.name() == name)
     }
 
