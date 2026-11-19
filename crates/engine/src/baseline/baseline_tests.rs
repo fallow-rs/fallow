@@ -822,6 +822,7 @@ fn the_declared_keys_are_every_key_each_format_writes() {
         runtime_coverage_findings: vec!["src/a.ts:run".to_owned()],
         runtime_coverage_source_hashes: vec!["src/a.ts\0run\0hash".to_owned()],
         target_keys: vec!["src/a.ts:complexity".to_owned()],
+        file_lines_categories: false,
     };
     assert_eq!(
         serialized_keys_without_kind(&health),
@@ -1464,6 +1465,7 @@ fn health_baseline_legacy_findings_still_load() {
         finding_counts: BTreeMap::new(),
         identity_finding_counts: BTreeMap::new(),
         target_keys: vec![],
+        file_lines_categories: false,
         runtime_coverage_findings: vec![],
         runtime_coverage_source_hashes: vec![],
     };
@@ -1506,6 +1508,109 @@ fn health_baseline_keeps_crap_categories_separate_from_complexity() {
     );
     assert_eq!(filtered.len(), 1);
     assert_eq!(filtered[0].name, "newComplexityOnlyFunction");
+}
+
+#[test]
+fn health_baseline_slot_of_a_fixed_function_does_not_accept_a_long_file() {
+    let root = PathBuf::from("/project");
+    let moderate = |name: &str, line: u32, exceeded| {
+        make_health_finding_with(
+            &root,
+            name,
+            line,
+            exceeded,
+            fallow_output::FindingSeverity::Moderate,
+        )
+    };
+    let baseline = HealthBaselineData::from_findings(
+        &[
+            moderate("parse", 10, fallow_output::ExceededThreshold::Both),
+            moderate("render", 90, fallow_output::ExceededThreshold::Both),
+        ],
+        &[],
+        &[],
+        &root,
+    );
+    let filtered = filter_new_health_findings(
+        vec![
+            moderate("parse", 10, fallow_output::ExceededThreshold::Both),
+            moderate(
+                fallow_output::FILE_LINES_FINDING_NAME,
+                1,
+                fallow_output::ExceededThreshold::FileLines,
+            ),
+        ],
+        &baseline,
+        &root,
+    );
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(
+        filtered[0].exceeded,
+        fallow_output::ExceededThreshold::FileLines
+    );
+}
+
+/// The function finding and the long file of a baseline that the previous
+/// release saved: it counts both as `complexity_moderate`.
+fn file_lines_baseline_findings(root: &Path) -> Vec<fallow_output::ComplexityViolation> {
+    let moderate = |name: &str, line: u32, exceeded| {
+        make_health_finding_with(
+            root,
+            name,
+            line,
+            exceeded,
+            fallow_output::FindingSeverity::Moderate,
+        )
+    };
+    vec![
+        moderate("parse", 10, fallow_output::ExceededThreshold::Both),
+        moderate(
+            fallow_output::FILE_LINES_FINDING_NAME,
+            1,
+            fallow_output::ExceededThreshold::FileLines,
+        ),
+    ]
+}
+
+#[test]
+fn health_baseline_saved_before_file_lines_categories_still_accepts_its_long_files() {
+    let root = PathBuf::from("/project");
+    let file_bucket = format!("src/utils.ts\0{}", fallow_output::FILE_LINES_FINDING_NAME);
+    let legacy: HealthBaselineData = serde_json::from_value(serde_json::json!({
+        "kind": "health",
+        "finding_counts": { "src/utils.ts": { "complexity_moderate": { "count": 2 } } },
+        "identity_finding_counts": {
+            "src/utils.ts\u{0}parse": { "complexity_moderate": { "count": 1 } },
+            file_bucket: { "complexity_moderate": { "count": 1 } },
+        },
+    }))
+    .unwrap();
+    let findings = file_lines_baseline_findings(&root);
+    for mode in [HealthBaselineMode::Count, HealthBaselineMode::Identity] {
+        let filtered = super::filter_new_health_findings(findings.clone(), &legacy, &root, mode);
+        assert!(filtered.is_empty(), "{mode:?}: {filtered:?}");
+        let overlap = legacy.overlap_entries(&findings, &root, mode);
+        assert_eq!(overlap.matched_entries, 2, "{mode:?}");
+    }
+}
+
+#[test]
+fn health_baseline_save_records_file_lines_categories() {
+    let root = PathBuf::from("/project");
+    let findings = file_lines_baseline_findings(&root);
+    let saved = HealthBaselineData::from_findings(&findings, &[], &[], &root)
+        .with_identity(&findings, &root);
+    let json = serde_json::to_value(&saved).unwrap();
+    assert_eq!(json["file_lines_categories"], true);
+    assert_eq!(
+        json["finding_counts"]["src/utils.ts"]["file_lines_moderate"]["count"],
+        1
+    );
+    let reloaded: HealthBaselineData = serde_json::from_value(json).unwrap();
+    for mode in [HealthBaselineMode::Count, HealthBaselineMode::Identity] {
+        let filtered = super::filter_new_health_findings(findings.clone(), &reloaded, &root, mode);
+        assert!(filtered.is_empty(), "{mode:?}: {filtered:?}");
+    }
 }
 
 #[test]
@@ -1957,6 +2062,7 @@ fn health_baseline_empty_keeps_all() {
         finding_counts: BTreeMap::new(),
         identity_finding_counts: BTreeMap::new(),
         target_keys: vec![],
+        file_lines_categories: false,
         runtime_coverage_findings: vec![],
         runtime_coverage_source_hashes: vec![],
     };

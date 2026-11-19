@@ -124,6 +124,12 @@ mod install_state;
 
 use finding_counts::{baseline_finding_count, cascade_hidden_matches};
 mod caller_review_keys;
+mod health_categories;
+pub(crate) use health_categories::filter_new_health_findings;
+use health_categories::{
+    FileLengthCounting, HEALTH_FINDING_DIMENSIONS, HealthFindingCategory, health_finding_counts,
+    health_overlap_entry_count, severity_counts_for_dimension, severity_index,
+};
 mod identity_counts;
 use identity_counts::identity_counts_with_placeholder_allowance;
 
@@ -2193,6 +2199,11 @@ pub struct HealthBaselineData {
     /// Refactoring target keys: `relative_path:category`.
     #[serde(default)]
     pub(crate) target_keys: Vec<String>,
+    /// `true` when the counts hold file-length findings as `file_lines_*`. A
+    /// file without the marker holds them as `complexity_*`, and a run reads
+    /// it that way. See `FileLengthCounting`.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) file_lines_categories: bool,
 }
 
 /// Serialized per-bucket finding tally inside a health baseline file.
@@ -2228,46 +2239,6 @@ pub enum HealthBaselineMode {
     Identity,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum HealthFindingDimension {
-    Complexity,
-    Crap,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct HealthFindingCategory {
-    dimension: HealthFindingDimension,
-    severity: fallow_output::FindingSeverity,
-}
-
-impl HealthFindingCategory {
-    const fn key(self) -> &'static str {
-        match (self.dimension, self.severity) {
-            (HealthFindingDimension::Complexity, fallow_output::FindingSeverity::Moderate) => {
-                "complexity_moderate"
-            }
-            (HealthFindingDimension::Complexity, fallow_output::FindingSeverity::High) => {
-                "complexity_high"
-            }
-            (HealthFindingDimension::Complexity, fallow_output::FindingSeverity::Critical) => {
-                "complexity_critical"
-            }
-            (HealthFindingDimension::Crap, fallow_output::FindingSeverity::Moderate) => {
-                "crap_moderate"
-            }
-            (HealthFindingDimension::Crap, fallow_output::FindingSeverity::High) => "crap_high",
-            (HealthFindingDimension::Crap, fallow_output::FindingSeverity::Critical) => {
-                "crap_critical"
-            }
-        }
-    }
-}
-
-const HEALTH_FINDING_DIMENSIONS: [HealthFindingDimension; 2] = [
-    HealthFindingDimension::Complexity,
-    HealthFindingDimension::Crap,
-];
-
 impl HealthBaselineData {
     /// The keys this format writes, for [`declares_baseline_format`]. A health
     /// baseline omits the buckets it has nothing for, so a file carrying any
@@ -2292,7 +2263,12 @@ impl HealthBaselineData {
             kind: Some(BaselineKind::Health),
             scope_reasons: Vec::new(),
             findings: Vec::new(),
-            finding_counts: health_finding_counts(findings, root, HealthBaselineMode::Count),
+            finding_counts: health_finding_counts(
+                findings,
+                root,
+                HealthBaselineMode::Count,
+                FileLengthCounting::Separate,
+            ),
             identity_finding_counts: HealthFindingCountMap::new(),
             runtime_coverage_findings: runtime_coverage_findings
                 .iter()
@@ -2306,6 +2282,7 @@ impl HealthBaselineData {
                 .iter()
                 .map(|t| target_baseline_key(t, root))
                 .collect(),
+            file_lines_categories: true,
         }
     }
 
@@ -2331,8 +2308,12 @@ impl HealthBaselineData {
         findings: &[fallow_output::ComplexityViolation],
         root: &Path,
     ) -> Self {
-        self.identity_finding_counts =
-            health_finding_counts(findings, root, HealthBaselineMode::Identity);
+        self.identity_finding_counts = health_finding_counts(
+            findings,
+            root,
+            HealthBaselineMode::Identity,
+            self.file_length_counting(),
+        );
         self
     }
 
@@ -2369,7 +2350,8 @@ impl HealthBaselineData {
                 moved_entries: 0,
             }
         } else {
-            let current_counts = health_finding_counts(findings, root, mode);
+            let current_counts =
+                health_finding_counts(findings, root, mode, self.file_length_counting());
             let direct = health_overlap_entry_count(&current_counts, baseline_counts);
             if mode != HealthBaselineMode::Identity {
                 return HealthBaselineOverlap {
@@ -2555,164 +2537,6 @@ fn identity_counts_with_move_tolerance(
     Some(remapped)
 }
 
-fn health_finding_counts(
-    findings: &[fallow_output::ComplexityViolation],
-    root: &Path,
-    mode: HealthBaselineMode,
-) -> HealthFindingCountMap {
-    let mut counts = BTreeMap::new();
-    for finding in findings {
-        let bucket = health_bucket_key(finding, root, mode);
-        let file_counts = counts.entry(bucket).or_insert_with(BTreeMap::new);
-        for category in health_finding_categories(finding).into_iter().flatten() {
-            file_counts
-                .entry(category.key().to_string())
-                .and_modify(|entry: &mut HealthBaselineCount| entry.count += 1)
-                .or_insert(HealthBaselineCount { count: 1 });
-        }
-    }
-    counts
-}
-
-fn health_finding_categories(
-    finding: &fallow_output::ComplexityViolation,
-) -> [Option<HealthFindingCategory>; 2] {
-    let complexity_category = HealthFindingCategory {
-        dimension: HealthFindingDimension::Complexity,
-        severity: finding.severity,
-    };
-    let crap_category = HealthFindingCategory {
-        dimension: HealthFindingDimension::Crap,
-        severity: finding.severity,
-    };
-    // A file-length finding counts as complexity: it has no CRAP part, and a
-    // finding without a category would never match a baseline entry.
-    let has_complexity = finding.exceeded.includes_cyclomatic()
-        || finding.exceeded.includes_cognitive()
-        || finding.exceeded.is_file_lines();
-    let has_crap = finding.exceeded.includes_crap();
-    [
-        has_complexity.then_some(complexity_category),
-        has_crap.then_some(crap_category),
-    ]
-}
-
-fn severity_index(severity: fallow_output::FindingSeverity) -> usize {
-    match severity {
-        fallow_output::FindingSeverity::Moderate => 0,
-        fallow_output::FindingSeverity::High => 1,
-        fallow_output::FindingSeverity::Critical => 2,
-    }
-}
-
-fn severity_counts_for_dimension(
-    file_counts: Option<&BTreeMap<String, HealthBaselineCount>>,
-    dimension: HealthFindingDimension,
-) -> [usize; 3] {
-    let mut counts = [0; 3];
-    for severity in [
-        fallow_output::FindingSeverity::Moderate,
-        fallow_output::FindingSeverity::High,
-        fallow_output::FindingSeverity::Critical,
-    ] {
-        let category = HealthFindingCategory {
-            dimension,
-            severity,
-        };
-        counts[severity_index(severity)] = file_counts
-            .and_then(|entries| entries.get(category.key()))
-            .map_or(0, |entry| entry.count);
-    }
-    counts
-}
-
-fn overflowing_severities(current: [usize; 3], baseline: [usize; 3]) -> [bool; 3] {
-    let mut available = baseline;
-    let mut overflow = [false; 3];
-
-    for severity_idx in 0..3 {
-        let compatible = available[severity_idx..].iter().sum::<usize>();
-        overflow[severity_idx] = compatible < current[severity_idx];
-
-        let mut matched = current[severity_idx].min(compatible);
-        for slot in available.iter_mut().skip(severity_idx) {
-            let taken = matched.min(*slot);
-            *slot -= taken;
-            matched -= taken;
-            if matched == 0 {
-                break;
-            }
-        }
-    }
-
-    overflow
-}
-
-fn health_overflow_categories(
-    current_counts: &HealthFindingCountMap,
-    baseline_counts: &HealthFindingCountMap,
-) -> FxHashMap<String, FxHashSet<&'static str>> {
-    let mut overflow_by_path = FxHashMap::default();
-
-    for (path, current_file_counts) in current_counts {
-        let mut overflow_categories: FxHashSet<&'static str> = FxHashSet::default();
-        let baseline_file_counts = baseline_counts.get(path);
-
-        for dimension in HEALTH_FINDING_DIMENSIONS {
-            let current = severity_counts_for_dimension(Some(current_file_counts), dimension);
-            let baseline = severity_counts_for_dimension(baseline_file_counts, dimension);
-            let overflow = overflowing_severities(current, baseline);
-
-            for severity in [
-                fallow_output::FindingSeverity::Moderate,
-                fallow_output::FindingSeverity::High,
-                fallow_output::FindingSeverity::Critical,
-            ] {
-                if overflow[severity_index(severity)] {
-                    overflow_categories.insert(
-                        HealthFindingCategory {
-                            dimension,
-                            severity,
-                        }
-                        .key(),
-                    );
-                }
-            }
-        }
-
-        if !overflow_categories.is_empty() {
-            overflow_by_path.insert(path.clone(), overflow_categories);
-        }
-    }
-
-    overflow_by_path
-}
-
-fn health_overlap_entry_count(
-    current_counts: &HealthFindingCountMap,
-    baseline_counts: &HealthFindingCountMap,
-) -> usize {
-    let mut overlap = 0;
-
-    for (path, baseline_file_counts) in baseline_counts {
-        let current_file_counts = current_counts.get(path);
-
-        for dimension in HEALTH_FINDING_DIMENSIONS {
-            let current_total: usize =
-                severity_counts_for_dimension(current_file_counts, dimension)
-                    .into_iter()
-                    .sum();
-            let baseline_total: usize =
-                severity_counts_for_dimension(Some(baseline_file_counts), dimension)
-                    .into_iter()
-                    .sum();
-            overlap += current_total.min(baseline_total);
-        }
-    }
-
-    overlap
-}
-
 fn runtime_coverage_finding_key(
     finding: &fallow_output::RuntimeCoverageFinding,
     _root: &Path,
@@ -2741,43 +2565,6 @@ fn runtime_coverage_source_hash_key(
             hash
         )
     })
-}
-
-/// Filter health findings to only include those not present in the baseline.
-pub(crate) fn filter_new_health_findings(
-    mut findings: Vec<fallow_output::ComplexityViolation>,
-    baseline: &HealthBaselineData,
-    root: &Path,
-    mode: HealthBaselineMode,
-) -> Vec<fallow_output::ComplexityViolation> {
-    let baseline_counts = baseline.counts_for(mode);
-    if !baseline_counts.is_empty() {
-        let current_counts = health_finding_counts(&findings, root, mode);
-        let remapped = (mode == HealthBaselineMode::Identity)
-            .then(|| effective_identity_counts(baseline_counts, &current_counts, root))
-            .flatten();
-        let overflow_categories = health_overflow_categories(
-            &current_counts,
-            remapped.as_ref().unwrap_or(baseline_counts),
-        );
-        findings.retain(|finding| {
-            let bucket = health_bucket_key(finding, root, mode);
-            overflow_categories.get(&bucket).is_some_and(|categories| {
-                health_finding_categories(finding)
-                    .into_iter()
-                    .flatten()
-                    .any(|category| categories.contains(category.key()))
-            })
-        });
-        return findings;
-    }
-
-    let baseline_keys: FxHashSet<&str> = baseline.findings.iter().map(String::as_str).collect();
-    findings.retain(|f| {
-        let key = health_finding_key(f, root);
-        !baseline_keys.contains(key.as_str())
-    });
-    findings
 }
 
 pub(crate) fn filter_new_runtime_coverage_findings(

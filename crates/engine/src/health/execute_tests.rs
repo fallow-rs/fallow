@@ -1433,6 +1433,7 @@ fn runtime_coverage_top_applies_after_baseline_filtering() {
         ],
         runtime_coverage_source_hashes: vec![],
         target_keys: vec![],
+        file_lines_categories: false,
     };
     let mut report = fallow_output::RuntimeCoverageReport {
         cloud_context: None,
@@ -1559,6 +1560,7 @@ fn runtime_coverage_baseline_refreshes_to_clean_when_only_baselined_findings_rem
         runtime_coverage_findings: vec!["fallow:prod:aaaaaaaa".to_owned()],
         runtime_coverage_source_hashes: vec![],
         target_keys: vec![],
+        file_lines_categories: false,
     };
     let mut report = fallow_output::RuntimeCoverageReport {
         cloud_context: None,
