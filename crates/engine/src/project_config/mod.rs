@@ -7,7 +7,7 @@ use fallow_config::{
     WorkspaceDiagnostic, WorkspaceInfo,
 };
 use fallow_types::output_format::OutputFormat;
-use fallow_types::sourced::{Given, Layer, Origin, Sourced};
+use fallow_types::sourced::{Given, Origin};
 
 use crate::EngineResult;
 use crate::resolved_run::steps::{
@@ -127,8 +127,12 @@ impl ProductionFlags {
     }
 
     /// The effective production mode of each analysis.
+    #[cfg(test)]
     #[must_use]
-    pub fn effective_modes(self, config: &fallow_config::ProductionConfig) -> ProductionModes {
+    pub(crate) fn effective_modes(
+        self,
+        config: &fallow_config::ProductionConfig,
+    ) -> ProductionModes {
         let decided = decide_production(&self.as_inputs(), config, None);
         ProductionModes {
             dead_code: decided.dead_code.into_value(),
@@ -137,14 +141,16 @@ impl ProductionFlags {
         }
     }
 
-    /// The override of each analysis from `self`, else from `fallback`. A
-    /// host that reads production overrides from two sources, such as the
-    /// flags and the environment variables of the CLI, puts the stronger
-    /// source first. The config decides only when neither source sets a
+    /// The override of each analysis from `self`, else from `fallback`. The
+    /// parity tests use it to put the flags before the environment
+    /// variables. The config decides only when neither source sets a
     /// value. `fallback` has the rank of the environment variables in
     /// `decide_production`.
+    #[cfg(test)]
     #[must_use]
-    pub fn with_fallback(self, fallback: Self) -> Self {
+    pub(crate) fn with_fallback(self, fallback: Self) -> Self {
+        use fallow_types::sourced::{Layer, Sourced};
+
         let inputs = ProductionInputs {
             global_env: fallback.global,
             own_env: PerAnalysis {
