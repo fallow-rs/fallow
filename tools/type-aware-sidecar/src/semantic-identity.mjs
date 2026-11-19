@@ -241,7 +241,7 @@ const defaultExportedLocalNames = (sourceFile) => {
 };
 
 const isDefaultExportedOwner = (owner, defaultLocalNames) => {
-  if (!owner?.parent || !isSourceFile(owner.parent)) return false;
+  if (!owner || !isClassDeclaration(owner) || !isSourceFile(owner.parent)) return false;
   if (defaultModifierFor(owner)) return true;
   const name = nodeText(owner.name);
   return name !== undefined && defaultLocalNames.has(name);

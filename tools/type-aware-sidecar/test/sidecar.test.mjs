@@ -482,6 +482,56 @@ for (const [form, rendererSource] of DEFAULT_EXPORTED_RENDERERS) {
   });
 }
 
+const NOT_DEFAULT_CLASS_MEMBERS = [
+  ["a default interface", "export default interface Shape {\n  m(): void;\n}\n"],
+  [
+    "an interface that merges with the default class",
+    "class Shape {}\ninterface Shape {\n  m(): void;\n}\nexport default Shape;\n",
+  ],
+  [
+    "a type-only default specifier",
+    "class Shape {\n  m() {}\n}\nexport type { Shape as default };\n",
+  ],
+  ["an export assignment with equals", "class Shape {\n  m() {}\n}\nexport = Shape;\n"],
+  [
+    "a default export of an ambient module",
+    'declare module "shapes" {\n  class Shape {\n    m(): void;\n  }\n  export default Shape;\n}\n',
+  ],
+];
+
+for (const [form, source] of NOT_DEFAULT_CLASS_MEMBERS) {
+  test(`does not resolve the default owner for ${form}`, () => {
+    const root = makeProject();
+    try {
+      write(
+        root,
+        "tsconfig.json",
+        JSON.stringify({ compilerOptions: { strict: true }, include: ["src"] }),
+      );
+      write(root, "src/shape.ts", source);
+
+      const response = runSidecar(
+        semanticRequest(root, [
+          classMemberQuery({
+            id: 0,
+            file: "src/shape.ts",
+            owner: "default",
+            member: "m",
+            ...utf8Position(source, "m("),
+          }),
+        ]),
+      );
+
+      const [result] = response.results;
+      assert.notEqual(result.assertion, "confirmed-used");
+      assert.notEqual(result.assertion, "confirmed-no-static-references");
+      assert.notEqual(result.reason_code, null);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}
+
 test("does not give the default owner to a class that is not the default export", () => {
   const root = makeProject();
   try {
