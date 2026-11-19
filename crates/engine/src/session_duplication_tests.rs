@@ -5,10 +5,10 @@
 //! directory out, and the default duplication ignores do not, so only the
 //! production mode decides whether duplication reads the file.
 
-use std::ffi::OsString;
 use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
+use fallow_config::EnvSnapshot;
 use fallow_types::duplicates::CloneGroup;
 
 use crate::project_config::config_for_project_with_env;
@@ -120,9 +120,9 @@ fn duplication_scope_honors_max_file_size_env() {
     }
     std::fs::write(root.join("tests/big.ts"), big).expect("big test file");
 
-    let env = |name: &str| (name == "FALLOW_MAX_FILE_SIZE").then(|| OsString::from("1"));
+    let env = EnvSnapshot::from_pairs(&[("FALLOW_MAX_FILE_SIZE", "1")], None);
     let session = AnalysisSession::from_config(
-        config_for_project_with_env(&root, None, env).expect("config loads"),
+        config_for_project_with_env(&root, None, &env).expect("config loads"),
     );
     let groups = clone_groups(&session);
 

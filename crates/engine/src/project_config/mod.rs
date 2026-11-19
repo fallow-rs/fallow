@@ -1,18 +1,21 @@
 //! Project config resolution owned by the engine boundary.
 
-use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use fallow_config::{
-    ConfigLoadOptions, FallowConfig, ProductionAnalysis, ResolvedConfig, WorkspaceDiagnostic,
-    WorkspaceInfo,
+    ConfigLoadOptions, EnvSnapshot, FallowConfig, ProductionAnalysis, ResolvedConfig,
+    WorkspaceDiagnostic, WorkspaceInfo,
 };
 use fallow_types::output_format::OutputFormat;
 use fallow_types::sourced::{Given, Layer, Origin, Sourced};
-use rustc_hash::FxHashSet;
 
+use crate::EngineResult;
+use crate::resolved_run::steps::{
+    GivenSettings, ModeEntry, flatten_production, mode_entry, mode_entry_lossy,
+    validate_boundaries_and_rule_packs, validate_config,
+};
+pub(crate) use crate::resolved_run::steps::{collect_workspace_metadata, resolve_with_env_from};
 use crate::resolved_run::{PerAnalysis, ProductionInputs, decide_production};
-use crate::{EngineError, EngineResult};
 
 mod loader;
 
@@ -257,7 +260,10 @@ pub(crate) enum DuplicationScope {
     Own {
         config: Box<FallowConfig>,
         options: ResolveOptions,
-        env: EnvLookup,
+        env: Box<EnvSnapshot>,
+        /// The settings that win over `env`. The session writes them on the
+        /// config after it resolves the config with `env`.
+        given: Box<GivenSettings>,
     },
 }
 
@@ -269,7 +275,7 @@ impl DuplicationScope {
         file: &ConfigFile,
         flags: ProductionFlags,
         options: ResolveOptions,
-        env: EnvLookup,
+        env: &EnvSnapshot,
     ) -> Self {
         let mode = |analysis| {
             if file.path.is_some() {
@@ -289,7 +295,8 @@ impl DuplicationScope {
         Self::Own {
             config: Box::new(dupes.config),
             options,
-            env,
+            env: Box::new(env.clone()),
+            given: Box::default(),
         }
     }
 }
@@ -325,13 +332,13 @@ impl ConfigFile {
     /// gets the mode of the flags.
     #[must_use]
     pub fn for_analysis(mut self, analysis: ProductionAnalysis, flags: ProductionFlags) -> Self {
-        self.config.production = if self.path.is_some() {
-            self.config
-                .production
-                .for_run(flags.effective(analysis, &self.config.production))
+        let from_file = self.path.is_some();
+        let on = if from_file {
+            flags.effective(analysis, &self.config.production)
         } else {
-            flags.mode(analysis).into()
+            flags.mode(analysis)
         };
+        flatten_production(&mut self.config, from_file, on);
         self
     }
 
@@ -354,36 +361,28 @@ impl ConfigFile {
     }
 }
 
-/// Reads one environment variable. Hosts read the process environment. A test
-/// gives a fixed set of values.
-pub(crate) type EnvLookup = fn(&str) -> Option<OsString>;
-
-fn process_env(name: &str) -> Option<OsString> {
-    std::env::var_os(name)
-}
-
 fn resolve_with_env(config: FallowConfig, root: &Path, options: ResolveOptions) -> ResolvedConfig {
-    resolve_with_env_from(config, root, options, process_env)
+    resolve_with_env_from(config, root, options, &EnvSnapshot::capture())
 }
 
-/// Resolve the config for `root`, then apply the environment variables that
-/// `env` gives.
-pub(crate) fn resolve_with_env_from(
-    config: FallowConfig,
-    root: &Path,
-    options: ResolveOptions,
-    env: EnvLookup,
-) -> ResolvedConfig {
-    let mut resolved = config.resolve(
-        root.to_path_buf(),
-        options.output,
-        options.threads,
-        options.no_cache,
-        options.quiet,
-        None,
-    );
-    apply_env_overrides_from(&mut resolved, env);
-    resolved
+impl ModeEntry {
+    /// The project config of this mode entry.
+    pub(crate) fn into_project_config(
+        self,
+        path: Option<PathBuf>,
+        duplication: DuplicationScope,
+    ) -> ProjectConfig {
+        ProjectConfig {
+            config: self.config,
+            path,
+            workspaces: self.workspaces,
+            workspace_diagnostics: self.workspace_diagnostics,
+            workspace_discovery_ms: Some(self.workspace_discovery_ms),
+            inputs: self.inputs,
+            inputs_before_resolve: self.inputs_before_resolve,
+            duplication,
+        }
+    }
 }
 
 /// Scalar config-loading knobs for one analysis family.
@@ -455,7 +454,13 @@ pub fn config_for_project_with_production(
     load_options: ConfigLoadOptions,
     production: ProductionFlags,
 ) -> EngineResult<ProjectConfig> {
-    load_project_config(root, config_path, load_options, production, process_env)
+    load_project_config(
+        root,
+        config_path,
+        load_options,
+        production,
+        &EnvSnapshot::capture(),
+    )
 }
 
 /// Load a project config as [`config_for_project_with_production`] does, with
@@ -464,7 +469,7 @@ pub fn config_for_project_with_production(
 pub(crate) fn config_for_project_with_env(
     root: &Path,
     config_path: Option<&Path>,
-    env: EnvLookup,
+    env: &EnvSnapshot,
 ) -> EngineResult<ProjectConfig> {
     load_project_config(
         root,
@@ -480,7 +485,7 @@ fn load_project_config(
     config_path: Option<&Path>,
     load_options: ConfigLoadOptions,
     production: ProductionFlags,
-    env: EnvLookup,
+    env: &EnvSnapshot,
 ) -> EngineResult<ProjectConfig> {
     let file = load_config_file(
         root,
@@ -495,21 +500,7 @@ fn load_project_config(
     if path.is_some() {
         validate_boundaries_and_rule_packs(root, &config)?;
     }
-    let inputs = fallow_config::ConfigInputs::new(root, &config);
-    let inputs_before_resolve = inputs.snapshot();
-    let resolved = resolve_with_env_from(config, root, options, env);
-    let (workspaces, workspace_diagnostics, workspace_discovery_ms) =
-        collect_workspace_metadata(&resolved)?;
-    Ok(ProjectConfig {
-        inputs,
-        inputs_before_resolve,
-        config: resolved,
-        path,
-        workspaces,
-        workspace_diagnostics,
-        workspace_discovery_ms: Some(workspace_discovery_ms),
-        duplication,
-    })
+    Ok(mode_entry(root, config, options, env)?.into_project_config(path, duplication))
 }
 
 impl ProjectConfig {
@@ -536,25 +527,13 @@ pub(crate) fn resolve_cache_max_size_bytes(config: &ResolvedConfig) -> usize {
 }
 
 pub(crate) fn default_project_config(root: &Path) -> ProjectConfig {
-    let inputs = fallow_config::ConfigInputs::new(root, &FallowConfig::default());
-    let inputs_before_resolve = inputs.snapshot();
-    let config = resolve_with_env(
-        FallowConfig::default(),
+    mode_entry_lossy(
         root,
+        FallowConfig::default(),
         ResolveOptions::host_default(),
-    );
-    let (workspaces, workspace_diagnostics, workspace_discovery_ms) =
-        collect_workspace_metadata_lossy(&config);
-    ProjectConfig {
-        inputs,
-        inputs_before_resolve,
-        config,
-        path: None,
-        workspaces,
-        workspace_diagnostics,
-        workspace_discovery_ms: Some(workspace_discovery_ms),
-        duplication: DuplicationScope::SameAsSession,
-    }
+        &EnvSnapshot::capture(),
+    )
+    .into_project_config(None, DuplicationScope::SameAsSession)
 }
 
 /// Resolve config for a specific analysis without depending on the CLI crate.
@@ -572,7 +551,20 @@ pub fn config_for_project_analysis(
     config_path: Option<&Path>,
     options: ProjectConfigOptions,
 ) -> EngineResult<ProjectConfig> {
-    resolve_project_config_analysis(root, config_path, options).map(|(project, _)| project)
+    resolve_project_config_analysis(root, config_path, options, &EnvSnapshot::capture())
+        .map(|(project, _)| project)
+}
+
+/// [`config_for_project_analysis`] with the environment variables of `env`
+/// in place of the process environment.
+#[cfg(test)]
+pub(crate) fn config_for_project_analysis_with_env(
+    root: &Path,
+    config_path: Option<&Path>,
+    options: ProjectConfigOptions,
+    env: &EnvSnapshot,
+) -> EngineResult<ProjectConfig> {
+    resolve_project_config_analysis(root, config_path, options, env).map(|(project, _)| project)
 }
 
 /// Resolve project configuration and collect typed readiness diagnostics for
@@ -587,7 +579,7 @@ pub fn config_for_project_readiness(
     options: ProjectConfigOptions,
 ) -> EngineResult<ProjectConfigReadiness> {
     let (project, configured_plugin_paths) =
-        resolve_project_config_analysis(root, config_path, options)?;
+        resolve_project_config_analysis(root, config_path, options, &EnvSnapshot::capture())?;
     let configured_plugin_diagnostics =
         fallow_config::diagnose_configured_external_plugins(root, &configured_plugin_paths);
     Ok(ProjectConfigReadiness {
@@ -600,6 +592,7 @@ fn resolve_project_config_analysis(
     root: &Path,
     config_path: Option<&Path>,
     options: ProjectConfigOptions,
+    env: &EnvSnapshot,
 ) -> EngineResult<(ProjectConfig, Vec<String>)> {
     let file = load_config_file(
         root,
@@ -618,157 +611,29 @@ fn resolve_project_config_analysis(
     file.validate(root)?;
     let ConfigFile { config, path } = file;
     let configured_plugin_paths = config.plugins.clone();
-    let inputs = fallow_config::ConfigInputs::new(root, &config);
-    let inputs_before_resolve = inputs.snapshot();
-    let resolved = resolve_with_env(
-        config,
-        root,
-        ResolveOptions {
-            output: options.output,
-            threads: options.threads,
-            no_cache: options.no_cache,
-            quiet: options.quiet,
-        },
-    );
-    let (workspaces, workspace_diagnostics, workspace_discovery_ms) =
-        collect_workspace_metadata(&resolved)?;
-    Ok((
-        ProjectConfig {
-            inputs,
-            inputs_before_resolve,
-            config: resolved,
-            path,
-            workspaces,
-            workspace_diagnostics,
-            workspace_discovery_ms: Some(workspace_discovery_ms),
-            // The caller names one analysis and owns the production mode of
-            // each other analysis, so a session of this config runs
-            // duplication only when the caller found that the modes match.
-            duplication: DuplicationScope::SameAsSession,
-        },
-        configured_plugin_paths,
-    ))
-}
-
-/// Apply the environment variables that every host honors. The CLI, the LSP,
-/// the MCP server and the Node bindings all load config through this module,
-/// so a variable applied here has the same meaning on each surface.
-fn apply_env_overrides_from(
-    config: &mut ResolvedConfig,
-    lookup: impl Fn(&str) -> Option<OsString>,
-) {
-    let max_file_size_mb = lookup("FALLOW_MAX_FILE_SIZE")
-        .and_then(|raw| raw.to_str().and_then(|raw| raw.trim().parse::<u32>().ok()));
-    if let Some(max_file_size_mb) = max_file_size_mb {
-        config.max_file_size_bytes =
-            fallow_config::resolve_max_file_size_bytes(Some(max_file_size_mb));
-    }
-    if let Some(dir) =
-        lookup(fallow_config::CACHE_DIR_ENV).and_then(fallow_config::cache_dir_from_env_value)
-    {
-        config.override_cache_dir(dir);
-    }
-    if let Some(mb) = lookup(fallow_config::CACHE_MAX_SIZE_ENV)
-        .as_deref()
-        .and_then(fallow_config::cache_max_size_from_env_value)
-    {
-        config.cache_max_size_mb = Some(mb);
-    }
-    config.apply_package_baselines_env(lookup(fallow_config::PACKAGE_BASELINES_ENV).as_deref());
-}
-
-pub(crate) fn collect_workspace_metadata(
-    config: &ResolvedConfig,
-) -> EngineResult<(Vec<WorkspaceInfo>, Vec<WorkspaceDiagnostic>, f64)> {
-    let start = std::time::Instant::now();
-    let (workspaces, diagnostics) =
-        fallow_config::discover_workspaces_with_diagnostics_and_patterns(
-            &config.root,
-            &config.ignore_patterns,
-            &config.workspace_patterns,
-        )
-        .map_err(|err| EngineError::new(err.to_string()))?;
-    let diagnostics = with_undeclared_workspace_diagnostics(config, &workspaces, diagnostics);
-    let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
-    Ok((workspaces, diagnostics, elapsed_ms))
-}
-
-fn collect_workspace_metadata_lossy(
-    config: &ResolvedConfig,
-) -> (Vec<WorkspaceInfo>, Vec<WorkspaceDiagnostic>, f64) {
-    collect_workspace_metadata(config).unwrap_or_default()
-}
-
-fn with_undeclared_workspace_diagnostics(
-    config: &ResolvedConfig,
-    workspaces: &[WorkspaceInfo],
-    mut diagnostics: Vec<WorkspaceDiagnostic>,
-) -> Vec<WorkspaceDiagnostic> {
-    let mut existing: FxHashSet<PathBuf> = diagnostics
-        .iter()
-        .map(|diagnostic| {
-            dunce::canonicalize(&diagnostic.path).unwrap_or_else(|_| diagnostic.path.clone())
-        })
-        .collect();
-    for diagnostic in fallow_config::find_undeclared_workspaces_with_ignores(
-        &config.root,
-        workspaces,
-        &config.ignore_patterns,
-    ) {
-        let canonical =
-            dunce::canonicalize(&diagnostic.path).unwrap_or_else(|_| diagnostic.path.clone());
-        if existing.insert(canonical) {
-            diagnostics.push(diagnostic);
-        }
-    }
-    diagnostics
-}
-
-fn validate_config(root: &Path, config: &FallowConfig) -> EngineResult<()> {
-    fallow_config::discover_and_validate_external_plugins(root, &config.plugins)
-        .map_err(|errors| joined_config_errors("invalid external plugin definition", &errors))?;
-    validate_boundaries_and_rule_packs(root, config)
-}
-
-fn validate_boundaries_and_rule_packs(root: &Path, config: &FallowConfig) -> EngineResult<()> {
-    config
-        .validate_resolved_boundaries(root)
-        .map_err(|errors| joined_config_errors("invalid boundary configuration", &errors))?;
-    let packs = fallow_config::load_rule_packs(root, &config.rule_packs)
-        .map_err(|errors| joined_config_errors("invalid rule pack", &errors))?;
-    let zone_errors = fallow_config::validate_rule_pack_zones(
-        root,
-        &config.boundaries,
-        &config.rule_packs,
-        &packs,
-    );
-    if !zone_errors.is_empty() {
-        return Err(joined_config_errors("invalid rule pack", &zone_errors));
-    }
-    Ok(())
-}
-
-fn joined_config_errors(label: &str, errors: &[impl ToString]) -> EngineError {
-    let joined = errors
-        .iter()
-        .map(ToString::to_string)
-        .collect::<Vec<_>>()
-        .join("\n  - ");
-    EngineError::new(format!("{label}:\n  - {joined}"))
+    let options = ResolveOptions {
+        output: options.output,
+        threads: options.threads,
+        no_cache: options.no_cache,
+        quiet: options.quiet,
+    };
+    let entry = mode_entry(root, config, options, env)?;
+    // The caller names one analysis and owns the production mode of each
+    // other analysis, so a session of this config runs duplication only when
+    // the caller found that the modes match.
+    let project = entry.into_project_config(path, DuplicationScope::SameAsSession);
+    Ok((project, configured_plugin_paths))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use fallow_config::EnvVar;
 
-    fn lookup_from(
-        vars: &'static [(&'static str, &'static str)],
-    ) -> impl Fn(&str) -> Option<OsString> {
-        move |name| {
-            vars.iter()
-                .find(|(key, _)| *key == name)
-                .map(|(_, value)| OsString::from(value))
-        }
+    use crate::resolved_run::steps::apply_env_overrides_from;
+
+    fn lookup_from(vars: &[(&str, &str)]) -> EnvSnapshot {
+        EnvSnapshot::from_pairs(vars, None)
     }
 
     #[test]
@@ -778,7 +643,7 @@ mod tests {
 
         apply_env_overrides_from(
             &mut config,
-            lookup_from(&[
+            &lookup_from(&[
                 ("FALLOW_MAX_FILE_SIZE", "7"),
                 ("FALLOW_CACHE_DIR", ".cache/fallow"),
                 ("FALLOW_CACHE_MAX_SIZE", "64"),
@@ -815,7 +680,7 @@ mod tests {
                 argument,
             )
         };
-        let values: [&'static [(&'static str, &'static str)]; 5] = [
+        let values: [&[(&str, &str)]; 5] = [
             &[],
             &[("FALLOW_CACHE_MAX_SIZE", "64")],
             &[("FALLOW_CACHE_MAX_SIZE", " 8 ")],
@@ -824,12 +689,12 @@ mod tests {
         ];
         for configured in [None, Some(5)] {
             for vars in values {
-                let argument = lookup_from(vars)("FALLOW_CACHE_MAX_SIZE")
-                    .as_deref()
+                let argument = lookup_from(vars)
+                    .get(EnvVar::CacheMaxSize)
                     .and_then(fallow_config::cache_max_size_from_env_value);
                 let before = resolve(configured, argument);
                 let mut after = resolve(configured, None);
-                apply_env_overrides_from(&mut after, lookup_from(vars));
+                apply_env_overrides_from(&mut after, &lookup_from(vars));
                 assert_eq!(
                     before.cache_max_size_mb, after.cache_max_size_mb,
                     "{configured:?} {vars:?}"
@@ -847,7 +712,7 @@ mod tests {
 
         apply_env_overrides_from(
             &mut config,
-            lookup_from(&[("FALLOW_CACHE_DIR", ""), ("FALLOW_CACHE_MAX_SIZE", "0")]),
+            &lookup_from(&[("FALLOW_CACHE_DIR", ""), ("FALLOW_CACHE_MAX_SIZE", "0")]),
         );
 
         assert_eq!(config.cache_dir, before_dir);
@@ -868,19 +733,16 @@ mod tests {
         let mut disabled = with_map();
         apply_env_overrides_from(
             &mut disabled,
-            lookup_from(&[("FALLOW_PACKAGE_BASELINES", " Off ")]),
+            &lookup_from(&[("FALLOW_PACKAGE_BASELINES", " Off ")]),
         );
         assert!(disabled.workspace_changed_since.is_empty());
 
         for value in ["true", "1", "maybe", ""] {
             let mut kept = with_map();
-            let vars: &'static [(&'static str, &'static str)] = match value {
-                "true" => &[("FALLOW_PACKAGE_BASELINES", "true")],
-                "1" => &[("FALLOW_PACKAGE_BASELINES", "1")],
-                "maybe" => &[("FALLOW_PACKAGE_BASELINES", "maybe")],
-                _ => &[("FALLOW_PACKAGE_BASELINES", "")],
-            };
-            apply_env_overrides_from(&mut kept, lookup_from(vars));
+            apply_env_overrides_from(
+                &mut kept,
+                &lookup_from(&[("FALLOW_PACKAGE_BASELINES", value)]),
+            );
             assert_eq!(kept.workspace_changed_since.len(), 1, "{value:?}");
         }
     }
