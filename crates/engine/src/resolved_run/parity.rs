@@ -139,7 +139,7 @@ pub fn load_cases() -> Vec<Case> {
 /// # Panics
 ///
 /// Panics when a file cannot be written.
-pub fn write_case(dir: &Path, case: &Case) {
+fn write_case(dir: &Path, case: &Case) {
     std::fs::create_dir_all(dir.join(".git")).unwrap_or_else(|err| panic!("git marker: {err}"));
     for (name, content) in &case.files {
         let path = dir.join(name);
@@ -291,8 +291,9 @@ fn source_label(source: &Value) -> String {
 
 /// The argv of an MCP CLI route without the arguments that the MCP server
 /// adds to each command: `--format json`, `--quiet` and `--explain`.
+#[cfg(test)]
 #[must_use]
-pub fn normalize_mcp_cli_argv(argv: &[String]) -> Vec<String> {
+fn normalize_mcp_cli_argv(argv: &[String]) -> Vec<String> {
     let mut normalized = Vec::with_capacity(argv.len());
     let mut args = argv.iter().peekable();
     while let Some(arg) = args.next() {

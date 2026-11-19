@@ -212,7 +212,8 @@ impl ResolvedRun {
     }
 
     /// The set variables that the run reads.
-    pub fn env_read(&self) -> &[EnvVar] {
+    #[cfg(test)]
+    fn env_read(&self) -> &[EnvVar] {
         &self.env_read
     }
 
@@ -223,7 +224,8 @@ impl ResolvedRun {
 
     /// Whether the run uses the default config because the discovered config
     /// failed to load, to validate or to give workspace metadata.
-    pub const fn fell_back(&self) -> bool {
+    #[cfg(test)]
+    const fn fell_back(&self) -> bool {
         self.fell_back
     }
 
@@ -278,7 +280,8 @@ impl<'run> Runnable<'run> {
 
     /// Whether the two analyses analyze the same files: both run in the same
     /// production mode.
-    pub fn shares_files_with(&self, other: Runnable<'_>) -> bool {
+    #[cfg(test)]
+    fn shares_files_with(&self, other: Runnable<'_>) -> bool {
         self.production().value() == other.production().value()
     }
 
