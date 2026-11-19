@@ -1,6 +1,8 @@
 //! Self-tests of the harness. The translator here is a model of a typed MCP
-//! tool: it reads the tool name and the `production` parameter. A wrong
-//! translator must fail at least one case.
+//! tool: it reads the tool name and the `production` parameter. The cases
+//! have only an `mcp` input, so the self-tests prove that the cases catch a
+//! wrong command, a wrong surface and a dropped `production` parameter of
+//! each tool that the cases name.
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -45,6 +47,18 @@ fn translate_with(
     env: EnvSnapshot,
     change: impl Fn(CommandKind, Surface) -> (CommandKind, Surface),
 ) -> RowResult {
+    translate_params(case, root, env, change, |_| true)
+}
+
+/// The model translator, with hooks that change the decided command and
+/// surface, and that drop the `production` parameter of a tool.
+fn translate_params(
+    case: &Case,
+    root: &Path,
+    env: EnvSnapshot,
+    change: impl Fn(CommandKind, Surface) -> (CommandKind, Surface),
+    reads_production: impl Fn(&str) -> bool,
+) -> RowResult {
     let input = &case.inputs[ROW];
     let tool = input["tool"].as_str().unwrap_or_default();
     let (command, selection) = tool_command(tool);
@@ -58,10 +72,13 @@ fn translate_with(
         value: 1,
         origin: Origin::ToolParam("threads"),
     });
-    inputs.production = input["params"]["production"].as_bool().map(|value| Given {
-        value,
-        origin: Origin::ToolParam("production"),
-    });
+    inputs.production = input["params"]["production"]
+        .as_bool()
+        .filter(|_| reads_production(tool))
+        .map(|value| Given {
+            value,
+            origin: Origin::ToolParam("production"),
+        });
     match resolve_run(&inputs) {
         Ok(run) => RowResult::Run(Box::new(run)),
         Err(err) => RowResult::Failed(err.message()),
@@ -102,6 +119,43 @@ fn a_translator_that_maps_every_command_to_dead_code_fails() {
         "{failures:?}"
     );
     assert!(!failed.contains(&"analyze-production-env"), "{failures:?}");
+}
+
+#[test]
+fn a_translator_that_maps_audit_to_combined_fails() {
+    let cases = load_cases();
+    let failures = assert_rows(ROW, &cases, |case, root, env| {
+        translate_with(case, root, env, |command, surface| {
+            let command = if command == CommandKind::Audit {
+                CommandKind::Combined
+            } else {
+                command
+            };
+            (command, surface)
+        })
+    });
+    assert!(
+        failures
+            .iter()
+            .any(|failure| failure.case == "per-analysis-split-env" && failure.key == "command"),
+        "{failures:?}"
+    );
+}
+
+#[test]
+fn a_translator_that_drops_the_production_parameter_fails() {
+    let cases = load_cases();
+    for tool in ["analyze", "trace_import_path"] {
+        let failures = assert_rows(ROW, &cases, |case, root, env| {
+            translate_params(case, root, env, |c, s| (c, s), |name| name != tool)
+        });
+        assert!(
+            failures
+                .iter()
+                .any(|failure| failure.key == "analyses.dead_code.production"),
+            "{tool}: {failures:?}"
+        );
+    }
 }
 
 #[test]

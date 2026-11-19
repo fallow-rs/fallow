@@ -34,6 +34,51 @@ pub struct ModeEntry {
     pub workspace_discovery_ms: f64,
 }
 
+/// The run settings that a surface gives and that win over the environment.
+#[derive(Debug, Clone, Default)]
+pub struct GivenSettings {
+    /// The max file size in megabytes.
+    pub max_file_size_mb: Option<u32>,
+    /// The cache directory. A relative path resolves from the project root.
+    pub cache_dir: Option<PathBuf>,
+    /// Whether dead code reports the exports of entry files.
+    pub include_entry_exports: Option<bool>,
+    /// Whether the run reads `workspaces.changedSince`.
+    pub package_baselines: Option<bool>,
+}
+
+impl GivenSettings {
+    /// The snapshot without the variables that a given setting replaces. A
+    /// given `package_baselines` must remove `FALLOW_PACKAGE_BASELINES`,
+    /// because [`apply_env_overrides_from`] clears the baselines and
+    /// [`Self::apply`] cannot get them back.
+    #[must_use]
+    pub fn env_for_steps(&self, env: &EnvSnapshot) -> EnvSnapshot {
+        env.clone().retain(|var| match var {
+            EnvVar::MaxFileSize => self.max_file_size_mb.is_none(),
+            EnvVar::CacheDir => self.cache_dir.is_none(),
+            EnvVar::PackageBaselines => self.package_baselines.is_none(),
+            _ => true,
+        })
+    }
+
+    /// Write the given settings on a config that the steps resolved.
+    pub fn apply(&self, config: &mut ResolvedConfig) {
+        if let Some(mb) = self.max_file_size_mb {
+            config.max_file_size_bytes = fallow_config::resolve_max_file_size_bytes(Some(mb));
+        }
+        if let Some(dir) = &self.cache_dir {
+            config.override_cache_dir(dir.clone());
+        }
+        if let Some(include) = self.include_entry_exports {
+            config.include_entry_exports = include;
+        }
+        if self.package_baselines == Some(false) {
+            config.workspace_changed_since.clear();
+        }
+    }
+}
+
 /// The workspace metadata: the workspaces, their diagnostics and the wall time
 /// of the discovery in milliseconds.
 type WorkspaceMetadata = (Vec<WorkspaceInfo>, Vec<WorkspaceDiagnostic>, f64);

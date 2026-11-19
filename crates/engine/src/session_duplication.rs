@@ -48,20 +48,32 @@ impl DuplicationFiles {
 }
 
 impl AnalysisSession {
-    /// The files of the production mode of duplication.
-    fn duplication_files(&self) -> &[DiscoveredFile] {
+    /// The resolved config of the duplication mode, when it differs from the
+    /// mode of the session config.
+    pub(crate) fn own_duplication_config(&self) -> Option<&ResolvedConfig> {
         let DuplicationScope::Own {
             config,
             options,
             env,
+            given,
         } = &self.duplication.scope
         else {
+            return None;
+        };
+        Some(self.duplication.config.get_or_init(|| {
+            let mut resolved =
+                resolve_with_env_from((**config).clone(), &self.config.root, *options, env);
+            given.apply(&mut resolved);
+            resolved
+        }))
+    }
+
+    /// The files of the production mode of duplication.
+    fn duplication_files(&self) -> &[DiscoveredFile] {
+        let Some(resolved) = self.own_duplication_config() else {
             return self.files();
         };
         self.duplication.files.get_or_init(|| {
-            let resolved = self.duplication.config.get_or_init(|| {
-                resolve_with_env_from((**config).clone(), &self.config.root, *options, env)
-            });
             crate::discover::prepare_analysis_discovery_with_workspaces(
                 resolved,
                 &self.workspaces,

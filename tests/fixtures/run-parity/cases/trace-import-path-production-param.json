@@ -1,0 +1,13 @@
+{
+  "name": "trace-import-path-production-param",
+  "files": { "package.json": "{}" },
+  "env": { "FALLOW_PRODUCTION": "0" },
+  "inputs": {
+    "mcp": { "tool": "trace_import_path", "params": { "production": true } }
+  },
+  "expected": {
+    "surface": "<row>",
+    "command": "trace-path",
+    "analyses.dead_code.production": { "value": true, "source": "given:production" }
+  }
+}
