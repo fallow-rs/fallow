@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [3.44.1] - 2026-11-19
+## [3.44.2] - 2026-11-19
 
 ### Changed
 
@@ -17708,8 +17708,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.44.1...HEAD
-[3.44.1]: https://github.com/fallow-rs/fallow/compare/v3.44.0...v3.44.1
+[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.44.2...HEAD
+[3.44.2]: https://github.com/fallow-rs/fallow/compare/v3.44.0...v3.44.2
 [3.44.0]: https://github.com/fallow-rs/fallow/compare/v3.43.2...v3.44.0
 [3.43.2]: https://github.com/fallow-rs/fallow/compare/v3.43.1...v3.43.2
 [3.43.1]: https://github.com/fallow-rs/fallow/compare/v3.43.0...v3.43.1

@@ -185,7 +185,7 @@ GitLab CI:
 
 ```yaml
 include:
-  - remote: 'https://raw.githubusercontent.com/fallow-rs/fallow/v3.44.1/ci/gitlab-ci.yml'
+  - remote: 'https://raw.githubusercontent.com/fallow-rs/fallow/v3.44.2/ci/gitlab-ci.yml'
 
 fallow:
   extends: .fallow
