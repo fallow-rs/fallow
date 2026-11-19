@@ -1397,3 +1397,61 @@ fn editor_session_split_production_runs_dupes_in_dupes_mode() {
         "duplication keeps the test file when only dead code is production"
     );
 }
+
+/// A project root with a `.git` marker, a manifest and one source file.
+fn editor_project(config: &str) -> (tempfile::TempDir, PathBuf) {
+    let dir = tempfile::tempdir().expect("temp dir");
+    let root = dunce::canonicalize(dir.path()).expect("canonical root");
+    std::fs::create_dir_all(root.join(".git")).expect("git marker");
+    std::fs::create_dir_all(root.join("src")).expect("source dir");
+    std::fs::write(root.join("package.json"), r#"{"name":"app"}"#).expect("manifest");
+    std::fs::write(root.join(".fallowrc.json"), config).expect("config");
+    std::fs::write(root.join("src/index.ts"), "export const a = 1;\n").expect("source");
+    (dir, root)
+}
+
+fn editor_run(root: &Path) -> crate::run::ResolvedRun {
+    fallow_engine::resolved_run::testing::ResolvedRunBuilder::new(root)
+        .surface(fallow_config::Surface::Lsp)
+        .command(
+            fallow_config::CommandKind::Editor,
+            fallow_config::SelectionInput::Booleans {
+                dead_code: true,
+                duplication: true,
+                health: false,
+                origin: fallow_types::sourced::Origin::EditorSetting("test"),
+            },
+        )
+        .config_file(root.join(".fallowrc.json"))
+        .build()
+}
+
+#[test]
+fn a_session_of_a_run_runs_duplication_only_when_the_run_plans_it() {
+    for (enabled, runs) in [(true, 1), (false, 0)] {
+        let (_dir, root) = editor_project(&format!(r#"{{"duplicates":{{"enabled":{enabled}}}}}"#));
+        let session = EditorAnalysisSession::open(&editor_run(&root)).expect("session opens");
+        let duplicates = session.config().duplicates.clone();
+        session
+            .analyze_project_with_changed_files(&duplicates, false, None)
+            .expect("analysis runs");
+        assert_eq!(
+            fallow_engine::resolved_run::testing::duplication_runs::count(&root),
+            runs,
+            "duplicates.enabled: {enabled}"
+        );
+    }
+}
+
+#[test]
+fn a_run_without_dead_code_opens_no_editor_session() {
+    let (_dir, root) = editor_project("{}");
+    let run = fallow_engine::resolved_run::testing::ResolvedRunBuilder::new(&root)
+        .command(
+            fallow_config::CommandKind::Dupes,
+            fallow_config::SelectionInput::Single(fallow_config::PlannedAnalysis::Duplication),
+        )
+        .build();
+    let err = EditorAnalysisSession::open(&run).expect_err("dead code is skipped");
+    assert!(err.message.contains("dead-code"), "{}", err.message);
+}
