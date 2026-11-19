@@ -326,16 +326,19 @@ pub fn execute_health_in(
     run: Option<Runnable<'_>>,
 ) -> Result<HealthResult, ExitCode> {
     let (config, config_ms) = load_health_config_in(opts, run)?;
-    execute_health_with_config(opts, config, config_ms)
+    execute_health_with_config(opts, config, config_ms, run)
 }
 
+/// Run the health analysis with `config`. With `run`, the session opens from
+/// the health analysis of the run, and `config` must keep its decided fields.
 pub fn execute_health_with_config(
     opts: &HealthOptions<'_>,
     config: fallow_config::ResolvedConfig,
     config_ms: f64,
+    run: Option<Runnable<'_>>,
 ) -> Result<HealthResult, ExitCode> {
     let seams = health_seams();
-    let result = execute_health_with_config_and_seams(opts, config, config_ms, &seams)?;
+    let result = execute_health_with_config_and_seams(opts, config, run, config_ms, &seams)?;
     record_health_telemetry(&result.report, result.coverage_gaps_has_findings);
     Ok(result)
 }
@@ -343,12 +346,17 @@ pub fn execute_health_with_config(
 fn execute_health_with_config_and_seams(
     opts: &HealthOptions<'_>,
     config: fallow_config::ResolvedConfig,
+    run: Option<Runnable<'_>>,
     config_ms: f64,
     seams: &HealthSeams<'_>,
 ) -> Result<HealthResult, ExitCode> {
     let t = Instant::now();
-    let session = fallow_engine::session::AnalysisSession::from_resolved_config(config)
-        .map_err(|e| emit_input_error(&format!("analysis failed: {e}"), opts.output))?;
+    // The health settings of the command leave the decided fields of the run.
+    let session = match run {
+        Some(runnable) => runnable.open_session_adjusted(|decided| *decided = config),
+        None => fallow_engine::session::AnalysisSession::from_resolved_config(config),
+    }
+    .map_err(|e| emit_input_error(&format!("analysis failed: {e}"), opts.output))?;
     let discover_ms = t.elapsed().as_secs_f64() * 1000.0;
     let parts = session.parsed_parts_uncached(true);
     let pre_computed_analysis =
@@ -430,7 +438,7 @@ pub fn benchmark_execute_health_with_response(
         note_graph_structure: &|_module_count, _edge_count| {},
     };
     let (config, config_ms) = load_health_config(opts)?;
-    execute_health_with_config_and_seams(opts, config, config_ms, &seams)
+    execute_health_with_config_and_seams(opts, config, None, config_ms, &seams)
 }
 
 /// Run `fallow health` and print the report. `run` is the health analysis
@@ -498,7 +506,7 @@ pub fn run_health(
     {
         execution_opts.analysis_identity = identity;
     }
-    let mut result = match execute_health_with_config(&execution_opts, config, config_ms) {
+    let mut result = match execute_health_with_config(&execution_opts, config, config_ms, run) {
         Ok(result) => result,
         Err(code) => return code,
     };

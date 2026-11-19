@@ -52,13 +52,13 @@ const OPEN_SITES: &[OpenSite] = &[
     },
     OpenSite {
         path: "crates/cli/src/dupes.rs",
-        calls: 2,
-        why: "a duplication run without a run, and the duplication session",
+        calls: 1,
+        why: "a duplication run without a run: benchmark hooks and the audit sides",
     },
     OpenSite {
         path: "crates/cli/src/health/mod.rs",
         calls: 2,
-        why: "a health run without a run, and the health session",
+        why: "a health run without a run, and its session: benchmark hooks and the audit sides",
     },
     OpenSite {
         path: "crates/cli/src/cli_production.rs",
