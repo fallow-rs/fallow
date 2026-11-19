@@ -1,0 +1,47 @@
+{
+  "name": "node-duplication-production",
+  "files": {
+    ".fallowrc.json": "{\"production\":{\"dupes\":true}}",
+    "package.json": "{}"
+  },
+  "inputs": {
+    "mcp": {
+      "not_expressible": "The typed MCP rows of this matrix have no duplication tool"
+    },
+    "api": {
+      "entry": "duplication",
+      "options": {
+        "no_package_baselines": true
+      }
+    },
+    "node": {
+      "function": "detectDuplication",
+      "options": {
+        "noPackageBaselines": true
+      }
+    }
+  },
+  "expected": {
+    "surface": "<row>",
+    "command": "dupes",
+    "analyses.duplication.production": {
+      "value": true,
+      "source": "config-file:production.dupes"
+    },
+    "settings.package_baselines": {
+      "value": false,
+      "source": "given:noPackageBaselines"
+    }
+  },
+  "deviations": {
+    "api": {
+      "reason": "The Rust API names its option analysis.no_package_baselines",
+      "expected": {
+        "settings.package_baselines": {
+          "value": false,
+          "source": "given:analysis.no_package_baselines"
+        }
+      }
+    }
+  }
+}

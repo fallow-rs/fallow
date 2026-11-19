@@ -1,0 +1,37 @@
+{
+  "name": "api-combined-per-analysis-split",
+  "files": {
+    ".fallowrc.json": "{\"production\":{\"deadCode\":true,\"dupes\":false}}",
+    "package.json": "{}"
+  },
+  "env": {
+    "FALLOW_PRODUCTION_HEALTH": "1"
+  },
+  "inputs": {
+    "mcp": {
+      "not_expressible": "The typed MCP rows of this matrix have no combined tool"
+    },
+    "api": {
+      "entry": "combined"
+    },
+    "node": {
+      "not_expressible": "The Node bindings have no combined entry point"
+    }
+  },
+  "expected": {
+    "surface": "<row>",
+    "command": "combined",
+    "analyses.dead_code.production": {
+      "value": true,
+      "source": "config-file:production.deadCode"
+    },
+    "analyses.duplication.production": {
+      "value": false,
+      "source": "config-file:production.dupes"
+    },
+    "analyses.health.production": {
+      "value": false,
+      "source": "config-file:production.health"
+    }
+  }
+}
