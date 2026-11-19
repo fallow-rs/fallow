@@ -8,3 +8,4 @@
 ### Fixed
 
 - **`fallow inspect` now applies `--allow-remote-extends` to each part of the bundle.** The child processes that collect the evidence did not get the flag, so a config with an `https://` entry in `extends` failed there. The type-aware evidence of a symbol now also reads the flag and the `FALLOW_PRODUCTION*` variables, as the child processes do.
+- **The VS Code extension passes the `allowRemoteExtends` setting in each run.** The Health view, the workspace picker, the audit run and the fix run now pass the setting to the CLI, as the combined analysis run does.
