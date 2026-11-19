@@ -92,16 +92,32 @@ fn every_analysis_named(origin: &'static str) -> SelectionInput {
 /// The route of the parsed command line, or `None` for a command that loads
 /// no config.
 fn command_route(cli: &Cli) -> Option<CommandRoute> {
-    use CommandKind as Kind;
-    use PlannedAnalysis::{DeadCode, Duplication, Health};
-    use ProductionRule::{ConfigOnly, Full, OnOnly};
     let Some(command) = &cli.command else {
         return Some(CommandRoute::new(
-            Kind::Combined,
+            CommandKind::Combined,
             lists(&cli.only, &cli.skip),
-            Full,
+            ProductionRule::Full,
         ));
     };
+    analysis_route(command)
+        .or_else(|| {
+            on_only_kind(command).map(|kind| {
+                CommandRoute::single(kind, PlannedAnalysis::DeadCode, ProductionRule::OnOnly)
+            })
+        })
+        .or_else(|| {
+            config_only_kind(command).map(|kind| {
+                CommandRoute::single(kind, PlannedAnalysis::DeadCode, ProductionRule::ConfigOnly)
+            })
+        })
+}
+
+/// The route of an analysis command, of `trace`, and of a command that
+/// selects every analysis.
+fn analysis_route(command: &Command) -> Option<CommandRoute> {
+    use CommandKind as Kind;
+    use PlannedAnalysis::{DeadCode, Duplication, Health};
+    use ProductionRule::{ConfigOnly, Full};
     let route = match command {
         Command::Check { .. } | Command::Architecture { .. } => {
             CommandRoute::single(Kind::DeadCode, DeadCode, Full)
@@ -130,12 +146,10 @@ fn command_route(cli: &Cli) -> Option<CommandRoute> {
         Command::DecisionSurface { .. } => {
             CommandRoute::new(Kind::Audit, every_analysis_named("decision-surface"), Full)
         }
-        Command::List { .. } => CommandRoute::single(Kind::List, DeadCode, OnOnly),
-        Command::Fix { .. } => CommandRoute::single(Kind::Fix, DeadCode, OnOnly),
-        Command::Watch { .. } => CommandRoute::single(Kind::Watch, DeadCode, OnOnly),
-        Command::Viz { .. } => CommandRoute::single(Kind::Viz, DeadCode, OnOnly),
-        Command::Flags { .. } => CommandRoute::single(Kind::Flags, DeadCode, OnOnly),
-        Command::Suppressions { .. } => CommandRoute::single(Kind::Suppressions, DeadCode, OnOnly),
+        Command::Inspect { .. } => CommandRoute::new(Kind::Inspect, all_by_default(), Full),
+        Command::Baselines {
+            subcommand: BaselinesCli::Prune { .. },
+        } => CommandRoute::new(Kind::BaselinesPrune, all_by_default(), Full),
         Command::Trace {
             dependency, path, ..
         } => {
@@ -153,34 +167,51 @@ fn command_route(cli: &Cli) -> Option<CommandRoute> {
             };
             CommandRoute::single(kind, DeadCode, production)
         }
-        Command::TraceError { .. } => CommandRoute::single(Kind::TraceError, DeadCode, ConfigOnly),
-        Command::Security { .. } => CommandRoute::single(Kind::Security, DeadCode, ConfigOnly),
-        Command::Inspect { .. } => CommandRoute::new(Kind::Inspect, all_by_default(), Full),
+        _ => return None,
+    };
+    Some(route)
+}
+
+/// The dead-code command whose flags and variables can only turn production
+/// mode on.
+const fn on_only_kind(command: &Command) -> Option<CommandKind> {
+    let kind = match command {
+        Command::List { .. } => CommandKind::List,
+        Command::Fix { .. } => CommandKind::Fix,
+        Command::Watch { .. } => CommandKind::Watch,
+        Command::Viz { .. } => CommandKind::Viz,
+        Command::Flags { .. } => CommandKind::Flags,
+        Command::Suppressions { .. } => CommandKind::Suppressions,
+        _ => return None,
+    };
+    Some(kind)
+}
+
+/// The dead-code command that reads production mode from the config only.
+const fn config_only_kind(command: &Command) -> Option<CommandKind> {
+    let kind = match command {
+        Command::TraceError { .. } => CommandKind::TraceError,
+        Command::Security { .. } => CommandKind::Security,
         Command::Coverage {
             subcommand: CoverageCli::Analyze { .. },
-        } => CommandRoute::single(Kind::CoverageAnalyze, DeadCode, ConfigOnly),
+        } => CommandKind::CoverageAnalyze,
         Command::Coverage {
             subcommand:
                 CoverageCli::UploadInventory { .. }
                 | CoverageCli::UploadSourceMaps { .. }
                 | CoverageCli::UploadStaticFindings { .. },
-        } => CommandRoute::single(Kind::CoverageUpload, DeadCode, ConfigOnly),
-        Command::Guard { .. } => CommandRoute::single(Kind::Guard, DeadCode, ConfigOnly),
+        } => CommandKind::CoverageUpload,
+        Command::Guard { .. } => CommandKind::Guard,
         Command::RulePack {
             subcommand: RulePackCli::List | RulePackCli::Test { .. },
-        } => CommandRoute::single(Kind::RulePack, DeadCode, ConfigOnly),
-        Command::Baselines {
-            subcommand: BaselinesCli::Prune { .. },
-        } => CommandRoute::new(Kind::BaselinesPrune, all_by_default(), Full),
-        Command::Mutation { .. } => CommandRoute::single(Kind::Mutation, DeadCode, ConfigOnly),
-        Command::SimilarCode { .. } => {
-            CommandRoute::single(Kind::SimilarCode, DeadCode, ConfigOnly)
-        }
-        Command::PluginCheck => CommandRoute::single(Kind::PluginCheck, DeadCode, ConfigOnly),
-        Command::Doctor => CommandRoute::single(Kind::Doctor, DeadCode, ConfigOnly),
+        } => CommandKind::RulePack,
+        Command::Mutation { .. } => CommandKind::Mutation,
+        Command::SimilarCode { .. } => CommandKind::SimilarCode,
+        Command::PluginCheck => CommandKind::PluginCheck,
+        Command::Doctor => CommandKind::Doctor,
         _ => return None,
     };
-    Some(route)
+    Some(kind)
 }
 
 /// The production flag of `coverage analyze`, which the subcommand owns.
