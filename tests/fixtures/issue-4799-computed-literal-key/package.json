@@ -1,0 +1,6 @@
+{
+  "name": "issue-4799-computed-literal-key",
+  "version": "1.0.0",
+  "main": "src/main.ts",
+  "exports": { ".": "./src/main.ts", "./shadow": "./src/shadow.ts" }
+}

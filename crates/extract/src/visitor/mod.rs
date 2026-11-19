@@ -53,7 +53,7 @@ use fallow_types::extract::{
     SkippedSecurityCalleeSite, TaintedBinding,
 };
 use helpers::LitCustomElementDecorator;
-use helpers::array_element_type_from_type;
+pub(crate) use helpers::array_element_type_from_type;
 use helpers::finish_package_resolve_sites;
 use interface_types::InterfaceTypeLinks;
 use worker_env::WorkerEnvBodies;
@@ -69,19 +69,6 @@ pub(crate) enum RouteLoadHarvestMode {
     None,
     SvelteKitPage,
     ConventionalRoute,
-}
-
-/// Infer the element class of a Vue `defineProps` field whose declared type is an
-/// array (or nullable array) of a non-builtin class (`items: Util[]` /
-/// `Array<Util>` / `readonly Util[]` / `Util[] | null`). Thin crate-visible
-/// wrapper over the visitor helper so the SFC props harvest reuses the same
-/// inference the `v-for` binding fix uses, keyed by the prop field's `TSType`.
-/// Returns a non-builtin class name only; `number[]` / `Map[]` / non-array field
-/// types yield `None` (over-credit only, issue #1711).
-pub(crate) fn infer_props_field_array_element_type(
-    field_type: &oxc_ast::ast::TSType<'_>,
-) -> Option<String> {
-    array_element_type_from_type(field_type)
 }
 
 /// A local function that returns dynamic `import()` results, with the count of
@@ -1190,6 +1177,7 @@ pub(crate) struct ModuleInfoExtractor {
     module_sanitizer_bindings: FxHashMap<String, Option<SanitizerScope>>,
     /// Nested lexical sanitizer binding stack for functions and blocks.
     sanitizer_binding_stack: Vec<FxHashMap<String, Option<SanitizerScope>>>,
+    literal_keys: visit_impl::visit_computed_keys::LiteralKeyBindings,
     /// Module-scope literal-backed string allowlists; `false` shadows without trust.
     module_literal_allowlist_bindings: FxHashMap<String, bool>,
     /// Module-scope literal constants for security sink argument classification.

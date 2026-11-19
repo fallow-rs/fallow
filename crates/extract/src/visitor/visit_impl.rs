@@ -60,6 +60,8 @@ mod visit_factory_returns;
 #[path = "visit_impl_for_of_bindings.rs"]
 mod visit_for_of_bindings;
 pub(super) use visit_for_of_bindings::ITERABLE_ELEMENT_CALLBACK_METHODS;
+#[path = "visit_impl_computed_keys.rs"]
+pub(super) mod visit_computed_keys;
 #[path = "visit_impl_function_returns.rs"]
 mod visit_function_returns;
 #[path = "visit_impl_helpers.rs"]
@@ -3382,6 +3384,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.record_local_function_return_types(program);
         self.preseed_direct_object_binding_targets(&program.body);
         self.record_module_vars(&program.body);
+        self.record_trusted_literal_keys(program);
         self.record_program_local_import_loaders(program);
         self.record_program_component_loader_imports(program);
         self.walk_program_and_finish_inert_callees(program);
@@ -4198,6 +4201,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.preseed_direct_object_binding_declaration(decl);
         for declarator in &decl.declarations {
             self.record_variable_declarator(decl, declarator);
+            self.record_literal_key_declarator(declarator);
             self.record_declarator_function_name(declarator);
             self.record_handler_object_declarator(declarator);
         }
@@ -4830,26 +4834,17 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
                     key_object_span: key_object.span,
                 });
         }
-        if let Expression::Identifier(obj) = &expr.object {
-            let shadowed = self.namespace_like_binding_is_shadowed(obj.name.as_str());
-            if (self.route_loader_data_bindings.contains(obj.name.as_str())
+        if let Expression::Identifier(obj) = &expr.object
+            && (self.route_loader_data_bindings.contains(obj.name.as_str())
                 || obj.name == "loaderData")
-                && let Expression::StringLiteral(lit) = &expr.expression
-            {
-                self.member_accesses.push(MemberAccess {
-                    object: ROUTE_LOADER_DATA_OBJECT.to_string(),
-                    member: lit.value.text().into_owned(),
-                });
-            }
-            if let Expression::StringLiteral(lit) = &expr.expression
-                && !shadowed
-            {
-                self.push_receiver_member_access(obj.name.to_string(), lit.value.text().into());
-                self.mark_structured_namespace_reference(obj);
-            } else if !shadowed {
-                self.record_whole_object_identifier_use(obj.name.as_str());
-            }
+            && let Expression::StringLiteral(lit) = &expr.expression
+        {
+            self.member_accesses.push(MemberAccess {
+                object: ROUTE_LOADER_DATA_OBJECT.to_string(),
+                member: lit.value.text().into_owned(),
+            });
         }
+        self.record_computed_key_access(expr);
         walk::walk_computed_member_expression(self, expr);
     }
 
