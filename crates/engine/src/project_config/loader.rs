@@ -22,6 +22,58 @@ pub struct ConfigFile {
     pub config: FallowConfig,
     /// The path of the loaded file. `None` when no file exists.
     pub path: Option<PathBuf>,
+    /// The bytes of the loaded file and of its local `extends` chain.
+    pub chain: ConfigChainSnapshot,
+}
+
+/// The bytes of a config file and of each local file of its `extends`
+/// chain. The loader reads them before and after it parses the file, so a
+/// long-lived caller can see that the parsed config is out of date.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct ConfigChainSnapshot {
+    /// Each file with its bytes, or `None` when the file did not read.
+    files: Vec<(PathBuf, Option<Vec<u8>>)>,
+    /// A file of the chain changed while the loader parsed it.
+    changed_during_load: bool,
+}
+
+impl ConfigChainSnapshot {
+    /// Read the file at `path` and each local file that it extends. No path
+    /// gives an empty snapshot.
+    fn read(path: Option<&Path>) -> Self {
+        let files = path
+            .into_iter()
+            .flat_map(FallowConfig::local_source_files)
+            .map(|file| {
+                let bytes = std::fs::read(&file).ok();
+                (file, bytes)
+            })
+            .collect();
+        Self {
+            files,
+            changed_during_load: false,
+        }
+    }
+
+    /// The snapshot `after` the parse, marked as changed when it differs
+    /// from the snapshot `before` the parse.
+    fn around_load(before: &Self, after: Self) -> Self {
+        Self {
+            changed_during_load: *before != after,
+            ..after
+        }
+    }
+
+    /// Whether a file of the chain changed while the loader parsed it, or
+    /// has other bytes now.
+    #[must_use]
+    pub fn changed(&self) -> bool {
+        self.changed_during_load
+            || self
+                .files
+                .iter()
+                .any(|(path, bytes)| std::fs::read(path).ok() != *bytes)
+    }
 }
 
 /// The error of [`load_config_file`].
@@ -85,21 +137,32 @@ pub fn load_config_file(
         allow_remote_extends: options.allow_remote_extends,
     };
     if let Some(path) = config_path {
+        let before = ConfigChainSnapshot::read(Some(path));
         return FallowConfig::load_with_options(path, load_options)
             .map(|config| ConfigFile {
                 config,
                 path: Some(path.to_path_buf()),
+                chain: ConfigChainSnapshot::around_load(
+                    &before,
+                    ConfigChainSnapshot::read(Some(path)),
+                ),
             })
             .map_err(|err| explicit_load_error(path, &err));
     }
+    let before = ConfigChainSnapshot::read(FallowConfig::find_config_path(root).as_deref());
     match FallowConfig::find_and_load_with_options(root, load_options) {
         Ok(Some((config, path))) => Ok(ConfigFile {
             config,
+            chain: ConfigChainSnapshot::around_load(
+                &before,
+                ConfigChainSnapshot::read(Some(&path)),
+            ),
             path: Some(path),
         }),
         Ok(None) => Ok(ConfigFile {
             config: FallowConfig::default(),
             path: None,
+            chain: ConfigChainSnapshot::around_load(&before, ConfigChainSnapshot::default()),
         }),
         Err(message) => Err(ConfigLoadError::Parse {
             path: None,
@@ -251,6 +314,37 @@ mod tests {
                 message: cause.clone(),
                 chain: cause,
             }
+        );
+    }
+
+    #[test]
+    fn the_chain_snapshot_sees_an_edit_of_each_local_file() {
+        let (_dir, root) = project(r#"{ "extends": "./base.json" }"#);
+        let base = root.join("base.json");
+        std::fs::write(&base, r#"{ "entry": ["a.ts"] }"#).expect("base");
+        let config = root.join(".fallowrc.json");
+        for config_path in [None, Some(config.as_path())] {
+            let file =
+                load_config_file(&root, config_path, ConfigFileOptions::default()).expect("loads");
+            assert!(!file.chain.changed());
+            std::fs::write(&base, r#"{ "entry": ["b.ts"] }"#).expect("same-size edit");
+            assert!(file.chain.changed());
+            std::fs::write(&base, r#"{ "entry": ["a.ts"] }"#).expect("restore");
+        }
+    }
+
+    #[test]
+    fn a_chain_that_differs_around_the_parse_counts_as_changed() {
+        let (_dir, root) = project("{}");
+        let config = root.join(".fallowrc.json");
+        let before = ConfigChainSnapshot::read(Some(&config));
+        std::fs::write(&config, r#"{ "entry": [] }"#).expect("edit during the parse");
+        let after = ConfigChainSnapshot::read(Some(&config));
+        assert!(ConfigChainSnapshot::around_load(&before, after.clone()).changed());
+        assert!(!ConfigChainSnapshot::around_load(&after.clone(), after).changed());
+        assert!(
+            ConfigChainSnapshot::around_load(&before, ConfigChainSnapshot::default()).changed(),
+            "a discovered file that is gone at the parse counts as changed"
         );
     }
 
