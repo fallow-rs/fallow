@@ -1436,6 +1436,78 @@ export function blockB(value: number): number {
     }
 
     #[test]
+    fn min_occurrences_evaluates_after_file_suppressions() {
+        let dir = tempfile::tempdir().expect("create temp dir");
+        let src_dir = dir.path().join("src");
+        std::fs::create_dir_all(&src_dir).expect("create src dir");
+
+        let block = r#"
+export function shared(input: string): string {
+    const trimmed = input.trim();
+    if (trimmed.length === 0) {
+        return "";
+    }
+    const parts = trimmed.split(",");
+    const filtered = parts.filter(p => p.length > 0);
+    const mapped = filtered.map(p => p.toUpperCase());
+    return mapped.join(", ");
+}
+"#;
+        let suppressed = format!("// fallow-ignore-file code-duplication\n{block}");
+
+        let a = src_dir.join("a.ts");
+        let b = src_dir.join("b.ts");
+        let c = src_dir.join("c.ts");
+        std::fs::write(&a, block).expect("write a");
+        std::fs::write(&b, block).expect("write b");
+        std::fs::write(&c, &suppressed).expect("write c");
+
+        let files = vec![
+            DiscoveredFile {
+                id: FileId(0),
+                path: a,
+                size_bytes: block.len() as u64,
+            },
+            DiscoveredFile {
+                id: FileId(1),
+                path: b,
+                size_bytes: block.len() as u64,
+            },
+            DiscoveredFile {
+                id: FileId(2),
+                path: c,
+                size_bytes: suppressed.len() as u64,
+            },
+        ];
+
+        let config = DuplicatesConfig {
+            min_tokens: 10,
+            min_lines: 2,
+            min_occurrences: 3,
+            ..DuplicatesConfig::default()
+        };
+        let report = find_duplicates(dir.path(), &files, &config);
+        assert!(
+            report.clone_groups.is_empty(),
+            "post-suppression 2-instance group must be hidden by minOccurrences=3, \
+             got groups: {:?}",
+            report
+                .clone_groups
+                .iter()
+                .map(|g| g.instances.len())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            report.stats.clone_groups, 0,
+            "stats.clone_groups must match the empty post-filter array"
+        );
+        assert_eq!(
+            report.stats.clone_instances, 0,
+            "stats.clone_instances must match the empty post-filter array"
+        );
+    }
+
+    #[test]
     fn min_occurrences_evaluates_after_line_suppressions() {
         let dir = tempfile::tempdir().expect("create temp dir");
         let src_dir = dir.path().join("src");
