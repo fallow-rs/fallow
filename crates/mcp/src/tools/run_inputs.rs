@@ -1,11 +1,12 @@
 //! The API call of each typed tool.
 //!
-//! [`typed_call`] is the one place that maps a typed tool to a
-//! [`ProgrammaticEntry`] and that gives the call the MCP surface and the
-//! environment snapshot. The resolver of `fallow-api` then decides the
-//! production mode of each analysis from the tool parameters, the
-//! `FALLOW_PRODUCTION*` variables that the MCP surface reads for the command,
-//! and the config.
+//! [`typed_call`] is the one place that builds the shared analysis options of
+//! a typed tool: the environment scope of the tool, the production parameter,
+//! the MCP surface and the environment snapshot of the call. The resolver of
+//! `fallow-api` then decides the production mode of each analysis from the
+//! tool parameters, the `FALLOW_PRODUCTION*` variables that the MCP surface
+//! reads for the command, and the config. In test builds, `TypedTool::entry`
+//! names the programmatic entry of each tool for the parity rows.
 
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
