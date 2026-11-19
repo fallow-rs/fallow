@@ -252,7 +252,12 @@ pub fn command_run_inputs(cli: &Cli, env: EnvSnapshot) -> Option<RunInputs> {
     inputs.config_path = cli.config.clone().map(|path| given(path, "--config"));
     inputs.allow_remote_extends = flag_on(cli.allow_remote_extends, "--allow-remote-extends");
     inputs.no_cache = flag_on(cli.no_cache, "--no-cache");
-    inputs.threads = cli.threads.map(|threads| given(threads, "--threads"));
+    // `--threads 0` gives the default thread count of the worker pool, so the
+    // resolver gets no thread input for it.
+    inputs.threads = cli
+        .threads
+        .filter(|threads| *threads > 0)
+        .map(|threads| given(threads, "--threads"));
     inputs.max_file_size_mb = cli.max_file_size.map(|mb| given(mb, "--max-file-size"));
     inputs.package_baselines = cli
         .no_package_baselines

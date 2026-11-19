@@ -91,3 +91,13 @@ fn a_translator_that_drops_the_production_flag_fails() {
         "{failures:?}"
     );
 }
+
+#[test]
+fn a_zero_thread_flag_keeps_the_default_thread_count() {
+    let cli = Cli::try_parse_from(["fallow", "dead-code", "--threads", "0"]).expect("argv parses");
+    let inputs = command_run_inputs(&cli, EnvSnapshot::none()).expect("dead-code loads a config");
+    assert_eq!(inputs.threads, None);
+    let cli = Cli::try_parse_from(["fallow", "dead-code", "--threads", "3"]).expect("argv parses");
+    let inputs = command_run_inputs(&cli, EnvSnapshot::none()).expect("dead-code loads a config");
+    assert_eq!(inputs.threads.map(|given| given.value), Some(3));
+}
