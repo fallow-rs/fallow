@@ -256,7 +256,7 @@ impl ProgrammaticHealthRunner for EngineHealthRunner {
             };
             let run = if health_reads_config_type_aware(options) {
                 type_aware_config::resolve_run_refusing_type_aware(
-                    &options.analysis.type_aware,
+                    &options.analysis,
                     type_aware_config::TypeAwareCommand::Analysis,
                     type_aware_config::ConfigLocation::of(&resolved),
                     resolve,
@@ -517,7 +517,7 @@ fn reject_health_config_type_aware(options: &ComplexityOptions) -> ProgrammaticR
         options.analysis.config_path.as_deref(),
     )?;
     type_aware_config::reject_config_type_aware_at(
-        &options.analysis.type_aware,
+        &options.analysis,
         type_aware_config::ConfigLocation {
             root: &root,
             config_path: options.analysis.config_path.as_deref(),

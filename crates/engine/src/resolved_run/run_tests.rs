@@ -471,3 +471,42 @@ fn a_rule_adjustment_opens_a_session_after_the_workspace_discovery() {
             .is_err()
     );
 }
+
+/// The run resolves with a type-aware value that it cannot use, and returns
+/// the error only to a reader of the type-aware settings. The language server
+/// reads no type-aware variable.
+#[test]
+fn an_unknown_type_aware_value_fails_only_the_type_aware_reader() {
+    let (_dir, root) = project(Some(r#"{ "typeAware": { "enabled": true } }"#));
+    let env = EnvSnapshot::from_pairs(&[("FALLOW_TYPE_AWARE", "maybe")], Some(&root));
+    let inputs = RunInputs::new(
+        Surface::Cli,
+        env.clone(),
+        CommandKind::Dupes,
+        SelectionInput::Single(PlannedAnalysis::Duplication),
+    );
+    let run = resolve(&inputs);
+    assert!(matches!(
+        run.type_aware(),
+        Err(ResolveError::Input {
+            field: InputField::Env(fallow_config::EnvVar::TypeAware),
+            problem: InputProblem::InvalidValue,
+            ..
+        })
+    ));
+    let lsp = RunInputs::new(
+        Surface::Lsp,
+        env,
+        CommandKind::Editor,
+        SelectionInput::Single(PlannedAnalysis::DeadCode),
+    );
+    let settings = resolve(&lsp).type_aware().cloned().expect("settings");
+    assert!(settings.enabled.value());
+    assert!(matches!(
+        settings.enabled.source(),
+        Source::ConfigFile {
+            key: "typeAware.enabled",
+            ..
+        }
+    ));
+}

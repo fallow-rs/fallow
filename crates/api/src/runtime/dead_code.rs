@@ -95,7 +95,7 @@ fn resolve_dead_code_run_refusing_type_aware(
     resolved: &ProgrammaticAnalysisContext,
 ) -> ProgrammaticResult<ResolvedRun> {
     super::type_aware_config::resolve_run_refusing_type_aware(
-        &options.analysis.type_aware,
+        &options.analysis,
         super::type_aware_config::TypeAwareCommand::Analysis,
         super::type_aware_config::ConfigLocation::of(resolved),
         || resolve_dead_code_run(options, &ProgrammaticEntry::DeadCode),

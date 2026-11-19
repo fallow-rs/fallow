@@ -653,11 +653,14 @@ fn load_watch_config(opts: &WatchOptions<'_>) -> Result<WatchConfig, ExitCode> {
         config.show_cascade = true;
     }
     crate::check::apply_type_aware_overrides_from(
+        Some(&run),
         opts.output,
-        opts.type_aware,
-        None,
-        opts.type_aware_projects,
-        opts.type_aware_require,
+        &crate::check::TypeAwareRequest {
+            enabled: opts.type_aware,
+            config_override: None,
+            projects: opts.type_aware_projects,
+            require: opts.type_aware_require,
+        },
         &mut config,
     )?;
     Ok(WatchConfig { run, config })

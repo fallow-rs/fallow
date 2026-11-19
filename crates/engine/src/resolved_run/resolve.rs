@@ -12,6 +12,7 @@ use fallow_types::sourced::{Given, Origin, Scope, Source, Sourced};
 use super::env_policy::applies;
 use super::pick::{PerAnalysis, ProductionInputs, decide_production};
 use super::steps::{self, GivenSettings, ModeEntry};
+use super::type_aware::{TypeAwareConfigInput, TypeAwareDecision};
 use super::{AnalysisDecision, ResolvedRun, RunSettings, config_key_name, join_cwd, skip_key};
 use crate::project_config::{
     ConfigChainSnapshot, ConfigFile, ConfigFileOptions, ConfigLoadError, load_config_file,
@@ -26,6 +27,8 @@ pub enum InputField {
     ConfigPath,
     /// The thread count.
     Threads,
+    /// An environment variable.
+    Env(EnvVar),
 }
 
 /// What is wrong with an input.
@@ -38,6 +41,10 @@ pub enum InputProblem {
     Invalid,
     /// The input is zero.
     Zero,
+    /// The value is not one of the values that the input takes.
+    InvalidValue,
+    /// The value is not valid UTF-8.
+    NotUnicode,
 }
 
 /// What a run plan leaves out when it selects no analysis.
@@ -356,6 +363,7 @@ fn resolve_with(
         config_snapshot,
         decisions,
         settings,
+        type_aware,
         mut off,
         mut on,
     } = loaded;
@@ -387,6 +395,7 @@ fn resolve_with(
         off,
         on,
         settings,
+        type_aware,
         given,
         env,
         env_read,
@@ -481,6 +490,7 @@ struct Loaded {
     config_snapshot: ConfigChainSnapshot,
     decisions: PerAnalysis<AnalysisDecision>,
     settings: RunSettings,
+    type_aware: TypeAwareDecision,
     off: Option<ModeEntry>,
     on: Option<ModeEntry>,
 }
@@ -617,12 +627,23 @@ impl Context<'_> {
             |entry| entry.config.cache_dir.clone(),
         );
         settings.cache_dir = settings.cache_dir.map(|_| cache_dir);
+        let type_aware = super::type_aware::decision(
+            self.inputs.command,
+            &self.inputs.type_aware,
+            self.env,
+            TypeAwareConfigInput {
+                section: &file.type_aware,
+                audit: file.audit.type_aware,
+                file: path.as_deref(),
+            },
+        );
         Ok(Loaded {
             file,
             config_file,
             config_snapshot: ConfigChainSnapshot::default(),
             decisions,
             settings,
+            type_aware,
             off,
             on,
         })

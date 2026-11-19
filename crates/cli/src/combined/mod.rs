@@ -506,6 +506,7 @@ fn run_combined_health(
                 projects: opts.type_aware_projects,
                 require: opts.type_aware_require,
             },
+            health,
             &config,
         )
         .map_err(|message| crate::error::emit_input_error(&message, opts.output))?;

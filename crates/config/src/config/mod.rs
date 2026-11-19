@@ -352,6 +352,19 @@ pub enum TypeAwareRequire {
     Complete,
 }
 
+impl TypeAwareRequire {
+    /// The policy of a `FALLOW_TYPE_AWARE_REQUIRE` value: `best-effort` or
+    /// `complete`, without case and outer spaces. `None` for another value.
+    #[must_use]
+    pub fn from_env_value(value: &str) -> Option<Self> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "best-effort" => Some(Self::BestEffort),
+            "complete" => Some(Self::Complete),
+            _ => None,
+        }
+    }
+}
+
 impl From<TypeAwareRequire> for fallow_types::semantic::SemanticCompletenessRequirement {
     fn from(value: TypeAwareRequire) -> Self {
         match value {

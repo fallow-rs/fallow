@@ -456,7 +456,7 @@ pub fn run_health(
         Ok(config) => config,
         Err(code) => return code,
     };
-    let resolved_type_aware = match resolve_type_aware_health_options(type_aware, &config) {
+    let resolved_type_aware = match resolve_type_aware_health_options(type_aware, run, &config) {
         Ok(options) => options,
         Err(message) => return emit_input_error(&message, opts.output),
     };
@@ -557,54 +557,33 @@ pub struct ResolvedTypeAwareHealthOptions {
     pub require: fallow_config::TypeAwareRequire,
 }
 
+/// The type-aware settings of a health run: the flags of `options` over the
+/// environment of `run` and the config.
+///
+/// # Errors
+///
+/// Returns the message of a `FALLOW_TYPE_AWARE` or
+/// `FALLOW_TYPE_AWARE_REQUIRE` value that the run cannot use.
 pub fn resolve_type_aware_health_options(
     options: &TypeAwareHealthOptions<'_>,
+    run: Option<Runnable<'_>>,
     config: &fallow_config::ResolvedConfig,
 ) -> Result<ResolvedTypeAwareHealthOptions, String> {
-    let env_enabled = std::env::var("FALLOW_TYPE_AWARE")
-        .ok()
-        .map(|value| match value.trim().to_ascii_lowercase().as_str() {
-            "1" | "true" | "yes" | "on" => Ok(true),
-            "0" | "false" | "no" | "off" => Ok(false),
-            _ => Err(
-                "FALLOW_TYPE_AWARE must be one of true, false, 1, 0, yes, no, on, or off"
-                    .to_string(),
-            ),
-        })
-        .transpose()?;
-    let enabled = options
-        .enabled
-        .or(env_enabled)
-        .unwrap_or(config.type_aware.enabled);
-    let projects = if !options.projects.is_empty() {
-        options.projects.to_vec()
-    } else if let Some(value) = std::env::var_os("FALLOW_TYPE_AWARE_PROJECTS") {
-        std::env::split_paths(&value).collect()
-    } else {
-        config
-            .type_aware
-            .projects
-            .iter()
-            .map(std::path::PathBuf::from)
-            .collect()
-    };
-    let require = if let Some(require) = options.require {
-        require
-    } else if let Ok(value) = std::env::var("FALLOW_TYPE_AWARE_REQUIRE") {
-        match value.trim().to_ascii_lowercase().as_str() {
-            "best-effort" => fallow_config::TypeAwareRequire::BestEffort,
-            "complete" => fallow_config::TypeAwareRequire::Complete,
-            _ => {
-                return Err("FALLOW_TYPE_AWARE_REQUIRE must be best-effort or complete".to_string());
-            }
-        }
-    } else {
-        config.type_aware.require
-    };
+    let values = crate::check::type_aware_values(
+        run.map(|health| health.run()),
+        &crate::check::TypeAwareRequest {
+            enabled: options.enabled,
+            config_override: None,
+            projects: options.projects,
+            require: options.require,
+        },
+        &config.type_aware,
+    )
+    .map_err(|err| err.message())?;
     Ok(ResolvedTypeAwareHealthOptions {
-        enabled,
-        projects,
-        require,
+        enabled: values.enabled,
+        projects: values.projects,
+        require: values.require,
     })
 }
 

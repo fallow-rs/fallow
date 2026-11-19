@@ -41,11 +41,14 @@ fn type_aware_override_precedence_is_cli_then_scoped_config_then_config() {
     for (cli, scoped, config_enabled, expected) in cases {
         let mut config = resolved_config(config_enabled);
         apply_type_aware_overrides_from(
-            fallow_config::OutputFormat::Json,
-            cli,
-            scoped,
-            &[],
             None,
+            fallow_config::OutputFormat::Json,
+            &TypeAwareRequest {
+                enabled: cli,
+                config_override: scoped,
+                projects: &[],
+                require: None,
+            },
             &mut config,
         )
         .expect("overrides should apply");

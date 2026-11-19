@@ -13,9 +13,21 @@ use fallow_types::output_format::OutputFormat;
 use fallow_types::sourced::{Given, Origin};
 use serde::Serialize;
 
-pub use env::{EnvSnapshot, EnvValue, EnvVar};
+pub use env::{EnvProblem, EnvSnapshot, EnvValue, EnvVar};
 
-use crate::PlannedAnalysis;
+use crate::{PlannedAnalysis, TypeAwareRequire};
+
+/// The type-aware settings that a surface gives, such as the
+/// `--type-aware`, `--type-aware-project` and `--type-aware-require` flags.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct TypeAwareInputs {
+    /// Turn type-aware analysis on or off.
+    pub enabled: Option<Given<bool>>,
+    /// The TypeScript project configs. An empty list is not an input.
+    pub projects: Option<Given<Vec<PathBuf>>>,
+    /// The completeness policy.
+    pub require: Option<Given<TypeAwareRequire>>,
+}
 
 /// The surface that starts a run.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, schemars::JsonSchema)]
@@ -191,6 +203,8 @@ pub struct RunInputs {
     /// The analysis flags of the run, such as `--unused-exports`, with the
     /// analysis that each flag belongs to.
     pub analysis_flags: Vec<(PlannedAnalysis, Origin)>,
+    /// The type-aware settings that the surface gives.
+    pub type_aware: TypeAwareInputs,
     /// The output format.
     pub output: OutputFormat,
     /// Suppress progress output.
@@ -227,6 +241,7 @@ impl RunInputs {
             production_health: None,
             production_dupes: None,
             analysis_flags: Vec::new(),
+            type_aware: TypeAwareInputs::default(),
             output: OutputFormat::Human,
             quiet: true,
         }

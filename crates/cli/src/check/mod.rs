@@ -41,7 +41,8 @@ mod benchmark;
 mod configuration;
 mod type_aware_summary;
 pub use benchmark::benchmark_dead_code_json;
-use configuration::{parse_type_aware_bool, parse_type_aware_require, prepare_check_config};
+use configuration::prepare_check_config;
+pub use configuration::{TypeAwareRequest, apply_type_aware_overrides_from, type_aware_values};
 #[cfg(test)]
 use type_aware_summary::format_type_aware_summary;
 use type_aware_summary::print_type_aware_summary;
@@ -851,52 +852,6 @@ fn drop_in_background<T: Send + 'static>(value: T) {
         .name("fallow-drop".to_owned())
         .spawn(move || drop(value));
     drop(spawned);
-}
-
-pub fn apply_type_aware_overrides_from(
-    output: fallow_config::OutputFormat,
-    enabled: Option<bool>,
-    config_override: Option<bool>,
-    projects: &[std::path::PathBuf],
-    require: Option<fallow_config::TypeAwareRequire>,
-    config: &mut ResolvedConfig,
-) -> Result<(), ExitCode> {
-    let env_enabled = match std::env::var("FALLOW_TYPE_AWARE") {
-        Ok(value) => Some(parse_type_aware_bool(&value, output)?),
-        Err(std::env::VarError::NotPresent) => None,
-        Err(std::env::VarError::NotUnicode(_)) => {
-            return Err(emit_input_error(
-                "FALLOW_TYPE_AWARE must be valid UTF-8",
-                output,
-            ));
-        }
-    };
-    // First match wins: CLI flag, environment, command-scoped config override
-    // (audit.typeAware), then the top-level typeAware.enabled opt-in.
-    config.type_aware.enabled = enabled
-        .or(env_enabled)
-        .or(config_override)
-        .unwrap_or(config.type_aware.enabled);
-
-    if !projects.is_empty() {
-        config.type_aware.projects = projects
-            .iter()
-            .map(|path| path.to_string_lossy().into_owned())
-            .collect();
-    } else if let Some(paths) = std::env::var_os("FALLOW_TYPE_AWARE_PROJECTS") {
-        config.type_aware.projects = std::env::split_paths(&paths)
-            .map(|path| path.to_string_lossy().into_owned())
-            .collect();
-    }
-
-    config.type_aware.require = if let Some(require) = require {
-        require
-    } else if let Ok(value) = std::env::var("FALLOW_TYPE_AWARE_REQUIRE") {
-        parse_type_aware_require(&value, output)?
-    } else {
-        config.type_aware.require
-    };
-    Ok(())
 }
 
 fn handle_trace_side_effects(

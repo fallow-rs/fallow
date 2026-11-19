@@ -286,6 +286,15 @@ const PRODUCTION_DUPES: OptionName = OptionName {
     mcp: "production_dupes",
 };
 
+/// The environment snapshot of one programmatic call: the snapshot of
+/// `options.host`, else a snapshot of the process environment.
+pub(crate) fn host_env(options: &AnalysisOptions) -> EnvSnapshot {
+    options
+        .host
+        .as_ref()
+        .map_or_else(EnvSnapshot::capture, |host| host.env.clone())
+}
+
 /// The raw run inputs of one programmatic call.
 pub(crate) fn run_inputs(
     options: &AnalysisOptions,
@@ -407,6 +416,13 @@ pub(crate) fn programmatic_error(err: &ResolveError) -> ProgrammaticError {
                 (InputField::Root, _) => ("FALLOW_INVALID_ROOT", "analysis.root"),
                 (InputField::ConfigPath, _) => ("FALLOW_INVALID_CONFIG_PATH", CONFIG_PATH_CONTEXT),
                 (InputField::Threads, _) => ("FALLOW_INVALID_THREADS", "analysis.threads"),
+                // The typed routes refuse a type-aware layer with this code, so
+                // a caller that can run the CLI falls back on it.
+                (InputField::Env(EnvVar::TypeAware), _) => (
+                    crate::TYPE_AWARE_CONFIG_UNSUPPORTED,
+                    EnvVar::TypeAware.name(),
+                ),
+                (InputField::Env(var), _) => ("FALLOW_INVALID_ENV", var.name()),
             };
             ProgrammaticError::new(message.clone(), 2)
                 .with_code(code)

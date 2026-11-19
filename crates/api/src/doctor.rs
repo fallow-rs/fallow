@@ -141,6 +141,9 @@ struct ReadyProject {
     config: ResolvedConfig,
     workspaces: Vec<WorkspaceInfo>,
     workspace_diagnostics: Vec<WorkspaceDiagnostic>,
+    /// The type-aware setting and policy of the run, or the readiness text of
+    /// a variable whose value the run cannot use.
+    type_aware: Result<(bool, fallow_config::TypeAwareRequire), &'static str>,
 }
 
 impl ReadyProject {
@@ -155,7 +158,32 @@ impl ReadyProject {
             config: dead_code.config().clone(),
             workspaces: dead_code.workspaces().to_vec(),
             workspace_diagnostics: dead_code.workspace_diagnostics().to_vec(),
+            type_aware: run
+                .type_aware()
+                .map(|settings| (*settings.enabled.value(), *settings.require.value()))
+                .map_err(|err| type_aware_readiness_text(&err)),
         }
+    }
+}
+
+/// The readiness text of a type-aware variable that the run cannot use.
+fn type_aware_readiness_text(err: &fallow_engine::resolved_run::ResolveError) -> &'static str {
+    use fallow_engine::resolved_run::{InputField, InputProblem, ResolveError};
+    match err {
+        ResolveError::Input {
+            field: InputField::Env(fallow_config::EnvVar::TypeAwareRequire),
+            problem: InputProblem::NotUnicode,
+            ..
+        } => "FALLOW_TYPE_AWARE_REQUIRE must contain valid UTF-8.",
+        ResolveError::Input {
+            field: InputField::Env(fallow_config::EnvVar::TypeAwareRequire),
+            ..
+        } => "FALLOW_TYPE_AWARE_REQUIRE must be best-effort or complete.",
+        ResolveError::Input {
+            problem: InputProblem::NotUnicode,
+            ..
+        } => "FALLOW_TYPE_AWARE must contain valid UTF-8.",
+        _ => "FALLOW_TYPE_AWARE must contain a supported boolean value.",
     }
 }
 
@@ -232,7 +260,7 @@ fn push_ready_project_checks<F>(
 
     checks.push(type_aware_check(
         root,
-        &project.config.type_aware,
+        project.type_aware,
         discover_companion,
     ));
 
@@ -670,13 +698,13 @@ fn push_project_failure_checks(
 
 fn type_aware_check<F>(
     root: &Path,
-    config: &fallow_config::TypeAwareConfig,
+    type_aware: Result<(bool, fallow_config::TypeAwareRequire), &'static str>,
     discover_companion: &F,
 ) -> DoctorCheck
 where
     F: Fn(&Path) -> Result<(), String>,
 {
-    let (enabled, require) = match effective_type_aware_config(config) {
+    let (enabled, require) = match type_aware {
         Ok(effective) => effective,
         Err(message) => {
             return check(
@@ -728,34 +756,6 @@ where
             )
         }
     }
-}
-
-fn effective_type_aware_config(
-    config: &fallow_config::TypeAwareConfig,
-) -> Result<(bool, fallow_config::TypeAwareRequire), &'static str> {
-    let enabled = match std::env::var("FALLOW_TYPE_AWARE") {
-        Ok(value) => match value.trim().to_ascii_lowercase().as_str() {
-            "1" | "true" | "yes" | "on" => true,
-            "0" | "false" | "no" | "off" => false,
-            _ => return Err("FALLOW_TYPE_AWARE must contain a supported boolean value."),
-        },
-        Err(std::env::VarError::NotPresent) => config.enabled,
-        Err(std::env::VarError::NotUnicode(_)) => {
-            return Err("FALLOW_TYPE_AWARE must contain valid UTF-8.");
-        }
-    };
-    let require = match std::env::var("FALLOW_TYPE_AWARE_REQUIRE") {
-        Ok(value) => match value.trim().to_ascii_lowercase().as_str() {
-            "best-effort" => fallow_config::TypeAwareRequire::BestEffort,
-            "complete" => fallow_config::TypeAwareRequire::Complete,
-            _ => return Err("FALLOW_TYPE_AWARE_REQUIRE must be best-effort or complete."),
-        },
-        Err(std::env::VarError::NotPresent) => config.require,
-        Err(std::env::VarError::NotUnicode(_)) => {
-            return Err("FALLOW_TYPE_AWARE_REQUIRE must contain valid UTF-8.");
-        }
-    };
-    Ok((enabled, require))
 }
 
 /// The package manager that a suggested install command names. npm is the
