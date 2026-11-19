@@ -626,8 +626,8 @@ fn security_command_dead_code_routes_through_analysis_session() {
     let security = read_source_without_line_comments("crates/cli/src/security.rs")
         .expect("read security module");
     assert!(
-        security.contains("AnalysisSession::from_resolved_config"),
-        "security must build an AnalysisSession before dead-code variants"
+        security.contains("open_session_adjusted("),
+        "security must open an AnalysisSession of its run before dead-code variants"
     );
     for forbidden in [
         "fallow_engine::dead_code::analyze(",

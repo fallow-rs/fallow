@@ -620,44 +620,44 @@ fn run_security_blind_spots_or_default(
     inputs: &SecurityRunInputs<'_>,
     derived_flags: &SecurityDerivedFlagState<'_>,
 ) -> ExitCode {
-    let cli = dispatch.cli;
-    let (output, quiet, fail_on_issues) =
-        (dispatch.output, dispatch.quiet, dispatch.fail_on_issues);
-    let opts = security::SecurityOptions {
-        root: dispatch.root,
-        config_path: &cli.config,
-        output,
-        json_style: dispatch.json_style,
-        no_cache: cli.no_cache,
-        threads: dispatch.threads,
-        quiet,
-        allow_remote_extends: cli.allow_remote_extends,
-        fail_on_issues,
-        sarif_file: cli.sarif_file.as_deref(),
-        summary: cli.summary,
-        changed_since: cli.changed_since.as_deref(),
-        use_shared_diff_index: true,
-        workspace: cli.workspace.as_deref(),
-        changed_workspaces: cli.changed_workspaces.as_deref(),
-        file: inputs.scoped_files,
-        surface: inputs.surface,
-        scope: inputs.scope.clone(),
-        gate: inputs.gate,
-        runtime_coverage: inputs.runtime_coverage,
-        min_invocations_hot: inputs.min_invocations_hot,
-        explain: cli.explain,
-    };
-    if matches!(
+    let blind_spots = matches!(
         inputs.subcommand,
         Some(SecuritySubcommand::BlindSpots { .. })
-    ) {
-        if let Some(code) = validate_security_blind_spots_flags(derived_flags) {
-            return code;
-        }
-        security::run_blind_spots(&opts)
-    } else {
-        security::run(&opts)
+    );
+    if blind_spots && let Some(code) = validate_security_blind_spots_flags(derived_flags) {
+        return code;
     }
+    dispatch.run_resolved(|run| {
+        let opts = security::SecurityOptions {
+            root: dispatch.root,
+            run,
+            output: dispatch.output,
+            json_style: dispatch.json_style,
+            no_cache: dispatch.cli.no_cache,
+            threads: dispatch.threads,
+            quiet: dispatch.quiet,
+            allow_remote_extends: dispatch.cli.allow_remote_extends,
+            fail_on_issues: dispatch.fail_on_issues,
+            sarif_file: dispatch.cli.sarif_file.as_deref(),
+            summary: dispatch.cli.summary,
+            changed_since: dispatch.cli.changed_since.as_deref(),
+            use_shared_diff_index: true,
+            workspace: dispatch.cli.workspace.as_deref(),
+            changed_workspaces: dispatch.cli.changed_workspaces.as_deref(),
+            file: inputs.scoped_files,
+            surface: inputs.surface,
+            scope: inputs.scope.clone(),
+            gate: inputs.gate,
+            runtime_coverage: inputs.runtime_coverage,
+            min_invocations_hot: inputs.min_invocations_hot,
+            explain: dispatch.cli.explain,
+        };
+        if blind_spots {
+            security::run_blind_spots(&opts)
+        } else {
+            security::run(&opts)
+        }
+    })
 }
 
 /// Handle `fallow security survivors` as an early return. Returns `Some(code)`

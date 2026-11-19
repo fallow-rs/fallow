@@ -74,6 +74,13 @@ impl crate::DispatchContext<'_> {
             .map_err(|err| self.emit_resolve_error(err))
     }
 
+    /// Run `command` with the run of the command line. A resolve error prints
+    /// as [`Self::resolve_run`] prints it and gives exit code 2.
+    pub(crate) fn run_resolved(&self, command: impl FnOnce(&ResolvedRun) -> ExitCode) -> ExitCode {
+        self.resolve_run()
+            .map_or_else(|code| code, |run| command(&run))
+    }
+
     /// Run `command` with the run of `pending`, after [`Self::finish_run`].
     pub(crate) fn with_run(
         &self,
@@ -170,6 +177,43 @@ impl<'a> DeadCodeRun<'a> {
 /// The resolver of a command that reads its config after its own checks of
 /// the command line. The dispatch passes `&|| dispatch.resolve_run()`.
 pub type ResolveRun<'a> = &'a dyn Fn() -> Result<ResolvedRun, ExitCode>;
+
+/// The run of a benchmark hook or a unit test: `command` on `root` with the
+/// config file that discovery finds, `threads` worker threads, no parse
+/// cache, JSON output and no progress output. This is not a supported API.
+///
+/// # Errors
+///
+/// Prints a resolve error as JSON and gives exit code 2.
+pub fn benchmark_run(
+    root: &std::path::Path,
+    command: CommandKind,
+    threads: usize,
+) -> Result<ResolvedRun, ExitCode> {
+    let flag = |value| fallow_types::sourced::Given {
+        value,
+        origin: fallow_types::sourced::Origin::Flag("--root"),
+    };
+    let mut inputs = fallow_config::RunInputs::new(
+        fallow_config::Surface::Cli,
+        fallow_config::EnvSnapshot::capture(),
+        command,
+        fallow_config::SelectionInput::Single(PlannedAnalysis::DeadCode),
+    );
+    inputs.root = Some(flag(root.to_path_buf()));
+    inputs.threads = Some(fallow_types::sourced::Given {
+        value: threads.max(1),
+        origin: fallow_types::sourced::Origin::Flag("--threads"),
+    });
+    inputs.no_cache = Some(fallow_types::sourced::Given {
+        value: true,
+        origin: fallow_types::sourced::Origin::Flag("--no-cache"),
+    });
+    inputs.output = OutputFormat::Json;
+    inputs.quiet = true;
+    fallow_engine::resolved_run::resolve_run(&inputs)
+        .map_err(|err| crate::error::emit_input_error(&err.message(), OutputFormat::Json))
+}
 
 /// The dead-code analysis of `run`. A run that skips it prints an error on
 /// the error channel of `output` and gives exit code 2.
