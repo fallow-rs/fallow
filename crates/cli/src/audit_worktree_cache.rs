@@ -127,13 +127,12 @@ pub fn lend_to_base(
         .then(|| WorktreeParseCache::lend(host_root, opts.cache_dir, base_root, WriteBack::No))
 }
 
-/// The size, modification time and file id of a file. Each cache save
-/// replaces the file through a rename, so a save changes the file id.
+/// The size and modification time of a file. Each cache save writes a new
+/// file and renames it over the old one, so a save gives a new mtime.
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct FileStamp {
     len: u64,
     modified: Option<SystemTime>,
-    file_id: u64,
 }
 
 impl FileStamp {
@@ -147,17 +146,6 @@ impl FileStamp {
         Some(Self {
             len: metadata.len(),
             modified: metadata.modified().ok(),
-            file_id: file_id(&metadata),
         })
     }
-}
-
-#[cfg(unix)]
-fn file_id(metadata: &std::fs::Metadata) -> u64 {
-    std::os::unix::fs::MetadataExt::ino(metadata)
-}
-
-#[cfg(not(unix))]
-const fn file_id(_metadata: &std::fs::Metadata) -> u64 {
-    0
 }
