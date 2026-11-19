@@ -28,5 +28,6 @@ serde_json = { workspace = true }
 napi-build = "2"
 
 [dev-dependencies]
+fallow-api = { workspace = true, features = ["testing"] }
 fallow-types = { workspace = true }
 tempfile = { workspace = true }

@@ -8,6 +8,7 @@
 )]
 
 use fallow_api as api;
+use fallow_api::run::{EnvSnapshot, HostInputs, Surface};
 use napi::bindgen_prelude::{AsyncTask, JsObjectValue, ToNapiValue, Unknown};
 use napi::{Env, ScopedTask, Status};
 use napi_derive::napi;
@@ -222,6 +223,15 @@ pub struct ComplexityOptions {
     pub coverage_root: Option<String>,
 }
 
+/// The translation of one Node option object into the options of the Rust
+/// API, with the environment snapshot of the call.
+trait ToApiOptions {
+    /// The options of the Rust API.
+    type Api;
+
+    fn to_api(self, env: EnvSnapshot) -> napi::Result<Self::Api>;
+}
+
 struct CommonOptionsInput {
     root: Option<String>,
     config_path: Option<String>,
@@ -238,7 +248,12 @@ struct CommonOptionsInput {
     type_aware: Option<TypeAwareOptions>,
 }
 
-fn map_common_options(input: CommonOptionsInput) -> napi::Result<api::AnalysisOptions> {
+/// The shared options of a Node call. `env` is the environment snapshot of
+/// the call, which each exported function captures once.
+fn map_common_options(
+    input: CommonOptionsInput,
+    env: EnvSnapshot,
+) -> napi::Result<api::AnalysisOptions> {
     let threads = input
         .threads
         .map(usize::try_from)
@@ -266,6 +281,10 @@ fn map_common_options(input: CommonOptionsInput) -> napi::Result<api::AnalysisOp
         changed_workspaces: input.changed_workspaces,
         explain: input.explain.unwrap_or(false),
         type_aware,
+        host: Some(HostInputs {
+            surface: Surface::Node,
+            env,
+        }),
         // A JS embedder cannot hold a Rust cancellation token, so the napi
         // surface never carries one.
         ..api::AnalysisOptions::default()
@@ -400,27 +419,31 @@ fn parse_target_effort(value: Option<String>) -> napi::Result<Option<api::Target
     }
 }
 
-impl TryFrom<DeadCodeOptions> for api::DeadCodeOptions {
-    type Error = napi::Error;
+impl ToApiOptions for DeadCodeOptions {
+    type Api = api::DeadCodeOptions;
 
-    fn try_from(value: DeadCodeOptions) -> Result<Self, Self::Error> {
-        Ok(Self {
+    fn to_api(self, env: EnvSnapshot) -> napi::Result<api::DeadCodeOptions> {
+        let value = self;
+        Ok(api::DeadCodeOptions {
             finding_ids: value.finding_ids.unwrap_or_default(),
-            analysis: map_common_options(CommonOptionsInput {
-                root: value.root,
-                config_path: value.config_path,
-                allow_remote_extends: value.allow_remote_extends,
-                no_cache: value.no_cache,
-                threads: value.threads,
-                diff_file: value.diff_file,
-                production: value.production,
-                changed_since: value.changed_since,
-                no_package_baselines: value.no_package_baselines,
-                workspace: value.workspace,
-                changed_workspaces: value.changed_workspaces,
-                explain: value.explain,
-                type_aware: value.type_aware,
-            })?,
+            analysis: map_common_options(
+                CommonOptionsInput {
+                    root: value.root,
+                    config_path: value.config_path,
+                    allow_remote_extends: value.allow_remote_extends,
+                    no_cache: value.no_cache,
+                    threads: value.threads,
+                    diff_file: value.diff_file,
+                    production: value.production,
+                    changed_since: value.changed_since,
+                    no_package_baselines: value.no_package_baselines,
+                    workspace: value.workspace,
+                    changed_workspaces: value.changed_workspaces,
+                    explain: value.explain,
+                    type_aware: value.type_aware,
+                },
+                env,
+            )?,
             filters: api::DeadCodeFilters {
                 shared_state: false,
                 unused_files: value.unused_files.unwrap_or(false),
@@ -481,27 +504,31 @@ impl TryFrom<DeadCodeOptions> for api::DeadCodeOptions {
     }
 }
 
-impl TryFrom<ArchitectureOptions> for api::ArchitectureOptions {
-    type Error = napi::Error;
+impl ToApiOptions for ArchitectureOptions {
+    type Api = api::ArchitectureOptions;
 
-    fn try_from(value: ArchitectureOptions) -> Result<Self, Self::Error> {
-        Ok(Self {
+    fn to_api(self, env: EnvSnapshot) -> napi::Result<api::ArchitectureOptions> {
+        let value = self;
+        Ok(api::ArchitectureOptions {
             shared_state: false,
-            analysis: map_common_options(CommonOptionsInput {
-                root: value.root,
-                config_path: value.config_path,
-                allow_remote_extends: value.allow_remote_extends,
-                no_cache: value.no_cache,
-                threads: value.threads,
-                diff_file: value.diff_file,
-                production: value.production,
-                changed_since: value.changed_since,
-                no_package_baselines: value.no_package_baselines,
-                workspace: value.workspace,
-                changed_workspaces: value.changed_workspaces,
-                explain: value.explain,
-                type_aware: None,
-            })?,
+            analysis: map_common_options(
+                CommonOptionsInput {
+                    root: value.root,
+                    config_path: value.config_path,
+                    allow_remote_extends: value.allow_remote_extends,
+                    no_cache: value.no_cache,
+                    threads: value.threads,
+                    diff_file: value.diff_file,
+                    production: value.production,
+                    changed_since: value.changed_since,
+                    no_package_baselines: value.no_package_baselines,
+                    workspace: value.workspace,
+                    changed_workspaces: value.changed_workspaces,
+                    explain: value.explain,
+                    type_aware: None,
+                },
+                env,
+            )?,
             files: value
                 .files
                 .unwrap_or_default()
@@ -515,26 +542,30 @@ impl TryFrom<ArchitectureOptions> for api::ArchitectureOptions {
     }
 }
 
-impl TryFrom<DuplicationOptions> for api::DuplicationOptions {
-    type Error = napi::Error;
+impl ToApiOptions for DuplicationOptions {
+    type Api = api::DuplicationOptions;
 
-    fn try_from(value: DuplicationOptions) -> Result<Self, Self::Error> {
-        Ok(Self {
-            analysis: map_common_options(CommonOptionsInput {
-                root: value.root,
-                config_path: value.config_path,
-                allow_remote_extends: value.allow_remote_extends,
-                no_cache: value.no_cache,
-                threads: value.threads,
-                diff_file: value.diff_file,
-                production: value.production,
-                changed_since: value.changed_since,
-                no_package_baselines: value.no_package_baselines,
-                workspace: value.workspace,
-                changed_workspaces: value.changed_workspaces,
-                explain: value.explain,
-                type_aware: None,
-            })?,
+    fn to_api(self, env: EnvSnapshot) -> napi::Result<api::DuplicationOptions> {
+        let value = self;
+        Ok(api::DuplicationOptions {
+            analysis: map_common_options(
+                CommonOptionsInput {
+                    root: value.root,
+                    config_path: value.config_path,
+                    allow_remote_extends: value.allow_remote_extends,
+                    no_cache: value.no_cache,
+                    threads: value.threads,
+                    diff_file: value.diff_file,
+                    production: value.production,
+                    changed_since: value.changed_since,
+                    no_package_baselines: value.no_package_baselines,
+                    workspace: value.workspace,
+                    changed_workspaces: value.changed_workspaces,
+                    explain: value.explain,
+                    type_aware: None,
+                },
+                env,
+            )?,
             mode: parse_duplication_mode(value.mode)?,
             near: value.near,
             min_tokens: value.min_tokens.map(|n| n as usize),
@@ -565,10 +596,11 @@ impl TryFrom<DuplicationOptions> for api::DuplicationOptions {
     }
 }
 
-impl TryFrom<SimilarCodeOptions> for api::SimilarCodeOptions {
-    type Error = napi::Error;
+impl ToApiOptions for SimilarCodeOptions {
+    type Api = api::SimilarCodeOptions;
 
-    fn try_from(value: SimilarCodeOptions) -> Result<Self, Self::Error> {
+    fn to_api(self, env: EnvSnapshot) -> napi::Result<api::SimilarCodeOptions> {
+        let value = self;
         if value
             .threshold
             .is_some_and(|threshold| !threshold.is_finite() || !(0.0..=1.0).contains(&threshold))
@@ -590,22 +622,25 @@ impl TryFrom<SimilarCodeOptions> for api::SimilarCodeOptions {
                 "`top` must be greater than zero".to_owned(),
             ));
         }
-        Ok(Self {
-            analysis: map_common_options(CommonOptionsInput {
-                root: value.root,
-                config_path: value.config_path,
-                allow_remote_extends: value.allow_remote_extends,
-                no_cache: value.no_cache,
-                threads: value.threads,
-                diff_file: value.diff_file,
-                production: None,
-                changed_since: value.changed_since,
-                no_package_baselines: None,
-                workspace: value.workspace,
-                changed_workspaces: value.changed_workspaces,
-                explain: Some(true),
-                type_aware: None,
-            })?,
+        Ok(api::SimilarCodeOptions {
+            analysis: map_common_options(
+                CommonOptionsInput {
+                    root: value.root,
+                    config_path: value.config_path,
+                    allow_remote_extends: value.allow_remote_extends,
+                    no_cache: value.no_cache,
+                    threads: value.threads,
+                    diff_file: value.diff_file,
+                    production: None,
+                    changed_since: value.changed_since,
+                    no_package_baselines: None,
+                    workspace: value.workspace,
+                    changed_workspaces: value.changed_workspaces,
+                    explain: Some(true),
+                    type_aware: None,
+                },
+                env,
+            )?,
             threshold: value.threshold,
             min_lines: value.min_lines.map(|value| value as usize),
             top: value.top.map(|value| value as usize),
@@ -620,52 +655,60 @@ impl TryFrom<SimilarCodeOptions> for api::SimilarCodeOptions {
     }
 }
 
-impl TryFrom<FeatureFlagsOptions> for api::FeatureFlagsOptions {
-    type Error = napi::Error;
+impl ToApiOptions for FeatureFlagsOptions {
+    type Api = api::FeatureFlagsOptions;
 
-    fn try_from(value: FeatureFlagsOptions) -> Result<Self, Self::Error> {
-        Ok(Self {
-            analysis: map_common_options(CommonOptionsInput {
-                root: value.root,
-                config_path: value.config_path,
-                allow_remote_extends: value.allow_remote_extends,
-                no_cache: value.no_cache,
-                threads: value.threads,
-                diff_file: value.diff_file,
-                production: value.production,
-                changed_since: value.changed_since,
-                no_package_baselines: None,
-                workspace: value.workspace,
-                changed_workspaces: value.changed_workspaces,
-                explain: value.explain,
-                type_aware: None,
-            })?,
+    fn to_api(self, env: EnvSnapshot) -> napi::Result<api::FeatureFlagsOptions> {
+        let value = self;
+        Ok(api::FeatureFlagsOptions {
+            analysis: map_common_options(
+                CommonOptionsInput {
+                    root: value.root,
+                    config_path: value.config_path,
+                    allow_remote_extends: value.allow_remote_extends,
+                    no_cache: value.no_cache,
+                    threads: value.threads,
+                    diff_file: value.diff_file,
+                    production: value.production,
+                    changed_since: value.changed_since,
+                    no_package_baselines: None,
+                    workspace: value.workspace,
+                    changed_workspaces: value.changed_workspaces,
+                    explain: value.explain,
+                    type_aware: None,
+                },
+                env,
+            )?,
             top: value.top.map(|n| n as usize),
             retirement: None,
         })
     }
 }
 
-impl TryFrom<ComplexityOptions> for api::ComplexityOptions {
-    type Error = napi::Error;
+impl ToApiOptions for ComplexityOptions {
+    type Api = api::ComplexityOptions;
 
-    fn try_from(value: ComplexityOptions) -> Result<Self, Self::Error> {
-        Ok(Self {
-            analysis: map_common_options(CommonOptionsInput {
-                root: value.root,
-                config_path: value.config_path,
-                allow_remote_extends: value.allow_remote_extends,
-                no_cache: value.no_cache,
-                threads: value.threads,
-                diff_file: value.diff_file,
-                production: value.production,
-                changed_since: value.changed_since,
-                no_package_baselines: None,
-                workspace: value.workspace,
-                changed_workspaces: value.changed_workspaces,
-                explain: value.explain,
-                type_aware: value.type_aware,
-            })?,
+    fn to_api(self, env: EnvSnapshot) -> napi::Result<api::ComplexityOptions> {
+        let value = self;
+        Ok(api::ComplexityOptions {
+            analysis: map_common_options(
+                CommonOptionsInput {
+                    root: value.root,
+                    config_path: value.config_path,
+                    allow_remote_extends: value.allow_remote_extends,
+                    no_cache: value.no_cache,
+                    threads: value.threads,
+                    diff_file: value.diff_file,
+                    production: value.production,
+                    changed_since: value.changed_since,
+                    no_package_baselines: None,
+                    workspace: value.workspace,
+                    changed_workspaces: value.changed_workspaces,
+                    explain: value.explain,
+                    type_aware: value.type_aware,
+                },
+                env,
+            )?,
             max_cyclomatic: value
                 .max_cyclomatic
                 .map(|n| narrow_to_u16("maxCyclomatic", n))
@@ -854,7 +897,7 @@ impl<'task> ScopedTask<'task> for ProgrammaticTask {
 pub fn detect_dead_code(
     options: Option<DeadCodeOptions>,
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
-    let options = api::DeadCodeOptions::try_from(options.unwrap_or_default())?;
+    let options = options.unwrap_or_default().to_api(EnvSnapshot::capture())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
         api::run_dead_code(&options)
             .map(Box::new)
@@ -866,7 +909,7 @@ pub fn detect_dead_code(
 pub fn detect_circular_dependencies(
     options: Option<DeadCodeOptions>,
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
-    let options = api::DeadCodeOptions::try_from(options.unwrap_or_default())?;
+    let options = options.unwrap_or_default().to_api(EnvSnapshot::capture())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
         api::run_circular_dependencies(&options)
             .map(Box::new)
@@ -878,7 +921,7 @@ pub fn detect_circular_dependencies(
 pub fn detect_boundary_violations(
     options: Option<DeadCodeOptions>,
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
-    let options = api::DeadCodeOptions::try_from(options.unwrap_or_default())?;
+    let options = options.unwrap_or_default().to_api(EnvSnapshot::capture())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
         api::run_boundary_violations(&options)
             .map(Box::new)
@@ -890,7 +933,7 @@ pub fn detect_boundary_violations(
 pub fn detect_architecture(
     options: Option<ArchitectureOptions>,
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
-    let options = api::ArchitectureOptions::try_from(options.unwrap_or_default())?;
+    let options = options.unwrap_or_default().to_api(EnvSnapshot::capture())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
         api::run_architecture(&options)
             .map(Box::new)
@@ -902,7 +945,7 @@ pub fn detect_architecture(
 pub fn detect_duplication(
     options: Option<DuplicationOptions>,
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
-    let options = api::DuplicationOptions::try_from(options.unwrap_or_default())?;
+    let options = options.unwrap_or_default().to_api(EnvSnapshot::capture())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
         api::run_duplication(&options)
             .map(Box::new)
@@ -914,7 +957,7 @@ pub fn detect_duplication(
 pub fn detect_similar_code(
     options: Option<SimilarCodeOptions>,
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
-    let options = api::SimilarCodeOptions::try_from(options.unwrap_or_default())?;
+    let options = options.unwrap_or_default().to_api(EnvSnapshot::capture())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
         api::run_similar_code(&options)
             .map(Box::new)
@@ -926,7 +969,7 @@ pub fn detect_similar_code(
 pub fn detect_feature_flags(
     options: Option<FeatureFlagsOptions>,
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
-    let options = api::FeatureFlagsOptions::try_from(options.unwrap_or_default())?;
+    let options = options.unwrap_or_default().to_api(EnvSnapshot::capture())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
         api::run_feature_flags(&options)
             .map(Box::new)
@@ -938,7 +981,7 @@ pub fn detect_feature_flags(
 pub fn compute_complexity(
     options: Option<ComplexityOptions>,
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
-    let options = api::ComplexityOptions::try_from(options.unwrap_or_default())?;
+    let options = options.unwrap_or_default().to_api(EnvSnapshot::capture())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
         api::run_complexity_with_runner(&options, &api::EngineHealthRunner)
             .map(Box::new)
@@ -950,7 +993,7 @@ pub fn compute_complexity(
 pub fn compute_health(
     options: Option<ComplexityOptions>,
 ) -> napi::Result<AsyncTask<ProgrammaticTask>> {
-    let options = api::ComplexityOptions::try_from(options.unwrap_or_default())?;
+    let options = options.unwrap_or_default().to_api(EnvSnapshot::capture())?;
     Ok(AsyncTask::new(ProgrammaticTask::new(move || {
         api::run_health_with_runner(&options, &api::EngineHealthRunner)
             .map(Box::new)
@@ -959,10 +1002,19 @@ pub fn compute_health(
 }
 
 #[cfg(test)]
+#[path = "run_parity_tests.rs"]
+mod run_parity_tests;
+
+#[cfg(test)]
 mod tests {
     use std::path::Path;
 
     use super::*;
+
+    /// The translation with an empty environment.
+    fn to_api<T: ToApiOptions>(value: T) -> napi::Result<T::Api> {
+        value.to_api(EnvSnapshot::none())
+    }
 
     fn error_reason<T>(result: napi::Result<T>) -> String {
         match result {
@@ -1000,34 +1052,32 @@ mod tests {
 
     #[test]
     fn absent_component_prop_opt_in_maps_without_enabling_unused_props() {
-        let options = api::DeadCodeOptions::try_from(DeadCodeOptions {
+        let options = to_api(DeadCodeOptions {
             absent_component_props: Some(true),
             ..DeadCodeOptions::default()
         })
         .expect("options");
         assert!(options.filters.absent_component_props);
         assert!(!options.filters.unused_component_props);
-        let defaults =
-            api::DeadCodeOptions::try_from(DeadCodeOptions::default()).expect("defaults");
+        let defaults = to_api(DeadCodeOptions::default()).expect("defaults");
         assert!(!defaults.filters.absent_component_props);
     }
 
     #[test]
     fn constant_parameter_opt_in_maps_to_its_filter() {
-        let options = api::DeadCodeOptions::try_from(DeadCodeOptions {
+        let options = to_api(DeadCodeOptions {
             constant_parameters: Some(true),
             ..DeadCodeOptions::default()
         })
         .expect("options");
         assert!(options.filters.constant_parameters);
-        let defaults =
-            api::DeadCodeOptions::try_from(DeadCodeOptions::default()).expect("defaults");
+        let defaults = to_api(DeadCodeOptions::default()).expect("defaults");
         assert!(!defaults.filters.constant_parameters);
     }
 
     #[test]
     fn dead_code_options_map_common_fields_filters_and_files() {
-        let options = api::DeadCodeOptions::try_from(DeadCodeOptions {
+        let options = to_api(DeadCodeOptions {
             root: Some("/repo".to_string()),
             config_path: Some("/repo/fallow.toml".to_string()),
             allow_remote_extends: Some(true),
@@ -1126,7 +1176,7 @@ mod tests {
     #[test]
     fn dead_code_options_map_finding_ids() {
         let id = "dc1:unused-export:0123456789abcdef".to_string();
-        let options = api::DeadCodeOptions::try_from(DeadCodeOptions {
+        let options = to_api(DeadCodeOptions {
             finding_ids: Some(vec![id.clone()]),
             ..DeadCodeOptions::default()
         })
@@ -1137,15 +1187,14 @@ mod tests {
 
     #[test]
     fn omitted_production_option_defers_to_config() {
-        let options =
-            api::DeadCodeOptions::try_from(DeadCodeOptions::default()).expect("options should map");
+        let options = to_api(DeadCodeOptions::default()).expect("options should map");
 
         assert_eq!(options.analysis.production_override, None);
     }
 
     #[test]
     fn explicit_production_false_is_forwarded_as_override() {
-        let options = api::DeadCodeOptions::try_from(DeadCodeOptions {
+        let options = to_api(DeadCodeOptions {
             production: Some(false),
             ..DeadCodeOptions::default()
         })
@@ -1267,7 +1316,7 @@ mod tests {
 
     #[test]
     fn duplication_options_map_modes_thresholds_and_flags() {
-        let options = api::DuplicationOptions::try_from(DuplicationOptions {
+        let options = to_api(DuplicationOptions {
             mode: Some(" SEMANTIC ".to_string()),
             near: Some(true),
             min_tokens: Some(30),
@@ -1298,7 +1347,7 @@ mod tests {
 
     #[test]
     fn feature_flags_options_map_common_fields_and_top() {
-        let options = api::FeatureFlagsOptions::try_from(FeatureFlagsOptions {
+        let options = to_api(FeatureFlagsOptions {
             root: Some("/repo".to_string()),
             config_path: Some("/repo/fallow.toml".to_string()),
             allow_remote_extends: Some(true),
@@ -1342,7 +1391,7 @@ mod tests {
 
     #[test]
     fn complexity_options_map_sections_sort_ownership_effort_and_coverage() {
-        let options = api::ComplexityOptions::try_from(ComplexityOptions {
+        let options = to_api(ComplexityOptions {
             max_cyclomatic: Some(42),
             max_cognitive: Some(21),
             max_crap: Some(18.5),
@@ -1473,7 +1522,7 @@ mod tests {
         std::fs::write(root.join("src/b.ts"), block("copied")).expect("b");
 
         let clone_files = |ignore_symlinks: Option<bool>| -> Vec<Vec<String>> {
-            let options = api::DuplicationOptions::try_from(DuplicationOptions {
+            let options = to_api(DuplicationOptions {
                 root: Some(root.to_string_lossy().into_owned()),
                 no_cache: Some(true),
                 threads: Some(1),

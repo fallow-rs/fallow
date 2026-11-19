@@ -1,13 +1,49 @@
 {
   "name": "analyze-production-env",
-  "files": { "package.json": "{}" },
-  "env": { "FALLOW_PRODUCTION": "1" },
+  "files": {
+    "package.json": "{}"
+  },
+  "env": {
+    "FALLOW_PRODUCTION": "1"
+  },
   "inputs": {
-    "mcp": { "tool": "analyze", "params": {} }
+    "mcp": {
+      "tool": "analyze",
+      "params": {}
+    },
+    "api": {
+      "entry": "dead-code"
+    },
+    "node": {
+      "function": "detectDeadCode"
+    }
   },
   "expected": {
     "surface": "<row>",
     "command": "dead-code",
-    "analyses.dead_code.production": { "value": true, "source": "environment:FALLOW_PRODUCTION" }
+    "analyses.dead_code.production": {
+      "value": true,
+      "source": "environment:FALLOW_PRODUCTION"
+    }
+  },
+  "deviations": {
+    "api": {
+      "reason": "The Rust API and the Node bindings read no FALLOW_PRODUCTION* variable",
+      "expected": {
+        "analyses.dead_code.production": {
+          "value": false,
+          "source": "default:production-off"
+        }
+      }
+    },
+    "node": {
+      "reason": "The Rust API and the Node bindings read no FALLOW_PRODUCTION* variable",
+      "expected": {
+        "analyses.dead_code.production": {
+          "value": false,
+          "source": "default:production-off"
+        }
+      }
+    }
   }
 }

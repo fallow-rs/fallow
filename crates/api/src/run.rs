@@ -437,3 +437,7 @@ pub(crate) fn open_session_adjusted(
 #[cfg(test)]
 #[path = "run_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "run_parity_tests.rs"]
+mod parity_tests;

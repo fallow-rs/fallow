@@ -1,13 +1,45 @@
 {
   "name": "trace-import-path-production-param",
-  "files": { "package.json": "{}" },
-  "env": { "FALLOW_PRODUCTION": "0" },
+  "files": {
+    "package.json": "{}"
+  },
+  "env": {
+    "FALLOW_PRODUCTION": "0"
+  },
   "inputs": {
-    "mcp": { "tool": "trace_import_path", "params": { "production": true } }
+    "mcp": {
+      "tool": "trace_import_path",
+      "params": {
+        "production": true
+      }
+    },
+    "api": {
+      "entry": "trace-path",
+      "options": {
+        "production_override": true
+      }
+    },
+    "node": {
+      "not_expressible": "The Node bindings have no trace entry point"
+    }
   },
   "expected": {
     "surface": "<row>",
     "command": "trace-path",
-    "analyses.dead_code.production": { "value": true, "source": "given:production" }
+    "analyses.dead_code.production": {
+      "value": true,
+      "source": "given:production"
+    }
+  },
+  "deviations": {
+    "api": {
+      "reason": "The Rust API names its option analysis.production_override",
+      "expected": {
+        "analyses.dead_code.production": {
+          "value": true,
+          "source": "given:analysis.production_override"
+        }
+      }
+    }
   }
 }
