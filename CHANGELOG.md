@@ -7,6 +7,59 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [3.44.1] - 2026-11-19
+
+### Changed
+
+- **The Node bindings and the Rust API read the config once for each call.** A combined or audit call used to load the config for each analysis, so a config edit during a call could give two analyses different settings. The feature flags, mutation and similar-code calls now also check external plugin files, as the other calls do. A config that does not load gives the same error text on each call. The combined result lists each skipped analysis with its reason in the new `skipped` member. The `ProgrammaticHealthRunner` trait has a new `refuses_config_type_aware` method. A custom runner returns `true` when it does the type-aware config check itself, and `run_health_with_runner` then does not read the config for that check.
+
+- **`fallow` checks the config once before the first analysis.** The bare run, `dead-code`, `dupes`, `health` and `audit` load, validate and resolve the config one time for each run. A config that fails validation stops the run with exit code 2 before it prints the `loaded config` line. On the bare run, this error also comes before a flag usage error, such as `--baseline-base` without `--fail-on-baseline-growth`. An `audit` that selects no sub-analysis prints only its error, with no `loaded config` line before it. The workspace discovery notice prints one time for each run. When the host cannot report its parallelism, fallow now starts one worker thread, not four.
+
+### Fixed
+
+- **The editor finds duplicates in the same files as `fallow dupes`.** With a per-analysis `production` setting such as `{"deadCode": true, "dupes": false}`, the language server and the VS Code extension ran duplication on the files of the dead-code mode. Duplicates in files that production mode leaves out, such as files under `tests/`, then did not show in the editor, but `fallow dupes` reported them. The reverse setting showed duplicates that `fallow dupes` did not report. Duplication now uses its own production mode on every surface. (Closes [#4784](https://github.com/fallow-rs/fallow/issues/4784))
+
+- **A stylesheet with an unusual math function no longer stops `fallow dead-code` or `fallow health --css`.** The CSS parser panicked on a math function that does not reduce to one percentage where it expects a percentage, for example `opacity: max(4%, 5)`, `opacity: calc(4% + 5)` or `color: lab(max(4, nan) 1 1)`, and the panic ended the run. Fallow now checks the math functions of a stylesheet before the structural CSS parse and skips that parse when a math function would make it panic. CSS Modules classes in such a file come from the plain class scan, and the file gets no CSS analytics.
+- **A crafted stylesheet can no longer make `fallow dead-code` or `fallow health --css` hang.** The CSS parse time doubled with each level of nested math functions such as `calc(calc(...))`, and the check for nested color functions missed some nesting behind a stray `}` or inside a `url(`. Fallow now reads the stylesheet with the CSS tokenizer before the parse and skips the structural parse of a stylesheet that nests more than 6 math functions or more than 8 color functions. Real stylesheets are not affected.
+- **A stylesheet with an unterminated string no longer crashes fallow with a stack overflow.** A string that a newline ends hid the nesting after it from the stack estimate when it held `/*`, so a deeply nested stylesheet after it overflowed the stack of the CSS parser. Fallow now ends such a string at the newline, as CSS does.
+- **A Vue class component with `@Component({ template })` no longer gets Angular facts.** Fallow read the `@Component` decorator of a `.vue` or `.svelte` script block as an Angular component, so its Vue `template` string counted as an Angular template. The decorator in these files comes from a Vue class-component library, so fallow now skips the Angular component analysis there.
+
+- **The experimental tsrs backend accepts tsrs releases with TypeScript-aligned versions.** From `7.1.0-beta.tsrs2`, tsrs uses the version of the TypeScript release that it ports, and `7.1.0-beta.tsrs3` is the npm `latest` tag. The backend (`FALLOW_TYPE_AWARE_BACKEND=tsrs`) accepted only `>=0.18.0 <1.0.0`, so the companion and the CLI rejected these releases. The supported ranges are now `>=0.18.0 <1.0.0 || >=7.1.0 <8.0.0`. A project can now use the tsrs that the rest of its toolchain installs. The tested version and the install hint are now `tsrs@7.1.0-beta.tsrs3`. The type-aware wire protocol is now 9, so Fallow does not use a companion of an earlier release, which still rejects these tsrs releases. A companion from `fallow type-aware setup` needs a new `setup` run. Thanks [@PedroMartpico](https://github.com/PedroMartpico) for the report. (Closes [#4803](https://github.com/fallow-rs/fallow/issues/4803))
+
+- **A project package with only a `types` entry now resolves.** A package whose `package.json` has `types` or `typings` and no `main` or `exports` resolves through that entry. A type import of such a package was an unresolved import, and its dependency was unused.
+- **`effect.schemaExportsAsTypes` reads `HttpApiSchema` transforms in `pipe`.** A schema such as `Schema.Struct({...}).pipe(HttpApiSchema.asFormUrlEncoded())` is now a schema. It stayed an unused export.
+- **An Astro project no longer gets an unused dependency finding for `sharp`.** Astro loads it by name as the default image service of `astro:assets`. A config that uses `passthroughImageService` does not load `sharp`, so fallow still reports it there.
+
+- **The editor keeps the `fallow.production` setting when the project config does not load.** The language server then analyzes with the default config, as before, but it now also keeps the production setting and the duplication settings of the editor. An invalid external plugin file in the config now also gives this fallback and a warning.
+- **The editor does no duplication work when `duplicates.enabled` is `false`.** The diagnostics stay the same. Before, the language server ran the duplication analysis and then dropped its result.
+
+- **`fallow audit --staged` reuses the parse cache of the checkout.** The
+  staged audit analyzes a new temporary worktree on each run, so it read an
+  empty cache and parsed every file again. The run now starts from the parse
+  cache of the checkout and writes the updated cache back, so a second staged
+  run parses only the files whose staged content changed. The cache keys each
+  entry by its content hash, so a staged file that differs from the working
+  tree is still parsed from the index. Thanks
+  [@frontendwizard](https://github.com/frontendwizard) for the report.
+  (Closes [#4763](https://github.com/fallow-rs/fallow/issues/4763))
+
+- **`fallow audit` with a shared `FALLOW_CACHE_DIR` keeps the caches of the
+  checkout valid.** The base pass and the staged pass analyze temporary
+  worktrees. They wrote their module graph cache into the shared directory,
+  so the next run of the checkout rejected the graph cache with
+  `root-mismatch` and built the graph again. These passes now keep their
+  caches in their own worktree.
+
+- **`fallow audit` no longer reports an existing finding on a workspace package import as introduced.** The base worktree shares the `node_modules` of the checkout under review, so its workspace links point at the packages of that checkout, outside the base. The base analysis classified an import such as `@acme/lib` as an npm package and lost the edge, and a boundary violation or another finding on that edge looked introduced in the head. The import now resolves to the workspace package of the base. Thanks [@DrJKL](https://github.com/DrJKL) for the patch in [#4807](https://github.com/fallow-rs/fallow/pull/4807).
+
+- **A health baseline no longer accepts a new long file in the slot of a fixed function.** A count-mode health baseline counted a file-length finding as complexity, so when a function finding that the baseline accepted was fixed, a file that crossed `health.maxFileLines` used its slot and `fallow health --baseline` and `fallow audit` with `audit.healthBaseline` did not report it. File-length findings now have their own baseline categories (`file_lines_moderate`, `file_lines_high`, `file_lines_critical`), and a save marks the file with `file_lines_categories: true`. A baseline saved before this release gives the same results as before, and gets the fix when it is saved again. On that save, the shrink-only baseline check reports the new `file_lines_*` counts in `finding_counts` as growth once. Thanks [@DrJKL](https://github.com/DrJKL) for the patch in [#4808](https://github.com/fallow-rs/fallow/pull/4808).
+
+- **`--no-production` now turns off a config `production: true` on every command.** On `fallow list`, `workspaces`, `fix`, `watch`, `viz`, `flags` and `suppressions`, a config with `production: true` won over `--no-production` and over `FALLOW_PRODUCTION=false`. These commands now use the same order as `fallow dead-code`: the flag, then the environment variable, then the config. The MCP `list_boundaries` tool now also lets an off `FALLOW_PRODUCTION` value turn off production mode, and the MCP `fix_preview`, `fix_apply` and `suppressions` tools now apply `production: false`. `fallow viz` now finds duplicates in the files of the duplication production mode. `fallow fix`, `list`, `viz`, `flags` and `suppressions` now apply the global `--include-entry-exports` and `--no-package-baselines` flags. When `fallow watch` reloads an edited config, it now follows a `production` change in both directions, and it keeps the type-aware flags. The combined analysis run of the VS Code sidebar now passes the `allowRemoteExtends` setting to the CLI. The Health view and the workspace picker do not pass it yet.
+
+- **A computed member access credits the class members that its key can name.** With a class field `view: View` and `action: "zoomIn" | "zoomOut"`, `this.view[action]()` gave no credit, so fallow reported every member of `View` as unused. With `const view = new View()`, `view[action]()` counted as a use of the whole object, so fallow reported no member of `View`, also a member that no code reads. A key that is a string literal, a conditional of string literals, or a parameter or variable typed as a union of string literals now credits those members. A key of another type keeps the whole-object use. Thanks [@neumaennl](https://github.com/neumaennl) for the report. (Closes [#4799](https://github.com/fallow-rs/fallow/issues/4799))
+
+- **Type-aware analysis resolves the members of a default-exported class.** A member of `export default class Foo {}`, `export default class {}`, or a class that `export default Foo;` or `export { Foo as default };` exports, stayed unresolved, so fallow kept the unused-member finding when code used the member. The type-aware companion now finds these members. Thanks [@DiefBell](https://github.com/DiefBell) for the report. (Closes [#4792](https://github.com/fallow-rs/fallow/issues/4792))
+
 ## [3.44.0] - 2026-11-18
 
 ### Added
@@ -17655,7 +17708,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--changed-since` and `--fail-on-issues` for CI
 - Cross-workspace resolution for npm/yarn/pnpm workspaces
 
-[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.44.0...HEAD
+[unreleased]: https://github.com/fallow-rs/fallow/compare/v3.44.1...HEAD
+[3.44.1]: https://github.com/fallow-rs/fallow/compare/v3.44.0...v3.44.1
 [3.44.0]: https://github.com/fallow-rs/fallow/compare/v3.43.2...v3.44.0
 [3.43.2]: https://github.com/fallow-rs/fallow/compare/v3.43.1...v3.43.2
 [3.43.1]: https://github.com/fallow-rs/fallow/compare/v3.43.0...v3.43.1
