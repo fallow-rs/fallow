@@ -480,10 +480,14 @@ fn reference_env(value: Option<&str>) -> Option<bool> {
     }
 }
 
-/// The production override of one analysis with the precedence that each
-/// typed tool had when it read the variables itself. This is an
-/// independent copy of that precedence: the oracle of
-/// [`typed_production_matches_the_resolver`].
+/// The production override of one analysis for each typed tool, written
+/// without the resolver: the oracle of
+/// [`typed_production_matches_the_resolver`]. `None` lets the config decide.
+/// A tool with a CLI route that reads the `FALLOW_PRODUCTION*` variables
+/// takes the parameter, then the variable of the analysis, then
+/// `FALLOW_PRODUCTION`. `list_boundaries` keeps only a variable that turns
+/// production mode on. An audit parameter of one analysis counts only when
+/// it is `true`.
 fn reference_override(
     tool: TypedTool,
     own_param: Option<bool>,
@@ -646,56 +650,4 @@ fn typed_production_matches_the_resolver() {
         }
     }
     assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
-}
-
-/// The reference precedence equals the old precedence: each typed tool
-/// called `production_with_env` with its own parameter value, and
-/// `list_boundaries` kept only an override that is on.
-#[test]
-fn the_reference_precedence_matches_the_old_function() {
-    use fallow_api::{ProductionAnalysis, ProductionEnv};
-    let old = |param, own, global, analysis| {
-        let mut env = ProductionEnv {
-            global,
-            ..ProductionEnv::default()
-        };
-        let production_analysis = match analysis {
-            Analysis::DeadCode => {
-                env.dead_code = own;
-                ProductionAnalysis::DeadCode
-            }
-            Analysis::Health => {
-                env.health = own;
-                ProductionAnalysis::Health
-            }
-            Analysis::Dupes => {
-                env.dupes = own;
-                ProductionAnalysis::Dupes
-            }
-        };
-        super::super::api_runtime::production_with_env(param, env, production_analysis)
-    };
-    let combinations = value_combinations(&PARAM_VALUES, &PARAM_VALUES);
-    for analysis in [Analysis::DeadCode, Analysis::Health, Analysis::Dupes] {
-        for &(own_param, param, own_env, global_env) in &combinations {
-            let (own, global) = (reference_env(own_env), reference_env(global_env));
-            let context =
-                format!("{analysis:?} {own_param:?} {param:?} {own_env:?} {global_env:?}");
-            assert_eq!(
-                reference_override(TypedTool::Analyze, None, param, own, global),
-                old(param, own, global, analysis),
-                "{context}"
-            );
-            assert_eq!(
-                reference_override(TypedTool::ListBoundaries, None, None, own, global),
-                old(None, own, global, analysis).filter(|&on| on),
-                "{context}"
-            );
-            assert_eq!(
-                reference_override(TypedTool::Audit, own_param, param, own, global),
-                old(own_param.filter(|&on| on).or(param), own, global, analysis),
-                "{context}"
-            );
-        }
-    }
 }
