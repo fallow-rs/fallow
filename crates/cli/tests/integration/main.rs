@@ -68,6 +68,7 @@ mod cloud_login_linux_keychain_tests;
 mod codeowners_tests;
 mod combined_coverage_tests;
 mod combined_health_duplication_tests;
+mod command_production_rule_tests;
 mod complexity_gate_tests;
 mod config_load_cli_tests;
 mod config_pattern_parity_tests;
