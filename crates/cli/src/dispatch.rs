@@ -54,7 +54,7 @@ use ci_dispatch::map_ci_subcommand;
 
 #[path = "dispatch_audit_inputs.rs"]
 mod audit_inputs;
-use audit_inputs::resolve_audit_inputs;
+use audit_inputs::{ResolvedAuditInputs, resolve_audit_inputs};
 #[path = "dispatch_audit_command.rs"]
 mod audit_command;
 use audit_command::dispatch_audit_command;
@@ -1739,22 +1739,6 @@ struct AuditDispatchArgs {
     staged_host: Option<PathBuf>,
 }
 
-struct ResolvedAuditInputs {
-    audit_cfg: fallow_config::AuditConfig,
-    analyses: audit::AuditAnalysisSelection,
-    cache_dir: PathBuf,
-    production: ProductionModes,
-    dead_code_baseline: Option<PathBuf>,
-    health_baseline: Option<PathBuf>,
-    dupes_baseline: Option<PathBuf>,
-    /// Istanbul coverage inputs resolved with the health precedence (flag,
-    /// env, then `health.coverage` / `health.coverageRoot`), so the head and
-    /// base passes score from the same map the standalone health run uses.
-    coverage: Option<PathBuf>,
-    coverage_root: Option<PathBuf>,
-    file_lines_check: bool,
-}
-
 fn dispatch_audit(dispatch: &DispatchContext<'_>, args: &AuditDispatchArgs) -> ExitCode {
     let cli = dispatch.cli;
     let output = dispatch.output;
@@ -1937,6 +1921,7 @@ fn run_resolved_audit(
             show_deprioritized: args.show_deprioritized,
             scope: args.scope.clone(),
         },
+        &inputs.run,
         args.gate_marker.as_deref(),
         audit::AuditTypeAwareOptions {
             enabled: cli.type_aware_override(),
@@ -1973,11 +1958,8 @@ fn dispatch_decision_surface(dispatch: &DispatchContext<'_>, max_decisions: usiz
             );
         }
     }
-    audit::run_decision_surface(&decision_surface_audit_options(
-        dispatch,
-        &inputs,
-        max_decisions,
-    ))
+    let opts = decision_surface_audit_options(dispatch, &inputs, max_decisions);
+    audit::run_decision_surface(&opts, &inputs.run)
 }
 
 #[path = "dispatch_decision_surface.rs"]

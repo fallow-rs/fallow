@@ -315,12 +315,8 @@ pub fn execute_health_with_shared_parse_in(
     Ok(result)
 }
 
-pub fn execute_health(opts: &HealthOptions<'_>) -> Result<HealthResult, ExitCode> {
-    execute_health_in(opts, None)
-}
-
-/// [`execute_health`] with the health analysis of a resolved run. `None`
-/// loads the config.
+/// Run the health analysis with the health analysis of a resolved run.
+/// `None` loads the config.
 pub fn execute_health_in(
     opts: &HealthOptions<'_>,
     run: Option<Runnable<'_>>,

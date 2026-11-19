@@ -1,8 +1,27 @@
 //! Resolves the inputs of `fallow audit` from the command flags.
 
 use fallow_config::{ConfigKey, RunPlan};
+use fallow_engine::resolved_run::ResolvedRun;
 
 use super::*;
+
+pub(super) struct ResolvedAuditInputs {
+    /// The resolved run of the head side.
+    pub(super) run: ResolvedRun,
+    pub(super) audit_cfg: fallow_config::AuditConfig,
+    pub(super) analyses: audit::AuditAnalysisSelection,
+    pub(super) cache_dir: PathBuf,
+    pub(super) production: ProductionModes,
+    pub(super) dead_code_baseline: Option<PathBuf>,
+    pub(super) health_baseline: Option<PathBuf>,
+    pub(super) dupes_baseline: Option<PathBuf>,
+    /// Istanbul coverage inputs resolved with the health precedence (flag,
+    /// env, then `health.coverage` / `health.coverageRoot`), so the head and
+    /// base passes score from the same map the standalone health run uses.
+    pub(super) coverage: Option<PathBuf>,
+    pub(super) coverage_root: Option<PathBuf>,
+    pub(super) file_lines_check: bool,
+}
 
 pub(super) fn resolve_audit_inputs(
     dispatch: &DispatchContext<'_>,
@@ -71,6 +90,7 @@ pub(super) fn resolve_audit_inputs(
     )?;
 
     Ok(ResolvedAuditInputs {
+        run,
         audit_cfg,
         analyses,
         cache_dir,
