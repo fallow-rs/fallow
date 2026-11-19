@@ -33,7 +33,8 @@ jobs:
   windows-verify:
     name: Windows correctness and lifecycle
     runs-on: windows-latest
-    timeout-minutes: 75
+    # The job takes about 75 minutes on a hosted Windows runner.
+    timeout-minutes: 110
     permissions:
       contents: read
     steps:
