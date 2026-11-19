@@ -64,7 +64,7 @@ testing = ["fallow-config/testing"]
 schema = ["fallow-output/schema", "fallow-types/schema"]
 
 [dev-dependencies]
-fallow-engine = { path = ".", features = ["testing"] }
+fallow-config = { workspace = true, features = ["testing"] }
 fallow-graph = { workspace = true, features = ["read-trace"] }
 criterion = { workspace = true }
 insta = { workspace = true }

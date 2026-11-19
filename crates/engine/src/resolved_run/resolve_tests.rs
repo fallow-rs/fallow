@@ -63,7 +63,9 @@ const fn single_command(analysis: ProductionAnalysis) -> CommandKind {
 }
 
 fn fixture_roots() -> Vec<PathBuf> {
-    let fixtures = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../tests/fixtures");
+    let fixtures =
+        Path::new(&std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"))
+            .join("../../tests/fixtures");
     let mut roots: Vec<PathBuf> = std::fs::read_dir(&fixtures)
         .expect("fixtures dir")
         .filter_map(Result::ok)
