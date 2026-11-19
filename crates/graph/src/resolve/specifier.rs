@@ -30,6 +30,7 @@ use super::path_info::{
     extract_package_name, is_bare_specifier, is_path_alias, is_valid_package_name,
     normalize_npm_specifier,
 };
+use super::project_root::{is_inside_project_root, try_project_package_outside_root};
 use super::react_native::{build_condition_names, build_extensions};
 use super::root_relative::try_root_relative_specifier;
 use super::tsconfig_scope::{glob_values_match, resolve_tsconfig_relative_path};
@@ -1161,29 +1162,6 @@ fn resolve_style_canonical_path(
     ResolveResult::ExternalFile(canonical)
 }
 
-/// Whether `path` lives under the analyzed project root.
-///
-/// Containment is tested against both the configured root and its canonicalized
-/// form: the resolver returns realpaths (`ResolveOptions::symlinks` defaults to
-/// true) while the configured root may itself be reached through a symlink, as
-/// it is under `/tmp` on macOS.
-///
-/// This separates the two cases that reach the bare-specifier classification
-/// tail with no `node_modules` segment in the resolved path. A path-alias target
-/// inside the root is a project file the alias points at, which stays a concrete
-/// `ExternalFile` when `ignorePatterns` kept it out of the file index. A target
-/// outside the root is a workspace package reached through its install symlink,
-/// which must keep npm-package accounting so the declared dependency is credited
-/// (see `package_usage_name_for_external_bare_specifier`).
-pub(super) fn is_inside_project_root(ctx: &ResolveContext<'_>, path: &Path) -> bool {
-    if path.starts_with(ctx.root) {
-        return true;
-    }
-    ctx.canonicalize_cache
-        .get(ctx.root)
-        .is_some_and(|canonical_root| path.starts_with(canonical_root))
-}
-
 struct ResolvedPathContext<'ctx, 'resolve> {
     ctx: &'resolve ResolveContext<'ctx>,
     from_file: &'resolve Path,
@@ -1240,31 +1218,6 @@ impl ResolvedPathContext<'_, '_> {
         }
     }
 
-    /// A bare import of a project package whose install link points outside
-    /// the project root.
-    ///
-    /// The base worktree of `fallow audit` links `node_modules` to the
-    /// `node_modules` of the checkout under review, so its workspace links
-    /// reach the packages of that checkout. The import still names the package
-    /// of this project, so it resolves into this project. Without this, the
-    /// base reports the import as an npm package, and every finding that the
-    /// edge carries in the head looks introduced.
-    fn project_package_outside_root(&self, path: &Path) -> Option<ResolveResult> {
-        if !is_bare_specifier(self.specifier) || is_inside_project_root(self.ctx, path) {
-            return None;
-        }
-        let package_name = extract_package_name(self.specifier);
-        if !self.ctx.workspace_roots.contains_key(package_name.as_str()) {
-            return None;
-        }
-        try_aliased_workspace_package_fallback(
-            self.ctx,
-            self.from_file,
-            self.specifier,
-            self.from_style || is_style_file(self.from_file),
-        )
-    }
-
     fn resolve_uncanonicalized_path(&self, resolved_path: &Path) -> ResolveResult {
         if let Some(file_id) = try_source_fallback(resolved_path, self.ctx.path_to_id) {
             ResolveResult::InternalModule(file_id)
@@ -1282,7 +1235,14 @@ impl ResolvedPathContext<'_, '_> {
     }
 
     fn package_or_external_result(&self, path: &Path) -> Option<ResolveResult> {
-        if let Some(result) = self.project_package_outside_root(path) {
+        let style_context = self.from_style || is_style_file(self.from_file);
+        if let Some(result) = try_project_package_outside_root(
+            self.ctx,
+            self.from_file,
+            self.specifier,
+            style_context,
+            path,
+        ) {
             return Some(result);
         }
         if let Some(pkg_name) =
@@ -1293,7 +1253,7 @@ impl ResolvedPathContext<'_, '_> {
                     self.ctx,
                     self.from_file,
                     self.specifier,
-                    self.from_style || is_style_file(self.from_file),
+                    style_context,
                 )
             {
                 return Some(result);

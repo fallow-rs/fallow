@@ -28,6 +28,7 @@ mod output_entry;
 mod package_credit;
 mod package_import_conditions;
 mod path_info;
+mod project_root;
 mod re_exports;
 mod react_native;
 mod require_imports;

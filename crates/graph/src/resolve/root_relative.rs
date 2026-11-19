@@ -5,9 +5,8 @@
 
 use std::path::Path;
 
-use super::specifier::{
-    is_inside_project_root, resolve_with_extension_policy, try_html_root_relative_asset,
-};
+use super::project_root::is_inside_project_root;
+use super::specifier::{resolve_with_extension_policy, try_html_root_relative_asset};
 use super::types::{ResolveContext, ResolveResult};
 use crate::read_trace::TracedPath;
 
