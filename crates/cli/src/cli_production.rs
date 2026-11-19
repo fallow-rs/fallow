@@ -140,6 +140,39 @@ pub fn resolve_error_message(err: &ResolveError, given_config: Option<&std::path
     }
 }
 
+/// The base side of a comparison with a base ref, with the base copy of the
+/// config file of `head`. A base copy that does not resolve gives the config
+/// file of the head run, as the base pass of `fallow audit` reads it.
+///
+/// # Errors
+///
+/// Returns the CLI text of the resolve error of the head config file.
+pub fn base_copy_run(
+    head: &ResolvedRun,
+    side: fallow_engine::resolved_run::BaseSide,
+) -> Result<ResolvedRun, String> {
+    use fallow_engine::resolved_run::{BaseConfig, BaseSide, resolve_base_run};
+    let head_side = BaseSide {
+        config: BaseConfig::Head,
+        ..side.clone()
+    };
+    resolve_base_run(
+        head,
+        BaseSide {
+            config: BaseConfig::BaseCopy,
+            ..side
+        },
+    )
+    .or_else(|err| {
+        tracing::debug!(
+            "the base copy of the config does not resolve: {}",
+            err.message()
+        );
+        resolve_base_run(head, head_side)
+    })
+    .map_err(|err| resolve_error_message(&err, None))
+}
+
 /// A resolved run whose config load side effects did not apply yet. See
 /// [`crate::DispatchContext::begin_run`].
 pub struct PendingRun {

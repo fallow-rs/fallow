@@ -8,8 +8,8 @@
 use std::path::{Path, PathBuf};
 
 use fallow_config::{
-    ConfigInputs, ConfigInputsSnapshot, EnvSnapshot, EnvVar, FallowConfig, ResolvedConfig,
-    WorkspaceDiagnostic, WorkspaceInfo,
+    CommandKind, ConfigInputs, ConfigInputsSnapshot, EnvSnapshot, EnvVar, FallowConfig,
+    ResolvedConfig, WorkspaceDiagnostic, WorkspaceInfo,
 };
 use rustc_hash::FxHashSet;
 
@@ -254,6 +254,26 @@ fn with_undeclared_workspace_diagnostics(
         }
     }
     diagnostics
+}
+
+/// Validate the config of a run of `command`.
+///
+/// - `plugin-check` reports each external plugin, also a plugin that fails
+///   validation, so it validates only the boundaries and the rule packs.
+/// - A coverage upload reads the project as the config file gives it, so it
+///   validates nothing.
+/// - Each other command validates the external plugins, the boundaries and
+///   the rule packs.
+pub(crate) fn validate_command_config(
+    command: CommandKind,
+    root: &Path,
+    config: &FallowConfig,
+) -> EngineResult<()> {
+    match command {
+        CommandKind::PluginCheck => validate_boundaries_and_rule_packs(root, config),
+        CommandKind::CoverageUpload => Ok(()),
+        _ => validate_config(root, config),
+    }
 }
 
 /// Validate the external plugins, the boundaries and the rule packs.

@@ -28,10 +28,10 @@ use crate::runtime_support::AnalysisKind;
 use crate::{
     DEFAULT_MIN_INVOCATIONS_HOT, DispatchContext, audit, audit_cache_prune, base_worktree,
     baseline_gate, baseline_growth, baselines, check, ci, ci_template, cli_report, combined,
-    config, coverage, dupes, error, explain, fix, flags, guard, health, init, json_style, license,
-    list, migrate, mutation_cli, onboarding, plugin_check, regression, regression_save_targets,
-    report, resolve_audit_baseline_path, rule_pack, security, setup_hooks, similar_code_cli,
-    suppressions, telemetry, trace_chain, trace_dependency, trace_error, trace_path, viz, watch,
+    config, coverage, dupes, explain, fix, flags, guard, health, init, json_style, license, list,
+    migrate, onboarding, plugin_check, regression, regression_save_targets, report,
+    resolve_audit_baseline_path, rule_pack, security, setup_hooks, suppressions, telemetry,
+    trace_chain, trace_dependency, trace_error, trace_path, viz, watch,
 };
 use crate::{error::emit_input_error, exit_codes::exit_invalid_input};
 use fallow_config::PlannedAnalysis;
@@ -61,64 +61,9 @@ use audit_command::dispatch_audit_command;
 #[path = "dispatch_audit_staged.rs"]
 mod audit_staged;
 
-fn dispatch_mutation_command(
-    dispatch: &DispatchContext<'_>,
-    subcommand: Option<mutation_cli::MutationSubcommand>,
-    args: mutation_cli::MutationArgs,
-) -> ExitCode {
-    let cli = dispatch.cli;
-    let workspace_flag = if cli.workspace.is_some() {
-        Some("--workspace")
-    } else if cli.changed_workspaces.is_some() {
-        Some("--changed-workspaces")
-    } else {
-        None
-    };
-    if let Some(flag) = workspace_flag {
-        return error::emit_input_error_with_style(
-            &format!(
-                "{flag} does not narrow `fallow mutation` yet; pass the workspace directory as a path, for example `fallow mutation packages/app`"
-            ),
-            dispatch.output,
-            dispatch.json_style,
-        );
-    }
-    let config = if matches!(
-        subcommand,
-        Some(mutation_cli::MutationSubcommand::Inspect { .. })
-    ) {
-        fallow_config::MutationConfig::default()
-    } else {
-        // The command printed no `loaded config` line before it resolved a run.
-        match (DispatchContext {
-            quiet: true,
-            ..*dispatch
-        })
-        .resolve_run()
-        {
-            Ok(run) => run.config().mutation.clone(),
-            Err(code) => return code,
-        }
-    };
-    mutation_cli::run(&mutation_cli::MutationCliInput {
-        root: dispatch.root,
-        config_path: cli.config.as_deref(),
-        root_flag: cli.root.as_deref(),
-        output_file: cli.output_file.as_deref(),
-        allow_remote_extends: cli.allow_remote_extends,
-        no_cache: cli.no_cache,
-        threads: dispatch.threads,
-        changed_since: cli.changed_since.as_deref(),
-        diff_file: cli.diff_file.as_deref(),
-        quiet: dispatch.quiet,
-        output: dispatch.output,
-        json_style: dispatch.json_style,
-        config,
-        args,
-        subcommand,
-        host: Some(crate::run_inputs::cli_host(dispatch.run_inputs)),
-    })
-}
+#[path = "dispatch_mutation.rs"]
+mod mutation_dispatch;
+use mutation_dispatch::{dispatch_mutation_command, dispatch_similar_code};
 
 #[expect(
     clippy::too_many_lines,
@@ -139,45 +84,7 @@ pub fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> 
             type_aware_status::dispatch_type_aware_command(dispatch, subcommand)
         }
         Command::Doctor => unreachable!("doctor bypasses the normal dispatch epilogue"),
-        Command::SimilarCode {
-            subcommand,
-            threshold,
-            min_lines,
-            top,
-            file,
-            path,
-        } => {
-            let scope = match crate::scope_path::resolve_command_scope(
-                dispatch.root,
-                dispatch.output,
-                path,
-            ) {
-                Ok(scope) => scope,
-                Err(code) => return code,
-            };
-            similar_code_cli::run(similar_code_cli::SimilarCodeCliInput {
-                root,
-                config_path: cli.config.as_deref(),
-                allow_remote_extends: cli.allow_remote_extends,
-                no_cache: cli.no_cache,
-                threads: dispatch.threads,
-                changed_since: cli.changed_since.as_deref(),
-                diff_file: cli.diff_file.as_deref(),
-                workspace: cli.workspace.as_deref(),
-                changed_workspaces: cli.changed_workspaces.as_deref(),
-                explain: cli.explain,
-                quiet,
-                output,
-                json_style: dispatch.json_style,
-                threshold,
-                min_lines,
-                top,
-                files: file,
-                scope,
-                subcommand,
-                host: Some(crate::run_inputs::cli_host(dispatch.run_inputs)),
-            })
-        }
+        similar @ Command::SimilarCode { .. } => dispatch_similar_code(dispatch, similar),
         Command::Mutation { subcommand, args } => {
             dispatch_mutation_command(dispatch, subcommand, args)
         }
@@ -621,6 +528,15 @@ fn run_security_blind_spots_or_default(
         Some(SecuritySubcommand::BlindSpots { .. })
     );
     if blind_spots && let Some(code) = validate_security_blind_spots_flags(derived_flags) {
+        return code;
+    }
+    // The format error comes before a config error.
+    let format = if blind_spots {
+        security::validate_derived_security_output(dispatch.output, "blind-spots")
+    } else {
+        security::validate_security_output(dispatch.output)
+    };
+    if let Err(code) = format {
         return code;
     }
     dispatch.run_resolved(|run| {

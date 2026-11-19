@@ -599,7 +599,7 @@ struct SecurityOutputInput<'a, 'b> {
     workspace_diagnostics: Vec<fallow_config::WorkspaceDiagnostic>,
 }
 
-fn validate_security_output(output: OutputFormat) -> Result<(), ExitCode> {
+pub fn validate_security_output(output: OutputFormat) -> Result<(), ExitCode> {
     if matches!(
         output,
         OutputFormat::Human
@@ -617,7 +617,7 @@ fn validate_security_output(output: OutputFormat) -> Result<(), ExitCode> {
     }
 }
 
-fn validate_derived_security_output(
+pub fn validate_derived_security_output(
     output: OutputFormat,
     subcommand: &'static str,
 ) -> Result<(), ExitCode> {
@@ -1099,7 +1099,6 @@ fn compute_base_security_snapshot(
         ));
     };
     let base_root = fallow_engine::repo_refs::base_analysis_root(opts.root, worktree.path());
-    // The base side reads the config file of the base commit.
     let given = |value| fallow_types::sourced::Given {
         value,
         origin: fallow_types::sourced::Origin::Flag("--changed-since"),
@@ -1115,8 +1114,8 @@ fn compute_base_security_snapshot(
             ),
         )),
     };
-    let base_run = fallow_engine::resolved_run::resolve_base_run(opts.run, base_side)
-        .map_err(|err| emit_input_error(&err.message(), opts.output))?;
+    let base_run = crate::cli_production::base_copy_run(opts.run, base_side)
+        .map_err(|message| emit_input_error(&message, opts.output))?;
     // The findings of the base run name files under its canonical root.
     let base_root = base_run.root().value().clone();
     let base_opts = base_snapshot_security_options(opts, &base_root, &base_run);

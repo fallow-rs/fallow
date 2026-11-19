@@ -1,7 +1,9 @@
 ### Changed
 
 - **`fallow coverage analyze` reads `production` from the config.** Without `--production`, the command analyzed in non-production mode. It now uses the `production` setting of the config, as `fallow dead-code` does.
-- **`fallow security` reads the base config from the base commit.** When `fallow security --gate newly-reachable` compares with a base ref, the base side now uses the config file of that commit, as the second base pass of `fallow audit` does. A config change in the pull request then shows as a change in the findings.
+- **`fallow security` reads the base config from the base commit.** When `fallow security --gate newly-reachable` compares with a base ref, the base side now uses the config file of that commit, as the second base pass of `fallow audit` does. A config change in the pull request then shows as a change in the findings. When the base version of the config does not load or does not validate, the base side reads the config file of the head run.
+- **`fallow mutation` and `fallow plugin-check` print a config error with the same text as the analysis commands.** An invalid rule pack or boundary now gives `invalid rule pack:` or `invalid boundary configuration:` without the `failed to load config:` prefix. A `--config` file that does not load gives `failed to load config '<path>': <cause>`, with the path as given. The `message` field of the JSON error of `fallow mutation --format json` changes the same way. The exit code stays 2.
+- **The programmatic audit reads the base version of an explicit config file on the base side.** When `AnalysisOptions.config_path` names a file under the root and the change edits that file, the second base pass of `run_audit` now reads the base version of that file, as `fallow audit --config` does. Before, that pass read the config file that discovery found in the base checkout. When the base version does not load or does not validate, the audit skips that pass.
 
 ### Fixed
 

@@ -6,8 +6,8 @@
 //! files.
 //!
 //! The calls are `load_config`, `load_config_for_analysis`,
-//! `AnalysisSession::from_resolved_config` and the `config_for_project*`
-//! functions. [`OPEN_SITES`] holds the sites that still call them, each with
+//! `load_config_file`, `AnalysisSession::from_resolved_config` and the
+//! `config_for_project*` functions. [`OPEN_SITES`] holds the sites that still call them, each with
 //! the exact count, so a new call fails and a removed call asks for a smaller
 //! count.
 
@@ -27,8 +27,29 @@ struct OpenSite {
 const OPEN_SITES: &[OpenSite] = &[
     OpenSite {
         path: "crates/cli/src/runtime_support.rs",
+        calls: 4,
+        why: "the fallback load of an option struct without a run, the shared file load \
+              of the sites below, and `loaded_config` for one optional setting",
+    },
+    OpenSite {
+        path: "crates/cli/src/audit_cache.rs",
         calls: 1,
-        why: "the fallback load of an option struct without a run",
+        why: "the fingerprint of the config file in the audit cache key",
+    },
+    OpenSite {
+        path: "crates/cli/src/audit_dead_code.rs",
+        calls: 1,
+        why: "the load check of the base config before the own-config pass",
+    },
+    OpenSite {
+        path: "crates/cli/src/cli_report.rs",
+        calls: 1,
+        why: "the load check of the `--config` file of a saved report",
+    },
+    OpenSite {
+        path: "crates/cli/src/config.rs",
+        calls: 1,
+        why: "`fallow config` prints the config file as the loader gives it",
     },
     OpenSite {
         path: "crates/cli/src/audit.rs",
@@ -96,7 +117,7 @@ const OPEN_SITES: &[OpenSite] = &[
 fn is_load_call(name: &str) -> bool {
     matches!(
         name,
-        "load_config" | "load_config_for_analysis" | "from_resolved_config"
+        "load_config" | "load_config_for_analysis" | "load_config_file" | "from_resolved_config"
     ) || name.starts_with("config_for_project")
 }
 

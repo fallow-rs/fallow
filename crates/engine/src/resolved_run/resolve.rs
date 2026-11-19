@@ -453,9 +453,11 @@ impl Context<'_> {
             chain,
         } = load_config_file(self.root, explicit.as_ref().map(|(path, _)| *path), options)
             .map_err(ResolveError::ConfigLoad)?;
-        steps::validate_config(self.root, &config).map_err(|err| ResolveError::ConfigInvalid {
-            file: path.clone(),
-            message: err.to_string(),
+        steps::validate_command_config(self.inputs.command, self.root, &config).map_err(|err| {
+            ResolveError::ConfigInvalid {
+                file: path.clone(),
+                message: err.to_string(),
+            }
         })?;
         let config_file = match (explicit, path) {
             (Some((_, source)), Some(path)) => Sourced::new(Some(path), source, Scope::Global),
