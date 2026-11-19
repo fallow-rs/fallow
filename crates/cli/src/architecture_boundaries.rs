@@ -717,8 +717,8 @@ fn list_surfaces_reuse_session_discovery() {
     for source_path in ["crates/cli/src/list.rs", "crates/api/src/list_runtime.rs"] {
         let source = read_source_without_line_comments(source_path).expect("read source");
         assert!(
-            source.contains("AnalysisSession::from_"),
-            "{source_path} must build an AnalysisSession before collecting discovered files"
+            source.contains("AnalysisSession::from_") || source.contains(".open_session("),
+            "{source_path} must open an AnalysisSession before collecting discovered files"
         );
         assert!(
             !source.contains("discover_files_with_plugin_scopes"),
