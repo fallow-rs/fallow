@@ -2232,6 +2232,7 @@ pub enum HealthBaselineMode {
 enum HealthFindingDimension {
     Complexity,
     Crap,
+    FileLength,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2259,13 +2260,23 @@ impl HealthFindingCategory {
             (HealthFindingDimension::Crap, fallow_output::FindingSeverity::Critical) => {
                 "crap_critical"
             }
+            (HealthFindingDimension::FileLength, fallow_output::FindingSeverity::Moderate) => {
+                "file_lines_moderate"
+            }
+            (HealthFindingDimension::FileLength, fallow_output::FindingSeverity::High) => {
+                "file_lines_high"
+            }
+            (HealthFindingDimension::FileLength, fallow_output::FindingSeverity::Critical) => {
+                "file_lines_critical"
+            }
         }
     }
 }
 
-const HEALTH_FINDING_DIMENSIONS: [HealthFindingDimension; 2] = [
+const HEALTH_FINDING_DIMENSIONS: [HealthFindingDimension; 3] = [
     HealthFindingDimension::Complexity,
     HealthFindingDimension::Crap,
+    HealthFindingDimension::FileLength,
 ];
 
 impl HealthBaselineData {
@@ -2577,23 +2588,21 @@ fn health_finding_counts(
 fn health_finding_categories(
     finding: &fallow_output::ComplexityViolation,
 ) -> [Option<HealthFindingCategory>; 2] {
-    let complexity_category = HealthFindingCategory {
-        dimension: HealthFindingDimension::Complexity,
+    let category = |dimension| HealthFindingCategory {
+        dimension,
         severity: finding.severity,
     };
-    let crap_category = HealthFindingCategory {
-        dimension: HealthFindingDimension::Crap,
-        severity: finding.severity,
-    };
-    // A file-length finding counts as complexity: it has no CRAP part, and a
-    // finding without a category would never match a baseline entry.
-    let has_complexity = finding.exceeded.includes_cyclomatic()
-        || finding.exceeded.includes_cognitive()
-        || finding.exceeded.is_file_lines();
+    // A file-length finding has its own category, so a function finding that
+    // the baseline accepted and that was fixed leaves no slot for it.
+    if finding.exceeded.is_file_lines() {
+        return [Some(category(HealthFindingDimension::FileLength)), None];
+    }
+    let has_complexity =
+        finding.exceeded.includes_cyclomatic() || finding.exceeded.includes_cognitive();
     let has_crap = finding.exceeded.includes_crap();
     [
-        has_complexity.then_some(complexity_category),
-        has_crap.then_some(crap_category),
+        has_complexity.then(|| category(HealthFindingDimension::Complexity)),
+        has_crap.then(|| category(HealthFindingDimension::Crap)),
     ]
 }
 

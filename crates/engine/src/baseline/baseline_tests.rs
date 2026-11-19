@@ -1509,6 +1509,46 @@ fn health_baseline_keeps_crap_categories_separate_from_complexity() {
 }
 
 #[test]
+fn health_baseline_slot_of_a_fixed_function_does_not_accept_a_long_file() {
+    let root = PathBuf::from("/project");
+    let moderate = |name: &str, line: u32, exceeded| {
+        make_health_finding_with(
+            &root,
+            name,
+            line,
+            exceeded,
+            fallow_output::FindingSeverity::Moderate,
+        )
+    };
+    let baseline = HealthBaselineData::from_findings(
+        &[
+            moderate("parse", 10, fallow_output::ExceededThreshold::Both),
+            moderate("render", 90, fallow_output::ExceededThreshold::Both),
+        ],
+        &[],
+        &[],
+        &root,
+    );
+    let filtered = filter_new_health_findings(
+        vec![
+            moderate("parse", 10, fallow_output::ExceededThreshold::Both),
+            moderate(
+                fallow_output::FILE_LINES_FINDING_NAME,
+                1,
+                fallow_output::ExceededThreshold::FileLines,
+            ),
+        ],
+        &baseline,
+        &root,
+    );
+    assert_eq!(filtered.len(), 1);
+    assert_eq!(
+        filtered[0].exceeded,
+        fallow_output::ExceededThreshold::FileLines
+    );
+}
+
+#[test]
 fn health_baseline_suppresses_findings_that_only_improve_in_severity() {
     let root = PathBuf::from("/project");
     let baseline = HealthBaselineData::from_findings(
