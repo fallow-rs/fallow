@@ -34,6 +34,14 @@ const ALWAYS_USED: &[&str] = &[
 
 const TOOLING_DEPENDENCIES: &[&str] = &["astro", "@astrojs/check", "@astrojs/ts-plugin"];
 
+/// The default image service of `astro:assets`. Astro loads it by name, so
+/// no import in the project names it.
+const DEFAULT_IMAGE_SERVICE_PACKAGE: &str = "sharp";
+
+/// The `astro/config` helper that replaces the default image service with one
+/// that needs no package.
+const PASSTHROUGH_IMAGE_SERVICE: &str = "passthroughImageService";
+
 /// Virtual module prefixes provided by Astro at build time.
 /// `astro:` provides built-in modules (content, transitions, env, actions, assets,
 /// i18n, middleware, container, schema).
@@ -84,6 +92,11 @@ define_plugin! {
     resolve_config(config_path, source, root) {
         let mut result = PluginResult::default();
         crate::plugins::add_import_referenced_dependencies(&mut result, source, config_path);
+        if !source.contains(PASSTHROUGH_IMAGE_SERVICE) {
+            result
+                .referenced_dependencies
+                .push(DEFAULT_IMAGE_SERVICE_PACKAGE.to_string());
+        }
         for value in starlight_file_values(source, config_path) {
             add_starlight_file_value(&mut result, &value, config_path, root);
         }
@@ -216,6 +229,33 @@ mod tests {
     fn resolve(source: &str) -> PluginResult {
         let root = Path::new("/project");
         AstroPlugin.resolve_config(&root.join("astro.config.mjs"), source, root)
+    }
+
+    #[test]
+    fn default_image_service_is_credited_unless_the_config_uses_passthrough() {
+        let default_service = resolve(
+            r#"
+            import { defineConfig } from "astro/config";
+            export default defineConfig({ site: "https://example.com" });
+            "#,
+        );
+        assert!(
+            default_service
+                .referenced_dependencies
+                .contains(&"sharp".to_string())
+        );
+
+        let passthrough = resolve(
+            r#"
+            import { defineConfig, passthroughImageService } from "astro/config";
+            export default defineConfig({ image: { service: passthroughImageService() } });
+            "#,
+        );
+        assert!(
+            !passthrough
+                .referenced_dependencies
+                .contains(&"sharp".to_string())
+        );
     }
 
     #[test]

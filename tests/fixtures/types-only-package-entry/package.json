@@ -1,0 +1,10 @@
+{
+  "name": "types-only-package-entry",
+  "private": true,
+  "main": "src/index.ts",
+  "dependencies": {
+    "@fixture/native-spec": "file:./modules/native-spec",
+    "@fixture/no-entry": "file:./modules/no-entry",
+    "@fixture/typings-output": "file:./modules/typings-output"
+  }
+}

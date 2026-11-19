@@ -14,7 +14,8 @@
 //!
 //! Each later member must be a method that returns a schema (`pipe`,
 //! `annotations`, `extend`), and each `pipe` argument must be a `Schema`
-//! transform (`Schema.brand("Id")`, `Schema.minLength(1)`). The rule is
+//! transform (`Schema.brand("Id")`, `Schema.minLength(1)`) or a call of an
+//! `HttpApiSchema` transform (`HttpApiSchema.asFormUrlEncoded()`). The rule is
 //! conservative: a chain that ends in `make`, `decode*`, a field read or an
 //! arrow function is not a schema. A chain on a member of a namespace import
 //! (`Imported.User.pipe(...)`) is not a schema: the root is the namespace.
@@ -27,7 +28,7 @@ use fallow_types::extract::{ImportInfo, ImportedName};
 
 #[path = "effect_schema_names.rs"]
 mod names;
-use names::{PIPE_TRANSFORMS, TYPE_ONLY_NAMES};
+use names::{HTTP_API_PIPE_TRANSFORMS, PIPE_TRANSFORMS, TYPE_ONLY_NAMES};
 
 /// `Schema` functions with a lowercase name that return a schema. Every
 /// other lowercase function (`decodeUnknownSync`, `is`, `isGreaterThan`)
@@ -101,6 +102,28 @@ fn is_schema_module_import(import: &ImportInfo) -> bool {
     }
 }
 
+/// True when the import binds the Effect `HttpApiSchema` module: the named
+/// export of `effect/http-api` (effect 4) or `@effect/platform` (effect 3),
+/// or a namespace import of the module itself.
+fn is_http_api_schema_module_import(import: &ImportInfo) -> bool {
+    match &import.imported_name {
+        ImportedName::Named(name) => {
+            name == "HttpApiSchema"
+                && matches!(
+                    import.source.as_str(),
+                    "effect/http-api" | "@effect/platform"
+                )
+        }
+        ImportedName::Namespace => {
+            matches!(
+                import.source.as_str(),
+                "effect/http-api/HttpApiSchema" | "@effect/platform/HttpApiSchema"
+            )
+        }
+        ImportedName::Default | ImportedName::SideEffect => false,
+    }
+}
+
 fn is_schema_constructor(name: &str) -> bool {
     if name.starts_with(|c: char| c.is_ascii_uppercase()) {
         return !TYPE_ONLY_NAMES.contains(&name);
@@ -147,6 +170,8 @@ pub enum SchemaShape {
 pub struct SchemaShapes<'s, 'a> {
     semantic: &'s Semantic<'a>,
     namespaces: FxHashSet<SymbolId>,
+    /// Bindings of the `HttpApiSchema` module.
+    http_api_namespaces: FxHashSet<SymbolId>,
     /// Named and default value imports that a derived chain can start at.
     imports: FxHashMap<SymbolId, String>,
     locals: FxHashMap<SymbolId, SchemaShape>,
@@ -162,6 +187,13 @@ impl<'s, 'a> SchemaShapes<'s, 'a> {
                 crate::binding_references::admitted_import_symbol(semantic, import)
             })
             .collect();
+        let http_api_namespaces = imports
+            .iter()
+            .filter(|import| is_http_api_schema_module_import(import))
+            .filter_map(|import| {
+                crate::binding_references::admitted_import_symbol(semantic, import)
+            })
+            .collect();
         let imports = imports
             .iter()
             .filter(|import| {
@@ -171,6 +203,7 @@ impl<'s, 'a> SchemaShapes<'s, 'a> {
                         ImportedName::Named(_) | ImportedName::Default
                     )
                     && !is_schema_module_import(import)
+                    && !is_http_api_schema_module_import(import)
             })
             .filter_map(|import| {
                 crate::binding_references::admitted_import_symbol(semantic, import)
@@ -180,6 +213,7 @@ impl<'s, 'a> SchemaShapes<'s, 'a> {
         Self {
             semantic,
             namespaces,
+            http_api_namespaces,
             imports,
             locals: FxHashMap::default(),
             local_names: FxHashMap::default(),
@@ -264,7 +298,9 @@ impl<'s, 'a> SchemaShapes<'s, 'a> {
 
     /// True when a `pipe` argument is a `Schema` transform: a call such as
     /// `Schema.brand("Id")` or `Schema.minLength(1)`, a bare transform such as
-    /// `Schema.optional`, or a bare constructor such as `Schema.NullOr`.
+    /// `Schema.optional`, or a bare constructor such as `Schema.NullOr`. A
+    /// call of an `HttpApiSchema` transform is one too. Its bare form is not:
+    /// each is a factory, so `pipe` would return a function.
     fn is_pipe_transform(&self, argument: &Argument<'a>) -> bool {
         let Some(expression) = argument.as_expression() else {
             return false;
@@ -280,12 +316,15 @@ impl<'s, 'a> SchemaShapes<'s, 'a> {
             return false;
         };
         let name = member.property.name.as_str();
+        let Some(symbol) = self.symbol(object) else {
+            return false;
+        };
+        if self.http_api_namespaces.contains(&symbol) {
+            return called && HTTP_API_PIPE_TRANSFORMS.contains(&name);
+        }
         let known =
             PIPE_TRANSFORMS.contains(&name) || (!called && PIPE_CONSTRUCTORS.contains(&name));
-        known
-            && self
-                .symbol(object)
-                .is_some_and(|symbol| self.namespaces.contains(&symbol))
+        known && self.namespaces.contains(&symbol)
     }
 
     fn symbol(&self, identifier: &IdentifierReference<'a>) -> Option<SymbolId> {
