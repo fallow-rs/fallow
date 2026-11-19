@@ -71,6 +71,15 @@
           "source": "given:fallow.production"
         }
       }
+    },
+    "cli": {
+      "reason": "The CLI names the flag --no-production",
+      "expected": {
+        "analyses.dead_code.production": {
+          "value": false,
+          "source": "given:--no-production"
+        }
+      }
     }
   }
 }

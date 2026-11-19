@@ -32,6 +32,13 @@
       "compare_keys": [
         "packageBaselines"
       ]
+    },
+    "cli": {
+      "argv": [
+        "fallow",
+        "dupes",
+        "--no-package-baselines"
+      ]
     }
   },
   "expected": {
@@ -63,6 +70,15 @@
         "settings.package_baselines": {
           "value": false,
           "source": "given:fallow.packageBaselines"
+        }
+      }
+    },
+    "cli": {
+      "reason": "The CLI names the flag --no-package-baselines",
+      "expected": {
+        "settings.package_baselines": {
+          "value": false,
+          "source": "given:--no-package-baselines"
         }
       }
     }

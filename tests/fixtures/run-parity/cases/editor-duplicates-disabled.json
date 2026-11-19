@@ -19,6 +19,11 @@
     },
     "vscode": {
       "not_expressible": "VS Code has no setting for duplicates.enabled"
+    },
+    "cli": {
+      "argv": [
+        "fallow"
+      ]
     }
   },
   "expected": {

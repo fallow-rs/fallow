@@ -88,6 +88,8 @@ mod regression;
 pub mod report;
 mod requests;
 mod rule_pack;
+#[cfg(test)]
+mod run_inputs;
 mod runtime_support;
 mod schema;
 mod scope_path;
@@ -125,7 +127,7 @@ use cli_format::FormatConfig;
 #[cfg(test)]
 use cli_format::parse_format_arg;
 use cli_impact::ImpactCli;
-use cli_production::{ProductionModes, resolve_production_modes};
+use cli_production::ProductionModes;
 use cli_startup::{
     bare_combined_baseline_subcommand_error_message, bare_coverage_subcommand_error_message,
     cli_bare_combined_baseline_flag, cli_has_bare_coverage_input, parse_cli_args,
@@ -254,23 +256,6 @@ struct DispatchContext<'a> {
 }
 
 impl DispatchContext<'_> {
-    fn production_modes(
-        &self,
-        dead_code: bool,
-        health: bool,
-        dupes: bool,
-    ) -> Result<ProductionModes, ExitCode> {
-        resolve_production_modes(self.cli, self.root, self.output, dead_code, health, dupes)
-    }
-
-    fn production_for(
-        &self,
-        analysis: fallow_config::ProductionAnalysis,
-    ) -> Result<bool, ExitCode> {
-        self.production_modes(false, false, false)
-            .map(|modes| modes.for_analysis(analysis))
-    }
-
     fn growth_flags(&self) -> baseline_growth::GrowthFlags<'_> {
         baseline_growth::GrowthFlags {
             enabled: self.cli.fail_on_baseline_growth,

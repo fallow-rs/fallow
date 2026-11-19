@@ -7,6 +7,25 @@ pub use fallow_engine::project_config::ProductionModes;
 use super::Cli;
 use crate::runtime_support::load_config_file;
 
+impl crate::DispatchContext<'_> {
+    pub(crate) fn production_modes(
+        &self,
+        dead_code: bool,
+        health: bool,
+        dupes: bool,
+    ) -> Result<ProductionModes, ExitCode> {
+        resolve_production_modes(self.cli, self.root, self.output, dead_code, health, dupes)
+    }
+
+    pub(crate) fn production_for(
+        &self,
+        analysis: fallow_config::ProductionAnalysis,
+    ) -> Result<bool, ExitCode> {
+        self.production_modes(false, false, false)
+            .map(|modes| modes.for_analysis(analysis))
+    }
+}
+
 /// The run plan of the project config for `request`. A project without a
 /// config file has the default config. The config loads only when the plan
 /// depends on it.

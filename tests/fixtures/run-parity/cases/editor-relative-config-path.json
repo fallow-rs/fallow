@@ -21,6 +21,9 @@
     },
     "vscode": {
       "not_expressible": "VS Code resolves a relative configPath against the first workspace folder and sends an absolute path"
+    },
+    "cli": {
+      "not_expressible": "The CLI joins a relative --config to the current directory, and the current directory of this matrix is not the case root"
     }
   },
   "expected": {
