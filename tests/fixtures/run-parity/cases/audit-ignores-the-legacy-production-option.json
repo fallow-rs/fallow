@@ -17,6 +17,12 @@
     },
     "node": {
       "not_expressible": "The Node bindings have no audit entry point"
+    },
+    "lsp": {
+      "not_expressible": "The language server has no audit command"
+    },
+    "vscode": {
+      "not_expressible": "The editor has no audit input for the language server"
     }
   },
   "expected": {

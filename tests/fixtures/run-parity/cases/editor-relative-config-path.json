@@ -1,0 +1,34 @@
+{
+  "name": "editor-relative-config-path",
+  "files": {
+    "config/fallow.json": "{\"production\":true}",
+    "package.json": "{}"
+  },
+  "inputs": {
+    "mcp": {
+      "not_expressible": "The test translator of this row has no config path input"
+    },
+    "api": {
+      "not_expressible": "The test translator of this row has no config path input"
+    },
+    "node": {
+      "not_expressible": "The test translator of this row has no config path input"
+    },
+    "lsp": {
+      "initializationOptions": {
+        "configPath": "config/fallow.json"
+      }
+    },
+    "vscode": {
+      "not_expressible": "VS Code resolves a relative configPath against the first workspace folder and sends an absolute path"
+    }
+  },
+  "expected": {
+    "surface": "<row>",
+    "command": "editor",
+    "analyses.dead_code.production": {
+      "value": true,
+      "source": "config-file:production"
+    }
+  }
+}

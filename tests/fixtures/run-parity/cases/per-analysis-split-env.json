@@ -17,6 +17,15 @@
     },
     "node": {
       "not_expressible": "The Node bindings have no audit entry point"
+    },
+    "lsp": {
+      "initializationOptions": {}
+    },
+    "vscode": {
+      "settings": {},
+      "compare_keys": [
+        "production"
+      ]
     }
   },
   "expected": {
@@ -39,6 +48,16 @@
     "api": {
       "reason": "The Rust API and the Node bindings read no FALLOW_PRODUCTION* variable",
       "expected": {
+        "analyses.health.production": {
+          "value": false,
+          "source": "config-file:production.health"
+        }
+      }
+    },
+    "lsp": {
+      "reason": "The language server has one editor command, which plans dead code and duplication. The language server reads no FALLOW_PRODUCTION* variable",
+      "expected": {
+        "command": "editor",
         "analyses.health.production": {
           "value": false,
           "source": "config-file:production.health"

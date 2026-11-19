@@ -16,6 +16,12 @@
     },
     "node": {
       "not_expressible": "The Node bindings have no trace entry point"
+    },
+    "lsp": {
+      "not_expressible": "The language server has no trace command"
+    },
+    "vscode": {
+      "not_expressible": "The editor has no trace input for the language server"
     }
   },
   "expected": {

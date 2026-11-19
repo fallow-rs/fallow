@@ -1,0 +1,43 @@
+{
+  "name": "editor-duplicates-disabled",
+  "files": {
+    ".fallowrc.json": "{\"duplicates\":{\"enabled\":false}}",
+    "package.json": "{}"
+  },
+  "inputs": {
+    "mcp": {
+      "not_expressible": "The typed MCP rows of this matrix have no combined tool"
+    },
+    "api": {
+      "entry": "combined"
+    },
+    "node": {
+      "not_expressible": "The Node bindings have no combined entry point"
+    },
+    "lsp": {
+      "initializationOptions": {}
+    },
+    "vscode": {
+      "not_expressible": "VS Code has no setting for duplicates.enabled"
+    }
+  },
+  "expected": {
+    "surface": "<row>",
+    "analyses.dead_code.selection": {
+      "value": "run",
+      "source": "default:runs-by-default"
+    },
+    "analyses.duplication.selection": {
+      "value": "off-by-config",
+      "source": "config-file:duplicates.enabled"
+    }
+  },
+  "deviations": {
+    "lsp": {
+      "reason": "The language server has one editor command, which plans dead code and duplication",
+      "expected": {
+        "command": "editor"
+      }
+    }
+  }
+}

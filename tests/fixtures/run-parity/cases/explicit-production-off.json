@@ -22,6 +22,19 @@
       "options": {
         "production": false
       }
+    },
+    "lsp": {
+      "initializationOptions": {
+        "production": false
+      }
+    },
+    "vscode": {
+      "settings": {
+        "fallow.production": "off"
+      },
+      "compare_keys": [
+        "production"
+      ]
     }
   },
   "expected": {
@@ -39,6 +52,16 @@
         "analyses.dead_code.production": {
           "value": false,
           "source": "given:analysis.production_override"
+        }
+      }
+    },
+    "lsp": {
+      "reason": "The language server has one editor command, which plans dead code and duplication. The editor names the setting fallow.production",
+      "expected": {
+        "command": "editor",
+        "analyses.dead_code.production": {
+          "value": false,
+          "source": "given:fallow.production"
         }
       }
     }

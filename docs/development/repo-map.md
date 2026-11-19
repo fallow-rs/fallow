@@ -92,7 +92,11 @@ Find the first incorrect stage before editing:
   and decides the selection, the production mode and the settings, each with
   its source. `env_policy.rs` is the table of the environment variables that
   each surface and command reads. `parity.rs` is the harness of the run
-  parity matrix (`tests/fixtures/run-parity/cases/`).
+  parity matrix (`tests/fixtures/run-parity/cases/`). Each surface row wires
+  its real translator: `crates/api/src/run_parity_tests.rs`,
+  `crates/napi/src/run_parity_tests.rs`, `crates/lsp/src/run_parity_tests.rs`
+  and `editors/vscode/test/run-parity.test.ts`, which compares the
+  initialization options of the extension with the `lsp` input of a case.
 - `crates/engine/src/results.rs`: engine result carriers.
 - `crates/engine/src/duplicates.rs` and `duplication_detector/`: duplication
   orchestration and detection.
@@ -118,6 +122,8 @@ Find the first incorrect stage before editing:
 - `crates/cli/src/report/`: CLI output formats.
 - `crates/mcp/src/tools/`: MCP tools and adapters.
 - `crates/lsp/src/diagnostics/`: diagnostics by issue family.
+- `crates/lsp/src/run_inputs.rs`: the translator of the initialization
+  options to the run inputs of each project root.
 - `crates/napi/src/lib.rs`: Node.js API bindings.
 - `editors/vscode/src/`: editor client and commands.
 - `crates/engine/src/viz.rs`: command-neutral visualization graph data.

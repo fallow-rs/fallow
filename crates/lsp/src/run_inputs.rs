@@ -66,3 +66,7 @@ pub fn run_inputs(
 #[cfg(test)]
 #[path = "run_inputs_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "run_parity_tests.rs"]
+mod parity_tests;
