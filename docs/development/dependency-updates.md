@@ -32,8 +32,13 @@ workflows take them to `main` without a maintainer in most cases.
      with a repair merges only on top of the current `main`. The squash
      subject stays within the 100 character limit of commitlint.
 
-The commit lint and the title lint in `commitlint.yml` skip bot pull requests:
-their commit headers and long titles never reach `main`.
+The commit lint and the title lint in `commitlint.yml` skip bot pull requests.
+The workflow writes its own short squash subject, so a long Dependabot title
+does not reach `main`. A merge by hand uses the pull request title as the
+subject, and Commitlint on `main` fails for a header longer than 100
+characters. So the scheduled run also gives each open pull request with a long
+title a short one. Until that run, give a shorter subject when you merge a
+Dependabot pull request by hand.
 
 A Dependabot pull request that changes a file with a code owner in
 `.github/CODEOWNERS` waits for that review, because branch protection requires
