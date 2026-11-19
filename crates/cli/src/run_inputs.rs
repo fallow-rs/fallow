@@ -117,7 +117,7 @@ fn command_route(cli: &Cli) -> Option<CommandRoute> {
             walkthrough_file,
             ..
         } => {
-            // The review brief names every sub-analysis.
+            // `--brief` and the walkthrough flags name every sub-analysis.
             let selection =
                 if *brief || *walkthrough_guide || *walkthrough || walkthrough_file.is_some() {
                     every_analysis_named("--brief")
@@ -126,7 +126,7 @@ fn command_route(cli: &Cli) -> Option<CommandRoute> {
                 };
             CommandRoute::new(Kind::Audit, selection, Full)
         }
-        // The decision surface runs the audit of the review brief.
+        // The decision surface runs `audit --brief`.
         Command::DecisionSurface { .. } => {
             CommandRoute::new(Kind::Audit, every_analysis_named("decision-surface"), Full)
         }
