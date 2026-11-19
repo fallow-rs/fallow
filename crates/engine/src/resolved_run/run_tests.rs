@@ -411,3 +411,63 @@ fn a_selection_error_does_not_fall_back() {
         Err(ResolveError::NothingSelected { .. })
     ));
 }
+
+#[test]
+fn a_given_include_entry_exports_wins_over_a_workspace_false() {
+    let (_dir, root) = project(Some(
+        r#"{ "workspaces": { "settings": { "packages/a": { "includeEntryExports": false } } } }"#,
+    ));
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"app","workspaces":["packages/*"]}"#,
+    )
+    .expect("root manifest");
+    std::fs::create_dir_all(root.join("packages/a")).expect("workspace dir");
+    std::fs::write(root.join("packages/a/package.json"), r#"{"name":"a"}"#)
+        .expect("workspace manifest");
+    let file = root.join("packages/a/index.ts");
+    let include_for = |given_include: Option<bool>| {
+        let mut inputs = combined(&root);
+        inputs.include_entry_exports = given_include.map(given);
+        let run = resolve(&inputs);
+        let AnalysisSlot::Runs(dead_code) = run.analysis(PlannedAnalysis::DeadCode) else {
+            panic!("dead code runs");
+        };
+        let config = dead_code.config();
+        config
+            .workspace_settings
+            .bind(&root, dead_code.workspaces());
+        config.include_entry_exports_for(&file)
+    };
+    assert!(!include_for(None));
+    assert!(include_for(Some(true)));
+}
+
+/// The workspace discovery of the resolver matches the ignore globs. An
+/// adjustment that writes only rule settings still opens a session after it.
+#[test]
+fn a_rule_adjustment_opens_a_session_after_the_workspace_discovery() {
+    let (_dir, root) = project(Some(r#"{ "ignorePatterns": ["gen/**"] }"#));
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"app","workspaces":["packages/*"]}"#,
+    )
+    .expect("root manifest");
+    std::fs::create_dir_all(root.join("packages/empty")).expect("workspace dir");
+    let run = resolve(&combined(&root));
+    let AnalysisSlot::Runs(dead_code) = run.analysis(PlannedAnalysis::DeadCode) else {
+        panic!("dead code runs");
+    };
+    assert!(
+        dead_code
+            .open_session_adjusted(|config| config.show_cascade = true)
+            .is_ok()
+    );
+    assert!(
+        dead_code
+            .open_session_adjusted(
+                |config| config.ignore_patterns = fallow_config::IgnorePatternSet::empty()
+            )
+            .is_err()
+    );
+}

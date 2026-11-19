@@ -79,6 +79,8 @@ pub fn load_config_file(
     config_path: Option<&Path>,
     options: ConfigFileOptions,
 ) -> Result<ConfigFile, ConfigLoadError> {
+    #[cfg(any(test, feature = "testing"))]
+    load_count::record(root);
     let load_options = ConfigLoadOptions {
         allow_remote_extends: options.allow_remote_extends,
     };
@@ -117,9 +119,53 @@ fn explicit_load_error(path: &Path, err: &impl std::fmt::Display) -> ConfigLoadE
     }
 }
 
+/// A count of the calls of [`load_config_file`] for each project root, for
+/// tests that check how often one call reads the config file.
+#[cfg(any(test, feature = "testing"))]
+pub mod load_count {
+    use std::path::{Path, PathBuf};
+    use std::sync::{Mutex, PoisonError};
+
+    use rustc_hash::FxHashMap;
+
+    static LOADS: Mutex<Option<FxHashMap<PathBuf, usize>>> = Mutex::new(None);
+
+    pub(super) fn record(root: &Path) {
+        let mut loads = LOADS.lock().unwrap_or_else(PoisonError::into_inner);
+        *loads
+            .get_or_insert_with(FxHashMap::default)
+            .entry(root.to_path_buf())
+            .or_default() += 1;
+    }
+
+    /// The number of config loads for `root` since the process started. Each
+    /// test uses its own temporary root, so tests that run in parallel do not
+    /// change the count of another test.
+    #[must_use]
+    pub fn config_loads(root: &Path) -> usize {
+        LOADS
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .and_then(|loads| loads.get(root).copied())
+            .unwrap_or(0)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_load_counts_for_its_root() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::create_dir(dir.path().join(".git")).expect("git marker");
+        assert_eq!(load_count::config_loads(dir.path()), 0);
+        for _ in 0..2 {
+            load_config_file(dir.path(), None, ConfigFileOptions::default()).expect("loads");
+        }
+        assert_eq!(load_count::config_loads(dir.path()), 2);
+    }
 
     /// No server listens on port 1, so the fetch fails at once and offline.
     const UNREACHABLE_REMOTE_EXTENDS: &str = r#"{ "extends": "https://127.0.0.1:1/fallow.json" }"#;
