@@ -101,7 +101,7 @@ pub(super) fn health_finding_counts(
     counts
 }
 
-pub(super) fn health_finding_categories(
+fn health_finding_categories(
     finding: &fallow_output::ComplexityViolation,
     counting: FileLengthCounting,
 ) -> [Option<HealthFindingCategory>; 2] {
@@ -176,7 +176,7 @@ pub(super) fn overflowing_severities(current: [usize; 3], baseline: [usize; 3]) 
     overflow
 }
 
-pub(super) fn health_overflow_categories(
+fn health_overflow_categories(
     current_counts: &HealthFindingCountMap,
     baseline_counts: &HealthFindingCountMap,
 ) -> FxHashMap<String, FxHashSet<&'static str>> {
