@@ -24,6 +24,7 @@ const baseArgsOptions = {
   packageBaselines: true,
   workspace: "",
   configPath: "",
+  allowRemoteExtends: false,
   dupesMode: "mild" as const,
   dupesNear: false,
   dupesThreshold: 0,

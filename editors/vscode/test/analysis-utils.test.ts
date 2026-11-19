@@ -19,6 +19,7 @@ const baseOptions = {
   packageBaselines: true,
   workspace: "",
   configPath: "",
+  allowRemoteExtends: false,
   dupesMode: undefined,
   dupesNear: undefined,
   dupesThreshold: undefined,
@@ -104,6 +105,25 @@ const dupesResult = (
 });
 
 describe("buildAnalysisArgs", () => {
+  it("sidebar argv includes --allow-remote-extends when the setting is on", () => {
+    expect(buildAnalysisArgs(baseOptions).args).not.toContain("--allow-remote-extends");
+    const { args, skipped } = buildAnalysisArgs({ ...baseOptions, allowRemoteExtends: true });
+    expect(args).toContain("--allow-remote-extends");
+    expect(skipped).toEqual([]);
+  });
+
+  it("skips --allow-remote-extends on a CLI that predates it", () => {
+    const { args, skipped } = buildAnalysisArgs({
+      ...baseOptions,
+      allowRemoteExtends: true,
+      cliVersion: "3.4.1",
+    });
+    expect(args).not.toContain("--allow-remote-extends");
+    expect(skipped).toEqual([
+      { flag: "--allow-remote-extends", requires: "3.4.2", cliVersion: "3.4.1" },
+    ]);
+  });
+
   it("forwards --no-package-baselines only when the setting is off", () => {
     expect(buildAnalysisArgs(baseOptions).args).not.toContain("--no-package-baselines");
     const { args, skipped } = buildAnalysisArgs({ ...baseOptions, packageBaselines: false });

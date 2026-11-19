@@ -119,6 +119,7 @@ vi.mock("../src/config.js", () => ({
   getIssueTypes: () => mockIssueTypes,
   getChangedSince: () => "",
   getPackageBaselines: () => true,
+  getAllowRemoteExtends: () => false,
   getResolvedConfigPath: (workspaceRoot?: string) => {
     mockResolvedConfigRoots.push(workspaceRoot ?? "");
     return mockConfigPathSetting && workspaceRoot
