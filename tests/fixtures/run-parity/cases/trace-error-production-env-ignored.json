@@ -1,0 +1,45 @@
+{
+  "name": "trace-error-production-env-ignored",
+  "files": {
+    ".fallowrc.json": "{\"production\":true}",
+    "package.json": "{}"
+  },
+  "env": {
+    "FALLOW_PRODUCTION": "false"
+  },
+  "inputs": {
+    "cli": {
+      "argv": [
+        "fallow",
+        "trace-error",
+        "stack.txt"
+      ]
+    },
+    "lsp": {
+      "not_expressible": "The language server has no trace-error command"
+    },
+    "vscode": {
+      "not_expressible": "The editor has no trace-error input for the language server"
+    },
+    "node": {
+      "not_expressible": "The Node bindings have no trace-error function"
+    },
+    "api": {
+      "entry": "trace-error"
+    },
+    "mcp": {
+      "tool": "trace_error",
+      "params": {
+        "trace": "Error: x"
+      }
+    }
+  },
+  "expected": {
+    "surface": "<row>",
+    "command": "trace-error",
+    "analyses.dead_code.production": {
+      "value": true,
+      "source": "config-file:production"
+    }
+  }
+}

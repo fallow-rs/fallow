@@ -1,0 +1,41 @@
+{
+  "name": "mutation-production-env-ignored",
+  "files": {
+    ".fallowrc.json": "{\"production\":true}",
+    "package.json": "{}"
+  },
+  "env": {
+    "FALLOW_PRODUCTION": "false"
+  },
+  "inputs": {
+    "cli": {
+      "argv": [
+        "fallow",
+        "mutation"
+      ]
+    },
+    "lsp": {
+      "not_expressible": "The language server has no mutation command"
+    },
+    "vscode": {
+      "not_expressible": "The editor has no mutation input for the language server"
+    },
+    "node": {
+      "not_expressible": "The Node bindings have no mutation function"
+    },
+    "api": {
+      "entry": "mutation"
+    },
+    "mcp": {
+      "not_expressible": "The mutation tools run the API with a production setting of their own"
+    }
+  },
+  "expected": {
+    "surface": "<row>",
+    "command": "mutation",
+    "analyses.dead_code.production": {
+      "value": true,
+      "source": "config-file:production"
+    }
+  }
+}

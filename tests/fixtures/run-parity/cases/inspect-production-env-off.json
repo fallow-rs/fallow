@@ -1,0 +1,43 @@
+{
+  "name": "inspect-production-env-off",
+  "files": {
+    ".fallowrc.json": "{\"production\":true}",
+    "package.json": "{}"
+  },
+  "env": {
+    "FALLOW_PRODUCTION": "false"
+  },
+  "inputs": {
+    "cli": {
+      "argv": [
+        "fallow",
+        "inspect",
+        "--file",
+        "src/a.ts"
+      ]
+    },
+    "lsp": {
+      "not_expressible": "The language server has no inspect command"
+    },
+    "vscode": {
+      "not_expressible": "The editor has no inspect input for the language server"
+    },
+    "node": {
+      "not_expressible": "The Node bindings have no inspect function"
+    },
+    "api": {
+      "not_expressible": "The Rust API has no inspect entry point"
+    },
+    "mcp": {
+      "not_expressible": "The MCP server has no typed inspect tool"
+    }
+  },
+  "expected": {
+    "surface": "<row>",
+    "command": "inspect",
+    "analyses.dead_code.production": {
+      "value": false,
+      "source": "environment:FALLOW_PRODUCTION"
+    }
+  }
+}
