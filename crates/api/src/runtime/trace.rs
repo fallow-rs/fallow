@@ -39,8 +39,11 @@ pub fn run_trace_export(
     validate_non_empty("export_name", &options.export_name)?;
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
     resolved.install(|| {
-        let run = resolve_programmatic_run(&options.analysis, &ProgrammaticEntry::TraceChain)?;
-        super::type_aware_config::reject_type_aware_trace(&options.analysis.type_aware, &run)?;
+        let run = super::type_aware_config::resolve_trace_run(
+            &options.analysis.type_aware,
+            super::type_aware_config::ConfigLocation::of(&resolved),
+            || resolve_programmatic_run(&options.analysis, &ProgrammaticEntry::TraceChain),
+        )?;
         let session = load_trace_session(&resolved, &options.analysis, &run)?;
         let artifacts = trace_artifacts(&session)?;
         // Resolve a top-level export first; on a miss fall back to a class /

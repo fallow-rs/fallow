@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 
 use fallow_api::{
     AnalysisOptions, CombinedOptions, ComplexityOptions, FeatureFlagsOptions, run_combined,
-    run_feature_flags, serialize_combined_programmatic_json,
+    run_feature_flags, run_health, serialize_combined_programmatic_json,
 };
 use fallow_engine::project_config::load_count::config_loads;
 
@@ -84,6 +84,24 @@ fn programmatic_call_loads_the_config_once() {
     })
     .expect("combined runs");
     assert_eq!(config_loads(&root) - before, 1);
+}
+
+/// A health call with no section also checks the type-aware layers of the
+/// config, and it reads them from the config of its run.
+#[test]
+fn a_health_call_loads_the_config_once() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = project(dir.path(), "{}");
+    for complexity in [false, true] {
+        let before = config_loads(&root);
+        run_health(&ComplexityOptions {
+            analysis: analysis(&root),
+            complexity,
+            ..ComplexityOptions::default()
+        })
+        .expect("health runs");
+        assert_eq!(config_loads(&root) - before, 1, "complexity {complexity}");
+    }
 }
 
 #[test]
