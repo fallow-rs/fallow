@@ -1,0 +1,43 @@
+{
+  "name": "list-boundaries-production-env-off",
+  "files": {
+    ".fallowrc.json": "{\"production\":true}",
+    "package.json": "{}"
+  },
+  "env": {
+    "FALLOW_PRODUCTION": "0"
+  },
+  "inputs": {
+    "mcp": {
+      "tool": "list_boundaries",
+      "params": {}
+    },
+    "cli": {
+      "argv": [
+        "fallow",
+        "list",
+        "--boundaries"
+      ]
+    },
+    "api": {
+      "entry": "list"
+    },
+    "node": {
+      "not_expressible": "The Node bindings have no boundary list function"
+    },
+    "lsp": {
+      "not_expressible": "The language server has no list command"
+    },
+    "vscode": {
+      "not_expressible": "The editor has no list input for the language server"
+    }
+  },
+  "expected": {
+    "surface": "<row>",
+    "command": "list",
+    "analyses.dead_code.production": {
+      "value": true,
+      "source": "config-file:production"
+    }
+  }
+}

@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use fallow_api::mutation::Operator;
+use fallow_api::run::EnvSnapshot;
 use fallow_api::{MutationRunOptions, MutationRunScope, plan_mutation};
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
@@ -15,9 +16,10 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use crate::params::{MutationInspectParams, MutationPlanParams, MutationTasksParams};
 
 use super::api_runtime::{
-    EnvScope, call_cancellation, json_success, non_empty_path, non_empty_string,
-    programmatic_error_body, run_api_blocking, shared_analysis_options, shared_params,
+    call_cancellation, json_success, non_empty_path, non_empty_string, programmatic_error_body,
+    run_api_blocking, shared_params,
 };
+use super::run_inputs::{ToolProduction, TypedTool, typed_call};
 use super::{push_global, push_remote_extends, run_tool, validation_error_body};
 
 /// The error for `package` on the JavaScript route: only a Cargo workspace
@@ -40,7 +42,11 @@ pub async fn run_mutation_plan(
     params: MutationPlanParams,
 ) -> Result<CallToolResult, McpError> {
     let cancellation = call_cancellation();
-    let options = match mutation_plan_options(&params, Some(Arc::clone(&cancellation))) {
+    let options = match mutation_plan_options(
+        &params,
+        Some(Arc::clone(&cancellation)),
+        EnvSnapshot::capture(),
+    ) {
         Ok(options) => options,
         Err(message) => return Ok(CallToolResult::error(vec![ContentBlock::text(message)])),
     };
@@ -99,12 +105,18 @@ pub async fn run_mutation_tasks(
 pub fn mutation_plan_options(
     params: &MutationPlanParams,
     cancellation: Option<Arc<AtomicBool>>,
+    env: EnvSnapshot,
 ) -> Result<MutationRunOptions, String> {
     reject_package(params.package.as_deref())?;
     Ok(MutationRunOptions {
-        // The plan scope comes from the tool's own `changed_since`, `paths`
-        // and `all` params, not from the inherited environment.
-        analysis: shared_analysis_options(shared_params!(params), EnvScope::Own, cancellation),
+        analysis: typed_call(
+            TypedTool::MutationPlan,
+            shared_params!(params),
+            ToolProduction::default(),
+            env,
+            cancellation,
+        )
+        .analysis,
         scope: plan_scope(params)?,
         operators: plan_operators(params.operators.as_deref())?,
         max_mutants: params.max_mutants,
@@ -295,7 +307,9 @@ mod tests {
             ),
         ];
         for (input, expected) in cases {
-            let options = mutation_plan_options(&plan_params(input.clone()), None).unwrap();
+            let options =
+                mutation_plan_options(&plan_params(input.clone()), None, EnvSnapshot::capture())
+                    .unwrap();
             assert_eq!(options.scope, expected, "input {input}");
         }
     }
@@ -315,6 +329,7 @@ mod tests {
                 "operators": ["relational-operator", "return-value"],
             })),
             None,
+            EnvSnapshot::capture(),
         )
         .unwrap();
         assert_eq!(options.max_mutants, Some(25));
@@ -368,9 +383,10 @@ mod tests {
             ),
         ];
         for (input, expected) in cases {
-            let error = mutation_plan_options(&plan_params(input.clone()), None)
-                .err()
-                .unwrap_or_else(|| panic!("input {input} must be refused"));
+            let error =
+                mutation_plan_options(&plan_params(input.clone()), None, EnvSnapshot::capture())
+                    .err()
+                    .unwrap_or_else(|| panic!("input {input} must be refused"));
             let message = error_message(&error);
             assert!(
                 message.contains(expected),
@@ -386,6 +402,7 @@ mod tests {
                 "operators": ["relational"],
             })),
             None,
+            EnvSnapshot::capture(),
         )
         .unwrap_err();
         let message = error_message(&error);
@@ -402,6 +419,7 @@ mod tests {
                 "changed_since": "main",
             })),
             None,
+            EnvSnapshot::capture(),
         )
         .unwrap();
         assert_eq!(
@@ -750,10 +768,13 @@ mod tests {
 
     #[test]
     fn a_package_on_a_javascript_project_is_an_error() {
-        let body =
-            mutation_plan_options(&plan_params(serde_json::json!({ "package": "core" })), None)
-                .err()
-                .unwrap();
+        let body = mutation_plan_options(
+            &plan_params(serde_json::json!({ "package": "core" })),
+            None,
+            EnvSnapshot::capture(),
+        )
+        .err()
+        .unwrap();
         assert_eq!(error_message(&body), PACKAGE_ON_JS_MESSAGE);
         let body = build_mutation_inspect_args(&inspect_params(serde_json::json!({
             "mutant_id": "m_1",

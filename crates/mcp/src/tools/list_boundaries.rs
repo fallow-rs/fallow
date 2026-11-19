@@ -3,19 +3,20 @@ use std::sync::atomic::AtomicBool;
 
 use crate::params::ListBoundariesParams;
 
+use fallow_api::run::EnvSnapshot;
 use fallow_api::{
-    AnalysisOptions, ListBoundariesOptions, ProductionAnalysis,
-    run_list_boundaries as run_api_list_boundaries, serialize_list_boundaries_programmatic_json,
+    ListBoundariesOptions, run_list_boundaries as run_api_list_boundaries,
+    serialize_list_boundaries_programmatic_json,
 };
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
 
 use super::{
     api_runtime::{
-        EnvScope, call_cancellation, json_success, programmatic_error_body, run_api_blocking,
-        shared_analysis_options, shared_params, typed_production,
+        call_cancellation, json_success, programmatic_error_body, run_api_blocking, shared_params,
     },
     push_global, push_remote_extends,
+    run_inputs::{ToolProduction, TypedTool, typed_call},
 };
 
 /// Run `list_boundaries` through the typed API.
@@ -24,7 +25,11 @@ pub async fn run_list_boundaries(
     params: ListBoundariesParams,
 ) -> Result<CallToolResult, McpError> {
     let cancellation = call_cancellation();
-    let options = list_boundaries_options_from_params(&params, Some(Arc::clone(&cancellation)));
+    let options = list_boundaries_options_from_params(
+        &params,
+        Some(Arc::clone(&cancellation)),
+        EnvSnapshot::capture(),
+    );
     let result = run_api_blocking("list_boundaries", cancellation, move || {
         run_api_list_boundaries(&options).and_then(serialize_list_boundaries_programmatic_json)
     })
@@ -40,7 +45,7 @@ pub fn run_list_boundaries_api_value(
     params: &ListBoundariesParams,
     cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<Option<serde_json::Value>, String> {
-    let options = list_boundaries_options_from_params(params, cancellation);
+    let options = list_boundaries_options_from_params(params, cancellation, EnvSnapshot::capture());
     let value = run_api_list_boundaries(&options)
         .and_then(serialize_list_boundaries_programmatic_json)
         .map_err(|err| programmatic_error_body(&err))?;
@@ -69,21 +74,20 @@ pub fn build_list_boundaries_args(params: &ListBoundariesParams) -> Vec<String> 
     args
 }
 
-fn list_boundaries_options_from_params(
+pub(super) fn list_boundaries_options_from_params(
     params: &ListBoundariesParams,
     cancellation: Option<Arc<AtomicBool>>,
+    env: EnvSnapshot,
 ) -> ListBoundariesOptions {
     ListBoundariesOptions {
-        // This envelope carries no `request_outcomes`, so a ref that stood
-        // down would widen the result with nothing to say so: keep the hard
-        // error of an explicit ref.
-        analysis: AnalysisOptions {
-            // `fallow list` turns production mode on from the variables and
-            // never off: a variable that is off leaves the config in charge.
-            production_override: typed_production(None, ProductionAnalysis::DeadCode)
-                .filter(|&production| production),
-            ..shared_analysis_options(shared_params!(params), EnvScope::HardRef, cancellation)
-        },
+        analysis: typed_call(
+            TypedTool::ListBoundaries,
+            shared_params!(params),
+            ToolProduction::default(),
+            env,
+            cancellation,
+        )
+        .analysis,
     }
 }
 
@@ -166,7 +170,7 @@ mod route_parity_tests {
             &serde_json::json!({}),
             |params: ListBoundariesParams| build_list_boundaries_args(&params),
             |params: ListBoundariesParams| {
-                list_boundaries_options_from_params(&params, None).analysis
+                list_boundaries_options_from_params(&params, None, EnvSnapshot::capture()).analysis
             },
         );
     }

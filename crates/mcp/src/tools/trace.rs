@@ -6,11 +6,12 @@ use crate::params::{
     TraceImportPathParams,
 };
 
+use fallow_api::run::EnvSnapshot;
 use fallow_api::{
-    AnalysisOptions, DependencyUsageQuery, DuplicationOptions, ProductionAnalysis, SitePageRequest,
-    TraceCloneOptions, TraceCloneTarget, TraceDependencyOptions, TraceErrorOptions,
-    TraceExportOptions, TraceFileOptions, TraceImportPathOptions, run_trace_clone,
-    run_trace_dependency, run_trace_error, run_trace_export, run_trace_file, run_trace_import_path,
+    AnalysisOptions, DependencyUsageQuery, DuplicationOptions, SitePageRequest, TraceCloneOptions,
+    TraceCloneTarget, TraceDependencyOptions, TraceErrorOptions, TraceExportOptions,
+    TraceFileOptions, TraceImportPathOptions, run_trace_clone, run_trace_dependency,
+    run_trace_error, run_trace_export, run_trace_file, run_trace_import_path,
     serialize_trace_clone_programmatic_json, serialize_trace_dependency_programmatic_json,
     serialize_trace_error_programmatic_json, serialize_trace_export_programmatic_json,
     serialize_trace_file_programmatic_json, serialize_trace_import_path_programmatic_json,
@@ -21,12 +22,13 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use super::{
     VALID_DUPES_MODES,
     api_runtime::{
-        EnvScope, SharedParams, call_cancellation, json_success, programmatic_error_body,
-        run_api_blocking, shared_analysis_options, shared_params, typed_api_value,
-        typed_production, typed_tool_result, workspace_patterns_from_param,
+        SharedParams, call_cancellation, json_success, programmatic_error_body, run_api_blocking,
+        shared_params, typed_api_value, typed_tool_result, workspace_patterns_from_param,
     },
     duplication_mode_from_param, min_occurrences_from_param, push_global, push_remote_extends,
-    push_scope, require_non_empty, run_tool, validation_error_body,
+    push_scope, require_non_empty,
+    run_inputs::{ToolProduction, TypedTool, typed_call},
+    run_tool, validation_error_body,
 };
 
 /// Run `trace_export` through the typed API. When type-aware analysis is on,
@@ -37,7 +39,11 @@ pub async fn run_trace_export_tool(
     params: TraceExportParams,
 ) -> Result<CallToolResult, McpError> {
     let cancellation = call_cancellation();
-    let options = match trace_export_options_from_params(&params, Some(Arc::clone(&cancellation))) {
+    let options = match trace_export_options_from_params(
+        &params,
+        Some(Arc::clone(&cancellation)),
+        EnvSnapshot::capture(),
+    ) {
         Ok(options) => options,
         Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
     };
@@ -57,7 +63,11 @@ pub async fn run_trace_export_tool(
 /// Run `trace_file` through the typed API.
 pub async fn run_trace_file_tool(params: TraceFileParams) -> Result<CallToolResult, McpError> {
     let cancellation = call_cancellation();
-    let options = match trace_file_options_from_params(&params, Some(Arc::clone(&cancellation))) {
+    let options = match trace_file_options_from_params(
+        &params,
+        Some(Arc::clone(&cancellation)),
+        EnvSnapshot::capture(),
+    ) {
         Ok(options) => options,
         Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
     };
@@ -77,11 +87,14 @@ pub async fn run_trace_import_path_tool(
     params: TraceImportPathParams,
 ) -> Result<CallToolResult, McpError> {
     let cancellation = call_cancellation();
-    let options =
-        match trace_import_path_options_from_params(&params, Some(Arc::clone(&cancellation))) {
-            Ok(options) => options,
-            Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
-        };
+    let options = match trace_import_path_options_from_params(
+        &params,
+        Some(Arc::clone(&cancellation)),
+        EnvSnapshot::capture(),
+    ) {
+        Ok(options) => options,
+        Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
+    };
     let result = run_api_blocking("trace_import_path", cancellation, move || {
         run_trace_import_path(&options).and_then(serialize_trace_import_path_programmatic_json)
     })
@@ -96,7 +109,11 @@ pub async fn run_trace_import_path_tool(
 /// Run `trace_error` through the typed API.
 pub async fn run_trace_error_tool(params: TraceErrorParams) -> Result<CallToolResult, McpError> {
     let cancellation = call_cancellation();
-    let options = trace_error_options_from_params(&params, Some(Arc::clone(&cancellation)));
+    let options = trace_error_options_from_params(
+        &params,
+        Some(Arc::clone(&cancellation)),
+        EnvSnapshot::capture(),
+    );
     let result = run_api_blocking("trace_error", cancellation, move || {
         run_trace_error(&options).and_then(serialize_trace_error_programmatic_json)
     })
@@ -113,11 +130,14 @@ pub async fn run_trace_dependency_tool(
     params: TraceDependencyParams,
 ) -> Result<CallToolResult, McpError> {
     let cancellation = call_cancellation();
-    let options =
-        match trace_dependency_options_from_params(&params, Some(Arc::clone(&cancellation))) {
-            Ok(options) => options,
-            Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
-        };
+    let options = match trace_dependency_options_from_params(
+        &params,
+        Some(Arc::clone(&cancellation)),
+        EnvSnapshot::capture(),
+    ) {
+        Ok(options) => options,
+        Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
+    };
     let result = run_api_blocking("trace_dependency", cancellation, move || {
         run_trace_dependency(&options).and_then(serialize_trace_dependency_programmatic_json)
     })
@@ -132,7 +152,11 @@ pub async fn run_trace_dependency_tool(
 /// Run `trace_clone` through the typed API.
 pub async fn run_trace_clone_tool(params: TraceCloneParams) -> Result<CallToolResult, McpError> {
     let cancellation = call_cancellation();
-    let options = match trace_clone_options_from_params(&params, Some(Arc::clone(&cancellation))) {
+    let options = match trace_clone_options_from_params(
+        &params,
+        Some(Arc::clone(&cancellation)),
+        EnvSnapshot::capture(),
+    ) {
         Ok(options) => options,
         Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
     };
@@ -153,7 +177,7 @@ pub fn run_trace_export_api_value(
     params: &TraceExportParams,
     cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<Option<serde_json::Value>, String> {
-    let options = trace_export_options_from_params(params, cancellation)?;
+    let options = trace_export_options_from_params(params, cancellation, EnvSnapshot::capture())?;
     typed_api_value(run_trace_export(&options).and_then(serialize_trace_export_programmatic_json))
 }
 
@@ -161,7 +185,7 @@ pub fn run_trace_file_api_value(
     params: &TraceFileParams,
     cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<serde_json::Value, String> {
-    let options = trace_file_options_from_params(params, cancellation)?;
+    let options = trace_file_options_from_params(params, cancellation, EnvSnapshot::capture())?;
     run_trace_file(&options)
         .and_then(serialize_trace_file_programmatic_json)
         .map_err(|err| programmatic_error_body(&err))
@@ -171,7 +195,8 @@ pub fn run_trace_dependency_api_value(
     params: &TraceDependencyParams,
     cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<serde_json::Value, String> {
-    let options = trace_dependency_options_from_params(params, cancellation)?;
+    let options =
+        trace_dependency_options_from_params(params, cancellation, EnvSnapshot::capture())?;
     run_trace_dependency(&options)
         .and_then(serialize_trace_dependency_programmatic_json)
         .map_err(|err| programmatic_error_body(&err))
@@ -181,7 +206,7 @@ pub fn run_trace_clone_api_value(
     params: &TraceCloneParams,
     cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<serde_json::Value, String> {
-    let options = trace_clone_options_from_params(params, cancellation)?;
+    let options = trace_clone_options_from_params(params, cancellation, EnvSnapshot::capture())?;
     run_trace_clone(&options)
         .and_then(serialize_trace_clone_programmatic_json)
         .map_err(|err| programmatic_error_body(&err))
@@ -435,17 +460,20 @@ fn push_trace_clone_numeric_options(
     Ok(())
 }
 
-fn trace_export_options_from_params(
+pub(super) fn trace_export_options_from_params(
     params: &TraceExportParams,
     cancellation: Option<Arc<AtomicBool>>,
+    env: EnvSnapshot,
 ) -> Result<TraceExportOptions, String> {
     require_non_empty("file", &params.file).map_err(validation_error_body)?;
     require_non_empty("export_name", &params.export_name).map_err(validation_error_body)?;
     Ok(TraceExportOptions {
-        analysis: dead_code_analysis_options(
+        analysis: trace_analysis_options(
+            TypedTool::TraceExport,
             shared_params!(params),
             params.production,
             params.workspace.as_deref(),
+            env,
             cancellation,
         ),
         file: params.file.clone(),
@@ -453,33 +481,39 @@ fn trace_export_options_from_params(
     })
 }
 
-fn trace_file_options_from_params(
+pub(super) fn trace_file_options_from_params(
     params: &TraceFileParams,
     cancellation: Option<Arc<AtomicBool>>,
+    env: EnvSnapshot,
 ) -> Result<TraceFileOptions, String> {
     require_non_empty("file", &params.file).map_err(validation_error_body)?;
     Ok(TraceFileOptions {
-        analysis: dead_code_analysis_options(
+        analysis: trace_analysis_options(
+            TypedTool::TraceFile,
             shared_params!(params),
             params.production,
             params.workspace.as_deref(),
+            env,
             cancellation,
         ),
         file: params.file.clone(),
     })
 }
 
-fn trace_import_path_options_from_params(
+pub(super) fn trace_import_path_options_from_params(
     params: &TraceImportPathParams,
     cancellation: Option<Arc<AtomicBool>>,
+    env: EnvSnapshot,
 ) -> Result<TraceImportPathOptions, String> {
     require_non_empty("from", &params.from).map_err(validation_error_body)?;
     require_non_empty("to", &params.to).map_err(validation_error_body)?;
     Ok(TraceImportPathOptions {
-        analysis: parameter_production_analysis_options(
+        analysis: trace_analysis_options(
+            TypedTool::TraceImportPath,
             shared_params!(params),
             params.production,
             params.workspace.as_deref(),
+            env,
             cancellation,
         ),
         from: params.from.clone(),
@@ -499,9 +533,10 @@ const MCP_TRACE_SOURCE: &str = "mcp";
 /// and a `context`; short-circuiting the empty case here replaced that with a
 /// bare `{error, message, exit_code}` body, so the weakest refusal on the tool
 /// was the one an agent hits first.
-fn trace_error_options_from_params(
+pub(super) fn trace_error_options_from_params(
     params: &TraceErrorParams,
     cancellation: Option<Arc<AtomicBool>>,
+    env: EnvSnapshot,
 ) -> TraceErrorOptions {
     let source = params
         .source
@@ -510,10 +545,12 @@ fn trace_error_options_from_params(
         .filter(|source| !source.is_empty())
         .unwrap_or(MCP_TRACE_SOURCE);
     TraceErrorOptions {
-        analysis: parameter_production_analysis_options(
+        analysis: trace_analysis_options(
+            TypedTool::TraceError,
             shared_params!(params),
             params.production,
             params.workspace.as_deref(),
+            env,
             cancellation,
         ),
         trace: params.trace.clone(),
@@ -521,16 +558,19 @@ fn trace_error_options_from_params(
     }
 }
 
-fn trace_dependency_options_from_params(
+pub(super) fn trace_dependency_options_from_params(
     params: &TraceDependencyParams,
     cancellation: Option<Arc<AtomicBool>>,
+    env: EnvSnapshot,
 ) -> Result<TraceDependencyOptions, String> {
     require_non_empty("package_name", &params.package_name).map_err(validation_error_body)?;
     Ok(TraceDependencyOptions {
-        analysis: dead_code_analysis_options(
+        analysis: trace_analysis_options(
+            TypedTool::TraceDependency,
             shared_params!(params),
             params.production,
             params.workspace.as_deref(),
+            env,
             cancellation,
         ),
         package_name: params.package_name.clone(),
@@ -574,20 +614,21 @@ fn dependency_usage_query(
     .map_err(|err| validation_error_body(err.to_string()))
 }
 
-fn trace_clone_options_from_params(
+pub(super) fn trace_clone_options_from_params(
     params: &TraceCloneParams,
     cancellation: Option<Arc<AtomicBool>>,
+    env: EnvSnapshot,
 ) -> Result<TraceCloneOptions, String> {
     Ok(TraceCloneOptions {
         duplication: DuplicationOptions {
-            analysis: AnalysisOptions {
-                production_override: typed_production(None, ProductionAnalysis::Dupes),
-                workspace: workspace_patterns_from_param(params.workspace.as_deref()),
-                // This envelope carries no `request_outcomes`, so a ref that
-                // stood down would widen the result with nothing to say so:
-                // keep the hard error of an explicit ref.
-                ..shared_analysis_options(shared_params!(params), EnvScope::HardRef, cancellation)
-            },
+            analysis: trace_analysis_options(
+                TypedTool::TraceClone,
+                shared_params!(params),
+                None,
+                params.workspace.as_deref(),
+                env,
+                cancellation,
+            ),
             mode: duplication_mode_from_param(params.mode.as_deref())?,
             near: params.near,
             min_tokens: params.min_tokens.map(|value| value as usize),
@@ -605,36 +646,26 @@ fn trace_clone_options_from_params(
     })
 }
 
-/// The analysis options of the dead-code trace routes. This envelope carries
-/// no `request_outcomes`, so a ref that stood down would widen the result with
-/// nothing to say so: keep the hard error of an explicit ref.
-fn dead_code_analysis_options(
+/// The analysis options of a trace tool: the API call of `tool` with the
+/// workspace scope of the call.
+fn trace_analysis_options(
+    tool: TypedTool,
     shared: SharedParams<'_>,
     production: Option<bool>,
     workspace: Option<&str>,
+    env: EnvSnapshot,
     cancellation: Option<Arc<AtomicBool>>,
 ) -> AnalysisOptions {
     AnalysisOptions {
-        production: production.unwrap_or(false),
-        production_override: typed_production(production, ProductionAnalysis::DeadCode),
         workspace: workspace_patterns_from_param(workspace),
-        ..shared_analysis_options(shared, EnvScope::HardRef, cancellation)
-    }
-}
-
-/// The analysis options of `trace_import_path` and `trace_error`. Their CLI
-/// commands, `fallow trace --path` and `fallow trace-error`, read no
-/// `FALLOW_PRODUCTION*` variable, so only the tool parameter overrides the
-/// production mode of the config.
-fn parameter_production_analysis_options(
-    shared: SharedParams<'_>,
-    production: Option<bool>,
-    workspace: Option<&str>,
-    cancellation: Option<Arc<AtomicBool>>,
-) -> AnalysisOptions {
-    AnalysisOptions {
-        production_override: production,
-        ..dead_code_analysis_options(shared, production, workspace, cancellation)
+        ..typed_call(
+            tool,
+            shared,
+            ToolProduction::global(production),
+            env,
+            cancellation,
+        )
+        .analysis
     }
 }
 
@@ -754,7 +785,7 @@ mod tests {
 
         assert!(args.contains(&"--near".to_string()));
         assert_eq!(
-            trace_clone_options_from_params(&params, None)
+            trace_clone_options_from_params(&params, None, EnvSnapshot::capture())
                 .expect("trace clone options")
                 .duplication
                 .near,
@@ -783,21 +814,21 @@ mod tests {
             .expect("trace dependency params");
 
             assert_eq!(
-                trace_export_options_from_params(&export, None)
+                trace_export_options_from_params(&export, None, EnvSnapshot::capture())
                     .expect("trace export options")
                     .analysis
                     .allow_remote_extends,
                 expected
             );
             assert_eq!(
-                trace_file_options_from_params(&file, None)
+                trace_file_options_from_params(&file, None, EnvSnapshot::capture())
                     .expect("trace file options")
                     .analysis
                     .allow_remote_extends,
                 expected
             );
             assert_eq!(
-                trace_dependency_options_from_params(&dependency, None)
+                trace_dependency_options_from_params(&dependency, None, EnvSnapshot::capture())
                     .expect("trace dependency options")
                     .analysis
                     .allow_remote_extends,
@@ -858,7 +889,7 @@ mod route_parity_tests {
             &serde_json::json!({ "file": "src/a.ts", "export_name": "used" }),
             |params: TraceExportParams| build_trace_export_args(&params).expect("argv"),
             |params: TraceExportParams| {
-                trace_export_options_from_params(&params, None)
+                trace_export_options_from_params(&params, None, EnvSnapshot::capture())
                     .expect("options")
                     .analysis
             },
@@ -868,7 +899,7 @@ mod route_parity_tests {
             &serde_json::json!({ "file": "src/a.ts" }),
             |params: TraceFileParams| build_trace_file_args(&params).expect("argv"),
             |params: TraceFileParams| {
-                trace_file_options_from_params(&params, None)
+                trace_file_options_from_params(&params, None, EnvSnapshot::capture())
                     .expect("options")
                     .analysis
             },
@@ -878,7 +909,7 @@ mod route_parity_tests {
             &serde_json::json!({ "package_name": "react" }),
             |params: TraceDependencyParams| build_trace_dependency_args(&params).expect("argv"),
             |params: TraceDependencyParams| {
-                trace_dependency_options_from_params(&params, None)
+                trace_dependency_options_from_params(&params, None, EnvSnapshot::capture())
                     .expect("options")
                     .analysis
             },
@@ -888,7 +919,7 @@ mod route_parity_tests {
             &serde_json::json!({ "fingerprint": "dup:0123abcd" }),
             |params: TraceCloneParams| build_trace_clone_args(&params).expect("argv"),
             |params: TraceCloneParams| {
-                trace_clone_options_from_params(&params, None)
+                trace_clone_options_from_params(&params, None, EnvSnapshot::capture())
                     .expect("options")
                     .duplication
                     .analysis

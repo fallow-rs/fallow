@@ -6,7 +6,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
 use fallow_api::{
-    AnalysisOptions, DeadCodeFilters, DeadCodeOptions, ProductionAnalysis, run_boundary_violations,
+    AnalysisOptions, DeadCodeFilters, DeadCodeOptions, run_boundary_violations,
     run_circular_dependencies, run_dead_code, serialize_boundary_violations_programmatic_json,
     serialize_circular_dependencies_programmatic_json, serialize_dead_code_programmatic_json,
 };
@@ -16,15 +16,17 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use super::{
     ISSUE_TYPE_FLAGS,
     api_runtime::{
-        EnvScope, call_cancellation, run_api_blocking, shared_analysis_options, shared_params,
-        typed_production, typed_tool_result, typed_type_aware, workspace_patterns_from_param,
+        call_cancellation, run_api_blocking, shared_params, typed_tool_result, typed_type_aware,
+        workspace_patterns_from_param,
     },
     fallback_policy::{
         baseline_requested, grouped_requested, regression_requested, type_aware_requested,
     },
-    push_baseline, push_global, push_regression, push_remote_extends, push_scope, run_tool,
-    typed_validation_error_body,
+    push_baseline, push_global, push_regression, push_remote_extends, push_scope,
+    run_inputs::{ToolProduction, TypedTool, typed_call},
+    run_tool, typed_validation_error_body,
 };
+use fallow_api::run::EnvSnapshot;
 
 /// Run `analyze` through the typed API when parameters map cleanly to the
 /// programmatic contract, falling back to the CLI for CLI-only surfaces.
@@ -32,8 +34,11 @@ pub async fn run_analyze(binary: &str, params: AnalyzeParams) -> Result<CallTool
     if !requires_cli_fallback(&params) {
         let family = analyze_family(&params);
         let cancellation = call_cancellation();
-        let options = match dead_code_options_from_params(&params, Some(Arc::clone(&cancellation)))
-        {
+        let options = match dead_code_options_from_params(
+            &params,
+            Some(Arc::clone(&cancellation)),
+            EnvSnapshot::capture(),
+        ) {
             Ok(options) => options,
             Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
         };
@@ -173,20 +178,26 @@ fn analyze_family(params: &AnalyzeParams) -> AnalyzeFamily {
     AnalyzeFamily::DeadCode
 }
 
-fn dead_code_options_from_params(
+pub(super) fn dead_code_options_from_params(
     params: &AnalyzeParams,
     cancellation: Option<Arc<AtomicBool>>,
+    env: EnvSnapshot,
 ) -> Result<DeadCodeOptions, String> {
+    let call = typed_call(
+        TypedTool::Analyze,
+        shared_params!(params),
+        ToolProduction::global(params.production),
+        env,
+        cancellation,
+    );
     Ok(DeadCodeOptions {
         finding_ids: params.finding_ids.clone().unwrap_or_default(),
         analysis: AnalysisOptions {
-            production: params.production.unwrap_or(false),
-            production_override: typed_production(params.production, ProductionAnalysis::DeadCode),
             no_package_baselines: params.no_package_baselines.unwrap_or(false),
             workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             explain: true,
             type_aware: typed_type_aware(params.type_aware),
-            ..shared_analysis_options(shared_params!(params), EnvScope::Ambient, cancellation)
+            ..call.analysis
         },
         filters: filters_from_params(params)?,
         files: params
@@ -279,7 +290,8 @@ mod tests {
             issue_types: Some(vec!["constant-parameters".to_string()]),
             ..AnalyzeParams::default()
         };
-        let options = dead_code_options_from_params(&params, None).expect("options");
+        let options =
+            dead_code_options_from_params(&params, None, EnvSnapshot::capture()).expect("options");
         assert!(options.filters.constant_parameters);
         assert!(!options.filters.absent_component_props);
         let fallback_params = AnalyzeParams {
@@ -296,7 +308,8 @@ mod tests {
             issue_types: Some(vec!["absent-component-props".to_string()]),
             ..AnalyzeParams::default()
         };
-        let options = dead_code_options_from_params(&params, None).expect("options");
+        let options =
+            dead_code_options_from_params(&params, None, EnvSnapshot::capture()).expect("options");
         assert!(options.filters.absent_component_props);
         assert!(!options.filters.unused_component_props);
         assert!(!requires_cli_fallback(&params));
@@ -320,7 +333,8 @@ mod tests {
         };
 
         assert_eq!(analyze_family(&params), AnalyzeFamily::DeadCode);
-        let options = dead_code_options_from_params(&params, None).expect("options");
+        let options =
+            dead_code_options_from_params(&params, None, EnvSnapshot::capture()).expect("options");
         assert_eq!(options.finding_ids, vec![id.to_string()]);
         let args = build_analyze_args(&params).expect("args");
         assert!(
@@ -349,7 +363,8 @@ mod tests {
         };
 
         assert!(!requires_cli_fallback(&params));
-        let options = dead_code_options_from_params(&params, None).expect("options");
+        let options =
+            dead_code_options_from_params(&params, None, EnvSnapshot::capture()).expect("options");
         assert!(options.analysis.root.is_none());
         assert!(options.analysis.config_path.is_none());
         assert_eq!(
@@ -418,7 +433,8 @@ mod tests {
             ..AnalyzeParams::default()
         };
 
-        let err = dead_code_options_from_params(&params, None).expect_err("invalid issue type");
+        let err = dead_code_options_from_params(&params, None, EnvSnapshot::capture())
+            .expect_err("invalid issue type");
         assert!(err.contains("Unknown issue type"));
     }
 
@@ -429,7 +445,8 @@ mod tests {
             ..AnalyzeParams::default()
         };
 
-        let err = dead_code_options_from_params(&params, None).expect_err("invalid issue type");
+        let err = dead_code_options_from_params(&params, None, EnvSnapshot::capture())
+            .expect_err("invalid issue type");
         assert!(
             err.contains("Did you mean 'unused-exports'?"),
             "near-miss selector should name the intended one: {err}"
@@ -447,7 +464,8 @@ mod tests {
             ..AnalyzeParams::default()
         };
 
-        let err = dead_code_options_from_params(&params, None).expect_err("invalid issue type");
+        let err = dead_code_options_from_params(&params, None, EnvSnapshot::capture())
+            .expect_err("invalid issue type");
         assert!(
             err.contains("Did you mean 'unused-deps'?"),
             "the highest-traffic near miss must name the selector it meant: {err}"
@@ -463,7 +481,8 @@ mod tests {
             ..AnalyzeParams::default()
         };
 
-        let err = dead_code_options_from_params(&params, None).expect_err("invalid issue type");
+        let err = dead_code_options_from_params(&params, None, EnvSnapshot::capture())
+            .expect_err("invalid issue type");
         let body: serde_json::Value = serde_json::from_str(&err).expect("refusal body is JSON");
         assert_eq!(body["error"], true);
         assert_eq!(body["exit_code"], 2);
@@ -479,7 +498,8 @@ mod tests {
             ..AnalyzeParams::default()
         };
 
-        let err = dead_code_options_from_params(&params, None).expect_err("invalid issue type");
+        let err = dead_code_options_from_params(&params, None, EnvSnapshot::capture())
+            .expect_err("invalid issue type");
         assert!(
             !err.contains("Did you mean"),
             "a completely novel selector must not get a misleading suggestion: {err}"
@@ -494,7 +514,7 @@ mod tests {
                 ..AnalyzeParams::default()
             };
 
-            dead_code_options_from_params(&params, None)
+            dead_code_options_from_params(&params, None, EnvSnapshot::capture())
                 .unwrap_or_else(|err| panic!("{issue_type} should map through API path: {err}"));
         }
     }
@@ -825,7 +845,7 @@ mod route_parity_tests {
             &serde_json::json!({}),
             |params: AnalyzeParams| build_analyze_args(&params).expect("argv"),
             |params: AnalyzeParams| {
-                dead_code_options_from_params(&params, None)
+                dead_code_options_from_params(&params, None, EnvSnapshot::capture())
                     .expect("options")
                     .analysis
             },

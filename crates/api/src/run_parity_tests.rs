@@ -51,6 +51,8 @@ fn entry(name: &str, options: &ApiOptions) -> Option<ProgrammaticEntry> {
         "health" => ProgrammaticEntry::Health,
         "feature-flags" => ProgrammaticEntry::FeatureFlags,
         "trace-path" => ProgrammaticEntry::TracePath,
+        "trace-chain" => ProgrammaticEntry::TraceChain,
+        "list" => ProgrammaticEntry::List,
         "combined" => ProgrammaticEntry::Combined {
             dead_code: options.dead_code.unwrap_or(true),
             duplication: options.duplication.unwrap_or(true),

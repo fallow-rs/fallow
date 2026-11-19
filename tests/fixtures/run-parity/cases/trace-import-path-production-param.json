@@ -10,6 +10,8 @@
     "mcp": {
       "tool": "trace_import_path",
       "params": {
+        "from": "src/a.ts",
+        "to": "src/b.ts",
         "production": true
       }
     },

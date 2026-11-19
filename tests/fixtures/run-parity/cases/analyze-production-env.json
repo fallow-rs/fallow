@@ -11,6 +11,12 @@
       "tool": "analyze",
       "params": {}
     },
+    "cli": {
+      "argv": [
+        "fallow",
+        "dead-code"
+      ]
+    },
     "api": {
       "entry": "dead-code"
     },

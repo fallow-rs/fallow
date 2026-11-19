@@ -11,6 +11,13 @@
         "production": false
       }
     },
+    "cli": {
+      "argv": [
+        "fallow",
+        "dead-code",
+        "--no-production"
+      ]
+    },
     "api": {
       "entry": "dead-code",
       "options": {

@@ -1,0 +1,56 @@
+{
+  "name": "trace-export-production-env",
+  "files": {
+    "package.json": "{}"
+  },
+  "env": {
+    "FALLOW_PRODUCTION": "1"
+  },
+  "inputs": {
+    "mcp": {
+      "tool": "trace_export",
+      "params": {
+        "file": "src/a.ts",
+        "export_name": "a"
+      }
+    },
+    "cli": {
+      "argv": [
+        "fallow",
+        "dead-code",
+        "--trace",
+        "src/a.ts:a"
+      ]
+    },
+    "api": {
+      "entry": "trace-chain"
+    },
+    "node": {
+      "not_expressible": "The Node bindings have no trace entry point"
+    },
+    "lsp": {
+      "not_expressible": "The language server has no trace command"
+    },
+    "vscode": {
+      "not_expressible": "The editor has no trace input for the language server"
+    }
+  },
+  "expected": {
+    "surface": "<row>",
+    "analyses.dead_code.production": {
+      "value": true,
+      "source": "environment:FALLOW_PRODUCTION"
+    }
+  },
+  "deviations": {
+    "api": {
+      "reason": "The Rust API and the Node bindings read no FALLOW_PRODUCTION* variable",
+      "expected": {
+        "analyses.dead_code.production": {
+          "value": false,
+          "source": "default:production-off"
+        }
+      }
+    }
+  }
+}

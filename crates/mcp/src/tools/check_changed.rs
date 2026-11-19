@@ -1,8 +1,9 @@
 use std::sync::Arc;
 use std::sync::atomic::AtomicBool;
 
+use fallow_api::run::EnvSnapshot;
 use fallow_api::{
-    AnalysisOptions, DeadCodeFilters, DeadCodeOptions, ProductionAnalysis, run_dead_code,
+    AnalysisOptions, DeadCodeFilters, DeadCodeOptions, run_dead_code,
     serialize_dead_code_programmatic_json,
 };
 use rmcp::ErrorData as McpError;
@@ -12,11 +13,13 @@ use crate::params::CheckChangedParams;
 
 use super::{
     api_runtime::{
-        EnvScope, call_cancellation, run_api_blocking, shared_analysis_options, shared_params,
-        typed_api_value, typed_production, typed_tool_result, workspace_patterns_from_param,
+        call_cancellation, run_api_blocking, shared_params, typed_api_value, typed_tool_result,
+        workspace_patterns_from_param,
     },
     fallback_policy::{baseline_requested, regression_requested},
-    push_baseline, push_global, push_regression, push_remote_extends, push_scope, run_tool,
+    push_baseline, push_global, push_regression, push_remote_extends, push_scope,
+    run_inputs::{ToolProduction, TypedTool, typed_call},
+    run_tool,
 };
 
 /// Run `check_changed` through the typed API when parameters map cleanly to the
@@ -28,7 +31,11 @@ pub async fn run_check_changed(
 ) -> Result<CallToolResult, McpError> {
     if !requires_cli_fallback(&params) {
         let cancellation = call_cancellation();
-        let options = check_changed_options_from_params(&params, Some(Arc::clone(&cancellation)));
+        let options = check_changed_options_from_params(
+            &params,
+            Some(Arc::clone(&cancellation)),
+            EnvSnapshot::capture(),
+        );
         let result = run_api_blocking("check_changed", cancellation, move || {
             run_dead_code(&options).and_then(serialize_dead_code_programmatic_json)
         })
@@ -50,7 +57,7 @@ pub fn run_check_changed_api_value(
         return Ok(None);
     }
 
-    let options = check_changed_options_from_params(params, cancellation);
+    let options = check_changed_options_from_params(params, cancellation, EnvSnapshot::capture());
     typed_api_value(run_dead_code(&options).and_then(serialize_dead_code_programmatic_json))
 }
 
@@ -108,20 +115,26 @@ fn requires_cli_fallback(params: &CheckChangedParams) -> bool {
         )
 }
 
-fn check_changed_options_from_params(
+pub(super) fn check_changed_options_from_params(
     params: &CheckChangedParams,
     cancellation: Option<Arc<AtomicBool>>,
+    env: EnvSnapshot,
 ) -> DeadCodeOptions {
+    let call = typed_call(
+        TypedTool::CheckChanged,
+        shared_params!(params),
+        ToolProduction::global(params.production),
+        env,
+        cancellation,
+    );
     DeadCodeOptions {
         finding_ids: Vec::new(),
         analysis: AnalysisOptions {
-            production: params.production.unwrap_or(false),
-            production_override: typed_production(params.production, ProductionAnalysis::DeadCode),
             // The tool's own `since` wins over any inherited ref.
             changed_since: Some(params.since.clone()),
             workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             explain: true,
-            ..shared_analysis_options(shared_params!(params), EnvScope::Ambient, cancellation)
+            ..call.analysis
         },
         filters: DeadCodeFilters::default(),
         files: Vec::new(),
@@ -279,7 +292,9 @@ mod route_parity_tests {
             "check_changed",
             &serde_json::json!({ "since": "main" }),
             |params: CheckChangedParams| build_check_changed_args(params),
-            |params: CheckChangedParams| check_changed_options_from_params(&params, None).analysis,
+            |params: CheckChangedParams| {
+                check_changed_options_from_params(&params, None, EnvSnapshot::capture()).analysis
+            },
         );
     }
 }

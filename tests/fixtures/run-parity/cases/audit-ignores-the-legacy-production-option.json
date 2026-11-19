@@ -9,6 +9,12 @@
       "tool": "audit",
       "params": {}
     },
+    "cli": {
+      "argv": [
+        "fallow",
+        "audit"
+      ]
+    },
     "api": {
       "entry": "audit",
       "options": {

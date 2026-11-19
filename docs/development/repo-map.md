@@ -94,9 +94,10 @@ Find the first incorrect stage before editing:
   each surface and command reads. `parity.rs` is the harness of the run
   parity matrix (`tests/fixtures/run-parity/cases/`). Each surface row wires
   its real translator: `crates/api/src/run_parity_tests.rs`,
-  `crates/napi/src/run_parity_tests.rs`, `crates/lsp/src/run_parity_tests.rs`
-  and `editors/vscode/test/run-parity.test.ts`, which compares the
-  initialization options of the extension with the `lsp` input of a case.
+  `crates/napi/src/run_parity_tests.rs`, `crates/lsp/src/run_parity_tests.rs`,
+  `crates/mcp/src/tools/run_parity_tests.rs` (the typed MCP row and the MCP
+  CLI route row) and `editors/vscode/test/run-parity.test.ts`, which compares
+  the initialization options of the extension with the `lsp` input of a case.
 - `crates/engine/src/results.rs`: engine result carriers.
 - `crates/engine/src/duplicates.rs` and `duplication_detector/`: duplication
   orchestration and detection.
@@ -121,6 +122,8 @@ Find the first incorrect stage before editing:
 
 - `crates/cli/src/report/`: CLI output formats.
 - `crates/mcp/src/tools/`: MCP tools and adapters.
+- `crates/mcp/src/tools/run_inputs.rs`: the API call of each typed tool, with
+  the MCP surface and the environment snapshot of the call.
 - `crates/lsp/src/diagnostics/`: diagnostics by issue family.
 - `crates/lsp/src/run_inputs.rs`: the translator of the initialization
   options to the run inputs of each project root.

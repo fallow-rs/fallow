@@ -5,10 +5,11 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use fallow_api::{
-    AUDIT_CONFIG_BASELINE_UNSUPPORTED, AnalysisOptions, CoverageInputs, ProductionAnalysis,
-    ProductionEnv, ProgrammaticError, TYPE_AWARE_CONFIG_UNSUPPORTED, load_health_config,
-    resolve_coverage_inputs,
+    AUDIT_CONFIG_BASELINE_UNSUPPORTED, AnalysisOptions, CoverageInputs, ProgrammaticError,
+    TYPE_AWARE_CONFIG_UNSUPPORTED, load_health_config, resolve_coverage_inputs,
 };
+#[cfg(test)]
+use fallow_api::{ProductionAnalysis, ProductionEnv};
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
 use tokio_util::sync::CancellationToken;
@@ -193,18 +194,12 @@ fn env_changed_since() -> Option<String> {
     changed_since_from_lookup(|name| std::env::var_os(name))
 }
 
-/// The production override of a typed route, with the precedence of the CLI
-/// route: the tool parameter, then the `FALLOW_PRODUCTION*` variable of
-/// `analysis`, then `FALLOW_PRODUCTION`. `None` lets the config decide. The
-/// typed route reads the variables here, at the adapter boundary, because
-/// `fallow_api` takes explicit options only.
-pub(super) fn typed_production(param: Option<bool>, analysis: ProductionAnalysis) -> Option<bool> {
-    production_with_env(param, ProductionEnv::from_process(), analysis)
-}
-
-/// [`typed_production`] over an injected environment, so the precedence is
-/// testable without a change to the process environment.
-const fn production_with_env(
+/// The production override of a typed route before the resolver decided it:
+/// the tool parameter, then the `FALLOW_PRODUCTION*` variable of `analysis`,
+/// then `FALLOW_PRODUCTION`. `None` lets the config decide. The parity tests
+/// compare their reference precedence with it.
+#[cfg(test)]
+pub(super) const fn production_with_env(
     param: Option<bool>,
     env: ProductionEnv,
     analysis: ProductionAnalysis,

@@ -1,0 +1,74 @@
+{
+  "name": "health-production-env",
+  "files": {
+    "package.json": "{}"
+  },
+  "env": {
+    "FALLOW_PRODUCTION_HEALTH": "1"
+  },
+  "inputs": {
+    "mcp": {
+      "tool": "check_health",
+      "params": {}
+    },
+    "cli": {
+      "argv": [
+        "fallow",
+        "health"
+      ]
+    },
+    "api": {
+      "entry": "health"
+    },
+    "node": {
+      "function": "computeHealth"
+    },
+    "lsp": {
+      "initializationOptions": {}
+    },
+    "vscode": {
+      "settings": {},
+      "compare_keys": [
+        "production"
+      ]
+    }
+  },
+  "expected": {
+    "surface": "<row>",
+    "command": "health",
+    "analyses.health.production": {
+      "value": true,
+      "source": "environment:FALLOW_PRODUCTION_HEALTH"
+    }
+  },
+  "deviations": {
+    "api": {
+      "reason": "The Rust API and the Node bindings read no FALLOW_PRODUCTION* variable",
+      "expected": {
+        "analyses.health.production": {
+          "value": false,
+          "source": "default:production-off"
+        }
+      }
+    },
+    "node": {
+      "reason": "The Rust API and the Node bindings read no FALLOW_PRODUCTION* variable",
+      "expected": {
+        "analyses.health.production": {
+          "value": false,
+          "source": "default:production-off"
+        }
+      }
+    },
+    "lsp": {
+      "reason": "The language server has one editor command, which plans dead code and duplication. The language server reads no FALLOW_PRODUCTION* variable",
+      "expected": {
+        "command": "editor",
+        "analyses.health.production": {
+          "value": false,
+          "source": "default:production-off"
+        }
+      }
+    }
+  }
+}
