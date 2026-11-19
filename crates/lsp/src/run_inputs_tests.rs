@@ -1,5 +1,6 @@
-//! The rules of an editor run: the defaults fallback of a discovered config,
-//! the error of an explicit config path, and the reload of a kept session.
+//! The translator of the editor run inputs, and the rules of an editor run:
+//! the defaults fallback of a discovered config, the error of an explicit
+//! config path, the reload of a kept session, and the plan of duplication.
 
 use std::path::Path;
 use std::sync::atomic::AtomicBool;
@@ -14,8 +15,10 @@ use crate::analysis::{
     self, BlockingAnalysisInput, ProjectRootAnalysisInput, RunParseWork, SharedSessionStore,
     analyze_project_root, run_blocking_analysis,
 };
-use crate::initialization::{initialization_config_path, parse_initialization_options};
-use crate::session_store::{EditorSessionStore, SessionKey, session_input_file};
+use crate::initialization::parse_initialization_options;
+use crate::session_store::{EditorSessionStore, session_input_file};
+
+use super::run_inputs;
 
 /// A config with a boundary rule that names a zone that does not exist.
 const INVALID_BOUNDARY_CONFIG: &str = r#"{
@@ -79,7 +82,6 @@ fn project() -> (tempfile::TempDir, std::path::PathBuf) {
 /// Analyze `root` with the initialization options `options`.
 fn analyze(root: &Path, options: &Value) -> Outcome {
     let parsed = parse_initialization_options(Some(options));
-    let config_path = initialization_config_path(options, Some(root));
     let mut output = EditorAnalysisOutput::new(
         EditorAnalysisResults::default(),
         fallow_api::EditorDuplicationReport::default(),
@@ -89,10 +91,8 @@ fn analyze(root: &Path, options: &Value) -> Outcome {
     let type_aware_sessions = Arc::new(Mutex::new(FxHashMap::default()));
     let result = analyze_project_root(&mut ProjectRootAnalysisInput {
         project_root: root,
-        config_path: config_path.as_deref(),
-        allow_remote_extends: parsed.allow_remote_extends,
+        run_options: &parsed,
         duplication_options: parsed.duplication.as_ref(),
-        production_override: parsed.production,
         inline_complexity_enabled: false,
         type_aware_options: None,
         type_aware_sessions: &type_aware_sessions,
@@ -101,7 +101,6 @@ fn analyze(root: &Path, options: &Value) -> Outcome {
         run_cancellation: &cancellation,
         changed_files: None,
         global_changed_since_requested: false,
-        no_package_baselines: false,
         sessions: &Arc::default(),
         parse_work: &mut RunParseWork::default(),
         merged_analysis: &mut output,
@@ -122,12 +121,10 @@ fn analyze(root: &Path, options: &Value) -> Outcome {
 /// as changed after `edit`.
 fn changed_after(root: &Path, options: &Value, edit: impl FnOnce()) -> bool {
     let parsed = parse_initialization_options(Some(options));
-    let key = SessionKey {
-        config_path: initialization_config_path(options, Some(root)),
-        allow_remote_extends: parsed.allow_remote_extends,
-        production_override: parsed.production,
-    };
-    let (_session, sources) = analysis::load_project_session(root, &key).expect("session loads");
+    let inputs = run_inputs(&parsed, root, fallow_config::EnvSnapshot::none());
+    let sources = analysis::load_project_session(root, &inputs)
+        .expect("session loads")
+        .sources;
     assert!(!sources.changed(), "nothing changed yet");
     edit();
     sources.changed()
@@ -140,11 +137,8 @@ fn blocking_run(
 ) -> (EditorAnalysisOutput, RunParseWork) {
     let output = run_blocking_analysis(&BlockingAnalysisInput {
         project_roots: vec![root.to_path_buf()],
-        config_path: None,
-        allow_remote_extends: false,
+        run_options: crate::initialization::LspInitializationOptions::default(),
         duplication_options: None,
-        production_override: None,
-        no_package_baselines: false,
         inline_complexity_enabled: false,
         type_aware_options: None,
         type_aware_sessions: Arc::new(Mutex::new(FxHashMap::default())),
@@ -158,6 +152,51 @@ fn blocking_run(
     })
     .expect("the run succeeds");
     (output.analysis, output.parse_work)
+}
+
+#[test]
+fn discovered_invalid_boundary_falls_back_with_editor_settings() {
+    let (_dir, root) = project();
+    std::fs::write(root.join(".fallowrc.json"), INVALID_BOUNDARY_CONFIG).expect("config");
+
+    let outcome = analyze(&root, &json!({ "production": true }));
+
+    assert_eq!(outcome.result, Ok(()));
+    let warnings = outcome.warnings();
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(
+        warnings[0].contains("invalid boundary configuration"),
+        "{warnings:?}"
+    );
+    assert!(
+        outcome.reports_unused_file("orphan.ts"),
+        "the default config still gives findings"
+    );
+    assert!(
+        !outcome.reports_unused_file("orphan.test.ts"),
+        "the fallback keeps fallow.production, so the test file is out"
+    );
+}
+
+#[test]
+fn the_fallback_keeps_the_editor_duplication_options() {
+    let (_dir, root) = project();
+    std::fs::write(root.join(".fallowrc.json"), INVALID_BOUNDARY_CONFIG).expect("config");
+    let clone = "export function total(items: number[]) {\n  let sum = 0;\n  for (const item of items) {\n    sum += item;\n  }\n  return sum;\n}\n";
+    std::fs::write(root.join("src/a.ts"), clone).expect("first copy");
+    std::fs::write(root.join("src/b.ts"), clone).expect("second copy");
+
+    let outcome = analyze(
+        &root,
+        &json!({ "duplication": { "minTokens": 5, "minLines": 2 } }),
+    );
+
+    assert_eq!(outcome.result, Ok(()));
+    assert_eq!(outcome.warnings().len(), 1, "{:?}", outcome.messages);
+    assert!(
+        !outcome.output.duplication.clone_groups.is_empty(),
+        "the editor options find the short clone"
+    );
 }
 
 #[test]
@@ -282,5 +321,72 @@ fn config_created_after_first_run_reloads() {
         second.results.unused_files.is_empty(),
         "{:?}",
         second.results.unused_files
+    );
+}
+
+fn translated(options: &Value, root: &Path) -> fallow_config::RunInputs {
+    run_inputs(
+        &parse_initialization_options(Some(options)),
+        root,
+        fallow_config::EnvSnapshot::none(),
+    )
+}
+
+#[test]
+fn the_translator_gives_only_the_settings_that_the_client_sets() {
+    let root = Path::new("/workspace");
+    let none = translated(&json!({}), root);
+    assert_eq!(none.surface(), fallow_config::Surface::Lsp);
+    assert_eq!(none.command, fallow_config::CommandKind::Editor);
+    assert_eq!(none.env().cwd(), Some(root));
+    assert_eq!(
+        none.config_fallback,
+        fallow_config::ConfigFallback::DefaultsOnDiscoveredError
+    );
+    assert!(none.config_path.is_none());
+    assert!(none.allow_remote_extends.is_none());
+    assert!(none.production.is_none());
+    assert!(none.package_baselines.is_none());
+
+    let defaults = translated(
+        &json!({ "configPath": "   ", "allowRemoteExtends": false, "packageBaselines": true }),
+        root,
+    );
+    assert!(defaults.config_path.is_none(), "a blank path is no path");
+    assert!(defaults.allow_remote_extends.is_none());
+    assert!(defaults.package_baselines.is_none());
+
+    let given = translated(
+        &json!({
+            "configPath": " config/fallow.json ",
+            "allowRemoteExtends": true,
+            "production": false,
+            "packageBaselines": false
+        }),
+        root,
+    );
+    let value = |given: Option<&fallow_types::sourced::Given<bool>>| given.map(|given| given.value);
+    assert_eq!(
+        given.config_path.map(|given| given.value),
+        Some(std::path::PathBuf::from("config/fallow.json"))
+    );
+    assert_eq!(value(given.allow_remote_extends.as_ref()), Some(true));
+    assert_eq!(value(given.production.as_ref()), Some(false));
+    assert_eq!(value(given.package_baselines.as_ref()), Some(false));
+}
+
+#[test]
+fn a_relative_config_path_resolves_from_the_workspace_root() {
+    let (_dir, root) = project();
+    std::fs::create_dir_all(root.join("config")).expect("config dir");
+    std::fs::write(root.join("config/fallow.json"), "{}").expect("config");
+    let run = fallow_api::run::resolve_run(&translated(
+        &json!({ "configPath": "config/fallow.json" }),
+        &root,
+    ))
+    .expect("the run resolves");
+    assert_eq!(
+        run.config_file().value().as_deref(),
+        Some(root.join("config/fallow.json").as_path())
     );
 }
