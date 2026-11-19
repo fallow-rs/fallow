@@ -1,0 +1,14 @@
+{
+  "name": "given-production-flag",
+  "files": {
+    ".fallowrc.json": "{\"production\":false}",
+    "package.json": "{}"
+  },
+  "inputs": {
+    "mcp": { "tool": "analyze", "params": { "production": true } }
+  },
+  "expected": {
+    "surface": "<row>",
+    "analyses.dead_code.production": { "value": true, "source": "given:production" }
+  }
+}

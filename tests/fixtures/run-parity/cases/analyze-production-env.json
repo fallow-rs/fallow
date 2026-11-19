@@ -1,0 +1,13 @@
+{
+  "name": "analyze-production-env",
+  "files": { "package.json": "{}" },
+  "env": { "FALLOW_PRODUCTION": "1" },
+  "inputs": {
+    "mcp": { "tool": "analyze", "params": {} }
+  },
+  "expected": {
+    "surface": "<row>",
+    "command": "dead-code",
+    "analyses.dead_code.production": { "value": true, "source": "environment:FALLOW_PRODUCTION" }
+  }
+}
