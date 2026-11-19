@@ -59,7 +59,9 @@ pub(super) fn dispatch_baselines_command(
             output,
         );
     }
-    let production = match resolve_production_modes(cli, root, output, false, false, false) {
+    let production = match crate::cli_production::resolve_production_modes(
+        cli, root, output, false, false, false,
+    ) {
         Ok(production) => production,
         Err(code) => return code,
     };

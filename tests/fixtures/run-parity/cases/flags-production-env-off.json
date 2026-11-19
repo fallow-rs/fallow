@@ -1,0 +1,62 @@
+{
+  "name": "flags-production-env-off",
+  "files": {
+    ".fallowrc.json": "{\"production\":true}",
+    "package.json": "{}"
+  },
+  "env": {
+    "FALLOW_PRODUCTION": "false"
+  },
+  "inputs": {
+    "cli": {
+      "argv": [
+        "fallow",
+        "flags"
+      ]
+    },
+    "lsp": {
+      "not_expressible": "The language server has no flags command"
+    },
+    "vscode": {
+      "not_expressible": "The editor has no flags input for the language server"
+    },
+    "node": {
+      "function": "detectFeatureFlags"
+    },
+    "api": {
+      "entry": "feature-flags"
+    },
+    "mcp": {
+      "tool": "feature_flags",
+      "params": {}
+    }
+  },
+  "expected": {
+    "surface": "<row>",
+    "command": "flags",
+    "analyses.dead_code.production": {
+      "value": false,
+      "source": "environment:FALLOW_PRODUCTION"
+    }
+  },
+  "deviations": {
+    "api": {
+      "reason": "The Rust API and the Node bindings read no FALLOW_PRODUCTION* variable",
+      "expected": {
+        "analyses.dead_code.production": {
+          "value": true,
+          "source": "config-file:production"
+        }
+      }
+    },
+    "node": {
+      "reason": "The Rust API and the Node bindings read no FALLOW_PRODUCTION* variable",
+      "expected": {
+        "analyses.dead_code.production": {
+          "value": true,
+          "source": "config-file:production"
+        }
+      }
+    }
+  }
+}

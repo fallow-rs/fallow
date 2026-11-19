@@ -37,7 +37,9 @@ pub struct FlagsOptions<'a> {
     pub threads: usize,
     pub quiet: bool,
     pub allow_remote_extends: bool,
-    pub production: bool,
+    /// The resolved run of the command. `None` in a test or a benchmark hook,
+    /// which loads the config without production mode.
+    pub run: Option<crate::cli_production::DeadCodeRun<'a>>,
     pub workspace: Option<&'a [String]>,
     pub changed_workspaces: Option<&'a str>,
     pub changed_since: Option<&'a str>,
@@ -166,11 +168,11 @@ pub fn run_flags(opts: &FlagsOptions<'_>) -> ExitCode {
         Err(code) => return code,
     };
 
-    let config = match load_flags_config(opts) {
-        Ok(c) => c,
+    let (run, config) = match load_flags_config(opts) {
+        Ok(loaded) => loaded,
         Err(code) => return code,
     };
-    let session = match fallow_engine::session::AnalysisSession::from_resolved_config(config) {
+    let session = match crate::cli_production::open_session(run, &config) {
         Ok(session) => session,
         Err(err) => return analysis_error(&err, opts.output),
     };
@@ -527,19 +529,29 @@ fn warn_on_stale_export(state: &RetirementVendorState) {
     }
 }
 
-fn load_flags_config(opts: &FlagsOptions<'_>) -> Result<ResolvedConfig, ExitCode> {
-    crate::runtime_support::load_config(
-        opts.root,
-        opts.config_path,
-        crate::runtime_support::LoadConfigArgs {
-            output: opts.output,
-            no_cache: opts.no_cache,
-            threads: opts.threads,
-            production: opts.production,
-            quiet: opts.quiet,
-            allow_remote_extends: opts.allow_remote_extends,
-        },
-    )
+fn load_flags_config<'a>(
+    opts: &FlagsOptions<'a>,
+) -> Result<
+    (
+        Option<fallow_engine::resolved_run::Runnable<'a>>,
+        ResolvedConfig,
+    ),
+    ExitCode,
+> {
+    crate::cli_production::dead_code_config(opts.run, || {
+        crate::runtime_support::load_config(
+            opts.root,
+            opts.config_path,
+            crate::runtime_support::LoadConfigArgs {
+                output: opts.output,
+                no_cache: opts.no_cache,
+                threads: opts.threads,
+                production: false,
+                quiet: opts.quiet,
+                allow_remote_extends: opts.allow_remote_extends,
+            },
+        )
+    })
 }
 
 /// The files a flags run reports on, from `--changed-since`, `--workspace`
@@ -1424,7 +1436,7 @@ mod tests {
             threads: 1,
             quiet: true,
             allow_remote_extends: false,
-            production: false,
+            run: None,
             workspace: None,
             changed_workspaces: None,
             changed_since: None,

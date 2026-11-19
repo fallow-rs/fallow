@@ -36,8 +36,28 @@
     "surface": "<row>",
     "command": "list",
     "analyses.dead_code.production": {
-      "value": true,
-      "source": "config-file:production"
+      "value": false,
+      "source": "environment:FALLOW_PRODUCTION"
+    }
+  },
+  "deviations": {
+    "api": {
+      "reason": "The Rust API reads no FALLOW_PRODUCTION* variable",
+      "expected": {
+        "analyses.dead_code.production": {
+          "value": true,
+          "source": "config-file:production"
+        }
+      }
+    },
+    "mcp": {
+      "reason": "list_boundaries drops a production variable that is off, so the config decides",
+      "expected": {
+        "analyses.dead_code.production": {
+          "value": true,
+          "source": "config-file:production"
+        }
+      }
     }
   }
 }

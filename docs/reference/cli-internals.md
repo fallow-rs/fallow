@@ -156,7 +156,8 @@ load. `runtime_support::load_config_for_analysis` does these steps:
    and warns about unknown security categories.
 
 The bare run, `audit`, `decision-surface`, `dead-code`, `architecture`,
-`dupes` and `health` resolve one run instead:
+`dupes`, `health`, `list`, `workspaces`, `fix`, `watch`, `viz`, `flags` and
+`suppressions` resolve one run instead:
 
 1. `run_inputs::command_run_inputs` maps the parsed command line to
    `fallow_config::RunInputs`: the `CommandKind`, the selection of `--only`
@@ -186,6 +187,16 @@ The bare run, `audit`, `decision-surface`, `dead-code`, `architecture`,
    and `DupesOptions`, and through the `*_in` variants of the health entry
    points. The dead-code session opens with `Runnable::open_session_adjusted`,
    so a command setting cannot change a decided field.
+5. `list`, `fix`, `viz`, `flags` and `suppressions` call
+   `DispatchContext::begin_run` in the dispatch, and take a
+   `cli_production::DeadCodeRun`. The command calls `DeadCodeRun::runnable`
+   at the point where it loaded its config, so its own checks keep their
+   order before the `loaded config` line. `list` applies the side effects with
+   `--quiet` on, as it did before. `viz` prints a config error as text. A
+   session of these commands opens through `cli_production::open_session`,
+   so duplication in `viz` runs on the files of the duplication production
+   mode. `watch` takes `DispatchContext::resolve_run` as its `resolve` step,
+   and resolves the run again on each config reload.
 
 The sub-analyses of `audit` and its base worktree still load the config
 through `runtime_support::load_config_for_analysis`.

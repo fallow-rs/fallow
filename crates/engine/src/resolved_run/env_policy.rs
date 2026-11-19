@@ -33,11 +33,10 @@ const PRODUCTION_ROWS: [ProductionRow; 9] = [
         cli: true,
         mcp: true,
     },
-    // `crates/cli/src/dispatch.rs:1626`, `:1575`, `:1542`, `:1522`, `:1207`,
-    // `:1254`. MCP: `feature_flags` and `project_info`; `list_boundaries`
-    // reads only a value that turns production mode on
-    // (`crates/mcp/src/tools/run_inputs.rs`); `fix` and `suppressions` run
-    // the CLI (`crates/mcp/src/tools/fix.rs:44`,
+    // Flags, then variables, then config: the commands resolve a run in
+    // `crates/cli/src/dispatch.rs`. MCP: `feature_flags`, `project_info` and
+    // `list_boundaries` (`crates/mcp/src/tools/run_inputs.rs`); `fix` and
+    // `suppressions` run the CLI (`crates/mcp/src/tools/fix.rs:44`,
     // `crates/mcp/src/tools/suppressions.rs:45`).
     ProductionRow {
         commands: &[

@@ -40,11 +40,12 @@ fn type_aware_failure_message(error: &str) -> String {
 }
 
 fn run_analyze(
+    run: Option<fallow_engine::resolved_run::Runnable<'_>>,
     config: &fallow_config::ResolvedConfig,
     output: OutputFormat,
     quiet: bool,
 ) -> Result<AnalyzedProject, ExitCode> {
-    let session = fallow_engine::session::AnalysisSession::from_resolved_config(config.clone())
+    let session = crate::cli_production::open_session(run, config)
         .map_err(|e| crate::error::emit_input_error(&format!("Analysis error: {e}"), output))?;
     let output_struct = session
         .analyze_dead_code_keeping_graph()
@@ -139,7 +140,9 @@ pub struct FixOptions<'a> {
     pub allow_remote_extends: bool,
     pub dry_run: bool,
     pub yes: bool,
-    pub production: bool,
+    /// The resolved run of the command. `None` in a test or a benchmark hook,
+    /// which loads the config without production mode.
+    pub run: Option<crate::cli_production::DeadCodeRun<'a>>,
     /// Refuse to create a new fallow config file when none exists. The
     /// duplicate-export config-add path is skipped with an explanatory
     /// entry; source-file fixes proceed normally. Honored by
@@ -183,19 +186,21 @@ fn run_fix_impl(opts: &FixOptions<'_>, fix_count: &mut usize) -> ExitCode {
         );
     }
 
-    let mut config = match crate::runtime_support::load_config(
-        opts.root,
-        opts.config_path,
-        crate::runtime_support::LoadConfigArgs {
-            output: opts.output,
-            no_cache: opts.no_cache,
-            threads: opts.threads,
-            production: opts.production,
-            quiet: opts.quiet,
-            allow_remote_extends: opts.allow_remote_extends,
-        },
-    ) {
-        Ok(c) => c,
+    let (run, mut config) = match crate::cli_production::dead_code_config(opts.run, || {
+        crate::runtime_support::load_config(
+            opts.root,
+            opts.config_path,
+            crate::runtime_support::LoadConfigArgs {
+                output: opts.output,
+                no_cache: opts.no_cache,
+                threads: opts.threads,
+                production: false,
+                quiet: opts.quiet,
+                allow_remote_extends: opts.allow_remote_extends,
+            },
+        )
+    }) {
+        Ok(loaded) => loaded,
         Err(code) => return code,
     };
     if let Err(code) = crate::check::apply_type_aware_overrides_from(
@@ -217,7 +222,7 @@ fn run_fix_impl(opts: &FixOptions<'_>, fix_count: &mut usize) -> ExitCode {
         mut results,
         file_hashes,
         re_exports,
-    } = match run_analyze(&config, opts.output, opts.quiet) {
+    } = match run_analyze(run, &config, opts.output, opts.quiet) {
         Ok(r) => r,
         Err(code) => return code,
     };

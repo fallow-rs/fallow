@@ -22,7 +22,6 @@ use fallow_engine::health::{
     HealthThresholdOverrides, run_ungrouped_health_with_session_artifacts,
 };
 use fallow_engine::project_analysis::ProjectAnalysisArtifactOptions;
-use fallow_engine::session::AnalysisSession;
 use fallow_engine::viz::{
     VizAvailabilityState, VizBuildInput, VizData, VizFileStatus, apply_health_report,
     build_viz_data,
@@ -65,7 +64,9 @@ pub struct VizOptions<'a> {
     pub no_cache: bool,
     pub threads: usize,
     pub quiet: bool,
-    pub production: bool,
+    /// The resolved run of the command. `None` in a test or a benchmark hook,
+    /// which loads the config without production mode.
+    pub run: Option<crate::cli_production::DeadCodeRun<'a>>,
     pub allow_remote_extends: bool,
     pub output_path: Option<&'a Path>,
     pub no_open: bool,
@@ -102,7 +103,7 @@ pub fn benchmark_viz_html(root: &Path, threads: usize) -> Result<(usize, usize, 
         no_cache: true,
         threads,
         quiet: true,
-        production: false,
+        run: None,
         allow_remote_extends: false,
         output_path: None,
         no_open: true,
@@ -121,18 +122,21 @@ pub fn benchmark_viz_html(root: &Path, threads: usize) -> Result<(usize, usize, 
 }
 
 fn build_viz_data_from_options(opts: &VizOptions<'_>) -> Result<VizData, ExitCode> {
-    let mut config = load_config(
-        opts.root,
-        opts.config_path,
-        LoadConfigArgs {
-            output: OutputFormat::Human,
-            no_cache: opts.no_cache,
-            threads: opts.threads,
-            production: opts.production,
-            quiet: opts.quiet,
-            allow_remote_extends: opts.allow_remote_extends,
-        },
-    )?;
+    let (run, mut config) = crate::cli_production::dead_code_config(opts.run, || {
+        load_config(
+            opts.root,
+            opts.config_path,
+            LoadConfigArgs {
+                output: OutputFormat::Human,
+                no_cache: opts.no_cache,
+                threads: opts.threads,
+                production: false,
+                quiet: opts.quiet,
+                allow_remote_extends: opts.allow_remote_extends,
+            },
+        )
+    })?;
+    config.output = OutputFormat::Human;
 
     // The Security lens reports candidates, so it needs the advisory rules on.
     // Text formats emit the import graph alone and never read them.
@@ -148,7 +152,9 @@ fn build_viz_data_from_options(opts: &VizOptions<'_>) -> Result<VizData, ExitCod
         Ok(config.health.clone())
     })?;
 
-    let session = match AnalysisSession::from_resolved_config(config) {
+    // The session runs duplication on the files of the duplication
+    // production mode of the run.
+    let session = match crate::cli_production::open_session(run, &config) {
         Ok(session) => session,
         Err(e) => {
             return Err(emit_input_error(
@@ -204,6 +210,7 @@ fn build_viz_data_from_options(opts: &VizOptions<'_>) -> Result<VizData, ExitCod
 
     let health_options = viz_health_options(
         opts,
+        session.config().production,
         coverage_inputs.coverage.as_deref(),
         coverage_inputs.coverage_root.as_deref(),
     );
@@ -234,6 +241,7 @@ fn build_viz_data_from_options(opts: &VizOptions<'_>) -> Result<VizData, ExitCod
 
 fn viz_health_options<'a>(
     opts: &'a VizOptions<'a>,
+    production: bool,
     coverage: Option<&'a Path>,
     coverage_root: Option<&'a Path>,
 ) -> HealthExecutionOptions<'a> {
@@ -248,7 +256,7 @@ fn viz_health_options<'a>(
         thresholds: HealthThresholdOverrides::default(),
         top: None,
         sort: HealthSort::Severity,
-        production: opts.production,
+        production,
         production_override: None,
         allow_remote_extends: opts.allow_remote_extends,
         changed_since: None,
@@ -877,7 +885,7 @@ mod tests {
             no_cache: false,
             threads: 1,
             quiet: true,
-            production: false,
+            run: None,
             allow_remote_extends: false,
             output_path: Some(target.as_path()),
             no_open: true,

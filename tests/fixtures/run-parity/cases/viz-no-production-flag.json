@@ -1,0 +1,51 @@
+{
+  "name": "viz-no-production-flag",
+  "files": {
+    ".fallowrc.json": "{\"production\":true}",
+    "package.json": "{}"
+  },
+  "inputs": {
+    "cli": {
+      "argv": [
+        "fallow",
+        "viz",
+        "--no-open",
+        "--no-production"
+      ]
+    },
+    "lsp": {
+      "not_expressible": "The language server has no viz command"
+    },
+    "vscode": {
+      "not_expressible": "The editor has no viz input for the language server"
+    },
+    "node": {
+      "not_expressible": "The Node bindings have no viz function"
+    },
+    "api": {
+      "not_expressible": "The Rust API has no viz entry point"
+    },
+    "mcp": {
+      "not_expressible": "The MCP server has no viz tool"
+    }
+  },
+  "expected": {
+    "surface": "<row>",
+    "command": "viz",
+    "analyses.dead_code.production": {
+      "value": false,
+      "source": "given:production"
+    }
+  },
+  "deviations": {
+    "cli": {
+      "reason": "The CLI names the flag --no-production",
+      "expected": {
+        "analyses.dead_code.production": {
+          "value": false,
+          "source": "given:--no-production"
+        }
+      }
+    }
+  }
+}

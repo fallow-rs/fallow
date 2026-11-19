@@ -62,11 +62,18 @@ root, so the two runs can replace the graph cache of each other.
 | Variable | Description | Default | Example |
 | --- | --- | --- | --- |
 | `FALLOW_PRODUCTION` | Override production mode for all analyses (`true`/`false`/`1`/`0`/`yes`/`no`/`on`/`off`). | unset | `FALLOW_PRODUCTION=true` |
-| `FALLOW_PRODUCTION_DEAD_CODE` | Override production mode for dead-code analysis only (combined mode and `fallow audit`). | unset | `FALLOW_PRODUCTION_DEAD_CODE=false` |
+| `FALLOW_PRODUCTION_DEAD_CODE` | Override production mode for dead-code analysis only. | unset | `FALLOW_PRODUCTION_DEAD_CODE=false` |
 | `FALLOW_PRODUCTION_HEALTH` | Override production mode for health analysis only. | unset | `FALLOW_PRODUCTION_HEALTH=true` |
 | `FALLOW_PRODUCTION_DUPES` | Override production mode for duplication analysis only. | unset | `FALLOW_PRODUCTION_DUPES=false` |
 
-The CLI and the MCP server read these variables. An MCP tool reads them on its
+The CLI and the MCP server read these variables. These CLI commands read them:
+the bare `fallow` run, `audit`, `decision-surface`, `dead-code`, `dupes`,
+`health`, `list`, `workspaces`, `fix`, `watch`, `viz`, `flags`,
+`suppressions`, `trace` for a dependency, `baselines prune` and `inspect`. On
+each of these commands, `--production` and `--no-production` come first, then
+the variable of the analysis, then `FALLOW_PRODUCTION`, then the `production`
+config field. So `FALLOW_PRODUCTION=false` turns off a config `production:
+true`. The other commands do not read them. An MCP tool reads them on its
 typed route and on its CLI route with the precedence of the CLI: the tool
 parameter, then the variable of the analysis, then `FALLOW_PRODUCTION`, then
 the `production` config field. A tool whose CLI command does not read them
