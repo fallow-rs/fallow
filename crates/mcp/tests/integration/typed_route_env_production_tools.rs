@@ -556,3 +556,125 @@ fn trace_clone_typed_route_reads_fallow_production_dupes() {
     );
     assert_eq!(instances(&typed), instances(&cli), "{typed}");
 }
+
+/// A repository whose change adds a test file that nothing imports and that
+/// imports a new dependency. Production mode leaves the test file out, so the
+/// dependency has no user.
+fn write_changed_test_file_project(root: &Path) {
+    write(
+        root,
+        "package.json",
+        r#"{"name":"production-changed","private":true,"main":"src/index.ts"}"#,
+    );
+    write(root, "src/index.ts", "export const used = 1;\n");
+    git(root, &["init", "-q"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-q", "-m", "base"]);
+    write(
+        root,
+        "package.json",
+        r#"{"name":"production-changed","private":true,"main":"src/index.ts","dependencies":{"lodash":"4.17.21"}}"#,
+    );
+    write(
+        root,
+        "src/orphan.test.ts",
+        "import { chunk } from \"lodash\";\nexport const helper = chunk([1], 1);\n",
+    );
+    git(root, &["add", "-A"]);
+}
+
+/// The CLI route of `check_changed` runs `fallow dead-code --changed-since`,
+/// which reads `FALLOW_PRODUCTION`.
+#[test]
+fn check_changed_typed_route_reads_fallow_production() {
+    let project = tempfile::tempdir().expect("project dir");
+    let root = project.path();
+    write_changed_test_file_project(root);
+    let env = [("FALLOW_PRODUCTION", "1")];
+
+    let cli = cli_json(root, &env, &["dead-code", "--changed-since", "HEAD"]);
+    let typed = typed_json(
+        &env,
+        "check_changed",
+        root,
+        &serde_json::json!({"since": "HEAD"}),
+    );
+    assert_eq!(
+        unused_file_paths(&cli),
+        Vec::<String>::new(),
+        "the CLI leaves the test file out: {cli}"
+    );
+    assert_eq!(
+        unused_file_paths(&typed),
+        unused_file_paths(&cli),
+        "{typed}"
+    );
+}
+
+/// The CLI route of `project_info` runs `fallow list`, which reads
+/// `FALLOW_PRODUCTION`.
+#[test]
+fn project_info_typed_route_reads_fallow_production() {
+    let project = tempfile::tempdir().expect("project dir");
+    let root = project.path();
+    write_zone_project(root);
+    let env = [("FALLOW_PRODUCTION", "1")];
+
+    let cli = cli_json(root, &env, &["list", "--files"]);
+    let typed = typed_json(
+        &env,
+        "project_info",
+        root,
+        &serde_json::json!({"files": true}),
+    );
+    assert_eq!(
+        cli["file_count"], 2,
+        "the CLI leaves the test file out: {cli}"
+    );
+    assert_eq!(typed["file_count"], cli["file_count"], "{typed}");
+    assert_eq!(typed["files"], cli["files"], "{typed}");
+}
+
+/// The question of the dependency decision of a decision surface.
+fn dependency_question(surface: &serde_json::Value) -> String {
+    surface["decisions"]
+        .as_array()
+        .unwrap_or_else(|| panic!("decisions: {surface}"))
+        .iter()
+        .find(|decision| decision["category"] == "dependency")
+        .and_then(|decision| decision["question"].as_str())
+        .unwrap_or_else(|| panic!("a dependency decision: {surface}"))
+        .to_owned()
+}
+
+/// The typed `decision_surface` tool reads no `FALLOW_PRODUCTION*` variable:
+/// the test file stays a user of the new dependency. The tool has no CLI
+/// route. `fallow decision-surface` reads the variables.
+#[test]
+fn decision_surface_typed_route_ignores_fallow_production() {
+    let project = tempfile::tempdir().expect("project dir");
+    let root = project.path();
+    write_changed_test_file_project(root);
+
+    let base = serde_json::json!({"base": "HEAD"});
+    let with_env = typed_json(
+        &[("FALLOW_PRODUCTION", "1")],
+        "decision_surface",
+        root,
+        &base,
+    );
+    let without_env = typed_json(
+        &[("FALLOW_PRODUCTION", "")],
+        "decision_surface",
+        root,
+        &base,
+    );
+    assert!(
+        dependency_question(&with_env).contains("imported by 1 in-repo module"),
+        "{with_env}"
+    );
+    assert_eq!(
+        dependency_question(&with_env),
+        dependency_question(&without_env)
+    );
+}

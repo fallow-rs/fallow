@@ -306,6 +306,7 @@ production_rows! {
     env_policy_production_cli_coverage_upload: Cli, CoverageUpload, false;
     env_policy_production_cli_doctor: Cli, Doctor, false;
     env_policy_production_mcp_decision_surface: Mcp, DecisionSurface, false;
+    env_policy_production_mcp_mutation: Mcp, Mutation, false;
     env_policy_production_lsp_editor: Lsp, Editor, false;
     env_policy_production_api_combined: Api, Combined, false;
     env_policy_production_node_combined: Node, Combined, false;

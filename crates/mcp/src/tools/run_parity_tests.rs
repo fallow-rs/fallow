@@ -667,3 +667,58 @@ fn typed_production_matches_the_resolver() {
     }
     assert!(mismatches.is_empty(), "{}", mismatches.join("\n"));
 }
+
+/// The params that the options builder of `tool` needs, without the
+/// production parameters.
+fn required_params(tool: TypedTool) -> Value {
+    match tool {
+        TypedTool::CheckChanged => serde_json::json!({ "since": "HEAD" }),
+        TypedTool::TraceExport => serde_json::json!({ "file": "src/a.ts", "export_name": "a" }),
+        TypedTool::TraceFile => serde_json::json!({ "file": "src/a.ts" }),
+        TypedTool::TraceImportPath => serde_json::json!({ "from": "src/a.ts", "to": "src/b.ts" }),
+        TypedTool::TraceError => serde_json::json!({ "trace": "Error: x" }),
+        TypedTool::TraceDependency => serde_json::json!({ "package_name": "react" }),
+        _ => serde_json::json!({}),
+    }
+}
+
+/// Each production parameter of each typed tool reaches the run through the
+/// real options builder of the tool. A builder that drops a parameter, such
+/// as `production` of `trace_error` or `production_dupes` of `audit`, fails.
+#[test]
+fn every_production_param_reaches_the_run() {
+    let (_dir, root) = project(None);
+    let cwd = tempfile::tempdir().expect("cwd");
+    let mut cases = Vec::new();
+    for tool in TypedTool::ALL {
+        if tool == TypedTool::Combined || !has_production_param(tool) {
+            continue;
+        }
+        for &analysis in tool_analyses(tool) {
+            cases.push((tool, "production", analysis));
+        }
+    }
+    for (param, analysis) in [
+        ("production_dead_code", Analysis::DeadCode),
+        ("production_health", Analysis::Health),
+        ("production_dupes", Analysis::Dupes),
+    ] {
+        cases.push((TypedTool::Audit, param, analysis));
+    }
+    let mut missing = Vec::new();
+    for (tool, param, analysis) in cases {
+        let mut params = required_params(tool);
+        params["root"] = Value::String(root.display().to_string());
+        params[param] = Value::Bool(true);
+        let env = EnvSnapshot::from_pairs(&[], Some(cwd.path()));
+        let (entry, analysis_options) = tool_call(tool, &params, env, table)
+            .unwrap_or_else(|err| panic!("{}: {err}", tool.name()));
+        let run = resolve_programmatic_run(&analysis_options, &entry)
+            .unwrap_or_else(|err| panic!("{}: {}", tool.name(), err.message));
+        let decided = production_of(&run, analysis.view_key());
+        if decided != (true, format!("given:{param}")) {
+            missing.push(format!("{} {param} {analysis:?}: {decided:?}", tool.name()));
+        }
+    }
+    assert!(missing.is_empty(), "{}", missing.join("\n"));
+}
