@@ -29,7 +29,9 @@ use fallow_types::sourced::Sourced;
 
 pub use pick::{PerAnalysis, ProductionInputs, decide_production};
 
-use crate::project_config::{DuplicationScope, ProductionModes, ResolveOptions};
+use crate::project_config::{
+    ConfigChainSnapshot, DuplicationScope, ProductionModes, ResolveOptions,
+};
 use crate::session::AnalysisSession;
 use crate::{EngineError, EngineResult};
 use steps::{GivenSettings, ModeEntry};
@@ -43,6 +45,8 @@ pub struct ResolvedRun {
     command: CommandKind,
     root: Sourced<PathBuf>,
     config_file: Sourced<Option<PathBuf>>,
+    /// The bytes of the config file and its local `extends` chain at the load.
+    config_snapshot: ConfigChainSnapshot,
     /// The validated config, before the production mode is flattened.
     file: FallowConfig,
     dead_code: AnalysisDecision,
@@ -60,7 +64,8 @@ pub struct ResolvedRun {
     env: EnvSnapshot,
     env_read: Vec<EnvVar>,
     env_ignored: Vec<EnvVar>,
-    fell_back: bool,
+    /// The config error that made the run use the default config.
+    fallback: Option<ResolveError>,
 }
 
 /// The decisions of one analysis.
@@ -226,7 +231,26 @@ impl ResolvedRun {
     /// failed to load, to validate or to give workspace metadata.
     #[cfg(test)]
     const fn fell_back(&self) -> bool {
-        self.fell_back
+        self.fallback.is_some()
+    }
+
+    /// The error of the discovered config when the run uses the default
+    /// config because that config failed to load, to validate or to give
+    /// workspace metadata.
+    pub const fn fallback_error(&self) -> Option<&ResolveError> {
+        self.fallback.as_ref()
+    }
+
+    /// Whether a config input changed since the load or during the load: the
+    /// bytes of the config file or of a file of its local `extends` chain, or
+    /// a plugin file, a rule pack or an `autoDiscover` directory that config
+    /// resolution read. A long-lived caller then resolves the run again.
+    pub fn sources_changed(&self) -> bool {
+        self.config_snapshot.changed()
+            || [self.off.as_ref(), self.on.as_ref()]
+                .into_iter()
+                .flatten()
+                .any(|entry| entry.inputs.snapshot() != entry.inputs_before_resolve)
     }
 
     /// The resources that the `plugins` config field names and that do not

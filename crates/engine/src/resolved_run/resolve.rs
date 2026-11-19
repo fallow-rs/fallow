@@ -13,7 +13,9 @@ use super::env_policy::applies;
 use super::pick::{PerAnalysis, ProductionInputs, decide_production};
 use super::steps::{self, GivenSettings, ModeEntry};
 use super::{AnalysisDecision, ResolvedRun, RunSettings, config_key_name, join_cwd, skip_key};
-use crate::project_config::{ConfigFile, ConfigFileOptions, ConfigLoadError, load_config_file};
+use crate::project_config::{
+    ConfigChainSnapshot, ConfigFile, ConfigFileOptions, ConfigLoadError, load_config_file,
+};
 
 /// The field of the run inputs that an input error names.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -84,6 +86,16 @@ pub enum ResolveError {
 }
 
 impl ResolveError {
+    /// The config file that the error names, when it names one.
+    #[must_use]
+    pub fn config_file(&self) -> Option<&Path> {
+        match self {
+            Self::ConfigLoad(ConfigLoadError::Parse { path, .. })
+            | Self::ConfigInvalid { file: path, .. } => path.as_deref(),
+            Self::Input { .. } | Self::Workspace { .. } | Self::NothingSelected { .. } => None,
+        }
+    }
+
     /// Whether the config failed to load, to validate or to give workspace
     /// metadata. Only such an error can fall back to the defaults.
     const fn is_config_error(&self) -> bool {
@@ -137,7 +149,9 @@ fn given_value<T: Clone>(given: &Given<T>, scope: Scope) -> Sourced<T> {
 /// resolved config for each production mode that a planned analysis uses.
 /// With [`ConfigFallback::DefaultsOnDiscoveredError`], a discovered config
 /// that fails to load, to validate or to give workspace metadata gives the
-/// default config.
+/// default config, and [`ResolvedRun::fallback_error`] keeps the error. A run
+/// of [`Surface::Lsp`] scopes a shared cache directory to the root, so two
+/// editor roots do not write the same cache files.
 ///
 /// # Errors
 ///
@@ -187,28 +201,29 @@ fn resolve_with(
         root: root.value(),
     };
     let given = ctx.given_settings();
-    let loaded = match load(&ctx, config_path.as_ref()) {
-        Ok(loaded) => loaded,
+    let (loaded, fallback) = match load(&ctx, config_path.as_ref()) {
+        Ok(loaded) => (loaded, None),
         Err(err) if err.is_config_error() && ctx.falls_back(config_path.as_ref()) => {
             tracing::debug!("config fell back to the defaults: {}", err.message());
-            ctx.defaults()?
+            (ctx.defaults()?, Some(err))
         }
         Err(err) => return Err(err),
     };
     let Loaded {
         file,
         config_file,
+        config_snapshot,
         decisions,
         settings,
         off,
         on,
-        fell_back,
     } = loaded;
     Ok(ResolvedRun {
         surface,
         command: inputs.command,
         root,
         config_file,
+        config_snapshot,
         file,
         dead_code: decisions.dead_code,
         duplication: decisions.dupes,
@@ -220,7 +235,7 @@ fn resolve_with(
         env,
         env_read,
         env_ignored,
-        fell_back,
+        fallback,
     })
 }
 
@@ -305,11 +320,11 @@ struct Context<'a> {
 struct Loaded {
     file: FallowConfig,
     config_file: Sourced<Option<PathBuf>>,
+    config_snapshot: ConfigChainSnapshot,
     decisions: PerAnalysis<AnalysisDecision>,
     settings: RunSettings,
     off: Option<ModeEntry>,
     on: Option<ModeEntry>,
-    fell_back: bool,
 }
 
 impl Context<'_> {
@@ -338,7 +353,11 @@ impl Context<'_> {
         let options = ConfigFileOptions {
             allow_remote_extends: *self.allow_remote_extends().value(),
         };
-        let ConfigFile { config, path } = load_config_file(
+        let ConfigFile {
+            config,
+            path,
+            chain,
+        } = load_config_file(
             self.root,
             config_path.map(|given| given.value.as_path()),
             options,
@@ -359,7 +378,10 @@ impl Context<'_> {
             ),
             (_, None) => Sourced::new(None, Source::Default { rule: "no-config" }, Scope::Global),
         };
-        self.decide(config, config_file, false)
+        Ok(Loaded {
+            config_snapshot: chain,
+            ..self.decide(config, config_file, false)?
+        })
     }
 
     /// The steps of [`Self::load`] with a config that the caller built.
@@ -417,8 +439,23 @@ impl Context<'_> {
             },
         };
         let mut settings = self.settings(&file, path.as_deref());
-        let (off, on) =
+        let (mut off, mut on) =
             self.mode_entries(&file, path.is_some(), &decisions, &settings, fell_back)?;
+        if self.inputs.surface() == Surface::Lsp {
+            let mut scoped = false;
+            for entry in [off.as_mut(), on.as_mut()].into_iter().flatten() {
+                scoped |= steps::scope_cache_dir_to_root(&mut entry.config);
+            }
+            if scoped {
+                settings.cache_dir = Sourced::new(
+                    PathBuf::new(),
+                    Source::Derived {
+                        from: "editor-cache-per-root",
+                    },
+                    Scope::Global,
+                );
+            }
+        }
         let cache_dir = off.as_ref().or(on.as_ref()).map_or_else(
             || self.cache_dir_without_entry(file.cache.dir.clone()),
             |entry| entry.config.cache_dir.clone(),
@@ -427,11 +464,11 @@ impl Context<'_> {
         Ok(Loaded {
             file,
             config_file,
+            config_snapshot: ConfigChainSnapshot::default(),
             decisions,
             settings,
             off,
             on,
-            fell_back,
         })
     }
 

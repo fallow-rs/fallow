@@ -58,7 +58,7 @@ impl ResolvedRun {
                 read: self.env_read.iter().map(|var| var.name()).collect(),
                 ignored: self.env_ignored.iter().map(|var| var.name()).collect(),
             },
-            fell_back: self.fell_back,
+            fell_back: self.fallback.is_some(),
         }
     }
 }

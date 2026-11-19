@@ -619,6 +619,7 @@ pub(super) fn config_file_fingerprint(
     let ConfigFile {
         config,
         path: Some(path),
+        ..
     } = file
     else {
         return Ok(AuditConfigFingerprint {
