@@ -1,6 +1,8 @@
 use std::process::ExitCode;
 
-use fallow_config::{AnalysisSelection, CommandKind, OutputFormat, PlannedAnalysis, RunPlan};
+use fallow_config::{
+    AnalysisSelection, CommandKind, OutputFormat, PlannedAnalysis, ResolvedConfig, RunPlan,
+};
 pub use fallow_engine::project_config::ProductionModes;
 use fallow_engine::project_config::{ConfigLoadError, ProductionFlags};
 use fallow_engine::resolved_run::{AnalysisSlot, EmptyCause, ResolveError, ResolvedRun, Runnable};
@@ -157,6 +159,64 @@ impl PendingRun {
             result,
             finished: std::cell::Cell::new(false),
         }
+    }
+}
+
+/// The pending run of a command that runs the dead-code analysis: `list`,
+/// `fix`, `viz`, `flags` and `suppressions`. The command reads the config at
+/// the point where it loaded the config before, so its own checks of the
+/// command line keep their order before the `loaded config` line.
+#[derive(Clone, Copy)]
+pub struct DeadCodeRun<'a> {
+    dispatch: &'a crate::DispatchContext<'a>,
+    pending: &'a PendingRun,
+}
+
+impl<'a> DeadCodeRun<'a> {
+    /// The run of `pending`, with the side effects of `dispatch`.
+    pub const fn new(dispatch: &'a crate::DispatchContext<'a>, pending: &'a PendingRun) -> Self {
+        Self { dispatch, pending }
+    }
+
+    /// The dead-code analysis of the run, after the side effects of the
+    /// config load. An error prints on the error channel of the dispatch
+    /// output format and gives exit code 2.
+    pub fn runnable(self) -> Result<Runnable<'a>, ExitCode> {
+        let run = self.dispatch.finish_run(self.pending)?;
+        runnable(run, PlannedAnalysis::DeadCode).ok_or_else(|| {
+            crate::error::emit_input_error(
+                "the run skips the dead-code analysis",
+                self.dispatch.output,
+            )
+        })
+    }
+}
+
+/// The resolved config of a dead-code command: the config of `run`, or the
+/// config that `load` gives when the command has no run, as in a benchmark
+/// hook.
+pub fn dead_code_config(
+    run: Option<DeadCodeRun<'_>>,
+    load: impl FnOnce() -> Result<ResolvedConfig, ExitCode>,
+) -> Result<(Option<Runnable<'_>>, ResolvedConfig), ExitCode> {
+    match run {
+        Some(run) => {
+            let runnable = run.runnable()?;
+            Ok((Some(runnable), runnable.config().clone()))
+        }
+        None => Ok((None, load()?)),
+    }
+}
+
+/// A session with `config`, the config of the run after the settings of the
+/// command. The settings cannot change a decided field of the run.
+pub fn open_session(
+    run: Option<Runnable<'_>>,
+    config: &ResolvedConfig,
+) -> fallow_engine::EngineResult<fallow_engine::session::AnalysisSession> {
+    match run {
+        Some(runnable) => runnable.open_session_adjusted(|decided| *decided = config.clone()),
+        None => fallow_engine::session::AnalysisSession::from_resolved_config(config.clone()),
     }
 }
 

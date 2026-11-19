@@ -167,3 +167,10 @@ fn the_config_and_setting_flags_reach_the_run_inputs() {
     assert_eq!(default.package_baselines, None);
     assert_eq!(default.include_entry_exports, None);
 }
+
+#[test]
+fn workspaces_resolves_the_run_of_list() {
+    let workspaces = inputs(&["fallow", "workspaces", "--no-production"]);
+    assert_eq!(workspaces.command, fallow_config::CommandKind::List);
+    assert_eq!(workspaces.production, Some(flag(false, "--no-production")));
+}

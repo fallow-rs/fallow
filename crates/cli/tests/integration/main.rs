@@ -144,6 +144,7 @@ mod permutation;
 mod platform;
 mod plugin_diagnostic_tests;
 mod production_ignore_tests;
+mod production_override_tests;
 mod production_support_entries_tests;
 mod production_workspace_tests;
 mod quiet_stderr_tests;

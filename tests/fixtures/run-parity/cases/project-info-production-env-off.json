@@ -35,17 +35,17 @@
     "surface": "<row>",
     "command": "list",
     "analyses.dead_code.production": {
-      "value": true,
-      "source": "config-file:production"
+      "value": false,
+      "source": "environment:FALLOW_PRODUCTION"
     }
   },
   "deviations": {
-    "mcp": {
-      "reason": "project_info lets a production variable that is off turn production mode off. fallow list and list_boundaries keep the config",
+    "api": {
+      "reason": "The Rust API reads no FALLOW_PRODUCTION* variable",
       "expected": {
         "analyses.dead_code.production": {
-          "value": false,
-          "source": "environment:FALLOW_PRODUCTION"
+          "value": true,
+          "source": "config-file:production"
         }
       }
     }

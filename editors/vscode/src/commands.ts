@@ -4,6 +4,7 @@ import * as path from "node:path";
 // fallow-ignore-next-line unlisted-dependency
 import * as vscode from "vscode";
 import {
+  getAllowRemoteExtends,
   getLspPath,
   getProductionOverride,
   getAuditGate,
@@ -736,6 +737,7 @@ export const runAnalysis = async (
       packageBaselines: getPackageBaselines(),
       workspace: resolveActiveWorkspaceScope(context),
       configPath: getResolvedConfigPath(),
+      allowRemoteExtends: getAllowRemoteExtends(),
       dupesMode: getDuplicationModeOverride(),
       dupesNear: getDuplicationNearOverride(),
       dupesThreshold: getDuplicationThresholdOverride(),

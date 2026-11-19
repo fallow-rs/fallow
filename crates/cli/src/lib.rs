@@ -555,7 +555,7 @@ pub fn benchmark_fix_dry_run(root: &Path, threads: usize) -> (ExitCode, usize) {
         allow_remote_extends: false,
         dry_run: true,
         yes: false,
-        production: false,
+        run: None,
         no_create_config: true,
         type_aware: None,
         type_aware_projects: &[],

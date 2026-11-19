@@ -24,7 +24,9 @@ pub struct ListOptions<'a> {
     pub entry_weight: bool,
     /// Regression baseline flags for `--entry-weight`; `None` ignores them.
     pub entry_weight_gate: Option<crate::regression::EntryWeightGate<'a>>,
-    pub production: bool,
+    /// The resolved run of the command. `None` in a benchmark hook, which
+    /// loads the config without production mode.
+    pub run: Option<crate::cli_production::DeadCodeRun<'a>>,
     pub allow_remote_extends: bool,
     /// Positional `[PATH]` scope: root-joined absolute file or directory inside
     /// the root. Narrows the file and entry-point inventory to the scope;
@@ -46,19 +48,8 @@ struct ListData {
 }
 
 pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
-    let config = match load_config(
-        opts.root,
-        opts.config_path,
-        LoadConfigArgs {
-            output: opts.output,
-            no_cache: opts.no_cache,
-            threads: opts.threads,
-            production: opts.production,
-            quiet: true, // list command doesn't need progress bars
-            allow_remote_extends: opts.allow_remote_extends,
-        },
-    ) {
-        Ok(c) => c,
+    let (run, config) = match list_config(opts) {
+        Ok(loaded) => loaded,
         Err(code) => return code,
     };
 
@@ -72,7 +63,7 @@ pub fn run_list(opts: &ListOptions<'_>) -> ExitCode {
         return code;
     }
 
-    let mut data = match collect_list_data(opts, &config) {
+    let mut data = match collect_list_data(opts, &config, run) {
         Ok(data) => data,
         Err(code) => return code,
     };
@@ -134,7 +125,7 @@ pub fn benchmark_list_json(
         workspaces: false,
         entry_weight: false,
         entry_weight_gate: None,
-        production: false,
+        run: None,
         allow_remote_extends: false,
         scope: None,
     };
@@ -175,7 +166,7 @@ pub fn benchmark_list_boundaries_json(
         workspaces: false,
         entry_weight: false,
         entry_weight_gate: None,
-        production: false,
+        run: None,
         allow_remote_extends: false,
         scope: None,
     };
@@ -192,20 +183,37 @@ pub fn benchmark_list_boundaries_json(
     ))
 }
 
+/// The config of a list run. The list command shows no progress bars.
+fn list_config<'a>(
+    opts: &ListOptions<'a>,
+) -> Result<
+    (
+        Option<fallow_engine::resolved_run::Runnable<'a>>,
+        fallow_config::ResolvedConfig,
+    ),
+    ExitCode,
+> {
+    let (run, mut config) = crate::cli_production::dead_code_config(opts.run, || {
+        load_config(
+            opts.root,
+            opts.config_path,
+            LoadConfigArgs {
+                output: opts.output,
+                no_cache: opts.no_cache,
+                threads: opts.threads,
+                production: false,
+                quiet: true,
+                allow_remote_extends: opts.allow_remote_extends,
+            },
+        )
+    })?;
+    config.quiet = true;
+    Ok((run, config))
+}
+
 fn benchmark_list_data_json(opts: &ListOptions<'_>) -> Result<(ListData, usize), ExitCode> {
-    let config = load_config(
-        opts.root,
-        opts.config_path,
-        LoadConfigArgs {
-            output: opts.output,
-            no_cache: opts.no_cache,
-            threads: opts.threads,
-            production: opts.production,
-            quiet: true,
-            allow_remote_extends: opts.allow_remote_extends,
-        },
-    )?;
-    let data = collect_list_data(opts, &config)?;
+    let (run, config) = list_config(opts)?;
+    let data = collect_list_data(opts, &config, run)?;
     let rendered = render_list_json(&ListJsonInput {
         opts,
         show_all: data.show_all,
@@ -230,6 +238,7 @@ fn benchmark_list_data_json(opts: &ListOptions<'_>) -> Result<(ListData, usize),
 fn collect_list_data(
     opts: &ListOptions<'_>,
     config: &fallow_config::ResolvedConfig,
+    run: Option<fallow_engine::resolved_run::Runnable<'_>>,
 ) -> Result<ListData, ExitCode> {
     let show_all = should_show_all(opts);
 
@@ -237,7 +246,7 @@ fn collect_list_data(
     let need_files = needs_file_discovery(opts.files, show_all, opts.entry_points, opts.boundaries)
         || opts.entry_weight;
     let session = if need_files || need_plugin_result {
-        match fallow_engine::session::AnalysisSession::from_resolved_config(config.clone()) {
+        match crate::cli_production::open_session(run, config) {
             Ok(session) => Some(session),
             Err(err) => return Err(crate::error::emit_input_error(err.message(), opts.output)),
         }
@@ -1053,7 +1062,7 @@ mod tests {
             workspaces: false,
             entry_weight: false,
             entry_weight_gate: None,
-            production: false,
+            run: None,
             allow_remote_extends: false,
             scope: None,
         }

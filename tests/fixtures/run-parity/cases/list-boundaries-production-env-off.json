@@ -36,8 +36,19 @@
     "surface": "<row>",
     "command": "list",
     "analyses.dead_code.production": {
-      "value": true,
-      "source": "config-file:production"
+      "value": false,
+      "source": "environment:FALLOW_PRODUCTION"
+    }
+  },
+  "deviations": {
+    "api": {
+      "reason": "The Rust API reads no FALLOW_PRODUCTION* variable",
+      "expected": {
+        "analyses.dead_code.production": {
+          "value": true,
+          "source": "config-file:production"
+        }
+      }
     }
   }
 }

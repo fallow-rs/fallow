@@ -30,6 +30,7 @@ const VERSION_GATED_FLAGS: Readonly<Record<string, string>> = {
   // spawn-failing (issue #1055).
   "--no-production": "2.90.0",
   "--no-package-baselines": "3.31.0",
+  "--allow-remote-extends": "3.4.2",
   "--dupes-min-occurrences": "2.88.0",
   "--dupes-min-tokens": "2.88.3",
   "--dupes-min-lines": "2.88.3",
@@ -74,6 +75,11 @@ interface AnalysisArgsOptions {
    */
   readonly workspace: string;
   readonly configPath: string;
+  /**
+   * `true` forwards `--allow-remote-extends` (version-gated), so the sidebar
+   * reads a config with an `https://` extends entry as the language server does.
+   */
+  readonly allowRemoteExtends: boolean;
   readonly typeAware?: TypeAwareArgsOptions;
   readonly dupesMode: DuplicationMode | undefined;
   readonly dupesNear: boolean | undefined;
@@ -131,6 +137,10 @@ export const buildAnalysisArgs = (options: AnalysisArgsOptions): BuiltCliArgs =>
 
   if (!options.packageBaselines) {
     pushVersionGatedFlag(args, skipped, "--no-package-baselines", options.cliVersion);
+  }
+
+  if (options.allowRemoteExtends) {
+    pushVersionGatedFlag(args, skipped, "--allow-remote-extends", options.cliVersion);
   }
 
   appendCommonScopeArgs(args, options);

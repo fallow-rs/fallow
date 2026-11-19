@@ -19,7 +19,7 @@ use crate::cli_args::{
 };
 use crate::cli_hooks::run_hooks_command;
 use crate::cli_impact::{ImpactCrossRepoOpts, dispatch_impact};
-use crate::cli_production::{ProductionModes, resolve_production_modes};
+use crate::cli_production::{DeadCodeRun, ProductionModes};
 use crate::cli_startup::cli_global_baseline_flag;
 use crate::dupes::{DupesOptions, DupesOverrides};
 use crate::health::HealthOptions;
@@ -1202,24 +1202,20 @@ fn dispatch_flags_command(
     retirement: Option<flags::RetirementArgs>,
 ) -> ExitCode {
     let cli = dispatch.cli;
-    let root = dispatch.root;
-    let output = dispatch.output;
-    let quiet = dispatch.quiet;
-    let threads = dispatch.threads;
-    let production = match resolve_production_modes(cli, root, output, false, false, false) {
-        Ok(modes) => modes.for_analysis(fallow_config::ProductionAnalysis::DeadCode),
+    let pending = match dispatch.begin_run() {
+        Ok(pending) => pending,
         Err(code) => return code,
     };
     flags::run_flags(&flags::FlagsOptions {
-        root,
+        root: dispatch.root,
         config_path: &cli.config,
-        output,
+        output: dispatch.output,
         json_style: dispatch.json_style,
         no_cache: cli.no_cache,
-        threads,
-        quiet,
+        threads: dispatch.threads,
+        quiet: dispatch.quiet,
         allow_remote_extends: cli.allow_remote_extends,
-        production,
+        run: Some(DeadCodeRun::new(dispatch, &pending)),
         workspace: cli.workspace.as_deref(),
         changed_workspaces: cli.changed_workspaces.as_deref(),
         changed_since: cli.changed_since.as_deref(),
@@ -1251,22 +1247,20 @@ fn dispatch_suppressions_command(
     file: &[std::path::PathBuf],
 ) -> ExitCode {
     let cli = dispatch.cli;
-    let root = dispatch.root;
-    let output = dispatch.output;
-    let production = match resolve_production_modes(cli, root, output, false, false, false) {
-        Ok(modes) => modes.for_analysis(fallow_config::ProductionAnalysis::DeadCode),
+    let pending = match dispatch.begin_run() {
+        Ok(pending) => pending,
         Err(code) => return code,
     };
     suppressions::run_suppressions(&suppressions::SuppressionsOptions {
-        root,
+        root: dispatch.root,
         config_path: &cli.config,
-        output,
+        output: dispatch.output,
         json_style: dispatch.json_style,
         no_cache: cli.no_cache,
         threads: dispatch.threads,
         quiet: dispatch.quiet,
         allow_remote_extends: cli.allow_remote_extends,
-        production,
+        run: Some(DeadCodeRun::new(dispatch, &pending)),
         workspace: cli.workspace.as_deref(),
         changed_workspaces: cli.changed_workspaces.as_deref(),
         changed_since: cli.changed_since.as_deref(),
@@ -1521,9 +1515,14 @@ fn dispatch_viz(
     format: viz::VizFormat,
 ) -> ExitCode {
     let cli = dispatch.cli;
-    let production = match dispatch.production_for(fallow_config::ProductionAnalysis::DeadCode) {
-        Ok(production) => production,
+    let pending = match dispatch.begin_run() {
+        Ok(pending) => pending,
         Err(code) => return code,
+    };
+    // `fallow viz` prints a config error as text in each output format.
+    let human = DispatchContext {
+        output: fallow_config::OutputFormat::Human,
+        ..*dispatch
     };
     viz::run_viz(&viz::VizOptions {
         root: dispatch.root,
@@ -1531,7 +1530,7 @@ fn dispatch_viz(
         no_cache: cli.no_cache,
         threads: dispatch.threads,
         quiet: dispatch.quiet,
-        production,
+        run: Some(DeadCodeRun::new(&human, &pending)),
         allow_remote_extends: cli.allow_remote_extends,
         output_path,
         no_open,
@@ -1541,23 +1540,15 @@ fn dispatch_viz(
 
 fn dispatch_watch(dispatch: &DispatchContext<'_>, no_clear: bool) -> ExitCode {
     let cli = dispatch.cli;
-    let production = match dispatch.production_for(fallow_config::ProductionAnalysis::DeadCode) {
-        Ok(production) => production,
-        Err(code) => return code,
-    };
     watch::run_watch(&watch::WatchOptions {
         root: dispatch.root,
         config_path: &cli.config,
         output: dispatch.output,
         json_style: dispatch.json_style,
-        no_cache: cli.no_cache,
-        threads: dispatch.threads,
         quiet: dispatch.quiet,
-        allow_remote_extends: cli.allow_remote_extends,
-        production,
+        resolve: &|| dispatch.resolve_run(),
         clear_screen: !no_clear,
         explain: cli.explain,
-        include_entry_exports: cli.include_entry_exports,
         show_cascade: cli.show_cascade,
         type_aware: cli.type_aware_override(),
         type_aware_projects: &cli.type_aware_project,
@@ -1574,8 +1565,8 @@ struct FixDispatchArgs {
 
 fn dispatch_fix(dispatch: &DispatchContext<'_>, args: &FixDispatchArgs) -> ExitCode {
     let cli = dispatch.cli;
-    let production = match dispatch.production_for(fallow_config::ProductionAnalysis::DeadCode) {
-        Ok(production) => production,
+    let pending = match dispatch.begin_run() {
+        Ok(pending) => pending,
         Err(code) => return code,
     };
     fix::run_fix(&fix::FixOptions {
@@ -1590,7 +1581,7 @@ fn dispatch_fix(dispatch: &DispatchContext<'_>, args: &FixDispatchArgs) -> ExitC
         allow_remote_extends: cli.allow_remote_extends,
         dry_run: args.dry_run,
         yes: args.yes,
-        production,
+        run: Some(DeadCodeRun::new(dispatch, &pending)),
         no_create_config: args.no_create_config,
         type_aware: cli.type_aware_override(),
         type_aware_projects: &cli.type_aware_project,
@@ -1625,9 +1616,14 @@ fn dispatch_list(dispatch: &DispatchContext<'_>, args: &ListDispatchArgs) -> Exi
     } else {
         None
     };
-    let production = match dispatch.production_for(fallow_config::ProductionAnalysis::DeadCode) {
-        Ok(production) => production,
+    let pending = match dispatch.begin_run() {
+        Ok(pending) => pending,
         Err(code) => return code,
+    };
+    // `fallow list` prints no `loaded config` line and no workspace notice.
+    let quiet = DispatchContext {
+        quiet: true,
+        ..*dispatch
     };
     list::run_list(&ListOptions {
         root: dispatch.root,
@@ -1643,7 +1639,7 @@ fn dispatch_list(dispatch: &DispatchContext<'_>, args: &ListDispatchArgs) -> Exi
         workspaces: args.workspaces,
         entry_weight: args.entry_weight,
         entry_weight_gate,
-        production,
+        run: Some(DeadCodeRun::new(&quiet, &pending)),
         allow_remote_extends: cli.allow_remote_extends,
         scope: args.scope.clone(),
     })

@@ -522,9 +522,7 @@ parameter, then the `FALLOW_PRODUCTION*` variable of the analysis, then
 whether the MCP surface reads the variables. `trace_import_path` and
 `trace_error` read no variable, because `fallow trace --path` and `fallow
 trace-error` read none. `decision_surface` and `mutation_plan` take the
-production mode from the config. `list_boundaries` removes a variable that
-turns the dead-code analysis off from its snapshot, because `fallow list`
-turns production mode on from the variables and never off. `audit` passes a
+production mode from the config. `audit` passes a
 per-analysis parameter only when it is `true`, as the CLI flag can only turn
 production mode on.
 

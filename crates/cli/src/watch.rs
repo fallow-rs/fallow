@@ -10,9 +10,10 @@ use ignore::Match;
 use notify::{RecommendedWatcher, Watcher};
 use rustc_hash::FxHashSet;
 
+use fallow_engine::resolved_run::{ResolvedRun, Runnable};
+
 use crate::exit_codes::{exit_gate_failed, exit_invalid_input};
 use crate::report;
-use crate::runtime_support::{LoadConfigArgs, load_config};
 
 /// ANSI escape: clear screen + scrollback + move cursor home.
 const CLEAR_SCREEN: &str = "\x1B[2J\x1B[3J\x1B[H";
@@ -25,15 +26,12 @@ pub struct WatchOptions<'a> {
     pub config_path: &'a Option<PathBuf>,
     pub output: OutputFormat,
     pub json_style: crate::json_style::JsonStyle,
-    pub no_cache: bool,
-    pub threads: usize,
     pub quiet: bool,
-    pub allow_remote_extends: bool,
-    pub production: bool,
+    /// Resolve the run of the command line, with the side effects of the
+    /// config load. The first analysis and each config reload call it.
+    pub resolve: &'a dyn Fn() -> Result<ResolvedRun, ExitCode>,
     pub clear_screen: bool,
     pub explain: bool,
-    /// Mirror of the global `--include-entry-exports` flag.
-    pub include_entry_exports: bool,
     /// Keep the export and member findings of unused files (`--show-cascade`).
     pub show_cascade: bool,
     pub type_aware: Option<bool>,
@@ -41,11 +39,18 @@ pub struct WatchOptions<'a> {
     pub type_aware_require: Option<fallow_config::TypeAwareRequire>,
 }
 
-type LoadConfigFn = fn(
-    root: &Path,
-    config_path: &Option<PathBuf>,
-    args: LoadConfigArgs,
-) -> Result<fallow_config::ResolvedConfig, ExitCode>;
+/// The resolved run of a watch cycle, and the dead-code config of the run
+/// with the settings of the command.
+struct WatchConfig {
+    run: ResolvedRun,
+    config: fallow_config::ResolvedConfig,
+}
+
+impl WatchConfig {
+    fn runnable(&self) -> Option<Runnable<'_>> {
+        crate::cli_production::runnable(&self.run, fallow_config::PlannedAnalysis::DeadCode)
+    }
+}
 
 fn is_relevant_source(path: &Path) -> bool {
     path.extension()
@@ -353,16 +358,16 @@ fn print_waiting(opts: &WatchOptions<'_>) {
     );
 }
 
-fn analyze_and_report(config: &fallow_config::ResolvedConfig, opts: &WatchOptions<'_>) -> ExitCode {
+fn analyze_and_report(watch: &WatchConfig, opts: &WatchOptions<'_>) -> ExitCode {
     let start = Instant::now();
-    let session =
-        match fallow_engine::session::AnalysisSession::from_resolved_config(config.clone()) {
-            Ok(session) => session,
-            Err(e) => {
-                eprintln!("Analysis error: {e}");
-                return exit_invalid_input();
-            }
-        };
+    let config = &watch.config;
+    let session = match crate::cli_production::open_session(watch.runnable(), config) {
+        Ok(session) => session,
+        Err(e) => {
+            eprintln!("Analysis error: {e}");
+            return exit_invalid_input();
+        }
+    };
     let mut analysis =
         match session.analyze_dead_code_with_artifacts(false, config.type_aware.enabled) {
             Ok(analysis) => analysis,
@@ -478,32 +483,9 @@ fn watch_type_aware_exit_code(
     }
 }
 
-fn reload_config_or_keep_previous(
-    config: &mut fallow_config::ResolvedConfig,
-    opts: &WatchOptions<'_>,
-    load: LoadConfigFn,
-) {
-    match load(
-        opts.root,
-        opts.config_path,
-        LoadConfigArgs {
-            output: opts.output,
-            no_cache: opts.no_cache,
-            threads: opts.threads,
-            production: opts.production,
-            quiet: opts.quiet,
-            allow_remote_extends: opts.allow_remote_extends,
-        },
-    ) {
-        Ok(mut reloaded) => {
-            if opts.include_entry_exports {
-                reloaded.force_include_entry_exports();
-            }
-            if opts.show_cascade {
-                reloaded.show_cascade = true;
-            }
-            *config = reloaded;
-        }
+fn reload_config_or_keep_previous(watch: &mut WatchConfig, opts: &WatchOptions<'_>) {
+    match load_watch_config(opts) {
+        Ok(reloaded) => *watch = reloaded,
         Err(_) => {
             eprintln!("Warning: failed to reload config, using previous configuration");
         }
@@ -530,7 +512,7 @@ pub fn run_watch(opts: &WatchOptions<'_>) -> ExitCode {
 }
 
 fn run_initial_watch_analysis(
-    config: &fallow_config::ResolvedConfig,
+    config: &WatchConfig,
     opts: &WatchOptions<'_>,
 ) -> Result<(), ExitCode> {
     let initial_status = analyze_and_report(config, opts);
@@ -542,7 +524,7 @@ fn run_initial_watch_analysis(
 }
 
 struct WatchLoopState {
-    config: fallow_config::ResolvedConfig,
+    config: WatchConfig,
     filter: Arc<Mutex<WatchFilter>>,
     watcher: Option<RecommendedWatcher>,
     tx: mpsc::Sender<WatchEvent>,
@@ -554,12 +536,9 @@ struct WatchLoopState {
 }
 
 impl WatchLoopState {
-    fn new(
-        opts: &WatchOptions<'_>,
-        config: fallow_config::ResolvedConfig,
-    ) -> Result<Self, ExitCode> {
+    fn new(opts: &WatchOptions<'_>, config: WatchConfig) -> Result<Self, ExitCode> {
         let (tx, rx) = mpsc::channel();
-        let filter = Arc::new(Mutex::new(WatchFilter::new(&config)));
+        let filter = Arc::new(Mutex::new(WatchFilter::new(&config.config)));
         let watcher = match create_watcher(opts.root, Arc::clone(&filter), tx.clone()) {
             Ok(watcher) => Some(watcher),
             Err(e) => {
@@ -657,23 +636,19 @@ fn receive_watch_event(
     }
 }
 
-/// Load the watch config, applying the `--include-entry-exports` override.
-fn load_watch_config(opts: &WatchOptions<'_>) -> Result<fallow_config::ResolvedConfig, ExitCode> {
-    let mut config = load_config(
-        opts.root,
-        opts.config_path,
-        LoadConfigArgs {
-            output: opts.output,
-            no_cache: opts.no_cache,
-            threads: opts.threads,
-            production: opts.production,
-            quiet: opts.quiet,
-            allow_remote_extends: opts.allow_remote_extends,
-        },
-    )?;
-    if opts.include_entry_exports {
-        config.force_include_entry_exports();
-    }
+/// Resolve the run of the watch command, and apply the `--show-cascade` and
+/// type-aware settings to its dead-code config.
+fn load_watch_config(opts: &WatchOptions<'_>) -> Result<WatchConfig, ExitCode> {
+    let run = (opts.resolve)()?;
+    let Some(runnable) =
+        crate::cli_production::runnable(&run, fallow_config::PlannedAnalysis::DeadCode)
+    else {
+        return Err(crate::error::emit_input_error(
+            "the run skips the dead-code analysis",
+            opts.output,
+        ));
+    };
+    let mut config = runnable.config().clone();
     if opts.show_cascade {
         config.show_cascade = true;
     }
@@ -685,13 +660,13 @@ fn load_watch_config(opts: &WatchOptions<'_>) -> Result<fallow_config::ResolvedC
         opts.type_aware_require,
         &mut config,
     )?;
-    Ok(config)
+    Ok(WatchConfig { run, config })
 }
 
 /// Drain the debouncer; if a non-empty batch is ready, reload config and
 /// re-run the analysis. No-op when no batch is ready or all paths dedupe away.
 fn run_ready_reanalysis(
-    config: &mut fallow_config::ResolvedConfig,
+    config: &mut WatchConfig,
     opts: &WatchOptions<'_>,
     debouncer: &mut PathDebouncer,
 ) {
@@ -712,7 +687,7 @@ fn run_ready_reanalysis(
     }
     eprintln!();
 
-    reload_config_or_keep_previous(config, opts, load_config);
+    reload_config_or_keep_previous(config, opts);
 
     let status = analyze_and_report(config, opts);
     if status != ExitCode::SUCCESS {
@@ -755,7 +730,7 @@ fn replace_watch_filter(filter: &Arc<Mutex<WatchFilter>>, config: &fallow_config
 }
 
 struct RootLifecycleState<'a> {
-    config: &'a mut fallow_config::ResolvedConfig,
+    config: &'a mut WatchConfig,
     filter: &'a Arc<Mutex<WatchFilter>>,
     watcher: &'a mut Option<RecommendedWatcher>,
     tx: &'a std::sync::mpsc::Sender<WatchEvent>,
@@ -793,8 +768,8 @@ fn handle_root_lifecycle(opts: &WatchOptions<'_>, state: RootLifecycleState<'_>)
         return;
     }
 
-    reload_config_or_keep_previous(config, opts, load_config);
-    replace_watch_filter(filter, config);
+    reload_config_or_keep_previous(config, opts);
+    replace_watch_filter(filter, &config.config);
     match create_watcher(opts.root, Arc::clone(filter), tx.clone()) {
         Ok(new_watcher) => {
             *watcher = Some(new_watcher);
@@ -1172,9 +1147,10 @@ mod tests {
         let temp = tempfile::tempdir().expect("tempdir");
         let root = temp.path().join("project");
         std::fs::create_dir(&root).expect("create root");
-        let mut config = make_config(&root, OutputFormat::Human, 1, true);
-        let opts = make_watch_options(&root, OutputFormat::Human, 1, true);
-        let filter = Arc::new(Mutex::new(WatchFilter::new(&config)));
+        let resolve = resolver(&root, &[], &[]);
+        let opts = make_watch_options(&root, &resolve);
+        let mut config = load_watch_config(&opts).expect("config");
+        let filter = Arc::new(Mutex::new(WatchFilter::new(&config.config)));
         let (tx, _rx) = std::sync::mpsc::channel();
         let mut watcher = None;
         let mut debouncer = PathDebouncer::default();
@@ -1285,25 +1261,46 @@ mod tests {
         .resolve(root.to_path_buf(), output, threads, false, quiet, None)
     }
 
-    fn make_watch_options(
+    /// A project with `config` as its `.fallowrc.json`.
+    fn watch_project(config: &str) -> tempfile::TempDir {
+        let dir = tempfile::tempdir().expect("project");
+        std::fs::create_dir(dir.path().join(".git")).expect("git marker");
+        std::fs::write(dir.path().join("package.json"), "{}").expect("package.json");
+        std::fs::write(dir.path().join(".fallowrc.json"), config).expect("config");
+        dir
+    }
+
+    /// The resolve step of `fallow watch` with `args` on `root`, through the
+    /// translator of the CLI, with the variables `env`.
+    fn resolver(
         root: &Path,
-        output: OutputFormat,
-        threads: usize,
-        quiet: bool,
-    ) -> WatchOptions<'_> {
+        args: &[&str],
+        env: &[(&str, &str)],
+    ) -> impl Fn() -> Result<ResolvedRun, ExitCode> + use<> {
+        use clap::Parser as _;
+        let root_arg = root.display().to_string();
+        let mut argv = vec!["fallow", "watch", "--root", root_arg.as_str()];
+        argv.extend_from_slice(args);
+        let cli = crate::cli_args::Cli::try_parse_from(argv).expect("argv parses");
+        let env = fallow_config::EnvSnapshot::from_pairs(env, None);
+        let inputs =
+            crate::run_inputs::command_run_inputs(&cli, env).expect("watch resolves a run");
+        move || fallow_engine::resolved_run::resolve_run(&inputs).map_err(|_| exit_invalid_input())
+    }
+
+    fn make_watch_options<'a>(
+        root: &'a Path,
+        resolve: &'a dyn Fn() -> Result<ResolvedRun, ExitCode>,
+    ) -> WatchOptions<'a> {
         WatchOptions {
             root,
             config_path: &None,
-            output,
+            output: OutputFormat::Json,
             json_style: crate::json_style::JsonStyle::Compact,
-            no_cache: false,
-            threads,
-            quiet,
-            allow_remote_extends: false,
-            production: false,
+            quiet: true,
+            resolve,
             clear_screen: false,
             explain: false,
-            include_entry_exports: false,
             show_cascade: false,
             type_aware: None,
             type_aware_projects: &[],
@@ -1313,60 +1310,71 @@ mod tests {
 
     #[test]
     fn reload_config_successfully_replaces_previous_config() {
-        let root = Path::new("/project");
-        let mut config = make_config(root, OutputFormat::Human, 1, false);
-        let opts = make_watch_options(root, OutputFormat::Json, 8, true);
+        let dir = watch_project(r#"{"production":false}"#);
+        let resolve = resolver(dir.path(), &[], &[]);
+        let opts = make_watch_options(dir.path(), &resolve);
+        let mut watch = load_watch_config(&opts).expect("config");
+        assert!(!watch.config.production);
 
-        reload_config_or_keep_previous(&mut config, &opts, |_root, _config_path, args| {
-            Ok(make_config(
-                Path::new("/project"),
-                args.output,
-                args.threads,
-                args.quiet,
-            ))
-        });
+        std::fs::write(dir.path().join(".fallowrc.json"), r#"{"production":true}"#)
+            .expect("config");
+        reload_config_or_keep_previous(&mut watch, &opts);
+        assert!(watch.config.production);
+    }
 
-        assert!(matches!(config.output, OutputFormat::Json));
-        assert_eq!(config.threads, 8);
-        assert!(config.quiet);
+    #[test]
+    fn reload_config_follows_production_true_to_false() {
+        let dir = watch_project(r#"{"production":true}"#);
+        let resolve = resolver(dir.path(), &[], &[]);
+        let opts = make_watch_options(dir.path(), &resolve);
+        let mut watch = load_watch_config(&opts).expect("config");
+        assert!(watch.config.production);
+
+        std::fs::write(dir.path().join(".fallowrc.json"), r#"{"production":false}"#)
+            .expect("config");
+        reload_config_or_keep_previous(&mut watch, &opts);
+        assert!(!watch.config.production);
     }
 
     #[test]
     fn reload_config_applies_include_entry_exports_override() {
-        let root = Path::new("/project");
-        let mut config = make_config(root, OutputFormat::Human, 1, false);
-        assert!(!config.include_entry_exports);
-
-        let mut opts = make_watch_options(root, OutputFormat::Json, 8, true);
-        opts.include_entry_exports = true;
-
-        reload_config_or_keep_previous(&mut config, &opts, |_root, _config_path, args| {
-            Ok(make_config(
-                Path::new("/project"),
-                args.output,
-                args.threads,
-                args.quiet,
-            ))
-        });
-
+        let dir = watch_project("{}");
+        let resolve = resolver(dir.path(), &["--include-entry-exports"], &[]);
+        let opts = make_watch_options(dir.path(), &resolve);
+        let mut watch = load_watch_config(&opts).expect("config");
+        std::fs::write(dir.path().join(".fallowrc.json"), r#"{"production":false}"#)
+            .expect("config");
+        reload_config_or_keep_previous(&mut watch, &opts);
         assert!(
-            config.include_entry_exports,
+            watch.config.include_entry_exports,
             "CLI flag should OR into reloaded config"
         );
     }
 
     #[test]
+    fn the_watch_config_load_lets_no_production_beat_the_config() {
+        let dir = watch_project(r#"{"production":true}"#);
+        let resolve = resolver(dir.path(), &["--no-production"], &[]);
+        let watch = load_watch_config(&make_watch_options(dir.path(), &resolve)).expect("config");
+        assert!(!watch.config.production);
+    }
+
+    #[test]
+    fn the_watch_config_load_lets_an_off_env_value_beat_the_config() {
+        let dir = watch_project(r#"{"production":true}"#);
+        let resolve = resolver(dir.path(), &[], &[("FALLOW_PRODUCTION", "false")]);
+        let watch = load_watch_config(&make_watch_options(dir.path(), &resolve)).expect("config");
+        assert!(!watch.config.production);
+    }
+
+    #[test]
     fn reload_config_failure_keeps_previous_config() {
-        let root = Path::new("/project");
-        let mut config = make_config(root, OutputFormat::Human, 1, false);
-        let opts = make_watch_options(root, OutputFormat::Json, 8, true);
-
-        reload_config_or_keep_previous(&mut config, &opts, |_root, _config_path, _args| {
-            Err(exit_invalid_input())
-        });
-
-        assert!(matches!(config.output, OutputFormat::Human));
-        assert_eq!(config.threads, 1);
-        assert!(!config.quiet);
+        let dir = watch_project(r#"{"production":true}"#);
+        let resolve = resolver(dir.path(), &[], &[]);
+        let mut watch =
+            load_watch_config(&make_watch_options(dir.path(), &resolve)).expect("config");
+        let fail = || Err(exit_invalid_input());
+        reload_config_or_keep_previous(&mut watch, &make_watch_options(dir.path(), &fail));
+        assert!(watch.config.production);
     }
 }

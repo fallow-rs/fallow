@@ -1,0 +1,51 @@
+{
+  "name": "fix-no-production-flag",
+  "files": {
+    ".fallowrc.json": "{\"production\":true}",
+    "package.json": "{}"
+  },
+  "inputs": {
+    "cli": {
+      "argv": [
+        "fallow",
+        "fix",
+        "--dry-run",
+        "--no-production"
+      ]
+    },
+    "lsp": {
+      "not_expressible": "The language server has no fix command"
+    },
+    "vscode": {
+      "not_expressible": "The editor has no fix input for the language server"
+    },
+    "node": {
+      "not_expressible": "The Node bindings have no fix function"
+    },
+    "api": {
+      "not_expressible": "The Rust API has no fix entry point"
+    },
+    "mcp": {
+      "not_expressible": "The fix tools run the CLI, so the CLI row covers them"
+    }
+  },
+  "expected": {
+    "surface": "<row>",
+    "command": "fix",
+    "analyses.dead_code.production": {
+      "value": false,
+      "source": "given:production"
+    }
+  },
+  "deviations": {
+    "cli": {
+      "reason": "The CLI names the flag --no-production",
+      "expected": {
+        "analyses.dead_code.production": {
+          "value": false,
+          "source": "given:--no-production"
+        }
+      }
+    }
+  }
+}

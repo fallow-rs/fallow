@@ -7,8 +7,7 @@
 //! variables that the CLI reads for the command, and the config.
 
 use fallow_config::{
-    CommandKind, EnvSnapshot, EnvVar, OutputFormat, PlannedAnalysis, RunInputs, SelectionInput,
-    Surface,
+    CommandKind, EnvSnapshot, OutputFormat, PlannedAnalysis, RunInputs, SelectionInput, Surface,
 };
 use fallow_types::sourced::{Given, Origin};
 
@@ -20,9 +19,6 @@ enum ProductionRule {
     /// `--production`, `--no-production`, the per-analysis flags, the
     /// variables and the config.
     Full,
-    /// The flags and the variables can only turn production mode on. An off
-    /// value leaves the config in charge.
-    OnOnly,
     /// The config only: the command ignores the production flags.
     ConfigOnly,
 }
@@ -101,8 +97,8 @@ fn command_route(cli: &Cli) -> Option<CommandRoute> {
     };
     analysis_route(command)
         .or_else(|| {
-            on_only_kind(command).map(|kind| {
-                CommandRoute::single(kind, PlannedAnalysis::DeadCode, ProductionRule::OnOnly)
+            dead_code_kind(command).map(|kind| {
+                CommandRoute::single(kind, PlannedAnalysis::DeadCode, ProductionRule::Full)
             })
         })
         .or_else(|| {
@@ -172,11 +168,11 @@ fn analysis_route(command: &Command) -> Option<CommandRoute> {
     Some(route)
 }
 
-/// The dead-code command whose flags and variables can only turn production
-/// mode on.
-const fn on_only_kind(command: &Command) -> Option<CommandKind> {
+/// The command that runs on the files of the dead-code production mode and
+/// reads that mode from the flags, the variables and the config.
+const fn dead_code_kind(command: &Command) -> Option<CommandKind> {
     let kind = match command {
-        Command::List { .. } => CommandKind::List,
+        Command::List { .. } | Command::Workspaces => CommandKind::List,
         Command::Fix { .. } => CommandKind::Fix,
         Command::Watch { .. } => CommandKind::Watch,
         Command::Viz { .. } => CommandKind::Viz,
@@ -273,11 +269,6 @@ const fn flag_on(set: bool, flag: &'static str) -> Option<Given<bool>> {
 /// two fields after the call.
 pub fn command_run_inputs(cli: &Cli, env: EnvSnapshot) -> Option<RunInputs> {
     let route = command_route(cli)?;
-    let env = if route.production == ProductionRule::OnOnly {
-        production_switches_on_only(env)
-    } else {
-        env
-    };
     let mut inputs = RunInputs::new(Surface::Cli, env, route.command, route.selection);
     inputs.root = cli.root.clone().map(|root| given(root, "--root"));
     inputs.config_path = cli.config.clone().map(|path| given(path, "--config"));
@@ -308,7 +299,6 @@ pub fn command_run_inputs(cli: &Cli, env: EnvSnapshot) -> Option<RunInputs> {
             inputs.production_health = flag_on(health, "--production-health");
             inputs.production_dupes = flag_on(dupes, "--production-dupes");
         }
-        ProductionRule::OnOnly => inputs.production = flag_on(cli.production, "--production"),
         ProductionRule::ConfigOnly => {
             inputs.production = flag_on(
                 coverage_analyze_production(cli.command.as_ref()),
@@ -340,20 +330,6 @@ pub fn dispatch_inputs(
     inputs.output = output;
     inputs.quiet = quiet;
     Some(inputs)
-}
-
-/// A command of the [`ProductionRule::OnOnly`] rule turns production mode on
-/// from the variables and never off: a variable that turns the dead-code
-/// analysis off leaves the config in charge. So the snapshot loses the
-/// variables that decide an off value.
-fn production_switches_on_only(env: EnvSnapshot) -> EnvSnapshot {
-    let value = |var| env.bool(var).set();
-    let decided = value(EnvVar::ProductionDeadCode).or_else(|| value(EnvVar::Production));
-    if decided == Some(false) {
-        env.retain(|var| !matches!(var, EnvVar::Production | EnvVar::ProductionDeadCode))
-    } else {
-        env
-    }
 }
 
 #[cfg(test)]

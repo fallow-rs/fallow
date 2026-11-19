@@ -1,0 +1,62 @@
+{
+  "name": "list-no-production-flag",
+  "files": {
+    ".fallowrc.json": "{\"production\":true}",
+    "package.json": "{}"
+  },
+  "inputs": {
+    "cli": {
+      "argv": [
+        "fallow",
+        "list",
+        "--no-production"
+      ]
+    },
+    "lsp": {
+      "not_expressible": "The language server has no list command"
+    },
+    "vscode": {
+      "not_expressible": "The editor has no list input for the language server"
+    },
+    "node": {
+      "not_expressible": "The Node bindings have no list function"
+    },
+    "api": {
+      "entry": "list",
+      "options": {
+        "production_override": false
+      }
+    },
+    "mcp": {
+      "not_expressible": "The project_info and list_boundaries tools have no production parameter"
+    }
+  },
+  "expected": {
+    "surface": "<row>",
+    "command": "list",
+    "analyses.dead_code.production": {
+      "value": false,
+      "source": "given:production"
+    }
+  },
+  "deviations": {
+    "cli": {
+      "reason": "The CLI names the flag --no-production",
+      "expected": {
+        "analyses.dead_code.production": {
+          "value": false,
+          "source": "given:--no-production"
+        }
+      }
+    },
+    "api": {
+      "reason": "The Rust API names its option analysis.production_override",
+      "expected": {
+        "analyses.dead_code.production": {
+          "value": false,
+          "source": "given:analysis.production_override"
+        }
+      }
+    }
+  }
+}

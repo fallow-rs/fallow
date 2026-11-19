@@ -28,7 +28,9 @@ pub struct SuppressionsOptions<'a> {
     pub no_cache: bool,
     pub threads: usize,
     pub quiet: bool,
-    pub production: bool,
+    /// The resolved run of the command. `None` in a test or a benchmark hook,
+    /// which loads the config without production mode.
+    pub run: Option<crate::cli_production::DeadCodeRun<'a>>,
     pub allow_remote_extends: bool,
     pub workspace: Option<&'a [String]>,
     pub changed_workspaces: Option<&'a str>,
@@ -44,11 +46,11 @@ pub fn run_suppressions(opts: &SuppressionsOptions<'_>) -> ExitCode {
     if let Err(code) = validate_suppressions_output(opts.output) {
         return code;
     }
-    let config = match load_suppressions_config(opts) {
-        Ok(c) => c,
+    let (run, config) = match load_suppressions_config(opts) {
+        Ok(loaded) => loaded,
         Err(code) => return code,
     };
-    let session = match fallow_engine::session::AnalysisSession::from_resolved_config(config) {
+    let session = match crate::cli_production::open_session(run, &config) {
         Ok(session) => session,
         Err(err) => return emit_input_error(&format!("Analysis error: {err}"), opts.output),
     };
@@ -102,19 +104,29 @@ fn validate_suppressions_output(output: OutputFormat) -> Result<(), ExitCode> {
     }
 }
 
-fn load_suppressions_config(opts: &SuppressionsOptions<'_>) -> Result<ResolvedConfig, ExitCode> {
-    crate::runtime_support::load_config(
-        opts.root,
-        opts.config_path,
-        crate::runtime_support::LoadConfigArgs {
-            output: opts.output,
-            no_cache: opts.no_cache,
-            threads: opts.threads,
-            production: opts.production,
-            quiet: opts.quiet,
-            allow_remote_extends: opts.allow_remote_extends,
-        },
-    )
+fn load_suppressions_config<'a>(
+    opts: &SuppressionsOptions<'a>,
+) -> Result<
+    (
+        Option<fallow_engine::resolved_run::Runnable<'a>>,
+        ResolvedConfig,
+    ),
+    ExitCode,
+> {
+    crate::cli_production::dead_code_config(opts.run, || {
+        crate::runtime_support::load_config(
+            opts.root,
+            opts.config_path,
+            crate::runtime_support::LoadConfigArgs {
+                output: opts.output,
+                no_cache: opts.no_cache,
+                threads: opts.threads,
+                production: false,
+                quiet: opts.quiet,
+                allow_remote_extends: opts.allow_remote_extends,
+            },
+        )
+    })
 }
 
 /// Apply `--changed-since`, `--workspace` / `--changed-workspaces`, and
@@ -345,7 +357,7 @@ mod tests {
             no_cache: true,
             threads: 1,
             quiet: true,
-            production: false,
+            run: None,
             allow_remote_extends: false,
             workspace: None,
             changed_workspaces: None,
