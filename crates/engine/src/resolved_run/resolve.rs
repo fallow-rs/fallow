@@ -7,7 +7,7 @@ use fallow_config::{
     FallowConfig, PlannedAnalysis, RunCommand, RunInputs, RunPlan, RunRequest, SelectionInput,
     Surface,
 };
-use fallow_types::sourced::{Given, Scope, Source, Sourced};
+use fallow_types::sourced::{Given, Origin, Scope, Source, Sourced};
 
 use super::env_policy::applies;
 use super::pick::{PerAnalysis, ProductionInputs, decide_production};
@@ -197,6 +197,31 @@ pub struct BaseSide {
 ///
 /// Returns a [`ResolveError`] as [`resolve_run`] does.
 pub fn resolve_base_run(head: &ResolvedRun, base: BaseSide) -> Result<ResolvedRun, ResolveError> {
+    resolve_base_side(head, base, false)
+}
+
+/// Resolve the base side of a comparison with a base ref as
+/// [`resolve_base_run`] does, with the decisions of `head` for the analyses:
+/// the base side runs each analysis that the head run runs, and no other,
+/// with the production mode of the head run. The config of the base side
+/// then cannot turn an analysis off or change a production mode, so the
+/// findings of the two sides compare.
+///
+/// # Errors
+///
+/// Returns a [`ResolveError`] as [`resolve_run`] does.
+pub fn resolve_base_run_with_head_decisions(
+    head: &ResolvedRun,
+    base: BaseSide,
+) -> Result<ResolvedRun, ResolveError> {
+    resolve_base_side(head, base, true)
+}
+
+fn resolve_base_side(
+    head: &ResolvedRun,
+    base: BaseSide,
+    head_decisions: bool,
+) -> Result<ResolvedRun, ResolveError> {
     let BaseSide {
         root,
         config,
@@ -204,6 +229,9 @@ pub fn resolve_base_run(head: &ResolvedRun, base: BaseSide) -> Result<ResolvedRu
     } = base;
     let file = base_config_file(head, &root.value, config);
     let mut inputs = (*head.inputs).clone();
+    if head_decisions {
+        keep_head_decisions(&mut inputs, head, root.origin);
+    }
     inputs.root = Some(root);
     inputs.config_path = None;
     inputs.config_fallback = ConfigFallback::Fail;
@@ -217,6 +245,28 @@ pub fn resolve_base_run(head: &ResolvedRun, base: BaseSide) -> Result<ResolvedRu
                 .map(|(path, source)| (path.as_path(), source.clone())),
         )
     })
+}
+
+/// Give `inputs` the plan and the production modes of `head` as inputs of
+/// `origin`.
+fn keep_head_decisions(inputs: &mut RunInputs, head: &ResolvedRun, origin: Origin) {
+    let runs = |analysis| Some(head.decision(analysis).selection.value().runs());
+    inputs.selection = SelectionInput::Options {
+        dead_code: runs(PlannedAnalysis::DeadCode),
+        duplication: runs(PlannedAnalysis::Duplication),
+        health: runs(PlannedAnalysis::Health),
+        origin,
+    };
+    let production = |analysis| {
+        Some(Given {
+            value: *head.production(analysis).value(),
+            origin,
+        })
+    };
+    inputs.production = None;
+    inputs.production_dead_code = production(PlannedAnalysis::DeadCode);
+    inputs.production_health = production(PlannedAnalysis::Health);
+    inputs.production_dupes = production(PlannedAnalysis::Duplication);
 }
 
 /// The config file of a base side with its source, or `None` for discovery
@@ -306,9 +356,24 @@ fn resolve_with(
         config_snapshot,
         decisions,
         settings,
-        off,
-        on,
+        mut off,
+        mut on,
     } = loaded;
+    let notices = super::notices::run_notices(&super::notices::NoticeInput {
+        root: root.value(),
+        env: &env,
+        file: &file,
+        config_file: &config_file,
+        fallback: fallback.as_ref(),
+    });
+    // Each session of the run carries the notices with the diagnostics of
+    // workspace discovery, so every output of the run holds them.
+    for entry in [off.as_mut(), on.as_mut()].into_iter().flatten() {
+        entry.workspace_diagnostics = fallow_types::workspace::merge_workspace_diagnostics(
+            std::mem::take(&mut entry.workspace_diagnostics),
+            notices.clone(),
+        );
+    }
     Ok(ResolvedRun {
         surface,
         command: inputs.command,
@@ -327,6 +392,7 @@ fn resolve_with(
         env_read,
         env_ignored,
         fallback,
+        notices,
         inputs: Box::new(inputs.clone()),
     })
 }

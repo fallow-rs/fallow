@@ -50,7 +50,7 @@
 //! ran, which is the correct side to err on: the alternative is charging an
 //! agent less than what enters its context.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use rmcp::model::{CallToolResult, ContentBlock};
 use serde_json::{Map, Value};
@@ -171,6 +171,7 @@ fn verdict_warnings(root: &Map<String, Value>) -> Vec<String> {
     warnings.extend(gate_warnings(root, baseline_reported));
     warnings.extend(degraded_analysis_warning(root));
     warnings.extend(requested_rule_off_warning(root));
+    warnings.extend(inert_flag_warning(root));
     warnings.extend(no_client_roots_warning(root));
     warnings.extend(unapplied_request_warning(root));
     warnings.extend(empty_scope_request_warning(root));
@@ -181,9 +182,11 @@ fn verdict_warnings(root: &Map<String, Value>) -> Vec<String> {
 /// order they are looked for.
 ///
 /// The single-analysis and combined envelopes carry them at the root; `audit`
-/// carries them inside its sub-analysis sections. First match wins rather than
-/// summing, because a run records its diagnostics once and adding up two
-/// views of the same walk would report every kind twice.
+/// carries the run notices at the root and the diagnostics of each walk
+/// inside its sub-analysis sections. The degraded sentence reads every site
+/// and counts a `(path, kind)` that an earlier site holds once, because a
+/// combined envelope repeats a section diagnostic at the root and adding up
+/// two views of the same walk would report every kind twice.
 const DIAGNOSTIC_SITES: &[&[&str]] = &[
     &["workspace_diagnostics"],
     &["dead_code", "workspace_diagnostics"],
@@ -508,11 +511,24 @@ fn number(value: f64) -> String {
 /// The classification stays in Rust: this reads `degrades_analysis` rather
 /// than matching a kind allowlist that a later release would silently outgrow.
 fn degraded_analysis_warning(root: &Map<String, Value>) -> Option<String> {
-    let counts = DIAGNOSTIC_SITES
+    let mut seen: BTreeSet<(&str, &str)> = BTreeSet::new();
+    let mut union: Vec<Value> = Vec::new();
+    for diagnostics in DIAGNOSTIC_SITES
         .iter()
         .filter_map(|path| fallow_types::envelope_sites::lookup(root, path)?.as_array())
-        .map(|diagnostics| degrading_kinds(diagnostics))
-        .find(|counts| !counts.is_empty())?;
+    {
+        union.extend(
+            diagnostics
+                .iter()
+                .filter(|diagnostic| !seen.contains(&diagnostic_key(diagnostic)))
+                .cloned(),
+        );
+        seen.extend(diagnostics.iter().map(diagnostic_key));
+    }
+    let counts = degrading_kinds(&union);
+    if counts.is_empty() {
+        return None;
+    }
     let kinds = counts
         .iter()
         .map(|(kind, count)| format!("{kind} ({count})"))
@@ -551,6 +567,32 @@ fn requested_rule_off_warning(root: &Map<String, Value>) -> Option<String> {
          for these rules measures nothing.",
         rules.join(", ")
     ))
+}
+
+/// One sentence for every flag that had no effect on the run, never one per
+/// flag. The kind is not `degrades_analysis`, so the degraded sentence does
+/// not cover it.
+fn inert_flag_warning(root: &Map<String, Value>) -> Option<String> {
+    let mut flags: Vec<String> = DIAGNOSTIC_SITES
+        .iter()
+        .filter_map(|path| fallow_types::envelope_sites::lookup(root, path)?.as_array())
+        .flatten()
+        .filter(|diagnostic| diagnostic.get("kind").and_then(Value::as_str) == Some("inert-flag"))
+        .filter_map(|diagnostic| {
+            let flag = diagnostic.get("flag")?.as_str()?;
+            let analysis = diagnostic.get("analysis")?.as_str()?;
+            Some(format!("{flag} ({analysis})"))
+        })
+        .collect();
+    flags.sort();
+    flags.dedup();
+    (!flags.is_empty()).then(|| {
+        format!(
+            "Flags had no effect on this run: {}. Read workspace_diagnostics for the reason of \
+             each.",
+            flags.join(", ")
+        )
+    })
 }
 
 /// One sentence when `client-server-leak` was active but had no `"use client"`
@@ -668,6 +710,12 @@ fn empty_scope_request_warning(root: &Map<String, Value>) -> Option<String> {
             empty.join(", ")
         )
     })
+}
+
+/// The `(path, kind)` of one diagnostic, the key that one walk records once.
+fn diagnostic_key(diagnostic: &Value) -> (&str, &str) {
+    let text = |field| diagnostic.get(field).and_then(Value::as_str).unwrap_or("");
+    (text("path"), text("kind"))
 }
 
 fn degrading_kinds(diagnostics: &[Value]) -> BTreeMap<&str, usize> {
@@ -1244,6 +1292,77 @@ mod tests {
         assert!(
             !warnings[0].contains("boundaries-not-configured"),
             "an advisory diagnostic is not a degraded run: {warnings:?}"
+        );
+    }
+
+    /// A run notice sits at the root of an audit envelope, and the
+    /// diagnostics of the walk sit in its sections. The sentence names both.
+    #[test]
+    fn degraded_warning_counts_root_and_section_kinds() {
+        let warnings = warnings_of(&serde_json::json!({
+            "kind": "audit",
+            "workspace_diagnostics": [
+                {
+                    "kind": "env-value-ignored",
+                    "path": ".",
+                    "name": "FALLOW_PRODUCTION",
+                    "degrades_analysis": true,
+                },
+            ],
+            "dead_code": {
+                "workspace_diagnostics": [
+                    { "kind": "node-modules-missing", "path": "node_modules", "degrades_analysis": true },
+                ],
+            },
+        }));
+
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].contains("env-value-ignored (1), node-modules-missing (1)"),
+            "{warnings:?}"
+        );
+    }
+
+    #[test]
+    fn an_inert_flag_is_one_warning_and_not_a_degraded_run() {
+        let entry = serde_json::json!({
+            "kind": "inert-flag",
+            "path": ".",
+            "flag": "--dupes-baseline",
+            "analysis": "duplication",
+            "reason": "off-by-config",
+            "key": "duplicates.enabled",
+        });
+        let warnings = warnings_of(&serde_json::json!({
+            "workspace_diagnostics": [entry],
+            "dead_code": { "workspace_diagnostics": [entry] },
+        }));
+
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].contains("--dupes-baseline (duplication)"),
+            "{warnings:?}"
+        );
+    }
+
+    /// The combined envelope repeats a section diagnostic at the root. One
+    /// walk counts once.
+    #[test]
+    fn degraded_warning_counts_one_walk_once() {
+        let entry = serde_json::json!({
+            "kind": "node-modules-missing",
+            "path": "node_modules",
+            "degrades_analysis": true,
+        });
+        let warnings = warnings_of(&serde_json::json!({
+            "workspace_diagnostics": [entry],
+            "dead_code": { "workspace_diagnostics": [entry] },
+        }));
+
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].contains("node-modules-missing (1)"),
+            "{warnings:?}"
         );
     }
 

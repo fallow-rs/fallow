@@ -130,13 +130,14 @@ fn bare_run_names_a_dupes_baseline_that_has_no_effect() {
     );
 
     assert!(output.code == 0 || output.code == 1, "{}", output.stdout);
-    assert!(
-        output
-            .stderr
-            .contains("--dupes-baseline has no effect: duplicates.enabled is false"),
-        "stderr: {}",
-        output.stderr
-    );
+    let json = parse_json(&output);
+    let inert = json["workspace_diagnostics"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|entry| entry["kind"] == "inert-flag" && entry["flag"] == "--dupes-baseline")
+        .count();
+    assert_eq!(inert, 1, "{json:#}");
 }
 
 #[test]

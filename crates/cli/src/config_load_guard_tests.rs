@@ -37,11 +37,6 @@ const OPEN_SITES: &[OpenSite] = &[
         why: "the fingerprint of the config file in the audit cache key",
     },
     OpenSite {
-        path: "crates/cli/src/audit_dead_code.rs",
-        calls: 1,
-        why: "the load check of the base config before the own-config pass",
-    },
-    OpenSite {
         path: "crates/cli/src/cli_report.rs",
         calls: 1,
         why: "the load check of the `--config` file of a saved report",
@@ -52,14 +47,9 @@ const OPEN_SITES: &[OpenSite] = &[
         why: "`fallow config` prints the config file as the loader gives it",
     },
     OpenSite {
-        path: "crates/cli/src/audit.rs",
-        calls: 1,
-        why: "the duplication config of each audit side",
-    },
-    OpenSite {
         path: "crates/cli/src/check/configuration.rs",
         calls: 1,
-        why: "a dead-code run without a run: benchmark hooks and the audit sides",
+        why: "a dead-code run without a run: benchmark hooks",
     },
     OpenSite {
         path: "crates/cli/src/check/mod.rs",
@@ -74,12 +64,12 @@ const OPEN_SITES: &[OpenSite] = &[
     OpenSite {
         path: "crates/cli/src/dupes.rs",
         calls: 1,
-        why: "a duplication run without a run: benchmark hooks and the audit sides",
+        why: "a duplication run without a run: benchmark hooks",
     },
     OpenSite {
         path: "crates/cli/src/health/mod.rs",
         calls: 2,
-        why: "a health run without a run, and its session: benchmark hooks and the audit sides",
+        why: "a health run without a run, and its session: benchmark hooks and the security base",
     },
     OpenSite {
         path: "crates/cli/src/cli_production.rs",

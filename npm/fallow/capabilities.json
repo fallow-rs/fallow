@@ -1791,6 +1791,83 @@
             "true",
             "false"
           ]
+        },
+        {
+          "name": "--resolved",
+          "type": "bool",
+          "required": false,
+          "description": "Print each decision of a run and its cause as JSON: for each analysis whether it runs and its production mode, and the run settings, each with the flag, environment variable, config key or default that gave it. Environment variables show by name only",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--for",
+          "type": "string",
+          "required": false,
+          "description": "The command whose rules `--resolved` applies. Without it, the rules of the bare `fallow` run apply",
+          "possible_values": [
+            "combined",
+            "audit",
+            "dead-code",
+            "dupes",
+            "health"
+          ]
+        },
+        {
+          "name": "--only",
+          "type": "string",
+          "required": false,
+          "description": "With `--resolved`: run only these analyses, as `--only` of the bare run or of `fallow audit` does",
+          "possible_values": [
+            "dead-code",
+            "dupes",
+            "health",
+            "architecture"
+          ]
+        },
+        {
+          "name": "--skip",
+          "type": "string",
+          "required": false,
+          "description": "With `--resolved`: skip these analyses, as `--skip` of the bare run or of `fallow audit` does",
+          "possible_values": [
+            "dead-code",
+            "dupes",
+            "health",
+            "architecture"
+          ]
+        },
+        {
+          "name": "--production-dead-code",
+          "type": "bool",
+          "required": false,
+          "description": "With `--resolved`: run dead-code analysis in production mode",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--production-health",
+          "type": "bool",
+          "required": false,
+          "description": "With `--resolved`: run health analysis in production mode",
+          "possible_values": [
+            "true",
+            "false"
+          ]
+        },
+        {
+          "name": "--production-dupes",
+          "type": "bool",
+          "required": false,
+          "description": "With `--resolved`: run duplication analysis in production mode",
+          "possible_values": [
+            "true",
+            "false"
+          ]
         }
       ]
     },

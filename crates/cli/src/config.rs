@@ -130,6 +130,131 @@ pub fn run_config_with_options(input: RunConfigInput<'_>) -> ExitCode {
     }
 }
 
+/// Run `fallow config`: the view of the run with `--resolved`, else the
+/// loaded config file.
+pub fn run_config_command(
+    dispatch: &crate::DispatchContext<'_>,
+    args: &crate::cli_args::ConfigArgs,
+) -> ExitCode {
+    if args.resolved {
+        return run_resolved_view(dispatch, args);
+    }
+    run_config_with_options(RunConfigInput {
+        root: dispatch.root,
+        explicit_config: dispatch.cli.config.as_deref(),
+        path_only: args.path,
+        output: dispatch.output,
+        quiet: dispatch.quiet,
+        json_style: dispatch.json_style,
+        load_options: fallow_config::ConfigLoadOptions {
+            allow_remote_extends: dispatch.cli.allow_remote_extends,
+        },
+    })
+}
+
+/// Run `fallow config --resolved`: resolve the run of the command that
+/// `--for` names, without its side effects, and print the view of the run as
+/// JSON on stdout for each output format. A path under the root prints
+/// relative to the root. The run notices print as notes on stderr when the
+/// user selected the human format. A resolve error, and `--only` or `--skip`
+/// with a `--for` command of one analysis, print as a structured error and
+/// give exit code 2.
+pub fn run_resolved_view(
+    dispatch: &crate::DispatchContext<'_>,
+    args: &crate::cli_args::ConfigArgs,
+) -> ExitCode {
+    let output = dispatch.output;
+    if let Some(message) = single_analysis_list_error(args) {
+        return emit_input_error(&message, output);
+    }
+    let Some(inputs) = dispatch.run_inputs else {
+        return emit_input_error("this command resolves no run", output);
+    };
+    let run = match fallow_engine::resolved_run::resolve_run(inputs) {
+        Ok(run) => run,
+        Err(err) => {
+            let given = dispatch.cli.config.as_deref();
+            return emit_input_error(
+                &crate::cli_production::resolve_error_message(&err, given),
+                output,
+            );
+        }
+    };
+    let mut view = match serde_json::to_value(run.view()) {
+        Ok(view) => view,
+        Err(e) => return emit_input_error(&format!("failed to serialize the run: {e}"), output),
+    };
+    let notes = crate::cli_format::selected_output(dispatch.cli);
+    crate::report::notices::print_run_notices(run.notices(), notes, dispatch.quiet);
+    relativize_paths(&mut view, run.root().value());
+    match dispatch.json_style.serialize(&view) {
+        Ok(json) => {
+            crate::report::sink::stdoutln!("{json}");
+            ExitCode::SUCCESS
+        }
+        Err(e) => emit_input_error(&format!("failed to serialize the run: {e}"), output),
+    }
+}
+
+/// The error for `--only` or `--skip` with a `--for` command that runs one
+/// analysis: that command has no selection, so the flag would have no effect.
+fn single_analysis_list_error(args: &crate::cli_args::ConfigArgs) -> Option<String> {
+    use crate::cli_args::ForCommand;
+    let command = match args.for_command? {
+        ForCommand::Combined | ForCommand::Audit => return None,
+        ForCommand::DeadCode => "dead-code",
+        ForCommand::Dupes => "dupes",
+        ForCommand::Health => "health",
+    };
+    let flag = if !args.only.is_empty() {
+        "--only"
+    } else if !args.skip.is_empty() {
+        "--skip"
+    } else {
+        return None;
+    };
+    Some(format!(
+        "{flag} has no effect with --for {command}, because that command runs one analysis. \
+         Use --for combined or --for audit."
+    ))
+}
+
+/// Rewrite every path string under `root` relative to `root`. The `root`
+/// member keeps its absolute path, so a reader can join the others to it.
+fn relativize_paths(view: &mut serde_json::Value, root: &Path) {
+    fn walk(value: &mut serde_json::Value, prefixes: &[String]) {
+        match value {
+            serde_json::Value::String(text) => {
+                if let Some(rest) = prefixes.iter().find_map(|prefix| text.strip_prefix(prefix)) {
+                    *text = rest.replace('\\', "/");
+                }
+            }
+            serde_json::Value::Array(items) => {
+                for item in items {
+                    walk(item, prefixes);
+                }
+            }
+            serde_json::Value::Object(members) => {
+                members
+                    .values_mut()
+                    .for_each(|member| walk(member, prefixes));
+            }
+            _ => {}
+        }
+    }
+    let display = root.display().to_string();
+    let prefixes = [
+        format!("{display}/"),
+        format!("{display}\\"),
+        format!("{}/", display.replace('\\', "/")),
+    ];
+    let root_member = view.get("root").cloned();
+    walk(view, &prefixes);
+    if let (Some(member), Some(object)) = (root_member, view.as_object_mut()) {
+        object.insert("root".to_owned(), member);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

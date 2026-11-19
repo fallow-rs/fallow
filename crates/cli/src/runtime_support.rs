@@ -401,8 +401,9 @@ pub fn load_config_for_analysis(
 
 /// The side effects of a config load for a resolved run: the `loaded config`
 /// line, the config shape of the telemetry, the cache notice candidate, the
-/// stash and the notice of the workspace diagnostics, the warning for an
-/// unknown security category and the workspace patterns of the output.
+/// stash and the notice of the workspace diagnostics, the notes of the run
+/// notices, the warning for an unknown security category and the workspace
+/// patterns of the output.
 ///
 /// `given_config` is the `--config` path as the user wrote it, so the line
 /// names an explicit file as given.
@@ -451,12 +452,17 @@ pub fn on_run_resolved(
             })
             .cloned()
             .collect();
-        if !diagnostics.is_empty() && matches!(output, OutputFormat::Human) && !quiet {
-            eprintln!("{}", workspace_diagnostics_notice(diagnostics.len()));
+        let discovered = diagnostics
+            .iter()
+            .filter(|diagnostic| !diagnostic.kind.is_run_notice())
+            .count();
+        if discovered > 0 && matches!(output, OutputFormat::Human) && !quiet {
+            eprintln!("{}", workspace_diagnostics_notice(discovered));
         }
         fallow_config::stash_workspace_diagnostics(root, diagnostics);
         crate::output_runtime::set_workspace_patterns(&runnable.config().workspace_patterns);
     }
+    crate::report::notices::print_run_notices(run.notices(), output, quiet);
     warn_unknown_security_categories(&run.config().security);
 }
 

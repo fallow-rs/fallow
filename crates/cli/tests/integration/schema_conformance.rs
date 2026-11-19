@@ -451,6 +451,52 @@ fn error_envelope_conforms_to_output_schema() {
     );
 }
 
+/// `fallow config --resolved` prints its own versioned envelope, outside the
+/// `FallowOutput` union. Validate a real document against its definition, so
+/// the schema cannot omit the envelope or drift from it.
+#[test]
+fn resolved_run_view_conforms_to_output_schema() {
+    let fixture = git_fixture();
+    let schema = load_schema_root();
+    let definitions = schema
+        .get("definitions")
+        .expect("schema has a definitions object");
+    let view_schema = serde_json::json!({
+        "$schema": "http://json-schema.org/draft-07/schema#",
+        "allOf": [{ "$ref": "#/definitions/ResolvedRunView" }],
+        "definitions": definitions,
+    });
+    assert!(
+        definitions.get("ResolvedRunView").is_some(),
+        "docs/output-schema.json has no ResolvedRunView definition"
+    );
+    let validator = jsonschema::draft7::new(&view_schema).expect("compile ResolvedRunView");
+
+    for for_command in ["combined", "audit", "dupes"] {
+        let output = Command::new(fallow_bin())
+            .args(["config", "--resolved", "--for", for_command, "--root"])
+            .arg(fixture.path())
+            .args(["--format", "json", "--quiet"])
+            .env("RUST_LOG", "")
+            .env("NO_COLOR", "1")
+            .output()
+            .expect("run fallow binary");
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let value: Value = serde_json::from_str(&stdout)
+            .unwrap_or_else(|err| panic!("stdout is not JSON: {err}\nstdout:\n{stdout}"));
+        assert_eq!(value["kind"], "resolved-run", "{value}");
+        let errors: Vec<String> = validator
+            .iter_errors(&value)
+            .map(|err| format!("  at {} : {err}", err.instance_path()))
+            .collect();
+        assert!(
+            errors.is_empty(),
+            "the resolved run view does not conform to docs/output-schema.json:\n{}",
+            errors.join("\n"),
+        );
+    }
+}
+
 /// A `--kill-matrix-for` target is always `complete` or `incomplete`. The
 /// schema must not offer the run-level `unavailable` state for a target.
 #[test]

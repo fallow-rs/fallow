@@ -437,13 +437,26 @@ fn a_dupes_baseline_flag_is_dropped_with_duplicates_enabled_false() {
     let json = report(&output);
 
     assert_eq!(sections(&json), [true, true, false], "{json:#}");
+    assert!(has_inert_dupes_baseline(&json), "{json:#}");
     assert!(
-        output
-            .stderr
-            .contains("--dupes-baseline has no effect: duplicates.enabled is false"),
-        "stderr: {}",
+        !output.stderr.contains("--dupes-baseline has no effect"),
+        "a JSON run prints no note: {}",
         output.stderr
     );
+}
+
+/// Whether the root `workspace_diagnostics` of the audit names the inert
+/// `--dupes-baseline` flag.
+fn has_inert_dupes_baseline(json: &serde_json::Value) -> bool {
+    json["workspace_diagnostics"]
+        .as_array()
+        .is_some_and(|entries| {
+            entries.iter().any(|entry| {
+                entry["kind"] == "inert-flag"
+                    && entry["flag"] == "--dupes-baseline"
+                    && entry["key"] == "duplicates.enabled"
+            })
+        })
 }
 
 /// The review brief keeps every sub-analysis, also when
@@ -477,10 +490,8 @@ fn a_dupes_baseline_flag_fails_under_audit_dupes_false_only() {
     let output = audit(tmp.path(), &args);
     assert_eq!(output.code, 0, "stdout: {}", output.stdout);
     assert!(
-        output
-            .stderr
-            .contains("--dupes-baseline has no effect: duplicates.enabled is false"),
-        "stderr: {}",
-        output.stderr
+        has_inert_dupes_baseline(&report(&output)),
+        "{}",
+        output.stdout
     );
 }

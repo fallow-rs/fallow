@@ -196,6 +196,24 @@ pub fn serialize_audit_programmatic_json(
             duplication,
             complexity,
             diff_risk: output.diff_risk,
+            workspace_diagnostics: crate::audit_run_notices(
+                [
+                    output
+                        .dead_code
+                        .as_ref()
+                        .map(|section| section.output.workspace_diagnostics.as_slice()),
+                    output
+                        .duplication
+                        .as_ref()
+                        .map(|section| section.output.workspace_diagnostics.as_slice()),
+                    output
+                        .complexity
+                        .as_ref()
+                        .map(|section| section.workspace_diagnostics.as_slice()),
+                ]
+                .into_iter()
+                .flatten(),
+            ),
             next_steps: output.next_steps,
         },
         output.telemetry_analysis_run_id.as_deref(),

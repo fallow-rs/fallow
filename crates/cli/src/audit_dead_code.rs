@@ -3,33 +3,41 @@
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use fallow_config::ProductionAnalysis;
-use fallow_engine::project_config::{self, ConfigFileOptions};
+use fallow_config::PlannedAnalysis;
+use fallow_engine::resolved_run::ResolvedRun;
 use rustc_hash::FxHashSet;
 
-use super::{
-    AuditOptions, AuditTypeAwareOptions, audit_production_flags, build_base_audit_options,
-};
+use super::{AuditOptions, AuditTypeAwareOptions, build_base_audit_options, runs};
 use crate::check::{CheckOptions, CheckResult, IssueFilters, TraceOptions};
 
+/// One dead-code pass of an audit side.
+#[derive(Clone, Copy)]
+pub(super) struct CheckPass<'a> {
+    /// The resolved run of the side.
+    pub(super) run: &'a ResolvedRun,
+    pub(super) changed_since: Option<&'a str>,
+    /// `None` when the caller could not express a focus set for this
+    /// analysis root.
+    pub(super) changed_files: Option<&'a FxHashSet<PathBuf>>,
+    pub(super) retain_modules_for_health: bool,
+    pub(super) snapshot: fallow_config::AnalysisSnapshot,
+}
+
 /// Run dead code analysis for the audit pipeline.
-/// `changed_files` is `None` when the caller could not express a focus set for
-/// this analysis root; results are then left unfiltered rather than filtered
+/// Without `changed_files`, results are left unfiltered rather than filtered
 /// against an empty set, which would drop every finding. A base pass, and a
 /// head pass under `--gate new-only`, keep every unused file and unused export
 /// (see [`scope_audit_dead_code`]).
 pub(super) fn run_audit_check<'a>(
     opts: &'a AuditOptions<'a>,
     type_aware: AuditTypeAwareOptions<'a>,
-    changed_since: Option<&'a str>,
-    changed_files: Option<&FxHashSet<PathBuf>>,
-    retain_modules_for_health: bool,
-    analysis_snapshot: fallow_config::AnalysisSnapshot,
+    pass: CheckPass<'a>,
 ) -> Result<Option<CheckResult>, ExitCode> {
-    if !opts.analyses.dead_code {
+    let dead_code = opts.analyses.dead_code;
+    let Some(runnable) = runs::sub_analysis(pass.run, PlannedAnalysis::DeadCode, dead_code) else {
         return Ok(None);
-    }
-    let keep_unused_code = match analysis_snapshot {
+    };
+    let keep_unused_code = match pass.snapshot {
         fallow_config::AnalysisSnapshot::Base => true,
         fallow_config::AnalysisSnapshot::Current => {
             matches!(opts.gate, fallow_config::AuditGate::NewOnly)
@@ -43,7 +51,7 @@ pub(super) fn run_audit_check<'a>(
     // rides the retained-modules path. Force retention on the brief path even
     // when health does not share the dead-code parse (mismatched production
     // modes), so the graph is available before health consumes the shared parse.
-    let retain_modules_for_health = retain_modules_for_health || opts.brief;
+    let retain_modules_for_health = pass.retain_modules_for_health || opts.brief;
     let trace_opts = TraceOptions {
         trace_export: None,
         trace_file: None,
@@ -63,7 +71,7 @@ pub(super) fn run_audit_check<'a>(
         allow_remote_extends: opts.allow_remote_extends,
         fail_on_issues: false,
         filters: &filters,
-        changed_since,
+        changed_since: pass.changed_since,
         // Audit compares head and base against its own changed files. The
         // scope keeps the unused code that the change made unused outside the
         // changed files.
@@ -83,9 +91,9 @@ pub(super) fn run_audit_check<'a>(
         // this sub-pass is change-scoped and could only stand down again.
         fail_on_stale_baseline: false,
         sarif_file: None,
-        production: audit_production_flags(opts).mode(ProductionAnalysis::DeadCode),
-        production_override: opts.production_dead_code,
-        run: None,
+        production: *runnable.production().value(),
+        production_override: Some(*runnable.production().value()),
+        run: Some(runnable),
         workspace: opts.workspace,
         changed_workspaces: opts.changed_workspaces,
         group_by: opts.group_by,
@@ -117,12 +125,12 @@ pub(super) fn run_audit_check<'a>(
         },
         retain_modules_for_health,
         defer_performance: false,
-        analysis_snapshot,
+        analysis_snapshot: pass.snapshot,
         explain_skipped: opts.explain_skipped,
         surface: crate::check::CheckSurface::DeadCode,
     }) {
         Ok(mut result) => {
-            if let Some(changed_files) = changed_files {
+            if let Some(changed_files) = pass.changed_files {
                 scope_audit_dead_code(opts, &mut result.results, changed_files, keep_unused_code);
             }
             Ok(Some(result))
@@ -174,6 +182,8 @@ fn scope_audit_dead_code(
 
 pub(super) struct BaseOwnConfigInput<'a> {
     pub(super) opts: &'a AuditOptions<'a>,
+    /// The head run, for the base copy of its config file.
+    pub(super) head: &'a ResolvedRun,
     /// The config file of the head run.
     pub(super) current_config_path: Option<&'a Path>,
     pub(super) base_root: &'a Path,
@@ -189,10 +199,11 @@ pub(super) struct BaseOwnConfigInput<'a> {
 /// `fallow_api::audit_run::AuditKeySnapshot::own_config_unused_code`).
 ///
 /// This second dead-code pass runs only when the change touched the config
-/// file of the head run. It returns `None` when the change did not touch it,
-/// when the base config does not load, and when the base config turns the
-/// `unused-files` or `unused-exports` rule off. Then the base pass with the
-/// head config is the only evidence. A finding of that pass in code that the
+/// file of the head run, with the dead-code production mode of the head run.
+/// It returns `None` when the change did not touch it, when the base config
+/// does not resolve, and when the base config turns the `unused-files` or
+/// `unused-exports` rule off. Then the base pass with the head config is the
+/// only evidence. A finding of that pass in code that the
 /// base config ignores also counts as unused under the base config (see
 /// `fallow_api::audit_run::own_config_unused_code_keys`).
 pub(super) fn base_own_config_unused_code(
@@ -200,6 +211,7 @@ pub(super) fn base_own_config_unused_code(
 ) -> Option<FxHashSet<String>> {
     let BaseOwnConfigInput {
         opts,
+        head,
         current_config_path,
         base_root,
         base_cache_dir,
@@ -214,25 +226,8 @@ pub(super) fn base_own_config_unused_code(
     }
     // With `--config`, the base config is the base version of that file. A
     // file that the change added has no base version, so discovery decides.
-    let base_config_path = opts
-        .config_path
-        .as_ref()
-        .map(|_| base_root.join(&relative))
-        .filter(|path| path.is_file())
-        .or_else(|| fallow_engine::project_config::find_config_file(base_root));
-    // A config that does not load would make the pass print an error.
-    if let Some(path) = base_config_path.as_deref()
-        && project_config::load_config_file(
-            base_root,
-            Some(path),
-            ConfigFileOptions {
-                allow_remote_extends: opts.allow_remote_extends,
-            },
-        )
-        .is_err()
-    {
-        return None;
-    }
+    let run = runs::own_config_run(head, base_root, opts.no_cache)?;
+    let base_config_path = run.config_file().value().clone();
     let own_opts = build_base_audit_options(
         opts,
         base_root,
@@ -246,15 +241,14 @@ pub(super) fn base_own_config_unused_code(
         enabled: Some(false),
         ..AuditTypeAwareOptions::default()
     };
-    let check = run_audit_check(
-        &own_opts,
-        syntactic,
-        None,
-        Some(focus),
-        false,
-        fallow_config::AnalysisSnapshot::Base,
-    )
-    .ok()??;
+    let pass = CheckPass {
+        run: &run,
+        changed_since: None,
+        changed_files: Some(focus),
+        retain_modules_for_health: false,
+        snapshot: fallow_config::AnalysisSnapshot::Base,
+    };
+    let check = run_audit_check(&own_opts, syntactic, pass).ok()??;
     let rules = &check.config.rules;
     if rules.unused_files == fallow_config::Severity::Off
         || rules.unused_exports == fallow_config::Severity::Off

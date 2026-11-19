@@ -70,7 +70,7 @@ Every fallow command with its purpose and key flags. The table is regenerated fr
 | `rule-pack-schema` | Print the JSON Schema for rule pack files |  |
 | `rule-pack` | Manage declarative rule packs (policy-as-code) |  |
 | `guard` | Show which architecture rules apply to files before changing them | `files` |
-| `config` | Show the loaded config path and resolved config (verifies which `.fallowrc.json` is in effect) | `--path` |
+| `config` | Show the loaded config path and resolved config (verifies which `.fallowrc.json` is in effect); `--resolved` shows each decision of a run and its cause | `--path`, `--resolved`, `--for`, `--only`, `--skip`, `--production-dead-code`, `--production-health`, `--production-dupes` |
 | `recommend` | Recommend a project-tailored config for an agent to author |  |
 | `list` | Inspect project structure | `--files`, `--entry-points`, `--plugins`, `--boundaries`, `--workspaces`, `--entry-weight` |
 | `workspaces` | Inspect monorepo workspaces + discovery diagnostics (shorthand for `list --workspaces`) | (no flags) |
@@ -2040,7 +2040,10 @@ Prints the loaded config file path and the resolved config (with `extends` merge
 ```bash
 fallow config            # path on first line, JSON below
 fallow config --path     # only the path (scriptable)
+fallow config --resolved --for audit   # each decision of an audit run and its cause
 ```
+
+`--resolved` prints the decisions of a run as JSON: for each analysis whether it runs and its production mode, and the run settings, each with its source (a flag, an environment variable by name, a config key with its file, or a default). `--for` picks the command whose rules apply (`combined`, `audit`, `dead-code`, `dupes`, `health`); the default is the bare run. A config that does not resolve exits 2 with a structured error.
 
 ### Flags
 
@@ -2048,6 +2051,13 @@ fallow config --path     # only the path (scriptable)
 | Flag | Type | Default | Description |
 |---|---|---|---|
 | `--path` | `bool` | `false` | Print only the config file path, no JSON |
+| `--resolved` | `bool` | `false` | Print each decision of a run and its cause as JSON: for each analysis whether it runs and its production mode, and the run settings, each with the flag, environment variable, config key or default that gave it. Environment variables show by name only |
+| `--for` | `combined\|audit\|dead-code\|dupes\|health` | - | The command whose rules `--resolved` applies. Without it, the rules of the bare `fallow` run apply |
+| `--only` | `dead-code\|dupes\|health\|architecture` | - | With `--resolved`: run only these analyses, as `--only` of the bare run or of `fallow audit` does |
+| `--skip` | `dead-code\|dupes\|health\|architecture` | - | With `--resolved`: skip these analyses, as `--skip` of the bare run or of `fallow audit` does |
+| `--production-dead-code` | `bool` | `false` | With `--resolved`: run dead-code analysis in production mode |
+| `--production-health` | `bool` | `false` | With `--resolved`: run health analysis in production mode |
+| `--production-dupes` | `bool` | `false` | With `--resolved`: run duplication analysis in production mode |
 
 Common global flags for this command: [`--format`](#global-flags), [`--quiet`](#global-flags), [`--config`](#global-flags), [`--root`](#global-flags).
 <!-- generated:flags:config:end -->

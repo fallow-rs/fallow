@@ -304,7 +304,7 @@ pub fn telemetry_workflow_for_command(
             | Command::PluginCheck
             | Command::RulePackSchema
             | Command::RulePack { .. }
-            | Command::Config { .. }
+            | Command::Config(_)
             | Command::Recommend
             | Command::CiTemplate { .. }
             | Command::Migrate { .. }

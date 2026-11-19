@@ -3,8 +3,8 @@ use std::process::ExitCode;
 use std::sync::OnceLock;
 use std::time::{Duration, Instant};
 
-use fallow_config::{AuditGate, AuditWorsened, OutputFormat, ProductionAnalysis};
-use fallow_engine::project_config::ProductionFlags;
+use fallow_config::{AuditGate, AuditWorsened, OutputFormat, PlannedAnalysis};
+use fallow_engine::resolved_run::ResolvedRun;
 use rustc_hash::{FxHashMap, FxHashSet};
 use xxhash_rust::xxh3::xxh3_64;
 
@@ -392,7 +392,9 @@ use security_scan::compute_security_step_signals;
 
 #[path = "audit_dead_code.rs"]
 mod dead_code;
-use dead_code::run_audit_check;
+use dead_code::{CheckPass, run_audit_check};
+#[path = "audit_runs.rs"]
+mod runs;
 
 #[path = "audit_routing.rs"]
 pub mod routing;
@@ -483,10 +485,12 @@ impl BaseCheckout for BaseWorktree {
 }
 
 /// The CLI runners of `fallow audit`: `execute_check`, `execute_dupes` and
-/// `execute_health`, with baselines, type-aware analysis, runtime coverage,
+/// `execute_health_in`, with baselines, type-aware analysis, runtime coverage,
 /// the reusable base worktree and the base-snapshot cache.
 struct CliAuditBackend<'a> {
     opts: &'a AuditOptions<'a>,
+    /// The resolved run of the head side.
+    head: &'a ResolvedRun,
     /// The checkout that owns the base worktree and its reusable cache. It
     /// differs from `opts.root` for `--staged`, which analyzes a temporary
     /// worktree.
@@ -529,6 +533,7 @@ impl AuditBackend for CliAuditBackend<'_> {
     fn run_head(&self, changed_files: &FxHashSet<PathBuf>) -> Result<HeadAnalyses, ExitCode> {
         run_audit_head_analyses(
             self.opts,
+            self.head,
             self.type_aware,
             Some(self.base_ref),
             changed_files,
@@ -564,6 +569,7 @@ impl AuditBackend for CliAuditBackend<'_> {
     ) -> Result<HeadAnalyses, ExitCode> {
         run_audit_base_analyses(
             self.opts,
+            self.head,
             self.type_aware,
             BaseAnalysisRoots {
                 host: self.host_root,
@@ -629,6 +635,7 @@ struct BaseAnalysisRoots<'a> {
 /// results stay unscoped.
 fn run_audit_base_analyses(
     opts: &AuditOptions<'_>,
+    head: &ResolvedRun,
     type_aware: AuditTypeAwareOptions<'_>,
     roots: BaseAnalysisRoots<'_>,
     focus: Option<&FxHashSet<PathBuf>>,
@@ -651,23 +658,19 @@ fn run_audit_base_analyses(
         &base_cache_dir,
         &base_coverage,
     );
-    let share_dead_code_parse_with_health = opts.analyses.health
-        && audit_production_flags(opts)
-            .modes()
-            .dead_code_matches_health();
-
+    let run = runs::worktree_run(head, base_root, opts, "--base")?;
+    let share_dead_code_parse_with_health =
+        opts.analyses.health && run.production_modes().dead_code_matches_health();
+    let pass = CheckPass {
+        run: &run,
+        changed_since: None,
+        changed_files: focus,
+        retain_modules_for_health: share_dead_code_parse_with_health,
+        snapshot: fallow_config::AnalysisSnapshot::Base,
+    };
     let (check_res, dupes_res) = rayon::join(
-        || {
-            run_audit_check(
-                &base_opts,
-                type_aware,
-                None,
-                focus,
-                share_dead_code_parse_with_health,
-                fallow_config::AnalysisSnapshot::Base,
-            )
-        },
-        || run_audit_dupes(&base_opts, None, focus, None),
+        || run_audit_check(&base_opts, type_aware, pass),
+        || run_audit_dupes(&base_opts, &run, None, focus, None),
     );
     let mut check = check_res?;
     let dupes = dupes_res?;
@@ -683,13 +686,14 @@ fn run_audit_base_analyses(
     } else {
         None
     };
-    let health = run_audit_health(&base_opts, None, shared_parse, true)?;
+    let health = run_audit_health(&base_opts, &run, None, shared_parse, true)?;
     if let Some(check) = check.as_mut() {
         check.shared_parse = None;
     }
     let own_config_unused_code =
         dead_code::base_own_config_unused_code(&dead_code::BaseOwnConfigInput {
             opts,
+            head,
             current_config_path: current_config_path.as_deref(),
             base_root,
             base_cache_dir: &base_cache_dir,
@@ -704,15 +708,6 @@ fn run_audit_base_analyses(
         brief_diff_evidence: None,
         own_config_unused_code,
     })
-}
-
-fn audit_production_flags(opts: &AuditOptions<'_>) -> ProductionFlags {
-    ProductionFlags::from_cli(
-        opts.production,
-        opts.production_dead_code,
-        opts.production_health,
-        opts.production_dupes,
-    )
 }
 
 struct AuditResultParts {
@@ -806,23 +801,23 @@ pub struct AuditReviewBenchmarkResult {
 /// [`run_audit_base_analyses`], which operates on an isolated worktree.
 fn run_audit_head_analyses(
     opts: &AuditOptions<'_>,
+    run: &ResolvedRun,
     type_aware: AuditTypeAwareOptions<'_>,
     changed_since: Option<&str>,
     changed_files: &FxHashSet<PathBuf>,
 ) -> Result<HeadAnalyses, ExitCode> {
-    let modes = audit_production_flags(opts).modes();
+    let modes = run.production_modes();
     let share_dead_code_parse_with_health =
         opts.analyses.health && modes.dead_code_matches_health();
     let share_dead_code_files_with_dupes = opts.analyses.dupes && modes.all_match();
-
-    let mut check = run_audit_check(
-        opts,
-        type_aware,
+    let pass = CheckPass {
+        run,
         changed_since,
-        Some(changed_files),
-        share_dead_code_parse_with_health,
-        fallow_config::AnalysisSnapshot::Current,
-    )?;
+        changed_files: Some(changed_files),
+        retain_modules_for_health: share_dead_code_parse_with_health,
+        snapshot: fallow_config::AnalysisSnapshot::Current,
+    };
+    let mut check = run_audit_check(opts, type_aware, pass)?;
     let dupes_files = if share_dead_code_files_with_dupes {
         check
             .as_ref()
@@ -830,7 +825,7 @@ fn run_audit_head_analyses(
     } else {
         None
     };
-    let dupes = run_audit_dupes(opts, changed_since, Some(changed_files), dupes_files)?;
+    let dupes = run_audit_dupes(opts, run, changed_since, Some(changed_files), dupes_files)?;
     let mut brief_diff_evidence = None;
     // Compute the impact closure AND the exports-aware public-export key
     // set for the review brief BEFORE health consumes the shared parse (which
@@ -886,7 +881,7 @@ fn run_audit_head_analyses(
     } else {
         None
     };
-    let health = run_audit_health(opts, changed_since, shared_parse, false)?;
+    let health = run_audit_health(opts, run, changed_since, shared_parse, false)?;
     // The brief facts above hold what the review needs from the graph, so a
     // graph that health did not consume is released here.
     if let Some(check) = check.as_mut() {
@@ -1257,24 +1252,21 @@ fn audit_changed_files(
 }
 
 /// Run the audit pipeline: resolve base ref, run analyses, compute verdict.
-pub fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
-    execute_audit_with_type_aware(opts, AuditTypeAwareOptions::default())
+/// Run the audit of `opts` with the run that its options resolve.
+#[cfg(test)]
+fn execute_audit(opts: &AuditOptions<'_>) -> Result<AuditResult, ExitCode> {
+    let head = runs::options_run(opts)?;
+    execute_audit_for_host(opts, AuditTypeAwareOptions::default(), opts.root, &head)
 }
 
-pub fn execute_audit_with_type_aware(
-    opts: &AuditOptions<'_>,
-    type_aware: AuditTypeAwareOptions<'_>,
-) -> Result<AuditResult, ExitCode> {
-    execute_audit_for_host(opts, type_aware, opts.root)
-}
-
-/// Run the audit of `opts.root`. `host_root` is the checkout that owns the
-/// base worktree. It is not `opts.root` when `opts.root` is the temporary
-/// worktree of `--staged`.
+/// Run the audit of `opts.root` with the resolved run `head`. `host_root` is
+/// the checkout that owns the base worktree. It is not `opts.root` when
+/// `opts.root` is the temporary worktree of `--staged`.
 fn execute_audit_for_host(
     opts: &AuditOptions<'_>,
     type_aware: AuditTypeAwareOptions<'_>,
     host_root: &Path,
+    head: &ResolvedRun,
 ) -> Result<AuditResult, ExitCode> {
     let start = Instant::now();
 
@@ -1295,8 +1287,12 @@ fn execute_audit_for_host(
     }
     let changed_files_count = changed_files.len();
 
+    let staged = (host_root != opts.root)
+        .then(|| runs::worktree_run(head, opts.root, opts, "--staged"))
+        .transpose()?;
     let backend = CliAuditBackend {
         opts,
+        head: staged.as_ref().unwrap_or(head),
         host_root,
         type_aware,
         base_ref: &base_ref,
@@ -1501,12 +1497,15 @@ pub fn create_audit_review_benchmark_corpus(
     changed_files: &[PathBuf],
     threads: usize,
 ) -> Result<AuditReviewBenchmarkCorpus, ExitCode> {
+    let (root, changed_files) = runs::canonical_changed_files(root, changed_files);
+    let root = root.as_path();
     let config_path = None;
     let cache_dir = root.join(".fallow-cache-benchmark");
     let opts = audit_review_benchmark_options(root, &config_path, &cache_dir, threads);
-    let changed_files = changed_files.iter().cloned().collect::<FxHashSet<_>>();
+    let run = runs::options_run(&opts)?;
     let mut head = run_audit_head_analyses(
         &opts,
+        &run,
         AuditTypeAwareOptions::default(),
         None,
         &changed_files,
@@ -1593,12 +1592,13 @@ pub fn benchmark_audit_analyses(
     changed_files: &[PathBuf],
     threads: usize,
 ) -> Result<AuditAnalysesBenchmarkResult, ExitCode> {
+    let (head_root, changed_files) = runs::canonical_changed_files(head_root, changed_files);
+    let head_root = head_root.as_path();
     let config_path = None;
     let cache_dir = head_root.join(".fallow-cache-benchmark");
     let mut opts = audit_review_benchmark_options(head_root, &config_path, &cache_dir, threads);
     // The review brief has its own benchmark and reads git history.
     opts.brief = false;
-    let changed_files = changed_files.iter().cloned().collect::<FxHashSet<_>>();
     let focus = fallow_api::audit_run::base_focus_files(&changed_files, &[]);
     // Production canonicalizes the base root, because a session
     // canonicalizes its root and a focus set under a symbolic link would
@@ -1606,18 +1606,16 @@ pub fn benchmark_audit_analyses(
     let base_root = dunce::canonicalize(base_root).unwrap_or_else(|_| base_root.to_path_buf());
     let base_root = base_root.as_path();
     let base_focus = fallow_api::audit_run::remap_focus_files(&focus, head_root, base_root);
+    let run = runs::options_run(&opts)?;
     let (head, base) = rayon::join(
         || {
-            run_audit_head_analyses(
-                &opts,
-                AuditTypeAwareOptions::default(),
-                None,
-                &changed_files,
-            )
+            let type_aware = AuditTypeAwareOptions::default();
+            run_audit_head_analyses(&opts, &run, type_aware, None, &changed_files)
         },
         || {
             run_audit_base_analyses(
                 &opts,
+                &run,
                 AuditTypeAwareOptions::default(),
                 BaseAnalysisRoots {
                     host: opts.root,
@@ -2429,34 +2427,25 @@ fn empty_audit_result(
 
 /// Run duplication analysis for the audit pipeline.
 ///
-/// Reads duplication settings from the project config file so that user
-/// options like `ignoreImports`, `crossLanguage`, and `skipLocal` are
-/// respected (same as combined mode).
+/// Reads the duplication settings of the duplication analysis of `run`, so
+/// that user options like `ignoreImports`, `crossLanguage`, and `skipLocal`
+/// are respected (same as combined mode).
 fn run_audit_dupes<'a>(
     opts: &'a AuditOptions<'a>,
+    run: &'a ResolvedRun,
     changed_since: Option<&'a str>,
     changed_files: Option<&'a FxHashSet<PathBuf>>,
     pre_discovered: Option<Vec<fallow_types::discover::DiscoveredFile>>,
 ) -> Result<Option<DupesResult>, ExitCode> {
-    if !opts.analyses.dupes {
+    let Some(runnable) = runs::sub_analysis(run, PlannedAnalysis::Duplication, opts.analyses.dupes)
+    else {
         return Ok(None);
-    }
-    let dupes_cfg = crate::load_config_for_analysis(
-        opts.root,
-        opts.config_path,
-        crate::ConfigLoadOptions {
-            output: opts.output,
-            no_cache: opts.no_cache,
-            threads: opts.threads,
-            production_override: audit_production_flags(opts)
-                .override_for(ProductionAnalysis::Dupes),
-            quiet: opts.quiet,
-            allow_remote_extends: opts.allow_remote_extends,
-        },
-        fallow_config::ProductionAnalysis::Dupes,
-    )?
-    .duplicates;
-    let dupes_opts = build_audit_dupes_options(opts, changed_since, changed_files, &dupes_cfg);
+    };
+    let dupes_cfg = &runnable.config().duplicates;
+    let mut dupes_opts = build_audit_dupes_options(opts, changed_since, changed_files, dupes_cfg);
+    dupes_opts.production = *runnable.production().value();
+    dupes_opts.production_override = Some(dupes_opts.production);
+    dupes_opts.run = Some(runnable);
     let dupes_run = if let Some(files) = pre_discovered {
         crate::dupes::execute_dupes_with_files(&dupes_opts, files)
     } else {
@@ -2504,8 +2493,8 @@ fn build_audit_dupes_options<'a>(
         fail_on_stale_baseline: false,
         // Audit rejects `--fail-on-issues`; its own verdict gates clone groups.
         fail_on_issues: false,
-        production: audit_production_flags(opts).mode(ProductionAnalysis::Dupes),
-        production_override: opts.production_dupes,
+        production: false,
+        production_override: None,
         run: None,
         trace: None,
         changed_since,
@@ -2536,13 +2525,15 @@ fn build_audit_dupes_options<'a>(
 /// recorded against the HEAD checkout; see `base_worktree_coverage_root`.
 fn run_audit_health<'a>(
     opts: &'a AuditOptions<'a>,
+    run: &'a ResolvedRun,
     changed_since: Option<&'a str>,
     shared_parse: Option<fallow_engine::health::HealthSharedParseData>,
     coverage_relocated: bool,
 ) -> Result<Option<HealthResult>, ExitCode> {
-    if !opts.analyses.health {
+    let Some(runnable) = runs::sub_analysis(run, PlannedAnalysis::Health, opts.analyses.health)
+    else {
         return Ok(None);
-    }
+    };
     let runtime_coverage = match opts.runtime_coverage {
         Some(path) => Some(crate::health::coverage::prepare_options(
             path,
@@ -2554,12 +2545,15 @@ fn run_audit_health<'a>(
         None => None,
     };
 
-    let health_opts =
+    let mut health_opts =
         build_audit_health_options(opts, changed_since, runtime_coverage, coverage_relocated);
+    health_opts.production = *runnable.production().value();
+    health_opts.production_override = Some(health_opts.production);
     let health_run = if let Some(shared) = shared_parse {
-        crate::health::execute_health_with_shared_parse(&health_opts, shared, None)
+        let run = Some(runnable);
+        crate::health::execute_health_with_shared_parse_in(&health_opts, shared, None, run)
     } else {
-        crate::health::execute_health(&health_opts)
+        crate::health::execute_health_in(&health_opts, Some(runnable))
     };
     match health_run {
         Ok(mut r) => {
@@ -2602,8 +2596,8 @@ fn build_audit_health_options<'a>(
         },
         top: None,
         sort: fallow_engine::health::HealthSort::Cyclomatic,
-        production: audit_production_flags(opts).mode(ProductionAnalysis::Health),
-        production_override: opts.production_health,
+        production: false,
+        production_override: None,
         allow_remote_extends: opts.allow_remote_extends,
         changed_since,
         diff_index: None,
@@ -2676,10 +2670,12 @@ pub use output::{
     print_audit_findings, print_audit_result,
 };
 
-/// Run and print one audit. `host_root` is the checkout of `--staged` when
-/// `opts.root` is its temporary worktree, otherwise `None`.
+/// Run and print one audit with the resolved run `head`. `host_root` is the
+/// checkout of `--staged` when `opts.root` is its temporary worktree,
+/// otherwise `None`.
 pub fn run_audit_with_type_aware(
     opts: &AuditOptions<'_>,
+    head: &ResolvedRun,
     gate_marker: Option<&str>,
     type_aware: AuditTypeAwareOptions<'_>,
     host_root: Option<&Path>,
@@ -2700,7 +2696,7 @@ pub fn run_audit_with_type_aware(
         scope: opts.scope.clone(),
         ..*opts
     };
-    match execute_audit_for_host(&resolved_opts, type_aware, host_root) {
+    match execute_audit_for_host(&resolved_opts, type_aware, host_root, head) {
         Ok(mut result) => {
             let _ = record_audit_impact(opts, host_root, gate_marker, &result);
             let report_exit = print_audit_command_result(opts, &mut result, opts.json_style);
@@ -2775,14 +2771,15 @@ fn print_audit_command_result(
 /// The MCP `decision_surface` tool wraps this command. It is callable without the
 /// full pipeline because it reuses `execute_audit` in brief mode (changed-code
 /// scope), not bare `fallow`.
-pub fn run_decision_surface(opts: &AuditOptions<'_>) -> ExitCode {
+pub fn run_decision_surface(opts: &AuditOptions<'_>, head: &ResolvedRun) -> ExitCode {
     // Force brief mode: the decision surface is only computed on the brief path.
     let brief_opts = AuditOptions {
         brief: true,
         scope: opts.scope.clone(),
         ..*opts
     };
-    match execute_audit(&brief_opts) {
+    let type_aware = AuditTypeAwareOptions::default();
+    match execute_audit_for_host(&brief_opts, type_aware, opts.root, head) {
         Ok(result) => {
             crate::audit_brief::print_decision_surface_result(&result, opts.quiet, opts.json_style)
         }

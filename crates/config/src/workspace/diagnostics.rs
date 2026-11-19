@@ -440,7 +440,9 @@ static WORKSPACE_DIAGNOSTICS: OnceLock<Mutex<FxHashMap<PathBuf, Vec<WorkspaceDia
 /// ([`WorkspaceDiagnosticKind::is_plugin_stage`]) are preserved on the same
 /// grounds: framework plugins run after config load, and
 /// [`record_plugin_config_diagnostics`] refreshes their set in one operation
-/// (issue #2736).
+/// (issue #2736). An `inert-flag` notice is preserved too: a command records
+/// it from its flags before the config load of the run stashes the
+/// workspace-discovery set, and the flags of a process do not change.
 ///
 /// The stored set is deduplicated on the whole `(kind, path)` the way every
 /// fold is: a repository that declares one glob in both `package.json` and
@@ -458,6 +460,7 @@ pub fn stash_workspace_diagnostics(root: &Path, diagnostics: Vec<WorkspaceDiagno
                         || d.kind.is_analysis_stage()
                         || d.kind.is_health_stage()
                         || d.kind.is_plugin_stage()
+                        || matches!(d.kind, WorkspaceDiagnosticKind::InertFlag { .. })
                 })
                 .cloned()
                 .collect()

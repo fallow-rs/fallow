@@ -95,6 +95,33 @@ pub fn load_project_session(
     })
 }
 
+/// The log lines of the run notices other than the config fallback, such as
+/// a shadowed config file: a warning for a notice that degrades the analysis.
+fn notice_messages(
+    project_root: &Path,
+    notices: &[fallow_config::WorkspaceDiagnostic],
+) -> impl Iterator<Item = (MessageType, String)> {
+    notices
+        .iter()
+        .filter(|notice| {
+            !matches!(
+                notice.kind,
+                fallow_config::WorkspaceDiagnosticKind::ConfigLoadFellBack { .. }
+            )
+        })
+        .map(move |notice| {
+            let level = if notice.degrades_analysis {
+                MessageType::WARNING
+            } else {
+                MessageType::INFO
+            };
+            (
+                level,
+                format!("{}: {}", project_root.display(), notice.message),
+            )
+        })
+}
+
 /// The run inputs of a project root: the editor settings and the
 /// environment of the server process now.
 fn project_inputs(options: &LspInitializationOptions, project_root: &Path) -> RunInputs {
@@ -347,6 +374,9 @@ pub fn analyze_project_root(
         |warning| (MessageType::WARNING, warning),
     );
     input.config_messages.push(message);
+    input
+        .config_messages
+        .extend(notice_messages(input.project_root, sources.notices()));
 
     let duplicates_config = input.duplication_options.map_or_else(
         || session.config().duplicates.clone(),

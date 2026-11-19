@@ -81,6 +81,11 @@ fn project() -> (tempfile::TempDir, std::path::PathBuf) {
 
 /// Analyze `root` with the initialization options `options`.
 fn analyze(root: &Path, options: &Value) -> Outcome {
+    analyze_in(root, options, &Arc::default())
+}
+
+/// Analyze `root` with `options` and the session store `sessions`.
+fn analyze_in(root: &Path, options: &Value, sessions: &SharedSessionStore) -> Outcome {
     let parsed = parse_initialization_options(Some(options));
     let mut output = EditorAnalysisOutput::new(
         EditorAnalysisResults::default(),
@@ -101,7 +106,7 @@ fn analyze(root: &Path, options: &Value) -> Outcome {
         run_cancellation: &cancellation,
         changed_files: None,
         global_changed_since_requested: false,
-        sessions: &Arc::default(),
+        sessions,
         parse_work: &mut RunParseWork::default(),
         merged_analysis: &mut output,
         merged_inline_complexity: &mut Vec::new(),
@@ -289,6 +294,44 @@ fn discovered_broken_workspace_glob_falls_back() {
     assert_eq!(warnings.len(), 1, "{warnings:?}");
     assert!(warnings[0].contains("config error for"), "{warnings:?}");
     assert!(outcome.reports_unused_file("orphan.ts"));
+}
+
+#[test]
+fn a_shadowed_config_file_logs_a_warning_notice() {
+    let (_dir, root) = project();
+    std::fs::write(root.join(".fallowrc.json"), "{}").expect("config");
+    std::fs::write(root.join("fallow.toml"), "").expect("shadowed config");
+
+    let outcome = analyze(&root, &json!({}));
+
+    assert_eq!(outcome.result, Ok(()));
+    let warnings = outcome.warnings();
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(
+        warnings[0].contains("Two fallow config files exist"),
+        "{warnings:?}"
+    );
+}
+
+#[test]
+fn a_run_that_reuses_a_kept_session_logs_its_notices() {
+    let (_dir, root) = project();
+    std::fs::write(root.join(".fallowrc.json"), "{}").expect("config");
+    std::fs::write(root.join("fallow.toml"), "").expect("shadowed config");
+    let sessions: SharedSessionStore = Arc::new(Mutex::new(EditorSessionStore::new(true)));
+
+    let first = analyze_in(&root, &json!({}), &sessions);
+    let second = analyze_in(&root, &json!({}), &sessions);
+
+    for outcome in [&first, &second] {
+        assert_eq!(outcome.result, Ok(()));
+        let warnings = outcome.warnings();
+        assert_eq!(warnings.len(), 1, "{warnings:?}");
+        assert!(
+            warnings[0].contains("Two fallow config files exist"),
+            "{warnings:?}"
+        );
+    }
 }
 
 #[test]

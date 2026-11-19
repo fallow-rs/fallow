@@ -102,7 +102,7 @@
       "section": "commands",
       "row": "config",
       "column": "Key Flags",
-      "seed": "`--path`"
+      "seed": "`--path`, `--resolved`, `--for`, `--only`, `--skip`, `--production-dead-code`, `--production-health`, `--production-dupes`"
     },
     {
       "section": "commands",
@@ -742,9 +742,51 @@
     },
     {
       "section": "flags:config",
+      "row": "--for",
+      "column": "Description",
+      "seed": "The command whose rules `--resolved` applies. Without it, the rules of the bare `fallow` run apply"
+    },
+    {
+      "section": "flags:config",
+      "row": "--only",
+      "column": "Description",
+      "seed": "With `--resolved`: run only these analyses, as `--only` of the bare run or of `fallow audit` does"
+    },
+    {
+      "section": "flags:config",
       "row": "--path",
       "column": "Description",
       "seed": "Print only the config file path (one line, no JSON)"
+    },
+    {
+      "section": "flags:config",
+      "row": "--production-dead-code",
+      "column": "Description",
+      "seed": "With `--resolved`: run dead-code analysis in production mode"
+    },
+    {
+      "section": "flags:config",
+      "row": "--production-dupes",
+      "column": "Description",
+      "seed": "With `--resolved`: run duplication analysis in production mode"
+    },
+    {
+      "section": "flags:config",
+      "row": "--production-health",
+      "column": "Description",
+      "seed": "With `--resolved`: run health analysis in production mode"
+    },
+    {
+      "section": "flags:config",
+      "row": "--resolved",
+      "column": "Description",
+      "seed": "Print each decision of a run and its cause as JSON: for each analysis whether it runs and its production mode, and the run settings, each with the flag, environment variable, config key or default that gave it. Environment variables show by name only"
+    },
+    {
+      "section": "flags:config",
+      "row": "--skip",
+      "column": "Description",
+      "seed": "With `--resolved`: skip these analyses, as `--skip` of the bare run or of `fallow audit` does"
     },
     {
       "section": "flags:dead-code",

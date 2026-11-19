@@ -18,7 +18,7 @@ pub use env::{EnvSnapshot, EnvValue, EnvVar};
 use crate::PlannedAnalysis;
 
 /// The surface that starts a run.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum Surface {
     /// The `fallow` command line.
@@ -35,7 +35,7 @@ pub enum Surface {
 
 /// The command of a run. There is one variant per distinct rule for the
 /// environment variables and for the selection of analyses.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 pub enum CommandKind {
     /// The bare `fallow` run and the combined API route.

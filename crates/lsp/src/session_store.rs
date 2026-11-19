@@ -117,6 +117,13 @@ impl ConfigSources {
     pub fn changed(&self) -> bool {
         self.run.as_ref().is_some_and(|run| run.sources_changed())
     }
+
+    /// The notices of the run of the session. A run that reuses the kept
+    /// session logs them again, as it logs the `loaded config` line.
+    #[must_use]
+    pub fn notices(&self) -> &[fallow_config::WorkspaceDiagnostic] {
+        self.run.as_ref().map_or(&[], |run| run.notices())
+    }
 }
 
 /// A session that [`EditorSessionStore::take`] took out of the store.

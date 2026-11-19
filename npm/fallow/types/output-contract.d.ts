@@ -936,6 +936,55 @@ flag: string
 kind: "baseline-install-state-mismatch"
 baseline_node_modules: NodeModulesState
 run_node_modules: NodeModulesState
+} | {
+kind: "inert-flag"
+/**
+ * The flag, as the user spelled it, such as `--dupes-baseline`.
+ */
+flag: string
+/**
+ * The analysis that the flag is for: `dead-code`, `duplication` or
+ * `health`.
+ */
+analysis: string
+/**
+ * Why the flag has no effect, as a kebab-case token: `off-by-config`
+ * (a config key turns the analysis off) or `not-read-by-command`.
+ * The token set is open.
+ */
+reason: string
+/**
+ * The config key that turns the analysis off, for `off-by-config`.
+ */
+key?: (string | null)
+} | {
+kind: "config-load-fell-back"
+/**
+ * The error of the discovered config.
+ */
+error: string
+} | {
+kind: "config-file-shadowed"
+/**
+ * The file name that the run loaded.
+ */
+used: string
+/**
+ * The file name that the run ignored.
+ */
+ignored: string
+} | {
+kind: "unknown-security-category"
+/**
+ * The category id, as written in the config.
+ */
+id: string
+} | {
+kind: "env-value-ignored"
+/**
+ * The name of the variable, such as `FALLOW_PRODUCTION`.
+ */
+name: string
 })
 /**
  * Why the declared pnpm version ignores the `overrides` section of
@@ -2055,6 +2104,13 @@ complexity?: (HealthReport | null)
  * the change has no diff-risk finding.
  */
 diff_risk?: (DiffRiskReport | null)
+/**
+ * The run notices of the audit, such as a flag without effect or an
+ * environment variable whose value the run ignores. The sub-analysis
+ * sections carry the other workspace diagnostics. Absent when the run
+ * has no notice.
+ */
+workspace_diagnostics?: WorkspaceDiagnostic[]
 /**
  * Read-only follow-up commands computed from this run's findings. See
  * `CheckOutput::next_steps` for the contract.
