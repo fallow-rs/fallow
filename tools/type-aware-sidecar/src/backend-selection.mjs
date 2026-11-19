@@ -26,21 +26,30 @@ const compareCores = (left, right) =>
   left.map((part, index) => part - right[index]).find((difference) => difference !== 0) ?? 0;
 
 /**
- * Whether a resolved backend package version is in the range that the
+ * Whether a resolved backend package version is in one of the ranges that the
  * protocol manifest supports. Only `major.minor.patch` counts, so a tsrs build
- * tag such as `-ts7.1.0-beta` or a TypeScript prerelease stays in range.
+ * tag such as `-ts7.1.0-beta` or `-beta.tsrs3`, or a TypeScript prerelease,
+ * stays in range.
  *
- * @param {{ minimum_version: string, below_version: string }} backend
+ * @param {{ supported_ranges: ReadonlyArray<{ minimum_version: string, below_version: string }> }} backend
  * @param {string} version
  */
 export const supportsVersion = (backend, version) => {
   const core = versionCore(version);
   if (!core) return false;
-  return (
-    compareCores(core, versionCore(backend.minimum_version)) >= 0 &&
-    compareCores(core, versionCore(backend.below_version)) < 0
+  return backend.supported_ranges.some(
+    (range) =>
+      compareCores(core, versionCore(range.minimum_version)) >= 0 &&
+      compareCores(core, versionCore(range.below_version)) < 0,
   );
 };
 
-/** @param {{ minimum_version: string, below_version: string }} backend */
-export const supportedRange = (backend) => `>=${backend.minimum_version} <${backend.below_version}`;
+/**
+ * The supported ranges in npm notation, for messages.
+ *
+ * @param {{ supported_ranges: ReadonlyArray<{ minimum_version: string, below_version: string }> }} backend
+ */
+export const supportedRange = (backend) =>
+  backend.supported_ranges
+    .map((range) => `>=${range.minimum_version} <${range.below_version}`)
+    .join(" || ");
