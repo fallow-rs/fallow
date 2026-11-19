@@ -9,7 +9,10 @@
   "inputs": {
     "mcp": {
       "tool": "trace_import_path",
-      "params": {}
+      "params": {
+        "from": "src/a.ts",
+        "to": "src/b.ts"
+      }
     },
     "api": {
       "entry": "trace-path"

@@ -3,19 +3,20 @@ use std::sync::atomic::AtomicBool;
 
 use crate::params::ProjectInfoParams;
 
+use fallow_api::run::EnvSnapshot;
 use fallow_api::{
-    AnalysisOptions, ProductionAnalysis, ProjectInfoOptions,
-    run_project_info as run_api_project_info, serialize_project_info_programmatic_json,
+    ProjectInfoOptions, run_project_info as run_api_project_info,
+    serialize_project_info_programmatic_json,
 };
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
 
 use super::{
     api_runtime::{
-        EnvScope, call_cancellation, json_success, programmatic_error_body, run_api_blocking,
-        shared_analysis_options, shared_params, typed_production,
+        call_cancellation, json_success, programmatic_error_body, run_api_blocking, shared_params,
     },
     push_global, push_remote_extends,
+    run_inputs::{ToolProduction, TypedTool, typed_call},
 };
 
 /// Run `project_info` through the typed API.
@@ -24,7 +25,11 @@ pub async fn run_project_info(
     params: ProjectInfoParams,
 ) -> Result<CallToolResult, McpError> {
     let cancellation = call_cancellation();
-    let options = project_info_options_from_params(&params, Some(Arc::clone(&cancellation)));
+    let options = project_info_options_from_params(
+        &params,
+        Some(Arc::clone(&cancellation)),
+        EnvSnapshot::capture(),
+    );
     let result = run_api_blocking("project_info", cancellation, move || {
         run_api_project_info(&options).and_then(serialize_project_info_programmatic_json)
     })
@@ -40,7 +45,7 @@ pub fn run_project_info_api_value(
     params: &ProjectInfoParams,
     cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<Option<serde_json::Value>, String> {
-    let options = project_info_options_from_params(params, cancellation);
+    let options = project_info_options_from_params(params, cancellation, EnvSnapshot::capture());
     let value = run_api_project_info(&options)
         .and_then(serialize_project_info_programmatic_json)
         .map_err(|err| programmatic_error_body(&err))?;
@@ -81,18 +86,20 @@ pub fn build_project_info_args(params: &ProjectInfoParams) -> Vec<String> {
     args
 }
 
-fn project_info_options_from_params(
+pub(super) fn project_info_options_from_params(
     params: &ProjectInfoParams,
     cancellation: Option<Arc<AtomicBool>>,
+    env: EnvSnapshot,
 ) -> ProjectInfoOptions {
     ProjectInfoOptions {
-        // This envelope carries no `request_outcomes`, so a ref that stood
-        // down would widen the result with nothing to say so: keep the hard
-        // error of an explicit ref.
-        analysis: AnalysisOptions {
-            production_override: typed_production(None, ProductionAnalysis::DeadCode),
-            ..shared_analysis_options(shared_params!(params), EnvScope::HardRef, cancellation)
-        },
+        analysis: typed_call(
+            TypedTool::ProjectInfo,
+            shared_params!(params),
+            ToolProduction::default(),
+            env,
+            cancellation,
+        )
+        .analysis,
         entry_points: params.entry_points == Some(true),
         files: params.files == Some(true),
         plugins: params.plugins == Some(true),
@@ -159,7 +166,9 @@ mod route_parity_tests {
             "project_info",
             &serde_json::json!({}),
             |params: ProjectInfoParams| build_project_info_args(&params),
-            |params: ProjectInfoParams| project_info_options_from_params(&params, None).analysis,
+            |params: ProjectInfoParams| {
+                project_info_options_from_params(&params, None, EnvSnapshot::capture()).analysis
+            },
         );
     }
 }

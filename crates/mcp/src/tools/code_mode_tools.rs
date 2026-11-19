@@ -10,18 +10,18 @@ use crate::params::{
     TraceFileParams,
 };
 
+use fallow_api::run::EnvSnapshot;
 use fallow_api::{
     AnalysisOptions, CombinedOptions, ComplexityOptions, CoverageInputs, DuplicationMode,
-    DuplicationOptions, ProductionAnalysis, run_combined, serialize_combined_programmatic_json,
+    DuplicationOptions, run_combined, serialize_combined_programmatic_json,
     serialize_explain_programmatic_json,
 };
 
 use super::super::{
     VALID_DUPES_MODES,
     api_runtime::{
-        EnvScope, non_empty_path, non_empty_string, programmatic_error_body,
-        resolve_typed_coverage_inputs, shared_analysis_options, shared_params, typed_api_value,
-        typed_production, workspace_patterns_from_param,
+        non_empty_path, non_empty_string, programmatic_error_body, resolve_typed_coverage_inputs,
+        shared_params, typed_api_value, workspace_patterns_from_param,
     },
     build_analyze_args, build_architecture_args, build_audit_args, build_check_changed_args,
     build_check_runtime_coverage_args, build_explain_args, build_feature_flags_args,
@@ -35,6 +35,7 @@ use super::super::{
     list_boundaries::run_list_boundaries_api_value,
     project_info::run_project_info_api_value,
     push_global, push_production, push_remote_extends,
+    run_inputs::{ToolProduction, TypedTool, typed_call},
     trace::{
         run_trace_clone_api_value, run_trace_dependency_api_value, run_trace_export_api_value,
         run_trace_file_api_value,
@@ -564,21 +565,27 @@ fn run_combined_api_value(
     params: &CombinedParams,
     cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<Option<serde_json::Value>, String> {
-    let options = combined_options_from_params(params, cancellation)?;
+    let options = combined_options_from_params(params, cancellation, EnvSnapshot::capture())?;
     typed_api_value(run_combined(&options).and_then(serialize_combined_programmatic_json))
 }
 
 fn combined_options_from_params(
     params: &CombinedParams,
     cancellation: Option<Arc<AtomicBool>>,
+    env: EnvSnapshot,
 ) -> Result<CombinedOptions, String> {
+    let call = typed_call(
+        TypedTool::Combined,
+        shared_params!(params),
+        ToolProduction::global(params.production),
+        env,
+        cancellation,
+    );
     let analysis = AnalysisOptions {
-        production: params.production.unwrap_or(false),
-        production_override: params.production,
         changed_since: non_empty_string(params.changed_since.as_deref()),
         workspace: workspace_patterns_from_param(params.workspace.as_deref()),
         explain: true,
-        ..shared_analysis_options(shared_params!(params), EnvScope::Ambient, cancellation)
+        ..call.analysis
     };
     let coverage = resolve_typed_coverage_inputs(
         &analysis,
@@ -592,9 +599,6 @@ fn combined_options_from_params(
     .map_err(|error| programmatic_error_body(&error))?;
     Ok(CombinedOptions {
         analysis,
-        production_dead_code: typed_production(params.production, ProductionAnalysis::DeadCode),
-        production_health: typed_production(params.production, ProductionAnalysis::Health),
-        production_dupes: typed_production(params.production, ProductionAnalysis::Dupes),
         include_entry_exports: params.include_entry_exports.unwrap_or(false),
         show_cascade: params.show_cascade.unwrap_or(false),
         duplication_options: DuplicationOptions {
@@ -925,8 +929,9 @@ mod tests {
 
     #[test]
     fn combined_params_default_to_cli_combined_health_sections() {
-        let options = combined_options_from_params(&CombinedParams::default(), None)
-            .expect("combined options");
+        let options =
+            combined_options_from_params(&CombinedParams::default(), None, EnvSnapshot::capture())
+                .expect("combined options");
 
         assert!(options.health_options.complexity);
         assert!(options.health_options.file_scores);
@@ -944,6 +949,7 @@ mod tests {
                 ..CombinedParams::default()
             },
             None,
+            EnvSnapshot::capture(),
         )
         .expect("combined options");
 
@@ -1063,7 +1069,8 @@ mod tests {
             dupes_near: Some(true),
             ..CombinedParams::default()
         };
-        let options = combined_options_from_params(&params, None).expect("combined options");
+        let options = combined_options_from_params(&params, None, EnvSnapshot::capture())
+            .expect("combined options");
         let args = build_combined_args(&params);
 
         assert_eq!(options.duplication_options.near, Some(true));
@@ -1088,7 +1095,8 @@ mod tests {
                 dupes_ignore_symlinks: Some(value),
                 ..CombinedParams::default()
             };
-            let options = combined_options_from_params(&params, None).expect("combined options");
+            let options = combined_options_from_params(&params, None, EnvSnapshot::capture())
+                .expect("combined options");
             let args = build_combined_args(&params);
 
             assert_eq!(options.duplication_options.ignore_symlinks, Some(value));
@@ -1289,7 +1297,7 @@ mod route_parity_tests {
             &serde_json::json!({ "coverage": "coverage-final.json", "coverage_root": "/parity/ci" }),
             |params: CombinedParams| build_combined_args(&params),
             |params: CombinedParams| {
-                combined_options_from_params(&params, None)
+                combined_options_from_params(&params, None, EnvSnapshot::capture())
                     .expect("options")
                     .analysis
             },

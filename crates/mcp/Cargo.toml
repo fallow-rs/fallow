@@ -41,6 +41,7 @@ tracing-subscriber.workspace = true
 mimalloc = { workspace = true }
 
 [dev-dependencies]
+fallow-api = { workspace = true, features = ["testing"] }
 regex.workspace = true
 
 [target.'cfg(windows)'.dev-dependencies]

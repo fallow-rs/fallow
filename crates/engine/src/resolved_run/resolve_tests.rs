@@ -297,6 +297,8 @@ production_rows! {
     env_policy_production_cli_trace_path: Cli, TracePath, false;
     env_policy_production_mcp_trace_path: Mcp, TracePath, false;
     env_policy_production_mcp_trace_error: Mcp, TraceError, false;
+    env_policy_production_cli_trace_chain: Cli, TraceChain, false;
+    env_policy_production_mcp_trace_chain: Mcp, TraceChain, true;
     env_policy_production_cli_security: Cli, Security, false;
     env_policy_production_cli_inspect: Cli, Inspect, true;
     env_policy_production_mcp_inspect: Mcp, Inspect, false;
@@ -448,7 +450,7 @@ var_rows! {
     env_policy_coverage_cli_dead_code: Cli, DeadCode, Coverage, false;
     env_policy_coverage_mcp_audit: Mcp, Audit, Coverage, true;
     env_policy_coverage_mcp_health: Mcp, Health, CoverageRoot, true;
-    env_policy_coverage_mcp_combined: Mcp, Combined, Coverage, false;
+    env_policy_coverage_mcp_combined: Mcp, Combined, Coverage, true;
     env_policy_coverage_mcp_viz: Mcp, Viz, Coverage, false;
     env_policy_audit_base_node_audit: Node, Audit, AuditBase, true;
     env_policy_audit_base_cli_audit: Cli, Audit, AuditBase, true;

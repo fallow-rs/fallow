@@ -3,8 +3,9 @@ use std::sync::atomic::AtomicBool;
 
 use crate::params::FeatureFlagsParams;
 
+use fallow_api::run::EnvSnapshot;
 use fallow_api::{
-    AnalysisOptions, FeatureFlagsOptions, FeatureFlagsRetirementOptions, ProductionAnalysis,
+    AnalysisOptions, FeatureFlagsOptions, FeatureFlagsRetirementOptions,
     run_feature_flags as run_api_feature_flags, serialize_feature_flags_programmatic_json,
 };
 use fallow_types::flag_retirement::FlagAgeMode;
@@ -12,10 +13,10 @@ use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
 
 use super::api_runtime::{
-    EnvScope, call_cancellation, json_success, non_empty_path, programmatic_error_body,
-    run_api_blocking, shared_analysis_options, shared_params, typed_production,
-    workspace_patterns_from_param,
+    call_cancellation, json_success, non_empty_path, programmatic_error_body, run_api_blocking,
+    shared_params, workspace_patterns_from_param,
 };
+use super::run_inputs::{ToolProduction, TypedTool, typed_call};
 use super::{push_global, push_remote_extends, push_scope};
 
 /// Run `feature_flags` through the typed API.
@@ -24,8 +25,11 @@ pub async fn run_feature_flags(
     params: FeatureFlagsParams,
 ) -> Result<CallToolResult, McpError> {
     let cancellation = call_cancellation();
-    let options = match feature_flags_options_from_params(&params, Some(Arc::clone(&cancellation)))
-    {
+    let options = match feature_flags_options_from_params(
+        &params,
+        Some(Arc::clone(&cancellation)),
+        EnvSnapshot::capture(),
+    ) {
         Ok(options) => options,
         Err(message) => return Ok(CallToolResult::error(vec![ContentBlock::text(message)])),
     };
@@ -44,7 +48,7 @@ pub fn run_feature_flags_api_value(
     params: &FeatureFlagsParams,
     cancellation: Option<Arc<AtomicBool>>,
 ) -> Result<Option<serde_json::Value>, String> {
-    let options = feature_flags_options_from_params(params, cancellation)?;
+    let options = feature_flags_options_from_params(params, cancellation, EnvSnapshot::capture())?;
     let value = run_api_feature_flags(&options)
         .and_then(serialize_feature_flags_programmatic_json)
         .map_err(|err| programmatic_error_body(&err))?;
@@ -120,17 +124,23 @@ fn retirement_options_from_params(
     }))
 }
 
-fn feature_flags_options_from_params(
+pub(super) fn feature_flags_options_from_params(
     params: &FeatureFlagsParams,
     cancellation: Option<Arc<AtomicBool>>,
+    env: EnvSnapshot,
 ) -> Result<FeatureFlagsOptions, String> {
+    let call = typed_call(
+        TypedTool::FeatureFlags,
+        shared_params!(params),
+        ToolProduction::global(params.production),
+        env,
+        cancellation,
+    );
     Ok(FeatureFlagsOptions {
         analysis: AnalysisOptions {
-            production: params.production == Some(true),
-            production_override: typed_production(params.production, ProductionAnalysis::DeadCode),
             workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             explain: true,
-            ..shared_analysis_options(shared_params!(params), EnvScope::Ambient, cancellation)
+            ..call.analysis
         },
         top: params.top,
         retirement: retirement_options_from_params(params)?,
@@ -233,6 +243,7 @@ mod tests {
                 ..FeatureFlagsParams::default()
             },
             None,
+            EnvSnapshot::capture(),
         )
         .expect("options");
         let retirement = options.retirement.expect("retirement options");
@@ -242,10 +253,14 @@ mod tests {
             Some(std::path::PathBuf::from("/repo/flag-state.json"))
         );
         assert!(
-            feature_flags_options_from_params(&FeatureFlagsParams::default(), None)
-                .expect("options")
-                .retirement
-                .is_none()
+            feature_flags_options_from_params(
+                &FeatureFlagsParams::default(),
+                None,
+                EnvSnapshot::capture()
+            )
+            .expect("options")
+            .retirement
+            .is_none()
         );
     }
 
@@ -258,6 +273,7 @@ mod tests {
                 ..FeatureFlagsParams::default()
             },
             None,
+            EnvSnapshot::capture(),
         )
         .expect_err("invalid flag_age");
         assert!(bad_age.contains("invalid flag_age 'git'"), "{bad_age}");
@@ -267,6 +283,7 @@ mod tests {
                 ..FeatureFlagsParams::default()
             },
             None,
+            EnvSnapshot::capture(),
         )
         .expect_err("flag_state without retirement");
         assert!(orphan.contains("need retirement"), "{orphan}");
@@ -306,7 +323,7 @@ mod route_parity_tests {
             &serde_json::json!({}),
             |params: FeatureFlagsParams| build_feature_flags_args(&params),
             |params: FeatureFlagsParams| {
-                feature_flags_options_from_params(&params, None)
+                feature_flags_options_from_params(&params, None, EnvSnapshot::capture())
                     .expect("options")
                     .analysis
             },

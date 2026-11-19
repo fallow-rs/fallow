@@ -3,9 +3,10 @@ use std::sync::atomic::AtomicBool;
 
 use crate::params::AuditParams;
 
+use fallow_api::run::EnvSnapshot;
 use fallow_api::{
-    AnalysisOptions, AuditGate, AuditOptions, AuditWorsened, CoverageInputs, ProductionAnalysis,
-    ProgrammaticError, run_audit as run_audit_api, serialize_audit_programmatic_json,
+    AnalysisOptions, AuditGate, AuditOptions, AuditWorsened, CoverageInputs, ProgrammaticError,
+    run_audit as run_audit_api, serialize_audit_programmatic_json,
 };
 use rmcp::ErrorData as McpError;
 use rmcp::model::{CallToolResult, ContentBlock};
@@ -13,12 +14,14 @@ use rmcp::model::{CallToolResult, ContentBlock};
 use super::{
     VALID_AUDIT_GATES, VALID_AUDIT_WORSENED,
     api_runtime::{
-        EnvScope, call_cancellation, non_empty_path, non_empty_string,
-        resolve_typed_coverage_inputs, run_api_blocking, shared_analysis_options, shared_params,
-        typed_production, typed_tool_result, typed_type_aware, workspace_patterns_from_param,
+        call_cancellation, non_empty_path, non_empty_string, resolve_typed_coverage_inputs,
+        run_api_blocking, shared_params, typed_tool_result, typed_type_aware,
+        workspace_patterns_from_param,
     },
     fallback_policy::{baseline_requested, filled, grouped_requested, type_aware_requested},
-    push_global, push_remote_extends, push_scope, push_str_flag, run_tool, validation_error_body,
+    push_global, push_remote_extends, push_scope, push_str_flag,
+    run_inputs::{ToolProduction, TypedTool, typed_call},
+    run_tool, validation_error_body,
 };
 
 /// Run the `audit` tool through the typed API when parameters map cleanly to
@@ -29,7 +32,11 @@ use super::{
 pub async fn run_audit(binary: &str, params: AuditParams) -> Result<CallToolResult, McpError> {
     if !requires_cli_fallback(&params) {
         let cancellation = call_cancellation();
-        let options = match audit_options_from_params(&params, Some(Arc::clone(&cancellation))) {
+        let options = match audit_options_from_params(
+            &params,
+            Some(Arc::clone(&cancellation)),
+            EnvSnapshot::capture(),
+        ) {
             Ok(options) => options,
             Err(msg) => return Ok(CallToolResult::error(vec![ContentBlock::text(msg)])),
         };
@@ -79,7 +86,7 @@ fn run_audit_api_value_with_env(
     if requires_cli_fallback(params) {
         return Ok(None);
     }
-    let options = audit_options_from_params(params, None)?;
+    let options = audit_options_from_params(params, None, EnvSnapshot::capture())?;
     super::api_runtime::typed_api_value(audit_typed_value(options, env))
 }
 
@@ -163,13 +170,6 @@ pub fn build_audit_args(params: &AuditParams) -> Result<Vec<String>, String> {
     push_audit_coverage_flags(&mut args, params);
 
     Ok(args)
-}
-
-/// The production parameter of one audit analysis. Like the CLI flag, the
-/// parameter of an analysis can only turn production mode on, so `false`
-/// counts as not set and the `production` parameter decides.
-fn audit_production_param(analysis: Option<bool>, global: Option<bool>) -> Option<bool> {
-    analysis.filter(|&on| on).or(global)
 }
 
 /// Push the per-analysis production-mode flags for the `audit` tool.
@@ -331,37 +331,41 @@ fn requires_cli_fallback(params: &AuditParams) -> bool {
 /// the base-ref worktree: `TemporaryBaseWorktree` is not registered with Git
 /// during the run and removes its directory on drop, also when the run
 /// returns early with the cancellation error.
-fn audit_options_from_params(
+pub(super) fn audit_options_from_params(
     params: &AuditParams,
     cancellation: Option<Arc<AtomicBool>>,
+    env: EnvSnapshot,
 ) -> Result<AuditOptions, String> {
     let gate = audit_gate_from_param(params.gate.as_deref())?;
     let worsened = audit_worsened_from_param(params.worsened.as_deref())?;
+    let production = ToolProduction {
+        production: params.production,
+        dead_code: params.production_dead_code,
+        health: params.production_health,
+        dupes: params.production_dupes,
+    };
+    let call = typed_call(
+        TypedTool::Audit,
+        shared_params!(params),
+        production,
+        env,
+        cancellation,
+    );
+    let audit = production.audit();
     Ok(AuditOptions {
         analysis: AnalysisOptions {
-            production: params.production.unwrap_or(false),
-            production_override: params.production,
             workspace: workspace_patterns_from_param(params.workspace.as_deref()),
             explain: true,
             type_aware: typed_type_aware(params.type_aware),
             // The base ref of this tool, not a narrowing request: the
             // runtime reads it from `changed_since`, so it stays there.
-            ..shared_analysis_options(shared_params!(params), EnvScope::HardRef, cancellation)
+            ..call.analysis
         },
         base: non_empty_string(params.base.as_deref()),
-        production: params.production.unwrap_or(false),
-        production_dead_code: typed_production(
-            audit_production_param(params.production_dead_code, params.production),
-            ProductionAnalysis::DeadCode,
-        ),
-        production_health: typed_production(
-            audit_production_param(params.production_health, params.production),
-            ProductionAnalysis::Health,
-        ),
-        production_dupes: typed_production(
-            audit_production_param(params.production_dupes, params.production),
-            ProductionAnalysis::Dupes,
-        ),
+        production: audit.production,
+        production_dead_code: audit.dead_code,
+        production_health: audit.health,
+        production_dupes: audit.dupes,
         // The typed route runs only without `only` and `skip`, so the config
         // decides the selection.
         dead_code: None,
@@ -422,11 +426,29 @@ mod tests {
     /// per-analysis flag only for `true`.
     #[test]
     fn a_false_analysis_production_parameter_counts_as_not_set() {
-        assert_eq!(audit_production_param(Some(true), Some(false)), Some(true));
-        assert_eq!(audit_production_param(Some(false), Some(true)), Some(true));
-        assert_eq!(audit_production_param(Some(false), None), None);
-        assert_eq!(audit_production_param(None, Some(false)), Some(false));
-        assert_eq!(audit_production_param(None, None), None);
+        let params = AuditParams {
+            production: Some(true),
+            production_dead_code: Some(false),
+            production_health: Some(true),
+            ..AuditParams::default()
+        };
+        let options =
+            audit_options_from_params(&params, None, EnvSnapshot::none()).expect("audit options");
+        assert!(options.production);
+        assert_eq!(options.analysis.production_override, Some(true));
+        assert_eq!(options.production_dead_code, None);
+        assert_eq!(options.production_health, Some(true));
+        assert_eq!(options.production_dupes, None);
+        assert!(
+            build_audit_args(&params)
+                .expect("audit args")
+                .contains(&"--production-health".to_string())
+        );
+        assert!(
+            !build_audit_args(&params)
+                .expect("audit args")
+                .contains(&"--production-dead-code".to_string())
+        );
     }
 
     /// #2699: called without a `base` on a repository that has remote-tracking
@@ -499,7 +521,8 @@ mod tests {
     fn default_audit_uses_programmatic_api_route_and_defers_the_gate() {
         let params = AuditParams::default();
         assert!(!requires_cli_fallback(&params));
-        let options = audit_options_from_params(&params, None).expect("audit options");
+        let options = audit_options_from_params(&params, None, EnvSnapshot::capture())
+            .expect("audit options");
         assert_eq!(options.gate, None);
     }
 
@@ -699,7 +722,8 @@ mod tests {
             ..AuditParams::default()
         };
         assert!(!requires_cli_fallback(&params));
-        let options = audit_options_from_params(&params, None).expect("audit options");
+        let options = audit_options_from_params(&params, None, EnvSnapshot::capture())
+            .expect("audit options");
         assert_eq!(options.gate, Some(AuditGate::All));
         assert!(options.analysis.explain);
     }
@@ -1189,7 +1213,7 @@ mod route_parity_tests {
             &serde_json::json!({}),
             |params: AuditParams| build_audit_args(&params).expect("argv"),
             |params: AuditParams| {
-                audit_options_from_params(&params, None)
+                audit_options_from_params(&params, None, EnvSnapshot::capture())
                     .expect("options")
                     .analysis
             },
