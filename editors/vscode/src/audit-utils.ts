@@ -2,6 +2,7 @@ import { escapeMarkdownText } from "./markdown-utils.js";
 import type { AuditGate, AuditOutput, AuditVerdict, AuditWorsened } from "./types.js";
 import { appendTypeAwareArgs, type TypeAwareArgsOptions } from "./type-aware-utils.js";
 import {
+  appendAllowRemoteExtends,
   appendCommonScopeArgs,
   compareVersions,
   type BuiltCliArgs,
@@ -35,6 +36,11 @@ interface AuditArgsOptions {
    * the workspace forwarding in `buildAnalysisArgs`.
    */
   readonly workspace: string;
+  /**
+   * `true` forwards `--allow-remote-extends` (version-gated), so the audit
+   * reads a config with an `https://` extends entry.
+   */
+  readonly allowRemoteExtends: boolean;
   readonly typeAware?: TypeAwareArgsOptions;
   /** Version of the exact CLI binary this argv will be passed to. */
   readonly cliVersion: string | null;
@@ -66,6 +72,15 @@ export const buildAuditArgs = (options: AuditArgsOptions): BuiltCliArgs => {
 
   if (options.production) {
     args.push("--production");
+  }
+
+  const skippedRemote = appendAllowRemoteExtends(
+    args,
+    options.allowRemoteExtends,
+    options.cliVersion,
+  );
+  if (skippedRemote) {
+    skipped.push(skippedRemote);
   }
 
   const skippedTypeAware = appendTypeAwareArgs(args, options.typeAware, options.cliVersion);

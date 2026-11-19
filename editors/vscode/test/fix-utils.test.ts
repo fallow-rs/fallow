@@ -8,7 +8,7 @@ import type { FixAction } from "../src/types.js";
 
 describe("buildFixArgs", () => {
   it("builds dry-run arguments without production mode", () => {
-    expect(buildFixArgs(true, false)).toEqual([
+    expect(buildFixArgs(true, false, false, null).args).toEqual([
       "fix",
       "--dry-run",
       "--format",
@@ -18,13 +18,27 @@ describe("buildFixArgs", () => {
   });
 
   it("appends production mode when enabled", () => {
-    expect(buildFixArgs(false, true)).toEqual([
+    expect(buildFixArgs(false, true, false, null).args).toEqual([
       "fix",
       "--yes",
       "--format",
       "json",
       "--quiet",
       "--production",
+    ]);
+  });
+
+  it("includes --allow-remote-extends when the setting is on", () => {
+    const { args, skipped } = buildFixArgs(true, false, true, null);
+    expect(args).toContain("--allow-remote-extends");
+    expect(skipped).toEqual([]);
+  });
+
+  it("skips --allow-remote-extends on a CLI that predates it", () => {
+    const { args, skipped } = buildFixArgs(true, false, true, "3.4.1");
+    expect(args).not.toContain("--allow-remote-extends");
+    expect(skipped).toEqual([
+      { flag: "--allow-remote-extends", requires: "3.4.2", cliVersion: "3.4.1" },
     ]);
   });
 });

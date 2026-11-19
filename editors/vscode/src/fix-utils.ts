@@ -1,5 +1,6 @@
 import * as path from "node:path";
 import type { FixAction } from "./types.js";
+import { appendAllowRemoteExtends, type BuiltCliArgs } from "./cli-args-utils.js";
 
 interface FixPreviewNavigateItem {
   readonly action: "navigate";
@@ -17,7 +18,16 @@ interface FixPreviewApplyAllItem {
 
 type FixPreviewItem = FixPreviewNavigateItem | FixPreviewApplyAllItem;
 
-export const buildFixArgs = (dryRun: boolean, production: boolean | undefined): string[] => {
+/**
+ * Build the argument vector of a `fallow fix` run. `allowRemoteExtends`
+ * forwards `--allow-remote-extends` when `cliVersion` knows the flag.
+ */
+export const buildFixArgs = (
+  dryRun: boolean,
+  production: boolean | undefined,
+  allowRemoteExtends: boolean,
+  cliVersion: string | null,
+): BuiltCliArgs => {
   const args = dryRun
     ? ["fix", "--dry-run", "--format", "json", "--quiet"]
     : ["fix", "--yes", "--format", "json", "--quiet"];
@@ -26,7 +36,8 @@ export const buildFixArgs = (dryRun: boolean, production: boolean | undefined): 
     args.push("--production");
   }
 
-  return args;
+  const skipped = appendAllowRemoteExtends(args, allowRemoteExtends, cliVersion);
+  return { args, skipped: skipped ? [skipped] : [] };
 };
 
 const getFixLabel = (fix: FixAction): string => fix.name ?? fix.package ?? fix.file ?? "unknown";

@@ -22,6 +22,7 @@ const baseArgs = {
   configPath: "",
   changedSince: "",
   production: false,
+  allowRemoteExtends: false,
   cliVersion: null,
 };
 
@@ -29,6 +30,25 @@ const healthArgs = (options: Parameters<typeof buildHealthArgs>[0] = baseArgs): 
   buildHealthArgs(options).args;
 
 describe("buildHealthArgs", () => {
+  it("includes --allow-remote-extends when the setting is on", () => {
+    expect(healthArgs()).not.toContain("--allow-remote-extends");
+    const { args, skipped } = buildHealthArgs({ ...baseArgs, allowRemoteExtends: true });
+    expect(args).toContain("--allow-remote-extends");
+    expect(skipped).toEqual([]);
+  });
+
+  it("skips --allow-remote-extends on a CLI that predates it", () => {
+    const { args, skipped } = buildHealthArgs({
+      ...baseArgs,
+      allowRemoteExtends: true,
+      cliVersion: "3.4.1",
+    });
+    expect(args).not.toContain("--allow-remote-extends");
+    expect(skipped).toEqual([
+      { flag: "--allow-remote-extends", requires: "3.4.2", cliVersion: "3.4.1" },
+    ]);
+  });
+
   it("always requests the cheap health sections and never --skip", () => {
     const args = healthArgs();
     expect(args).toEqual([
