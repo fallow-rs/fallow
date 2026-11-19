@@ -9,7 +9,7 @@
 
 use std::path::PathBuf;
 
-pub use fallow_config::{CommandKind, EnvSnapshot, HostInputs, SelectionInput, Surface};
+pub use fallow_config::{CommandKind, EnvSnapshot, EnvVar, HostInputs, SelectionInput, Surface};
 pub use fallow_engine::resolved_run::{
     AnalysisSlot, ResolveError, ResolvedRun, Runnable, resolve_run,
 };
@@ -175,7 +175,9 @@ pub(crate) struct RouteSettings {
 /// Resolve the run of one programmatic call.
 ///
 /// `options.host` names the surface and the environment snapshot. `None`
-/// means the Rust API with a snapshot of the process environment.
+/// means the Rust API with a snapshot of the process environment. The surface
+/// names the origin of each given value: an option of the Rust API, an option
+/// of the Node bindings, or an MCP tool parameter.
 ///
 /// # Errors
 ///
@@ -210,63 +212,78 @@ pub(crate) fn resolve_route_run_raw(
     fallow_engine::resolved_run::resolve_run(&run_inputs(options, entry, route))
 }
 
-/// The names of one option on the Rust API and on the Node bindings.
+/// The names of one option on the Rust API, on the Node bindings and as an
+/// MCP tool parameter.
 struct OptionName {
     api: &'static str,
     node: &'static str,
+    mcp: &'static str,
 }
 
 const ROOT: OptionName = OptionName {
     api: "analysis.root",
     node: "root",
+    mcp: "root",
 };
 const CONFIG_PATH: OptionName = OptionName {
     api: "analysis.config_path",
     node: "configPath",
+    mcp: "config",
 };
 const ALLOW_REMOTE_EXTENDS: OptionName = OptionName {
     api: "analysis.allow_remote_extends",
     node: "allowRemoteExtends",
+    mcp: "allow_remote_extends",
 };
 const NO_CACHE: OptionName = OptionName {
     api: "analysis.no_cache",
     node: "noCache",
+    mcp: "no_cache",
 };
 const THREADS: OptionName = OptionName {
     api: "analysis.threads",
     node: "threads",
+    mcp: "threads",
 };
 const NO_PACKAGE_BASELINES: OptionName = OptionName {
     api: "analysis.no_package_baselines",
     node: "noPackageBaselines",
+    mcp: "no_package_baselines",
 };
 const PRODUCTION_OVERRIDE: OptionName = OptionName {
     api: "analysis.production_override",
     node: "production",
+    mcp: "production",
 };
 const PRODUCTION: OptionName = OptionName {
     api: "analysis.production",
     node: "production",
+    mcp: "production",
 };
 const AUDIT_PRODUCTION: OptionName = OptionName {
     api: "audit.production",
     node: "production",
+    mcp: "production",
 };
 const INCLUDE_ENTRY_EXPORTS: OptionName = OptionName {
     api: "include_entry_exports",
     node: "includeEntryExports",
+    mcp: "include_entry_exports",
 };
 const PRODUCTION_DEAD_CODE: OptionName = OptionName {
     api: "production_dead_code",
     node: "productionDeadCode",
+    mcp: "production_dead_code",
 };
 const PRODUCTION_HEALTH: OptionName = OptionName {
     api: "production_health",
     node: "productionHealth",
+    mcp: "production_health",
 };
 const PRODUCTION_DUPES: OptionName = OptionName {
     api: "production_dupes",
     node: "productionDupes",
+    mcp: "production_dupes",
 };
 
 /// The raw run inputs of one programmatic call.
@@ -279,12 +296,10 @@ pub(crate) fn run_inputs(
         surface: Surface::Api,
         env: EnvSnapshot::capture(),
     });
-    let origin = |name: OptionName| {
-        if surface == Surface::Node {
-            Origin::NodeOption(name.node)
-        } else {
-            Origin::ApiOption(name.api)
-        }
+    let origin = |name: OptionName| match surface {
+        Surface::Node => Origin::NodeOption(name.node),
+        Surface::Mcp => Origin::ToolParam(name.mcp),
+        Surface::Api | Surface::Cli | Surface::Lsp => Origin::ApiOption(name.api),
     };
     let given = |value, name| Given {
         value,
