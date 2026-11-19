@@ -47,7 +47,9 @@ jobs:
         run: pnpm install --frozen-lockfile --ignore-scripts
 
       # The merge automation writes the squash subject of a bot pull request
-      # within the header limit, so a long Dependabot title never reaches main.
+      # within the header limit. A merge by hand uses the title, so the
+      # automation also shortens a long Dependabot title. The check uses the
+      # author, because the automation edits the title as another actor.
       - name: Lint pull request title
         if: github.event_name == 'pull_request' && github.event.pull_request.user.type != 'Bot'
         env:
