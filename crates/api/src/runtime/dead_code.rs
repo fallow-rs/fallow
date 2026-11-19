@@ -1,18 +1,14 @@
 use std::path::Path;
 use std::time::Instant;
 
-use fallow_config::ProductionAnalysis;
+use fallow_config::{PlannedAnalysis, ResolvedConfig};
 use fallow_engine::{
-    change_scope::ChangeScope,
-    dead_code::DeadCodeAnalysisArtifacts,
-    project_config::{ProjectConfig, ProjectConfigOptions},
-    session::AnalysisSession,
+    change_scope::ChangeScope, dead_code::DeadCodeAnalysisArtifacts, session::AnalysisSession,
 };
 use fallow_output::{
     CheckEnvelope, CheckOutputInput, DeadCodeNextStepsInput, architecture_meta, build_check_output,
     build_dead_code_next_steps, check_meta,
 };
-use fallow_types::output_format::OutputFormat;
 use fallow_types::path_util::is_absolute_path_any_platform;
 use fallow_types::results::AnalysisResults;
 use rustc_hash::FxHashSet;
@@ -29,6 +25,7 @@ use crate::{
         audit_changed_applicable, default_workspace_ref_for_workspaces, setup_pointer_applicable,
         suggestions_enabled,
     },
+    run::{ProgrammaticEntry, ResolvedRun, RouteSettings, resolve_route_run},
 };
 
 use super::ProgrammaticResult;
@@ -68,8 +65,27 @@ pub fn run_dead_code_with_baseline(
     baseline: Option<&Path>,
 ) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
-    reject_config_type_aware(options, &resolved)?;
-    run_dead_code_in_context(options, baseline, &resolved)
+    resolved.install(|| {
+        resolved.ensure_not_cancelled("config load and file discovery")?;
+        let run = resolve_dead_code_run(options, &ProgrammaticEntry::DeadCode)?;
+        reject_config_type_aware(options, &run)?;
+        run_dead_code_in_context(options, baseline, &resolved, &run)
+    })
+}
+
+/// The run of a dead-code route, with the `include_entry_exports` option of
+/// `options`.
+pub(super) fn resolve_dead_code_run(
+    options: &DeadCodeOptions,
+    entry: &ProgrammaticEntry,
+) -> ProgrammaticResult<ResolvedRun> {
+    resolve_route_run(
+        &options.analysis,
+        entry,
+        RouteSettings {
+            include_entry_exports: options.include_entry_exports,
+        },
+    )
 }
 
 /// `fallow dead-code` turns type-aware analysis on from the environment and
@@ -77,27 +93,28 @@ pub fn run_dead_code_with_baseline(
 /// [`super::TYPE_AWARE_CONFIG_UNSUPPORTED`].
 fn reject_config_type_aware(
     options: &DeadCodeOptions,
-    resolved: &ProgrammaticAnalysisContext,
+    run: &ResolvedRun,
 ) -> ProgrammaticResult<()> {
     super::type_aware_config::reject_config_type_aware(
         &options.analysis.type_aware,
-        resolved,
+        run,
         super::type_aware_config::TypeAwareCommand::Analysis,
     )
 }
 
-/// Run dead-code analysis in a context that the caller resolved. Audit uses
-/// this to hand the change scope of every section to itself.
+/// Run dead-code analysis in a context and a run that the caller resolved.
+/// Audit uses this to hand the change scope of every section to itself.
 pub(super) fn run_dead_code_in_context(
     options: &DeadCodeOptions,
     baseline: Option<&Path>,
     resolved: &ProgrammaticAnalysisContext,
+    run: &ResolvedRun,
 ) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
     resolved.install(|| {
         let start = Instant::now();
         resolved.ensure_not_cancelled("config load and file discovery")?;
         let finding_ids = parse_finding_ids(options)?;
-        let session = load_dead_code_session(options, resolved)?;
+        let session = load_dead_code_session(options, resolved, run)?;
         resolve_package_map_before_analysis(resolved, &session)?;
         let (mut results, finished) =
             analyze_dead_code_results(options, resolved, &session, finding_ids)?;
@@ -262,7 +279,6 @@ pub fn run_circular_dependencies(
 ) -> ProgrammaticResult<CircularDependenciesProgrammaticOutput> {
     reject_finding_ids(options)?;
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
-    reject_config_type_aware(options, &resolved)?;
     resolved.install(|| {
         run_dead_code_inner(options, &resolved, keep_circular_dependencies).map(Into::into)
     })
@@ -288,7 +304,8 @@ pub fn run_architecture(
     resolved.install(|| {
         let start = Instant::now();
         resolved.ensure_not_cancelled("config load and file discovery")?;
-        let session = load_dead_code_session(&dead_code, &resolved)?;
+        let run = resolve_dead_code_run(&dead_code, &ProgrammaticEntry::DeadCode)?;
+        let session = load_dead_code_session(&dead_code, &resolved, &run)?;
         resolve_package_map_before_analysis(&resolved, &session)?;
         let mut output = run_dead_code_with_changed_files(
             &dead_code,
@@ -323,7 +340,6 @@ pub fn run_boundary_violations(
 ) -> ProgrammaticResult<BoundaryViolationsProgrammaticOutput> {
     reject_finding_ids(options)?;
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
-    reject_config_type_aware(options, &resolved)?;
     resolved.install(|| {
         run_dead_code_inner(options, &resolved, keep_boundary_violations).map(Into::into)
     })
@@ -336,7 +352,9 @@ fn run_dead_code_inner(
 ) -> ProgrammaticResult<DeadCodeProgrammaticOutput> {
     let start = Instant::now();
     resolved.ensure_not_cancelled("config load and file discovery")?;
-    let session = load_dead_code_session(options, resolved)?;
+    let run = resolve_dead_code_run(options, &ProgrammaticEntry::DeadCode)?;
+    reject_config_type_aware(options, &run)?;
+    let session = load_dead_code_session(options, resolved, &run)?;
     resolve_package_map_before_analysis(resolved, &session)?;
     run_dead_code_with_session(options, resolved, &session, None, post_filter, start)
 }
@@ -816,45 +834,18 @@ fn keep_boundary_violations(results: &mut AnalysisResults) {
     results.boundary_call_violations = boundary_call_violations;
 }
 
+/// Open the dead-code session of `run`, with the rule settings of
+/// `options`.
 pub(super) fn load_dead_code_session(
     options: &DeadCodeOptions,
     resolved: &ProgrammaticAnalysisContext,
+    run: &ResolvedRun,
 ) -> ProgrammaticResult<AnalysisSession> {
-    load_dead_code_session_in_mode(options, resolved, resolved.production_override)
-}
-
-/// [`load_dead_code_session`] with the production override of the session.
-/// A combined run resolves one mode per section after the context resolves,
-/// so its shared session takes the dead-code mode, not the override of the
-/// context.
-pub(super) fn load_dead_code_session_in_mode(
-    options: &DeadCodeOptions,
-    resolved: &ProgrammaticAnalysisContext,
-    production_override: Option<bool>,
-) -> ProgrammaticResult<AnalysisSession> {
-    let project_config = fallow_engine::project_config::config_for_project_analysis(
-        &resolved.root,
-        resolved.config_path.as_deref(),
-        ProjectConfigOptions {
-            output: OutputFormat::Json,
-            no_cache: resolved.no_cache,
-            threads: resolved.threads,
-            production_override,
-            quiet: true,
-            analysis: ProductionAnalysis::DeadCode,
-            allow_remote_extends: resolved.allow_remote_extends,
-        },
-    )
-    .map_err(|err| {
-        ProgrammaticError::new(format!("failed to load config: {err}"), 2)
-            .with_code("FALLOW_CONFIG_LOAD_FAILED")
-            .with_context("analysis.configPath")
+    let dead_code = crate::run::runnable(run, PlannedAnalysis::DeadCode)?;
+    let session = crate::run::open_session_adjusted(&dead_code, |config| {
+        configure_dead_code(config, options);
     })?;
-    let project_config = configure_project_for_dead_code(project_config, options);
-    Ok(attach_cancellation(
-        AnalysisSession::from_config(project_config),
-        resolved,
-    ))
+    Ok(attach_cancellation(session, resolved))
 }
 
 /// Resolve the package map before the analysis starts, so a malformed map
@@ -886,23 +877,12 @@ pub(super) fn attach_cancellation(
     }
 }
 
-pub(super) fn default_dead_code_options_for_context(
-    resolved: &ProgrammaticAnalysisContext,
-) -> DeadCodeOptions {
+/// The dead-code options of a route that runs the dead-code analysis with
+/// the shared options of `analysis` only, such as a trace.
+pub(super) fn default_dead_code_options(analysis: &AnalysisOptions) -> DeadCodeOptions {
     DeadCodeOptions {
         finding_ids: Vec::new(),
-        analysis: AnalysisOptions {
-            root: Some(resolved.root().to_path_buf()),
-            config_path: resolved.config_path().clone(),
-            no_cache: resolved.no_cache(),
-            threads: Some(resolved.threads()),
-            production_override: resolved.production_override(),
-            changed_since: resolved.changed_since().map(str::to_owned),
-            workspace: resolved.workspace().map(<[String]>::to_vec),
-            changed_workspaces: resolved.changed_workspaces().map(str::to_owned),
-            explain: resolved.explain_enabled(),
-            ..AnalysisOptions::default()
-        },
+        analysis: analysis.clone(),
         filters: DeadCodeFilters::default(),
         files: Vec::new(),
         include_entry_exports: false,
@@ -910,22 +890,17 @@ pub(super) fn default_dead_code_options_for_context(
     }
 }
 
-fn configure_project_for_dead_code(
-    mut project_config: ProjectConfig,
-    options: &DeadCodeOptions,
-) -> ProjectConfig {
+/// The rule settings of the dead-code options. The run decides
+/// `include_entry_exports` (see [`resolve_dead_code_run`]).
+fn configure_dead_code(config: &mut ResolvedConfig, options: &DeadCodeOptions) {
     if options.filters.shared_state {
-        project_config.config.request_shared_state();
-    }
-    if options.include_entry_exports {
-        project_config.config.force_include_entry_exports();
+        config.request_shared_state();
     }
     if options.show_cascade {
-        project_config.config.show_cascade = true;
+        config.show_cascade = true;
     }
-    activate_explicit_dead_code_opt_ins(&options.filters, &mut project_config.config.rules);
-    apply_explicit_type_aware_choice(options, &mut project_config.config);
-    project_config
+    activate_explicit_dead_code_opt_ins(&options.filters, &mut config.rules);
+    apply_explicit_type_aware_choice(options, config);
 }
 
 /// Write an explicit `type_aware` choice into the resolved config, as the

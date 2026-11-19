@@ -5,20 +5,21 @@ use fallow_engine::flag_report::{RetirementRequest, build_retirement_report};
 use fallow_engine::flag_retirement::{RetirementFacts, RetirementOptions};
 use fallow_engine::flag_vendor::{VendorExport, load_flag_state};
 
-use fallow_engine::{project_config::ProjectConfig, session::AnalysisSession};
+use fallow_config::PlannedAnalysis;
+use fallow_engine::session::AnalysisSession;
 use fallow_output::{
     DiffIndex, FEATURE_FLAGS_SCHEMA_VERSION, FeatureFlagsOutputInput, build_feature_flags_output,
     feature_flags_meta,
 };
-use fallow_types::output_format::OutputFormat;
 use fallow_types::results::FeatureFlag;
 
 use crate::{
-    FeatureFlagsOptions, FeatureFlagsProgrammaticOutput, ProgrammaticError,
+    AnalysisOptions, FeatureFlagsOptions, FeatureFlagsProgrammaticOutput, ProgrammaticError,
     analysis_context::{
         ProgrammaticAnalysisContext, changed_files_for_run, resolve_programmatic_analysis_context,
         workspace_roots_for_session,
     },
+    run::{ProgrammaticEntry, resolve_programmatic_run},
 };
 
 use super::ProgrammaticResult;
@@ -46,7 +47,7 @@ fn run_feature_flags_inner(
     let start = Instant::now();
     let vendor_export = load_vendor_export(options, &resolved.root)?;
     resolved.ensure_not_cancelled("config load and file discovery")?;
-    let session = load_feature_flags_session(resolved)?;
+    let session = load_feature_flags_session(resolved, &options.analysis)?;
     let scan = if options.retirement.is_some() {
         fallow_engine::flags::analyze_feature_flags_for_retirement(&session)
     } else {
@@ -131,42 +132,15 @@ fn run_feature_flags_inner(
     })
 }
 
+/// Open the session of a feature flags run. The run validates the config,
+/// external plugins included, as the other routes do.
 fn load_feature_flags_session(
     resolved: &ProgrammaticAnalysisContext,
+    analysis: &AnalysisOptions,
 ) -> ProgrammaticResult<AnalysisSession> {
-    let project_config = fallow_engine::project_config::config_for_project_with_production(
-        &resolved.root,
-        resolved.config_path.as_deref(),
-        fallow_config::ConfigLoadOptions {
-            allow_remote_extends: resolved.allow_remote_extends(),
-        },
-        fallow_engine::project_config::ProductionFlags {
-            global: resolved.production_override,
-            ..fallow_engine::project_config::ProductionFlags::default()
-        },
-    )
-    .map_err(|err| {
-        ProgrammaticError::new(format!("failed to load config: {err}"), 2)
-            .with_code("FALLOW_CONFIG_LOAD_FAILED")
-            .with_context("analysis.configPath")
-    })?;
-    Ok(super::dead_code::attach_cancellation(
-        AnalysisSession::from_config(configure_project_for_feature_flags(
-            project_config,
-            resolved,
-        )),
-        resolved,
-    ))
-}
-
-fn configure_project_for_feature_flags(
-    mut project_config: ProjectConfig,
-    resolved: &ProgrammaticAnalysisContext,
-) -> ProjectConfig {
-    project_config.config.output = OutputFormat::Json;
-    project_config.config.no_cache = resolved.no_cache;
-    project_config.config.threads = resolved.threads;
-    project_config
+    let run = resolve_programmatic_run(analysis, &ProgrammaticEntry::FeatureFlags)?;
+    let session = crate::run::runnable(&run, PlannedAnalysis::DeadCode)?.open_session();
+    Ok(super::dead_code::attach_cancellation(session, resolved))
 }
 
 /// The files a flags run reports on, from the workspace, changed-since and
@@ -251,21 +225,20 @@ fn sort_and_limit_feature_flags(flags: &mut Vec<FeatureFlag>, top: Option<usize>
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::AnalysisOptions;
 
     #[test]
     fn production_override_gives_the_rules_of_production_mode() {
         let project = tempfile::tempdir().expect("temp dir");
         std::fs::write(project.path().join("package.json"), r#"{"name":"flags"}"#)
             .expect("package");
-        let resolved = resolve_programmatic_analysis_context(&AnalysisOptions {
+        let analysis = AnalysisOptions {
             root: Some(project.path().to_path_buf()),
             production_override: Some(true),
             ..AnalysisOptions::default()
-        })
-        .expect("context resolves");
+        };
+        let resolved = resolve_programmatic_analysis_context(&analysis).expect("context resolves");
 
-        let session = load_feature_flags_session(&resolved).expect("session loads");
+        let session = load_feature_flags_session(&resolved, &analysis).expect("session loads");
 
         assert!(session.config().production);
         assert_eq!(

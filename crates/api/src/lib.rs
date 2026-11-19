@@ -69,6 +69,8 @@ pub mod ownership;
 mod release_signature;
 pub mod review_deltas;
 pub mod routing;
+/// One resolved run for each programmatic call: [`run::resolve_programmatic_run`].
+pub mod run;
 pub mod runtime;
 mod runtime_json;
 mod runtime_output;
@@ -430,6 +432,12 @@ pub struct AnalysisOptions {
     /// uninterruptible work on a large repository. A caller that needs a
     /// bounded stop has to run Fallow as a child process and kill it.
     pub cancellation: Option<Arc<AtomicBool>>,
+    /// The surface and the environment snapshot of the call. `None` means
+    /// the Rust API with a snapshot of the process environment at the start
+    /// of the call. The Node bindings set the Node surface. The surface
+    /// decides which environment variables the call reads, see
+    /// `docs/environment-variables.md`.
+    pub host: Option<run::HostInputs>,
 }
 
 /// Typed options for Fallow's optional TypeScript semantic companion.

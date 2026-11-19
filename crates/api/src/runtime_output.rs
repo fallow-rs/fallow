@@ -133,6 +133,10 @@ pub struct CombinedProgrammaticOutput {
     /// envelope root as `request_outcomes`, the only carrier on the combined
     /// envelope.
     pub request_outcomes: Option<fallow_output::RequestOutcomes>,
+    /// Each analysis that the run skips, with the reason, emitted at the
+    /// envelope root as `skipped` and omitted when empty. A skipped analysis
+    /// has no section.
+    pub skipped: Vec<fallow_output::SkippedAnalysis>,
 }
 
 /// Typed programmatic dead-code output before JSON serialization.

@@ -8,12 +8,13 @@
 //! layers would report syntactic results where `fallow` reports type-aware
 //! ones, so the typed route fails with a stable code instead.
 
+use std::borrow::Cow;
 use std::path::Path;
 
 use fallow_config::FallowConfig;
 
 use super::{ProgrammaticResult, load_config_file};
-use crate::{ProgrammaticError, TypeAwareOptions, analysis_context::ProgrammaticAnalysisContext};
+use crate::{ProgrammaticError, TypeAwareOptions, run::ResolvedRun};
 
 /// Error code of the typed runners when the environment or the project config
 /// turns on type-aware analysis that the caller did not request through
@@ -34,27 +35,21 @@ pub(super) enum TypeAwareCommand {
 }
 
 /// Fail with [`TYPE_AWARE_CONFIG_UNSUPPORTED`] when the environment or the
-/// config turns on type-aware analysis and `type_aware` leaves the choice
-/// open.
+/// config of `run` turns on type-aware analysis and `type_aware` leaves the
+/// choice open.
 ///
 /// # Errors
 ///
-/// Returns the config load errors, and [`TYPE_AWARE_CONFIG_UNSUPPORTED`] when
-/// a layer turns type-aware analysis on.
+/// Returns [`TYPE_AWARE_CONFIG_UNSUPPORTED`] when a layer turns type-aware
+/// analysis on.
 pub(super) fn reject_config_type_aware(
     type_aware: &TypeAwareOptions,
-    resolved: &ProgrammaticAnalysisContext,
+    run: &ResolvedRun,
     command: TypeAwareCommand,
 ) -> ProgrammaticResult<()> {
-    reject_config_type_aware_at(
-        type_aware,
-        ConfigLocation {
-            root: resolved.root(),
-            config_path: resolved.config_path().as_deref(),
-            allow_remote_extends: resolved.allow_remote_extends(),
-        },
-        command,
-    )
+    reject_type_aware_layers(type_aware, command, || {
+        Ok(Some(Cow::Borrowed(run.config())))
+    })
 }
 
 /// `fallow dead-code --trace` adds semantic evidence and its completeness
@@ -69,7 +64,7 @@ pub(super) fn reject_config_type_aware(
 /// the option or a layer turns type-aware analysis on.
 pub(super) fn reject_type_aware_trace(
     type_aware: &TypeAwareOptions,
-    resolved: &ProgrammaticAnalysisContext,
+    run: &ResolvedRun,
 ) -> ProgrammaticResult<()> {
     if type_aware.requested() {
         return Err(type_aware_refusal(
@@ -77,7 +72,7 @@ pub(super) fn reject_type_aware_trace(
             "the programmatic trace has no semantic evidence; run the `fallow` CLI",
         ));
     }
-    reject_config_type_aware(type_aware, resolved, TypeAwareCommand::Analysis)
+    reject_config_type_aware(type_aware, run, TypeAwareCommand::Analysis)
 }
 
 /// Where the project config of a run lives.
@@ -88,12 +83,29 @@ pub(super) struct ConfigLocation<'a> {
     pub allow_remote_extends: bool,
 }
 
-/// [`reject_config_type_aware`] for a caller without a resolved analysis
-/// context.
+/// [`reject_config_type_aware`] for a caller without a resolved run. It
+/// reads the config file only when the environment leaves the choice open.
 pub(super) fn reject_config_type_aware_at(
     type_aware: &TypeAwareOptions,
     location: ConfigLocation<'_>,
     command: TypeAwareCommand,
+) -> ProgrammaticResult<()> {
+    reject_type_aware_layers(type_aware, command, || {
+        Ok(load_config_file(
+            location.root,
+            location.config_path,
+            location.allow_remote_extends,
+        )?
+        .map(Cow::Owned))
+    })
+}
+
+/// The check of [`reject_config_type_aware`]. `config` gives the config file,
+/// or `None` when the project has none.
+fn reject_type_aware_layers<'config>(
+    type_aware: &TypeAwareOptions,
+    command: TypeAwareCommand,
+    config: impl FnOnce() -> ProgrammaticResult<Option<Cow<'config, FallowConfig>>>,
 ) -> ProgrammaticResult<()> {
     // An explicit choice wins over the environment and the config, as the
     // `--type-aware` and `--no-type-aware` flags do.
@@ -103,16 +115,9 @@ pub(super) fn reject_config_type_aware_at(
     let source = match env_layer(std::env::var(TYPE_AWARE_ENV)) {
         EnvLayer::Off => return Ok(()),
         EnvLayer::On => Some(TYPE_AWARE_ENV),
-        EnvLayer::Unset => {
-            let config = load_config_file(
-                location.root,
-                location.config_path,
-                location.allow_remote_extends,
-            )?;
-            config
-                .as_ref()
-                .and_then(|config| config_source(config, command))
-        }
+        EnvLayer::Unset => config()?
+            .as_ref()
+            .and_then(|config| config_source(config, command)),
     };
     let Some(source) = source else {
         return Ok(());

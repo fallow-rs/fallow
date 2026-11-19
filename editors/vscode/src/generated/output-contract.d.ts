@@ -1632,6 +1632,14 @@ export type SecurityBlindSpotsSchemaVersion = "1"
  */
 export type CombinedSchemaVersion = 15
 /**
+ * The analysis of a [`SkippedAnalysis`].
+ */
+export type SkippedAnalysisName = ("dead-code" | "duplication" | "health")
+/**
+ * The reason of a [`SkippedAnalysis`].
+ */
+export type SkipReasonName = ("not-requested" | "off-by-config")
+/**
  * Schema projection for the feature-flags envelope's exact version.
  */
 export type FeatureFlagsSchemaVersion = 8
@@ -18272,6 +18280,12 @@ workspace_diagnostics?: WorkspaceDiagnostic[]
  * findings. See `CheckOutput::next_steps` for the contract.
  */
 next_steps?: NextStep[]
+/**
+ * Each analysis that the run skips, with the reason, in the order dead
+ * code, duplication, health. The typed programmatic API fills it. The
+ * CLI leaves it absent. Omitted when the run skips no analysis.
+ */
+skipped?: SkippedAnalysis[]
 }
 /**
  * Optional `_meta` block for [`CombinedOutput`].
@@ -18333,6 +18347,18 @@ stats: DuplicationStats
  * `matched_entries: 0` on a healthy baseline.
  */
 baseline_staleness?: (BaselineStaleness | null)
+}
+/**
+ * One analysis that a combined run skips.
+ */
+export interface SkippedAnalysis {
+analysis: SkippedAnalysisName
+reason: SkipReasonName
+/**
+ * The config key that turns the analysis off, for example
+ * `duplicates.enabled`. Present only for `off-by-config`.
+ */
+config_key?: (string | null)
 }
 /**
  * Envelope emitted by `fallow flags --format json`.

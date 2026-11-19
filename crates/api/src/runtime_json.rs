@@ -48,6 +48,7 @@ pub fn serialize_combined_programmatic_json(
         next_steps,
         telemetry_analysis_run_id,
         request_outcomes,
+        skipped,
     } = output;
     let workspace_diagnostics =
         combined_workspace_diagnostics(dead_code.as_ref(), health.as_ref(), duplication.as_ref());
@@ -82,6 +83,7 @@ pub fn serialize_combined_programmatic_json(
         workspace_diagnostics,
         next_steps,
         telemetry_analysis_run_id: telemetry_analysis_run_id.as_deref(),
+        skipped,
     })
     .map_err(|err| {
         ProgrammaticError::new(format!("failed to serialize combined report: {err}"), 2)
@@ -788,6 +790,7 @@ mod tests {
             next_steps: Vec::new(),
             telemetry_analysis_run_id: None,
             request_outcomes: None,
+            skipped: Vec::new(),
         }
     }
 

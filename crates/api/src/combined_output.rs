@@ -69,6 +69,9 @@ pub struct CombinedJsonOutputInput<'a> {
     pub next_steps: Vec<NextStep>,
     /// Analysis run id stamped into telemetry metadata when present.
     pub telemetry_analysis_run_id: Option<&'a str>,
+    /// Each analysis that the run skips, with the reason. The CLI leaves it
+    /// empty.
+    pub skipped: Vec<fallow_output::SkippedAnalysis>,
 }
 
 /// Build and serialize bare combined JSON through the API output boundary.
@@ -133,6 +136,7 @@ pub fn serialize_combined_json(
         health,
         workspace_diagnostics: input.workspace_diagnostics,
         next_steps: input.next_steps,
+        skipped: input.skipped,
     };
 
     let mut value = serialize_combined_json_output(output, input.telemetry_analysis_run_id)?;
@@ -240,6 +244,7 @@ mod tests {
             workspace_diagnostics: Vec::new(),
             next_steps: Vec::new(),
             telemetry_analysis_run_id: None,
+            skipped: Vec::new(),
         })
         .expect("combined JSON root");
 
@@ -339,6 +344,7 @@ mod tests {
             workspace_diagnostics: Vec::new(),
             next_steps: Vec::new(),
             telemetry_analysis_run_id: None,
+            skipped: Vec::new(),
         })
         .expect("combined JSON");
 
@@ -378,6 +384,7 @@ mod tests {
             workspace_diagnostics,
             next_steps: Vec::new(),
             telemetry_analysis_run_id: None,
+            skipped: Vec::new(),
         })
         .expect("combined JSON")
     }

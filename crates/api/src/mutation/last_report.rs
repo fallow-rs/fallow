@@ -31,20 +31,10 @@ fn cache_error(message: String) -> ProgrammaticError {
 
 /// The cache directory of the project config: the directory that a run uses.
 fn cache_dir(analysis: &AnalysisOptions) -> Result<PathBuf, ProgrammaticError> {
-    let resolved = resolve_programmatic_analysis_context(analysis)?;
-    let project = fallow_engine::project_config::config_for_project_with_load_options(
-        resolved.root(),
-        resolved.config_path().as_deref(),
-        fallow_config::ConfigLoadOptions {
-            allow_remote_extends: resolved.allow_remote_extends(),
-        },
-    )
-    .map_err(|error| {
-        ProgrammaticError::new(format!("failed to load config: {error}"), 2)
-            .with_code("FALLOW_CONFIG_LOAD_FAILED")
-            .with_context("analysis.configPath")
-    })?;
-    Ok(project.config.cache_dir)
+    resolve_programmatic_analysis_context(analysis)?;
+    let run =
+        crate::run::resolve_programmatic_run(analysis, &crate::run::ProgrammaticEntry::Mutation)?;
+    Ok(run.settings().cache_dir.value().clone())
 }
 
 /// The path of the saved report of the last run of the project.

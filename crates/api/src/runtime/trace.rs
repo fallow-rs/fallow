@@ -12,6 +12,7 @@ use crate::{
 
 use super::{ProgrammaticResult, duplication, resolve_programmatic_analysis_context};
 use crate::analysis_context::validate_workspace_selection;
+use crate::run::{ProgrammaticEntry, ResolvedRun, resolve_programmatic_run};
 
 struct TraceArtifacts {
     graph: fallow_engine::module_graph::RetainedModuleGraph,
@@ -37,9 +38,10 @@ pub fn run_trace_export(
     validate_non_empty("file", &options.file)?;
     validate_non_empty("export_name", &options.export_name)?;
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
-    super::type_aware_config::reject_type_aware_trace(&options.analysis.type_aware, &resolved)?;
     resolved.install(|| {
-        let session = load_trace_session(&resolved)?;
+        let run = resolve_programmatic_run(&options.analysis, &ProgrammaticEntry::TraceChain)?;
+        super::type_aware_config::reject_type_aware_trace(&options.analysis.type_aware, &run)?;
+        let session = load_trace_session(&resolved, &options.analysis, &run)?;
         let artifacts = trace_artifacts(&session)?;
         // Resolve a top-level export first; on a miss fall back to a class /
         // enum / store member trace so the MCP tool and Code Mode match the
@@ -92,7 +94,8 @@ pub fn run_trace_file(
     validate_non_empty("file", &options.file)?;
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
     resolved.install(|| {
-        let session = load_trace_session(&resolved)?;
+        let run = resolve_programmatic_run(&options.analysis, &ProgrammaticEntry::TraceChain)?;
+        let session = load_trace_session(&resolved, &options.analysis, &run)?;
         let artifacts = trace_artifacts(&session)?;
         let mut output =
             fallow_engine::trace::trace_file(&artifacts.graph, session.root(), &options.file)
@@ -132,7 +135,8 @@ pub fn run_trace_import_path(
     validate_non_empty("to", &options.to)?;
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
     resolved.install(|| {
-        let session = load_trace_session(&resolved)?;
+        let run = resolve_programmatic_run(&options.analysis, &ProgrammaticEntry::TracePath)?;
+        let session = load_trace_session(&resolved, &options.analysis, &run)?;
         let artifacts = trace_artifacts(&session)?;
         let trace = if options.eager_only {
             fallow_engine::trace::trace_eager_import_path
@@ -214,7 +218,8 @@ pub fn run_trace_error(
     }
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
     resolved.install(|| {
-        let session = load_trace_session(&resolved)?;
+        let run = resolve_programmatic_run(&options.analysis, &ProgrammaticEntry::TraceError)?;
+        let session = load_trace_session(&resolved, &options.analysis, &run)?;
         let output = fallow_engine::trace_error::trace_error_with_session(
             &session,
             &options.trace,
@@ -241,7 +246,8 @@ pub fn run_trace_dependency(
     validate_non_empty("package_name", &options.package_name)?;
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
     resolved.install(|| {
-        let session = load_trace_session(&resolved)?;
+        let run = resolve_programmatic_run(&options.analysis, &ProgrammaticEntry::TraceDependency)?;
+        let session = load_trace_session(&resolved, &options.analysis, &run)?;
         if let Some(query) = &options.usage {
             return trace_dependency_usage(&session, &options.package_name, query);
         }
@@ -304,7 +310,11 @@ pub fn run_trace_clone(
     let resolved = resolve_programmatic_analysis_context(&options.duplication.analysis)?;
     resolved.install(|| {
         resolved.ensure_not_cancelled("config load and file discovery")?;
-        let session = duplication::load_duplication_session(&options.duplication, &resolved)?;
+        let run = resolve_programmatic_run(
+            &options.duplication.analysis,
+            &ProgrammaticEntry::Duplication,
+        )?;
+        let session = duplication::load_duplication_session(&options.duplication, &resolved, &run)?;
         validate_workspace_selection(&resolved, session.workspaces())?;
         resolved.ensure_not_cancelled("duplication detection")?;
         let dupes_config =
@@ -547,10 +557,13 @@ fn validate_trace_clone_target(target: &TraceCloneTarget) -> ProgrammaticResult<
 
 fn load_trace_session(
     resolved: &ProgrammaticAnalysisContext,
+    analysis: &crate::AnalysisOptions,
+    run: &ResolvedRun,
 ) -> ProgrammaticResult<AnalysisSession> {
     let session = super::dead_code::load_dead_code_session(
-        &super::dead_code::default_dead_code_options_for_context(resolved),
+        &super::dead_code::default_dead_code_options(analysis),
         resolved,
+        run,
     )?;
     validate_workspace_selection(resolved, session.workspaces())?;
     Ok(session)

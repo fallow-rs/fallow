@@ -1,26 +1,22 @@
 use std::time::Instant;
 
-use fallow_config::{DetectionMode, DuplicatesConfig, ProductionAnalysis};
-use fallow_engine::{
-    change_scope::ChangeScope,
-    project_config::{ProjectConfig, ProjectConfigOptions},
-    session::AnalysisSession,
-};
+use fallow_config::{DetectionMode, DuplicatesConfig, PlannedAnalysis};
+use fallow_engine::{change_scope::ChangeScope, session::AnalysisSession};
 use fallow_output::{
     DUPES_PROGRAMMATIC_SCHEMA_VERSION, DupesNextStepsInput, DupesOutput, DupesOutputInput,
     build_dupes_next_steps, build_dupes_output, dupes_meta,
 };
-use fallow_types::output_format::OutputFormat;
 use rustc_hash::FxHashSet;
 
 use crate::{
     DupesReportPayload, DuplicationGroup, DuplicationMode, DuplicationOptions,
-    DuplicationProgrammaticOutput, ProgrammaticError,
+    DuplicationProgrammaticOutput,
     analysis_context::{
         ProgrammaticAnalysisContext, changed_files_for_run, resolve_programmatic_analysis_context,
         workspace_roots_for_session,
     },
     next_steps::{audit_changed_applicable, setup_pointer_applicable, suggestions_enabled},
+    run::{ProgrammaticEntry, ResolvedRun, resolve_programmatic_run},
 };
 
 use super::ProgrammaticResult;
@@ -35,25 +31,31 @@ pub fn run_duplication(
     options: &DuplicationOptions,
 ) -> ProgrammaticResult<DuplicationProgrammaticOutput> {
     let resolved = resolve_programmatic_analysis_context(&options.analysis)?;
-    run_duplication_in_context(options, &resolved)
+    resolved.install(|| {
+        resolved.ensure_not_cancelled("config load and file discovery")?;
+        let run = resolve_programmatic_run(&options.analysis, &ProgrammaticEntry::Duplication)?;
+        run_duplication_in_context(options, &resolved, &run)
+    })
 }
 
-/// Run duplication analysis in a context that the caller resolved. Audit uses
-/// this to hand the change scope of every section to itself.
+/// Run duplication analysis in a context and a run that the caller resolved.
+/// Audit uses this to hand the change scope of every section to itself.
 pub(super) fn run_duplication_in_context(
     options: &DuplicationOptions,
     resolved: &ProgrammaticAnalysisContext,
+    run: &ResolvedRun,
 ) -> ProgrammaticResult<DuplicationProgrammaticOutput> {
-    resolved.install(|| run_duplication_inner(options, resolved))
+    resolved.install(|| run_duplication_inner(options, resolved, run))
 }
 
 fn run_duplication_inner(
     options: &DuplicationOptions,
     resolved: &ProgrammaticAnalysisContext,
+    run: &ResolvedRun,
 ) -> ProgrammaticResult<DuplicationProgrammaticOutput> {
     let start = Instant::now();
     resolved.ensure_not_cancelled("config load and file discovery")?;
-    let session = load_duplication_session(options, resolved)?;
+    let session = load_duplication_session(options, resolved, run)?;
     super::dead_code::resolve_package_map_before_analysis(resolved, &session)?;
     run_duplication_with_session(options, resolved, &session, None, start)
 }
@@ -167,42 +169,18 @@ pub(super) fn run_duplication_report_with_session(
     })
 }
 
+/// Open the duplication session of `run`, with the detector options of
+/// `options`.
 pub(super) fn load_duplication_session(
     options: &DuplicationOptions,
     resolved: &ProgrammaticAnalysisContext,
+    run: &ResolvedRun,
 ) -> ProgrammaticResult<AnalysisSession> {
-    let project_config = fallow_engine::project_config::config_for_project_analysis(
-        &resolved.root,
-        resolved.config_path.as_deref(),
-        ProjectConfigOptions {
-            output: OutputFormat::Json,
-            no_cache: resolved.no_cache,
-            threads: resolved.threads,
-            production_override: resolved.production_override,
-            quiet: true,
-            analysis: ProductionAnalysis::Dupes,
-            allow_remote_extends: resolved.allow_remote_extends(),
-        },
-    )
-    .map_err(|err| {
-        ProgrammaticError::new(format!("failed to load config: {err}"), 2)
-            .with_code("FALLOW_CONFIG_LOAD_FAILED")
-            .with_context("analysis.configPath")
+    let duplication = crate::run::runnable(run, PlannedAnalysis::Duplication)?;
+    let session = crate::run::open_session_adjusted(&duplication, |config| {
+        config.duplicates = build_dupes_config(options, &config.duplicates);
     })?;
-    let project_config = configure_project_for_duplication(project_config, options);
-    Ok(super::dead_code::attach_cancellation(
-        AnalysisSession::from_config(project_config),
-        resolved,
-    ))
-}
-
-fn configure_project_for_duplication(
-    mut project_config: ProjectConfig,
-    options: &DuplicationOptions,
-) -> ProjectConfig {
-    project_config.config.duplicates =
-        build_dupes_config(options, &project_config.config.duplicates);
-    project_config
+    Ok(super::dead_code::attach_cancellation(session, resolved))
 }
 
 pub(super) fn build_dupes_config(
