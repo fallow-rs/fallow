@@ -69,7 +69,6 @@ pub mod ownership;
 mod release_signature;
 pub mod review_deltas;
 pub mod routing;
-/// One resolved run for each programmatic call: [`run::resolve_programmatic_run`].
 pub mod run;
 pub mod runtime;
 mod runtime_json;
