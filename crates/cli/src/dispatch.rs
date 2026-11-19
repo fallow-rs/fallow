@@ -89,21 +89,15 @@ fn dispatch_mutation_command(
     ) {
         fallow_config::MutationConfig::default()
     } else {
-        match fallow_engine::project_config::config_for_project_with_load_options(
-            dispatch.root,
-            cli.config.as_deref(),
-            fallow_config::ConfigLoadOptions {
-                allow_remote_extends: cli.allow_remote_extends,
-            },
-        ) {
-            Ok(project) => project.config.mutation,
-            Err(error) => {
-                return error::emit_input_error_with_style(
-                    &format!("failed to load config: {error}"),
-                    dispatch.output,
-                    dispatch.json_style,
-                );
-            }
+        // The command printed no `loaded config` line before it resolved a run.
+        match (DispatchContext {
+            quiet: true,
+            ..*dispatch
+        })
+        .resolve_run()
+        {
+            Ok(run) => run.config().mutation.clone(),
+            Err(code) => return code,
         }
     };
     mutation_cli::run(&mutation_cli::MutationCliInput {
@@ -122,6 +116,7 @@ fn dispatch_mutation_command(
         config,
         args,
         subcommand,
+        host: Some(crate::run_inputs::cli_host(dispatch.run_inputs)),
     })
 }
 
@@ -180,6 +175,7 @@ pub fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> 
                 files: file,
                 scope,
                 subcommand,
+                host: Some(crate::run_inputs::cli_host(dispatch.run_inputs)),
             })
         }
         Command::Mutation { subcommand, args } => {
@@ -1241,12 +1237,9 @@ fn dispatch_suppressions_command(
 
 fn dispatch_guard_command(dispatch: &DispatchContext<'_>, files: &[String]) -> ExitCode {
     guard::run_guard(&guard::GuardOptions {
-        root: dispatch.root,
-        config_path: &dispatch.cli.config,
         output: dispatch.output,
         json_style: dispatch.json_style,
-        quiet: dispatch.quiet,
-        allow_remote_extends: dispatch.cli.allow_remote_extends,
+        resolve: &|| dispatch.resolve_run(),
         files,
     })
 }
@@ -1257,10 +1250,8 @@ fn dispatch_rule_pack_command(dispatch: &DispatchContext<'_>, subcommand: RulePa
         config_path: &dispatch.cli.config,
         output: dispatch.output,
         json_style: dispatch.json_style,
-        quiet: dispatch.quiet,
-        no_cache: dispatch.cli.no_cache,
         threads: Some(dispatch.threads),
-        allow_remote_extends: dispatch.cli.allow_remote_extends,
+        resolve: Some(&|| dispatch.resolve_run()),
     };
     rule_pack::run(&map_rule_pack_subcommand(subcommand), &ctx)
 }

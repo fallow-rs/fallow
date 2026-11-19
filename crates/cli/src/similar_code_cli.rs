@@ -111,6 +111,8 @@ pub struct SimilarCodeCliInput<'a> {
     /// (the full corpus is still compared). `None` means whole-project scope.
     pub(crate) scope: Option<crate::scope_path::ScopePath>,
     pub(crate) subcommand: Option<SimilarCodeSubcommand>,
+    /// The host of the run. `Some` makes the run resolve as the CLI.
+    pub(crate) host: Option<fallow_config::HostInputs>,
 }
 
 pub fn run(input: SimilarCodeCliInput<'_>) -> ExitCode {
@@ -322,6 +324,7 @@ fn options(input: &SimilarCodeCliInput<'_>) -> SimilarCodeOptions {
             workspace: input.workspace.map(<[String]>::to_vec),
             changed_workspaces: input.changed_workspaces.map(str::to_owned),
             explain: input.explain,
+            host: input.host.clone(),
             ..AnalysisOptions::default()
         },
         threshold: input.threshold,
@@ -902,6 +905,37 @@ mod tests {
         read_bounded_candidate_file, read_bounded_verdict_file, render_posix_argument,
         render_powershell_argument, render_reviewed_candidate, review_summary,
     };
+
+    #[test]
+    fn similar_code_cli_resolves_as_cli_surface() {
+        let input = super::SimilarCodeCliInput {
+            root: std::path::Path::new("/repo"),
+            config_path: None,
+            allow_remote_extends: false,
+            no_cache: true,
+            threads: 1,
+            changed_since: None,
+            diff_file: None,
+            workspace: None,
+            changed_workspaces: None,
+            explain: false,
+            quiet: true,
+            output: fallow_config::OutputFormat::Json,
+            json_style: crate::json_style::JsonStyle::default(),
+            threshold: None,
+            min_lines: None,
+            top: None,
+            files: Vec::new(),
+            scope: None,
+            subcommand: None,
+            host: Some(crate::run_inputs::cli_host(None)),
+        };
+        let surface = super::options(&input)
+            .analysis
+            .host
+            .map(|host| host.surface);
+        assert_eq!(surface, Some(fallow_config::Surface::Cli));
+    }
 
     fn reviewed_candidate(
         verdict: Option<SimilarCodeVerdict>,

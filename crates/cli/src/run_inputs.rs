@@ -7,7 +7,8 @@
 //! variables that the CLI reads for the command, and the config.
 
 use fallow_config::{
-    CommandKind, EnvSnapshot, OutputFormat, PlannedAnalysis, RunInputs, SelectionInput, Surface,
+    CommandKind, EnvSnapshot, HostInputs, OutputFormat, PlannedAnalysis, RunInputs, SelectionInput,
+    Surface,
 };
 use fallow_types::sourced::{Given, Origin};
 
@@ -315,6 +316,16 @@ pub fn command_run_inputs(cli: &Cli, env: EnvSnapshot) -> Option<RunInputs> {
     inputs.output = OutputFormat::from(cli.format);
     inputs.quiet = cli.quiet;
     Some(inputs)
+}
+
+/// The host of a command that runs through `fallow-api` (`mutation` and
+/// `similar-code`), so that its run resolves as [`Surface::Cli`] with the
+/// environment snapshot of `inputs`. `None` captures the environment.
+pub fn cli_host(inputs: Option<&RunInputs>) -> HostInputs {
+    HostInputs {
+        surface: Surface::Cli,
+        env: inputs.map_or_else(EnvSnapshot::capture, |inputs| inputs.env().clone()),
+    }
 }
 
 /// The run inputs of the command that the CLI dispatches, with the output

@@ -5,30 +5,22 @@ use fallow_config::{OutputFormat, ResolvedConfig, RulePackRule, RulePackRuleKind
 use serde_json::json;
 
 use super::RulePackContext;
-use crate::runtime_support::{LoadConfigArgs, load_config};
 
 pub fn run(ctx: &RulePackContext<'_>) -> ExitCode {
-    let config = match load_config(
-        ctx.root,
-        ctx.config_path,
-        LoadConfigArgs {
-            output: ctx.output,
-            no_cache: ctx.no_cache,
-            threads: ctx.threads.unwrap_or_else(default_threads),
-            production: false,
-            quiet: ctx.quiet,
-            allow_remote_extends: ctx.allow_remote_extends,
-        },
-    ) {
-        Ok(config) => config,
+    let run = match ctx.run() {
+        Ok(run) => run,
+        Err(code) => return code,
+    };
+    let config = match crate::cli_production::dead_code_runnable(&run, ctx.output) {
+        Ok(dead_code) => dead_code.config(),
         Err(code) => return code,
     };
 
     if matches!(ctx.output, OutputFormat::Json) {
-        return emit_json(&config, ctx.json_style);
+        return emit_json(config, ctx.json_style);
     }
 
-    emit_human(&config)
+    emit_human(config)
 }
 
 fn emit_json(config: &ResolvedConfig, json_style: crate::json_style::JsonStyle) -> ExitCode {
@@ -159,8 +151,4 @@ fn rule_patterns(rule: &RulePackRule) -> Vec<String> {
 
 fn path_to_string(path: &Path) -> String {
     path.to_string_lossy().replace('\\', "/")
-}
-
-fn default_threads() -> usize {
-    std::thread::available_parallelism().map_or(1, std::num::NonZeroUsize::get)
 }

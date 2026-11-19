@@ -287,6 +287,8 @@ pub struct MutationCliInput<'a> {
     pub(crate) config: MutationConfig,
     pub(crate) args: MutationArgs,
     pub(crate) subcommand: Option<MutationSubcommand>,
+    /// The host of the run. `Some` makes the run resolve as the CLI.
+    pub(crate) host: Option<fallow_config::HostInputs>,
 }
 
 fn input_error(message: impl Into<String>, context: &str) -> ProgrammaticError {
@@ -457,6 +459,7 @@ pub fn run_options(input: &MutationCliInput<'_>) -> Result<MutationRunOptions, P
             no_cache: input.no_cache,
             threads: Some(input.threads),
             diff_file: input.diff_file.map(Path::to_path_buf),
+            host: input.host.clone(),
             ..AnalysisOptions::default()
         },
         scope: scope(input)?,
