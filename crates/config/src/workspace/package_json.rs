@@ -269,6 +269,42 @@ pub struct PackageJson {
     pub inline_tool_configs: BTreeMap<&'static str, serde_json::Value>,
 }
 
+/// The package.json field that declares an entry point.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PackageEntryField {
+    /// The `main` field.
+    Main,
+    /// The `module` field.
+    Module,
+    /// The `types` field.
+    Types,
+    /// The `typings` field.
+    Typings,
+    /// The `source` field.
+    Source,
+    /// The `browser` field, as a string or as a map of replacement paths.
+    Browser,
+    /// The `bin` field, as a string or as a map of command names.
+    Bin,
+    /// The `exports` field, at any depth of conditions and subpaths.
+    Exports,
+}
+
+impl From<PackageEntryField> for fallow_types::discover::EntryPointSource {
+    fn from(field: PackageEntryField) -> Self {
+        match field {
+            PackageEntryField::Main => Self::PackageJsonMain,
+            PackageEntryField::Module => Self::PackageJsonModule,
+            PackageEntryField::Types => Self::PackageJsonTypes,
+            PackageEntryField::Typings => Self::PackageJsonTypings,
+            PackageEntryField::Source => Self::PackageJsonSource,
+            PackageEntryField::Browser => Self::PackageJsonBrowser,
+            PackageEntryField::Bin => Self::PackageJsonBin,
+            PackageEntryField::Exports => Self::PackageJsonExports,
+        }
+    }
+}
+
 impl PackageJson {
     /// The raw value of the tool config key `key`, such as `prettier` or
     /// `nodemonConfig`. Returns `None` when the manifest has no such key, or
@@ -358,33 +394,42 @@ impl PackageJson {
     /// Extract entry points from package.json fields.
     #[must_use]
     pub fn entry_points(&self) -> Vec<String> {
+        self.entry_points_by_field()
+            .into_iter()
+            .map(|(_, entry)| entry)
+            .collect()
+    }
+
+    /// Extract entry points from package.json fields, each with the field
+    /// that declares it, in field order: `main`, `module`, `types`,
+    /// `typings`, `source`, `browser`, `bin`, `exports`.
+    #[must_use]
+    pub fn entry_points_by_field(&self) -> Vec<(PackageEntryField, String)> {
         let mut entries = Vec::new();
 
-        if let Some(main) = &self.main {
-            entries.push(main.clone());
-        }
-        if let Some(module) = &self.module {
-            entries.push(module.clone());
-        }
-        if let Some(types) = &self.types {
-            entries.push(types.clone());
-        }
-        if let Some(typings) = &self.typings {
-            entries.push(typings.clone());
-        }
-        if let Some(source) = &self.source {
-            entries.push(source.clone());
+        for (field, value) in [
+            (PackageEntryField::Main, &self.main),
+            (PackageEntryField::Module, &self.module),
+            (PackageEntryField::Types, &self.types),
+            (PackageEntryField::Typings, &self.typings),
+            (PackageEntryField::Source, &self.source),
+        ] {
+            if let Some(entry) = value {
+                entries.push((field, entry.clone()));
+            }
         }
 
         if let Some(browser) = &self.browser {
             match browser {
-                serde_json::Value::String(s) => entries.push(s.clone()),
+                serde_json::Value::String(s) => {
+                    entries.push((PackageEntryField::Browser, s.clone()));
+                }
                 serde_json::Value::Object(map) => {
                     for v in map.values() {
                         if let serde_json::Value::String(s) = v
                             && (s.starts_with("./") || s.starts_with("../"))
                         {
-                            entries.push(s.clone());
+                            entries.push((PackageEntryField::Browser, s.clone()));
                         }
                     }
                 }
@@ -394,11 +439,11 @@ impl PackageJson {
 
         if let Some(bin) = &self.bin {
             match bin {
-                serde_json::Value::String(s) => entries.push(s.clone()),
+                serde_json::Value::String(s) => entries.push((PackageEntryField::Bin, s.clone())),
                 serde_json::Value::Object(map) => {
                     for v in map.values() {
                         if let serde_json::Value::String(s) = v {
-                            entries.push(s.clone());
+                            entries.push((PackageEntryField::Bin, s.clone()));
                         }
                     }
                 }
@@ -407,7 +452,13 @@ impl PackageJson {
         }
 
         if let Some(exports) = &self.exports {
-            extract_exports_entries(exports, &mut entries);
+            let mut exported = Vec::new();
+            extract_exports_entries(exports, &mut exported);
+            entries.extend(
+                exported
+                    .into_iter()
+                    .map(|entry| (PackageEntryField::Exports, entry)),
+            );
         }
 
         entries
