@@ -1569,3 +1569,7 @@ mod clone_columns_tests;
 #[cfg(test)]
 #[path = "tests_production_rules.rs"]
 mod production_rules_tests;
+
+#[cfg(test)]
+#[path = "run_inputs_tests.rs"]
+mod run_inputs_tests;

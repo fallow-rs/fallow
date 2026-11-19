@@ -1,4 +1,4 @@
-//! A builder of resolved runs for tests.
+//! A builder of resolved runs for tests, and a count of duplication runs.
 //!
 //! The builder fills [`RunInputs`] with test defaults and resolves them with
 //! the steps of [`super::resolve::resolve_run`], so a test run has the same
@@ -188,6 +188,37 @@ impl ResolvedRunBuilder {
             adjust(&mut entry.config);
         }
         run
+    }
+}
+
+/// A count of the duplication runs of the sessions of each project root, for
+/// tests that check whether a run skips duplication.
+pub mod duplication_runs {
+    use std::path::{Path, PathBuf};
+    use std::sync::{Mutex, PoisonError};
+
+    use rustc_hash::FxHashMap;
+
+    static RUNS: Mutex<Option<FxHashMap<PathBuf, usize>>> = Mutex::new(None);
+
+    pub(crate) fn record(root: &Path) {
+        let mut runs = RUNS.lock().unwrap_or_else(PoisonError::into_inner);
+        *runs
+            .get_or_insert_with(FxHashMap::default)
+            .entry(root.to_path_buf())
+            .or_default() += 1;
+    }
+
+    /// The number of duplication runs of a session with the root `root` since
+    /// the process started. Each test uses its own temporary root, so tests
+    /// that run in parallel do not change the count of another test.
+    #[must_use]
+    pub fn count(root: &Path) -> usize {
+        RUNS.lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .as_ref()
+            .and_then(|runs| runs.get(root).copied())
+            .unwrap_or(0)
     }
 }
 
