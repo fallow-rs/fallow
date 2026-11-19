@@ -1323,6 +1323,20 @@ mod tests {
     }
 
     #[test]
+    fn reload_config_follows_production_true_to_false() {
+        let dir = watch_project(r#"{"production":true}"#);
+        let resolve = resolver(dir.path(), &[], &[]);
+        let opts = make_watch_options(dir.path(), &resolve);
+        let mut watch = load_watch_config(&opts).expect("config");
+        assert!(watch.config.production);
+
+        std::fs::write(dir.path().join(".fallowrc.json"), r#"{"production":false}"#)
+            .expect("config");
+        reload_config_or_keep_previous(&mut watch, &opts);
+        assert!(!watch.config.production);
+    }
+
+    #[test]
     fn reload_config_applies_include_entry_exports_override() {
         let dir = watch_project("{}");
         let resolve = resolver(dir.path(), &["--include-entry-exports"], &[]);

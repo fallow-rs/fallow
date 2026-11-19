@@ -228,6 +228,39 @@ off_beats_config!(
     viz_draws_the_test_file
 );
 
+/// `fix` reads the global flags through the same resolver as the production
+/// flags, so `--include-entry-exports` makes an unused export of the entry
+/// file a fix candidate.
+#[test]
+fn fix_applies_include_entry_exports() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let root = dir.path();
+    std::fs::create_dir_all(root.join("src")).unwrap();
+    std::fs::write(
+        root.join("package.json"),
+        r#"{"name":"entry-exports","main":"src/index.ts"}"#,
+    )
+    .unwrap();
+    std::fs::write(root.join("src/index.ts"), "export const main = 1;\n").unwrap();
+    git(root, &["init", "-q"]);
+
+    let removes_main = |extra: &[&str]| -> bool {
+        let mut args = vec!["fix", "--dry-run", "--format", "json", "--quiet"];
+        args.extend_from_slice(extra);
+        json(&run(root, &args, &[]))["fixes"]
+            .as_array()
+            .expect("fixes")
+            .iter()
+            .any(|fix| {
+                fix["type"] == "remove_export"
+                    && fix["path"] == "src/index.ts"
+                    && fix["name"] == "main"
+            })
+    };
+    assert!(!removes_main(&[]));
+    assert!(removes_main(&["--include-entry-exports"]));
+}
+
 /// The duplicated lines of `path` in the data of a viz page.
 fn viz_dup_lines(page: &str, path: &str) -> u64 {
     let start = page
