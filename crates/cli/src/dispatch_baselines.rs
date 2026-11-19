@@ -33,21 +33,22 @@ pub(super) fn dispatch_baselines_command(
             output,
         );
     }
-    let config = match load_config(
-        root,
-        &cli.config,
-        LoadConfigArgs {
-            output,
-            no_cache: cli.no_cache,
-            threads: dispatch.threads,
-            production: false,
-            quiet: dispatch.quiet,
-            allow_remote_extends: cli.allow_remote_extends,
-        },
-    ) {
-        Ok(config) => config,
+    // The analyses of the prune run quietly, as the analyses of a baseline
+    // save do. The `loaded config` line still follows `--quiet`.
+    let quiet_inputs = dispatch.run_inputs.map(|inputs| {
+        let mut inputs = inputs.clone();
+        inputs.quiet = true;
+        inputs
+    });
+    let quiet_dispatch = DispatchContext {
+        run_inputs: quiet_inputs.as_ref(),
+        ..*dispatch
+    };
+    let run = match quiet_dispatch.resolve_run() {
+        Ok(run) => run,
         Err(code) => return code,
     };
+    let config = run.config();
     let targets = baselines::prune_targets(
         root,
         &config.audit,
@@ -59,17 +60,11 @@ pub(super) fn dispatch_baselines_command(
             output,
         );
     }
-    let production = match crate::cli_production::resolve_production_modes(
-        cli, root, output, false, false, false,
-    ) {
-        Ok(production) => production,
-        Err(code) => return code,
-    };
     let coverage_inputs = match resolve_coverage_inputs(
         coverage.as_deref(),
         coverage_root.as_deref(),
         output,
-        || Ok(config.health),
+        || Ok(config.health.clone()),
     ) {
         Ok(inputs) => inputs,
         Err(code) => return code,
@@ -85,7 +80,8 @@ pub(super) fn dispatch_baselines_command(
         allow_remote_extends: cli.allow_remote_extends,
         check: *check,
         targets,
-        production,
+        production: run.production_modes(),
+        run: &run,
         mode_flags: fallow_output::BaselineMode {
             production: cli.production,
             include_entry_exports: cli.include_entry_exports,

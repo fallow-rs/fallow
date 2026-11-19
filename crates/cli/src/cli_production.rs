@@ -3,12 +3,9 @@ use std::process::ExitCode;
 use fallow_config::{
     AnalysisSelection, CommandKind, OutputFormat, PlannedAnalysis, ResolvedConfig, RunPlan,
 };
+use fallow_engine::project_config::ConfigLoadError;
 pub use fallow_engine::project_config::ProductionModes;
-use fallow_engine::project_config::{ConfigLoadError, ProductionFlags};
 use fallow_engine::resolved_run::{AnalysisSlot, EmptyCause, ResolveError, ResolvedRun, Runnable};
-
-use super::Cli;
-use crate::runtime_support::load_config_file;
 
 impl crate::DispatchContext<'_> {
     /// Resolve the run of the command line once, and apply the side effects
@@ -127,23 +124,6 @@ impl crate::DispatchContext<'_> {
         };
         crate::error::emit_input_error(&message, self.output)
     }
-
-    pub(crate) fn production_modes(
-        &self,
-        dead_code: bool,
-        health: bool,
-        dupes: bool,
-    ) -> Result<ProductionModes, ExitCode> {
-        resolve_production_modes(self.cli, self.root, self.output, dead_code, health, dupes)
-    }
-
-    pub(crate) fn production_for(
-        &self,
-        analysis: fallow_config::ProductionAnalysis,
-    ) -> Result<bool, ExitCode> {
-        self.production_modes(false, false, false)
-            .map(|modes| modes.for_analysis(analysis))
-    }
 }
 
 /// A resolved run whose config load side effects did not apply yet. See
@@ -183,13 +163,23 @@ impl<'a> DeadCodeRun<'a> {
     /// output format and gives exit code 2.
     pub fn runnable(self) -> Result<Runnable<'a>, ExitCode> {
         let run = self.dispatch.finish_run(self.pending)?;
-        runnable(run, PlannedAnalysis::DeadCode).ok_or_else(|| {
-            crate::error::emit_input_error(
-                "the run skips the dead-code analysis",
-                self.dispatch.output,
-            )
-        })
+        dead_code_runnable(run, self.dispatch.output)
     }
+}
+
+/// The resolver of a command that reads its config after its own checks of
+/// the command line. The dispatch passes `&|| dispatch.resolve_run()`.
+pub type ResolveRun<'a> = &'a dyn Fn() -> Result<ResolvedRun, ExitCode>;
+
+/// The dead-code analysis of `run`. A run that skips it prints an error on
+/// the error channel of `output` and gives exit code 2.
+pub fn dead_code_runnable(
+    run: &ResolvedRun,
+    output: OutputFormat,
+) -> Result<Runnable<'_>, ExitCode> {
+    runnable(run, PlannedAnalysis::DeadCode).ok_or_else(|| {
+        crate::error::emit_input_error("the run skips the dead-code analysis", output)
+    })
 }
 
 /// The resolved config of a dead-code command: the config of `run`, or the
@@ -255,46 +245,6 @@ const fn nothing_selected_message(command: CommandKind, cause: EmptyCause) -> Op
         ),
         _ => None,
     }
-}
-
-/// The production mode of each analysis: the flag of the analysis, then
-/// `--production` or `--no-production`, then the environment variable of the
-/// analysis, then `FALLOW_PRODUCTION`, then the config.
-pub fn resolve_production_modes(
-    cli: &Cli,
-    root: &std::path::Path,
-    output: OutputFormat,
-    production_dead_code: bool,
-    production_health: bool,
-    production_dupes: bool,
-) -> Result<ProductionModes, ExitCode> {
-    let config = load_config_file(
-        root,
-        cli.config.as_deref(),
-        cli.allow_remote_extends,
-        output,
-    )?
-    .config;
-    let flags = ProductionFlags {
-        global: if cli.production {
-            Some(true)
-        } else if cli.no_production {
-            Some(false)
-        } else {
-            None
-        },
-        dead_code: production_dead_code.then_some(true),
-        health: production_health.then_some(true),
-        dupes: production_dupes.then_some(true),
-    };
-    let env = fallow_config::ProductionEnv::from_process();
-    let env = ProductionFlags {
-        global: env.global,
-        dead_code: env.dead_code,
-        health: env.health,
-        dupes: env.dupes,
-    };
-    Ok(flags.with_fallback(env).effective_modes(&config.production))
 }
 
 #[cfg(test)]

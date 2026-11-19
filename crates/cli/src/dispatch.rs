@@ -24,7 +24,7 @@ use crate::cli_startup::cli_global_baseline_flag;
 use crate::dupes::{DupesOptions, DupesOverrides};
 use crate::health::HealthOptions;
 use crate::list::ListOptions;
-use crate::runtime_support::{AnalysisKind, LoadConfigArgs, load_config};
+use crate::runtime_support::AnalysisKind;
 use crate::{
     DEFAULT_MIN_INVOCATIONS_HOT, DispatchContext, audit, audit_cache_prune, base_worktree,
     baseline_gate, baseline_growth, baselines, check, ci, ci_template, cli_report, combined,
@@ -228,13 +228,10 @@ pub fn dispatch_subcommand(command: Command, dispatch: &DispatchContext<'_>) -> 
         Command::TraceError { trace_file } => {
             trace_error::run_trace_error(&trace_error::TraceErrorOptions {
                 root: dispatch.root,
-                config_path: &dispatch.cli.config,
                 output: dispatch.output,
                 json_style: dispatch.json_style,
-                no_cache: dispatch.cli.no_cache,
-                threads: dispatch.threads,
                 quiet: dispatch.quiet,
-                allow_remote_extends: dispatch.cli.allow_remote_extends,
+                resolve: &|| dispatch.resolve_run(),
                 trace_file: trace_file.as_deref(),
             })
         }
@@ -494,20 +491,12 @@ fn dispatch_trace_dependency(
     dispatch: &DispatchContext<'_>,
     target: trace_dependency::TraceDependencyTarget,
 ) -> ExitCode {
-    let production = match dispatch.production_for(fallow_config::ProductionAnalysis::DeadCode) {
-        Ok(production) => production,
-        Err(code) => return code,
-    };
     trace_dependency::run_trace_dependency(&trace_dependency::TraceDependencyOptions {
         root: dispatch.root,
-        config_path: &dispatch.cli.config,
         output: dispatch.output,
         json_style: dispatch.json_style,
-        no_cache: dispatch.cli.no_cache,
-        threads: dispatch.threads,
         quiet: dispatch.quiet,
-        allow_remote_extends: dispatch.cli.allow_remote_extends,
-        production,
+        resolve: &|| dispatch.resolve_run(),
         workspace: dispatch.cli.workspace.as_deref(),
         changed_workspaces: dispatch.cli.changed_workspaces.as_deref(),
         target,
@@ -528,14 +517,10 @@ fn dispatch_trace_command(
     } = chain;
     if let [from, to] = path {
         return trace_path::run_trace_path(&trace_path::TracePathOptions {
-            root: dispatch.root,
-            config_path: &dispatch.cli.config,
             output: dispatch.output,
             json_style: dispatch.json_style,
-            no_cache: dispatch.cli.no_cache,
-            threads: dispatch.threads,
             quiet: dispatch.quiet,
-            allow_remote_extends: dispatch.cli.allow_remote_extends,
+            resolve: &|| dispatch.resolve_run(),
             from,
             to,
             eager_only,
@@ -548,14 +533,10 @@ fn dispatch_trace_command(
         );
     };
     trace_chain::run_trace(&trace_chain::TraceChainOptions {
-        root: dispatch.root,
-        config_path: &dispatch.cli.config,
         output: dispatch.output,
         json_style: dispatch.json_style,
-        no_cache: dispatch.cli.no_cache,
-        threads: dispatch.threads,
         quiet: dispatch.quiet,
-        allow_remote_extends: dispatch.cli.allow_remote_extends,
+        resolve: &|| dispatch.resolve_run(),
         target: symbol,
         callers,
         callees,

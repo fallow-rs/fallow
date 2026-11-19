@@ -6,17 +6,16 @@
 //! stays off the ranked path. A name that no file imports is an answer with
 //! zero counts, not an error. A cursor that belongs to another query exits 2.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::ExitCode;
 
-use fallow_config::{OutputFormat, ProductionAnalysis};
+use fallow_config::OutputFormat;
 use fallow_engine::trace::{DependencyTrace, DependencyUsageQuery, SitePageRequest};
 use fallow_types::trace_usage::DEFAULT_USAGE_SITE_LIMIT;
 
 use crate::error::{emit_error_with_hint, emit_input_error};
 use crate::exit_codes::INVALID_INPUT;
 use crate::report;
-use crate::{ConfigLoadOptions, load_config_for_analysis};
 
 /// The `--dependency` target and its usage flags.
 pub struct TraceDependencyTarget {
@@ -67,15 +66,12 @@ impl TraceDependencyTarget {
 /// Options for `fallow trace --dependency`.
 pub struct TraceDependencyOptions<'a> {
     pub root: &'a Path,
-    pub config_path: &'a Option<PathBuf>,
     pub output: OutputFormat,
     pub json_style: crate::json_style::JsonStyle,
-    pub no_cache: bool,
-    pub threads: usize,
     pub quiet: bool,
-    pub allow_remote_extends: bool,
-    /// The resolved production mode for dead-code analysis.
-    pub production: bool,
+    /// Resolves the run of the command line. The command calls it after its
+    /// own checks of the command line.
+    pub resolve: crate::cli_production::ResolveRun<'a>,
     /// `--workspace`, validated as in `fallow dead-code`.
     pub workspace: Option<&'a [String]>,
     /// `--changed-workspaces`, validated as in `fallow dead-code`.
@@ -92,24 +88,12 @@ pub fn run_trace_dependency(opts: &TraceDependencyOptions<'_>) -> ExitCode {
         Ok(query) => query,
         Err(err) => return emit_input_error(&err.to_string(), opts.output),
     };
-    let config = match load_config_for_analysis(
-        opts.root,
-        opts.config_path,
-        ConfigLoadOptions {
-            output: opts.output,
-            no_cache: opts.no_cache,
-            threads: opts.threads,
-            production_override:
-                fallow_engine::project_config::ProductionFlags::single_analysis_override(
-                    opts.production,
-                    Some(opts.production),
-                ),
-            quiet: opts.quiet,
-            allow_remote_extends: opts.allow_remote_extends,
-        },
-        ProductionAnalysis::DeadCode,
-    ) {
-        Ok(config) => config,
+    let run = match (opts.resolve)() {
+        Ok(run) => run,
+        Err(code) => return code,
+    };
+    let dead_code = match crate::cli_production::dead_code_runnable(&run, opts.output) {
+        Ok(runnable) => runnable,
         Err(code) => return code,
     };
     // `fallow dead-code --trace-dependency` validates the workspace scope the
@@ -118,15 +102,12 @@ pub fn run_trace_dependency(opts: &TraceDependencyOptions<'_>) -> ExitCode {
         opts.root,
         opts.workspace,
         opts.changed_workspaces,
-        &config.workspace_patterns,
+        &dead_code.config().workspace_patterns,
         opts.output,
     ) {
         return code;
     }
-    let session = match fallow_engine::session::AnalysisSession::from_resolved_config(config) {
-        Ok(session) => session,
-        Err(err) => return emit_input_error(&format!("Analysis error: {err}"), opts.output),
-    };
+    let session = dead_code.open_session();
     let trace = match fallow_engine::trace::trace_dependency_with_session(
         &session,
         &opts.target.package_name,

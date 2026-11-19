@@ -101,6 +101,8 @@ pub struct BaselinesPruneOptions<'a> {
     pub check: bool,
     pub targets: BaselineTargets,
     pub production: crate::cli_production::ProductionModes,
+    /// The run of the command line. The analyses read their configs from it.
+    pub run: &'a fallow_engine::resolved_run::ResolvedRun,
     /// The mode flags this command received, so the run uses them and a printed
     /// prune command repeats them. A mode from the config needs no flag.
     pub mode_flags: BaselineMode,
@@ -247,7 +249,7 @@ fn combined_options<'a>(opts: &'a BaselinesPruneOptions<'a>) -> CombinedOptions<
         production_dead_code: Some(opts.production.dead_code),
         production_health: Some(opts.production.health),
         production_dupes: Some(opts.production.dupes),
-        run: None,
+        run: Some(opts.run),
         workspace: None,
         changed_workspaces: None,
         group_by: None,

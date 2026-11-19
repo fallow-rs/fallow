@@ -8,10 +8,10 @@
 //! failed analysis exits 2.
 
 use std::io::Read;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::process::ExitCode;
 
-use fallow_config::{OutputFormat, ProductionAnalysis};
+use fallow_config::OutputFormat;
 use fallow_engine::trace_error::MAX_STACK_TRACE_BYTES;
 use fallow_types::trace_error::{ErrorTrace, FrameResolution};
 
@@ -19,7 +19,6 @@ use crate::error::emit_input_error;
 use crate::exit_codes::INVALID_INPUT;
 use crate::report;
 use crate::report::sink::outln;
-use crate::{ConfigLoadOptions, load_config_for_analysis};
 
 /// The stdin sentinel, matching `--diff-file -`.
 const STDIN_SENTINEL: &str = "-";
@@ -27,13 +26,12 @@ const STDIN_SENTINEL: &str = "-";
 /// Options for `fallow trace-error`.
 pub struct TraceErrorOptions<'a> {
     pub root: &'a Path,
-    pub config_path: &'a Option<PathBuf>,
     pub output: OutputFormat,
     pub json_style: crate::json_style::JsonStyle,
-    pub no_cache: bool,
-    pub threads: usize,
     pub quiet: bool,
-    pub allow_remote_extends: bool,
+    /// Resolves the run of the command line. The command calls it after its
+    /// own checks of the command line.
+    pub resolve: crate::cli_production::ResolveRun<'a>,
     /// The trace file, or `-` / `None` to read stdin.
     pub trace_file: Option<&'a str>,
 }
@@ -47,26 +45,13 @@ pub fn run_trace_error(opts: &TraceErrorOptions<'_>) -> ExitCode {
         }
     };
 
-    let config = match load_config_for_analysis(
-        opts.root,
-        opts.config_path,
-        ConfigLoadOptions {
-            output: opts.output,
-            no_cache: opts.no_cache,
-            threads: opts.threads,
-            production_override: None,
-            quiet: opts.quiet,
-            allow_remote_extends: opts.allow_remote_extends,
-        },
-        ProductionAnalysis::DeadCode,
-    ) {
-        Ok(config) => config,
+    let run = match (opts.resolve)() {
+        Ok(run) => run,
         Err(code) => return code,
     };
-
-    let session = match fallow_engine::session::AnalysisSession::from_resolved_config(config) {
-        Ok(session) => session,
-        Err(err) => return emit_input_error(&format!("Analysis error: {err}"), opts.output),
+    let session = match crate::cli_production::dead_code_runnable(&run, opts.output) {
+        Ok(runnable) => runnable.open_session(),
+        Err(code) => return code,
     };
 
     let trace = match fallow_engine::trace_error::trace_error_with_session(&session, &input, source)
