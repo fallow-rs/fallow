@@ -2,7 +2,8 @@ use std::path::{Component, Path, PathBuf};
 use std::process::{Command, ExitCode};
 use std::sync::atomic::{AtomicU8, AtomicUsize, Ordering};
 
-use fallow_config::OutputFormat;
+use fallow_config::{OutputFormat, PlannedAnalysis};
+use fallow_engine::resolved_run::ResolvedRun;
 use fallow_types::envelope::Meta;
 use serde_json::{Value, json};
 
@@ -37,6 +38,12 @@ pub struct InspectOptions<'a> {
     pub json_style: crate::json_style::JsonStyle,
     pub no_cache: bool,
     pub no_production: bool,
+    /// `--allow-remote-extends`, passed to each child process.
+    pub allow_remote_extends: bool,
+    /// Resolves the run of the command line for the in-process semantic
+    /// evidence. `None` gives no semantic evidence. The child processes run
+    /// on other threads, so the resolver is `Sync`.
+    pub resolve: Option<&'a (dyn Fn() -> Result<ResolvedRun, ExitCode> + Sync)>,
     pub max_file_size: Option<u32>,
     pub threads: usize,
     pub quiet: bool,
@@ -317,29 +324,17 @@ fn collect_semantic_evidence(
             warnings: Vec::new(),
         };
     };
-    let config_path = opts.config_path.cloned();
-    let Ok(mut config) = crate::runtime_support::load_config_for_analysis(
-        opts.root,
-        &config_path,
-        crate::runtime_support::ConfigLoadOptions {
-            output: opts.output,
-            no_cache: opts.no_cache,
-            threads: opts.threads,
-            production_override: if opts.no_production {
-                Some(false)
-            } else {
-                opts.production.then_some(true)
-            },
-            quiet: opts.quiet,
-            allow_remote_extends: false,
-        },
-        fallow_config::ProductionAnalysis::DeadCode,
-    ) else {
+    let run = opts.resolve.and_then(|resolve| resolve().ok());
+    let Some(dead_code) = run
+        .as_ref()
+        .and_then(|run| crate::cli_production::runnable(run, PlannedAnalysis::DeadCode))
+    else {
         return semantic_error_sections(
             "could not load type-aware inspect config",
             opts.type_aware_require.map(Into::into),
         );
     };
+    let mut config = dead_code.config().clone();
     if crate::check::apply_type_aware_overrides_from(
         opts.output,
         opts.type_aware,
@@ -365,16 +360,15 @@ fn collect_semantic_evidence(
             warnings: Vec::new(),
         };
     }
-    let session =
-        match fallow_engine::session::AnalysisSession::from_resolved_config(config.clone()) {
-            Ok(session) => session,
-            Err(error) => {
-                return semantic_error_sections(
-                    &format!("analysis failed: {error}"),
-                    Some(config.type_aware.require.into()),
-                );
-            }
-        };
+    let session = match dead_code.open_session_adjusted(|decided| *decided = config.clone()) {
+        Ok(session) => session,
+        Err(error) => {
+            return semantic_error_sections(
+                &format!("analysis failed: {error}"),
+                Some(config.type_aware.require.into()),
+            );
+        }
+    };
     let analysis = match session.analyze_dead_code_with_artifacts(false, true) {
         Ok(analysis) => analysis,
         Err(error) => {
@@ -970,6 +964,9 @@ fn build_child_args(
     if opts.no_cache {
         args.push("--no-cache".to_string());
     }
+    if opts.allow_remote_extends {
+        args.push("--allow-remote-extends".to_string());
+    }
     if opts.no_production && command_name != Some("security") {
         args.push("--no-production".to_string());
     }
@@ -1352,6 +1349,8 @@ fn inspect_benchmark_options(root: &Path, threads: usize) -> InspectOptions<'_> 
         json_style: crate::json_style::JsonStyle::Compact,
         no_cache: true,
         no_production: true,
+        allow_remote_extends: false,
+        resolve: None,
         max_file_size: None,
         threads,
         quiet: true,
@@ -1491,6 +1490,8 @@ mod tests {
             json_style: crate::json_style::JsonStyle::Compact,
             no_cache: true,
             no_production: true,
+            allow_remote_extends: false,
+            resolve: None,
             max_file_size: Some(2),
             threads: 3,
             quiet: true,
@@ -1594,6 +1595,31 @@ mod tests {
         assert!(args.contains(&"--no-production".to_string()));
         assert!(args.windows(2).any(|pair| pair == ["--max-file-size", "2"]));
         assert!(args.windows(2).any(|pair| pair == ["--threads", "3"]));
+    }
+
+    #[test]
+    fn inspect_child_argv_keeps_allow_remote_extends() {
+        let root = PathBuf::from("/repo");
+        let target = || InspectTarget::File {
+            file: "src/api.ts".to_string(),
+        };
+        let opts = InspectOptions {
+            allow_remote_extends: true,
+            ..inspect_options(&root, None, target())
+        };
+        for command in [dead_code_args("src/api.ts"), security_args("src/api.ts")] {
+            let args = build_child_args(&opts, command, opts.threads);
+            assert!(
+                args.contains(&"--allow-remote-extends".to_string()),
+                "{args:?}"
+            );
+        }
+        let plain = inspect_options(&root, None, target());
+        let args = build_child_args(&plain, dead_code_args("src/api.ts"), plain.threads);
+        assert!(
+            !args.contains(&"--allow-remote-extends".to_string()),
+            "{args:?}"
+        );
     }
 
     #[test]
