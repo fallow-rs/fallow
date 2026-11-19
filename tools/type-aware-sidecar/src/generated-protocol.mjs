@@ -1,7 +1,7 @@
 // Generated from crates/api/type-aware-protocol.json. Do not edit.
 export const TYPE_AWARE_PROTOCOL = Object.freeze({
   schema_version: 1,
-  wire_protocol_version: 8,
+  wire_protocol_version: 9,
   semantic_schema_version: 3,
   analysis_operation: "semantic-queries",
   status_operation: "status",
@@ -12,17 +12,18 @@ export const TYPE_AWARE_PROTOCOL = Object.freeze({
   backend: {
     family: "typescript-go",
     version: "7.0.2",
-    minimum_version: "7.0.0",
-    below_version: "8.0.0",
+    supported_ranges: [{ minimum_version: "7.0.0", below_version: "8.0.0" }],
     package: "typescript",
   },
   experimental_backends: [
     {
       family: "tsrs",
       package: "tsrs",
-      version: "0.20.1-ts7.1.0-beta",
-      minimum_version: "0.18.0",
-      below_version: "1.0.0",
+      version: "7.1.0-beta.tsrs3",
+      supported_ranges: [
+        { minimum_version: "0.18.0", below_version: "1.0.0" },
+        { minimum_version: "7.1.0", below_version: "8.0.0" },
+      ],
     },
   ],
   sidecar: {

@@ -207,11 +207,7 @@ export const generateTypeAwareProtocol = (stagingRoot) => {
         typeof backend?.family !== "string" ||
         typeof backend.package !== "string" ||
         typeof backend.version !== "string" ||
-        !SEMVER_CORE.test(backend.minimum_version) ||
-        !SEMVER_CORE.test(backend.below_version) ||
-        compareVersionCores(backend.minimum_version, backend.below_version) >= 0 ||
-        compareVersionCores(backend.version, backend.minimum_version) < 0 ||
-        compareVersionCores(backend.version, backend.below_version) >= 0,
+        !isValidSupportedRanges(backend.supported_ranges, backend.version),
     ) ||
     new Set([manifest.backend, ...manifest.experimental_backends].map((backend) => backend.family))
       .size !==
@@ -239,15 +235,14 @@ export const TYPE_AWARE_PROTOCOL = Object.freeze({\n\
   backend: {\n\
     family: ${string(manifest.backend.family)},\n\
     version: ${string(manifest.backend.version)},\n\
-    minimum_version: ${string(manifest.backend.minimum_version)},\n\
-    below_version: ${string(manifest.backend.below_version)},\n\
+${supportedRangesSource(manifest.backend.supported_ranges, "    ")}\
     package: ${string(manifest.backend.package)},\n\
   },\n\
   experimental_backends: [\n\
 ${manifest.experimental_backends
   .map(
     (backend) =>
-      `    {\n      family: ${string(backend.family)},\n      package: ${string(backend.package)},\n      version: ${string(backend.version)},\n      minimum_version: ${string(backend.minimum_version)},\n      below_version: ${string(backend.below_version)},\n    },\n`,
+      `    {\n      family: ${string(backend.family)},\n      package: ${string(backend.package)},\n      version: ${string(backend.version)},\n${supportedRangesSource(backend.supported_ranges, "      ")}    },\n`,
   )
   .join("")}\
   ],\n\
@@ -299,6 +294,41 @@ const compareVersionCores = (left, right) => {
   return [0, 1, 2].map((index) => (a[index] ?? 0) - (b[index] ?? 0)).find((d) => d !== 0) ?? 0;
 };
 const ENV_NAME = /^[A-Z][A-Z0-9_]*$/u;
+
+/**
+ * A backend accepts a version that is in one of its `supported_ranges`. The
+ * ranges are half-open, ascending and disjoint, and the tested `version` is
+ * in one of them.
+ */
+const isValidSupportedRanges = (ranges, version) =>
+  Array.isArray(ranges) &&
+  ranges.length > 0 &&
+  ranges.every(
+    (range, index) =>
+      SEMVER_CORE.test(range?.minimum_version) &&
+      SEMVER_CORE.test(range.below_version) &&
+      compareVersionCores(range.minimum_version, range.below_version) < 0 &&
+      (index === 0 ||
+        compareVersionCores(ranges[index - 1].below_version, range.minimum_version) <= 0),
+  ) &&
+  ranges.some(
+    (range) =>
+      compareVersionCores(version, range.minimum_version) >= 0 &&
+      compareVersionCores(version, range.below_version) < 0,
+  );
+
+const GENERATED_LINE_WIDTH = 100;
+
+/** The `supported_ranges` property in the layout that oxfmt keeps. */
+const supportedRangesSource = (ranges, indent) => {
+  const entries = ranges.map(
+    (range) =>
+      `{ minimum_version: ${JSON.stringify(range.minimum_version)}, below_version: ${JSON.stringify(range.below_version)} }`,
+  );
+  const inline = `${indent}supported_ranges: [${entries.join(", ")}],`;
+  if (inline.length <= GENERATED_LINE_WIDTH) return `${inline}\n`;
+  return `${indent}supported_ranges: [\n${entries.map((entry) => `${indent}  ${entry},\n`).join("")}${indent}],\n`;
+};
 
 const isNonEmptyString = (value) => typeof value === "string" && value.length > 0;
 

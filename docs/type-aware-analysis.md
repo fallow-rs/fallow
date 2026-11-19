@@ -175,13 +175,14 @@ still rejects a response with a different path, position, name or owner.
 a Rust port of the TypeScript 7 checker. It serves the same `unstable/sync`
 API. The manifest `backend` object is the default backend, and
 `experimental_backends` lists the opt-in backends. Each backend has its npm
-package, the `version` that the repository tests, and a supported range from
-`minimum_version` (inclusive) to `below_version` (exclusive). Only
-`major.minor.patch` counts, so a tsrs build tag or a TypeScript prerelease
-stays in range. The native client and the sidecar both read the selection.
-The sidecar reports the version that it resolved, and the client rejects a
-status or analysis response from another backend family or from a version
-outside the range.
+package, the `version` that the repository tests, and a `supported_ranges`
+list. Each range goes from `minimum_version` (inclusive) to `below_version`
+(exclusive). The ranges are ascending and disjoint, and a version is supported
+when it is in one of them. Only `major.minor.patch` counts, so a tsrs build
+tag or a TypeScript prerelease stays in range. The native client and the
+sidecar both read the selection. The sidecar reports the version that it
+resolved, and the client rejects a status or analysis response from another
+backend family or from a version outside the supported ranges.
 
 An experimental backend refines findings, but its evidence never makes a fix
 eligible: guarded fixes need the corpus evidence of the default backend. The
@@ -193,12 +194,16 @@ backend.
 
 `tsrs` is an optional peer dependency of `fallow-type-aware`. A project can
 reuse the tsrs that it already installs when the version is in the supported
-range (`>=0.18.0 <1.0.0`). The peer range is `*` because npm excludes the
+ranges (`>=0.18.0 <1.0.0 || >=7.1.0 <8.0.0`). tsrs `0.25.0-ts7.1.0-beta` was
+the last release with `0.x` numbers. From `7.1.0-beta.tsrs2`, tsrs uses the
+version of the TypeScript release that it ports. Both schemes port the same
+TypeScript 7.1, so the backend accepts both. The second range does not
+accept a TypeScript 8 port. The peer range is `*` because npm excludes the
 prerelease versions that tsrs publishes from every bounded range. To install
 the tested version where the companion can resolve it:
 
 ```bash
-npm install --save-dev tsrs@0.20.1-ts7.1.0-beta
+npm install --save-dev tsrs@7.1.0-beta.tsrs3
 FALLOW_TYPE_AWARE_BACKEND=tsrs npx fallow type-aware status
 ```
 

@@ -9,25 +9,26 @@ pub(super) struct BackendSpec {
     pub package: &'static str,
     /// Version that the repository tests and that install hints name.
     pub version: &'static str,
-    /// Lowest supported `major.minor.patch`, inclusive.
-    pub minimum_version: &'static str,
-    /// First unsupported `major.minor.patch`.
-    pub below_version: &'static str,
+    /// Supported `major.minor.patch` ranges in ascending order. Each pair is
+    /// an inclusive lowest version and the first unsupported version.
+    pub supported_ranges: &'static [(&'static str, &'static str)],
 }
 
 impl BackendSpec {
-    /// Whether a resolved backend version is in the supported range. Only
-    /// `major.minor.patch` counts, so a tsrs build tag such as
-    /// `-ts7.1.0-beta` or a TypeScript prerelease stays in range.
+    /// Whether a resolved backend version is in one of the supported ranges.
+    /// Only `major.minor.patch` counts, so a tsrs build tag such as
+    /// `-ts7.1.0-beta` or `-beta.tsrs3`, or a TypeScript prerelease, stays in
+    /// range.
     pub(super) fn supports(&self, version: &str) -> bool {
-        let (Some(core), Some(minimum), Some(below)) = (
-            version_core(version),
-            version_core(self.minimum_version),
-            version_core(self.below_version),
-        ) else {
+        let Some(core) = version_core(version) else {
             return false;
         };
-        core >= minimum && core < below
+        self.supported_ranges.iter().any(|&(minimum, below)| {
+            matches!(
+                (version_core(minimum), version_core(below)),
+                (Some(minimum), Some(below)) if core >= minimum && core < below
+            )
+        })
     }
 
     /// Check the backend family and version that a companion response reports.
@@ -53,9 +54,13 @@ impl BackendSpec {
         Ok(())
     }
 
-    /// Supported range in npm notation, for messages.
+    /// Supported ranges in npm notation, for messages.
     pub(super) fn range(&self) -> String {
-        format!(">={} <{}", self.minimum_version, self.below_version)
+        self.supported_ranges
+            .iter()
+            .map(|(minimum, below)| format!(">={minimum} <{below}"))
+            .collect::<Vec<_>>()
+            .join(" || ")
     }
 }
 
@@ -182,7 +187,25 @@ mod tests {
         ] {
             assert!(!tsrs.supports(version), "{version}");
         }
-        assert_eq!(tsrs.range(), ">=0.18.0 <1.0.0");
+        assert_eq!(tsrs.range(), ">=0.18.0 <1.0.0 || >=7.1.0 <8.0.0");
+    }
+
+    /// tsrs 7.1.0-beta.tsrs2 and later use TypeScript-aligned versions. They
+    /// port the same TypeScript 7.1 as the 0.x builds (#4803).
+    #[test]
+    fn tsrs_accepts_typescript_aligned_versions() {
+        let tsrs = backend_for("tsrs").expect("tsrs backend");
+        for version in [
+            "7.1.0-beta.tsrs2",
+            "7.1.0-beta.tsrs3",
+            "7.1.0",
+            "7.9.9-rc.tsrs1",
+        ] {
+            assert!(tsrs.supports(version), "{version}");
+        }
+        for version in ["1.0.0", "6.99.99", "7.0.9", "8.0.0-beta.tsrs1"] {
+            assert!(!tsrs.supports(version), "{version}");
+        }
     }
 
     #[test]

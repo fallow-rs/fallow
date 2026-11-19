@@ -187,10 +187,22 @@ test("preflight accepts a newer tsrs inside the supported range", () => {
   }
 });
 
+// tsrs 7.1.0-beta.tsrs2 and later use TypeScript-aligned versions. They port
+// the same TypeScript 7.1 as the 0.x builds (#4803).
+test("preflight accepts a tsrs with a TypeScript-aligned version", () => {
+  for (const version of ["7.1.0-beta.tsrs2", "7.1.0-beta.tsrs3", "7.1.0", "7.9.9-rc.tsrs1"]) {
+    withFakeTsrs(version, (preflight) => assert.doesNotThrow(preflight, version));
+  }
+});
+
 test("preflight rejects a tsrs outside the supported range", () => {
-  for (const version of ["0.17.0", "1.0.0-ts8.0.0"]) {
+  for (const version of ["0.17.0", "1.0.0-ts8.0.0", "6.99.99", "7.0.9", "8.0.0-beta.tsrs1"]) {
     withFakeTsrs(version, (preflight) =>
-      assert.throws(preflight, /the tsrs backend supports >=0\.18\.0 <1\.0\.0/u, version),
+      assert.throws(
+        preflight,
+        /the tsrs backend supports >=0\.18\.0 <1\.0\.0 \|\| >=7\.1\.0 <8\.0\.0/u,
+        version,
+      ),
     );
   }
 });

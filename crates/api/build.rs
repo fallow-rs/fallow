@@ -28,6 +28,14 @@ struct Backend {
     family: String,
     package: String,
     version: String,
+    supported_ranges: Vec<VersionRange>,
+}
+
+/// A half-open `major.minor.patch` range: `minimum_version` is inclusive and
+/// `below_version` is the first unsupported version.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct VersionRange {
     minimum_version: String,
     below_version: String,
 }
@@ -154,6 +162,59 @@ fn warn_on_stale_companion() {
     }
 }
 
+/// Validates the backend entries: unique families, non-empty names, and
+/// ascending, disjoint `supported_ranges` that contain the tested version.
+fn validate_backends(backends: &[&Backend]) -> io::Result<()> {
+    let mut families: Vec<&str> = backends.iter().map(|b| b.family.as_str()).collect();
+    families.sort_unstable();
+    families.dedup();
+    if families.len() != backends.len() {
+        return Err(invalid_manifest("backend families must be unique"));
+    }
+    if backends
+        .iter()
+        .any(|b| b.package.is_empty() || b.version.is_empty())
+    {
+        return Err(invalid_manifest(
+            "backend package and version must not be empty",
+        ));
+    }
+    if backends.iter().any(|b| {
+        b.supported_ranges.is_empty()
+            || b.supported_ranges.iter().any(|range| {
+                !is_version_core(&range.minimum_version) || !is_version_core(&range.below_version)
+            })
+    }) {
+        return Err(invalid_manifest(
+            "backend supported_ranges must be a non-empty list of major.minor.patch bounds",
+        ));
+    }
+    if backends.iter().any(|b| {
+        let ranges: Vec<_> = b
+            .supported_ranges
+            .iter()
+            .map(|range| {
+                (
+                    version_core(&range.minimum_version),
+                    version_core(&range.below_version),
+                )
+            })
+            .collect();
+        let ascending = ranges.iter().all(|(minimum, below)| minimum < below)
+            && ranges.windows(2).all(|pair| pair[0].1 <= pair[1].0);
+        let tested = version_core(&b.version);
+        !ascending
+            || !ranges
+                .iter()
+                .any(|(minimum, below)| (minimum..below).contains(&&tested))
+    }) {
+        return Err(invalid_manifest(
+            "backend supported_ranges must be ascending and disjoint, and version must be in one of them",
+        ));
+    }
+    Ok(())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     warn_on_stale_companion();
     const MANIFEST_PATH: &str = "type-aware-protocol.json";
@@ -175,37 +236,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let backends: Vec<&Backend> = std::iter::once(&manifest.backend)
         .chain(&manifest.experimental_backends)
         .collect();
-    let mut families: Vec<&str> = backends.iter().map(|b| b.family.as_str()).collect();
-    families.sort_unstable();
-    families.dedup();
-    if families.len() != backends.len() {
-        return Err(invalid_manifest("backend families must be unique").into());
-    }
-    if backends
-        .iter()
-        .any(|b| b.package.is_empty() || b.version.is_empty())
-    {
-        return Err(invalid_manifest("backend package and version must not be empty").into());
-    }
-    if backends
-        .iter()
-        .any(|b| !is_version_core(&b.minimum_version) || !is_version_core(&b.below_version))
-    {
-        return Err(invalid_manifest(
-            "backend minimum_version and below_version must be major.minor.patch",
-        )
-        .into());
-    }
-    if backends.iter().any(|b| {
-        let minimum = version_core(&b.minimum_version);
-        let below = version_core(&b.below_version);
-        minimum >= below || !(minimum..below).contains(&version_core(&b.version))
-    }) {
-        return Err(invalid_manifest(
-            "backend minimum_version must be below below_version, and version must be in that range",
-        )
-        .into());
-    }
+    validate_backends(&backends)?;
     if manifest.sidecar.version_source != "workspace-package" {
         return Err(invalid_manifest("unsupported sidecar version source").into());
     }
@@ -237,12 +268,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         backends
             .iter()
             .map(|b| format!(
-                "BackendSpec {{ family: {}, package: {}, version: {}, minimum_version: {}, below_version: {} }}",
+                "BackendSpec {{ family: {}, package: {}, version: {}, supported_ranges: &[{}] }}",
                 rust_string(&b.family),
                 rust_string(&b.package),
                 rust_string(&b.version),
-                rust_string(&b.minimum_version),
-                rust_string(&b.below_version),
+                b.supported_ranges
+                    .iter()
+                    .map(|range| format!(
+                        "({}, {})",
+                        rust_string(&range.minimum_version),
+                        rust_string(&range.below_version)
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(", "),
             ))
             .collect::<Vec<_>>()
             .join(", "),
