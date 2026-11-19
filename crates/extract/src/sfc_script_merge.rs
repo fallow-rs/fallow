@@ -34,6 +34,7 @@ pub(super) fn merge_script_into_module(input: &mut SfcScriptMergeInput<'_>) {
     crate::parse_degradation::ParseDegradation::from_parser(&parser_return)
         .apply_to(input.combined);
     let mut extractor = ModuleInfoExtractor::new();
+    extractor.sfc_script = true;
     extractor.set_top_level_is_component_body(is_template_visible_script(input.kind, input.script));
     extractor.set_template_reads_root(
         input.kind == SfcKind::Svelte || is_template_visible_script(input.kind, input.script),

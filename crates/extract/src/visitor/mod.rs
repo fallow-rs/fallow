@@ -928,6 +928,9 @@ pub(crate) struct ModuleInfoExtractor {
     /// script and an Astro frontmatter into a setup or render function, so a
     /// top-level `await import()` there runs per instance, on demand.
     top_level_is_component_body: bool,
+    /// True for a Vue or Svelte script block. An SFC script is never Angular, so
+    /// a `@Component` decorator there (Vue class components) is not analyzed.
+    pub(crate) sfc_script: bool,
     /// True while walking the immediate quasi of a tagged template. Tagged
     /// templates receive raw values, so interpolation should not credit
     /// `toString` coercion for the quasi itself.
@@ -3519,10 +3522,7 @@ impl ModuleInfoExtractor {
     pub(crate) fn merge_into(mut self, info: &mut ModuleInfo) {
         debug_assert!(
             self.inline_template_findings.is_empty(),
-            "merge_into is the SFC-script path and SFC scripts cannot host \
-             Angular @Component decorators; if a future caller routes \
-             Angular content here, plumb inline_template_findings into the \
-             merge step before relying on this assertion"
+            "merge_into is the SFC-script path, which skips Angular components"
         );
         self.finalize_cjs_provenance();
         self.finalize_import_load_kinds();

@@ -1,0 +1,8 @@
+.layout { width: calc(100% - 2rem); max-width: min(90vw, 72rem); padding: clamp(1rem, 2.5vw, 2rem); }
+.grid { grid-template-columns: repeat(3, calc(100% / 3)); gap: max(1px, 0.5em); }
+.fade { opacity: calc(50% * 2); transform: scale(calc(1 + 0.1)) rotate(atan2(1, 2)); }
+.round { width: round(up, 101px, 10px); height: mod(18px, 5px); margin: rem(10px, 3px); }
+.trig { rotate: calc(sin(30deg) * 1turn); scale: pow(1.1, 2); line-height: sqrt(2); }
+.sign { top: calc(abs(-4px) * sign(1px)); left: hypot(3px, 4px); z-index: calc(1 + 1); }
+.consts { width: calc(pi * 1px); height: calc(e * 1px); flex-grow: calc(infinity); }
+@media (min-width: calc(40rem + 1px)) { .wide { opacity: max(50%, 20%); } }

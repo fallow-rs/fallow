@@ -1,0 +1,9 @@
+@layer base, components;
+@import url("theme.css") layer(theme.button);
+@property --progress { syntax: '<percentage>'; inherits: false; initial-value: 0%; }
+@keyframes pulse { from { opacity: 0; } 50% { opacity: 1; } to { opacity: 0; } }
+@font-face { font-family: Brand; src: url(./brand.woff2) format("woff2"); font-stretch: 75% 125%; }
+@container card (inline-size > 30rem) { .card :global(.title) { font-size: clamp(1rem, 3cqi, 2rem); } }
+@supports (color: color-mix(in srgb, red, blue)) { :local(.mix) { color: color-mix(in oklab, red, blue); } }
+@scope (.card) to (.content) { .inner { animation: pulse 1s infinite; } }
+.wrap :global .legacy { composes: base from "./base.css"; }

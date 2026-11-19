@@ -1,0 +1,8 @@
+<script lang="ts">
+import { Component, Vue, Prop } from "vue-facing-decorator";
+@Component({ components: { Child }, template: `<div>{{ msg }}</div>` })
+export default class Hello extends Vue {
+  @Prop() msg!: string;
+}
+</script>
+<template><Child :msg="msg" /></template>

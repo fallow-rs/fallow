@@ -5010,7 +5010,7 @@ impl<'a> Visit<'a> for ModuleInfoExtractor {
         self.record_lit_custom_element(class);
         self.record_worker_env_bodies(class);
 
-        if let Some(meta) = extract_angular_component_metadata(class) {
+        if let Some(meta) = extract_angular_component_metadata(class).filter(|_| !self.sfc_script) {
             self.record_angular_selector(class, &meta);
             self.record_angular_component_field_array_types(class);
             self.record_angular_template_assets(&meta);

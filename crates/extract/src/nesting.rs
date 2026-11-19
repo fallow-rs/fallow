@@ -58,7 +58,7 @@ pub const MAX_NESTING_DEPTH: u32 = 1024;
 /// lightningcss parses it a second time as a plain function. Each level of
 /// such nesting doubles the parse time. Real stylesheets nest a few color
 /// functions at most, for example `color-mix(in srgb, light-dark(rgb(...)))`.
-const MAX_COLOR_FUNCTION_DEPTH: usize = 8;
+pub const MAX_COLOR_FUNCTION_DEPTH: usize = 8;
 
 /// The CSS functions that lightningcss tries to parse as a color first.
 const COLOR_FUNCTIONS: &[&[u8]] = &[
@@ -130,15 +130,18 @@ pub fn parse_bounded<R: Send>(source: &str, parse: impl FnOnce() -> R + Send) ->
 }
 
 /// [`parse_bounded`] for a lightningcss parse of stylesheet source. The
-/// nesting scan uses stylesheet rules. Returns `None` also when color
-/// functions nest deeper than [`MAX_COLOR_FUNCTION_DEPTH`], because the parse
-/// time of lightningcss grows exponentially with that depth.
+/// nesting scan uses stylesheet rules. Returns `None` also when the token
+/// walk in `crate::style_tokens` finds the stylesheet unsafe to parse, see
+/// `style_parse_is_safe`.
 pub fn parse_style_bounded<R: Send>(source: &str, parse: impl FnOnce() -> R + Send) -> Option<R> {
     let scan = scan_depth(source, MAX_NESTING_DEPTH, Dialect::Style);
     if scan.max_colors > MAX_COLOR_FUNCTION_DEPTH {
         return None;
     }
-    run_bounded(source, scan.max_depth, parse)
+    run_bounded(source, scan.max_depth, || {
+        crate::style_tokens::style_parse_is_safe(source).then(parse)
+    })
+    .flatten()
 }
 
 /// [`parse_bounded`] for the file at `path`. A CSS, Sass or Less file is
@@ -257,6 +260,10 @@ struct Scanner<'a> {
     colors: Vec<u32>,
     /// Maximum number of color functions open at one time.
     max_colors: usize,
+    /// The closing byte of each open stylesheet block, innermost last. In CSS
+    /// only the matching byte ends a block, so a `}` inside an open `(` is a
+    /// plain token.
+    style_closers: Vec<u8>,
 }
 
 /// An open `<` that can start a type-argument list.
@@ -285,6 +292,7 @@ impl<'a> Scanner<'a> {
             regex_body: false,
             colors: Vec::new(),
             max_colors: 0,
+            style_closers: Vec::new(),
         }
     }
 }
@@ -300,6 +308,8 @@ impl Scanner<'_> {
                 b'\\' | b'(' | b'/'
                     if self.dialect == Dialect::Style && self.scan_style_byte(byte) => {}
                 b'(' | b'[' | b'{' => self.open_bracket(byte),
+                b')' | b']' | b'}'
+                    if self.dialect == Dialect::Style && !self.close_style_block(byte) => {}
                 b'}' if self.templates.last() == Some(&self.depth) => {
                     self.templates.pop();
                     self.depth -= 1;
@@ -344,7 +354,24 @@ impl Scanner<'_> {
         if byte != b'{' {
             self.expression_brackets.push(self.depth);
         }
+        if self.dialect == Dialect::Style {
+            self.style_closers.push(match byte {
+                b'(' => b')',
+                b'[' => b']',
+                _ => b'}',
+            });
+        }
         self.regex_allowed = true;
+    }
+
+    /// Ends the innermost stylesheet block when `closer` matches it. Returns
+    /// false for a closing byte that CSS reads as a plain token.
+    fn close_style_block(&mut self, closer: u8) -> bool {
+        if self.style_closers.last() != Some(&closer) {
+            return false;
+        }
+        self.style_closers.pop();
+        true
     }
 
     /// Handles the script tokens that stylesheets do not have: a template
@@ -460,6 +487,7 @@ impl Scanner<'_> {
             _ if self.at_unquoted_url() => self.skip_unquoted_url(),
             _ if self.at_color_function() => {
                 self.open();
+                self.style_closers.push(b')');
                 self.colors.push(self.depth);
                 self.max_colors = self.max_colors.max(self.colors.len());
             }
@@ -588,6 +616,9 @@ impl Scanner<'_> {
         }
         self.max_depth = self.max_depth.max(self.depth + peak);
         self.depth = self.depth - 1 + local;
+        // A body that reaches the end of the source leaves its brackets open.
+        self.style_closers
+            .extend(std::iter::repeat_n(b')', local as usize));
     }
 
     /// Skips a `/* */` comment when one starts at the `/` at `pos - 1`.
@@ -602,23 +633,31 @@ impl Scanner<'_> {
         self.pos = (self.pos + 2).min(self.bytes.len());
     }
 
-    /// Skips a string body. A quote without a closing quote on its line is
-    /// not a string, so the scan goes on after the quote as code.
+    /// Skips a string body. In script, a quote without a closing quote on its
+    /// line is not a string, so the scan goes on after the quote as code. In
+    /// a stylesheet such a quote starts a bad string, which ends before the
+    /// newline, as in the CSS tokenizer.
     fn skip_string(&mut self, quote: u8) {
         let start = self.pos;
         while let Some(&byte) = self.bytes.get(self.pos) {
             self.pos += 1;
             match byte {
+                b'\\' if self.dialect == Dialect::Style => self.skip_style_escape(),
                 b'\\' => self.skip_escape(),
                 // A string may hold U+2028 and U+2029 since ES2019. A form
                 // feed is a newline in CSS.
+                b'\n' | b'\r' | 0x0C if self.dialect == Dialect::Style => {
+                    self.pos -= 1;
+                    return;
+                }
                 b'\n' | b'\r' => break,
-                0x0C if self.dialect == Dialect::Style => break,
                 _ if byte == quote => return,
                 _ => {}
             }
         }
-        self.pos = start;
+        if self.dialect == Dialect::Script {
+            self.pos = start;
+        }
     }
 
     /// Skips a regex body. A real regex balances its own groups, so its
@@ -812,6 +851,27 @@ impl Scanner<'_> {
     /// line, so the whole terminator is skipped.
     fn skip_escape(&mut self) {
         self.pos += self.line_terminator_len().max(1);
+    }
+
+    /// Skips a CSS escape after the `\` at `pos - 1`. A hex escape such as
+    /// `\a` takes up to six hex digits and one whitespace after them, so a
+    /// newline there does not end a string.
+    fn skip_style_escape(&mut self) {
+        let digits = self.bytes[self.pos..]
+            .iter()
+            .take(MAX_HEX_ESCAPE_DIGITS)
+            .take_while(|byte| byte.is_ascii_hexdigit())
+            .count();
+        if digits == 0 {
+            self.skip_escape();
+            return;
+        }
+        self.pos += digits;
+        self.pos += match self.bytes.get(self.pos..) {
+            Some([b'\r', b'\n', ..]) => 2,
+            Some([b' ' | b'\t' | b'\n' | b'\r' | 0x0C, ..]) => 1,
+            _ => 0,
+        };
     }
 
     /// Whether the word before the `/` at `pos - 1` is a keyword that a regex
