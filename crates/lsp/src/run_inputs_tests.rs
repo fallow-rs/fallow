@@ -178,6 +178,55 @@ fn discovered_invalid_boundary_falls_back_with_editor_settings() {
     );
 }
 
+/// An external plugin whose entry pattern leaves the project root.
+const INVALID_PLUGIN: &str = r#"{"name":"p","entryPoints":["../escape/**"]}"#;
+
+/// Analyze `root` in production mode and assert the defaults fallback for an
+/// invalid external plugin file.
+fn assert_invalid_plugin_falls_back(root: &Path) {
+    let outcome = analyze(root, &json!({ "production": true }));
+
+    assert_eq!(outcome.result, Ok(()));
+    let warnings = outcome.warnings();
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(
+        warnings[0].contains("invalid external plugin definition"),
+        "{warnings:?}"
+    );
+    assert!(
+        outcome.reports_unused_file("orphan.ts"),
+        "the default config still gives findings"
+    );
+    assert!(
+        !outcome.reports_unused_file("orphan.test.ts"),
+        "the fallback keeps fallow.production, so the test file is out"
+    );
+}
+
+#[test]
+fn discovered_config_with_an_invalid_listed_plugin_falls_back() {
+    let (_dir, root) = project();
+    std::fs::create_dir_all(root.join("tools")).expect("plugin dir");
+    std::fs::write(root.join("tools/p.json"), INVALID_PLUGIN).expect("plugin");
+    std::fs::write(
+        root.join(".fallowrc.json"),
+        r#"{"plugins":["tools/p.json"]}"#,
+    )
+    .expect("config");
+
+    assert_invalid_plugin_falls_back(&root);
+}
+
+#[test]
+fn discovered_config_with_an_invalid_local_plugin_falls_back() {
+    let (_dir, root) = project();
+    std::fs::create_dir_all(root.join(".fallow/plugins")).expect("plugin dir");
+    std::fs::write(root.join(".fallow/plugins/p.json"), INVALID_PLUGIN).expect("plugin");
+    std::fs::write(root.join(".fallowrc.json"), "{}").expect("config");
+
+    assert_invalid_plugin_falls_back(&root);
+}
+
 #[test]
 fn the_fallback_keeps_the_editor_duplication_options() {
     let (_dir, root) = project();
