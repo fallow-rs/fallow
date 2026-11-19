@@ -13,6 +13,8 @@
 )]
 
 mod env_policy;
+#[cfg(any(test, feature = "testing"))]
+mod parity;
 mod pick;
 mod resolve;
 pub mod steps;

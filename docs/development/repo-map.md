@@ -87,6 +87,12 @@ Find the first incorrect stage before editing:
 ### Engine, API, and output
 
 - `crates/engine/src/session.rs`: resolved project and session state.
+- `crates/engine/src/resolved_run/`: the resolver of one run. It takes the
+  `RunInputs` and the `EnvSnapshot` of a surface (`crates/config/src/run_inputs/`)
+  and decides the selection, the production mode and the settings, each with
+  its source. `env_policy.rs` is the table of the environment variables that
+  each surface and command reads. `parity.rs` is the harness of the run
+  parity matrix (`tests/fixtures/run-parity/cases/`).
 - `crates/engine/src/results.rs`: engine result carriers.
 - `crates/engine/src/duplicates.rs` and `duplication_detector/`: duplication
   orchestration and detection.
