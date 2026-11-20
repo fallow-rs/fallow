@@ -615,7 +615,7 @@ impl ModuleInfoExtractor {
         }
     }
 
-    pub(super) fn record_held_names(&mut self, owner: &str, held: Vec<String>) {
+    fn record_held_names(&mut self, owner: &str, held: Vec<String>) {
         self.local_value_aliases
             .extend(held.into_iter().map(|held| (owner.to_string(), held)));
     }
