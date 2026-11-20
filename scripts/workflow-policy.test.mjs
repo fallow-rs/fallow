@@ -3896,6 +3896,15 @@ test("only reviewed workflows run on pull requests", () => {
   );
 });
 
+// `pull_request_target` runs with write tokens. `github.actor` names the
+// account that caused the event, so the merge job must also check the author
+// of the pull request.
+test("the Dependabot auto-merge job runs only for a pull request that Dependabot wrote", () => {
+  const workflow = readWorkflow(".github/workflows/dependabot-auto-merge.yml");
+  assert.match(workflow, /github\.actor == 'dependabot\[bot\]'/u);
+  assert.match(workflow, /github\.event\.pull_request\.user\.login == 'dependabot\[bot\]'/u);
+});
+
 test("the Dependabot caller pins the org-wide workflow and passes only what it needs", () => {
   const workflow = readWorkflow(".github/workflows/dependabot.yml");
 
