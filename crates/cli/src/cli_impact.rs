@@ -230,19 +230,25 @@ fn impact_reset(root: &Path, all: bool, quiet: bool) -> ExitCode {
 }
 
 /// Print the short human view of `fallow impact status`: the tracking state,
-/// the record count and the store file. Bare `fallow impact` prints the full
-/// report.
+/// the record count, the store file and the store key. Bare `fallow impact`
+/// prints the full report.
 fn render_impact_status_human(root: &Path, quiet: bool) -> ExitCode {
     let report = impact::build_report(&impact::load(root));
     let store = impact::resolved_store_path(root).map_or_else(
         || "(no user config dir resolved; not persisted)".to_owned(),
         |path| path.display().to_string(),
     );
-    println!("{}", status_human(&report, &store, quiet));
+    let key = impact::resolved_project_key(root);
+    println!("{}", status_human(&report, &store, &key, quiet));
     ExitCode::SUCCESS
 }
 
-fn status_human(report: &fallow_output::ImpactReport, store: &str, quiet: bool) -> String {
+fn status_human(
+    report: &fallow_output::ImpactReport,
+    store: &str,
+    key: &str,
+    quiet: bool,
+) -> String {
     use fallow_output::EnabledSource;
     let tracking = match (report.enabled, report.enabled_source) {
         (true, EnabledSource::Project) => "on (enabled for this project)",
@@ -252,7 +258,7 @@ fn status_human(report: &fallow_output::ImpactReport, store: &str, quiet: bool) 
         (false, EnabledSource::User | EnabledSource::Default) => "off",
     };
     let mut out = format!(
-        "FALLOW IMPACT STATUS\n\n  Tracking: {tracking}\n  Records: {}\n  Store file: {store}\n",
+        "FALLOW IMPACT STATUS\n\n  Tracking: {tracking}\n  Records: {}\n  Store file: {store}\n  Store key: {key}\n",
         report.record_count
     );
     if !quiet {

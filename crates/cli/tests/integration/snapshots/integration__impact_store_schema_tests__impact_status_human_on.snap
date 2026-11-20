@@ -7,5 +7,6 @@ FALLOW IMPACT STATUS
   Tracking: on (enabled for this project)
   Records: 0
   Store file: <store>
+  Store key: <key>
 
 Run `fallow impact` for the full report.

@@ -672,7 +672,7 @@ fn clone_removal_with_duplication_off_is_credited_when_duplication_is_on_again()
 }
 
 /// `fallow impact status` prints a short human view: the tracking state, the
-/// record count and the store file. The full report stays on bare
+/// record count, the store file and the store key. The full report stays on bare
 /// `fallow impact`.
 #[test]
 fn impact_status_human_output_is_a_short_view() {
@@ -698,6 +698,8 @@ fn impact_status_human_output_is_a_short_view() {
             .map(|line| {
                 if line.starts_with("  Store file: ") {
                     "  Store file: <store>".to_owned()
+                } else if line.starts_with("  Store key: ") {
+                    "  Store key: <key>".to_owned()
                 } else {
                     line.to_owned()
                 }

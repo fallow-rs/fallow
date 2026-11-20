@@ -1385,12 +1385,25 @@ fn baseline_subcommands_keep_the_global_save_baseline_flag() {
 /// `/tmp`, so the case lives outside it: on Unix in `$HOME/.cache`, which is
 /// outside every allowed directory of the child. The child gets
 /// `<case>/system-tmp` as its temp directory and `<case>/home` as its home.
+///
+/// The case base must not be inside a Git work tree: the write guard allows
+/// the work tree of the root when the working directory is inside it. A
+/// `$HOME/.git` (for example a dotfiles repository) makes every case allowed,
+/// so the helper stops with a clear message in that setup.
 fn confinement_case_dir() -> tempfile::TempDir {
     let base = std::env::var_os("HOME")
         .filter(|_| cfg!(unix))
         .map(|home| std::path::PathBuf::from(home).join(".cache/fallow-write-scope-tests"));
     match base {
         Some(base) => {
+            if let Some(tree) = base.ancestors().find(|dir| dir.join(".git").exists()) {
+                panic!(
+                    "the write-scope tests need a case base outside a Git work tree, \
+                     but {} is inside {}",
+                    base.display(),
+                    tree.display()
+                );
+            }
             std::fs::create_dir_all(&base).expect("create case base dir");
             tempfile::Builder::new()
                 .prefix("case-")
