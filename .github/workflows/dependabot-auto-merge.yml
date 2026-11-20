@@ -17,7 +17,12 @@ permissions: {}
 
 jobs:
   auto-merge:
-    if: github.actor == 'dependabot[bot]'
+    # `github.actor` names the account that caused the event, not the author
+    # of the pull request. Check both, so that a pull request of another
+    # author never reaches the merge step.
+    if: >-
+      github.actor == 'dependabot[bot]' &&
+      github.event.pull_request.user.login == 'dependabot[bot]'
     runs-on: ubuntu-26.04
     timeout-minutes: 5
     permissions:
