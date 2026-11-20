@@ -23,4 +23,5 @@ pub(super) fn print_human_footer(input: &PrintHumanInput<'_>, total: usize) {
     if let Some(line) = cascade_footer(input.results) {
         eprintln!("  {}", line.dimmed());
     }
+    super::super::print_warn_only_hint(input.run_fails);
 }

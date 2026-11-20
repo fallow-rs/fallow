@@ -447,6 +447,89 @@ fn migrate_without_knip_omits_ignore_scope_note() {
     cleanup(&dir);
 }
 
+/// Project with one unused `devDependencies` entry and a knip config.
+fn unused_dev_dependency_fixture(suffix: &str, knip_config: &str) -> std::path::PathBuf {
+    let dir = migrate_temp_dir(suffix, "knip.json", knip_config);
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name": "probe", "private": true, "devDependencies": {"left-pad": "1.3.0"}}"#,
+    )
+    .unwrap();
+    fs::write(dir.join("index.ts"), "").unwrap();
+    dir
+}
+
+/// Marker phrase of the note that names the rules that the migration sets to
+/// `error`.
+const SEVERITY_NOTE_MARKER: &str = "the migrated config sets these rules to `error`";
+
+/// Run `migrate`, then the dependency gate on the migrated project.
+fn migrate_then_check_unused_deps(dir: &std::path::Path) -> (String, crate::common::CommandOutput) {
+    let root = dir.to_str().unwrap();
+    let migrate = run_fallow_raw(&["migrate", "--root", root]);
+    assert_eq!(migrate.code, 0, "stderr: {}", migrate.stderr);
+    let check = run_fallow_raw(&["dead-code", "--unused-deps", "--root", root]);
+    (migrate.stderr, check)
+}
+
+#[test]
+fn migrate_knip_include_dependencies_still_fails_on_unused_dev_dependency() {
+    let dir =
+        unused_dev_dependency_fixture("gate-include", r#"{"include": ["files", "dependencies"]}"#);
+    let (_, check) = migrate_then_check_unused_deps(&dir);
+
+    assert_eq!(
+        check.code, 1,
+        "knip fails on the unused devDependency, so the migrated gate must too: {}",
+        check.stdout
+    );
+    assert!(check.stdout.contains("left-pad"), "{}", check.stdout);
+
+    cleanup(&dir);
+}
+
+#[test]
+fn migrate_knip_without_rules_still_fails_on_unused_dev_dependency() {
+    let dir = unused_dev_dependency_fixture("gate-defaults", r#"{"entry": ["index.ts"]}"#);
+    let (migrate_stderr, check) = migrate_then_check_unused_deps(&dir);
+
+    assert_eq!(
+        check.code, 1,
+        "knip fails on the unused devDependency, so the migrated gate must too: {}",
+        check.stdout
+    );
+    assert_eq!(
+        migrate_stderr.matches(SEVERITY_NOTE_MARKER).count(),
+        1,
+        "expected exactly one severity note, got stderr: {migrate_stderr}"
+    );
+    assert!(
+        migrate_stderr.contains("unused-dev-dependencies"),
+        "the note must name the rules: {migrate_stderr}"
+    );
+
+    cleanup(&dir);
+}
+
+#[test]
+fn migrate_without_knip_omits_severity_note() {
+    let dir = migrate_temp_dir(
+        "severity-note-jscpd",
+        ".jscpd.json",
+        r#"{"minTokens": 100}"#,
+    );
+    let output = run_fallow_raw(&["migrate", "--dry-run", "--root", dir.to_str().unwrap()]);
+
+    assert_eq!(output.code, 0, "stderr: {}", output.stderr);
+    assert!(
+        !output.stderr.contains(SEVERITY_NOTE_MARKER),
+        "a jscpd-only migration sets no rule severity: {}",
+        output.stderr
+    );
+
+    cleanup(&dir);
+}
+
 /// Monorepo fixture whose per-workspace knip settings decide the findings.
 fn workspace_settings_fixture(suffix: &str) -> std::path::PathBuf {
     let dir = migrate_temp_dir(

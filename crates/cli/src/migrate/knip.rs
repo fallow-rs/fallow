@@ -2,9 +2,9 @@ use serde_json::Value;
 
 use super::knip_cycles::migrate_cycles;
 use super::knip_fields::{
-    migrate_exclude, migrate_ignore, migrate_ignore_binaries, migrate_ignore_deps,
-    migrate_ignore_exports_used_in_file, migrate_include, migrate_rules, warn_unhandled_root_keys,
-    warn_unmappable_fields,
+    keep_error_severity, migrate_exclude, migrate_ignore, migrate_ignore_binaries,
+    migrate_ignore_deps, migrate_ignore_exports_used_in_file, migrate_include, migrate_rules,
+    warn_unhandled_root_keys, warn_unmappable_fields,
 };
 use super::knip_scoped::{
     KnipScope, WorkspaceMigration, config_marks_production_entry, migrate_entry,
@@ -79,6 +79,8 @@ pub(super) fn migrate_knip(
         }
     }
 
+    keep_error_severity(config);
+
     // `ignoreIssues` reads the migrated `rules`, so it runs after them.
     if let Some(value) = obj.get("ignoreIssues") {
         migrate_ignore_issues(value, &root, config, warnings);
@@ -132,6 +134,21 @@ mod tests {
 
     fn empty_config() -> serde_json::Map<String, serde_json::Value> {
         serde_json::Map::new()
+    }
+
+    /// Assert that `config` holds only the `rules` that keep the knip default
+    /// severity, so the migration wrote nothing from the fields of the config.
+    fn assert_only_default_severity(config: &serde_json::Map<String, serde_json::Value>) {
+        assert_eq!(config.keys().collect::<Vec<_>>(), ["rules"], "{config:?}");
+        assert_eq!(
+            config["rules"],
+            serde_json::json!({
+                "unused-dev-dependencies": "error",
+                "unused-namespace-members": "error",
+                "unlisted-binaries": "error",
+                "duplicate-export-aliases": "error"
+            })
+        );
     }
 
     #[test]
@@ -816,7 +833,7 @@ mod tests {
         let mut warnings = Vec::new();
         migrate_knip(&knip, &mut config, &mut warnings);
 
-        assert!(config.is_empty(), "{config:?}");
+        assert_only_default_severity(&config);
         assert_eq!(
             warning_fields(&warnings),
             [
@@ -980,7 +997,7 @@ mod tests {
         let mut warnings = Vec::new();
         migrate_knip(&knip, &mut config, &mut warnings);
 
-        assert!(!config.contains_key("rules"));
+        assert_only_default_severity(&config);
         assert!(warnings.is_empty());
     }
 
@@ -1161,7 +1178,7 @@ mod tests {
         let mut warnings = Vec::new();
         migrate_knip(&knip, &mut config, &mut warnings);
 
-        assert!(!config.contains_key("rules"));
+        assert_only_default_severity(&config);
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].field, "rules.completelyUnknownRule");
         assert!(warnings[0].message.contains("unknown knip issue type"));
@@ -1291,13 +1308,13 @@ mod tests {
     }
 
     #[test]
-    fn migrate_knip_empty_object_no_config() {
+    fn migrate_knip_empty_object_keeps_default_severity() {
         let knip: serde_json::Value = serde_json::from_str(r"{}").unwrap();
         let mut config = empty_config();
         let mut warnings = Vec::new();
         migrate_knip(&knip, &mut config, &mut warnings);
 
-        assert!(config.is_empty());
+        assert_only_default_severity(&config);
         assert!(warnings.is_empty());
     }
 
@@ -1416,7 +1433,7 @@ mod tests {
         let mut warnings = Vec::new();
         migrate_knip(&knip, &mut config, &mut warnings);
 
-        assert!(!config.contains_key("rules"));
+        assert_only_default_severity(&config);
     }
 
     #[test]
@@ -1426,7 +1443,7 @@ mod tests {
         let mut warnings = Vec::new();
         migrate_knip(&knip, &mut config, &mut warnings);
 
-        assert!(!config.contains_key("rules"));
+        assert_only_default_severity(&config);
     }
 
     #[test]

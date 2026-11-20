@@ -3643,17 +3643,14 @@ fn emit_grouped_final_status(
             .iter()
             .filter(|g| g.results.total_issues() > 0)
             .count();
-        eprintln!(
-            "{}",
-            super::findings_status_line(
-                &format!(
-                    "{grand_total} issue{} across {non_empty_groups} group{} ({:.2}s)",
-                    plural(grand_total),
-                    plural(non_empty_groups),
-                    elapsed.as_secs_f64()
-                ),
-                run_fails,
-            )
+        super::print_check_status_line(
+            &format!(
+                "{grand_total} issue{} across {non_empty_groups} group{} ({:.2}s)",
+                plural(grand_total),
+                plural(non_empty_groups),
+                elapsed.as_secs_f64()
+            ),
+            run_fails,
         );
     }
 }
@@ -4210,16 +4207,13 @@ fn print_check_summary_total(total: usize) {
 }
 
 fn print_check_summary_status(total: usize, elapsed: Duration, run_fails: bool) {
-    eprintln!(
-        "{}",
-        super::findings_status_line(
-            &format!(
-                "{total} issue{} ({:.2}s)",
-                plural(total),
-                elapsed.as_secs_f64()
-            ),
-            run_fails,
-        )
+    super::print_check_status_line(
+        &format!(
+            "{total} issue{} ({:.2}s)",
+            plural(total),
+            elapsed.as_secs_f64()
+        ),
+        run_fails,
     );
 }
 
