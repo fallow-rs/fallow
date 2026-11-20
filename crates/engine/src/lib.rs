@@ -67,6 +67,7 @@ pub mod import_bindings;
 pub(crate) mod graph {
     pub use fallow_graph::graph::*;
 }
+mod base_worktree_context;
 mod base_worktree_orphans;
 mod base_worktree_registration;
 #[path = "git_env.rs"]

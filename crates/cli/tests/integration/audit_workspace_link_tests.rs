@@ -162,3 +162,79 @@ fn a_boundary_violation_through_a_workspace_alias_link_stays_inherited() {
     assert_eq!(violations[0]["introduced"], false, "{json}");
     assert_eq!(json["attribution"]["dead_code_introduced"], 0, "{json}");
 }
+
+/// A SvelteKit app in a workspace package. Its `tsconfig.json` extends the
+/// generated and gitignored `.svelte-kit/tsconfig.json`, which holds the path
+/// aliases of the app. The base must load that alias too, or `values.ts` is
+/// an unused file on the base and its unused export `d` looks introduced.
+#[test]
+fn an_unused_export_behind_a_generated_svelte_kit_alias_stays_inherited() {
+    let tmp = TempDir::new().expect("failed to create temp dir");
+    let dir = tmp.path();
+    let app = dir.join("packages/app");
+    fs::create_dir_all(app.join("src/lib")).unwrap();
+    fs::create_dir_all(app.join(".svelte-kit")).unwrap();
+    fs::write(
+        dir.join("package.json"),
+        r#"{"name": "workspace-link", "private": true}"#,
+    )
+    .unwrap();
+    fs::write(
+        dir.join("pnpm-workspace.yaml"),
+        "packages:\n  - 'packages/*'\n",
+    )
+    .unwrap();
+    fs::write(
+        dir.join(".gitignore"),
+        "node_modules\n.fallow\n.svelte-kit\n",
+    )
+    .unwrap();
+    fs::write(
+        app.join("package.json"),
+        r#"{"name": "@acme/app", "private": true, "main": "src/index.ts"}"#,
+    )
+    .unwrap();
+    fs::write(
+        app.join("tsconfig.json"),
+        r#"{"extends": "./.svelte-kit/tsconfig.json"}"#,
+    )
+    .unwrap();
+    fs::write(
+        app.join(".svelte-kit/tsconfig.json"),
+        r#"{"compilerOptions": {"paths": {"~lib/*": ["../src/lib/*"]}}}"#,
+    )
+    .unwrap();
+    fs::write(
+        app.join("src/lib/values.ts"),
+        "export const c = 1;\nexport const d = 2;\n",
+    )
+    .unwrap();
+    fs::write(
+        app.join("src/index.ts"),
+        "import { c } from '~lib/values';\nconsole.log(c);\n",
+    )
+    .unwrap();
+    git(dir, &["init", "-b", "main"]);
+    commit_all(dir, "baseline");
+    fs::write(
+        app.join("src/index.ts"),
+        "import { c } from '~lib/values';\nconsole.log(c, 3);\n",
+    )
+    .unwrap();
+
+    let json = audit_against_head(dir);
+
+    // `values.ts` is not a changed file, so the audit reports its unused
+    // export only when the change created it.
+    let unused_exports = json["dead_code"]["unused_exports"]
+        .as_array()
+        .unwrap_or_else(|| panic!("unused exports missing: {json}"));
+    assert!(
+        unused_exports
+            .iter()
+            .all(|export| export["introduced"] != true),
+        "{json}"
+    );
+    assert_eq!(json["attribution"]["dead_code_introduced"], 0, "{json}");
+    assert_eq!(json["verdict"], "pass", "{json}");
+}

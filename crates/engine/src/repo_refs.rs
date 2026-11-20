@@ -17,14 +17,14 @@ use xxhash_rust::xxh3::xxh3_64;
 
 use crate::{EngineError, EngineResult};
 
+use crate::base_worktree_context::{
+    AUDIT_CONTEXT_FILE_MAX_BYTES, AUDIT_MATERIALIZED_CONTEXT_DIRS, SVELTE_KIT_DIR,
+    base_has_slot_parent, context_markers, copy_generated_tsconfig,
+};
 pub use crate::base_worktree_orphans::*;
 pub use crate::base_worktree_registration::*;
 
 const RAW_MATERIALIZATION_MARKER: &str = "fallow-raw-materialized-v1";
-
-/// Host directories shared with detached audit base views.
-const AUDIT_MATERIALIZED_CONTEXT_DIRS: &[&str] = &["node_modules", ".nuxt", ".astro"];
-const AUDIT_WORKSPACE_GENERATED_CONTEXT_DIRS: &[&str] = &[".nuxt", ".astro"];
 
 const AUDIT_LOCKFILES: &[&str] = &[
     "package-lock.json",
@@ -35,17 +35,6 @@ const AUDIT_LOCKFILES: &[&str] = &[
     "bun.lockb",
 ];
 
-const NODE_MODULES_MARKERS: &[&str] = &[".package-lock.json", ".modules.yaml", ".yarn-state.yml"];
-const NUXT_MARKERS: &[&str] = &[
-    "tsconfig.json",
-    "tsconfig.app.json",
-    "imports.d.ts",
-    "components.d.ts",
-    "types/nitro-routes.d.ts",
-    "types/nitro-imports.d.ts",
-];
-const ASTRO_MARKERS: &[&str] = &["types.d.ts", "content.d.ts", "env.d.ts"];
-const AUDIT_CONTEXT_FILE_MAX_BYTES: u64 = 16 * 1024 * 1024;
 const CONTEXT_SYMLINK_STATE: &str = "symlink";
 const CONTEXT_SPECIAL_FILE_STATE: &str = "not_regular_file";
 const CONTEXT_OVERSIZED_FILE_STATE: &str = "file_too_large";
@@ -142,12 +131,17 @@ pub fn materialize_base_dependency_context(
             continue;
         };
 
-        if validate_materialized_path(&slot.relative).is_err()
+        if !base_has_slot_parent(worktree_path, slot.kind, &slot.relative)
+            || validate_materialized_path(&slot.relative).is_err()
             || create_safe_parent_directories(worktree_path, &slot.relative).is_err()
         {
             continue;
         }
         let destination = worktree_path.join(&slot.relative);
+        if slot.kind == SVELTE_KIT_DIR {
+            let _ = copy_generated_tsconfig(&source, &destination);
+            continue;
+        }
         match fs::symlink_metadata(&destination) {
             Ok(metadata) if metadata.file_type().is_dir() => continue,
             Ok(metadata) if metadata.file_type().is_symlink() => {
@@ -219,7 +213,7 @@ fn audit_materialized_context_slots(
         if relative_workspace.as_os_str().is_empty() {
             continue;
         }
-        for &kind in AUDIT_WORKSPACE_GENERATED_CONTEXT_DIRS {
+        for &kind in AUDIT_MATERIALIZED_CONTEXT_DIRS {
             slots.push(AuditMaterializedContextSlot {
                 kind,
                 relative: relative_workspace.join(kind),
@@ -292,15 +286,6 @@ fn canonical_context_directory(path: &Path) -> std::io::Result<PathBuf> {
             CONTEXT_SPECIAL_FILE_STATE,
         )),
         Err(error) => Err(error),
-    }
-}
-
-fn context_markers(name: &str) -> &'static [&'static str] {
-    match name {
-        "node_modules" => NODE_MODULES_MARKERS,
-        ".nuxt" => NUXT_MARKERS,
-        ".astro" => ASTRO_MARKERS,
-        _ => &[],
     }
 }
 
@@ -2732,7 +2717,7 @@ mod tests {
         materialize_base_dependency_context(host.path(), worktree.path(), &[]);
 
         let fingerprint = audit_materialized_context_fingerprint(host.path(), &[]);
-        for kind in AUDIT_MATERIALIZED_CONTEXT_DIRS {
+        for kind in &["node_modules", ".nuxt", ".astro"] {
             let target = dunce::canonicalize(targets.path().join(kind)).expect("canonical target");
             let mirrored = worktree.path().join(kind);
             assert_eq!(
