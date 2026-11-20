@@ -23,6 +23,7 @@ fn upload_inventory_hint_fits_eighty_columns_with_the_docs_url_on_its_own_line()
         );
     }
 }
+use super::setup_recipe::{RecipeStatus, final_recipe_line, kept_step_line};
 use fallow_config::PackageJson;
 use fallow_license::LicenseStatus;
 use std::path::{Path, PathBuf};
@@ -928,7 +929,7 @@ fn recipe_step_replaces_an_untouched_recipe_recorded_under_another_root_spelling
     let outcome =
         run_setup_recipe_step(dir.path(), &next, &mut state).expect("second setup should succeed");
 
-    assert!(!outcome.kept);
+    assert_ne!(outcome.status, RecipeStatus::Kept);
     assert_eq!(
         std::fs::read_to_string(&outcome.path).expect("recipe should be readable"),
         recipe_contents(&next)
@@ -1034,7 +1035,7 @@ fn recipe_step_keeps_an_authored_recipe_on_first_setup() {
         std::fs::read_to_string(&path).expect("recipe should be readable"),
         "# Our own coverage notes\n"
     );
-    assert!(outcome.kept);
+    assert_eq!(outcome.status, RecipeStatus::Kept);
     assert!(state.recipe.is_none());
 }
 
@@ -1053,7 +1054,7 @@ fn recipe_step_keeps_a_manual_edit_of_the_generated_recipe() {
         std::fs::read_to_string(&path).expect("recipe should be readable"),
         "# Edited by hand\n"
     );
-    assert!(outcome.kept);
+    assert_eq!(outcome.status, RecipeStatus::Kept);
 }
 
 #[test]
@@ -1067,7 +1068,7 @@ fn recipe_step_replaces_an_untouched_generated_recipe_when_the_framework_changes
     let outcome =
         run_setup_recipe_step(dir.path(), &next, &mut state).expect("second setup should succeed");
 
-    assert!(!outcome.kept);
+    assert_ne!(outcome.status, RecipeStatus::Kept);
     assert_eq!(
         std::fs::read_to_string(&outcome.path).expect("recipe should be readable"),
         recipe_contents(&next)
@@ -1090,11 +1091,80 @@ fn recipe_step_adopts_an_existing_file_that_matches_the_recipe() {
     let outcome =
         run_setup_recipe_step(dir.path(), &context, &mut state).expect("setup should succeed");
 
-    assert!(!outcome.kept);
+    assert_ne!(outcome.status, RecipeStatus::Kept);
     assert!(recipe_state_is_current(
         &state,
         dir.path(),
         &context,
         &recipe_contents(&context)
     ));
+}
+
+#[test]
+fn recipe_step_reports_an_adopted_recipe_as_present_not_written() {
+    let dir = tempdir().expect("tempdir should be created");
+    let context = vite_setup_context();
+    write_authored_recipe(dir.path(), &recipe_contents(&context));
+    let mut state = super::CoverageSetupState::default();
+
+    let outcome =
+        run_setup_recipe_step(dir.path(), &context, &mut state).expect("setup should succeed");
+    let line = final_recipe_line(dir.path(), &outcome, context.framework.label());
+
+    assert_eq!(outcome.status, RecipeStatus::Present);
+    assert!(!line.contains("Wrote"), "nothing was written: {line}");
+    assert!(line.contains("has the"), "{line}");
+}
+
+#[test]
+fn recipe_step_reports_a_new_recipe_as_written() {
+    let dir = tempdir().expect("tempdir should be created");
+    let context = vite_setup_context();
+    let mut state = super::CoverageSetupState::default();
+
+    let outcome =
+        run_setup_recipe_step(dir.path(), &context, &mut state).expect("setup should succeed");
+
+    assert_eq!(outcome.status, RecipeStatus::Written);
+    assert!(final_recipe_line(dir.path(), &outcome, context.framework.label()).contains("Wrote"));
+}
+
+#[test]
+fn kept_recipe_line_does_not_claim_who_wrote_the_file() {
+    let dir = tempdir().expect("tempdir should be created");
+    let path = write_authored_recipe(dir.path(), "# An older generated recipe\n");
+
+    let line = kept_step_line(dir.path(), &path, "Next.js");
+
+    assert!(!line.contains("did not write"), "{line}");
+    assert!(line.contains("differs from the Next.js recipe"), "{line}");
+}
+
+#[test]
+fn recipe_step_reports_a_resumed_recipe_as_present() {
+    let dir = tempdir().expect("tempdir should be created");
+    let context = vite_setup_context();
+    let mut state = super::CoverageSetupState::default();
+    run_setup_recipe_step(dir.path(), &context, &mut state).expect("first setup should succeed");
+
+    let outcome = run_setup_recipe_step(dir.path(), &context, &mut state)
+        .expect("resumed setup should succeed");
+
+    assert_eq!(outcome.status, RecipeStatus::Present);
+}
+
+#[test]
+fn recipe_step_tells_how_to_replace_a_kept_recipe() {
+    let dir = tempdir().expect("tempdir should be created");
+    write_authored_recipe(dir.path(), "# Our own coverage notes\n");
+    let context = vite_setup_context();
+    let mut state = super::CoverageSetupState::default();
+
+    let outcome =
+        run_setup_recipe_step(dir.path(), &context, &mut state).expect("setup should succeed");
+    let line = final_recipe_line(dir.path(), &outcome, context.framework.label());
+
+    assert_eq!(outcome.status, RecipeStatus::Kept);
+    assert!(line.contains("Move") && line.contains("away"), "{line}");
+    assert!(!line.contains("Wrote"), "{line}");
 }

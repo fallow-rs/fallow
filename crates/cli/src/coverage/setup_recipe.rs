@@ -10,12 +10,21 @@ use super::{
     refuse_outside_link, save_setup_state, setup_error_exit, write_recipe,
 };
 
-/// The recipe file that setup points the user to, and whether setup kept a
-/// file that it did not write.
+/// The recipe file that setup points the user to, and what setup did with it.
 #[derive(Debug)]
 pub(super) struct RecipeOutcome {
     pub(super) path: PathBuf,
-    pub(super) kept: bool,
+    pub(super) status: RecipeStatus,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) enum RecipeStatus {
+    /// Setup wrote the recipe in this run.
+    Written,
+    /// The file already held the expected recipe, so setup wrote nothing.
+    Present,
+    /// The file differs from the expected recipe and setup did not overwrite it.
+    Kept,
 }
 
 /// What setup does with an existing `docs/collect-coverage.md`.
@@ -63,31 +72,54 @@ pub(super) fn run_setup_recipe_step(
     if recipe_state_is_current(setup_state, root, context, &recipe) {
         return Ok(RecipeOutcome {
             path: resumed_recipe_path(root, setup_state),
-            kept: false,
+            status: RecipeStatus::Present,
         });
     }
 
     let path = recipe_path(root);
     refuse_outside_link(root, &path)
         .map_err(|message| setup_error_exit(&message, INVALID_INPUT))?;
-    match recipe_action(setup_state, &path, &recipe) {
+    let status = match recipe_action(setup_state, &path, &recipe) {
         RecipeAction::Keep => {
-            println!(
-                "Step 3/4: Coverage recipe... kept {} (setup did not write this file).",
-                display_relative(root, &path)
-            );
-            return Ok(RecipeOutcome { path, kept: true });
+            println!("{}", kept_step_line(root, &path, context.framework.label()));
+            return Ok(RecipeOutcome {
+                path,
+                status: RecipeStatus::Kept,
+            });
         }
-        RecipeAction::Adopt => {}
+        RecipeAction::Adopt => RecipeStatus::Present,
         RecipeAction::Write => {
             write_recipe(root, &recipe)
                 .map_err(|message| setup_error_exit(&message, INVALID_INPUT))?;
+            RecipeStatus::Written
         }
-    }
+    };
     record_recipe_state(setup_state, path.clone(), context, &recipe);
     save_setup_state(root, setup_state)
         .map_err(|message| setup_error_exit(&message, INVALID_INPUT))?;
-    Ok(RecipeOutcome { path, kept: false })
+    Ok(RecipeOutcome { path, status })
+}
+
+/// Step 3 for a kept file. A kept file can be an authored recipe, a hand
+/// edit, or a recipe that an earlier setup wrote for another framework before
+/// its setup state was lost, so the line names only the fact that setup checks.
+pub(super) fn kept_step_line(root: &Path, path: &Path, framework: &str) -> String {
+    format!(
+        "Step 3/4: Coverage recipe... kept {} (it differs from the {framework} recipe).",
+        display_relative(root, path)
+    )
+}
+
+/// The recipe line of the final step.
+pub(super) fn final_recipe_line(root: &Path, recipe: &RecipeOutcome, framework: &str) -> String {
+    let path = display_relative(root, &recipe.path);
+    match recipe.status {
+        RecipeStatus::Written => format!("  -> Wrote {path} with the {framework} recipe."),
+        RecipeStatus::Present => format!("  -> {path} has the {framework} recipe."),
+        RecipeStatus::Kept => {
+            format!("  -> Move {path} away and re-run to get the {framework} recipe.")
+        }
+    }
 }
 
 fn resumed_recipe_path(root: &Path, setup_state: &CoverageSetupState) -> PathBuf {

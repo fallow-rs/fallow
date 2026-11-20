@@ -33,7 +33,7 @@ use crate::exit_codes::{
 };
 use crate::health::coverage as runtime_coverage;
 use crate::license;
-use setup_recipe::{RecipeOutcome, run_setup_recipe_step};
+use setup_recipe::{RecipeOutcome, final_recipe_line, run_setup_recipe_step};
 
 pub use analyze::AnalyzeArgs;
 pub use analyze::benchmark_local_json;
@@ -733,19 +733,10 @@ fn run_setup_final_step(
 
     println!("Step 4/4: Collecting coverage for your app.");
     println!("  -> Detected: {}.", context.framework.label());
-    if recipe.kept {
-        println!(
-            "  -> Move {} away and re-run to get the {} recipe.",
-            display_relative(root, &recipe.path),
-            context.framework.label()
-        );
-    } else {
-        println!(
-            "  -> Wrote {} with the {} recipe.",
-            display_relative(root, &recipe.path),
-            context.framework.label()
-        );
-    }
+    println!(
+        "{}",
+        final_recipe_line(root, recipe, context.framework.label())
+    );
     println!("  -> Run your app with the instrumentation on, then re-run this command.");
     print_upload_inventory_hint();
     ExitCode::SUCCESS
