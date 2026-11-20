@@ -160,7 +160,9 @@ measure a whole CLI run, and they need no benchmark harness:
   config, git, analysis, the work after the analysis, and output. Only a
   standalone `dead-code` run reports it, because only that command clocks
   its report output. `spans` gives the parent of each stage, so you can see
-  which stages run before the `total_ms` clock starts.
+  which stages run before the `total_ms` clock starts. The config load
+  discovers the workspaces, so `workspaces` is a child of `config`. The
+  other stages are children of `analysis`.
 
 Use the counters as the metric when a change removes repeated work. Use the
 process spans to find the largest cost outside the pipeline. Measure the wall
