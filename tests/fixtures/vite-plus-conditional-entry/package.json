@@ -1,0 +1,7 @@
+{
+  "name": "vite-plus-conditional-entry",
+  "private": true,
+  "devDependencies": {
+    "vite-plus": "1.5.0"
+  }
+}

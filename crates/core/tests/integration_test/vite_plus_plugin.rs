@@ -123,3 +123,19 @@ fn plain_vite_config_pack_block_is_not_read() {
         "a plain Vite project has no Vite+ pack entries, got {files:?}"
     );
 }
+
+/// `pack.entry` can be a conditional expression: the build picks one branch
+/// from the environment at run time. Each branch names entry files, so each
+/// file of each branch is an entry point.
+#[test]
+fn vite_plus_conditional_pack_entry_reads_each_branch() {
+    let root = fixture_path("vite-plus-conditional-entry");
+    let config = create_config(root.clone());
+    let results = fallow_core::analyze(&config).expect("analysis should succeed");
+
+    assert_eq!(
+        unused_files(&results, &root),
+        ["src/orphan.ts"],
+        "the files of each branch of the conditional `pack.entry` are entry points"
+    );
+}
