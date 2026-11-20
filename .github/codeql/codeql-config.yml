@@ -2,6 +2,7 @@
 # fallow source. Some fixtures contain deliberate bad code.
 paths-ignore:
   - tests/fixtures
+  - crates/api/rule-examples
   - tests/semantic-clone-corpus
   - tests/coverage-producer-corpus
   - tests/benchmark-corpus

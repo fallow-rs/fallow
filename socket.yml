@@ -14,6 +14,7 @@ version: 2
 projectIgnorePaths:
   - tests/fixtures/
   - tests/conformance/
+  - crates/api/rule-examples/
   - assets/demo-project/
   - examples/
 
