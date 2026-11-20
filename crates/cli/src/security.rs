@@ -42,7 +42,6 @@ use xxhash_rust::xxh3::xxh3_64;
 
 use crate::base_worktree::{BaseWorktree, git_rev_parse};
 use crate::error::emit_input_error;
-use crate::health::HealthOptions;
 use fallow_output::{
     RuntimeCoverageFinding, RuntimeCoverageHotPath, RuntimeCoverageReport, RuntimeCoverageVerdict,
 };
@@ -65,6 +64,9 @@ use human::{
 };
 #[cfg(test)]
 use human::{gate_human_header, hop_role_label};
+#[path = "security_runtime_health.rs"]
+mod runtime_health;
+use runtime_health::analyze_security_runtime;
 #[path = "security_sarif.rs"]
 mod sarif;
 #[path = "security_survivors_input.rs"]
@@ -1322,97 +1324,6 @@ fn security_runtime_report(
         return Ok(None);
     };
     analyze_security_runtime(opts, path, modules.clone(), files.clone(), analysis_output)
-}
-
-fn analyze_security_runtime(
-    opts: &SecurityOptions<'_>,
-    path: &Path,
-    modules: Vec<ModuleInfo>,
-    files: Vec<DiscoveredFile>,
-    analysis_output: fallow_engine::dead_code::DeadCodeAnalysisArtifacts,
-) -> Result<Option<RuntimeCoverageReport>, ExitCode> {
-    let runtime_coverage = crate::health::coverage::prepare_options(
-        path,
-        opts.min_invocations_hot,
-        None,
-        None,
-        opts.output,
-    )?;
-    let result = crate::health::execute_health_with_shared_parse(
-        &security_runtime_health_options(opts, runtime_coverage),
-        fallow_engine::health::HealthSharedParseData {
-            files,
-            modules,
-            dead_code_results: None,
-            workspaces: Vec::new(),
-            analysis_output: Some(analysis_output),
-        },
-        None,
-    )?;
-    Ok(result.report.runtime_coverage)
-}
-
-/// Build the production-forced `HealthOptions` used to compute runtime coverage
-/// context for security findings (complexity/hotspot/ownership all disabled).
-fn security_runtime_health_options<'a>(
-    opts: &SecurityOptions<'a>,
-    runtime_coverage: fallow_engine::health::RuntimeCoverageOptions,
-) -> HealthOptions<'a> {
-    HealthOptions {
-        root: opts.root,
-        config_path: opts.run.config_file().value(),
-        output: opts.output,
-        no_cache: opts.no_cache,
-        threads: opts.threads,
-        quiet: opts.quiet,
-        thresholds: fallow_engine::health::HealthThresholdOverrides::default(),
-        top: None,
-        sort: fallow_engine::health::HealthSort::Cyclomatic,
-        production: true,
-        production_override: Some(true),
-        allow_remote_extends: opts.allow_remote_extends,
-        changed_since: opts.changed_since,
-        diff_index: None,
-        use_shared_diff_index: opts.use_shared_diff_index,
-        workspace: opts.workspace,
-        changed_workspaces: opts.changed_workspaces,
-        baseline: None,
-        save_baseline: None,
-        baseline_mode: fallow_engine::baseline::HealthBaselineMode::default(),
-        baseline_mode_explicit: false,
-        complexity: false,
-        file_scores: false,
-        coverage_gaps: false,
-        config_activates_coverage_gaps: false,
-        hotspots: false,
-        ownership: false,
-        ownership_emails: None,
-        targets: false,
-        css: false,
-        css_deep: false,
-        force_full: false,
-        score_only_output: false,
-        enforce_coverage_gap_gate: false,
-        effort: None,
-        score: false,
-        gates: fallow_engine::health::HealthGateOptions::default(),
-        since: None,
-        min_commits: None,
-        explain: false,
-        summary: false,
-        save_snapshot: None,
-        trend: false,
-        coverage_inputs: fallow_engine::health::HealthCoverageInputs::default(),
-        performance: false,
-        runtime_coverage: Some(runtime_coverage),
-        churn_file: None,
-        analysis_identity: fallow_types::semantic::SemanticAnalysisIdentity::default(),
-        complexity_breakdown: false,
-        group_by: None,
-        group_filter: None,
-        trend_from: None,
-        scope: opts.scope.clone(),
-    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -3836,7 +3747,7 @@ mod tests {
         Box::leak(Box::new(run.expect("fixture run")))
     }
 
-    fn leak_fixture_root() -> PathBuf {
+    pub(super) fn leak_fixture_root() -> PathBuf {
         std::path::PathBuf::from(
             std::env::var_os("CARGO_MANIFEST_DIR").expect("cargo sets CARGO_MANIFEST_DIR"),
         )
@@ -3850,7 +3761,11 @@ mod tests {
         .join("../../tests/fixtures/security-source-reachability-885")
     }
 
-    fn run_opts(root: &Path, output: OutputFormat, fail_on_issues: bool) -> SecurityOptions<'_> {
+    pub(super) fn run_opts(
+        root: &Path,
+        output: OutputFormat,
+        fail_on_issues: bool,
+    ) -> SecurityOptions<'_> {
         SecurityOptions {
             root,
             run: test_run(root),

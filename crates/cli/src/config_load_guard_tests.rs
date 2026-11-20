@@ -69,7 +69,7 @@ const OPEN_SITES: &[OpenSite] = &[
     OpenSite {
         path: "crates/cli/src/health/mod.rs",
         calls: 2,
-        why: "a health run without a run, and its session: benchmark hooks and the security base",
+        why: "a health run without a run, and its session: benchmark hooks",
     },
     OpenSite {
         path: "crates/cli/src/cli_production.rs",
