@@ -317,16 +317,24 @@ const countOfficialStyleXNestedThemeCallSamples = (consumers) => {
   return new Set(locations.map((location) => `${location.path || ""}\0${location.line || 0}`)).size;
 };
 
-const styleXCommandFailure = (command) => {
-  if (!command) return "StyleX health command did not run";
-  if (command.timed_out) return "StyleX health command timed out";
-  if (command.spawn_error) return `StyleX health command failed to start: ${command.spawn_error}`;
-  if (command.parse_error) return `StyleX health output was invalid JSON: ${command.parse_error}`;
+const commandProblem = (command) => {
+  if (command.timed_out) return "command timed out";
+  if (command.spawn_error) return `command failed to start: ${command.spawn_error}`;
+  if (command.parse_error) return `output was invalid JSON: ${command.parse_error}`;
   if (command.status === null || command.status > 1) {
-    return `StyleX health command failed with status ${commandStatusLabel(command)}`;
+    return `command failed with status ${commandStatusLabel(command)}`;
   }
   return null;
 };
+
+const styleXCommandFailure = (command) => {
+  if (!command) return "StyleX health command did not run";
+  const failure = commandProblem(command);
+  return failure ? `StyleX health ${failure}` : null;
+};
+
+const projectRan = (project) =>
+  !project.error && project.commands.some((command) => commandProblem(command) === null);
 
 const normalizeFinding = (finding) => ({
   code: String(finding.code || "unknown"),
@@ -681,7 +689,10 @@ const main = () => {
 
   if (opts.failOnSpikes && results.spikes.length > 0) return 2;
   if (results.stylex_contract_failures.length > 0) return 3;
-  if (results.projects.every((project) => project.error)) return 1;
+  if (!results.projects.some(projectRan)) {
+    console.error("styling corpus smoke: no project gave a usable fallow result");
+    return 1;
+  }
   return 0;
 };
 
